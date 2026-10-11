@@ -2874,3 +2874,71 @@ release or tag until the last task records the new one.
     - Gates (R-LITE, ARM64EC lane; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-13-fix1-dxmt-check.log`):
       `dxmt-check: all passed`, 338 lines `ok` after `info arm64 mode` (the 335 above plus the three named rows; the
       `0/7` row changed in place), 0 `FAIL`. The x64 lane and `make test` were not run.
+- **0053 (`airconv, d3d12: Float atomics on R32_FLOAT typed UAVs through an R32Uint view.`):** Shader Model 6.6's float
+  `InterlockedExchange`, `InterlockedCompareStoreFloatBitwise` and `InterlockedCompareExchangeFloatBitwise` reach DXIL
+  as i32 atomics on the float's bits, on every resource that may hold them. Raw, structured and groupshared locations
+  already took the integer paths and are unchanged: for groupshared, DXC 1.9.2607 emits `atomicrmw xchg i32` and
+  `cmpxchg i32` on a bitcast `float addrspace(3)*`, never a float `atomicrmw`, so the translator has nothing to bitcast
+  and no code was added for it. A typed `RWBuffer<float>` or `RWTexture*<float>` was refused (Metal's texture atomics
+  take integer textures only). Now a typed UAV (a texture or typed buffer) with element type F32 that op 78 or 79
+  reaches is `UnorderedAccessViewInfo::atomic_view` (`ScanUsage` marks it `atomic`): `FillResourceMaps` declares it
+  `uint`, `GetUAVTexture` reads its handle from the descriptor's third qword (`GetTextureDescriptor`'s new field-index
+  argument, 2 here, 0 elsewhere: same IR), its loads and stores bitcast through `Cast`, its atomics take the integer
+  path. The DXBC path never sets it. Runtime: `SRVTextureGPUStorage` (which `UAVTextureGPUStorage` aliases) and
+  `UAVTexelBufferGPUStorage` name their third qword `atomic_resource_id` (`padding[0]` before); the texel-buffer
+  descriptor's fourth qword stays `padding`, reserved for Task 14b. `CreateUnorderedAccessView` on a texture whose view
+  format is `R32Float` also creates the same view as `R32Uint` (every D3D12 texture has `PixelFormatView` usage), and
+  on a typed buffer of `R32Float` an `R32Uint` buffer view (which gets `ShaderAtomic` usage); both texture and
+  texel-buffer `AddUnorderedAccessView` take that view as an explicit `std::optional` and always write its GPU resource
+  ID, or 0, into the third qword, and the two SRV writers write 0 there, so a reused slot never keeps a stale ID.
+  `CopyDescriptors` copies all 32 bytes. One `R32Uint` view per `R32_FLOAT` UAV, used or not (a `ponytail:` comment
+  names making it on a shader's first atomic use instead). Float atomics have no cap bit: Shader Model 6.6 requires
+  them (spec §4).
+  - Shader: `dxil/floatatomics.hlsl` (cs_6_6): on a raw (`Out`'s word 15 of each thread's row), a structured
+    (`AtomicSF`), a groupshared (`G`), a typed-buffer (`RWTypedF`, `R32_FLOAT`) and a typed-texture (`AtomicTexF`,
+    `R32_FLOAT`) location each thread owns, all starting at +0.0: compare-store against -0.0 (bitwise no match), exchange
+    0 -> a, compare-store against b (no match), compare-exchange a -> b, compare-store b -> c, exchange c -> 0; slots
+    3k..3k+2 hold the three exchanges' returns 0, a, c (a = i * 0.5 + 0.25, c = i * 4 + 1). Two inputs differ from the
+    plan's shader, the expected words unchanged: the leading -0.0 compare-store, and b a quiet NaN with payload i + 1
+    (the plan had b = -i - 0.75), so a float == compare would store c at the first step (slot 3k = c) and miss at the
+    NaN one (slot 3k+2 = b). `dxil-probe -S` keeps 16 `atomicCompareExchange.i32` (79) and 8 `atomicBinOp.i32` (78, op 8)
+    on the four UAVs (compare `i32 -2147483648` for -0.0) and four `cmpxchg i32` and two `atomicrmw xchg i32` on
+    `addrspace(3)`. DXC rewrote no other `.dxil`.
+  - `common.hlsli` and `d3d12_dxil_exec.cpp`: `AtomicSF` (u5, `AtomicS`'s buffer as 64 floats, stride 4), `RWTypedF`
+    (u6, `RWTyped`'s buffer as 64 `R32_FLOAT` elements) and `AtomicTexF` (u7, a new 8x8 `R32_FLOAT` texture, zeroed
+    before each group as `AtomicTex` is), in a third table range (3 UAVs from register 5 at offset 13; `root_heap`
+    shares it) at view-heap slots 13-15, the heap (and `heap2`) growing to 16. D3DMetal's run creates them too: its 13
+    groups read nothing that moved, and every `matches D3DMetal` row stayed `ok` with the new harness on the old
+    translator.
+  - Rows: `DXIL floatatomics matches its CPU reference` (`expect_floatatomics`: f32 0, a, c in each of slots 0, 3, 6, 9
+    and 12, slot 15 0) and `dxil-translate accepts every behaviour shader` 28/28. Anchor (not a row): D3DMetal's run of
+    `floatatomics` matches the same reference, -0.0 and NaN steps included.
+  - Before the patch: `fail floatatomics.dxil DXIL: dx.op.atomicCompareExchange.i32 (79) not supported` (27/28; the
+    leading compare-store is the first op), D3D12 `group floatatomics fail 0x80004001`.
+  - Single mutations, each on its own build, against a cut-down check (the 13 D3DMetal comparison groups and `mad`,
+    the 16 Shader Model 6.1-6.8 groups against their CPU references, the `dxil-translate` count; 31 rows),
+    `floatatomics`'s mismatching threads per slot: `FillResourceMaps` never setting `atomic_view` fails the pipeline
+    (`0x80004001`) and the count (27/28); the texture descriptor's third qword always 0 fails slots 13 and 14 (64 each:
+    a null texture returns 0); the texel-buffer descriptor's always 0 fails slots 10 and 11 (64 each); a synthetic
+    rewrite of each groupshared `cmpxchg` into a float == compare (in the converter's module load: the path is Metal's
+    own, so there is no translator code to break) fails slots 6 (c: the -0.0 step stored) and 8 (`7fc00002` for thread
+    1: the NaN step missed), 64 each. `GetUAVTexture` reading the first qword (the `R32Float` view) for an
+    `atomic_view` passes: this GPU performs the atomics on an `R32Float` texture reached through a `uint` texture handle,
+    which Metal doesn't define (its texture atomics are for integer formats); the `R32Uint` view is the defined path,
+    and the two third-qword mutations show it is the one read. Under `MTL_DEBUG_LAYER=1` and `MTL_SHADER_VALIDATION=1`
+    neither the patch nor that mutation logs a validation error. Every other row stays `ok` in every mutation.
+  - Limits: plain loads and stores on an `atomic_view` UAV (the `Cast` bitcasts through the `R32Uint` view) are by code
+    reading only: no slot exercises them. `atomic_view` is per resource range: in a bound array of `RWTexture*<float>`
+    or `RWBuffer<float>`, or the one heap range all dynamic `RWTexture2D<float>` share (one ResourceProperties), an
+    atomic on any element sends every element through the third qword, so an element whose view isn't `R32_FLOAT`
+    (`R16_FLOAT`, `R8_UNORM`) reads 0 and drops writes, where D3D12 would serve it (hardening pass). 1D, 2D array and
+    3D `R32_FLOAT` UAVs take the same path by code reading.
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged` against 0052, as
+    predicted (no SMITE 2 shader has a float atomic on a typed UAV: none was refused); DXBC `corpus-diff: 2/2 ok, 0 new
+    failures, 0 fixed, 0 changed, 2 unchanged`. Every test shader's `air=` in `dxmt/tests/dxil` and `dxmt/tests/shaders`
+    but `floatatomics.dxil`'s is unchanged.
+  - Gates (one lane, ruling R-LITE): `dxmt/check.sh` in the ARM64EC lane
+    (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-14-dxmt-check.log`): `dxmt-check: all passed`, 339 lines `ok`
+    after `info arm64 mode` (Task 13's 338 plus the `floatatomics` row; the 28/28 row changed in place), 0 `FAIL`; all
+    13 `DXIL <group> matches D3DMetal` rows `ok` with D3DMetal running the grown harness. The x64 lane and `make test`
+    were not run.

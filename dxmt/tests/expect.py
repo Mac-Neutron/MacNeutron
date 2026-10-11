@@ -213,6 +213,13 @@ def expect_cmp68(got):
     return per_thread(slots)
 
 
+
+# Five locations (raw, structured, groupshared, typed buffer, typed texture), each returning 0, a, c (floatatomics.hlsl);
+# slot 15, the raw location, is 0 again after its last exchange.
+def expect_floatatomics(got):
+    return per_thread(lambda t: [f32(0.0), f32(t * 0.5 + 0.25), f32(t * 4.0 + 1.0)] * 5)
+
+
 def main(path, group):
     for line in open(path, encoding="utf-8", errors="replace"):
         parts = line.split()

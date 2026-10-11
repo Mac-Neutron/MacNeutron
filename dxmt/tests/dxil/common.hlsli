@@ -12,6 +12,9 @@ RWBuffer<uint> RWTyped : register(u1);                                     // 64
 RWTexture2D<float4> RWTex : register(u2);                                  // 8x8 RGBA32F
 RWStructuredBuffer<int2> AtomicS : register(u3);                           // 65 elements, zeroed before each group
 RWTexture2D<uint> AtomicTex : register(u4);                                // 8x8 R32_UINT, zeroed before each group
+RWStructuredBuffer<float> AtomicSF : register(u5);                         // AtomicS's buffer as 64 floats, zeroed with it
+RWBuffer<float> RWTypedF : register(u6);                                   // RWTyped's buffer as 64 R32_FLOAT elements, zeroed with it
+RWTexture2D<float> AtomicTexF : register(u7);                              // 8x8 R32_FLOAT, zeroed before each group
 SamplerState Linear : register(s0);                                        // static: linear, clamp
 SamplerState Point : register(s1);                                         // static: point, clamp
 SamplerComparisonState Cmp : register(s2);                                 // static: point comparison, LESS_EQUAL, clamp
