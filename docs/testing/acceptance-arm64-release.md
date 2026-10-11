@@ -2503,6 +2503,10 @@ release or tag until the last task records the new one.
       wrap; the `Sample*` wrap stays for D3D's rule on any GPU. A one-off D3DMetal run of the shader (not a row;
       `build/sm68/logs/exec-t6-ref.txt`) matches the CPU reference in slots 1-3 on all 64 threads and in slot 0 on the
       16 whose offsets lie in [-8, 7]; for the other 48 it reads 0 (`Load` unwrapped, out of bounds).
+    - Found (code reading; no symptom seen): the sample ops' offsets were read up front for every op after the
+      `Load`/`Store` switch, so `CalculateLOD` (81, seven arguments) read arguments 7 and 8 past its last one, and a
+      gather read its channel as o2. Harmless while only constants were taken; now the `Sample*` cases read theirs
+      each on its own.
     - Covered by code reading only: gathers passing their offsets unwrapped (the shader's gather offsets lie in
       [-8, 7], where the wrap changes nothing, and Metal's gather keeps [-8, 7], the gap spec §3.6 records); runtime
       offsets on `Sample`, `SampleBias`, `SampleGrad`, `SampleCmp`, `SampleCmpLevelZero` and `TextureGatherCmp` (the
