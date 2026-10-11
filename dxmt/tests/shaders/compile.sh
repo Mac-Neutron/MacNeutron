@@ -57,6 +57,7 @@ dxc -T vs_6_6 -E vsid -Fo indirect.vsid.dxil indirect.hlsl
 dxc -T ps_6_6 -E psid -Fo indirect.psid.dxil indirect.hlsl
 dxc -T vs_6_6 -E vsvid -Fo indirect.vsvid.dxil indirect.hlsl
 dxc -T vs_6_8 -E vsstart -Fo indirect.vsstart.dxil indirect.hlsl
+dxc -T ps_6_8 -E psmain -Fo cmp68.ps.dxil cmp68.hlsl
 dxc -T vs_6_6 -E vsfull -Fo hazards.vsfull.dxil hazards.hlsl
 dxc -T ps_6_6 -E psvalue -Fo hazards.psvalue.dxil hazards.hlsl
 dxc -T ps_6_6 -E pssample -Fo hazards.pssample.dxil hazards.hlsl
@@ -87,6 +88,7 @@ dxc -T cs_6_7 -E main -Fo offsets.dxil offsets.hlsl
 dxc -T cs_6_8 -E main -Fo wavesize32r.dxil wavesize32.hlsl
 dxc -T cs_6_8 -E main -Fo wavesize.dxil wavesize.hlsl
 dxc -T cs_6_8 -E main -Fo barrier68.dxil barrier68.hlsl
+dxc -T cs_6_8 -E main -Fo cmp68.dxil cmp68.hlsl
 dxc -T cs_6_6 -E main8x8 -Fo deriv2d.dxil deriv2d.hlsl
 dxc -T cs_6_6 -E main32x2 -Fo deriv2dwide.dxil deriv2d.hlsl
 dxc -T cs_6_6 -E main6x6 -Fo deriv2dodd.dxil deriv2d.hlsl

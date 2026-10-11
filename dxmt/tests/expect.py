@@ -198,6 +198,21 @@ def expect_barrier68(got):
     return per_thread(lambda t: [in_word(63 - t), ((t + 1) & 63) * 3 + 1, ((t + 2) & 63) + 7 + ((t + 3) & 63) * 5])
 
 
+# Shader Model 6.8's comparison sampling (dxil/cmp68.hlsl), deriv's quads: thread t's quad q = t >> 2 has LOD k = q % 5
+# (Depth's 4 mips clamp a sample's to 3). The point comparison (LESS_EQUAL) reads 1.0 where the reference is at most mip
+# m's 0.125 + 0.25 m, else 0.0: SampleCmpGrad at LOD k (and k + 1 for the doubled gradients), SampleCmpBias at k - 1 and
+# k + 1. Slots 3 and 4 the LODs as round(lod * 64).
+def expect_cmp68(got):
+    def cmp(reference, m):
+        return f32(1.0 if reference <= 0.125 + 0.25 * min(max(m, 0), 3) else 0.0)
+
+    def slots(t):
+        k = (t >> 2) % 5
+        return [cmp(0.5, k), cmp(0.5, k - 1), cmp(0.5, k + 1), 64 * min(k, 3), 64 * k, cmp(0.5, k), cmp(0.1, 0),
+                cmp(0.7, k + 1), cmp(0.5, k)]
+    return per_thread(slots)
+
+
 def main(path, group):
     for line in open(path, encoding="utf-8", errors="replace"):
         parts = line.split()

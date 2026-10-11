@@ -2810,3 +2810,46 @@ release or tag until the last task records the new one.
     after `info arm64 mode` (Task 11's 325 plus the five rows above and three `dxil-translate` lines for the new
     shaders; the `direct` line and the count rows changed in place), 0 `FAIL`. The x64 lane and `make test` were not
     run.
+- **0052 (`airconv: Lower SampleCmpBias and SampleCmpGrad.`):** `SampleCmpBias` (255) is `SampleCmp` with `SampleBias`'s
+  bias (the shader's plus the sampler's `MipLODBias`) and min-LOD clamp: `air.sample_compare_*` with that bias in a pixel
+  shader, and in a compute shader 0046's comparison-gradient builder with the quad's coarse gradients scaled by 2^bias.
+  `SampleCmpGrad` (254) is `air.sample_compare_<depth kind>_grad` with its gradients scaled by 2^(sampler bias) and the
+  clamp, as `SampleGrad`; cubes take no offset (the builder drops it). Both mark their texture sampled and compared in
+  `ScanUsage`, so it binds as a depth texture, and a compute shader calling 255 gets the SIMD lane inputs as 60, 61 and
+  64 do. `CalculateLOD` (81) with a comparison sampler needed nothing new. `SampleGrad` now shares its gradient vectors
+  with 254 and emits the same IR: every test shader's `air=` but the two new ones is unchanged.
+  - Shaders: `dxil/cmp68.hlsl` (cs_6_8, nine slots on `Depth` with the point comparison sampler `Cmp`, deriv's quads:
+    LOD k = q % 5) and `shaders/cmp68.hlsl` (ps_6_8 `psmain`: `SampleCmpBias(C, uv, 0.5, 1) + SampleCmpGrad(C, uv, 0.5,
+    ddx(uv), ddy(uv))`, Metal's own LOD path, translated offline only). `dxil-probe -S` keeps three `sampleCmpGrad (254)`,
+    two `sampleCmpBias (255)`, two `calculateLOD (81)` on `Cmp`, `sampleCmp (64)` and `sampleCmpLevelZero (65)` in the
+    compute shader (coordinates and gradients SSA, the offset form's `i32 1, i32 0`, clamps `undef`), and one 254 and one
+    255 in the pixel shader. DXC rewrote no other `.dxil`.
+  - Rows: `DXIL cmp68 matches its CPU reference` (`expect_cmp68`, 1.0 or 0.0 as f32 bits where LESS_EQUAL passes on mip
+    m's 0.125 + 0.25 m: `SampleCmpGrad` 0.5 at LOD k, `SampleCmpBias` 0.5 at k - 1 and k + 1, `CalculateLevelOfDetail`
+    and `…Unclamped` on `Cmp` as `64 min(k, 3)` and `64 k`, `SampleCmp` 0.5, `SampleCmpLevelZero` 0.1, `SampleCmpGrad`
+    0.7 with doubled gradients at LOD k + 1, and the offset form as slot 0); `dxil-translate accepts every behaviour
+    shader` 27/27; `dxil-translate accepts the test shaders` 50/50; `no translated shader assumes NaN or infinity away`
+    50:50.
+  - Before the patch: `fail cmp68.dxil DXIL: dx.op.sampleCmpGrad.f32 (254) not supported` (26/27), `fail cmp68.ps.dxil
+    DXIL: dx.op.sampleCmpBias.f32 (255) not supported` (49/50, 49:49), and D3D12 `group cmp68 fail 0x80004001`.
+  - Single mutations, each on its own build, against a cut-down check (the 15 Shader Model 6.1-6.8 groups against their
+    CPU references and the four `dxil-translate` count rows), cmp68's mismatching threads per slot: compute
+    `SampleCmpBias` dropping the shader's bias fails slots 1 and 2 (12 threads each); `SampleCmpGrad` taking the quad's
+    coarse gradients instead of its own fails slot 7 (12); `SampleCmpGrad` comparing against 0.5 instead of its value
+    fails slot 7 (12); compute `SampleCmpBias` comparing against its bias operand fails slots 1 and 2 (40, 48);
+    `ScanUsage` not marking 254/255's texture compared leaves `cmp68` passing (its `SampleCmp` marks `Depth`) but
+    `dxil-translate` dies on `cmp68.ps.dxil` (a non-depth binding reaches the comparison builder, which returns null, as
+    it would for `SampleCmp`), failing the three shader-count rows. Every other row stays `ok`.
+  - Limits: the static comparison sampler is point-filtered with `MipLODBias` 0, so the 2^(sampler bias) folds and a
+    linear comparison filter are by code reading only, as are the clamp operand, the array and cube forms and the
+    pixel-shader lowering (offline translation only: OPTIONS21's `SampleCmpGradientAndBiasSupported` rests on the
+    compute rows). Slot 8's offset can't move a sample of a uniform mip: it shows the offset form translates and runs.
+    Comparison `CalculateLOD` in a compute shader is 0046's ALU LOD, which reads no sampler: it ignores the sampler's
+    bias and MinLOD/MaxLOD whatever the sampler, and a cube's reads 0, Metal's kernel LOD (hardening pass).
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged` against 0051, as
+    predicted (no SMITE 2 shader is Shader Model 6.8); DXBC `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2
+    unchanged`.
+  - Gates (one lane, ruling R-LITE): `dxmt/check.sh` in the ARM64EC lane
+    (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-13-dxmt-check.log`): `dxmt-check: all passed`, 335 lines `ok`
+    after `info arm64 mode` (Task 12's 333 plus the `cmp68` row and the `dxil-probe` line for `cmp68.ps.dxil`; the three
+    count rows changed in place), 0 `FAIL`. The x64 lane and `make test` were not run.
