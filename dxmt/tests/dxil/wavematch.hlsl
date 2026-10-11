@@ -1,9 +1,10 @@
 #include "common.hlsli"
 // WaveMatch (165), WaveMultiPrefixOp (166: Sum 0, And 1, Or 2, Xor 3, Product 4) and WaveMultiPrefixBitCount (167),
-// partitioned by a 2-bit key; exclusive prefixes over the lanes below in the same partition.
+// partitioned by a 2-bit key into uneven groups that differ from wave to wave (InWord's two low bits repeat every 4
+// lanes; bits 9-10 don't); exclusive prefixes over the lanes below in the same partition.
 [numthreads(64, 1, 1)]
 void main(uint3 id : SV_DispatchThreadID) {
-    uint w = InWord(id.x), key = w & 3;
+    uint w = InWord(id.x), key = (w >> 9) & 3;
     uint4 m = WaveMatch(key);
     Put(id, 0, m.x); Put(id, 1, m.y | m.z | m.w); Put(id, 2, WaveMatch((float)key * 0.5).x);
     Put(id, 3, WaveMultiPrefixSum(w & 0xff, m)); Put(id, 4, WaveMultiPrefixProduct((w >> 8 & 3) + 1, m));
