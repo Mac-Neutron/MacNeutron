@@ -23,6 +23,14 @@ float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0, uint layer : SV_R
     float4 t = Tex.Sample(Point, uv * 0.5);
     return float4(t.rgb * (1 - uv.y) + ddx(uv.x) * 8, 1 - layer * 0.25);
 }
+// DXIL SM 6.8 plan, Task 10: psmain with Tex and Point through the descriptor heaps (d3d12_triangle.exe --heap: Tex at
+// view-heap slot 0, a point clamp sampler at sampler-heap slot 0), so the same pixels.
+float4 psheap(float4 pos : SV_Position, float2 uv : TEXCOORD0, uint layer : SV_RenderTargetArrayIndex) : SV_Target {
+    Texture2D<float4> tex = ResourceDescriptorHeap[0]; SamplerState pt = SamplerDescriptorHeap[0];
+    if (uv.x > 0.9) discard;
+    float4 t = tex.Sample(pt, uv * 0.5);
+    return float4(t.rgb * (1 - uv.y) + ddx(uv.x) * 8, 1 - layer * 0.25);
+}
 // Geometry shader (Task 7: SMITE 2's volume passes need one): relinks the vertex outputs by semantic, reads the
 // primitive ID, and emits two strips: the triangle shrunk to 3/4, then a small copy in the top right corner.
 struct GSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; uint layer : SV_RenderTargetArrayIndex; };

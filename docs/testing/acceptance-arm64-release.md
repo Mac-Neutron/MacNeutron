@@ -2663,3 +2663,48 @@ release or tag until the last task records the new one.
     (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-9-dxmt-check.log`): `dxmt-check: all passed`, 317 rows `ok` after
     `info arm64 mode` (Task 8's 313, plus the two noflag rows and the two Lane E naming rows), 0 `FAIL`. The x64 lane and
     `make test` were not run (the milestone's full run is the controller's).
+- **0049 (`d3d12: Pass the bound descriptor heaps to shaders that index them.`):** the runtime half of 0048's contract.
+  `CalculateRootSignatureQwordOffsets` appends two qwords after the parameters' when the root signature's
+  `Flags & 0xC00` and returns where (`MTLD3D12RootSignature::HeapQwordOffset`, `~0u` without); `UploadQwords` counts
+  them, so `ExecuteIndirect`'s per-command copies of the staging carry them. The compute and graphics staging arrays
+  grow to 66 qwords. `SetDescriptorHeaps` (a no-op before) records each heap's `GetGPUDescriptorHandleForHeapStart()`
+  by its type (0 for a type not bound), writes both bases into each staging whose root signature has the qwords, and
+  marks both root arguments dirty; `SetComputeRootSignature` and `SetGraphicsRootSignature` write the bases recorded so
+  far. `Reset` forgets them. Runtime only: `src/airconv` is untouched, so no corpus run (the DXBC pair is unaffected
+  too).
+  - Rows: `DXIL heap matches its CPU reference` and `DXIL heap-swap matches its CPU reference` (`match`),
+    `a pixel shader reads its texture and sampler through the descriptor heaps` (`yes`: `tri-heap` draws `tri-ours`'s
+    pixels, the same hash), and `and without the heap flags its pipeline is refused, naming the flag` (the logged run's
+    `flag CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;triangle fail 0x80004001;`: the graphics path of 0048's check; the program's
+    output goes to the log too, so one run gives both); `dxil-translate accepts the test shaders` 46/46 and
+    `no translated shader assumes NaN or infinity away` 46:46 (`triangle2.psheap`).
+  - `d3d12_dxil_exec.cpp`: when a group named `heap…` is asked for (D3DMetal's run asks for none), `root_heap` (`root`
+    plus 3 root constants at b1, which `heap.hlsl` doesn't read: they round up to two qwords, so the heap qwords sit at
+    4 and 5; flags 0xC00), a shader-visible sampler heap (`[0]` linear clamp, `[1]` point clamp), a CBV of the constant
+    buffer at view-heap slot 12 (the heap now has 13 descriptors) and `heap2` (`heap`'s views, slot 0 a raw view of
+    1024 zero words). `heap` binds the heaps, then the root signature, then the constants, and dispatches once;
+    `heap-swap` dispatches the same, then (a UAV barrier between) binds `heap2`, points the table at it and dispatches
+    again, printing the second dispatch. `expect.py`: each even slot 0-14 equals the next odd one; slot 11 also
+    `((i + 1) & 63) * 7 + 1` and slot 1 `InWord(i)` from the CPU, so reads that went nowhere can't pass as equal zeros;
+    `heap-swap` reads 0 in slots 0 and 1. `d3d12_triangle.exe <vs> <ps> [gs] [--heap]`: `--heap` adds flags 0xC00 and
+    binds a shader-visible sampler heap of one point clamp sampler beside the view heap. `triangle2.psheap` (ps_6_6):
+    `psmain` with `Tex` and its sampler from the heaps; `dxil-probe -S` keeps two `createHandleFromHeap` (view index 0
+    `{2, 1033}`, sampler-heap index 0 `{14, 0}`) and no other resource. DXC rewrote no other `.dxil`.
+  - Before the patch (cut-down check of these rows and their neighbours): `DXIL heap` `FAIL` at thread 0 slot 6 (`got
+    00000000 want 00005a5a`), `heap-swap` at thread 0 slot 0 (`got c6ef3675 want 00000000`: the unwritten qwords read
+    whatever followed the root arguments), `tri-heap` `FAIL` (every sampled pixel `ff2323..`); the refusal row already
+    `ok` (0048's check).
+  - Single mutations, each on its own build: the two bases swapped (by heap type) fails both heap rows and `tri-heap`;
+    the view base one descriptor (32 bytes) late fails the same three; the root constants rounded down
+    (`Num32BitValues / 2`, so the heap qwords start at 3, not 4) fails both heap rows (`tri-heap` stays `ok`: its root
+    signature has no root constants). Every other row stays `ok`.
+  - Not covered by any row (two more mutations, both passing every row): the sampler heap's base one descriptor late,
+    or never written (0). On this GPU a sampler descriptor read from zeros acts as Metal's default sampler (nearest,
+    clamp to edge), which draws exactly what point clamp draws, and `heap.hlsl` samples at texel centres, where linear
+    and point agree. A one-off D3DMetal run of `tri-heap` (not a row) draws the same hash as `tri-ours`, so a `--heap`
+    variant with a linear heap sampler anchored to D3DMetal would close it. Also by code reading only: the heap qwords
+    through `ExecuteIndirect`.
+  - Gates (one lane, ruling R-LITE): `dxmt/check.sh` in the ARM64EC lane
+    (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-10-dxmt-check.log`): `dxmt-check: all passed`, 322 lines `ok`
+    after `info arm64 mode` counted as Task 9 counted its 317 (276 rows, Task 9's 272 plus the four above, and 46
+    `dxil-translate` lines, one more for `triangle2.psheap`), 0 `FAIL`. The x64 lane and `make test` were not run.

@@ -1,5 +1,7 @@
 // Draws dxmt/tests/shaders/triangle2.hlsl offscreen through D3D12 and prints the result (DXIL translator plan, Task 3):
-//   d3d12_triangle.exe <vs.dxil> <ps.dxil>
+//   d3d12_triangle.exe <vs.dxil> <ps.dxil> [gs.dxil] [--heap]
+// --heap (DXIL SM 6.8 plan, Task 10): root signature flags 0xC00 (both heaps directly indexed), and a shader-visible
+// sampler heap of one point clamp sampler bound beside the view heap.
 // Prints "triangle ok <FNV-1a 64 of all pixels> <8 sampled pixels>" or "triangle fail 0x<hr>". check.sh compares the
 // pixels between our DXMT and D3DMetal.
 #define WIDL_EXPLICIT_AGGREGATE_RETURNS  // D3D12 methods that return structs: the MSVC ABI under mingw
@@ -57,9 +59,14 @@ static void Barrier(ID3D12GraphicsCommandList *list, ID3D12Resource *r, D3D12_RE
 }
 
 int main(int argc, char **argv) {
-    if (argc != 3 && argc != 4) { printf("usage: d3d12_triangle.exe <vs.dxil> <ps.dxil> [gs.dxil]\n"); return 2; }
-    std::vector<char> vs = load(argv[1]), ps = load(argv[2]), gs = argc == 4 ? load(argv[3]) : std::vector<char>();
-    if (vs.empty() || ps.empty() || (argc == 4 && gs.empty())) { printf("can't read the shaders\n"); return 1; }
+    int n = 1;  // the shaders: the arguments before the first -- option
+    while (n < argc && strncmp(argv[n], "--", 2)) n++;
+    bool heaps = false;
+    for (int i = n; i < argc; i++)
+        if (!strcmp(argv[i], "--heap")) heaps = true; else n = 0;  // an unknown option: the usage line
+    if (n != 3 && n != 4) { printf("usage: d3d12_triangle.exe <vs.dxil> <ps.dxil> [gs.dxil] [--heap]\n"); return 2; }
+    std::vector<char> vs = load(argv[1]), ps = load(argv[2]), gs = n == 4 ? load(argv[3]) : std::vector<char>();
+    if (vs.empty() || ps.empty() || (n == 4 && gs.empty())) { printf("can't read the shaders\n"); return 1; }
     const UINT size = 64;
     CHECK(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), (void **)&device));
     ID3D12CommandQueue *queue; ID3D12CommandAllocator *allocator; ID3D12GraphicsCommandList *list; ID3D12Fence *fence;
@@ -79,7 +86,8 @@ int main(int argc, char **argv) {
     sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
     sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
     sampler.MaxLOD = D3D12_FLOAT32_MAX;
-    D3D12_ROOT_SIGNATURE_DESC rd = {2, params, 1, &sampler, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT};
+    D3D12_ROOT_SIGNATURE_DESC rd = {2, params, 1, &sampler, (D3D12_ROOT_SIGNATURE_FLAGS)(
+        D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | (heaps ? 0xC00 : 0))};  // llvm-mingw lacks their names
     ID3DBlob *blob = nullptr, *error = nullptr;
     CHECK(D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
     ID3D12RootSignature *root;
@@ -134,6 +142,15 @@ int main(int argc, char **argv) {
     D3D12_DESCRIPTOR_HEAP_DESC hd = {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
     CHECK(device->CreateDescriptorHeap(&hd, __uuidof(ID3D12DescriptorHeap), (void **)&srv_heap));
     device->CreateShaderResourceView(tex, nullptr, srv_heap->GetCPUDescriptorHandleForHeapStart());
+    ID3D12DescriptorHeap *bound[2] = {srv_heap, nullptr};
+    if (heaps) {
+        D3D12_DESCRIPTOR_HEAP_DESC shd = {D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 1, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
+        CHECK(device->CreateDescriptorHeap(&shd, __uuidof(ID3D12DescriptorHeap), (void **)&bound[1]));
+        D3D12_SAMPLER_DESC sd = {D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+                                 D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP};
+        sd.MaxLOD = D3D12_FLOAT32_MAX;
+        device->CreateSampler(&sd, bound[1]->GetCPUDescriptorHandleForHeapStart());
+    }
     D3D12_DESCRIPTOR_HEAP_DESC rhd = {D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1};
     CHECK(device->CreateDescriptorHeap(&rhd, __uuidof(ID3D12DescriptorHeap), (void **)&rtv_heap));
     D3D12_CLEAR_VALUE clear = {DXGI_FORMAT_R8G8B8A8_UNORM, {0, 0, 0, 1}};
@@ -151,7 +168,7 @@ int main(int argc, char **argv) {
     list->RSSetViewports(1, &viewport);
     list->RSSetScissorRects(1, &scissor);
     list->SetGraphicsRootSignature(root);
-    list->SetDescriptorHeaps(1, &srv_heap);
+    list->SetDescriptorHeaps(heaps ? 2 : 1, bound);
     list->SetGraphicsRootConstantBufferView(0, cbuf->GetGPUVirtualAddress());
     list->SetGraphicsRootDescriptorTable(1, srv_heap->GetGPUDescriptorHandleForHeapStart());
     list->SetPipelineState(pso);

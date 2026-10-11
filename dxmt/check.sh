@@ -534,7 +534,7 @@ print('mad fused %d precise %d of 64 (%d differ)' % (sum(w[16 * i:16 * i + 1] ==
 PY
 )" "mad fused 64 precise 64 of 64 (32 differ)"
 # Shader Model 6.1-6.8 groups (DXIL SM 6.8 plan): our DXMT only, each against its CPU reference (dxmt/tests/expect.py).
-SM68_GROUPS="helperquad msad wavematch wavesize32 wavesize32r wavesize offsets deriv deriv2d deriv2dwide deriv2dodd"
+SM68_GROUPS="helperquad msad wavematch wavesize32 wavesize32r wavesize offsets deriv deriv2d deriv2dwide deriv2dodd heap heap-swap"
 run ours exec-sm68 dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X" $SM68_GROUPS
 for g in $SM68_GROUPS; do
   expect "DXIL $g matches its CPU reference" "$(python3 "$ROOT/dxmt/tests/expect.py" "$WORK/exec-sm68.txt" $g)" match
@@ -587,6 +587,20 @@ expect "and float16_t and uint16_t ones" "$(same_pixels "$WORK/tri-v16n.txt" "$W
 # pipeline and draws only the clear colour for this pair, so the row has no D3DMetal reference.
 run ours tri-v16x dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/varying16.vs16.dxil" "Z:$S/varying16.ps32.dxil"
 expect "and a float pixel shader reads them as float, uint and int" "$(same_pixels "$WORK/tri-v16x.txt" "$WORK/tri-v32.txt")" yes
+# A pixel shader indexes the descriptor heaps (DXIL SM 6.8 plan, Task 10): a draw's root arguments, staged apart from
+# a dispatch's, carry the heap bases too.
+run ours tri-heap dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.psheap.dxil" --heap
+expect "a pixel shader reads its texture and sampler through the descriptor heaps" \
+  "$(same_pixels "$WORK/tri-heap.txt" "$WORK/tri-ours.txt")" yes
+# Without the heap flags its graphics pipeline is refused, naming the first flag missing (the program's output goes to
+# the log too).
+before=$(cat "$LOG" 2> /dev/null | wc -l)
+export MACNEUTRON_LOG=1
+run ours tri-heap-noflag dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.psheap.dxil"
+unset MACNEUTRON_LOG
+expect "and without the heap flags its pipeline is refused, naming the flag" \
+  "$(tail -n +$((before + 1)) "$LOG" | grep -oE 'triangle fail 0x[0-9a-f]+|flag [A-Z_]+_HEAP_DIRECTLY_INDEXED' | sort | tr '\n' ';')" \
+  "flag CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;triangle fail 0x80004001;"
 CACHE="$WORK/cache/gs"
 run ours trigs-cold dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.ps.dxil" "Z:$S/triangle2.gs.dxil"
 run ours trigs-warm dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.ps.dxil" "Z:$S/triangle2.gs.dxil"
@@ -905,7 +919,7 @@ expect "and DXBC's, GroupMemoryBarrier's threadgroup fence included" \
   "$(grep '^ok sync\.dxbc ' "$WORK/translate-dxbc.txt" | grep -oE 'fence=[^ ]+ barrier=[0-9]+' || echo none)" \
   "fence=2:1,5:3,5:3,7:3,7:3 barrier=3"
 "$TOOLS/dxil-translate" "$S" > "$WORK/translate-shaders.txt" 2>&1 || true
-expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-shaders.txt" | cut -d ' ' -f 2)" "45/45"
+expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-shaders.txt" | cut -d ' ' -f 2)" "46/46"
 # DXIL keeps NaN and infinity: no translated shader assumes them away or keeps a fast compare. Vertex and geometry
 # shaders also carry no reassoc, contract or arcp flags, as airconv's DXBC path, so LLVM fuses or reorders nothing on
 # its own: a depth prepass and a base pass then compute the same positions, and their depth EQUAL test holds (grass
@@ -914,7 +928,7 @@ expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-sha
 # precise, so no fma there).
 "$TOOLS/dxil-translate" "$S" --flags > "$WORK/translate-flags.txt" 2>&1 || true
 expect "no translated shader assumes NaN or infinity away" \
-  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "45:45"
+  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "46:46"
 expect "vertex and geometry shaders carry no reassoc, contract or arcp flags" \
   "$(grep -E '^ok [^ ]+ (vs|gs) ' "$WORK/translate-flags.txt" | grep -c ' reassoc=0 contract=0 arcp=0$' || true)" 15
 # Task FU: Metal's gradient sample takes no LOD bias, so the sampler's MipLODBias scales the derivatives (2^bias): every

@@ -34,6 +34,7 @@ dxc -T cs_6_0 -E csmain -Fo compute.cs.dxil compute.hlsl
 dxc -T vs_6_6 -E vsmain -Fo triangle2.vs.dxil triangle2.hlsl
 dxc -T ps_6_6 -E psmain -Fo triangle2.ps.dxil triangle2.hlsl
 dxc -T gs_6_6 -E gsmain -Fo triangle2.gs.dxil triangle2.hlsl
+dxc -T ps_6_6 -E psheap -Fo triangle2.psheap.dxil triangle2.hlsl
 dxc -T vs_6_6 -E vsmain -Fo depth.vs.dxil depth.hlsl
 dxc -T ps_6_6 -E psmain -Fo depth.ps.dxil depth.hlsl
 dxc -T ps_6_6 -E psdepth -Fo depth.psdepth.dxil depth.hlsl

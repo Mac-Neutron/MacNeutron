@@ -174,6 +174,21 @@ def expect_deriv2dodd(got):
     return quads_2d(6, 6)
 
 
+# Dynamic resources (dxil/heap.hlsl): each even slot 0-14, read through the descriptor heaps, equals the odd slot after
+# it, read through the table or a root binding. CPU anchors, so reads that went nowhere can't pass as two equal zeros:
+# slot 11 is RWTyped after the heap write, ((i + 1) & 63) * 7 + 1; slot 1 In's word i (so slot 0 isn't all zero).
+# heap-swap prints the dispatch after heap2's binding: its slot 0 is a raw view of zeros, so slots 0 and 1 read 0.
+def expect_heap(got, raw=in_word):
+    want = [got[i | 1] for i in range(1024)]
+    for t in range(64):
+        want[t * 16 + 1], want[t * 16 + 11] = raw(t), ((t + 1) & 63) * 7 + 1
+    return want
+
+
+def expect_heap_swap(got):
+    return expect_heap(got, lambda t: 0)
+
+
 def main(path, group):
     for line in open(path, encoding="utf-8", errors="replace"):
         parts = line.split()

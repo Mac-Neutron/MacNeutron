@@ -1,11 +1,13 @@
 // Runs DXIL behaviour groups through D3D12 and prints each group's output (DXIL translator plan, Task 1):
 //   d3d12_dxil_exec.exe <shader folder> [group...]   one line per group: "group <name> ok <1024 hex words>" or "group <name> fail 0x<hr>"
 //   d3d12_dxil_exec.exe <shader folder> threads      compiles buffers.dxil on 8 threads at once: "threads ok 8/8"
-// A group named heap-<x> runs heap.dxil (heap-noflag, heap-noflag-sampler: under a root signature missing a heap flag).
+// heap, heap-swap and any group named heap-<x> run heap.dxil (heap-noflag, heap-noflag-sampler: under a root signature
+// missing a heap flag).
 // Resources follow dxmt/tests/dxil/common.hlsli. check.sh runs it on our DXMT and on D3DMetal and compares.
 #define WIDL_EXPLICIT_AGGREGATE_RETURNS  // D3D12 methods that return structs: the MSVC ABI under mingw
 #include <windows.h>
 #include <d3d12.h>
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -200,12 +202,12 @@ int main(int argc, char **argv) {
     ID3D12Resource *readback = Buffer(4096, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
     Flush();
 
-    // Descriptors: t0-t6 at 0-6, u0-u4 at 7-11.
+    // Descriptors: t0-t6 at 0-6, u0-u4 at 7-11 (the heap groups add b0's buffer at 12).
     ID3D12DescriptorHeap *heap;
-    D3D12_DESCRIPTOR_HEAP_DESC hd = {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 12, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
+    D3D12_DESCRIPTOR_HEAP_DESC hd = {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 13, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
     CHECK(device->CreateDescriptorHeap(&hd, __uuidof(ID3D12DescriptorHeap), (void **)&heap));
     UINT inc = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    D3D12_CPU_DESCRIPTOR_HANDLE cpu = heap->GetCPUDescriptorHandleForHeapStart();
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu;
     auto slot = [&](int i) { D3D12_CPU_DESCRIPTOR_HANDLE h = cpu; h.ptr += i * inc; return h; };
     auto buffer_srv = [&](ID3D12Resource *r, int i, DXGI_FORMAT f, UINT n, UINT stride, D3D12_BUFFER_SRV_FLAGS flags) {
         D3D12_SHADER_RESOURCE_VIEW_DESC d = {}; d.Format = f; d.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
@@ -213,36 +215,71 @@ int main(int argc, char **argv) {
         d.Buffer.NumElements = n; d.Buffer.StructureByteStride = stride; d.Buffer.Flags = flags;
         device->CreateShaderResourceView(r, &d, slot(i));
     };
-    buffer_srv(inbuf, 0, DXGI_FORMAT_R32_TYPELESS, 2048, 0, D3D12_BUFFER_SRV_FLAG_RAW);
-    device->CreateShaderResourceView(tex, nullptr, slot(1));
-    buffer_srv(typedbuf, 2, DXGI_FORMAT_R32G32B32A32_FLOAT, 64, 0, D3D12_BUFFER_SRV_FLAG_NONE);
-    buffer_srv(structbuf, 3, DXGI_FORMAT_UNKNOWN, 64, 20, D3D12_BUFFER_SRV_FLAG_NONE);
-    buffer_srv(arrbuf[0], 4, DXGI_FORMAT_R32G32B32A32_FLOAT, 64, 0, D3D12_BUFFER_SRV_FLAG_NONE);
-    buffer_srv(arrbuf[1], 5, DXGI_FORMAT_R32G32B32A32_FLOAT, 64, 0, D3D12_BUFFER_SRV_FLAG_NONE);
-    D3D12_SHADER_RESOURCE_VIEW_DESC dv = {}; dv.Format = DXGI_FORMAT_R32_FLOAT; dv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    dv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; dv.Texture2D.MipLevels = 4;
-    device->CreateShaderResourceView(depth, &dv, slot(6));
-    D3D12_UNORDERED_ACCESS_VIEW_DESC u = {}; u.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-    u.Format = DXGI_FORMAT_R32_TYPELESS; u.Buffer.NumElements = 1024; u.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
-    device->CreateUnorderedAccessView(out, nullptr, &u, slot(7));
-    u.Format = DXGI_FORMAT_R32_UINT; u.Buffer.NumElements = 64; u.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
-    device->CreateUnorderedAccessView(rwtyped, nullptr, &u, slot(8));
-    device->CreateUnorderedAccessView(rwtex, nullptr, nullptr, slot(9));
-    u.Format = DXGI_FORMAT_UNKNOWN; u.Buffer.NumElements = 65; u.Buffer.StructureByteStride = 8;
-    device->CreateUnorderedAccessView(atomics, nullptr, &u, slot(10));
-    device->CreateUnorderedAccessView(atomictex, nullptr, nullptr, slot(11));
+    auto views = [&](ID3D12DescriptorHeap *h) {  // slot() writes to h from here on
+        cpu = h->GetCPUDescriptorHandleForHeapStart();
+        buffer_srv(inbuf, 0, DXGI_FORMAT_R32_TYPELESS, 2048, 0, D3D12_BUFFER_SRV_FLAG_RAW);
+        device->CreateShaderResourceView(tex, nullptr, slot(1));
+        buffer_srv(typedbuf, 2, DXGI_FORMAT_R32G32B32A32_FLOAT, 64, 0, D3D12_BUFFER_SRV_FLAG_NONE);
+        buffer_srv(structbuf, 3, DXGI_FORMAT_UNKNOWN, 64, 20, D3D12_BUFFER_SRV_FLAG_NONE);
+        buffer_srv(arrbuf[0], 4, DXGI_FORMAT_R32G32B32A32_FLOAT, 64, 0, D3D12_BUFFER_SRV_FLAG_NONE);
+        buffer_srv(arrbuf[1], 5, DXGI_FORMAT_R32G32B32A32_FLOAT, 64, 0, D3D12_BUFFER_SRV_FLAG_NONE);
+        D3D12_SHADER_RESOURCE_VIEW_DESC dv = {}; dv.Format = DXGI_FORMAT_R32_FLOAT; dv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        dv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; dv.Texture2D.MipLevels = 4;
+        device->CreateShaderResourceView(depth, &dv, slot(6));
+        D3D12_UNORDERED_ACCESS_VIEW_DESC u = {}; u.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+        u.Format = DXGI_FORMAT_R32_TYPELESS; u.Buffer.NumElements = 1024; u.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+        device->CreateUnorderedAccessView(out, nullptr, &u, slot(7));
+        u.Format = DXGI_FORMAT_R32_UINT; u.Buffer.NumElements = 64; u.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+        device->CreateUnorderedAccessView(rwtyped, nullptr, &u, slot(8));
+        device->CreateUnorderedAccessView(rwtex, nullptr, nullptr, slot(9));
+        u.Format = DXGI_FORMAT_UNKNOWN; u.Buffer.NumElements = 65; u.Buffer.StructureByteStride = 8;
+        device->CreateUnorderedAccessView(atomics, nullptr, &u, slot(10));
+        device->CreateUnorderedAccessView(atomictex, nullptr, nullptr, slot(11));
+    };
+    views(heap);
 
     const char *all[] = {"buffers", "math", "transcendental", "textures", "groupshared", "wave", "half", "packed", "atomics", "quad", "specials", "mad", "barriers"};
     std::vector<std::string> groups;
     for (int i = 2; i < argc; i++) groups.push_back(argv[i]);
     if (groups.empty()) groups.assign(std::begin(all), std::end(all));
 
+    // The heap groups (DXIL SM 6.8 plan, Task 10), made only when one runs (the D3DMetal run has none). root_heap: `root`
+    // plus 3 root constants at b1 (heap.hlsl doesn't read them; they round up to two qwords, so the heap bases follow
+    // at qword 4), flags 0xC00 (llvm-mingw lacks their names). A sampler heap of [0] linear clamp, [1] point clamp.
+    // b0's buffer at slot 12. heap2: heap's views, except a raw view of zeros at slot 0.
+    ID3D12RootSignature *root_heap = nullptr;
+    ID3D12DescriptorHeap *sampler_heap = nullptr, *heap2 = nullptr;
+    if (std::any_of(groups.begin(), groups.end(), [](const std::string &g) { return g.rfind("heap", 0) == 0; })) {
+        D3D12_ROOT_PARAMETER hp[3] = {params[0], params[1], {}};
+        hp[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        hp[2].Constants.ShaderRegister = 1; hp[2].Constants.Num32BitValues = 3;
+        D3D12_ROOT_SIGNATURE_DESC hrd = {3, hp, 3, samplers, (D3D12_ROOT_SIGNATURE_FLAGS)0xC00};
+        ID3DBlob *b = nullptr;
+        CHECK(D3D12SerializeRootSignature(&hrd, D3D_ROOT_SIGNATURE_VERSION_1, &b, &error));
+        CHECK(device->CreateRootSignature(0, b->GetBufferPointer(), b->GetBufferSize(), __uuidof(ID3D12RootSignature), (void **)&root_heap));
+        D3D12_DESCRIPTOR_HEAP_DESC sd = {D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 2, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
+        CHECK(device->CreateDescriptorHeap(&sd, __uuidof(ID3D12DescriptorHeap), (void **)&sampler_heap));
+        D3D12_CPU_DESCRIPTOR_HANDLE s = sampler_heap->GetCPUDescriptorHandleForHeapStart();
+        for (int i = 0; i < 2; i++) {
+            D3D12_SAMPLER_DESC d = {};
+            d.Filter = i ? D3D12_FILTER_MIN_MAG_MIP_POINT : D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+            d.AddressU = d.AddressV = d.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP; d.MaxLOD = D3D12_FLOAT32_MAX;
+            device->CreateSampler(&d, s); s.ptr += device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+        }
+        D3D12_CONSTANT_BUFFER_VIEW_DESC cv = {cbuf->GetGPUVirtualAddress(), 256};
+        device->CreateConstantBufferView(&cv, slot(12));
+        CHECK(device->CreateDescriptorHeap(&hd, __uuidof(ID3D12DescriptorHeap), (void **)&heap2));
+        views(heap2);
+        device->CreateConstantBufferView(&cv, slot(12));
+        buffer_srv(zerobuf, 0, DXGI_FORMAT_R32_TYPELESS, 1024, 0, D3D12_BUFFER_SRV_FLAG_RAW);
+    }
+
     for (auto &name : groups) {
         // heap-noflag and heap-noflag-sampler (DXIL SM 6.8 plan, Task 9): heap.dxil under `root`, which has neither heap
         // flag, and under its description with CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED (0x400) alone: no sampler heap flag.
         std::vector<char> cs = load(folder + "/" + (name.rfind("heap-", 0) == 0 ? std::string("heap") : name) + ".dxil");
         if (cs.empty()) { printf("group %s fail missing\n", name.c_str()); continue; }
-        ID3D12RootSignature *rs = root;
+        ID3D12RootSignature *rs = name == "heap" || name == "heap-swap" ? root_heap : root;
         if (name == "heap-noflag-sampler") {
             D3D12_ROOT_SIGNATURE_DESC views = rd; views.Flags = (D3D12_ROOT_SIGNATURE_FLAGS)0x400; // llvm-mingw lacks its name
             ID3DBlob *b = nullptr;
@@ -266,12 +303,29 @@ int main(int argc, char **argv) {
         from.PlacedFootprint.Footprint = {DXGI_FORMAT_R32_UINT, 8, 8, 1, 256};
         list->CopyTextureRegion(&to, 0, 0, 0, &from, nullptr);
         Barrier(atomictex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        list->SetComputeRootSignature(rs);
-        list->SetDescriptorHeaps(1, &heap);
+        ID3D12DescriptorHeap *bound[2] = {heap, sampler_heap};
+        if (rs == root_heap) {  // the heaps first: setting the root signature brings their bases in
+            list->SetDescriptorHeaps(2, bound);
+            list->SetComputeRootSignature(rs);
+            const UINT constants[3] = {1, 2, 3};
+            list->SetComputeRoot32BitConstants(2, 3, constants, 0);
+        } else {
+            list->SetComputeRootSignature(rs);
+            list->SetDescriptorHeaps(1, &heap);
+        }
         list->SetComputeRootConstantBufferView(0, cbuf->GetGPUVirtualAddress());
         list->SetComputeRootDescriptorTable(1, heap->GetGPUDescriptorHandleForHeapStart());
         list->SetPipelineState(pso);
         list->Dispatch(1, 1, 1);
+        if (name == "heap-swap") {  // heap2 bound between two dispatches in one list: the second reads it, and is printed
+            D3D12_RESOURCE_BARRIER uav[2] = {};
+            uav[0].Type = uav[1].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV; uav[0].UAV.pResource = out; uav[1].UAV.pResource = rwtyped;
+            list->ResourceBarrier(2, uav);
+            bound[0] = heap2;
+            list->SetDescriptorHeaps(2, bound);
+            list->SetComputeRootDescriptorTable(1, heap2->GetGPUDescriptorHandleForHeapStart());
+            list->Dispatch(1, 1, 1);
+        }
         Barrier(out, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
         list->CopyBufferRegion(readback, 0, out, 0, 4096);
         Barrier(out, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
