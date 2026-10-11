@@ -2367,15 +2367,21 @@ release or tag until the last task records the new one.
   `mask0` below this one: 32 shuffles a call, from 0 (+0.0 for a float sum), all ones (and) or 1 (product).
   `WaveMultiPrefixBitCount` (167) is the popcount of the ballot ANDed with the same lanes. In a pixel shader helpers
   are left out as in 0041. `AddWaveInputs` defines the lane index for 165-167.
-  - Rows: `DXIL wavematch matches its CPU reference` reads `match`. `wavematch.hlsl` partitions each wave by
-    `key = (w >> 9) & 3` and writes `WaveMatch(key)` (its lanes 32-127 as 0), a float `WaveMatch`, the five
-    `WaveMultiPrefix` kinds and `WaveMultiPrefixCountBits` over that mask, and an integer-valued float prefix sum. The
-    groups are uneven (6 to 9 lanes), differ between the two waves, and the fourth key first appears at lane 4.
-    `dxil-translate` accepts 16/17 behaviour shaders.
+  - Rows: `DXIL wavematch matches its CPU reference` is `ok` (`expect.py` prints `match`). `wavematch.hlsl`
+    partitions each wave by `key = (w >> 9) & 3` and writes `WaveMatch(key)` (its lanes 32-127 as 0), a float
+    `WaveMatch`, the five `WaveMultiPrefix` kinds and `WaveMultiPrefixCountBits` over that mask, and an integer-valued
+    float prefix sum. The groups are uneven (6 to 9 lanes), differ between the two waves, and the fourth key first
+    appears at lane 4. `dxil-translate` accepts 16/17 behaviour shaders.
+    - In the float `WaveMatch`, the key-3 lanes hold a quiet NaN, and each one's mask is only its own lane.
+    - Slots 10-14 run under `if (id.x % 3 != 0)`, and the other threads write `0xe15e` to slot 10. In those slots
+      `WaveMatch(key)` sees only the lanes that are on, and the sum, product, and and count prefixes over the outer
+      `m` skip m's lanes that are off.
     - Before the patch: `fail wavematch.dxil DXIL: dx.op.waveMatch.i32 (165) not supported` (15/17). `dxil-probe -S`
-      shows all nine calls kept: `waveMatch.i32` and `.f32`, `waveMultiPrefixOp.i32` kinds 0-4, `.f32` kind 0, and
-      `waveMultiPrefixBitCount`.
-    - With the patch, the row reads `FAIL` under each of seven single-op mutations, each on its own build:
+      shows all fourteen calls kept: `waveMatch.i32` and `.f32` (on `select …, float 0x7FF8000000000000, …`),
+      `waveMultiPrefixOp.i32` kinds 0-4, `.f32` kind 0 and `waveMultiPrefixBitCount`; then, in the block behind
+      `urem %id, 3`, `waveMatch.i32`, kinds 0, 4 and 1, and `waveMultiPrefixBitCount`.
+    - With the patch, the row reads `FAIL` under each of nine single-op mutations, each on its own build. The first
+      seven ran before the NaN and slots 10-14 were added:
       - 165 without the loop: thread 2 slot 0;
       - 165 as four passes reading lanes 0-3 (it assumes they hold every value): thread 4 slot 0, the 13 lanes whose
         key first appears at lane 4;
@@ -2384,13 +2390,17 @@ release or tag until the last task records the new one.
       - 166's and starting at 0: slot 5 only;
       - 166's float sum starting at -0.0: slot 9 only, the 8 lanes that start a partition;
       - 167 without the lanes-below mask: slot 8 only.
-      The float-compare mutation also shows the loop ending through `simd_is_first` alone.
+      The float-compare mutation also shows the loop ending through `simd_is_first` alone. On the final test:
+      - 165 without the `simd_is_first` exit: a NaN first lane never leaves. The program's 10 s fence wait gives up
+        (`GPU work never finished`), and the row reads `wavematch missing`;
+      - 166 without the filter for lanes that are on: slots 11-13 only (sum, product, and).
     - Found: the first version keyed on `w & 3`, which is `lane & 3` (`InWord`'s multiplier 2654435761 is 1 mod 4):
       four stride-4 groups headed by lanes 0-3, the same in both waves. The four-pass break passed it, so the key moved
       to bits 9-10 (ruling R-T3a).
   - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged`, as predicted (no
     SMITE 2 shader calls 165-167); DXBC `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`.
-  - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-3-r1-dxmt-check.log`):
+  - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-3-r2-dxmt-check.log`):
     `dxmt-check: all passed` twice, 516 rows `ok`, 0 `FAIL`. `make test`: 252 passed.
-  - Not covered at runtime (spec §8): helper lanes in 165-167. A pixel shader calling them translates offline, with and
-    without `[WaveOpsIncludeHelperLanes]`.
+  - Not covered at runtime (spec §8): helper lanes in 165-167. They were checked once, by hand: two scratch pixel
+    shaders calling 165-167, one with `[WaveOpsIncludeHelperLanes]`, translated with `dxil-translate` (`2/2 ok`).
+    They aren't committed, and no row repeats the check.

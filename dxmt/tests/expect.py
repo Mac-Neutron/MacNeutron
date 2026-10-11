@@ -70,18 +70,28 @@ def expect_msad(got):
 
 # Per 32-lane wave, m is the lanes with the same key ((w >> 9) & 3); the prefixes fold the lanes of m below this one,
 # in lane order, wrapping at 32 bits, from 0 (sum, or, xor), 1 (product) or all ones (and). Slot 1 (m's lanes 32-127)
-# is 0.
+# is 0. Slot 2: a key-3 lane holds a NaN and matches only itself. Slots 10-14 run on the threads t % 3 != 0 (the others
+# write 0xe15e to slot 10), and WaveMatch and the prefixes count only those lanes.
 def expect_wavematch(got):
+    def fold(xs):  # sum, product, and, or, xor, count bits over the lanes' words xs
+        product, band, bor, bxor = 1, 0xffffffff, 0, 0
+        for x in xs:
+            product, band, bor, bxor = product * ((x >> 8 & 3) + 1), band & x, bor | x & 0xf0f0, bxor ^ x
+        return sum(x & 0xff for x in xs), product & 0xffffffff, band, bor, bxor, sum(x & 16 != 0 for x in xs)
+
     def slots(t):
         ws = [in_word(i) for i in range(wave(t) * 32, wave(t) * 32 + 32)]
-        m = sum(1 << j for j in range(32) if ws[j] >> 9 & 3 == ws[lane(t)] >> 9 & 3)
-        below = [ws[j] for j in range(lane(t)) if m >> j & 1]
-        product, band, bor, bxor = 1, 0xffffffff, 0, 0
-        for x in below:
-            product, band, bor, bxor = product * ((x >> 8 & 3) + 1), band & x, bor | x & 0xf0f0, bxor ^ x
-        total = sum(x & 0xff for x in below)
-        return [m, 0, m, total & 0xffffffff, product & 0xffffffff, band, bor, bxor, sum(x & 16 != 0 for x in below),
-                f32(total)]
+        on = [(wave(t) * 32 + j) % 3 != 0 for j in range(32)]
+        key = [x >> 9 & 3 for x in ws]
+        group = [j for j in range(32) if key[j] == key[lane(t)]]
+        m = sum(1 << j for j in group)
+        total, product, band, bor, bxor, count = fold([ws[j] for j in group if j < lane(t)])
+        # f32(0) for an empty prefix on purpose: an empty sum is +0.0; Task 2's -0.0 is only a left-out lane's operand.
+        want = [m, 0, 1 << lane(t) if key[lane(t)] == 3 else m, total, product, band, bor, bxor, count, f32(total)]
+        if not on[lane(t)]:
+            return want + [0xe15e]
+        total, product, band, _, _, count = fold([ws[j] for j in group if j < lane(t) and on[j]])
+        return want + [sum(1 << j for j in group if on[j]), total, product, band, count]
     return per_thread(slots)
 
 
