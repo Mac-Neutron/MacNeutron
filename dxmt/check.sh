@@ -534,11 +534,15 @@ print('mad fused %d precise %d of 64 (%d differ)' % (sum(w[16 * i:16 * i + 1] ==
 PY
 )" "mad fused 64 precise 64 of 64 (32 differ)"
 # Shader Model 6.1-6.8 groups (DXIL SM 6.8 plan): our DXMT only, each against its CPU reference (dxmt/tests/expect.py).
-SM68_GROUPS="helperquad msad wavematch"
+SM68_GROUPS="helperquad msad wavematch wavesize32 wavesize32r wavesize"
 run ours exec-sm68 dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X" $SM68_GROUPS
 for g in $SM68_GROUPS; do
   expect "DXIL $g matches its CPU reference" "$(python3 "$ROOT/dxmt/tests/expect.py" "$WORK/exec-sm68.txt" $g)" match
 done
+# A [WaveSize] range without 32 fails its D3D12 pipeline (DXIL SM 6.8 plan, Task 4).
+run ours exec-reject dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X/reject" wavesize64 wavesizerange
+expect "D3D12 refuses a pipeline whose [WaveSize] excludes 32" \
+  "$(/usr/bin/grep -cE '^group wavesize(64|range) fail 0x80004005$' "$WORK/exec-reject.txt" || true)" 2
 run ours exec-threads dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X" threads
 expect "DXIL pipelines compile on 8 threads at once" "$(grep -o 'threads ok 8/8' "$WORK/exec-threads.txt" || true)" "threads ok 8/8"
 run ours tri-ours dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.ps.dxil"
@@ -853,7 +857,13 @@ run ref d3dmetal d3dmetal "$LOOP" 1280 720 0 0 200 0
 expect "the frozen D3DMetal reference still runs" "$(grep -c 'avg frame' "$WORK/d3dmetal.txt" || true)" 1
 # 6. dxil-translate: every test shader reaches a Metal pipeline offline (heap.dxil is out of scope on purpose).
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxil" --flags > "$WORK/translate.txt" 2>&1 || true
-expect "dxil-translate accepts every behaviour shader but heap" "$(tail -1 "$WORK/translate.txt" | cut -d ' ' -f 2)" "16/17"
+expect "dxil-translate accepts every behaviour shader but heap" "$(tail -1 "$WORK/translate.txt" | cut -d ' ' -f 2)" "19/20"
+# [WaveSize] outside the device's 32 lanes is refused, naming the range (DXIL SM 6.8 plan, Task 4).
+"$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxil/reject" > "$WORK/translate-reject.txt" 2>&1 || true
+expect "dxil-translate refuses every out-of-scope shader" "$(tail -1 "$WORK/translate-reject.txt" | cut -d ' ' -f 2)" "0/2"
+expect "a [WaveSize] range without 32 is refused, naming it" \
+  "$(/usr/bin/grep -oE 'WaveSize\([0-9]+, [0-9]+\)\] excludes' "$WORK/translate-reject.txt" | tr '\n' ';')" \
+  "WaveSize(64, 64)] excludes;WaveSize(8, 16)] excludes;"
 # Task F2, Task FR: DXIL barriers fence memory as Metal Shader Converter does at Metal 3.1 (an air.atomic.fence, then
 # for a synced one an air.wg.barrier), the device and texture ones at device scope whether or not they sync the group
 # (a barrier's memory flags only order within the group). dxil/barriers.hlsl's modes 8, 9, 2, 3, 10, 11:

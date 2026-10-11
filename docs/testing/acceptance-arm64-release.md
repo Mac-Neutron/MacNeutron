@@ -2404,3 +2404,37 @@ release or tag until the last task records the new one.
   - Not covered at runtime (spec §8): helper lanes in 165-167. They were checked once, by hand: two scratch pixel
     shaders calling 165-167, one with `[WaveOpsIncludeHelperLanes]`, translated with `dxil-translate` (`2/2 ok`).
     They aren't committed, and no row repeats the check.
+- **0043 (`airconv: Refuse a WaveSize range that excludes 32 lanes.`):** `ReadEntry` reads `[WaveSize]` into
+  `EntryInfo::wave_size_min` and `wave_size_max` (0 without it): entry property 11 (WaveSize, `!{N}`) sets both to N,
+  and 23 (WaveSizeRange, 6.8: `!{min, max, preferred}`) sets min and max, a max of 0 meaning min alone.
+  `InitializeDXIL` refuses a shader whose range leaves out 32, the only width Apple GPUs run (the device reports
+  `WaveLaneCountMin` and `Max` 32): `DXIL: [WaveSize(<min>, <max>)] excludes this device's 32-lane waves`. D3D12's
+  `CreateComputePipelineState` then answers `E_FAIL` (`CachedShader::Parse`). The preferred size is ignored. Refused
+  test shaders live in `dxmt/tests/dxil/reject/`, which `dxil-translate` and D3D12 must refuse.
+  - Rows: `DXIL wavesize32`, `wavesize32r` and `wavesize matches its CPU reference` are `ok` (slot 0
+    `WaveGetLaneCount()` 32, slot 1 the lane). `wavesize32` is `[WaveSize(32)]` at cs_6_6 (property 11, `!{i32 32}`),
+    `wavesize32r` the same source at cs_6_8 (property 23, `!{i32 32, i32 0, i32 0}`), and `wavesize`
+    `[WaveSize(16, 64, 32)]` at cs_6_8 (`!{i32 16, i32 64, i32 32}`); `dxil-probe -S` shows each. `D3D12 refuses a
+    pipeline whose [WaveSize] excludes 32` reads 2 (`group wavesize64 fail 0x80004005` and `group wavesizerange …`,
+    Lane C); `dxil-translate refuses every out-of-scope shader` reads `0/2` and `a [WaveSize] range without 32 is
+    refused, naming it` reads `WaveSize(64, 64)] excludes;WaveSize(8, 16)] excludes;` (Lane E). `dxil-translate`
+    accepts 19/20 behaviour shaders.
+    - `reject/wavesize64` is `[WaveSize(64)]` at cs_6_6 (`!{i32 64}`); `reject/wavesizerange` is `[WaveSize(8, 16)]`
+      at cs_6_8 (`!{i32 8, i32 16, i32 0}`). The plan had `(64, 128)` there: with both minimums above 32, a check
+      that only tested `min <= 32` passed every row. Now each half of the check has a shader only it refuses.
+    - Before the patch: `summary 2/2 ok`, and both reject groups ran, `WaveGetLaneCount()` 32: `[WaveSize(64)]` ran
+      at 32 lanes without a word.
+    - With the patch, single mutations, each on its own build: max 0 kept as 0 (wavesize32r refused, `18/20`); only
+      `min <= 32` tested (wavesizerange runs: `1/2`, the D3D12 row 1); only `32 <= max` tested (wavesize64 runs);
+      property 11 ignored (wavesize64 runs); 23's preferred read as max (the naming row reads `WaveSize(8, 8)]`).
+      Each turns at least one row `FAIL`.
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged`, as predicted; DXBC
+    `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`.
+    - Found: the plan's reason was that SMITE 2 has no `[WaveSize]`, but a read-only `dxil-probe -S` over
+      `~/dxil-smite2` finds 48 cs_6_6 shaders with property 11 `!{i32 32}`, `[WaveSize(32)]`. They are accepted
+      and translate as before (the property changes no code), which is the case `wavesize32` checks. No shader in
+      the corpus has property 23 or another size.
+  - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-4-dxmt-check.log`):
+    `dxmt-check: all passed` twice, 528 rows `ok`, 0 `FAIL`. `make test`: 252 passed. A first run, started with
+    `taskpolicy -b` while another session's GPU probe ran, timed out XeSS and upscale runs (the 120 s watchdog) and a
+    minimised-present timing row in the x64 lane; none touch DXIL, and the rerun on an idle machine passed.

@@ -95,6 +95,14 @@ def expect_wavematch(got):
     return per_thread(slots)
 
 
+# [WaveSize(32)] at cs_6_6 (tag 11) and at cs_6_8 (tag 23, max 0), and [WaveSize(16, 64, 32)]: accepted, 32-lane waves.
+def expect_wavesize32(got):
+    return per_thread(lambda t: [32, lane(t)])
+
+
+expect_wavesize32r = expect_wavesize = expect_wavesize32
+
+
 def main(path, group):
     for line in open(path, encoding="utf-8", errors="replace"):
         parts = line.split()
