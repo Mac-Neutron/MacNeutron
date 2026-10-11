@@ -1,5 +1,6 @@
 #include "common.hlsli"
-// IsHelperLane (221) is false in compute; QuadAny/QuadAll (222) over 1D quads, four consecutive threads.
+// QuadAny/QuadAll (222) over 1D quads, four consecutive threads. Slot 0 checks DXC's fold: DXC 1.9 makes
+// IsHelperLane() false in compute without op 221 (sm6x.ps runs our lowering of it).
 [numthreads(64, 1, 1)]
 void main(uint3 id : SV_DispatchThreadID) {
     uint w = InWord(id.x);

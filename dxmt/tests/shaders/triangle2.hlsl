@@ -14,6 +14,8 @@ VSOut vsmain(uint id : SV_VertexID, float2 uv : POSITION) {
     o.extra = uv * 3;
     o.uv = uv;
     o.layer = id / 8; // 0
+    // 0. Msad (50) in a vertex shader, whose helper the geometry pipeline must link too (DXIL SM 6.8 plan, Task 1).
+    o.uv += msad4(id, uint2(id, 0), uint4(0, 0, 0, 0)).x;
     return o;
 }
 float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0, uint layer : SV_RenderTargetArrayIndex) : SV_Target {

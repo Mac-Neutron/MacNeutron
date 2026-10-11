@@ -22,87 +22,126 @@ run, which failed their pipelines as unsupported:
 - ViewID (138): 0. View instancing isn't supported, so there is one view.
 
 SM50Initialize sets use_msad and use_samplepos from the module's calls,
-so SM50Compile links the helpers. Metal compiled those with fast math:
-the DXIL float policy (no NaN or infinity assumed away; no reassociation,
+so the compiles link the helpers (LinkHelpers). A DXIL geometry
+pipeline's object function links the vertex shader's helpers too: it
+runs the vertex shader, and upstream links the geometry shader's only
+(D3D11 keeps that). Metal compiled the helpers with fast math: the DXIL
+float policy (no NaN or infinity assumed away; no reassociation,
 contraction or reciprocals before the rasterizer) moves from LowerBody
-into StripFastMath, which SM50Compile and the geometry pipeline compiles
-also run on the whole module after linking a helper into a DXIL one.
-D3D11's shaders are unchanged.
+into StripFastMath, which also runs on a DXIL module after a helper is
+linked and drops the helpers' fast-math function attributes. D3D11's
+shaders are unchanged.
 
 The op enum also names 75-77, 138, 165-167, 222, 244, 245 and 254-257.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- src/airconv/dxbc_converter.cpp            | 11 +++++
- src/airconv/dxil/dxil.hpp                 |  5 +++
- src/airconv/dxil/dxil_converter.cpp       | 55 +++++++++++++++--------
+ src/airconv/dxbc_converter.cpp            | 39 +++++++++-----
+ src/airconv/dxil/dxil.hpp                 |  6 +++
+ src/airconv/dxil/dxil_converter.cpp       | 62 ++++++++++++++++-------
  src/airconv/dxil/dxil_initialize.cpp      |  4 ++
- src/airconv/dxil/dxil_lower.cpp           | 24 ++++++++++
- src/airconv/dxil/dxil_lower_math.cpp      | 10 +++++
- src/airconv/dxil/dxil_lower_resources.cpp | 13 ++++++
+ src/airconv/dxil/dxil_lower.cpp           | 24 +++++++++
+ src/airconv/dxil/dxil_lower_math.cpp      | 10 ++++
+ src/airconv/dxil/dxil_lower_resources.cpp | 13 +++++
  src/airconv/dxil/dxil_types.hpp           |  7 ++-
- 8 files changed, 108 insertions(+), 21 deletions(-)
+ 8 files changed, 132 insertions(+), 33 deletions(-)
 
 diff --git a/src/airconv/dxbc_converter.cpp b/src/airconv/dxbc_converter.cpp
-index 0073a7e..e217e93 100644
+index 0073a7e..5bd7fd0 100644
 --- a/src/airconv/dxbc_converter.cpp
 +++ b/src/airconv/dxbc_converter.cpp
-@@ -1419,6 +1419,9 @@ AIRCONV_API int SM50Compile(
-     linkMSAD(*pModule);
-   if (shader_info.use_samplepos)
-     linkSamplePos(*pModule);
-+  // DXIL's float policy (no NaN or infinity assumed away) holds in the helpers too: Metal compiled them with fast math.
-+  if (auto d = ((dxmt::dxbc::SM50ShaderInternal *)pShader)->dxil; d && (shader_info.use_msad || shader_info.use_samplepos))
-+    dxmt::dxil::StripFastMath(*pModule, d->entry.kind); // (MacNeutron)
+@@ -1369,6 +1369,18 @@ AIRCONV_API void SM50Destroy(sm50_shader_t pShader) {
+   delete (dxmt::dxbc::SM50ShaderInternal *)pShader;
+ }
+ 
++// Links airconv's Metal helpers (msad, sample positions) a module calls. A DXIL module (`dxil`: its stage) keeps the
++// DXIL float policy in them too: Metal compiled them with fast math. (MacNeutron)
++static void
++LinkHelpers(llvm::Module &M, bool msad, bool samplepos, std::optional<dxmt::dxil::ShaderKind> dxil) {
++  if (msad)
++    dxmt::linkMSAD(M);
++  if (samplepos)
++    dxmt::linkSamplePos(M);
++  if (dxil && (msad || samplepos))
++    dxmt::dxil::StripFastMath(M, *dxil);
++}
++
+ AIRCONV_API int SM50Compile(
+   sm50_shader_t pShader, SM50_SHADER_COMPILATION_ARGUMENT_DATA *pArgs,
+   const char *FunctionName, sm50_bitcode_t *ppBitcode, sm50_error_t *ppError
+@@ -1415,10 +1427,9 @@ AIRCONV_API int SM50Compile(
+     return 1;
+   }
+ 
+-  if (shader_info.use_msad)
+-    linkMSAD(*pModule);
+-  if (shader_info.use_samplepos)
+-    linkSamplePos(*pModule);
++  auto &dxil_shader = ((dxmt::dxbc::SM50ShaderInternal *)pShader)->dxil;
++  LinkHelpers(*pModule, shader_info.use_msad, shader_info.use_samplepos,
++              dxil_shader ? std::optional(dxil_shader->entry.kind) : std::nullopt);
  
    runOptimizationPasses(*pModule);
  
-@@ -1651,6 +1654,10 @@ AIRCONV_API int SM50CompileGeometryPipelineVertex(
-     linkMSAD(*pModule);
-   if (shader_info.use_samplepos)
-     linkSamplePos(*pModule);
-+  // DXIL's float policy holds in the helpers too: Metal compiled them with fast math. Pre-raster. (MacNeutron)
-+  if ((((dxbc::SM50ShaderInternal *)pVertexShader)->dxil || ((dxbc::SM50ShaderInternal *)pGeometryShader)->dxil) &&
-+      (shader_info.use_msad || shader_info.use_samplepos))
-+    dxmt::dxil::StripFastMath(*pModule, dxmt::dxil::ShaderKind::Geometry);
+@@ -1647,10 +1658,13 @@ AIRCONV_API int SM50CompileGeometryPipelineVertex(
+     return 1;
+   }
+ 
+-  if (shader_info.use_msad)
+-    linkMSAD(*pModule);
+-  if (shader_info.use_samplepos)
+-    linkSamplePos(*pModule);
++  // The object function runs the vertex shader, so a DXIL pipeline links its helpers too (D3D11 links the geometry
++  // shader's only, as upstream). (MacNeutron)
++  auto vs = (dxbc::SM50ShaderInternal *)pVertexShader;
++  bool dxil_pipeline = vs->dxil || ((dxbc::SM50ShaderInternal *)pGeometryShader)->dxil;
++  LinkHelpers(*pModule, shader_info.use_msad || (dxil_pipeline && vs->shader_info.use_msad),
++              shader_info.use_samplepos || (dxil_pipeline && vs->shader_info.use_samplepos),
++              dxil_pipeline ? std::optional(dxmt::dxil::ShaderKind::Geometry) : std::nullopt);
  
    runOptimizationPasses(*pModule);
  
-@@ -1726,6 +1733,10 @@ AIRCONV_API int SM50CompileGeometryPipelineGeometry(
-     linkMSAD(*pModule);
-   if (shader_info.use_samplepos)
-     linkSamplePos(*pModule);
-+  // DXIL's float policy holds in the helpers too: Metal compiled them with fast math. Pre-raster. (MacNeutron)
-+  if ((((dxbc::SM50ShaderInternal *)pVertexShader)->dxil || ((dxbc::SM50ShaderInternal *)pGeometryShader)->dxil) &&
-+      (shader_info.use_msad || shader_info.use_samplepos))
-+    dxmt::dxil::StripFastMath(*pModule, dxmt::dxil::ShaderKind::Geometry);
+@@ -1722,10 +1736,11 @@ AIRCONV_API int SM50CompileGeometryPipelineGeometry(
+     return 1;
+   }
+ 
+-  if (shader_info.use_msad)
+-    linkMSAD(*pModule);
+-  if (shader_info.use_samplepos)
+-    linkSamplePos(*pModule);
++  // The mesh function runs the geometry shader alone: its helpers are the ones to link.
++  LinkHelpers(*pModule, shader_info.use_msad, shader_info.use_samplepos,
++              ((dxbc::SM50ShaderInternal *)pVertexShader)->dxil || ((dxbc::SM50ShaderInternal *)pGeometryShader)->dxil
++                  ? std::optional(dxmt::dxil::ShaderKind::Geometry)
++                  : std::nullopt);
    
    runOptimizationPasses(*pModule);
  
 diff --git a/src/airconv/dxil/dxil.hpp b/src/airconv/dxil/dxil.hpp
-index 745f9a1..cfe8642 100644
+index 745f9a1..e3c1cb1 100644
 --- a/src/airconv/dxil/dxil.hpp
 +++ b/src/airconv/dxil/dxil.hpp
-@@ -73,6 +73,11 @@ llvm::Expected<std::unique_ptr<llvm::Module>> ConvertDXILGeometryPipeline(
+@@ -73,6 +73,12 @@ llvm::Expected<std::unique_ptr<llvm::Module>> ConvertDXILGeometryPipeline(
      SM50_SHADER_COMPILATION_ARGUMENT_DATA *pArgs
  );
  
 +// dxil_converter.cpp: applies the DXIL float policy (no NaN or infinity assumed away; no reassociation, contraction
-+// or reciprocals before the rasterizer) to every function in `module`. SM50Compile runs it after linking airconv's
-+// Metal helpers (msad, sample positions), which Metal compiled with fast math.
++// or reciprocals before the rasterizer) to every function defined in `module`, and drops their fast-math function
++// attributes. SM50Compile runs it after linking airconv's Metal helpers (msad, sample positions), which Metal compiled
++// with fast math.
 +void StripFastMath(llvm::Module &module, ShaderKind kind);
 +
  // dxil_converter.cpp: SM50Compile's DXIL branch; returns the AIR module, ready for airconv's passes.
  llvm::Expected<std::unique_ptr<llvm::Module>> ConvertDXIL(
      dxbc::SM50ShaderInternal *shader, const char *name, llvm::LLVMContext &context,
 diff --git a/src/airconv/dxil/dxil_converter.cpp b/src/airconv/dxil/dxil_converter.cpp
-index 1910442..462b14c 100644
+index 1910442..1a59519 100644
 --- a/src/airconv/dxil/dxil_converter.cpp
 +++ b/src/airconv/dxil/dxil_converter.cpp
-@@ -221,6 +221,32 @@ ApplyProbe(const DXILShader &dxil, llvm::Function &main) {
- // Moves the DXIL entry's blocks to the end of the function being built, turns its returns into branches to
- // `epilogue`, lowers every dx.op call, and returns the block that enters the body. The insertion point is kept (the
- // caller branches to the body from where its prologue ended; the prologue may have added blocks, e.g. vertex pulls).
+@@ -218,6 +218,32 @@ ApplyProbe(const DXILShader &dxil, llvm::Function &main) {
+       }
+ }
+ 
 +// DXC marks most float math `fast`. D3D keeps NaN and infinity, so no stage assumes them away, and compares keep no
 +// fast flag at all (Metal's compiler treats any as leave to ignore NaN: (x < y) || (x >= y) came out true for a NaN).
 +// As airconv's DXBC path (Converter::UseFastMath), pre-raster stages neither reassociate, fuse nor use reciprocals,
@@ -129,9 +168,9 @@ index 1910442..462b14c 100644
 +  }
 +}
 +
- llvm::Expected<llvm::BasicBlock *>
- LowerBody(const DXILShader &dxil, struct context &ctx, llvm::Function *dxil_main, llvm::BasicBlock *epilogue,
-           const EntryInfo *vertex_outputs = nullptr) {
+ // Moves the DXIL entry's blocks to the end of the function being built, turns its returns into branches to
+ // `epilogue`, lowers every dx.op call, and returns the block that enters the body. The insertion point is kept (the
+ // caller branches to the body from where its prologue ended; the prologue may have added blocks, e.g. vertex pulls).
 @@ -232,31 +258,14 @@ LowerBody(const DXILShader &dxil, struct context &ctx, llvm::Function *dxil_main
      blocks.push_back(&bb);
    ctx.function->getBasicBlockList().splice(ctx.function->end(), dxil_main->getBasicBlockList());
@@ -166,16 +205,23 @@ index 1910442..462b14c 100644
        if (auto call = llvm::dyn_cast<llvm::CallInst>(&inst); call && OpCode(*call) != ~0u)
          calls.push_back(call);
      }
-@@ -290,6 +299,14 @@ llvm::Error Finish(llvm::Module &module, llvm::Function *dxil_main) {
+@@ -290,6 +299,21 @@ llvm::Error Finish(llvm::Module &module, llvm::Function *dxil_main) {
  
  } // namespace
  
 +void
 +StripFastMath(llvm::Module &module, ShaderKind kind) {
-+  for (auto &fn : module)
++  for (auto &fn : module) {
++    if (fn.isDeclaration())
++      continue;
++    // The function-level fast math Metal's compiler gives the helpers, which would allow what the flags no longer do.
++    for (auto attr :
++         {"unsafe-fp-math", "no-nans-fp-math", "no-infs-fp-math", "no-signed-zeros-fp-math", "approx-func-fp-math"})
++      fn.removeFnAttr(attr);
 +    for (auto &bb : fn)
 +      for (auto &inst : bb)
 +        StripFastMath(inst, PreRaster(kind));
++  }
 +}
 +
  llvm::Expected<std::unique_ptr<llvm::Module>>

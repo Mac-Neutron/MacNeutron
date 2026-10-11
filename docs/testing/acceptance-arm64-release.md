@@ -2298,24 +2298,31 @@ release or tag until the last task records the new one.
   `air.quad_all`; `Msad` (50) calls airconv's `dxmt.msad.i32`; `Texture2DMSGetSamplePosition` (75) and
   `RenderTargetGetSamplePosition` (76) call `dxmt.sample_pos.i32` with the texture's or the render target's sample
   count; `RenderTargetGetSampleCount` (77) is `air.get_num_samples`; `ViewID` (138) is 0. `InitializeDXIL` sets
-  `use_msad` and `use_samplepos`, so `SM50Compile` links the helpers; 76 and 77 no longer fail as "resource handle
+  `use_msad` and `use_samplepos`, so the compiles link the helpers; 76 and 77 no longer fail as "resource handle
   through phi/select". The op enum also gains the numbers later tasks lower (165-167, 244, 245, 254-257).
   - Rows: `DXIL helperquad matches its CPU reference` and `DXIL msad matches its CPU reference` read `match`
     (`dxmt/tests/expect.py`, our DXMT only); `ViewID, the render target's sample count and position read 0, 1 and
-    (0,0)` reads `yes` (`sm6x.ps` draws `triangle2`'s pixels). `dxil-translate` accepts 15/16 behaviour shaders (heap
-    is still refused) and 36/36 test shaders (`36:36` with no NaN or infinity assumed away; 12 vertex and geometry
-    shaders without reassoc, contract or arcp).
+    (0,0)` reads `yes` (`sm6x.ps` draws `triangle2`'s pixels; its zero term includes `IsHelperLane()`, which DXC keeps
+    as op 221 in a pixel shader). `triangle2.hlsl`'s vertex shader adds `msad4(id, uint2(id, 0), 0).x` (0) to `uv`, so
+    the existing triangle rows run `Msad` in a vertex shader, the geometry pipeline included. `dxil-translate` accepts
+    15/16 behaviour shaders (heap is still refused) and 36/36 test shaders (`36:36` with no NaN or infinity assumed
+    away; 12 vertex and geometry shaders without reassoc, contract or arcp).
   - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged`; DXBC
-    `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`.
-  - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-1-dxmt-check.log`):
+    `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`. `corpus-diff.py` fails on an `ok` line
+    without `air=` and on a shader missing from the second run.
+  - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-1-fix1-dxmt-check.log`):
     `dxmt-check: all passed` twice, 508 rows `ok`, 0 `FAIL`. `make test`: 252 passed.
-  - Found: airconv's Metal helpers (`air_samplepos`, `air_msad`) are compiled with Metal's fast math. The first build
-    left `nnan=4 ninf=4` in both `sm6x` shaders, and "no translated shader assumes NaN or infinity away" read `36:34`.
-    The DXIL float policy moved from `LowerBody` into `StripFastMath`, which `SM50Compile` and the two geometry-pipeline
-    compiles also run on the whole module once they have linked a helper (DXIL only; D3D11's helpers are unchanged).
+  - Found: airconv's Metal helpers (`air_samplepos`, `air_msad`) are compiled with Metal's fast math (instruction flags
+    and function attributes such as `"no-nans-fp-math"`). The first build left `nnan=4 ninf=4` in both `sm6x` shaders,
+    and "no translated shader assumes NaN or infinity away" read `36:34`. The DXIL float policy moved from `LowerBody`
+    into `StripFastMath`, which a DXIL compile also runs on the whole module once it has linked a helper, dropping the
+    helpers' fast-math function attributes too (D3D11's helpers are unchanged).
+  - Found: upstream's geometry pipeline links helpers on the geometry shader's `shader_info`, though its object function
+    runs the vertex shader, so a DXIL vertex shader's `msad` was an undefined symbol there ("Failed to create geometry
+    PSO: ... Undefined symbols", with the `msad` vertex shader on the first 0040). A DXIL pipeline now also links the
+    vertex shader's helpers; D3D11 keeps upstream's behaviour.
   - Found: DXC 1.9.2607 folds `IsHelperLane()` to false in a compute shader, so `helperquad.dxil` has no op 221
-    (`dxil-probe`) and its slot 0 checks DXC; Task 2's `helper.hlsl` is the first test of the pixel shader path.
-  - Not fixed (upstream, D3D11 too): `SM50CompileGeometryPipelineVertex` links helpers on the geometry shader's
-    `shader_info`, though its object function runs the vertex shader. A DXIL vertex shader calling `msad` or
-    `GetSamplePosition` in a geometry pipeline whose geometry shader doesn't would be left with an undefined `dxmt.*`
-    function (untested).
+    (`dxil-probe`) and its slot 0 checks DXC; `sm6x.ps` runs the pixel shader path.
+  - Not covered at runtime: op 75 (`sm6x.cs` is translated offline only) and op 76 on a multisampled target. The rows
+    run a one-sample target, whose position is (0,0) for any index, so a wrong position table, a swapped argument or a
+    wrong index operand would not show yet.

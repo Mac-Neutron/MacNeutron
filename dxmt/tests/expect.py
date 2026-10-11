@@ -41,7 +41,7 @@ def per_thread(slots):  # 1024 words from slots(t) -> the first words of thread 
     return want
 
 
-# IsHelperLane is false in compute; QuadAny/QuadAll vote over threads 4q .. 4q+3.
+# Slot 0: DXC folds IsHelperLane() to false in compute (no op 221). QuadAny/QuadAll vote over threads 4q .. 4q+3.
 def expect_helperquad(got):
     def slots(t):
         quad = range(t & ~3, (t & ~3) + 4)

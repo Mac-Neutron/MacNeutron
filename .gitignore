@@ -5,3 +5,4 @@ build/
 .claude/settings.local.json
 .superpowers/
 .DS_Store
+__pycache__/
