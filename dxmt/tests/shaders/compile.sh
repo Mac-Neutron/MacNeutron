@@ -83,6 +83,7 @@ dxc -T cs_6_7 -E main -Fo helperquad.dxil helperquad.hlsl
 dxc -T cs_6_7 -E main -Fo offsets.dxil offsets.hlsl
 dxc -T cs_6_8 -E main -Fo wavesize32r.dxil wavesize32.hlsl
 dxc -T cs_6_8 -E main -Fo wavesize.dxil wavesize.hlsl
+dxc -T cs_6_8 -E main -Fo barrier68.dxil barrier68.hlsl
 dxc -T cs_6_6 -E main8x8 -Fo deriv2d.dxil deriv2d.hlsl
 dxc -T cs_6_6 -E main32x2 -Fo deriv2dwide.dxil deriv2d.hlsl
 dxc -T cs_6_6 -E main6x6 -Fo deriv2dodd.dxil deriv2d.hlsl

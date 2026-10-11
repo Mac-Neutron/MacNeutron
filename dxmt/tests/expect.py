@@ -192,6 +192,12 @@ def expect_heap_swap(got):
     return expect_heap(got, lambda t: 0)
 
 
+# Shader Model 6.8's Barrier() (dxil/barrier68.hlsl), barriers.hlsl's words: each thread reads another's groupshared
+# word and RWTyped element across a synced barrier (threads 32-63 are another simdgroup).
+def expect_barrier68(got):
+    return per_thread(lambda t: [in_word(63 - t), ((t + 1) & 63) * 3 + 1, ((t + 2) & 63) + 7 + ((t + 3) & 63) * 5])
+
+
 def main(path, group):
     for line in open(path, encoding="utf-8", errors="replace"):
         parts = line.split()

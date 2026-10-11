@@ -2721,3 +2721,33 @@ release or tag until the last task records the new one.
     (`task-10a-dxmt-check.log`, same folder): `dxmt-check: all passed`, 323 lines `ok` (277 rows: one more, D3DMetal's
     heap sampler row), 0 `FAIL`; the shader counts stay 46/46 and 46:46 (no new shader file). The x64 lane and
     `make test` were not run.
+- **0050 (`airconv: Lower Shader Model 6.8's Barrier().`):** `BarrierByMemoryType` (244) and `BarrierByMemoryHandle`
+  (245), which DXC emits only for the Shader Model 6.8 `Barrier()` intrinsic, become the op-80 mode they spell and take
+  op 80's lowering (shared, not copied): `(sem & 1 ? 1 : 0) | (uav ? (sem & 4 ? 2 : 4) : 0) | (mem & 2 ? 8 : 0)`, with
+  `uav = mem & 1` for 244 and true for 245 (its handle is a UAV); node memory bits are ignored.
+  - `dxil/barrier68.hlsl` (cs_6_8): `barriers.hlsl` with each legacy barrier as its `Barrier()` form. `dxil-probe -S`
+    keeps six calls and no op 80: 244 `(2, 2)`, `(2, 3)`, `(1, 4)`, 245 on `RWTyped`'s handle with `5`, 244 `(3, 4)`,
+    `(3, 5)`, which are `barriers.hlsl`'s modes 8, 9, 2, 3, 10, 11. Its translated AIR is byte-identical to
+    `barriers.dxil`'s (`air=fa82eb64cc634454` both), and its 1024 words equal `barriers`' word for word (a cut-down
+    check). DXC rewrote no other `.dxil`.
+  - Rows: `DXIL barrier68 matches its CPU reference` (`expect_barrier68`: slot 0 `in_word(63 - t)`, slot 1
+    `((t + 1) & 63) * 3 + 1`, slot 2 `((t + 2) & 63) + 7 + ((t + 3) & 63) * 5`); Lane E `and Shader Model 6.8's Barrier()
+    fences as the legacy barriers it spells` (`fence=2:1,5:3,5:3,7:3,7:3 barrier=3`, the `barriers` row's value);
+    `dxil-translate accepts every behaviour shader` 26/26.
+  - Before the patch: `fail barrier68.dxil DXIL: dx.op.barrierByMemoryType (244) not supported`, `summary 25/26`.
+  - Single mutations of the mapping, each on its own build, against a cut-down check (the DXIL groups against D3DMetal
+    and their CPU references, and Lane E's `dxil-translate` rows): device scope dropped (UAV always mode 4) fails the
+    new fence row (`fence=2:1,5:1,5:1,7:1,7:1 barrier=3`); group sync dropped fails it (`fence=2:1,2:1,5:3,5:3,7:3,7:3
+    barrier=0`) and the runtime row (thread 0 slot 0: `got 00000000 want efa6f28f`, the other simdgroup's groupshared
+    word not yet written); group-shared memory dropped fails the fence row (`fence=5:3,5:3,5:3,5:3 barrier=3`). Every
+    other row stays `ok`. The runtime row is a race without the sync: on the group-sync mutant it failed 7 of 10
+    separate runs (and the cut-down check's one), and on the patch it matched 10 of 10. The fence row is the
+    deterministic guard for all three; the scope and memory-type mutants change nothing a single group can see.
+  - By code reading only: a UAV barrier at group scope (mode 4), a sync with no memory (mode 1), and node memory flags.
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged` against 0048, as
+    predicted (no SMITE 2 shader calls `Barrier()`); DXBC `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2
+    unchanged`.
+  - Gates (one lane, ruling R-LITE): `dxmt/check.sh` in the ARM64EC lane
+    (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-11-dxmt-check.log`): `dxmt-check: all passed`, 325 lines `ok`
+    after `info arm64 mode` (Task 10's 323 plus the two rows above; the 26/26 row changed in place), 0 `FAIL`. The x64
+    lane and `make test` were not run.

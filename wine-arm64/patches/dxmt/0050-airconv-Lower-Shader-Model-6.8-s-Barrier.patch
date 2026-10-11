@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sun, 11 Oct 2026 15:47:16 -0400
+Subject: [PATCH] airconv: Lower Shader Model 6.8's Barrier().
+
+BarrierByMemoryType (244) and BarrierByMemoryHandle (245), which DXC emits
+only for Shader Model 6.8's Barrier() intrinsic, were refused. Each now
+becomes the op-80 mode it spells and takes op 80's lowering: group sync is
+mode bit 1, UAV memory a device fence (2) at device scope or a threadgroup
+UAV fence (4) otherwise, and group-shared memory the threadgroup fence (8).
+BarrierByMemoryHandle's handle is a UAV, so it fences UAV memory. Node
+memory flags are ignored: no node shader reaches the translator.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/airconv/dxil/dxil_lower.cpp | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/airconv/dxil/dxil_lower.cpp b/src/airconv/dxil/dxil_lower.cpp
+index 2fd4595..96a6591 100644
+--- a/src/airconv/dxil/dxil_lower.cpp
++++ b/src/airconv/dxil/dxil_lower.cpp
+@@ -617,6 +617,8 @@ Lowering::LowerOther(uint32_t opcode, llvm::CallInst *call) {
+     Replace(call, acc);
+     return llvm::Error::success();
+   }
++  case op::BarrierByMemoryType:   // (244, i32 MemoryTypeFlags, i32 SemanticFlags)
++  case op::BarrierByMemoryHandle: // (245, handle, i32 SemanticFlags): the handle is a UAV
+   case op::Barrier: { // (80, i32 mode): 1 = sync threadgroup, 2 = UAV fence global, 4 = UAV fence threadgroup, 8 = TGSM fence
+     // As airconv's DXBC sync lowering (nt/dxbc_converter_base.hpp, InstSync), at any Metal version, as Metal Shader
+     // Converter does at Metal 3.1: a fence without the sync bit (GroupMemoryBarrier 8, AllMemoryBarrier 10,
+@@ -626,6 +628,13 @@ Lowering::LowerOther(uint32_t opcode, llvm::CallInst *call) {
+     // (MacNeutron)
+     using namespace llvm::air;
+     uint32_t mode = ConstantU32(call->getArgOperand(1));
++    if (opcode != op::Barrier) {
++      // Shader Model 6.8's Barrier() as the op-80 mode it spells (DXC 1.9's DxilConstants.h): memory UAV 1, group shared
++      // 2 (node memory 4, 8 ignored: no node shader reaches the translator); semantics group sync 1, group scope 2,
++      // device scope 4.
++      uint32_t mem = opcode == op::BarrierByMemoryHandle ? 1 : mode, sem = ConstantU32(call->getArgOperand(2));
++      mode = (sem & 1 ? 1 : 0) | (mem & 1 ? (sem & 4 ? 2 : 4) : 0) | (mem & 2 ? 8 : 0);
++    }
+     bool sync = mode & 1, non_execution = ctx.metal_version >= SM50_SHADER_METAL_320;
+     MemFlags flags = (mode & 8) ? MemFlags::Threadgroup : MemFlags::None;
+     auto scope = (mode & 2) ? (ThreadScope::Device | ThreadScope::Threadgroup) : ThreadScope::Threadgroup;
+-- 
+2.54.0 (Apple Git-157)
+

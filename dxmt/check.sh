@@ -534,7 +534,7 @@ print('mad fused %d precise %d of 64 (%d differ)' % (sum(w[16 * i:16 * i + 1] ==
 PY
 )" "mad fused 64 precise 64 of 64 (32 differ)"
 # Shader Model 6.1-6.8 groups (DXIL SM 6.8 plan): our DXMT only, each against its CPU reference (dxmt/tests/expect.py).
-SM68_GROUPS="helperquad msad wavematch wavesize32 wavesize32r wavesize offsets deriv deriv2d deriv2dwide deriv2dodd heap heap-swap"
+SM68_GROUPS="helperquad msad wavematch wavesize32 wavesize32r wavesize offsets deriv deriv2d deriv2dwide deriv2dodd heap heap-swap barrier68"
 run ours exec-sm68 dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X" $SM68_GROUPS
 for g in $SM68_GROUPS; do
   expect "DXIL $g matches its CPU reference" "$(python3 "$ROOT/dxmt/tests/expect.py" "$WORK/exec-sm68.txt" $g)" match
@@ -897,7 +897,7 @@ run ref d3dmetal d3dmetal "$LOOP" 1280 720 0 0 200 0
 expect "the frozen D3DMetal reference still runs" "$(grep -c 'avg frame' "$WORK/d3dmetal.txt" || true)" 1
 # 6. dxil-translate: every test shader reaches a Metal pipeline offline.
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxil" --flags > "$WORK/translate.txt" 2>&1 || true
-expect "dxil-translate accepts every behaviour shader" "$(tail -1 "$WORK/translate.txt" | cut -d ' ' -f 2)" "25/25"
+expect "dxil-translate accepts every behaviour shader" "$(tail -1 "$WORK/translate.txt" | cut -d ' ' -f 2)" "26/26"
 # [WaveSize] outside the device's 32 lanes is refused, naming the range (DXIL SM 6.8 plan, Task 4); so are the E_NOTIMPL
 # canary and a 64-bit groupshared atomic, naming them (Task 9).
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxil/reject" > "$WORK/translate-reject.txt" 2>&1 || true
@@ -917,6 +917,9 @@ expect "a 64-bit groupshared atomic is refused naming it" "$(/usr/bin/grep -c '^
 # metal_version >= 3.2 branch): the runtime groups are DXIL only. ponytail: a D3D11 compute row of sync.hlsl vs D3DMetal.
 expect "DXIL barriers fence memory, at device scope for device memory" \
   "$(grep '^ok barriers\.dxil ' "$WORK/translate.txt" | grep -oE 'fence=[^ ]+ barrier=[0-9]+' || echo none)" \
+  "fence=2:1,5:3,5:3,7:3,7:3 barrier=3"
+expect "and Shader Model 6.8's Barrier() fences as the legacy barriers it spells" \
+  "$(grep '^ok barrier68\.dxil ' "$WORK/translate.txt" | grep -oE 'fence=[^ ]+ barrier=[0-9]+' || echo none)" \
   "fence=2:1,5:3,5:3,7:3,7:3 barrier=3"
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxbc" --flags > "$WORK/translate-dxbc.txt" 2>&1 || true
 expect "and DXBC's, GroupMemoryBarrier's threadgroup fence included" \
