@@ -103,6 +103,26 @@ def expect_wavesize32(got):
 expect_wavesize32r = expect_wavesize = expect_wavesize32
 
 
+# Programmable offsets (SM 6.7) from base texel (4, 4): Load and SampleLevel (point, clamp) take the offset's low 4
+# bits, sign-extended; GatherRed/GatherGreen take og as is, footprint (4..5, 4..5) + og clamped to [0, 7], components
+# (i0,j1) (i1,j1) (i1,j0) (i0,j0). Slots hold the texel bytes packed (common.hlsli's tex_rgba).
+def expect_offsets(got):
+    k_off = [-4, -1, 0, 3, 12, 13, -13, -15]
+    wrap = lambda v: ((v & 15) ^ 8) - 8
+    clamp = lambda v: min(max(v, 0), 7)
+    pack = lambda b: b[0] | b[1] << 8 | b[2] << 16 | b[3] << 24
+
+    def slots(t):
+        w = in_word(t)
+        ox, oy = wrap(k_off[w & 7]), wrap(k_off[(w >> 3) & 7])
+        gx, gy = k_off[w & 3], k_off[(w >> 3) & 3]
+        i0, i1, j0, j1 = clamp(4 + gx), clamp(5 + gx), clamp(4 + gy), clamp(5 + gy)
+        texel = pack(tex_rgba(4 + ox, 4 + oy))
+        return [texel, texel, pack([tex_rgba(i, 0)[0] for i in (i0, i1, i1, i0)]),
+                pack([tex_rgba(0, j)[1] for j in (j1, j1, j0, j0)])]
+    return per_thread(slots)
+
+
 def main(path, group):
     for line in open(path, encoding="utf-8", errors="replace"):
         parts = line.split()

@@ -79,6 +79,7 @@ ls -l ./*.dxil
 cd "$HERE/../dxil"
 for g in buffers math transcendental textures groupshared wave atomics quad heap specials mad barriers msad wavematch wavesize32; do dxc -T cs_6_6 -E main -Fo "$g.dxil" "$g.hlsl"; done
 dxc -T cs_6_7 -E main -Fo helperquad.dxil helperquad.hlsl
+dxc -T cs_6_7 -E main -Fo offsets.dxil offsets.hlsl
 dxc -T cs_6_8 -E main -Fo wavesize32r.dxil wavesize32.hlsl
 dxc -T cs_6_8 -E main -Fo wavesize.dxil wavesize.hlsl
 for g in half packed; do dxc -T cs_6_6 -E main -enable-16bit-types -Fo "$g.dxil" "$g.hlsl"; done

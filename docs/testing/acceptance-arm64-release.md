@@ -2478,3 +2478,40 @@ release or tag until the last task records the new one.
     `~/dxil-smite2` finds no `loadInput` or `storeOutput` with an `f16` or `i16` overload.
   - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-5-r1-dxmt-check.log`):
     `dxmt-check: all passed` twice, 536 rows `ok`, 0 `FAIL`. `make test`: 252 passed.
+- **0045 (`airconv: Pass programmable texture offsets through.`):** a texture offset that isn't a constant (Shader
+  Model 6.7's programmable offsets, and `TextureGather`'s at any model) was read as 0. `TextureLoad` (66) and the
+  `Sample*` family (60-65) now take the runtime value wrapped to D3D's low 4 bits, sign-extended (`(x << 28) >> 28`);
+  `TextureGather` (73) and `TextureGatherCmp` (74) pass it through unwrapped, as the DXBC path's `gather4_po` does.
+  Constant offsets keep their immediate form. In `nt/`, both `AIRBuilder::GetOffset` forms are public (the new one
+  builds the offset vector from values), `CreateSample`, `CreateSampleCmp` and `CreateSampleGrad` gain `Value *Offset`
+  forms, and `CreateSampleGrad`'s immediate form now forwards to its value form, which the D3D11 converter calls too.
+  - Rows: `DXIL offsets matches its CPU reference` reads `match` (`dxmt/tests/expect.py`, our DXMT only), and
+    `dxil-translate` accepts 20/21 behaviour shaders. `offsets.hlsl` (cs_6_7) reads `Tex` from texel (4, 4) with
+    offsets from `{-4, -1, 0, 3, 12, 13, -13, -15}` picked by the thread's input word (all 64 x, y pairs for `Load`
+    and `SampleLevel`; 16 pairs from the first four for `GatherRed` and `GatherGreen`), and stores each texel's
+    bytes. DXC keeps every offset a runtime value (`dxil-probe -S`: loaded from `@kOff` at a runtime index).
+    - Beyond the plan's shader: slot 3, `GatherGreen` with the same offsets. Red holds only x, so with slots 0-2
+      alone a gather whose y offset reads 0 passed (shown with that mutation).
+    - Before the patch the row read `FAIL` (thread 0 slot 0: `ff808080`, texel (4, 4)): 63 of 64 threads wrong in
+      `Load` and `SampleLevel`, 48 in each gather. Single mutations, each on its own build: `Load`'s runtime offsets
+      0 (slot 0 only, 63 threads); `Sample*`'s offsets 0 (slot 1, 63; and `DXIL textures matches D3DMetal`, whose
+      constant offset goes too); the gathers' offsets 0 (slots 2 and 3, 48 each); the gathers' y offset 0 (slot 3
+      only); the wrap removed (slot 0, 48 threads); the wrap zero-extended (`lshr`; slot 0, 48); x and y swapped
+      (all four slots, and the textures row); constant offsets 0 (the textures row only).
+    - Found: removing the wrap leaves `SampleLevel` right on this M5 Pro: the sampler keeps a runtime offset's low 4
+      bits itself, as spec §2's probe found on Apple10. Only `Load`, whose offset we add to the position, shows the
+      wrap; the `Sample*` wrap stays for D3D's rule on any GPU. A one-off D3DMetal run of the shader (not a row;
+      `build/sm68/logs/exec-t6-ref.txt`) matches the CPU reference in slots 1-3 on all 64 threads and in slot 0 on the
+      16 whose offsets lie in [-8, 7]; for the other 48 it reads 0 (`Load` unwrapped, out of bounds).
+    - Covered by code reading only: gathers passing their offsets unwrapped (the shader's gather offsets lie in
+      [-8, 7], where the wrap changes nothing, and Metal's gather keeps [-8, 7], the gap spec §3.6 records); runtime
+      offsets on `Sample`, `SampleBias`, `SampleGrad`, `SampleCmp`, `SampleCmpLevelZero` and `TextureGatherCmp` (the
+      same lambda and overloads as the rows' ops); 3D, array and multisampled textures (a multisampled `Load` adds its
+      offset to the position as before, since `GetOffset` has no multisampled form).
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged`, as predicted; DXBC
+    `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged` (`grad.dxbc`'s `sample_d` goes through
+    `CreateSampleGrad`'s forwarding). A read-only `dxil-probe -S` over `~/dxil-smite2` finds 81,131 calls of ops
+    60-66, 73 and 74, 295 of them with a non-zero offset, every offset a constant.
+  - Gates (the maintainer's process change of 2026-10-11: one lane between milestones): `dxmt/check.sh` in the ARM64EC
+    lane (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-6-dxmt-check.log`): `dxmt-check: all passed`, 264 rows `ok`
+    (263 before, plus the offsets row), 0 `FAIL`. The x64 lane and `make test` (no Swift touched) were not run.
