@@ -89,6 +89,25 @@ int main(void)
         printf("breakaway ok\n");
         return 0;
     }
+    if (!wcscmp(mode, L"drm"))  /* SteamStub DRM's start handshake with Steam, as Proton's steam.exe answers it */
+    {
+        WCHAR name[64];
+        HANDLE ack, produce, consume;
+
+        _snwprintf(name, ARRAYSIZE(name), L"STEAM_START_ACK_EVENT_%lu", GetCurrentProcessId());
+        ack = CreateEventW(NULL, FALSE, FALSE, name);
+        produce = OpenSemaphoreW(SYNCHRONIZE | SEMAPHORE_MODIFY_STATE, FALSE, L"SREAM_DIPC_PRODUCE");
+        consume = OpenSemaphoreW(SYNCHRONIZE | SEMAPHORE_MODIFY_STATE, FALSE, L"STEAM_DIPC_CONSUME");
+        if (!ack || !produce || !consume)
+        {
+            printf("no Steam DRM channel\n");
+            return 0;
+        }
+        if (WaitForSingleObject(produce, 5000)) { printf("no slot\n"); return 0; }
+        ReleaseSemaphore(consume, 1, NULL);
+        printf("ack=%d\n", WaitForSingleObject(ack, 5000) == WAIT_OBJECT_0);
+        return 0;
+    }
     if (!wcscmp(mode, L"late") && argc > 2)  /* the real game, still running after its launcher quit */
     {
         FILE *out;

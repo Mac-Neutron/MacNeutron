@@ -5,11 +5,12 @@
  * steam_api(64).dll treats Steam as running when HKCU\Software\Valve\Steam\ActiveProcess\pid names a
  * live process, and loads the client DLL named next to it. This writes those values (pointing at the
  * runtime's Steam bridge, which the launcher copies into C:\Program Files (x86)\Steam), runs <program>
- * in a job, waits until every process in the job has exited (launchers start the real game and quit),
- * clears the pid, and exits with <program>'s exit code.
+ * in a job, answers SteamStub DRM's start check (see answer_drm), waits until every process in the job
+ * has exited (launchers start the real game and quit), clears the pid, and exits with <program>'s exit code.
  * Spec: docs/superpowers/specs/2026-09-28-macneutron-steam-bridge-design.md §4.2.
  */
 #include <windows.h>
+#include <winternl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,6 +93,59 @@ static void unregister_steam(DWORD pid)
     RegCloseKey(key);
 }
 
+/* ntdll's object-directory calls, which mingw's headers leave out. */
+typedef struct { UNICODE_STRING ObjectName, ObjectTypeName; } DIRECTORY_BASIC_INFORMATION;
+NTSTATUS NTAPI NtOpenDirectoryObject(HANDLE *, ACCESS_MASK, OBJECT_ATTRIBUTES *);
+NTSTATUS NTAPI NtQueryDirectoryObject(HANDLE, void *, ULONG, BOOLEAN, BOOLEAN, ULONG *, ULONG *);
+
+/* SteamStub DRM (Steam's wrapper on many games' exes) has Steam confirm the start: it takes a slot from the
+ * SREAM_DIPC_PRODUCE semaphore (Valve's spelling), creates an event named STEAM_START_ACK_EVENT<something>, signals
+ * STEAM_DIPC_CONSUME and waits for Steam to set the event. Unanswered, the game stops with "Application load error
+ * 3:0000065432". This answers it the way Proton's steam.exe does (steam_helper/steam.c, steam_drm_thread). */
+static HANDLE drm_consume, drm_produce;
+
+/* The game's ack event: its name's suffix isn't known, so look through the session's named objects. */
+static HANDLE find_ack_event(void)
+{
+    static const WCHAR prefix[] = L"STEAM_START_ACK_EVENT";
+    union { DIRECTORY_BASIC_INFORMATION info; char buffer[1024]; } entry;
+    UNICODE_STRING name;
+    OBJECT_ATTRIBUTES attr;
+    ULONG context = 0, size;
+    BOOLEAN first = TRUE;
+    HANDLE dir, ack = NULL;
+
+    /* ponytail: Wine puts every process in session 1. */
+    RtlInitUnicodeString(&name, L"\\Sessions\\1\\BaseNamedObjects");
+    InitializeObjectAttributes(&attr, &name, 0, NULL, NULL);
+    if (NtOpenDirectoryObject(&dir, 1 /* DIRECTORY_QUERY */, &attr)) return NULL;
+    while (!ack && !NtQueryDirectoryObject(dir, &entry, sizeof(entry), TRUE, first, &context, &size))
+    {
+        first = FALSE;
+        if (entry.info.ObjectName.Length >= sizeof(prefix) - sizeof(WCHAR)
+            && !wcsncmp(entry.info.ObjectName.Buffer, prefix, ARRAYSIZE(prefix) - 1))
+            ack = OpenEventW(EVENT_MODIFY_STATE, FALSE, entry.info.ObjectName.Buffer);
+    }
+    CloseHandle(dir);
+    return ack;
+}
+
+static DWORD WINAPI answer_drm(void *arg)
+{
+    HANDLE ack;
+
+    while (!WaitForSingleObject(drm_consume, INFINITE))
+    {
+        if ((ack = find_ack_event()))
+        {
+            SetEvent(ack);
+            CloseHandle(ack);
+        }
+        ReleaseSemaphore(drm_produce, 1, NULL);
+    }
+    return 0;
+}
+
 /* Our command line minus our own name (argv[0] rules: quoted, or up to the first blank). */
 static WCHAR *child_command_line(void)
 {
@@ -139,6 +193,10 @@ int main(void)
         return 1;
     }
     register_steam(pid);
+    /* Before the game runs, so its stub finds the semaphores. */
+    drm_consume = CreateSemaphoreW(NULL, 0, 512, L"STEAM_DIPC_CONSUME");
+    drm_produce = CreateSemaphoreW(NULL, 1, 512, L"SREAM_DIPC_PRODUCE");
+    if (drm_consume && drm_produce) CreateThread(NULL, 0, answer_drm, NULL, 0, NULL);
     if ((job = CreateJobObjectW(NULL, NULL)))
     {
         /* Launchers may start the game with CREATE_BREAKAWAY_FROM_JOB; Wine refuses that inside a job

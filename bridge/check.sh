@@ -62,6 +62,7 @@ expect "pid cleared afterwards" "$("$WINE" "$HELPER" pid 2>/dev/null | tr -d '\r
 set +e; "$WINE" "$STEAMEXE" 'C:\missing.exe' >/dev/null 2>&1; got=$?; set -e
 expect "missing program exits 1" "$got" 1
 expect "launchers may start children outside the job" "$(steam breakaway)" "breakaway ok"
+expect "SteamStub DRM's start handshake is answered" "$(steam drm)" "ack=1"
 
 # The same rows through the tool folder's launcher, as Steam starts a game: the launcher copies steam.exe and starts
 # the game through it. A fake account ID: the launcher would fill in the real one, which steam.exe writes to the
