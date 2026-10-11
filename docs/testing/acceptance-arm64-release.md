@@ -2838,10 +2838,10 @@ release or tag until the last task records the new one.
     coarse gradients instead of its own fails slot 7 (12); `SampleCmpGrad` comparing against 0.5 instead of its value
     fails slot 7 (12); compute `SampleCmpBias` comparing against its bias operand fails slots 1 and 2 (40, 48);
     `ScanUsage` not marking 254/255's texture compared leaves `cmp68` passing (its `SampleCmp` marks `Depth`) but
-    `dxil-translate` dies on `cmp68.ps.dxil` (a non-depth binding reaches the comparison builder, which returns null, as
-    it would for `SampleCmp`), failing the three shader-count rows. Every other row stays `ok`.
+    `dxil-translate` died on `cmp68.ps.dxil` (before the fix round below: a non-depth binding reaches the comparison
+    builder, which returns no texel), failing the three shader-count rows. Every other row stays `ok`.
   - Limits: the static comparison sampler is point-filtered with `MipLODBias` 0, so the 2^(sampler bias) folds and a
-    linear comparison filter are by code reading only, as are the clamp operand, the array and cube forms and the
+    linear comparison filter are by code reading only, as are the clamp operand, the 2D array and cube forms and the
     pixel-shader lowering (offline translation only: OPTIONS21's `SampleCmpGradientAndBiasSupported` rests on the
     compute rows). Slot 8's offset can't move a sample of a uniform mip: it shows the offset form translates and runs.
     Comparison `CalculateLOD` in a compute shader is 0046's ALU LOD, which reads no sampler: it ignores the sampler's
@@ -2853,3 +2853,24 @@ release or tag until the last task records the new one.
     (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-13-dxmt-check.log`): `dxmt-check: all passed`, 335 lines `ok`
     after `info arm64 mode` (Task 12's 333 plus the `cmp68` row and the `dxil-probe` line for `cmp68.ps.dxil`; the three
     count rows changed in place), 0 `FAIL`. The x64 lane and `make test` were not run.
+  - **Fix round (review, ruling R-T13a): a 1D comparison refused by name, not a crash.** airconv binds a `Texture1D` or
+    `Texture1DArray` as a 2D colour texture whether or not it is compared (a depth kind is never chosen for 1D), so the
+    comparison builders return no texel for it, and the shared `result` dereferenced that null: `dxil-translate`
+    exited 139 with no output on a ps_6_8 `Texture1D<float>.SampleCmpBias` or `.SampleCmpGrad` (refused by name before
+    0052) and on a ps_6_0 `.SampleCmp` (a crash older than this series). DXC accepts all three. `result` now refuses a
+    call with no texel by name (`Unsupported`), which covers 64, 65, 74, 254 and 255 and the compute gradient path; it
+    is dead code for every comparison that binds as depth (every test shader's `air=` unchanged). Mapping a compared 1D
+    texture to `depth_2d` is left out: it would change the D3D11 path too. The amended 0052 carries it.
+    - Shaders: `dxil/reject/cmp1d.hlsl`'s `psbias` (ps_6_8, 255), `psgrad` (ps_6_8, 254) and `pscmp` (ps_6_0, 64), as
+      `cmp1dbias.dxil`, `cmp1dgrad.dxil`, `cmp1d.dxil`; `dxil-probe -S` keeps each op.
+    - Rows: `a Texture1D SampleCmpBias is refused naming its op`, the same for `SampleCmpGrad` and `SampleCmp`
+      (`fail cmp1dbias.dxil DXIL: dx.op.sampleCmpBias.f32 (255) not supported`, `… sampleCmpGrad.f32 (254) …`,
+      `… sampleCmp.f32 (64) …`); `dxil-translate refuses every out-of-scope shader` `0/4` → `0/7`. The D3D12 reject row
+      (`exec-reject`, 3) is unchanged: the new shaders are pixel shaders, which `d3d12_dxil_exec` doesn't run.
+    - Before the guard: `dxil-translate` over `dxil/reject` exits 139 with no line (each new shader alone too), so the
+      count row reads nothing and the three named rows read 0.
+    - Corpus after the amend: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged`
+      against 0051; DXBC `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`.
+    - Gates (R-LITE, ARM64EC lane; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-13-fix1-dxmt-check.log`):
+      `dxmt-check: all passed`, 338 lines `ok` after `info arm64 mode` (the 335 above plus the three named rows; the
+      `0/7` row changed in place), 0 `FAIL`. The x64 lane and `make test` were not run.

@@ -101,5 +101,8 @@ dxc -T cs_6_6 -E main -Fo wavesize64.dxil wavesize64.hlsl
 dxc -T cs_6_8 -E main -Fo wavesizerange.dxil wavesizerange.hlsl
 dxc -T cs_6_7 -E main -Fo gatherraw.dxil gatherraw.hlsl
 dxc -T cs_6_6 -E main -Fo gsatomic64.dxil gsatomic64.hlsl
+dxc -T ps_6_8 -E psbias -Fo cmp1dbias.dxil cmp1d.hlsl
+dxc -T ps_6_8 -E psgrad -Fo cmp1dgrad.dxil cmp1d.hlsl
+dxc -T ps_6_0 -E pscmp -Fo cmp1d.dxil cmp1d.hlsl
 finish
 ls -l ./*.dxil

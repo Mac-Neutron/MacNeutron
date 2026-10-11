@@ -925,11 +925,16 @@ expect "dxil-translate accepts every behaviour shader" "$(tail -1 "$WORK/transla
 # [WaveSize] outside the device's 32 lanes is refused, naming the range (DXIL SM 6.8 plan, Task 4); so are the E_NOTIMPL
 # canary and a 64-bit groupshared atomic, naming them (Task 9).
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxil/reject" > "$WORK/translate-reject.txt" 2>&1 || true
-expect "dxil-translate refuses every out-of-scope shader" "$(tail -1 "$WORK/translate-reject.txt" | cut -d ' ' -f 2)" "0/4"
+expect "dxil-translate refuses every out-of-scope shader" "$(tail -1 "$WORK/translate-reject.txt" | cut -d ' ' -f 2)" "0/7"
 expect "a [WaveSize] range without 32 is refused, naming it" \
   "$(/usr/bin/grep -oE 'WaveSize\([0-9]+, [0-9]+\)\] excludes' "$WORK/translate-reject.txt" | tr '\n' ';')" \
   "WaveSize(64, 64)] excludes;WaveSize(8, 16)] excludes;"
 expect "the canary is refused naming its op" "$(/usr/bin/grep -cE '^fail gatherraw\.dxil DXIL: dx\.op\.textureGatherRaw\.[a-z0-9]+ \(223\) not supported$' "$WORK/translate-reject.txt")" 1
+# A Texture1D binds as a 2D colour texture, never a depth one, so its comparison samples have no Metal form: refused
+# naming the op, not a translator crash (DXIL SM 6.8 plan, Task 13 fix round).
+expect "a Texture1D SampleCmpBias is refused naming its op" "$(/usr/bin/grep -c '^fail cmp1dbias\.dxil DXIL: dx\.op\.sampleCmpBias\.f32 (255) not supported$' "$WORK/translate-reject.txt")" 1
+expect "a Texture1D SampleCmpGrad is refused naming its op" "$(/usr/bin/grep -c '^fail cmp1dgrad\.dxil DXIL: dx\.op\.sampleCmpGrad\.f32 (254) not supported$' "$WORK/translate-reject.txt")" 1
+expect "a Texture1D SampleCmp is refused naming its op" "$(/usr/bin/grep -c '^fail cmp1d\.dxil DXIL: dx\.op\.sampleCmp\.f32 (64) not supported$' "$WORK/translate-reject.txt")" 1
 # Until Task 14c, which replaces this row: Metal's compiler service would crash on it unnamed (i64 spike).
 expect "a 64-bit groupshared atomic is refused naming it" "$(/usr/bin/grep -c '^fail gsatomic64.dxil DXIL: 64-bit groupshared atomic (atomicrmw add) not supported$' "$WORK/translate-reject.txt")" 1
 # Task F2, Task FR: DXIL barriers fence memory as Metal Shader Converter does at Metal 3.1 (an air.atomic.fence, then

@@ -14,13 +14,19 @@ binds as a depth texture, and a compute shader calling SampleCmpBias gets
 the SIMD lane inputs as the other implicit-LOD samples do. CalculateLOD
 with a comparison sampler needed nothing new.
 
+A 1D texture binds as a 2D colour texture, never a depth one, so the
+comparison builders have no form for it and return no texel. Sampling
+lowerings now refuse such a call by name instead of crashing: this covers
+SampleCmpBias and SampleCmpGrad on a Texture1D, and SampleCmp, which
+crashed there already.
+
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- src/airconv/dxil/dxil_initialize.cpp      |  3 ++-
- src/airconv/dxil/dxil_lower.cpp           |  3 ++-
- src/airconv/dxil/dxil_lower_resources.cpp | 32 +++++++++++++++++------
+ src/airconv/dxil/dxil_initialize.cpp      |  3 +-
+ src/airconv/dxil/dxil_lower.cpp           |  3 +-
+ src/airconv/dxil/dxil_lower_resources.cpp | 39 +++++++++++++++++------
  src/airconv/dxil/dxil_signature.cpp       |  4 +--
- 4 files changed, 30 insertions(+), 12 deletions(-)
+ 4 files changed, 35 insertions(+), 14 deletions(-)
 
 diff --git a/src/airconv/dxil/dxil_initialize.cpp b/src/airconv/dxil/dxil_initialize.cpp
 index b6e2e87..b3cee5f 100644
@@ -51,10 +57,24 @@ index 4d12a3c..0c35e7b 100644
    return LowerOther(opcode, call);
  }
 diff --git a/src/airconv/dxil/dxil_lower_resources.cpp b/src/airconv/dxil/dxil_lower_resources.cpp
-index 1d91fb0..22fafde 100644
+index 1d91fb0..93a2b99 100644
 --- a/src/airconv/dxil/dxil_lower_resources.cpp
 +++ b/src/airconv/dxil/dxil_lower_resources.cpp
-@@ -394,8 +394,17 @@ Lowering::LowerTexture(uint32_t opcode, llvm::CallInst *call, const HandleInfo &
+@@ -302,8 +302,11 @@ Lowering::LowerTexture(uint32_t opcode, llvm::CallInst *call, const HandleInfo &
+       o[i] = (int32_t)ConstantU32(v[i]);
+     return air.GetOffset(tex, o);
+   };
+-  // The texel (vector or depth scalar) as the call's ResRet struct.
+-  auto result = [&](llvm::Value *texel) {
++  // The texel (vector or depth scalar) as the call's ResRet struct. No texel: the builder has no form for this texture
++  // kind (a comparison of a 1D texture, which binds as a 2D colour texture, never a depth one).
++  auto result = [&](llvm::Value *texel) -> llvm::Error {
++    if (!texel)
++      return Unsupported(call);
+     auto elem = ty->getStructElementType(0);
+     llvm::Value *fields[5];
+     for (unsigned c = 0; c < 4; c++) {
+@@ -394,8 +397,17 @@ Lowering::LowerTexture(uint32_t opcode, llvm::CallInst *call, const HandleInfo &
      auto ddx = ir.CreateFMul(grad.first, scale);
      return std::make_pair(ddx, ir.CreateFMul(grad.second, scale));
    };
@@ -74,7 +94,7 @@ index 1d91fb0..22fafde 100644
    bool compute = entry.kind == ShaderKind::Compute;
    auto coarse = [&](llvm::Value *lod_bias, llvm::Value *shader_clamp, llvm::Value *reference) {
      auto [ddx, ddy] = scaled(CoarseGradients(coord), lod_bias);
-@@ -421,19 +430,24 @@ Lowering::LowerTexture(uint32_t opcode, llvm::CallInst *call, const HandleInfo &
+@@ -421,19 +433,24 @@ Lowering::LowerTexture(uint32_t opcode, llvm::CallInst *call, const HandleInfo &
      return result(air.CreateSample(tex, d->ResourceHandle, sampler, coord, array, o(),
                                     llvm::air::sample_level{ir.CreateFAdd(arg(10), bias)}).first);
    case op::SampleGrad: { // (63, ..., ddx0..2, ddy0..2, clamp)
@@ -105,7 +125,7 @@ index 1d91fb0..22fafde 100644
    case op::SampleCmpLevelZero: // (65, ..., compare)
      return result(air.CreateSampleCmp(tex, d->ResourceHandle, sampler, coord, array, arg(10), o(),
                                        llvm::air::sample_level{llvm::ConstantFP::get(ir.getFloatTy(), 0)}).first);
-@@ -646,6 +660,8 @@ Lowering::LowerResource(uint32_t opcode, llvm::CallInst *call) {
+@@ -646,6 +663,8 @@ Lowering::LowerResource(uint32_t opcode, llvm::CallInst *call) {
    case op::TextureGather:
    case op::TextureGatherCmp:
    case op::CalculateLOD:
