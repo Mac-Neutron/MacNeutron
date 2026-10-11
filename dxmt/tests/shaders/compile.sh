@@ -64,6 +64,9 @@ dxc -T vs_6_6 -E vsmain -Fo lod.vs.dxil lod.hlsl
 dxc -T ps_6_6 -E psmain -Fo lod.ps.dxil lod.hlsl
 dxc -T ps_6_6 -E psmain -Fo sm6x.ps.dxil sm6x.hlsl
 dxc -T cs_6_6 -E csmain -Fo sm6x.cs.dxil sm6x.hlsl
+dxc -T ps_6_6 -E psmain -Fo helper.ps.dxil helper.hlsl
+dxc -T ps_6_7 -E psinclude -Fo helper.psinclude.dxil helper.hlsl
+dxc -T ps_6_6 -E psgreen -Fo helper.psgreen.dxil helper.hlsl
 finish
 ls -l ./*.dxil
 # DXIL translator behaviour groups (dxmt/tests/dxil; see common.hlsli). 16-bit types where the group needs them.

@@ -2326,3 +2326,24 @@ release or tag until the last task records the new one.
   - Not covered at runtime: op 75 (`sm6x.cs` is translated offline only) and op 76 on a multisampled target. The rows
     run a one-sample target, whose position is (0,0) for any index, so a wrong position table, a swapped argument or a
     wrong index operand would not show yet.
+- **0041 (`airconv: Leave helper lanes out of pixel shader wave operations.`):** a pixel shader whose entry function
+  lacks `"waveops-include-helper-lanes"` (`[WaveOpsIncludeHelperLanes]`, read in `InitializeDXIL`) leaves its helper
+  lanes out of wave operations, as D3D does; Metal's simdgroup functions count them. The lanes taking part are the
+  ballot of `!air.simd_is_helper_thread()` at each operation: `WaveIsFirstLane` (110) and `WaveReadLaneFirst` (118)
+  use the lowest of them; `WaveAnyTrue` (113), `WaveActiveBallot` (116), `WaveAllBitCount` (135) and
+  `WavePrefixBitCount` (136) see false from a helper, `WaveAllTrue` (114) true; `WaveActiveAllEqual` (115) compares
+  with the first lane taking part; `WaveActiveOp`/`WavePrefixOp` (119/121) and `WaveActiveBit` (120) get each
+  operation's identity from a helper (a float sum's is -0.0). 111, 112, 117 and the quad operations are unchanged, and
+  so is every other stage, or a pixel shader with the attribute.
+  - Rows: `pixel-shader wave ops leave helper lanes out by default`, `and count them with
+    [WaveOpsIncludeHelperLanes]` and `the always-green image drew` read `ok` (`helper.hlsl`: `helper.ps` checks each
+    wave operation, `helper.psinclude` a helper's vote, both against `helper.psgreen`'s image hash). Before the patch
+    the first read `FAIL`, 4 of the 12 sampled pixels red. `dxil-translate` accepts 39/39 test shaders (`39:39` with
+    no NaN or infinity assumed away).
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 6 changed, 11095 unchanged`, the changed shaders
+    `ps-2da27d2ee0b8be5d`, `ps-2e65d63c8b2298cf`, `ps-4e6f229dfb1baa34`, `ps-86b411ed29256949`, `ps-cd6b6058f8957a24`
+    and `ps-de7c851d2fbd9e11`: six pixel shaders, as the research's six with `waveReadLaneFirst` (their first lane is
+    now a covered one). No compute, vertex or geometry shader changed. DXBC `corpus-diff: 2/2 ok, 0 new failures, 0
+    fixed, 0 changed, 2 unchanged`.
+  - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-2-dxmt-check.log`):
+    `dxmt-check: all passed` twice, 514 rows `ok`, 0 `FAIL`. `make test`: 252 passed.

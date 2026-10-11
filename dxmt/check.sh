@@ -551,6 +551,14 @@ expect "DXIL geometry shader triangle matches D3DMetal (12 pixels within 1/255)"
 run ours tri-sm6x dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/sm6x.ps.dxil"
 expect "ViewID, the render target's sample count and position read 0, 1 and (0,0)" \
   "$(same_pixels "$WORK/tri-sm6x.txt" "$WORK/tri-ours.txt")" yes
+# Helper lanes (DXIL SM 6.8 plan, Task 2): left out of pixel-shader wave ops by default, in with the attribute.
+img() { awk '$1 == "triangle" && $2 == "ok" { print $3 }' "$WORK/$1.txt"; }
+for p in ps psinclude psgreen; do
+  run ours "tri-helper-$p" dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/helper.$p.dxil"
+done
+expect "pixel-shader wave ops leave helper lanes out by default" "$(img tri-helper-ps)" "$(img tri-helper-psgreen)"
+expect "and count them with [WaveOpsIncludeHelperLanes]" "$(img tri-helper-psinclude)" "$(img tri-helper-psgreen)"
+expect "the always-green image drew" "$(img tri-helper-psgreen | /usr/bin/grep -cE '^[0-9a-f]{16}$')" 1
 CACHE="$WORK/cache/gs"
 run ours trigs-cold dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.ps.dxil" "Z:$S/triangle2.gs.dxil"
 run ours trigs-warm dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.ps.dxil" "Z:$S/triangle2.gs.dxil"
@@ -859,7 +867,7 @@ expect "and DXBC's, GroupMemoryBarrier's threadgroup fence included" \
   "$(grep '^ok sync\.dxbc ' "$WORK/translate-dxbc.txt" | grep -oE 'fence=[^ ]+ barrier=[0-9]+' || echo none)" \
   "fence=2:1,5:3,5:3,7:3,7:3 barrier=3"
 "$TOOLS/dxil-translate" "$S" > "$WORK/translate-shaders.txt" 2>&1 || true
-expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-shaders.txt" | cut -d ' ' -f 2)" "36/36"
+expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-shaders.txt" | cut -d ' ' -f 2)" "39/39"
 # DXIL keeps NaN and infinity: no translated shader assumes them away or keeps a fast compare. Vertex and geometry
 # shaders also carry no reassoc, contract or arcp flags, as airconv's DXBC path, so LLVM fuses or reorders nothing on
 # its own: a depth prepass and a base pass then compute the same positions, and their depth EQUAL test holds (grass
@@ -868,7 +876,7 @@ expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-sha
 # precise, so no fma there).
 "$TOOLS/dxil-translate" "$S" --flags > "$WORK/translate-flags.txt" 2>&1 || true
 expect "no translated shader assumes NaN or infinity away" \
-  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "36:36"
+  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "39:39"
 expect "vertex and geometry shaders carry no reassoc, contract or arcp flags" \
   "$(grep -E '^ok [^ ]+ (vs|gs) ' "$WORK/translate-flags.txt" | grep -c ' reassoc=0 contract=0 arcp=0$' || true)" 12
 # Task FU: Metal's gradient sample takes no LOD bias, so the sampler's MipLODBias scales the derivatives (2^bias): every
