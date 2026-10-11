@@ -1,15 +1,16 @@
 #include "common.hlsli"
 // Dynamic resources (SM 6.6, op 218): each resource through ResourceDescriptorHeap/SamplerDescriptorHeap (even slots)
 // and through its table or root binding (odd slots), which must agree. Heap slots: t0-t6 at 0-6, u0-u4 at 7-11, b0's
-// buffer at 12; sampler heap [0] linear clamp, [1] point clamp.
+// buffer at 12; sampler heap [0] linear clamp, [1] point clamp. Tex is sampled linear at texel corners (rows y - 1 and y
+// blend), where a point sampler, or a sampler read from zeros, gives another value (DXIL SM 6.8 plan, Task 10).
 struct C { float4 k[4]; uint4 u; };
 [numthreads(64, 1, 1)]
 void main(uint3 id : SV_DispatchThreadID) {
     uint i = id.x;
     ByteAddressBuffer raw = ResourceDescriptorHeap[0];         Put(id, 0, raw.Load(i * 4));  Put(id, 1, InWord(i));
-    Texture2D<float4> tex = ResourceDescriptorHeap[1];         SamplerState pt = SamplerDescriptorHeap[1];
-    float2 uv = float2(i & 7, i >> 3) / 8 + 1.0 / 16;
-    PutF(id, 2, tex.SampleLevel(pt, uv, 0).y);                 PutF(id, 3, Tex.SampleLevel(Point, uv, 0).y);
+    Texture2D<float4> tex = ResourceDescriptorHeap[1];         SamplerState lin = SamplerDescriptorHeap[0];
+    float2 uv = float2(i & 7, i >> 3) / 8;
+    Put(id, 2, (uint)round(tex.SampleLevel(lin, uv, 0).y * 510)); Put(id, 3, (uint)round(Tex.SampleLevel(Linear, uv, 0).y * 510));
     Buffer<float4> typed = ResourceDescriptorHeap[2];          PutF(id, 4, typed[i].z);      PutF(id, 5, Typed[i].z);
     StructuredBuffer<S> st = ResourceDescriptorHeap[3];        Put(id, 6, st[i].b);          Put(id, 7, Structured[i].b);
     Buffer<float4> arr = ResourceDescriptorHeap[NonUniformResourceIndex(4 + (i & 1))];

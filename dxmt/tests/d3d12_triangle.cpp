@@ -1,7 +1,7 @@
 // Draws dxmt/tests/shaders/triangle2.hlsl offscreen through D3D12 and prints the result (DXIL translator plan, Task 3):
 //   d3d12_triangle.exe <vs.dxil> <ps.dxil> [gs.dxil] [--heap]
 // --heap (DXIL SM 6.8 plan, Task 10): root signature flags 0xC00 (both heaps directly indexed), and a shader-visible
-// sampler heap of one point clamp sampler bound beside the view heap.
+// sampler heap of one linear clamp sampler bound beside the view heap.
 // Prints "triangle ok <FNV-1a 64 of all pixels> <8 sampled pixels>" or "triangle fail 0x<hr>". check.sh compares the
 // pixels between our DXMT and D3DMetal.
 #define WIDL_EXPLICIT_AGGREGATE_RETURNS  // D3D12 methods that return structs: the MSVC ABI under mingw
@@ -146,7 +146,7 @@ int main(int argc, char **argv) {
     if (heaps) {
         D3D12_DESCRIPTOR_HEAP_DESC shd = {D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 1, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
         CHECK(device->CreateDescriptorHeap(&shd, __uuidof(ID3D12DescriptorHeap), (void **)&bound[1]));
-        D3D12_SAMPLER_DESC sd = {D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        D3D12_SAMPLER_DESC sd = {D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
                                  D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP};
         sd.MaxLOD = D3D12_FLOAT32_MAX;
         device->CreateSampler(&sd, bound[1]->GetCPUDescriptorHandleForHeapStart());

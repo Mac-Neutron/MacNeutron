@@ -588,10 +588,14 @@ expect "and float16_t and uint16_t ones" "$(same_pixels "$WORK/tri-v16n.txt" "$W
 run ours tri-v16x dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/varying16.vs16.dxil" "Z:$S/varying16.ps32.dxil"
 expect "and a float pixel shader reads them as float, uint and int" "$(same_pixels "$WORK/tri-v16x.txt" "$WORK/tri-v32.txt")" yes
 # A pixel shader indexes the descriptor heaps (DXIL SM 6.8 plan, Task 10): a draw's root arguments, staged apart from
-# a dispatch's, carry the heap bases too.
+# a dispatch's, carry the heap bases too. Its heap sampler is linear, so it draws as D3DMetal does the same, not as the
+# static point sampler (tri-ref), which a sampler read from zeros (Metal's default: nearest, clamp) would draw.
 run ours tri-heap dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.psheap.dxil" --heap
+run ref tri-heap-ref d3dmetal "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.psheap.dxil" --heap
 expect "a pixel shader reads its texture and sampler through the descriptor heaps" \
-  "$(same_pixels "$WORK/tri-heap.txt" "$WORK/tri-ours.txt")" yes
+  "$(same_pixels "$WORK/tri-heap.txt" "$WORK/tri-heap-ref.txt")" yes
+expect "and D3DMetal's heap sampler draws other pixels than the point one" \
+  "$([ "$(img tri-heap-ref)" != "$(img tri-ref)" ] && echo differ)" differ
 # Without the heap flags its graphics pipeline is refused, naming the first flag missing (the program's output goes to
 # the log too).
 before=$(cat "$LOG" 2> /dev/null | wc -l)
