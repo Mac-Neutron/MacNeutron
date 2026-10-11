@@ -2563,3 +2563,42 @@ release or tag until the last task records the new one.
     (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-7-dxmt-check.log`): `dxmt-check: all passed`, 265 rows `ok`
     (264 before, plus the deriv row), 0 `FAIL`; the 13 `matches D3DMetal` rows read `ok` with the new descriptor
     layout, so D3DMetal creates and fills the depth texture too. The x64 lane and `make test` were not run.
+- **0047 (`airconv: Lay 2D compute quads out as D3D's 2x2 blocks.`):** Metal's kernel quads are four consecutive lanes of
+  the group's flat thread index; a compute shader whose `numthreads` X and Y are both even has 2×2 quads of
+  `SV_GroupThreadID` instead (`HLSL_SM_6_6_Derivatives.md`), so its derivatives, quad reads and votes took a row of four.
+  When such a shader calls any of ops 60, 61, 64, 81, 83-86, 122, 123, 222 or 255, `InitializeDXIL` sets
+  `DXILShader::quads_2d` (the struct is in `dxil_types.hpp`) and `AddComputeHandlers` always defines Metal's flat index
+  `t` and the group position, and its prologue gives thread `t` the D3D IDs of spec §3.3 (`slice = X * Y`,
+  `z = t / slice`, `r = t % slice`, `q = r >> 2`, `l = r & 3`, `x = 2 (q % (X / 2)) + (l & 1)`,
+  `y = 2 (q / (X / 2)) + (l >> 1)`): `SV_GroupThreadID` is (x, y, z), `SV_GroupIndex` D3D's flattening of it,
+  `SV_DispatchThreadID` `SV_GroupID * numthreads + (x, y, z)`. Metal's quad lane `l` (0046's derivatives read the simd
+  lane) is now D3D's quad lane. 1D groups and shaders without those ops keep today's IDs and IR.
+  - Rows: `DXIL deriv2d matches its CPU reference`, the same for `deriv2dwide` and `deriv2dodd`, read `match`, and
+    `dxil-translate` accepts 24/25 behaviour shaders. `deriv2d.hlsl` (cs_6_6) has one body under three `numthreads`:
+    (8, 8, 1) (`deriv2d`: rows of 8 fit a 32-lane simdgroup), (32, 2, 1) (`deriv2dwide`: they don't) and (6, 6, 1)
+    (`deriv2dodd`: not a power of two; rows 36-63 stay 0). Row `SV_GroupIndex` holds the four derivatives of
+    `v = x² + 3y² + xy` (different along both axes; coarse and fine differ), `QuadReadAcrossX/Y/Diagonal` and
+    `QuadReadLaneAt(…, 3)` of the group index, `SV_GroupThreadID` packed, and `Tex`'s unclamped LOD with one k per quad
+    (64 k). `dxil-probe -S`: DXC keeps 83-86 once each, 123 three times, 122 and 81 once, 95 and 96, and the three
+    `numthreads`.
+    - Before the patch: all three rows `FAIL` at thread 0 slot 1 (`got 40800000 want 40400000`: `ddy_coarse` read lane
+      2 of a row, v(2, 0) - v(0, 0) = 4, for v(0, 1) - v(0, 0) = 3); mismatching threads per slot 0-9
+      [48, 64, 0, 62, 0, 64, 64, 48, 0, 32] (8x8), [48, 64, 0, 64, 0, 64, 64, 48, 0, 32] (32x2) and
+      [24, 36, 0, 36, 0, 36, 36, 24, 0, 18] (6x6). The 1D `quad` row stays `ok` against D3DMetal before and after.
+    - Single mutations, each on its own build: the remap off (`quads_2d` false) fails the three rows as before the
+      patch; `FlattenedThreadIdInGroup` returning Metal's `t` instead of D3D's index fails them at slot 5 (rows land on
+      the wrong threads: slots 0-3 and 5-9 mismatch, 24 to 64 threads each). Every other row stays `ok`.
+    - A one-off D3DMetal run of the three groups (not a row) agrees with the CPU reference on slots 2-8 (fine
+      derivatives, the four quad reads, `SV_GroupThreadID`) in all three layouts: D3DMetal lays 2D quads out as 2×2
+      blocks too. It differs on coarse derivatives (equal to its fine ones) and `CalculateLOD` (0), as Task 7 found.
+    - Covered by code reading only: `SV_DispatchThreadID` and `SV_GroupID` past group 0 (the harness dispatches one
+      group), Z > 1, and `QuadVote` (222) and `SampleCmpBias` (255) as triggers. In a remapped shader the wave lanes
+      no longer follow `SV_GroupIndex` order (D3D defines no relation for 2D groups).
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged`, as predicted; DXBC
+    `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`. Measured first with a read-only
+    `dxil-probe -S` scan of the 3,343 compute shaders of `~/dxil-smite2`: 1,783 have X and Y even, 10 call one of the
+    ops (all `numthreads` 1D), none both; the two whose `numthreads` the scan could not read call none of them.
+  - Gates (one lane, ruling R-LITE): `dxmt/check.sh` in the ARM64EC lane
+    (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-8-dxmt-check.log`): `dxmt-check: all passed`, 313 rows `ok` after
+    `info arm64 mode` (Task 7's log counts 310 the same way; plus the three new rows), 0 `FAIL`. The x64 lane and
+    `make test` were not run.

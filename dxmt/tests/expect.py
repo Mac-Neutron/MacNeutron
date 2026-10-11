@@ -143,6 +143,37 @@ def expect_deriv(got):
     return per_thread(slots)
 
 
+# 2D compute quads (one group of W x H threads, H = 64 / W or 6 for W = 6): row gi is thread (x, y) = (gi % W, gi // W),
+# in the 2x2 quad at (x & ~1, y & ~1), v = x² + 3y² + xy. Coarse derivatives from the quad's top-left, top-right and
+# bottom-left; fine from this thread's row (x) or column (y). The quad reads return the group index of (x ^ 1, y),
+# (x, y ^ 1), (x ^ 1, y ^ 1) and lane 3 (x | 1, y | 1). Tex's LOD at (x & 1, y & 1) * 2^k / 8 is k = (x/2 + y/2) % 4.
+def quads_2d(w, h):
+    v = lambda x, y: float(x * x + 3 * y * y + x * y)
+
+    def slots(t):
+        if t >= w * h:
+            return []
+        x, y = t % w, t // w
+        bx, by = x & ~1, y & ~1
+        gi = lambda x, y: y * w + x
+        return [f32(v(bx + 1, by) - v(bx, by)), f32(v(bx, by + 1) - v(bx, by)),
+                f32(v(bx + 1, y) - v(bx, y)), f32(v(x, by + 1) - v(x, by)),
+                gi(x ^ 1, y), gi(x, y ^ 1), gi(x ^ 1, y ^ 1), gi(x | 1, y | 1), x | y << 8, 64 * ((x // 2 + y // 2) % 4)]
+    return per_thread(slots)
+
+
+def expect_deriv2d(got):
+    return quads_2d(8, 8)
+
+
+def expect_deriv2dwide(got):
+    return quads_2d(32, 2)
+
+
+def expect_deriv2dodd(got):
+    return quads_2d(6, 6)
+
+
 def main(path, group):
     for line in open(path, encoding="utf-8", errors="replace"):
         parts = line.split()
