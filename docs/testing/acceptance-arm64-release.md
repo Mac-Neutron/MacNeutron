@@ -2446,29 +2446,35 @@ release or tag until the last task records the new one.
   on the call's overload, so the geometry shader's reads of vertex outputs convert the same way; `Cast` is unchanged.
   DXC gives min precision (`min16float`, `min16uint`, `min16int`) and native 16-bit types (`-enable-16bit-types`) the
   same overloads and component types (`F16`, `U16`, `I16`; `dxil-probe -S`), so both forms take this path.
-  - Rows (Lane C): `min16float and min16uint varyings draw as float ones`, `and float16_t and uint16_t ones` and `and a
-    float pixel shader reads them as float, uint and int` read `yes`. `varying16.hlsl` draws one triangle as float
-    (`vs32`/`ps32`), min precision (`vs16`/`ps16`, `-D MIN16`) and native 16-bit (`vs16n`/`ps16n`, `-D NATIVE16
-    -enable-16bit-types`), each at 6.6: a 16-bit IA input (`POSITION`, from an `R32G32_FLOAT` buffer), an
-    interpolated 16-bit `TEXCOORD0`, two flat 16-bit integers and a 16-bit `SV_Target`. Both 16-bit forms draw the
-    float form's image (the same hash, `c7a3ffaf12c9a820`). The third row runs `vs16` with `ps32`, whose 32-bit loads
-    see the registers whole.
+  - Rows (Lane C): `the float form of the 16-bit varyings draws as D3DMetal`, `min16float and min16uint varyings draw
+    as float ones`, `and float16_t and uint16_t ones` and `and a float pixel shader reads them as float, uint and int`
+    read `yes`. `varying16.hlsl` draws one triangle as float (`vs32`/`ps32`), min precision (`vs16`/`ps16`,
+    `-D MIN16`) and native 16-bit (`vs16n`/`ps16n`, `-D NATIVE16 -enable-16bit-types`), each at 6.6: a 16-bit IA
+    input (`POSITION`, from an `R32G32_FLOAT` buffer), an interpolated 16-bit `TEXCOORD0`, two flat 16-bit integers
+    and a 16-bit `SV_Target`. Both 16-bit forms draw the float form's image (the same hash, `c7a3ffaf12c9a820`). The
+    fourth row runs `vs16` with `ps32`, whose 32-bit loads see the registers whole.
     - The plan's shader had one flat `uint` tag of 200, which zero- and sign-extension both carry, and its 16-bit pixel
       shaders truncate what they read, so neither row could see the integer extension. The tag is now `0x80C8` (bit 15
       set; alpha `tag >> 8` = 128) and a flat `bias` of -56 (`int`, `min16int`, `int16_t`; blue `bias + 128` = 72)
       takes the blue channel in place of `1 - uv.x`.
-    - D3DMetal draws the float and both 16-bit forms within 1/255 of ours, but nothing for `vs16` with `ps32` (its
-      16-bit varyings don't link to 32-bit ones). The third row is a check of what our registers hold, with no
-      reference.
-    - Before the patch all three rows read `FAIL` with every sampled pixel black: the IA corners (0 and 2) read as 0
-      and the triangle collapsed. With the patch, single mutations, each on its own build: the load's `fptrunc`
-      dropped (all three rows, black); the store's `fpext` dropped (all three; the 16-bit forms draw `00000000`, the
-      third row reads uv as 0); every `i16` zero-extended (third row, blue 255); every `i16` sign-extended (third row,
-      alpha 255); `I16` and `U16` swapped (third row, both 255).
+    - The first row anchors the float form, which the other three compare with, on D3DMetal (`tri-v32-ref`, the same
+      hash): a break common to all four forms passes those three but fails it. Shown with a mutation that reads every
+      `loadInput` as 0 (all four draw only the clear colour): the first row `FAIL`, the other three `ok`. No row runs
+      the 16-bit forms on D3DMetal; a one-off run drew both within 1/255 of ours.
+    - D3DMetal creates the pipeline and draws only the clear colour for `vs16` with `ps32`, so the fourth row has no
+      D3DMetal reference: it checks what our registers hold.
+    - Before the patch the three 16-bit rows read `FAIL` with every sampled pixel black: the IA corners (0 and 2)
+      read as 0 and the triangle collapsed. With the patch, single mutations, each on its own build: the load's
+      `fptrunc` dropped (all three, black); the store's `fpext` dropped (all three; the 16-bit forms draw
+      `00000000`, the fourth row reads uv as 0); every `i16` zero-extended (fourth row, blue 255); every `i16`
+      sign-extended (fourth row, alpha 255); `I16` and `U16` swapped (fourth row, both 255). These ran before the
+      first row was added.
+    - Covered by code reading only, no row: the geometry shader's reads of 16-bit vertex outputs (the same load site),
+      16-bit IA formats, 16-bit integer render targets, and centroid or sample 16-bit varyings.
     - `dxil-translate` accepts 45/45 test shaders: `45:45` with no NaN or infinity assumed away, and 15 vertex and
       geometry shaders without reassoc, contract or arcp.
   - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged`, as predicted; DXBC
     `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`. A read-only `dxil-probe -S` over
     `~/dxil-smite2` finds no `loadInput` or `storeOutput` with an `f16` or `i16` overload.
-  - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-5-dxmt-check.log`):
-    `dxmt-check: all passed` twice, 534 rows `ok`, 0 `FAIL`. `make test`: 252 passed.
+  - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-5-r1-dxmt-check.log`):
+    `dxmt-check: all passed` twice, 536 rows `ok`, 0 `FAIL`. `make test`: 252 passed.

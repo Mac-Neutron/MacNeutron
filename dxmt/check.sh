@@ -567,11 +567,14 @@ expect "and count them with [WaveOpsIncludeHelperLanes]" "$(img tri-helper-psinc
 expect "the always-green image drew, its 12 sampled pixels green" "$(pixels tri-helper-psgreen)" " 12 ff00ff00"
 # 16-bit varyings (DXIL SM 6.8 plan, Task 5): min precision and native 16-bit draw the float form's pixels.
 for v in 32 16 16n; do run ours "tri-v$v" dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/varying16.vs$v.dxil" "Z:$S/varying16.ps$v.dxil"; done
+# The float form, which the rows below compare with, draws as D3DMetal: a common-mode break can't pass them all.
+run ref tri-v32-ref d3dmetal "$TESTS/d3d12_triangle.exe" "Z:$S/varying16.vs32.dxil" "Z:$S/varying16.ps32.dxil"
+expect "the float form of the 16-bit varyings draws as D3DMetal" "$(same_pixels "$WORK/tri-v32.txt" "$WORK/tri-v32-ref.txt")" yes
 expect "min16float and min16uint varyings draw as float ones" "$(same_pixels "$WORK/tri-v16.txt" "$WORK/tri-v32.txt")" yes
 expect "and float16_t and uint16_t ones" "$(same_pixels "$WORK/tri-v16n.txt" "$WORK/tri-v32.txt")" yes
 # The float pixel shader reads the min16 vertex shader's 32-bit registers: its min16uint tag zero-extended, its min16int
-# bias sign-extended (either the other way saturates alpha or blue). A register check only: D3DMetal draws nothing for
-# this pair (its 16-bit varyings don't link to 32-bit ones), so it has no reference.
+# bias sign-extended (either the other way saturates alpha or blue). A register check only: D3DMetal creates the
+# pipeline and draws only the clear colour for this pair, so the row has no D3DMetal reference.
 run ours tri-v16x dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/varying16.vs16.dxil" "Z:$S/varying16.ps32.dxil"
 expect "and a float pixel shader reads them as float, uint and int" "$(same_pixels "$WORK/tri-v16x.txt" "$WORK/tri-v32.txt")" yes
 CACHE="$WORK/cache/gs"
