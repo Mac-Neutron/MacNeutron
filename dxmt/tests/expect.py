@@ -68,6 +68,22 @@ def expect_msad(got):
     return per_thread(slots)
 
 
+# Per 32-lane wave, m is the lanes with the same key (w & 3); the prefixes fold the lanes of m below this one, in lane
+# order, wrapping at 32 bits, from 0 (sum, or, xor), 1 (product) or all ones (and). Slot 1 (m's lanes 32-127) is 0.
+def expect_wavematch(got):
+    def slots(t):
+        ws = [in_word(i) for i in range(wave(t) * 32, wave(t) * 32 + 32)]
+        m = sum(1 << j for j in range(32) if ws[j] & 3 == ws[lane(t)] & 3)
+        below = [ws[j] for j in range(lane(t)) if m >> j & 1]
+        product, band, bor, bxor = 1, 0xffffffff, 0, 0
+        for x in below:
+            product, band, bor, bxor = product * ((x >> 8 & 3) + 1), band & x, bor | x & 0xf0f0, bxor ^ x
+        total = sum(x & 0xff for x in below)
+        return [m, 0, m, total & 0xffffffff, product & 0xffffffff, band, bor, bxor, sum(x & 16 != 0 for x in below),
+                f32(total)]
+    return per_thread(slots)
+
+
 def main(path, group):
     for line in open(path, encoding="utf-8", errors="replace"):
         parts = line.split()

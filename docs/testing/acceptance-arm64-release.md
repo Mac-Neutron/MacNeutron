@@ -2359,3 +2359,34 @@ release or tag until the last task records the new one.
     - DXBC: `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`.
   - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-2-fix1-dxmt-check.log`):
     `dxmt-check: all passed` twice, 514 rows `ok`, 0 `FAIL`. `make test`: 252 passed.
+- **0042 (`airconv: Lower WaveMatch and the multi-prefix wave operations.`):** `WaveMatch` (165) returns
+  `{lanes 0-31, 0, 0, 0}`, `WaveActiveBallot`'s shape. It loops over the distinct values: each pass reads the first
+  remaining lane's value (`air.simd_broadcast_first`), and the lanes equal to it take their ballot and leave. Floats
+  compare with `==`, and the first lane (`air.simd_is_first`) always leaves, so a NaN ends the loop too and a lane's own
+  bit is always set. `WaveMultiPrefixOp` (166: sum, and, or, xor, product) folds, in lane order, the active lanes of
+  `mask0` below this one: 32 shuffles a call, from 0 (+0.0 for a float sum), all ones (and) or 1 (product).
+  `WaveMultiPrefixBitCount` (167) is the popcount of the ballot ANDed with the same lanes. In a pixel shader helpers
+  are left out as in 0041. `AddWaveInputs` defines the lane index for 165-167.
+  - Rows: `DXIL wavematch matches its CPU reference` reads `match`. `wavematch.hlsl` partitions each wave by
+    `key = w & 3` and writes `WaveMatch(key)` (its lanes 32-127 as 0), a float `WaveMatch`, the five
+    `WaveMultiPrefix` kinds and `WaveMultiPrefixCountBits` over that mask, and an integer-valued float prefix sum.
+    `dxil-translate` accepts 16/17 behaviour shaders.
+    - Before the patch: `fail wavematch.dxil DXIL: dx.op.waveMatch.i32 (165) not supported` (15/17). `dxil-probe -S`
+      shows all nine calls kept: `waveMatch.i32` and `.f32`, `waveMultiPrefixOp.i32` kinds 0-4, `.f32` kind 0, and
+      `waveMultiPrefixBitCount`.
+    - With the patch, the row reads `FAIL` under each of six single-op mutations, each on its own build:
+      - 165 without the loop: thread 1 slot 0;
+      - 165's float compare dropped: slot 2 only, all 64 threads;
+      - 166 without `mask0`: slots 3-7 and 9, not 8;
+      - 166's and starting at 0: slot 5 only;
+      - 166's float sum starting at -0.0: slot 9 only, the 8 lanes that start a partition;
+      - 167 without the lanes-below mask: slot 8 only.
+      The float-compare mutation also shows the loop ending through `simd_is_first` alone.
+    - Found: `InWord`'s multiplier 2654435761 is 1 mod 4, so `key` is `lane & 3`. The partitions are four stride-4 sets,
+      the same in both waves.
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged`, as predicted (no
+    SMITE 2 shader calls 165-167); DXBC `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`.
+  - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-3-dxmt-check.log`):
+    `dxmt-check: all passed` twice, 516 rows `ok`, 0 `FAIL`. `make test`: 252 passed.
+  - Not covered at runtime (spec §8): helper lanes in 165-167. A pixel shader calling them translates offline, with and
+    without `[WaveOpsIncludeHelperLanes]`.
