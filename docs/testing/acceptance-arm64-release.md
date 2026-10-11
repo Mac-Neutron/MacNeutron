@@ -2336,14 +2336,26 @@ release or tag until the last task records the new one.
   operation's identity from a helper (a float sum's is -0.0). 111, 112, 117 and the quad operations are unchanged, and
   so is every other stage, or a pixel shader with the attribute.
   - Rows: `pixel-shader wave ops leave helper lanes out by default`, `and count them with
-    [WaveOpsIncludeHelperLanes]` and `the always-green image drew` read `ok` (`helper.hlsl`: `helper.ps` checks each
-    wave operation, `helper.psinclude` a helper's vote, both against `helper.psgreen`'s image hash). Before the patch
-    the first read `FAIL`, 4 of the 12 sampled pixels red. `dxil-translate` accepts 39/39 test shaders (`39:39` with
-    no NaN or infinity assumed away).
+    [WaveOpsIncludeHelperLanes]` and `the always-green image drew, its 12 sampled pixels green` read `ok`.
+    - `helper.hlsl`: `helper.ps` checks each wave operation, and `helper.psinclude` checks a helper's vote. Both are
+      compared with `helper.psgreen`'s image hash, whose 12 sampled pixels the third row reads as green.
+    - Every masked operation has a check whose helper operand differs from that operation's identity:
+      - sum, prefix sum and prefix product (121 kind 1) of `1u + h`;
+      - float min, max and sum (+inf, -inf, -0.0);
+      - signed `int` min and max;
+      - a `WaveActiveBitXor` of lane-distinct bits.
+      The existing `1u - h` sums stay as the references for 135 and 136.
+    - Before the patch the first row read `FAIL`, with 4 of the 12 sampled pixels red. It also reads `FAIL` with the
+      patch when only one operation goes unmasked. That held for each of three single-op mutations: 118 alone, 110
+      alone, and 119's sum alone (3, 3 and 4 sampled pixels red).
+    - `dxil-translate` accepts 39/39 test shaders: `39:39` with no NaN or infinity assumed away.
   - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 6 changed, 11095 unchanged`, the changed shaders
     `ps-2da27d2ee0b8be5d`, `ps-2e65d63c8b2298cf`, `ps-4e6f229dfb1baa34`, `ps-86b411ed29256949`, `ps-cd6b6058f8957a24`
-    and `ps-de7c851d2fbd9e11`: six pixel shaders, as the research's six with `waveReadLaneFirst` (their first lane is
-    now a covered one). No compute, vertex or geometry shader changed. DXBC `corpus-diff: 2/2 ok, 0 new failures, 0
-    fixed, 0 changed, 2 unchanged`.
-  - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-2-dxmt-check.log`):
+    and `ps-de7c851d2fbd9e11`. These are six pixel shaders, and their first lane is now a covered one.
+    - The controller's read-only `dxil-probe -S` over `~/dxil-smite2` found that each of the six calls
+      `waveReadLaneFirst` (118) once. They are the only pixel shaders in the corpus that use any of ops 110-121 or
+      135-136.
+    - No compute, vertex or geometry shader changed.
+    - DXBC: `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`.
+  - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-2-fix1-dxmt-check.log`):
     `dxmt-check: all passed` twice, 514 rows `ok`, 0 `FAIL`. `make test`: 252 passed.

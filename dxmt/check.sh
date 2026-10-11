@@ -553,12 +553,14 @@ expect "ViewID, the render target's sample count and position read 0, 1 and (0,0
   "$(same_pixels "$WORK/tri-sm6x.txt" "$WORK/tri-ours.txt")" yes
 # Helper lanes (DXIL SM 6.8 plan, Task 2): left out of pixel-shader wave ops by default, in with the attribute.
 img() { awk '$1 == "triangle" && $2 == "ok" { print $3 }' "$WORK/$1.txt"; }
+pixels() { awk '$1 == "triangle" && $2 == "ok" && NF == 15 { for (i = 4; i <= 15; i++) print $i }' "$WORK/$1.txt" | sort | uniq -c | tr -s ' '; }
 for p in ps psinclude psgreen; do
   run ours "tri-helper-$p" dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/helper.$p.dxil"
 done
 expect "pixel-shader wave ops leave helper lanes out by default" "$(img tri-helper-ps)" "$(img tri-helper-psgreen)"
 expect "and count them with [WaveOpsIncludeHelperLanes]" "$(img tri-helper-psinclude)" "$(img tri-helper-psgreen)"
-expect "the always-green image drew" "$(img tri-helper-psgreen | /usr/bin/grep -cE '^[0-9a-f]{16}$')" 1
+# One "triangle ok" line with 12 sampled pixels, all green: the hash the rows above compare with is a green image.
+expect "the always-green image drew, its 12 sampled pixels green" "$(pixels tri-helper-psgreen)" " 12 ff00ff00"
 CACHE="$WORK/cache/gs"
 run ours trigs-cold dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.ps.dxil" "Z:$S/triangle2.gs.dxil"
 run ours trigs-warm dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.ps.dxil" "Z:$S/triangle2.gs.dxil"
