@@ -1,0 +1,363 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sun, 11 Oct 2026 11:47:24 -0400
+Subject: [PATCH] airconv: Emulate derivatives and implicit-LOD sampling in
+ compute shaders.
+
+Metal kernels have no air.dfdx/air.dfdy (pipeline creation refuses them), and
+an implicit-LOD sample in a kernel read LOD 0. In a DXIL compute shader:
+
+- DerivCoarseX..DerivFineY read the quad with air.quad_shuffle. The quad lane
+  l is Metal's, the simd lane & 3: coarse x/y are lane 1 - lane 0 and lane 2 -
+  lane 0; fine x/y are (l | 1) - (l & 2) and (l | 2) - (l & 1). 1D groups'
+  quads (four consecutive group indices) are Metal's lane quads.
+- Sample, SampleBias and SampleCmp take the quad's coarse gradients of their
+  coordinates through the gradient path, scaled by 2^(sampler bias), SampleBias
+  by 2^(bias + sampler bias); SampleCmp through the new comparison-gradient
+  builder.
+- CalculateLOD is 0.5 * log2(max(|ddx * size|^2, |ddy * size|^2)) from the
+  coarse gradients and mip 0's size, the clamped one clamped to [0, mips - 1]
+  of the view. Cubes keep Metal's LOD.
+- AddWaveInputs defines the simd lane input for these ops.
+
+Pixel shaders keep air.dfdx/air.dfdy and Metal's own LOD.
+
+AIRBuilder::CreateSampleCmpGrad emits air.sample_compare_<depth kind>_grad
+(texture, sampler, i32 1, coord, [slice], ref, ddx, ddy, clamp, [i1, offset],
+i32 0); cubes take no offset.
+
+Constant texel offsets of TextureLoad and the Sample family now wrap to D3D's
+low 4 bits too, as runtime ones do: from Shader Model 6.7 DXC no longer checks
+their range. The wrap is the identity on [-8, 7].
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/airconv/dxil/dxil_lower.cpp           | 34 +++++++++++-
+ src/airconv/dxil/dxil_lower.hpp           |  7 +++
+ src/airconv/dxil/dxil_lower_resources.cpp | 68 ++++++++++++++++++++---
+ src/airconv/dxil/dxil_signature.cpp       | 24 +++++---
+ src/airconv/nt/air_builder.cpp            | 62 +++++++++++++++++++++
+ src/airconv/nt/air_builder.hpp            |  6 ++
+ 6 files changed, 181 insertions(+), 20 deletions(-)
+
+diff --git a/src/airconv/dxil/dxil_lower.cpp b/src/airconv/dxil/dxil_lower.cpp
+index 2bc0353..d4046f8 100644
+--- a/src/airconv/dxil/dxil_lower.cpp
++++ b/src/airconv/dxil/dxil_lower.cpp
+@@ -273,6 +273,32 @@ llvm::Value *Lowering::Participates() {
+   return HelpersLeftOut() ? ir.CreateNot(Simd(ir, "air.simd_is_helper_thread", ir.getInt1Ty(), {})) : ir.getTrue();
+ }
+ 
++llvm::Value *Lowering::QuadDerivative(llvm::Value *v, bool y, bool fine) {
++  auto ty = v->getType();
++  if (auto vec = llvm::dyn_cast<llvm::FixedVectorType>(ty)) { // per component: the quad shuffles here take scalars
++    llvm::Value *d = llvm::UndefValue::get(ty);
++    for (unsigned i = 0; i < vec->getNumElements(); i++)
++      d = ir.CreateInsertElement(d, QuadDerivative(ir.CreateExtractElement(v, i), y, fine), i);
++    return d;
++  }
++  llvm::Value *from = ir.getInt32(0), *to = ir.getInt32(y ? 2 : 1);
++  if (fine) { // the lane index is defined for these ops in a compute shader (AddWaveInputs)
++    auto l = ir.CreateAnd(ctx.function->getArg(dxil.lane_index_arg), 3);
++    from = ir.CreateAnd(l, y ? 1 : 2);
++    to = ir.CreateOr(l, y ? 2 : 1);
++  }
++  auto read = [&](llvm::Value *lane) {
++    return Simd(ir, "air.quad_shuffle" + SimdSuffix(ty, false), ty, {v, ir.CreateTrunc(lane, ir.getInt16Ty())});
++  };
++  auto a = read(to);
++  return ir.CreateFSub(a, read(from));
++}
++
++std::pair<llvm::Value *, llvm::Value *> Lowering::CoarseGradients(llvm::Value *coord) {
++  auto ddx = QuadDerivative(coord, false, false);
++  return {ddx, QuadDerivative(coord, true, false)};
++}
++
+ llvm::Error
+ Lowering::LowerOther(uint32_t opcode, llvm::CallInst *call) {
+   auto &res = ctx.resource;
+@@ -374,9 +400,13 @@ Lowering::LowerOther(uint32_t opcode, llvm::CallInst *call) {
+   case op::DerivCoarseX:
+   case op::DerivCoarseY:
+   case op::DerivFineX:
+-  case op::DerivFineY:
+-    Replace(call, air.CreateDerivative(call->getArgOperand(1), opcode == op::DerivCoarseY || opcode == op::DerivFineY));
++  case op::DerivFineY: {
++    bool y = opcode == op::DerivCoarseY || opcode == op::DerivFineY;
++    Replace(call, entry.kind == ShaderKind::Compute
++                      ? QuadDerivative(call->getArgOperand(1), y, opcode == op::DerivFineX || opcode == op::DerivFineY)
++                      : air.CreateDerivative(call->getArgOperand(1), y));
+     return llvm::Error::success();
++  }
+   case op::PrimitiveID:
+     if (entry.kind != ShaderKind::Geometry)
+       goto unpacked_system_value;
+diff --git a/src/airconv/dxil/dxil_lower.hpp b/src/airconv/dxil/dxil_lower.hpp
+index c5096b0..e0806f6 100644
+--- a/src/airconv/dxil/dxil_lower.hpp
++++ b/src/airconv/dxil/dxil_lower.hpp
+@@ -96,6 +96,13 @@ private:
+   // i1: this lane takes part, !helper when helpers are left out, true otherwise.
+   llvm::Value *Participates();
+ 
++  // Compute shaders, which have no air.dfdx (spec 3.3): the derivative of float `v` (scalar or vector) across its quad,
++  // read with air.quad_shuffle. Quad lane l is Metal's (simd lane & 3), never D3D's flattened ID: coarse lanes 1 - 0
++  // (x) and 2 - 0 (y); fine (l | 1) - (l & 2) and (l | 2) - (l & 1).
++  llvm::Value *QuadDerivative(llvm::Value *v, bool y, bool fine);
++  // (ddx, ddy) of `coord`, coarse: the gradients implicit-LOD sampling in a compute shader uses.
++  std::pair<llvm::Value *, llvm::Value *> CoarseGradients(llvm::Value *coord);
++
+   // Geometry shaders: the vertex shader output register and column holding input `e`'s row `row`, column `col`.
+   llvm::Expected<llvm::Value *> VertexOutputPointer(const SignatureElement &e, llvm::Value *row, uint32_t col, llvm::Value *vertex);
+ 
+diff --git a/src/airconv/dxil/dxil_lower_resources.cpp b/src/airconv/dxil/dxil_lower_resources.cpp
+index b71a480..1d91fb0 100644
+--- a/src/airconv/dxil/dxil_lower_resources.cpp
++++ b/src/airconv/dxil/dxil_lower_resources.cpp
+@@ -277,7 +277,7 @@ Lowering::LowerTexture(uint32_t opcode, llvm::CallInst *call, const HandleInfo &
+   // Texel offsets o0.. from argument `first` (`count` of them, the rest 0). Constants (undef is 0) as immediates.
+   // Runtime ones, SM 6.7's programmable offsets and Gather's at any model, pass through: wrapped to D3D's low 4 bits,
+   // sign-extended, when `wrap` (Load and Sample*); Gather's unwrapped, as the DXBC path's gather4_po (spec 3.6).
+-  // Returns whether all were constant.
++  // Constants wrap too: from 6.7 DXC no longer checks their range. Returns whether all were constant.
+   auto offset_values = [&](unsigned first, unsigned count, bool wrap, llvm::Value *out[3]) {
+     bool constant = true;
+     for (unsigned i = 0; i < 3; i++) {
+@@ -286,7 +286,8 @@ Lowering::LowerTexture(uint32_t opcode, llvm::CallInst *call, const HandleInfo &
+         out[i] = wrap ? ir.CreateAShr(ir.CreateShl(v, 28), 28) : v;
+         constant = false;
+       } else {
+-        out[i] = ir.getInt32(v ? ConstantU32(v, 0) : 0);
++        int32_t c = v ? (int32_t)ConstantU32(v, 0) : 0;
++        out[i] = ir.getInt32(wrap ? ((c & 15) ^ 8) - 8 : c);
+       }
+     }
+     return constant;
+@@ -386,11 +387,34 @@ Lowering::LowerTexture(uint32_t opcode, llvm::CallInst *call, const HandleInfo &
+       clamp = air.CreateFPBinOp(llvm::air::AIRBuilder::fmax, clamp, shader_clamp);
+     return llvm::air::sample_min_lod_clamp{clamp};
+   };
++  // MacNeutron: D3D adds the sampler's MipLODBias to a gradient sample's LOD; Metal's gradient sample takes no bias.
++  // Gradients scaled by 2^bias move the LOD by bias, also past the anisotropy cap.
++  auto scaled = [&](std::pair<llvm::Value *, llvm::Value *> grad, llvm::Value *lod_bias) {
++    auto scale = ir.CreateVectorSplat(dims, air.CreateFPUnOp(llvm::air::AIRBuilder::exp2, lod_bias, false));
++    auto ddx = ir.CreateFMul(grad.first, scale);
++    return std::make_pair(ddx, ir.CreateFMul(grad.second, scale));
++  };
++  // A compute shader has no implicit derivatives (spec 3.3): Sample, SampleBias and SampleCmp take the quad's coarse
++  // gradients of their coordinates through the gradient path (`reference`: SampleCmp's).
++  bool compute = entry.kind == ShaderKind::Compute;
++  auto coarse = [&](llvm::Value *lod_bias, llvm::Value *shader_clamp, llvm::Value *reference) {
++    auto [ddx, ddy] = scaled(CoarseGradients(coord), lod_bias);
++    auto clamp = min_lod(shader_clamp).lod;
++    auto offset = o();
++    return result((reference ? air.CreateSampleCmpGrad(tex, d->ResourceHandle, sampler, coord, array, reference, ddx, ddy,
++                                                       clamp, offset)
++                             : air.CreateSampleGrad(tex, d->ResourceHandle, sampler, coord, array, ddx, ddy, clamp, offset))
++                      .first);
++  };
+ 
+   switch (opcode) {
+   case op::Sample: // (60, srv, sampler, c0..c3, o0..o2, clamp)
++    if (compute)
++      return coarse(bias, arg(10), nullptr);
+     return result(air.CreateSample(tex, d->ResourceHandle, sampler, coord, array, o(), llvm::air::sample_bias{bias}, min_lod(arg(10))).first);
+   case op::SampleBias: // (61, ..., bias, clamp)
++    if (compute)
++      return coarse(ir.CreateFAdd(arg(10), bias), arg(11), nullptr);
+     return result(air.CreateSample(tex, d->ResourceHandle, sampler, coord, array, o(),
+                                    llvm::air::sample_bias{ir.CreateFAdd(arg(10), bias)}, min_lod(arg(11))).first);
+   case op::SampleLevel: // (62, ..., lod)
+@@ -402,14 +426,12 @@ Lowering::LowerTexture(uint32_t opcode, llvm::CallInst *call, const HandleInfo &
+       ddx = ir.CreateInsertElement(ddx, one_d && i == 1 ? llvm::ConstantFP::get(ir.getFloatTy(), 0) : arg(10 + i), i);
+       ddy = ir.CreateInsertElement(ddy, one_d && i == 1 ? llvm::ConstantFP::get(ir.getFloatTy(), 0) : arg(13 + i), i);
+     }
+-    // MacNeutron: D3D adds the sampler's MipLODBias to a gradient sample's LOD; Metal's gradient sample takes no bias.
+-    // Gradients scaled by 2^bias move the LOD by bias, also past the anisotropy cap.
+-    auto scale = ir.CreateVectorSplat(dims, air.CreateFPUnOp(llvm::air::AIRBuilder::exp2, bias, false));
+-    ddx = ir.CreateFMul(ddx, scale);
+-    ddy = ir.CreateFMul(ddy, scale);
++    std::tie(ddx, ddy) = scaled({ddx, ddy}, bias);
+     return result(air.CreateSampleGrad(tex, d->ResourceHandle, sampler, coord, array, ddx, ddy, min_lod(arg(16)).lod, o()).first);
+   }
+   case op::SampleCmp: // (64, ..., compare, clamp)
++    if (compute)
++      return coarse(bias, arg(11), arg(10));
+     return result(air.CreateSampleCmp(tex, d->ResourceHandle, sampler, coord, array, arg(10), o(),
+                                       llvm::air::sample_bias{bias}, min_lod(arg(11))).first);
+   case op::SampleCmpLevelZero: // (65, ..., compare)
+@@ -421,8 +443,36 @@ Lowering::LowerTexture(uint32_t opcode, llvm::CallInst *call, const HandleInfo &
+     return result(air.CreateGatherCompare(tex, d->ResourceHandle, sampler, coord, array, arg(10),
+                                           Offsets(7, 2, false)).first);
+   case op::CalculateLOD: { // (81, srv, sampler, c0, c1, c2, i1 clamped)
+-    auto lod = air.CreateCalculateLOD(tex, d->ResourceHandle, sampler, coord);
+-    Replace(call, ConstantU32(arg(6), 1) ? lod.first : lod.second);
++    // ponytail: a cube in a compute shader keeps Metal's LOD (no derivatives in a kernel); D3D's projection onto the
++    // major face when a shader needs it
++    if (!compute || (Dimensions(logical) == 3 && logical != Texture::texture3d)) {
++      auto lod = air.CreateCalculateLOD(tex, d->ResourceHandle, sampler, coord);
++      Replace(call, ConstantU32(arg(6), 1) ? lod.first : lod.second);
++      return llvm::Error::success();
++    }
++    // Compute (spec 3.3): 0.5 log2 of the larger squared gradient in mip 0's texels; clamped to the view's mips.
++    using llvm::air::AIRBuilder;
++    auto [ddx, ddy] = CoarseGradients(coord);
++    static const Texture::Query axes[] = {Texture::width, Texture::height, Texture::depth};
++    llvm::Value *size = llvm::UndefValue::get(coord->getType());
++    for (unsigned i = 0; i < dims; i++) {
++      auto n = one_d && i == 1 ? ir.getInt32(0) : air.CreateTextureQuery(tex, d->ResourceHandle, axes[i], ir.getInt32(0));
++      size = ir.CreateInsertElement(size, ir.CreateUIToFP(n, ir.getFloatTy()), i);
++    }
++    auto texels2 = [&](llvm::Value *g) {
++      auto t = ir.CreateFMul(g, size);
++      return air.CreateDotProduct(t, t);
++    };
++    auto x2 = texels2(ddx);
++    auto lod = ir.CreateFMul(llvm::ConstantFP::get(ir.getFloatTy(), 0.5),
++                             air.CreateFPUnOp(AIRBuilder::log2, air.CreateFPBinOp(AIRBuilder::fmax, x2, texels2(ddy)), false));
++    if (ConstantU32(arg(6), 1)) {
++      auto mips = air.CreateTextureQuery(tex, d->ResourceHandle, Texture::num_mip_levels, ir.getInt32(0));
++      auto top = ir.CreateUIToFP(ir.CreateSub(mips, ir.getInt32(1)), ir.getFloatTy());
++      lod = air.CreateFPBinOp(AIRBuilder::fmin,
++                              air.CreateFPBinOp(AIRBuilder::fmax, lod, llvm::ConstantFP::get(ir.getFloatTy(), 0)), top);
++    }
++    Replace(call, lod);
+     return llvm::Error::success();
+   }
+   default:
+diff --git a/src/airconv/dxil/dxil_signature.cpp b/src/airconv/dxil/dxil_signature.cpp
+index f50ecdf..314b88c 100644
+--- a/src/airconv/dxil/dxil_signature.cpp
++++ b/src/airconv/dxil/dxil_signature.cpp
+@@ -18,6 +18,7 @@
+ #include "dxil.hpp"
+ #include "../airconv_error.hpp"
+ #include "../dxbc_converter.hpp"
++#include <algorithm>
+ 
+ // Entry-point inputs and outputs for DXIL shaders, built from the entry's signature metadata with airconv's IO helpers
+ // (as dxbc_signature.cpp builds them from DXBC dcl_* instructions). Elements live in airconv's register file at
+@@ -406,15 +407,20 @@ air::OutputVertex Varying(const SignatureElement &e, uint32_t row) {
+ 
+ void
+ AddWaveInputs(const llvm::Module &module, SM50ShaderInternal *shader, uint32_t &lane_index_arg, uint32_t &lane_count_arg) {
+-  for (uint32_t opcode : {op::WaveIsFirstLane, op::WaveGetLaneIndex, op::WaveGetLaneCount, op::WaveAnyTrue, op::WaveAllTrue,
+-                          op::WaveActiveAllEqual, op::WaveActiveBallot, op::WaveReadLaneAt, op::WaveReadLaneFirst,
+-                          op::WaveActiveOp, op::WaveActiveBit, op::WavePrefixOp, op::WaveAllBitCount, op::WavePrefixBitCount,
+-                          op::WaveMatch, op::WaveMultiPrefixOp, op::WaveMultiPrefixBitCount})
+-    if (ModuleCallsOp(module, opcode)) {
+-      lane_index_arg = shader->func_signature.DefineInput(air::InputThreadIndexInSimdgroup{});
+-      lane_count_arg = shader->func_signature.DefineInput(air::InputThreadsPerSimdgroup{});
+-      return;
+-    }
++  auto calls = [&](std::initializer_list<uint32_t> ops) {
++    return std::any_of(ops.begin(), ops.end(), [&](uint32_t opcode) { return ModuleCallsOp(module, opcode); });
++  };
++  // A compute shader's derivatives, implicit-LOD samples and LODs read the quad lane (Lowering::QuadDerivative).
++  if (calls({op::WaveIsFirstLane, op::WaveGetLaneIndex, op::WaveGetLaneCount, op::WaveAnyTrue, op::WaveAllTrue,
++             op::WaveActiveAllEqual, op::WaveActiveBallot, op::WaveReadLaneAt, op::WaveReadLaneFirst, op::WaveActiveOp,
++             op::WaveActiveBit, op::WavePrefixOp, op::WaveAllBitCount, op::WavePrefixBitCount, op::WaveMatch,
++             op::WaveMultiPrefixOp, op::WaveMultiPrefixBitCount}) ||
++      (shader->shader_type == microsoft::D3D11_SB_COMPUTE_SHADER &&
++       calls({op::Sample, op::SampleBias, op::SampleCmp, op::CalculateLOD, op::DerivCoarseX, op::DerivCoarseY,
++              op::DerivFineX, op::DerivFineY}))) {
++    lane_index_arg = shader->func_signature.DefineInput(air::InputThreadIndexInSimdgroup{});
++    lane_count_arg = shader->func_signature.DefineInput(air::InputThreadsPerSimdgroup{});
++  }
+ }
+ 
+ llvm::Error
+diff --git a/src/airconv/nt/air_builder.cpp b/src/airconv/nt/air_builder.cpp
+index 0f6488a..132dc30 100644
+--- a/src/airconv/nt/air_builder.cpp
++++ b/src/airconv/nt/air_builder.cpp
+@@ -623,6 +623,68 @@ AIRBuilder::CreateSampleGrad(
+   return {builder.CreateExtractValue(Result, {0u}), builder.CreateExtractValue(Result, {1u})};
+ }
+ 
++// MacNeutron: (texture, sampler, i32 1, coord, [slice], float ref, ddx, ddy, float clamp, [i1 true, <2 x i32> offset],
++// i32 0), the operands Metal's own depth sample_compare(..., gradient2d/gradientcube, ...) emits.
++std::pair<Value *, Value *>
++AIRBuilder::CreateSampleCmpGrad(
++    const Texture &Texture, Value *Handle, Value *Sampler, Value *Coord, Value *ArrayIndex, Value *Reference,
++    Value *DerivX, Value *DerivY, Value *MinLOD, Value *Offset
++) {
++  assert(Texture.kind <= Texture::last_resource_kind);
++  auto &TexInfo = TextureInfo[Texture.kind];
++
++  if (!TexInfo.is_depth) {
++    debug << "invalid operation: compare on non depth texture.\n";
++    return {nullptr, nullptr};
++  }
++
++  auto &Context = getContext();
++  auto Attrs = AttributeList::get(
++      Context,
++      {
++          {1U, Attribute::get(Context, Attribute::AttrKind::NoCapture)},
++          {1U, Attribute::get(Context, Attribute::AttrKind::ReadOnly)},
++          {2U, Attribute::get(Context, Attribute::AttrKind::NoCapture)},
++          {2U, Attribute::get(Context, Attribute::AttrKind::ReadOnly)},
++          {~0U, Attribute::get(Context, Attribute::AttrKind::ArgMemOnly)},
++          {~0U, Attribute::get(Context, Attribute::AttrKind::NoUnwind)},
++          {~0U, Attribute::get(Context, Attribute::AttrKind::WillReturn)},
++          {~0U, Attribute::get(Context, Attribute::AttrKind::ReadOnly)},
++      }
++  );
++
++  auto NaNToZero = [&](Value *V) { return options.sampleNaNToZero ? getNaNToZero(V) : V; };
++  auto CoordTy = getTextureSampleCoordType(Texture);
++  SmallVector<Value *> Ops = {Handle, Sampler, getInt(1), NaNToZero(Coord)};
++  SmallVector<Type *> Tys = {getTextureHandleType(Texture), getSamplerHandleType(), getIntTy(), CoordTy};
++  if (TexInfo.is_array) {
++    Tys.push_back(getIntTy());
++    Ops.push_back(ArrayIndex);
++  }
++  Tys.append({getFloatTy(), CoordTy, CoordTy, getFloatTy()});
++  Ops.append({Reference, NaNToZero(DerivX), NaNToZero(DerivY), MinLOD});
++  if (!TexInfo.is_cube) {
++    Tys.append({getBoolTy(), getIntTy(2)});
++    Ops.append({getBool(true), Offset});
++  }
++  /* access: always 0 = sample */
++  Tys.push_back(getIntTy());
++  Ops.push_back(getInt(0));
++
++  std::string FnName = "air.sample_compare_";
++  FnName += TexInfo.air_symbol_suffix;
++  FnName += "_grad";
++  FnName += getTypeOverloadSuffix(getTexelType(Texture), getTexelSign(Texture));
++
++  auto Fn = getModule()->getOrInsertFunction(
++      FnName, FunctionType::get(getTextureSampleResultType(Texture), Tys, false), Attrs
++  );
++
++  auto Result = builder.CreateCall(Fn, Ops);
++
++  return {builder.CreateExtractValue(Result, {0u}), builder.CreateExtractValue(Result, {1u})};
++}
++
+ std::pair<Value *, Value *>
+ AIRBuilder::CreateRead(
+     const Texture &Texture, Value *Handle, Value *Pos, Value *ArrayIndex, Value *SampleIndexOrCubeFace, Value *Level,
+diff --git a/src/airconv/nt/air_builder.hpp b/src/airconv/nt/air_builder.hpp
+index 8acb93f..754c757 100644
+--- a/src/airconv/nt/air_builder.hpp
++++ b/src/airconv/nt/air_builder.hpp
+@@ -283,6 +283,12 @@ public:
+       Value *DerivY, Value *MinLOD, Value *Offset
+   );
+ 
++  // MacNeutron: a depth comparison with explicit gradients (air.sample_compare_<depth kind>_grad; cubes take no offset).
++  std::pair<Value *, Value *> CreateSampleCmpGrad(
++      const Texture &Texture, Value *Handle, Value *Sampler, Value *Coord, Value *ArrayIndex, Value *Reference,
++      Value *DerivX, Value *DerivY, Value *MinLOD, Value *Offset
++  );
++
+   Value *CreateAtomicRMW(
+       const Texture &Texture, Value *Handle, AtomicRMWInst::BinOp Op, Value *Pos, Value *ValVec4,
+       Value *ArrayIndex = nullptr
+-- 
+2.54.0 (Apple Git-157)
+

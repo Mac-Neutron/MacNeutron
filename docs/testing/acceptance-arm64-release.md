@@ -2519,3 +2519,47 @@ release or tag until the last task records the new one.
   - Gates (the maintainer's process change of 2026-10-11: one lane between milestones): `dxmt/check.sh` in the ARM64EC
     lane (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-6-dxmt-check.log`): `dxmt-check: all passed`, 264 rows `ok`
     (263 before, plus the offsets row), 0 `FAIL`. The x64 lane and `make test` (no Swift touched) were not run.
+- **0046 (`airconv: Emulate derivatives and implicit-LOD sampling in compute shaders.`):** a Metal kernel may not call
+  `air.dfdx`/`air.dfdy` (pipeline creation refuses it), and an implicit-LOD sample in a kernel read LOD 0. In a DXIL
+  compute shader, `DerivCoarseX`..`DerivFineY` (83-86) now read the quad with `air.quad_shuffle`, from Metal's quad lane
+  `l` = simd lane & 3 (never D3D's flattened ID): coarse `s(1) - s(0)` (x) and `s(2) - s(0)` (y), fine
+  `s(l | 1) - s(l & 2)` and `s(l | 2) - s(l & 1)`. `Sample`, `SampleBias` and `SampleCmp` (60, 61, 64) take the quad's
+  coarse gradients of their coordinates through the gradient path (scaled by 2^(sampler bias), `SampleBias` by
+  2^(bias + sampler bias)); `SampleCmp` through the new `AIRBuilder::CreateSampleCmpGrad`
+  (`air.sample_compare_depth_2d_grad.f32` and its array and cube forms). `CalculateLOD` (81) is
+  `0.5 * log2(max(|ddx · size|², |ddy · size|²))` with mip 0's size, the clamped form clamped to the view's
+  `[0, mips - 1]`. `AddWaveInputs` defines the simd lane input for these ops in a compute shader. Pixel shaders keep
+  `air.dfdx`/`air.dfdy` and Metal's LOD. Also (ruling R-T6a, from Task 6's review): constant `Load`/`Sample*` offsets
+  wrap to their low 4 bits as runtime ones do (`((c & 15) ^ 8) - 8`, the identity on [-8, 7]; gathers stay unwrapped).
+  - Harness: `common.hlsli` gains `Depth` (t6: 8x8 `R32_TYPELESS` with `ALLOW_DEPTH_STENCIL`, 4 mips, mip m all
+    0.125 + 0.25 m, each mip copied whole from an upload buffer, `R32_FLOAT` SRV), `Cmp` (s2: static point comparison,
+    `LESS_EQUAL`, clamp) and `Lod64(lod) = round(lod * 64)`; descriptor slots are t0-t6 at 0-6 and u0-u4 at 7-11. The 13
+    D3DMetal groups read `ok` with the new layout on both runtimes before any translator change.
+  - Rows: `DXIL deriv matches its CPU reference` reads `match`, and `dxil-translate` accepts 21/22 behaviour shaders.
+    `deriv.hlsl` (cs_6_6, `numthreads(64, 1, 1)`) takes the four derivatives of `v = gi * gi` (fine and coarse differ),
+    and, with coordinates stepping 2^k / 8 per lane (k = quad % 5, LOD exactly k), `Depth`'s unclamped and clamped LOD,
+    `Sample`, `SampleBias(-1)`, `SampleCmp(0.5)` and `Tex`'s unclamped LOD at `uv * (1, 2)` (the larger gradient:
+    k + 1). `dxil-probe -S`: DXC keeps all ten calls (83-86; 81 three times, one clamped; 60, 61, 64).
+    `DXIL offsets matches its CPU reference` gains slots 4 (`Load` at the constant offset (12, -13), texel (0, 7)) and
+    5 (`int2(o.x, -13)`, a runtime x and a constant y); DXC at cs_6_7 keeps both constants as `i32 12, i32 -13`.
+    - Before the patch: `dxil-translate` failed `deriv.dxil` (`kernel function main uses illegal functions
+      (air.dfdx.f32, air.dfdy.f32)`; 20/22), its D3D12 pipeline failed `0x80004005`, and the offsets row read `FAIL`
+      (slots 4 and 5, all 64 threads: `00000000` for texel (0, 7)'s `ff70e000`, the unwrapped offset out of bounds).
+    - Single mutations, each on its own build, each failing only its own slot: fine derivatives reading the coarse
+      lanes (slots 2 and 3, 32 threads each); the LOD taking the smaller gradient (slot 9, 64 threads; slots 4 and 5
+      are isotropic and stay right); `SampleCmp`'s gradients zero (slot 8, the 36 threads with k >= 2); `SampleBias`
+      dropping the shader's bias (slot 7, the 36 threads with k in 1..3).
+    - A one-off D3DMetal run of `deriv` (not a row) agrees with the CPU reference on the fine derivatives, `Sample`
+      and `SampleCmp` (slots 2, 3, 6, 8, all 64 threads). It differs elsewhere: coarse derivatives equal its fine ones,
+      `CalculateLOD` reads 0, and `SampleBias` reads `Sample`'s mip.
+    - Covered by code reading only: half-precision derivatives; implicit-LOD sampling of 1D, 3D, array and cube
+      textures; a non-zero sampler `MipLODBias` (the static samplers have none); `CreateSampleCmpGrad`'s array and
+      cube forms. `CalculateLOD` on a cube in a compute shader keeps Metal's LOD (`ponytail:` comment). 2D compute
+      groups are Task 8's: their quads are Metal's lane quads until then.
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged`, as predicted; DXBC
+    `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`. A read-only `dxil-probe -S` over the 3,343
+    compute shaders of `~/dxil-smite2` finds no call of ops 60, 61, 64, 81 or 83-86.
+  - Gates (one lane, ruling R-LITE): `dxmt/check.sh` in the ARM64EC lane
+    (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-7-dxmt-check.log`): `dxmt-check: all passed`, 265 rows `ok`
+    (264 before, plus the deriv row), 0 `FAIL`; the 13 `matches D3DMetal` rows read `ok` with the new descriptor
+    layout, so D3DMetal creates and fills the depth texture too. The x64 lane and `make test` were not run.

@@ -6,6 +6,7 @@ Buffer<float4> Typed : register(t2);                                       // 64
 struct S { float4 a; uint b; };
 StructuredBuffer<S> Structured : register(t3);                             // 64 elements, a = (i, 2i, 3i, 4i), b = i ^ 0x5a5a
 Buffer<float4> Arr[2] : register(t4);                                      // t4: element i = (i,0,0,0); t5: element i = (0,i,0,0)
+Texture2D<float> Depth : register(t6);                                     // 8x8 D32, 4 mips: mip m all 0.125 + 0.25 m
 RWByteAddressBuffer Out : register(u0);                                    // 64 threads x 16 words, zeroed
 RWBuffer<uint> RWTyped : register(u1);                                     // 64 elements, zeroed before each group
 RWTexture2D<float4> RWTex : register(u2);                                  // 8x8 RGBA32F
@@ -13,7 +14,9 @@ RWStructuredBuffer<int2> AtomicS : register(u3);                           // 65
 RWTexture2D<uint> AtomicTex : register(u4);                                // 8x8 R32_UINT, zeroed before each group
 SamplerState Linear : register(s0);                                        // static: linear, clamp
 SamplerState Point : register(s1);                                         // static: point, clamp
+SamplerComparisonState Cmp : register(s2);                                 // static: point comparison, LESS_EQUAL, clamp
 uint InWord(uint i) { return In.Load(i * 4); }
 float InFloat(uint i) { return asfloat(In.Load(4096 + i * 4)); }
 void Put(uint3 id, uint slot, uint v) { Out.Store((id.x * 16 + slot) * 4, v); }
 void PutF(uint3 id, uint slot, float v) { Put(id, slot, asuint(v)); }
+uint Lod64(float lod) { return (uint)round(lod * 64); }  // LODs as exact integers: an ULP of log2 doesn't fail a row

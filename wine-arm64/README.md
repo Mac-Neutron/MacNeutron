@@ -312,5 +312,5 @@ re-clone; that is why they wait for the rebase.
     the date before importing another. This is not legal advice.
 - Each patch taken or derived from another tree names its source in its message (Wine 0006's is given above, since its
   message doesn't). Patch files keep their original authors.
-- **DXMT** is LGPL-2.1+; our patches to it are too. 0001-0045 are ours.
+- **DXMT** is LGPL-2.1+; our patches to it are too. 0001-0046 are ours.
 - Upstream FEX and DXMT refuse AI-authored contributions: no patches go upstream (issue reports only).

@@ -105,7 +105,8 @@ expect_wavesize32r = expect_wavesize = expect_wavesize32
 
 # Programmable offsets (SM 6.7) from base texel (4, 4): Load and SampleLevel (point, clamp) take the offset's low 4
 # bits, sign-extended; GatherRed/GatherGreen take og as is, footprint (4..5, 4..5) + og clamped to [0, 7], components
-# (i0,j1) (i1,j1) (i1,j0) (i0,j0). Slots hold the texel bytes packed (common.hlsli's tex_rgba).
+# (i0,j1) (i1,j1) (i1,j0) (i0,j0). Slots 4 and 5: Load with the constant offset (12, -13) and with (o.x, -13), constants
+# wrapped as runtime values are. Slots hold the texel bytes packed (common.hlsli's tex_rgba).
 def expect_offsets(got):
     k_off = [-4, -1, 0, 3, 12, 13, -13, -15]
     wrap = lambda v: ((v & 15) ^ 8) - 8
@@ -119,7 +120,26 @@ def expect_offsets(got):
         i0, i1, j0, j1 = clamp(4 + gx), clamp(5 + gx), clamp(4 + gy), clamp(5 + gy)
         texel = pack(tex_rgba(4 + ox, 4 + oy))
         return [texel, texel, pack([tex_rgba(i, 0)[0] for i in (i0, i1, i1, i0)]),
-                pack([tex_rgba(0, j)[1] for j in (j1, j1, j0, j0)])]
+                pack([tex_rgba(0, j)[1] for j in (j1, j1, j0, j0)]),
+                pack(tex_rgba(4 + wrap(12), 4 + wrap(-13))), pack(tex_rgba(4 + ox, 4 + wrap(-13)))]
+    return per_thread(slots)
+
+
+# Compute derivatives on 1D quads: thread t is quad q = t >> 2's lane l = t & 3 (one 64-thread group), v = t * t.
+# Coarse from lanes 0-2 of the quad, fine from this lane's row (x) or column (y). uv steps 2^k / 8, k = q % 5: LOD k
+# (Depth's 4 mips clamp it to 3; Tex at uv * (1, 2): k + 1), LODs as round(lod * 64). Depth's mip m holds 0.125 + 0.25 m;
+# SampleCmp (LESS_EQUAL, reference 0.5) is 1 from mip 2 up.
+def expect_deriv(got):
+    v = lambda i: float(i * i)
+    clamp = lambda m: min(max(m, 0), 3)
+    mip = lambda m: f32(0.125 + 0.25 * m)
+
+    def slots(t):
+        q, l, k = t >> 2, t & 3, (t >> 2) % 5
+        b = 4 * q
+        return [f32(v(b + 1) - v(b)), f32(v(b + 2) - v(b)),
+                f32(v(b + (l | 1)) - v(b + (l & 2))), f32(v(b + (l | 2)) - v(b + (l & 1))),
+                64 * k, 64 * min(k, 3), mip(clamp(k)), mip(clamp(k - 1)), f32(1.0 if clamp(k) >= 2 else 0.0), 64 * (k + 1)]
     return per_thread(slots)
 
 

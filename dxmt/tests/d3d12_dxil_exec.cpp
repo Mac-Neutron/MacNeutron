@@ -45,11 +45,12 @@ static ID3D12Resource *Buffer(UINT64 size, D3D12_HEAP_TYPE type, D3D12_RESOURCE_
     return r;
 }
 
-static ID3D12Resource *Texture(UINT w, UINT h, DXGI_FORMAT format, D3D12_RESOURCE_STATES state, D3D12_RESOURCE_FLAGS flags) {
+static ID3D12Resource *Texture(UINT w, UINT h, DXGI_FORMAT format, D3D12_RESOURCE_STATES state, D3D12_RESOURCE_FLAGS flags,
+                              UINT16 mips = 1) {
     D3D12_HEAP_PROPERTIES heap = {D3D12_HEAP_TYPE_DEFAULT};
     D3D12_RESOURCE_DESC desc = {};
     desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D; desc.Width = w; desc.Height = h; desc.DepthOrArraySize = 1;
-    desc.MipLevels = 1; desc.Format = format; desc.SampleDesc.Count = 1; desc.Flags = flags;
+    desc.MipLevels = mips; desc.Format = format; desc.SampleDesc.Count = 1; desc.Flags = flags;
     ID3D12Resource *r;
     CHECK(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, state, nullptr, __uuidof(ID3D12Resource), (void **)&r));
     return r;
@@ -92,22 +93,25 @@ int main(int argc, char **argv) {
     CHECK(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void **)&fence));
     fence_event = CreateEventA(nullptr, FALSE, FALSE, nullptr);
 
-    // Root signature: b0 root CBV; one table of t0-t5 then u0-u4; static samplers s0 (linear) and s1 (point).
+    // Root signature: b0 root CBV; one table of t0-t6 then u0-u4; static samplers s0 (linear), s1 (point) and s2 (point
+    // comparison, LESS_EQUAL).
     D3D12_DESCRIPTOR_RANGE ranges[2] = {};
-    ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV; ranges[0].NumDescriptors = 6; ranges[0].BaseShaderRegister = 0;
+    ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV; ranges[0].NumDescriptors = 7; ranges[0].BaseShaderRegister = 0;
     ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV; ranges[1].NumDescriptors = 5; ranges[1].BaseShaderRegister = 0;
-    ranges[1].OffsetInDescriptorsFromTableStart = 6;
+    ranges[1].OffsetInDescriptorsFromTableStart = 7;
     D3D12_ROOT_PARAMETER params[2] = {};
     params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; params[0].Descriptor.ShaderRegister = 0;
     params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     params[1].DescriptorTable.NumDescriptorRanges = 2; params[1].DescriptorTable.pDescriptorRanges = ranges;
-    D3D12_STATIC_SAMPLER_DESC samplers[2] = {};
-    for (int s = 0; s < 2; s++) {
-        samplers[s].Filter = s == 0 ? D3D12_FILTER_MIN_MAG_MIP_LINEAR : D3D12_FILTER_MIN_MAG_MIP_POINT;
+    D3D12_STATIC_SAMPLER_DESC samplers[3] = {};
+    for (int s = 0; s < 3; s++) {
+        samplers[s].Filter = s == 0 ? D3D12_FILTER_MIN_MAG_MIP_LINEAR
+                             : s == 1 ? D3D12_FILTER_MIN_MAG_MIP_POINT : D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT;
         samplers[s].AddressU = samplers[s].AddressV = samplers[s].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
         samplers[s].MaxLOD = D3D12_FLOAT32_MAX; samplers[s].ShaderRegister = s;
     }
-    D3D12_ROOT_SIGNATURE_DESC rd = {2, params, 2, samplers, D3D12_ROOT_SIGNATURE_FLAG_NONE};
+    samplers[2].ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    D3D12_ROOT_SIGNATURE_DESC rd = {2, params, 3, samplers, D3D12_ROOT_SIGNATURE_FLAG_NONE};
     ID3DBlob *blob = nullptr, *error = nullptr;
     CHECK(D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
     ID3D12RootSignature *root;
@@ -167,6 +171,21 @@ int main(int argc, char **argv) {
     list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
     Barrier(tex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
+    // Depth: 8x8 D32 with 4 mips, mip m all 0.125 + 0.25 m, each copied whole from its own 2048-byte block (pitch 256).
+    ID3D12Resource *depth = Texture(8, 8, DXGI_FORMAT_R32_TYPELESS, D3D12_RESOURCE_STATE_COPY_DEST,
+                                    D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, 4);
+    std::vector<float> depths(4 * 512);
+    for (size_t i = 0; i < depths.size(); i++) depths[i] = 0.125f + 0.25f * (i / 512);
+    ID3D12Resource *depthup = Buffer(depths.size() * 4, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    Fill(depthup, depths.data(), depths.size() * 4);
+    for (UINT m = 0; m < 4; m++) {
+        D3D12_TEXTURE_COPY_LOCATION to = {depth, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX}; to.SubresourceIndex = m;
+        D3D12_TEXTURE_COPY_LOCATION from = {depthup, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT};
+        from.PlacedFootprint.Offset = m * 2048; from.PlacedFootprint.Footprint = {DXGI_FORMAT_R32_FLOAT, 8u >> m, 8u >> m, 1, 256};
+        list->CopyTextureRegion(&to, 0, 0, 0, &from, nullptr);
+    }
+    Barrier(depth, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
     // UAVs, zeroed from an upload buffer of zeros.
     std::vector<uint8_t> zeros(4096, 0);
     ID3D12Resource *zerobuf = Buffer(4096, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ); Fill(zerobuf, zeros.data(), 4096);
@@ -180,9 +199,9 @@ int main(int argc, char **argv) {
     ID3D12Resource *readback = Buffer(4096, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
     Flush();
 
-    // Descriptors: t0-t5 at 0-5, u0-u4 at 6-10.
+    // Descriptors: t0-t6 at 0-6, u0-u4 at 7-11.
     ID3D12DescriptorHeap *heap;
-    D3D12_DESCRIPTOR_HEAP_DESC hd = {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 11, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
+    D3D12_DESCRIPTOR_HEAP_DESC hd = {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 12, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
     CHECK(device->CreateDescriptorHeap(&hd, __uuidof(ID3D12DescriptorHeap), (void **)&heap));
     UINT inc = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     D3D12_CPU_DESCRIPTOR_HANDLE cpu = heap->GetCPUDescriptorHandleForHeapStart();
@@ -199,15 +218,18 @@ int main(int argc, char **argv) {
     buffer_srv(structbuf, 3, DXGI_FORMAT_UNKNOWN, 64, 20, D3D12_BUFFER_SRV_FLAG_NONE);
     buffer_srv(arrbuf[0], 4, DXGI_FORMAT_R32G32B32A32_FLOAT, 64, 0, D3D12_BUFFER_SRV_FLAG_NONE);
     buffer_srv(arrbuf[1], 5, DXGI_FORMAT_R32G32B32A32_FLOAT, 64, 0, D3D12_BUFFER_SRV_FLAG_NONE);
+    D3D12_SHADER_RESOURCE_VIEW_DESC dv = {}; dv.Format = DXGI_FORMAT_R32_FLOAT; dv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    dv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; dv.Texture2D.MipLevels = 4;
+    device->CreateShaderResourceView(depth, &dv, slot(6));
     D3D12_UNORDERED_ACCESS_VIEW_DESC u = {}; u.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
     u.Format = DXGI_FORMAT_R32_TYPELESS; u.Buffer.NumElements = 1024; u.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
-    device->CreateUnorderedAccessView(out, nullptr, &u, slot(6));
+    device->CreateUnorderedAccessView(out, nullptr, &u, slot(7));
     u.Format = DXGI_FORMAT_R32_UINT; u.Buffer.NumElements = 64; u.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
-    device->CreateUnorderedAccessView(rwtyped, nullptr, &u, slot(7));
-    device->CreateUnorderedAccessView(rwtex, nullptr, nullptr, slot(8));
+    device->CreateUnorderedAccessView(rwtyped, nullptr, &u, slot(8));
+    device->CreateUnorderedAccessView(rwtex, nullptr, nullptr, slot(9));
     u.Format = DXGI_FORMAT_UNKNOWN; u.Buffer.NumElements = 65; u.Buffer.StructureByteStride = 8;
-    device->CreateUnorderedAccessView(atomics, nullptr, &u, slot(9));
-    device->CreateUnorderedAccessView(atomictex, nullptr, nullptr, slot(10));
+    device->CreateUnorderedAccessView(atomics, nullptr, &u, slot(10));
+    device->CreateUnorderedAccessView(atomictex, nullptr, nullptr, slot(11));
 
     const char *all[] = {"buffers", "math", "transcendental", "textures", "groupshared", "wave", "half", "packed", "atomics", "quad", "specials", "mad", "barriers"};
     std::vector<std::string> groups;

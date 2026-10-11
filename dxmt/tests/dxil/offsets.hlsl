@@ -12,4 +12,7 @@ void main(uint3 id : SV_DispatchThreadID) {
     Put(id, 1, Rgba(Tex.SampleLevel(Point, uv, 0, o)));
     Put(id, 2, Rgba(Tex.GatherRed(Point, uv, og)));  // footprint (4..5, 4..5) + og, clamped: x, y, z, w = (i0,j1) (i1,j1) (i1,j0) (i0,j0)
     Put(id, 3, Rgba(Tex.GatherGreen(Point, uv, og)));  // red holds only x: green shows og.y
+    // Constant offsets wrap too (DXC stops checking their range at 6.7): (12, -13) is (-4, 3), texel (0, 7).
+    Put(id, 4, Rgba(Tex.Load(int3(4, 4, 0), int2(12, -13))));
+    Put(id, 5, Rgba(Tex.Load(int3(4, 4, 0), int2(o.x, -13))));  // runtime x, constant y
 }
