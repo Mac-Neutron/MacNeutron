@@ -565,6 +565,15 @@ expect "pixel-shader wave ops leave helper lanes out by default" "$(img tri-help
 expect "and count them with [WaveOpsIncludeHelperLanes]" "$(img tri-helper-psinclude)" "$(img tri-helper-psgreen)"
 # One "triangle ok" line with 12 sampled pixels, all green: the hash the rows above compare with is a green image.
 expect "the always-green image drew, its 12 sampled pixels green" "$(pixels tri-helper-psgreen)" " 12 ff00ff00"
+# 16-bit varyings (DXIL SM 6.8 plan, Task 5): min precision and native 16-bit draw the float form's pixels.
+for v in 32 16 16n; do run ours "tri-v$v" dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/varying16.vs$v.dxil" "Z:$S/varying16.ps$v.dxil"; done
+expect "min16float and min16uint varyings draw as float ones" "$(same_pixels "$WORK/tri-v16.txt" "$WORK/tri-v32.txt")" yes
+expect "and float16_t and uint16_t ones" "$(same_pixels "$WORK/tri-v16n.txt" "$WORK/tri-v32.txt")" yes
+# The float pixel shader reads the min16 vertex shader's 32-bit registers: its min16uint tag zero-extended, its min16int
+# bias sign-extended (either the other way saturates alpha or blue). A register check only: D3DMetal draws nothing for
+# this pair (its 16-bit varyings don't link to 32-bit ones), so it has no reference.
+run ours tri-v16x dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/varying16.vs16.dxil" "Z:$S/varying16.ps32.dxil"
+expect "and a float pixel shader reads them as float, uint and int" "$(same_pixels "$WORK/tri-v16x.txt" "$WORK/tri-v32.txt")" yes
 CACHE="$WORK/cache/gs"
 run ours trigs-cold dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.ps.dxil" "Z:$S/triangle2.gs.dxil"
 run ours trigs-warm dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.ps.dxil" "Z:$S/triangle2.gs.dxil"
@@ -879,7 +888,7 @@ expect "and DXBC's, GroupMemoryBarrier's threadgroup fence included" \
   "$(grep '^ok sync\.dxbc ' "$WORK/translate-dxbc.txt" | grep -oE 'fence=[^ ]+ barrier=[0-9]+' || echo none)" \
   "fence=2:1,5:3,5:3,7:3,7:3 barrier=3"
 "$TOOLS/dxil-translate" "$S" > "$WORK/translate-shaders.txt" 2>&1 || true
-expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-shaders.txt" | cut -d ' ' -f 2)" "39/39"
+expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-shaders.txt" | cut -d ' ' -f 2)" "45/45"
 # DXIL keeps NaN and infinity: no translated shader assumes them away or keeps a fast compare. Vertex and geometry
 # shaders also carry no reassoc, contract or arcp flags, as airconv's DXBC path, so LLVM fuses or reorders nothing on
 # its own: a depth prepass and a base pass then compute the same positions, and their depth EQUAL test holds (grass
@@ -888,9 +897,9 @@ expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-sha
 # precise, so no fma there).
 "$TOOLS/dxil-translate" "$S" --flags > "$WORK/translate-flags.txt" 2>&1 || true
 expect "no translated shader assumes NaN or infinity away" \
-  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "39:39"
+  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "45:45"
 expect "vertex and geometry shaders carry no reassoc, contract or arcp flags" \
-  "$(grep -E '^ok [^ ]+ (vs|gs) ' "$WORK/translate-flags.txt" | grep -c ' reassoc=0 contract=0 arcp=0$' || true)" 12
+  "$(grep -E '^ok [^ ]+ (vs|gs) ' "$WORK/translate-flags.txt" | grep -c ' reassoc=0 contract=0 arcp=0$' || true)" 15
 # Task FU: Metal's gradient sample takes no LOD bias, so the sampler's MipLODBias scales the derivatives (2^bias): every
 # gradient sample of shaders/lod.hlsl (DXIL SampleGrad) and dxbc/grad.hlsl (DXBC sample_d) has an fmul operand.
 expect "gradient samples carry the sampler's LOD bias, DXIL and DXBC" \

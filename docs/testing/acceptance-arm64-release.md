@@ -2438,3 +2438,37 @@ release or tag until the last task records the new one.
     `dxmt-check: all passed` twice, 528 rows `ok`, 0 `FAIL`. `make test`: 252 passed. A first run, started with
     `taskpolicy -b` while another session's GPU probe ran, timed out XeSS and upscale runs (the 120 s watchdog) and a
     minimised-present timing row in the x64 lane; none touch DXIL, and the rerun on an idle machine passed.
+- **0044 (`airconv: Carry 16-bit signature elements as 32-bit values.`):** signature registers stay 32-bit, so a
+  `loadInput` (4) of a `half` reads the register as a float and `fptrunc`s it (an `i16` one already truncated), and a
+  `storeOutput` (5) of a `half` `fpext`s it to a float; of an `i16`, it sign-extends when the element's component type
+  is `I16` and zero-extends otherwise (`U16`). Before, a half's bits crossed the register zero-extended (a denormal
+  float to the rasterizer and the render target) and a half read took a float's low 16 bits. The conversion is keyed
+  on the call's overload, so the geometry shader's reads of vertex outputs convert the same way; `Cast` is unchanged.
+  DXC gives min precision (`min16float`, `min16uint`, `min16int`) and native 16-bit types (`-enable-16bit-types`) the
+  same overloads and component types (`F16`, `U16`, `I16`; `dxil-probe -S`), so both forms take this path.
+  - Rows (Lane C): `min16float and min16uint varyings draw as float ones`, `and float16_t and uint16_t ones` and `and a
+    float pixel shader reads them as float, uint and int` read `yes`. `varying16.hlsl` draws one triangle as float
+    (`vs32`/`ps32`), min precision (`vs16`/`ps16`, `-D MIN16`) and native 16-bit (`vs16n`/`ps16n`, `-D NATIVE16
+    -enable-16bit-types`), each at 6.6: a 16-bit IA input (`POSITION`, from an `R32G32_FLOAT` buffer), an
+    interpolated 16-bit `TEXCOORD0`, two flat 16-bit integers and a 16-bit `SV_Target`. Both 16-bit forms draw the
+    float form's image (the same hash, `c7a3ffaf12c9a820`). The third row runs `vs16` with `ps32`, whose 32-bit loads
+    see the registers whole.
+    - The plan's shader had one flat `uint` tag of 200, which zero- and sign-extension both carry, and its 16-bit pixel
+      shaders truncate what they read, so neither row could see the integer extension. The tag is now `0x80C8` (bit 15
+      set; alpha `tag >> 8` = 128) and a flat `bias` of -56 (`int`, `min16int`, `int16_t`; blue `bias + 128` = 72)
+      takes the blue channel in place of `1 - uv.x`.
+    - D3DMetal draws the float and both 16-bit forms within 1/255 of ours, but nothing for `vs16` with `ps32` (its
+      16-bit varyings don't link to 32-bit ones). The third row is a check of what our registers hold, with no
+      reference.
+    - Before the patch all three rows read `FAIL` with every sampled pixel black: the IA corners (0 and 2) read as 0
+      and the triangle collapsed. With the patch, single mutations, each on its own build: the load's `fptrunc`
+      dropped (all three rows, black); the store's `fpext` dropped (all three; the 16-bit forms draw `00000000`, the
+      third row reads uv as 0); every `i16` zero-extended (third row, blue 255); every `i16` sign-extended (third row,
+      alpha 255); `I16` and `U16` swapped (third row, both 255).
+    - `dxil-translate` accepts 45/45 test shaders: `45:45` with no NaN or infinity assumed away, and 15 vertex and
+      geometry shaders without reassoc, contract or arcp.
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged`, as predicted; DXBC
+    `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`. A read-only `dxil-probe -S` over
+    `~/dxil-smite2` finds no `loadInput` or `storeOutput` with an `f16` or `i16` overload.
+  - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-5-dxmt-check.log`):
+    `dxmt-check: all passed` twice, 534 rows `ok`, 0 `FAIL`. `make test`: 252 passed.

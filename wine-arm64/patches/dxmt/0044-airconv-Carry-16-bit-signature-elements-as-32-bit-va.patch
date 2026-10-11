@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sun, 11 Oct 2026 09:15:09 -0400
+Subject: [PATCH] airconv: Carry 16-bit signature elements as 32-bit values.
+
+Signature registers are 32-bit, but a half loadInput took the low 16
+bits of the register and a half storeOutput wrote its bits
+zero-extended, a denormal float to the rasterizer and the render target.
+Min precision (min16float, min16uint, min16int) and native 16-bit types
+both give these overloads (F16, U16 and I16 elements).
+
+loadInput of a half now reads the register as a float and narrows it;
+an i16 one truncates, as before. storeOutput of a half widens it to a
+float; of an i16, it sign-extends for an I16 element and zero-extends
+for U16. Keyed on the call's overload, so the geometry shader's reads of
+vertex outputs convert the same way. This covers IA inputs, varyings and
+render-target outputs.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/airconv/dxil/dxil_lower.cpp | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/src/airconv/dxil/dxil_lower.cpp b/src/airconv/dxil/dxil_lower.cpp
+index 352562c..2bc0353 100644
+--- a/src/airconv/dxil/dxil_lower.cpp
++++ b/src/airconv/dxil/dxil_lower.cpp
+@@ -321,9 +321,12 @@ Lowering::LowerOther(uint32_t opcode, llvm::CallInst *call) {
+     } else {
+       ptr = RegisterElementPointer(res.input, *e, call->getArgOperand(2), ConstantU32(call->getArgOperand(3)));
+     }
++    // Signature registers hold 32-bit values: a half element reads a float and narrows it; i16 truncates (Cast).
+     auto word = ir.CreateLoad(ir.getInt32Ty(), ptr);
+     auto ty = call->getType();
+-    Replace(call, ty->isIntegerTy(1) ? ir.CreateICmpNE(word, ir.getInt32(0)) : Cast(word, ty));
++    Replace(call, ty->isIntegerTy(1) ? ir.CreateICmpNE(word, ir.getInt32(0))
++                  : ty->isHalfTy()   ? ir.CreateFPTrunc(ir.CreateBitCast(word, ir.getFloatTy()), ty)
++                                     : Cast(word, ty));
+     return llvm::Error::success();
+   }
+   case op::StoreOutput: { // (5, i32 outputSigId, i32 row, i8 col, T value)
+@@ -344,8 +347,12 @@ Lowering::LowerOther(uint32_t opcode, llvm::CallInst *call) {
+     case SemanticKind::StencilRef:
+       ir.CreateStore(Cast(value, ir.getInt32Ty()), res.stencil_ref_reg);
+       break;
+-    default: {
+-      auto word = value->getType()->isIntegerTy(1) ? ir.CreateSExt(value, ir.getInt32Ty()) : Cast(value, ir.getInt32Ty());
++    default: { // as 32-bit values (LoadInput): a half widened to a float, an I16 element sign-extended, U16 zero-extended
++      auto ty = value->getType();
++      auto word = ty->isIntegerTy(1) || (ty->isIntegerTy(16) && e->type == ComponentType::I16)
++                      ? ir.CreateSExt(value, ir.getInt32Ty())
++                  : ty->isHalfTy() ? ir.CreateBitCast(ir.CreateFPExt(value, ir.getFloatTy()), ir.getInt32Ty())
++                                   : Cast(value, ir.getInt32Ty());
+       ir.CreateStore(word, RegisterElementPointer(res.output, *e, call->getArgOperand(2), ConstantU32(call->getArgOperand(3))));
+     }
+     }
+-- 
+2.54.0 (Apple Git-157)
+
