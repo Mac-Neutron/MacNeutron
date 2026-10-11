@@ -2751,3 +2751,62 @@ release or tag until the last task records the new one.
     (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-11-dxmt-check.log`): `dxmt-check: all passed`, 325 lines `ok`
     after `info arm64 mode` (Task 10's 323 plus the two rows above; the 26/26 row changed in place), 0 `FAIL`. The x64
     lane and `make test` were not run.
+- **0051 (`airconv: Lower SV_StartVertexLocation and SV_StartInstanceLocation.`):** `StartVertexLocation` (256) and
+  `StartInstanceLocation` (257) read the values airconv already builds the vertex shader's IDs from,
+  `base_vertex_id` and `base_instance_id`, cast to the call's type: `[[base_vertex]]` and `[[base_instance]]` in a vertex
+  function, the draw's arguments in a geometry pipeline's object function (fields 2 and 3 of a draw, 3 and 4 of an
+  indexed one). Any other stage refuses them by name.
+  - Shaders: `shaders/indirect.hlsl`'s `vsvid` (vs_6_6: cells tagged `600 + SV_VertexID - VERT`, VERT being the vertex
+    fetched) and `vsstart` (vs_6_8: `1000 + 100 * (SV_StartVertexLocation + 10) + SV_StartInstanceLocation`), and
+    `triangle2.hlsl`'s `vsstart` (vs_6_8: `vsmain` moved off screen unless the two read 5 and 3). `dxil-probe -S` keeps
+    `dx.op.startVertexLocation(256)` and `dx.op.startInstanceLocation(257)` in both vs_6_8 shaders. DXC rewrote no other
+    `.dxil`.
+  - `d3d12_indirect.exe <vs> <ps> <cs> [<vsid> <psid> [<vsvid> [<vsstart>]]]` draws its cell runs once per vertex shader
+    given (lines `indirect <run>`, `indirect vid-<run>`, `indirect start-<run>`), each ending with a `direct` run: the
+    drawn records as `DrawInstanced(3, 2, 6, 7)`, `DrawInstanced(6, 1, 9, 0)`, `DrawIndexedInstanced(6, 2, 3, -1, 7)` and
+    `DrawIndexedInstanced(3, 1, 9, 2, 2)`. `d3d12_triangle.exe … --start <v> <i>` puts the corners at vertex `v` and draws
+    `DrawInstanced(3, 1, v, i)`.
+  - **The `SV_VertexID` convention**, as DXMT (ExecuteIndirect native and `DXMT_D3D12_INDIRECT=icb`, and direct) and
+    D3DMetal both draw it, line for line:
+    `vid-native-draw 2,0:594 3,0:591 4,0:591 2,1:594`, `vid-counted 2,0:594 2,1:594`,
+    `vid-native-indexed 0,0:600 4,0:601 5,0:601 7,0:598 4,1:601 5,1:601` (and `vid-aliased-indexed` the same),
+    `vid-vbv-gap` and `vid-vbv-null` `2,0:594 3,0:591 2,1:594`,
+    `vid-direct 2,0:594 3,0:591 4,0:601 5,0:601 7,0:598 2,1:594 4,1:601 5,1:601`. So `SV_VertexID` counts from 0 on a
+    non-indexed draw (`600 - start`: 594 for start 6, 591 for 9), and is the index without `BaseVertexLocation` on an
+    indexed one (`600 - base`: 601 for -1, 598 for 2). DXMT computes it as `[[vertex_id]] - [[base_vertex]]`, so on
+    non-indexed draws Metal's `[[base_vertex]]` is the draw's `vertexStart`, not 0.
+  - Rows: Lane E's `indirect draws read from the argument buffer draw what D3D12 says` (ours, D3DMetal, icb) gains the
+    `direct` line `direct 2,0:107 3,0:100 4,0:107 5,0:107 7,0:102 2,1:108 4,1:108 5,1:108`; `SV_VertexID under start and
+    base vertex locations reads as on D3DMetal` (the `vid-` lines above); `SV_StartVertexLocation and
+    SV_StartInstanceLocation read the draw's` and the same on `indirect-icb` (`start-native-draw 2,0:2607 3,0:2900
+    4,0:2900 2,1:2607`, `start-counted 2,0:2607 2,1:2607`, `start-native-indexed` and `start-aliased-indexed 0,0:2000
+    4,0:1907 5,0:1907 7,0:2202 4,1:1907 5,1:1907`, `start-direct 2,0:2607 3,0:2900 4,0:1907 5,0:1907 7,0:2202 2,1:2607
+    4,1:1907 5,1:1907`: start vertex 6, 9, 0, -1 and 2, start instance 7, 0 and 2); Lane C's `a vertex shader reads
+    start vertex 5 and start instance 3` and `and so does one in a geometry pipeline` (`tri-start` and `trigs-start`
+    draw `tri-ours`'s and `trigs-ours`'s images exactly: hashes `a6cc70be915cf615`, `36d4e042e7f93e39`); shader counts
+    `49/49`, `49:49` and the vertex/geometry flags row `18`. The stats runs keep the five original shaders and their rows
+    read as before (`list.ExecuteIndirect calls 16390`, `ExecuteIndirect native 8195;indirect command buffers created
+    1026;indirect resolve passes 3;`, `indirect resolve passes 14;`): the `direct` run issues no `ExecuteIndirect`.
+  - **`ExtendedCommandInfoSupported` may be TRUE** (Task 15): every non-indexed `start-` cell reads the draw's
+    `StartVertexLocation` (6 and 9) directly, through `ExecuteIndirect` natively and with `DXMT_D3D12_INDIRECT=icb`, and
+    the geometry pipeline reads 5.
+  - Before the patch: `fail indirect.vsstart.dxil DXIL: dx.op.startInstanceLocation.i32 (257) not supported` (257 comes
+    first in the function), the same for `triangle2.vsstart`, `dxil-translate` `47/49`; both programs' vs_6_8 pipelines
+    refused (`0x80004001`), so no `start-` line and `triangle fail` for `tri-start` and `trigs-start`. The `vid-` and
+    `direct` rows already read `ok`: `SV_VertexID` was right before the patch.
+  - Single mutations, each on its own build, against a cut-down check (Lane C's triangle rows, Lane E's indirect rows
+    with the stats runs, the `dxil-translate` counts; 21 rows): 256 reading 0 fails both `start-` rows (`start-native-draw
+    2,0:2007 3,0:2000 …`) and both Lane C rows; 257 reading 0 fails the same four (`start-native-draw 2,0:2600 …`); the
+    object function's 256 and 257 reading 0 while its vertex fetch still uses the draw's arguments fails only `and so
+    does one in a geometry pipeline`. Every other row stays `ok`.
+  - Limits: `triangle2.vsstart` can't tell the two values apart (start vertex 3 and instance 5 also move it by 0); the
+    `start-` rows can (a swap reads 2706, not 2607). By code reading only: an indexed draw in a geometry pipeline (fields
+    3 and 4 of its arguments).
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged` against 0050, as
+    predicted (no SMITE 2 shader is Shader Model 6.8); DXBC `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2
+    unchanged`.
+  - Gates (one lane, ruling R-LITE): `dxmt/check.sh` in the ARM64EC lane
+    (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-12-dxmt-check.log`): `dxmt-check: all passed`, 333 lines `ok`
+    after `info arm64 mode` (Task 11's 325 plus the five rows above and three `dxil-translate` lines for the new
+    shaders; the `direct` line and the count rows changed in place), 0 `FAIL`. The x64 lane and `make test` were not
+    run.

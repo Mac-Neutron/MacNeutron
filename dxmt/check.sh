@@ -596,6 +596,13 @@ expect "a pixel shader reads its texture and sampler through the descriptor heap
   "$(same_pixels "$WORK/tri-heap.txt" "$WORK/tri-heap-ref.txt")" yes
 expect "and D3DMetal's heap sampler draws other pixels than the point one" \
   "$([ "$(img tri-heap-ref)" != "$(img tri-ref)" ] && echo differ)" differ
+# SV_StartVertexLocation and SV_StartInstanceLocation (DXIL SM 6.8 plan, Task 12): triangle2's vertex shader moved off
+# screen unless they read the draw's 5 and 3, in the plain pipeline and in a geometry pipeline (whose object function
+# reads them from the draw's arguments).
+run ours tri-start dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vsstart.dxil" "Z:$S/triangle2.ps.dxil" --start 5 3
+run ours trigs-start dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vsstart.dxil" "Z:$S/triangle2.ps.dxil" "Z:$S/triangle2.gs.dxil" --start 5 3
+expect "a vertex shader reads start vertex 5 and start instance 3" "$(same_pixels "$WORK/tri-start.txt" "$WORK/tri-ours.txt")" yes
+expect "and so does one in a geometry pipeline" "$(same_pixels "$WORK/trigs-start.txt" "$WORK/trigs-ours.txt")" yes
 # Without the heap flags its graphics pipeline is refused, naming the first flag missing (the program's output goes to
 # the log too).
 before=$(cat "$LOG" 2> /dev/null | wc -l)
@@ -800,10 +807,12 @@ expect "and in D3D11 on D3DMetal" "$(grep '^d3d11 ia' "$WORK/vsia11-ref.txt" || 
 run ours vsunbind dxmt "$TESTS/d3d12_vsread.exe" "Z:$S/vsread.vsia.dxil" "Z:$S/vsread.ps.dxil" unbind
 expect "vertex buffer slots set with no views read zeros" "$(grep '^vsread unbind' "$WORK/vsunbind.txt" || echo none)" "vsread unbind $ia"
 # Unreal draws grass and GPU particles with ExecuteIndirect: 1024 of them in one render pass, 8 frames, none lost.
-indirect() { run ours "$1" "$2" "$TESTS/d3d12_indirect.exe" "Z:$S/indirect.vs.dxil" "Z:$S/indirect.ps.dxil" \
-  "Z:$S/indirect.cs.dxil" "Z:$S/indirect.vsid.dxil" "Z:$S/indirect.psid.dxil"; }
-indirect indirect-ours dxmt
-indirect indirect-ref d3dmetal
+# Extra arguments (Task 12): vsvid, which D3DMetal runs too, and vsstart, ours only (D3DMetal's converter has no
+# SV_StartVertexLocation); the stats runs keep the five shaders.
+indirect() { n=$1 b=$2; shift 2; run ours "$n" "$b" "$TESTS/d3d12_indirect.exe" "Z:$S/indirect.vs.dxil" \
+  "Z:$S/indirect.ps.dxil" "Z:$S/indirect.cs.dxil" "Z:$S/indirect.vsid.dxil" "Z:$S/indirect.psid.dxil" "$@"; }
+indirect indirect-ours dxmt "Z:$S/indirect.vsvid.dxil" "Z:$S/indirect.vsstart.dxil"
+indirect indirect-ref d3dmetal "Z:$S/indirect.vsvid.dxil"
 expect "1024 indirect draws in one pass paint every cell" "$(grep '^indirect ok' "$WORK/indirect-ours.txt" || echo none)" "indirect ok 8 0"
 expect "and on D3DMetal" "$(grep '^indirect ok' "$WORK/indirect-ref.txt" || echo 'D3DMetal printed nothing')" "indirect ok 8 0"
 expect "1024 indirect dispatches in one pass run every thread" "$(grep '^indirect dispatch' "$WORK/indirect-ours.txt" || echo none)" "indirect dispatch 81920 81920"
@@ -812,18 +821,33 @@ expect "and on D3DMetal" "$(grep '^indirect dispatch' "$WORK/indirect-ref.txt" |
 # BaseVertexLocation), instances from StartInstanceLocation, ByteStride and the argument and index buffer offsets kept,
 # an instance count of 0 drawing nothing, a count buffer capping the call, and an index buffer placed where a released
 # buffer was. Then vertex buffer views as arguments, for slot 2 of a pipeline using slots 0 and 2 (DXMT 0010), and a
-# null one, which reads zeros, not the slot's earlier view (Task F2).
+# null one, which reads zeros, not the slot's earlier view (Task F2). Last, the same draws direct (Task 12).
 native=$(printf 'indirect %s\n' "native-draw 2,0:107 3,0:100 4,0:100 2,1:108" "counted 2,0:107 2,1:108" \
   "native-indexed 0,0:100 4,0:107 5,0:107 7,0:102 4,1:108 5,1:108" \
-  "aliased-indexed 0,0:100 4,0:107 5,0:107 7,0:102 4,1:108 5,1:108" "vbv-gap 2,0:107 3,0:300 2,1:108" "vbv-null 3,0:300")
+  "aliased-indexed 0,0:100 4,0:107 5,0:107 7,0:102 4,1:108 5,1:108" "vbv-gap 2,0:107 3,0:300 2,1:108" "vbv-null 3,0:300" \
+  "direct 2,0:107 3,0:100 4,0:107 5,0:107 7,0:102 2,1:108 4,1:108 5,1:108")
 expect "indirect draws read from the argument buffer draw what D3D12 says" \
-  "$(grep -E '^indirect (native|counted|aliased|vbv)' "$WORK/indirect-ours.txt" || echo none)" "$native"
-expect "and on D3DMetal" "$(grep -E '^indirect (native|counted|aliased|vbv)' "$WORK/indirect-ref.txt" || echo 'D3DMetal printed nothing')" "$native"
+  "$(grep -E '^indirect (native|counted|aliased|vbv|direct)' "$WORK/indirect-ours.txt" || echo none)" "$native"
+expect "and on D3DMetal" "$(grep -E '^indirect (native|counted|aliased|vbv|direct)' "$WORK/indirect-ref.txt" || echo 'D3DMetal printed nothing')" "$native"
 export DXMT_D3D12_INDIRECT=icb
-indirect indirect-icb dxmt
+indirect indirect-icb dxmt "Z:$S/indirect.vsvid.dxil" "Z:$S/indirect.vsstart.dxil"
 unset DXMT_D3D12_INDIRECT
-expect "and with DXMT_D3D12_INDIRECT=icb" "$(grep -E '^indirect (ok|native|counted|aliased|vbv)' "$WORK/indirect-icb.txt" || echo none)" \
+expect "and with DXMT_D3D12_INDIRECT=icb" "$(grep -E '^indirect (ok|native|counted|aliased|vbv|direct)' "$WORK/indirect-icb.txt" || echo none)" \
   "$(printf 'indirect ok 8 0\n%s' "$native")"
+# Task 12: vsvid tags its cells 600 + SV_VertexID - the fetched vertex (600: SV_VertexID counts from the start vertex;
+# 600 - start: from 0; 600 - BaseVertexLocation on indexed draws), drawn as D3DMetal draws it. vsstart tags them
+# 1000 + 100 * (SV_StartVertexLocation + 10) + SV_StartInstanceLocation: the draw's StartVertexLocation (non-indexed) or
+# BaseVertexLocation (indexed, -1 here) and StartInstanceLocation, direct and through ExecuteIndirect.
+expect "SV_VertexID under start and base vertex locations reads as on D3DMetal" \
+  "$(grep -E '^indirect vid-' "$WORK/indirect-ours.txt" || echo none)" "$(grep -E '^indirect vid-' "$WORK/indirect-ref.txt" || echo 'D3DMetal printed nothing')"
+start=$(printf 'indirect start-%s\n' "native-draw 2,0:2607 3,0:2900 4,0:2900 2,1:2607" "counted 2,0:2607 2,1:2607" \
+  "native-indexed 0,0:2000 4,0:1907 5,0:1907 7,0:2202 4,1:1907 5,1:1907" \
+  "aliased-indexed 0,0:2000 4,0:1907 5,0:1907 7,0:2202 4,1:1907 5,1:1907" \
+  "direct 2,0:2607 3,0:2900 4,0:1907 5,0:1907 7,0:2202 2,1:2607 4,1:1907 5,1:1907")
+expect "SV_StartVertexLocation and SV_StartInstanceLocation read the draw's" \
+  "$(grep -E '^indirect start-(native|counted|aliased|direct)' "$WORK/indirect-ours.txt" || echo none)" "$start"
+expect "and with DXMT_D3D12_INDIRECT=icb" \
+  "$(grep -E '^indirect start-(native|counted|aliased|direct)' "$WORK/indirect-icb.txt" || echo none)" "$start"
 # DXMT_STATS: every D3D12 call counted and timed per thread, encoder boundaries with and without a barrier, written to
 # <capture folder>/stats.txt (at exit when nothing presents).
 rm -rf "$WORK/stats"; export DXMT_DXIL_DUMP="$WORK/stats" DXMT_STATS=1
@@ -926,7 +950,7 @@ expect "and DXBC's, GroupMemoryBarrier's threadgroup fence included" \
   "$(grep '^ok sync\.dxbc ' "$WORK/translate-dxbc.txt" | grep -oE 'fence=[^ ]+ barrier=[0-9]+' || echo none)" \
   "fence=2:1,5:3,5:3,7:3,7:3 barrier=3"
 "$TOOLS/dxil-translate" "$S" > "$WORK/translate-shaders.txt" 2>&1 || true
-expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-shaders.txt" | cut -d ' ' -f 2)" "46/46"
+expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-shaders.txt" | cut -d ' ' -f 2)" "49/49"
 # DXIL keeps NaN and infinity: no translated shader assumes them away or keeps a fast compare. Vertex and geometry
 # shaders also carry no reassoc, contract or arcp flags, as airconv's DXBC path, so LLVM fuses or reorders nothing on
 # its own: a depth prepass and a base pass then compute the same positions, and their depth EQUAL test holds (grass
@@ -935,9 +959,9 @@ expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-sha
 # precise, so no fma there).
 "$TOOLS/dxil-translate" "$S" --flags > "$WORK/translate-flags.txt" 2>&1 || true
 expect "no translated shader assumes NaN or infinity away" \
-  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "46:46"
+  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "49:49"
 expect "vertex and geometry shaders carry no reassoc, contract or arcp flags" \
-  "$(grep -E '^ok [^ ]+ (vs|gs) ' "$WORK/translate-flags.txt" | grep -c ' reassoc=0 contract=0 arcp=0$' || true)" 15
+  "$(grep -E '^ok [^ ]+ (vs|gs) ' "$WORK/translate-flags.txt" | grep -c ' reassoc=0 contract=0 arcp=0$' || true)" 18
 # Task FU: Metal's gradient sample takes no LOD bias, so the sampler's MipLODBias scales the derivatives (2^bias): every
 # gradient sample of shaders/lod.hlsl (DXIL SampleGrad) and dxbc/grad.hlsl (DXBC sample_d) has an fmul operand.
 expect "gradient samples carry the sampler's LOD bias, DXIL and DXBC" \

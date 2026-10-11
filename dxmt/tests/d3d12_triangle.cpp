@@ -1,7 +1,9 @@
 // Draws dxmt/tests/shaders/triangle2.hlsl offscreen through D3D12 and prints the result (DXIL translator plan, Task 3):
-//   d3d12_triangle.exe <vs.dxil> <ps.dxil> [gs.dxil] [--heap]
+//   d3d12_triangle.exe <vs.dxil> <ps.dxil> [gs.dxil] [--heap] [--start <vertex> <instance>]
 // --heap (DXIL SM 6.8 plan, Task 10): root signature flags 0xC00 (both heaps directly indexed), and a shader-visible
 // sampler heap of one linear clamp sampler bound beside the view heap.
+// --start (Task 12): the corners sit at vertex <vertex> of the vertex buffer, drawn with DrawInstanced(3, 1, <vertex>,
+// <instance>).
 // Prints "triangle ok <FNV-1a 64 of all pixels> <8 sampled pixels>" or "triangle fail 0x<hr>". check.sh compares the
 // pixels between our DXMT and D3DMetal.
 #define WIDL_EXPLICIT_AGGREGATE_RETURNS  // D3D12 methods that return structs: the MSVC ABI under mingw
@@ -62,9 +64,15 @@ int main(int argc, char **argv) {
     int n = 1;  // the shaders: the arguments before the first -- option
     while (n < argc && strncmp(argv[n], "--", 2)) n++;
     bool heaps = false;
+    UINT start_vertex = 0, start_instance = 0;
     for (int i = n; i < argc; i++)
-        if (!strcmp(argv[i], "--heap")) heaps = true; else n = 0;  // an unknown option: the usage line
-    if (n != 3 && n != 4) { printf("usage: d3d12_triangle.exe <vs.dxil> <ps.dxil> [gs.dxil] [--heap]\n"); return 2; }
+        if (!strcmp(argv[i], "--heap")) heaps = true;
+        else if (!strcmp(argv[i], "--start") && i + 2 < argc) start_vertex = atoi(argv[++i]), start_instance = atoi(argv[++i]);
+        else n = 0;  // an unknown option: the usage line
+    if (n != 3 && n != 4) {
+        printf("usage: d3d12_triangle.exe <vs.dxil> <ps.dxil> [gs.dxil] [--heap] [--start <vertex> <instance>]\n");
+        return 2;
+    }
     std::vector<char> vs = load(argv[1]), ps = load(argv[2]), gs = n == 4 ? load(argv[3]) : std::vector<char>();
     if (vs.empty() || ps.empty() || (n == 4 && gs.empty())) { printf("can't read the shaders\n"); return 1; }
     const UINT size = 64;
@@ -119,11 +127,13 @@ int main(int argc, char **argv) {
     void *p; D3D12_RANGE none = {0, 0};
     CHECK(cbuf->Map(0, &none, &p)); memcpy(p, cb, sizeof cb); cbuf->Unmap(0, nullptr);
 
-    // Vertex buffer: the three corners, in texture coordinates.
+    // Vertex buffer: the three corners, in texture coordinates, from vertex start_vertex (zeros before).
     const float corners[6] = {0, 0, 2, 0, 0, 2};
-    ID3D12Resource *vbuf = Resource(D3D12_HEAP_TYPE_UPLOAD, BufferDesc(256), D3D12_RESOURCE_STATE_GENERIC_READ);
-    CHECK(vbuf->Map(0, &none, &p)); memcpy(p, corners, sizeof corners); vbuf->Unmap(0, nullptr);
-    D3D12_VERTEX_BUFFER_VIEW vbv = {vbuf->GetGPUVirtualAddress(), sizeof corners, 8};
+    const UINT vb_size = sizeof corners + start_vertex * 8;
+    ID3D12Resource *vbuf = Resource(D3D12_HEAP_TYPE_UPLOAD, BufferDesc(256 + start_vertex * 8), D3D12_RESOURCE_STATE_GENERIC_READ);
+    CHECK(vbuf->Map(0, &none, &p)); memset(p, 0, vb_size); memcpy((char *)p + start_vertex * 8, corners, sizeof corners);
+    vbuf->Unmap(0, nullptr);
+    D3D12_VERTEX_BUFFER_VIEW vbv = {vbuf->GetGPUVirtualAddress(), vb_size, 8};
 
     // Texture: 2x2 red, green, blue, white, uploaded through a 256-byte-pitched buffer.
     ID3D12Resource *tex = Resource(D3D12_HEAP_TYPE_DEFAULT, TextureDesc(2, 2, D3D12_RESOURCE_FLAG_NONE), D3D12_RESOURCE_STATE_COPY_DEST);
@@ -174,7 +184,7 @@ int main(int argc, char **argv) {
     list->SetPipelineState(pso);
     list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     list->IASetVertexBuffers(0, 1, &vbv);
-    list->DrawInstanced(3, 1, 0, 0);
+    list->DrawInstanced(3, 1, start_vertex, start_instance);
     Barrier(list, target, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
     D3D12_TEXTURE_COPY_LOCATION from = {target, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX}; from.SubresourceIndex = 0;
     D3D12_TEXTURE_COPY_LOCATION to = {readback, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT};

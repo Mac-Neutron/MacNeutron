@@ -35,6 +35,7 @@ dxc -T vs_6_6 -E vsmain -Fo triangle2.vs.dxil triangle2.hlsl
 dxc -T ps_6_6 -E psmain -Fo triangle2.ps.dxil triangle2.hlsl
 dxc -T gs_6_6 -E gsmain -Fo triangle2.gs.dxil triangle2.hlsl
 dxc -T ps_6_6 -E psheap -Fo triangle2.psheap.dxil triangle2.hlsl
+dxc -T vs_6_8 -E vsstart -Fo triangle2.vsstart.dxil triangle2.hlsl
 dxc -T vs_6_6 -E vsmain -Fo depth.vs.dxil depth.hlsl
 dxc -T ps_6_6 -E psmain -Fo depth.ps.dxil depth.hlsl
 dxc -T ps_6_6 -E psdepth -Fo depth.psdepth.dxil depth.hlsl
@@ -54,6 +55,8 @@ dxc -T ps_6_6 -E psmain -Fo indirect.ps.dxil indirect.hlsl
 dxc -T cs_6_6 -E csmain -Fo indirect.cs.dxil indirect.hlsl
 dxc -T vs_6_6 -E vsid -Fo indirect.vsid.dxil indirect.hlsl
 dxc -T ps_6_6 -E psid -Fo indirect.psid.dxil indirect.hlsl
+dxc -T vs_6_6 -E vsvid -Fo indirect.vsvid.dxil indirect.hlsl
+dxc -T vs_6_8 -E vsstart -Fo indirect.vsstart.dxil indirect.hlsl
 dxc -T vs_6_6 -E vsfull -Fo hazards.vsfull.dxil hazards.hlsl
 dxc -T ps_6_6 -E psvalue -Fo hazards.psvalue.dxil hazards.hlsl
 dxc -T ps_6_6 -E pssample -Fo hazards.pssample.dxil hazards.hlsl

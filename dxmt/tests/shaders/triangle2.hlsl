@@ -47,3 +47,10 @@ void gsmain(triangle VSOut input[3], uint prim : SV_PrimitiveID, inout TriangleS
         stream.Append(o);
     }
 }
+// DXIL SM 6.8 plan, Task 12: vsmain, moved off screen unless the draw's start vertex is 5 and start instance 3.
+VSOut vsstart(uint id : SV_VertexID, float2 uv : POSITION, int sv : SV_StartVertexLocation, uint si : SV_StartInstanceLocation) {
+    VSOut o = vsmain(id, uv);
+    float wrong = (float)(sv - 5) + (float)si - 3;
+    o.pos.xy += wrong; o.uv += wrong;
+    return o;
+}

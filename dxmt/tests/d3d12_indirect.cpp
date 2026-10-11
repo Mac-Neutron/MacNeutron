@@ -1,19 +1,23 @@
 // Many indirect draws in one render pass, as Unreal draws grass and GPU particles:
-//   d3d12_indirect.exe <vs.dxil> <ps.dxil> <cs.dxil> [<vsid.dxil> <psid.dxil>]   (shaders/indirect.hlsl)
+//   d3d12_indirect.exe <vs.dxil> <ps.dxil> <cs.dxil> [<vsid.dxil> <psid.dxil> [<vsvid.dxil> [<vsstart.dxil>]]]
+//   (shaders/indirect.hlsl)
 // Each frame clears a 64x64 target and paints its 1024 cells with one ExecuteIndirect each (one draw command, its
 // StartInstanceLocation picks the cell from a per-instance vertex stream, as Unreal's instance ids), then runs 1024
 // indirect dispatches of 1 to 4 groups whose threads count themselves (as Niagara's GPU simulation). Prints "indirect ok <frames> <cells left unpainted over all frames>" and
 // "indirect dispatch <threads counted> <threads dispatched>".
 // With vsid and psid, also the cells (x,y:tag) that ExecuteIndirect calls paint on a 32x8 target (Draws below):
 // "indirect native-draw", "indirect counted", "indirect native-indexed", "indirect aliased-indexed" and
-// "indirect vbv-gap" and "indirect vbv-null".
+// "indirect vbv-gap", "indirect vbv-null" and "indirect direct" (the same draws as DrawInstanced and DrawIndexedInstanced).
+// With vsvid and vsstart (DXIL SM 6.8 plan, Task 12), the same lines again, each drawn with that vertex shader and named
+// "indirect vid-<run>" and "indirect start-<run>".
 #include "d3d12_common.hpp"
 #include <string>
 
 // GPU efficiency E10: draw signatures that set nothing but the draw. Each call clears the 32x8 target, runs one
 // ExecuteIndirect and prints the painted cells: vertex v (its index in a per-vertex stream of 0, 1, 2...) of instance i
 // paints cell (v / 3, i) with the instance's tag, 100 + its index in the per-instance stream.
-static void Draws(Gpu &gpu, ID3D12RootSignature *root, const std::vector<char> &vs, const std::vector<char> &ps) {
+static void Draws(Gpu &gpu, ID3D12RootSignature *root, const std::vector<char> &vs, const std::vector<char> &ps,
+                  const char *prefix) {
     // The pipeline, its tags in IA slot `tag_slot`.
     auto pipeline = [&](UINT tag_slot) {
         D3D12_INPUT_ELEMENT_DESC streams[2] = {
@@ -99,7 +103,7 @@ static void Draws(Gpu &gpu, ID3D12RootSignature *root, const std::vector<char> &
                 if (v) cells += " " + std::to_string(x) + "," + std::to_string(y) + ":" + std::to_string(v);
             }
         readback->Unmap(0, &none);
-        printf("indirect %s%s\n", name, cells.c_str());
+        printf("indirect %s%s%s\n", prefix, name, cells.c_str());
     };
 
     // Two records at offset 64: 3 vertices from 6, 2 instances from 7 (cell 2, tags 107 108); 6 vertices from 9, 1
@@ -191,11 +195,20 @@ static void Draws(Gpu &gpu, ID3D12RootSignature *root, const std::vector<char> &
         l->IASetVertexBuffers(2, 1, &stale_vbv);
         l->ExecuteIndirect(vb_signature, 2, null_args, 0, nullptr, 0);
     });
+    // The draws of native-draw and native-indexed's drawn records, direct (Task 12): cells 2, 3 and 4 (tag 100), then
+    // cells 4 and 5 (over 4) and 7.
+    run("direct", [&](ID3D12GraphicsCommandList *l) {
+        l->DrawInstanced(3, 2, 6, 7);
+        l->DrawInstanced(6, 1, 9, 0);
+        l->IASetIndexBuffer(&ibv);
+        l->DrawIndexedInstanced(6, 2, 3, -1, 7);
+        l->DrawIndexedInstanced(3, 1, 9, 2, 2);
+    });
 }
 
 int main(int argc, char **argv) {
-    if (argc != 4 && argc != 6) {
-        printf("usage: d3d12_indirect.exe <vs.dxil> <ps.dxil> <cs.dxil> [<vsid.dxil> <psid.dxil>]\n");
+    if (argc != 4 && (argc < 6 || argc > 8)) {
+        printf("usage: d3d12_indirect.exe <vs.dxil> <ps.dxil> <cs.dxil> [<vsid.dxil> <psid.dxil> [<vsvid.dxil> [<vsstart.dxil>]]]\n");
         return 2;
     }
     std::vector<char> vs = Load(argv[1]), ps = Load(argv[2]), cs = Load(argv[3]);
@@ -320,10 +333,14 @@ int main(int argc, char **argv) {
     readback->Unmap(0, &none);
     printf("indirect ok %u %u\n", frames, missing);
     printf("indirect dispatch %u %u\n", counted, threads * frames);
-    if (argc == 6) {
-        std::vector<char> vsid = Load(argv[4]), psid = Load(argv[5]);
-        if (vsid.empty() || psid.empty()) { printf("can't read the shaders\n"); return 1; }
-        Draws(gpu, root, vsid, psid);
+    // vsid, then vsvid and vsstart when given, each with psid.
+    const int vs_arg[3] = {4, 6, 7};
+    const char *prefixes[3] = {"", "vid-", "start-"};
+    std::vector<char> psid = argc >= 6 ? Load(argv[5]) : std::vector<char>();
+    for (int k = 0; k < 3 && vs_arg[k] < argc; k++) {
+        std::vector<char> draws_vs = Load(argv[vs_arg[k]]);
+        if (draws_vs.empty() || psid.empty()) { printf("can't read the shaders\n"); return 1; }
+        Draws(gpu, root, draws_vs, psid, prefixes[k]);
     }
     return 0;
 }
