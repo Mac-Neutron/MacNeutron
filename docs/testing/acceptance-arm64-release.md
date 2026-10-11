@@ -2602,3 +2602,64 @@ release or tag until the last task records the new one.
     (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-8-dxmt-check.log`): `dxmt-check: all passed`, 313 rows `ok` after
     `info arm64 mode` (Task 7's log counts 310 the same way; plus the three new rows), 0 `FAIL`. The x64 lane and
     `make test` were not run.
+- **0048 (`airconv: Translate ResourceDescriptorHeap and SamplerDescriptorHeap.`):** dynamic resources
+  (`createHandleFromHeap`, op 218) are translated. `InitializeDXIL` gives each distinct `ResourceProperties` that
+  `annotateHandle` puts on a `createHandleFromHeap` handle a range of its own (`Resource::heap`, `heap_props`): space
+  `kHeapSpace` (`~0u`), lower bound 0, unbounded, IDs from `kHeapRangeBase` (`1 << 24`), class, kind, element type,
+  stride and flags decoded from the properties (spec §2 item 5). `ResolveHandle` finds the range by the properties and
+  returns 218's index (argument 1) as the register; `Lower` and `Cleanup` treat 218 as the other handle ops. The
+  root-argument contract with Task 10: when the root signature's `Flags & 0xC00`, two qwords follow the last
+  parameter's, the CBV/SRV/UAV heap's GPU base, then the sampler heap's; `setup_binding_rootsig` declares them (`heap`,
+  `sampler_heap`) only in a shader with heap ranges, before `builder.Build`, and maps view-heap ranges to `heap` and
+  sampler-heap ranges to `sampler_heap` at descriptor offset 0. `ConvertDXIL` refuses a heap-indexing shader with no
+  root signature, or without 0x400 for views (checked first) or 0x800 for samplers, naming the flag; the DXIL
+  geometry pipeline runs the same check (code reading only: no row has a heap-indexing VS or GS).
+  `RootSignatureFlags(bytecode, length)` reads a blob's flags. `InitializeDXIL` also refuses a 64-bit groupshared
+  atomic (`atomicrmw`/`cmpxchg` of i64 on addrspace(3)), naming it, until Task 14c.
+  - The canary moves: `d3d12_dxil.exe`'s fourth shader is `dxil/reject/gatherraw.hlsl` (cs_6_7,
+    `Texture2D<uint>.GatherRaw`, op 223), printed `canary hr=`; its root signature gains a table of t0 and a static
+    point sampler at s0, so only the op is refused; every `printf` is flushed. `dxil-translate`'s root signature skips
+    heap ranges and sets flags 0xC00, so offline translation reads heaps through the contract above (shaders without
+    heap ranges gain no field). `heap.hlsl` is rewritten: each resource through the heaps (even slots) and through its
+    table or root binding (odd slots), including a CBV at heap slot 12 and a sampler heap read; it runs in Task 10.
+  - Rows: `an out-of-scope DXIL op fails only its pipeline` (`canary hr=0x80004001`), `the unsupported op is named in
+    the log` (`Failed to compile cs shader: DXIL: dx.op.textureGatherRaw`), the capture rows still count four shaders
+    and one root signature, and `newer device interfaces (5-8) answer as on D3DMetal` and `a graphics pipeline with
+    sample count 0 fares as on D3DMetal` read `ok` (D3DMetal creates the canary's pipeline: `canary hr=0x00000000`);
+    `D3D12 refuses a pipeline whose [WaveSize] excludes 32, or with a 64-bit groupshared atomic` (3);
+    `heap indexing without its root signature flag is refused` (`group heap-noflag fail 0x80004001;group
+    heap-noflag-sampler fail 0x80004001;`) and `and the log names the missing flag`
+    (`flag CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;flag SAMPLER_HEAP_DIRECTLY_INDEXED;`); Lane E: `dxil-translate accepts every
+    behaviour shader` (25/25), `dxil-translate refuses every out-of-scope shader` (0/4), `the canary is refused naming
+    its op` and `a 64-bit groupshared atomic is refused naming it` (1 each).
+  - `dxil-probe -S`: `heap.dxil` keeps 9 `createHandleFromHeap` calls (one non-uniform, one on the sampler heap) with 8
+    distinct properties (raw SRV `{11, 0}`, Texture2D `{2, 1033}`, sampler `{14, 0}`, typed `{10, 1033}`, structured
+    `{524, 20}`, RWBuffer<uint> `{4106, 261}`, RWByteAddressBuffer `{4107, 0}`, CBV `{13, 80}`); `gatherraw.dxil` keeps
+    `dx.op.textureGatherRaw.i32` (223); `gsatomic64.dxil` keeps `atomicrmw add i64` on an addrspace(3) global.
+  - Before the patch: `dxil-translate` over `dxmt/tests/dxil` read `fail heap.dxil DXIL: dx.op.createHandleFromHeap
+    (dynamic resources) not supported`, `summary 24/25`; over `reject`, `fail gatherraw.dxil DXIL:
+    dx.op.textureGatherRaw.i32 (223) not supported` (the same line after the patch) and `fail gsatomic64.dxil
+    Compilation failed due to an interrupted connection: XPC_ERROR_CONNECTION_INTERRUPTED. This error occurred after
+    multiple retries.` (this run took 0.2 s for the folder, not the spike's slow failure).
+  - A one-off AIR dump of `heap.dxil` (a scratch build of `dxil-translate`, not a row): the root-argument struct has
+    the tool's 9 table fields, then `heap` (field 9) and `sampler_heap` (field 10); the heap loads index descriptors 0,
+    1, 2, 3, 7, 8 and 12 of field 9, and descriptor 1 of field 10.
+  - Single mutations, each on its own build, against a cut-down check of this task's rows: the view-flag check off
+    fails `and the log names the missing flag` (`flag SAMPLER_HEAP_DIRECTLY_INDEXED;` twice); the sampler-flag check
+    off fails both noflag rows (`heap-noflag-sampler` creates its pipeline); `dxil-translate` without flags 0xC00 fails
+    the 25/25 row (`fail heap.dxil DXIL: ResourceDescriptorHeap needs root signature flag
+    CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED (0x400)`, 24/25). Every other row stays `ok`.
+  - Covered by code reading only until Task 10 dispatches a heap: the qword order and descriptor offset 0 at run time,
+    non-uniform heap indices as per-lane loads, and the CBV through the heap. Also by code reading: the decoded UAV
+    counter, ROV, globally-coherent and comparison-sampler bits. The `cmpxchg` refusal has no row (only `atomicrmw add`
+    has); a one-off scratch shader (`InterlockedCompareExchange` on a `groupshared uint64_t`, which DXC emits as
+    `cmpxchg i64` on addrspace(3)) reads `DXIL: 64-bit groupshared atomic (cmpxchg) not supported`. The `exec-reject`
+    row's `gsatomic64` line can't tell the named refusal from a Metal failure (both would be `E_FAIL`, by code
+    reading); the Lane E row names it.
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged`, as predicted (no
+    SMITE 2 shader indexes a heap or has a 64-bit groupshared atomic); DXBC `corpus-diff: 2/2 ok, 0 new failures, 0
+    fixed, 0 changed, 2 unchanged`.
+  - Gates (one lane, ruling R-LITE): `dxmt/check.sh` in the ARM64EC lane
+    (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-9-dxmt-check.log`): `dxmt-check: all passed`, 317 rows `ok` after
+    `info arm64 mode` (Task 8's 313, plus the two noflag rows and the two Lane E naming rows), 0 `FAIL`. The x64 lane and
+    `make test` were not run (the milestone's full run is the controller's).

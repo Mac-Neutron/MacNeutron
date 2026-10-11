@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <string>
 #include <vector>
@@ -46,11 +47,15 @@ std::string FirstLine(std::string s) {
 }
 
 // A DXBC container with an RTS0 (root signature 1.0) part: one descriptor table per resource range, visible to all
-// stages, each range at offset 0 of its own table (so an unbounded range can't push another one out of place).
-std::vector<uint32_t> RootSignature(const std::vector<Resource> &resources) {
+// stages, each range at offset 0 of its own table (so an unbounded range can't push another one out of place). Heap
+// ranges get none: the flags say both heaps are directly indexed (0xC00), so a shader that indexes one reads it through
+// the heap bases after the parameters, as D3D12 binds it (DXIL SM 6.8 plan, Task 9); other shaders gain nothing.
+std::vector<uint32_t> RootSignature(const std::vector<Resource> &all) {
   const uint32_t header = 6, param = 3, table = 2, range = 5;
+  std::vector<Resource> resources;
+  std::copy_if(all.begin(), all.end(), std::back_inserter(resources), [](const Resource &r) { return !r.heap; });
   uint32_t n = resources.size();
-  std::vector<uint32_t> rts0{1, n, header * 4, 0, 0, 0};
+  std::vector<uint32_t> rts0{1, n, header * 4, 0, 0, 0xC00};
   for (uint32_t i = 0; i < n; i++) {
     uint32_t payload = (header + param * n + (table + range) * i) * 4;
     rts0.insert(rts0.end(), {0 /* table */, 0 /* all stages */, payload});

@@ -455,13 +455,13 @@ expect "and feature level 12_1, wave ops and 64-bit atomics" \
   "$(grep -c '^feature level 0xc100, wave ops 1, atomic64 1$' "$WORK/clear.txt" || true)" 1
 # 3. DXIL pipelines are created (an out-of-scope op fails only its own pipeline, named in the log), and DXMT_DXIL_DUMP
 #    captures each shader once, byte for byte. $WORK has a space in it, like the Application Support paths users pass.
-H="$ROOT/dxmt/tests/dxil/heap.dxil"
+H="$ROOT/dxmt/tests/dxil/reject/gatherraw.dxil"
 dxil() { run ours "$1" dxmt "$TESTS/d3d12_dxil.exe" "Z:$S/triangle.vs.dxil" "Z:$S/triangle.ps.dxil" "Z:$S/compute.cs.dxil" "Z:$H"; }
 D="$WORK/dxil"
 export DXMT_DXIL_DUMP="$D"
 dxil dxil
 expect "DXIL pipelines are created" "$(grep -cE '^(graphics|compute) hr=0x00000000$' "$WORK/dxil.txt" || true)" 2
-expect "an out-of-scope DXIL op fails only its pipeline" "$(grep -c '^heap hr=0x80004001$' "$WORK/dxil.txt" || true)" 1
+expect "an out-of-scope DXIL op fails only its pipeline" "$(grep -c '^canary hr=0x80004001$' "$WORK/dxil.txt" || true)" 1
 run ref dxil-ref d3dmetal "$TESTS/d3d12_dxil.exe" "Z:$S/triangle.vs.dxil" "Z:$S/triangle.ps.dxil" "Z:$S/compute.cs.dxil" "Z:$H"
 expect "newer device interfaces (5-8) answer as on D3DMetal" "$(grep '^device' "$WORK/dxil.txt" | tr -d '\r' | tr '\n' ' ')" \
   "$(grep '^device' "$WORK/dxil-ref.txt" | tr -d '\r' | tr '\n' ' ')"
@@ -512,7 +512,7 @@ unset DXMT_DXIL_DUMP
 # The unsupported op is named in the game log (MACNEUTRON_LOG=1 sends the output there; gate L2).
 LOG="$HOME/Library/Logs/MacNeutron/steam-0.log"; before=$(cat "$LOG" 2> /dev/null | wc -l)
 export MACNEUTRON_LOG=1; dxil dxil-logged; unset MACNEUTRON_LOG
-expect "the unsupported op is named in the log" "$(tail -n +$((before + 1)) "$LOG" | grep -c 'Failed to compile cs shader: DXIL: dx.op.createHandleFromHeap')" 1
+expect "the unsupported op is named in the log" "$(tail -n +$((before + 1)) "$LOG" | grep -c 'Failed to compile cs shader: DXIL: dx.op.textureGatherRaw')" 1
 # 3b. DXIL behaviour groups: our DXMT against D3DMetal on the same GPU.
 X="$ROOT/dxmt/tests/dxil"
 run ours exec-ours dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X"
@@ -539,10 +539,20 @@ run ours exec-sm68 dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X" $SM68_GROUPS
 for g in $SM68_GROUPS; do
   expect "DXIL $g matches its CPU reference" "$(python3 "$ROOT/dxmt/tests/expect.py" "$WORK/exec-sm68.txt" $g)" match
 done
-# A [WaveSize] range without 32 fails its D3D12 pipeline (DXIL SM 6.8 plan, Task 4).
-run ours exec-reject dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X/reject" wavesize64 wavesizerange
-expect "D3D12 refuses a pipeline whose [WaveSize] excludes 32" \
-  "$(/usr/bin/grep -cE '^group wavesize(64|range) fail 0x80004005$' "$WORK/exec-reject.txt" || true)" 2
+# A [WaveSize] range without 32 fails its D3D12 pipeline (DXIL SM 6.8 plan, Task 4), as a 64-bit groupshared atomic
+# does until Task 14c.
+run ours exec-reject dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X/reject" wavesize64 wavesizerange gsatomic64
+expect "D3D12 refuses a pipeline whose [WaveSize] excludes 32, or with a 64-bit groupshared atomic" "$(/usr/bin/grep -cE '^group (wavesize64|wavesizerange|gsatomic64) fail 0x80004005$' "$WORK/exec-reject.txt" || true)" 3
+# Heap indexing without its root signature flag fails only its pipeline, naming the flag (DXIL SM 6.8 plan, Task 9).
+run ours exec-heap-noflag dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X" heap-noflag heap-noflag-sampler
+expect "heap indexing without its root signature flag is refused" \
+  "$(grep '^group heap-noflag' "$WORK/exec-heap-noflag.txt" | tr '\n' ';')" \
+  "group heap-noflag fail 0x80004001;group heap-noflag-sampler fail 0x80004001;"
+before=$(cat "$LOG" 2> /dev/null | wc -l)
+export MACNEUTRON_LOG=1; run ours exec-heap-noflag-logged dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X" heap-noflag heap-noflag-sampler; unset MACNEUTRON_LOG
+expect "and the log names the missing flag" \
+  "$(tail -n +$((before + 1)) "$LOG" | grep -oE 'flag (CBV_SRV_UAV|SAMPLER)_HEAP_DIRECTLY_INDEXED' | tr '\n' ';')" \
+  "flag CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;flag SAMPLER_HEAP_DIRECTLY_INDEXED;"
 run ours exec-threads dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X" threads
 expect "DXIL pipelines compile on 8 threads at once" "$(grep -o 'threads ok 8/8' "$WORK/exec-threads.txt" || true)" "threads ok 8/8"
 run ours tri-ours dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vs.dxil" "Z:$S/triangle2.ps.dxil"
@@ -867,15 +877,19 @@ fi
 # 4. The frozen D3DMetal reference, which every "as on D3DMetal" check compares with, still runs.
 run ref d3dmetal d3dmetal "$LOOP" 1280 720 0 0 200 0
 expect "the frozen D3DMetal reference still runs" "$(grep -c 'avg frame' "$WORK/d3dmetal.txt" || true)" 1
-# 6. dxil-translate: every test shader reaches a Metal pipeline offline (heap.dxil is out of scope on purpose).
+# 6. dxil-translate: every test shader reaches a Metal pipeline offline.
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxil" --flags > "$WORK/translate.txt" 2>&1 || true
-expect "dxil-translate accepts every behaviour shader but heap" "$(tail -1 "$WORK/translate.txt" | cut -d ' ' -f 2)" "24/25"
-# [WaveSize] outside the device's 32 lanes is refused, naming the range (DXIL SM 6.8 plan, Task 4).
+expect "dxil-translate accepts every behaviour shader" "$(tail -1 "$WORK/translate.txt" | cut -d ' ' -f 2)" "25/25"
+# [WaveSize] outside the device's 32 lanes is refused, naming the range (DXIL SM 6.8 plan, Task 4); so are the E_NOTIMPL
+# canary and a 64-bit groupshared atomic, naming them (Task 9).
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxil/reject" > "$WORK/translate-reject.txt" 2>&1 || true
-expect "dxil-translate refuses every out-of-scope shader" "$(tail -1 "$WORK/translate-reject.txt" | cut -d ' ' -f 2)" "0/2"
+expect "dxil-translate refuses every out-of-scope shader" "$(tail -1 "$WORK/translate-reject.txt" | cut -d ' ' -f 2)" "0/4"
 expect "a [WaveSize] range without 32 is refused, naming it" \
   "$(/usr/bin/grep -oE 'WaveSize\([0-9]+, [0-9]+\)\] excludes' "$WORK/translate-reject.txt" | tr '\n' ';')" \
   "WaveSize(64, 64)] excludes;WaveSize(8, 16)] excludes;"
+expect "the canary is refused naming its op" "$(/usr/bin/grep -cE '^fail gatherraw\.dxil DXIL: dx\.op\.textureGatherRaw\.[a-z0-9]+ \(223\) not supported$' "$WORK/translate-reject.txt")" 1
+# Until Task 14c, which replaces this row: Metal's compiler service would crash on it unnamed (i64 spike).
+expect "a 64-bit groupshared atomic is refused naming it" "$(/usr/bin/grep -c '^fail gsatomic64.dxil DXIL: 64-bit groupshared atomic (atomicrmw add) not supported$' "$WORK/translate-reject.txt")" 1
 # Task F2, Task FR: DXIL barriers fence memory as Metal Shader Converter does at Metal 3.1 (an air.atomic.fence, then
 # for a synced one an air.wg.barrier), the device and texture ones at device scope whether or not they sync the group
 # (a barrier's memory flags only order within the group). dxil/barriers.hlsl's modes 8, 9, 2, 3, 10, 11:

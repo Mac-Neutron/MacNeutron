@@ -1,6 +1,7 @@
 // Runs DXIL behaviour groups through D3D12 and prints each group's output (DXIL translator plan, Task 1):
 //   d3d12_dxil_exec.exe <shader folder> [group...]   one line per group: "group <name> ok <1024 hex words>" or "group <name> fail 0x<hr>"
 //   d3d12_dxil_exec.exe <shader folder> threads      compiles buffers.dxil on 8 threads at once: "threads ok 8/8"
+// A group named heap-<x> runs heap.dxil (heap-noflag, heap-noflag-sampler: under a root signature missing a heap flag).
 // Resources follow dxmt/tests/dxil/common.hlsli. check.sh runs it on our DXMT and on D3DMetal and compares.
 #define WIDL_EXPLICIT_AGGREGATE_RETURNS  // D3D12 methods that return structs: the MSVC ABI under mingw
 #include <windows.h>
@@ -237,9 +238,18 @@ int main(int argc, char **argv) {
     if (groups.empty()) groups.assign(std::begin(all), std::end(all));
 
     for (auto &name : groups) {
-        std::vector<char> cs = load(folder + "/" + name + ".dxil");
+        // heap-noflag and heap-noflag-sampler (DXIL SM 6.8 plan, Task 9): heap.dxil under `root`, which has neither heap
+        // flag, and under its description with CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED (0x400) alone: no sampler heap flag.
+        std::vector<char> cs = load(folder + "/" + (name.rfind("heap-", 0) == 0 ? std::string("heap") : name) + ".dxil");
         if (cs.empty()) { printf("group %s fail missing\n", name.c_str()); continue; }
-        D3D12_COMPUTE_PIPELINE_STATE_DESC d = {}; d.pRootSignature = root; d.CS = {cs.data(), cs.size()};
+        ID3D12RootSignature *rs = root;
+        if (name == "heap-noflag-sampler") {
+            D3D12_ROOT_SIGNATURE_DESC views = rd; views.Flags = (D3D12_ROOT_SIGNATURE_FLAGS)0x400; // llvm-mingw lacks its name
+            ID3DBlob *b = nullptr;
+            CHECK(D3D12SerializeRootSignature(&views, D3D_ROOT_SIGNATURE_VERSION_1, &b, &error));
+            CHECK(device->CreateRootSignature(0, b->GetBufferPointer(), b->GetBufferSize(), __uuidof(ID3D12RootSignature), (void **)&rs));
+        }
+        D3D12_COMPUTE_PIPELINE_STATE_DESC d = {}; d.pRootSignature = rs; d.CS = {cs.data(), cs.size()};
         ID3D12PipelineState *pso = nullptr;
         HRESULT hr = device->CreateComputePipelineState(&d, __uuidof(ID3D12PipelineState), (void **)&pso);
         if (FAILED(hr)) { printf("group %s fail 0x%08lx\n", name.c_str(), (unsigned long)hr); fflush(stdout); continue; }
@@ -256,7 +266,7 @@ int main(int argc, char **argv) {
         from.PlacedFootprint.Footprint = {DXGI_FORMAT_R32_UINT, 8, 8, 1, 256};
         list->CopyTextureRegion(&to, 0, 0, 0, &from, nullptr);
         Barrier(atomictex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        list->SetComputeRootSignature(root);
+        list->SetComputeRootSignature(rs);
         list->SetDescriptorHeaps(1, &heap);
         list->SetComputeRootConstantBufferView(0, cbuf->GetGPUVirtualAddress());
         list->SetComputeRootDescriptorTable(1, heap->GetGPUDescriptorHandleForHeapStart());
