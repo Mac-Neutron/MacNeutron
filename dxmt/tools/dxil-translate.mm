@@ -77,6 +77,7 @@ struct Result {
   const char *stage = "";
   std::string reason;
   Flags flags; // --flags: summed over the pipeline's translated functions
+  uint64_t air = 0xcbf29ce484222325; // FNV-1a 64 of every translated metallib's bytes, in translation order
 };
 
 bool count_flags = false;
@@ -152,6 +153,8 @@ id<MTLLibrary> Library(id<MTLDevice> device, sm50_bitcode_t bitcode, Result &res
   SM50GetCompiledBitcode(bitcode, &data);
   if (count_flags)
     CountFlags(data.Data, data.Size, result.flags);
+  for (size_t i = 0; i < data.Size; i++)
+    result.air = (result.air ^ ((const uint8_t *)data.Data)[i]) * 0x100000001b3;
   auto dispatch = dispatch_data_create(data.Data, data.Size, nullptr, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
   SM50DestroyBitcode(bitcode);
   NSError *err = nil;
@@ -407,7 +410,7 @@ int main(int argc, char **argv) {
                name.c_str(), r.stage, ms, r.flags.fences.empty() ? "-" : r.flags.fences.c_str(), r.flags.barriers,
                r.flags.scaled_grads, r.flags.grads, r.flags.nnan, r.flags.ninf, r.flags.cmp, r.flags.reassoc, r.flags.contract, r.flags.arcp);
       else
-        printf("ok %s %s %.1f\n", name.c_str(), r.stage, ms);
+        printf("ok %s %s %.1f air=%016llx\n", name.c_str(), r.stage, ms, (unsigned long long)r.air);
     } else {
       printf("fail %s %s\n", name.c_str(), r.reason.c_str());
     }

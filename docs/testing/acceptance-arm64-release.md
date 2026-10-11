@@ -2279,3 +2279,43 @@ The translator has no shader model gate: an operation it lacks fails its own pip
 - Game: SMITE 2 has run on this code path since 2026-10-01 with `DXMT_D3D12_SM6=1`, most recently on Wine 0033-0035 (the
   section above); 0039 makes that the default. No other Direct3D 12 game is on record with these answers.
 - Not covered: a Direct3D 12 game that took its Shader Model 5.1 path in 0.3 and now takes its Shader Model 6 one.
+
+## DXIL Shader Model 6.8 (DXMT 0040-0054)
+
+2026-10-11. DXMT's DXIL translator learns the Shader Model 6.1-6.8 operations its caps require, one DXMT patch per task,
+and the device then reports 6.8: spec `docs/superpowers/specs/2026-10-10-dxmt-dxil-sm68-design.md`, plan
+`docs/superpowers/plans/2026-10-10-dxmt-dxil-sm68.md`, rulings S-R1 to S-R8 (`.superpowers/brainstorm-sm/rulings.md`).
+Every translator task translates SMITE 2's captured shaders (`~/dxil-smite2`, 11,101) and `dxmt/tests/dxbc` offline
+before and after: `dxil-translate`'s plain `ok` lines now end in `air=<16 hex>` (FNV-1a 64 of the translated metallibs,
+in translation order) and `dxmt/tools/corpus-diff.py` compares two runs (outputs in `build/sm68/corpus/`, never
+committed). The baseline at DXMT 0039, run twice with no difference (translation is deterministic):
+`summary 11101/11101 ok, mean 23.5 ms, slowest 2816.7 ms cs-e15dfce8559f19fe.dxil`, and `summary 2/2 ok` for DXBC.
+The translator key before the series (S-R7) is `d6863eccd27c3bbe36a00feeb31dbcd430a45ad9b3d0fdeb39336f9a0c1dfe2a`; no
+release or tag until the last task records the new one.
+
+- **0040 (`airconv: Lower IsHelperLane, QuadVote, Msad, the sample-position queries and ViewID.`):** `IsHelperLane`
+  (221) is `air.simd_is_helper_thread` in a pixel shader and false elsewhere; `QuadVote` (222) is `air.quad_any` or
+  `air.quad_all`; `Msad` (50) calls airconv's `dxmt.msad.i32`; `Texture2DMSGetSamplePosition` (75) and
+  `RenderTargetGetSamplePosition` (76) call `dxmt.sample_pos.i32` with the texture's or the render target's sample
+  count; `RenderTargetGetSampleCount` (77) is `air.get_num_samples`; `ViewID` (138) is 0. `InitializeDXIL` sets
+  `use_msad` and `use_samplepos`, so `SM50Compile` links the helpers; 76 and 77 no longer fail as "resource handle
+  through phi/select". The op enum also gains the numbers later tasks lower (165-167, 244, 245, 254-257).
+  - Rows: `DXIL helperquad matches its CPU reference` and `DXIL msad matches its CPU reference` read `match`
+    (`dxmt/tests/expect.py`, our DXMT only); `ViewID, the render target's sample count and position read 0, 1 and
+    (0,0)` reads `yes` (`sm6x.ps` draws `triangle2`'s pixels). `dxil-translate` accepts 15/16 behaviour shaders (heap
+    is still refused) and 36/36 test shaders (`36:36` with no NaN or infinity assumed away; 12 vertex and geometry
+    shaders without reassoc, contract or arcp).
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged`; DXBC
+    `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`.
+  - Gates: `make dxmt-check` (both lanes; `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-1-dxmt-check.log`):
+    `dxmt-check: all passed` twice, 508 rows `ok`, 0 `FAIL`. `make test`: 252 passed.
+  - Found: airconv's Metal helpers (`air_samplepos`, `air_msad`) are compiled with Metal's fast math. The first build
+    left `nnan=4 ninf=4` in both `sm6x` shaders, and "no translated shader assumes NaN or infinity away" read `36:34`.
+    The DXIL float policy moved from `LowerBody` into `StripFastMath`, which `SM50Compile` and the two geometry-pipeline
+    compiles also run on the whole module once they have linked a helper (DXIL only; D3D11's helpers are unchanged).
+  - Found: DXC 1.9.2607 folds `IsHelperLane()` to false in a compute shader, so `helperquad.dxil` has no op 221
+    (`dxil-probe`) and its slot 0 checks DXC; Task 2's `helper.hlsl` is the first test of the pixel shader path.
+  - Not fixed (upstream, D3D11 too): `SM50CompileGeometryPipelineVertex` links helpers on the geometry shader's
+    `shader_info`, though its object function runs the vertex shader. A DXIL vertex shader calling `msad` or
+    `GetSamplePosition` in a geometry pipeline whose geometry shader doesn't would be left with an undefined `dxmt.*`
+    function (untested).
