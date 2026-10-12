@@ -172,7 +172,10 @@ deleted.
    Expected:
    - at launch, "Watching" shows more than 0 files;
    - the exit pass uploads the changed saves;
-   - there are no delete lines for `Pal/Saved`.
+   - any delete line is for a file the game itself removed. Palworld prunes its oldest `backup/local/<date>` and
+     `backup/world/<date>` sets when it saves, and Steam mirrors that, as it does on Windows. Check that each deleted
+     file still exists in `steamuser BACKUP` and in `$B`, and that no world's own `Level.sav`, `LevelMeta.sav`,
+     `LocalData.sav` or `Players/*.sav` was deleted.
 
 **Back out of phase B:** there is no automatic way back, because reinstalling the previous build would leave every
 mapping naming `macneutron-proton`, a tool that build doesn't register. Ask first.
@@ -189,4 +192,4 @@ mapping naming `macneutron-proton`, a tool that build doesn't register. Ask firs
 | 2026-10-11 | B3 mappings moved, old name dropped | 72 legacy mappings → 0 (73 on `macneutron-proton`), 48 `macneutron-native` mappings kept; old name gone from the vdf; Steam registers only `macneutron-proton` and `macneutron-native`. D3 linked 231350 and 2437170 (`steamuser` and the XP links); Palworld's `steamuser` stayed a real folder. |
 | 2026-10-11 | B4 first resolved pass | No delete, conflict or resolve-failure lines for any game; Palworld "File is in sync" ×100. |
 | 2026-10-11 | B5 merge or conflict | `note: merged steamuser into <you> (140 files); the original is now steamuser BACKUP`. Steam's launch pass: "AutoCloud done. Watching 139 files" (was 0). The profile has 9 worlds (7 from the cloud, 2 from the Mac). |
-| | B6 exit pass | |
+| 2026-10-11 | B6 exit pass | Pass. "Watching 139 files" at launch. At exit: 16 uploads (the played world's own files, two new backup sets, the Mac worlds' `WorldOption.sav`) and 16 deletes, all of them the four oldest backup sets (2025-06-27) that Palworld pruned when it saved. Every deleted file survives in `steamuser BACKUP` and the Desktop backup. No world's own save was deleted. |
