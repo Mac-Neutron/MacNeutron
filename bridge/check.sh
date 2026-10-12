@@ -40,11 +40,14 @@ else
     || { echo "check: the launcher didn't prepare $WINEPREFIX" >&2; exit 1; }
 fi
 export WINEDEBUG=-all WINEMSYNC=1
+export SteamGameId=4242  # a game process, as Steam starts one: steam.exe sets Steam up only then (Proton's gate)
 
 [ -x "$WINE" ] || { echo "check: no runtime at $TOOL" >&2; exit 1; }
 STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM" "$WORK/game dir"
 cp "$B/steam.exe" "$STEAM/steam.exe"
+mkdir -p "$WINEPREFIX/drive_c/windows/system32"
+cp "$B/steam.exe" "$WINEPREFIX/drive_c/windows/system32/steam.exe"
 cp "$B/tests/helper.exe" "$WORK/game dir/hélper.exe"
 winpath() { printf 'Z:%s' "$1" | tr / '\\'; }
 HELPER="$(winpath "$WORK/game dir/hélper.exe")"
@@ -70,8 +73,8 @@ expect() { # name got want
 set +e; "$WINE" "$STEAMEXE" "$HELPER" exit 7 >/dev/null 2>&1; got=$?; set -e
 expect "exit code passes through" "$got" 7
 expect "arguments arrive unchanged" "$(steam args 'a b' '--name="Player One"' '')" '[a b][--name="Player One"][]'
-expect "registry names a live Steam" "$(MACNEUTRON_STEAM_ACCOUNT=12345 steam steam)" \
-  'alive=1 user=12345 client64=C:\Program Files (x86)\Steam\steamclient64.dll'
+expect "registry names a live Steam" "$(steam steam)" \
+  'alive=1 client64=C:\Program Files (x86)\Steam\steamclient64.dll'
 rm -f "$WORK/late.txt"
 steam spawn "$(winpath "$WORK/late.txt")" >/dev/null
 expect "launcher-style child still sees Steam" "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"
@@ -103,6 +106,21 @@ expect "PROTON_HIDE_PROCESS_WINDOW starts the program hidden" \
   "$(PROTON_HIDE_PROCESS_WINDOW=1-longer-than-8-chars steam hidden) $(PROTON_HIDE_PROCESS_WINDOW=0 steam hidden)" \
   "hidden=1 hidden=0"
 expect "Steam's named events exist while the game runs" "$(steam events)" "lock=1 ipc=1"
+# Proton's ValvePlatformMutex: the path of the steam.exe that ran (GetModuleFileNameW), with / for \.
+expect "ValvePlatformMutex names the steam.exe that ran (system32)" \
+  "$("$WINE" 'C:\windows\system32\steam.exe' "$HELPER" env ValvePlatformMutex 2>/dev/null | tr -d '\r')" \
+  '[C:/windows/system32/steam.exe]'
+expect "a game process has Steam's hidden window" "$(steam window)" "window=1"
+# Without SteamGameId steam.exe only starts the program, as Proton's: no pid, events or environment.
+"$WINE" reg delete 'HKCU\Software\Valve\Steam\ActiveProcess' /v pid /f >/dev/null 2>&1 || true
+nogame() { env -u SteamGameId "$WINE" "$STEAMEXE" "$HELPER" "$@" 2>/dev/null | tr -d '\r'; }
+expect "without SteamGameId nothing is set up" "$(nogame pid) $(nogame events) $(nogame env ValvePlatformMutex)" \
+  "0 lock=0 ipc=0 []"
+# An account ID earlier builds wrote (parity L2: Proton writes none) goes at the next game.
+"$WINE" reg add 'HKCU\Software\Valve\Steam\ActiveProcess' /v ActiveUser /t REG_DWORD /d 12345 /f >/dev/null 2>&1
+steam exit 0 >/dev/null
+expect "an earlier build's ActiveUser is removed" \
+  "$("$WINE" reg query 'HKCU\Software\Valve\Steam\ActiveProcess' /v ActiveUser >/dev/null 2>&1 && echo kept || echo gone)" gone
 # The prefix outlives a run: a fresh app ID and language each time, so only this run's steam.exe can have written them.
 expect "the game's Apps key and Steam's language" "$(SteamAppId=$$ MACNEUTRON_STEAM_LANGUAGE="français $$" steam app $$)" \
   "installed=1 running=1 updating=0 language=français $$"
@@ -122,19 +140,18 @@ tty_steam() {
 expect "steam.exe ends under a terminal" "$(tty_steam)" 5
 
 # The same rows through the tool folder's launcher, as Steam starts a game: the launcher copies steam.exe and starts
-# the game through it. A fake account ID and language: the launcher would fill in the real ones, which steam.exe writes
-# to the prefix's registry (and the language from registry.vdf, which also holds the login name). The helper goes as a
-# macOS path; the launcher converts it.
+# the game through it. A fake language: the launcher would fill in the real one from registry.vdf, which also holds the
+# login name. The helper goes as a macOS path, which steam.exe converts.
 if [ -n "$COMPAT" ]; then
   GAME="$WORK/game dir/hélper.exe"
-  L() { env STEAM_COMPAT_DATA_PATH="$COMPAT" SteamAppId=0 MACNEUTRON_STEAM_ACCOUNT=12345 MACNEUTRON_STEAM_LANGUAGE=english \
+  L() { env STEAM_COMPAT_DATA_PATH="$COMPAT" SteamAppId=0 SteamGameId=4242 MACNEUTRON_STEAM_LANGUAGE=english \
     "$TOOL/bin/macneutron" launch "$@"; }
   lsteam() { L waitforexitandrun "$GAME" "$@" 2>/dev/null | tr -d '\r'; }
   set +e; L waitforexitandrun "$GAME" exit 7 >/dev/null 2>&1; got=$?; set -e
   expect "launcher: exit code passes through" "$got" 7
   expect "launcher: arguments arrive unchanged" "$(lsteam args 'a b' '--name="Player One"' '')" '[a b][--name="Player One"][]'
   expect "launcher: registry names a live Steam" "$(lsteam steam)" \
-    'alive=1 user=12345 client64=C:\Program Files (x86)\Steam\steamclient64.dll'
+    'alive=1 client64=C:\Program Files (x86)\Steam\steamclient64.dll'
   rm -f "$WORK/late.txt"
   lsteam spawn "$(winpath "$WORK/late.txt")" >/dev/null
   expect "launcher: launcher-style child still sees Steam" "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"

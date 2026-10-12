@@ -22,7 +22,7 @@ private func makeFixture(runner: FakeRunner = winebootCreatingPrefix(), identity
     let notifier = RecordingNotifier()
     let layout = try makeToolLayout()
     if bridge { try installFakeSteamBridge(in: layout) }
-    let steam = try makeSteamLocation(loginUsers: loginUsersFile(loginUser(account: 1, timestamp: 100, mostRecent: true)))
+    let steam = try makeSteamLocation()
     let launcher = Launcher(layout: layout, runner: runner,
                             log: LauncherLog(directory: try makeTempDir().appending(path: "Logs")),
                             notifier: notifier, preflight: Preflight(systemSupported: { true }, identity: { _ in identity }),
@@ -241,7 +241,7 @@ private func i386Exe(named name: String) throws -> String {
     #expect(game.arguments == [#"C:\Program Files (x86)\Steam\steam.exe"#, "/Steam Library/My Game/Game.exe", "-windowed"])
     #expect(game.environment["STEAM_COMPAT_CLIENT_INSTALL_PATH"]
         == String(f.launcher.steam.bundleMacOS.path(percentEncoded: false).dropLast()))
-    #expect(game.environment["MACNEUTRON_STEAM_ACCOUNT"] == "1")
+    #expect(game.environment["MACNEUTRON_STEAM_ACCOUNT"] == nil)  // Proton writes no ActiveUser (parity L2)
     let prefix = try CompatContext(environment: f.env).prefix
     #expect(FileManager.default.fileExists(
         atPath: prefix.appending(path: "drive_c/Program Files (x86)/Steam/steamclient64.dll").path(percentEncoded: false)))
@@ -267,14 +267,6 @@ private func i386Exe(named name: String) throws -> String {
     _ = f.launcher.launch(["run", "/g/Game.exe"], environment: f.env)
     #expect(f.runner.calls.last?.arguments == ["/g/Game.exe"])
     #expect(f.launcherLog.contains("note: Steam bridge not installed"))
-}
-
-@Test func accountFromLaunchOptionsWins() throws {
-    let f = try makeFixture(bridge: true)
-    var env = f.env
-    env["MACNEUTRON_STEAM_ACCOUNT"] = "99"
-    _ = f.launcher.launch(["run", "/g/Game.exe"], environment: env)
-    #expect(f.runner.calls.last?.environment["MACNEUTRON_STEAM_ACCOUNT"] == "99")
 }
 
 @Test func steamsLanguageReachesSteamExe() throws {
@@ -334,13 +326,11 @@ private func i386Exe(named name: String) throws -> String {
     env["SteamAppUser"] = "fakeapplogin"
     _ = f.launcher.launch(["run", "/g/Game.exe"], environment: env)
     let log = try String(contentsOf: f.launcher.log.gameLog(appID: "42"), encoding: .utf8)
-    #expect(log.contains("MACNEUTRON_STEAM_ACCOUNT=<redacted>"))
-    #expect(!log.contains("MACNEUTRON_STEAM_ACCOUNT=1\n"))
     #expect(log.contains("SteamUser=<redacted>\n"))
     #expect(log.contains("SteamAppUser=<redacted>\n"))
     #expect(!log.contains("fakelogin") && !log.contains("fakeapplogin"))
     let game = f.runner.calls.last?.environment
-    #expect(game?["MACNEUTRON_STEAM_ACCOUNT"] == "1")
+    #expect(game?["MACNEUTRON_STEAM_ACCOUNT"] == nil)
     #expect(game?["SteamUser"] == "fakelogin" && game?["SteamAppUser"] == "fakeapplogin")  // only the header hides them
 }
 

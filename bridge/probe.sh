@@ -3,15 +3,14 @@
 # and a wine.app: the bundle's ARM64X lsteamclient.dll as steamclient64.dll, the aarch64 steam.exe, and the x64
 # steamprobe.exe under FEX with its fault check. Prints your SteamID and persona name: don't paste them anywhere public.
 #   bridge/probe.sh <path to a game's steam_api64.dll>
-# ACCOUNT=<id> sets MACNEUTRON_STEAM_ACCOUNT; APPID=<id> replaces 480; WINEDEBUG=+steamclient shows the bridge's log.
+# APPID=<id> replaces 480; WINEDEBUG=+steamclient shows the bridge's log.
 # PROBE_REDACT=1 prints only the probe's own rows, with "steamid ok" and "persona ok" for the values (WINEDEBUG=-all).
 # STEAM_COMPAT_CLIENT_INSTALL_PATH replaces Mac Steam's folder (steamclient.dylib). Two modes:
 # - arm64 (ship-base spec §7), when MACNEUTRON_ARM64_APP names a wine.app: directly in the booted prefix
 #   MACNEUTRON_ARM64_PREFIX.
 # - launcher (release spec §9 L3), when MACNEUTRON_TOOL_DIR names a tool folder (`macneutron install … --steam-exe`):
 #   through its `launch waitforexitandrun`, as Steam starts a game, in the compat folder STEAM_COMPAT_DATA_PATH
-#   (default $TMPDIR/macneutron probe/compat). The launcher prepares the prefix, copies the bridge in and, without
-#   ACCOUNT, fills MACNEUTRON_STEAM_ACCOUNT from Steam's loginusers.vdf.
+#   (default $TMPDIR/macneutron probe/compat). The launcher prepares the prefix and copies the bridge in.
 #   bridge/probe.sh --redact-self-test: checks PROBE_REDACT's filter on fake rows, no Wine needed.
 set -eu
 # PROBE_REDACT's filter, stdin to stdout: only the probe's rows, the SteamID and persona name as "ok", any other
@@ -56,7 +55,6 @@ export WINEDEBUG="${WINEDEBUG:--all}" WINEMSYNC=1
 export SteamAppId="${APPID:-480}" SteamGameId="${APPID:-480}"
 MAC_STEAM="$HOME/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS"
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_COMPAT_CLIENT_INSTALL_PATH:-$MAC_STEAM}"
-if [ -n "${ACCOUNT:-}" ]; then export MACNEUTRON_STEAM_ACCOUNT="$ACCOUNT"; else unset MACNEUTRON_STEAM_ACCOUNT || true; fi
 
 winpath() { printf 'Z:%s' "$1" | tr / '\\'; }
 if [ -n "${MACNEUTRON_TOOL_DIR:-}" ]; then

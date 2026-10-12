@@ -190,17 +190,10 @@ public struct Launcher: Sendable {
             log.append("note: steamclient.dylib not found in \(client)")
         }
         if env["MACNEUTRON_STEAM_LANGUAGE"] == nil { env["MACNEUTRON_STEAM_LANGUAGE"] = steam.uiLanguage() }
-        guard env["MACNEUTRON_STEAM_ACCOUNT"] == nil else { return }
-        if let account = steam.activeAccountID() {
-            env["MACNEUTRON_STEAM_ACCOUNT"] = String(account)
-        } else {
-            log.append("note: no Steam account found in loginusers.vdf")
-        }
     }
 
-    /// People post game logs in bug reports: the account ID leads straight to a Steam profile, and Steam passes the
-    /// account's login name as SteamUser and SteamAppUser.
-    static let redactedKeys: Set<String> = ["MACNEUTRON_STEAM_ACCOUNT", "SteamUser", "SteamAppUser"]
+    /// People post game logs in bug reports: Steam passes the account's login name as SteamUser and SteamAppUser.
+    static let redactedKeys: Set<String> = ["SteamUser", "SteamAppUser"]
 
     /// The rest of the environment comes from whatever started Steam (a terminal's shell can carry API tokens):
     /// any name that reads like a secret is hidden too.

@@ -92,9 +92,12 @@ static void set_dword(HKEY key, const WCHAR *name, DWORD value)
     RegSetValueExW(key, name, 0, REG_DWORD, (const BYTE *)&value, sizeof(value));
 }
 
+/* What a game process gets: ActiveProcess\pid, as Proton's set_active_process_pid, and the keys Valve's Wine writes
+ * into every Proton prefix (wine.inf: SteamPath, SteamExe, SteamClientDll*, InstallPath), which ours isn't built
+ * with. */
 static void register_steam(DWORD pid)
 {
-    WCHAR account[16], apps[64];
+    WCHAR apps[64];
     const WCHAR *value;
     DWORD appid;
     HKEY key;
@@ -125,8 +128,8 @@ static void register_steam(DWORD pid)
         set_string(key, L"SteamClientDll64", STEAM_DIR L"\\steamclient64.dll");
         if (GetFileAttributesW(STEAM_DIR L"\\steamclient.dll") != INVALID_FILE_ATTRIBUTES)
             set_string(key, L"SteamClientDll", STEAM_DIR L"\\steamclient.dll");
-        if (GetEnvironmentVariableW(L"MACNEUTRON_STEAM_ACCOUNT", account, ARRAYSIZE(account)))
-            set_dword(key, L"ActiveUser", wcstoul(account, NULL, 10));
+        /* An account ID earlier MacNeutron builds wrote; Proton writes none (parity L2). */
+        RegDeleteValueW(key, L"ActiveUser");
         RegCloseKey(key);
     }
     if ((key = create_key(HKEY_LOCAL_MACHINE, L"Software\\Wow6432Node\\Valve\\Steam")))
@@ -547,48 +550,127 @@ run:
     }
 }
 
-int main(void)
+/* Proton's dummy Steam windows, which games look for with FindWindow (hidden: WS_POPUP, never shown). */
+static DWORD WINAPI create_steam_windows(void *arg)
 {
-    BOOL should_await = TRUE;  /* hardening: Proton's run_process can return before setting it */
-    BOOL game_process = getenv("SteamGameId") != NULL;
-    DWORD code = 0;
-    HANDLE child, wait_handle;
-    int argc;
+    static WNDCLASSEXW wndclass = { sizeof(WNDCLASSEXW) };
+    MSG msg;
 
-    LocalFree(CommandLineToArgvW(GetCommandLineW(), &argc));
+    wndclass.lpfnWndProc = DefWindowProcW;
+    wndclass.lpszClassName = L"vguiPopupWindow";
+    RegisterClassExW(&wndclass);
+    CreateWindowW(wndclass.lpszClassName, L"Steam", WS_POPUP, 40, 40, 400, 300, NULL, NULL, NULL, NULL);
+    CreateWindowA("static", "SteamVR Status", WS_POPUP, 0, 0, 0, 0, NULL, NULL, NULL, NULL);
+    while (GetMessageW(&msg, NULL, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+    return 0;
+}
+
+/* Proton's setup_vr_registry: our runtime has no vrclient, so this logs and goes on. */
+static void setup_vr_registry(void)
+{
+    BOOL (CDECL *init)(void);
+    HMODULE vrclient;
+
+    if (!(vrclient = LoadLibraryW(L"vrclient_x64")))
+    {
+        ERR("Failed to load vrclient module, skipping initialization\n");
+        return;
+    }
+    if ((init = (void *)GetProcAddress(vrclient, "vrclient_init_registry"))) init();
+    else ERR("Failed to find vrclient_init_registry export\n");
+    FreeLibrary(vrclient);
+}
+
+/* Valve's Wine reports a Unix debugger (class 1100, Linux only); ours has no such class, so on a Mac only a Windows
+ * debugger (winedbg) ends PROTON_WAIT_ATTACH's wait. */
+static BOOL is_ptraced(void)
+{
+    ULONG len;
+    int pid;
+
+    if (NtQueryInformationProcess(GetCurrentProcess(), (PROCESSINFOCLASS)1100 /* ProcessWineUnixDebuggerPid */,
+                                  &pid, sizeof(pid), &len))
+        return FALSE;
+    return !!pid;
+}
+
+/* Proton's steam_command_handler: steam:// URLs and Steam's command-line options. Not yet: every run is a game. */
+static BOOL steam_command_handler(int argc, char *argv[])
+{
+    return FALSE;
+}
+
+/* Proton's main, in its order: Steam is set up only for a game process (SteamGameId set, empty included). */
+int main(int argc, char *argv[])
+{
+    HANDLE wait_handle = INVALID_HANDLE_VALUE, child = INVALID_HANDLE_VALUE;
+    BOOL game_process = FALSE;
+    BOOL should_await = TRUE;  /* hardening: Proton's run_process can return before setting it */
+    DWORD rc = 0;
+
+    if (steam_command_handler(argc, argv)) return 0;
     if (argc < 2)
     {
         fprintf(stderr, "usage: steam.exe <program> [arguments...]\n");
         return 1;
     }
-    /* Proton's steam.exe sets these for the game, as Steam on Windows does (Source's GameUI finds Steam through
-     * ValvePlatformMutex); macOS Steam doesn't. Before the game starts, which copies our environment. */
-    SetEnvironmentVariableW(L"SteamPath", STEAM_DIR);
-    /* ponytail: a constant; Proton's GetModuleFileNameW would repeat the command line's letter case. */
-    SetEnvironmentVariableW(L"ValvePlatformMutex", L"C:/Program Files (x86)/Steam/steam.exe");
-    /* Before the game, as Proton (set_active_process_pid): the last steam.exe owns the pid, and Proton never clears
-     * it. */
-    register_steam(GetCurrentProcessId());
-    /* Named objects the Windows client holds, which Proton's steam.exe creates too; ours last until we exit. Denuvo
-     * checks Steam3Master_SharedMemLock (Just Cause 3 deletes its saves without it), the 2K Launcher
-     * Global\Valve_SteamIPC_Class. */
-    CreateEventW(NULL, FALSE, FALSE, L"Steam3Master_SharedMemLock");
-    CreateEventW(NULL, FALSE, FALSE, L"Global\\Valve_SteamIPC_Class");
-    /* Before the game runs, so its stub finds the semaphores (Proton creates them once the game has started: R5). */
-    drm_consume = CreateSemaphoreW(NULL, 0, 512, L"STEAM_DIPC_CONSUME");
-    drm_produce = CreateSemaphoreW(NULL, 1, 512, L"SREAM_DIPC_PRODUCE");
-    if (drm_consume && drm_produce) CreateThread(NULL, 0, answer_drm, NULL, 0, NULL);
+    if (getenv("SteamGameId"))
+    {
+        WCHAR path[MAX_PATH], *p;
+
+        /* Named objects the Windows client holds: Denuvo checks Steam3Master_SharedMemLock (Just Cause 3 deletes its
+         * saves without it), the 2K Launcher Global\Valve_SteamIPC_Class. Ours last until we exit. */
+        CreateEventW(NULL, FALSE, FALSE, L"Steam3Master_SharedMemLock");
+        CreateEventW(NULL, FALSE, FALSE, L"Global\\Valve_SteamIPC_Class");
+        /* The desktop window first, on this thread: win32u hands explorer our environment unlocked, which the
+         * SetEnvironmentVariableW calls below would race (Proton 42f903ef). */
+        GetDesktopWindow();
+        CreateThread(NULL, 0, create_steam_windows, NULL, 0, NULL);
+        register_steam(GetCurrentProcessId());
+        /* Steam on Windows sets these for its games (Source's GameUI finds Steam through ValvePlatformMutex): the
+         * path of the steam.exe that ran, with / for \. The game copies our environment when it starts. */
+        SetEnvironmentVariableW(L"SteamPath", STEAM_DIR);
+        *path = 0;
+        GetModuleFileNameW(NULL, path, ARRAYSIZE(path));
+        for (p = path; *p; ++p) if (*p == '\\') *p = '/';
+        SetEnvironmentVariableW(L"ValvePlatformMutex", path);
+        if (env_nonzero("PROTON_WAIT_ATTACH"))
+            while (!IsDebuggerPresent() && !is_ptraced()) Sleep(100);
+        game_process = TRUE;
+    }
+    if (game_process)
+    {
+        setup_vr_registry();
+        /* Before the game runs, so its stub finds the semaphores (Proton creates them once the game has started: R5). */
+        drm_consume = CreateSemaphoreW(NULL, 0, 512, L"STEAM_DIPC_CONSUME");
+        drm_produce = CreateSemaphoreW(NULL, 1, 512, L"SREAM_DIPC_PRODUCE");
+        if (drm_consume && drm_produce) CreateThread(NULL, 0, answer_drm, NULL, 0, NULL);
+    }
     child = run_process(&should_await, game_process);
-    if (should_await && child == INVALID_HANDLE_VALUE) return 1;
-    /* Wine's shutdown event, set once no program is left in the prefix, as Proton's steam.exe waits: unlike the
-     * program's handle or a job, it covers a launcher that starts the real game, even with CREATE_BREAKAWAY_FROM_JOB
-     * or ShellExecute, and quits. A system process doesn't keep the prefix alive itself. If Wine refuses, we wait for
-     * the program, or not at all after ShellExecute. */
-    wait_handle = should_await ? child : INVALID_HANDLE_VALUE;
-    NtSetInformationProcess(GetCurrentProcess(), (PROCESSINFOCLASS)1000 /* ProcessWineMakeProcessSystem */,
-                            &wait_handle, sizeof(wait_handle));
-    FreeConsole();
-    if (wait_handle != INVALID_HANDLE_VALUE) WaitForSingleObject(wait_handle, INFINITE);
-    if (child != INVALID_HANDLE_VALUE) GetExitCodeProcess(child, &code);
-    return (int)code;
+    if (should_await)
+    {
+        if (child == INVALID_HANDLE_VALUE) return 1;
+        wait_handle = child;
+    }
+    /* A game process waits for Wine's shutdown event, set once no program is left in the prefix: it covers a launcher
+     * that starts the real game, even with CREATE_BREAKAWAY_FROM_JOB or ShellExecute, and quits. A system process
+     * doesn't keep the prefix alive itself. If Wine refuses, wait_handle stays the program, or nothing. */
+    if (game_process)
+        NtSetInformationProcess(GetCurrentProcess(), (PROCESSINFOCLASS)1000 /* ProcessWineMakeProcessSystem */,
+                                &wait_handle, sizeof(wait_handle));
+    if (wait_handle != INVALID_HANDLE_VALUE)
+    {
+        FreeConsole();
+        WaitForSingleObject(wait_handle, INFINITE);
+    }
+    if (child != INVALID_HANDLE_VALUE)
+    {
+        GetExitCodeProcess(child, &rc);
+        CloseHandle(child);
+    }
+    return (int)rc;
 }

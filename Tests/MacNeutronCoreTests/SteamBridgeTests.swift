@@ -44,25 +44,6 @@ func registryVDF(language: String) -> String {
     #expect(try makeSteamLocation().uiLanguage() == nil)
 }
 
-@Test func mostRecentUserIsTheActiveAccount() throws {
-    let steam = try makeSteamLocation(loginUsers: loginUsersFile(
-        loginUser(account: 1, timestamp: 200, mostRecent: false),
-        loginUser(account: 2, timestamp: 100, mostRecent: true)))
-    #expect(steam.activeAccountID() == 2)
-}
-
-@Test func newestTimestampWinsWithoutMostRecent() throws {
-    // The maintainer's loginusers.vdf has no MostRecent key at all.
-    let steam = try makeSteamLocation(loginUsers: loginUsersFile(
-        loginUser(account: 1, timestamp: 100), loginUser(account: 2, timestamp: 300), loginUser(account: 3, timestamp: 200)))
-    #expect(steam.activeAccountID() == 2)
-}
-
-@Test func noLoginUsersMeansNoAccount() throws {
-    #expect(try makeSteamLocation().activeAccountID() == nil)
-    #expect(try makeSteamLocation(loginUsers: "\"users\"\n{\n}\n").activeAccountID() == nil)
-}
-
 @Test func bridgeNeedsSteamExeAndBothHalvesOfTheClient() throws {
     let layout = try makeToolLayout()
     #expect(!layout.steamBridgeInstalled)  // wine.app has lsteamclient; the tool folder has no steam.exe yet

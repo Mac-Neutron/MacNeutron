@@ -26,7 +26,6 @@ public struct SteamLocation: Equatable, Sendable {
     public var configVDF: URL { root.appending(path: "config/config.vdf") }
     public var compatLog: URL { root.appending(path: "logs/compat_log.txt") }
     public var appInfo: URL { root.appending(path: "appcache/appinfo.vdf") }
-    public var loginUsers: URL { root.appending(path: "config/loginusers.vdf") }
     /// Steam's own settings; it also holds the login name (AutoLoginUser), which is never read.
     public var registryVDF: URL { root.appending(path: "registry.vdf") }
 
@@ -57,18 +56,6 @@ public struct SteamLocation: Equatable, Sendable {
             }
         }
         return ids
-    }
-
-    /// The account Steam is logged in as: the user marked `MostRecent`, else the newest `Timestamp`.
-    /// Returns its account ID, the low 32 bits of the SteamID64 that names the user's block.
-    public func activeAccountID() -> UInt32? {
-        guard let text = try? String(contentsOf: loginUsers, encoding: .utf8),
-              let nodes = try? KeyValues.parse(text) else { return nil }
-        let users = (nodes.node(at: ["users"])?.children ?? []).filter { UInt64($0.key) != nil }
-        func number(_ user: KVNode, _ key: String) -> UInt64 { UInt64(user.children.node(at: [key])?.stringValue ?? "") ?? 0 }
-        let chosen = users.first { number($0, "MostRecent") == 1 }
-            ?? users.max { number($0, "Timestamp") < number($1, "Timestamp") }
-        return chosen.flatMap { UInt64($0.key) }.map { UInt32(truncatingIfNeeded: $0) }
     }
 
     /// Steam's UI language ("english"), which the Windows client keeps in HKCU\Software\Valve\Steam\language.

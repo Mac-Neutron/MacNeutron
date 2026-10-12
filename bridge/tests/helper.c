@@ -51,7 +51,7 @@ int main(void)
         WCHAR client[MAX_PATH] = L"";
         DWORD size = sizeof(client);
         RegGetValueW(HKEY_CURRENT_USER, ACTIVE_PROCESS_KEY, L"SteamClientDll64", RRF_RT_REG_SZ, NULL, client, &size);
-        printf("alive=%d user=%lu client64=", steam_alive(), read_dword(L"ActiveUser"));
+        printf("alive=%d client64=", steam_alive());
         put(client);
         fputs("\n", stdout);
         return 0;
@@ -152,6 +152,14 @@ int main(void)
         if (WaitForSingleObject(produce, 5000)) { printf("no slot\n"); return 0; }
         ReleaseSemaphore(consume, 1, NULL);
         printf("ack=%d\n", WaitForSingleObject(ack, 5000) == WAIT_OBJECT_0);
+        return 0;
+    }
+    if (!wcscmp(mode, L"window"))  /* Steam's hidden window, which games look for with FindWindow */
+    {
+        int i;
+
+        for (i = 0; i < 20 && !FindWindowW(L"vguiPopupWindow", L"Steam"); i++) Sleep(100);
+        printf("window=%d\n", FindWindowW(L"vguiPopupWindow", L"Steam") != NULL);
         return 0;
     }
     if (!wcscmp(mode, L"module"))  /* the path the game sees itself at (S: in a Steam library) */
