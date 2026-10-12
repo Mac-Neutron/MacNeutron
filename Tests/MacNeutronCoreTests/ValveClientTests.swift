@@ -168,3 +168,27 @@ private func entries(_ folder: URL) -> Set<String> {
     await #expect(throws: ValveClientError.http(404)) { try await client.update(force: false) }
     #expect(ValveClient.installed(in: client.cache) == nil)
 }
+
+@Test func aContentFailureIsNotDownloadedAgainUntilTheNextAppVersion() async throws {
+    // Valve's package stops matching what we extract: the app is a login item, so each start must not fetch 64 MB
+    // again only to fail the same way. A MacNeutron update (a new app version) may fix it, so that retries.
+    var files = FakeValveCDN.sixFiles()
+    files["Steam.dll"] = nil
+    let cdn = try FakeValveCDN(dir: try makeTempDir(), files: files)
+    let client = try makeClient(cdn)
+    await #expect(throws: ValveClientError.extractFailed(11)) { try await client.updateIfNeeded(appVersion: "1.0") }
+    #expect(cdn.requests.count == 2)
+    #expect(try await client.updateIfNeeded(appVersion: "1.0") == nil)
+    #expect(cdn.requests.count == 2)
+    await #expect(throws: ValveClientError.extractFailed(11)) { try await client.updateIfNeeded(appVersion: "1.1") }
+    #expect(cdn.requests.count == 4)
+}
+
+@Test func aNetworkFailureIsRetriedAtTheNextStart() async throws {
+    let cdn = try FakeValveCDN(dir: try makeTempDir())
+    let client = try makeClient(cdn)
+    cdn.offline = true
+    await #expect(throws: ValveClientError.http(404)) { try await client.updateIfNeeded(appVersion: "1.0") }
+    cdn.offline = false
+    #expect(try await client.updateIfNeeded(appVersion: "1.0") == .installed(version))
+}

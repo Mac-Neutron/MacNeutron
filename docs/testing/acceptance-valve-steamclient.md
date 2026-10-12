@@ -49,6 +49,24 @@ Each task's RED was recorded first:
 - `PrefixManagerTests`: 5 rows failed. The builtin row threw, because `builtin` was read as a path.
 - `AppModelTests`: compile failure.
 
+## Final review (2026-10-12)
+
+Four Opus reviewers covered spec compliance, correctness and concurrency, security and the never-ship rule, and scripts
+and test honesty. An Opus skeptic then tried to refute each finding.
+- Nothing Critical or Important was confirmed.
+- Six Minor findings survived.
+- One of them was graded up by effect and fixed: a lasting failure in Valve's own files, such as a renamed member. The
+  app starts at every login, so it would have fetched the 64 MB package again at every start with no way to stop it.
+  - Fix: `updateIfNeeded` now records such a failure for the app version and retries at the next app version or on
+    Download again. Network failures are still retried at the next start.
+  - Rows: `aContentFailureIsNotDownloadedAgainUntilTheNextAppVersion` (RED, then GREEN) and
+    `aNetworkFailureIsRetriedAtTheNextStart`.
+  - `swift test`: 320 passed.
+- Deferred, as Minor:
+  - a `.staging-*` folder from an interrupted Download again stays until the next real install (disk only);
+  - `check.sh` falls back to the cache when an explicit `VALVE_STEAMCLIENT64` is missing;
+  - the offline app test doesn't pin the error text.
+
 ## Maintainer rows (build/dev/MacNeutron.app)
 
 1. Quit MacNeutron and open `build/dev/MacNeutron.app`. Settings shows "Version <n>" with no question asked, and

@@ -189,14 +189,22 @@ public struct ValveClient: Sendable {
         return .installed(manifest.version)
     }
 
-    /// The app's automatic check (spec D1, D2, D4): once per app version, never after Remove.
+    /// The app's automatic check (spec D1, D2, D4): once per app version, never after Remove. A network failure is
+    /// retried at the next app start; a failure in Valve's files themselves isn't (the app starts at every login, and
+    /// each retry would fetch the 64 MB package again only to fail the same way) until the next app version, which may
+    /// fix it, or Settings' Download again.
     public func updateIfNeeded(appVersion: String) async throws -> ValveUpdateOutcome? {
         guard !removedByUser else { return nil }
         let checked = marker("checked")
-        if Self.installed(in: cache) != nil, (try? String(contentsOf: checked, encoding: .utf8)) == appVersion { return nil }
-        let outcome = try await update(force: false)
-        try appVersion.write(to: checked, atomically: true, encoding: .utf8)
-        return outcome
+        if (try? String(contentsOf: checked, encoding: .utf8)) == appVersion { return nil }
+        do {
+            let outcome = try await update(force: false)
+            try appVersion.write(to: checked, atomically: true, encoding: .utf8)
+            return outcome
+        } catch let error as ValveClientError {
+            if case .http = error {} else { try? appVersion.write(to: checked, atomically: true, encoding: .utf8) }
+            throw error
+        }
     }
 
     /// Settings' Remove: the launcher then uses lsteamclient, and nothing is downloaded until a forced update.
