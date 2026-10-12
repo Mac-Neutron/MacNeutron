@@ -448,11 +448,18 @@ run ours clear-dump dxmt "$TESTS/d3d12_clear.exe" 20
 unset DXMT_DXIL_DUMP DXMT_DUMP_FRAME DXMT_DUMP_FRAMES
 expect "DXMT_DUMP_FRAMES=3 dumps three frames in a row" \
   "$(grep '^# frame ' "$WORK/clear-dump/passes.txt" 2> /dev/null | tr '\n' ';')" "# frame 0 presented;# frame 1 presented;# frame 2 presented;"
-# By default DXMT reports what Unreal Engine's SM6 check needs (DXMT 0039), shader model 6.7 included.
-expect "by default the D3D12 device reports shader model 6.7 and binding tier 3" \
-  "$(grep -cE '^(shader model 0x67 \(hr 0x00000000\)$|resource binding tier 3$)' "$WORK/clear.txt" || true)" 2
+# By default DXMT reports what Unreal Engine's SM6 check needs (DXMT 0039, 0059), shader model 6.8 included.
+expect "by default the D3D12 device reports shader model 6.8 and binding tier 3" \
+  "$(grep -cE '^(shader model 0x68 \(hr 0x00000000\)$|resource binding tier 3$)' "$WORK/clear.txt" || true)" 2
 expect "and feature level 12_1, wave ops and 64-bit atomics" \
   "$(grep -c '^feature level 0xc100, wave ops 1, atomic64 1$' "$WORK/clear.txt" || true)" 1
+expect "a 6.7 request still reads 6.7" "$(grep '^shader model for a 6.7 request' "$WORK/clear.txt" || echo none)" "shader model for a 6.7 request 0x67"
+expect "OPTIONS9 and OPTIONS11 report the 64-bit atomics the lock path implements" \
+  "$(grep -E '^options(9|11) ' "$WORK/clear.txt" | tr '\n' ';')" "options9 typed 1 groupshared 1;options11 heap 1;"
+expect "OPTIONS21 reports Shader Model 6.8's comparison sampling and extended command info" \
+  "$(grep '^options21' "$WORK/clear.txt" || echo none)" "options21 hr 0x00000000 work graphs 0, sample cmp grad/bias 1, extended command info 1"
+expect "OPTIONS22 is answered" "$(grep '^options22' "$WORK/clear.txt" || echo none)" \
+  "options22 hr 0x00000000 reorders 0, byte offset views 0, max 1D dispatch 65535 65535"
 # 3. DXIL pipelines are created (an out-of-scope op fails only its own pipeline, named in the log), and DXMT_DXIL_DUMP
 #    captures each shader once, byte for byte. $WORK has a space in it, like the Application Support paths users pass.
 H="$ROOT/dxmt/tests/dxil/reject/gatherraw.dxil"
@@ -487,10 +494,12 @@ expect "an existing capture is left alone" "$(cat "$vs" 2> /dev/null)" keep
 export DXMT_D3D12_SM6=0
 run ours clear-capture dxmt "$TESTS/d3d12_clear.exe" 10
 unset DXMT_D3D12_SM6
-expect "capture mode reports shader model 6.7 and binding tier 3" \
-  "$(grep -cE '^(shader model 0x67 \(hr 0x00000000\)$|resource binding tier 3$)' "$WORK/clear-capture.txt" || true)" 2
+expect "capture mode reports shader model 6.8 and binding tier 3" \
+  "$(grep -cE '^(shader model 0x68 \(hr 0x00000000\)$|resource binding tier 3$)' "$WORK/clear-capture.txt" || true)" 2
 expect "capture mode reports feature level 12_1, wave ops and 64-bit atomics" \
   "$(grep -c '^feature level 0xc100, wave ops 1, atomic64 1$' "$WORK/clear-capture.txt" || true)" 1
+expect "capture mode's OPTIONS21 reports Shader Model 6.8's comparison sampling and extended command info" \
+  "$(grep '^options21' "$WORK/clear-capture.txt" || echo none)" "options21 hr 0x00000000 work graphs 0, sample cmp grad/bias 1, extended command info 1"
 # Outside capture mode, DXMT_D3D12_SM6=0 brings back shader model 5.1 and DXMT's real limits (for a game whose
 # Shader Model 6 path fails).
 unset DXMT_DXIL_DUMP
@@ -501,6 +510,12 @@ expect "DXMT_D3D12_SM6=0 reports shader model 5.1 and binding tier 2" \
   "$(grep -cE '^(shader model 0x51 \(hr 0x00000000\)$|resource binding tier 2$)' "$WORK/clear-sm5.txt" || true)" 2
 expect "and feature level 11_1, no wave ops, no 64-bit atomics" \
   "$(grep -c '^feature level 0xb100, wave ops 0, atomic64 0$' "$WORK/clear-sm5.txt" || true)" 1
+expect "and no 64-bit atomics in OPTIONS9 or OPTIONS11" \
+  "$(grep -E '^options(9|11) ' "$WORK/clear-sm5.txt" | tr '\n' ';')" "options9 typed 0 groupshared 0;options11 heap 0;"
+expect "and no Shader Model 6.8 features in OPTIONS21" "$(grep '^options21' "$WORK/clear-sm5.txt" || echo none)" \
+  "options21 hr 0x00000000 work graphs 0, sample cmp grad/bias 0, extended command info 0"
+expect "and OPTIONS22 is answered" "$(grep '^options22' "$WORK/clear-sm5.txt" || echo none)" \
+  "options22 hr 0x00000000 reorders 0, byte offset views 0, max 1D dispatch 65535 65535"
 export DXMT_DXIL_DUMP="$WORK/dxil é"
 dxil dxil-unicode
 expect "a capture folder named outside ASCII works" "$(ls "$WORK/dxil é" 2> /dev/null | grep -c '\.dxil$')" 4

@@ -3098,3 +3098,20 @@ release or tag until the last task records the new one.
     `2/2 ok, 0 changed`. Fresh fetch: `applied 58/58`, tree-equal. Gate (ARM64EC): `dxmt-check: all passed`, 351 `ok`.
   - Deferred (rulings R-HARD2, R-HARD3): items 2 (compute cube LOD projection), 7 (heap ranges sharing usage) and 14
     (per-range `atomic_view`), and the test-only items.
+- **0059 (`d3d12: Report Shader Model 6.8.`):** Task 15. The device reports what Tasks 1-14c translate.
+  - `CheckFeatureSupport(SHADER_MODEL)` answers up to 6.8: a request for 0x69 reads `shader model 0x68` (it read 0x67), and a
+    6.7 request still reads 0x67.
+  - OPTIONS11's `AtomicInt64OnDescriptorHeapResourceSupported` is `SM6Caps()` (it was zero-filled): heap handles resolve to
+    the same pointers as bound ones, so the lock path (0054, 0055) covers them. OPTIONS9 keeps both 64-bit atomic bits.
+    `Int64ShaderOps` stays FALSE until an i64 audit (the 64-bit cbufferLoad is refused).
+  - OPTIONS21 reports `SampleCmpGradientAndBiasSupported` and `ExtendedCommandInfoSupported` (Tasks 11, 12); work graphs stay
+    tier 0. OPTIONS22 (feature 65) is answered instead of `E_NOTIMPL`: no reordering, no byte-offset views, 1D dispatch
+    limits 65535.
+  - Before: `options11 heap 0`, `options21 … grad/bias 0, extended command info 0`, `options22 hr 0x80004001`. After, on
+    the default device: `options9 typed 1 groupshared 1`, `options11 heap 1`, `options21 hr 0x00000000 work graphs 0,
+    sample cmp grad/bias 1, extended command info 1`, `options22 hr 0x00000000 reorders 0, byte offset views 0, max 1D
+    dispatch 65535 65535`. With `DXMT_D3D12_SM6=0`: shader model 0x51, OPTIONS9/11/21 all 0, OPTIONS22 answered.
+  - `src/airconv` is untouched: no corpus run. Fresh fetch: `applied 59/59`, tree-equal.
+  - Milestone 3 (both lanes and `make test`): the first run had one `FAIL`, D3DMetal's own hazards run (the reference,
+    not our DXMT), which reported `fence-order 1 0` and stopped there; the rerun passed, `dxmt-check: all passed` twice
+    (728 `ok`). `make test`: 290 passed.

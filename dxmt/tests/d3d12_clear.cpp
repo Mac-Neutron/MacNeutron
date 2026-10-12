@@ -33,8 +33,11 @@ int main(int argc, char **argv) {
     CHECK(factory->EnumAdapters1(0, &adapter));
     CHECK(adapter->GetDesc1(&ad));
     CHECK(D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), (void **)&device));
-    D3D12_FEATURE_DATA_SHADER_MODEL sm = {D3D_SHADER_MODEL_6_7};
+    D3D12_FEATURE_DATA_SHADER_MODEL sm = {(D3D_SHADER_MODEL)0x69};  // newer than the headers know (DXIL SM 6.8 plan, Task 15)
     HRESULT smhr = device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &sm, sizeof sm);
+    D3D12_FEATURE_DATA_SHADER_MODEL sm67 = {D3D_SHADER_MODEL_6_7};
+    device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &sm67, sizeof sm67);
+    printf("shader model for a 6.7 request 0x%x\n", (unsigned)sm67.HighestShaderModel);
     D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
     device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof options);
     printf("adapter %ls\nshader model 0x%x (hr 0x%08lx)\nresource binding tier %d\n",
@@ -49,6 +52,19 @@ int main(int argc, char **argv) {
     device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS9, &options9, sizeof options9);
     printf("feature level 0x%x, wave ops %d, atomic64 %d\n", (unsigned)fl.MaxSupportedFeatureLevel, (int)options1.WaveOps,
            (int)options9.AtomicInt64OnTypedResourceSupported);
+    D3D12_FEATURE_DATA_D3D12_OPTIONS11 options11 = {};
+    device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS11, &options11, sizeof options11);
+    printf("options9 typed %d groupshared %d\noptions11 heap %d\n", (int)options9.AtomicInt64OnTypedResourceSupported,
+           (int)options9.AtomicInt64OnGroupSharedSupported, (int)options11.AtomicInt64OnDescriptorHeapResourceSupported);
+    // OPTIONS21 and OPTIONS22, newer than llvm-mingw's d3d12.h (laid out as the Agility SDK and d3d12_feature_data.hpp).
+    struct { UINT WorkGraphsTier, ExecuteIndirectTier; BOOL SampleCmpGradientAndBias, ExtendedCommandInfo; } o21 = {};
+    HRESULT o21hr = device->CheckFeatureSupport((D3D12_FEATURE)53, &o21, sizeof o21);
+    printf("options21 hr 0x%08lx work graphs %u, sample cmp grad/bias %d, extended command info %d\n",
+           (unsigned long)o21hr, o21.WorkGraphsTier, (int)o21.SampleCmpGradientAndBias, (int)o21.ExtendedCommandInfo);
+    struct { BOOL Reorders, ByteOffsetViews; UINT Max1DDispatch, Max1DDispatchMesh; } o22 = {};
+    HRESULT o22hr = device->CheckFeatureSupport((D3D12_FEATURE)65, &o22, sizeof o22);
+    printf("options22 hr 0x%08lx reorders %d, byte offset views %d, max 1D dispatch %u %u\n", (unsigned long)o22hr,
+           (int)o22.Reorders, (int)o22.ByteOffsetViews, o22.Max1DDispatch, o22.Max1DDispatchMesh);
 
     ID3D12CommandQueue *queue;
     D3D12_COMMAND_QUEUE_DESC qd = {D3D12_COMMAND_LIST_TYPE_DIRECT};
