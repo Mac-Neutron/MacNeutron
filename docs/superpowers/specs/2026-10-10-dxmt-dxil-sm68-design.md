@@ -198,6 +198,9 @@ phi/select" (L:37-38).
     product 1; and `~0`; min the type's largest value; max its smallest;
   - unchanged: `WaveGetLaneIndex`, `WaveGetLaneCount` (the wave's width), `WaveReadLaneAt` (an explicit lane), and
     every quad operation (D3D's quad operations include helpers).
+  - when no active lane is a non-helper (a waterfall loop's covered lanes have left it, or a discard demoted them), every
+    active lane takes part, as Metal does: D3D leaves a helper's wave results undefined, and with an empty mask a loop
+    waiting on a wave result never ends for its helpers, a GPU hang (final review, DXMT 0060).
 
   With the attribute, or outside pixel shaders, nothing is masked. Vertex, compute and geometry shaders have no
   helpers.

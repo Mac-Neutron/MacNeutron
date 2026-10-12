@@ -28,3 +28,17 @@ float4 psinclude(float4 pos : SV_Position) : SV_Target {  // helpers take part
     return Paint(ddx(pos.x) == 1 && (!quad_has_helper || WaveActiveAnyTrue(h != 0)));
 }
 float4 psgreen(float4 pos : SV_Position) : SV_Target { return Paint(ddx(pos.x) == 1); }
+// A waterfall loop scalarizes a per-pixel key: each round the lanes whose key the wave picked leave. It must end for
+// every lane, helpers too: the edge's helpers hold keys no covered lane has, and once the covered lanes have left, only
+// helpers remain in the loop. The loop is bounded (no GPU hang in a test); quad reads after it see a helper's count.
+uint QuadMax(uint n) { return max(max(n, QuadReadAcrossX(n)), max(QuadReadAcrossY(n), QuadReadAcrossDiagonal(n))); }
+float4 pswaterfall(float4 pos : SV_Position) : SV_Target {  // the first lane's key (WaveReadLaneFirst)
+    uint key = uint(pos.x) + uint(pos.y) * 4096, n = 0;
+    [loop] for (; n < 1000; n++) { if (WaveReadLaneFirst(key) == key) break; }
+    return Paint(ddx(pos.x) == 1 && QuadMax(n) < 1000);
+}
+float4 pswaterfallmin(float4 pos : SV_Position) : SV_Target {  // the smallest key (WaveActiveMin)
+    uint key = uint(pos.x) + uint(pos.y) * 4096, n = 0;
+    [loop] for (; n < 1000; n++) { if (WaveActiveMin(key) == key) break; }
+    return Paint(ddx(pos.x) == 1 && QuadMax(n) < 1000);
+}

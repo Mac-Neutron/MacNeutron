@@ -2280,7 +2280,7 @@ The translator has no shader model gate: an operation it lacks fails its own pip
   section above); 0039 makes that the default. No other Direct3D 12 game is on record with these answers.
 - Not covered: a Direct3D 12 game that took its Shader Model 5.1 path in 0.3 and now takes its Shader Model 6 one.
 
-## DXIL Shader Model 6.8 (DXMT 0040-0059)
+## DXIL Shader Model 6.8 (DXMT 0040-0060)
 
 2026-10-11. DXMT's DXIL translator learns the Shader Model 6.1-6.8 operations its caps require, one DXMT patch per task,
 and the device then reports 6.8: spec `docs/superpowers/specs/2026-10-10-dxmt-dxil-sm68-design.md`, plan
@@ -2318,13 +2318,14 @@ release or tag until the last task records the new one.
     1.4-2.5 s).
   - 64-bit atomics: not measured on M1 (Apple7): the 14a-14c groups ran on an M5 Pro only; M1 is not claimed until
     they run on one.
-- **Translator key:** `d6863ecc…` → `17e0b1ee78600f14bbfbc638a0a9193511e2d71611d3fb655e2f2927fb306b3f`.
-- **Corpus, 0039 → 0058:** 0058 is the last patch that touches `src/airconv`; 0059 reports caps only.
+- **Translator key:** `d6863ecc…` → `c588d3fc4ca5bf64ef6f202ba6d5aa9eae99189996738866942dfb39dfe274b5` (with 0060; it was
+  `17e0b1ee…` at 0059).
+- **Corpus, 0039 → 0060:** 0059 reports caps only, and 0060 touches `src/airconv` again.
   - SMITE 2: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 6 changed, 11095 unchanged`. These are the six pixel
     shaders the per-task bullets above explain.
   - DXBC: `2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`.
-- **Final tree** (milestone 3 rerun on DXMT 0059): `dxmt-check: all passed` twice, 369 `ok` (x64 lane) and 359 `ok`
-  (ARM64EC lane), 0 `FAIL`. `make test`: 290 passed.
+- **Final tree** (DXMT 0060, after the final review's fix): `dxmt-check: all passed` twice, 373 `ok` (x64 lane) and 363
+  `ok` (ARM64EC lane), 0 `FAIL`. `make test`: 320 passed. Milestone 3, on 0059, had 369 and 359 `ok` and 290 tests.
 - **What rests on offline translation or has no row:**
   - Op 109 is dropped (no HLSL intrinsic emits it).
   - Op 75 and the pixel-shader `SampleCmpBias`/`Grad` lowering are checked offline only, so OPTIONS21's comparison flag
@@ -3161,6 +3162,27 @@ release or tag until the last task records the new one.
     not our DXMT), which reported `fence-order 1 0` and stopped there; the rerun passed, `dxmt-check: all passed` twice
     (728 `ok`). `make test`: 290 passed.
 
+- **0060 (`airconv: Let a simdgroup with no live lane run wave ops over its helpers.`):** the final review's one
+  finding graded up, by effect (Important: a GPU hang).
+  - **The bug.** A pixel shader without `[WaveOpsIncludeHelperLanes]` masked its wave operations to the non-helper
+    lanes (0041). In a waterfall loop, once the covered lanes had left, only helper lanes remained, and their mask was
+    empty. WaveReadLaneFirst then read lane 32, WaveActiveMin returned the identity, and the helpers never left the
+    loop.
+  - **The fix.** Such a simdgroup now runs the operation over all its active lanes, as Metal does. Covered lanes'
+    results are unchanged. Spec §3.2 gains the clause.
+  - **The rows.** `helper.pswaterfall` (WaveReadLaneFirst) and `helper.pswaterfallmin` (WaveActiveMin) run a waterfall
+    loop bounded at 1,000 rounds on a triangle whose edges hold helper quads. Each pixel paints red if any lane of its
+    quad hit the bound.
+    - RED, on 0059: both images differed from the all-green image (`312098d48c753442` against `7b66487a6ba982e0`) in
+      both lanes. The helpers did spin on Apple's GPU.
+    - GREEN: both images are the all-green one in both lanes.
+    - `dxil-translate` now counts 54 test shaders, not 52.
+  - **Corpus**, against 0058: `11101/11101 ok, 0 new failures, 0 fixed, 6 changed`. The six pixel shaders with
+    WaveReadLaneFirst each get one more ballot. DXBC: `2/2 ok, 0 changed`.
+  - Fresh fetch: `applied 60/60`, tree-equal.
+  - Not reachable in SMITE 2 or Palworld: their pixel shaders call their one wave op in the entry block, outside any
+    loop.
+
 ### SMITE 2 on DXMT 0040-0059 (2026-10-12)
 
 - **Build:** the maintainer's session on `build/dev/MacNeutron.app` (`make app` at e5aeb43: DXMT 0059 and Proton parity
@@ -3171,6 +3193,8 @@ release or tag until the last task records the new one.
 - **Steam client DLL:** Valve's client 1788652215, from the app's download.
 - **Game log:** not written for this session (no `MACNEUTRON_LOG=1`), so there are no `not supported` or
   `Failed to compile` counts.
-- **Not covered:** a second start (for "no rebuild the second time") and a match.
+- **Not covered:** a second start (for "no rebuild the second time") and a match. Also, 0060 came after this session
+  and changes six of SMITE 2's pixel shaders, those with a wave op. A logged session on a 0060 build (a match and a
+  second start, `MACNEUTRON_LOG=1`) closes spec §8 item 7.
 - **Maintainer's verdict:** "working fine".
 

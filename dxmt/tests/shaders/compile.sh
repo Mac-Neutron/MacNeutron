@@ -74,6 +74,8 @@ dxc -T cs_6_6 -E csmain -Fo sm6x.cs.dxil sm6x.hlsl
 dxc -T ps_6_6 -E psmain -Fo helper.ps.dxil helper.hlsl
 dxc -T ps_6_7 -E psinclude -Fo helper.psinclude.dxil helper.hlsl
 dxc -T ps_6_6 -E psgreen -Fo helper.psgreen.dxil helper.hlsl
+dxc -T ps_6_6 -E pswaterfall -Fo helper.pswaterfall.dxil helper.hlsl
+dxc -T ps_6_6 -E pswaterfallmin -Fo helper.pswaterfallmin.dxil helper.hlsl
 dxc -T vs_6_6 -E vsmain -Fo varying16.vs32.dxil varying16.hlsl
 dxc -T ps_6_6 -E psmain -Fo varying16.ps32.dxil varying16.hlsl
 dxc -T vs_6_6 -E vsmain -D MIN16 -Fo varying16.vs16.dxil varying16.hlsl
