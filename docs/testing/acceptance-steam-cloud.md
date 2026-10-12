@@ -184,6 +184,9 @@ mapping naming `macneutron-proton`, a tool that build doesn't register. Ask firs
 | 2026-10-11 | A4 two names registered | Pass: `Registering tool macneutron-proton,` and `macneutron,` from one vdf, both manifests loaded (D1 holds, no fallback needed). |
 | 2026-10-11 | A7 resolved and downloaded | Pass: Steam mapped 1623730 to `macneutron-proton`; 0 `WinAppDataLocal` resolve failures; 139 `Download OK` for `Pal/Saved/SaveGames/<SID>/…`; no delete, conflict or failure lines for Palworld. |
 | 2026-10-11 | A8 overlap | `steamuser` is a real folder with 140 files (7 worlds, `GlobalPalStorage.sav`, `steam_autocloud.vdf`). Mac-made: 4 files (2 worlds holding only `WorldOption.sav`, `GlobalPalStorage.sav`, and `UserOption.sav` outside the cloud rule). Both sides have only `<SID>/GlobalPalStorage.sav`. Backups in `~/Desktop/steam-cloud-backup`. |
-| | B3 mappings moved, old name dropped | |
-| | B5 merge or conflict | |
+| 2026-10-11 | B1 app installed | Built from `36ef63e` with the tool folder's own `wine.app` (CDHash `0b6b8694…`) and `steam.exe`, so the start-up install left the runtime alone: new launcher, vdf with both names ("MacNeutron", "MacNeutron (old)"). The previous app is in the backup folder. |
+| 2026-10-11 | B2 backups | `users` of the 3 prefixes that have one (1623730, 231350, 2437170). The cloud's `GlobalPalStorage.sav` was copied over the Mac's beforehand (maintainer's choice), so the first launch merges. |
+| 2026-10-11 | B3 mappings moved, old name dropped | 72 legacy mappings → 0 (73 on `macneutron-proton`), 48 `macneutron-native` mappings kept; old name gone from the vdf; Steam registers only `macneutron-proton` and `macneutron-native`. D3 linked 231350 and 2437170 (`steamuser` and the XP links); Palworld's `steamuser` stayed a real folder. |
+| 2026-10-11 | B4 first resolved pass | No delete, conflict or resolve-failure lines for any game; Palworld "File is in sync" ×100. |
+| 2026-10-11 | B5 merge or conflict | `note: merged steamuser into <you> (140 files); the original is now steamuser BACKUP`. Steam's launch pass: "AutoCloud done. Watching 139 files" (was 0). The profile has 9 worlds (7 from the cloud, 2 from the Mac). |
 | | B6 exit pass | |
