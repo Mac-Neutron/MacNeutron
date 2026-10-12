@@ -110,7 +110,15 @@ deleted.
    - Its start-up install rewrites `compatibilitytool.vdf` with both names, displayed as "MacNeutron" and
      "MacNeutron (old)": it keeps the old name because the file still has it.
    - Check: `grep -c '"macneutron"$' "$T/compatibilitytool.vdf"` gives 1.
-2. Note the cloud log position again: `N=$(wc -l < "$S/logs/cloud_log.txt")`.
+2. Note the cloud log position again: `N=$(wc -l < "$S/logs/cloud_log.txt")`. Then back up every prefix's `users`
+   folder. The next step links them all, and Steam's first resolved pass then sees the Mac's saves:
+   ```bash
+   for u in "$S"/steamapps/compatdata/*/pfx/drive_c/users; do
+     id=${u#"$S/steamapps/compatdata/"}; id=${id%%/*}
+     mkdir -p "$B/users-$id" && cp -c -R "$u" "$B/users-$id/"
+   done
+   ```
+   Do the same for each extra library in `$S/steamapps/libraryfolders.vdf`.
 3. In MacNeutron's Games window, "Restart Steam to apply N changes" → **Restart Steam**. Quitting Steam yourself works
    too: the app moves the mappings when Steam quits. After Steam is back, check:
    ```bash
@@ -139,7 +147,7 @@ deleted.
      it in the backup). The next launch merges.
 6. Play briefly, save, and quit. Then check the exit pass:
    ```bash
-   tail -n +$((N+1)) "$S/logs/cloud_log.txt" | grep -E 'AC Launch|Watching|AC Exit|Upload|delet' | R | tail -20
+   tail -n +$((N+1)) "$S/logs/cloud_log.txt" | grep -iE 'AC Launch|Watching|AC Exit|Upload|delet' | R | tail -20
    ```
    Expected:
    - at launch, "Watching" shows more than 0 files;

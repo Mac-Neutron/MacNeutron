@@ -60,7 +60,8 @@ Today nothing syncs, and that is the only reason Palworld's 139 cloud saves (mad
 Called inside `PrefixManager.prepare`'s lock on every launch, after the stamp logic (also on the up-to-date path).
 D3's pass calls it too, in a mode that only adds links and never merges.
 
-1. Find the profile: `drive_c/users/$USER` must be a real directory. If `$USER` is `steamuser`, step 3 is skipped.
+1. Find the profile: `drive_c/users/$USER` must be a real directory. If `$USER` is `steamuser` in any case (APFS
+   ignores case), step 3 is skipped; a folder is never merged into itself (same inode).
    (Implementation check: confirm in Wine 11.19's source that the profile name comes from `$USER`.)
 2. Inside the profile: `Local Settings/Application Data` → `../AppData/Local`, `Application Data` → `AppData/Roaming`,
    `My Documents` → `Documents` (relative links, as Proton makes them).
@@ -69,7 +70,9 @@ D3's pass calls it too, in a mode that only adds links and never merges.
 For each link, depending on what is at the path now:
 
 - **Nothing:** create the parent folders and the link.
-- **A link:** leave it if it points to the right place; otherwise replace it (a link holds no data).
+- **A link:** leave it if it reaches the right folder. Replace it only if it is dangling. A link that reaches another
+  existing folder (the Mac's short name changed, say) is left, logged and counted as a conflict: Steam's watched files
+  resolve through it. (Amended after the final review, I1; this draft said "otherwise replace it".)
 - **A real folder (Steam made it):**
   1. Compare the folder's regular files with the same relative paths under the target. Paths are resolved through
      the target's links, so `steamuser/Local Settings/Application Data/Pal/x` is compared with
@@ -81,8 +84,9 @@ For each link, depending on what is at the path now:
      After this single atomic step the link sits at the path and the old folder is the backup. Nothing is deleted.
 - **A file:** leave it and log.
 
-Step 2 runs before step 3, so the merge of `steamuser` lands in the Vista folders. The log never contains file paths
-below the first folder name, because Palworld's save path contains the SteamID. A volume that isn't APFS is
+Step 2 runs before step 3, so the merge of `steamuser` lands in the Vista folders. Finder's `.DS_Store` and `._*`
+files are ignored by the merge. Logged paths show only Steam's and Wine's root folders and the game's folder, then `…`:
+below it, save paths hold SteamIDs, account IDs and persona names. A volume that isn't APFS is
 skipped with a log line: without clones or `RENAME_SWAP`, the merge can't be made crash-safe.
 
 ### 4.3 Prefix guard
@@ -90,7 +94,9 @@ skipped with a log line: without clones or `RENAME_SWAP`, the merge can't be mad
 In `prepare`: a `pfx` with no `version` stamp and no `pfx/user.reg` was seeded by Steam. Build into it
 (`wineboot -u` in place, then the usual steps), and never rename it to `pfx.rosetta` or carry from it. After the
 rename, this is the normal first launch of any newly installed Windows game. Proton commit 1846fe4 handles the same
-case.
+case. A Rosetta-era prefix (it has `user.reg`) is still renamed, but a real `users/steamuser` beside its `crossover`
+profile is Steam's: it moves straight back into the new `pfx` for §4.2's merge, and the rename is undone if it can't
+(final review, I3).
 
 ### 4.4 Environment
 
