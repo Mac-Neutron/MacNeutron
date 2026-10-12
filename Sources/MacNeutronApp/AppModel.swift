@@ -61,6 +61,9 @@ final class AppModel {
     private let launcherOverride: URL?
     private let installer: @Sendable (URL, ToolLayout, URL, Bool) throws -> RuntimeInstallOutcome
     private let identity: @Sendable (URL) -> String?
+    /// Valve's signed Windows client files in `layout.valveCache` (`ValveClient`).
+    let valveClient: ValveClient
+    private let appVersion: String
 
     private(set) var runtime: InstalledRuntime?
     /// Setup's runtime text while installing, deferred or failed; nil once installed.
@@ -85,6 +88,13 @@ final class AppModel {
         default: readStatus
         }
     }
+    /// The version of Valve's files the launcher puts in prefixes; nil when none is downloaded.
+    private(set) var valveVersion: String?
+    /// "Downloading…" while working, the failure after one; nil otherwise.
+    private(set) var valveNotice: String?
+    private(set) var valveUpdating = false
+    /// The automatic check a successful runtime install starts.
+    private(set) var valveTask: Task<Void, Never>?
     private(set) var games: [GameRow] = []
     private(set) var orphans: [OrphanPrefix] = []
     private(set) var appInfoError: String?
@@ -104,7 +114,8 @@ final class AppModel {
          installer: @escaping @Sendable (URL, ToolLayout, URL, Bool) throws -> RuntimeInstallOutcome = {
              try RuntimeInstaller.install(wineApp: $0, layout: $1, launcherBinary: $2, force: $3)
          },
-         identity: @escaping @Sendable (URL) -> String? = CodeIdentity.of) {
+         identity: @escaping @Sendable (URL) -> String? = CodeIdentity.of,
+         valveClient: ValveClient? = nil, appVersion: String = AppModel.appVersion) {
         self.steam = steam
         self.layout = layout
         self.mode = mode
@@ -114,6 +125,9 @@ final class AppModel {
         self.launcherOverride = launcherBinary
         self.installer = installer
         self.identity = identity
+        self.valveClient = valveClient ?? ValveClient(cache: layout.valveCache)
+        self.appVersion = appVersion
+        valveVersion = ValveClient.installed(in: self.valveClient.cache)?.version
         // Read now, not in the first refresh: the scene decides at launch whether to open the setup window.
         runtime = InstalledRuntime.read(layout, identity: identity)
         Task { await refresh() }
@@ -123,6 +137,11 @@ final class AppModel {
 
     var setupComplete: Bool { runtime != nil && mode.isWanted }
     var steamInstalled: Bool { steam.isInstalled }
+
+    /// `CFBundleVersion`: the automatic Valve check runs once per app version (spec D4).
+    nonisolated static var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "dev"
+    }
 
     nonisolated static var bundledWineApp: URL? {
         let app = Bundle.main.bundleURL.appending(path: "Contents/Helpers/wine.app", directoryHint: .isDirectory)
@@ -215,6 +234,11 @@ final class AppModel {
         }
         generation += 1  // a refresh that read the folder mid-install would put the old runtime back
         runtime = InstalledRuntime.read(layout, identity: identity)
+        // D2: no question asked; the files come from Valve's CDN to this Mac, as Linux Steam's legacycompat does for
+        // Proton (macOS Steam has no legacycompat). Only for a runtime that can use them (Wine 0036).
+        if case .success = result, layout.supportsGenuineSteamclient {
+            valveTask = Task { [weak self] in await self?.updateValveClient(force: false) }
+        }
         await refresh()
     }
 
@@ -225,6 +249,33 @@ final class AppModel {
         } else if !installFailed, FileManager.default.fileExists(atPath: layout.runtimeDamagedMarker.path(percentEncoded: false)) {
             await installRuntime()
         }
+    }
+
+    // MARK: Valve
+
+    /// The automatic check (`force` false: once per app version, never after Remove) or Settings' Download again. One
+    /// at a time; a failure shows in Settings only, and launches keep lsteamclient or the last good copy.
+    func updateValveClient(force: Bool) async {
+        guard !valveUpdating else { return }
+        valveUpdating = true
+        valveNotice = "Downloading Steam components from Valve…"
+        let (client, version) = (valveClient, appVersion)
+        let failure: (any Error)? = await Task.detached {
+            do {
+                _ = force ? try await client.update(force: true) : try await client.updateIfNeeded(appVersion: version)
+                return nil
+            } catch { return error }
+        }.value
+        valveUpdating = false
+        valveNotice = failure.map { ($0 as? ValveClientError)?.description ?? $0.localizedDescription }
+        valveVersion = ValveClient.installed(in: valveClient.cache)?.version
+    }
+
+    /// Settings' Remove (spec D5): prefixes get lsteamclient from the next launch, and nothing is downloaded again until
+    /// Download again.
+    func removeValveClient() {
+        do { try valveClient.remove() } catch { valveNotice = error.localizedDescription }
+        valveVersion = ValveClient.installed(in: valveClient.cache)?.version
     }
 
     // MARK: Setup

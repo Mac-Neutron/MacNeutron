@@ -21,6 +21,16 @@ struct SettingsView: View {
                     .disabled(model.installing)
             }
             if let notice = model.runtimeNotice { Text(notice).foregroundStyle(.secondary).textSelection(.enabled) }
+            LabeledContent("Steam components from Valve") {
+                HStack {
+                    Text(model.valveVersion.map { "Version \($0)" } ?? "Not downloaded").foregroundStyle(.secondary)
+                    Button("Download again") { Task { await model.updateValveClient(force: true) } }
+                        .disabled(model.valveUpdating)
+                    Button("Remove") { model.removeValveClient() }
+                        .disabled(model.valveVersion == nil || model.valveUpdating)
+                }
+            }
+            if let notice = model.valveNotice { Text(notice).foregroundStyle(.secondary).textSelection(.enabled) }
             LabeledContent("Setup") {
                 Button("Run setup again") { show("setup", with: openWindow) }
             }

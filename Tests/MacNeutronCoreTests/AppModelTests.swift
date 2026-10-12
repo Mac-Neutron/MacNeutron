@@ -284,3 +284,80 @@ private func makeModel(steamRunning: Bool = false,
     await model.installRuntime()
     #expect(model.status == .restartNeeded(1))
 }
+
+// MARK: Valve's Steam components (spec D1, D2, D4, D5)
+
+/// A tool folder whose runtime has Wine 0036's marker.
+private func supportingLayout() throws -> ToolLayout {
+    let layout = try makeToolLayout()
+    try write("0036\n", to: layout.wineApp.appending(path: "Contents/Resources/genuine-steamclient"))
+    return layout
+}
+
+/// One app start: the bundled runtime is already installed (`.unchanged`), then the automatic Valve check runs.
+@MainActor
+private func makeValveModel(layout: ToolLayout, cdn: FakeValveCDN, appVersion: String = "1.0") async throws -> AppModel {
+    let (mode, _) = try makeMode()
+    let model = AppModel(steam: mode.steam, layout: layout, mode: mode, store: GameSettingsStore(directory: try makeTempDir()),
+                         loginItem: FakeLoginItem(statusAfterRegister: .enabled).item,
+                         wineAppSource: try makeToolLayout().wineApp, installer: ScriptedInstaller(.unchanged).install,
+                         identity: { _ in testIdentity },
+                         valveClient: ValveClient(cache: layout.valveCache, fetch: cdn.fetch), appVersion: appVersion)
+    await model.installTask?.value
+    await model.valveTask?.value
+    return model
+}
+
+@MainActor @Test func startupDownloadsValvesFilesWhenTheRuntimeSupportsThem() async throws {
+    let cdn = try FakeValveCDN(dir: try makeTempDir())
+    let model = try await makeValveModel(layout: try supportingLayout(), cdn: cdn)
+    #expect(model.valveVersion == "1788652215")
+    #expect(model.valveNotice == nil)
+    #expect(cdn.requests == [ValveClient.manifestURL, cdn.packageURL])
+}
+
+@MainActor @Test func noMarkerNoDownload() async throws {
+    let cdn = try FakeValveCDN(dir: try makeTempDir())
+    let model = try await makeValveModel(layout: try makeToolLayout(), cdn: cdn)
+    #expect(cdn.requests.isEmpty)
+    #expect(model.valveVersion == nil)
+}
+
+@MainActor @Test func valveFailureLeavesTheRuntimeInstalled() async throws {
+    // Offline at app start: the runtime is fine, launches use lsteamclient, the next app start retries.
+    let cdn = try FakeValveCDN(dir: try makeTempDir())
+    cdn.offline = true
+    let layout = try supportingLayout()
+    let model = try await makeValveModel(layout: layout, cdn: cdn)
+    #expect(model.runtime != nil)
+    #expect(model.runtimeNotice == nil)
+    #expect(model.errorMessage == nil)
+    #expect(model.valveVersion == nil)
+    #expect(model.valveNotice != nil)
+    cdn.offline = false
+    let next = try await makeValveModel(layout: layout, cdn: cdn)
+    #expect(next.valveVersion == "1788652215")
+}
+
+@MainActor @Test func removeSticksAcrossAppStarts() async throws {
+    let cdn = try FakeValveCDN(dir: try makeTempDir())
+    let layout = try supportingLayout()
+    let model = try await makeValveModel(layout: layout, cdn: cdn)
+    model.removeValveClient()
+    #expect(model.valveVersion == nil)
+    let next = try await makeValveModel(layout: layout, cdn: cdn, appVersion: "2.0")
+    #expect(cdn.requests.count == 2)
+    #expect(next.valveVersion == nil)
+    await next.updateValveClient(force: true)
+    #expect(next.valveVersion == "1788652215")
+}
+
+@MainActor @Test func aNewAppVersionChecksAgain() async throws {
+    let cdn = try FakeValveCDN(dir: try makeTempDir())
+    let layout = try supportingLayout()
+    _ = try await makeValveModel(layout: layout, cdn: cdn, appVersion: "1")
+    _ = try await makeValveModel(layout: layout, cdn: cdn, appVersion: "1")
+    #expect(cdn.requests.count == 2)
+    _ = try await makeValveModel(layout: layout, cdn: cdn, appVersion: "2")
+    #expect(cdn.requests == [ValveClient.manifestURL, cdn.packageURL, ValveClient.manifestURL])
+}
