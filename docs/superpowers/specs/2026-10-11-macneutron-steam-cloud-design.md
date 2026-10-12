@@ -110,6 +110,39 @@ profile is Steam's: it moves straight back into the new `pfx` for §4.2's merge,
 - **Runs as** (`GamesView`): changing a dual-platform game's version first asks: "Steam Cloud keeps this game's saves
   in a different place for each version. Back up your saves before switching." with buttons Switch and Cancel.
 
+### 4.6 Palworld: Mac-made saves before the first resolved sync
+
+Palworld now starts under MacNeutron, so the maintainer's new Mac game writes saves to
+`compatdata/1623730/pfx/drive_c/users/$USER/AppData/Local/Pal/Saved/SaveGames/<SID>/`. Nothing syncs them until the
+rename ships. The cloud meanwhile holds 139 saves from another machine. When Steam first resolves the path, both sets
+meet.
+
+- **Which files collide.**
+  - Worlds live in their own GUID folders (`<SID>/<world>/Level.sav`, `LocalData.sav`, `Players/…`, `backup/…`), so a
+    world started on the Mac never shares a path with a cloud world.
+  - The expected collisions are the account-level files under `<SID>/` itself, such as `GlobalPalStorage.sav`.
+  - Protocol step A8 lists the actual overlap; this list is an expectation until then.
+- **The path the design takes.**
+  - Phase A runs before the migration, so Steam's first resolved pass finds no local files at its path (the XP-name
+    path under a `steamuser` that doesn't exist yet). It downloads the 139 into a real `steamuser` tree, and there's
+    no Steam dialog.
+  - The D3 pass then skips Palworld, because `steamuser` is a real folder.
+  - The first launch's merge (§4.2) finds the colliding files different, so D2 applies: nothing changes, the player is
+    notified, and the game runs on the Mac's saves. The cloud files stay untouched, so Steam neither deletes nor
+    uploads anything.
+- **Resolution (the player's choice, per colliding file).**
+  - First, both trees are backed up (steps A2 and A8).
+  - Then copy the chosen version over the other one, so the two copies are identical. The next launch merges cleanly.
+  - If the Mac's copy wins, Steam uploads it at the exit pass. If the cloud's copy wins, there is nothing to upload.
+  - A file Steam downloaded is never deleted or moved out of the tree: at the next launch Steam would take that as a
+    local deletion and delete the cloud copy.
+- **Steam's own conflict dialog.** It shows up when Steam meets local files it never synced next to cloud files. That
+  happens if Palworld is migrated without phase A: the D3 links show Steam the Mac's tree directly.
+  - "Keep local" uploads the Mac's colliding files over the cloud's.
+  - "Keep cloud" downloads the cloud's over the Mac's.
+  - Either way, that file's other version survives only in the backup.
+  - The protocol says: close the dialog without choosing (the launch is cancelled), back up both trees, then decide.
+
 ## 5. How the hazards are avoided
 
 | Hazard | Handling |
@@ -119,6 +152,7 @@ profile is Steam's: it moves straight back into the new `pfx` for §4.2's merge,
 | Mapping to a tool Steam doesn't know | The old name stays registered until no mapping uses it (§4.1). |
 | "Leftover data" deleting the only copy of a save | Warning and confirmation (§4.5). |
 | Switching a dual-platform game's version | Warning (§4.5). |
+| Saves made on the Mac before the first resolved sync (Palworld) | Phase A before the migration, so a collision is a D2 conflict rather than Steam's dialog; backups first; resolved by making both copies identical, never by moving a downloaded file (§4.6). |
 
 ## 6. Tests (`make build test`)
 
@@ -145,7 +179,8 @@ profile is Steam's: it moves straight back into the new `pfx` for §4.2's merge,
 **Phase A, before any code changes (checks D1 and the core claim on Palworld only):**
 
 1. Quit MacNeutron.app and keep it closed through phase A: on every Steam quit, it would put Palworld's mapping back.
-   Quit Steam. Back up `config/config.vdf` and the tool's `compatibilitytool.vdf`.
+   Quit Steam. Back up `config/config.vdf`, the tool's `compatibilitytool.vdf`, and the Mac-made Palworld saves
+   (`users/$USER/AppData/Local/Pal`, §4.6).
 2. Add a second entry, `macneutron-proton` (display "MacNeutron (cloud test)"), to
    `MacNeutron/compatibilitytools.d/macneutron/compatibilitytool.vdf`.
 3. Start Steam.

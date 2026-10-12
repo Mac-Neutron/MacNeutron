@@ -29,9 +29,11 @@ R() { sed -E -e "s#$HOME#~#g" -e 's/7656119[0-9]+/<SID>/g' -e 's/\[U:1:[0-9]+\]/
    - at start-up, the current build rewrites `compatibilitytool.vdf` without the test entry.
 
    Check: `pgrep -x steam_osx; pgrep -x MacNeutron` prints nothing.
-2. Back up:
+2. Back up the config files and the saves you made on the Mac. Do this right before step 3: it is the last moment no
+   resolved sync has seen them (spec §4.6).
    ```bash
    mkdir -p "$B" && cp -c "$S/config/config.vdf" "$T/compatibilitytool.vdf" "$S/logs/cloud_log.txt" "$B/"
+   cp -c -R "$P/drive_c/users/$USER/AppData/Local/Pal" "$B/pal-mac-made"
    ```
 3. Register the second name from the same folder. This is the file the new build writes, except the test display
    name:
@@ -90,7 +92,16 @@ R() { sed -E -e "s#$HOME#~#g" -e 's/7656119[0-9]+/<SID>/g' -e 's/\[U:1:[0-9]+\]/
    ```
    Expected:
    - Steam's download under `drive_c/users/steamuser/Local Settings/Application Data/Pal/Saved/SaveGames/<SID>/…`;
-   - your earlier local sessions under `drive_c/users/<you>/AppData/Local/Pal/…`.
+   - your Mac-made saves under `drive_c/users/<you>/AppData/Local/Pal/…`.
+
+   Then list the files both sides have (these are the step B5 conflict), with names only and IDs hidden:
+   ```bash
+   L="$P/drive_c/users/$USER/AppData/Local/Pal/Saved/SaveGames"
+   C="$P/drive_c/users/steamuser/Local Settings/Application Data/Pal/Saved/SaveGames"
+   comm -12 <(cd "$L" && find . -type f | sort) <(cd "$C" && find . -type f | sort) | R
+   ```
+   Expect account-level files such as `./<SID>/GlobalPalStorage.sav`; world folders differ by GUID. For each file
+   listed, decide now which version you want to keep.
 9. Stop here until phase B. Don't play Palworld, and don't reopen the current MacNeutron.app.
 
 **Back out of phase A:**
@@ -142,9 +153,18 @@ deleted.
    ```
    - **Merged:** `note: merged steamuser into <you> (N files); the original is now steamuser BACKUP`. Palworld lists
      both the cloud worlds and the local ones.
-   - **Conflict:** `note: kept steamuser: N of its files differ …`, plus a notification. Nothing was changed. Quit the
-     game, compare the two trees in `$B/palworld-users`, and move the copy you don't want out of `drive_c/users` (keep
-     it in the backup). The next launch merges.
+   - **Conflict** (expected when step A8 listed files): `note: kept steamuser: N of its files differ …`, plus a
+     notification. Nothing was changed, and the game runs on the Mac's saves only. Quit the game.
+     - For each listed file, copy the version you chose over the other one, so both are identical. Both are already in
+       `$B`. For example, to keep the cloud's `GlobalPalStorage.sav`:
+       ```bash
+       cp -p "$C/<SID>/GlobalPalStorage.sav" "$L/<SID>/GlobalPalStorage.sav"
+       ```
+       (Type the real folder name. To keep the Mac's version instead, copy the other way.)
+     - Never delete or move a file out of `$C`: Steam would take it as deleted on this Mac and delete the cloud copy.
+     - Launch again: the merge goes through, and Palworld lists the Mac's worlds and the cloud's.
+   - **Steam shows a "Cloud Sync Conflict" dialog instead:** close it without choosing (the launch is cancelled) and
+     send the redacted cloud log. Choosing "local" or "cloud" overwrites the other side's colliding files (spec §4.6).
 6. Play briefly, save, and quit. Then check the exit pass:
    ```bash
    tail -n +$((N+1)) "$S/logs/cloud_log.txt" | grep -iE 'AC Launch|Watching|AC Exit|Upload|delet' | R | tail -20
