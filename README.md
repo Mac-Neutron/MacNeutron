@@ -78,7 +78,7 @@ Start launch options with `/usr/bin/env`. macOS Steam runs them without a shell,
 | `/usr/bin/env DXMT_MAX_ANISOTROPY=0\|4\|8\|16 %command%` | Anisotropic filtering on the game's trilinear textures: 16x by default, `0` keeps the game's own (also "Anisotropic filtering" in the Games window) |
 | `/usr/bin/env MACNEUTRON_POST_AA=cmaa2 %command%` | Anti-alias each frame with Intel's CMAA2 (for games without their own anti-aliasing; also "Anti-aliasing (post)" in the Games window) |
 | `/usr/bin/env MACNEUTRON_XESS=1 %command%` | Load the game's own Intel XeSS (for comparison: on Apple GPUs it is many times slower, SMITE 2 ~4 FPS). By default XeSS on D3D12 runs on MetalFX's upscaler |
-| `/usr/bin/env DXMT_D3D12_SM6=0 %command%` | On DXMT, report Shader Model 5.1 to a Direct3D 12 game instead of 6.7, with the 0.3 answers: feature level 11_1, binding tier 2, no wave ops or 64-bit atomics (for a game that worked in 0.3 and fails on its Shader Model 6 path) |
+| `/usr/bin/env DXMT_D3D12_SM6=0 %command%` | On DXMT, report Shader Model 5.1 to a Direct3D 12 game instead of 6.8, with the 0.3 answers: feature level 11_1, binding tier 2, no wave ops or 64-bit atomics (for a game that worked in 0.3 and fails on its Shader Model 6 path) |
 | `/usr/bin/env DXMT_D3D12_OVERLAP=1 %command%` | On DXMT, let a Direct3D 12 game's GPU passes overlap between barriers (experimental: not faster on Apple GPUs so far) |
 | `/usr/bin/env MACNEUTRON_PRECACHE=0 %command%` | Don't record the game's pipelines or rebuild them after updates (shader pre-caching) |
 
@@ -89,13 +89,15 @@ Games use DXMT by default, an open-source Direct3D → Metal translator. MacNeut
 in `wine.app/Contents/Resources/DXMT` (`COPYING.LIB`, `LICENSE`, `LICENSE.OLD`), and the fork commit is in its `version` file. The fork's
 changes are AI-assisted and never go to DXMT upstream, per its contribution policy.
 
-DXMT's Direct3D 12 is early, but it translates Shader Model 6 (DXIL) shaders: SMITE 2 (Unreal Engine 5) plays on it. It
-reports Shader Model 6.7, feature level 12_1, resource binding tier 3, wave ops and 64-bit atomics by default, so Unreal
-Engine 5 games start without a launch option. The translator covers vertex, pixel, geometry and compute shaders and the
-operations SMITE 2 uses. Not translated yet: tessellation, mesh and ray-tracing shaders (inline ray queries too), Shader
-Model 6.6 dynamic resources and IsHelperLane, 64-bit atomics, Shader Model 6.7's new operations (QuadAny/QuadAll, raw
-gathers, SampleCmpLevel, writable MSAA textures), wave match and multi-prefix, barycentrics, view instancing and sampler
-feedback; a shader that needs one fails its own pipeline. If a Direct3D 12 game that worked in 0.3 fails now,
+DXMT's Direct3D 12 is early, but it translates Shader Model 6 (DXIL) shaders: SMITE 2 and Palworld (Unreal Engine 5)
+play on it. It reports Shader Model 6.8, feature level 12_1, resource binding tier 3, wave ops and 64-bit atomics by
+default, so Unreal Engine 5 games start without a launch option. The translator covers vertex, pixel, geometry and
+compute shaders, Shader Model 6.6 dynamic resources, float and 64-bit atomics and compute-shader derivatives, and the
+Shader Model 6.5-6.8 wave, quad, barrier, start-location and comparison-sampling operations. Not translated yet:
+tessellation, mesh and ray-tracing shaders (inline ray queries too), append/consume buffers and UAV counters,
+EvaluateAttribute*, clip and cull distances, raw gathers, SampleCmpLevel, writable MSAA textures, barycentrics, view
+instancing, sampler feedback, work graphs and Shader Model 6.9's long vectors; a shader that needs one fails its own
+pipeline. If a Direct3D 12 game that worked in 0.3 fails now,
 `/usr/bin/env DXMT_D3D12_SM6=0 %command%` gives it Shader Model 5.1 again. For a game that doesn't run on DXMT yet, set
 **Graphics: wined3d** for it in the Games window (or use `/usr/bin/env MACNEUTRON_GRAPHICS=wined3d %command%`); it
 covers Direct3D 9-11 only.
