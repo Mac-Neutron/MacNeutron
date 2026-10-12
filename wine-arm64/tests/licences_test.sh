@@ -2,7 +2,8 @@
 # licences_test.sh [--self-test] <wine.app>: every notice the shipped binaries need is in the bundle (ship-base spec §4).
 # Prints MISSING <what> per gap, then PASS or FAIL. Read-only. BUILD_DIR replaces build/ (FEX's External list).
 # --app <MacNeutron.app> (arm64 release spec §7.1, gate R4): the app's own licences (MIT, llvm-mingw's for steam.exe,
-# equal to wine.app's copies, a README pointing into wine.app), then the check above on its Contents/Helpers/wine.app.
+# equal to wine.app's copies, Valve's notice for the parts of steam.exe that follow Proton's steam.c, a README pointing
+# into wine.app and naming Valve's notice), then the check above on its Contents/Helpers/wine.app.
 # --self-test proves it red on copies in $TMPDIR: a licence file deleted (FEX's, MacNeutron's, CMAA2's), NOTICES.md
 # without its FFmpeg section (the bundle has to ship FFmpeg) or its section for Wine's Arm Optimized Routines (Wine
 # patch 0035's msvcrt string routines), an extra FEX external.
@@ -98,11 +99,13 @@ if [ "${1:-}" = --app ]; then
   A="${2:?usage: licences_test.sh --app <MacNeutron.app>}"
   AL="$A/Contents/Resources/licenses"
   abad=0
-  for f in LICENSE LICENSE.TXT COPYING.MinGW-w64-runtime.txt README; do
+  for f in LICENSE LICENSE.TXT COPYING.MinGW-w64-runtime.txt Proton-steam-LICENSE.txt README; do
     [ -s "$AL/$f" ] || { echo "MISSING Contents/Resources/licenses/$f"; abad=1; }
   done
   g -qF 'Contents/Helpers/wine.app/Contents/Resources/licenses/' "$AL/README" 2> /dev/null \
     || { echo "MISSING the README's pointer to Contents/Helpers/wine.app/Contents/Resources/licenses/"; abad=1; }
+  g -qF 'Proton-steam-LICENSE.txt' "$AL/README" 2> /dev/null \
+    || { echo "MISSING the README's entry for Proton-steam-LICENSE.txt (Valve's notice for steam.exe)"; abad=1; }
   for f in LICENSE.TXT COPYING.MinGW-w64-runtime.txt; do  # steam.exe's: the same texts as wine.app's llvm-mingw/
     cmp -s "$AL/$f" "$A/Contents/Helpers/wine.app/Contents/Resources/licenses/llvm-mingw/$f" \
       || { echo "DIFFERENT Contents/Resources/licenses/$f from wine.app's licenses/llvm-mingw/$f"; abad=1; }

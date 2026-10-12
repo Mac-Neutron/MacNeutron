@@ -4,10 +4,42 @@
  *
  * steam_api(64).dll treats Steam as running when HKCU\Software\Valve\Steam\ActiveProcess\pid names a
  * live process, and loads the client DLL named next to it. This writes those values (pointing at the
- * runtime's Steam bridge, which the launcher copies into C:\Program Files (x86)\Steam), runs <program>,
- * answers SteamStub DRM's start check (see answer_drm), waits until no program is left in the prefix
- * (launchers start the real game and quit), clears the pid, and exits with <program>'s exit code.
+ * runtime's Steam bridge, which the launcher copies into C:\Program Files (x86)\Steam) with the rest of
+ * what Proton's steam.exe sets up for a game (register_steam, main), runs <program>, answers Steam's DRM
+ * start check (see answer_drm), waits until no program is left in the prefix (launchers start the real
+ * game and quit), clears the pid, and exits with <program>'s exit code.
  * Spec: docs/superpowers/specs/2026-09-28-macneutron-steam-bridge-design.md §4.2.
+ *
+ * It follows Valve's Proton, steam_helper/steam.c, in much of its behaviour, and find_ack_event and answer_drm
+ * closely, under Proton's notice (also in bridge/Proton-steam-LICENSE.txt):
+ *
+ * Copyright (c) 2015, 2019, 2020, 2021, 2022 Valve Corporation
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice, this
+ * list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ * this list of conditions and the following disclaimer in the documentation and/or
+ * other materials provided with the distribution.
+ *
+ * 3. Neither the name of the copyright holder nor the names of its contributors
+ * may be used to endorse or promote products derived from this software without
+ * specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include <windows.h>
 #include <winternl.h>
@@ -110,10 +142,11 @@ typedef struct { UNICODE_STRING ObjectName, ObjectTypeName; } DIRECTORY_BASIC_IN
 NTSTATUS NTAPI NtOpenDirectoryObject(HANDLE *, ACCESS_MASK, OBJECT_ATTRIBUTES *);
 NTSTATUS NTAPI NtQueryDirectoryObject(HANDLE, void *, ULONG, BOOLEAN, BOOLEAN, ULONG *, ULONG *);
 
-/* SteamStub DRM (Steam's wrapper on many games' exes) has Steam confirm the start: it takes a slot from the
- * SREAM_DIPC_PRODUCE semaphore (Valve's spelling), creates an event named STEAM_START_ACK_EVENT<something>, signals
- * STEAM_DIPC_CONSUME and waits for Steam to set the event. Unanswered, the game stops with "Application load error
- * 3:0000065432". This answers it the way Proton's steam.exe does (steam_helper/steam.c, steam_drm_thread). */
+/* Steam's start channel (DIPC), which Proton's steam.exe answers (steam_helper/steam.c, steam_drm_thread): a DRM-wrapped
+ * game (CEG, the Steam client's start check) takes a slot from the SREAM_DIPC_PRODUCE semaphore (Valve's spelling),
+ * creates an event named STEAM_START_ACK_EVENT<something>, signals STEAM_DIPC_CONSUME and waits for Steam to set the
+ * event. SteamStub 3.x's "Application load error 3:0000065432" is another check: its signature check of
+ * steamclient64.dll, which Wine patch 0036 and Valve's signed DLL answer (MACNEUTRON_STEAMCLIENT64). */
 static HANDLE drm_consume, drm_produce;
 
 /* The game's ack event: its name's suffix isn't known, so look through the session's named objects. */

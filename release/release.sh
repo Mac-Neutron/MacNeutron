@@ -346,6 +346,7 @@ build_app() {
   cp "$STEAM_EXE" "$A/Contents/Resources/steam.exe"
   AL="$A/Contents/Resources/licenses"
   cp "$ROOT/LICENSE" "$AL/LICENSE"
+  cp "$ROOT/bridge/Proton-steam-LICENSE.txt" "$AL/"
   for f in LICENSE.TXT COPYING.MinGW-w64-runtime.txt; do
     cp "$OUT/wine.app/Contents/Resources/licenses/llvm-mingw/$f" "$AL/"
   done
@@ -354,7 +355,8 @@ MacNeutron is under the MIT licence (LICENSE, beside this file).
 
 steam.exe (Contents/Resources/steam.exe), MacNeutron's own Windows-side Steam stub, is built with llvm-mingw and links
 its mingw-w64 runtime: llvm-mingw's licence is LICENSE.TXT and the runtime's notices COPYING.MinGW-w64-runtime.txt,
-beside this file.
+beside this file. Parts of it follow Valve's Proton (steam_helper/steam.c, BSD-3-Clause): Valve's notice is
+Proton-steam-LICENSE.txt, beside this file.
 
 The runtime, Contents/Helpers/wine.app (Wine, FEX, DXMT, FreeType, gnutls, nettle, GMP, FFmpeg, LLVM, lsteamclient
 and MacNeutron's MetalFX presenter), carries every component's licence and the exact sources it is built from in
