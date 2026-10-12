@@ -89,6 +89,16 @@ check_source() {  # check_source <SOURCE> <head>: the release bundle's SOURCE na
   esac
   return $r
 }
+# Valve's Windows client files reach a player's Mac only from Valve: ValveClient downloads them there, as Linux Steam's
+# legacycompat folder holds them for Proton (macOS Steam has none). We never ship them (parity spec A7).
+check_no_valve() {  # check_no_valve <dir>: no file under <dir> has one of their names, in any letter case
+  out=$(find "$1" \( -iname 'steamclient*' -o -iname 'GameOverlayRenderer*' -o -iname 'Steam.dll' -o -iname 'SteamService*' \
+    -o -iname 'tier0_s*' -o -iname 'vstdlib_s*' -o -iname 'gameoverlayui*' -o -iname 'SteamOverlayVulkanLayer*' \) -print) \
+    || { echo "release: can't search $1" >&2; return 1; }
+  [ -n "$out" ] || return 0
+  printf '%s\n' "$out" | sed "s/^/release: /; s/\$/ is one of Valve's files/" >&2
+  return 1
+}
 check_up_to_date() {  # make wine-arm64 has nothing to do: the bundle staged from these trees is current
   out=$(sh "$ROOT/wine-arm64/build.sh" 2>&1) && st=0 || st=$?
   if [ "$st" = 0 ] && printf '%s\n' "$out" | LC_ALL=C /usr/bin/grep -qx 'wine-arm64: up to date'; then return 0; fi
@@ -256,6 +266,16 @@ EOF
   checks "that rejection after stapling (distribution)" distribution "gk" "Unnotarized Developer ID" 1
   checks "a failure with no findings" notary-submission "" "Unnotarized Developer ID" 1
 
+  # Valve's Windows client files (parity spec A7): never in the app.
+  mkdir -p "$T/clean/Contents/Resources/lib"
+  for f in steam.exe lib/lsteamclient.dll lib/lsteamclient.so; do : > "$T/clean/Contents/Resources/$f"; done
+  passes "an app without Valve's files (lsteamclient and our steam.exe are ours)" check_no_valve "$T/clean"
+  for n in steamclient64.dll steamclient.dll GameOverlayRenderer64.dll Steam.dll SteamService.exe bin/SteamService.dll \
+    tier0_s64.dll vstdlib_s64.dll gameoverlayui64.exe SteamOverlayVulkanLayer64.dll STEAMCLIENT64.DLL; do
+    rm -rf "$T/v"; mkdir -p "$(dirname "$T/v/x/$n")"; : > "$T/v/x/$n"
+    refused "Valve's $n in the app" "release: $T/v/x/$n is one of Valve's files" check_no_valve "$T/v"
+  done
+
   if [ $fail = 0 ]; then echo "PASS release self-test"; else echo "FAIL release self-test"; fi
   return $fail
 }
@@ -362,6 +382,7 @@ The runtime, Contents/Helpers/wine.app (Wine, FEX, DXMT, FreeType, gnutls, nettl
 and MacNeutron's MetalFX presenter), carries every component's licence and the exact sources it is built from in
 Contents/Helpers/wine.app/Contents/Resources/licenses/ (README there first; SOURCE names each commit).
 EOF
+  out=$(check_no_valve "$A" 2>&1) || die "A7: $out"
   out=$(build_paths "$A")  # no build path ships (Ruling 20)
   [ -z "$out" ] || die "files naming the repository, build or home folder (the first ten): $(echo "$out" | tr '\n' ' ')"
   sign() { codesign -f -s "$MACNEUTRON_SIGN_IDENTITY" --options runtime --timestamp "$1" > /dev/null 2>&1 \
