@@ -69,12 +69,22 @@ and test honesty. An Opus skeptic then tried to refute each finding.
 
 ## Maintainer rows (build/dev/MacNeutron.app)
 
-1. Quit MacNeutron and open `build/dev/MacNeutron.app`. Settings shows "Version <n>" with no question asked, and
-   `~/Library/Application Support/MacNeutron/Valve/<n>/` holds the six files and `source.txt`. — *pending*
-2. Remove Palworld's `MACNEUTRON_STEAMCLIENT64` launch option and start it. It reaches the title screen, and
-   launcher.log has `steamclient64.dll from Valve's client <n>`. — *pending*
-3. SMITE 2 still runs with the bridge. — *pending*
-4. Settings → Remove, then start Palworld. launcher.log says `is lsteamclient: Valve's isn't downloaded`, and the
-   SteamStub error is back. Then Download again, and Palworld starts again. — *pending*
-5. Steam's mappings: `macneutron-proton` for every Windows game and none for `macneutron` (parity §0, the tool-name
-   regression). — *pending*
+Session of 2026-10-12, on runtime `dev (48329b3d1c02)`, the dev app's `wine.app`. Verdict: "Tested Smite2 and
+Palworld, both seems to be working fine".
+
+1. **Silent download.** After the dev app opened, the first game launch (SMITE 2, 10:52Z) logged
+   `steamclient64.dll from Valve's client 1788652215 (~/Library/Application Support/MacNeutron/Valve/1788652215/…)`.
+   No question was asked. That matches the manifest version of the 2026-10-11 spike. The folder listing and the
+   Settings row were not checked separately. — **passed** (by launcher.log)
+2. **Palworld without the launch option.**
+   - The first launch (10:54Z) still had `MACNEUTRON_STEAMCLIENT64` set to `build/valve`. The override won, as
+     designed. The game log has no `Application load error`, and its seven `not supported` lines are Streamline's
+     plugin notes and a Wine thread-name note.
+   - The second launch (10:55Z to 10:58Z, `exit=0`) had no option. It logged `steamclient64.dll from Valve's client
+     1788652215`, and the maintainer reports it working.
+   - **passed**
+3. **SMITE 2 with Valve's DLL in its prefix:** `exit=0`, working. — **passed**
+4. **Remove, then Download again.** — *not run*
+5. **Steam's mappings** (`config.vdf`, counted by tool name only): 73 `macneutron-proton`, 0 `macneutron`, 48
+   `macneutron-native`. Before, the palfix app had left 73 on `macneutron` and 0 on `macneutron-proton`. The tool-name
+   regression is fixed. — **passed**
