@@ -54,3 +54,16 @@ VSOut vsstart(uint id : SV_VertexID, float2 uv : POSITION, int sv : SV_StartVert
     o.pos.xy += wrong; o.uv += wrong;
     return o;
 }
+// DXIL SM 6.8 plan, Task 14a: 64-bit atomics in a vertex and a pixel shader, through d3d12_triangle.exe --atomic64's
+// root UAV. The pixel shader counts itself with derivatives in play (the helper lanes on the edges must not count)
+// and paints every covered pixel non-black; the vertex shader keeps the largest of its vertices' values, whose high
+// halves tie.
+RWByteAddressBuffer Count : register(u1);
+VSOut vsatomic64(uint id : SV_VertexID, float2 uv : POSITION) {
+    Count.InterlockedMax64(8, (uint64_t)1 << 32 | (0xfffffff0 + id));
+    return vsmain(id, uv);
+}
+float4 psatomic64(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
+    Count.InterlockedAdd64(0, 1);
+    return float4(1, abs(ddx(uv.x)) * 8, 0, 1);
+}

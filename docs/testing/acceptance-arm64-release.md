@@ -2280,7 +2280,7 @@ The translator has no shader model gate: an operation it lacks fails its own pip
   section above); 0039 makes that the default. No other Direct3D 12 game is on record with these answers.
 - Not covered: a Direct3D 12 game that took its Shader Model 5.1 path in 0.3 and now takes its Shader Model 6 one.
 
-## DXIL Shader Model 6.8 (DXMT 0040-0054)
+## DXIL Shader Model 6.8 (DXMT 0040-0057)
 
 2026-10-11. DXMT's DXIL translator learns the Shader Model 6.1-6.8 operations its caps require, one DXMT patch per task,
 and the device then reports 6.8: spec `docs/superpowers/specs/2026-10-10-dxmt-dxil-sm68-design.md`, plan
@@ -2942,3 +2942,73 @@ release or tag until the last task records the new one.
     after `info arm64 mode` (Task 13's 338 plus the `floatatomics` row; the 28/28 row changed in place), 0 `FAIL`; all
     13 `DXIL <group> matches D3DMetal` rows `ok` with D3DMetal running the grown harness. The x64 lane and `make test`
     were not run.
+- **0054 (`airconv, d3d12: 64-bit buffer atomics through a lock table.`):** Shader Model 6.6's 64-bit atomics (ops 78
+  and 79 with the i64 overload) on raw, structured, root-descriptor and heap-indexed buffers (ruling R-A64; spec 3.8;
+  mechanism and measurements from the i64 spike, `.superpowers/brainstorm-sm/i64-spike-result.json`). Metal's own 64-bit
+  atomics are never emitted: the translator wraps each operation in a u32 lock from a per-device table and reads and
+  writes the location's two halves as relaxed 32-bit atomics between `air.atomic.fence(1, 5, 2)` calls. Translator:
+  `kAtomic64Locks = 1 << 16` (`airconv_public.h`); `InitializeDXIL` sets `ShaderInfo::use_atomic64_locks` for an i64 op
+  78 or 79, and `setup_binding_rootsig` then declares the root-argument field `atomic64_locks` (a device `uint *`) last:
+  after the heap fields when the root signature has flags 0xC00 (declared then even in a shader that indexes no heap),
+  else after the last parameter's. `BindingMap::atomic64_locks` is its index and `GetAtomic64Locks` loads it. Each stage
+  of a geometry pipeline binds with its own `ShaderInfo`, so the two stages' flags need no OR (unlike the helper links,
+  which read the geometry shader's `ShaderInfo` for a module holding vertex code too). `Lowering::UnderLock` is the
+  spike's hybrid: one `cmpxchg i32` per lane, the winners run the critical section inside that branch; then, while
+  `air.simd_any(pending)`, the first pending lane (`air.simd_is_first`, reached by pending lanes only) spins, runs it
+  and releases (a relaxed store of 0 after the fence); no spin cap. `Lowering::Atomic64` takes the element pointer as
+  the i32 path forms it and the lock `((a >> 3) ^ (a >> 19)) & 0xFFFF` of its 32-bit address `a`, computes the new value
+  with LLVM's `buildAtomicRMWValue` (signed compares for IMin and IMax), and stores CompareExchange's and CompareStore's
+  only on a 64-bit match. A pixel shader's helper lanes (`air.simd_is_helper_thread`, whatever
+  `[WaveOpsIncludeHelperLanes]` says) and an out-of-bounds element skip the path and read 0. Typed buffers and textures
+  stay refused by name until 0055. Runtime: `MTLD3D12Device::Atomic64Locks()` creates the 256 KiB table on first use
+  (shared storage, zeroed, `RegisterResidencyAndVA` as the null buffers; the device's residency set covers every queue)
+  and `ResetAtomic64Locks()` zeroes it again after a command buffer's `Device error`; every root signature has one more
+  trailing qword, `MTLD3D12RootSignature::LockQwordOffset`, which `SetComputeRootSignature` and
+  `SetGraphicsRootSignature` always write (staging arrays 66 → 67 qwords).
+  - The atomic `load`/`store` form, checked first (Step 1): the i32 raw-buffer RMW temporarily emitted as `load atomic
+    i32 … monotonic, align 4`, `air.atomic.fence(1, 5, 2)` and `store atomic i32 … monotonic, align 4` built a Metal
+    pipeline (`ok atomics.dxil`, its `air=` changed from `762afff838f50a63` to `1288625436a164ed` and back once
+    reverted), so the lock path uses those forms, not the `air.atomic.global.xchg`/`or 0` fallback.
+  - Rows (Lane C, last, in a run of their own: a deadlock costs only its own 120 s watchdog): `DXIL atomic64 matches its
+    CPU reference` (`dxil/atomic64.hlsl`, one group of 64 threads under `root_a64`: every op kind on a thread-owned
+    raw and structured qword, `expect.py`'s `own64`; 64 adds of `V = 0x100000001` on one qword through four views (raw,
+    structured, the root UAV, `ResourceDescriptorHeap[16]`) whose olds are `{0..63} * V`; a UMax whose olds pass the
+    linearizability multiset check; a CAS-counter permutation of `{0..63}`; an out-of-bounds add reading 0; the finals
+    by plain loads after a barrier); `DXIL atomic64c matches its CPU reference` and `… atomic64c-rootheap …`
+    (`dxil/atomic64c.hlsl`, 4,096 threads: a storm of adds on one qword ending at `4096 * V` and 1,024 qwords with four
+    adds each, every old's `k` marked once in a bitmap); `a pixel shader's 64-bit adds count each covered pixel once`
+    and `and a vertex shader's 64-bit max keeps the largest vertex's value` (`d3d12_triangle.exe --atomic64` with
+    `triangle2.psatomic64`/`vsatomic64`: `atomic64 pixels 3475 sum 3475 max 00000001fffffff2`). Lane E: `the 64-bit
+    buffer lock path fences device memory at device scope` (`fences atomic64c.dxil` = `1:2 `). The lock qword sits at
+    qword 7 under `root_a64` (CBV 0, table 1, constants 2-3, root UAV 4, heap bases 5-6; `atomic64` and
+    `atomic64c-rootheap`), at qword 2 under the plain root signature (`atomic64c`) and at qword 3 in `tri-atomic64` (no
+    heap flags). Counts: 30/30 behaviour shaders, 52/52 and `52:52` test shaders, 19 vertex and geometry shaders.
+  - Before the patch: `fail atomic64.dxil DXIL: dx.op.atomicBinOp.i64 (78) not supported`, the same for `atomic64c`,
+    `triangle2.vsatomic64` and `triangle2.psatomic64` (28/30, 50/52); in the gate exactly the ten predicted rows failed
+    (`atomic64 fail 0x80004001` for the three groups, no `atomic64` line for the triangle, the empty fence row and the
+    four counts), and all 13 `DXIL <group> matches D3DMetal` rows stayed `ok` with D3DMetal running the grown harness
+    (the 16 KiB `a64` buffer and its three views at heap slots 16-18).
+  - Single mutations, each on its own build and a full ARM64EC-lane check: the naive loop in `UnderLock` (spin until
+    acquired, then the section) fails all five runtime rows: the triangle's command buffer ends in Metal's `Caused GPU
+    Hang Error` (`atomic64 pixels 4096 sum 0 max 0000000000000000`: the macOS GPU watchdog fired here, which the spike
+    never saw for its spin shapes), `atomic64` prints after a GPU hang with its four-view olds wrong (the runtime's
+    re-zero ran on that `Device error`), and `atomic64c` and `atomic64c-rootheap` are `missing` (`GPU work never
+    finished`); no `d3d12_dxil_exec` survived. Removing both fences fails the fence row only (`got [- ]`): `atomic64c`
+    and `atomic64` still match, so the runtime groups give no fence evidence on this GPU and the Lane E row is the
+    proof (the spike measured 397 to 1,600 bad of 1,600 dispatches without fences, in another loop shape). Removing the
+    helper-lane guard passes every row (`psatomic64`'s `air=` did change, `42d4bc864c82b36f` → `1223c24d557baa6b`):
+    helper lanes' device atomics were inert on this GPU. The guard stays: D3D gives helper lanes no UAV side effects
+    and Metal promises nothing either way.
+  - Limits (spec 3.8, "Not supported"): a 32-bit atomic or a plain store on either half of a qword while a 64-bit
+    atomic runs on it is not atomic with respect to it; a plain 64-bit load may see one half updated; two devices
+    sharing memory have separate tables. A thread storm on one address is slow (the spike: ~600x a native 32-bit
+    atomic). The re-zero after a fault has no row (a GPU fault can't be forced safely), though the naive mutation's
+    hang exercised it. Nothing ran on an M1 (Apple7): its scheduling, which forward progress rests on, is unmeasured.
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged` against 0053, as
+    predicted (no SMITE 2 shader has a 64-bit atomic, and a shader without one declares no lock field); DXBC
+    `corpus-diff: 2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`. Every earlier test shader's `air=` in
+    `dxmt/tests/dxil` and `dxmt/tests/shaders` is unchanged.
+  - Gates (one lane, ruling R-LITE): `dxmt/check.sh` in the ARM64EC lane after the commit and export
+    (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-14a-dxmt-check.log`): `dxmt-check: all passed`, 347 lines `ok`
+    after `info arm64 mode` (Task 14's 339, the six new rows and the two new shaders' `dxil-probe` lines; the four
+    count rows changed in place), 0 `FAIL`. The x64 lane and `make test` were not run.

@@ -36,6 +36,8 @@ dxc -T ps_6_6 -E psmain -Fo triangle2.ps.dxil triangle2.hlsl
 dxc -T gs_6_6 -E gsmain -Fo triangle2.gs.dxil triangle2.hlsl
 dxc -T ps_6_6 -E psheap -Fo triangle2.psheap.dxil triangle2.hlsl
 dxc -T vs_6_8 -E vsstart -Fo triangle2.vsstart.dxil triangle2.hlsl
+dxc -T vs_6_6 -E vsatomic64 -Fo triangle2.vsatomic64.dxil triangle2.hlsl
+dxc -T ps_6_6 -E psatomic64 -Fo triangle2.psatomic64.dxil triangle2.hlsl
 dxc -T vs_6_6 -E vsmain -Fo depth.vs.dxil depth.hlsl
 dxc -T ps_6_6 -E psmain -Fo depth.ps.dxil depth.hlsl
 dxc -T ps_6_6 -E psdepth -Fo depth.psdepth.dxil depth.hlsl
@@ -82,7 +84,7 @@ finish
 ls -l ./*.dxil
 # DXIL translator behaviour groups (dxmt/tests/dxil; see common.hlsli). 16-bit types where the group needs them.
 cd "$HERE/../dxil"
-for g in buffers math transcendental textures groupshared wave atomics quad heap specials mad barriers msad wavematch wavesize32 deriv floatatomics; do dxc -T cs_6_6 -E main -Fo "$g.dxil" "$g.hlsl"; done
+for g in buffers math transcendental textures groupshared wave atomics quad heap specials mad barriers msad wavematch wavesize32 deriv floatatomics atomic64 atomic64c; do dxc -T cs_6_6 -E main -Fo "$g.dxil" "$g.hlsl"; done
 dxc -T cs_6_7 -E main -Fo helperquad.dxil helperquad.hlsl
 dxc -T cs_6_7 -E main -Fo offsets.dxil offsets.hlsl
 dxc -T cs_6_8 -E main -Fo wavesize32r.dxil wavesize32.hlsl

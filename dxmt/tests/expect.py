@@ -220,6 +220,83 @@ def expect_floatatomics(got):
     return per_thread(lambda t: [f32(0.0), f32(t * 0.5 + 0.25), f32(t * 4.0 + 1.0)] * 5)
 
 
+# 64-bit atomics (dxil/atomic64.hlsli): V adds to both halves; q(j) is Q(j).
+M64, V = (1 << 64) - 1, 0x100000001
+
+
+def q(j):
+    return in_word(j) << 32 | in_word(j + 256)
+
+
+def s64(x):  # a 64-bit word as signed
+    return x - (1 << 64) if x >> 63 else x
+
+
+# atomic64.hlsli's thread-owned sequence of kind k on a zeroed location: [o1, o2, o3, o4].
+def own64(k, x0, a, b, c):
+    if k == 9:  # CompareExchange (x0, a), (x0, b), (a, c)
+        x, olds = x0, []
+        for compare, v in ((x0, a), (x0, b), (a, c)):
+            olds.append(x)
+            x = v if x == compare else x
+        return olds + [x]
+    if k == 10:  # CompareStore (x0, a), (x0, b), then Exchange c; o1 = o2 = 0
+        x = x0
+        for compare, v in ((x0, a), (x0, b)):
+            x = v if x == compare else x
+        return [0, 0, x, c]
+    f = {0: lambda o, v: (o + v) & M64, 11: lambda o, v: (o + v) & M64, 1: lambda o, v: o & v, 2: lambda o, v: o | v,
+         3: lambda o, v: o ^ v, 4: lambda o, v: min(o, v, key=s64), 5: lambda o, v: max(o, v, key=s64), 6: min, 7: max,
+         8: lambda o, v: v}[k]
+    x, olds = x0, []
+    for v in (a, b, c):
+        olds.append(x)
+        x = f(x, v)
+    return olds + [x]
+
+
+# The linearizability multiset identity: {init} + {f(old_i, v_i)} == {old_i} + {final}, over 64-bit ints.
+def linearizable(olds, vals, init, final, f):
+    return sorted([init] + [f(o, v) & M64 for o, v in zip(olds, vals)]) == sorted(olds + [final])
+
+
+def word64(got, t, slot):  # thread t's 64-bit value at slots (slot, slot + 1)
+    return got[t * 16 + slot] | got[t * 16 + slot + 1] << 32
+
+
+# Slots 0-7 the thread's own sequence (raw for threads 0-31, structured for 32-63); 8-9, 10-11 and 12 shared qwords of
+# a64 checked as multisets (ValueError names a bad one); 13 an out-of-bounds add (0); 14-15 the finals of threads 0-2.
+def expect_atomic64(got):
+    vals = [(i >> 3) << 32 | (in_word(i) & 0xffff) for i in range(64)]
+    adds = [word64(got, t, 8) for t in range(64)]
+    if sorted(adds) != sorted(k * V & M64 for k in range(64)):
+        raise ValueError("slots 8-9: the four-view adds' olds aren't {0..63} * V")
+    maxes = [word64(got, t, 10) for t in range(64)]
+    if word64(got, 1, 14) != max(vals) or not linearizable(maxes, vals, 0, max(vals), max):
+        raise ValueError("slots 10-11: the UMax olds aren't linearizable")
+    if sorted(got[t * 16 + 12] for t in range(64)) != list(range(64)):
+        raise ValueError("slot 12: the CAS-counter tickets aren't {0..63}")
+
+    def slots(t):
+        k = t % 12
+        x0, a, b, c = (0xffffffff, 1, 0xffffffff, V) if k == 11 else (q(t), q(t + 64), q(t + 128), q(t + 192))
+        words = []
+        for o in own64(k, x0, a, b, c):
+            words += [o & 0xffffffff, o >> 32]
+        finals = {0: [0x40, 0x40], 1: [max(vals) & 0xffffffff, max(vals) >> 32], 2: [0x40, 0]}.get(t, [0, 0])
+        return words + [got[t * 16 + 8], got[t * 16 + 9], got[t * 16 + 10], got[t * 16 + 11], got[t * 16 + 12], 0] + finals
+    return per_thread(slots)
+
+
+# 4,096 adds of V on Out's qword 0 (words 0-1: 4096 * V) and four on each of 1,024 qwords of a64; every old's k marked
+# once in Out's bitmaps (words 128-383 all ones), no malformed old (word 2).
+def expect_atomic64c(got):
+    return [0x1000, 0x1000] + [0] * 126 + [0xffffffff] * 256 + [0] * 640
+
+
+expect_atomic64c_rootheap = expect_atomic64c
+
+
 def main(path, group):
     for line in open(path, encoding="utf-8", errors="replace"):
         parts = line.split()
@@ -232,7 +309,11 @@ def main(path, group):
             print(f"{group} ok with {len(parts) - 3} words")
             return 1
         got = [int(x, 16) for x in parts[3:]]
-        want = globals()["expect_" + group.replace("-", "_")](got)
+        try:
+            want = globals()["expect_" + group.replace("-", "_")](got)
+        except ValueError as e:
+            print(group, e)
+            return 1
         for i, (g, w) in enumerate(zip(got, want)):
             if w is not None and g != w:
                 print(f"{group} thread {i // 16} slot {i % 16}: got {g:08x} want {w:08x}")

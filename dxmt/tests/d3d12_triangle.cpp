@@ -1,9 +1,12 @@
 // Draws dxmt/tests/shaders/triangle2.hlsl offscreen through D3D12 and prints the result (DXIL translator plan, Task 3):
-//   d3d12_triangle.exe <vs.dxil> <ps.dxil> [gs.dxil] [--heap] [--start <vertex> <instance>]
+//   d3d12_triangle.exe <vs.dxil> <ps.dxil> [gs.dxil] [--heap] [--start <vertex> <instance>] [--atomic64]
 // --heap (DXIL SM 6.8 plan, Task 10): root signature flags 0xC00 (both heaps directly indexed), and a shader-visible
 // sampler heap of one linear clamp sampler bound beside the view heap.
 // --start (Task 12): the corners sit at vertex <vertex> of the vertex buffer, drawn with DrawInstanced(3, 1, <vertex>,
 // <instance>).
+// --atomic64 (Task 14a): a root UAV at u1 (visibility all; no heap flags, so the lock qword follows it: qword 3) bound
+// to a zeroed 16-byte buffer, and after the draw "atomic64 pixels <n> sum <s> max <16 hex>": n the pixels that aren't
+// the clear colour, s the buffer's first qword, max its second.
 // Prints "triangle ok <FNV-1a 64 of all pixels> <8 sampled pixels>" or "triangle fail 0x<hr>". check.sh compares the
 // pixels between our DXMT and D3DMetal.
 #define WIDL_EXPLICIT_AGGREGATE_RETURNS  // D3D12 methods that return structs: the MSVC ABI under mingw
@@ -63,14 +66,15 @@ static void Barrier(ID3D12GraphicsCommandList *list, ID3D12Resource *r, D3D12_RE
 int main(int argc, char **argv) {
     int n = 1;  // the shaders: the arguments before the first -- option
     while (n < argc && strncmp(argv[n], "--", 2)) n++;
-    bool heaps = false;
+    bool heaps = false, atomic64 = false;
     UINT start_vertex = 0, start_instance = 0;
     for (int i = n; i < argc; i++)
         if (!strcmp(argv[i], "--heap")) heaps = true;
         else if (!strcmp(argv[i], "--start") && i + 2 < argc) start_vertex = atoi(argv[++i]), start_instance = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--atomic64")) atomic64 = true;
         else n = 0;  // an unknown option: the usage line
     if (n != 3 && n != 4) {
-        printf("usage: d3d12_triangle.exe <vs.dxil> <ps.dxil> [gs.dxil] [--heap] [--start <vertex> <instance>]\n");
+        printf("usage: d3d12_triangle.exe <vs.dxil> <ps.dxil> [gs.dxil] [--heap] [--start <vertex> <instance>] [--atomic64]\n");
         return 2;
     }
     std::vector<char> vs = load(argv[1]), ps = load(argv[2]), gs = n == 4 ? load(argv[3]) : std::vector<char>();
@@ -84,17 +88,18 @@ int main(int argc, char **argv) {
     CHECK(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, __uuidof(ID3D12GraphicsCommandList), (void **)&list));
     CHECK(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void **)&fence));
 
-    // Root signature: b0 root CBV, a table with t0, static point sampler s0.
+    // Root signature: b0 root CBV, a table with t0, static point sampler s0; --atomic64: a root UAV at u1.
     D3D12_DESCRIPTOR_RANGE range = {D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, 0};
-    D3D12_ROOT_PARAMETER params[2] = {};
+    D3D12_ROOT_PARAMETER params[3] = {};
     params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     params[1].DescriptorTable.NumDescriptorRanges = 1; params[1].DescriptorTable.pDescriptorRanges = &range;
+    params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV; params[2].Descriptor.ShaderRegister = 1;
     D3D12_STATIC_SAMPLER_DESC sampler = {};
     sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
     sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
     sampler.MaxLOD = D3D12_FLOAT32_MAX;
-    D3D12_ROOT_SIGNATURE_DESC rd = {2, params, 1, &sampler, (D3D12_ROOT_SIGNATURE_FLAGS)(
+    D3D12_ROOT_SIGNATURE_DESC rd = {atomic64 ? 3u : 2u, params, 1, &sampler, (D3D12_ROOT_SIGNATURE_FLAGS)(
         D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | (heaps ? 0xC00 : 0))};  // llvm-mingw lacks their names
     ID3DBlob *blob = nullptr, *error = nullptr;
     CHECK(D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
@@ -147,6 +152,16 @@ int main(int argc, char **argv) {
     src.PlacedFootprint.Footprint = {DXGI_FORMAT_R8G8B8A8_UNORM, 2, 2, 1, 256};
     list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
     Barrier(list, tex, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    // --atomic64: Count, 16 bytes zeroed by a copy from `up`'s zeros (bytes 16-31).
+    D3D12_RESOURCE_DESC count_desc = BufferDesc(16);
+    count_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    ID3D12Resource *count = nullptr, *count_readback = nullptr;
+    if (atomic64) {
+        count = Resource(D3D12_HEAP_TYPE_DEFAULT, count_desc, D3D12_RESOURCE_STATE_COPY_DEST);
+        count_readback = Resource(D3D12_HEAP_TYPE_READBACK, BufferDesc(16), D3D12_RESOURCE_STATE_COPY_DEST);
+        list->CopyBufferRegion(count, 0, up, 16, 16);
+        Barrier(list, count, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    }
 
     ID3D12DescriptorHeap *srv_heap, *rtv_heap;
     D3D12_DESCRIPTOR_HEAP_DESC hd = {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
@@ -181,6 +196,8 @@ int main(int argc, char **argv) {
     list->SetDescriptorHeaps(heaps ? 2 : 1, bound);
     list->SetGraphicsRootConstantBufferView(0, cbuf->GetGPUVirtualAddress());
     list->SetGraphicsRootDescriptorTable(1, srv_heap->GetGPUDescriptorHandleForHeapStart());
+    if (atomic64)
+        list->SetGraphicsRootUnorderedAccessView(2, count->GetGPUVirtualAddress());
     list->SetPipelineState(pso);
     list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     list->IASetVertexBuffers(0, 1, &vbv);
@@ -190,6 +207,10 @@ int main(int argc, char **argv) {
     D3D12_TEXTURE_COPY_LOCATION to = {readback, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT};
     to.PlacedFootprint.Footprint = {DXGI_FORMAT_R8G8B8A8_UNORM, size, size, 1, 256};
     list->CopyTextureRegion(&to, 0, 0, 0, &from, nullptr);
+    if (atomic64) {
+        Barrier(list, count, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        list->CopyBufferRegion(count_readback, 0, count, 0, 16);
+    }
     CHECK(list->Close());
     ID3D12CommandList *lists[] = {list};
     queue->ExecuteCommandLists(1, lists);
@@ -209,6 +230,14 @@ int main(int argc, char **argv) {
     printf("triangle ok %016llx", (unsigned long long)hash);
     for (auto &xy : at) { uint32_t px; memcpy(&px, &pixels[xy[1] * 256 + xy[0] * 4], 4); printf(" %08x", px); }
     printf("\n");
+    if (atomic64) {
+        unsigned n = 0;
+        for (UINT y = 0; y < size; y++)
+            for (UINT x = 0; x < size; x++) { uint32_t px; memcpy(&px, &pixels[y * 256 + x * 4], 4); n += px != 0xff000000; }
+        uint64_t q[2]; D3D12_RANGE sixteen = {0, 16}; void *c;
+        CHECK(count_readback->Map(0, &sixteen, &c)); memcpy(q, c, 16); count_readback->Unmap(0, &none);
+        printf("atomic64 pixels %u sum %llu max %016llx\n", n, (unsigned long long)q[0], (unsigned long long)q[1]);
+    }
     readback->Unmap(0, &none);
     return 0;
 }

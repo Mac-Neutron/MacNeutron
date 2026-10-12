@@ -635,6 +635,24 @@ expect "and draws as D3DMetal" "$(same_pixels "$WORK/gs-after.txt" "$WORK/trigs-
 CACHE="$WORK/cache/threads"
 expect "pipelines created on 8 threads at once replay whole" \
   "$(replay threads-replay "$WORK/rec-threads/d3d12_dxil_exec.exe.pipelines" | grep -cE '^replay: [1-9][0-9]* pipelines .*, 0 failed, 0 bad records$' || true)" 1
+unset CACHE
+# 64-bit atomics in a vertex and a pixel shader (DXIL SM 6.8 plan, Task 14a): the lock path in both stages, helper
+# lanes left out, and a root signature without heap flags (the lock qword right after the last parameter).
+run ours tri-atomic64 dxmt "$TESTS/d3d12_triangle.exe" "Z:$S/triangle2.vsatomic64.dxil" "Z:$S/triangle2.psatomic64.dxil" --atomic64
+expect "a pixel shader's 64-bit adds count each covered pixel once" \
+  "$(awk '$1 == "atomic64" { print ($3 > 0 && $3 == $5) ? "yes" : $0 }' "$WORK/tri-atomic64.txt")" yes
+expect "and a vertex shader's 64-bit max keeps the largest vertex's value" \
+  "$(awk '$1 == "atomic64" { print $7 }' "$WORK/tri-atomic64.txt")" 00000001fffffff2
+# 64-bit atomics (DXIL SM 6.8 plan, Tasks 14a-14c): a run of their own, last in the lane, so a deadlock costs only its
+# own 120 s watchdog and these rows; the contended groups last.
+# atomic64c-rootheap: atomic64c.dxil again, under root_a64 (flags 0xC00; the shader indexes no heap), so the lock
+# qword after the two heap qwords is tested for a shader that declares the heap fields without indexing the heap.
+# d3d12_dxil_exec maps the group to atomic64c.dxil and root_a64; expect.py checks it as atomic64c.
+A64_GROUPS="atomic64 atomic64c atomic64c-rootheap"
+run ours exec-a64 dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X" $A64_GROUPS
+for g in $A64_GROUPS; do
+  expect "DXIL $g matches its CPU reference" "$(python3 "$ROOT/dxmt/tests/expect.py" "$WORK/exec-a64.txt" $g)" match
+done
 exit $fail
 ) > "$WORK/lane-C.log" 2>&1 & pC=$!
 
@@ -921,7 +939,7 @@ run ref d3dmetal d3dmetal "$LOOP" 1280 720 0 0 200 0
 expect "the frozen D3DMetal reference still runs" "$(grep -c 'avg frame' "$WORK/d3dmetal.txt" || true)" 1
 # 6. dxil-translate: every test shader reaches a Metal pipeline offline.
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxil" --flags > "$WORK/translate.txt" 2>&1 || true
-expect "dxil-translate accepts every behaviour shader" "$(tail -1 "$WORK/translate.txt" | cut -d ' ' -f 2)" "28/28"
+expect "dxil-translate accepts every behaviour shader" "$(tail -1 "$WORK/translate.txt" | cut -d ' ' -f 2)" "30/30"
 # [WaveSize] outside the device's 32 lanes is refused, naming the range (DXIL SM 6.8 plan, Task 4); so are the E_NOTIMPL
 # canary and a 64-bit groupshared atomic, naming them (Task 9).
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxil/reject" > "$WORK/translate-reject.txt" 2>&1 || true
@@ -950,12 +968,16 @@ expect "DXIL barriers fence memory, at device scope for device memory" \
 expect "and Shader Model 6.8's Barrier() fences as the legacy barriers it spells" \
   "$(grep '^ok barrier68\.dxil ' "$WORK/translate.txt" | grep -oE 'fence=[^ ]+ barrier=[0-9]+' || echo none)" \
   "fence=2:1,5:3,5:3,7:3,7:3 barrier=3"
+# The 64-bit lock path's fences (DXIL SM 6.8 plan, Tasks 14a-14c): the distinct flags:scope pairs of a shader's
+# air.atomic.fence calls. atomic64c has no barrier, so they are the lock path's alone.
+fences() { grep "^ok $1 " "$WORK/translate.txt" | grep -oE 'fence=[^ ]+' | cut -d= -f2 | tr ',' '\n' | sort -u | tr '\n' ' '; }
+expect "the 64-bit buffer lock path fences device memory at device scope" "$(fences atomic64c.dxil)" "1:2 "
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxbc" --flags > "$WORK/translate-dxbc.txt" 2>&1 || true
 expect "and DXBC's, GroupMemoryBarrier's threadgroup fence included" \
   "$(grep '^ok sync\.dxbc ' "$WORK/translate-dxbc.txt" | grep -oE 'fence=[^ ]+ barrier=[0-9]+' || echo none)" \
   "fence=2:1,5:3,5:3,7:3,7:3 barrier=3"
 "$TOOLS/dxil-translate" "$S" > "$WORK/translate-shaders.txt" 2>&1 || true
-expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-shaders.txt" | cut -d ' ' -f 2)" "50/50"
+expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-shaders.txt" | cut -d ' ' -f 2)" "52/52"
 # DXIL keeps NaN and infinity: no translated shader assumes them away or keeps a fast compare. Vertex and geometry
 # shaders also carry no reassoc, contract or arcp flags, as airconv's DXBC path, so LLVM fuses or reorders nothing on
 # its own: a depth prepass and a base pass then compute the same positions, and their depth EQUAL test holds (grass
@@ -964,9 +986,9 @@ expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-sha
 # precise, so no fma there).
 "$TOOLS/dxil-translate" "$S" --flags > "$WORK/translate-flags.txt" 2>&1 || true
 expect "no translated shader assumes NaN or infinity away" \
-  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "50:50"
+  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "52:52"
 expect "vertex and geometry shaders carry no reassoc, contract or arcp flags" \
-  "$(grep -E '^ok [^ ]+ (vs|gs) ' "$WORK/translate-flags.txt" | grep -c ' reassoc=0 contract=0 arcp=0$' || true)" 18
+  "$(grep -E '^ok [^ ]+ (vs|gs) ' "$WORK/translate-flags.txt" | grep -c ' reassoc=0 contract=0 arcp=0$' || true)" 19
 # Task FU: Metal's gradient sample takes no LOD bias, so the sampler's MipLODBias scales the derivatives (2^bias): every
 # gradient sample of shaders/lod.hlsl (DXIL SampleGrad) and dxbc/grad.hlsl (DXBC sample_d) has an fmul operand.
 expect "gradient samples carry the sampler's LOD bias, DXIL and DXBC" \

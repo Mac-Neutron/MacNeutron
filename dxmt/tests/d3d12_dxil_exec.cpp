@@ -2,7 +2,7 @@
 //   d3d12_dxil_exec.exe <shader folder> [group...]   one line per group: "group <name> ok <1024 hex words>" or "group <name> fail 0x<hr>"
 //   d3d12_dxil_exec.exe <shader folder> threads      compiles buffers.dxil on 8 threads at once: "threads ok 8/8"
 // heap, heap-swap and any group named heap-<x> run heap.dxil (heap-noflag, heap-noflag-sampler: under a root signature
-// missing a heap flag).
+// missing a heap flag). atomic64c-rootheap runs atomic64c.dxil under root_a64 (DXIL SM 6.8 plan, Task 14a).
 // Resources follow dxmt/tests/dxil/common.hlsli. check.sh runs it on our DXMT and on D3DMetal and compares.
 #define WIDL_EXPLICIT_AGGREGATE_RETURNS  // D3D12 methods that return structs: the MSVC ABI under mingw
 #include <windows.h>
@@ -96,13 +96,13 @@ int main(int argc, char **argv) {
     CHECK(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void **)&fence));
     fence_event = CreateEventA(nullptr, FALSE, FALSE, nullptr);
 
-    // Root signature: b0 root CBV; one table of t0-t6, u0-u4, then u5-u7 after b0's heap slot 12 (DXIL SM 6.8 plan, Task
-    // 14); static samplers s0 (linear), s1 (point) and s2 (point comparison, LESS_EQUAL).
+    // Root signature: b0 root CBV; one table of t0-t6, u0-u4, then u5-u10 after b0's heap slot 12 (DXIL SM 6.8 plan,
+    // Tasks 14 and 14a); static samplers s0 (linear), s1 (point) and s2 (point comparison, LESS_EQUAL).
     D3D12_DESCRIPTOR_RANGE ranges[3] = {};
     ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV; ranges[0].NumDescriptors = 7; ranges[0].BaseShaderRegister = 0;
     ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV; ranges[1].NumDescriptors = 5; ranges[1].BaseShaderRegister = 0;
     ranges[1].OffsetInDescriptorsFromTableStart = 7;
-    ranges[2].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV; ranges[2].NumDescriptors = 3; ranges[2].BaseShaderRegister = 5;
+    ranges[2].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV; ranges[2].NumDescriptors = 6; ranges[2].BaseShaderRegister = 5;
     ranges[2].OffsetInDescriptorsFromTableStart = 13;
     D3D12_ROOT_PARAMETER params[2] = {};
     params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; params[0].Descriptor.ShaderRegister = 0;
@@ -192,8 +192,8 @@ int main(int argc, char **argv) {
     Barrier(depth, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // UAVs, zeroed from an upload buffer of zeros.
-    std::vector<uint8_t> zeros(4096, 0);
-    ID3D12Resource *zerobuf = Buffer(4096, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ); Fill(zerobuf, zeros.data(), 4096);
+    std::vector<uint8_t> zeros(16384, 0);
+    ID3D12Resource *zerobuf = Buffer(16384, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ); Fill(zerobuf, zeros.data(), 16384);
     ID3D12Resource *out = Buffer(4096, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     ID3D12Resource *rwtyped = Buffer(256, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     list->CopyBufferRegion(rwtyped, 0, zerobuf, 0, 256);
@@ -202,12 +202,13 @@ int main(int argc, char **argv) {
     ID3D12Resource *atomics = Buffer(65 * 8, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     ID3D12Resource *atomictex = Texture(8, 8, DXGI_FORMAT_R32_UINT, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     ID3D12Resource *atomictexf = Texture(8, 8, DXGI_FORMAT_R32_FLOAT, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    ID3D12Resource *a64 = Buffer(16384, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     ID3D12Resource *readback = Buffer(4096, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
     Flush();
 
-    // Descriptors: t0-t6 at 0-6, u0-u4 at 7-11, u5-u7 at 13-15 (the heap groups add b0's buffer at 12).
+    // Descriptors: t0-t6 at 0-6, u0-u4 at 7-11, u5-u10 at 13-18 (the heap groups add b0's buffer at 12).
     ID3D12DescriptorHeap *heap;
-    D3D12_DESCRIPTOR_HEAP_DESC hd = {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 16, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
+    D3D12_DESCRIPTOR_HEAP_DESC hd = {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 19, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
     CHECK(device->CreateDescriptorHeap(&hd, __uuidof(ID3D12DescriptorHeap), (void **)&heap));
     UINT inc = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     D3D12_CPU_DESCRIPTOR_HANDLE cpu;
@@ -243,6 +244,12 @@ int main(int argc, char **argv) {
         u.Format = DXGI_FORMAT_R32_FLOAT; u.Buffer.StructureByteStride = 0;  // RWTypedF
         device->CreateUnorderedAccessView(rwtyped, nullptr, &u, slot(14));
         device->CreateUnorderedAccessView(atomictexf, nullptr, nullptr, slot(15));
+        u.Format = DXGI_FORMAT_R32_TYPELESS; u.Buffer.NumElements = 4096; u.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;  // Raw64
+        device->CreateUnorderedAccessView(a64, nullptr, &u, slot(16));
+        u.Format = DXGI_FORMAT_UNKNOWN; u.Buffer.NumElements = 2048; u.Buffer.StructureByteStride = 8;  // AtomicS64(S)
+        u.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+        device->CreateUnorderedAccessView(a64, nullptr, &u, slot(17));
+        device->CreateUnorderedAccessView(a64, nullptr, &u, slot(18));
     };
     views(heap);
 
@@ -255,9 +262,13 @@ int main(int argc, char **argv) {
     // plus 3 root constants at b1 (heap.hlsl doesn't read them; they round up to two qwords, so the heap bases follow
     // at qword 4), flags 0xC00 (llvm-mingw lacks their names). A sampler heap of [0] linear clamp, [1] point clamp.
     // b0's buffer at slot 12. heap2: heap's views, except a raw view of zeros at slot 0.
-    ID3D12RootSignature *root_heap = nullptr;
+    // root_a64 (Task 14a), made with them only when atomic64 or atomic64c-rootheap runs: root_heap's parameters and
+    // flags, then a root UAV at u20 bound to a64. Its lock qword is qword 7 (CBV 0, table 1, constants 2-3, root UAV 4,
+    // heap bases 5-6); the plain root's is qword 2.
+    auto a64_root = [](const std::string &g) { return g == "atomic64" || g == "atomic64c-rootheap"; };
+    ID3D12RootSignature *root_heap = nullptr, *root_a64 = nullptr;
     ID3D12DescriptorHeap *sampler_heap = nullptr, *heap2 = nullptr;
-    if (std::any_of(groups.begin(), groups.end(), [](const std::string &g) { return g.rfind("heap", 0) == 0; })) {
+    if (std::any_of(groups.begin(), groups.end(), [&](const std::string &g) { return g.rfind("heap", 0) == 0 || a64_root(g); })) {
         D3D12_ROOT_PARAMETER hp[3] = {params[0], params[1], {}};
         hp[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
         hp[2].Constants.ShaderRegister = 1; hp[2].Constants.Num32BitValues = 3;
@@ -265,6 +276,13 @@ int main(int argc, char **argv) {
         ID3DBlob *b = nullptr;
         CHECK(D3D12SerializeRootSignature(&hrd, D3D_ROOT_SIGNATURE_VERSION_1, &b, &error));
         CHECK(device->CreateRootSignature(0, b->GetBufferPointer(), b->GetBufferSize(), __uuidof(ID3D12RootSignature), (void **)&root_heap));
+        if (std::any_of(groups.begin(), groups.end(), a64_root)) {
+            D3D12_ROOT_PARAMETER ap[4] = {hp[0], hp[1], hp[2], {}};
+            ap[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV; ap[3].Descriptor.ShaderRegister = 20;
+            D3D12_ROOT_SIGNATURE_DESC ard = {4, ap, 3, samplers, (D3D12_ROOT_SIGNATURE_FLAGS)0xC00};
+            CHECK(D3D12SerializeRootSignature(&ard, D3D_ROOT_SIGNATURE_VERSION_1, &b, &error));
+            CHECK(device->CreateRootSignature(0, b->GetBufferPointer(), b->GetBufferSize(), __uuidof(ID3D12RootSignature), (void **)&root_a64));
+        }
         D3D12_DESCRIPTOR_HEAP_DESC sd = {D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 2, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
         CHECK(device->CreateDescriptorHeap(&sd, __uuidof(ID3D12DescriptorHeap), (void **)&sampler_heap));
         D3D12_CPU_DESCRIPTOR_HANDLE s = sampler_heap->GetCPUDescriptorHandleForHeapStart();
@@ -285,9 +303,10 @@ int main(int argc, char **argv) {
     for (auto &name : groups) {
         // heap-noflag and heap-noflag-sampler (DXIL SM 6.8 plan, Task 9): heap.dxil under `root`, which has neither heap
         // flag, and under its description with CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED (0x400) alone: no sampler heap flag.
-        std::vector<char> cs = load(folder + "/" + (name.rfind("heap-", 0) == 0 ? std::string("heap") : name) + ".dxil");
+        std::vector<char> cs = load(folder + "/" + (name.rfind("heap-", 0) == 0 ? std::string("heap")
+                                                    : name == "atomic64c-rootheap" ? std::string("atomic64c") : name) + ".dxil");
         if (cs.empty()) { printf("group %s fail missing\n", name.c_str()); continue; }
-        ID3D12RootSignature *rs = name == "heap" || name == "heap-swap" ? root_heap : root;
+        ID3D12RootSignature *rs = name == "heap" || name == "heap-swap" ? root_heap : a64_root(name) ? root_a64 : root;
         if (name == "heap-noflag-sampler") {
             D3D12_ROOT_SIGNATURE_DESC views = rd; views.Flags = (D3D12_ROOT_SIGNATURE_FLAGS)0x400; // llvm-mingw lacks its name
             ID3DBlob *b = nullptr;
@@ -298,8 +317,8 @@ int main(int argc, char **argv) {
         ID3D12PipelineState *pso = nullptr;
         HRESULT hr = device->CreateComputePipelineState(&d, __uuidof(ID3D12PipelineState), (void **)&pso);
         if (FAILED(hr)) { printf("group %s fail 0x%08lx\n", name.c_str(), (unsigned long)hr); fflush(stdout); continue; }
-        // Every group starts from zeroed UAVs (RWTyped, AtomicS, AtomicTex and AtomicTexF are zeroed here too; RWTex isn't
-        // read).
+        // Every group starts from zeroed UAVs (RWTyped, AtomicS, AtomicTex, AtomicTexF and a64 are zeroed here too; RWTex
+        // isn't read).
         list->CopyBufferRegion(out, 0, zerobuf, 0, 4096);
         Barrier(out, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         Barrier(rwtyped, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -307,6 +326,8 @@ int main(int argc, char **argv) {
         Barrier(rwtyped, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         list->CopyBufferRegion(atomics, 0, zerobuf, 0, 65 * 8);
         Barrier(atomics, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        list->CopyBufferRegion(a64, 0, zerobuf, 0, 16384);
+        Barrier(a64, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         D3D12_TEXTURE_COPY_LOCATION to = {atomictex, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX}; to.SubresourceIndex = 0;
         D3D12_TEXTURE_COPY_LOCATION from = {zerobuf, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT};
         from.PlacedFootprint.Footprint = {DXGI_FORMAT_R32_UINT, 8, 8, 1, 256};
@@ -316,11 +337,13 @@ int main(int argc, char **argv) {
         list->CopyTextureRegion(&to, 0, 0, 0, &from, nullptr);
         Barrier(atomictexf, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         ID3D12DescriptorHeap *bound[2] = {heap, sampler_heap};
-        if (rs == root_heap) {  // the heaps first: setting the root signature brings their bases in
+        if (rs == root_heap || rs == root_a64) {  // the heaps first: setting the root signature brings their bases in
             list->SetDescriptorHeaps(2, bound);
             list->SetComputeRootSignature(rs);
             const UINT constants[3] = {1, 2, 3};
             list->SetComputeRoot32BitConstants(2, 3, constants, 0);
+            if (rs == root_a64)
+                list->SetComputeRootUnorderedAccessView(3, a64->GetGPUVirtualAddress());
         } else {
             list->SetComputeRootSignature(rs);
             list->SetDescriptorHeaps(1, &heap);
@@ -328,7 +351,7 @@ int main(int argc, char **argv) {
         list->SetComputeRootConstantBufferView(0, cbuf->GetGPUVirtualAddress());
         list->SetComputeRootDescriptorTable(1, heap->GetGPUDescriptorHandleForHeapStart());
         list->SetPipelineState(pso);
-        list->Dispatch(1, 1, 1);
+        list->Dispatch(name.rfind("atomic64c", 0) == 0 ? 64 : 1, 1, 1);  // atomic64c: 4,096 threads
         if (name == "heap-swap") {  // heap2 bound between two dispatches in one list: the second reads it, and is printed
             D3D12_RESOURCE_BARRIER uav[2] = {};
             uav[0].Type = uav[1].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV; uav[0].UAV.pResource = out; uav[1].UAV.pResource = rwtyped;
@@ -342,6 +365,7 @@ int main(int argc, char **argv) {
         list->CopyBufferRegion(readback, 0, out, 0, 4096);
         Barrier(out, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
         Barrier(atomics, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST);
+        Barrier(a64, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST);
         Barrier(atomictex, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST);
         Barrier(atomictexf, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST);
         Flush();
