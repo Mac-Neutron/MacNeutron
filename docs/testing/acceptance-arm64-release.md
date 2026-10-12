@@ -2280,7 +2280,7 @@ The translator has no shader model gate: an operation it lacks fails its own pip
   section above); 0039 makes that the default. No other Direct3D 12 game is on record with these answers.
 - Not covered: a Direct3D 12 game that took its Shader Model 5.1 path in 0.3 and now takes its Shader Model 6 one.
 
-## DXIL Shader Model 6.8 (DXMT 0040-0057)
+## DXIL Shader Model 6.8 (DXMT 0040-0058)
 
 2026-10-11. DXMT's DXIL translator learns the Shader Model 6.1-6.8 operations its caps require, one DXMT patch per task,
 and the device then reports 6.8: spec `docs/superpowers/specs/2026-10-10-dxmt-dxil-sm68-design.md`, plan
@@ -3012,3 +3012,51 @@ release or tag until the last task records the new one.
     (`.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-14a-dxmt-check.log`): `dxmt-check: all passed`, 347 lines `ok`
     after `info arm64 mode` (Task 14's 339, the six new rows and the two new shaders' `dxil-probe` lines; the four
     count rows changed in place), 0 `FAIL`. The x64 lane and `make test` were not run.
+- **0055 (`airconv, d3d12: 64-bit atomics on typed buffers and R32G32_UINT textures.`):** Shader Model 6.6's 64-bit
+  atomics on `RWBuffer<uint64_t>`/`<int64_t>` and `RWTexture*<uint64_t>`/`<int64_t>` (`R32G32_UINT`), through 0054's
+  lock table (ruling R-A64; spec 3.8).
+  - Typed buffers take the raw path. The texel-buffer UAV descriptor's fourth qword, `buffer_address` (`padding` since
+    0053), holds `UAVBuffer->current()->gpuAddress()`. The element sits at `base + 8 * (index + first element)` and is
+    skipped, reading 0, from the view's element count. So a raw and a typed view of one qword take one lock, and no
+    `RG32Uint` texture buffer is accessed.
+  - `UnorderedAccessViewInfo::address64` marks a typed UAV that an i64 op 78/79 reaches. It goes by use because DXC 1.9
+    declares `RWBuffer<uint64_t>` U32 with an Atomic64Use tag (`!{i32 0, i32 5, i32 3, i32 1}`), which heap handles
+    lack. `GetUAVTexture` then loads the qword as `TextureDescirptor::BufferAddress`.
+  - Textures are keyed by `(x, y)` alone: `h = x * 0x9E3779B1 + y; h ^= h >> 16`. They are read and written through the
+    `<4 x i32>` texel under `air.atomic.fence(5, 5, 2)`, each write followed by `air.fence_texture`.
+  - Rows:
+    - `DXIL atomic64typed matches its CPU reference` (`dxil/atomic64typed.hlsl`): every op kind on a typed element and
+      a texel; 64 adds of `V` through a raw and a typed view of one qword, whose olds are `{0..63} * V`; four texels'
+      Nanite-shaped maxima, linearizable; a texel CAS counter, `{0..63}`; an out-of-view typed add reading 0, which
+      didn't land.
+    - `atomic64c` and `-rootheap` gain a 4,096-thread storm on a typed element and on a texel (words 128-639 all
+      ones).
+    - The Lane E fence row now reads `1:2 5:2 `.
+    - Count: 31/31 behaviour shaders.
+  - Before the patch: the two shaders failed `dx.op.atomicBinOp.i64 (78) not supported` (29/31). In the gate, exactly
+    five rows failed, and all D3DMetal rows stayed `ok` with the grown harness (slots 19-22, heap 23).
+  - Single mutations:
+    - The typed key from the view-relative index fails `atomic64typed` at slots 8-9.
+    - Device-only texture fences fail only the fence row: `atomic64typed` (one threadgroup) and the texel storm (no
+      re-reads) don't see stale texture reads on this GPU. Accepted (ruling R-T14b1): the Lane E fence row is the guard, as for 0054's fences; hardening item 23 tries a 64-group texel CAS counter that re-reads across cores.
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged` against 0054; DXBC
+    `2/2 ok, … 0 changed, 2 unchanged`. Every earlier test shader's `air=` is unchanged.
+  - Gates (R-LITE, ARM64EC lane), one run with 0056 on top (ruling R-PAL1;
+    `.superpowers/sdd/2026-10-10-dxmt-dxil-sm68/task-14b-0056-dxmt-check.log`): `dxmt-check: all passed`, 348 lines `ok`
+    after `info arm64 mode`, 0 `FAIL`. The x64 lane and `make test` were not run.
+
+- **0056 (`airconv: Drop lifetime markers on hoisted constant arrays.`):** Palworld crashed on New Game (and, once its
+  saves were in the prefix, on loading a world): two `vs_6_6` vertex shaders, and a compute shader seen later, failed
+  with `DXIL: a static const array used other than by loads`. DXC hoists a local array that only ever holds constants
+  to a global (`<name>.hca`, e.g. `NeighborOffset.i.i.i.i.0.hca`) and, from Shader Model 6.6, keeps the array's
+  `llvm.lifetime.start/end` markers on it through a constant bitcast. `MoveConstantsToConstantSpace`'s `Retarget` now
+  drops those markers (and the bitcast that only fed them) instead of refusing the shader. Outside the plan's tasks
+  (ruling R-PAL1): Task 14c became 0057 and Task 15 0058.
+  - Row: `dxil/buffers.hlsl` slot 15 reads a local `int2` array of constants in a `[loop]`; DXC 1.9 (`cs_6_6`) gives
+    `kNeighbor.i.0.hca` and `.1.hca` with lifetime markers, as Palworld's shaders have. Before the patch,
+    `dxil-translate` failed it offline (`fail buffers.dxil DXIL: a static const array used other than by loads`); after
+    it, `DXIL buffers matches D3DMetal` holds with the new slot.
+  - Palworld's captured shaders (`~/dxil-palworld`, never committed): 189/191 → 191/191 offline.
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged` against 0055; DXBC
+    `2/2 ok, 0 changed`. Fresh fetch: `applied 56/56`, tree-equal.
+  - Gate: the run above (348 `ok`, 0 `FAIL`).
