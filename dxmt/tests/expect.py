@@ -264,6 +264,15 @@ def word64(got, t, slot):  # thread t's 64-bit value at slots (slot, slot + 1)
     return got[t * 16 + slot] | got[t * 16 + slot + 1] << 32
 
 
+def own64_words(t):  # thread t's slots 0-7: its own sequence (atomic64.hlsli's OPERANDS and OWN), as 32-bit words
+    k = t % 12
+    x0, a, b, c = (0xffffffff, 1, 0xffffffff, V) if k == 11 else (q(t), q(t + 64), q(t + 128), q(t + 192))
+    words = []
+    for o in own64(k, x0, a, b, c):
+        words += [o & 0xffffffff, o >> 32]
+    return words
+
+
 # Slots 0-7 the thread's own sequence (raw for threads 0-31, structured for 32-63); 8-9, 10-11 and 12 shared qwords of
 # a64 checked as multisets (ValueError names a bad one); 13 an out-of-bounds add (0); 14-15 the finals of threads 0-2.
 def expect_atomic64(got):
@@ -278,20 +287,36 @@ def expect_atomic64(got):
         raise ValueError("slot 12: the CAS-counter tickets aren't {0..63}")
 
     def slots(t):
-        k = t % 12
-        x0, a, b, c = (0xffffffff, 1, 0xffffffff, V) if k == 11 else (q(t), q(t + 64), q(t + 128), q(t + 192))
-        words = []
-        for o in own64(k, x0, a, b, c):
-            words += [o & 0xffffffff, o >> 32]
         finals = {0: [0x40, 0x40], 1: [max(vals) & 0xffffffff, max(vals) >> 32], 2: [0x40, 0]}.get(t, [0, 0])
-        return words + [got[t * 16 + 8], got[t * 16 + 9], got[t * 16 + 10], got[t * 16 + 11], got[t * 16 + 12], 0] + finals
+        return own64_words(t) + got[t * 16 + 8:t * 16 + 13] + [0] + finals
     return per_thread(slots)
 
 
-# 4,096 adds of V on Out's qword 0 (words 0-1: 4096 * V) and four on each of 1,024 qwords of a64; every old's k marked
-# once in Out's bitmaps (words 128-383 all ones), no malformed old (word 2).
+# atomic64typed.hlsl: slots 0-7 the thread's own sequence (typed for threads 0-31, texel for 32-63); 8-9 (an add through
+# a raw and a typed view of one qword), 10-11 (texel (x, 1)'s max, from threads i & 3 == x) and 12 (a CAS counter on
+# texel (0, 0)) checked as multisets; 13 an add out of the typed view (0); 14-15 the finals of threads 0-6.
+def expect_atomic64typed(got):
+    vals = [(in_word(i) >> 28) << 32 | i for i in range(64)]
+    maxima = [max(vals[x::4]) for x in range(4)]
+    if sorted(word64(got, t, 8) for t in range(64)) != sorted(k * V & M64 for k in range(64)):
+        raise ValueError("slots 8-9: the raw and typed adds' olds aren't {0..63} * V")
+    for x in range(4):
+        olds = [word64(got, t, 10) for t in range(x, 64, 4)]
+        if word64(got, x + 1, 14) != maxima[x] or not linearizable(olds, vals[x::4], 0, maxima[x], max):
+            raise ValueError(f"slots 10-11: texel ({x}, 1)'s max olds aren't linearizable")
+    if sorted(got[t * 16 + 12] for t in range(64)) != list(range(64)):
+        raise ValueError("slot 12: the CAS-counter tickets aren't {0..63}")
+
+    def slots(t):
+        final = {0: 64 * V, 5: 0x40}.get(t, maxima[t - 1] if 1 <= t <= 4 else 0)
+        return own64_words(t) + got[t * 16 + 8:t * 16 + 13] + [0, final & 0xffffffff, final >> 32]
+    return per_thread(slots)
+
+
+# 4,096 adds of V on Out's qword 0 (words 0-1: 4096 * V), four on each of 1,024 qwords of a64, 4,096 on a typed element
+# and 4,096 on a texel; every old's k marked once in Out's bitmaps (words 128-639 all ones), no malformed old (word 2).
 def expect_atomic64c(got):
-    return [0x1000, 0x1000] + [0] * 126 + [0xffffffff] * 256 + [0] * 640
+    return [0x1000, 0x1000] + [0] * 126 + [0xffffffff] * 512 + [0] * 384
 
 
 expect_atomic64c_rootheap = expect_atomic64c

@@ -18,6 +18,10 @@ RWTexture2D<float> AtomicTexF : register(u7);                              // 8x
 RWByteAddressBuffer Raw64 : register(u8);                                  // a64: 16 KiB, zeroed before each group
 RWStructuredBuffer<uint64_t> AtomicS64 : register(u9);                     // a64 as 2048 uint64_t
 RWStructuredBuffer<int64_t> AtomicS64S : register(u10);                    // a64 as 2048 int64_t (the signed ops)
+RWBuffer<uint64_t> RWTyped64 : register(u11);                              // a64's qwords 128-191, R32G32_UINT
+RWBuffer<int64_t> RWTyped64S : register(u12);                              // the same, as int64_t
+RWTexture2D<uint64_t> AtomicTex64 : register(u13);                         // 8x8 R32G32_UINT, zeroed before each group
+RWTexture2D<int64_t> AtomicTex64S : register(u14);                         // the same texture, as int64_t
 SamplerState Linear : register(s0);                                        // static: linear, clamp
 SamplerState Point : register(s1);                                         // static: point, clamp
 SamplerComparisonState Cmp : register(s2);                                 // static: point comparison, LESS_EQUAL, clamp

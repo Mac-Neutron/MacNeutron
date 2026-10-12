@@ -643,12 +643,12 @@ expect "a pixel shader's 64-bit adds count each covered pixel once" \
   "$(awk '$1 == "atomic64" { print ($3 > 0 && $3 == $5) ? "yes" : $0 }' "$WORK/tri-atomic64.txt")" yes
 expect "and a vertex shader's 64-bit max keeps the largest vertex's value" \
   "$(awk '$1 == "atomic64" { print $7 }' "$WORK/tri-atomic64.txt")" 00000001fffffff2
-# 64-bit atomics (DXIL SM 6.8 plan, Tasks 14a-14c): a run of their own, last in the lane, so a deadlock costs only its
-# own 120 s watchdog and these rows; the contended groups last.
+# 64-bit atomics (DXIL SM 6.8 plan, Tasks 14a-14c): a run of their own, last in the lane, so a deadlock (on this GPU
+# Metal's "Caused GPU Hang Error", else the 120 s watchdog) costs only these rows; the contended groups last.
 # atomic64c-rootheap: atomic64c.dxil again, under root_a64 (flags 0xC00; the shader indexes no heap), so the lock
 # qword after the two heap qwords is tested for a shader that declares the heap fields without indexing the heap.
 # d3d12_dxil_exec maps the group to atomic64c.dxil and root_a64; expect.py checks it as atomic64c.
-A64_GROUPS="atomic64 atomic64c atomic64c-rootheap"
+A64_GROUPS="atomic64 atomic64typed atomic64c atomic64c-rootheap"
 run ours exec-a64 dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X" $A64_GROUPS
 for g in $A64_GROUPS; do
   expect "DXIL $g matches its CPU reference" "$(python3 "$ROOT/dxmt/tests/expect.py" "$WORK/exec-a64.txt" $g)" match
@@ -939,7 +939,7 @@ run ref d3dmetal d3dmetal "$LOOP" 1280 720 0 0 200 0
 expect "the frozen D3DMetal reference still runs" "$(grep -c 'avg frame' "$WORK/d3dmetal.txt" || true)" 1
 # 6. dxil-translate: every test shader reaches a Metal pipeline offline.
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxil" --flags > "$WORK/translate.txt" 2>&1 || true
-expect "dxil-translate accepts every behaviour shader" "$(tail -1 "$WORK/translate.txt" | cut -d ' ' -f 2)" "30/30"
+expect "dxil-translate accepts every behaviour shader" "$(tail -1 "$WORK/translate.txt" | cut -d ' ' -f 2)" "31/31"
 # [WaveSize] outside the device's 32 lanes is refused, naming the range (DXIL SM 6.8 plan, Task 4); so are the E_NOTIMPL
 # canary and a 64-bit groupshared atomic, naming them (Task 9).
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxil/reject" > "$WORK/translate-reject.txt" 2>&1 || true
@@ -971,7 +971,7 @@ expect "and Shader Model 6.8's Barrier() fences as the legacy barriers it spells
 # The 64-bit lock path's fences (DXIL SM 6.8 plan, Tasks 14a-14c): the distinct flags:scope pairs of a shader's
 # air.atomic.fence calls. atomic64c has no barrier, so they are the lock path's alone.
 fences() { grep "^ok $1 " "$WORK/translate.txt" | grep -oE 'fence=[^ ]+' | cut -d= -f2 | tr ',' '\n' | sort -u | tr '\n' ' '; }
-expect "the 64-bit buffer lock path fences device memory at device scope" "$(fences atomic64c.dxil)" "1:2 "
+expect "the 64-bit lock path fences device memory at device scope, and textures with the texture flag" "$(fences atomic64c.dxil)" "1:2 5:2 "
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxbc" --flags > "$WORK/translate-dxbc.txt" 2>&1 || true
 expect "and DXBC's, GroupMemoryBarrier's threadgroup fence included" \
   "$(grep '^ok sync\.dxbc ' "$WORK/translate-dxbc.txt" | grep -oE 'fence=[^ ]+ barrier=[0-9]+' || echo none)" \
