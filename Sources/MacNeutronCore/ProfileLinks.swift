@@ -28,7 +28,10 @@ public enum ProfileLinks {
             return report
         }
         var links = xpLinks.map { (profile.appending(path: $0.0), "\(user)/\($0.0)", $0.1) }
-        if user != "steamuser" { links.append((users.appending(path: "steamuser"), "steamuser", user)) }
+        // APFS compares names without case: for the Mac user "SteamUser", users/steamuser is the profile itself.
+        if user.caseInsensitiveCompare("steamuser") != .orderedSame {
+            links.append((users.appending(path: "steamuser"), "steamuser", user))
+        }
         for (path, name, target) in links {
             switch kind(path) {
             case .missing:
@@ -55,6 +58,12 @@ public enum ProfileLinks {
     private static func mergeAndSwap(_ folder: URL, name: String, target: String, _ report: inout ProfileLinkReport) {
         let fm = FileManager.default
         let destination = folder.deletingLastPathComponent().appending(path: target)  // through the target's links
+        var here = stat(), there = stat()
+        if stat(folder.path(percentEncoded: false), &here) == 0, stat(destination.path(percentEncoded: false), &there) == 0,
+           here.st_dev == there.st_dev, here.st_ino == there.st_ino {
+            report.notes.append("left \(name): it is already \(target)")  // never merged into itself
+            return
+        }
         let files = regularFiles(under: folder)
         let before = compare(files, folder, destination)
         guard before.differing.isEmpty else {

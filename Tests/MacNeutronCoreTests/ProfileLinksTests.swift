@@ -164,3 +164,16 @@ private func seed(_ prefix: URL, _ path: String, _ text: String) throws { try wr
     #expect(read(prefix, "steamuser BACKUP 2/Saved Games/G/x") == "cloud")
     #expect(link(prefix, "steamuser") == "u")
 }
+
+// MARK: Final review fixes
+
+@Test func aProfileNamedSteamuserInAnyCaseIsNeverMergedIntoItself() throws {
+    // APFS is case-insensitive: for the Mac user "SteamUser", users/steamuser *is* the profile.
+    let prefix = try makePrefix(user: "SteamUser")
+    try seed(prefix, "SteamUser/AppData/Local/G/s.sav", "local")
+    let report = ProfileLinks.apply(prefix: prefix, user: "SteamUser")
+    #expect(isRealFolder(prefix, "SteamUser"))
+    #expect(read(prefix, "SteamUser/AppData/Local/G/s.sav") == "local")
+    #expect(!isRealFolder(prefix, "steamuser BACKUP"))
+    #expect(report.conflicts == 0)
+}
