@@ -249,6 +249,34 @@ private func inode(_ url: URL) throws -> UInt64? {
     #expect(try modified(client) == modified(manager.layout.lsteamclient))
 }
 
+@Test func steamClient64OverrideReplacesLsteamclientInThePrefix() throws {
+    // The SteamStub spike: SteamStub checks the signature of the prefix's steamclient64.dll, so Valve's goes where
+    // lsteamclient.dll goes; the next launch without the option puts lsteamclient.dll back.
+    let (manager, env) = try makeManager(winebootCreatingPrefix())
+    try installFakeSteamBridge(in: manager.layout)
+    let genuine = try makeTempDir().appending(path: "valve/steamclient64.dll")
+    try FileManager.default.createDirectory(at: genuine.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try peBytes(machine: PEImage.amd64).write(to: genuine)
+    let path = genuine.path(percentEncoded: false)
+    try manager.prepare(environment: wineEnvironment(manager, ["MACNEUTRON_STEAMCLIENT64": path]), steamBridge: true)
+    let client = steamFolder(manager).appending(path: "steamclient64.dll")
+    #expect(try Data(contentsOf: client) == peBytes(machine: PEImage.amd64))
+    #expect(launcherLog(manager).contains("steamclient64.dll from \(path)"))
+    try manager.prepare(environment: env, steamBridge: true)
+    #expect(try String(contentsOf: client, encoding: .utf8) == "lsteamclient aarch64")
+}
+
+@Test func steamClient64OverrideThatIsMissingOrNotX64FailsTheLaunch() throws {
+    let (manager, _) = try makeManager(winebootCreatingPrefix())
+    try installFakeSteamBridge(in: manager.layout)
+    let thirtyTwoBit = try makeTempDir().appending(path: "steamclient.dll")
+    try peBytes(machine: PEImage.i386).write(to: thirtyTwoBit)
+    for path in [thirtyTwoBit.path(percentEncoded: false), "/nonexistent/steamclient64.dll"] {
+        let env = wineEnvironment(manager, ["MACNEUTRON_STEAMCLIENT64": path])
+        #expect(throws: PrefixError.self) { try manager.prepare(environment: env, steamBridge: true) }
+    }
+}
+
 @Test func upToDatePrefixStillGetsTheSteamBridge() throws {
     // Prefixes prepared before the bridge existed (SMITE 2's on the maintainer's Mac) must get it too.
     let (manager, env) = try makeManager(winebootCreatingPrefix())

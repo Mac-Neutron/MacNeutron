@@ -85,7 +85,7 @@ public struct PrefixManager: Sendable {
                 if let carryFrom { carryPlayerData(from: carryFrom) }
                 try want.write(to: context.versionFile, atomically: true, encoding: .utf8)
             }
-            if steamBridge { try deploySteamBridge() }
+            if steamBridge { try deploySteamBridge(environment: environment) }
         }
     }
 
@@ -154,8 +154,19 @@ public struct PrefixManager: Sendable {
     }
 
     /// Every launch: prefixes made before the bridge existed get it too, and a runtime update replaces it.
-    func deploySteamBridge() throws {
-        for (source, destination) in SteamBridge.prefixFiles(layout: layout) {
+    func deploySteamBridge(environment: [String: String]) throws {
+        var steamClient64: URL?
+        if let path = environment[SteamBridge.steamClient64Variable], !path.isEmpty {
+            // Logged first, so a bad path is diagnosable; per launch, so dropping the option puts lsteamclient.dll
+            // back (its size differs).
+            log.append("note: steamclient64.dll from \(path) (\(SteamBridge.steamClient64Variable))")
+            guard PEImage.machine(of: URL(filePath: path)) == PEImage.amd64 else {
+                throw PrefixError.steamBridgeCopyFailed(
+                    "\(SteamBridge.steamClient64Variable): \(path) is missing or not an x64 DLL")
+            }
+            steamClient64 = URL(filePath: path)
+        }
+        for (source, destination) in SteamBridge.prefixFiles(layout: layout, steamClient64: steamClient64) {
             do { try install(source, at: destination) } catch {
                 throw PrefixError.steamBridgeCopyFailed("\(destination): \(error.localizedDescription)")
             }

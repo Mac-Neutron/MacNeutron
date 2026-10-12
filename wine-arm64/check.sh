@@ -5,7 +5,9 @@
 # its Rosetta baseline, and the dxmt-* steps, for their D3DMetal reference, need the frozen Rosetta reference
 # (tools/freeze-rosetta-reference.sh; MACNEUTRON_REFERENCE names another), run by its own launcher. dxmt-x64's FSR 3 check needs SMITE 2 installed
 # (Steam): its amd_fidelityfx_dx12.dll, read from the game's install, never copied. steam-bridge needs `make bridge`,
-# Steam running and logged in, and SMITE 2 installed (its steam_api64.dll, read in place).
+# Steam running and logged in, and SMITE 2 installed (its steam_api64.dll, read in place). steamclient needs Valve's signed
+# steamclient64.dll at build/valve/steamclient64.dll (never in the repo; VALVE_STEAMCLIENT64 names another) and prints
+# a skip line without it.
 # Every run starts fresh: a new clone of the staged bundle, a new prefix. The clone sits at a path with a space, as the
 # app installs it. A step that needs a prefix gets one from `boot`, which runs first if it isn't named.
 # Nothing of the runtime is left after the script exits, whatever the reason: the last line is PASS or FAIL orphans.
@@ -56,7 +58,7 @@ LANES="lanes"
 NEEDS_PREFIX="$NEEDS_PREFIX $LANES"
 NEEDS_FEX="$NEEDS_FEX $LANES"
 # The batch's gated steps (batch Tasks 4-8): each needs the prefix with FEX; they run after the rest.
-BATCH="fex-vmd winetests ec-hook crt"
+BATCH="fex-vmd winetests ec-hook crt steamclient"
 STEPS="$STEPS $BATCH" NEEDS_PREFIX="$NEEDS_PREFIX $BATCH" NEEDS_FEX="$NEEDS_FEX $BATCH"
 
 # The processes running the runtime's executables. Wine rewrites argv, so `pkill -f <path>` finds nothing; the kernel
@@ -797,6 +799,27 @@ crt_cmd() {
   [ -z "$fails" ] || { echo "FAIL crt: $fails"; return 1; }
 }
 
+# A genuine steamclient64.dll (Wine patch 0036): x64-steamclient under FEX loads Valve's signed DLL from a copy here,
+# then the bundle's lsteamclient.dll copied under the same name, which the loader must leave alone. Wine's trace+module
+# lines show whose DllMain ran: lsteamclient.dll's (the control) and the builtin copy's, never the genuine one's.
+STEAMCLIENT64="${VALVE_STEAMCLIENT64:-$B/valve/steamclient64.dll}"
+dllmain_calls() {
+  tr -d '\r' < "$WORK/x64-steamclient.err" | LC_ALL=C /usr/bin/grep -c "L\"$1\",PROCESS_ATTACH,.*) - CALL" || true
+}
+steamclient_cmd() {
+  [ -f "$STEAMCLIENT64" ] || { echo "skip steamclient: no genuine steamclient64.dll at $STEAMCLIENT64"; return 0; }
+  d="$WORK/steamclient"
+  mkdir -p "$d/genuine" "$d/builtin"
+  cp "$STEAMCLIENT64" "$d/genuine/steamclient64.dll"
+  cp "$TOOL/Contents/Resources/lib/wine/aarch64-windows/lsteamclient.dll" "$d/builtin/steamclient64.dll"
+  wine_run reg add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f > /dev/null || return 1
+  WINEDEBUG=trace+module exe_cmd x64-steamclient genuine "Z:$d/genuine/steamclient64.dll" || return 1
+  [ "$(dllmain_calls lsteamclient.dll)" -ge 1 ] || { echo "FAIL steamclient: no trace of lsteamclient.dll's DllMain"; return 1; }
+  [ "$(dllmain_calls steamclient64.dll)" = 0 ] || { echo "FAIL steamclient: the genuine steamclient64.dll's DllMain ran"; return 1; }
+  WINEDEBUG=trace+module exe_cmd x64-steamclient builtin "Z:$d/builtin/steamclient64.dll" || return 1
+  [ "$(dllmain_calls steamclient64.dll)" -ge 1 ] || { echo "FAIL steamclient: the builtin copy's DllMain didn't run"; return 1; }
+}
+
 run_step() {
   case $1 in
     macos) step macos 10 macos_cmd ;;
@@ -837,6 +860,7 @@ run_step() {
     winetests) step winetests 1800 winetests_cmd; grep '^info ' "$WORK/winetests.log" ;;
     ec-hook) step ec-hook 60 ec_hook_cmd ;;
     crt) step crt 300 crt_cmd ;;
+    steamclient) step steamclient 120 steamclient_cmd; LC_ALL=C /usr/bin/grep -E '^(skip|info) ' "$WORK/steamclient.log" ;;
     *) die "no runner for $1" ;;
   esac
 }
