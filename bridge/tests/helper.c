@@ -82,6 +82,13 @@ int main(void)
         fputs("\n", stdout);
         return 0;
     }
+    if (!wcscmp(mode, L"hidden"))  /* asked to start without showing a window */
+    {
+        STARTUPINFOW si;
+        GetStartupInfoW(&si);
+        printf("hidden=%d\n", (si.dwFlags & STARTF_USESHOWWINDOW) && si.wShowWindow == SW_HIDE);
+        return 0;
+    }
     if (!wcscmp(mode, L"breakaway") && argc > 2)  /* a launcher that starts the real game outside any job, then quits */
     {
         WCHAR self[MAX_PATH], cmd[3 * MAX_PATH];

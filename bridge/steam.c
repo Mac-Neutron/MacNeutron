@@ -154,6 +154,7 @@ int main(void)
     PROCESS_INFORMATION pi;
     DWORD pid = GetCurrentProcessId(), code = 1;
     WCHAR *cmd = child_command_line();
+    const WCHAR *hide;
     HANDLE done;
 
     if (!cmd)
@@ -166,6 +167,13 @@ int main(void)
     SetEnvironmentVariableW(L"SteamPath", STEAM_DIR);
     /* ponytail: a constant; Proton's GetModuleFileNameW would repeat the command line's letter case. */
     SetEnvironmentVariableW(L"ValvePlatformMutex", L"C:/Program Files (x86)/Steam/steam.exe");
+    /* macOS Steam sets this when it runs a game's DRM helper (its custom-binary job), as for Proton's steam.exe: any
+     * value not starting with 0 hides the program (Proton's env_nonzero). */
+    if ((hide = _wgetenv(L"PROTON_HIDE_PROCESS_WINDOW")) && *hide && *hide != '0')
+    {
+        si.dwFlags |= STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+    }
     /* Registered only once the child exists (still suspended): a steam.exe that can't start its
      * program must not touch the Steam another one registered. */
     if (!CreateProcessW(NULL, cmd, NULL, NULL, TRUE, CREATE_SUSPENDED, NULL, NULL, &si, &pi))
