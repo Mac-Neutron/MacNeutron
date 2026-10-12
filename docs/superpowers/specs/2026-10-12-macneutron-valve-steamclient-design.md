@@ -1,6 +1,6 @@
 # MacNeutron: Valve's signed steamclient64.dll in every prefix
 
-Status: draft for the maintainer (2026-10-12). The spike it builds on passed on 2026-10-11: Palworld got past
+Status: approved by the maintainer (2026-10-12): D1, D3, D4 and D5 as recommended; D2 changed to (b), download without asking. The spike it builds on passed on 2026-10-11: Palworld got past
 SteamStub with Wine patch 0036 and `MACNEUTRON_STEAMCLIENT64` (repo 65c748e).
 
 ## 1. Goal
@@ -36,7 +36,7 @@ Games wrapped in SteamStub DRM (Palworld) start with no launch option. Today the
 | # | Question | Options | Recommendation |
 |---|---|---|---|
 | D1 | When to download | (a) when the app installs or updates the runtime; (b) at the first game launch that needs it; (c) both: (a), with (b) as a fallback | **(a)**. The app has UI for progress and errors, and a launch stays fast and offline-safe. Without the DLL, a launch falls back to today's lsteamclient copy and logs a note. |
-| D2 | Ask first? | (a) a one-time consent sheet ("Download Steam's Windows components from Valve, about 64 MB"); (b) silent, with a Settings row | **(a)** once, remembered. It is a 64 MB third-party download. Declining keeps today's behaviour, with a Settings button to download later. |
+| D2 | Ask first? | (a) a one-time consent sheet ("Download Steam's Windows components from Valve, about 64 MB"); (b) silent, with a Settings row | **(b)** (maintainer, 2026-10-12): no question; Settings shows the version and offers Download again and Remove. |
 | D3 | What to keep | (a) `steamclient64.dll` only; (b) also `steamclient.dll` (32-bit games, after WoW64 support); (c) also `Steam.dll` | **(a)+(b)**, cached together. `Steam.dll` only if a game proves it needs it. |
 | D4 | Refresh | (a) never; (b) on each app update; (c) monthly | **(b)**: re-read the manifest on app update and download only if `bins_win64`'s `sha2` changed. |
 | D5 | Opt-out | a launch option `MACNEUTRON_STEAMCLIENT64=builtin`, plus Settings | **Yes**. `=<path>` keeps working, as in the spike. |
@@ -65,8 +65,8 @@ Games wrapped in SteamStub DRM (Palworld) start with no launch option. Today the
 
    The launcher log notes which one and why. The existing size-and-mtime copy rule keeps relaunches cheap.
 4. **App:**
-   - Shows the one-time consent sheet (D2) when it installs or updates a runtime that supports the DLL and none is
-     cached.
+   - Downloads without asking (D2) when it installs or updates a runtime that supports the DLL and none is cached, or
+     when Valve's `sha2` changed (D4).
    - Shows progress and errors.
    - Has a Settings row: "Steam components from Valve: version, Download again, Remove".
 5. **Never shipped by us.** Valve's files are never committed, bundled into the app or release zip, or uploaded. The
@@ -85,7 +85,7 @@ Games wrapped in SteamStub DRM (Palworld) start with no launch option. Today the
 - **Maintainer:**
   - After installing, Palworld starts with no launch option and the launcher log names the cached DLL.
   - SMITE 2 (no SteamStub) still runs.
-  - Declining consent keeps today's behaviour.
+  - Remove in Settings puts lsteamclient back at the next launch.
 
 ## 6. Out of scope
 
