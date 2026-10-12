@@ -19,7 +19,7 @@ P="$S/steamapps/compatdata/1623730/pfx"
 B="$HOME/Desktop/steam-cloud-backup"
 R() { sed -E -e "s#$HOME#~#g" -e 's/7656119[0-9]+/<SID>/g' -e 's/\[U:1:[0-9]+\]/[U:1:<id>]/g' \
   -e 's#userdata/[0-9]+#userdata/<id>#g' -e 's/(for user|user|account ID|previous user) [0-9]{3,}/\1 <id>/g' \
-  -e 's/"[0-9]{6,12}"/"<num>"/g'; }
+  -e 's/"[0-9]{6,12}"/"<num>"/g' -e 's#/cloud/[0-9/]+/#/cloud/<id>/#g'; }  # Steam's cloud storage paths encode the account
 ```
 
 ## Phase A: Palworld only, before the new build (checks D1 and the core claim)
@@ -181,8 +181,9 @@ mapping naming `macneutron-proton`, a tool that build doesn't register. Ask firs
 
 | Date | Step | Result |
 |---|---|---|
-| | A4 two names registered | |
-| | A7 resolved and downloaded | |
+| 2026-10-11 | A4 two names registered | Pass: `Registering tool macneutron-proton,` and `macneutron,` from one vdf, both manifests loaded (D1 holds, no fallback needed). |
+| 2026-10-11 | A7 resolved and downloaded | Pass: Steam mapped 1623730 to `macneutron-proton`; 0 `WinAppDataLocal` resolve failures; 139 `Download OK` for `Pal/Saved/SaveGames/<SID>/…`; no delete, conflict or failure lines for Palworld. |
+| 2026-10-11 | A8 overlap | `steamuser` is a real folder with 140 files (7 worlds, `GlobalPalStorage.sav`, `steam_autocloud.vdf`). Mac-made: 4 files (2 worlds holding only `WorldOption.sav`, `GlobalPalStorage.sav`, and `UserOption.sav` outside the cloud rule). Both sides have only `<SID>/GlobalPalStorage.sav`. Backups in `~/Desktop/steam-cloud-backup`. |
 | | B3 mappings moved, old name dropped | |
 | | B5 merge or conflict | |
 | | B6 exit pass | |
