@@ -112,6 +112,12 @@ int main(void)
         fputs("\n", stdout);
         return 0;
     }
+    if (!wcscmp(mode, L"url") && argc > 2)  /* a game opening a steam:// link, as an in-game store button does */
+    {
+        INT_PTR ret = (INT_PTR)ShellExecuteW(NULL, L"open", argv[2], NULL, NULL, SW_SHOWNORMAL);
+        printf(ret > 32 ? "url ok\n" : "url failed (%d)\n", (int)ret);
+        return 0;
+    }
     if (!wcscmp(mode, L"breakaway") && argc > 2)  /* a launcher that starts the real game outside any job, then quits */
     {
         WCHAR self[MAX_PATH], cmd[3 * MAX_PATH];

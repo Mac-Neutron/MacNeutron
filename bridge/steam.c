@@ -78,6 +78,18 @@ static void register_steam(DWORD pid)
         set_string(key, L"InstallPath", STEAM_DIR);
         RegCloseKey(key);
     }
+    /* Steam's URL handler, which Valve's Wine registers for Proton: a game's ShellExecute("steam://store/…") goes
+     * through winebrowser (a GUI program: no console window) to open(1), which hands it to macOS Steam. */
+    if ((key = create_key(HKEY_CLASSES_ROOT, L"steam")))
+    {
+        set_string(key, L"URL Protocol", L"");
+        RegCloseKey(key);
+    }
+    if ((key = create_key(HKEY_CLASSES_ROOT, L"steam\\shell\\open\\command")))
+    {
+        set_string(key, NULL, L"\"C:\\windows\\system32\\winebrowser.exe\" \"%1\"");
+        RegCloseKey(key);
+    }
 }
 
 /* Another steam.exe in the same prefix may own the pid by now: only clear our own. Every steam.exe ends once nothing

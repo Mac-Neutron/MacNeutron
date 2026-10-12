@@ -49,6 +49,16 @@ cp "$B/tests/helper.exe" "$WORK/game dir/hélper.exe"
 winpath() { printf 'Z:%s' "$1" | tr / '\\'; }
 HELPER="$(winpath "$WORK/game dir/hélper.exe")"
 STEAMEXE='C:\Program Files (x86)\Steam\steam.exe'
+# steam:// links go through Wine's winebrowser to open(1), which would start macOS Steam: in this prefix winebrowser runs
+# a stand-in that writes its arguments to $WORK/open.txt (its Browsers list; the default one names /usr/bin/open).
+mkdir -p "$WORK/bin"
+cat > "$WORK/bin/open" << 'EOF'
+#!/bin/sh
+printf '%s\n' "$@" > "${0%/bin/open}/open.txt"
+EOF
+chmod +x "$WORK/bin/open"
+"$WINE" reg add 'HKCU\Software\Wine\WineBrowser' /v Browsers /d "\"$WORK/bin/open\"" /f >/dev/null 2>&1 \
+  || { echo "check: can't point winebrowser at the stand-in open" >&2; exit 1; }
 
 steam() { "$WINE" "$STEAMEXE" "$HELPER" "$@" 2>/dev/null | tr -d '\r'; }
 fail=0
@@ -82,6 +92,11 @@ expect "Steam's named events exist while the game runs" "$(steam events)" "lock=
 # The prefix outlives a run: a fresh app ID and language each time, so only this run's steam.exe can have written them.
 expect "the game's Apps key and Steam's language" "$(SteamAppId=$$ MACNEUTRON_STEAM_LANGUAGE="français $$" steam app $$)" \
   "installed=1 running=1 updating=0 language=français $$"
+rm -f "$WORK/open.txt"
+"$WINE" reg delete 'HKCR\steam' /f >/dev/null 2>&1 || true  # an earlier run's handler
+expect "a game's steam:// link opens" "$(steam url steam://store/480)" "url ok"
+i=0; while [ ! -s "$WORK/open.txt" ] && [ "$i" -lt 10 ]; do sleep 0.5; i=$((i + 1)); done  # winebrowser doesn't wait
+expect "... and goes to macOS Steam through open(1)" "$(cat "$WORK/open.txt" 2>/dev/null || true)" "steam://store/480"
 # Under a terminal Wine gives steam.exe a console host, which waits for steam.exe to leave while steam.exe waits for
 # every program in the prefix to end: steam.exe must leave its console (FreeConsole). script(1) supplies the terminal.
 tty_steam() {
