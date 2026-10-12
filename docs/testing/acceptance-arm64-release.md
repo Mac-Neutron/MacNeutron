@@ -2293,6 +2293,51 @@ committed). The baseline at DXMT 0039, run twice with no difference (translation
 The translator key before the series (S-R7) is `d6863eccd27c3bbe36a00feeb31dbcd430a45ad9b3d0fdeb39336f9a0c1dfe2a`; no
 release or tag until the last task records the new one.
 
+**Summary (Task 16, 2026-10-12).**
+- **Caps on the default device, before → after** (`d3d12_clear`, DXMT 0059):
+  - shader model `0x67` → `0x68`;
+  - OPTIONS11 heap `0` → `1`;
+  - OPTIONS21 comparison sampling with gradient or bias `0` → `1`, extended command info `0` → `1`;
+  - OPTIONS22 `E_NOTIMPL` → answered.
+- **OPTIONS9's two 64-bit atomic bits** were already 1 and are now honest. Every 64-bit atomic goes through the
+  translator's lock path (0054, 0055, 0057; ruling R-A64), so no atomic cap is over-reported. `Int64ShaderOps` stays
+  FALSE until the i64 audit (the next spec). Float atomics need no cap bit (Task 14).
+- **64-bit atomics, for the maintainer:**
+  - **Known non-conformance:** a 32-bit atomic or a plain store racing a 64-bit atomic on the same 8 bytes isn't atomic
+    with respect to it.
+  - **Costs** (spec §3.8; M5 Pro, GPU ns per operation; uncontended / one address per simdgroup / all threads on one
+    address):
+
+    | Kind | Lock path | Native 32-bit | Slowdown |
+    |---|---|---|---|
+    | Buffers and typed buffers | 0.131 / 3.06 / 421 | 0.012-0.017 / 0.25 / 0.69 | ~8-11x / 12x / ~600x |
+    | Textures (`RG32Uint`) | 0.161 / 1.87 / 628 | 0.021 / 0.30 / 0.71 | ~5-8x / 6x / ~900x |
+    | Groupshared (+ 256 / 1,024 lanes on 1 address) | 0.059 / 0.875 / 7.5 / 19.2 | 0.011 / 0.042 / 0.10 / 0.21 | 5x / 21x / 75x / 90x |
+
+  - **The cliff:** thousands of threads on one address take seconds per dispatch (65,536 threads into 1-16 locks:
+    1.4-2.5 s).
+  - 64-bit atomics: not measured on M1 (Apple7): the 14a-14c groups ran on an M5 Pro only; M1 is not claimed until
+    they run on one.
+- **Translator key:** `d6863ecc…` → `17e0b1ee78600f14bbfbc638a0a9193511e2d71611d3fb655e2f2927fb306b3f`.
+- **Corpus, 0039 → 0058:** 0058 is the last patch that touches `src/airconv`; 0059 reports caps only.
+  - SMITE 2: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 6 changed, 11095 unchanged`. These are the six pixel
+    shaders the per-task bullets above explain.
+  - DXBC: `2/2 ok, 0 new failures, 0 fixed, 0 changed, 2 unchanged`.
+- **Final tree** (milestone 3 rerun on DXMT 0059): `dxmt-check: all passed` twice, 369 `ok` (x64 lane) and 359 `ok`
+  (ARM64EC lane), 0 `FAIL`. `make test`: 290 passed.
+- **What rests on offline translation or has no row:**
+  - Op 109 is dropped (no HLSL intrinsic emits it).
+  - Op 75 and the pixel-shader `SampleCmpBias`/`Grad` lowering are checked offline only, so OPTIONS21's comparison flag
+    rests on compute behaviour.
+  - A WaveSize refusal answers `E_FAIL`, where Microsoft's runtime likely answers `E_INVALIDARG`.
+  - No row covers `WaveMatch`/`WaveMultiPrefix*` masking in pixel shaders, `QuadVote` in 2D compute, the indexed
+    geometry-shader start-vertex path, 64-bit atomics in a geometry pipeline, or the lock table's re-zero on a
+    command-buffer error.
+- **Release notes**, for the next version's Graphics section: "DXMT reports Shader Model 6.8.
+  ResourceDescriptorHeap, compute-shader derivatives, float and 64-bit atomics and the Shader Model 6.5-6.8 wave and
+  quad operations are translated. This update changes the shader translator: each game rebuilds its shaders once, at
+  its next start."
+
 - **0040 (`airconv: Lower IsHelperLane, QuadVote, Msad, the sample-position queries and ViewID.`):** `IsHelperLane`
   (221) is `air.simd_is_helper_thread` in a pixel shader and false elsewhere; `QuadVote` (222) is `air.quad_any` or
   `air.quad_all`; `Msad` (50) calls airconv's `dxmt.msad.i32`; `Texture2DMSGetSamplePosition` (75) and
@@ -3115,3 +3160,17 @@ release or tag until the last task records the new one.
   - Milestone 3 (both lanes and `make test`): the first run had one `FAIL`, D3DMetal's own hazards run (the reference,
     not our DXMT), which reported `fence-order 1 0` and stopped there; the rerun passed, `dxmt-check: all passed` twice
     (728 `ok`). `make test`: 290 passed.
+
+### SMITE 2 on DXMT 0040-0059 (2026-10-12)
+
+- **Build:** the maintainer's session on `build/dev/MacNeutron.app` (`make app` at e5aeb43: DXMT 0059 and Proton parity
+  P0-1). launcher.log has `runtime=dev (48329b3d1c02)`, the dev app's `wine.app`.
+- **Session:** about 2.5 minutes (launcher lines 10:52:01Z to 10:54:31Z), `exit=0`.
+- **Shader rebuild:** the replay rebuilt the recorded pipelines once for the new translator key: 24,813 pipelines (21,354
+  graphics, 3,459 compute), 24,813 created, 0 failed, 0 bad records, 10,616 ms.
+- **Steam client DLL:** Valve's client 1788652215, from the app's download.
+- **Game log:** not written for this session (no `MACNEUTRON_LOG=1`), so there are no `not supported` or
+  `Failed to compile` counts.
+- **Not covered:** a second start (for "no rebuild the second time") and a match.
+- **Maintainer's verdict:** "working fine".
+
