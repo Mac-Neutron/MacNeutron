@@ -1,6 +1,6 @@
 # MacNeutron: Proton 11 parity for the Steam connection
 
-Status: draft for the maintainer (2026-10-12). The maintainer's rule: MacNeutron's Steam connection follows Proton 11's
+Status: approved by the maintainer (2026-10-12). The maintainer's rule: MacNeutron's Steam connection follows Proton 11's
 way of doing things, and deviates only for a documented macOS reason. This spec is the parity audit's plan (part B),
 with the adversarial review's corrections (part A), which bind where they differ.
 
