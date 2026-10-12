@@ -3199,6 +3199,21 @@ release or tag until the last task records the new one.
 - **Maintainer's verdict:** "working fine".
 
 
+### SMITE 2 on DXMT 0040-0060, logged (2026-10-12)
+
+- **Build:** `build/dev/MacNeutron.app`, built from `main` with 0060. launcher.log has `runtime=dev (7329939d0d19)`.
+  The launch line was `/usr/bin/env MACNEUTRON_LOG=1 %command%`.
+- **Session:** about 2 minutes (launcher lines 12:38:54Z to 12:40:44Z), `exit=0`.
+- **Shader rebuild:** the replay rebuilt the recorded pipelines once for the 0060 key: 24,814 (21,355 graphics, 3,459
+  compute), 24,814 created, 0 failed, 0 bad records, 10,580 ms.
+- **Game log:** 0 DXIL refusals. `not supported`: 682, and `Failed to compile`: 2. Those are the same counts as SMITE
+  2's logged session of 2026-10-10, before this series, so there are 0 new:
+  - the two compile lines are Unreal's material warnings about two rock assets;
+  - the `not supported` lines come from OpenGL, wined3d and Streamline.
+- **Steam client DLL:** Valve's client 1788652215.
+- **Not covered:** a second start (no rebuild the second time). The session was too short for a full match.
+- **Maintainer:** the run is done, and no problem was reported.
+
 ### Rulings made while executing the plan (from its ledger, verbatim)
 
 - Ruling: work on main in the repo and on branch macneutron in build/wine-arm64-src/dxmt, as every earlier plan — commits stay local (no push without a new yes) — cost if wrong: one branch move.

@@ -84,7 +84,9 @@ Palworld, both seems to be working fine".
      1788652215`, and the maintainer reports it working.
    - **passed**
 3. **SMITE 2 with Valve's DLL in its prefix:** `exit=0`, working. — **passed**
-4. **Remove, then Download again.** — *not run*
+4. **Remove, then Download again.** The maintainer reports (2026-10-12) that Settings → Remove, then Download again,
+   works. launcher.log has no Palworld launch while the files were removed, so "the SteamStub error is back" wasn't
+   observed. — **passed** (maintainer)
 5. **Steam's mappings** (`config.vdf`, counted by tool name only): 73 `macneutron-proton`, 0 `macneutron`, 48
    `macneutron-native`. Before, the palfix app had left 73 on `macneutron` and 0 on `macneutron-proton`. The tool-name
    regression is fixed. — **passed**
