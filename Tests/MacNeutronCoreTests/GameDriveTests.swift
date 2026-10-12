@@ -77,6 +77,26 @@ private func gameDriveLink(_ prefix: URL) -> String? {
     #expect(notes.isEmpty)
 }
 
+@Test func aLibraryLinkFollowsItsTextAsPythonsRealpathDoes() throws {
+    // Python's realpath resolves a link by its text: "<other>/steamapps" -> "<lib>/steamapps" passes the check even when
+    // the folder is "SteamApps" on disk, where realpath(3) gives "SteamApps".
+    let (lib, _, _) = try makeLibrary(steamapps: "SteamApps")
+    let link = try makeTempDir().appending(path: "steamapps")
+    try FileManager.default.createSymbolicLink(atPath: path(link), withDestinationPath: path(lib) + "/steamapps")
+    var notes: [String] = []
+    let environment = ["STEAM_COMPAT_LIBRARY_PATHS": path(link), "STEAM_COMPAT_INSTALL_PATH": path(link) + "/common/Game"]
+    #expect(GameDrive.target(environment: environment, notes: &notes) == realPath(path(lib)))
+    #expect(notes.isEmpty)
+
+    // A link spelled "SteamApps" fails it, as under Proton.
+    let wrong = try makeTempDir().appending(path: "steamapps")
+    try FileManager.default.createSymbolicLink(atPath: path(wrong), withDestinationPath: path(lib) + "/SteamApps")
+    notes = []
+    let wrongEnvironment = ["STEAM_COMPAT_LIBRARY_PATHS": path(wrong), "STEAM_COMPAT_INSTALL_PATH": path(wrong) + "/common/Game"]
+    #expect(GameDrive.target(environment: wrongEnvironment, notes: &notes) == path(wrong))
+    #expect(notes.count == 1)
+}
+
 @Test func aLibraryThatFailsValidationGetsProtonsFallback() throws {
     // The basename is checked as written, after realpath: "SteamApps" isn't "steamapps".
     let (_, wrongCase, wrongCaseGame) = try makeLibrary(steamapps: "SteamApps")

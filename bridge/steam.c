@@ -1,7 +1,7 @@
 /* steam.exe for MacNeutron: tells Windows games inside Wine that Steam is running.
  *
  *   steam.exe <program> [arguments...]      (<program>: a Windows path, or a macOS path, which it converts)
- *   steam.exe [--] steam://… | -applaunch <id> | (nothing)      (Steam's commands: to Mac Steam, or a restart)
+ *   steam.exe [--] steam://… | -applaunch <id> [arguments] | (nothing)   (Steam's commands: to Mac Steam, or a restart)
  *
  * steam_api(64).dll treats Steam as running when HKCU\Software\Valve\Steam\ActiveProcess\pid names a
  * live process, and loads the client DLL named next to it. This writes those values (pointing at the
@@ -9,7 +9,7 @@
  * what Proton's steam.exe sets up for a game (register_steam, main), runs <program>, answers Steam's DRM
  * start check (see answer_drm), waits until no program is left in the prefix (launchers start the real
  * game and quit), and exits with <program>'s exit code. A GUI program, as Proton's (-mwindows).
- * Spec: docs/superpowers/specs/2026-09-28-macneutron-steam-bridge-design.md §4.2.
+ * Spec: docs/superpowers/specs/2026-09-28-macneutron-steam-bridge-design.md, Amendment 2 (Proton 11 parity).
  *
  * It follows Valve's Proton, steam_helper/steam.c, in much of its behaviour, and find_ack_event and answer_drm
  * closely, under Proton's notice (also in bridge/Proton-steam-LICENSE.txt):
@@ -60,8 +60,30 @@
 #define ACTIVE_PROCESS_KEY STEAM_KEY L"\\ActiveProcess"
 #define CP_UNIXCP 65010  /* Wine's Unix code page (Wine's winnls.h); not in mingw's headers */
 
-/* Proton's WINE_ERR; its TRACEs are left out. */
-#define ERR(...) fprintf(stderr, "steam.exe: " __VA_ARGS__)
+/* Proton's WINE_ERR (its TRACEs are left out): Wine's debug output, which goes to Wine's Unix stderr, the game log, even
+ * when steam.exe has no Windows standard handles, as when a game's steam:// link starts it through HKCR\steam (Wine's
+ * shell32 gives it a new console). Formatted wide and written as UTF-8: a letter above U+00FF doesn't cut the line. */
+static void err_line(const WCHAR *format, ...)
+{
+    static int (CDECL *output)(const char *);
+    WCHAR wide[2048];
+    char line[ARRAYSIZE(wide) * 3];
+    va_list ap;
+
+    va_start(ap, format);
+    if (_vsnwprintf(wide, ARRAYSIZE(wide), format, ap) < 0)  /* cut: still a whole line, which Wine flushes */
+    {
+        wide[ARRAYSIZE(wide) - 2] = '\n';
+        wide[ARRAYSIZE(wide) - 1] = 0;
+    }
+    va_end(ap);
+    if (!WideCharToMultiByte(CP_UTF8, 0, wide, -1, line, sizeof(line), NULL, NULL)) return;
+    if (!output) output = (void *)GetProcAddress(GetModuleHandleW(L"ntdll"), "__wine_dbg_output");
+    if (output) output(line);
+    else fputs(line, stderr);
+}
+/* Wide formats: %ls for a WCHAR string, %hs for a char one. */
+#define ERR(format, ...) err_line(L"steam.exe: " format, ##__VA_ARGS__)
 
 /* Wine's kernel32 export (kernel32.spec), which mingw's import library lacks: a Unix path as a DOS one, on its deepest
  * drive (S: for a game in a Steam library). Freed with HeapFree. */
@@ -117,7 +139,7 @@ static void set_dword(HKEY key, const WCHAR *name, DWORD value)
 
 /* What a game process gets: ActiveProcess\pid, as Proton's set_active_process_pid, and the keys Valve's Wine writes
  * into every Proton prefix (wine.inf: SteamPath, SteamExe, SteamClientDll*, InstallPath), which ours isn't built
- * with. */
+ * with. Not ActiveProcess\SteamPath, and SteamClientDll only with a 32-bit client (D-26). */
 static void register_steam(DWORD pid)
 {
     WCHAR apps[64];
@@ -160,8 +182,9 @@ static void register_steam(DWORD pid)
         set_string(key, L"InstallPath", STEAM_DIR);
         RegCloseKey(key);
     }
-    /* Steam's URL handler, Valve's Wine's value for Proton (wine.inf): a game's ShellExecute("steam://…") runs the
-     * Steam folder's steam.exe, whose command handler restarts the game or sends the URL on to Mac Steam. */
+    /* Steam's URL handler: Proton's command (Valve's wine.inf), and an empty URL Protocol value, which wine.inf lacks
+     * (R9, D-26). A game's ShellExecute("steam://…") runs the Steam folder's steam.exe, whose command handler restarts
+     * the game or sends the URL on to Mac Steam. */
     if ((key = create_key(HKEY_CLASSES_ROOT, L"steam")))
     {
         set_string(key, L"URL Protocol", L"");
@@ -339,8 +362,9 @@ static WCHAR *fixup_cmdline_paths(WCHAR *cmdline)
 {
     const WCHAR argname[] = L"-game";
     WCHAR *p, *next, *dos_path, *ret, *wide;
-    unsigned int len, path_len;
+    unsigned int len, path_len, extra;
     char *unix_path;
+    BOOL quoted;
     int r;
 
     if (!wcsstr(cmdline, L"\\Source SDK Base")) return cmdline;
@@ -357,7 +381,7 @@ static WCHAR *fixup_cmdline_paths(WCHAR *cmdline)
         {
             p += ARRAYSIZE(argname) - 1;
             while (iswspace(*p)) ++p;
-            if (*p == '"' && p[1] == '/')
+            if ((quoted = *p == '"' && p[1] == '/'))
             {
                 next = ++p;  /* the path between the quotes, which stay */
                 while (*next && *next != '"') ++next;
@@ -385,11 +409,14 @@ static WCHAR *fixup_cmdline_paths(WCHAR *cmdline)
                 continue;
             }
             path_len = wcslen(dos_path);
+            /* Wine keeps a trailing separator, and Windows reads \" as a quote: doubled before the closing one. */
+            extra = quoted && path_len && dos_path[path_len - 1] == '\\';
             len = wcslen(cmdline) + 1;
-            ret = malloc((len + path_len - (next - p)) * sizeof(*ret));
+            ret = malloc((len + path_len + extra - (next - p)) * sizeof(*ret));
             memcpy(ret, cmdline, (p - cmdline) * sizeof(*ret));
             memcpy(ret + (p - cmdline), dos_path, path_len * sizeof(*ret));
-            memcpy(ret + (p - cmdline) + path_len, next, (len - (next - cmdline)) * sizeof(*ret));
+            if (extra) ret[(p - cmdline) + path_len] = '\\';
+            memcpy(ret + (p - cmdline) + path_len + extra, next, (len - (next - cmdline)) * sizeof(*ret));
             HeapFree(GetProcessHeap(), 0, dos_path);
             return ret;
         }
@@ -473,7 +500,7 @@ static HANDLE run_process(BOOL *should_await, BOOL game_process)
         /* Hardening over Proton, which goes on with NULL: an unconvertible path runs as given. */
         if (!(dos = wine_get_dos_file_name(scratchA)))
         {
-            ERR("Can't convert %s to a DOS path\n", scratchA);
+            ERR("Can't convert %ls to a DOS path\n", scratchW);
             goto run;
         }
         CoInitialize(NULL);
@@ -697,7 +724,13 @@ static void setup_steam_files(void)
         {
             path = malloc(end - start + 1);
             lstrcpynA(path, start, end - start);
-            if (!(str = escape_path_unix_to_dos(path))) ERR("Could not convert %s to win path.\n", path);
+            if (!(str = escape_path_unix_to_dos(path)))
+            {
+                WCHAR wpath[MAX_PATH];
+
+                if (!MultiByteToWideChar(CP_UNIXCP, 0, path, -1, wpath, ARRAYSIZE(wpath))) wcscpy(wpath, L"(a long path)");
+                ERR("Could not convert %ls to win path.\n", wpath);
+            }
             else
             {
                 pos += strappend(&buf, &buf_size, pos, "\t\"%u\"\n\t{\n\t\t\"path\"\t\t\"%s\"\n\t}\n", index, str);
@@ -790,42 +823,74 @@ static void forward_to_mac_steam(const WCHAR *url)
     free(cmd);
 }
 
+/* An argument as a Windows command line spells it, which CommandLineToArgvW reads back: quoted when it is empty or holds
+ * a space, tab or quote; \" for a quote, and backslashes doubled before one or before the closing quote. malloc'd. */
+static WCHAR *spell_argument(const WCHAR *arg)
+{
+    size_t len = wcslen(arg), i, n = 0, slashes = 0;
+    BOOL quote = !len || wcspbrk(arg, L" \t\"");
+    WCHAR *ret = malloc((2 * len + 3) * sizeof(*ret));
+
+    if (!ret) return NULL;
+    if (quote) ret[n++] = '"';
+    for (i = 0; i < len; ++i)
+    {
+        if (arg[i] == '"')
+        {
+            for (; slashes; --slashes) ret[n++] = '\\';
+            ret[n++] = '\\';
+        }
+        slashes = arg[i] == '\\' ? slashes + 1 : 0;
+        ret[n++] = arg[i];
+    }
+    if (quote)
+    {
+        for (; slashes; --slashes) ret[n++] = '\\';
+        ret[n++] = '"';
+    }
+    ret[n] = 0;
+    return ret;
+}
+
 /* -applaunch <id> [arguments]: Proton passes them to the Linux client's command line. Mac Steam has none, so the URL
- * carries them: steam://rungameid/<id>, or Valve's steam://run/<id>//<arguments>/ with the arguments joined by spaces
- * (one with a space, or empty, quoted) and percent-encoded as UTF-8 (open(1) refuses a URL with a space; the encoding
- * is common usage, as in steam://run/730//+connect%20<server>). */
+ * carries them: steam://rungameid/<id>, or Valve's steam://run/<id>//<arguments>/ with the arguments spelled as a
+ * Windows command line and percent-encoded as UTF-8. Encoded, a '/', '?', '#' or '%' in an argument can't change the
+ * URL's structure (Steam splits it on '/'); the form is common usage, as in steam://run/730//+connect%20<server>. */
 static void forward_applaunch(WCHAR **args, int count)
 {
     static const char keep[] = "-_.~+:,=@!$'()*;&";
     size_t size = 0, pos = 0;
     char *url = NULL, *utf8;
-    WCHAR *wide;
+    WCHAR *wide, *spelled;
     int i, j, r;
 
     pos += strappend(&url, &size, pos, count > 1 ? "steam://run/" : "steam://rungameid/");
     for (i = 0; i < count; ++i)
     {
-        BOOL quote = i && (!*args[i] || wcspbrk(args[i], L" \t"));
+        const WCHAR *text;
+
+        spelled = i ? spell_argument(args[i]) : NULL;  /* the ID goes as it is */
+        text = i ? spelled : args[i];
 
         if (i == 1) pos += strappend(&url, &size, pos, "//");
         else if (i) pos += strappend(&url, &size, pos, "%%20");
-        if (quote) pos += strappend(&url, &size, pos, "%%22");
-        if (!(r = WideCharToMultiByte(CP_UTF8, 0, args[i], -1, NULL, 0, NULL, NULL)) || !(utf8 = malloc(r)))
+        if (!text || !(r = WideCharToMultiByte(CP_UTF8, 0, text, -1, NULL, 0, NULL, NULL)) || !(utf8 = malloc(r)))
         {
             ERR("Can't convert %ls for Mac Steam.\n", args[i]);
+            free(spelled);
             free(url);
             return;
         }
-        WideCharToMultiByte(CP_UTF8, 0, args[i], -1, utf8, r, NULL, NULL);
+        WideCharToMultiByte(CP_UTF8, 0, text, -1, utf8, r, NULL, NULL);
         for (j = 0; utf8[j]; ++j)
         {
             unsigned char c = utf8[j];
 
-            if (isalnum(c) || (c < 0x80 && strchr(keep, c))) pos += strappend(&url, &size, pos, "%c", c);
+            if (c < 0x80 && (isalnum(c) || strchr(keep, c))) pos += strappend(&url, &size, pos, "%c", c);
             else pos += strappend(&url, &size, pos, "%%%02X", c);
         }
         free(utf8);
-        if (quote) pos += strappend(&url, &size, pos, "%%22");
+        free(spelled);
     }
     if (count > 1) pos += strappend(&url, &size, pos, "/");
     if ((r = MultiByteToWideChar(CP_UTF8, 0, url, -1, NULL, 0)) && (wide = malloc(r * sizeof(*wide))))
@@ -834,7 +899,7 @@ static void forward_applaunch(WCHAR **args, int count)
         forward_to_mac_steam(wide);
         free(wide);
     }
-    else ERR("Out of memory forwarding %s to Mac Steam.\n", url);
+    else ERR("Out of memory forwarding %hs to Mac Steam.\n", url);
     free(url);
 }
 

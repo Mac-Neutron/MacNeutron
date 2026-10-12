@@ -100,6 +100,10 @@ expect "Source SDK's -game path is converted" \
 expect "... and when it's quoted (a space and a non-ASCII letter)" \
   "$("$WINE" "$STEAMEXE" "$(winpath "$WORK/Source SDK Base 2007/helper.exe")" args -game "$WORK/mod ü" 2>/dev/null | tr -d '\r')" \
   "[-game][$(winpath "$(printf '%s' "$WORK" | sed 's#//*#/#g')/mod ü")]"
+# A trailing separator stays, doubled before the closing quote (Windows reads \" as a quote): the next argument stays apart.
+expect "... and when it ends in a separator" \
+  "$("$WINE" "$STEAMEXE" "$(winpath "$WORK/Source SDK Base 2007/helper.exe")" args -game "$WORK/mod ü/" x 2>/dev/null | tr -d '\r')" \
+  "[-game][$(winpath "$(printf '%s' "$WORK" | sed 's#//*#/#g')/mod ü/")][x]"
 # Proton's EA workarounds for a link2ea:// target (ShellExecute): EA Desktop's IsUnavailable is cleared; with no EA app,
 # ShellExecute finds no handler and steam.exe still exits 0 (the uninstall Proton tries then is skipped here, R19).
 "$WINE" reg add 'HKLM\Software\Electronic Arts\EA Desktop' /v IsUnavailable /t REG_DWORD /d 1 /f >/dev/null 2>&1
@@ -164,6 +168,12 @@ rm -f "$WORK/open.txt"
 set +e; "$WINE" "$STEAMEXE" -applaunch 480 +connect 'a b' -x >/dev/null 2>&1; got=$?; set -e
 expect "... and with arguments as run/<id>//<arguments>/, as Proton passes them to Steam" "$got $(opened)" \
   '0 steam://run/480//+connect%20%22a%20b%22%20-x/'
+# Each argument as a Windows command line spells it (quoted when empty or holding a space, tab or quote; \" for a quote,
+# backslashes doubled before one), then percent-encoded as UTF-8.
+rm -f "$WORK/open.txt"
+set +e; "$WINE" "$STEAMEXE" -applaunch 480 'Ünal' '' 'C:/x%y' "$(printf 'tab\tx')" 'a"b' 'c d\' >/dev/null 2>&1; got=$?; set -e
+expect "... each argument quoted as Windows reads it and percent-encoded as UTF-8" "$got $(opened)" \
+  '0 steam://run/480//%C3%9Cnal%20%22%22%20C:%2Fx%25y%20%22tab%09x%22%20%22a%5C%22b%22%20%22c%20d%5C%5C%22/'
 # The link is read from the wide command line: any length, any letter (the ANSI argv had 1899 characters and '?').
 long="steam://openurl/https://store.steampowered.com/search/?term=$(printf '%2000s' '' | tr ' ' a)"
 rm -f "$WORK/open.txt"
@@ -171,6 +181,7 @@ set +e; "$WINE" "$STEAMEXE" "$long" >/dev/null 2>&1; got=$?; set -e
 expect "a steam:// link of 2000 characters reaches Mac Steam whole" "$got $(opened)" "0 $long"
 rm -f "$WORK/open.txt"
 set +e; "$WINE" "$STEAMEXE" 'steam://openurl/https://store.steampowered.com/search/?term=日本' >/dev/null 2>&1; got=$?; set -e
+# (Wine's ANSI code page here is Windows-1252, which has no 日本: the ANSI argv turned them into '?'.)
 expect "... and one with letters outside the Windows code page keeps them" "$got $(opened)" \
   '0 steam://openurl/https://store.steampowered.com/search/?term=日本'
 # A game restarting itself through steam://rungameid/<its id> restarts in place (L6); Mac Steam isn't asked.
@@ -179,6 +190,11 @@ set +e; "$WINE" "$STEAMEXE" "$HELPER" restart "$(winpath "$WORK/starts.txt")" 6 
 expect "a game restarting itself through steam:// restarts in place" \
   "$got $(tr -d '\r' < "$WORK/starts.txt" 2>/dev/null || true)" "6 2"
 expect "... and Mac Steam isn't asked to launch it" "$(opened)" ""
+# A game's link starts steam.exe through HKCR\steam with no Windows standard handles (Wine's shell32 gives it a new
+# console): its failure lines go out through Wine's debug output, as Proton's WINE_ERR, so they still reach the game log.
+# A restart link with no game steam.exe to restart is one.
+expect "a steam.exe a game's link started still logs its failures" \
+  "$("$WINE" "$HELPER" url steam://rungameid/4242 2>&1 >/dev/null | tr -d '\r' | /usr/bin/grep -c 'Restart event not found')" 1
 # Not a game process: no libraryfolders.vdf (Proton's gate).
 rm -f "$STEAM/steamapps/libraryfolders.vdf"
 env -u SteamGameId STEAM_COMPAT_LIBRARY_PATHS="$WORK/steamapps" "$WINE" "$STEAMEXE" "$HELPER" exit 0 >/dev/null 2>&1 || true
@@ -252,8 +268,8 @@ if [ -n "$COMPAT" ]; then
     own_console=1
   expect "launcher: ... and its exit code still reaches Steam" "$(lib_status "$SLIB/steamapps" helper-console.exe exit 9)" 9
   # A target that isn't an .exe goes through ShellExecute, as Proton's: a batch file, ASCII only (cmd reads it in the
-  # OEM code page), which finds the helper next to it and exits 3. steam.exe doesn't wait for what ShellExecute starts,
-  # so it exits 0; started with CreateProcess, it would pass the batch's 3 on.
+  # OEM code page), which finds the helper next to it and exits 3. steam.exe still waits for the prefix to empty, but
+  # ShellExecute gives it no program to take an exit code from, so it exits 0; through CreateProcess it would pass the 3 on.
   cp "$B/tests/helper.exe" "$WORK/game dir/helper.exe"
   printf '@"%%~dp0helper.exe" marker "%%~dp0marker.txt"\r\n@exit 3\r\n' > "$WORK/game dir/run.bat"
   rm -f "$WORK/game dir/marker.txt"
@@ -284,6 +300,12 @@ fi
 own=$("$WINE" "$HELPER" pid 2>/dev/null | tr -d '\r')
 case $own in 0|1|'') own="pid=$own" ;; *) own=own ;; esac
 expect "a steam.exe that fails leaves its own pid, dead" \
+  "$("$WINE" "$HELPER" steam 2>/dev/null | tr -d '\r' | cut -d ' ' -f 1) $own" "alive=0 own"
+"$WINE" reg add 'HKCU\Software\Valve\Steam\ActiveProcess' /v pid /t REG_DWORD /d 1 /f >/dev/null 2>&1
+steam exit 0 >/dev/null
+own=$("$WINE" "$HELPER" pid 2>/dev/null | tr -d '\r')
+case $own in 0|1|'') own="pid=$own" ;; *) own=own ;; esac
+expect "... and so does one whose game ended" \
   "$("$WINE" "$HELPER" steam 2>/dev/null | tr -d '\r' | cut -d ' ' -f 1) $own" "alive=0 own"
 expect "... and the next one registers again" "$(steam steam | cut -d ' ' -f 1)" "alive=1"
 

@@ -345,9 +345,9 @@ private func i386Exe(named name: String) throws -> String {
     #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "steamclient64.dll").path(percentEncoded: false)))
 }
 
-@Test func gameLogsHideTheSteamAccount() throws {
-    // People post game logs in bug reports; the account ID leads straight to a Steam profile, and Steam passes the
-    // account's login name as SteamUser and SteamAppUser. (Fake values.)
+@Test func gameLogsHideTheSteamLoginName() throws {
+    // People post game logs in bug reports, and Steam passes the account's login name as SteamUser and SteamAppUser.
+    // MacNeutron adds no account variable of its own. (Fake values.)
     let f = try makeFixture(bridge: true)
     var env = f.env
     env["MACNEUTRON_LOG"] = "1"
