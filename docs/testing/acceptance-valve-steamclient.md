@@ -1,0 +1,62 @@
+# Acceptance: Valve's signed steamclient64.dll by default (Proton parity P0-1)
+
+Spec: `docs/superpowers/specs/2026-10-12-macneutron-valve-steamclient-design.md`, amended by the parity spec's Part A
+item 1 (`docs/superpowers/specs/2026-10-12-macneutron-proton-parity-design.md`). Plan:
+`docs/superpowers/plans/2026-10-12-macneutron-valve-steamclient.md`.
+
+## What changed
+
+- **Release guard (A7).** `release/release.sh` refuses an app holding any of Valve's Windows client files, by name and in
+  any letter case: `steamclient*`, `GameOverlayRenderer*`, `Steam.dll`, `SteamService*`, `tier0_s*`, `vstdlib_s*`,
+  `gameoverlayui*` and `SteamOverlayVulkanLayer*`. Our own `lsteamclient` and `steam.exe` pass. Commit 625fa93.
+- **Runtime marker.** `wine-arm64/bundle.sh` writes `wine.app/Contents/Resources/genuine-steamclient` when the Wine tree
+  it bundles has patch 0036. `ToolLayout.supportsGenuineSteamclient` reads it. `ToolLayout.valveCache` is
+  `~/Library/Application Support/MacNeutron/Valve`. `wine-arm64/check.sh steamclient` asserts the marker. Commit 7c32e31.
+- **ValveClient.** It fetches `https://client-update.steamstatic.com/steam_client_win64`, then the `bins_win64` package
+  it names, through an ephemeral `URLSession`.
+  - It checks the package's size and SHA-256 against the manifest.
+  - It extracts Proton's six legacycompat files flat with `unzip -j`, and checks each one's PE machine and certificate
+    table.
+  - It installs them atomically in `Valve/<version>/` with a `source.txt`, then prunes older versions and stopped
+    installs.
+  - Manifest fields are checked before any path or URL is built from them.
+  - Commit ccb9e09.
+- **Launcher.** The prefix's `steamclient64.dll` is chosen in this order:
+  1. `MACNEUTRON_STEAMCLIENT64=<path>`, or `=builtin` for lsteamclient;
+  2. the cached Valve DLL when the runtime has the marker;
+  3. lsteamclient.
+
+  launcher.log names the choice and the reason. Commit 78f5198.
+- **App.** After each successful runtime install, on a runtime with the marker, the app checks Valve's manifest once per
+  app version, without asking. It downloads only when `bins_win64`'s `sha2` changed or nothing is cached. Settings →
+  "Steam components from Valve" shows the version, with Download again and Remove. Remove sticks until Download again
+  is pressed. A failure shows only in that row. Commit e5aeb43.
+
+## Gates (2026-10-12)
+
+| Gate | Result |
+|---|---|
+| `swift test` | 318 tests passed (290 before P0-1) |
+| `sh release/release.sh --self-test` | `PASS release self-test`, with 12 new Valve-file rows |
+| `sh wine-arm64/check.sh steamclient` (rebuilt runtime, marker present) | `PASS steamclient`. Before the rebuild: `FAIL steamclient: wine.app has no genuine-steamclient marker …` |
+| `make bridge-check` | all passed (27 `ok`), SMITE 2's bridge path unchanged |
+| `make app APP=build/dev/MacNeutron.app` | built; its `wine.app` carries `genuine-steamclient` |
+
+Each task's RED was recorded first:
+- release self-test: 12 rows failed (no `check_no_valve`).
+- `PathsTests`: compile failure.
+- `ValveClientTests` and `PEImageTests`: compile failure.
+- `PrefixManagerTests`: 5 rows failed. The builtin row threw, because `builtin` was read as a path.
+- `AppModelTests`: compile failure.
+
+## Maintainer rows (build/dev/MacNeutron.app)
+
+1. Quit MacNeutron and open `build/dev/MacNeutron.app`. Settings shows "Version <n>" with no question asked, and
+   `~/Library/Application Support/MacNeutron/Valve/<n>/` holds the six files and `source.txt`. — *pending*
+2. Remove Palworld's `MACNEUTRON_STEAMCLIENT64` launch option and start it. It reaches the title screen, and
+   launcher.log has `steamclient64.dll from Valve's client <n>`. — *pending*
+3. SMITE 2 still runs with the bridge. — *pending*
+4. Settings → Remove, then start Palworld. launcher.log says `is lsteamclient: Valve's isn't downloaded`, and the
+   SteamStub error is back. Then Download again, and Palworld starts again. — *pending*
+5. Steam's mappings: `macneutron-proton` for every Windows game and none for `macneutron` (parity §0, the tool-name
+   regression). — *pending*

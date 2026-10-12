@@ -139,6 +139,14 @@ Windows games talk to your running Mac Steam through the runtime's Steam client 
 built for arm64 by `wine.app`, and shipped under Valve's Steamworks SDK licence, see `licenses/lsteamclient/`). MacNeutron's `steam.exe` tells each game that Steam is running. Anti-cheat
 that needs a Windows kernel driver (Easy Anti-Cheat, BattlEye, Vanguard and others) still won't run.
 
+Games wrapped in Valve's DRM (SteamStub, Palworld among them) check the signature of `steamclient64.dll` in the prefix.
+As Proton does, MacNeutron puts Valve's own signed copy there, and the runtime sends its calls to the bridge. macOS
+Steam has no Windows files, so MacNeutron downloads Valve's Windows client package (about 64 MB) from Valve's servers
+when it installs a runtime that can use it, and keeps six of its files in
+`~/Library/Application Support/MacNeutron/Valve/`. They come only from Valve to your Mac: MacNeutron's downloads never
+contain them. Settings → **Steam components from Valve** shows the version, downloads again or removes them (games then
+get the bridge itself; `MACNEUTRON_STEAMCLIENT64=builtin` does the same for one game).
+
 Game logs (`MACNEUTRON_LOG=1` or `2`) hide your Steam account ID and login name, and any environment variable whose
 name looks like a secret (`…TOKEN…`, `…SECRET…`, `…PASSWORD…`, `…_KEY`); they still contain file paths that name your
 macOS user, and Wine's `steamclient` lines in them (all of its calls with `MACNEUTRON_LOG=2`) can contain your SteamID
