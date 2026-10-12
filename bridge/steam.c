@@ -1,6 +1,7 @@
 /* steam.exe for MacNeutron: tells Windows games inside Wine that Steam is running.
  *
  *   steam.exe <program> [arguments...]      (<program>: a Windows path, or a macOS path, which it converts)
+ *   steam.exe [--] steam://… | -applaunch <id> | (nothing)      (Steam's commands: to Mac Steam, or a restart)
  *
  * steam_api(64).dll treats Steam as running when HKCU\Software\Valve\Steam\ActiveProcess\pid names a
  * live process, and loads the client DLL named next to it. This writes those values (pointing at the
@@ -45,6 +46,7 @@
 #include <winternl.h>
 #include <objbase.h>
 #include <shellapi.h>
+#include <shlwapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -137,8 +139,8 @@ static void register_steam(DWORD pid)
         set_string(key, L"InstallPath", STEAM_DIR);
         RegCloseKey(key);
     }
-    /* Steam's URL handler, which Valve's Wine registers for Proton: a game's ShellExecute("steam://store/…") goes
-     * through winebrowser (a GUI program: no console window) to open(1), which hands it to macOS Steam. */
+    /* Steam's URL handler, Valve's Wine's value for Proton (wine.inf): a game's ShellExecute("steam://…") runs the
+     * Steam folder's steam.exe, whose command handler restarts the game or sends the URL on to Mac Steam. */
     if ((key = create_key(HKEY_CLASSES_ROOT, L"steam")))
     {
         set_string(key, L"URL Protocol", L"");
@@ -146,7 +148,7 @@ static void register_steam(DWORD pid)
     }
     if ((key = create_key(HKEY_CLASSES_ROOT, L"steam\\shell\\open\\command")))
     {
-        set_string(key, NULL, L"\"C:\\windows\\system32\\winebrowser.exe\" \"%1\"");
+        set_string(key, NULL, L"\"" STEAM_DIR L"\\steam.exe\" -- \"%1\"");
         RegCloseKey(key);
     }
 }
@@ -598,10 +600,71 @@ static BOOL is_ptraced(void)
     return !!pid;
 }
 
-/* Proton's steam_command_handler: steam:// URLs and Steam's command-line options. Not yet: every run is a game. */
+/* A steam:// URL to Mac Steam: winebrowser, which runs open(1) (D-12; Proton runs the Linux client's own commands,
+ * steam-runtime-steam-remote or steam, which macOS has no equivalent of). Never ShellExecute: HKCR\steam is us. */
+static void forward_to_mac_steam(const char *url)
+{
+    STARTUPINFOW si = { sizeof(si) };
+    PROCESS_INFORMATION pi;
+    WCHAR cmd[2048], wide[1900];
+
+    if (!MultiByteToWideChar(CP_ACP, 0, url, -1, wide, ARRAYSIZE(wide))) return;
+    _snwprintf(cmd, ARRAYSIZE(cmd), L"C:\\windows\\system32\\winebrowser.exe \"%ls\"", wide);
+    if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+    {
+        ERR("Forwarding %s to Mac Steam failed, error %lu.\n", url, GetLastError());
+        return;
+    }
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+}
+
+/* Proton's steam_command_handler: steam:// URLs and options are commands, anything else is a program to start. */
 static BOOL steam_command_handler(int argc, char *argv[])
 {
-    return FALSE;
+    const char *sgi;
+    char url[64];
+    int i = 1;
+
+    /* If there are command line options, only forward steam:// and options start with - */
+    if (argc > 1 && StrStrIA(argv[1], "steam://") != argv[1] && argv[1][0] != '-') return FALSE;
+    /* The game restarting itself (HKCR's form: -- steam://launch/<id> or steam://rungameid/<id>): signal the steam.exe
+     * that started it. Proton opens the event for SYNCHRONIZE only, which our Wine refuses SetEvent (R6). */
+    if (argc > 2 && !strcmp(argv[1], "--") && (sgi = getenv("SteamGameId")))
+    {
+        char launch[64], rungameid[64];
+
+        snprintf(launch, sizeof(launch), "steam://launch/%s", sgi);
+        snprintf(rungameid, sizeof(rungameid), "steam://rungameid/%s", sgi);
+        if (!strcmp(argv[2], launch) || !strcmp(argv[2], rungameid))
+        {
+            HANDLE event = OpenEventW(SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE, L"PROTON_STEAM_EXE_RESTART_APP");
+
+            if (event)
+            {
+                SetEvent(event);
+                CloseHandle(event);
+            }
+            else ERR("Restart event not found.\n");
+            return TRUE;
+        }
+    }
+    /* Mac Steam has no command line (D-12): HKCR's -- goes, URLs are forwarded, -applaunch <id> becomes
+     * steam://rungameid/<id>, nothing at all opens Steam, and every other option is dropped. */
+    if (argc > 1 && !strcmp(argv[1], "--")) i = 2;
+    if (i >= argc) forward_to_mac_steam("steam://open/main");
+    for (; i < argc; ++i)
+    {
+        if (StrStrIA(argv[i], "steam://") == argv[i]) forward_to_mac_steam(argv[i]);
+        else if (!strcmp(argv[i], "-applaunch") && i + 1 < argc)
+        {
+            snprintf(url, sizeof(url), "steam://rungameid/%s", argv[++i]);
+            forward_to_mac_steam(url);
+        }
+        else ERR("ignoring %s (Mac Steam has no command line)\n", argv[i]);
+    }
+    return TRUE;
 }
 
 /* Proton's main, in its order: Steam is set up only for a game process (SteamGameId set, empty included). */
@@ -612,12 +675,7 @@ int main(int argc, char *argv[])
     BOOL should_await = TRUE;  /* hardening: Proton's run_process can return before setting it */
     DWORD rc = 0;
 
-    if (steam_command_handler(argc, argv)) return 0;
-    if (argc < 2)
-    {
-        fprintf(stderr, "usage: steam.exe <program> [arguments...]\n");
-        return 1;
-    }
+    if (steam_command_handler(argc, argv)) return 0;  /* every run with no arguments is one */
     if (getenv("SteamGameId"))
     {
         WCHAR path[MAX_PATH], *p;
@@ -664,8 +722,37 @@ int main(int argc, char *argv[])
                                 &wait_handle, sizeof(wait_handle));
     if (wait_handle != INVALID_HANDLE_VALUE)
     {
+        HANDLE waits[2] = { wait_handle, NULL };
+        DWORD ret, wait_count = 1;
+
+        /* The game asks for its own restart through steam://rungameid/<its id> (steam_command_handler). */
+        if (game_process)
+        {
+            if ((waits[1] = CreateEventW(NULL, FALSE, FALSE, L"PROTON_STEAM_EXE_RESTART_APP"))) ++wait_count;
+            else ERR("Failed to create restart event, err %lu.\n", GetLastError());
+        }
         FreeConsole();
-        WaitForSingleObject(wait_handle, INFINITE);
+        /* Proton's loop, without its precedence slip (ret got the comparison, so a failed wait read as a restart): it
+         * loops only on the restart event (R7). */
+        while ((ret = WaitForMultipleObjects(wait_count, waits, FALSE, INFINITE)) != WAIT_OBJECT_0)
+        {
+            if (ret != WAIT_OBJECT_0 + 1)
+            {
+                ERR("Wait failed.\n");
+                break;
+            }
+            if (child != INVALID_HANDLE_VALUE)
+            {
+                if (WaitForSingleObject(child, 0) == WAIT_TIMEOUT)
+                {
+                    ERR("Child is still running, not restarting.\n");
+                    continue;
+                }
+                CloseHandle(child);
+            }
+            child = run_process(&should_await, game_process);
+        }
+        if (waits[1]) CloseHandle(waits[1]);
     }
     if (child != INVALID_HANDLE_VALUE)
     {

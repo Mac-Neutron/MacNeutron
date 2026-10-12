@@ -27,7 +27,7 @@ smoke: build bridge wine-arm64
 bridge:
 	mkdir -p $(BRIDGE)/arm64/tests
 	$(MINGW) -fms-extensions -mwindows -o $(BRIDGE)/steamprobe.exe bridge/probe.c
-	$(MINGW_A64) -mwindows -o $(BRIDGE)/arm64/steam.exe bridge/steam.c -ladvapi32 -lntdll -luser32 -lshell32 -lole32
+	$(MINGW_A64) -mwindows -o $(BRIDGE)/arm64/steam.exe bridge/steam.c -ladvapi32 -lntdll -luser32 -lshell32 -lshlwapi -lole32
 	$(MINGW_A64) -mwindows -o $(BRIDGE)/arm64/tests/helper.exe bridge/tests/helper.c -ladvapi32 -lshell32 -luser32
 	$(MINGW_A64) -o $(BRIDGE)/arm64/tests/helper-console.exe bridge/tests/helper.c -ladvapi32 -lshell32 -luser32
 

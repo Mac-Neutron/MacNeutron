@@ -154,6 +154,36 @@ int main(void)
         printf("ack=%d\n", WaitForSingleObject(ack, 5000) == WAIT_OBJECT_0);
         return 0;
     }
+    /* A game restarting itself through Steam (steam://rungameid/<its id>): counts its starts in <file>; the first start
+     * asks for the restart once steam.exe's restart event exists, then exits; the next exits with <code>. */
+    if (!wcscmp(mode, L"restart") && argc > 3)
+    {
+        STARTUPINFOW si = { sizeof(si) };
+        PROCESS_INFORMATION pi;
+        WCHAR cmd[256], id[32] = L"";
+        HANDLE event;
+        FILE *f;
+        int n = 0;
+
+        if ((f = _wfopen(argv[2], L"r"))) { if (fscanf(f, "%d", &n) != 1) n = 0; fclose(f); }
+        if (!(f = _wfopen(argv[2], L"w"))) return 2;
+        fprintf(f, "%d\n", ++n);
+        fclose(f);
+        if (n > 1) return _wtoi(argv[3]);
+        for (i = 0; i < 20; i++)
+        {
+            if ((event = OpenEventW(SYNCHRONIZE, FALSE, L"PROTON_STEAM_EXE_RESTART_APP"))) { CloseHandle(event); break; }
+            Sleep(100);
+        }
+        GetEnvironmentVariableW(L"SteamGameId", id, ARRAYSIZE(id));
+        _snwprintf(cmd, ARRAYSIZE(cmd), L"\"C:\\Program Files (x86)\\Steam\\steam.exe\" -- steam://rungameid/%ls", id);
+        if (CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+        {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
+        return 0;
+    }
     if (!wcscmp(mode, L"window"))  /* Steam's hidden window, which games look for with FindWindow */
     {
         int i;

@@ -143,6 +143,25 @@ tty_steam() {
 }
 expect "steam.exe ends under a terminal" "$(tty_steam)" 5
 
+# Proton's command handler: steam:// URLs and Steam's options are commands, not programs. Mac Steam has no command line:
+# URLs reach it through open(1) (winebrowser), -applaunch as steam://rungameid, the rest is logged and dropped (D-12).
+steam exit 0 >/dev/null
+expect "HKCR\\steam is Proton's handler" \
+  "$("$WINE" reg query 'HKCR\steam\shell\open\command' /ve 2>/dev/null | tr -d '\r' | sed -n 's/.*REG_SZ *//p')" \
+  '"C:\Program Files (x86)\Steam\steam.exe" -- "%1"'
+rm -f "$WORK/open.txt"
+set +e; "$WINE" "$STEAMEXE" steam://store/480 >/dev/null 2>&1; got=$?; set -e
+expect "steam.exe steam://store/480 opens Mac Steam" "$got $(opened)" "0 steam://store/480"
+rm -f "$WORK/open.txt"
+set +e; "$WINE" "$STEAMEXE" -applaunch 480 >/dev/null 2>&1; got=$?; set -e
+expect "-applaunch reaches Mac Steam as rungameid" "$got $(opened)" "0 steam://rungameid/480"
+# A game restarting itself through steam://rungameid/<its id> restarts in place (L6); Mac Steam isn't asked.
+rm -f "$WORK/starts.txt" "$WORK/open.txt"
+set +e; "$WINE" "$STEAMEXE" "$HELPER" restart "$(winpath "$WORK/starts.txt")" 6 >/dev/null 2>&1; got=$?; set -e
+expect "a game restarting itself through steam:// restarts in place" \
+  "$got $(tr -d '\r' < "$WORK/starts.txt" 2>/dev/null || true)" "6 2"
+expect "... and Mac Steam isn't asked to launch it" "$(opened)" ""
+
 # The same rows through the tool folder's launcher, as Steam starts a game: the launcher copies steam.exe and starts
 # the game through it. A fake language: the launcher would fill in the real one from registry.vdf, which also holds the
 # login name. The helper goes as a macOS path, which steam.exe converts.
