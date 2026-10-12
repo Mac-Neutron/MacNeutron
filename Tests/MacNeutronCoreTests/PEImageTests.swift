@@ -48,3 +48,17 @@ import Testing
     #expect(PEImage.machine(of: exe) == PEImage.amd64)
     #expect(ContinuousClock.now - start < .seconds(1))
 }
+
+@Test func certificateTableIsSeenInPE32AndPE32Plus() throws {
+    let dir = try makeTempDir()
+    for machine in [PEImage.i386, PEImage.amd64] {
+        for signed in [true, false] {
+            let file = dir.appending(path: "\(machine)-\(signed).dll")
+            try peBytes(machine: machine, certificate: signed).write(to: file)
+            #expect(PEImage.hasCertificateTable(file) == signed)
+        }
+    }
+    let short = dir.appending(path: "short.dll")
+    try peBytes(machine: PEImage.amd64, certificate: true).prefix(0x100).write(to: short)
+    #expect(!PEImage.hasCertificateTable(short))
+}

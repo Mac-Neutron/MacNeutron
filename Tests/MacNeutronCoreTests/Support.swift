@@ -122,13 +122,28 @@ func installFakeSteamBridge(in layout: ToolLayout) throws {
     try write("steam.exe", to: layout.steamHelper)
 }
 
-/// A minimal PE: 64-byte DOS header with `e_lfanew` 0x80, padding, `PE\0\0`, then the COFF machine.
-func peBytes(machine: UInt16) -> Data {
-    var bytes = [UInt8](repeating: 0, count: 0x86)
+/// A minimal PE: 64-byte DOS header with `e_lfanew` 0x80, padding, `PE\0\0`, the COFF header, then an optional header
+/// (PE32 for i386, PE32+ otherwise) with 16 data directories. `certificate` fills directory 4, the Certificate Table, as
+/// an Authenticode-signed file has it.
+func peBytes(machine: UInt16, certificate: Bool = false) -> Data {
+    let pe32 = machine == PEImage.i386
+    let optional = 0x98, optionalSize = pe32 ? 0xE0 : 0xF0
+    var bytes = [UInt8](repeating: 0, count: optional + optionalSize)
+    func put(_ value: Int, at offset: Int, size: Int) {
+        for i in 0..<size { bytes[offset + i] = UInt8((value >> (8 * i)) & 0xFF) }
+    }
     bytes[0] = 0x4D; bytes[1] = 0x5A
     bytes[0x3C] = 0x80
     bytes[0x80] = 0x50; bytes[0x81] = 0x45
-    bytes[0x84] = UInt8(machine & 0xFF); bytes[0x85] = UInt8(machine >> 8)
+    put(Int(machine), at: 0x84, size: 2)
+    put(optionalSize, at: 0x80 + 20, size: 2)
+    put(pe32 ? 0x10B : 0x20B, at: optional, size: 2)
+    put(16, at: optional + (pe32 ? 92 : 108), size: 4)
+    if certificate {
+        let directory = optional + (pe32 ? 128 : 144)
+        put(0x400, at: directory, size: 4)
+        put(0x10, at: directory + 4, size: 4)
+    }
     return Data(bytes)
 }
 

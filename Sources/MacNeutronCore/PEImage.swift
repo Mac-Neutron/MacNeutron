@@ -18,4 +18,20 @@ public enum PEImage {
         else { return nil }
         return UInt16(nt[4]) | UInt16(nt[5]) << 8
     }
+
+    /// The optional header's Certificate Table (data directory 4) has a non-zero size: the file carries an Authenticode
+    /// signature. Not a validity check (Wine's WinVerifyTrust, and SteamStub, do that).
+    public static func hasCertificateTable(_ url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count >= 64 else { return false }
+        func value(at offset: Int, size: Int) -> Int? {
+            guard offset >= 0, offset + size <= data.count else { return nil }
+            return (0..<size).reduce(0) { $0 | Int(data[data.startIndex + offset + $1]) << (8 * $1) }
+        }
+        guard let lfanew = value(at: 0x3C, size: 4), value(at: lfanew, size: 4) == 0x4550,  // "PE\0\0"
+              let magic = value(at: lfanew + 24, size: 2), magic == 0x10B || magic == 0x20B else { return false }
+        let optional = lfanew + 24, pe32 = magic == 0x10B
+        guard let count = value(at: optional + (pe32 ? 92 : 108), size: 4), count > 4,
+              let size = value(at: optional + (pe32 ? 128 : 144) + 4, size: 4) else { return false }
+        return size > 0
+    }
 }
