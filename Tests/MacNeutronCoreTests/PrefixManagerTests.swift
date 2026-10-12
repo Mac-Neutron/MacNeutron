@@ -103,6 +103,7 @@ private let emulateModeset = ["reg", "add", #"HKCU\Software\Wine\X11 Driver"#, "
     try write("first", to: data.appending(path: "pfx.rosetta/save.dat"))
     try write("second", to: data.appending(path: "pfx.rosetta-2/save.dat"))
     try write("third", to: manager.context.prefix.appending(path: "save.dat"))  // no stamp at all: Rosetta-era too
+    try write("WINE REGISTRY Version 2\n", to: manager.context.prefix.appending(path: "user.reg"))  // Wine made it, not Steam
     try manager.prepare(environment: env)
     #expect(try String(contentsOf: data.appending(path: "pfx.rosetta/save.dat"), encoding: .utf8) == "first")
     #expect(try String(contentsOf: data.appending(path: "pfx.rosetta-2/save.dat"), encoding: .utf8) == "second")
@@ -719,4 +720,46 @@ private func failedFirstPreparation() throws -> (PrefixManager, [String: String]
     #expect(newPrefixFile(manager, "player/Saved Games/G/mac.sav") == "Saved Games/G/mac.sav")
     #expect(newPrefixFile(manager, "steamuser/AppData/Local/G/steam.sav") == nil)
     #expect(newPrefixFile(manager, "macuser/Saved Games/G/mac.sav") == nil)
+}
+
+// MARK: Steam Cloud (spec §4.2, §4.3)
+
+/// A launch by Steam for the Mac user `u`, whose Wine profile is `users/u`.
+private func makeCloudManager() throws -> (PrefixManager, [String: String]) {
+    let (manager, env) = try makeCarryManager(winebootMakingUser("u"))
+    return (manager, env.merging(["USER": "u"]) { _, new in new })
+}
+
+@Test func aSeededPrefixIsPreparedInPlace() throws {
+    // Steam's cloud download made pfx before MacNeutron ever ran: no stamp, no user.reg.
+    let (manager, env) = try makeCloudManager()
+    let seeded = manager.context.prefix.appending(path: "drive_c/users/steamuser/Local Settings/Application Data/G/s.sav")
+    try write("cloud", to: seeded)
+    try manager.prepare(environment: env)
+    #expect(!FileManager.default.fileExists(atPath: manager.context.dataPath.appending(path: "pfx.rosetta").path(percentEncoded: false)))
+    #expect(newPrefixFile(manager, "u/AppData/Local/G/s.sav") == "cloud")
+    #expect(try String(contentsOf: seeded, encoding: .utf8) == "cloud")  // the path Steam watches, now through the links
+    #expect(stamp(manager) == "wine.app id1 msync=1")
+}
+
+@Test func linksAreKeptOnEveryLaunch() throws {
+    let (manager, env) = try makeCloudManager()
+    try manager.prepare(environment: env)
+    let steamuser = manager.context.prefix.appending(path: "drive_c/users/steamuser").path(percentEncoded: false)
+    #expect(try FileManager.default.destinationOfSymbolicLink(atPath: steamuser) == "u")
+    try FileManager.default.removeItem(atPath: steamuser)
+    try manager.prepare(environment: env)  // up to date: no wineboot
+    #expect(try FileManager.default.destinationOfSymbolicLink(atPath: steamuser) == "u")
+}
+
+@Test func aCloudConflictIsReportedAndLogged() throws {
+    let (manager, env) = try makeCloudManager()
+    try manager.prepare(environment: env)
+    let users = manager.context.prefix.appending(path: "drive_c/users")
+    try FileManager.default.removeItem(at: users.appending(path: "steamuser"))  // as if Steam had made a real folder
+    try write("local", to: users.appending(path: "u/AppData/Local/G/s.sav"))
+    try write("cloud", to: users.appending(path: "steamuser/Local Settings/Application Data/G/s.sav"))
+    let report = try manager.prepare(environment: env)
+    #expect(report.conflicts == 1)
+    #expect(launcherLog(manager).contains("note: kept steamuser: 1 of its files differ"))
 }

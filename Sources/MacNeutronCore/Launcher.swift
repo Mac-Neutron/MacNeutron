@@ -83,14 +83,14 @@ public struct Launcher: Sendable {
             case .runinprefix:
                 status = try runGame(request, env, gameLog, throughSteam: false)
             case .run:
-                try prefix.prepare(environment: env, steamBridge: steamBridge)
+                notifyAboutCloudConflicts(try prefix.prepare(environment: env, steamBridge: steamBridge))
                 if !steamBridge { try prefix.removeSteamBridge() }
                 status = try runGame(request, env, gameLog, throughSteam: steamBridge)
             case .waitforexitandrun:
                 // Prepare first (Proton's order): a launch queued on the prefix lock behind
                 // `run iscriptevaluator.exe` then finds that session's wineserver alive, and
                 // `-w` waits for the redistributable installers to finish.
-                try prefix.prepare(environment: env, steamBridge: steamBridge)
+                notifyAboutCloudConflicts(try prefix.prepare(environment: env, steamBridge: steamBridge))
                 if !steamBridge { try prefix.removeSteamBridge() }
                 _ = try runner.run(layout.wineserver, ["-w"], environment: env, output: nil)
                 // Shader pre-caching: after a DXMT or macOS update, rebuild the recorded pipelines before the game.
@@ -154,6 +154,13 @@ public struct Launcher: Sendable {
         let game = [request.target] + request.arguments
         let command = throughSteam ? [SteamBridge.steamExe, SteamBridge.windowsPath(request.target)] + request.arguments : game
         return try runner.run(layout.wine, command, environment: env, output: gameLog)
+    }
+
+    /// Spec D2: Steam's copy and the Mac's were both kept, and only the player can choose between them.
+    private func notifyAboutCloudConflicts(_ links: ProfileLinkReport) {
+        guard links.conflicts > 0 else { return }
+        notifier.post(title: "MacNeutron", message: "Steam Cloud saves for this game differ from the ones on this Mac,"
+                      + " so MacNeutron kept both. Details are in launcher.log.")
     }
 
     /// `run` and `waitforexitandrun` start the game through `steam.exe` when the bridge is installed,

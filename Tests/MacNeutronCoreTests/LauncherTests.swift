@@ -391,3 +391,20 @@ private func i386Exe(named name: String) throws -> String {
     #expect(!f.runner.calls.isEmpty)
     #expect(f.runner.calls.allSatisfy { $0.environment["MACNEUTRON_PRESENT"] == nil })
 }
+
+@Test func aCloudConflictPostsANotification() throws {
+    // Spec D2: both copies are kept, and only the player can choose between them.
+    let runner = FakeRunner { call in
+        if call.arguments.first == "wineboot", let prefix = call.environment["WINEPREFIX"] {
+            try? write("local", to: URL(filePath: prefix).appending(path: "drive_c/users/u/AppData/Local/G/s.sav"))
+        }
+        return 0
+    }
+    let f = try makeFixture(runner: runner)
+    let prefix = URL(filePath: f.env["STEAM_COMPAT_DATA_PATH"]!).appending(path: "pfx")
+    try write("cloud", to: prefix.appending(path: "drive_c/users/steamuser/Local Settings/Application Data/G/s.sav"))
+    _ = f.launcher.launch(["waitforexitandrun", "/g/Game.exe"], environment: f.env.merging(["USER": "u"]) { _, new in new })
+    #expect(f.notifier.posted == [
+        "Steam Cloud saves for this game differ from the ones on this Mac, so MacNeutron kept both. Details are in launcher.log.",
+    ])
+}

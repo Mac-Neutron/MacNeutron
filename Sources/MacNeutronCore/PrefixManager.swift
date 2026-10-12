@@ -48,12 +48,14 @@ public struct PrefixManager: Sendable {
     static let carriedMarker = "player-data-carried"
 
     /// Prepares the prefix when it is missing or another `wine.app` prepared it; stops a wineserver left in the other
-    /// msync mode; then, when asked, installs the Steam bridge. Holds the prefix lock only for this, never while the
-    /// game runs. Nothing under `drive_c` is ever deleted: a Rosetta-era prefix is renamed.
-    public func prepare(environment: [String: String], steamBridge: Bool = false) throws {
+    /// msync mode; keeps Steam Cloud's profile links (spec §4.2); then, when asked, installs the Steam bridge. Holds the
+    /// prefix lock only for this, never while the game runs. Nothing under `drive_c` is ever deleted: a Rosetta-era
+    /// prefix is renamed. Returns what the links did, for the launcher to tell the player about a conflict.
+    @discardableResult
+    public func prepare(environment: [String: String], steamBridge: Bool = false) throws -> ProfileLinkReport {
         let fm = FileManager.default
         try fm.createDirectory(at: context.dataPath, withIntermediateDirectories: true)
-        try withFileLock(at: context.lockFile) {
+        return try withFileLock(at: context.lockFile) {
             // Wine reads WINEMSYNC with atoi; launch options may set it to anything.
             let want = Self.stamp(identity: identity, msync: atoi(environment["WINEMSYNC"] ?? "") != 0)
             let recorded = (try? String(contentsOf: context.versionFile, encoding: .utf8))?
@@ -73,7 +75,11 @@ public struct PrefixManager: Sendable {
                 // after one (its pending record says which) carries on its retry; an arm64 prefix prepared again
                 // never does, whatever pfx.rosetta lies beside it.
                 var carryFrom: String?
-                if exists, recorded?.hasPrefix("wine.app ") != true {
+                // Steam's cloud download makes pfx before the tool ever runs (no stamp, no user.reg): it is built
+                // into, never renamed, or the saves it holds go missing from where Steam watches them (spec §4.3).
+                let seeded = recorded == nil
+                    && !fm.fileExists(atPath: context.prefix.appending(path: "user.reg").path(percentEncoded: false))
+                if exists, recorded?.hasPrefix("wine.app ") != true, !seeded {
                     carryFrom = try renameRosettaPrefix()
                 } else {
                     carryFrom = (try? String(contentsOf: context.dataPath.appending(path: Self.pendingRecord), encoding: .utf8))
@@ -85,7 +91,11 @@ public struct PrefixManager: Sendable {
                 if let carryFrom { carryPlayerData(from: carryFrom) }
                 try want.write(to: context.versionFile, atomically: true, encoding: .utf8)
             }
+            // Every launch: Steam may have made real folders where the links go since the last one.
+            let links = ProfileLinks.apply(prefix: context.prefix, user: environment["USER"] ?? NSUserName())
+            for note in links.notes { log.append("note: \(note)") }
             if steamBridge { try deploySteamBridge() }
+            return links
         }
     }
 
