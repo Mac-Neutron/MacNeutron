@@ -166,6 +166,7 @@ profile stops launching, so a release is rebuilt before its profile runs out.
 ## Licence
 
 MacNeutron's own code is MIT (`LICENSE`), except `presenter/cmaa2.metal`, our Metal port of Intel's CMAA2, which is
-Apache-2.0 (`presenter/CMAA2-LICENSE.txt`). The patches in `wine-arm64/patches/` keep the licence of the tree they patch:
+Apache-2.0 (`presenter/CMAA2-LICENSE.txt`), and the parts of `bridge/steam.c` that follow Proton's `steam_helper/steam.c`,
+which keep Valve's BSD-3-Clause notice (`bridge/Proton-steam-LICENSE.txt`). The patches in `wine-arm64/patches/` keep the licence of the tree they patch:
 Wine's and DXMT's are LGPL-2.1+ and FEX's are MIT (details in `wine-arm64/README.md`'s Licences section). The source
 archive of a release holds every tree as built.
