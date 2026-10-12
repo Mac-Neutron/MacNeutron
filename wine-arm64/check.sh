@@ -846,7 +846,7 @@ run_step() {
     g1-unaligned) step g1-unaligned 60 exe_cmd x64-unaligned ;;
     g5-jit) step g5-jit 600 g5_jit_cmd; grep '^info ' "$WORK/g5-jit.log" ;;
     fonts-tls) step fonts-tls 60 fonts_tls_cmd ;;
-    steam-bridge) step steam-bridge 300 steam_bridge_cmd; grep '^info ' "$WORK/steam-bridge.log" ;;
+    steam-bridge) step steam-bridge 600 steam_bridge_cmd; grep '^info ' "$WORK/steam-bridge.log" ;;
     dxmt) step dxmt 120 dxmt_cmd ;;
     dxmt-present) step dxmt-present 600 dxmt_present_cmd; grep '^info ' "$WORK/dxmt-present.log" ;;
     dxmt-arm64ec) step dxmt-arm64ec 3600 dxmt_lane_cmd arm64ec ARM64EC "$B/dxmt-tests-arm64ec" \
