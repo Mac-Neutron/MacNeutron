@@ -186,9 +186,9 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
 - **D-24:** The restart event is opened with `SYNCHRONIZE | EVENT_MODIFY_STATE`; Proton opens it with `SYNCHRONIZE`
   alone, which our Wine refuses `SetEvent` (R6; Valve's own precedent is db9e6ffb).
 - **D-25:** The restart loop is Proton's, without its precedence slip, which read a failed wait as a restart (R7).
-- **D-26:** `HKCR\steam` (Proton's command) and the keys of Valve's wine.inf `[SteamClient64]` are written by steam.exe
-  for a game process: our prefix isn't built from Valve's wine.inf. A prefix that has never run a game with the bridge
-  has no `steam://` handler (R9). Where steam.exe differs from wine.inf:
+- **D-26:** `HKCR\steam` (Proton's command) and the Steam keys of Valve's wine.inf (`[SteamClient64]` and the lines
+  before it) are written by steam.exe for a game process: our prefix isn't built from Valve's wine.inf. A prefix that
+  has never run a game with the bridge has no `steam://` handler (R9). Where steam.exe differs from wine.inf:
   - no `ActiveProcess\SteamPath`;
   - `ActiveProcess\SteamClientDll` only when `steamclient.dll` exists, and no 32-bit client is deployed (D-14); wine.inf
     writes it always;
@@ -372,9 +372,9 @@ Rewritten for Amendment 2: what the tests check today.
   - `steamBridgeInstalled` needs `steam.exe` and both halves of lsteamclient;
   - `WINEDEBUG` gains the `steamclient` channel under `MACNEUTRON_LOG` (§7);
   - launcher: `run` and `waitforexitandrun` run `C:\windows\system32\steam.exe` with the game's raw macOS path, Steam's
-    client folder and no account variable, and the three games run the Steam folder's copy; `runinprefix`, the escape
-    hatch and a missing bridge start the game directly, each with its log note, and take the client DLLs out of the
-    prefix while both `steam.exe` copies stay; the client folder is logged, and a missing `steamclient.dylib` noted;
+    client folder and no account variable, and the three games run the Steam folder's copy; `runinprefix` starts the
+    game directly; so do the escape hatch and a missing bridge, each with its log note, taking the client DLLs out of
+    the prefix while both `steam.exe` copies stay; the client folder is logged, and a missing `steamclient.dylib` noted;
     the game log hides `SteamUser`, `SteamAppUser` and secret-looking variables;
   - `PrefixManager` copies `steam.exe` into `system32` and the Steam folder and `steamclient64.dll` into the latter (no
     `steamclient.dll`), recopies only a changed file, and picks Valve's cached DLL or lsteamclient
