@@ -63,7 +63,8 @@ chmod +x "$WORK/bin/open"
 steam() { "$WINE" "$STEAMEXE" "$HELPER" "$@" 2>/dev/null | tr -d '\r'; }
 fail=0
 expect() { # name got want
-  if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got [$2], want [$3]"; fail=1; fi
+  # printf, not echo: sh's echo reads the backslashes of Windows paths as escapes.
+  if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s: got [%s], want [%s]\n' "$1" "$2" "$3"; fail=1; fi
 }
 
 set +e; "$WINE" "$STEAMEXE" "$HELPER" exit 7 >/dev/null 2>&1; got=$?; set -e
@@ -74,7 +75,6 @@ expect "registry names a live Steam" "$(MACNEUTRON_STEAM_ACCOUNT=12345 steam ste
 rm -f "$WORK/late.txt"
 steam spawn "$(winpath "$WORK/late.txt")" >/dev/null
 expect "launcher-style child still sees Steam" "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"
-expect "pid cleared afterwards" "$("$WINE" "$HELPER" pid 2>/dev/null | tr -d '\r')" 0
 set +e; "$WINE" "$STEAMEXE" 'C:\missing.exe' >/dev/null 2>&1; got=$?; set -e
 expect "missing program exits 1" "$got" 1
 rm -f "$WORK/late.txt"
@@ -82,6 +82,20 @@ expect "a launcher may start the game with CREATE_BREAKAWAY_FROM_JOB" \
   "$(steam breakaway "$(winpath "$WORK/late.txt")")" "breakaway ok"
 expect "... and that game still sees Steam" "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"
 expect "SteamStub DRM's start handshake is answered" "$(steam drm)" "ack=1"
+# Proton's fixup_cmdline_paths: a Source SDK Base game's -game path, a macOS path, is converted (unquoted, as Proton).
+mkdir -p "$WORK/Source SDK Base 2007"
+cp "$B/tests/helper.exe" "$WORK/Source SDK Base 2007/helper.exe"
+expect "Source SDK's -game path is converted" \
+  "$("$WINE" "$STEAMEXE" "$(winpath "$WORK/Source SDK Base 2007/helper.exe")" args -game /Volumes/x/mod 2>/dev/null | tr -d '\r')" \
+  '[-game][Z:\Volumes\x\mod]'
+# Proton's EA workarounds for a link2ea:// target (ShellExecute): EA Desktop's IsUnavailable is cleared; with no EA app,
+# ShellExecute finds no handler and steam.exe still exits 0 (the uninstall Proton tries then is skipped here, R19).
+"$WINE" reg add 'HKLM\Software\Electronic Arts\EA Desktop' /v IsUnavailable /t REG_DWORD /d 1 /f >/dev/null 2>&1
+set +e; "$WINE" "$STEAMEXE" 'link2ea://launchgame/1' >/dev/null 2>&1; got=$?; set -e
+expect "a link2ea:// target clears EA's IsUnavailable and exits 0" "$got $("$WINE" reg query \
+  'HKLM\Software\Electronic Arts\EA Desktop' /v IsUnavailable 2>/dev/null | tr -d '\r' | awk '/IsUnavailable/ { print $3 }')" \
+  "0 0x0"
+"$WINE" reg delete 'HKLM\Software\Electronic Arts' /f >/dev/null 2>&1 || true
 expect "the game sees SteamPath and ValvePlatformMutex" "$(steam env SteamPath ValvePlatformMutex)" \
   '[C:\Program Files (x86)\Steam][C:/Program Files (x86)/Steam/steam.exe]'
 # Any value not starting with 0, of any length, as Proton reads it (env_nonzero).
@@ -124,13 +138,57 @@ if [ -n "$COMPAT" ]; then
   rm -f "$WORK/late.txt"
   lsteam spawn "$(winpath "$WORK/late.txt")" >/dev/null
   expect "launcher: launcher-style child still sees Steam" "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"
-  expect "launcher: pid cleared afterwards" "$(L runinprefix "$GAME" pid 2>/dev/null | tr -d '\r')" 0
   set +e; L waitforexitandrun 'C:\missing.exe' >/dev/null 2>&1; got=$?; set -e
   expect "launcher: missing program exits 1" "$got" 1
   rm -f "$WORK/late.txt"
   expect "launcher: a launcher may start the game with CREATE_BREAKAWAY_FROM_JOB" \
     "$(lsteam breakaway "$(winpath "$WORK/late.txt")")" "breakaway ok"
   expect "launcher: ... and that game still sees Steam" "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"
+  # Games in Steam libraries (P0-3): the launcher links S: to the library's parent and passes the game's macOS path,
+  # which steam.exe converts (Proton's setup_dir_drive and run_process), so the game sees itself on S:.
+  SLIB="$WORK/Lib Ünï"
+  NS=$(mktemp -d "${TMPDIR:-/tmp}/mnlib.XXXXXX")
+  trap 'rm -rf "$NS"' EXIT
+  for d in "$SLIB/steamapps" "$NS/steamapps" "$WORK/Bad/SteamApps"; do
+    mkdir -p "$d/common/Game"
+    cp "$B/tests/helper.exe" "$d/common/Game/hélper.exe"
+    cp "$B/tests/helper-console.exe" "$d/common/Game/helper-console.exe"
+  done
+  # lib <steamapps folder> <exe> [args...]: the game <steamapps>/common/Game/<exe>, started as Steam starts it.
+  lib() {
+    a=$1 e=$2; shift 2
+    STEAM_COMPAT_LIBRARY_PATHS="$a" STEAM_COMPAT_INSTALL_PATH="$a/common/Game" \
+      L waitforexitandrun "$a/common/Game/$e" "$@" 2>/dev/null | tr -d '\r'
+  }
+  lib_status() {
+    a=$1 e=$2; shift 2
+    set +e; STEAM_COMPAT_LIBRARY_PATHS="$a" STEAM_COMPAT_INSTALL_PATH="$a/common/Game" \
+      L waitforexitandrun "$a/common/Game/$e" "$@" >/dev/null 2>&1; s=$?; set -e; echo "$s"
+  }
+  expect "launcher: a game in a library runs from S:" "$(lib "$SLIB/steamapps" hélper.exe module)" \
+    'S:\steamapps\common\Game\hélper.exe'
+  case $NS in
+    *' '*) echo "info no unquoted-branch rows: $NS has a space" ;;
+    *)
+      expect "launcher: ... on a library whose path has no space" "$(lib "$NS/steamapps" hélper.exe module)" \
+        'S:\steamapps\common\Game\hélper.exe'
+      expect "launcher: ... with its arguments unchanged" "$(lib "$NS/steamapps" hélper.exe args 'a b' x)" '[a b][x]' ;;
+  esac
+  expect "launcher: a library that fails Proton's checks gets its fallback (S: is the steamapps folder)" \
+    "$(lib "$WORK/Bad/SteamApps" hélper.exe module)" 'S:\common\Game\hélper.exe'
+  rm -f "$WORK/ownconsole.txt"
+  lib "$SLIB/steamapps" helper-console.exe console "$(winpath "$WORK/ownconsole.txt")" >/dev/null
+  expect "launcher: a console program gets a console of its own" "$(tr -d '\r' < "$WORK/ownconsole.txt" 2>/dev/null || true)" \
+    own_console=1
+  expect "launcher: ... and its exit code still reaches Steam" "$(lib_status "$SLIB/steamapps" helper-console.exe exit 9)" 9
+  # A target that isn't an .exe goes through ShellExecute, as Proton's: a batch file, ASCII only (cmd reads it in the
+  # OEM code page), which finds the helper next to it.
+  cp "$B/tests/helper.exe" "$WORK/game dir/helper.exe"
+  printf '@"%%~dp0helper.exe" marker "%%~dp0marker.txt"\r\n' > "$WORK/game dir/run.bat"
+  rm -f "$WORK/game dir/marker.txt"
+  set +e; L waitforexitandrun "$WORK/game dir/run.bat" >/dev/null 2>&1; got=$?; set -e
+  expect "launcher: a .bat target runs through ShellExecute and exits 0" \
+    "$got $(tr -d '\r' < "$WORK/game dir/marker.txt" 2>/dev/null || true)" "0 marker"
   # The rest of Proton's setup_steam_files, written by the launcher with the bridge: Steam's config folder, and
   # libraryfolders.vdf with each library of STEAM_COMPAT_LIBRARY_PATHS (its steamapps folder's parent).
   rm -rf "$STEAM/steamapps/libraryfolders.vdf" "$STEAM/config"
@@ -144,17 +202,11 @@ if [ -n "$COMPAT" ]; then
   expect "launcher: Steam's config folder exists" "$([ -d "$STEAM/config" ] && echo yes || echo no)" yes
 fi
 
-# A second steam.exe in the prefix (a failed one, then a short one) must not end Steam for the first one's game. Every
-# steam.exe now waits until nothing runs in the prefix, so the short one ends with the game: this catches a steam.exe
-# that leaves early (no shutdown event), not unregister_steam's own-pid check, which only that fallback reaches. Direct
-# only: a second `launch waitforexitandrun` would wait in `wineserver -w` for the first one's processes.
-rm -f "$WORK/late.txt"
-steam spawn "$(winpath "$WORK/late.txt")" >/dev/null &
-sleep 0.5
+# Proton's rule: steam.exe registers its pid before it starts the game and never clears it, so the last steam.exe owns
+# it. One that fails to start its game leaves its own, dead pid; the next game's steam.exe registers again.
 "$WINE" "$STEAMEXE" 'C:\missing.exe' >/dev/null 2>&1 || true
-steam exit 0 >/dev/null
-wait
-expect "a second steam.exe doesn't end Steam for the first one's game" \
-  "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"
+expect "a steam.exe that fails leaves its own pid, dead" "$("$WINE" "$HELPER" steam 2>/dev/null | tr -d '\r' | cut -d ' ' -f 1)" \
+  "alive=0"
+expect "... and the next one registers again" "$(steam steam | cut -d ' ' -f 1)" "alive=1"
 
 exit $fail

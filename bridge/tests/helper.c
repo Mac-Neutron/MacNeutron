@@ -154,6 +154,36 @@ int main(void)
         printf("ack=%d\n", WaitForSingleObject(ack, 5000) == WAIT_OBJECT_0);
         return 0;
     }
+    if (!wcscmp(mode, L"module"))  /* the path the game sees itself at (S: in a Steam library) */
+    {
+        WCHAR path[MAX_PATH];
+
+        GetModuleFileNameW(NULL, path, ARRAYSIZE(path));
+        put(path);
+        fputs("\n", stdout);
+        return 0;
+    }
+    /* Built as a console program (helper-console.exe): whether steam.exe gave it a console of its own. Its stdout can't
+     * reach check.sh then, so it writes to <file>. */
+    if (!wcscmp(mode, L"console") && argc > 2)
+    {
+        DWORD list[8];
+        FILE *out;
+
+        if (!(out = _wfopen(argv[2], L"w"))) return 2;
+        fprintf(out, "own_console=%d\n", GetConsoleProcessList(list, ARRAYSIZE(list)) == 1);
+        fclose(out);
+        return 0;
+    }
+    if (!wcscmp(mode, L"marker") && argc > 2)  /* a batch file's proof that it ran */
+    {
+        FILE *out;
+
+        if (!(out = _wfopen(argv[2], L"w"))) return 2;
+        fputs("marker\n", out);
+        fclose(out);
+        return 0;
+    }
     if (!wcscmp(mode, L"late") && argc > 2)  /* the real game, still running after its launcher quit */
     {
         FILE *out;

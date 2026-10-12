@@ -152,7 +152,8 @@ public struct Launcher: Sendable {
     private func runGame(_ request: LaunchRequest, _ env: [String: String], _ gameLog: URL?,
                          throughSteam: Bool) throws -> Int32 {
         let game = [request.target] + request.arguments
-        let command = throughSteam ? [SteamBridge.steamExe, SteamBridge.windowsPath(request.target)] + request.arguments : game
+        // The macOS path as Steam gave it: steam.exe converts it (Proton's run_process), to S: for a game in a library.
+        let command = throughSteam ? [SteamBridge.steamExe, request.target] + request.arguments : game
         return try runner.run(layout.wine, command, environment: env, output: gameLog)
     }
 

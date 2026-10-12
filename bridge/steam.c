@@ -1,13 +1,13 @@
 /* steam.exe for MacNeutron: tells Windows games inside Wine that Steam is running.
  *
- *   steam.exe <program> [arguments...]      (<program> is a Windows path)
+ *   steam.exe <program> [arguments...]      (<program>: a Windows path, or a macOS path, which it converts)
  *
  * steam_api(64).dll treats Steam as running when HKCU\Software\Valve\Steam\ActiveProcess\pid names a
  * live process, and loads the client DLL named next to it. This writes those values (pointing at the
  * runtime's Steam bridge, which the launcher copies into C:\Program Files (x86)\Steam) with the rest of
  * what Proton's steam.exe sets up for a game (register_steam, main), runs <program>, answers Steam's DRM
  * start check (see answer_drm), waits until no program is left in the prefix (launchers start the real
- * game and quit), clears the pid, and exits with <program>'s exit code.
+ * game and quit), and exits with <program>'s exit code. A GUI program, as Proton's (-mwindows).
  * Spec: docs/superpowers/specs/2026-09-28-macneutron-steam-bridge-design.md §4.2.
  *
  * It follows Valve's Proton, steam_helper/steam.c, in much of its behaviour, and find_ack_event and answer_drm
@@ -43,14 +43,38 @@
  */
 #include <windows.h>
 #include <winternl.h>
+#include <objbase.h>
+#include <shellapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+#include <wctype.h>
 
 #define STEAM_DIR L"C:\\Program Files (x86)\\Steam"
 #define STEAM_KEY L"Software\\Valve\\Steam"
 #define ACTIVE_PROCESS_KEY STEAM_KEY L"\\ActiveProcess"
+#define CP_UNIXCP 65010  /* Wine's Unix code page (Wine's winnls.h); not in mingw's headers */
+
+/* Proton's WINE_ERR; its TRACEs are left out. */
+#define ERR(...) fprintf(stderr, "steam.exe: " __VA_ARGS__)
+
+/* Wine's kernel32 export (kernel32.spec), which mingw's import library lacks: a Unix path as a DOS one, on its deepest
+ * drive (S: for a game in a Steam library). Freed with HeapFree. */
+static WCHAR *wine_get_dos_file_name(const char *path)
+{
+    static WCHAR *(CDECL *convert)(const char *);
+
+    if (!convert) convert = (void *)GetProcAddress(GetModuleHandleW(L"kernel32"), "wine_get_dos_file_name");
+    return convert ? convert(path) : NULL;
+}
+
+/* Proton's env_nonzero: set, and its first character isn't 0. */
+static BOOL env_nonzero(const char *name)
+{
+    const char *value = getenv(name);
+    return value && *value && *value != '0';
+}
 
 static HKEY create_key(HKEY root, const WCHAR *path)
 {
@@ -124,19 +148,6 @@ static void register_steam(DWORD pid)
     }
 }
 
-/* Another steam.exe in the same prefix may own the pid by now: only clear our own. Every steam.exe ends once nothing
- * runs in the prefix, so none is left to hand it back to; only one that Wine refused the shutdown event ends early. */
-static void unregister_steam(DWORD pid)
-{
-    DWORD current = 0, size = sizeof(current);
-    HKEY key;
-
-    if (!(key = create_key(HKEY_CURRENT_USER, ACTIVE_PROCESS_KEY))) return;
-    if (!RegQueryValueExW(key, L"pid", NULL, NULL, (BYTE *)&current, &size) && current == pid)
-        set_dword(key, L"pid", 0);
-    RegCloseKey(key);
-}
-
 /* ntdll's object-directory calls, which mingw's headers leave out. */
 typedef struct { UNICODE_STRING ObjectName, ObjectTypeName; } DIRECTORY_BASIC_INFORMATION;
 NTSTATUS NTAPI NtOpenDirectoryObject(HANDLE *, ACCESS_MASK, OBJECT_ATTRIBUTES *);
@@ -193,77 +204,391 @@ static DWORD WINAPI answer_drm(void *arg)
     return 0;
 }
 
-/* Our command line minus our own name (argv[0] rules: quoted, or up to the first blank). */
-static WCHAR *child_command_line(void)
+/* From here to run_process: Proton's steam_helper/steam.c (find_quote ... run_process), ported to mingw. */
+static WCHAR *find_quote(WCHAR *str)
 {
-    const WCHAR *p = GetCommandLineW();
-
-    if (*p == '"')
+    WCHAR *end = wcschr(str, '"'), *ch;
+    int odd;
+    while (end)
     {
-        for (p++; *p && *p != '"'; p++) ;
-        if (*p) p++;
+        odd = 0;
+        ch = end - 1;
+        while (ch >= str && *ch == '\\')
+        {
+            odd = !odd;
+            --ch;
+        }
+        if (!odd)
+            return end;
+        end = wcschr(end + 1, '"');
+    }
+    return NULL;
+}
+
+static BOOL WINAPI console_ctrl_handler(DWORD type)
+{
+    return TRUE;
+}
+
+static BOOL streq_niw(const WCHAR *l, const WCHAR *r, size_t len)
+{
+    while (len > 0)
+    {
+        if (towlower(*l) != towlower(*r)) return FALSE;
+        ++l; ++r; --len;
+    }
+    return TRUE;
+}
+
+static WCHAR *get_end_of_excutable_name(WCHAR *cmdline)
+{
+    BOOL quoted = FALSE;
+    WCHAR *executable_name_end = cmdline;
+
+    /* find the end of the first arg... */
+    while (*executable_name_end != '\0' && (*executable_name_end != ' ' || quoted))
+    {
+        quoted ^= *executable_name_end == '"';
+        executable_name_end++;
+    }
+    return executable_name_end;
+}
+
+/* ShellExecute anything that isn't a program: a URL, a batch file, a shortcut, a document. */
+static BOOL should_use_shell_execute(WCHAR *cmdline)
+{
+    BOOL use_shell_execute = TRUE;
+    const WCHAR *executable_name_end = get_end_of_excutable_name(cmdline);
+
+    /* if the executable is quoted backtrack a bit */
+    if (*(executable_name_end - 1) == '"') --executable_name_end;
+    /* backtrack to before the end of the arg and check if we end in .exe or not */
+    executable_name_end -= strlen(".exe");
+    if (executable_name_end >= cmdline)
+    {
+        if (streq_niw(executable_name_end, L".exe", 4)) use_shell_execute = FALSE;
+    }
+    return use_shell_execute;
+}
+
+static BOOL try_recover_eadesktop_symlink(void)
+{
+    WIN32_FIND_DATAA ff;
+    HANDLE handle, file;
+    char path[MAX_PATH];
+
+    handle = CreateFileA("C:\\Program Files\\Electronic Arts\\EA Desktop\\EA Desktop", GENERIC_READ,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
+    if (handle != INVALID_HANDLE_VALUE || GetLastError() != ERROR_FILE_NOT_FOUND)
+    {
+        if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+        return FALSE;
+    }
+    if ((handle = FindFirstFileA("C:\\Program Files\\Electronic Arts\\EA Desktop\\*.*", &ff)) == INVALID_HANDLE_VALUE)
+        return FALSE;
+    do
+    {
+        if (!(ff.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        if (!strcmp(ff.cFileName, ".") || !strcmp(ff.cFileName, "..")) continue;
+        sprintf(path, "C:\\Program Files\\Electronic Arts\\EA Desktop\\%s\\EA Desktop\\Link2EA.exe", ff.cFileName);
+        file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0);
+        if (file == INVALID_HANDLE_VALUE) continue;
+        CloseHandle(file);
+        sprintf(path, "%s\\EA Desktop", ff.cFileName);
+        if (CreateSymbolicLinkA("C:\\Program Files\\Electronic Arts\\EA Desktop\\EA Desktop", path,
+                                SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE))
+        {
+            FindClose(handle);
+            return TRUE;
+        }
+    } while (FindNextFileA(handle, &ff));
+    FindClose(handle);
+    return FALSE;
+}
+
+/* Source SDK Base 2007's -game path, a Unix path, to DOS (only the first one, unquoted, as Proton). */
+static WCHAR *fixup_cmdline_paths(WCHAR *cmdline)
+{
+    const WCHAR argname[] = L"-game";
+    WCHAR *p, *next, *dos_path, *ret;
+    unsigned int i, len, path_len;
+    char *unix_path;
+
+    if (!wcsstr(cmdline, L"\\Source SDK Base")) return cmdline;
+    p = cmdline;
+    if (*p != '\"') return cmdline;
+    ++p;
+    while (*p && *p != '\"') ++p;
+    if (!*p) return cmdline;
+    ++p;
+    while (*p)
+    {
+        while (iswspace(*p)) ++p;
+        if (!wcsncmp(p, argname, ARRAYSIZE(argname) - 1) && iswspace(p[ARRAYSIZE(argname) - 1]))
+        {
+            p += ARRAYSIZE(argname) - 1;
+            while (iswspace(*p)) ++p;
+            if (*p != '/') continue;
+            next = p + 1;
+            while (*next && !iswspace(*next)) ++next;
+            unix_path = malloc(next - p + 1);
+            for (i = 0; p + i != next; ++i) unix_path[i] = p[i];
+            unix_path[i] = 0;
+            dos_path = wine_get_dos_file_name(unix_path);
+            free(unix_path);
+            if (!dos_path)
+            {
+                p = next;
+                continue;
+            }
+            path_len = wcslen(dos_path);
+            len = wcslen(cmdline) + 1;
+            ret = malloc((len + path_len - (next - p)) * sizeof(*ret));
+            memcpy(ret, cmdline, (p - cmdline) * sizeof(*ret));
+            memcpy(ret + (p - cmdline), dos_path, path_len * sizeof(*ret));
+            memcpy(ret + (p - cmdline) + path_len, next, (len - (next - cmdline)) * sizeof(*ret));
+            HeapFree(GetProcessHeap(), 0, dos_path);
+            return ret;
+        }
+        while (*p && !iswspace(*p)) ++p;
+    }
+    return cmdline;
+}
+
+/* Starts our command line minus argv[0]: a Unix path converted to DOS (S: for a game in a Steam library; a console
+ * program gets its own console), anything not ending in .exe through ShellExecute. Returns the child, or
+ * INVALID_HANDLE_VALUE (ShellExecute, or a failure); *should_await says whether to wait for it. */
+static HANDLE run_process(BOOL *should_await, BOOL game_process)
+{
+    WCHAR *cmdline = GetCommandLineW();
+    STARTUPINFOW si = { sizeof(si) };
+    PROCESS_INFORMATION pi;
+    DWORD flags = CREATE_UNICODE_ENVIRONMENT;
+    BOOL use_shell_execute = TRUE, link2ea = FALSE;
+    BOOL hide_window;
+
+    /* skip argv[0] */
+    if (*cmdline == '"')
+    {
+        cmdline = find_quote(cmdline + 1);
+        if (cmdline) cmdline++;
     }
     else
-        while (*p && *p != ' ' && *p != '\t') p++;
-    while (*p == ' ' || *p == '\t') p++;
-    return *p ? _wcsdup(p) : NULL;
+        cmdline = wcschr(cmdline, ' ');
+    if (!cmdline)
+    {
+        ERR("Invalid command\n");
+        return INVALID_HANDLE_VALUE;
+    }
+    while (*cmdline == ' ') cmdline++;
+
+    /* convert absolute unix path to dos */
+    if (cmdline[0] == '/' || (cmdline[0] == '"' && cmdline[1] == '/'))
+    {
+        WCHAR *scratchW, *start, *end, *dos, *remainder, *new_cmdline;
+        char *scratchA;
+        size_t argv0_len;
+        int r;
+        DWORD_PTR console;
+        SHFILEINFOW sfi;
+
+        if (cmdline[0] == '"')
+        {
+            start = cmdline + 1;
+            end = find_quote(start);
+            if (!end)
+            {
+                ERR("Unmatched quote? %ls\n", cmdline);
+                goto run;
+            }
+            remainder = end + 1;
+        }
+        else
+        {
+            start = cmdline;
+            end = wcschr(start, ' ');
+            if (!end) end = wcschr(start, '\0');
+            remainder = end;
+        }
+        argv0_len = end - start;
+        scratchW = malloc((argv0_len + 1) * sizeof(WCHAR));
+        memcpy(scratchW, start, argv0_len * sizeof(WCHAR));
+        scratchW[argv0_len] = '\0';
+        r = WideCharToMultiByte(CP_UNIXCP, 0, scratchW, -1, NULL, 0, NULL, NULL);
+        if (!r)
+        {
+            ERR("Char conversion size failed?\n");
+            goto run;
+        }
+        scratchA = malloc(r);
+        r = WideCharToMultiByte(CP_UNIXCP, 0, scratchW, -1, scratchA, r, NULL, NULL);
+        if (!r)
+        {
+            ERR("Char conversion failed?\n");
+            goto run;
+        }
+        /* Hardening over Proton, which goes on with NULL: an unconvertible path runs as given. */
+        if (!(dos = wine_get_dos_file_name(scratchA)))
+        {
+            ERR("Can't convert %s to a DOS path\n", scratchA);
+            goto run;
+        }
+        CoInitialize(NULL);
+        console = SHGetFileInfoW(dos, 0, &sfi, sizeof(sfi), SHGFI_EXETYPE);
+        if (console && !HIWORD(console)) flags |= CREATE_NEW_CONSOLE;
+        new_cmdline = malloc((wcslen(dos) + 3 + wcslen(remainder) + 1) * sizeof(WCHAR));
+        wcscpy(new_cmdline, L"\"");
+        wcscat(new_cmdline, dos);
+        wcscat(new_cmdline, L"\"");
+        wcscat(new_cmdline, remainder);
+        cmdline = new_cmdline;
+    }
+
+run:
+    SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
+
+    use_shell_execute = should_use_shell_execute(cmdline);
+    if (use_shell_execute && wcslen(cmdline) > 10
+        && (!memcmp(cmdline, L"link2ea://", 10 * sizeof(WCHAR)) || !memcmp(cmdline, L"steam2ea://", 11 * sizeof(WCHAR))))
+    {
+        HDESK desktop = GetThreadDesktop(GetCurrentThreadId());
+        DWORD is_unavailable, type, size;
+        SC_HANDLE manager, service;
+        SERVICE_STATUS status;
+        DWORD timeout = 3000;
+        HKEY eakey;
+
+        link2ea = TRUE;
+        /* Valve's Wine keeps the desktop up while EA's app hands over; ours rejects this index and logs it (R14). */
+        if (!SetUserObjectInformationA(desktop, 1000, &timeout, sizeof(timeout)))
+            ERR("Failed to set desktop timeout, err %lu.\n", GetLastError());
+        if (!RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Electronic Arts\\EA Desktop", 0, KEY_ALL_ACCESS, &eakey))
+        {
+            size = sizeof(is_unavailable);
+            if (!RegQueryValueExW(eakey, L"IsUnavailable", NULL, &type, (BYTE *)&is_unavailable, &size)
+                && type == REG_DWORD && is_unavailable)
+            {
+                ERR("EA Desktop\\IsUnavailable is set, clearing.\n");
+                is_unavailable = 0;
+                RegSetValueExW(eakey, L"IsUnavailable", 0, REG_DWORD, (BYTE *)&is_unavailable, sizeof(is_unavailable));
+            }
+            RegCloseKey(eakey);
+        }
+        if ((manager = OpenSCManagerW(NULL, SERVICES_ACTIVE_DATABASEW, SERVICE_QUERY_STATUS)))
+        {
+            if ((service = OpenServiceW(manager, L"EABackgroundService", SERVICE_QUERY_STATUS)))
+            {
+                if (QueryServiceStatus(service, &status))
+                {
+                    if (status.dwCurrentState == SERVICE_STOP_PENDING || status.dwCurrentState == SERVICE_STOPPED)
+                        DeleteFileW(L"C:\\ProgramData\\EA Desktop\\backgroundservice.ini");
+                }
+                else ERR("Could not query service status, error %lu.\n", GetLastError());
+                CloseServiceHandle(service);
+            }
+            CloseServiceHandle(manager);
+        }
+        else ERR("Could not open service manager, error %lu.\n", GetLastError());
+    }
+    hide_window = env_nonzero("PROTON_HIDE_PROCESS_WINDOW");
+
+    /* only await the process finishing if we launch a process directly: Steam simply calls ShellExecuteA with the
+     * same parameters, and what it starts may ShellExecute something as a throw-away */
+    *should_await = !use_shell_execute;
+
+    if (use_shell_execute)
+    {
+        WCHAR *param = NULL;
+        WCHAR *executable_name_end = get_end_of_excutable_name(cmdline);
+        unsigned int retry_count = 0;
+        INT_PTR ret;
+
+        if (*executable_name_end != '\0')
+        {
+            *executable_name_end = '\0';
+            param = executable_name_end + 1;
+        }
+        while ((ret = (INT_PTR)ShellExecuteW(NULL, L"open", cmdline, param, NULL, hide_window ? SW_HIDE : SW_SHOWNORMAL)) < 32)
+        {
+            ERR("Failed to execute %ls, ret %Iu.\n", cmdline, ret);
+            if (game_process && ret == SE_ERR_FNF && link2ea)
+            {
+                if (!try_recover_eadesktop_symlink()) break;
+                if (retry_count++) break;
+                continue;
+            }
+            /* Proton uninstalls the EA app here so its prerequisites set it up again on the next run. Install scripts
+             * never run on macOS Steam (D-16), so nothing would: it is left alone (R19). */
+            if (game_process && ret == SE_ERR_NOASSOC && link2ea)
+                ERR("EA app has no link2ea handler; not uninstalling it: nothing would reinstall it.\n");
+            break;
+        }
+        return INVALID_HANDLE_VALUE;
+    }
+    else
+    {
+        WCHAR *new_cmdline = fixup_cmdline_paths(cmdline);
+
+        if (hide_window)
+        {
+            si.dwFlags |= STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_HIDE;
+        }
+        /* Proton inherits no handles. Then Wine gives the game no standard handles at all, and its own output, which
+         * MacNeutron's game log holds (MACNEUTRON_LOG), is lost: we inherit them (D-line). */
+        if (!CreateProcessW(NULL, new_cmdline, NULL, NULL, TRUE, flags, NULL, NULL, &si, &pi))
+        {
+            ERR("could not start %ls (error %lu)\n", new_cmdline, GetLastError());
+            return INVALID_HANDLE_VALUE;
+        }
+        if (new_cmdline != cmdline) free(new_cmdline);
+        CloseHandle(pi.hThread);
+        return pi.hProcess;
+    }
 }
 
 int main(void)
 {
-    STARTUPINFOW si = { sizeof(si) };
-    PROCESS_INFORMATION pi;
-    DWORD pid = GetCurrentProcessId(), code = 1;
-    WCHAR *cmd = child_command_line();
-    const WCHAR *hide;
-    HANDLE done;
+    BOOL should_await = TRUE;  /* hardening: Proton's run_process can return before setting it */
+    BOOL game_process = getenv("SteamGameId") != NULL;
+    DWORD code = 0;
+    HANDLE child, wait_handle;
+    int argc;
 
-    if (!cmd)
+    LocalFree(CommandLineToArgvW(GetCommandLineW(), &argc));
+    if (argc < 2)
     {
         fprintf(stderr, "usage: steam.exe <program> [arguments...]\n");
         return 1;
     }
     /* Proton's steam.exe sets these for the game, as Steam on Windows does (Source's GameUI finds Steam through
-     * ValvePlatformMutex); macOS Steam doesn't. Before CreateProcessW, which copies our environment. */
+     * ValvePlatformMutex); macOS Steam doesn't. Before the game starts, which copies our environment. */
     SetEnvironmentVariableW(L"SteamPath", STEAM_DIR);
     /* ponytail: a constant; Proton's GetModuleFileNameW would repeat the command line's letter case. */
     SetEnvironmentVariableW(L"ValvePlatformMutex", L"C:/Program Files (x86)/Steam/steam.exe");
-    /* macOS Steam sets this when it runs a game's DRM helper (its custom-binary job), as for Proton's steam.exe: any
-     * value not starting with 0 hides the program (Proton's env_nonzero). */
-    if ((hide = _wgetenv(L"PROTON_HIDE_PROCESS_WINDOW")) && *hide && *hide != '0')
-    {
-        si.dwFlags |= STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
-    }
-    /* Registered only once the child exists (still suspended): a steam.exe that can't start its
-     * program must not touch the Steam another one registered. */
-    if (!CreateProcessW(NULL, cmd, NULL, NULL, TRUE, CREATE_SUSPENDED, NULL, NULL, &si, &pi))
-    {
-        fprintf(stderr, "steam.exe: could not start %ls (error %lu)\n", cmd, GetLastError());
-        return 1;
-    }
-    register_steam(pid);
+    /* Before the game, as Proton (set_active_process_pid): the last steam.exe owns the pid, and Proton never clears
+     * it. */
+    register_steam(GetCurrentProcessId());
     /* Named objects the Windows client holds, which Proton's steam.exe creates too; ours last until we exit. Denuvo
      * checks Steam3Master_SharedMemLock (Just Cause 3 deletes its saves without it), the 2K Launcher
      * Global\Valve_SteamIPC_Class. */
     CreateEventW(NULL, FALSE, FALSE, L"Steam3Master_SharedMemLock");
     CreateEventW(NULL, FALSE, FALSE, L"Global\\Valve_SteamIPC_Class");
-    /* Before the game runs, so its stub finds the semaphores. */
+    /* Before the game runs, so its stub finds the semaphores (Proton creates them once the game has started: R5). */
     drm_consume = CreateSemaphoreW(NULL, 0, 512, L"STEAM_DIPC_CONSUME");
     drm_produce = CreateSemaphoreW(NULL, 1, 512, L"SREAM_DIPC_PRODUCE");
     if (drm_consume && drm_produce) CreateThread(NULL, 0, answer_drm, NULL, 0, NULL);
-    ResumeThread(pi.hThread);
-    /* Wine's shutdown event, set once no program is left in the prefix, as Proton's steam.exe waits (after the program
-     * started): unlike the program's handle or a job, it covers a launcher that starts the real game, even with
-     * CREATE_BREAKAWAY_FROM_JOB or ShellExecute, and quits. A system process doesn't keep the prefix alive itself. If
-     * Wine refuses, `done` stays the program. */
-    done = pi.hProcess;
-    NtSetInformationProcess(GetCurrentProcess(), (PROCESSINFOCLASS)1000 /* ProcessWineMakeProcessSystem */, &done,
-                            sizeof(done));
-    /* Under a terminal Wine starts a console host for us, which would wait for us to leave while we wait for it. */
+    child = run_process(&should_await, game_process);
+    if (should_await && child == INVALID_HANDLE_VALUE) return 1;
+    /* Wine's shutdown event, set once no program is left in the prefix, as Proton's steam.exe waits: unlike the
+     * program's handle or a job, it covers a launcher that starts the real game, even with CREATE_BREAKAWAY_FROM_JOB
+     * or ShellExecute, and quits. A system process doesn't keep the prefix alive itself. If Wine refuses, we wait for
+     * the program, or not at all after ShellExecute. */
+    wait_handle = should_await ? child : INVALID_HANDLE_VALUE;
+    NtSetInformationProcess(GetCurrentProcess(), (PROCESSINFOCLASS)1000 /* ProcessWineMakeProcessSystem */,
+                            &wait_handle, sizeof(wait_handle));
     FreeConsole();
-    WaitForSingleObject(done, INFINITE);
-    GetExitCodeProcess(pi.hProcess, &code);
-    unregister_steam(pid);
+    if (wait_handle != INVALID_HANDLE_VALUE) WaitForSingleObject(wait_handle, INFINITE);
+    if (child != INVALID_HANDLE_VALUE) GetExitCodeProcess(child, &code);
     return (int)code;
 }

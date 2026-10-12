@@ -237,7 +237,8 @@ private func i386Exe(named name: String) throws -> String {
     let f = try makeFixture(bridge: true)
     #expect(f.launcher.launch(["waitforexitandrun", "/Steam Library/My Game/Game.exe", "-windowed"], environment: f.env) == 0)
     let game = try #require(f.runner.calls.first { $0.arguments.first == SteamBridge.steamExe })
-    #expect(game.arguments == [#"C:\Program Files (x86)\Steam\steam.exe"#, #"Z:\Steam Library\My Game\Game.exe"#, "-windowed"])
+    // The game's macOS path, raw: steam.exe converts it (Proton's run_process), to S: in a Steam library.
+    #expect(game.arguments == [#"C:\Program Files (x86)\Steam\steam.exe"#, "/Steam Library/My Game/Game.exe", "-windowed"])
     #expect(game.environment["STEAM_COMPAT_CLIENT_INSTALL_PATH"]
         == String(f.launcher.steam.bundleMacOS.path(percentEncoded: false).dropLast()))
     #expect(game.environment["MACNEUTRON_STEAM_ACCOUNT"] == "1")
