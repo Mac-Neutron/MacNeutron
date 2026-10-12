@@ -707,7 +707,8 @@ private func failedFirstPreparation() throws -> (PrefixManager, [String: String]
     // Task FR (#8): wineboot makes one user (named after $USER); every old user's files go there. Task FR2: the old
     // user of that name (the one Wine read) wins a file others have, then the first by name.
     let (manager, env) = try makeCarryManager(winebootMakingUser("player"))
-    try rosettaPrefix(manager, user: "steamuser", files: ["AppData/Local/G/both.sav", "AppData/Local/G/steam.sav"])
+    // Not `steamuser`: beside another profile that one is Steam's own folder, handed back to the new prefix (I3).
+    try rosettaPrefix(manager, user: "olduser", files: ["AppData/Local/G/both.sav", "AppData/Local/G/steam.sav"])
     try rosettaPrefix(manager, user: "macuser", files: ["AppData/Local/G/both.sav", "Saved Games/G/mac.sav"])
     try rosettaPrefix(manager, user: "player", files: ["AppData/Local/G/live.sav"])
     try rosettaPrefix(manager, user: "aaa", files: ["AppData/Local/G/live.sav"])
@@ -718,7 +719,7 @@ private func failedFirstPreparation() throws -> (PrefixManager, [String: String]
     #expect(newPrefixFile(manager, "player/AppData/Local/G/both.sav") == "macuser's")
     #expect(newPrefixFile(manager, "player/AppData/Local/G/steam.sav") == "AppData/Local/G/steam.sav")
     #expect(newPrefixFile(manager, "player/Saved Games/G/mac.sav") == "Saved Games/G/mac.sav")
-    #expect(newPrefixFile(manager, "steamuser/AppData/Local/G/steam.sav") == nil)
+    #expect(newPrefixFile(manager, "olduser/AppData/Local/G/steam.sav") == nil)
     #expect(newPrefixFile(manager, "macuser/Saved Games/G/mac.sav") == nil)
 }
 
@@ -762,4 +763,20 @@ private func makeCloudManager() throws -> (PrefixManager, [String: String]) {
     let report = try manager.prepare(environment: env)
     #expect(report.conflicts == 1)
     #expect(launcherLog(manager).contains("note: kept steamuser: 1 of its files differ"))
+}
+
+@Test func aRenamedRosettaPrefixLeavesSteamsCloudFilesWhereSteamWatches() throws {
+    // A Rosetta-era prefix (profile `crossover`, user.reg, no wine.app stamp) that Steam's cloud download has since
+    // written into: the rename must not take Steam's files out from under its exit pass (final review, I3).
+    let (manager, env) = try makeCloudManager()
+    try rosettaPrefix(manager, user: "crossover", files: ["AppData/Roaming/G/local.cfg"])
+    let watched = manager.context.prefix.appending(path: "drive_c/users/steamuser/Local Settings/Application Data/G/s.sav")
+    try write("cloud", to: watched)
+    try manager.prepare(environment: env)
+    #expect(try String(contentsOf: watched, encoding: .utf8) == "cloud")
+    #expect(newPrefixFile(manager, "u/AppData/Local/G/s.sav") == "cloud")
+    #expect(newPrefixFile(manager, "u/AppData/Roaming/G/local.cfg") == "AppData/Roaming/G/local.cfg")  // still carried
+    let old = manager.context.dataPath.appending(path: "pfx.rosetta/drive_c/users")
+    #expect(!FileManager.default.fileExists(atPath: old.appending(path: "steamuser").path(percentEncoded: false)))
+    #expect(FileManager.default.fileExists(atPath: old.appending(path: "crossover/AppData/Roaming/G/local.cfg").path(percentEncoded: false)))
 }

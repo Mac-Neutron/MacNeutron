@@ -26,7 +26,9 @@ enum PlayerData {
         // wineboot names the one user after $USER, and Wine reads only that one: every old user goes there, whatever
         // the names. The old user of that name (the one Wine read) goes first, then by name: the first wins a file two
         // have.
-        let live = newUsers.count == 1 ? newUsers[0] : nil
+        // Steam's own `steamuser` (its cloud files, handed back beside the new profile) is never the one Wine reads.
+        let profiles = newUsers.count > 1 ? newUsers.filter { $0.lowercased() != "steamuser" } : newUsers
+        let live = profiles.count == 1 ? profiles[0] : nil
         for user in oldUsers.filter({ $0 == live }) + oldUsers.filter({ $0 != live }) {
             let target = live ?? user
             for folder in folders {

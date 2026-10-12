@@ -143,9 +143,41 @@ public struct PrefixManager: Sendable {
             name = "pfx.rosetta-\(number)"
         }
         try name.write(to: context.dataPath.appending(path: Self.pendingRecord), atomically: true, encoding: .utf8)
-        try FileManager.default.moveItem(at: context.prefix, to: context.dataPath.appending(path: name))
+        let fm = FileManager.default, old = context.dataPath.appending(path: name)
+        try fm.moveItem(at: context.prefix, to: old)
+        // Steam's cloud download made users/steamuser beside the Rosetta-era profile (`crossover`): its files go straight
+        // back where Steam watches them, for ProfileLinks to merge (spec §4.3); if they can't, the rename is undone.
+        // ponytail: two renames, so a kill between them leaves those paths missing for one exit pass; a RENAME_SWAP of
+        // a staged pfx would close that window.
+        if let cloud = Self.steamsOwnFolder(in: old) {
+            let users = context.prefix.appending(path: "drive_c/users")
+            do {
+                try fm.createDirectory(at: users, withIntermediateDirectories: true)
+                try fm.moveItem(at: cloud, to: users.appending(path: "steamuser"))
+            } catch {
+                for folder in [users, users.deletingLastPathComponent(), context.prefix] {
+                    rmdir(folder.path(percentEncoded: false))  // only the empty folders made just above
+                }
+                try? fm.moveItem(at: old, to: context.prefix)
+                throw error
+            }
+        }
         log.append("note: renamed a Rosetta-era prefix to \(name)")
         return name
+    }
+
+    /// `users/steamuser` when Steam made it: a real folder beside another profile (Wine names its own after `$USER`, the
+    /// Rosetta-era Wine `crossover`).
+    static func steamsOwnFolder(in prefix: URL) -> URL? {
+        let users = prefix.appending(path: "drive_c/users")
+        func isRealFolder(_ name: String) -> Bool {
+            var info = stat()
+            return lstat(users.appending(path: name).path(percentEncoded: false), &info) == 0 && info.st_mode & S_IFMT == S_IFDIR
+        }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: users.path(percentEncoded: false))) ?? []
+        guard isRealFolder("steamuser"),
+              names.contains(where: { !["public", "steamuser"].contains($0.lowercased()) && isRealFolder($0) }) else { return nil }
+        return users.appending(path: "steamuser")
     }
 
     /// The fresh prefix gets the renamed one's settings and local saves (spec §14, amending §3.4 step 1). What isn't
