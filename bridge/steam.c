@@ -4,9 +4,9 @@
  *
  * steam_api(64).dll treats Steam as running when HKCU\Software\Valve\Steam\ActiveProcess\pid names a
  * live process, and loads the client DLL named next to it. This writes those values (pointing at the
- * runtime's Steam bridge, which the launcher copies into C:\Program Files (x86)\Steam), runs <program>
- * in a job, answers SteamStub DRM's start check (see answer_drm), waits until every process in the job
- * has exited (launchers start the real game and quit), clears the pid, and exits with <program>'s exit code.
+ * runtime's Steam bridge, which the launcher copies into C:\Program Files (x86)\Steam), runs <program>,
+ * answers SteamStub DRM's start check (see answer_drm), waits until no program is left in the prefix
+ * (launchers start the real game and quit), clears the pid, and exits with <program>'s exit code.
  * Spec: docs/superpowers/specs/2026-09-28-macneutron-steam-bridge-design.md §4.2.
  */
 #include <windows.h>
@@ -36,24 +36,9 @@ static void set_dword(HKEY key, const WCHAR *name, DWORD value)
     RegSetValueExW(key, name, 0, REG_DWORD, (const BYTE *)&value, sizeof(value));
 }
 
-/* The pid another steam.exe in this prefix registered before us, restored when we exit. */
-static DWORD previous_pid;
-
-static int process_alive(DWORD pid)
-{
-    HANDLE process;
-    DWORD code = 0;
-
-    if (!pid || !(process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid))) return 0;
-    GetExitCodeProcess(process, &code);
-    CloseHandle(process);
-    return code == STILL_ACTIVE;
-}
-
 static void register_steam(DWORD pid)
 {
     WCHAR account[16];
-    DWORD size = sizeof(previous_pid);
     HKEY key;
 
     if ((key = create_key(HKEY_CURRENT_USER, STEAM_KEY)))
@@ -64,7 +49,6 @@ static void register_steam(DWORD pid)
     }
     if ((key = create_key(HKEY_CURRENT_USER, ACTIVE_PROCESS_KEY)))
     {
-        if (RegQueryValueExW(key, L"pid", NULL, NULL, (BYTE *)&previous_pid, &size)) previous_pid = 0;
         set_dword(key, L"pid", pid);
         set_string(key, L"SteamClientDll64", STEAM_DIR L"\\steamclient64.dll");
         if (GetFileAttributesW(STEAM_DIR L"\\steamclient.dll") != INVALID_FILE_ATTRIBUTES)
@@ -80,8 +64,8 @@ static void register_steam(DWORD pid)
     }
 }
 
-/* Another steam.exe in the same prefix may own the pid by now: only touch our own, and hand it
- * back to the one we replaced while that one still runs (its game may still call into Steam). */
+/* Another steam.exe in the same prefix may own the pid by now: only clear our own. Every steam.exe ends once nothing
+ * runs in the prefix, so none is left to hand it back to; only one that Wine refused the shutdown event ends early. */
 static void unregister_steam(DWORD pid)
 {
     DWORD current = 0, size = sizeof(current);
@@ -89,7 +73,7 @@ static void unregister_steam(DWORD pid)
 
     if (!(key = create_key(HKEY_CURRENT_USER, ACTIVE_PROCESS_KEY))) return;
     if (!RegQueryValueExW(key, L"pid", NULL, NULL, (BYTE *)&current, &size) && current == pid)
-        set_dword(key, L"pid", previous_pid != pid && process_alive(previous_pid) ? previous_pid : 0);
+        set_dword(key, L"pid", 0);
     RegCloseKey(key);
 }
 
@@ -164,23 +148,13 @@ static WCHAR *child_command_line(void)
     return *p ? _wcsdup(p) : NULL;
 }
 
-/* Waits until no process in the job is left; returns at once if the count can't be read. */
-static void wait_for_job(HANDLE job)
-{
-    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info;
-
-    while (QueryInformationJobObject(job, JobObjectBasicAccountingInformation, &info, sizeof(info), NULL)
-           && info.ActiveProcesses)
-        Sleep(250);
-}
-
 int main(void)
 {
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi;
     DWORD pid = GetCurrentProcessId(), code = 1;
     WCHAR *cmd = child_command_line();
-    HANDLE job;
+    HANDLE done;
 
     if (!cmd)
     {
@@ -199,19 +173,18 @@ int main(void)
     drm_consume = CreateSemaphoreW(NULL, 0, 512, L"STEAM_DIPC_CONSUME");
     drm_produce = CreateSemaphoreW(NULL, 1, 512, L"SREAM_DIPC_PRODUCE");
     if (drm_consume && drm_produce) CreateThread(NULL, 0, answer_drm, NULL, 0, NULL);
-    if ((job = CreateJobObjectW(NULL, NULL)))
-    {
-        /* Launchers may start the game with CREATE_BREAKAWAY_FROM_JOB; Wine refuses that inside a job
-         * that doesn't allow it, so the game wouldn't start at all. */
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = { 0 };
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_BREAKAWAY_OK;
-        SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
-        AssignProcessToJobObject(job, pi.hProcess);
-    }
     ResumeThread(pi.hThread);
-    WaitForSingleObject(pi.hProcess, INFINITE);
+    /* Wine's shutdown event, set once no program is left in the prefix, as Proton's steam.exe waits (after the program
+     * started): unlike the program's handle or a job, it covers a launcher that starts the real game, even with
+     * CREATE_BREAKAWAY_FROM_JOB or ShellExecute, and quits. A system process doesn't keep the prefix alive itself. If
+     * Wine refuses, `done` stays the program. */
+    done = pi.hProcess;
+    NtSetInformationProcess(GetCurrentProcess(), (PROCESSINFOCLASS)1000 /* ProcessWineMakeProcessSystem */, &done,
+                            sizeof(done));
+    /* Under a terminal Wine starts a console host for us, which would wait for us to leave while we wait for it. */
+    FreeConsole();
+    WaitForSingleObject(done, INFINITE);
     GetExitCodeProcess(pi.hProcess, &code);
-    if (job) wait_for_job(job);
     unregister_steam(pid);
     return (int)code;
 }
