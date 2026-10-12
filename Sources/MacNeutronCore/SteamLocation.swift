@@ -27,6 +27,8 @@ public struct SteamLocation: Equatable, Sendable {
     public var compatLog: URL { root.appending(path: "logs/compat_log.txt") }
     public var appInfo: URL { root.appending(path: "appcache/appinfo.vdf") }
     public var loginUsers: URL { root.appending(path: "config/loginusers.vdf") }
+    /// Steam's own settings; it also holds the login name (AutoLoginUser), which is never read.
+    public var registryVDF: URL { root.appending(path: "registry.vdf") }
 
     public var isInstalled: Bool { FileManager.default.fileExists(atPath: bundleMacOS.path(percentEncoded: false)) }
 
@@ -67,6 +69,13 @@ public struct SteamLocation: Equatable, Sendable {
         let chosen = users.first { number($0, "MostRecent") == 1 }
             ?? users.max { number($0, "Timestamp") < number($1, "Timestamp") }
         return chosen.flatMap { UInt64($0.key) }.map { UInt32(truncatingIfNeeded: $0) }
+    }
+
+    /// Steam's UI language ("english"), which the Windows client keeps in HKCU\Software\Valve\Steam\language.
+    public func uiLanguage() -> String? {
+        guard let text = try? String(contentsOf: registryVDF, encoding: .utf8),
+              let nodes = try? KeyValues.parse(text) else { return nil }
+        return nodes.node(at: ["Registry", "HKCU", "Software", "Valve", "Steam", "language"])?.stringValue
     }
 
     static func samePath(_ a: URL, _ b: URL) -> Bool {

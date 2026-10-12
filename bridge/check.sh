@@ -93,11 +93,13 @@ tty_steam() {
 expect "steam.exe ends under a terminal" "$(tty_steam)" 5
 
 # The same rows through the tool folder's launcher, as Steam starts a game: the launcher copies steam.exe and starts
-# the game through it. A fake account ID: the launcher would fill in the real one, which steam.exe writes to the
-# prefix's registry. The helper goes as a macOS path; the launcher converts it.
+# the game through it. A fake account ID and language: the launcher would fill in the real ones, which steam.exe writes
+# to the prefix's registry (and the language from registry.vdf, which also holds the login name). The helper goes as a
+# macOS path; the launcher converts it.
 if [ -n "$COMPAT" ]; then
   GAME="$WORK/game dir/hélper.exe"
-  L() { env STEAM_COMPAT_DATA_PATH="$COMPAT" SteamAppId=0 MACNEUTRON_STEAM_ACCOUNT=12345 "$TOOL/bin/macneutron" launch "$@"; }
+  L() { env STEAM_COMPAT_DATA_PATH="$COMPAT" SteamAppId=0 MACNEUTRON_STEAM_ACCOUNT=12345 MACNEUTRON_STEAM_LANGUAGE=english \
+    "$TOOL/bin/macneutron" launch "$@"; }
   lsteam() { L waitforexitandrun "$GAME" "$@" 2>/dev/null | tr -d '\r'; }
   set +e; L waitforexitandrun "$GAME" exit 7 >/dev/null 2>&1; got=$?; set -e
   expect "launcher: exit code passes through" "$got" 7

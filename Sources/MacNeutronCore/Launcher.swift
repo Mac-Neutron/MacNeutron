@@ -178,7 +178,8 @@ public struct Launcher: Sendable {
         return true
     }
 
-    /// Tells the runtime's lsteamclient where macOS Steam's client library is, and steam.exe who is logged in.
+    /// Tells the runtime's lsteamclient where macOS Steam's client library is, and steam.exe who is logged in and in
+    /// which language.
     private func addSteamClient(to env: inout [String: String]) {
         let passed = env["STEAM_COMPAT_CLIENT_INSTALL_PATH"]
         let client = SteamBridge.clientDirectory(steamValue: passed, steam: steam)
@@ -187,6 +188,7 @@ public struct Launcher: Sendable {
         if !FileManager.default.fileExists(atPath: client + "/steamclient.dylib") {
             log.append("note: steamclient.dylib not found in \(client)")
         }
+        if env["MACNEUTRON_STEAM_LANGUAGE"] == nil { env["MACNEUTRON_STEAM_LANGUAGE"] = steam.uiLanguage() }
         guard env["MACNEUTRON_STEAM_ACCOUNT"] == nil else { return }
         if let account = steam.activeAccountID() {
             env["MACNEUTRON_STEAM_ACCOUNT"] = String(account)

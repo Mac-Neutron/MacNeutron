@@ -276,6 +276,17 @@ private func i386Exe(named name: String) throws -> String {
     #expect(f.runner.calls.last?.environment["MACNEUTRON_STEAM_ACCOUNT"] == "99")
 }
 
+@Test func steamsLanguageReachesSteamExe() throws {
+    let f = try makeFixture(bridge: true)
+    try write(registryVDF(language: "french"), to: f.launcher.steam.registryVDF)
+    _ = f.launcher.launch(["run", "/g/Game.exe"], environment: f.env)
+    #expect(f.runner.calls.last?.environment["MACNEUTRON_STEAM_LANGUAGE"] == "french")
+    var env = f.env
+    env["MACNEUTRON_STEAM_LANGUAGE"] = "latam"  // a launch option wins
+    _ = f.launcher.launch(["run", "/g/Game.exe"], environment: env)
+    #expect(f.runner.calls.last?.environment["MACNEUTRON_STEAM_LANGUAGE"] == "latam")
+}
+
 @Test func steamsClientPathIsLoggedAndCheckedForTheLibrary() throws {
     let f = try makeFixture(bridge: true)
     try FileManager.default.removeItem(at: f.launcher.steam.bundleMacOS.appending(path: "steamclient.dylib"))

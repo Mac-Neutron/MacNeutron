@@ -45,8 +45,9 @@ trap 'exec 3>&- 2> /dev/null; stop_wine; sweep' EXIT
 
 launch() { # compat-folder backend exe [args...]
   data=$1 backend=$2 exe=$3; shift 3
+  # A fixed language: the launcher would read it from Steam's registry.vdf, which also holds the login name.
   env STEAM_COMPAT_DATA_PATH="$WORK/compatdata/$data" SteamAppId=0 MACNEUTRON_GRAPHICS="$backend" \
-    "$TOOL/bin/macneutron" launch waitforexitandrun "$WORK/bin/$exe" "$@"
+    MACNEUTRON_STEAM_LANGUAGE=english "$TOOL/bin/macneutron" launch waitforexitandrun "$WORK/bin/$exe" "$@"
 }
 check() { # name want compat-folder backend exe [args...]
   name=$1 want=$2; shift 2

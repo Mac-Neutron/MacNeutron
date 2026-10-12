@@ -22,6 +22,20 @@ import Testing
     #expect(SteamBridge.clientDirectory(steamValue: nil, steam: steam) == bundle)
 }
 
+/// macOS Steam's registry.vdf with `language` under HKCU/Software/Valve/Steam, and a sibling block's own `language`.
+func registryVDF(language: String) -> String {
+    "\"Registry\"\n{\n\t\"HKCU\"\n\t{\n\t\t\"Software\"\n\t\t{\n\t\t\t\"Valve\"\n\t\t\t{\n\t\t\t\t\"Steam\"\n\t\t\t\t{\n"
+        + "\t\t\t\t\t\"language\"\t\t\"\(language)\"\n\t\t\t\t}\n\t\t\t\t\"Steamsteamglobal\"\n\t\t\t\t{\n"
+        + "\t\t\t\t\t\"language\"\t\t\"german\"\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n"
+}
+
+@Test func uiLanguageComesFromRegistryVDF() throws {
+    let steam = try makeSteamLocation()
+    try write(registryVDF(language: "french"), to: steam.registryVDF)
+    #expect(steam.uiLanguage() == "french")
+    #expect(try makeSteamLocation().uiLanguage() == nil)
+}
+
 @Test func mostRecentUserIsTheActiveAccount() throws {
     let steam = try makeSteamLocation(loginUsers: loginUsersFile(
         loginUser(account: 1, timestamp: 200, mostRecent: false),
