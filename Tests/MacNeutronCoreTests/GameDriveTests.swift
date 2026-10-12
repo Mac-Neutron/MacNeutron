@@ -66,6 +66,17 @@ private func gameDriveLink(_ prefix: URL) -> String? {
     #expect(gameDriveLink(prefix) == nil)
 }
 
+@Test func aLegacySteamAppsFolderNamedSteamappsIsTheLibrary() throws {
+    // Mac Steam passes ".../steamapps" for a folder that may be "SteamApps" on disk (an old install). Python's realpath,
+    // which Proton uses, keeps that spelling; Darwin's realpath(3) gives the on-disk case.
+    let (lib, onDisk, _) = try makeLibrary(steamapps: "SteamApps")
+    let apps = path(onDisk).replacingOccurrences(of: "/SteamApps", with: "/steamapps")
+    var notes: [String] = []
+    let environment = ["STEAM_COMPAT_LIBRARY_PATHS": apps, "STEAM_COMPAT_INSTALL_PATH": apps + "/common/Game"]
+    #expect(GameDrive.target(environment: environment, notes: &notes) == realPath(path(lib)))
+    #expect(notes.isEmpty)
+}
+
 @Test func aLibraryThatFailsValidationGetsProtonsFallback() throws {
     // The basename is checked as written, after realpath: "SteamApps" isn't "steamapps".
     let (_, wrongCase, wrongCaseGame) = try makeLibrary(steamapps: "SteamApps")

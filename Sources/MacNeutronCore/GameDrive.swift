@@ -17,8 +17,12 @@ enum GameDrive {
         guard let entry = libraries.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
             .first(where: { $0.isEmpty || install.contains($0) }) else { return nil }
         var isFolder: ObjCBool = false
+        // Python's realpath keeps the spelling it was given for a part that isn't a link; Darwin's realpath(3) gives
+        // the on-disk case. So the name checked is the entry's own, or the resolved one when the entry is a link: Mac
+        // Steam's ".../steamapps" on a legacy on-disk "SteamApps" folder passes, as it would under Proton.
+        let isLink = (try? FileManager.default.destinationOfSymbolicLink(atPath: entry)) != nil
         if let path = realPath(entry), FileManager.default.fileExists(atPath: path, isDirectory: &isFolder), isFolder.boolValue,
-           path.split(separator: "/").last == "steamapps" {
+           (isLink ? path : entry).split(separator: "/").last == "steamapps" {
             let parent = (path as NSString).deletingLastPathComponent
             if access(parent, W_OK) == 0, let own = device(path), own == device(parent) { return parent }
         }
