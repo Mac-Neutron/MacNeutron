@@ -47,6 +47,7 @@
 #include <objbase.h>
 #include <shellapi.h>
 #include <shlwapi.h>
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -331,13 +332,16 @@ static BOOL try_recover_eadesktop_symlink(void)
     return FALSE;
 }
 
-/* Source SDK Base 2007's -game path, a Unix path, to DOS (only the first one, unquoted, as Proton). */
+/* Source SDK Base's -game path, a Unix path, to DOS (only the first one, as Proton). Hardening over Proton, which
+ * converts an unquoted path only, and byte by byte: a quoted one too (Wine quotes an argument with a space, as every
+ * path under ~/Library/Application Support is), and as UTF-8, as run_process converts (D-line). */
 static WCHAR *fixup_cmdline_paths(WCHAR *cmdline)
 {
     const WCHAR argname[] = L"-game";
-    WCHAR *p, *next, *dos_path, *ret;
-    unsigned int i, len, path_len;
+    WCHAR *p, *next, *dos_path, *ret, *wide;
+    unsigned int len, path_len;
     char *unix_path;
+    int r;
 
     if (!wcsstr(cmdline, L"\\Source SDK Base")) return cmdline;
     p = cmdline;
@@ -353,14 +357,28 @@ static WCHAR *fixup_cmdline_paths(WCHAR *cmdline)
         {
             p += ARRAYSIZE(argname) - 1;
             while (iswspace(*p)) ++p;
-            if (*p != '/') continue;
-            next = p + 1;
-            while (*next && !iswspace(*next)) ++next;
-            unix_path = malloc(next - p + 1);
-            for (i = 0; p + i != next; ++i) unix_path[i] = p[i];
-            unix_path[i] = 0;
-            dos_path = wine_get_dos_file_name(unix_path);
-            free(unix_path);
+            if (*p == '"' && p[1] == '/')
+            {
+                next = ++p;  /* the path between the quotes, which stay */
+                while (*next && *next != '"') ++next;
+            }
+            else if (*p == '/')
+            {
+                next = p + 1;
+                while (*next && !iswspace(*next)) ++next;
+            }
+            else continue;
+            wide = malloc((next - p + 1) * sizeof(*wide));
+            memcpy(wide, p, (next - p) * sizeof(*wide));
+            wide[next - p] = 0;
+            dos_path = NULL;
+            if ((r = WideCharToMultiByte(CP_UNIXCP, 0, wide, -1, NULL, 0, NULL, NULL)) && (unix_path = malloc(r)))
+            {
+                if (WideCharToMultiByte(CP_UNIXCP, 0, wide, -1, unix_path, r, NULL, NULL))
+                    dos_path = wine_get_dos_file_name(unix_path);
+                free(unix_path);
+            }
+            free(wide);
             if (!dos_path)
             {
                 p = next;
@@ -747,30 +765,85 @@ static BOOL is_ptraced(void)
 
 /* A steam:// URL to Mac Steam: winebrowser, which runs open(1) (D-12; Proton runs the Linux client's own commands,
  * steam-runtime-steam-remote or steam, which macOS has no equivalent of). Never ShellExecute: HKCR\steam is us. */
-static void forward_to_mac_steam(const char *url)
+static void forward_to_mac_steam(const WCHAR *url)
 {
+    static const WCHAR format[] = L"C:\\windows\\system32\\winebrowser.exe \"%ls\"";
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi;
-    WCHAR cmd[2048], wide[1900];
+    size_t len = wcslen(url) + ARRAYSIZE(format);
+    WCHAR *cmd = malloc(len * sizeof(*cmd));
 
-    if (!MultiByteToWideChar(CP_ACP, 0, url, -1, wide, ARRAYSIZE(wide))) return;
-    _snwprintf(cmd, ARRAYSIZE(cmd), L"C:\\windows\\system32\\winebrowser.exe \"%ls\"", wide);
-    if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+    if (!cmd)
     {
-        ERR("Forwarding %s to Mac Steam failed, error %lu.\n", url, GetLastError());
+        ERR("Out of memory forwarding %ls to Mac Steam.\n", url);
         return;
     }
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
+    _snwprintf(cmd, len, format, url);
+    if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+        ERR("Forwarding %ls to Mac Steam failed, error %lu.\n", url, GetLastError());
+    else
+    {
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+    free(cmd);
+}
+
+/* -applaunch <id> [arguments]: Proton passes them to the Linux client's command line. Mac Steam has none, so the URL
+ * carries them: steam://rungameid/<id>, or Valve's steam://run/<id>//<arguments>/ with the arguments joined by spaces
+ * (one with a space, or empty, quoted) and percent-encoded as UTF-8 (open(1) refuses a URL with a space; the encoding
+ * is common usage, as in steam://run/730//+connect%20<server>). */
+static void forward_applaunch(WCHAR **args, int count)
+{
+    static const char keep[] = "-_.~+:,=@!$'()*;&";
+    size_t size = 0, pos = 0;
+    char *url = NULL, *utf8;
+    WCHAR *wide;
+    int i, j, r;
+
+    pos += strappend(&url, &size, pos, count > 1 ? "steam://run/" : "steam://rungameid/");
+    for (i = 0; i < count; ++i)
+    {
+        BOOL quote = i && (!*args[i] || wcspbrk(args[i], L" \t"));
+
+        if (i == 1) pos += strappend(&url, &size, pos, "//");
+        else if (i) pos += strappend(&url, &size, pos, "%%20");
+        if (quote) pos += strappend(&url, &size, pos, "%%22");
+        if (!(r = WideCharToMultiByte(CP_UTF8, 0, args[i], -1, NULL, 0, NULL, NULL)) || !(utf8 = malloc(r)))
+        {
+            ERR("Can't convert %ls for Mac Steam.\n", args[i]);
+            free(url);
+            return;
+        }
+        WideCharToMultiByte(CP_UTF8, 0, args[i], -1, utf8, r, NULL, NULL);
+        for (j = 0; utf8[j]; ++j)
+        {
+            unsigned char c = utf8[j];
+
+            if (isalnum(c) || (c < 0x80 && strchr(keep, c))) pos += strappend(&url, &size, pos, "%c", c);
+            else pos += strappend(&url, &size, pos, "%%%02X", c);
+        }
+        free(utf8);
+        if (quote) pos += strappend(&url, &size, pos, "%%22");
+    }
+    if (count > 1) pos += strappend(&url, &size, pos, "/");
+    if ((r = MultiByteToWideChar(CP_UTF8, 0, url, -1, NULL, 0)) && (wide = malloc(r * sizeof(*wide))))
+    {
+        MultiByteToWideChar(CP_UTF8, 0, url, -1, wide, r);
+        forward_to_mac_steam(wide);
+        free(wide);
+    }
+    else ERR("Out of memory forwarding %s to Mac Steam.\n", url);
+    free(url);
 }
 
 /* Proton's steam_command_handler: steam:// URLs and options are commands, anything else is a program to start. */
 static BOOL steam_command_handler(int argc, char *argv[])
 {
     const char *sgi;
-    char url[64];
-    int i = 1;
+    WCHAR **wargv;
+    int i = 1, wargc;
 
     /* If there are command line options, only forward steam:// and options start with - */
     if (argc > 1 && StrStrIA(argv[1], "steam://") != argv[1] && argv[1][0] != '-') return FALSE;
@@ -795,20 +868,27 @@ static BOOL steam_command_handler(int argc, char *argv[])
             return TRUE;
         }
     }
-    /* Mac Steam has no command line (D-12): HKCR's -- goes, URLs are forwarded, -applaunch <id> becomes
-     * steam://rungameid/<id>, nothing at all opens Steam, and every other option is dropped. */
-    if (argc > 1 && !strcmp(argv[1], "--")) i = 2;
-    if (i >= argc) forward_to_mac_steam("steam://open/main");
-    for (; i < argc; ++i)
+    /* Mac Steam has no command line (D-12): HKCR's -- goes, URLs are forwarded, -applaunch <id> and what follows it
+     * become a URL, nothing at all opens Steam, and every other option is dropped. From the wide command line: the C
+     * runtime's ANSI argv turns letters outside the Windows code page into '?'. */
+    if (!(wargv = CommandLineToArgvW(GetCommandLineW(), &wargc)))
     {
-        if (StrStrIA(argv[i], "steam://") == argv[i]) forward_to_mac_steam(argv[i]);
-        else if (!strcmp(argv[i], "-applaunch") && i + 1 < argc)
-        {
-            snprintf(url, sizeof(url), "steam://rungameid/%s", argv[++i]);
-            forward_to_mac_steam(url);
-        }
-        else ERR("ignoring %s (Mac Steam has no command line)\n", argv[i]);
+        ERR("Can't read the command line, error %lu.\n", GetLastError());
+        return TRUE;
     }
+    if (wargc > 1 && !wcscmp(wargv[1], L"--")) i = 2;
+    if (i >= wargc) forward_to_mac_steam(L"steam://open/main");
+    for (; i < wargc; ++i)
+    {
+        if (StrStrIW(wargv[i], L"steam://") == wargv[i]) forward_to_mac_steam(wargv[i]);
+        else if (!wcscmp(wargv[i], L"-applaunch") && i + 1 < wargc)
+        {
+            forward_applaunch(wargv + i + 1, wargc - i - 1);
+            break;
+        }
+        else ERR("ignoring %ls (Mac Steam has no command line)\n", wargv[i]);
+    }
+    LocalFree(wargv);
     return TRUE;
 }
 

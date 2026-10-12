@@ -180,8 +180,7 @@ public struct Launcher: Sendable {
         return true
     }
 
-    /// Tells the runtime's lsteamclient where macOS Steam's client library is, and steam.exe who is logged in and in
-    /// which language.
+    /// Tells the runtime's lsteamclient where macOS Steam's client library is, and steam.exe Steam's language.
     private func addSteamClient(to env: inout [String: String]) {
         let passed = env["STEAM_COMPAT_CLIENT_INSTALL_PATH"]
         let client = SteamBridge.clientDirectory(steamValue: passed, steam: steam)
