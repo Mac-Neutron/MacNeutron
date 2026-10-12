@@ -163,8 +163,18 @@ public enum ProfileLinks {
         return withUnsafeBytes(of: info.f_fstypename) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) } == "apfs"
     }
 
-    /// Logged paths can hold a SteamID (Palworld's do), and launcher.log ends up in bug reports.
-    static func redacted(_ path: String) -> String { path.replacing(/[0-9]{6,}/, with: "<n>") }
+    /// The folders Steam's roots and Wine's profile name, above any game's own.
+    static let rootFolders: Set = ["Local Settings", "Application Data", "AppData", "Local", "Roaming", "LocalLow",
+                                   "My Documents", "Documents", "Saved Games"]
+
+    /// A logged path stops at the game's folder (spec §4.2): below it, save paths hold SteamIDs, account IDs and
+    /// persona names, and launcher.log ends up in bug reports.
+    static func redacted(_ path: String) -> String {
+        let parts = path.split(separator: "/").map(String.init)
+        let roots = parts.prefix { rootFolders.contains($0) }
+        let game = roots.count < parts.count - 1 ? [parts[roots.count]] : []  // never a file name
+        return (roots + game + ["…"]).joined(separator: "/")
+    }
 
     private enum Kind { case missing, link, directory, file, other }
 

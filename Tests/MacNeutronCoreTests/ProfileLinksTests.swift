@@ -108,14 +108,14 @@ private func seed(_ prefix: URL, _ path: String, _ text: String) throws { try wr
     #expect(report.notes.count == 1)
 }
 
-@Test func loggedPathsHideLongNumbers() throws {
-    // Palworld's save path contains the SteamID; launcher.log ends up in bug reports.
+@Test func loggedPathsStopAtTheGamesFolder() throws {
+    // Save paths hold SteamIDs, account IDs in hex, persona names; launcher.log ends up in bug reports (spec §4.2).
     let prefix = try makePrefix()
-    try seed(prefix, "u/AppData/Local/G/76561198000000000/x", "local")
-    try seed(prefix, "steamuser/Local Settings/Application Data/G/76561198000000000/x", "cloud")
+    try seed(prefix, "u/AppData/Local/G/0110000103a5b7c9/x", "local")
+    try seed(prefix, "steamuser/Local Settings/Application Data/G/0110000103a5b7c9/x", "cloud")
     let report = ProfileLinks.apply(prefix: prefix, user: "u")
-    #expect(report.notes.contains { $0.contains("G/<n>/x") })
-    #expect(!report.notes.joined().contains("76561198"))
+    #expect(report.notes.contains { $0.contains("(e.g. Local Settings/Application Data/G/…)") })
+    #expect(!report.notes.joined().contains("a5b7c9"))
 }
 
 // MARK: Review Focus
