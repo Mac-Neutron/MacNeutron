@@ -22,6 +22,14 @@ import Testing
     #expect(SteamBridge.clientDirectory(steamValue: nil, steam: steam) == bundle)
 }
 
+@Test func libraryFoldersListsEachLibraryUnderItsParent() {
+    // Proton's layout byte for byte; an empty entry and a steamapps folder at / name no library.
+    #expect(SteamBridge.libraryFolders(steamapps:
+        "/Users/me/Library/Application Support/Steam/steamapps:/Volumes/Gäme/SteamLibrary/steamapps/::/steamapps")
+        == "\"LibraryFolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"Z:\\\\Users\\\\me\\\\Library\\\\Application Support\\\\Steam\"\n\t}\n"
+         + "\t\"1\"\n\t{\n\t\t\"path\"\t\t\"Z:\\\\Volumes\\\\Gäme\\\\SteamLibrary\"\n\t}\n}\n")
+}
+
 /// macOS Steam's registry.vdf with `language` under HKCU/Software/Valve/Steam, and a sibling block's own `language`.
 func registryVDF(language: String) -> String {
     "\"Registry\"\n{\n\t\"HKCU\"\n\t{\n\t\t\"Software\"\n\t\t{\n\t\t\t\"Valve\"\n\t\t\t{\n\t\t\t\t\"Steam\"\n\t\t\t\t{\n"

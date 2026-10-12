@@ -131,6 +131,17 @@ if [ -n "$COMPAT" ]; then
   expect "launcher: a launcher may start the game with CREATE_BREAKAWAY_FROM_JOB" \
     "$(lsteam breakaway "$(winpath "$WORK/late.txt")")" "breakaway ok"
   expect "launcher: ... and that game still sees Steam" "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"
+  # The rest of Proton's setup_steam_files, written by the launcher with the bridge: Steam's config folder, and
+  # libraryfolders.vdf with each library of STEAM_COMPAT_LIBRARY_PATHS (its steamapps folder's parent).
+  rm -rf "$STEAM/steamapps/libraryfolders.vdf" "$STEAM/config"
+  STEAM_COMPAT_LIBRARY_PATHS="$WORK/library ü/steamapps:/Volumes/Game Drive/SteamLibrary/steamapps/" \
+    L waitforexitandrun "$GAME" exit 0 >/dev/null 2>&1 || true
+  lib=$(winpath "$WORK/library ü" | sed 's/\\/\\\\/g')
+  expect "launcher: libraryfolders.vdf names Steam's libraries" \
+    "$(cat "$STEAM/steamapps/libraryfolders.vdf" 2>/dev/null || true)" \
+    "$(printf '"LibraryFolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n\t"1"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}' \
+      "$lib" 'Z:\\Volumes\\Game Drive\\SteamLibrary')"
+  expect "launcher: Steam's config folder exists" "$([ -d "$STEAM/config" ] && echo yes || echo no)" yes
 fi
 
 # A second steam.exe in the prefix (a failed one, then a short one) must not end Steam for the first one's game. Every

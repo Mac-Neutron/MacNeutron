@@ -220,6 +220,18 @@ private func steamFolder(_ manager: PrefixManager) -> URL {
     #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "steamclient.dll").path(percentEncoded: false)))
 }
 
+@Test func steamFilesComeWithTheBridge() throws {
+    // The rest of Proton's setup_steam_files: Steam's config folder (CEG looks for it) and libraryfolders.vdf.
+    let (manager, _) = try makeManager(winebootCreatingPrefix())
+    try installFakeSteamBridge(in: manager.layout)
+    try manager.prepare(environment: wineEnvironment(manager, ["STEAM_COMPAT_LIBRARY_PATHS": "/Steam/steamapps"]),
+                        steamBridge: true)
+    let folder = steamFolder(manager)
+    #expect(FileManager.default.fileExists(atPath: folder.appending(path: "config").path(percentEncoded: false)))
+    #expect(try String(contentsOf: folder.appending(path: "steamapps/libraryfolders.vdf"), encoding: .utf8)
+        == SteamBridge.libraryFolders(steamapps: "/Steam/steamapps"))
+}
+
 private func inode(_ url: URL) throws -> UInt64? {
     try FileManager.default.attributesOfItem(atPath: url.path(percentEncoded: false))[.systemFileNumber] as? UInt64
 }

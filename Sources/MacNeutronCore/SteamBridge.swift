@@ -24,6 +24,22 @@ public enum SteamBridge {
          (steamClient64 ?? layout.lsteamclient, "\(prefixFolder)/steamclient64.dll")]
     }
 
+    /// `steamapps/libraryfolders.vdf` as Proton's steam.exe writes it at every launch (setup_steam_files): the 2K
+    /// Launcher and mod managers find the games through it. One library per `STEAM_COMPAT_LIBRARY_PATHS` entry, a
+    /// `steamapps` folder whose parent is the library, in Proton's spelling and layout. Proton lists
+    /// `STEAM_COMPAT_CLIENT_INSTALL_PATH` first: on macOS that's the Steam bundle's MacOS folder, no library, so it's left
+    /// out.
+    static func libraryFolders(steamapps: String) -> String {
+        let libraries = steamapps.split(separator: ":").compactMap { entry -> String? in
+            let path = entry.hasSuffix("/") ? entry.dropLast() : entry
+            guard let slash = path.lastIndex(of: "/"), slash > path.startIndex else { return nil }
+            return windowsPath(String(path[..<slash]))
+        }
+        return KeyValues.serialize([.block("LibraryFolders", libraries.enumerated().map {
+            .block(String($0.offset), [.string("path", $0.element)])
+        })])
+    }
+
     /// Steam's `STEAM_COMPAT_CLIENT_INSTALL_PATH` when that folder holds `steamclient.dylib`,
     /// otherwise the Steam bundle's MacOS folder, where macOS Steam keeps it.
     public static func clientDirectory(steamValue: String?, steam: SteamLocation) -> String {

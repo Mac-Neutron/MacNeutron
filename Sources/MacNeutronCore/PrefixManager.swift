@@ -94,7 +94,10 @@ public struct PrefixManager: Sendable {
             // Every launch: Steam may have made real folders where the links go since the last one.
             let links = ProfileLinks.apply(prefix: context.prefix, user: environment["USER"] ?? NSUserName())
             for note in links.notes { log.append("note: \(note)") }
-            if steamBridge { try deploySteamBridge(environment: environment) }
+            if steamBridge {
+                try deploySteamBridge(environment: environment)
+                writeSteamFiles(environment: environment)
+            }
             return links
         }
     }
@@ -213,6 +216,19 @@ public struct PrefixManager: Sendable {
                 throw PrefixError.steamBridgeCopyFailed("\(destination): \(error.localizedDescription)")
             }
         }
+    }
+
+    /// The rest of Proton's setup_steam_files: Steam's `config` folder, which CEG checks for, and
+    /// `steamapps/libraryfolders.vdf`. Best effort: a game starts without them. `removeSteamBridge` leaves them, as
+    /// Proton never removes them.
+    private func writeSteamFiles(environment: [String: String]) {
+        let steam = context.prefix.appending(path: SteamBridge.prefixFolder, directoryHint: .isDirectory)
+        for folder in ["config", "steamapps"] {
+            try? FileManager.default.createDirectory(at: steam.appending(path: folder), withIntermediateDirectories: true)
+        }
+        guard let paths = environment["STEAM_COMPAT_LIBRARY_PATHS"] else { return }
+        try? SteamBridge.libraryFolders(steamapps: paths)
+            .write(to: steam.appending(path: "steamapps/libraryfolders.vdf"), atomically: true, encoding: .utf8)
     }
 
     /// For a game started without the bridge (launch option, or a runtime without it): its steam_api
