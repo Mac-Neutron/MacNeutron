@@ -33,7 +33,7 @@ Amended by the P0-3/P1-1 plan (`docs/superpowers/plans/2026-10-12-macneutron-par
   match, which had no macOS reason.
 - **R10.** `removeSteamBridge` keeps both `steam.exe` copies, overriding Part B's P1-1 step 1 and part 3 A4's removal
   note: `HKCR\steam` needs them for the game's `steam://` links with the bridge off.
-- **The bridge spec's deviation list** (D-1 to D-33) is in its Amendment 2.
+- **The bridge spec's deviation list** (D-1 to D-34) is in its Amendment 2.
 
 Other corrections:
 - **P1-3 overlay (H1).** dyld applies `__interpose` tuples only for images present at launch. A `dlopen`ed

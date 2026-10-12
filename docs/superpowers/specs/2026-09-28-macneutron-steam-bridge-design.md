@@ -91,15 +91,16 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
   1985810, 1549250) run the Steam folder's copy, as in Proton.
 - No account variable: Proton writes no `ActiveUser`, and steam.exe deletes the one earlier builds wrote.
 - Every preparation links `s:`, with the bridge or without; Proton's messages go to launcher.log.
-- The `steamapps` check reads the name as Steam spells the library entry (its own last component), or the resolved
-  name when the entry is itself a link. Proton's Python `realpath` keeps the given spelling of a part that isn't a link,
-  where Darwin's `realpath(3)` returns the on-disk case: a legacy on-disk `SteamApps` folder that Mac Steam passes as
-  `…/steamapps` must keep `S:\steamapps`. This is parity, not a deviation.
+- The `steamapps` check reads the name as Proton's Python `os.path.realpath` gives it: it follows the library entry's
+  links by their text, hop by hop (`lstat`, `readlink`), and keeps the given spelling of a part that isn't a link, not
+  the on-disk case Darwin's `realpath(3)` returns. So a legacy on-disk `SteamApps` folder keeps `S:\steamapps` when Mac
+  Steam passes it as `…/steamapps`, or when the entry is a link whose text spells it `steamapps`. This is parity, not a
+  deviation.
 
 **Errors** (amends §8):
 - The account rows go.
 - `MACNEUTRON_NO_STEAM_BRIDGE=1`, or a missing bridge file, removes the client DLLs but keeps `steam.exe`, so the
-  game's `steam://` links still work (D-27).
+  game's `steam://` links, except its own restart link, still reach Mac Steam (D-27).
 - steam.exe never clears its pid, as Proton's (R4): after a crash, or a steam.exe that fails to start its program, the
   pid is that steam.exe's, dead, until the next game's steam.exe registers its own.
 - The S: drive applies with the bridge or without. `/usr/bin/env PROTON_SET_GAME_DRIVE=0 %command%` shows the game its
@@ -110,6 +111,7 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
 **Launching the tool**
 - **D-1:** Steam runs `/bin/macneutron launch %verb%`, an arm64 Mach-O, not `/proton`: a clean Mac has no Python.
 - **D-2:** No `require_tool_appid` and no `use_sessions`: macOS has no Steam Linux Runtime or pressure-vessel.
+  `STEAM_COMPAT_MOUNTS` and the runtime adverb have no consumer.
 - **D-3:** Compat tools apply only with `@sSteamCmdForcePlatformType linux` in the bundle's `steam_dev.cfg`. A second
   tool, `macneutron-native`, keeps Mac builds mounted.
 - **D-4:** A local tool (AppID 0) installed and updated by MacNeutron.app: only Valve can publish a tool app.
@@ -119,7 +121,8 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
 - **D-7:** `STEAM_COMPAT_CLIENT_INSTALL_PATH` is the Steam bundle's MacOS folder, which holds `steamclient.dylib`, not the
   Steam root. The Steam root's library and appcache paths come from `SteamLocation` instead.
 - **D-8:** `libraryfolders.vdf` leaves out Proton's entry 0, the client folder: on macOS it is no library.
-- **D-9:** Launch options run without a shell, so `VAR=x %command%` must be `/usr/bin/env VAR=x %command%`.
+- **D-9:** Launch options run without a shell, so `VAR=x %command%` must be `/usr/bin/env VAR=x %command%`. Otherwise
+  Steam fails with OS Error 260.
 
 **Steam client bridge**
 - **D-10:** `steamclient64.dll` falls back to lsteamclient when no Valve DLL is cached (first launch offline, or after
@@ -127,24 +130,34 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
 - **D-11:** Wine 0036 writes its trampolines PE-side (RW, then restore), not through Unix `mprotect(RWX)`: Apple Silicon
   refuses W^X violations. Two more differences from Proton's loader:
   - lsteamclient.dll is loaded from `system32` only;
-  - Proton's jump into the genuine DLL's entry point is replaced by `LDR_DONT_CALL_DLLMAIN` alone: its DllMain and TLS
-    callbacks are skipped, unless no export was redirected.
+  - Proton also points the genuine DLL's entry point at lsteamclient's (`steamclient_setup_trampolines`); 0036 doesn't,
+    and relies on `LDR_DONT_CALL_DLLMAIN`, which Proton sets too: the DLL's DllMain and TLS callbacks are skipped,
+    unless no export was redirected.
 - **D-12:** `steam://` URLs and steam.exe's commands go to Mac Steam through winebrowser, which runs `open(1)`. Proton
   runs the Linux client's `steam-runtime-steam-remote` or `steam` binary, which macOS doesn't have, with steam.exe's
   arguments on its command line (`steam -applaunch <id> <args>`). Mac Steam has no command line. Our additions:
   - a leading `--` is dropped;
   - `-applaunch <id>` with nothing after the id becomes `steam://rungameid/<id>`;
   - `-applaunch <id>` with arguments becomes Valve's documented `steam://run/<id>//<arguments>/`. Every following
-    argument is taken (one holding a space or tab, or empty, in double quotes), joined by spaces and percent-encoded as
-    UTF-8: `A-Z a-z 0-9` and `- _ . ~ + : , = @ ! $ ' ( ) * ; &` stay literal, and everything else, space, `"` and `/`
-    included, becomes `%XX`. `open(1)` rejects a URL with a space; the encoding follows common usage
-    (`steam://run/730//+connect%20host:port`). Example: `-applaunch 480 +connect "a b" -x` gives
-    `steam://run/480//+connect%20%22a%20b%22%20-x/`;
+    argument is taken and quoted as a Windows command line spells it: one that is empty or holds a space, tab or `"`
+    goes in double quotes, a `"` becomes `\"`, and backslashes before a `"` or the closing quote are doubled. The
+    arguments are joined by spaces and percent-encoded as UTF-8: `A-Z a-z 0-9` and `- _ . ~ + : , = @ ! $ ' ( ) * ; &`
+    stay literal, and everything else, space, `"` and `/` included, becomes `%XX`. A `/`, `?`, `#` or `%` left in an
+    argument would change the URL's structure (Steam splits `run/<id>/<language>/<arguments>` on `/`, and decodes
+    `%XX`), and a `"` must survive. The form follows common usage (`steam://run/730//+connect%20<server>`). Example:
+    `-applaunch 480 +connect "a b" -x` gives `steam://run/480//+connect%20%22a%20b%22%20-x/`. How Mac Steam handles
+    the arguments, including whether it asks the player to confirm arguments that come from a link, is unverified (the
+    maintainer observes it); Proton's Linux command line launches without asking;
   - no arguments open `steam://open/main`;
   - any other `-` option, including one before `-applaunch`, is logged and dropped;
   - the URL comes from the wide command line (`CommandLineToArgvW`), not the C runtime's ANSI argv, and the winebrowser
     command is built at any length, so a long link or one with letters outside the Windows code page reaches Mac Steam
-    whole, and every failure is logged. Proton passes the C runtime's ANSI argv, which loses such letters.
+    whole. Proton passes the C runtime's ANSI argv, which loses such letters;
+  - every failure is logged through Wine's debug output (ntdll's `__wine_dbg_output`), prefixed `steam.exe: ` (stderr
+    outside Wine): parity with Proton's `WINE_ERR`; our `ERR` was `fprintf` to the Windows stderr handle before. A
+    steam.exe that a game's `steam://` link starts through `HKCR\steam` gets a new console and no Windows standard
+    handles from Wine's shell32, and still logs to Wine's Unix stderr, the game log. Lines are formatted wide and
+    written as UTF-8, so a letter above U+00FF no longer cuts one short.
 - **D-13:** lsteamclient patches:
   - 0003: `Steam_IsKnownInterface` and `Steam_NotifyMissingInterface` are optional, because Mac `steamclient.dylib`
     doesn't export them;
@@ -160,11 +173,13 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
 
 **Platform**
 - **D-15:** msync instead of fsync and ntsync, and DXMT on Metal instead of DXVK and vkd3d (macOS has no futex, ntsync or
-  Vulkan).
+  Vulkan). The Proton graphics and sync variables don't apply: of Proton's variables, the launcher reads only
+  `PROTON_SET_GAME_DRIVE`, and steam.exe only `PROTON_HIDE_PROCESS_WINDOW` and `PROTON_WAIT_ATTACH`.
 - **D-16:** Install scripts don't run: Mac Steam has no `legacycompat/iscriptevaluator.exe`, and our runtime can't run
   the i386 redistributable installers (the launcher skips a 32-bit `run` target). Revise after the P1-4 probe.
-- **D-17:** The locale comes from CoreFoundation (the Mac's settings) once `LC_ALL` is dropped (P1-2, not yet), not from
-  `HOST_LC_ALL`, which Mac Steam doesn't send. Four Steam languages (Arabic, Latin American Spanish, Thai, Vietnamese)
+- **D-17:** Mac Steam's `LC_ALL` still passes through (P1-2, not yet). P1-2 sets `LC_ALL` from `HOST_LC_ALL`, or drops
+  it when that is empty, as Proton does; with `LC_ALL` dropped the locale comes from CoreFoundation (the Mac's
+  settings), because Mac Steam sends no `LANG`. Four Steam languages (Arabic, Latin American Spanish, Thai, Vietnamese)
   fall back to the Mac's locale, because macOS lacks those locale names.
 - **D-18:** The overlay is still to be designed (P1-3 spike).
 
@@ -196,7 +211,10 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
     handler).
 
   The first two, and seeding the keys at prefix creation, are the parity spec's P2-5.
-- **D-27:** `MACNEUTRON_NO_STEAM_BRIDGE=1` keeps steam.exe, for the `steam://` handler (R10).
+- **D-27:** `MACNEUTRON_NO_STEAM_BRIDGE=1` keeps steam.exe, for the `steam://` handler (R10). A game's link to restart
+  itself (`steam://rungameid/<its id>` or `steam://launch/<its id>`) isn't forwarded to Mac Steam then: no game
+  steam.exe holds the restart event, so the `HKCR\steam` steam.exe logs `Restart event not found` and stops, as
+  Proton's does.
 - **D-28:** A non-link at `dosdevices/s:` is left alone and noted, whether the drive is on or off (R15). Proton's script
   raises there (`os.readlink`) only when the drive is on and has a target. With the drive off, or no target, it deletes
   a regular file at `s:` (`os.remove`) and raises on a folder. A player's own file is never deleted here.
@@ -219,7 +237,8 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
 - **D-34:** Source SDK's `-game` path (Proton's `fixup_cmdline_paths`), hardening over Proton, which converts only an
   unquoted path and narrows each character to a byte:
   - Wine quotes an argument holding a space, and every path under `~/Library/Application Support/Steam` has one, so a
-    quoted path is converted too, and its quotes are kept;
+    quoted path is converted too, and its quotes are kept. A trailing `\` before the closing quote is doubled:
+    `wine_get_dos_file_name` keeps a trailing separator, and Windows reads `\"` as a quote;
   - the path is converted as UTF-8 (`CP_UNIXCP`, as in `run_process`): the byte-narrowed form of a non-ASCII path is
     what stalled Wine's lookup (D-32);
   - still only behind Proton's `\Source SDK Base` gate, and only the first `-game`.
@@ -316,7 +335,13 @@ Replaced by Amendment 2's **steam.exe** block; kept for the record.
 
 ### 4.3 `steamprobe.exe` (developer only, never shipped)
 
-`bridge/probe.c`. `bridge/probe.sh <steam_api64.dll>` prepares a scratch prefix exactly as the launcher does and runs `steam.exe steamprobe.exe <dll>` with `SteamAppId=480` (Valve's public test app). The probe uses only flat C exports looked up with `GetProcAddress`, so it needs no SDK headers. It:
+`bridge/probe.c`. `bridge/probe.sh <steam_api64.dll>` runs `steamprobe.exe <dll>` through `steam.exe` with `SteamAppId`
+and `SteamGameId` 480 (Valve's public test app), in one of two modes. With a tool folder (`MACNEUTRON_TOOL_DIR`) it goes
+through the launcher's `launch waitforexitandrun`, which prepares the prefix and copies the bridge in as for a game.
+With a `wine.app` and a booted prefix (`MACNEUTRON_ARM64_APP`, `MACNEUTRON_ARM64_PREFIX`) it copies only `steam.exe` and
+the bundle's lsteamclient (as `steamclient64.dll`) into the prefix's Steam folder and runs that `steam.exe` directly.
+`wine-arm64/check.sh steam-bridge` runs both. The probe uses only flat C exports looked up with `GetProcAddress`, so it
+needs no SDK headers. It:
 
 1. calls `SteamAPI_ManualDispatch_Init`, then `SteamAPI_Init` (or `SteamAPI_InitFlat` on newer SDKs);
 2. finds `SteamAPI_SteamUser_v0NN` and `SteamAPI_SteamFriends_v0NN` among the DLL's exports, trying the newest version first;
@@ -371,11 +396,12 @@ Rewritten for Amendment 2: what the tests check today.
     unless a launch option sets it;
   - `steamBridgeInstalled` needs `steam.exe` and both halves of lsteamclient;
   - `WINEDEBUG` gains the `steamclient` channel under `MACNEUTRON_LOG` (§7);
-  - launcher: `run` and `waitforexitandrun` run `C:\windows\system32\steam.exe` with the game's raw macOS path, Steam's
-    client folder and no account variable, and the three games run the Steam folder's copy; `runinprefix` starts the
-    game directly; so do the escape hatch and a missing bridge, each with its log note, taking the client DLLs out of
-    the prefix while both `steam.exe` copies stay; the client folder is logged, and a missing `steamclient.dylib` noted;
-    the game log hides `SteamUser`, `SteamAppUser` and secret-looking variables;
+  - launcher: `waitforexitandrun` runs `C:\windows\system32\steam.exe` with the game's raw macOS path, Steam's client
+    folder and no account variable, and the three games run the Steam folder's copy; `runinprefix` starts the game
+    directly; so do the escape hatch and a missing bridge, each with its log note; the escape hatch takes both client
+    DLLs out of the prefix and keeps both `steam.exe` copies, and a missing bridge takes `steamclient64.dll` out; the
+    client folder is logged, and a missing `steamclient.dylib` noted; the game log hides `SteamUser`, `SteamAppUser`
+    and secret-looking variables;
   - `PrefixManager` copies `steam.exe` into `system32` and the Steam folder and `steamclient64.dll` into the latter (no
     `steamclient.dll`), recopies only a changed file, and picks Valve's cached DLL or lsteamclient
     (`MACNEUTRON_STEAMCLIENT64` overrides); it links `s:` with the bridge or without and logs Proton's game-drive
@@ -392,24 +418,29 @@ Rewritten for Amendment 2: what the tests check today.
   - starting the program: the exit code passes through; arguments with spaces, quotes and an empty string arrive
     unchanged; a missing program exits 1; a launcher-style child, one started with `CREATE_BREAKAWAY_FROM_JOB`
     included, still sees Steam; `PROTON_HIDE_PROCESS_WINDOW` (any value not starting with 0) starts it hidden; Source
-    SDK's quoted `-game` path with a space and a non-ASCII letter is converted;
+    SDK's `-game` path is converted, unquoted or quoted (with a space and a non-ASCII letter), and a quoted one ending
+    in a separator keeps it, with the next argument kept apart;
   - what a game sees: the registry names a live Steam and `steamclient64.dll`; `SteamPath` and `ValvePlatformMutex`
     (the steam.exe that ran); Steam's named events and hidden window; the SteamStub start handshake is answered; the
-    `Apps` key and Steam's language; an earlier build's `ActiveUser` is removed; without `SteamGameId`, none of it and
-    no `libraryfolders.vdf`;
+    `Apps` key and Steam's language; an earlier build's `ActiveUser` is removed; without `SteamGameId`, no pid, named
+    events or `ValvePlatformMutex`, and no `libraryfolders.vdf`;
   - a `link2ea://` target clears EA's `IsUnavailable` and exits 0;
   - commands: `HKCR\steam` is Proton's handler; a game's `steam://` link and `steam.exe steam://…` reach Mac Steam;
-    `-applaunch <id>` reaches it as `rungameid/<id>`, and with arguments as `run/<id>//<args>/`; a 2000-character
-    `steam://` link and one with Japanese letters reach it whole; a game restarting itself through
-    `steam://rungameid/<its id>` restarts in place, and Mac Steam isn't asked;
-  - through the launcher (tool-folder mode), the start rows again, and: with the bridge off a game's `steam://` link
-    still reaches Mac Steam; a game in a library runs from `S:` (a library path with a space and a non-ASCII letter,
-    and one without a space); a library that fails Proton's checks gets its fallback; a console program gets a console
-    of its own and its exit code reaches Steam; a `.bat` target exits 3 and steam.exe still exits 0 (ShellExecute:
-    CreateProcess would pass the 3 on); `libraryfolders.vdf` names the libraries as the game sees them, and Steam's
-    config folder exists;
-  - the pid (R4): after pid 1 is written, a steam.exe that fails to start its program leaves a nonzero pid other than
-    1, which is dead; the next steam.exe registers again;
+    `-applaunch <id>` reaches it as `rungameid/<id>`, and with arguments as `run/<id>//<args>/`; arguments with a
+    non-ASCII letter, an empty one, `/`, `%`, a tab, an embedded quote and a trailing backslash give exactly the
+    Windows-quoted, UTF-8 percent-encoded URL; a 2000-character `steam://` link and one with Japanese letters reach it
+    whole; a game restarting itself through `steam://rungameid/<its id>` restarts in place, and Mac Steam isn't asked;
+    a steam.exe that a game's link starts through `HKCR\steam` (no Windows standard handles) still logs its failures:
+    a restart link with no game steam.exe to restart puts `Restart event not found` on stderr;
+  - through the launcher (tool-folder mode): the exit code, the arguments, a missing program, a launcher-style child
+    (with `CREATE_BREAKAWAY_FROM_JOB` too), a live Steam in the registry and system32's `ValvePlatformMutex` again, and:
+    with the bridge off a game's `steam://` link still reaches Mac Steam; a game in a library runs from `S:` (a library
+    path with a space and a non-ASCII letter, and one without a space); a library that fails Proton's checks gets its
+    fallback; a console program gets a console of its own and its exit code reaches Steam; a `.bat` target exits 3 and
+    steam.exe still exits 0 (ShellExecute: CreateProcess would pass the 3 on); `libraryfolders.vdf` names the libraries
+    as the game sees them, and Steam's config folder exists;
+  - the pid (R4): written as 1 first, it is left as a dead pid other than 0 and 1 by a steam.exe that fails to start
+    its program, and again by one whose game ended; the next steam.exe registers again;
   - a no-hang row: steam.exe run under a terminal (`script(1)`) ends with the program's exit code. steam.exe is a GUI
     program, so it has no console host to leave.
 - **Probe** (§4.3) on a Mac with Steam running and logged in.
@@ -434,7 +465,11 @@ The probe runs (plan task 2) before any Swift change:
 
 ## 11. Risks
 
-- **The runtime drops or breaks the bridge.** (Since 0.1.0 the runtime is our `wine.app`, installed from MacNeutron.app; there is no `RuntimePin`.) The launcher detects missing files and falls back to a direct start. A broken bridge shows up in `+steamclient` logs. The pinned runtime changes only when MacNeutron updates `RuntimePin`, and a pin update must re-run acceptance item 1.
+- **The runtime drops or breaks the bridge.** (Since 0.1.0 the runtime is our `wine.app`, installed from
+  MacNeutron.app; there is no `RuntimePin`.) The launcher detects missing files and falls back to a direct start. A
+  broken bridge shows up in `+steamclient` logs. ~~The pinned runtime changes only when MacNeutron updates
+  `RuntimePin`, and a pin update must re-run acceptance item 1.~~ A change to lsteamclient's pin (`LSTEAMCLIENT_COMMIT`
+  in `wine-arm64/deps.pins`) or patches, or to Wine patch 0036, must re-run acceptance item 1.
 - **License.** ~~`lsteamclient` stays the runtime distributor's (Steamworks SDK license); MacNeutron doesn't redistribute it. The repo has no `LICENSE` file yet; our own code (`steam.c`, `probe.c`, tests) needs one before public release. That is the maintainer's choice and not part of this plan.~~ Since Amendment 2, `wine.app` ships `lsteamclient` under Valve's Steamworks SDK licence (`licenses/lsteamclient/`), and the repo's own code is MIT (`LICENSE`), with the exceptions the README names.
 - **Intel slice.** (Superseded: since 0.1.0 `lsteamclient.so` is arm64, so it loads the arm64 slice.) If Valve drops the x86_64 slice of `steamclient.dylib`, the bridge stops working; the launcher's missing-file note won't catch that (the file exists), but `+steamclient` logs `unable to load native steamclient library`. There's no mitigation short of an arm64 Wine.
 - **SDK versions newer than the runtime's `lsteamclient`.** Games built against a newer Steamworks SDK may fail to get some interfaces until the runtime updates.
