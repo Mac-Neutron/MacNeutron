@@ -366,6 +366,8 @@ int main(int argc, char **argv) {
             D3D12_RESOURCE_BARRIER uav[2] = {};
             uav[0].Type = uav[1].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV; uav[0].UAV.pResource = out; uav[1].UAV.pResource = rwtyped;
             list->ResourceBarrier(2, uav);
+            ID3D12DescriptorHeap *with_null[2] = {nullptr, bound[1]};  // a null entry is skipped, not a crash (hardening 10)
+            list->SetDescriptorHeaps(2, with_null);
             bound[0] = heap2;
             list->SetDescriptorHeaps(2, bound);
             list->SetComputeRootDescriptorTable(1, heap2->GetGPUDescriptorHandleForHeapStart());

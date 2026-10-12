@@ -2280,7 +2280,7 @@ The translator has no shader model gate: an operation it lacks fails its own pip
   section above); 0039 makes that the default. No other Direct3D 12 game is on record with these answers.
 - Not covered: a Direct3D 12 game that took its Shader Model 5.1 path in 0.3 and now takes its Shader Model 6 one.
 
-## DXIL Shader Model 6.8 (DXMT 0040-0058)
+## DXIL Shader Model 6.8 (DXMT 0040-0059)
 
 2026-10-11. DXMT's DXIL translator learns the Shader Model 6.1-6.8 operations its caps require, one DXMT patch per task,
 and the device then reports 6.8: spec `docs/superpowers/specs/2026-10-10-dxmt-dxil-sm68-design.md`, plan
@@ -3085,3 +3085,16 @@ release or tag until the last task records the new one.
   - Gates (R-LITE, ARM64EC lane): the first run (`task-14c-dxmt-check.log`) had every 14c row `ok` and one known flake
     (`XeSS reports no device for an object without DXMT's interface`); the rerun on the final build
     (`task-14c-dxmt-check-rerun.log`): `dxmt-check: all passed`, 351 lines `ok`, 0 `FAIL`.
+
+- **0058 (`airconv, d3d12: Skip a null descriptor heap; refuse malformed WaveSize and f64 wave ops.`):** the first part of
+  the hardening pass (ruling R-HARD; H1 items 4, 10, 20 and 21).
+  - `SetDescriptorHeaps` skips a null entry instead of dereferencing it. Row: `heap-swap` now binds `{null, sampler heap}`
+    between its two dispatches, and `DXIL heap-swap matches its CPU reference` holds. The RED is by reading: the old loop
+    called `GetDesc()` on every entry.
+  - A WaveSize or WaveSizeRange property too short to read is refused (`DXIL: malformed WaveSize metadata`) instead of
+    skipped; WaveMatch and WaveMultiPrefixOp on f64 are refused by name. Neither is reachable from DXC output (the device
+    reports no double ops), so the evidence is reading and the corpus.
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged` against 0057; DXBC
+    `2/2 ok, 0 changed`. Fresh fetch: `applied 58/58`, tree-equal. Gate (ARM64EC): `dxmt-check: all passed`, 351 `ok`.
+  - Deferred (rulings R-HARD2, R-HARD3): items 2 (compute cube LOD projection), 7 (heap ranges sharing usage) and 14
+    (per-range `atomic_view`), and the test-only items.
