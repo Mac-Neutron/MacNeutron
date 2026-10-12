@@ -25,6 +25,8 @@ public struct SteamPlayMode: Sendable {
     public let process: any SteamControlling
     public var verifyTimeout: Duration = .seconds(60)
     public var quitTimeout: Duration = .seconds(30)
+    /// The Mac user Steam runs as: Wine names each prefix's profile after `$USER`.
+    public var profileUser = NSUserName()
 
     public init(steam: SteamLocation = SteamLocation(), root: URL = MacNeutronPaths.root,
                 process: any SteamControlling = SteamProcess()) {
@@ -134,8 +136,30 @@ public struct SteamPlayMode: Sendable {
     /// After `applyMappings` moved every mapping off the runtime's pre-rename name, Steam no longer needs that name.
     /// Best effort: a vdf that keeps it costs one more entry in Steam's tool list, never a mapping to a missing tool.
     func finishRename(wasMigrating: Bool) {
+        if wasMigrating { linkProfiles() }
         guard RuntimeInstaller.registersLegacyName(in: runtimeTool), (try? hasLegacyMappings()) == false else { return }
         try? RuntimeInstaller.writeCompatibilityTool(in: runtimeTool, legacyName: false)
+    }
+
+    /// Spec D3: while Steam is closed and the mappings move, every prefix with a Wine profile gets its Steam Cloud links,
+    /// so Steam's first resolved pass finds the Mac's saves where Proton prefixes keep them. Only adds links (merging
+    /// is the launch's job); a prefix skipped here gets them at its next launch.
+    func linkProfiles() {
+        let fm = FileManager.default
+        for library in steam.libraries() {
+            let compatdata = library.appending(path: "compatdata", directoryHint: .isDirectory)
+            for name in (try? fm.contentsOfDirectory(atPath: compatdata.path(percentEncoded: false))) ?? [] {
+                let path = compatdata.appending(path: name).path(percentEncoded: false)
+                guard let context = try? CompatContext(environment: ["STEAM_COMPAT_DATA_PATH": path]) else { continue }
+                // Another tool's prefix has no profile of this name: it gets no lock file either.
+                var isDirectory: ObjCBool = false
+                let profile = context.prefix.appending(path: "drive_c/users/\(profileUser)").path(percentEncoded: false)
+                guard fm.fileExists(atPath: profile, isDirectory: &isDirectory), isDirectory.boolValue else { continue }
+                _ = try? withFileLock(at: context.lockFile) {
+                    ProfileLinks.apply(prefix: context.prefix, user: profileUser, merge: false)
+                }
+            }
+        }
     }
 
     // MARK: Building blocks

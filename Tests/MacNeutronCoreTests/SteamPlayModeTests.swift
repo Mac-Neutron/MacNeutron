@@ -244,9 +244,61 @@ func verifiesCompatLogSessions(log: String, problem: String?) {
     let folder = mode.tools.appending(path: SteamPlayMode.runtimeFolderName)
     try RuntimeInstaller.writeCompatibilityTool(in: folder, legacyName: true)
     try await fake.quit(timeout: .seconds(1))
-    let renamed = samplePlan.mapValues { $0.tool == "macneutron" ? ToolMapping(tool: "macneutron-proton", priority: $0.priority) : $0 }
+    let renamed = renamedPlan(samplePlan)
     #expect(try mode.sync(plan: renamed) == true)
     #expect(try mode.currentMappings() == renamed)
     #expect(!RuntimeInstaller.registersLegacyName(in: folder))
     #expect(FileManager.default.fileExists(atPath: folder.appending(path: "compatibilitytool.vdf").path(percentEncoded: false)))
+}
+
+/// `plan` as a build after the rename makes it.
+private func renamedPlan(_ plan: [String: ToolMapping]) -> [String: ToolMapping] {
+    plan.mapValues { $0.tool == "macneutron" ? ToolMapping(tool: "macneutron-proton", priority: $0.priority) : $0 }
+}
+
+/// `compatdata/<id>/pfx/drive_c/users` in the fake Steam's own library, with the Wine profile `u` in it.
+private func makePrefixUsers(_ mode: SteamPlayMode, _ id: String) throws -> URL {
+    let users = mode.steam.root.appending(path: "steamapps/compatdata/\(id)/pfx/drive_c/users")
+    for folder in ["AppData/Local", "AppData/Roaming", "Documents"] {  // as wineboot makes them
+        try FileManager.default.createDirectory(at: users.appending(path: "u/\(folder)"), withIntermediateDirectories: true)
+    }
+    return users
+}
+
+@Test func migrationLinksExistingPrefixes() async throws {
+    // Spec D3: Steam's first resolved pass then finds the Mac's saves where Proton prefixes keep them.
+    let (made, fake) = try makeMode()
+    var mode = made
+    mode.profileUser = "u"
+    try await mode.enable(plan: samplePlan)
+    let users = try makePrefixUsers(mode, "10")
+    try await fake.quit(timeout: .seconds(1))
+    #expect(try mode.sync(plan: renamedPlan(samplePlan)) == true)
+    #expect(try FileManager.default.destinationOfSymbolicLink(atPath: users.appending(path: "steamuser").path(percentEncoded: false)) == "u")
+}
+
+@Test func migrationNeverMergesSeededFolders() async throws {
+    let (made, fake) = try makeMode()
+    var mode = made
+    mode.profileUser = "u"
+    try await mode.enable(plan: samplePlan)
+    let users = try makePrefixUsers(mode, "11")
+    try write("cloud", to: users.appending(path: "steamuser/Application Data/G/x"))
+    try await fake.quit(timeout: .seconds(1))
+    #expect(try mode.sync(plan: renamedPlan(samplePlan)) == true)
+    var info = stat()
+    #expect(lstat(users.appending(path: "steamuser").path(percentEncoded: false), &info) == 0 && info.st_mode & S_IFMT == S_IFDIR)
+}
+
+@Test func syncWithoutLegacyMappingsTouchesNoPrefix() async throws {
+    let (made, fake) = try makeMode()
+    var mode = made
+    mode.profileUser = "u"
+    try await mode.enable(plan: renamedPlan(samplePlan))
+    let users = try makePrefixUsers(mode, "12")
+    try await fake.quit(timeout: .seconds(1))
+    var plan = renamedPlan(samplePlan)
+    plan["3419430"] = ToolMapping(tool: "macneutron-native", priority: 250)
+    #expect(try mode.sync(plan: plan) == true)
+    #expect(!FileManager.default.fileExists(atPath: users.appending(path: "steamuser").path(percentEncoded: false)))
 }
