@@ -16,17 +16,23 @@ COMPAT=  # set in tool-folder mode only: the launcher rows run then
 if [ -z "${MACNEUTRON_TOOL_DIR:-}" ] && [ -n "${MACNEUTRON_ARM64_APP:-}" ]; then
   TOOL="$MACNEUTRON_ARM64_APP"
   WINE="$TOOL/Contents/MacOS/wine"
+  WINESERVER="$TOOL/Contents/Resources/bin/wineserver"
   export WINEPREFIX="${MACNEUTRON_ARM64_PREFIX:?arm64 mode needs MACNEUTRON_ARM64_PREFIX}"
   [ -d "$WINEPREFIX" ] || { echo "check: no prefix at $WINEPREFIX" >&2; exit 1; }
 else
   if [ -z "${MACNEUTRON_TOOL_DIR:-}" ]; then
     MACNEUTRON_TOOL_DIR="$WORK/tool"
+    # The last run's wineserver holds wine.app for a few seconds, and the install below would wait for it ("deferred").
+    WS="$WORK/tool/wine.app/Contents/Resources/bin/wineserver"
+    [ ! -x "$WS" ] || { WINEPREFIX="$WORK/compat/pfx" WINEMSYNC=1 "$WS" -k
+      WINEPREFIX="$WORK/compat/pfx" WINEMSYNC=1 "$WS" -w; } 2>/dev/null || true
     "$ROOT/.build/release/macneutron" install --tool-dir "$MACNEUTRON_TOOL_DIR" \
       --wine-app "$ROOT/build/wine-arm64/wine.app" --steam-exe "$B/steam.exe" \
       || { echo "check: assembling the tool folder failed" >&2; exit 1; }
   fi
   TOOL="$MACNEUTRON_TOOL_DIR"
   WINE="$TOOL/wine.app/Contents/MacOS/wine"
+  WINESERVER="$TOOL/wine.app/Contents/Resources/bin/wineserver"
   COMPAT="$WORK/compat"
   export WINEPREFIX="$COMPAT/pfx"
   # The prefix, prepared by the launcher (getcompatpath installs no bridge: the direct rows copy steam.exe below).
@@ -61,8 +67,19 @@ expect "launcher-style child still sees Steam" "$(tr -d '\r' < "$WORK/late.txt" 
 expect "pid cleared afterwards" "$("$WINE" "$HELPER" pid 2>/dev/null | tr -d '\r')" 0
 set +e; "$WINE" "$STEAMEXE" 'C:\missing.exe' >/dev/null 2>&1; got=$?; set -e
 expect "missing program exits 1" "$got" 1
-expect "launchers may start children outside the job" "$(steam breakaway)" "breakaway ok"
+rm -f "$WORK/late.txt"
+expect "a launcher may start the game with CREATE_BREAKAWAY_FROM_JOB" \
+  "$(steam breakaway "$(winpath "$WORK/late.txt")")" "breakaway ok"
+expect "... and that game still sees Steam" "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"
 expect "SteamStub DRM's start handshake is answered" "$(steam drm)" "ack=1"
+# Under a terminal Wine gives steam.exe a console host, which waits for steam.exe to leave while steam.exe waits for
+# every program in the prefix to end: steam.exe must leave its console (FreeConsole). script(1) supplies the terminal.
+tty_steam() {
+  script -q /dev/null "$WINE" "$STEAMEXE" "$HELPER" exit 5 </dev/null >/dev/null 2>&1 & p=$!; i=0
+  while kill -0 "$p" 2>/dev/null && [ "$i" -lt 60 ]; do sleep 0.5; i=$((i + 1)); done
+  if kill -0 "$p" 2>/dev/null; then "$WINESERVER" -k; wait "$p" || true; echo hung; else wait "$p" && echo 0 || echo "$?"; fi
+}
+expect "steam.exe ends under a terminal" "$(tty_steam)" 5
 
 # The same rows through the tool folder's launcher, as Steam starts a game: the launcher copies steam.exe and starts
 # the game through it. A fake account ID: the launcher would fill in the real one, which steam.exe writes to the
@@ -82,17 +99,23 @@ if [ -n "$COMPAT" ]; then
   expect "launcher: pid cleared afterwards" "$(L runinprefix "$GAME" pid 2>/dev/null | tr -d '\r')" 0
   set +e; L waitforexitandrun 'C:\missing.exe' >/dev/null 2>&1; got=$?; set -e
   expect "launcher: missing program exits 1" "$got" 1
-  expect "launcher: launchers may start children outside the job" "$(lsteam breakaway)" "breakaway ok"
+  rm -f "$WORK/late.txt"
+  expect "launcher: a launcher may start the game with CREATE_BREAKAWAY_FROM_JOB" \
+    "$(lsteam breakaway "$(winpath "$WORK/late.txt")")" "breakaway ok"
+  expect "launcher: ... and that game still sees Steam" "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"
 fi
 
-# A second steam.exe in the prefix (a failed one, then a short one) must not end the first one's Steam. Direct only: a
-# second `launch waitforexitandrun` would wait in `wineserver -w` for the first one's processes.
+# A second steam.exe in the prefix (a failed one, then a short one) must not end Steam for the first one's game. Every
+# steam.exe now waits until nothing runs in the prefix, so the short one ends with the game: this catches a steam.exe
+# that leaves early (no shutdown event), not unregister_steam's own-pid check, which only that fallback reaches. Direct
+# only: a second `launch waitforexitandrun` would wait in `wineserver -w` for the first one's processes.
 rm -f "$WORK/late.txt"
 steam spawn "$(winpath "$WORK/late.txt")" >/dev/null &
 sleep 0.5
 "$WINE" "$STEAMEXE" 'C:\missing.exe' >/dev/null 2>&1 || true
 steam exit 0 >/dev/null
 wait
-expect "a second steam.exe leaves the first one's Steam running" "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"
+expect "a second steam.exe doesn't end Steam for the first one's game" \
+  "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"
 
 exit $fail

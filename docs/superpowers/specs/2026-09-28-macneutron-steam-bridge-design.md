@@ -59,7 +59,7 @@ Mac Steam (Linux mode) ──Play──▶ macneutron launcher (Swift)
                                     ▼
                                  wine "C:\Program Files (x86)\Steam\steam.exe" "Z:\…\game.exe" <args>
                                     │  writes HKCU\Software\Valve\Steam (ActiveProcess pid, client DLL paths, user)
-                                    │  starts the game in a job; waits until the whole job has exited; clears pid
+                                    │  starts the game; waits until no program is left in the prefix; clears pid
                                     ▼
 game.exe ─▶ its own steam_api64.dll ─▶ steamclient64.dll (runtime's lsteamclient, Windows side)
                                           │ Wine unixlib call
@@ -99,7 +99,7 @@ Provided by the runtime (§2.8). MacNeutron only copies it into prefixes. If a f
   | `HKLM\Software\Wow6432Node\Valve\Steam` | `InstallPath` | `C:\Program Files (x86)\Steam` |
 
 - **Command line:** everything after its own name in its command line, passed verbatim as the child's command line, so the game gets exactly the arguments Wine built.
-- **Waiting:** it starts the child suspended in a job object, then resumes it. It waits for the child, then until the job has no active processes, because launchers start the real game and exit. If job accounting is unavailable, it stops after the child.
+- **Waiting:** it starts the child suspended, then resumes it. Then, as Proton's `steam.exe` does, it becomes a Wine system process and waits on Wine's shutdown event, which Wine sets once no user process is left in the prefix, because launchers start the real game and exit (also with `CREATE_BREAKAWAY_FROM_JOB` or ShellExecute). It leaves its console first (`FreeConsole`): under a terminal, Wine's console host would wait for it. If Wine refuses the shutdown event, it waits for the child only.
 - **Exit:** sets `ActiveProcess\pid` to 0 only if it still holds its own PID, then exits with the child's exit code. If the child can't be started, it prints the command line and Windows error to stderr and exits 1. With no program, it prints usage and exits 1.
 
 ### 4.3 `steamprobe.exe` (developer only, never shipped)
@@ -139,7 +139,7 @@ It exits 0 only when all four succeed.
 | `MACNEUTRON_NO_STEAM_BRIDGE=1` | Game starts directly, and `steam.exe`, `steamclient64.dll` and `steamclient.dll` are removed from the prefix: otherwise the game's `steam_api` loads the leftover client DLL (its registry values persist) and the bridge aborts the game for want of Steam's client path (seen in acceptance). Launcher log: `note: Steam bridge disabled by launch option` |
 | No `steamclient.dylib` in the folder used | Launcher log: `note: steamclient.dylib not found in <folder>`; the game still starts |
 | No readable `loginusers.vdf` or no user in it | `ActiveUser` not written; launcher log: `note: no Steam account found in loginusers.vdf` |
-| Launcher-style game (first process exits) | `steam.exe` keeps Steam "running" until the job is empty |
+| Launcher-style game (first process exits) | `steam.exe` keeps Steam "running" until no program is left in the prefix |
 | Game crashes | `steam.exe` still clears its pid; the exit code passes through |
 | `steam.exe` killed | The stale pid is overwritten at the next launch |
 | Copying bridge files into a prefix fails | Launch fails with `could not install the Steam bridge: <file>: <reason>`, like other prefix-preparation errors |

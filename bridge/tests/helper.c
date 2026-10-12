@@ -72,14 +72,14 @@ int main(void)
         cmd[ARRAYSIZE(cmd) - 1] = 0;
         return CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi) ? 0 : 2;
     }
-    if (!wcscmp(mode, L"breakaway"))  /* a launcher that starts its child outside any job */
+    if (!wcscmp(mode, L"breakaway") && argc > 2)  /* a launcher that starts the real game outside any job, then quits */
     {
-        WCHAR self[MAX_PATH], cmd[2 * MAX_PATH];
+        WCHAR self[MAX_PATH], cmd[3 * MAX_PATH];
         STARTUPINFOW si = { sizeof(si) };
         PROCESS_INFORMATION pi;
 
         GetModuleFileNameW(NULL, self, MAX_PATH);
-        _snwprintf(cmd, ARRAYSIZE(cmd), L"\"%ls\" exit 0", self);
+        _snwprintf(cmd, ARRAYSIZE(cmd), L"\"%ls\" late \"%ls\"", self, argv[2]);
         cmd[ARRAYSIZE(cmd) - 1] = 0;
         if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_BREAKAWAY_FROM_JOB, NULL, NULL, &si, &pi))
         {
