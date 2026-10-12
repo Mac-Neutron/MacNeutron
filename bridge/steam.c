@@ -154,12 +154,25 @@ int main(void)
     PROCESS_INFORMATION pi;
     DWORD pid = GetCurrentProcessId(), code = 1;
     WCHAR *cmd = child_command_line();
+    const WCHAR *hide;
     HANDLE done;
 
     if (!cmd)
     {
         fprintf(stderr, "usage: steam.exe <program> [arguments...]\n");
         return 1;
+    }
+    /* Proton's steam.exe sets these for the game, as Steam on Windows does (Source's GameUI finds Steam through
+     * ValvePlatformMutex); macOS Steam doesn't. Before CreateProcessW, which copies our environment. */
+    SetEnvironmentVariableW(L"SteamPath", STEAM_DIR);
+    /* ponytail: a constant; Proton's GetModuleFileNameW would repeat the command line's letter case. */
+    SetEnvironmentVariableW(L"ValvePlatformMutex", L"C:/Program Files (x86)/Steam/steam.exe");
+    /* macOS Steam sets this when it runs a game's DRM helper (its custom-binary job), as for Proton's steam.exe: any
+     * value not starting with 0 hides the program (Proton's env_nonzero). */
+    if ((hide = _wgetenv(L"PROTON_HIDE_PROCESS_WINDOW")) && *hide && *hide != '0')
+    {
+        si.dwFlags |= STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
     }
     /* Registered only once the child exists (still suspended): a steam.exe that can't start its
      * program must not touch the Steam another one registered. */

@@ -72,6 +72,12 @@ expect "a launcher may start the game with CREATE_BREAKAWAY_FROM_JOB" \
   "$(steam breakaway "$(winpath "$WORK/late.txt")")" "breakaway ok"
 expect "... and that game still sees Steam" "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"
 expect "SteamStub DRM's start handshake is answered" "$(steam drm)" "ack=1"
+expect "the game sees SteamPath and ValvePlatformMutex" "$(steam env SteamPath ValvePlatformMutex)" \
+  '[C:\Program Files (x86)\Steam][C:/Program Files (x86)/Steam/steam.exe]'
+# Any value not starting with 0, of any length, as Proton reads it (env_nonzero).
+expect "PROTON_HIDE_PROCESS_WINDOW starts the program hidden" \
+  "$(PROTON_HIDE_PROCESS_WINDOW=1-longer-than-8-chars steam hidden) $(PROTON_HIDE_PROCESS_WINDOW=0 steam hidden)" \
+  "hidden=1 hidden=0"
 # Under a terminal Wine gives steam.exe a console host, which waits for steam.exe to leave while steam.exe waits for
 # every program in the prefix to end: steam.exe must leave its console (FreeConsole). script(1) supplies the terminal.
 tty_steam() {
