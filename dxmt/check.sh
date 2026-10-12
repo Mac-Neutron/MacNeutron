@@ -541,8 +541,8 @@ for g in $SM68_GROUPS; do
 done
 # A [WaveSize] range without 32 fails its D3D12 pipeline (DXIL SM 6.8 plan, Task 4), as a 64-bit groupshared atomic
 # does until Task 14c.
-run ours exec-reject dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X/reject" wavesize64 wavesizerange gsatomic64
-expect "D3D12 refuses a pipeline whose [WaveSize] excludes 32, or with a 64-bit groupshared atomic" "$(/usr/bin/grep -cE '^group (wavesize64|wavesizerange|gsatomic64) fail 0x80004005$' "$WORK/exec-reject.txt" || true)" 3
+run ours exec-reject dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X/reject" wavesize64 wavesizerange gsatomic64full
+expect "D3D12 refuses a pipeline whose [WaveSize] excludes 32, or whose 64-bit groupshared atomics leave no room for a lock" "$(/usr/bin/grep -cE '^group (wavesize64|wavesizerange|gsatomic64full) fail 0x80004005$' "$WORK/exec-reject.txt" || true)" 3
 # Heap indexing without its root signature flag fails only its pipeline, naming the flag (DXIL SM 6.8 plan, Task 9).
 run ours exec-heap-noflag dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X" heap-noflag heap-noflag-sampler
 expect "heap indexing without its root signature flag is refused" \
@@ -648,7 +648,7 @@ expect "and a vertex shader's 64-bit max keeps the largest vertex's value" \
 # atomic64c-rootheap: atomic64c.dxil again, under root_a64 (flags 0xC00; the shader indexes no heap), so the lock
 # qword after the two heap qwords is tested for a shader that declares the heap fields without indexing the heap.
 # d3d12_dxil_exec maps the group to atomic64c.dxil and root_a64; expect.py checks it as atomic64c.
-A64_GROUPS="atomic64 atomic64typed atomic64c atomic64c-rootheap"
+A64_GROUPS="atomic64 atomic64typed atomic64c atomic64c-rootheap gsatomic64 gsatomic64c"
 run ours exec-a64 dxmt "$TESTS/d3d12_dxil_exec.exe" "Z:$X" $A64_GROUPS
 for g in $A64_GROUPS; do
   expect "DXIL $g matches its CPU reference" "$(python3 "$ROOT/dxmt/tests/expect.py" "$WORK/exec-a64.txt" $g)" match
@@ -939,9 +939,9 @@ run ref d3dmetal d3dmetal "$LOOP" 1280 720 0 0 200 0
 expect "the frozen D3DMetal reference still runs" "$(grep -c 'avg frame' "$WORK/d3dmetal.txt" || true)" 1
 # 6. dxil-translate: every test shader reaches a Metal pipeline offline.
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxil" --flags > "$WORK/translate.txt" 2>&1 || true
-expect "dxil-translate accepts every behaviour shader" "$(tail -1 "$WORK/translate.txt" | cut -d ' ' -f 2)" "31/31"
+expect "dxil-translate accepts every behaviour shader" "$(tail -1 "$WORK/translate.txt" | cut -d ' ' -f 2)" "33/33"
 # [WaveSize] outside the device's 32 lanes is refused, naming the range (DXIL SM 6.8 plan, Task 4); so are the E_NOTIMPL
-# canary and a 64-bit groupshared atomic, naming them (Task 9).
+# canary (Task 9), and 64-bit groupshared atomics with no threadgroup memory left for a lock (Task 14c), naming them.
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxil/reject" > "$WORK/translate-reject.txt" 2>&1 || true
 expect "dxil-translate refuses every out-of-scope shader" "$(tail -1 "$WORK/translate-reject.txt" | cut -d ' ' -f 2)" "0/7"
 expect "a [WaveSize] range without 32 is refused, naming it" \
@@ -953,8 +953,8 @@ expect "the canary is refused naming its op" "$(/usr/bin/grep -cE '^fail gatherr
 expect "a Texture1D SampleCmpBias is refused naming its op" "$(/usr/bin/grep -c '^fail cmp1dbias\.dxil DXIL: dx\.op\.sampleCmpBias\.f32 (255) not supported$' "$WORK/translate-reject.txt")" 1
 expect "a Texture1D SampleCmpGrad is refused naming its op" "$(/usr/bin/grep -c '^fail cmp1dgrad\.dxil DXIL: dx\.op\.sampleCmpGrad\.f32 (254) not supported$' "$WORK/translate-reject.txt")" 1
 expect "a Texture1D SampleCmp is refused naming its op" "$(/usr/bin/grep -c '^fail cmp1d\.dxil DXIL: dx\.op\.sampleCmp\.f32 (64) not supported$' "$WORK/translate-reject.txt")" 1
-# Until Task 14c, which replaces this row: Metal's compiler service would crash on it unnamed (i64 spike).
-expect "a 64-bit groupshared atomic is refused naming it" "$(/usr/bin/grep -c '^fail gsatomic64.dxil DXIL: 64-bit groupshared atomic (atomicrmw add) not supported$' "$WORK/translate-reject.txt")" 1
+# Task 14c's lock array needs at least one 4-byte lock beside the shader's own groupshared memory (32768 bytes in all).
+expect "64-bit groupshared atomics without room for a lock are refused naming it" "$(/usr/bin/grep -c '^fail gsatomic64full.dxil DXIL: 64-bit groupshared atomics need 4 bytes of threadgroup memory for a lock; the shader uses 32768 of 32768$' "$WORK/translate-reject.txt")" 1
 # Task F2, Task FR: DXIL barriers fence memory as Metal Shader Converter does at Metal 3.1 (an air.atomic.fence, then
 # for a synced one an air.wg.barrier), the device and texture ones at device scope whether or not they sync the group
 # (a barrier's memory flags only order within the group). dxil/barriers.hlsl's modes 8, 9, 2, 3, 10, 11:
@@ -972,6 +972,10 @@ expect "and Shader Model 6.8's Barrier() fences as the legacy barriers it spells
 # air.atomic.fence calls. atomic64c has no barrier, so they are the lock path's alone.
 fences() { grep "^ok $1 " "$WORK/translate.txt" | grep -oE 'fence=[^ ]+' | cut -d= -f2 | tr ',' '\n' | sort -u | tr '\n' ' '; }
 expect "the 64-bit lock path fences device memory at device scope, and textures with the texture flag" "$(fences atomic64c.dxil)" "1:2 5:2 "
+# gsatomic64c's two synced group barriers lower to barriers without a fence (dxil_lower.cpp), so its fences are the lock
+# path's and its barriers those two plus the lock array's zeroing one.
+expect "the 64-bit groupshared lock path fences threadgroup memory at threadgroup scope, after one zeroing barrier" \
+  "$(fences gsatomic64c.dxil)$(grep '^ok gsatomic64c\.dxil ' "$WORK/translate.txt" | grep -oE 'barrier=[0-9]+')" "2:1 barrier=3"
 "$TOOLS/dxil-translate" "$ROOT/dxmt/tests/dxbc" --flags > "$WORK/translate-dxbc.txt" 2>&1 || true
 expect "and DXBC's, GroupMemoryBarrier's threadgroup fence included" \
   "$(grep '^ok sync\.dxbc ' "$WORK/translate-dxbc.txt" | grep -oE 'fence=[^ ]+ barrier=[0-9]+' || echo none)" \

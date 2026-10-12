@@ -3060,3 +3060,28 @@ release or tag until the last task records the new one.
   - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged` against 0055; DXBC
     `2/2 ok, 0 changed`. Fresh fetch: `applied 56/56`, tree-equal.
   - Gate: the run above (348 `ok`, 0 `FAIL`).
+
+- **0057 (`airconv: 64-bit groupshared atomics through a threadgroup lock array.`):** Shader Model 6.6's 64-bit atomics on
+  groupshared memory (LLVM `atomicrmw`/`cmpxchg` of i64 on addrspace(3), no dx.op), which Task 9 refused by name.
+  - A shader with one gets an `[N x i32] addrspace(3)` lock array (`gs_locks`): N = 256 (1 KiB), or the largest power
+    of two whose `N * 4` fits beside the shader's own groupshared memory in 32768 bytes. When not even one lock fits,
+    `InitializeDXIL` refuses: `DXIL: 64-bit groupshared atomics need 4 bytes of threadgroup memory for a lock; the shader
+    uses <bytes> of 32768`. An `atomicrmw` other than xchg, add, and, or, xor, max, min, umax, umin is refused by name.
+  - Thread i (its flattened index, defined for such a shader even when no dx.op reads it) zeroes slots i, i + group, …
+    at the body's start; then one threadgroup barrier.
+  - Each atomic takes lock `(trunc32(ptrtoint(ptr)) >> 3) & (N - 1)` through 0054's `UnderLock` with threadgroup fences
+    at threadgroup scope (`2:1`), reads and writes the qword with plain loads and stores, and a compare-exchange stores
+    only on a match. Lock forms: `cmpxchg i32` (relaxed) and `store atomic i32` (monotonic) on the addrspace(3) lock
+    build a pipeline, so the `air.atomic.local.*` fallback is unused.
+  - Rows: `DXIL gsatomic64 matches its CPU reference` (every op kind on a thread-owned qword, a carry-crossing sum, a
+    UMax, a CAS counter, finals by plain loads) and `DXIL gsatomic64c …` (1,024 threads on two qwords, the olds as
+    bitmaps); `reject/gsatomic64full` (32768 bytes of groupshared) refused by name offline and its pipeline
+    `0x80004005` in D3D12; the fence-and-barrier row `2:1 barrier=3`; 33/33 behaviour shaders, reject 0/7.
+  - Before the patch: both shaders failed Task 9's refusal (31/33); gsatomic64full failed with Task 9's text.
+  - Single mutations (offline, deterministic): no zeroing barrier gives `2:1 barrier=2`; no threadgroup fences gives
+    `- barrier=3`. The naive-loop mutation was not run (ruling R-T14c1: the same `UnderLock` 0054 mutated).
+  - Corpus: `corpus-diff: 11101/11101 ok, 0 new failures, 0 fixed, 0 changed, 11101 unchanged` against 0056; DXBC
+    `2/2 ok, 0 changed`; Palworld's capture 191/191. Fresh fetch: `applied 57/57`, tree-equal.
+  - Gates (R-LITE, ARM64EC lane): the first run (`task-14c-dxmt-check.log`) had every 14c row `ok` and one known flake
+    (`XeSS reports no device for an object without DXMT's interface`); the rerun on the final build
+    (`task-14c-dxmt-check-rerun.log`): `dxmt-check: all passed`, 351 lines `ok`, 0 `FAIL`.

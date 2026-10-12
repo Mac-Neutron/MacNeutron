@@ -84,7 +84,7 @@ finish
 ls -l ./*.dxil
 # DXIL translator behaviour groups (dxmt/tests/dxil; see common.hlsli). 16-bit types where the group needs them.
 cd "$HERE/../dxil"
-for g in buffers math transcendental textures groupshared wave atomics quad heap specials mad barriers msad wavematch wavesize32 deriv floatatomics atomic64 atomic64typed atomic64c; do dxc -T cs_6_6 -E main -Fo "$g.dxil" "$g.hlsl"; done
+for g in buffers math transcendental textures groupshared wave atomics quad heap specials mad barriers msad wavematch wavesize32 deriv floatatomics atomic64 atomic64typed atomic64c gsatomic64 gsatomic64c; do dxc -T cs_6_6 -E main -Fo "$g.dxil" "$g.hlsl"; done
 dxc -T cs_6_7 -E main -Fo helperquad.dxil helperquad.hlsl
 dxc -T cs_6_7 -E main -Fo offsets.dxil offsets.hlsl
 dxc -T cs_6_8 -E main -Fo wavesize32r.dxil wavesize32.hlsl
@@ -102,7 +102,7 @@ cd "$HERE/../dxil/reject"
 dxc -T cs_6_6 -E main -Fo wavesize64.dxil wavesize64.hlsl
 dxc -T cs_6_8 -E main -Fo wavesizerange.dxil wavesizerange.hlsl
 dxc -T cs_6_7 -E main -Fo gatherraw.dxil gatherraw.hlsl
-dxc -T cs_6_6 -E main -Fo gsatomic64.dxil gsatomic64.hlsl
+dxc -T cs_6_6 -E main -Fo gsatomic64full.dxil gsatomic64full.hlsl
 dxc -T ps_6_8 -E psbias -Fo cmp1dbias.dxil cmp1d.hlsl
 dxc -T ps_6_8 -E psgrad -Fo cmp1dgrad.dxil cmp1d.hlsl
 dxc -T ps_6_0 -E pscmp -Fo cmp1d.dxil cmp1d.hlsl

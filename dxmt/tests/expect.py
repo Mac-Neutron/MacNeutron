@@ -322,6 +322,34 @@ def expect_atomic64c(got):
 expect_atomic64c_rootheap = expect_atomic64c
 
 
+# gsatomic64.hlsl (Task 14c): slots 0-7 the thread's own sequence on G[i] (GS[i] for the signed kinds); 8-9 the adds of
+# In's words into Total, 10-11 the UMax on M and 12 the CAS counter on C, checked as multisets; 13 unused (0); 14-15 the
+# finals of threads 0-2 (Total, M, C) by plain loads after a barrier.
+def expect_gsatomic64(got):
+    adds = [in_word(i) for i in range(64)]
+    total = sum(adds) & M64
+    if word64(got, 0, 14) != total or not linearizable([word64(got, t, 8) for t in range(64)], adds, 0, total,
+                                                         lambda o, v: o + v):
+        raise ValueError("slots 8-9: the groupshared adds' olds aren't linearizable")
+    vals = [(i >> 3) << 32 | (in_word(i) & 0xffff) for i in range(64)]
+    if word64(got, 1, 14) != max(vals) or not linearizable([word64(got, t, 10) for t in range(64)], vals, 0, max(vals),
+                                                             max):
+        raise ValueError("slots 10-11: the groupshared UMax olds aren't linearizable")
+    if sorted(got[t * 16 + 12] for t in range(64)) != list(range(64)):
+        raise ValueError("slot 12: the groupshared CAS-counter tickets aren't {0..63}")
+
+    def slots(t):
+        final = {0: total, 1: max(vals), 2: 0x40}.get(t, 0)
+        return own64_words(t) + got[t * 16 + 8:t * 16 + 13] + [0, final & 0xffffffff, final >> 32]
+    return per_thread(slots)
+
+
+# gsatomic64c.hlsl (Task 14c): 1,024 adds of V on A and of 1 on B (from 0xfffffe00); every old's k marked once (words
+# 0-31 for A, 32-63 for B), no malformed old (word 64), and the finals: A = 1024 * V, B = 0x100000200 (words 65-68).
+def expect_gsatomic64c(got):
+    return [0xffffffff] * 64 + [0, 0x400, 0x400, 0x200, 1] + [0] * (1024 - 69)
+
+
 def main(path, group):
     for line in open(path, encoding="utf-8", errors="replace"):
         parts = line.split()
