@@ -182,6 +182,11 @@ int main(void)
         return 1;
     }
     register_steam(pid);
+    /* Named objects the Windows client holds, which Proton's steam.exe creates too; ours last until we exit. Denuvo
+     * checks Steam3Master_SharedMemLock (Just Cause 3 deletes its saves without it), the 2K Launcher
+     * Global\Valve_SteamIPC_Class. */
+    CreateEventW(NULL, FALSE, FALSE, L"Steam3Master_SharedMemLock");
+    CreateEventW(NULL, FALSE, FALSE, L"Global\\Valve_SteamIPC_Class");
     /* Before the game runs, so its stub finds the semaphores. */
     drm_consume = CreateSemaphoreW(NULL, 0, 512, L"STEAM_DIPC_CONSUME");
     drm_produce = CreateSemaphoreW(NULL, 1, 512, L"SREAM_DIPC_PRODUCE");

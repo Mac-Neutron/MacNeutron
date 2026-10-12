@@ -78,12 +78,14 @@ expect "the game sees SteamPath and ValvePlatformMutex" "$(steam env SteamPath V
 expect "PROTON_HIDE_PROCESS_WINDOW starts the program hidden" \
   "$(PROTON_HIDE_PROCESS_WINDOW=1-longer-than-8-chars steam hidden) $(PROTON_HIDE_PROCESS_WINDOW=0 steam hidden)" \
   "hidden=1 hidden=0"
+expect "Steam's named events exist while the game runs" "$(steam events)" "lock=1 ipc=1"
 # Under a terminal Wine gives steam.exe a console host, which waits for steam.exe to leave while steam.exe waits for
 # every program in the prefix to end: steam.exe must leave its console (FreeConsole). script(1) supplies the terminal.
 tty_steam() {
   script -q /dev/null "$WINE" "$STEAMEXE" "$HELPER" exit 5 </dev/null >/dev/null 2>&1 & p=$!; i=0
   while kill -0 "$p" 2>/dev/null && [ "$i" -lt 60 ]; do sleep 0.5; i=$((i + 1)); done
-  if kill -0 "$p" 2>/dev/null; then "$WINESERVER" -k; wait "$p" || true; echo hung; else wait "$p" && echo 0 || echo "$?"; fi
+  if kill -0 "$p" 2>/dev/null; then "$WINESERVER" -k; wait "$p" || true; echo hung
+  else wait "$p" && echo 0 || echo "$?"; fi
 }
 expect "steam.exe ends under a terminal" "$(tty_steam)" 5
 

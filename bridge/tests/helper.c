@@ -89,6 +89,13 @@ int main(void)
         printf("hidden=%d\n", (si.dwFlags & STARTF_USESHOWWINDOW) && si.wShowWindow == SW_HIDE);
         return 0;
     }
+    if (!wcscmp(mode, L"events"))  /* named objects the Windows client holds */
+    {
+        HANDLE lock = OpenEventW(SYNCHRONIZE, FALSE, L"Steam3Master_SharedMemLock");
+        HANDLE ipc = OpenEventW(SYNCHRONIZE, FALSE, L"Global\\Valve_SteamIPC_Class");
+        printf("lock=%d ipc=%d\n", !!lock, !!ipc);
+        return 0;
+    }
     if (!wcscmp(mode, L"breakaway") && argc > 2)  /* a launcher that starts the real game outside any job, then quits */
     {
         WCHAR self[MAX_PATH], cmd[3 * MAX_PATH];
