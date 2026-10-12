@@ -75,6 +75,7 @@ Start launch options with `/usr/bin/env`. macOS Steam runs them without a shell,
 | `/usr/bin/env MACNEUTRON_NO_MSYNC=1 %command%` | Turn off msync |
 | `/usr/bin/env MACNEUTRON_NO_STEAM_BRIDGE=1 %command%` | Start the game without the Steam bridge (the game then can't reach Steam) |
 | `/usr/bin/env MACNEUTRON_STEAMCLIENT64=builtin %command%` | Put MacNeutron's own Steam bridge in the prefix instead of Valve's signed `steamclient64.dll` (some games with Valve's DRM then stop with "Application load error 3"); `=<path>` names another copy of Valve's DLL |
+| `/usr/bin/env PROTON_SET_GAME_DRIVE=0 %command%` | Show the game its install folder as a `Z:` path, not `S:\steamapps\common\…` (as Proton's option; `MACNEUTRON_NO_STEAM_BRIDGE=1` doesn't change the path) |
 | `/usr/bin/env MACNEUTRON_NO_METALFX=1 %command%` | Don't upscale with MetalFX (macOS then stretches smaller images with its nearest-neighbour filter) |
 | `/usr/bin/env DXMT_MAX_ANISOTROPY=0\|4\|8\|16 %command%` | Anisotropic filtering on the game's trilinear textures: 16x by default, `0` keeps the game's own (also "Anisotropic filtering" in the Games window) |
 | `/usr/bin/env MACNEUTRON_POST_AA=cmaa2 %command%` | Anti-alias each frame with Intel's CMAA2 (for games without their own anti-aliasing; also "Anti-aliasing (post)" in the Games window) |
@@ -138,6 +139,10 @@ While it's set, DXMT reports the Shader Model 6 features even with `DXMT_D3D12_S
 Windows games talk to your running Mac Steam through the runtime's Steam client bridge (Proton's `lsteamclient`,
 built for arm64 by `wine.app`, and shipped under Valve's Steamworks SDK licence, see `licenses/lsteamclient/`). MacNeutron's `steam.exe` tells each game that Steam is running. Anti-cheat
 that needs a Windows kernel driver (Easy Anti-Cheat, BattlEye, Vanguard and others) still won't run.
+
+As under Proton, a game sees its Steam library as drive `S:`, so it finds itself at `S:\steamapps\common\<Game>`, and
+`steam.exe` follows Proton's: `steam://` links from the game open Mac Steam, and a game that restarts itself through
+Steam restarts in place.
 
 Games wrapped in Valve's DRM (SteamStub, Palworld among them) check the signature of `steamclient64.dll` in the prefix.
 As Proton does, MacNeutron puts Valve's own signed copy there, and the runtime sends its calls to the bridge. macOS

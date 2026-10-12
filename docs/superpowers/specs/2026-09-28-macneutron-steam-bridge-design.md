@@ -16,6 +16,159 @@ The approved design planned to build Proton's `lsteamclient` for macOS ourselves
 - Kept: `steam.exe`, the prefix layout, launcher integration, the probe, acceptance.
 - Changed: the Windows helpers are built with Homebrew's `mingw-w64` (already required by `Tests/Smoke`), not llvm-mingw, so there are no downloads.
 
+## Amendment 2 (2026-10-12): Proton 11 parity
+
+Specs and plans:
+- spec: `docs/superpowers/specs/2026-10-12-macneutron-proton-parity-design.md`;
+- plans: `docs/superpowers/plans/2026-10-12-macneutron-valve-steamclient.md` (P0-1) and
+  `docs/superpowers/plans/2026-10-12-macneutron-parity-s-drive-steam-exe.md` (P0-3, P1-1, rulings R1-R20).
+
+This amendment replaces:
+- §2.8's and §3's runtime facts;
+- §4.2;
+- §5's toolchain;
+- §7's command and account lines;
+- §8's account rows.
+
+The rest stands. The maintainer's rule is that the Steam connection does what Proton 11 does, and each difference below
+carries its reason.
+
+**Facts today.**
+- **lsteamclient** is built in-tree from Proton's `proton_11.0` (`wine-arm64/deps.pins`), as an ARM64X Wine builtin,
+  with three macOS patches (D-13).
+- **steam.exe** is an arm64 PE built with llvm-mingw (`make bridge`). It is a GUI program, as Proton's is.
+- **steamclient64.dll** in the prefix is Valve's signed DLL from the app's download when the runtime has Wine 0036, and
+  lsteamclient otherwise (D-10).
+
+**Architecture** (replaces §3's diagram):
+
+```
+Mac Steam ──Play──▶ macneutron launch waitforexitandrun <the game's macOS path> <args>
+   │ prefix: dosdevices/s: → the game's Steam library (Proton's setup_dir_drive, PROTON_SET_GAME_DRIVE=0 turns it off)
+   │         C:\windows\system32\steam.exe and C:\Program Files (x86)\Steam\steam.exe (our helper)
+   │         C:\Program Files (x86)\Steam\steamclient64.dll (Valve's signed DLL, or lsteamclient)
+   ▼
+wine C:\windows\system32\steam.exe /…/steamapps/common/<Game>/Game.exe <args>
+   │ Proton's steam.exe: Steam set up for a game process (SteamGameId); the path becomes S:\steamapps\common\<Game>\…;
+   │ ShellExecute for what isn't an .exe; waits for Wine's shutdown event; restarts the game when it asks
+   ▼
+game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamclient.dll ─▶ lsteamclient.so ─▶ Mac steamclient.dylib
+```
+
+**steam.exe** (replaces §4.2): a close port of Proton 11's `steam_helper/steam.c`, under Valve's BSD-3 notice.
+- **Command handler, first.** `steam://` URLs and arguments starting with `-` are commands:
+  - `-- steam://rungameid/<its SteamGameId>` (or `launch`) restarts the game in place;
+  - anything else goes to Mac Steam (D-12).
+- **A game process** (SteamGameId set, empty included) gets, in Proton's order:
+  - Steam's named events;
+  - the desktop window, then the hidden `vguiPopupWindow` "Steam" and "SteamVR Status" windows;
+  - `ActiveProcess\pid` and the keys Valve's wine.inf writes (D-26), and `HKCR\steam`;
+  - `SteamPath` and `ValvePlatformMutex`, its own path from `GetModuleFileNameW`;
+  - `Steam\config` and `steamapps\libraryfolders.vdf`;
+  - `PROTON_WAIT_ATTACH`, and vrclient (absent on our runtime);
+  - the SteamStub start answer (DIPC);
+  - Wine's system-process status, which leads to the shutdown-event wait and the restart event.
+- **Starting the program** (Proton's `run_process`):
+  - a macOS path becomes its DOS path (`S:` in a library);
+  - a console program gets a console of its own;
+  - a target that isn't an `.exe` goes through ShellExecute, with the EA workarounds;
+  - Source SDK's `-game` path is converted.
+- **Exit code:** 0 for a command and for a ShellExecute target; 1 if the program can't be started; otherwise the last
+  child's code. `STILL_ACTIVE` is possible if Wine's shutdown event comes first, as in Proton.
+
+**Launcher** (replaces §7's command and account lines):
+- The command is `wine C:\windows\system32\steam.exe <the game's macOS path> <args…>`. Three games (SteamGameId 311210,
+  1985810, 1549250) run the Steam folder's copy, as in Proton.
+- No account variable: Proton writes no `ActiveUser`, and steam.exe deletes the one earlier builds wrote.
+- Every preparation links `s:`, with the bridge or without; Proton's messages go to launcher.log.
+
+**Errors** (amends §8):
+- The account rows go.
+- `MACNEUTRON_NO_STEAM_BRIDGE=1` removes the client DLLs but keeps `steam.exe`, so the game's `steam://` links still work
+  (D-27).
+- The S: drive applies with the bridge or without. `/usr/bin/env PROTON_SET_GAME_DRIVE=0 %command%` shows the game its
+  `Z:` path again.
+
+### Deviations from Proton 11 (each with its reason)
+
+**Launching the tool**
+- **D-1:** Steam runs `/bin/macneutron launch %verb%`, an arm64 Mach-O, not `/proton`: a clean Mac has no Python.
+- **D-2:** No `require_tool_appid` and no `use_sessions`: macOS has no Steam Linux Runtime or pressure-vessel.
+- **D-3:** Compat tools apply only with `@sSteamCmdForcePlatformType linux` in the bundle's `steam_dev.cfg`. A second
+  tool, `macneutron-native`, keeps Mac builds mounted.
+- **D-4:** A local tool (AppID 0) installed and updated by MacNeutron.app: only Valve can publish a tool app.
+- **D-5:** After the game, a second `wineserver -w` keeps Steam's "running" state until the prefix is empty: Mac Steam
+  has no subprocess reaper.
+- **D-6:** SIGTERM and SIGINT run `wineserver -k` for Steam's Stop button, for the same reason.
+- **D-7:** `STEAM_COMPAT_CLIENT_INSTALL_PATH` is the Steam bundle's MacOS folder, which holds `steamclient.dylib`, not the
+  Steam root.
+- **D-8:** `libraryfolders.vdf` leaves out Proton's entry 0, the client folder: on macOS it is no library.
+- **D-9:** Launch options run without a shell, so `VAR=x %command%` must be `/usr/bin/env VAR=x %command%`.
+
+**Steam client bridge**
+- **D-10:** `steamclient64.dll` falls back to lsteamclient when no Valve DLL is cached (first launch offline, or after
+  Remove): Mac Steam ships no `legacycompat`.
+- **D-11:** Wine 0036 writes its trampolines PE-side (RW, then restore), not through Unix `mprotect(RWX)`: Apple Silicon
+  refuses W^X violations.
+- **D-12:** `steam://` URLs and steam.exe's commands go to Mac Steam through winebrowser, which runs `open(1)`. Proton
+  runs the `steam` or `steam-runtime-steam-remote` binaries, which macOS doesn't have. Our additions:
+  - a leading `--` is dropped;
+  - `-applaunch <id>` becomes `steam://rungameid/<id>`;
+  - no arguments open `steam://open/main`;
+  - other `-` options are logged and dropped: Mac Steam has no command line.
+- **D-13:** lsteamclient patches:
+  - 0003: `Steam_IsKnownInterface` and `Steam_NotifyMissingInterface` are optional, because Mac `steamclient.dylib`
+    doesn't export them;
+  - 0001: native key codes are 0 (no X11 keysyms);
+  - 0001 and 0002: `-DNOMINMAX` and `-lc++` for the build.
+- ~~D-13a~~: removed. `ValvePlatformMutex` is Proton's now; Wine reports `C:/windows/system32/steam.exe`.
+- **D-14:** No i386 Valve files, no 32-bit lsteamclient, and SteamService.exe isn't at `Steam\steam.exe` until WoW64
+  exists and the helper is a builtin. Until then that path holds our helper. The three games above get only the
+  location, not Proton's 32-bit helper process.
+
+**Platform**
+- **D-15:** msync instead of fsync and ntsync, and DXMT on Metal instead of DXVK and vkd3d (macOS has no futex, ntsync or
+  Vulkan).
+- **D-16:** Install scripts don't run: Mac Steam has no `legacycompat/iscriptevaluator.exe`.
+- **D-17:** The locale comes from CoreFoundation once `LC_ALL` is dropped (P1-2, not yet).
+- **D-18:** The overlay is still to be designed (P1-3 spike).
+
+**Logs and settings**
+- **D-19:** Logs are `~/Library/Logs/MacNeutron/steam-<appid>.log`, with secrets redacted. Per-game settings come from
+  the app, not `user_settings.py`.
+- **D-20:** `PROTON_CRASH_REPORT_DIR` isn't ported yet (P2-7). `destroyprefix` isn't implemented: the Mac client never
+  sends it (P2-10).
+- **D-21:** `HKCU\Software\Wine\X11 Driver\EmulateModeset=Y`: fullscreen mode changes stay virtual, so the Mac display is
+  never switched.
+
+**steam.exe** (plan rulings)
+- **D-22:** The game is started with inherited handles; Proton inherits none. In our Wine a child started without
+  inheritance gets no standard handles at all, and the game's own output is what MacNeutron's game log holds.
+- **D-23:** Two DRM details (R5):
+  - the SteamStub semaphores are created before the game starts, where Proton creates them just after: the stub can
+    open them as soon as it runs;
+  - the ack event is looked up each round in `\Sessions\1\BaseNamedObjects`, the directory our Wine uses.
+- **D-24:** The restart event is opened with `SYNCHRONIZE | EVENT_MODIFY_STATE`; Proton opens it with `SYNCHRONIZE`
+  alone, which our Wine refuses `SetEvent` (R6; Valve's own precedent is db9e6ffb).
+- **D-25:** The restart loop is Proton's, without its precedence slip, which read a failed wait as a restart (R7).
+- **D-26:** `HKCR\steam` (Proton's value) and the wine.inf keys are written by steam.exe for a game process: our prefix
+  isn't built from Valve's wine.inf. A prefix that has never run a game with the bridge has no `steam://` handler (R9).
+- **D-27:** `MACNEUTRON_NO_STEAM_BRIDGE=1` keeps steam.exe, for the `steam://` handler (R10).
+- **D-28:** A non-link at `dosdevices/s:` is left alone and noted. Proton's script raises there (R15).
+- **D-29:** EA, two gaps:
+  - Valve-Wine's desktop close timeout (index 1000) isn't in our Wine, so the call only logs an error (R14, not ported
+    yet);
+  - on `SE_ERR_NOASSOC` the EA app is not uninstalled, because install scripts never run here to reinstall it (R19,
+    D-16).
+- **D-30:** `t:` (steamdrive) and `STEAM_COMPAT_CONFIG`'s `cmdlineappend` aren't ported yet (R17).
+- **D-31:** `PROTON_WAIT_ATTACH` ends only for a Windows debugger: our Wine has no Unix-debugger query (R18).
+- **D-32:** Hardening over Proton:
+  - `libraryfolders.vdf` skips empty library items, where Proton copies into an uninitialised buffer;
+  - it reads the library paths as UTF-8, where Proton's `getenv` mangles a non-ASCII path, which stalled Wine's lookup;
+  - a Unix path Wine can't convert is run as given;
+  - an early failure exits 1.
+- **D-33:** No GamingRepair mark (it waits for P1-4) and no `steamclient_init_registry` (P1-2) yet (R13).
+
 ## 1. Goal
 
 A Windows game started from native macOS Steam through MacNeutron can use the Steam API: `SteamAPI_Init` succeeds, and ownership/DRM checks, achievements, cloud saves, inventory and auth session tickets reach the user's running Mac Steam client. Games stop reporting "Steam unavailable".

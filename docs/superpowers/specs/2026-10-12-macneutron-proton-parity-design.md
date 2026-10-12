@@ -28,6 +28,13 @@ Corrected P0, in order:
 3. **lsteamclient's bad free** (LSC/unixlib.cpp:949-959) moves to P1, as a cherry-pick of `f46fd902` and `b94341c4` from
    Proton's `bleeding-edge`, riding along with the next lsteamclient rebuild.
 
+Amended by the P0-3/P1-1 plan (`docs/superpowers/plans/2026-10-12-macneutron-parity-s-drive-steam-exe.md`, 2026-10-12):
+- **R2.** The library pick is Proton's substring test (proton:319). Part B's P0-3 step 1 asked for a path-component
+  match, which had no macOS reason.
+- **R10.** `removeSteamBridge` keeps both `steam.exe` copies, overriding Part B's P1-1 step 1 and part 3 A4's removal
+  note: `HKCR\steam` needs them for the game's `steam://` links with the bridge off.
+- **The bridge spec's deviation list** (D-1 to D-33) is in its Amendment 2.
+
 Other corrections:
 - **P1-3 overlay (H1).** dyld applies `__interpose` tuples only for images present at launch. A `dlopen`ed
   gameoverlayrenderer.dylib would lose cursor release, mouse capture, the run-loop pump and the GL hooks. The spike's
