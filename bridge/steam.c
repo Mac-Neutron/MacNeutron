@@ -38,13 +38,29 @@ static void set_dword(HKEY key, const WCHAR *name, DWORD value)
 
 static void register_steam(DWORD pid)
 {
-    WCHAR account[16];
+    WCHAR account[16], apps[64];
+    const WCHAR *value;
+    DWORD appid;
     HKEY key;
 
     if ((key = create_key(HKEY_CURRENT_USER, STEAM_KEY)))
     {
         set_string(key, L"SteamPath", STEAM_DIR);
         set_string(key, L"SteamExe", STEAM_DIR L"\\steam.exe");
+        /* Steam's UI language, which the launcher reads from macOS Steam's registry.vdf; some games read it here. */
+        if ((value = _wgetenv(L"MACNEUTRON_STEAM_LANGUAGE")) && *value) set_string(key, L"language", value);
+        RegCloseKey(key);
+    }
+    /* What the Windows client keeps for the game it runs. Under Proton lsteamclient's steamclient_init_registry writes
+     * it, which needs a connection to Steam; these need none. The app ID is SteamAppId's, what steam_api's GetAppID
+     * reports; 0 or none is no game. Running stays 1 after the game, as under Proton. */
+    appid = (value = _wgetenv(L"SteamAppId")) ? wcstoul(value, NULL, 10) : 0;
+    _snwprintf(apps, ARRAYSIZE(apps), STEAM_KEY L"\\Apps\\%lu", appid);
+    if (appid && (key = create_key(HKEY_CURRENT_USER, apps)))
+    {
+        set_dword(key, L"Installed", 1);
+        set_dword(key, L"Running", 1);
+        set_dword(key, L"Updating", 0);
         RegCloseKey(key);
     }
     if ((key = create_key(HKEY_CURRENT_USER, ACTIVE_PROCESS_KEY)))

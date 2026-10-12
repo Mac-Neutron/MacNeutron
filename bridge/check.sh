@@ -79,6 +79,9 @@ expect "PROTON_HIDE_PROCESS_WINDOW starts the program hidden" \
   "$(PROTON_HIDE_PROCESS_WINDOW=1-longer-than-8-chars steam hidden) $(PROTON_HIDE_PROCESS_WINDOW=0 steam hidden)" \
   "hidden=1 hidden=0"
 expect "Steam's named events exist while the game runs" "$(steam events)" "lock=1 ipc=1"
+# The prefix outlives a run: a fresh app ID and language each time, so only this run's steam.exe can have written them.
+expect "the game's Apps key and Steam's language" "$(SteamAppId=$$ MACNEUTRON_STEAM_LANGUAGE="français $$" steam app $$)" \
+  "installed=1 running=1 updating=0 language=français $$"
 # Under a terminal Wine gives steam.exe a console host, which waits for steam.exe to leave while steam.exe waits for
 # every program in the prefix to end: steam.exe must leave its console (FreeConsole). script(1) supplies the terminal.
 tty_steam() {

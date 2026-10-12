@@ -96,6 +96,22 @@ int main(void)
         printf("lock=%d ipc=%d\n", !!lock, !!ipc);
         return 0;
     }
+    if (!wcscmp(mode, L"app") && argc > 2)  /* HKCU\Software\Valve\Steam\Apps\<id> and Steam's language; 9 is missing */
+    {
+        WCHAR key[64], language[64] = L"";
+        DWORD installed = 9, running = 9, updating = 9, size;
+
+        _snwprintf(key, ARRAYSIZE(key), L"Software\\Valve\\Steam\\Apps\\%ls", argv[2]);
+        size = sizeof(DWORD); RegGetValueW(HKEY_CURRENT_USER, key, L"Installed", RRF_RT_REG_DWORD, NULL, &installed, &size);
+        size = sizeof(DWORD); RegGetValueW(HKEY_CURRENT_USER, key, L"Running", RRF_RT_REG_DWORD, NULL, &running, &size);
+        size = sizeof(DWORD); RegGetValueW(HKEY_CURRENT_USER, key, L"Updating", RRF_RT_REG_DWORD, NULL, &updating, &size);
+        size = sizeof(language);
+        RegGetValueW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"language", RRF_RT_REG_SZ, NULL, language, &size);
+        printf("installed=%lu running=%lu updating=%lu language=", installed, running, updating);
+        put(language);
+        fputs("\n", stdout);
+        return 0;
+    }
     if (!wcscmp(mode, L"breakaway") && argc > 2)  /* a launcher that starts the real game outside any job, then quits */
     {
         WCHAR self[MAX_PATH], cmd[3 * MAX_PATH];
