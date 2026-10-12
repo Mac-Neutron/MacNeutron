@@ -141,6 +141,8 @@ static DWORD WINAPI answer_drm(void *arg)
             SetEvent(ack);
             CloseHandle(ack);
         }
+        /* In the game's log: a SteamStub error after "found" is about something else (its signature checks). */
+        fprintf(stderr, "steam.exe: SteamStub start check: ack event %s\n", ack ? "found and set" : "not found");
         ReleaseSemaphore(drm_produce, 1, NULL);
     }
     return 0;
