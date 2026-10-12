@@ -5,6 +5,8 @@ struct GamesView: View {
     @Environment(AppModel.self) private var model
     @State private var search = ""
     @State private var selection: UInt32?
+    /// A "Runs as" change waiting for the player to confirm it (spec §4.5).
+    @State private var pendingRunAs: (id: UInt32, runAs: RunAs)?
 
     private var rows: [GameRow] {
         search.isEmpty ? model.games : model.games.filter { $0.name.localizedCaseInsensitiveContains(search) }
@@ -23,7 +25,7 @@ struct GamesView: View {
                     if row.isDualPlatform {
                         Picker("", selection: Binding(
                             get: { row.settings.runAs ?? .mac },
-                            set: { value in Task { await model.update(row.id) { $0.runAs = value == .mac ? nil : value } } })) {
+                            set: { value in pendingRunAs = (row.id, value) })) {
                             Text("Mac version").tag(RunAs.mac)
                             Text("Windows version").tag(RunAs.windows)
                         }
@@ -96,6 +98,13 @@ struct GamesView: View {
             }
         }
         .searchable(text: $search)
+        .confirmationDialog("Switch versions?", isPresented: Binding(get: { pendingRunAs != nil }, set: { if !$0 { pendingRunAs = nil } }),
+                            presenting: pendingRunAs) { pending in
+            Button("Switch") { Task { await model.update(pending.id) { $0.runAs = pending.runAs == .mac ? nil : pending.runAs } } }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Steam Cloud keeps this game's saves in a different place for each version. Back up your saves before switching.")
+        }
         .frame(minWidth: 640, minHeight: 360)
         .overlay {
             if let error = model.appInfoError {

@@ -45,10 +45,18 @@ struct SettingsView: View {
 struct CleanupView: View {
     @Environment(AppModel.self) private var model
     @State private var selected = Set<String>()
+    @State private var confirming = false
+
+    private var chosen: [OrphanPrefix] { model.orphans.filter { selected.contains($0.appID) } }
+    private func name(_ orphan: OrphanPrefix) -> String {
+        model.games.first { String($0.id) == orphan.appID }?.name ?? "App \(orphan.appID)"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Leftover data from games you've uninstalled").font(.headline)
+            Text("These folders hold games' Windows settings and saves. Saves that aren't in Steam Cloud exist nowhere else.")
+                .foregroundStyle(.secondary)
             if model.orphans.isEmpty {
                 Text("Nothing to clean up.").foregroundStyle(.secondary)
             }
@@ -56,7 +64,7 @@ struct CleanupView: View {
                 Toggle(isOn: Binding(get: { selected.contains(orphan.appID) },
                                      set: { if $0 { selected.insert(orphan.appID) } else { selected.remove(orphan.appID) } })) {
                     HStack {
-                        Text(model.games.first { String($0.id) == orphan.appID }?.name ?? "App \(orphan.appID)")
+                        Text(name(orphan))
                         Spacer()
                         Text(ByteCountFormatter.string(fromByteCount: orphan.bytes, countStyle: .file)).foregroundStyle(.secondary)
                     }
@@ -64,15 +72,20 @@ struct CleanupView: View {
             }
             HStack {
                 Spacer()
-                Button("Delete selected", role: .destructive) {
-                    let chosen = model.orphans.filter { selected.contains($0.appID) }
-                    Task { await model.cleanUp(chosen) }
-                    selected.removeAll()
-                }
-                .disabled(selected.isEmpty)
+                Button("Delete selected", role: .destructive) { confirming = true }
+                    .disabled(selected.isEmpty)
             }
         }
         .padding(20)
         .frame(width: 420)
+        .confirmationDialog("Delete \(chosen.count) \(chosen.count == 1 ? "game's" : "games'") data?", isPresented: $confirming) {
+            Button("Delete", role: .destructive) {
+                let picked = chosen
+                Task { await model.cleanUp(picked) }
+                selected.removeAll()
+            }
+        } message: {
+            Text(chosen.map(name).joined(separator: ", ") + "\n\nThis can't be undone.")
+        }
     }
 }
