@@ -209,3 +209,16 @@ private func seed(_ prefix: URL, _ path: String, _ text: String) throws { try wr
     #expect(link(prefix, "u/Application Data") == "./AppData/Roaming")
     #expect(report == ProfileLinkReport())
 }
+
+@Test func findersOwnFilesNeverBlockAMerge() throws {
+    // Opening both trees in Finder (to back up saves, say) leaves a different .DS_Store in each.
+    let prefix = try makePrefix()
+    try seed(prefix, "u/AppData/Local/G/.DS_Store", "finder here")
+    try seed(prefix, "steamuser/Local Settings/Application Data/G/.DS_Store", "finder there")
+    try seed(prefix, "steamuser/Local Settings/Application Data/G/._s.sav", "resource fork")
+    try seed(prefix, "steamuser/Local Settings/Application Data/G/s.sav", "cloud")
+    let report = ProfileLinks.apply(prefix: prefix, user: "u")
+    #expect(link(prefix, "steamuser") == "u")
+    #expect(read(prefix, "u/AppData/Local/G/s.sav") == "cloud")
+    #expect(report.conflicts == 0)
+}

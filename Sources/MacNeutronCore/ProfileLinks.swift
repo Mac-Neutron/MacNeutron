@@ -114,11 +114,15 @@ public enum ProfileLinks {
                             + " \(URL(filePath: backup).lastPathComponent)")
     }
 
-    /// Relative paths of the regular files under `folder`. Links in it are skipped, never followed.
+    /// Relative paths of the regular files under `folder`. Links in it are skipped, never followed, and so are
+    /// Finder's own files (`.DS_Store`, `._*`): no game saves them, and they would differ in every tree Finder opened.
     private static func regularFiles(under folder: URL) -> [String] {
         guard let items = FileManager.default.enumerator(atPath: folder.path(percentEncoded: false)) else { return [] }
         var result: [String] = []
-        for case let path as String in items where kind(folder.appending(path: path)) == .file { result.append(path) }
+        for case let path as String in items where kind(folder.appending(path: path)) == .file {
+            let name = (path as NSString).lastPathComponent
+            if name != ".DS_Store", !name.hasPrefix("._") { result.append(path) }
+        }
         return result.sorted()
     }
 
