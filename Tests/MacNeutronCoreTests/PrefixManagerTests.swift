@@ -290,6 +290,84 @@ private func inode(_ url: URL) throws -> UInt64? {
     }
 }
 
+/// Valve's DLL as the app leaves it in `layout.valveCache/<version>/`, with or without the runtime's 0036 marker.
+@discardableResult
+private func cacheValveClient(_ layout: ToolLayout, version: String = "1788652215", marker: Bool = true) throws -> URL {
+    if marker { try write("0036\n", to: layout.wineApp.appending(path: "Contents/Resources/genuine-steamclient")) }
+    let dll = layout.valveCache.appending(path: "\(version)/steamclient64.dll")
+    try FileManager.default.createDirectory(at: dll.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try peBytes(machine: PEImage.amd64, certificate: true).write(to: dll)
+    return dll
+}
+
+@Test func theCachedValveDLLGoesInThePrefixWhenTheRuntimeSupportsIt() throws {
+    let (manager, env) = try makeManager(winebootCreatingPrefix())
+    try installFakeSteamBridge(in: manager.layout)
+    let dll = try cacheValveClient(manager.layout)
+    try manager.prepare(environment: env, steamBridge: true)
+    #expect(try Data(contentsOf: steamFolder(manager).appending(path: "steamclient64.dll"))
+        == peBytes(machine: PEImage.amd64, certificate: true))
+    #expect(launcherLog(manager).contains(
+        "note: steamclient64.dll from Valve's client 1788652215 (\(dll.path(percentEncoded: false)))"))
+}
+
+@Test func withoutTheMarkerTheCacheIsIgnored() throws {
+    // An older runtime can't load Valve's DLL (its tier0_s64 import): the game would get no Steam.
+    let (manager, env) = try makeManager(winebootCreatingPrefix())
+    try installFakeSteamBridge(in: manager.layout)
+    try cacheValveClient(manager.layout, marker: false)
+    try manager.prepare(environment: env, steamBridge: true)
+    #expect(try String(contentsOf: steamFolder(manager).appending(path: "steamclient64.dll"), encoding: .utf8)
+        == "lsteamclient aarch64")
+    #expect(launcherLog(manager).contains("note: steamclient64.dll is lsteamclient: this runtime has no genuine-steamclient marker"))
+}
+
+@Test func withoutACacheItIsLsteamclient() throws {
+    let (manager, env) = try makeManager(winebootCreatingPrefix())
+    try installFakeSteamBridge(in: manager.layout)
+    try write("0036\n", to: manager.layout.wineApp.appending(path: "Contents/Resources/genuine-steamclient"))
+    try manager.prepare(environment: env, steamBridge: true)
+    #expect(try String(contentsOf: steamFolder(manager).appending(path: "steamclient64.dll"), encoding: .utf8)
+        == "lsteamclient aarch64")
+    #expect(launcherLog(manager).contains("note: steamclient64.dll is lsteamclient: Valve's isn't downloaded"))
+}
+
+@Test func aCacheWithoutSteamclient64FallsBackToLsteamclient() throws {
+    // A cache damaged by hand: the launch still starts, on lsteamclient.
+    let (manager, env) = try makeManager(winebootCreatingPrefix())
+    try installFakeSteamBridge(in: manager.layout)
+    let dll = try cacheValveClient(manager.layout)
+    try write("sha2 x\n", to: dll.deletingLastPathComponent().appending(path: "source.txt"))
+    try FileManager.default.removeItem(at: dll)
+    try manager.prepare(environment: env, steamBridge: true)
+    #expect(try String(contentsOf: steamFolder(manager).appending(path: "steamclient64.dll"), encoding: .utf8)
+        == "lsteamclient aarch64")
+    #expect(launcherLog(manager).contains("note: steamclient64.dll is lsteamclient: Valve's isn't downloaded"))
+}
+
+@Test func builtinForcesLsteamclientOverTheCache() throws {
+    let (manager, env) = try makeManager(winebootCreatingPrefix())
+    try installFakeSteamBridge(in: manager.layout)
+    try cacheValveClient(manager.layout)
+    try manager.prepare(environment: wineEnvironment(manager, ["MACNEUTRON_STEAMCLIENT64": "builtin"]), steamBridge: true)
+    let client = steamFolder(manager).appending(path: "steamclient64.dll")
+    #expect(try String(contentsOf: client, encoding: .utf8) == "lsteamclient aarch64")
+    #expect(launcherLog(manager).contains("note: steamclient64.dll is lsteamclient (MACNEUTRON_STEAMCLIENT64=builtin)"))
+    try manager.prepare(environment: env, steamBridge: true)
+    #expect(try Data(contentsOf: client) == peBytes(machine: PEImage.amd64, certificate: true))
+}
+
+@Test func aPathOverrideBeatsTheCache() throws {
+    let (manager, _) = try makeManager(winebootCreatingPrefix())
+    try installFakeSteamBridge(in: manager.layout)
+    try cacheValveClient(manager.layout)
+    let other = try makeTempDir().appending(path: "steamclient64.dll")
+    try peBytes(machine: PEImage.amd64).write(to: other)
+    try manager.prepare(environment: wineEnvironment(manager, ["MACNEUTRON_STEAMCLIENT64": other.path(percentEncoded: false)]),
+                        steamBridge: true)
+    #expect(try Data(contentsOf: steamFolder(manager).appending(path: "steamclient64.dll")) == peBytes(machine: PEImage.amd64))
+}
+
 @Test func upToDatePrefixStillGetsTheSteamBridge() throws {
     // Prefixes prepared before the bridge existed (SMITE 2's on the maintainer's Mac) must get it too.
     let (manager, env) = try makeManager(winebootCreatingPrefix())

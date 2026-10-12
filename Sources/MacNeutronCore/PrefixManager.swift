@@ -200,22 +200,40 @@ public struct PrefixManager: Sendable {
 
     /// Every launch: prefixes made before the bridge existed get it too, and a runtime update replaces it.
     func deploySteamBridge(environment: [String: String]) throws {
-        var steamClient64: URL?
-        if let path = environment[SteamBridge.steamClient64Variable], !path.isEmpty {
-            // Logged first, so a bad path is diagnosable; per launch, so dropping the option puts lsteamclient.dll
-            // back (its size differs).
-            log.append("note: steamclient64.dll from \(path) (\(SteamBridge.steamClient64Variable))")
-            guard PEImage.machine(of: URL(filePath: path)) == PEImage.amd64 else {
-                throw PrefixError.steamBridgeCopyFailed(
-                    "\(SteamBridge.steamClient64Variable): \(path) is missing or not an x64 DLL")
-            }
-            steamClient64 = URL(filePath: path)
-        }
-        for (source, destination) in SteamBridge.prefixFiles(layout: layout, steamClient64: steamClient64) {
+        for (source, destination) in SteamBridge.prefixFiles(layout: layout, steamClient64: try steamClient64(environment)) {
             do { try install(source, at: destination) } catch {
                 throw PrefixError.steamBridgeCopyFailed("\(destination): \(error.localizedDescription)")
             }
         }
+    }
+
+    /// The prefix's `steamclient64.dll`, as Proton keeps Valve's signed one there (SteamStub checks its signature): the
+    /// launch option's choice, else the app's download from Valve when the runtime can use it (Wine 0036), else nil for
+    /// lsteamclient. Chosen and logged per launch, so a change takes effect at the next one (the sizes differ).
+    private func steamClient64(_ environment: [String: String]) throws -> URL? {
+        let variable = SteamBridge.steamClient64Variable
+        if let path = environment[variable], !path.isEmpty {
+            if path == "builtin" {
+                log.append("note: steamclient64.dll is lsteamclient (\(variable)=builtin)")
+                return nil
+            }
+            // Logged first, so a bad path is diagnosable.
+            log.append("note: steamclient64.dll from \(path) (\(variable))")
+            guard PEImage.machine(of: URL(filePath: path)) == PEImage.amd64 else {
+                throw PrefixError.steamBridgeCopyFailed("\(variable): \(path) is missing or not an x64 DLL")
+            }
+            return URL(filePath: path)
+        }
+        guard layout.supportsGenuineSteamclient else {
+            log.append("note: steamclient64.dll is lsteamclient: this runtime has no genuine-steamclient marker")
+            return nil
+        }
+        guard let valve = ValveClient.installed(in: layout.valveCache) else {
+            log.append("note: steamclient64.dll is lsteamclient: Valve's isn't downloaded")
+            return nil
+        }
+        log.append("note: steamclient64.dll from Valve's client \(valve.version) (\(valve.steamClient64.path(percentEncoded: false)))")
+        return valve.steamClient64
     }
 
     /// The rest of Proton's setup_steam_files: Steam's `config` folder, which CEG checks for, and

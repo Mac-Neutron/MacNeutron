@@ -14,8 +14,9 @@ public enum SteamBridge {
     /// The folder `steam.exe` names in the registry, relative to the prefix.
     static let prefixFolder = "drive_c/Program Files (x86)/Steam"
 
-    /// Spike: a launch option naming Valve's signed steamclient64.dll (an absolute Mac path), which the prefix gets in
-    /// place of lsteamclient.dll; Wine patch 0036 makes its exports jump to lsteamclient.dll's.
+    /// A launch option for the prefix's `steamclient64.dll`: an absolute Mac path to another copy of Valve's signed DLL,
+    /// or `builtin` for lsteamclient.dll (no Valve DLL). Without it the launcher uses the app's download from Valve when
+    /// the runtime has Wine patch 0036, which makes the genuine DLL's exports jump to lsteamclient.dll's.
     static let steamClient64Variable = "MACNEUTRON_STEAMCLIENT64"
 
     /// What the launcher copies into a prefix: (source, destination relative to the prefix).

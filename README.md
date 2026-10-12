@@ -74,6 +74,7 @@ Start launch options with `/usr/bin/env`. macOS Steam runs them without a shell,
 | `/usr/bin/env MACNEUTRON_LOG=1 %command%` | Wine log in `~/Library/Logs/MacNeutron/steam-<appid>.log` (Wine's warnings, without exception handling's); `MACNEUTRON_LOG=2` logs those too, and every Steam API call. Past 50 MB the log moves to `steam-<appid>.log.1` at the next launch |
 | `/usr/bin/env MACNEUTRON_NO_MSYNC=1 %command%` | Turn off msync |
 | `/usr/bin/env MACNEUTRON_NO_STEAM_BRIDGE=1 %command%` | Start the game without the Steam bridge (the game then can't reach Steam) |
+| `/usr/bin/env MACNEUTRON_STEAMCLIENT64=builtin %command%` | Put MacNeutron's own Steam bridge in the prefix instead of Valve's signed `steamclient64.dll` (some games with Valve's DRM then stop with "Application load error 3"); `=<path>` names another copy of Valve's DLL |
 | `/usr/bin/env MACNEUTRON_NO_METALFX=1 %command%` | Don't upscale with MetalFX (macOS then stretches smaller images with its nearest-neighbour filter) |
 | `/usr/bin/env DXMT_MAX_ANISOTROPY=0\|4\|8\|16 %command%` | Anisotropic filtering on the game's trilinear textures: 16x by default, `0` keeps the game's own (also "Anisotropic filtering" in the Games window) |
 | `/usr/bin/env MACNEUTRON_POST_AA=cmaa2 %command%` | Anti-alias each frame with Intel's CMAA2 (for games without their own anti-aliasing; also "Anti-aliasing (post)" in the Games window) |
