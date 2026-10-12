@@ -368,6 +368,40 @@ private func cacheValveClient(_ layout: ToolLayout, version: String = "178865221
     #expect(try Data(contentsOf: steamFolder(manager).appending(path: "steamclient64.dll")) == peBytes(machine: PEImage.amd64))
 }
 
+/// `STEAM_COMPAT_LIBRARY_PATHS` and `STEAM_COMPAT_INSTALL_PATH` for a game in a fresh library named `name`.
+private func libraryVariables(_ name: String = "Lib Ünï", steamapps: String = "steamapps") throws -> (vars: [String: String], lib: String, apps: String) {
+    let lib = try makeTempDir().appending(path: name, directoryHint: .isDirectory)
+    let game = lib.appending(path: "\(steamapps)/common/Game", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: game, withIntermediateDirectories: true)
+    let libPath = String(lib.path(percentEncoded: false).dropLast()), apps = libPath + "/" + steamapps
+    return (["STEAM_COMPAT_LIBRARY_PATHS": apps, "STEAM_COMPAT_INSTALL_PATH": apps + "/common/Game"], libPath, apps)
+}
+
+private func gameDrive(_ manager: PrefixManager) -> String? {
+    try? FileManager.default.destinationOfSymbolicLink(
+        atPath: manager.context.prefix.appending(path: "dosdevices/s:").path(percentEncoded: false))
+}
+
+@Test func prepareLinksTheGameDriveWithOrWithoutTheBridge() throws {
+    let runner = winebootCreatingPrefix()
+    let (manager, _) = try makeManager(runner)
+    let (vars, lib, _) = try libraryVariables()
+    try manager.prepare(environment: wineEnvironment(manager, vars))
+    #expect(gameDrive(manager) == realPath(lib))
+    try installFakeSteamBridge(in: manager.layout)
+    try manager.prepare(environment: wineEnvironment(manager, vars), steamBridge: true)
+    #expect(gameDrive(manager) == realPath(lib))
+    #expect(winebootCount(runner) == 1)
+}
+
+@Test func prepareLogsTheGameDriveNotes() throws {
+    let (manager, _) = try makeManager(winebootCreatingPrefix())
+    let (vars, _, apps) = try libraryVariables(steamapps: "SteamApps")
+    try manager.prepare(environment: wineEnvironment(manager, vars))
+    #expect(launcherLog(manager).contains("note: Proton: Error: unable to use parent for game drive, path \(apps)"))
+    #expect(gameDrive(manager) == apps)
+}
+
 @Test func upToDatePrefixStillGetsTheSteamBridge() throws {
     // Prefixes prepared before the bridge existed (SMITE 2's on the maintainer's Mac) must get it too.
     let (manager, env) = try makeManager(winebootCreatingPrefix())

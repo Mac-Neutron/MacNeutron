@@ -143,14 +143,10 @@ public enum ProfileLinks {
     }
 
     /// `realpath(3)`, or nil when `url` doesn't resolve to anything.
-    private static func resolved(_ url: URL) -> String? {
-        guard let path = realpath(url.path(percentEncoded: false), nil) else { return nil }
-        defer { free(path) }
-        return String(cString: path)
-    }
+    private static func resolved(_ url: URL) -> String? { realPath(url.path(percentEncoded: false)) }
 
     /// A new link renamed over the old one, so the path is never missing.
-    private static func replaceLink(at url: URL, with target: String) -> Bool {
+    static func replaceLink(at url: URL, with target: String) -> Bool {
         let path = url.path(percentEncoded: false), new = path + ".macneutron-new"
         unlink(new)
         guard symlink(target, new) == 0, rename(new, path) == 0 else {

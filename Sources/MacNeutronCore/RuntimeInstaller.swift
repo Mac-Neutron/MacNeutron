@@ -146,12 +146,8 @@ public enum RuntimeInstaller {
         return outcome
     }
 
-    /// `realpath(3)`, or nil when `url` doesn't exist. (`URL.resolvingSymlinksInPath` strips `/private`.)
-    private static func realPath(_ url: URL) -> String? {
-        guard let resolved = realpath(url.path(percentEncoded: false), nil) else { return nil }
-        defer { free(resolved) }
-        return String(cString: resolved)
-    }
+    /// `realpath(3)`, or nil when `url` doesn't exist.
+    private static func realPath(_ url: URL) -> String? { MacNeutronCore.realPath(url.path(percentEncoded: false)) }
 
     /// Writes Steam's tool files, then installs the launcher and `steamExe`, or the `steam.exe` it finds beside the
     /// launcher. Safe to repeat: identical files are skipped, and new ones are

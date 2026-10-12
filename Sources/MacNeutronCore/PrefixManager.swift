@@ -94,6 +94,8 @@ public struct PrefixManager: Sendable {
             // Every launch: Steam may have made real folders where the links go since the last one.
             let links = ProfileLinks.apply(prefix: context.prefix, user: environment["USER"] ?? NSUserName())
             for note in links.notes { log.append("note: \(note)") }
+            // Proton's game drive (setup_prefix, proton:1259): every preparation, with the bridge or without.
+            for note in GameDrive.apply(prefix: context.prefix, environment: environment) { log.append("note: \(note)") }
             if steamBridge {
                 try deploySteamBridge(environment: environment)
                 writeSteamFiles(environment: environment)
@@ -279,6 +281,13 @@ public struct PrefixManager: Sendable {
         var times = [src.st_atimespec, src.st_mtimespec]
         guard utimensat(AT_FDCWD, to, &times, 0) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
     }
+}
+
+/// `realpath(3)`, or nil when `path` doesn't resolve to anything. (`URL.resolvingSymlinksInPath` strips `/private`.)
+func realPath(_ path: String) -> String? {
+    guard let resolved = realpath(path, nil) else { return nil }
+    defer { free(resolved) }
+    return String(cString: resolved)
 }
 
 /// Exclusive `flock(2)` on `url` for the duration of `body`. Separate `open`s conflict even
