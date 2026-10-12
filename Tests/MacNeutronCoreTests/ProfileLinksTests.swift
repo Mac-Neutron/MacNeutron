@@ -177,3 +177,35 @@ private func seed(_ prefix: URL, _ path: String, _ text: String) throws { try wr
     #expect(!isRealFolder(prefix, "steamuser BACKUP"))
     #expect(report.conflicts == 0)
 }
+
+@Test func aLinkToAnotherRealFolderIsLeftAlone() throws {
+    // The Mac's short name changed, or two accounts share a library: Steam's watched files resolve through the old
+    // link, and repointing it would make them vanish before Steam's exit pass.
+    let prefix = try makePrefix()
+    try seed(prefix, "old/AppData/Local/G/s.sav", "cloud-synced")
+    try FileManager.default.createSymbolicLink(atPath: users(prefix, "steamuser").path(percentEncoded: false),
+                                               withDestinationPath: "old")
+    let report = ProfileLinks.apply(prefix: prefix, user: "u")
+    #expect(link(prefix, "steamuser") == "old")
+    #expect(read(prefix, "steamuser/AppData/Local/G/s.sav") == "cloud-synced")
+    #expect(report.conflicts == 1)
+}
+
+@Test func aDanglingLinkIsReplaced() throws {
+    let prefix = try makePrefix()
+    try FileManager.default.createSymbolicLink(atPath: users(prefix, "steamuser").path(percentEncoded: false),
+                                               withDestinationPath: "gone")
+    let report = ProfileLinks.apply(prefix: prefix, user: "u")
+    #expect(link(prefix, "steamuser") == "u")
+    #expect(report == ProfileLinkReport())
+}
+
+@Test func anEquivalentLinkIsKept() throws {
+    // Proton writes "./AppData/Roaming"; it reaches the same folder, so it isn't churned.
+    let prefix = try makePrefix()
+    try FileManager.default.createSymbolicLink(atPath: users(prefix, "u/Application Data").path(percentEncoded: false),
+                                               withDestinationPath: "./AppData/Roaming")
+    let report = ProfileLinks.apply(prefix: prefix, user: "u")
+    #expect(link(prefix, "u/Application Data") == "./AppData/Roaming")
+    #expect(report == ProfileLinkReport())
+}

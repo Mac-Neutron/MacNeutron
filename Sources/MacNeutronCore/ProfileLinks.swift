@@ -38,8 +38,15 @@ public enum ProfileLinks {
                 try? FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
                 if symlink(target, path.path(percentEncoded: false)) != 0 { report.notes.append("couldn't link \(name)") }
             case .link:
-                let current = try? FileManager.default.destinationOfSymbolicLink(atPath: path.path(percentEncoded: false))
-                if current != target, !replaceLink(at: path, with: target) { report.notes.append("couldn't relink \(name)") }
+                // Steam's watched files resolve through the link: only a dangling one is replaced. One reaching
+                // another folder (the Mac's short name changed, say) is left, or those files would vanish.
+                let current = resolved(path)
+                if current == nil {
+                    if !replaceLink(at: path, with: target) { report.notes.append("couldn't relink \(name)") }
+                } else if current != resolved(path.deletingLastPathComponent().appending(path: target)) {
+                    report.conflicts += 1
+                    report.notes.append("left \(name): it links to another folder, so Steam Cloud won't sync this game here yet")
+                }
             case .directory where !merge:
                 report.notes.append("left \(name): Steam's files there merge at the game's next launch")
             case .directory where !canSwap(prefix):
@@ -129,6 +136,13 @@ public enum ProfileLinks {
             }
         }
         return (missing, differing)
+    }
+
+    /// `realpath(3)`, or nil when `url` doesn't resolve to anything.
+    private static func resolved(_ url: URL) -> String? {
+        guard let path = realpath(url.path(percentEncoded: false), nil) else { return nil }
+        defer { free(path) }
+        return String(cString: path)
     }
 
     /// A new link renamed over the old one, so the path is never missing.
