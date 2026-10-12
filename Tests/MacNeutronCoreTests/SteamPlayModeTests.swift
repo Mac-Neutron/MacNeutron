@@ -231,3 +231,22 @@ func verifiesCompatLogSessions(log: String, problem: String?) {
     try mode.installNativeTool()
     #expect(!FileManager.default.fileExists(atPath: script.path(percentEncoded: false)))
 }
+
+@Test func verifyAcceptsEitherRuntimeName() {
+    // A Steam session started before the update registered only the old name.
+    #expect(SteamPlayMode.verify(log: okSession) == nil)
+    #expect(SteamPlayMode.verify(log: okSession.replacingOccurrences(of: "tool macneutron,", with: "tool macneutron-proton,")) == nil)
+}
+
+@Test func syncMovesLegacyMappingsThenDropsTheLegacyName() async throws {
+    let (mode, fake) = try makeMode()
+    try await mode.enable(plan: samplePlan)  // the old name, as installed before the rename
+    let folder = mode.tools.appending(path: SteamPlayMode.runtimeFolderName)
+    try RuntimeInstaller.writeCompatibilityTool(in: folder, legacyName: true)
+    try await fake.quit(timeout: .seconds(1))
+    let renamed = samplePlan.mapValues { $0.tool == "macneutron" ? ToolMapping(tool: "macneutron-proton", priority: $0.priority) : $0 }
+    #expect(try mode.sync(plan: renamed) == true)
+    #expect(try mode.currentMappings() == renamed)
+    #expect(!RuntimeInstaller.registersLegacyName(in: folder))
+    #expect(FileManager.default.fileExists(atPath: folder.appending(path: "compatibilitytool.vdf").path(percentEncoded: false)))
+}

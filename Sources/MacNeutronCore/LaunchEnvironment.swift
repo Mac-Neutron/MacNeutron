@@ -7,6 +7,9 @@ public enum LaunchEnvironment {
                              logging: Bool) -> [String: String] {
         var env = base
         env["WINEPREFIX"] = context.prefix.path(percentEncoded: false)
+        // Steam sets it for "proton" tools, and the steamclient our bridge loads reads it; the game keeps the
+        // environment it had before the rename (spec D5).
+        env.removeValue(forKey: "STEAM_COMPAT_PROTON")
         // XeSS's path for non-Intel GPUs (DP4a) ran SMITE 2 at ~4 FPS: Wine's builtin libxess answers XeSS on D3D12
         // with MetalFX's upscaler (through DXMT; no device elsewhere, so games pick another upscaler).
         // MACNEUTRON_XESS=1 loads the game's own Intel XeSS.

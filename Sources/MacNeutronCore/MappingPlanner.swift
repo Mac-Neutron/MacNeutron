@@ -18,7 +18,11 @@ public enum RunAs: String, Codable, Sendable {
 
 /// Decides which compatibility tool every app should use (spec §5).
 public enum MappingPlanner {
-    public static let runtimeTool = "macneutron"
+    /// Steam maps Auto-Cloud's Windows roots into a tool's prefix only when its name contains "proton" (and ignores
+    /// tools whose name contains "arm64").
+    public static let runtimeTool = "macneutron-proton"
+    /// The runtime's name before Steam Cloud: still registered until no mapping uses it.
+    public static let legacyRuntimeTool = "macneutron"
     public static let nativeTool = "macneutron-native"
     /// Tools such as Steam Linux Runtime or Proton must never be mapped.
     public static let mappableTypes: Set<String> = ["game", "demo", "application"]
@@ -79,5 +83,6 @@ public enum MappingPlanner {
         return (others + ours).sorted { (UInt64(KeyValues.unescape($0.key)) ?? .max) < (UInt64(KeyValues.unescape($1.key)) ?? .max) }
     }
 
-    static func isOurs(_ tool: String) -> Bool { tool.hasPrefix(runtimeTool) }
+    /// Every MacNeutron tool, the legacy runtime name included, so its entries are migrated.
+    static func isOurs(_ tool: String) -> Bool { tool.hasPrefix("macneutron") }
 }

@@ -30,22 +30,37 @@ public enum RuntimeInstallError: Error, Equatable, CustomStringConvertible {
 
 /// Installs `wine.app` and the Steam-facing tool files into a `macneutron` tool folder (spec §3.9).
 public enum RuntimeInstaller {
-    static let compatibilityTool = """
-        "compatibilitytools"
-        {
-          "compat_tools"
-          {
-            "macneutron"
-            {
-              "install_path" "."
-              "display_name" "MacNeutron"
-              "from_oslist"  "windows"
-              "to_oslist"    "linux"
-            }
-          }
-        }
+    /// The runtime tool, and with `legacyName` its pre-rename name too, both from this folder: a mapping must never
+    /// name a tool Steam doesn't know.
+    static func compatibilityTool(legacyName: Bool) -> String {
+        func entry(_ name: String, _ display: String) -> String {
+            """
+                "\(name)"
+                {
+                  "install_path" "."
+                  "display_name" "\(display)"
+                  "from_oslist"  "windows"
+                  "to_oslist"    "linux"
+                }
 
-        """
+            """
+        }
+        let legacy = legacyName ? entry(MappingPlanner.legacyRuntimeTool, "MacNeutron (old)") : ""
+        return "\"compatibilitytools\"\n{\n  \"compat_tools\"\n  {\n"
+            + entry(MappingPlanner.runtimeTool, "MacNeutron") + legacy + "  }\n}\n"
+    }
+
+    /// The tool folder's `compatibilitytool.vdf` still registers the pre-rename name.
+    static func registersLegacyName(in root: URL) -> Bool {
+        guard let text = try? String(contentsOf: root.appending(path: "compatibilitytool.vdf"), encoding: .utf8),
+              let nodes = try? KeyValues.parse(text) else { return false }
+        return nodes.node(at: ["compatibilitytools", "compat_tools", MappingPlanner.legacyRuntimeTool]) != nil
+    }
+
+    static func writeCompatibilityTool(in root: URL, legacyName: Bool) throws {
+        try compatibilityTool(legacyName: legacyName)
+            .write(to: root.appending(path: "compatibilitytool.vdf"), atomically: true, encoding: .utf8)
+    }
     /// Steam runs the thin arm64 CLI directly (R0b passed); there's no `/bin/sh` stub in between.
     static let toolManifest = """
         "manifest"
@@ -145,7 +160,8 @@ public enum RuntimeInstaller {
         let fm = FileManager.default
         try fm.createDirectory(at: layout.root, withIntermediateDirectories: true)
         try installFile(launcherBinary, at: layout.launcherBinary)  // before the manifest that runs it
-        try compatibilityTool.write(to: layout.root.appending(path: "compatibilitytool.vdf"), atomically: true, encoding: .utf8)
+        // The legacy name goes only once Steam Play mode has moved its mappings (SteamPlayMode.finishRename).
+        try writeCompatibilityTool(in: layout.root, legacyName: registersLegacyName(in: layout.root))
         try toolManifest.write(to: layout.root.appending(path: "toolmanifest.vdf"), atomically: true, encoding: .utf8)
         // Next to the launcher, or in MacNeutron.app's Contents/Resources: steam.exe isn't Mach-O code,
         // so codesign won't accept it in Contents/Helpers.

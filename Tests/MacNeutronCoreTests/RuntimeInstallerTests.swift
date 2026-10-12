@@ -341,3 +341,39 @@ private func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath:
     #expect(!exists(layout.root.appending(path: "wine.app.new")))
     #expect(try install() == .unchanged)
 }
+
+@Test func toolFilesKeepTheLegacyNameOnlyWhileTheVdfHasIt() throws {
+    // Steam maps cloud roots only for tool names containing "proton"; the old name stays until its mappings move.
+    let fresh = ToolLayout(root: try makeTempDir().appending(path: "macneutron"))
+    try RuntimeInstaller.writeToolFiles(layout: fresh, launcherBinary: try makeEchoLauncher())
+    let freshVdf = try KeyValues.parse(try String(contentsOf: fresh.root.appending(path: "compatibilitytool.vdf"), encoding: .utf8))
+    #expect(freshVdf.node(at: ["compatibilitytools", "compat_tools"])?.children.map(\.key) == ["macneutron-proton"])
+    #expect(freshVdf.node(at: ["compatibilitytools", "compat_tools", "macneutron-proton", "display_name"])?.stringValue == "MacNeutron")
+    #expect(!RuntimeInstaller.registersLegacyName(in: fresh.root))
+
+    let updated = ToolLayout(root: try makeTempDir().appending(path: "macneutron"))
+    try write("""
+        "compatibilitytools"
+        {
+          "compat_tools"
+          {
+            "macneutron"
+            {
+              "install_path" "."
+              "display_name" "MacNeutron"
+              "from_oslist"  "windows"
+              "to_oslist"    "linux"
+            }
+          }
+        }
+
+        """, to: updated.root.appending(path: "compatibilitytool.vdf"))  // the file every install before the rename wrote
+    try RuntimeInstaller.writeToolFiles(layout: updated, launcherBinary: try makeEchoLauncher())
+    let both = try KeyValues.parse(try String(contentsOf: updated.root.appending(path: "compatibilitytool.vdf"), encoding: .utf8))
+    #expect(both.node(at: ["compatibilitytools", "compat_tools"])?.children.map(\.key) == ["macneutron-proton", "macneutron"])
+    #expect(both.node(at: ["compatibilitytools", "compat_tools", "macneutron", "display_name"])?.stringValue == "MacNeutron (old)")
+
+    try RuntimeInstaller.writeCompatibilityTool(in: updated.root, legacyName: false)
+    try RuntimeInstaller.writeToolFiles(layout: updated, launcherBinary: try makeEchoLauncher())
+    #expect(!RuntimeInstaller.registersLegacyName(in: updated.root))
+}

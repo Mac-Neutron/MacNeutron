@@ -78,7 +78,7 @@ private func makeModel(steamRunning: Bool = false,
 @MainActor @Test func runsAsChangeAppliesImmediatelyWhenSteamIsClosed() async throws {
     let (model, mode, _) = try await makeModel()
     await model.update(bongoCat.appID) { $0.runAs = .windows }
-    #expect(try mode.currentMappings()["3419430"]?.tool == "macneutron")
+    #expect(try mode.currentMappings()["3419430"]?.tool == "macneutron-proton")
     #expect(model.status == .on)
 }
 

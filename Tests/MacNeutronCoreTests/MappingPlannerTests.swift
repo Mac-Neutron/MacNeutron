@@ -8,10 +8,10 @@ private func app(_ id: UInt32, _ oslist: Set<String>, type: String = "game") -> 
 
 @Test(arguments: [
     (Set(["macos"]), "macneutron-native"),
-    (Set(["windows"]), "macneutron"),
+    (Set(["windows"]), "macneutron-proton"),
     (Set(["windows", "macos"]), "macneutron-native"),
     (Set(["macos", "linux"]), "macneutron-native"),
-    (Set(["windows", "linux"]), "macneutron"),
+    (Set(["windows", "linux"]), "macneutron-proton"),
     (Set(["windows", "macos", "linux"]), "macneutron-native"),
 ])
 func routesByPlatform(oslist: Set<String>, tool: String) {
@@ -25,13 +25,13 @@ func routesByPlatform(oslist: Set<String>, tool: String) {
 }
 
 @Test func globalEntryAlwaysPointsAtTheRuntime() {
-    #expect(MappingPlanner.plan(apps: [], runAs: [:])["0"] == ToolMapping(tool: "macneutron", priority: 75))
+    #expect(MappingPlanner.plan(apps: [], runAs: [:])["0"] == ToolMapping(tool: "macneutron-proton", priority: 75))
 }
 
 @Test func runAsWindowsOnlyAppliesToDualPlatformGames() {
     let plan = MappingPlanner.plan(apps: [app(1, ["windows", "macos"]), app(2, ["macos"])],
                                    runAs: [1: .windows, 2: .windows])
-    #expect(plan["1"]?.tool == "macneutron")
+    #expect(plan["1"]?.tool == "macneutron-proton")
     #expect(plan["2"]?.tool == "macneutron-native")
 }
 
@@ -53,4 +53,18 @@ func routesByPlatform(oslist: Set<String>, tool: String) {
     let merged = MappingPlanner.merged(existing, with: ["20": ToolMapping(tool: "macneutron", priority: 250)])
     #expect(merged.count == 1)
     #expect(merged.node(at: ["20", "name"])?.stringValue == "proton_9")
+}
+
+@Test func legacyAndNativeEntriesAreOurs() {
+    // With the runtime renamed, "ours" must still cover the old name (so it is migrated) and the Mac-game tool (so a
+    // plan keeps protecting Mac games).
+    let existing = [
+        KVNode.block("1", [.string("name", "macneutron"), .string("config", ""), .string("priority", "250")]),
+        KVNode.block("2", [.string("name", "macneutron-native"), .string("config", ""), .string("priority", "250")]),
+    ]
+    #expect(MappingPlanner.claimedByOtherTools(in: existing).isEmpty)
+    #expect(MappingPlanner.current(in: existing).count == 2)
+    let merged = MappingPlanner.merged(existing, with: ["1": ToolMapping(tool: "macneutron-proton", priority: 250)])
+    #expect(merged.node(at: ["1", "name"])?.stringValue == "macneutron-proton")
+    #expect(merged.node(at: ["2"]) == nil)
 }

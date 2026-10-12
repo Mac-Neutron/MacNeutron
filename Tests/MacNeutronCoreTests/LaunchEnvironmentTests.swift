@@ -89,3 +89,9 @@ private let context = try! CompatContext(environment: ["STEAM_COMPAT_DATA_PATH":
     #expect(forced(GameSettings(anisotropy: "game")) == nil)
     #expect(forced(GameSettings(), ["DXMT_MAX_ANISOTROPY": "0"]) == "0")  // a launch option wins
 }
+
+@Test func steamsProtonFlagIsRemoved() {
+    // Steam sets it for tools named "proton"; the game's environment stays as it was before the rename.
+    let env = LaunchEnvironment.build(base: ["STEAM_COMPAT_PROTON": "1"], context: context, backend: .dxmt, logging: false)
+    #expect(env["STEAM_COMPAT_PROTON"] == nil)
+}

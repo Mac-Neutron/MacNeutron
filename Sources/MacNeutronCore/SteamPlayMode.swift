@@ -13,7 +13,8 @@ public enum SteamPlayStatus: Equatable, Sendable {
 /// Invariant: `steam_dev.cfg` never exists unless both tools resolve through Steam's bundle and every
 /// Mac game is mapped. Writes happen in the order that keeps it true even when interrupted.
 public struct SteamPlayMode: Sendable {
-    public static let runtimeToolName = MappingPlanner.runtimeTool
+    /// The runtime tool's folder and bundle link: the Steam tool name changed (spec D1), the folder didn't.
+    public static let runtimeFolderName = "macneutron"
     public static let nativeToolName = MappingPlanner.nativeTool
     public static let devConfig = "@sSteamCmdForcePlatformType linux\n"
 
@@ -34,7 +35,7 @@ public struct SteamPlayMode: Sendable {
         self.process = process
     }
 
-    var runtimeTool: URL { tools.appending(path: Self.runtimeToolName, directoryHint: .isDirectory) }
+    var runtimeTool: URL { tools.appending(path: Self.runtimeFolderName, directoryHint: .isDirectory) }
     var nativeTool: URL { tools.appending(path: Self.nativeToolName, directoryHint: .isDirectory) }
     func link(_ name: String) -> URL { steam.bundleCompatTools.appending(path: name) }
 
@@ -44,7 +45,7 @@ public struct SteamPlayMode: Sendable {
     /// Everything `enable` writes is still in place (a Steam update can wipe its bundle).
     public var filesIntact: Bool {
         exists(steam.steamDevConfig)
-            && exists(link(Self.runtimeToolName).appending(path: "toolmanifest.vdf"))
+            && exists(link(Self.runtimeFolderName).appending(path: "toolmanifest.vdf"))
             && exists(link(Self.nativeToolName).appending(path: "toolmanifest.vdf"))
     }
 
@@ -76,12 +77,14 @@ public struct SteamPlayMode: Sendable {
         let wasRunning = process.isRunning()
         try await process.quit(timeout: quitTimeout)
         var backup: URL?
+        var migrating = false
         do {
             let plan = try makePlan()
             _ = try readConfig()  // Steam may have rewritten it on exit
             backup = try backupConfig()
             try installNativeTool()
             try linkTools()
+            migrating = try hasLegacyMappings()
             try applyMappings(plan)
             try write(Self.devConfig, to: steam.steamDevConfig)  // last
         } catch {
@@ -98,6 +101,7 @@ public struct SteamPlayMode: Sendable {
             await rollBack(restoring: backup)
             throw SteamPlayError.verificationFailed(problem)
         }
+        finishRename(wasMigrating: migrating)  // after verification: a rollback puts the legacy mappings back
     }
 
     public func disable() async throws {
@@ -117,8 +121,21 @@ public struct SteamPlayMode: Sendable {
         guard isWanted, filesIntact, try pendingChanges(plan: plan) > 0 else { return false }
         let dropped = try currentMappings().filter { $0.value.tool == Self.nativeToolName && plan[$0.key] == nil }
         guard dropped.isEmpty else { throw SteamPlayError.planDropsMacGames(dropped.count) }
+        let migrating = try hasLegacyMappings()
         try applyMappings(plan)
+        finishRename(wasMigrating: migrating)
         return true
+    }
+
+    func hasLegacyMappings() throws -> Bool {
+        try currentMappings().values.contains { $0.tool == MappingPlanner.legacyRuntimeTool }
+    }
+
+    /// After `applyMappings` moved every mapping off the runtime's pre-rename name, Steam no longer needs that name.
+    /// Best effort: a vdf that keeps it costs one more entry in Steam's tool list, never a mapping to a missing tool.
+    func finishRename(wasMigrating: Bool) {
+        guard RuntimeInstaller.registersLegacyName(in: runtimeTool), (try? hasLegacyMappings()) == false else { return }
+        try? RuntimeInstaller.writeCompatibilityTool(in: runtimeTool, legacyName: false)
     }
 
     // MARK: Building blocks
@@ -205,7 +222,7 @@ public struct SteamPlayMode: Sendable {
     func linkTools() throws {
         let fm = FileManager.default
         try fm.createDirectory(at: steam.bundleCompatTools, withIntermediateDirectories: true)
-        for (name, target) in [(Self.runtimeToolName, runtimeTool), (Self.nativeToolName, nativeTool)] {
+        for (name, target) in [(Self.runtimeFolderName, runtimeTool), (Self.nativeToolName, nativeTool)] {
             let url = link(name)
             try? fm.removeItem(at: url)
             try fm.createSymbolicLink(at: url, withDestinationURL: target)
@@ -213,7 +230,7 @@ public struct SteamPlayMode: Sendable {
     }
 
     func unlinkTools() {
-        for name in [Self.runtimeToolName, Self.nativeToolName] { try? FileManager.default.removeItem(at: link(name)) }
+        for name in [Self.runtimeFolderName, Self.nativeToolName] { try? FileManager.default.removeItem(at: link(name)) }
     }
 
     private func rollBack(restoring backup: URL?) async {
@@ -248,10 +265,12 @@ public struct SteamPlayMode: Sendable {
 
     /// nil when a Steam session's compat log shows both tools registered in Linux mode; otherwise the problem.
     static func verify(log: String) -> String? {
-        if log.contains("Ignoring tool \(runtimeToolName)") {
+        if log.contains("Ignoring tool macneutron") {
             return "Steam started as a Mac client and ignored MacNeutron"
         }
-        guard log.contains("Registering tool \(runtimeToolName),"), log.contains("Registering tool \(nativeToolName),") else {
+        // Either name: a Steam session started before the rename registered only the old one.
+        let runtime = [MappingPlanner.runtimeTool, MappingPlanner.legacyRuntimeTool].contains { log.contains("Registering tool \($0),") }
+        guard runtime, log.contains("Registering tool \(nativeToolName),") else {
             return "Steam didn't find MacNeutron's tools"
         }
         guard log.contains("Recording non-user mapping") else {
