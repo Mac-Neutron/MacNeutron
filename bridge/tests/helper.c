@@ -72,6 +72,16 @@ int main(void)
         cmd[ARRAYSIZE(cmd) - 1] = 0;
         return CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi) ? 0 : 2;
     }
+    if (!wcscmp(mode, L"env"))  /* the variables steam.exe sets for the game */
+    {
+        for (i = 2; i < argc; i++)
+        {
+            const WCHAR *value = _wgetenv(argv[i]);
+            fputs("[", stdout); put(value ? value : L""); fputs("]", stdout);
+        }
+        fputs("\n", stdout);
+        return 0;
+    }
     if (!wcscmp(mode, L"breakaway") && argc > 2)  /* a launcher that starts the real game outside any job, then quits */
     {
         WCHAR self[MAX_PATH], cmd[3 * MAX_PATH];
