@@ -1,6 +1,6 @@
 # MacNeutron: Steam Cloud (Auto-Cloud) for Windows games
 
-Status: draft for the maintainer's review (2026-10-11). Nothing in this spec is implemented yet.
+Status: approved by the maintainer (2026-10-11), D1–D6 as recommended. D1 still hangs on protocol step A4.
 
 ## 1. Goal
 
