@@ -73,7 +73,7 @@ Start launch options with `/usr/bin/env`. macOS Steam runs them without a shell,
 | `/usr/bin/env MACNEUTRON_GRAPHICS=dxmt\|wined3d %command%` | Pick the Direct3D backend (default `dxmt`; `wined3d` is Wine's own, Direct3D 9-11 only) |
 | `/usr/bin/env MACNEUTRON_LOG=1 %command%` | Wine log in `~/Library/Logs/MacNeutron/steam-<appid>.log` (Wine's warnings, without exception handling's); `MACNEUTRON_LOG=2` logs those too, and every Steam API call. Past 50 MB the log moves to `steam-<appid>.log.1` at the next launch |
 | `/usr/bin/env MACNEUTRON_NO_MSYNC=1 %command%` | Turn off msync |
-| `/usr/bin/env MACNEUTRON_NO_STEAM_BRIDGE=1 %command%` | Start the game without the Steam bridge (the game then can't reach Steam) |
+| `/usr/bin/env MACNEUTRON_NO_STEAM_BRIDGE=1 %command%` | Start the game without the Steam bridge: no Steam API connection. `steam.exe` stays in the prefix, so the game's `steam://` links still open Mac Steam once a launch with the bridge has registered them |
 | `/usr/bin/env MACNEUTRON_STEAMCLIENT64=builtin %command%` | Put MacNeutron's own Steam bridge in the prefix instead of Valve's signed `steamclient64.dll` (some games with Valve's DRM then stop with "Application load error 3"); `=<path>` names another copy of Valve's DLL |
 | `/usr/bin/env PROTON_SET_GAME_DRIVE=0 %command%` | Show the game its install folder as a `Z:` path, not `S:\steamapps\common\…` (as Proton's option; `MACNEUTRON_NO_STEAM_BRIDGE=1` doesn't change the path) |
 | `/usr/bin/env MACNEUTRON_NO_METALFX=1 %command%` | Don't upscale with MetalFX (macOS then stretches smaller images with its nearest-neighbour filter) |
@@ -152,10 +152,12 @@ when it installs a runtime that can use it, and keeps six of its files in
 contain them. Settings → **Steam components from Valve** shows the version, downloads again or removes them (games then
 get the bridge itself; `MACNEUTRON_STEAMCLIENT64=builtin` does the same for one game).
 
-Game logs (`MACNEUTRON_LOG=1` or `2`) hide your Steam account ID and login name, and any environment variable whose
-name looks like a secret (`…TOKEN…`, `…SECRET…`, `…PASSWORD…`, `…_KEY`); they still contain file paths that name your
-macOS user, and Wine's `steamclient` lines in them (all of its calls with `MACNEUTRON_LOG=2`) can contain your SteamID
-or persona name: check before posting a log publicly.
+Game logs (`MACNEUTRON_LOG=1` or `2`) start with the game's environment, and that listing hides the values of
+`SteamUser` and `SteamAppUser` (where Steam passes your login name) and of any variable whose name contains `TOKEN`,
+`SECRET`, `PASSWORD`, `PASSWD`, `CREDENTIAL`, `AUTH`, `APIKEY` or `API_KEY`, or ends in `_KEY`, in any letter case.
+MacNeutron puts no account ID in the environment. The log still contains file paths that name your macOS user, and
+Wine's `steamclient` lines in it (all of its calls with `MACNEUTRON_LOG=2`) can contain your SteamID or persona name:
+check before posting a log publicly.
 
 ## Upscaling
 
