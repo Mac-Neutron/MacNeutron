@@ -161,6 +161,10 @@ set +e; "$WINE" "$STEAMEXE" "$HELPER" restart "$(winpath "$WORK/starts.txt")" 6 
 expect "a game restarting itself through steam:// restarts in place" \
   "$got $(tr -d '\r' < "$WORK/starts.txt" 2>/dev/null || true)" "6 2"
 expect "... and Mac Steam isn't asked to launch it" "$(opened)" ""
+# Not a game process: no libraryfolders.vdf (Proton's gate).
+rm -f "$STEAM/steamapps/libraryfolders.vdf"
+env -u SteamGameId STEAM_COMPAT_LIBRARY_PATHS="$WORK/steamapps" "$WINE" "$STEAMEXE" "$HELPER" exit 0 >/dev/null 2>&1 || true
+expect "without SteamGameId no libraryfolders.vdf" "$([ -e "$STEAM/steamapps/libraryfolders.vdf" ] && echo yes || echo no)" no
 
 # The same rows through the tool folder's launcher, as Steam starts a game: the launcher copies steam.exe and starts
 # the game through it. A fake language: the launcher would fill in the real one from registry.vdf, which also holds the
@@ -237,16 +241,19 @@ if [ -n "$COMPAT" ]; then
   set +e; L waitforexitandrun "$WORK/game dir/run.bat" >/dev/null 2>&1; got=$?; set -e
   expect "launcher: a .bat target runs through ShellExecute and exits 0" \
     "$got $(tr -d '\r' < "$WORK/game dir/marker.txt" 2>/dev/null || true)" "0 marker"
-  # The rest of Proton's setup_steam_files, written by the launcher with the bridge: Steam's config folder, and
-  # libraryfolders.vdf with each library of STEAM_COMPAT_LIBRARY_PATHS (its steamapps folder's parent).
+  # Proton's setup_steam_files, in steam.exe for a game process: Steam's config folder (CEG looks for it) and
+  # libraryfolders.vdf, each library of STEAM_COMPAT_LIBRARY_PATHS as the game sees it: S:\ for the game's library.
+  # Leaving out STEAM_COMPAT_CLIENT_INSTALL_PATH (Proton's entry 0): on a Mac that's the Steam bundle, no library (D-8).
   rm -rf "$STEAM/steamapps/libraryfolders.vdf" "$STEAM/config"
-  (export STEAM_COMPAT_LIBRARY_PATHS="$WORK/library ü/steamapps:/Volumes/Game Drive/SteamLibrary/steamapps/"
-    L waitforexitandrun "$GAME" exit 0 >/dev/null 2>&1) || true
-  lib=$(winpath "$WORK/library ü" | sed 's/\\/\\\\/g')
-  expect "launcher: libraryfolders.vdf names Steam's libraries" \
-    "$(cat "$STEAM/steamapps/libraryfolders.vdf" 2>/dev/null || true)" \
-    "$(printf '"LibraryFolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n\t"1"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}' \
-      "$lib" 'Z:\\Volumes\\Game Drive\\SteamLibrary')"
+  (export STEAM_COMPAT_LIBRARY_PATHS="$SLIB/steamapps:$WORK/library ü/steamapps:/Volumes/Game Drive/SteamLibrary/steamapps/"
+    export STEAM_COMPAT_INSTALL_PATH="$SLIB/steamapps/common/Game"
+    L waitforexitandrun "$SLIB/steamapps/common/Game/hélper.exe" exit 0 >/dev/null 2>&1) || true
+  # Wine keeps the path's /var (no /private) and collapses $TMPDIR's double slash.
+  lib=$(winpath "$(printf '%s' "$WORK" | sed 's#//*#/#g')/library ü" | sed 's/\\/\\\\/g')
+  expect "launcher: libraryfolders.vdf names Steam's libraries as the game sees them" \
+    "$(tr -d '\r' < "$STEAM/steamapps/libraryfolders.vdf" 2>/dev/null || true)" \
+    "$(printf '"LibraryFolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n\t"1"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n\t"2"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}' \
+      'S:\\' "$lib" 'Z:\\Volumes\\Game Drive\\SteamLibrary')"
   expect "launcher: Steam's config folder exists" "$([ -d "$STEAM/config" ] && echo yes || echo no)" yes
 fi
 

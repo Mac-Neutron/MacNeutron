@@ -47,6 +47,7 @@
 #include <objbase.h>
 #include <shellapi.h>
 #include <shlwapi.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -69,6 +70,25 @@ static WCHAR *wine_get_dos_file_name(const char *path)
 
     if (!convert) convert = (void *)GetProcAddress(GetModuleHandleW(L"kernel32"), "wine_get_dos_file_name");
     return convert ? convert(path) : NULL;
+}
+
+/* An environment variable in Wine's Unix code page (UTF-8), as wine_get_dos_file_name takes paths; malloc'd, or NULL.
+ * getenv gives the Windows code page instead, which mangles a non-ASCII path ("Lib Ünï"): Wine's lookup then stalls on
+ * it (seen in bridge/check.sh). Proton's setup_steam_files uses getenv; this is hardening over it. */
+static char *getenv_unix(const WCHAR *name)
+{
+    WCHAR *wide;
+    char *value = NULL;
+    DWORD len;
+    int size;
+
+    if (!(len = GetEnvironmentVariableW(name, NULL, 0)) || !(wide = malloc(len * sizeof(WCHAR)))) return NULL;
+    if (GetEnvironmentVariableW(name, wide, len) < len
+        && (size = WideCharToMultiByte(CP_UNIXCP, 0, wide, -1, NULL, 0, NULL, NULL))
+        && (value = malloc(size)))
+        WideCharToMultiByte(CP_UNIXCP, 0, wide, -1, value, size, NULL, NULL);
+    free(wide);
+    return value;
 }
 
 /* Proton's env_nonzero: set, and its first character isn't 0. */
@@ -552,6 +572,131 @@ run:
     }
 }
 
+/* From here to setup_steam_files: Proton's write_file, escape_path_unix_to_dos, strappend and setup_steam_files. */
+static void write_file(const WCHAR *filename, const char *data, size_t len)
+{
+    DWORD written;
+    HANDLE file;
+
+    file = CreateFileW(filename, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) ERR("Could not open %ls.\n", filename);
+    else
+    {
+        if (!WriteFile(file, data, len, &written, NULL)) ERR("Could not write to %ls.\n", filename);
+        CloseHandle(file);
+    }
+}
+
+/* A Unix path as KeyValues text: its DOS path (S: for the game's library), backslashes doubled, UTF-8. */
+static char *escape_path_unix_to_dos(const char *path)
+{
+    WCHAR *dos, *tmp = NULL, *src, *dst;
+    char *escaped = NULL;
+    UINT len;
+
+    if (!(dos = wine_get_dos_file_name(path)) || !(len = wcslen(dos))) goto done;
+    if (!(tmp = malloc((len * 2 + 1) * sizeof(*tmp)))) goto done;
+    for (src = dos, dst = tmp; *src; src++, dst++) if ((*dst = *src) == '\\') *++dst = '\\';
+    if (!(len = WideCharToMultiByte(CP_UTF8, 0, tmp, (dst - tmp), NULL, 0, NULL, NULL))) goto done;
+    if ((escaped = malloc(len + 1)))
+    {
+        WideCharToMultiByte(CP_UTF8, 0, tmp, (dst - tmp), escaped, len, NULL, NULL);
+        escaped[len] = '\0';
+    }
+done:
+    HeapFree(GetProcessHeap(), 0, dos);
+    free(tmp);
+    return escaped;
+}
+
+static size_t strappend(char **buf, size_t *buf_size, size_t pos, const char *fmt, ...)
+{
+    size_t size;
+    va_list ap;
+    char *ptr;
+    int n;
+
+    if (*buf)
+    {
+        size = *buf_size;
+        ptr = *buf;
+    }
+    else
+    {
+        size = 100;
+        ptr = malloc(size);
+    }
+    for (;;)
+    {
+        va_start(ap, fmt);
+        n = vsnprintf(ptr + pos, size - pos, fmt, ap);
+        va_end(ap);
+        if (n == -1) size *= 2;
+        else if (pos + (size_t)n >= size) size = pos + n + 1;
+        else break;
+        ptr = realloc(ptr, size);
+    }
+    *buf_size = size;
+    *buf = ptr;
+    return n;
+}
+
+/* Steam's config folder, which CEG looks for, and steamapps\libraryfolders.vdf, which the 2K Launcher and mod managers
+ * read: one entry per STEAM_COMPAT_LIBRARY_PATHS item, its steamapps folder's parent, as the game sees it. */
+static void setup_steam_files(void)
+{
+    char *steam_library_paths;
+    const char *start, *end, *next;
+    size_t buf_size = 0, pos = 0;
+    char *buf = NULL, *str;
+    unsigned int index = 0;
+
+    if (!CreateDirectoryW(STEAM_DIR L"\\config", NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
+    {
+        ERR("Failed to create config directory, GetLastError() %lu.\n", GetLastError());
+        return;
+    }
+    if (!CreateDirectoryW(STEAM_DIR L"\\steamapps", NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
+    {
+        ERR("Failed to create steamapps directory, GetLastError() %lu.\n", GetLastError());
+        return;
+    }
+    steam_library_paths = getenv_unix(L"STEAM_COMPAT_LIBRARY_PATHS");
+    pos += strappend(&buf, &buf_size, pos, "\"LibraryFolders\"\n{\n");
+    /* Proton lists STEAM_COMPAT_CLIENT_INSTALL_PATH first; on macOS that is the Steam bundle's MacOS folder, which holds
+     * no library (D-8). */
+    start = steam_library_paths;
+    while (start && *start)
+    {
+        char *path;
+
+        if (!(next = strchr(start, ':'))) next = start + strlen(start);
+        end = next;
+        if (end != start && end[-1] == '/') --end;
+        while (end != start && end[-1] != '/') --end;
+        /* An empty item ("a::b") or one without a /: Proton copies nothing into an uninitialised buffer there. */
+        if (end != start)
+        {
+            path = malloc(end - start + 1);
+            lstrcpynA(path, start, end - start);
+            if (!(str = escape_path_unix_to_dos(path))) ERR("Could not convert %s to win path.\n", path);
+            else
+            {
+                pos += strappend(&buf, &buf_size, pos, "\t\"%u\"\n\t{\n\t\t\"path\"\t\t\"%s\"\n\t}\n", index, str);
+                ++index;
+                free(str);
+            }
+            free(path);
+        }
+        if (*next == ':') ++next;
+        start = next;
+    }
+    pos += strappend(&buf, &buf_size, pos, "}\n");
+    write_file(STEAM_DIR L"\\steamapps\\libraryfolders.vdf", buf, pos);
+    free(buf);
+    free(steam_library_paths);
+}
+
 /* Proton's dummy Steam windows, which games look for with FindWindow (hidden: WS_POPUP, never shown). */
 static DWORD WINAPI create_steam_windows(void *arg)
 {
@@ -696,6 +841,7 @@ int main(int argc, char *argv[])
         GetModuleFileNameW(NULL, path, ARRAYSIZE(path));
         for (p = path; *p; ++p) if (*p == '\\') *p = '/';
         SetEnvironmentVariableW(L"ValvePlatformMutex", path);
+        setup_steam_files();
         if (env_nonzero("PROTON_WAIT_ATTACH"))
             while (!IsDebuggerPresent() && !is_ptraced()) Sleep(100);
         game_process = TRUE;

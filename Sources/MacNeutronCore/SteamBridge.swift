@@ -14,11 +14,6 @@ public enum SteamBridge {
         ["311210", "1985810", "1549250"].contains(gameID ?? "") ? programFilesSteamExe : steamExe
     }
 
-    /// `Z:` is Wine's mapping of `/`; Windows paths pass through.
-    public static func windowsPath(_ path: String) -> String {
-        path.hasPrefix("/") ? "Z:" + path.replacingOccurrences(of: "/", with: #"\"#) : path
-    }
-
     /// The folder `steam.exe` names in the registry, relative to the prefix.
     static let prefixFolder = "drive_c/Program Files (x86)/Steam"
 
@@ -32,22 +27,6 @@ public enum SteamBridge {
         [(layout.steamHelper, "drive_c/windows/system32/steam.exe"),
          (layout.steamHelper, "\(prefixFolder)/steam.exe"),
          (steamClient64 ?? layout.lsteamclient, "\(prefixFolder)/steamclient64.dll")]
-    }
-
-    /// `steamapps/libraryfolders.vdf` as Proton's steam.exe writes it at every launch (setup_steam_files): the 2K
-    /// Launcher and mod managers find the games through it. One library per `STEAM_COMPAT_LIBRARY_PATHS` entry, a
-    /// `steamapps` folder whose parent is the library, in Proton's spelling and layout. Proton lists
-    /// `STEAM_COMPAT_CLIENT_INSTALL_PATH` first: on macOS that's the Steam bundle's MacOS folder, no library, so it's left
-    /// out.
-    static func libraryFolders(steamapps: String) -> String {
-        let libraries = steamapps.split(separator: ":").compactMap { entry -> String? in
-            let path = entry.hasSuffix("/") ? entry.dropLast() : entry
-            guard let slash = path.lastIndex(of: "/"), slash > path.startIndex else { return nil }
-            return windowsPath(String(path[..<slash]))
-        }
-        return KeyValues.serialize([.block("LibraryFolders", libraries.enumerated().map {
-            .block(String($0.offset), [.string("path", $0.element)])
-        })])
     }
 
     /// Steam's `STEAM_COMPAT_CLIENT_INSTALL_PATH` when that folder holds `steamclient.dylib`,

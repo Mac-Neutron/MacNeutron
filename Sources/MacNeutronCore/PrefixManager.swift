@@ -96,10 +96,7 @@ public struct PrefixManager: Sendable {
             for note in links.notes { log.append("note: \(note)") }
             // Proton's game drive (setup_prefix, proton:1259): every preparation, with the bridge or without.
             for note in GameDrive.apply(prefix: context.prefix, environment: environment) { log.append("note: \(note)") }
-            if steamBridge {
-                try deploySteamBridge(environment: environment)
-                writeSteamFiles(environment: environment)
-            }
+            if steamBridge { try deploySteamBridge(environment: environment) }
             return links
         }
     }
@@ -236,19 +233,6 @@ public struct PrefixManager: Sendable {
         }
         log.append("note: steamclient64.dll from Valve's client \(valve.version) (\(valve.steamClient64.path(percentEncoded: false)))")
         return valve.steamClient64
-    }
-
-    /// The rest of Proton's setup_steam_files: Steam's `config` folder, which CEG checks for, and
-    /// `steamapps/libraryfolders.vdf`. Best effort: a game starts without them. `removeSteamBridge` leaves them, as
-    /// Proton never removes them.
-    private func writeSteamFiles(environment: [String: String]) {
-        let steam = context.prefix.appending(path: SteamBridge.prefixFolder, directoryHint: .isDirectory)
-        for folder in ["config", "steamapps"] {
-            try? FileManager.default.createDirectory(at: steam.appending(path: folder), withIntermediateDirectories: true)
-        }
-        guard let paths = environment["STEAM_COMPAT_LIBRARY_PATHS"] else { return }
-        try? SteamBridge.libraryFolders(steamapps: paths)
-            .write(to: steam.appending(path: "steamapps/libraryfolders.vdf"), atomically: true, encoding: .utf8)
     }
 
     /// For a game started without the bridge (launch option, or a runtime without it): its steam_api
