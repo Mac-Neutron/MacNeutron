@@ -188,6 +188,11 @@ if [ -n "$release" ]; then
   out=$(build_paths "$APP")
   [ -z "$out" ] || die "files naming the repository, build or home folder (the first ten): $(echo "$out" | tr '\n' ' ')"
 fi
+# Wine 0036 (a genuine steamclient64.dll's exports jump to lsteamclient): the launcher deploys Valve's DLL only to a
+# runtime that says so (ToolLayout.supportsGenuineSteamclient). Read from the tree this bundle is built from.
+if LC_ALL=C /usr/bin/grep -q setup_steamclient_trampolines "$B/wine-arm64-src/wine/dlls/ntdll/loader.c"; then
+  echo 0036 > "$R/genuine-steamclient"
+fi
 
 # 2. Sign: everything but the loader, then the bundle with the entitlements, which land on the loader alone.
 macho | grep -vxF "$LOADER" | tr '\n' '\0' \

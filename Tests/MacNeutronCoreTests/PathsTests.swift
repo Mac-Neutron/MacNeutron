@@ -41,6 +41,20 @@ import Testing
     #expect(layout.runtimeDamagedMarker.path(percentEncoded: false) == "/t/macneutron/runtime-damaged")
 }
 
+@Test func valveCacheSitsBesideTheToolFolders() {
+    // ~/Library/Application Support/MacNeutron/{compatibilitytools.d/macneutron, Valve}
+    #expect(ToolLayout(root: ToolLayout.defaultRoot).valveCache.path(percentEncoded: false)
+        == FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/Application Support/MacNeutron/Valve", directoryHint: .isDirectory).path(percentEncoded: false))
+}
+
+@Test func genuineSteamclientSupportIsTheRuntimesMarker() throws {
+    let layout = try makeToolLayout()
+    #expect(!layout.supportsGenuineSteamclient)
+    try write("0036\n", to: layout.wineApp.appending(path: "Contents/Resources/genuine-steamclient"))
+    #expect(layout.supportsGenuineSteamclient)
+}
+
 @Test func layoutFromExecutableIsTwoLevelsUp() {
     let layout = ToolLayout(executable: URL(filePath: "/t/macneutron/bin/macneutron"))
     #expect(layout.root.path(percentEncoded: false).hasSuffix("/t/macneutron/"))

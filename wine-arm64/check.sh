@@ -6,8 +6,8 @@
 # (tools/freeze-rosetta-reference.sh; MACNEUTRON_REFERENCE names another), run by its own launcher. dxmt-x64's FSR 3 check needs SMITE 2 installed
 # (Steam): its amd_fidelityfx_dx12.dll, read from the game's install, never copied. steam-bridge needs `make bridge`,
 # Steam running and logged in, and SMITE 2 installed (its steam_api64.dll, read in place). steamclient needs Valve's signed
-# steamclient64.dll at build/valve/steamclient64.dll (never in the repo; VALVE_STEAMCLIENT64 names another) and prints
-# a skip line without it.
+# steamclient64.dll at build/valve/steamclient64.dll (never in the repo; VALVE_STEAMCLIENT64 names another), or the
+# app's download of it, and prints a skip line without one.
 # Every run starts fresh: a new clone of the staged bundle, a new prefix. The clone sits at a path with a space, as the
 # app installs it. A step that needs a prefix gets one from `boot`, which runs first if it isn't named.
 # Nothing of the runtime is left after the script exits, whatever the reason: the last line is PASS or FAIL orphans.
@@ -803,11 +803,16 @@ crt_cmd() {
 # then the bundle's lsteamclient.dll copied under the same name, which the loader must leave alone. Wine's trace+module
 # lines show whose DllMain ran: lsteamclient.dll's (the control) and the builtin copy's, never the genuine one's.
 STEAMCLIENT64="${VALVE_STEAMCLIENT64:-$B/valve/steamclient64.dll}"
+# Then the copy the app downloaded from Valve (ValveClient), after build/valve.
+[ -f "$STEAMCLIENT64" ] || STEAMCLIENT64=$(ls -d "$HOME/Library/Application Support/MacNeutron/Valve/"[0-9]*/steamclient64.dll \
+  2> /dev/null | tail -n 1)
 dllmain_calls() {
   tr -d '\r' < "$WORK/x64-steamclient.err" | LC_ALL=C /usr/bin/grep -c "L\"$1\",PROCESS_ATTACH,.*) - CALL" || true
 }
 steamclient_cmd() {
   [ -f "$STEAMCLIENT64" ] || { echo "skip steamclient: no genuine steamclient64.dll at $STEAMCLIENT64"; return 0; }
+  [ -f "$TOOL/Contents/Resources/genuine-steamclient" ] \
+    || { echo "FAIL steamclient: wine.app has no genuine-steamclient marker (bundle.sh writes it with Wine 0036)"; return 1; }
   d="$WORK/steamclient"
   mkdir -p "$d/genuine" "$d/builtin"
   cp "$STEAMCLIENT64" "$d/genuine/steamclient64.dll"

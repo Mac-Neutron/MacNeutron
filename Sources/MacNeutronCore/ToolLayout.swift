@@ -47,6 +47,18 @@ public struct ToolLayout: Equatable, Sendable {
             .allSatisfy { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }
     }
 
+    /// Written by `bundle.sh` when the runtime has Wine 0036, which makes a genuine `steamclient64.dll`'s exports jump to
+    /// lsteamclient. An older runtime would fail to load Valve's DLL (its `tier0_s64` import), so the game gets no Steam.
+    public var supportsGenuineSteamclient: Bool {
+        FileManager.default.fileExists(atPath: resources.appending(path: "genuine-steamclient").path(percentEncoded: false))
+    }
+
+    /// `MacNeutron/Valve`, beside `MacNeutron/compatibilitytools.d`: Valve's Windows client files, downloaded by the app
+    /// from Valve (`ValveClient`).
+    public var valveCache: URL {
+        root.deletingLastPathComponent().deletingLastPathComponent().appending(path: "Valve", directoryHint: .isDirectory)
+    }
+
     /// Written by a launch that finds `wine.app` missing or unreadable; the app then reinstalls it.
     public var runtimeDamagedMarker: URL { root.appending(path: "runtime-damaged") }
 

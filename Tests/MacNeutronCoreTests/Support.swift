@@ -75,7 +75,8 @@ func winebootCreatingPrefix(status: Int32 = 0, delay: TimeInterval = 0) -> FakeR
 /// A tool folder with a fake, unsigned `wine.app`: executable wine/wineserver, DXMT's DLLs, translator key and replayer,
 /// both halves of lsteamclient, and `CFBundleShortVersionString` `test`. Tests that launch inject the identity.
 func makeToolLayout() throws -> ToolLayout {
-    let layout = ToolLayout(root: try makeTempDir().appending(path: "macneutron", directoryHint: .isDirectory))
+    // The installed shape, MacNeutron/compatibilitytools.d/macneutron: `valveCache` is then this test's own folder.
+    let layout = ToolLayout(root: try makeTempDir().appending(path: "compatibilitytools.d/macneutron", directoryHint: .isDirectory))
     try write("#!/bin/sh\n", to: layout.wine, executable: true)
     try write("#!/bin/sh\n", to: layout.wineserver, executable: true)
     let plist = ["CFBundleExecutable": "wine", "CFBundleShortVersionString": "test"]
