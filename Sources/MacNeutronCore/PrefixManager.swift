@@ -256,7 +256,8 @@ public struct PrefixManager: Sendable {
     /// then abort the game. Without these files the game just finds no Steam.
     public func removeSteamBridge() throws {
         try withFileLock(at: context.lockFile) {
-            for name in ["steam.exe", "steamclient64.dll", "steamclient.dll"] {
+            // steam.exe stays: HKCR\steam sends the game's steam:// links through it to Mac Steam (parity plan R10).
+            for name in ["steamclient64.dll", "steamclient.dll"] {
                 try? FileManager.default.removeItem(at: context.prefix.appending(path: "\(SteamBridge.prefixFolder)/\(name)"))
             }
         }

@@ -238,7 +238,7 @@ private func i386Exe(named name: String) throws -> String {
     #expect(f.launcher.launch(["waitforexitandrun", "/Steam Library/My Game/Game.exe", "-windowed"], environment: f.env) == 0)
     let game = try #require(f.runner.calls.first { $0.arguments.first == SteamBridge.steamExe })
     // The game's macOS path, raw: steam.exe converts it (Proton's run_process), to S: in a Steam library.
-    #expect(game.arguments == [#"C:\Program Files (x86)\Steam\steam.exe"#, "/Steam Library/My Game/Game.exe", "-windowed"])
+    #expect(game.arguments == [#"C:\windows\system32\steam.exe"#, "/Steam Library/My Game/Game.exe", "-windowed"])
     #expect(game.environment["STEAM_COMPAT_CLIENT_INSTALL_PATH"]
         == String(f.launcher.steam.bundleMacOS.path(percentEncoded: false).dropLast()))
     #expect(game.environment["MACNEUTRON_STEAM_ACCOUNT"] == nil)  // Proton writes no ActiveUser (parity L2)
@@ -290,6 +290,35 @@ private func i386Exe(named name: String) throws -> String {
     #expect(f.launcherLog.contains("note: steamclient.dylib not found in"))
 }
 
+@Test func threeGamesRunSteamExeFromTheSteamFolder() throws {
+    // Proton runs C:\windows\system32\steam.exe, except for three games it runs from the Steam folder (proton:2109-2115),
+    // keyed on SteamGameId.
+    let expected = ["311210": #"C:\Program Files (x86)\Steam\steam.exe"#, "1985810": #"C:\Program Files (x86)\Steam\steam.exe"#,
+                    "1549250": #"C:\Program Files (x86)\Steam\steam.exe"#, "480": #"C:\windows\system32\steam.exe"#]
+    for (id, path) in expected {
+        let f = try makeFixture(bridge: true)
+        var env = f.env
+        env["SteamGameId"] = id
+        _ = f.launcher.launch(["waitforexitandrun", "/g/Game.exe"], environment: env)
+        let game = f.runner.calls.first { $0.arguments.first?.hasSuffix(#"\steam.exe"#) == true }
+        #expect(game?.arguments.first == path, "SteamGameId \(id)")
+    }
+}
+
+@Test func escapeHatchKeepsSteamExeForSteamLinks() throws {
+    // The game's steam:// links go through HKCR\steam to the Steam folder's steam.exe: without the bridge they still
+    // reach Mac Steam (parity plan R10).
+    let f = try makeFixture(bridge: true)
+    _ = f.launcher.launch(["run", "/g/Game.exe"], environment: f.env)
+    var env = f.env
+    env["MACNEUTRON_NO_STEAM_BRIDGE"] = "1"
+    _ = f.launcher.launch(["run", "/g/Game.exe"], environment: env)
+    let prefix = try CompatContext(environment: f.env).prefix
+    for path in ["drive_c/Program Files (x86)/Steam/steam.exe", "drive_c/windows/system32/steam.exe"] {
+        #expect(FileManager.default.fileExists(atPath: prefix.appending(path: path).path(percentEncoded: false)), "\(path)")
+    }
+}
+
 @Test func escapeHatchTakesTheBridgeOutOfThePrefix() throws {
     // Seen in acceptance: a game's steam_api loads the client DLL an earlier launch left (its registry
     // values persist), and without Steam's client path the bridge aborts the game. Without the files,
@@ -301,7 +330,7 @@ private func i386Exe(named name: String) throws -> String {
     var env = f.env
     env["MACNEUTRON_NO_STEAM_BRIDGE"] = "1"
     _ = f.launcher.launch(["run", "/g/Game.exe"], environment: env)
-    for name in ["steam.exe", "steamclient64.dll", "steamclient.dll"] {
+    for name in ["steamclient64.dll", "steamclient.dll"] {
         #expect(!FileManager.default.fileExists(atPath: folder.appending(path: name).path(percentEncoded: false)))
     }
 }

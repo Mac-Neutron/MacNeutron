@@ -218,6 +218,9 @@ private func steamFolder(_ manager: PrefixManager) -> URL {
     #expect(try String(contentsOf: folder.appending(path: "steam.exe"), encoding: .utf8) == "steam.exe")
     #expect(try String(contentsOf: folder.appending(path: "steamclient64.dll"), encoding: .utf8) == "lsteamclient aarch64")
     #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "steamclient.dll").path(percentEncoded: false)))
+    // Proton's launch path, C:\windows\system32\steam.exe; the Steam folder's copy stays for HKCR\steam.
+    #expect(try String(contentsOf: manager.context.prefix.appending(path: "drive_c/windows/system32/steam.exe"),
+                       encoding: .utf8) == "steam.exe")
 }
 
 @Test func steamFilesComeWithTheBridge() throws {

@@ -64,6 +64,11 @@ chmod +x "$WORK/bin/open"
   || { echo "check: can't point winebrowser at the stand-in open" >&2; exit 1; }
 
 steam() { "$WINE" "$STEAMEXE" "$HELPER" "$@" 2>/dev/null | tr -d '\r'; }
+# What the stand-in open got: winebrowser starts it without waiting, so wait for it a little.
+opened() {
+  i=0; while [ ! -s "$WORK/open.txt" ] && [ "$i" -lt 10 ]; do sleep 0.5; i=$((i + 1)); done
+  tr -d '\r' < "$WORK/open.txt" 2>/dev/null || true
+}
 fail=0
 expect() { # name got want
   # printf, not echo: sh's echo reads the backslashes of Windows paths as escapes.
@@ -127,8 +132,7 @@ expect "the game's Apps key and Steam's language" "$(SteamAppId=$$ MACNEUTRON_ST
 rm -f "$WORK/open.txt"
 "$WINE" reg delete 'HKCR\steam' /f >/dev/null 2>&1 || true  # an earlier run's handler
 expect "a game's steam:// link opens" "$(steam url steam://store/480)" "url ok"
-i=0; while [ ! -s "$WORK/open.txt" ] && [ "$i" -lt 10 ]; do sleep 0.5; i=$((i + 1)); done  # winebrowser doesn't wait
-expect "... and goes to macOS Steam through open(1)" "$(cat "$WORK/open.txt" 2>/dev/null || true)" "steam://store/480"
+expect "... and goes to macOS Steam through open(1)" "$(opened)" "steam://store/480"
 # Under a terminal Wine gives steam.exe a console host, which waits for steam.exe to leave while steam.exe waits for
 # every program in the prefix to end: steam.exe must leave its console (FreeConsole). script(1) supplies the terminal.
 tty_steam() {
@@ -150,6 +154,13 @@ if [ -n "$COMPAT" ]; then
   set +e; L waitforexitandrun "$GAME" exit 7 >/dev/null 2>&1; got=$?; set -e
   expect "launcher: exit code passes through" "$got" 7
   expect "launcher: arguments arrive unchanged" "$(lsteam args 'a b' '--name="Player One"' '')" '[a b][--name="Player One"][]'
+  expect "launcher: ValvePlatformMutex names the steam.exe it runs, system32's (Proton's)" \
+    "$(lsteam env ValvePlatformMutex)" '[C:/windows/system32/steam.exe]'
+  # With the bridge off a game's steam:// link still reaches Mac Steam: steam.exe stays in the prefix (plan R10).
+  lsteam exit 0 >/dev/null
+  rm -f "$WORK/open.txt"
+  (export MACNEUTRON_NO_STEAM_BRIDGE=1; L waitforexitandrun "$GAME" url steam://store/480 >/dev/null 2>&1) || true
+  expect "launcher: with the bridge off, a game's steam:// link still opens Mac Steam" "$(opened)" "steam://store/480"
   expect "launcher: registry names a live Steam" "$(lsteam steam)" \
     'alive=1 client64=C:\Program Files (x86)\Steam\steamclient64.dll'
   rm -f "$WORK/late.txt"
@@ -171,16 +182,17 @@ if [ -n "$COMPAT" ]; then
     cp "$B/tests/helper.exe" "$d/common/Game/hélper.exe"
     cp "$B/tests/helper-console.exe" "$d/common/Game/helper-console.exe"
   done
-  # lib <steamapps folder> <exe> [args...]: the game <steamapps>/common/Game/<exe>, started as Steam starts it.
+  # lib <steamapps folder> <exe> [args...]: the game <steamapps>/common/Game/<exe>, started as Steam starts it. In a
+  # subshell: sh keeps an assignment made before a function call after the call.
   lib() {
     a=$1 e=$2; shift 2
-    STEAM_COMPAT_LIBRARY_PATHS="$a" STEAM_COMPAT_INSTALL_PATH="$a/common/Game" \
-      L waitforexitandrun "$a/common/Game/$e" "$@" 2>/dev/null | tr -d '\r'
+    (export STEAM_COMPAT_LIBRARY_PATHS="$a" STEAM_COMPAT_INSTALL_PATH="$a/common/Game"
+      L waitforexitandrun "$a/common/Game/$e" "$@" 2>/dev/null) | tr -d '\r'
   }
   lib_status() {
     a=$1 e=$2; shift 2
-    set +e; STEAM_COMPAT_LIBRARY_PATHS="$a" STEAM_COMPAT_INSTALL_PATH="$a/common/Game" \
-      L waitforexitandrun "$a/common/Game/$e" "$@" >/dev/null 2>&1; s=$?; set -e; echo "$s"
+    set +e; (export STEAM_COMPAT_LIBRARY_PATHS="$a" STEAM_COMPAT_INSTALL_PATH="$a/common/Game"
+      L waitforexitandrun "$a/common/Game/$e" "$@" >/dev/null 2>&1); s=$?; set -e; echo "$s"
   }
   expect "launcher: a game in a library runs from S:" "$(lib "$SLIB/steamapps" hélper.exe module)" \
     'S:\steamapps\common\Game\hélper.exe'
@@ -209,8 +221,8 @@ if [ -n "$COMPAT" ]; then
   # The rest of Proton's setup_steam_files, written by the launcher with the bridge: Steam's config folder, and
   # libraryfolders.vdf with each library of STEAM_COMPAT_LIBRARY_PATHS (its steamapps folder's parent).
   rm -rf "$STEAM/steamapps/libraryfolders.vdf" "$STEAM/config"
-  STEAM_COMPAT_LIBRARY_PATHS="$WORK/library ü/steamapps:/Volumes/Game Drive/SteamLibrary/steamapps/" \
-    L waitforexitandrun "$GAME" exit 0 >/dev/null 2>&1 || true
+  (export STEAM_COMPAT_LIBRARY_PATHS="$WORK/library ü/steamapps:/Volumes/Game Drive/SteamLibrary/steamapps/"
+    L waitforexitandrun "$GAME" exit 0 >/dev/null 2>&1) || true
   lib=$(winpath "$WORK/library ü" | sed 's/\\/\\\\/g')
   expect "launcher: libraryfolders.vdf names Steam's libraries" \
     "$(cat "$STEAM/steamapps/libraryfolders.vdf" 2>/dev/null || true)" \

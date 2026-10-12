@@ -3,8 +3,16 @@ import Foundation
 /// Where the Steam bridge lives inside a prefix, and the small decisions the launcher makes about it.
 /// The bridge itself (Proton's lsteamclient) ships with the runtime; `steam.exe` ships with MacNeutron.
 public enum SteamBridge {
-    /// `steam.exe` inside every prefix.
-    public static let steamExe = #"C:\Program Files (x86)\Steam\steam.exe"#
+    /// The `steam.exe` the launcher runs: Proton's, in `system32` (proton:2121-2122).
+    public static let steamExe = #"C:\windows\system32\steam.exe"#
+    /// The Steam folder's copy, which `HKCR\steam` names and which three games run (proton:2109-2115).
+    public static let programFilesSteamExe = #"C:\Program Files (x86)\Steam\steam.exe"#
+
+    /// `steam.exe` as Proton runs it for `gameID` (SteamGameId): from the Steam folder for Call of Duty: Black Ops III,
+    /// Black Ops Cold War and Undecember. Only the location: Proton's 32-bit helper there needs WoW64 (parity D-14).
+    public static func steamExe(forGameID gameID: String?) -> String {
+        ["311210", "1985810", "1549250"].contains(gameID ?? "") ? programFilesSteamExe : steamExe
+    }
 
     /// `Z:` is Wine's mapping of `/`; Windows paths pass through.
     public static func windowsPath(_ path: String) -> String {
@@ -21,7 +29,8 @@ public enum SteamBridge {
 
     /// What the launcher copies into a prefix: (source, destination relative to the prefix).
     static func prefixFiles(layout: ToolLayout, steamClient64: URL? = nil) -> [(URL, String)] {
-        [(layout.steamHelper, "\(prefixFolder)/steam.exe"),
+        [(layout.steamHelper, "drive_c/windows/system32/steam.exe"),
+         (layout.steamHelper, "\(prefixFolder)/steam.exe"),
          (steamClient64 ?? layout.lsteamclient, "\(prefixFolder)/steamclient64.dll")]
     }
 
