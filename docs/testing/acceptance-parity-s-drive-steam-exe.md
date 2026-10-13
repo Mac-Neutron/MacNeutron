@@ -36,21 +36,22 @@ bridge spec's Amendment 2 (D-1 to D-34).
    are read as UTF-8. Proton's `getenv` mangled a non-ASCII path and stalled Wine's lookup; the check hung there twice
    before the fix.
 7. **Final review fixes** (859e09b, e11fd38 and the commits after them):
-   - `GameDrive` checks the `steamapps` name as Python's `realpath` gives it: the entry as Steam spells it, or a link's
-     text, hop by hop. Darwin's `realpath(3)` returns the on-disk case, so a legacy on-disk `SteamApps` folder that Mac
+   - `GameDrive` checks the `steamapps` name as Python's `realpath` gives it: the entry as Steam spells it, a link's
+     text hop by hop, `.` dropped and `..` taken back. Darwin's `realpath(3)` returns the on-disk case, so a legacy on-disk `SteamApps` folder that Mac
      Steam passes as `.../steamapps` failed the check, and every game in that library got Proton's fallback
-     (`S:\common\<Game>`). Parity with Proton; two tests pin it.
+     (`S:\common\<Game>`). Parity with Proton; Swift tests pin it.
    - `steam.exe -applaunch <id> <arguments>` forwards `steam://run/<id>//<arguments>/`, not `steam://rungameid/<id>`
      with the arguments dropped: each argument spelled as a Windows command line spells it, percent-encoded as UTF-8
      (D-12). `-applaunch <id>` alone still forwards `steam://rungameid/<id>`.
    - Source SDK's `-game` fixup also converts a quoted path (every path under `~/Library/Application Support/Steam`
-     has a space), as UTF-8, and a trailing separator stays readable before the closing quote (D-34).
+     has a space), as UTF-8, and trailing separators stay readable before the closing quote (D-34).
    - `steam://` links come from the wide command line: any length, any letter (D-12).
    - `steam.exe` logs through Wine's debug output, as Proton's `WINE_ERR`. A `steam.exe` that a game's link starts has
-     no Windows standard handles, so its failure lines were lost.
-   - `bridge/check.sh` has a row for each of these. The pid rows pin R4 on a failed start and on a normal end, the
-     `.bat` row pins ShellExecute, and the terminal row is a no-hang row. The rows that couldn't fail before were seen
-     failing under a temporary mutation.
+     no Windows standard handles, so its failure lines were lost. Lines are UTF-8 and cut to 1000 bytes: Wine's debug
+     line holds 1020 and raises past them.
+   - `bridge/check.sh` rows pin the `steam.exe` changes, Swift tests the `GameDrive` one. The pid rows pin R4 on a
+     failed start and on a normal end, the `.bat` row pins ShellExecute, and the terminal row is a no-hang row. The rows
+     that couldn't fail before were seen failing under a temporary mutation (the ledger names each).
    - Documentation: the README (what game logs hide, what the escape hatch keeps), the bridge spec (Amendment 2 names
      every section the code contradicts, §9 lists what the tests check, the D-lines restored from the parity spec's
      Part 4 and the new ones) and the `swift test` count below.
@@ -60,7 +61,7 @@ bridge spec's Amendment 2 (D-1 to D-34).
 | Gate | Result |
 |---|---|
 | `swift test` | 324 tests passed (329 after Task 1; then 7 tests deleted with their code, `windowsPath`, `libraryFolders`, three `activeAccountID`, `accountFromLaunchOptionsWins` and `steamFilesComeWithTheBridge`, and 2 added, net -5). After the final review fixes: 326 passed (two `GameDrive` tests added) |
-| `make bridge-check` | all passed, 47 `ok`; the restart row passed 3 runs in a row. After the final review fixes: all passed, 55 `ok` |
+| `make bridge-check` | all passed, 47 `ok`; the restart row passed 3 runs in a row. After the final review fixes: all passed, 57 `ok` |
 | `make smoke` | all passed, including console programs started through the launcher |
 | `sh wine-arm64/check.sh steam-bridge` | `PASS steam-bridge`: the probe exits 0 directly and through the launcher (GUI `steamprobe.exe`, Mac Steam running) |
 
@@ -84,4 +85,15 @@ Part A item 2: P0-3 stays P0 only if rows 1-3 pass; otherwise it is recorded as 
 5. **Store link:** an in-game store link opens Mac Steam. — *pending*
 6. **No stray windows:** no Dock icon for steam.exe, and no console window for the three games. — *pending*
 7. **Opt-out:** `/usr/bin/env PROTON_SET_GAME_DRIVE=0 %command%` on one game shows `Z:` again (its game log). —
+   *pending*
+8. **`-applaunch` arguments** (optional; D-12 leaves it to you): with Mac Steam running and the game not running, in
+   Terminal:
+
+   ```sh
+   env STEAM_COMPAT_DATA_PATH="<library>/steamapps/compatdata/<appid>" \
+     ~/Library/Application\ Support/MacNeutron/compatibilitytools.d/macneutron/bin/macneutron \
+     launch runinprefix 'C:\windows\system32\steam.exe' -applaunch <appid> -windowed
+   ```
+
+   Record whether Mac Steam starts the game with `-windowed`, and whether it asks you to confirm the arguments. —
    *pending*

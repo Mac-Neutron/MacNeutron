@@ -92,10 +92,10 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
 - No account variable: Proton writes no `ActiveUser`, and steam.exe deletes the one earlier builds wrote.
 - Every preparation links `s:`, with the bridge or without; Proton's messages go to launcher.log.
 - The `steamapps` check reads the name as Proton's Python `os.path.realpath` gives it: it follows the library entry's
-  links by their text, hop by hop (`lstat`, `readlink`), and keeps the given spelling of a part that isn't a link, not
-  the on-disk case Darwin's `realpath(3)` returns. So a legacy on-disk `SteamApps` folder keeps `S:\steamapps` when Mac
-  Steam passes it as `…/steamapps`, or when the entry is a link whose text spells it `steamapps`. This is parity, not a
-  deviation.
+  links by their text, hop by hop (`readlink`), drops `.` and lets `..` remove the part before it, and keeps the given
+  spelling of a part that isn't a link, not the on-disk case Darwin's `realpath(3)` returns. So a legacy on-disk
+  `SteamApps` folder keeps `S:\steamapps` when Mac Steam passes it as `…/steamapps`, or when the entry is a link whose
+  text spells it `steamapps`. This is parity, not a deviation.
 
 **Errors** (amends §8):
 - The account rows go.
@@ -157,7 +157,8 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
     outside Wine): parity with Proton's `WINE_ERR`; our `ERR` was `fprintf` to the Windows stderr handle before. A
     steam.exe that a game's `steam://` link starts through `HKCR\steam` gets a new console and no Windows standard
     handles from Wine's shell32, and still logs to Wine's Unix stderr, the game log. Lines are formatted wide and
-    written as UTF-8, so a letter above U+00FF no longer cuts one short.
+    written as UTF-8, so a letter above U+00FF no longer cuts one short, and cut to 1000 bytes: Wine's debug line holds
+    1020 and raises past them. Unlike `WINE_ERR`, the lines aren't gated by `WINEDEBUG`.
 - **D-13:** lsteamclient patches:
   - 0003: `Steam_IsKnownInterface` and `Steam_NotifyMissingInterface` are optional, because Mac `steamclient.dylib`
     doesn't export them;
@@ -237,8 +238,8 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
 - **D-34:** Source SDK's `-game` path (Proton's `fixup_cmdline_paths`), hardening over Proton, which converts only an
   unquoted path and narrows each character to a byte:
   - Wine quotes an argument holding a space, and every path under `~/Library/Application Support/Steam` has one, so a
-    quoted path is converted too, and its quotes are kept. A trailing `\` before the closing quote is doubled:
-    `wine_get_dos_file_name` keeps a trailing separator, and Windows reads `\"` as a quote;
+    quoted path is converted too, and its quotes are kept. Each trailing `\` before the closing quote is doubled:
+    `wine_get_dos_file_name` keeps trailing separators, and Windows reads `\"` as a quote;
   - the path is converted as UTF-8 (`CP_UNIXCP`, as in `run_process`): the byte-narrowed form of a non-ASCII path is
     what stalled Wine's lookup (D-32);
   - still only behind Proton's `\Source SDK Base` gate, and only the first `-game`.
@@ -407,8 +408,10 @@ Rewritten for Amendment 2: what the tests check today.
     (`MACNEUTRON_STEAMCLIENT64` overrides); it links `s:` with the bridge or without and logs Proton's game-drive
     message;
   - `GameDrive`: the library's parent is the target; Proton's first substring match wins; an empty entry removes the
-    drive; a legacy `SteamApps` folder passed as `…/steamapps` is the library; a library that fails Proton's checks
-    gets its fallback; `PROTON_SET_GAME_DRIVE` `0` or empty turns the drive off; a non-link at `s:` is left alone;
+    drive; a legacy `SteamApps` folder passed as `…/steamapps` is the library, and so is a link to it spelled
+    `steamapps` (followed hop by hop, a trailing slash, a link text ending in `/.`); a library that fails Proton's
+    checks gets its fallback; `PROTON_SET_GAME_DRIVE` `0` or empty turns the drive off; a non-link at `s:` is left
+    alone;
   - `writeToolFiles` installs `steam.exe` from next to the launcher, from the app's `Contents/Resources` or from
     `--steam-exe`, and replaces only a changed launcher.
 - **`bridge/check.sh`** (`make bridge-check`, after `probe.sh`'s redaction self-test) runs `steam.exe` on `wine.app`
@@ -419,7 +422,8 @@ Rewritten for Amendment 2: what the tests check today.
     unchanged; a missing program exits 1; a launcher-style child, one started with `CREATE_BREAKAWAY_FROM_JOB`
     included, still sees Steam; `PROTON_HIDE_PROCESS_WINDOW` (any value not starting with 0) starts it hidden; Source
     SDK's `-game` path is converted, unquoted or quoted (with a space and a non-ASCII letter), and a quoted one ending
-    in a separator keeps it, with the next argument kept apart;
+    in one separator or two keeps them, with the next argument kept apart; a log line past Wine's 1020 bytes (with
+    Japanese letters) is cut, in UTF-8, and steam.exe still exits 0;
   - what a game sees: the registry names a live Steam and `steamclient64.dll`; `SteamPath` and `ValvePlatformMutex`
     (the steam.exe that ran); Steam's named events and hidden window; the SteamStub start handshake is answered; the
     `Apps` key and Steam's language; an earlier build's `ActiveUser` is removed; without `SteamGameId`, no pid, named
