@@ -619,8 +619,9 @@ static void Queues() {
 // timestamp from the counter buffer the second list's timestamp uses (Metal samples a buffer once per pass);
 // `mid_barrier`: a UAV barrier between the second pass's two draws (T0 258); `query`: the first pass counts into
 // occlusion query 0, the second draws once before its own query 1 on the same heap and once inside it: query 0 counts
-// the first pass's 256 instances alone (prints T0 then the two counts).
-enum UnsplitKind { kPlain, kBarrier, kSameBuffer, kMidBarrier, kQuery, kSegments };
+// the first pass's 256 instances alone (prints T0 then the two counts). Barriers between the lists merge (B6) unless
+// they name what a pass writes (`attachment`) or a UAV, whose pixel-shader writes no pass lists (`uav`).
+enum UnsplitKind { kPlain, kBarrier, kSameBuffer, kMidBarrier, kQuery, kSegments, kAttachment, kUav };
 static void Unsplit(const char *name, UnsplitKind kind) {
     static ID3D12CommandAllocator *a2;
     static ID3D12GraphicsCommandList *l2;
@@ -633,6 +634,9 @@ static void Unsplit(const char *name, UnsplitKind kind) {
         D3D12_QUERY_HEAP_DESC od = {D3D12_QUERY_HEAP_TYPE_OCCLUSION, 2};
         CHECK(g->device->CreateQueryHeap(&od, __uuidof(ID3D12QueryHeap), (void **)&occlusion));
     }
+    static ID3D12Resource *uav;
+    if (kind == kUav && !uav)
+        uav = Zeroed(256, UA);
     Clear(T[0]);
     g->Submit();
     auto *l1 = g->list;
@@ -648,11 +652,16 @@ static void Unsplit(const char *name, UnsplitKind kind) {
     }
     if (kind == kSameBuffer || kind == kSegments)
         l1->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, 1); // at the open pass's end
-    if (kind == kBarrier)
-        g->Barrier(T[1].texture, RT, PSR);
+    // kBarrier's barriers name another texture; kAttachment's name the passes' own target.
+    if (kind == kBarrier || kind == kAttachment)
+        g->Barrier(T[kind == kBarrier ? 1 : 0].texture, RT, PSR);
+    if (kind == kUav)
+        g->Barrier(uav, UA, PSR);
     g->list = l2;
-    if (kind == kBarrier)
-        g->Barrier(T[1].texture, PSR, RT);
+    if (kind == kBarrier || kind == kAttachment)
+        g->Barrier(T[kind == kBarrier ? 1 : 0].texture, PSR, RT);
+    if (kind == kUav)
+        g->Barrier(uav, PSR, UA);
     l2->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, 0); // a timestamp-only blit
     Pass(T[0], add, 1, 1);
     if (kind == kSegments)
@@ -713,6 +722,8 @@ static void UnsplitMidBarrier() { Unsplit("unsplit-midbarrier", kMidBarrier); }
 static void UnsplitQuery() { Unsplit("unsplit-query", kQuery); }
 // SMITE 2's base-pass segments: each list a start timestamp, a pass and its end timestamp, one heap (B6).
 static void UnsplitSegments() { Unsplit("unsplit-segments", kSegments); }
+static void UnsplitAttachment() { Unsplit("unsplit-attachment", kAttachment); }
+static void UnsplitUav() { Unsplit("unsplit-uav", kUav); }
 
 // One list, one pass adding 1 to T0, executed twice in one ExecuteCommandLists call: both runs draw (T0 2); M3 must
 // not merge a list into itself.
@@ -1557,7 +1568,7 @@ int main(int argc, char **argv) {
         {"many", Many},              {"clear-rects", ClearRects}, {"signal", Signal},
         {"wrap", Wrap}, {"onewait", OneWait}, {"newest", Newest}, {"nodraw", NoDraw}, {"queues", Queues}, {"unsplit", UnsplitPlain}, {"unsplit-barrier", UnsplitBarrier},
         {"unsplit-samebuffer", UnsplitSameBuffer}, {"unsplit-midbarrier", UnsplitMidBarrier},
-        {"unsplit-query", UnsplitQuery}, {"unsplit-segments", UnsplitSegments}, {"unsplit-twice", UnsplitTwice}, {"deferred", Deferred}, {"zeroed", Zeroed}, {"fold", Fold}, {"fold-order", FoldOrder}, {"fence-reset", FenceReset}, {"fence-cpu-late", FenceCpuLate},
+        {"unsplit-query", UnsplitQuery}, {"unsplit-segments", UnsplitSegments}, {"unsplit-attachment", UnsplitAttachment}, {"unsplit-uav", UnsplitUav}, {"unsplit-twice", UnsplitTwice}, {"deferred", Deferred}, {"zeroed", Zeroed}, {"fold", Fold}, {"fold-order", FoldOrder}, {"fence-reset", FenceReset}, {"fence-cpu-late", FenceCpuLate},
         {"fence-transitive", FenceTransitive}, {"fence-custom", FenceCustom}, {"fence-lower", FenceLower},
         {"fence-wait-first", FenceWaitFirst}, {"fence-order", FenceOrder}, {"two-heaps", TwoHeaps}, {"ts-start", TimestampStart}, {"after-own-blit", AfterOwnBlit}, {"fold-lists", FoldListsMode},
         {"fold-lists-barrier", FoldListsBarrier}, {"fold-m4", FoldM4}, {"fold-twice", FoldTwice}, {"fold-copy", FoldCopy},
