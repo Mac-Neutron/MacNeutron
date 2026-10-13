@@ -375,6 +375,11 @@ m3() { grep -oE '(render passes merged|timestamp blits folded|render pass merges
   "$WORK/$1/stats.txt" 2> /dev/null | tr '\n' ';'; }
 expect "render passes into one target across lists are one Metal render pass" "$(m3 m3-stats)" \
   "render pass merges refused (barrier) 3;render pass merges refused (other) 2;render passes merged 4;timestamp blits folded 4;"
+# DXMT_STATS says which barrier refused each (B6): unsplit-uav's UNORDERED_ACCESS, unsplit-midbarrier's UAV barrier,
+# unsplit-attachment's target.
+expect "and which barrier kept each apart" \
+  "$(grep -oE 'render pass merges refused \(barrier\): [^0-9]+ [0-9]+' "$WORK/m3-stats/stats.txt" 2> /dev/null | tr '\n' ';')" \
+  "render pass merges refused (barrier): UNORDERED_ACCESS 1;render pass merges refused (barrier): a UAV barrier 1;render pass merges refused (barrier): a resource the passes write 1;"
 # With a counter buffer per pass (DXMT_D3D12_TIMESTAMP_BLITS=1), a buffer sampled at the base pass's end can't be
 # sampled again in it: unsplit-samebuffer and unsplit-segments stay apart. DXMT_STATS says why each didn't join (B6,
 # Task F4): unsplit-attachment's, unsplit-uav's and unsplit-midbarrier's barriers, unsplit-query's query and
