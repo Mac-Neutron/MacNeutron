@@ -136,20 +136,30 @@ echo "info D3D11 frame time: $(sed -n 's/.*avg frame \([0-9.]*\).*/\1/p' "$WORK/
 expect "the D3D11 game ran our d3d11.dll" \
   "$(cmp -s "$WORK/ours/wine.app/Contents/Resources/DXMT/aarch64-windows/d3d11.dll" \
     "$WORK/compat/ours/pfx/drive_c/windows/system32/d3d11.dll" && echo yes || echo no)" "yes"
-# 9. GPU efficiency (spec 2026-10-02). E1: D3D12 textures that aren't UAVs get Apple lossless compression (which
-#    PixelFormatView usage alone would turn off): a clear-only pass of a 3840x2160 RGBA16F target is at least 3x
-#    cheaper than with DXMT_D3D12_COMPRESSION=0, and writes through other views of one layout, copies and placed
-#    textures read back as on D3DMetal.
+# 9. GPU efficiency (spec 2026-10-02). E1: D3D12 textures get Apple lossless compression (which PixelFormatView usage
+#    alone would turn off): a clear-only pass of a 3840x2160 RGBA16F target is at least 3x cheaper than with
+#    DXMT_D3D12_COMPRESSION=0, and writes through other views of one layout, copies and placed textures read back as on
+#    D3DMetal. UAVs too, but for 32-bit texels of more than one channel, which D3D12's UAV casting, R32 atomics and our
+#    packed-format UAV clears write through an R32 view (that write corrupts a compressed texture): a UAV render
+#    target's clear is at least 3x cheaper than with DXMT_D3D12_COMPRESSION=rt (UAVs uncompressed), and UAV clears of
+#    RGBA16F, RGBA16 UNORM and R11G11B10F read back as with nothing compressed.
 run ours compress dxmt "$TESTS/d3d12_compress.exe"
 export DXMT_D3D12_COMPRESSION=0
 run ours compress-off dxmt "$TESTS/d3d12_compress.exe"
+export DXMT_D3D12_COMPRESSION=rt
+run ours compress-rt dxmt "$TESTS/d3d12_compress.exe"
 unset DXMT_D3D12_COMPRESSION
 run ref compress-ref d3dmetal "$TESTS/d3d12_compress.exe"
-clear_on=$(awk '/^compress clear /{print $3}' "$WORK/compress.txt"); clear_off=$(awk '/^compress clear /{print $3}' "$WORK/compress-off.txt")
-expect "compressed targets clear at least 3x cheaper ($clear_on against $clear_off us)" \
-  "$(awk -v on="$clear_on" -v off="$clear_off" 'BEGIN { print (on > 0 && off >= 3 * on) ? "yes" : "no" }')" yes
+us() { awk -v k="$2" '$1 == "compress" && $2 == k {print $3}' "$WORK/$1.txt"; }
+cheaper() { awk -v on="$1" -v off="$2" 'BEGIN { print (on > 0 && off >= 3 * on) ? "yes" : "no" }'; }
+expect "compressed targets clear at least 3x cheaper ($(us compress clear) against $(us compress-off clear) us)" \
+  "$(cheaper "$(us compress clear)" "$(us compress-off clear)")" yes
 expect "and read back as on D3DMetal through other views, copies and heap placement" \
   "$(grep -E '^compress (views|placed) ' "$WORK/compress.txt")" "$(grep -E '^compress (views|placed) ' "$WORK/compress-ref.txt")"
+expect "UAV render targets clear at least 3x cheaper too ($(us compress uav-clear) against $(us compress-rt uav-clear) us)" \
+  "$(cheaper "$(us compress uav-clear)" "$(us compress-rt uav-clear)")" yes
+expect "and their UAV clears read back as with nothing compressed" \
+  "$(grep '^compress uav ' "$WORK/compress.txt")" "$(grep '^compress uav ' "$WORK/compress-off.txt")"
 
 # 5. The DXIL probe: results recorded, not graded; one line per shader, and a non-container is refused.
 "$TOOLS/dxil-probe" "$S"/*.dxil > "$WORK/probe.txt" || true
@@ -276,7 +286,7 @@ LANE=B
 want=$(printf 'hazard %s\n' "rt-read 257" "same-target 7 5" "uav 1048576" "copy-read 6" "indirect 9" "aliasing 2" \
   "occlusion 268435456" "independent 256 256" "precise 257" "mid-pass 77" "twice 514" "many 1200 1200" "clear-rects 3 256" \
   "signal 0" "wrap 4194304" "onewait 256 5 6" "newest 3 2" "nodraw 257" "queues 257 257" "unsplit 257" "unsplit-barrier 257" \
-  "unsplit-samebuffer 257" "unsplit-midbarrier 258" "unsplit-query 258 268435456 1048576" "unsplit-twice 2" "deferred 1" "zeroed 0 0" "fold 6 2 9 5" "fold-order 6 7" \
+  "unsplit-samebuffer 257" "unsplit-midbarrier 258" "unsplit-query 258 268435456 1048576" "unsplit-segments 257 1" "unsplit-twice 2" "deferred 1" "zeroed 0 0" "fold 6 2 9 5" "fold-order 6 7" \
   "fence-reset 1" "fence-cpu-late 1" "fence-transitive 0 0" "fence-custom 1" "fence-lower 0 1" "fence-wait-first 257" "fence-order 1 1" "two-heaps 1 1" "ts-start 1" "after-own-blit 7" \
   "fold-lists 6 2" "fold-lists-barrier 6 2" "fold-m4 11 7" "fold-twice 10 14" "fold-copy 2 6 2" "indirect-war 265" \
   "merge-indirect 10" "placed-uav 1048576" "heap-released 257" "ts-many 1" "sampled 1" "ts-queues 1")
@@ -350,21 +360,29 @@ expect "early fences only with overlap" \
   "$(grep -c 'encoder early fences' "$WORK/onewait-default/stats.txt" 2> /dev/null || true):$(grep -c 'encoder early fences' "$WORK/onewait-stats/stats.txt" 2> /dev/null || true)" "0:1"
 expect "and on the newest writer alone" \
   "$(grep -oE 'encoder dependency waits [0-9]+' "$WORK/newest-stats/stats.txt" 2> /dev/null)" "encoder dependency waits 3"
-# M3 (GPU overlap spec §3.5): two lists' passes into one target with only a timestamp between them are one Metal render
-# pass; not across a barrier (between or inside the passes), nor when the timestamp's counter buffer is already
-# sampled at that pass's end, nor out of a pass counting into an occlusion query, nor a list into itself.
+# M3 (GPU overlap spec §3.5): two lists' passes into one target with only timestamps between them are one Metal render
+# pass, the timestamp ring (the default) taking all their samples at one point, and in strict order (the default) out
+# of a pass that isn't its list's join too (unsplit-segments, SMITE 2's base-pass segments: B6); not across a barrier
+# (between or inside the passes), nor out of a pass counting into an occlusion query, nor a list into itself.
+m3_modes="unsplit unsplit-barrier unsplit-samebuffer unsplit-midbarrier unsplit-query unsplit-segments unsplit-twice"
 rm -rf "$WORK/m3-stats"; export DXMT_DXIL_DUMP="$WORK/m3-stats" DXMT_STATS=1
-run ours m3-stats dxmt "$TESTS/d3d12_hazards.exe" "Z:$S" unsplit unsplit-barrier unsplit-samebuffer unsplit-midbarrier \
-  unsplit-query unsplit-twice
+run ours m3-stats dxmt "$TESTS/d3d12_hazards.exe" "Z:$S" $m3_modes
 unset DXMT_DXIL_DUMP DXMT_STATS
-expect "render passes into one target across lists are one Metal render pass" \
-  "$(grep -oE '(render passes merged|timestamp blits folded) [0-9]+' "$WORK/m3-stats/stats.txt" 2> /dev/null | tr '\n' ';')" \
-  "render passes merged 1;timestamp blits folded 1;"
-# For the base-pass merge (B6, Task F4), DXMT_STATS says why the others didn't join: unsplit-barrier's and
-# unsplit-midbarrier's barriers, unsplit-samebuffer's counter buffer sampled twice, unsplit-twice's list run twice.
-expect "and why the others didn't" \
-  "$(grep -oE 'render pass merges refused \([a-z]+\) [0-9]+' "$WORK/m3-stats/stats.txt" 2> /dev/null | tr '\n' ';')" \
-  "render pass merges refused (barrier) 2;render pass merges refused (other) 1;render pass merges refused (timestamps) 1;"
+m3() { grep -oE '(render passes merged|timestamp blits folded|render pass merges refused \([a-z]+\)) [0-9]+' \
+  "$WORK/$1/stats.txt" 2> /dev/null | tr '\n' ';'; }
+expect "render passes into one target across lists are one Metal render pass" "$(m3 m3-stats)" \
+  "render pass merges refused (barrier) 2;render pass merges refused (other) 2;render passes merged 3;timestamp blits folded 3;"
+# With a counter buffer per pass (DXMT_D3D12_TIMESTAMP_BLITS=1), a buffer sampled at the base pass's end can't be
+# sampled again in it: unsplit-samebuffer and unsplit-segments stay apart. DXMT_STATS says why each didn't join (B6,
+# Task F4): unsplit-barrier's and unsplit-midbarrier's barriers, unsplit-query's query and unsplit-twice's list.
+rm -rf "$WORK/m3-blits-stats"; export DXMT_DXIL_DUMP="$WORK/m3-blits-stats" DXMT_STATS=1 DXMT_D3D12_TIMESTAMP_BLITS=1
+run ours m3-blits-stats dxmt "$TESTS/d3d12_hazards.exe" "Z:$S" $m3_modes
+unset DXMT_DXIL_DUMP DXMT_STATS DXMT_D3D12_TIMESTAMP_BLITS
+expect "and with a counter buffer per pass, not when that buffer is already sampled" "$(m3 m3-blits-stats)" \
+  "render pass merges refused (barrier) 2;render pass merges refused (other) 2;render pass merges refused (timestamps) 2;render passes merged 1;timestamp blits folded 1;"
+expect "and the merged passes' timestamps stay in order, with each run's picture right" \
+  "$(grep '^hazard unsplit-segments' "$WORK/m3-stats.txt"; grep '^hazard unsplit-segments' "$WORK/m3-blits-stats.txt")" \
+  "$(printf 'hazard unsplit-segments 257 1\nhazard unsplit-segments 257 1')"
 rm -rf "$WORK/m3-off-stats"; export DXMT_DXIL_DUMP="$WORK/m3-off-stats" DXMT_STATS=1 DXMT_D3D12_MERGE=0
 run ours m3-off-stats dxmt "$TESTS/d3d12_hazards.exe" "Z:$S" unsplit
 unset DXMT_DXIL_DUMP DXMT_STATS DXMT_D3D12_MERGE

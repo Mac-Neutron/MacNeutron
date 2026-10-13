@@ -6,6 +6,12 @@
 //                                    (b), then copied into an R8G8B8A8_UINT texture (c): red bytes 188 128 128
 //   "compress placed <a> <b> <c> <d>" two such targets placed back to back in one heap at GetResourceAllocationInfo's
 //                                    offsets, cleared to 1 and 2, read at two corners each: 1 1 2 2
+//   "compress uav-clear <us>"        as "compress clear", the target a UAV too: check.sh wants it 3x faster than with
+//                                    DXMT_D3D12_COMPRESSION=rt (UAVs uncompressed)
+//   "compress uav <f> <u> <p> <r>"   raw texels of render targets that are UAVs too, after UAV clears: RGBA16F cleared
+//                                    as floats (f), RGBA16 UNORM as uints (u), R11G11B10F as uints (p: DXMT writes its
+//                                    packed bits through an R32 view), then the RGBA16F target cleared as a render
+//                                    target (r). check.sh wants them as with DXMT_D3D12_COMPRESSION=0.
 // check.sh compares the views and placed lines with D3DMetal's.
 #include "d3d12_common.hpp"
 #include <algorithm>
@@ -15,8 +21,8 @@ static const UINT kW = 2560, kH = 1440;
 
 static Gpu *g;
 static ID3D12Resource *readback; // 16 slots of 256 bytes
-static ID3D12DescriptorHeap *rtv_heap;
-static UINT rtvs;
+static ID3D12DescriptorHeap *rtv_heap, *uav_gpu, *uav_cpu;
+static UINT rtvs, uavs;
 
 static D3D12_CPU_DESCRIPTOR_HANDLE Rtv(ID3D12Resource *r, DXGI_FORMAT format) {
     D3D12_CPU_DESCRIPTOR_HANDLE h = rtv_heap->GetCPUDescriptorHandleForHeapStart();
@@ -55,9 +61,28 @@ static float Half(uint16_t h) {
     return e ? ldexpf(1024.0f + m, e - 25) : ldexpf((float)m, -24);
 }
 
-static void Clear() {
+// A UAV of `r` (in UNORDERED_ACCESS) cleared to `u` (uint) or else `f` (float).
+static void ClearUav(ID3D12Resource *r, DXGI_FORMAT format, const UINT *u, const float *f) {
+    UINT inc = g->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu = uav_cpu->GetCPUDescriptorHandleForHeapStart();
+    D3D12_CPU_DESCRIPTOR_HANDLE shown = uav_gpu->GetCPUDescriptorHandleForHeapStart();
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu = uav_gpu->GetGPUDescriptorHandleForHeapStart();
+    cpu.ptr += uavs * inc;
+    shown.ptr += uavs * inc;
+    gpu.ptr += uavs++ * inc;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC vd = {format, D3D12_UAV_DIMENSION_TEXTURE2D};
+    g->device->CreateUnorderedAccessView(r, nullptr, &vd, cpu);
+    g->device->CreateUnorderedAccessView(r, nullptr, &vd, shown);
+    g->list->SetDescriptorHeaps(1, &uav_gpu);
+    if (u)
+        g->list->ClearUnorderedAccessViewUint(gpu, cpu, r, u, 0, nullptr);
+    else
+        g->list->ClearUnorderedAccessViewFloat(gpu, cpu, r, f, 0, nullptr);
+}
+
+static void Clear(const char *name, D3D12_RESOURCE_FLAGS flags) {
     auto rt = D3D12_RESOURCE_STATE_RENDER_TARGET;
-    ID3D12Resource *t = g->Texture(Tex2D(3840, 2160, DXGI_FORMAT_R16G16B16A16_FLOAT, 1, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET), rt);
+    ID3D12Resource *t = g->Texture(Tex2D(3840, 2160, DXGI_FORMAT_R16G16B16A16_FLOAT, 1, flags), rt);
     auto h = Rtv(t, DXGI_FORMAT_R16G16B16A16_FLOAT);
     ID3D12QueryHeap *heap;
     D3D12_QUERY_HEAP_DESC qd = {D3D12_QUERY_HEAP_TYPE_TIMESTAMP, 2};
@@ -78,7 +103,35 @@ static void Clear() {
         CHECK(g->queue->GetTimestampFrequency(&freq));
         best = std::min(best, (double)(ticks[1] - ticks[0]) / freq * 1e6 / n);
     }
-    printf("compress clear %.1f\n", best);
+    printf("compress %s %.1f\n", name, best);
+}
+
+static void Uav() {
+    auto ua = D3D12_RESOURCE_STATE_UNORDERED_ACCESS, rt = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    auto flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    ID3D12Resource *f16 = g->Texture(Tex2D(256, 256, DXGI_FORMAT_R16G16B16A16_FLOAT, 1, flags), ua);
+    ID3D12Resource *u16 = g->Texture(Tex2D(256, 256, DXGI_FORMAT_R16G16B16A16_UNORM, 1, flags), ua);
+    ID3D12Resource *p11 = g->Texture(Tex2D(256, 256, DXGI_FORMAT_R11G11B10_FLOAT, 1, flags), ua);
+    const float quarter[4] = {0.25f, 0.5f, 0.75f, 1.0f}, half[4] = {0.5f, 0.5f, 0.5f, 1.0f};
+    const UINT words[4] = {1000, 20000, 40000, 65535}, bits[4] = {0x5a5, 0x2d3, 0x1b6, 0};
+    ClearUav(f16, DXGI_FORMAT_R16G16B16A16_FLOAT, nullptr, quarter);
+    ClearUav(u16, DXGI_FORMAT_R16G16B16A16_UNORM, words, nullptr);
+    ClearUav(p11, DXGI_FORMAT_R11G11B10_FLOAT, bits, nullptr);
+    Read(f16, ua, DXGI_FORMAT_R16G16B16A16_FLOAT, 100, 100, 7);
+    Read(u16, ua, DXGI_FORMAT_R16G16B16A16_UNORM, 100, 100, 8);
+    Read(p11, ua, DXGI_FORMAT_R11G11B10_FLOAT, 100, 100, 9);
+    g->Barrier(f16, ua, rt);
+    g->list->ClearRenderTargetView(Rtv(f16, DXGI_FORMAT_R16G16B16A16_FLOAT), half, 0, nullptr);
+    Read(f16, rt, DXGI_FORMAT_R16G16B16A16_FLOAT, 100, 100, 10);
+    g->Submit();
+    auto s = Slots();
+    UINT64 f, u, r;
+    UINT p;
+    memcpy(&f, s + 7 * 256, 8);
+    memcpy(&u, s + 8 * 256, 8);
+    memcpy(&p, s + 9 * 256, 4);
+    memcpy(&r, s + 10 * 256, 8);
+    printf("compress uav %016llx %016llx %08x %016llx\n", f, u, p, r);
 }
 
 static void Views() {
@@ -131,8 +184,14 @@ int main() {
     readback = g->Buffer(D3D12_HEAP_TYPE_READBACK, 16 * 256, D3D12_RESOURCE_STATE_COPY_DEST);
     D3D12_DESCRIPTOR_HEAP_DESC dd = {D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 16};
     CHECK(g->device->CreateDescriptorHeap(&dd, __uuidof(ID3D12DescriptorHeap), (void **)&rtv_heap));
-    Clear();
+    D3D12_DESCRIPTOR_HEAP_DESC ud = {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 16, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
+    CHECK(g->device->CreateDescriptorHeap(&ud, __uuidof(ID3D12DescriptorHeap), (void **)&uav_gpu));
+    ud.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    CHECK(g->device->CreateDescriptorHeap(&ud, __uuidof(ID3D12DescriptorHeap), (void **)&uav_cpu));
+    Clear("clear", D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
+    Clear("uav-clear", D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     Views();
     Placed();
+    Uav();
     return 0;
 }

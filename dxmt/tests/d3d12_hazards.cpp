@@ -620,7 +620,7 @@ static void Queues() {
 // `mid_barrier`: a UAV barrier between the second pass's two draws (T0 258); `query`: the first pass counts into
 // occlusion query 0, the second draws once before its own query 1 on the same heap and once inside it: query 0 counts
 // the first pass's 256 instances alone (prints T0 then the two counts).
-enum UnsplitKind { kPlain, kBarrier, kSameBuffer, kMidBarrier, kQuery };
+enum UnsplitKind { kPlain, kBarrier, kSameBuffer, kMidBarrier, kQuery, kSegments };
 static void Unsplit(const char *name, UnsplitKind kind) {
     static ID3D12CommandAllocator *a2;
     static ID3D12GraphicsCommandList *l2;
@@ -628,7 +628,7 @@ static void Unsplit(const char *name, UnsplitKind kind) {
     if (!l2) {
         CHECK(g->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator), (void **)&a2));
         CHECK(g->device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, a2, nullptr, __uuidof(ID3D12GraphicsCommandList), (void **)&l2));
-        D3D12_QUERY_HEAP_DESC qd = {D3D12_QUERY_HEAP_TYPE_TIMESTAMP, 2};
+        D3D12_QUERY_HEAP_DESC qd = {D3D12_QUERY_HEAP_TYPE_TIMESTAMP, 4};
         CHECK(g->device->CreateQueryHeap(&qd, __uuidof(ID3D12QueryHeap), (void **)&heap));
         D3D12_QUERY_HEAP_DESC od = {D3D12_QUERY_HEAP_TYPE_OCCLUSION, 2};
         CHECK(g->device->CreateQueryHeap(&od, __uuidof(ID3D12QueryHeap), (void **)&occlusion));
@@ -636,6 +636,8 @@ static void Unsplit(const char *name, UnsplitKind kind) {
     Clear(T[0]);
     g->Submit();
     auto *l1 = g->list;
+    if (kind == kSegments) // the list's first encoder, so its pass isn't the list's join (SMITE 2's base pass)
+        l1->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, 2);
     if (kind == kQuery) {
         Bind(T[0], add, 1);
         l1->BeginQuery(occlusion, D3D12_QUERY_TYPE_OCCLUSION, 0);
@@ -644,7 +646,7 @@ static void Unsplit(const char *name, UnsplitKind kind) {
     } else {
         Pass(T[0], add, 1, 256);
     }
-    if (kind == kSameBuffer)
+    if (kind == kSameBuffer || kind == kSegments)
         l1->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, 1); // at the open pass's end
     if (kind == kBarrier)
         g->Barrier(T[1].texture, RT, PSR);
@@ -653,6 +655,8 @@ static void Unsplit(const char *name, UnsplitKind kind) {
         g->Barrier(T[1].texture, PSR, RT);
     l2->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, 0); // a timestamp-only blit
     Pass(T[0], add, 1, 1);
+    if (kind == kSegments)
+        l2->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, 3);
     if (kind == kQuery) {
         l2->BeginQuery(occlusion, D3D12_QUERY_TYPE_OCCLUSION, 1);
         l2->DrawInstanced(3, 1, 0, 0);
@@ -686,10 +690,20 @@ static void Unsplit(const char *name, UnsplitKind kind) {
         ReadBuffer(counts, COPY_DEST, 0, 8, 1);
         ReadBuffer(counts, COPY_DEST, 8, 8, 2);
     }
+    if (kind == kSegments)
+        g->list->ResolveQueryData(heap, D3D12_QUERY_TYPE_TIMESTAMP, 0, 4, readback, 60 * 512);
     g->Submit();
     if (kind == kQuery)
         printf("hazard %s %g %llu %llu\n", name, Texel(0), Word(1, 8), Word(2, 8));
-    else
+    else if (kind == kSegments) { // in time: 2 (l1's start), 1 (its pass's end), 0 (l2's start), 3 (its pass's end)
+        UINT64 t[4];
+        uint8_t *p;
+        D3D12_RANGE whole = {0, 64 * 512}, none = {0, 0};
+        CHECK(readback->Map(0, &whole, (void **)&p));
+        memcpy(t, p + 60 * 512, sizeof(t));
+        readback->Unmap(0, &none);
+        printf("hazard %s %g %d\n", name, Texel(0), t[2] <= t[1] && t[1] <= t[0] && t[0] <= t[3]);
+    } else
         printf("hazard %s %g\n", name, Texel(0));
 }
 static void UnsplitPlain() { Unsplit("unsplit", kPlain); }
@@ -697,6 +711,8 @@ static void UnsplitBarrier() { Unsplit("unsplit-barrier", kBarrier); }
 static void UnsplitSameBuffer() { Unsplit("unsplit-samebuffer", kSameBuffer); }
 static void UnsplitMidBarrier() { Unsplit("unsplit-midbarrier", kMidBarrier); }
 static void UnsplitQuery() { Unsplit("unsplit-query", kQuery); }
+// SMITE 2's base-pass segments: each list a start timestamp, a pass and its end timestamp, one heap (B6).
+static void UnsplitSegments() { Unsplit("unsplit-segments", kSegments); }
 
 // One list, one pass adding 1 to T0, executed twice in one ExecuteCommandLists call: both runs draw (T0 2); M3 must
 // not merge a list into itself.
@@ -1541,7 +1557,7 @@ int main(int argc, char **argv) {
         {"many", Many},              {"clear-rects", ClearRects}, {"signal", Signal},
         {"wrap", Wrap}, {"onewait", OneWait}, {"newest", Newest}, {"nodraw", NoDraw}, {"queues", Queues}, {"unsplit", UnsplitPlain}, {"unsplit-barrier", UnsplitBarrier},
         {"unsplit-samebuffer", UnsplitSameBuffer}, {"unsplit-midbarrier", UnsplitMidBarrier},
-        {"unsplit-query", UnsplitQuery}, {"unsplit-twice", UnsplitTwice}, {"deferred", Deferred}, {"zeroed", Zeroed}, {"fold", Fold}, {"fold-order", FoldOrder}, {"fence-reset", FenceReset}, {"fence-cpu-late", FenceCpuLate},
+        {"unsplit-query", UnsplitQuery}, {"unsplit-segments", UnsplitSegments}, {"unsplit-twice", UnsplitTwice}, {"deferred", Deferred}, {"zeroed", Zeroed}, {"fold", Fold}, {"fold-order", FoldOrder}, {"fence-reset", FenceReset}, {"fence-cpu-late", FenceCpuLate},
         {"fence-transitive", FenceTransitive}, {"fence-custom", FenceCustom}, {"fence-lower", FenceLower},
         {"fence-wait-first", FenceWaitFirst}, {"fence-order", FenceOrder}, {"two-heaps", TwoHeaps}, {"ts-start", TimestampStart}, {"after-own-blit", AfterOwnBlit}, {"fold-lists", FoldListsMode},
         {"fold-lists-barrier", FoldListsBarrier}, {"fold-m4", FoldM4}, {"fold-twice", FoldTwice}, {"fold-copy", FoldCopy},
