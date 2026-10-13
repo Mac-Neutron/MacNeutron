@@ -104,6 +104,9 @@ expect "... and when it's quoted (a space and a non-ASCII letter)" \
 expect "... and when it ends in a separator" \
   "$("$WINE" "$STEAMEXE" "$(winpath "$WORK/Source SDK Base 2007/helper.exe")" args -game "$WORK/mod ü/" x 2>/dev/null | tr -d '\r')" \
   "[-game][$(winpath "$(printf '%s' "$WORK" | sed 's#//*#/#g')/mod ü/")][x]"
+out=$("$WINE" "$STEAMEXE" "$(winpath "$WORK/Source SDK Base 2007/helper.exe")" args -game "$WORK/mod ü//" x 2>/dev/null | tr -d '\r')
+case ${out##*mod ü} in '\'*'][x]') out=apart ;; esac
+expect "... and when it ends in two" "$out" apart
 # Proton's EA workarounds for a link2ea:// target (ShellExecute): EA Desktop's IsUnavailable is cleared; with no EA app,
 # ShellExecute finds no handler and steam.exe still exits 0 (the uninstall Proton tries then is skipped here, R19).
 "$WINE" reg add 'HKLM\Software\Electronic Arts\EA Desktop' /v IsUnavailable /t REG_DWORD /d 1 /f >/dev/null 2>&1
@@ -180,8 +183,9 @@ rm -f "$WORK/open.txt"
 set +e; "$WINE" "$STEAMEXE" "$long" >/dev/null 2>&1; got=$?; set -e
 expect "a steam:// link of 2000 characters reaches Mac Steam whole" "$got $(opened)" "0 $long"
 rm -f "$WORK/open.txt"
-set +e; "$WINE" "$STEAMEXE" 'steam://openurl/https://store.steampowered.com/search/?term=日本' >/dev/null 2>&1; got=$?; set -e
-# (Wine's ANSI code page here is Windows-1252, which has no 日本: the ANSI argv turned them into '?'.)
+set +e; LC_ALL=en_US.UTF-8 "$WINE" "$STEAMEXE" 'steam://openurl/https://store.steampowered.com/search/?term=日本' >/dev/null 2>&1
+got=$?; set -e
+# (LC_ALL=en_US.UTF-8 gives Wine the ANSI code page Windows-1252, which has no 日本: the ANSI argv turned them into '?'.)
 expect "... and one with letters outside the Windows code page keeps them" "$got $(opened)" \
   '0 steam://openurl/https://store.steampowered.com/search/?term=日本'
 # A game restarting itself through steam://rungameid/<its id> restarts in place (L6); Mac Steam isn't asked.
@@ -195,6 +199,13 @@ expect "... and Mac Steam isn't asked to launch it" "$(opened)" ""
 # A restart link with no game steam.exe to restart is one.
 expect "a steam.exe a game's link started still logs its failures" \
   "$("$WINE" "$HELPER" url steam://rungameid/4242 2>&1 >/dev/null | tr -d '\r' | /usr/bin/grep -c 'Restart event not found')" 1
+# Wine's debug line holds 1020 bytes and raises past them: a longer line is cut, as UTF-8, and steam.exe goes on.
+long=$(printf '%1500s' '' | tr ' ' x)
+set +e; "$WINE" "$STEAMEXE" -silent "日本$long" >/dev/null 2>"$WORK/log.txt"; got=$?; set -e
+log=$(tr -d '\r' < "$WORK/log.txt")
+expect "a log line past Wine's 1020 bytes is cut, in UTF-8, and steam.exe still exits 0" \
+  "$got $(printf '%s\n' "$log" | /usr/bin/grep -c 'steam.exe: ignoring 日本x') $(printf '%s\n' "$log" | /usr/bin/grep -c 'Unhandled exception')" \
+  "0 1 0"
 # Not a game process: no libraryfolders.vdf (Proton's gate).
 rm -f "$STEAM/steamapps/libraryfolders.vdf"
 env -u SteamGameId STEAM_COMPAT_LIBRARY_PATHS="$WORK/steamapps" "$WINE" "$STEAMEXE" "$HELPER" exit 0 >/dev/null 2>&1 || true

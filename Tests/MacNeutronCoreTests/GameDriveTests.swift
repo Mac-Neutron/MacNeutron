@@ -95,6 +95,19 @@ private func gameDriveLink(_ prefix: URL) -> String? {
     let wrongEnvironment = ["STEAM_COMPAT_LIBRARY_PATHS": path(wrong), "STEAM_COMPAT_INSTALL_PATH": path(wrong) + "/common/Game"]
     #expect(GameDrive.target(environment: wrongEnvironment, notes: &notes) == path(wrong))
     #expect(notes.count == 1)
+
+    // Hop by hop (a relative link to that link), a trailing slash, and a link text ending in "/.", which Python drops.
+    let hops = try makeTempDir()
+    try FileManager.default.createSymbolicLink(atPath: path(hops) + "/steamapps", withDestinationPath: "hop")
+    try FileManager.default.createSymbolicLink(atPath: path(hops) + "/hop", withDestinationPath: path(link))
+    let dot = try makeTempDir().appending(path: "steamapps")
+    try FileManager.default.createSymbolicLink(atPath: path(dot), withDestinationPath: path(lib) + "/steamapps/.")
+    for entry in [path(hops) + "/steamapps", path(link) + "/", path(dot)] {
+        notes = []
+        let env = ["STEAM_COMPAT_LIBRARY_PATHS": entry, "STEAM_COMPAT_INSTALL_PATH": entry + "/common/Game"]
+        #expect(GameDrive.target(environment: env, notes: &notes) == realPath(path(lib)), "\(entry)")
+        #expect(notes.isEmpty, "\(entry)")
+    }
 }
 
 @Test func aLibraryThatFailsValidationGetsProtonsFallback() throws {

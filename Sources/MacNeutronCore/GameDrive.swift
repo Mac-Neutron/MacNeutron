@@ -26,17 +26,27 @@ enum GameDrive {
         return entry
     }
 
-    /// The last part of Python's os.path.realpath(path), which Proton checks: the name as given, or a link's text, hop by
-    /// hop. Darwin's realpath(3) gives the on-disk case instead, so Mac Steam's ".../steamapps" on a legacy on-disk
-    /// "SteamApps" folder would fail the check.
-    static func pythonName(_ path: String) -> Substring? {
-        var path = path
-        for _ in 0..<40 {  // realpath's ELOOP bound
-            while path.count > 1, path.hasSuffix("/") { path.removeLast() }
-            guard let text = try? FileManager.default.destinationOfSymbolicLink(atPath: path) else { break }
-            path = text.hasPrefix("/") ? text : (path as NSString).deletingLastPathComponent + "/" + text
+    /// The last part of Python's os.path.realpath(path) (posixpath, not strict), which Proton checks: a part that isn't
+    /// a link keeps its spelling, a link is replaced by its text, "." goes and ".." drops the part before it. Darwin's
+    /// realpath(3) gives the on-disk case instead, so Mac Steam's ".../steamapps" on a legacy on-disk "SteamApps"
+    /// folder would fail the check.
+    static func pythonName(_ path: String) -> String {
+        var resolved: [Substring] = []
+        var pending = path.split(separator: "/")[...]
+        var hops = 0
+        while let part = pending.popFirst() {
+            if part == "." { continue }
+            if part == ".." { _ = resolved.popLast(); continue }
+            let candidate = "/" + (resolved + [part]).joined(separator: "/")
+            if hops < 40, let text = try? FileManager.default.destinationOfSymbolicLink(atPath: candidate) {  // ELOOP
+                hops += 1
+                if text.hasPrefix("/") { resolved = [] }
+                pending = ArraySlice(text.split(separator: "/") + pending)
+            } else {
+                resolved.append(part)
+            }
         }
-        return path.split(separator: "/").last
+        return resolved.last.map(String.init) ?? "/"
     }
 
     /// stat(2)'s st_dev.

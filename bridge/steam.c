@@ -62,22 +62,26 @@
 
 /* Proton's WINE_ERR (its TRACEs are left out): Wine's debug output, which goes to Wine's Unix stderr, the game log, even
  * when steam.exe has no Windows standard handles, as when a game's steam:// link starts it through HKCR\steam (Wine's
- * shell32 gives it a new console). Formatted wide and written as UTF-8: a letter above U+00FF doesn't cut the line. */
+ * shell32 gives it a new console). Not gated by WINEDEBUG. Formatted wide and written as UTF-8: a letter above U+00FF
+ * doesn't cut the line. */
 static void err_line(const WCHAR *format, ...)
 {
     static int (CDECL *output)(const char *);
-    WCHAR wide[2048];
+    WCHAR wide[1024];
     char line[ARRAYSIZE(wide) * 3];
     va_list ap;
+    int n;
 
     va_start(ap, format);
-    if (_vsnwprintf(wide, ARRAYSIZE(wide), format, ap) < 0)  /* cut: still a whole line, which Wine flushes */
-    {
-        wide[ARRAYSIZE(wide) - 2] = '\n';
-        wide[ARRAYSIZE(wide) - 1] = 0;
-    }
+    _vsnwprintf(wide, ARRAYSIZE(wide) - 1, format, ap);  /* unterminated when cut or an exact fit */
     va_end(ap);
-    if (!WideCharToMultiByte(CP_UTF8, 0, wide, -1, line, sizeof(line), NULL, NULL)) return;
+    wide[ARRAYSIZE(wide) - 1] = 0;
+    if (!(n = WideCharToMultiByte(CP_UTF8, 0, wide, -1, line, sizeof(line), NULL, NULL))) return;
+    /* Wine's debug line holds 1020 bytes and raises past them (ntdll's append_output): a longer one is cut, at a
+     * character boundary, and still ends the line. */
+    if (--n > 1000) for (n = 1000; (line[n] & 0xc0) == 0x80; --n);
+    if (!n || line[n - 1] != '\n') line[n++] = '\n';
+    line[n] = 0;
     if (!output) output = (void *)GetProcAddress(GetModuleHandleW(L"ntdll"), "__wine_dbg_output");
     if (output) output(line);
     else fputs(line, stderr);
@@ -409,13 +413,13 @@ static WCHAR *fixup_cmdline_paths(WCHAR *cmdline)
                 continue;
             }
             path_len = wcslen(dos_path);
-            /* Wine keeps a trailing separator, and Windows reads \" as a quote: doubled before the closing one. */
-            extra = quoted && path_len && dos_path[path_len - 1] == '\\';
+            /* Wine keeps trailing separators, and Windows reads \" as a quote: each doubled before the closing one. */
+            for (extra = 0; quoted && extra < path_len && dos_path[path_len - 1 - extra] == '\\'; ++extra);
             len = wcslen(cmdline) + 1;
             ret = malloc((len + path_len + extra - (next - p)) * sizeof(*ret));
             memcpy(ret, cmdline, (p - cmdline) * sizeof(*ret));
             memcpy(ret + (p - cmdline), dos_path, path_len * sizeof(*ret));
-            if (extra) ret[(p - cmdline) + path_len] = '\\';
+            for (r = 0; r < (int)extra; ++r) ret[(p - cmdline) + path_len + r] = '\\';
             memcpy(ret + (p - cmdline) + path_len + extra, next, (len - (next - cmdline)) * sizeof(*ret));
             HeapFree(GetProcessHeap(), 0, dos_path);
             return ret;
