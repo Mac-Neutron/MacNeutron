@@ -626,8 +626,9 @@ static void Queues() {
 // occlusion query 0, the second draws once before its own query 1 on the same heap and once inside it: query 0 counts
 // the first pass's 256 instances alone (prints T0 then the two counts). Barriers between the lists merge (B6) unless
 // they name what a pass writes (`attachment`), or concern UAVs (`uav`, `mid_barrier`) where a pass's shader writes one
-// (`uav_write`: the second pass also counts its pixels into the buffer the barriers move).
-enum UnsplitKind { kPlain, kBarrier, kSameBuffer, kMidBarrier, kQuery, kSegments, kAttachment, kUav, kUavWrite };
+// (`uav_write`: the second pass also counts its pixels into the buffer the barriers move). `sampled`: the second list
+// renders T1 from T0, behind T0's move to PIXEL_SHADER_RESOURCE: another target, refused as such (prints T1, 257).
+enum UnsplitKind { kPlain, kBarrier, kSameBuffer, kMidBarrier, kQuery, kSegments, kAttachment, kUav, kUavWrite, kSampled };
 static void Unsplit(const char *name, UnsplitKind kind) {
     static ID3D12CommandAllocator *a2;
     static ID3D12GraphicsCommandList *l2;
@@ -663,6 +664,8 @@ static void Unsplit(const char *name, UnsplitKind kind) {
         g->Barrier(T[kind == kBarrier ? 1 : 0].texture, RT, PSR);
     if (kind == kUav || kind == kUavWrite)
         g->Barrier(uav, UA, PSR);
+    if (kind == kSampled)
+        g->Barrier(T[0].texture, RT, PSR);
     g->list = l2;
     if (kind == kBarrier || kind == kAttachment)
         g->Barrier(T[kind == kBarrier ? 1 : 0].texture, PSR, RT);
@@ -671,6 +674,8 @@ static void Unsplit(const char *name, UnsplitKind kind) {
     l2->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, 0); // a timestamp-only blit
     if (kind == kUavWrite)
         Pass(T[0], add_uav, 1, 1, nullptr, uav);
+    else if (kind == kSampled)
+        Pass(T[1], sample, 1, 1, &T[0]);
     else
         Pass(T[0], add, 1, 1);
     if (kind == kSegments)
@@ -685,6 +690,8 @@ static void Unsplit(const char *name, UnsplitKind kind) {
         l2->ResourceBarrier(1, &all);
         l2->DrawInstanced(3, 1, 0, 0);
     }
+    if (kind == kSampled)
+        g->Barrier(T[0].texture, PSR, RT);
     g->list = l1;
     CHECK(l1->Close());
     CHECK(l2->Close());
@@ -699,7 +706,7 @@ static void Unsplit(const char *name, UnsplitKind kind) {
     CHECK(l1->Reset(g->allocator, nullptr));
     CHECK(a2->Reset());
     CHECK(l2->Reset(a2, nullptr));
-    Read(T[0], RT, 512, 512, 0);
+    Read(T[kind == kSampled ? 1 : 0], RT, 512, 512, 0);
     if (kind == kQuery) {
         static ID3D12Resource *counts;
         if (!counts)
@@ -734,6 +741,7 @@ static void UnsplitSegments() { Unsplit("unsplit-segments", kSegments); }
 static void UnsplitAttachment() { Unsplit("unsplit-attachment", kAttachment); }
 static void UnsplitUav() { Unsplit("unsplit-uav", kUav); }
 static void UnsplitUavWrite() { Unsplit("unsplit-uavwrite", kUavWrite); }
+static void UnsplitSampled() { Unsplit("unsplit-sampled", kSampled); }
 
 // One list, one pass adding 1 to T0, executed twice in one ExecuteCommandLists call: both runs draw (T0 2); M3 must
 // not merge a list into itself.
@@ -1579,7 +1587,7 @@ int main(int argc, char **argv) {
         {"many", Many},              {"clear-rects", ClearRects}, {"signal", Signal},
         {"wrap", Wrap}, {"onewait", OneWait}, {"newest", Newest}, {"nodraw", NoDraw}, {"queues", Queues}, {"unsplit", UnsplitPlain}, {"unsplit-barrier", UnsplitBarrier},
         {"unsplit-samebuffer", UnsplitSameBuffer}, {"unsplit-midbarrier", UnsplitMidBarrier},
-        {"unsplit-query", UnsplitQuery}, {"unsplit-segments", UnsplitSegments}, {"unsplit-attachment", UnsplitAttachment}, {"unsplit-uav", UnsplitUav}, {"unsplit-uavwrite", UnsplitUavWrite}, {"unsplit-twice", UnsplitTwice}, {"deferred", Deferred}, {"zeroed", Zeroed}, {"fold", Fold}, {"fold-order", FoldOrder}, {"fence-reset", FenceReset}, {"fence-cpu-late", FenceCpuLate},
+        {"unsplit-query", UnsplitQuery}, {"unsplit-segments", UnsplitSegments}, {"unsplit-attachment", UnsplitAttachment}, {"unsplit-uav", UnsplitUav}, {"unsplit-uavwrite", UnsplitUavWrite}, {"unsplit-sampled", UnsplitSampled}, {"unsplit-twice", UnsplitTwice}, {"deferred", Deferred}, {"zeroed", Zeroed}, {"fold", Fold}, {"fold-order", FoldOrder}, {"fence-reset", FenceReset}, {"fence-cpu-late", FenceCpuLate},
         {"fence-transitive", FenceTransitive}, {"fence-custom", FenceCustom}, {"fence-lower", FenceLower},
         {"fence-wait-first", FenceWaitFirst}, {"fence-order", FenceOrder}, {"two-heaps", TwoHeaps}, {"ts-start", TimestampStart}, {"after-own-blit", AfterOwnBlit}, {"fold-lists", FoldListsMode},
         {"fold-lists-barrier", FoldListsBarrier}, {"fold-m4", FoldM4}, {"fold-twice", FoldTwice}, {"fold-copy", FoldCopy},
