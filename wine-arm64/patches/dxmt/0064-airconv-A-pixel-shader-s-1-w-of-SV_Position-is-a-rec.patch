@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Tue, 13 Oct 2026 08:01:44 -0400
+Subject: [PATCH] airconv: A pixel shader's 1/w of SV_Position is a reciprocal,
+ not an IEEE divide.
+
+Metal's [[position]].w is 1/w; airconv divides once per pixel to give D3D's w back. On the DXIL path the builder has no
+fast-math flags, so the divide compiled as a full IEEE division in every base-pass pixel shader reading SV_Position.
+D3D asks no exact division of an interpolated w, and Metal Shader Converter emits it fast: it now allows the reciprocal
+and approximate functions (not no-NaN or no-infinity: DXIL keeps them). With dxmt/llvm.sh's CreateFDivFMF fix, the
+translated divides keep DXIL's flags (B6).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/airconv/dxbc_converter_basicblock.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/airconv/dxbc_converter_basicblock.cpp b/src/airconv/dxbc_converter_basicblock.cpp
+index a289a58..5c338f0 100644
+--- a/src/airconv/dxbc_converter_basicblock.cpp
++++ b/src/airconv/dxbc_converter_basicblock.cpp
+@@ -237,6 +237,12 @@ IREffect init_input_reg(
+         auto rcp_w = ctx.builder.CreateFDiv(
+           llvm::ConstantFP::get(ctx.types._float, 1), w_component
+         );
++        // MacNeutron (B6): D3D's interpolated w needs no IEEE divide, so a reciprocal, as Metal Shader Converter emits
++        // it (the DXBC path's builder already has fast flags; DXIL's has none). NaN and infinity stay.
++        if (auto *div = llvm::dyn_cast<llvm::Instruction>(rcp_w)) {
++          div->setHasAllowReciprocal(true);
++          div->setHasApproxFunc(true);
++        }
+         arg = ctx.builder.CreateInsertElement(arg, rcp_w, 3);
+       }
+       return store_at_vec4_array_masked(
+-- 
+2.54.0 (Apple Git-157)
+

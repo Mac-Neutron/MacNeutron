@@ -5,7 +5,9 @@
 // own resources. With --flags, each result line also counts the fast-math flags left in the translated AIR
 // (nnan, ninf, fast compares; reassoc, contract, arcp), for checking what the translator keeps, after its memory
 // fences (each air.atomic.fence's flags:scope, in order), its air.wg.barrier count and its gradient samples (grad=
-// <scaled>/<all>; scaled: an operand is an fmul, as the sampler's LOD bias scaling makes the derivatives). A .dxbc
+// <scaled>/<all>; scaled: an operand is an fmul, as the sampler's LOD bias scaling makes the derivatives), and the
+// components its vertex functions output (vout=, position included: varyings at their signature's width, DXMT 0063)
+// and its divides that keep any fast-math flag (fdiv=<flagged>/<all>: dxmt/llvm.sh's CreateFDivFMF fix, DXMT 0064). A .dxbc
 // file in the folder is a DXBC (Shader Model 5) compute shader, translated as D3D11 does (Task FR: its sync lowering,
 // offline).
 #import <Metal/Metal.h>
@@ -73,7 +75,7 @@ std::vector<uint32_t> RootSignature(const std::vector<Resource> &all) {
 }
 
 struct Flags {
-  unsigned nnan = 0, ninf = 0, cmp = 0, reassoc = 0, contract = 0, arcp = 0, barriers = 0, grads = 0, scaled_grads = 0;
+  unsigned nnan = 0, ninf = 0, cmp = 0, reassoc = 0, contract = 0, arcp = 0, barriers = 0, grads = 0, scaled_grads = 0, vout = 0, fdivs = 0, fast_fdivs = 0;
   std::string fences; // "flags:scope" of each air.atomic.fence, comma-separated
 };
 
@@ -129,8 +131,18 @@ void CountFlags(const void *data, size_t size, Flags &flags) {
           flags.reassoc += f.allowReassoc();
           flags.contract += f.allowContract();
           flags.arcp += f.allowReciprocal();
+          if (inst.getOpcode() == llvm::Instruction::FDiv) {
+            flags.fdivs++;
+            flags.fast_fdivs += f.any();
+          }
         }
       }
+  if (auto vertex = (*module)->getNamedMetadata("air.vertex"))
+    for (auto *node : vertex->operands())
+      if (auto *f = llvm::mdconst::dyn_extract_or_null<llvm::Function>(node->getOperand(0)))
+        if (auto *ret = llvm::dyn_cast<llvm::StructType>(f->getReturnType()))
+          for (auto *field : ret->elements())
+            flags.vout += llvm::isa<llvm::FixedVectorType>(field) ? llvm::cast<llvm::FixedVectorType>(field)->getNumElements() : 1;
 }
 
 // A vertex shader seen in the folder, for pairing with geometry shaders: its bytecode and output semantics.
@@ -411,9 +423,10 @@ int main(int argc, char **argv) {
       if (ms > slowest_ms)
         slowest_ms = ms, slowest = name;
       if (count_flags)
-        printf("ok %s %s %.1f fence=%s barrier=%u grad=%u/%u nnan=%u ninf=%u cmp=%u reassoc=%u contract=%u arcp=%u\n",
+        printf("ok %s %s %.1f fence=%s barrier=%u grad=%u/%u nnan=%u ninf=%u cmp=%u reassoc=%u contract=%u arcp=%u vout=%u fdiv=%u/%u\n",
                name.c_str(), r.stage, ms, r.flags.fences.empty() ? "-" : r.flags.fences.c_str(), r.flags.barriers,
-               r.flags.scaled_grads, r.flags.grads, r.flags.nnan, r.flags.ninf, r.flags.cmp, r.flags.reassoc, r.flags.contract, r.flags.arcp);
+               r.flags.scaled_grads, r.flags.grads, r.flags.nnan, r.flags.ninf, r.flags.cmp, r.flags.reassoc, r.flags.contract, r.flags.arcp,
+               r.flags.vout, r.flags.fast_fdivs, r.flags.fdivs);
       else
         printf("ok %s %s %.1f air=%016llx\n", name.c_str(), r.stage, ms, (unsigned long long)r.air);
     } else {

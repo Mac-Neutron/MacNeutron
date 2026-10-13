@@ -2,8 +2,9 @@
 # The caller defines die, ROOT and LLVM_TAG (dxmt/pins); this file sets no variables. Messages go to stderr.
 
 # LLVM 15: static, with DXMT's CI flags but no assertions (they slowed every pipeline's translation, which Unreal does
-# thousands of times a launch). Built once per install folder and LLVM_TAG: <install>/.complete names the tag it was
-# built from, and another tag's install, build folder and clone are started over.
+# thousands of times a launch), and fix_llvm's fix. Built once per install folder and build: <install>/.complete names
+# the tag and fix it was built from (LLVM_TAG+fdivfmf). Another tag's install, build folder and clone are started over;
+# the same tag without the fix keeps its clone, which is fixed and built again.
 build_llvm() {  # build_llvm <arch> <install> <llvm-project>
   if [ -f "$2/.complete" ]; then
     # ponytail: an empty .complete predates the tag record; it was built from today's pin, so it's adopted, not rebuilt.
@@ -11,9 +12,12 @@ build_llvm() {  # build_llvm <arch> <install> <llvm-project>
       echo "$LLVM_TAG" > "$2/.complete"
       echo "dxmt: recorded LLVM $LLVM_TAG for $2" >&2
     fi
-    [ "$(cat "$2/.complete")" != "$LLVM_TAG" ] || return 0
-    echo "dxmt: $2 was built from LLVM $(cat "$2/.complete"), not $LLVM_TAG: building it again" >&2
-    rm -rf "$2" "$2-build" "$3"
+    [ "$(cat "$2/.complete")" != "$LLVM_TAG+fdivfmf" ] || return 0
+    echo "dxmt: $2 was built from LLVM $(cat "$2/.complete"), not $LLVM_TAG+fdivfmf: building it again" >&2
+    case $(cat "$2/.complete") in
+      "$LLVM_TAG") rm -rf "$2" "$2-build" ;;
+      *) rm -rf "$2" "$2-build" "$3" ;;
+    esac
   fi
   if [ ! -d "$3/llvm" ]; then  # cloned aside and moved into place, so an interrupted clone isn't taken for a source tree
     rm -rf "$3.tmp"
@@ -21,6 +25,7 @@ build_llvm() {  # build_llvm <arch> <install> <llvm-project>
       || die "can't clone llvm-project $LLVM_TAG"
     rm -rf "$3"; mv "$3.tmp" "$3"
   fi
+  fix_llvm "$3"
   echo "dxmt: building LLVM $LLVM_TAG (a few minutes, once); log: $2.log" >&2
   { cmake -B "$2-build" -S "$3/llvm" -G Ninja \
       -DCMAKE_INSTALL_PREFIX="$2" -DCMAKE_OSX_ARCHITECTURES="$1" -DLLVM_HOST_TRIPLE="$1-apple-darwin" \
@@ -28,7 +33,17 @@ build_llvm() {  # build_llvm <arch> <install> <llvm-project>
       -DLLVM_BUILD_TOOLS=Off -DLLVM_VERSION_PRINTER_SHOW_HOST_TARGET_INFO=Off -DCMAKE_POLICY_VERSION_MINIMUM=3.5 &&
     cmake --build "$2-build" && cmake --install "$2-build"; } > "$2.log" 2>&1 \
     || die "LLVM build failed; see $2.log"
-  echo "$LLVM_TAG" > "$2/.complete"  # written last: an interrupted install is redone
+  echo "$LLVM_TAG+fdivfmf" > "$2/.complete"  # written last: an interrupted install is redone
+}
+
+# LLVM 15's IRBuilder::CreateFDivFMF folds and builds with the builder's own fast-math flags, not FMFSource's, as its
+# siblings (CreateFMulFMF, ...) do: InstCombine's (-X/Y)+Z and Z-(-X/Y) folds turned DXIL's fast divides into precise
+# ones (2-3% of SMITE 2's TAA kernel, GPU efficiency B6). Fixed as its siblings read it; a fixed tree is left alone.
+fix_llvm() {  # fix_llvm <llvm-project>
+  h="$1/llvm/include/llvm/IR/IRBuilder.h"
+  grep -q 'MacNeutron: FMFSource' "$h" && return 0
+  perl -0pi -e 's/(experimental_constrained_fdiv,\n\s+L, R, FMFSource, Name\);\n\n)(\s+)(if \(Value \*V = Folder\.FoldBinOpFMF\(Instruction::FDiv, L, R, FMF\)\))/$1$2FastMathFlags FMF = FMFSource->getFastMathFlags(); \/\/ MacNeutron: FMFSource\n$2$3/' "$h"
+  grep -q 'MacNeutron: FMFSource' "$h" || die "can't fix CreateFDivFMF in $h"
 }
 
 # The DXIL probe (spec §6), against the same LLVM. -fno-rtti matches LLVM's own build.

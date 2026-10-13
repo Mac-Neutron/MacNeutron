@@ -78,6 +78,15 @@ dxc -T ps_6_6 -E pswaterfall -Fo helper.pswaterfall.dxil helper.hlsl
 dxc -T ps_6_6 -E pswaterfallmin -Fo helper.pswaterfallmin.dxil helper.hlsl
 dxc -T vs_6_6 -E vsmain -Fo varying16.vs32.dxil varying16.hlsl
 dxc -T ps_6_6 -E psmain -Fo varying16.ps32.dxil varying16.hlsl
+dxc -T vs_6_6 -E vsnarrow -Fo varyings.vsnarrow.dxil varyings.hlsl
+dxc -T ps_6_6 -E psnarrow -Fo varyings.psnarrow.dxil varyings.hlsl
+dxc -T vs_6_6 -E vswide -Fo varyings.vswide.dxil varyings.hlsl
+dxc -T ps_6_6 -E psread3 -Fo varyings.psread3.dxil varyings.hlsl
+dxc -T vs_6_6 -E vspacked -Fo varyings.vspacked.dxil varyings.hlsl
+dxc -T ps_6_6 -E pspacked -Fo varyings.pspacked.dxil varyings.hlsl
+dxc -T ps_6_6 -E psfold -Fo fdiv.psfold.dxil fdiv.hlsl
+dxc -T ps_6_6 -E psprecise -Fo fdiv.psprecise.dxil fdiv.hlsl
+dxc -T ps_6_6 -E pspos -Fo fdiv.pspos.dxil fdiv.hlsl
 dxc -T vs_6_6 -E vsmain -D MIN16 -Fo varying16.vs16.dxil varying16.hlsl
 dxc -T ps_6_6 -E psmain -D MIN16 -Fo varying16.ps16.dxil varying16.hlsl
 dxc -T vs_6_6 -E vsmain -D NATIVE16 -enable-16bit-types -Fo varying16.vs16n.dxil varying16.hlsl
