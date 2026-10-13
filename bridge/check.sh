@@ -157,10 +157,14 @@ expect "steam.exe ends under a terminal" "$(tty_steam)" 5
 # Proton's command handler: steam:// URLs and Steam's options are commands, not programs. Mac Steam has no command line:
 # URLs reach it through open(1) (winebrowser), -applaunch as steam://rungameid (with the arguments after it, as
 # steam://run/<id>//<arguments>/), the rest is logged and dropped (D-12).
+# Valve's wine.inf has no URL Protocol value: one an earlier build wrote goes at the next game.
+"$WINE" reg add 'HKCR\steam' /v 'URL Protocol' /d '' /f >/dev/null 2>&1
 steam exit 0 >/dev/null
 expect "HKCR\\steam is Proton's handler" \
   "$("$WINE" reg query 'HKCR\steam\shell\open\command' /ve 2>/dev/null | tr -d '\r' | sed -n 's/.*REG_SZ *//p')" \
   '"C:\Program Files (x86)\Steam\steam.exe" -- "%1"'
+expect "... with no URL Protocol value, as Valve's wine.inf" \
+  "$("$WINE" reg query 'HKCR\steam' /v 'URL Protocol' >/dev/null 2>&1 && echo kept || echo gone)" gone
 rm -f "$WORK/open.txt"
 set +e; "$WINE" "$STEAMEXE" steam://store/480 >/dev/null 2>&1; got=$?; set -e
 expect "steam.exe steam://store/480 opens Mac Steam" "$got $(opened)" "0 steam://store/480"

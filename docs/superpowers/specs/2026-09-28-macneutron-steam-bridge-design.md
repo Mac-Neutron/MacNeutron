@@ -207,11 +207,11 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
   has never run a game with the bridge has no `steam://` handler (R9). Where steam.exe differs from wine.inf:
   - no `ActiveProcess\SteamPath`;
   - `ActiveProcess\SteamClientDll` only when `steamclient.dll` exists, and no 32-bit client is deployed (D-14); wine.inf
-    writes it always;
-  - `HKCR\steam` also gets an empty `URL Protocol`, which wine.inf lacks (R9 kept it from the earlier winebrowser
-    handler).
+    writes it always.
 
-  The first two, and seeding the keys at prefix creation, are the parity spec's P2-5.
+  Both, and seeding the keys at prefix creation, are the parity spec's P2-5. `HKCR\steam` has no `URL Protocol` value,
+  as in wine.inf: steam.exe removes the one earlier builds wrote (R9 had kept it from the old winebrowser handler; the
+  maintainer dropped it on 2026-10-12, and Wine's ShellExecute doesn't need it).
 - **D-27:** `MACNEUTRON_NO_STEAM_BRIDGE=1` keeps steam.exe, for the `steam://` handler (R10). A game's link to restart
   itself (`steam://rungameid/<its id>` or `steam://launch/<its id>`) isn't forwarded to Mac Steam then: no game
   steam.exe holds the restart event, so the `HKCR\steam` steam.exe logs `Restart event not found` and stops, as
@@ -429,13 +429,14 @@ Rewritten for Amendment 2: what the tests check today.
     `Apps` key and Steam's language; an earlier build's `ActiveUser` is removed; without `SteamGameId`, no pid, named
     events or `ValvePlatformMutex`, and no `libraryfolders.vdf`;
   - a `link2ea://` target clears EA's `IsUnavailable` and exits 0;
-  - commands: `HKCR\steam` is Proton's handler; a game's `steam://` link and `steam.exe steam://…` reach Mac Steam;
-    `-applaunch <id>` reaches it as `rungameid/<id>`, and with arguments as `run/<id>//<args>/`; arguments with a
-    non-ASCII letter, an empty one, `/`, `%`, a tab, an embedded quote and a trailing backslash give exactly the
-    Windows-quoted, UTF-8 percent-encoded URL; a 2000-character `steam://` link and one with Japanese letters reach it
-    whole; a game restarting itself through `steam://rungameid/<its id>` restarts in place, and Mac Steam isn't asked;
-    a steam.exe that a game's link starts through `HKCR\steam` (no Windows standard handles) still logs its failures:
-    a restart link with no game steam.exe to restart puts `Restart event not found` on stderr;
+  - commands: `HKCR\steam` is Proton's handler, with no `URL Protocol` value; a game's `steam://` link and `steam.exe
+    steam://…` reach Mac Steam; `-applaunch <id>` reaches it as `rungameid/<id>`, and with arguments as
+    `run/<id>//<args>/`; arguments with a non-ASCII letter, an empty one, `/`, `%`, a tab, an embedded quote and a
+    trailing backslash give exactly the Windows-quoted, UTF-8 percent-encoded URL; a 2000-character `steam://` link and
+    one with Japanese letters reach it whole; a game restarting itself through `steam://rungameid/<its id>` restarts in
+    place, and Mac Steam isn't asked; a steam.exe that a game's link starts through `HKCR\steam` (no Windows standard
+    handles) still logs its failures: a restart link with no game steam.exe to restart puts `Restart event not found` on
+    stderr;
   - through the launcher (tool-folder mode): the exit code, the arguments, a missing program, a launcher-style child
     (with `CREATE_BREAKAWAY_FROM_JOB` too), a live Steam in the registry and system32's `ValvePlatformMutex` again, and:
     with the bridge off a game's `steam://` link still reaches Mac Steam; a game in a library runs from `S:` (a library

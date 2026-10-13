@@ -186,12 +186,12 @@ static void register_steam(DWORD pid)
         set_string(key, L"InstallPath", STEAM_DIR);
         RegCloseKey(key);
     }
-    /* Steam's URL handler: Proton's command (Valve's wine.inf), and an empty URL Protocol value, which wine.inf lacks
-     * (R9, D-26). A game's ShellExecute("steam://…") runs the Steam folder's steam.exe, whose command handler restarts
-     * the game or sends the URL on to Mac Steam. */
+    /* Steam's URL handler, Proton's command (Valve's wine.inf): a game's ShellExecute("steam://…") runs the Steam
+     * folder's steam.exe, whose command handler restarts the game or sends the URL on to Mac Steam. wine.inf has no
+     * URL Protocol value; the one earlier builds wrote goes (D-26). */
     if ((key = create_key(HKEY_CLASSES_ROOT, L"steam")))
     {
-        set_string(key, L"URL Protocol", L"");
+        RegDeleteValueW(key, L"URL Protocol");
         RegCloseKey(key);
     }
     if ((key = create_key(HKEY_CLASSES_ROOT, L"steam\\shell\\open\\command")))

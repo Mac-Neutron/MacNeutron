@@ -55,13 +55,16 @@ bridge spec's Amendment 2 (D-1 to D-34).
    - Documentation: the README (what game logs hide, what the escape hatch keeps), the bridge spec (Amendment 2 names
      every section the code contradicts, §9 lists what the tests check, the D-lines restored from the parity spec's
      Part 4 and the new ones) and the `swift test` count below.
+8. **`URL Protocol` removed** (after the maintainer rows, the maintainer's call): `HKCR\steam` has only Proton's
+   command, as in Valve's wine.inf, and steam.exe removes the value earlier builds wrote (D-26). The bridge check's link
+   rows pass without it.
 
 ## Gates (2026-10-12)
 
 | Gate | Result |
 |---|---|
 | `swift test` | 324 tests passed (329 after Task 1; then 7 tests deleted with their code, `windowsPath`, `libraryFolders`, three `activeAccountID`, `accountFromLaunchOptionsWins` and `steamFilesComeWithTheBridge`, and 2 added, net -5). After the final review fixes: 326 passed (two `GameDrive` tests added) |
-| `make bridge-check` | all passed, 47 `ok`; the restart row passed 3 runs in a row. After the final review fixes: all passed, 57 `ok` |
+| `make bridge-check` | all passed, 47 `ok`; the restart row passed 3 runs in a row. After the final review fixes: all passed, 57 `ok`; 58 after the `URL Protocol` removal |
 | `make smoke` | all passed, including console programs started through the launcher |
 | `sh wine-arm64/check.sh steam-bridge` | `PASS steam-bridge`: the probe exits 0 directly and through the launcher (GUI `steamprobe.exe`, Mac Steam running) |
 
@@ -72,20 +75,22 @@ Each task's RED was recorded first; the ledger has the details. Corrections made
 
 ## Maintainer rows (build/dev/MacNeutron.app)
 
-Part A item 2: P0-3 stays P0 only if rows 1-3 pass; otherwise it is recorded as P1.
+Run 2026-10-12 on the dev build at aa17ee8, by the maintainer: every row passed except row 3, which waits for a
+launcher-based game to be installed. Part A item 2: P0-3 stays P0 only if rows 1-3 pass; rows 1 and 2 passed, so it
+stays P0 until row 3 runs.
 
 1. **Palworld:**
    - it starts and loads a world;
    - its game log, with `/usr/bin/env MACNEUTRON_LOG=1 %command%`, shows `S:\steamapps\common\Palworld\…`;
-   - SteamStub passes. — *pending*
-2. **SMITE 2:** one match. — *pending*
+   - SteamStub passes. — passed
+2. **SMITE 2:** one match. — passed
 3. **A launcher-based game whose prefix last ran under the `Z:` build** (named by the maintainer): it starts through its
-   launcher; record whether the launcher asks to repair or relocate. — *pending*
-4. **Timberborn** (passthrough): unchanged. — *pending*
-5. **Store link:** an in-game store link opens Mac Steam. — *pending*
-6. **No stray windows:** no Dock icon for steam.exe, and no console window for the three games. — *pending*
+   launcher; record whether the launcher asks to repair or relocate. — *not run: no such game installed*
+4. **Timberborn** (passthrough): unchanged. — passed
+5. **Store link:** an in-game store link opens Mac Steam. — passed
+6. **No stray windows:** no Dock icon for steam.exe, and no console window for the three games. — passed
 7. **Opt-out:** `/usr/bin/env PROTON_SET_GAME_DRIVE=0 %command%` on one game shows `Z:` again (its game log). —
-   *pending*
+   passed
 8. **`-applaunch` arguments** (optional; D-12 leaves it to you): with Mac Steam running and the game not running, in
    Terminal:
 
@@ -96,4 +101,4 @@ Part A item 2: P0-3 stays P0 only if rows 1-3 pass; otherwise it is recorded as 
    ```
 
    Record whether Mac Steam starts the game with `-windowed`, and whether it asks you to confirm the arguments. —
-   *pending*
+   passed
