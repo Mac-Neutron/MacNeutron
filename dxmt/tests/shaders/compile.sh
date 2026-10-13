@@ -63,6 +63,7 @@ dxc -T ps_6_8 -E psmain -Fo cmp68.ps.dxil cmp68.hlsl
 dxc -T vs_6_6 -E vsfull -Fo hazards.vsfull.dxil hazards.hlsl
 dxc -T ps_6_6 -E psvalue -Fo hazards.psvalue.dxil hazards.hlsl
 dxc -T ps_6_6 -E pssample -Fo hazards.pssample.dxil hazards.hlsl
+dxc -T ps_6_6 -E psuav -Fo hazards.psuav.dxil hazards.hlsl
 dxc -T cs_6_6 -E csfill -Fo hazards.csfill.dxil hazards.hlsl
 dxc -T cs_6_6 -E cscount -Fo hazards.cscount.dxil hazards.hlsl
 dxc -T cs_6_6 -E csargs -Fo hazards.csargs.dxil hazards.hlsl

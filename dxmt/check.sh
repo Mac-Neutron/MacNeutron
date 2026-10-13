@@ -286,7 +286,7 @@ LANE=B
 want=$(printf 'hazard %s\n' "rt-read 257" "same-target 7 5" "uav 1048576" "copy-read 6" "indirect 9" "aliasing 2" \
   "occlusion 268435456" "independent 256 256" "precise 257" "mid-pass 77" "twice 514" "many 1200 1200" "clear-rects 3 256" \
   "signal 0" "wrap 4194304" "onewait 256 5 6" "newest 3 2" "nodraw 257" "queues 257 257" "unsplit 257" "unsplit-barrier 257" \
-  "unsplit-samebuffer 257" "unsplit-midbarrier 258" "unsplit-query 258 268435456 1048576" "unsplit-segments 257 1" "unsplit-attachment 257" "unsplit-uav 257" "unsplit-twice 2" "deferred 1" "zeroed 0 0" "fold 6 2 9 5" "fold-order 6 7" \
+  "unsplit-samebuffer 257" "unsplit-midbarrier 258" "unsplit-query 258 268435456 1048576" "unsplit-segments 257 1" "unsplit-attachment 257" "unsplit-uav 257" "unsplit-uavwrite 257" "unsplit-twice 2" "deferred 1" "zeroed 0 0" "fold 6 2 9 5" "fold-order 6 7" \
   "fence-reset 1" "fence-cpu-late 1" "fence-transitive 0 0" "fence-custom 1" "fence-lower 0 1" "fence-wait-first 257" "fence-order 1 1" "two-heaps 1 1" "ts-start 1" "after-own-blit 7" \
   "fold-lists 6 2" "fold-lists-barrier 6 2" "fold-m4 11 7" "fold-twice 10 14" "fold-copy 2 6 2" "indirect-war 265" \
   "merge-indirect 10" "placed-uav 1048576" "heap-released 257" "ts-many 1" "sampled 1" "ts-queues 1")
@@ -363,32 +363,30 @@ expect "and on the newest writer alone" \
 # M3 (GPU overlap spec §3.5): two lists' passes into one target with only timestamps between them are one Metal render
 # pass, the timestamp ring (the default) taking all their samples at one point, and in strict order (the default) out
 # of a pass that isn't its list's join too (unsplit-segments, SMITE 2's base-pass segments: B6), and across barriers
-# that name nothing the passes write (unsplit-barrier: B6, SMITE 2's 35 refusals a frame); not across a barrier that
-# names their target (unsplit-attachment), a UAV (unsplit-uav: no pass lists its pixel-shader writes) or orders
-# everything (unsplit-midbarrier's UAV barrier), nor out of a pass counting into an occlusion query, nor a list into
-# itself.
-m3_modes="unsplit unsplit-barrier unsplit-samebuffer unsplit-midbarrier unsplit-query unsplit-segments unsplit-attachment unsplit-uav unsplit-twice"
+# that name nothing the passes write (unsplit-barrier: B6, SMITE 2's 35 refusals a frame), UAV barriers and
+# UNORDERED_ACCESS moves among them when no pass's shader writes a UAV (unsplit-midbarrier, unsplit-uav); not across a
+# barrier that names their target (unsplit-attachment) or a UAV move where a pass's shader writes one (unsplit-uavwrite:
+# no pass lists its shaders' UAV writes), nor out of a pass counting into an occlusion query, nor a list into itself.
+m3_modes="unsplit unsplit-barrier unsplit-samebuffer unsplit-midbarrier unsplit-query unsplit-segments unsplit-attachment unsplit-uav unsplit-uavwrite unsplit-twice"
 rm -rf "$WORK/m3-stats"; export DXMT_DXIL_DUMP="$WORK/m3-stats" DXMT_STATS=1
 run ours m3-stats dxmt "$TESTS/d3d12_hazards.exe" "Z:$S" $m3_modes
 unset DXMT_DXIL_DUMP DXMT_STATS
 m3() { grep -oE '(render passes merged|timestamp blits folded|render pass merges refused \([a-z]+\)) [0-9]+' \
   "$WORK/$1/stats.txt" 2> /dev/null | tr '\n' ';'; }
 expect "render passes into one target across lists are one Metal render pass" "$(m3 m3-stats)" \
-  "render pass merges refused (barrier) 3;render pass merges refused (other) 2;render passes merged 4;timestamp blits folded 4;"
-# DXMT_STATS says which barrier refused each (B6): unsplit-uav's UNORDERED_ACCESS, unsplit-midbarrier's UAV barrier,
-# unsplit-attachment's target.
+  "render pass merges refused (barrier) 2;render pass merges refused (other) 2;render passes merged 6;timestamp blits folded 6;"
+# DXMT_STATS says which barrier refused each (B6): unsplit-uavwrite's UNORDERED_ACCESS, unsplit-attachment's target.
 expect "and which barrier kept each apart" \
   "$(grep -oE 'render pass merges refused \(barrier\): [^0-9]+ [0-9]+' "$WORK/m3-stats/stats.txt" 2> /dev/null | tr '\n' ';')" \
-  "render pass merges refused (barrier): UNORDERED_ACCESS 1;render pass merges refused (barrier): a UAV barrier 1;render pass merges refused (barrier): a resource the passes write 1;"
+  "render pass merges refused (barrier): UNORDERED_ACCESS 1;render pass merges refused (barrier): a resource the passes write 1;"
 # With a counter buffer per pass (DXMT_D3D12_TIMESTAMP_BLITS=1), a buffer sampled at the base pass's end can't be
 # sampled again in it: unsplit-samebuffer and unsplit-segments stay apart. DXMT_STATS says why each didn't join (B6,
-# Task F4): unsplit-attachment's, unsplit-uav's and unsplit-midbarrier's barriers, unsplit-query's query and
-# unsplit-twice's list.
+# Task F4): unsplit-attachment's and unsplit-uavwrite's barriers, unsplit-query's query and unsplit-twice's list.
 rm -rf "$WORK/m3-blits-stats"; export DXMT_DXIL_DUMP="$WORK/m3-blits-stats" DXMT_STATS=1 DXMT_D3D12_TIMESTAMP_BLITS=1
 run ours m3-blits-stats dxmt "$TESTS/d3d12_hazards.exe" "Z:$S" $m3_modes
 unset DXMT_DXIL_DUMP DXMT_STATS DXMT_D3D12_TIMESTAMP_BLITS
 expect "and with a counter buffer per pass, not when that buffer is already sampled" "$(m3 m3-blits-stats)" \
-  "render pass merges refused (barrier) 3;render pass merges refused (other) 2;render pass merges refused (timestamps) 2;render passes merged 2;timestamp blits folded 2;"
+  "render pass merges refused (barrier) 2;render pass merges refused (other) 2;render pass merges refused (timestamps) 2;render passes merged 4;timestamp blits folded 4;"
 expect "and the merged passes' timestamps stay in order, with each run's picture right" \
   "$(grep '^hazard unsplit-segments' "$WORK/m3-stats.txt"; grep '^hazard unsplit-segments' "$WORK/m3-blits-stats.txt")" \
   "$(printf 'hazard unsplit-segments 257 1\nhazard unsplit-segments 257 1')"
@@ -1043,7 +1041,7 @@ expect "and DXBC's, GroupMemoryBarrier's threadgroup fence included" \
   "$(grep '^ok sync\.dxbc ' "$WORK/translate-dxbc.txt" | grep -oE 'fence=[^ ]+ barrier=[0-9]+' || echo none)" \
   "fence=2:1,5:3,5:3,7:3,7:3 barrier=3"
 "$TOOLS/dxil-translate" "$S" > "$WORK/translate-shaders.txt" 2>&1 || true
-expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-shaders.txt" | cut -d ' ' -f 2)" "63/63"
+expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-shaders.txt" | cut -d ' ' -f 2)" "64/64"
 # DXIL keeps NaN and infinity: no translated shader assumes them away or keeps a fast compare. Vertex and geometry
 # shaders also carry no reassoc, contract or arcp flags, as airconv's DXBC path, so LLVM fuses or reorders nothing on
 # its own: a depth prepass and a base pass then compute the same positions, and their depth EQUAL test holds (grass
@@ -1052,7 +1050,7 @@ expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-sha
 # precise, so no fma there).
 "$TOOLS/dxil-translate" "$S" --flags > "$WORK/translate-flags.txt" 2>&1 || true
 expect "no translated shader assumes NaN or infinity away" \
-  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "63:63"
+  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "64:64"
 # Varyings at their signature's width (DXMT 0063, as Metal Shader Converter declares them): position 4, then
 # float3 + uint + float2, float4 + float2, and float2 + float2 (one register in DXIL) are 10, 10 and 8 components per
 # vertex, not a float4 each (16, 12 and 12). SMITE 2's base-pass vertex shaders store 20-36 such components per vertex.

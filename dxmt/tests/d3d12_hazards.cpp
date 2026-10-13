@@ -23,7 +23,7 @@ struct Target {
 
 static Gpu *g;
 static ID3D12RootSignature *root, *croot;
-static ID3D12PipelineState *add, *set, *sample, *add_sample, *fill, *count, *args;
+static ID3D12PipelineState *add, *set, *sample, *add_sample, *add_uav, *fill, *count, *args;
 static ID3D12CommandSignature *draw_signature;
 static ID3D12DescriptorHeap *rtv_heap, *srv_heap;
 static UINT targets_made;
@@ -51,9 +51,10 @@ static Target MakeTarget(ID3D12Resource *texture = nullptr) {
     return t;
 }
 
-static ID3D12PipelineState *Graphics(const std::vector<char> &vs, const std::vector<char> &ps, bool additive) {
+static ID3D12PipelineState *Graphics(const std::vector<char> &vs, const std::vector<char> &ps, bool additive,
+                                     ID3D12RootSignature *signature = root) {
     D3D12_GRAPHICS_PIPELINE_STATE_DESC gd = {};
-    gd.pRootSignature = root;
+    gd.pRootSignature = signature;
     gd.VS = {vs.data(), vs.size()};
     gd.PS = {ps.data(), ps.size()};
     auto &blend = gd.BlendState.RenderTarget[0];
@@ -88,8 +89,9 @@ static void Clear(Target &t) {
     g->list->ClearRenderTargetView(t.rtv, zero, 0, nullptr);
 }
 
-// Sets up a full-screen draw into `t` with `pso` and its constant `value` (sampling `from`, for the sample pipelines).
-static void Bind(Target &t, ID3D12PipelineState *pso, float value, Target *from = nullptr) {
+// Sets up a full-screen draw into `t` with `pso` and its constant `value` (sampling `from`, for the sample pipelines;
+// writing buffer `uav`, for add_uav).
+static void Bind(Target &t, ID3D12PipelineState *pso, float value, Target *from = nullptr, ID3D12Resource *uav = nullptr) {
     auto *l = g->list;
     D3D12_VIEWPORT vp = {0, 0, (float)kSize, (float)kSize, 0, 1};
     D3D12_RECT sc = {0, 0, (LONG)kSize, (LONG)kSize};
@@ -97,7 +99,7 @@ static void Bind(Target &t, ID3D12PipelineState *pso, float value, Target *from 
     l->RSSetViewports(1, &vp);
     l->RSSetScissorRects(1, &sc);
     l->SetDescriptorHeaps(1, &srv_heap);
-    l->SetGraphicsRootSignature(root);
+    l->SetGraphicsRootSignature(uav ? croot : root);
     l->SetPipelineState(pso);
     l->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     UINT constants[2] = {0, 0};
@@ -105,11 +107,14 @@ static void Bind(Target &t, ID3D12PipelineState *pso, float value, Target *from 
     l->SetGraphicsRoot32BitConstants(0, 2, constants, 0);
     if (from)
         l->SetGraphicsRootDescriptorTable(1, from->srv);
+    if (uav)
+        l->SetGraphicsRootUnorderedAccessView(1, uav->GetGPUVirtualAddress());
 }
 
 // `instances` full-screen triangles into `t` (with additive blending, each adds `value`).
-static void Pass(Target &t, ID3D12PipelineState *pso, float value, UINT instances, Target *from = nullptr) {
-    Bind(t, pso, value, from);
+static void Pass(Target &t, ID3D12PipelineState *pso, float value, UINT instances, Target *from = nullptr,
+                 ID3D12Resource *uav = nullptr) {
+    Bind(t, pso, value, from, uav);
     g->list->DrawInstanced(3, instances, 0, 0);
 }
 
@@ -620,8 +625,9 @@ static void Queues() {
 // `mid_barrier`: a UAV barrier between the second pass's two draws (T0 258); `query`: the first pass counts into
 // occlusion query 0, the second draws once before its own query 1 on the same heap and once inside it: query 0 counts
 // the first pass's 256 instances alone (prints T0 then the two counts). Barriers between the lists merge (B6) unless
-// they name what a pass writes (`attachment`) or a UAV, whose pixel-shader writes no pass lists (`uav`).
-enum UnsplitKind { kPlain, kBarrier, kSameBuffer, kMidBarrier, kQuery, kSegments, kAttachment, kUav };
+// they name what a pass writes (`attachment`), or concern UAVs (`uav`, `mid_barrier`) where a pass's shader writes one
+// (`uav_write`: the second pass also counts its pixels into the buffer the barriers move).
+enum UnsplitKind { kPlain, kBarrier, kSameBuffer, kMidBarrier, kQuery, kSegments, kAttachment, kUav, kUavWrite };
 static void Unsplit(const char *name, UnsplitKind kind) {
     static ID3D12CommandAllocator *a2;
     static ID3D12GraphicsCommandList *l2;
@@ -635,7 +641,7 @@ static void Unsplit(const char *name, UnsplitKind kind) {
         CHECK(g->device->CreateQueryHeap(&od, __uuidof(ID3D12QueryHeap), (void **)&occlusion));
     }
     static ID3D12Resource *uav;
-    if (kind == kUav && !uav)
+    if ((kind == kUav || kind == kUavWrite) && !uav)
         uav = Zeroed(256, UA);
     Clear(T[0]);
     g->Submit();
@@ -655,15 +661,18 @@ static void Unsplit(const char *name, UnsplitKind kind) {
     // kBarrier's barriers name another texture; kAttachment's name the passes' own target.
     if (kind == kBarrier || kind == kAttachment)
         g->Barrier(T[kind == kBarrier ? 1 : 0].texture, RT, PSR);
-    if (kind == kUav)
+    if (kind == kUav || kind == kUavWrite)
         g->Barrier(uav, UA, PSR);
     g->list = l2;
     if (kind == kBarrier || kind == kAttachment)
         g->Barrier(T[kind == kBarrier ? 1 : 0].texture, PSR, RT);
-    if (kind == kUav)
+    if (kind == kUav || kind == kUavWrite)
         g->Barrier(uav, PSR, UA);
     l2->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, 0); // a timestamp-only blit
-    Pass(T[0], add, 1, 1);
+    if (kind == kUavWrite)
+        Pass(T[0], add_uav, 1, 1, nullptr, uav);
+    else
+        Pass(T[0], add, 1, 1);
     if (kind == kSegments)
         l2->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, 3);
     if (kind == kQuery) {
@@ -724,6 +733,7 @@ static void UnsplitQuery() { Unsplit("unsplit-query", kQuery); }
 static void UnsplitSegments() { Unsplit("unsplit-segments", kSegments); }
 static void UnsplitAttachment() { Unsplit("unsplit-attachment", kAttachment); }
 static void UnsplitUav() { Unsplit("unsplit-uav", kUav); }
+static void UnsplitUavWrite() { Unsplit("unsplit-uavwrite", kUavWrite); }
 
 // One list, one pass adding 1 to T0, executed twice in one ExecuteCommandLists call: both runs draw (T0 2); M3 must
 // not merge a list into itself.
@@ -1548,6 +1558,7 @@ int main(int argc, char **argv) {
     set = Graphics(vs, value, false);
     sample = Graphics(vs, sampled, false);
     add_sample = Graphics(vs, sampled, true);
+    add_uav = Graphics(vs, shader("psuav"), true, croot);
     fill = Compute(shader("csfill"));
     count = Compute(shader("cscount"));
     args = Compute(shader("csargs"));
@@ -1568,7 +1579,7 @@ int main(int argc, char **argv) {
         {"many", Many},              {"clear-rects", ClearRects}, {"signal", Signal},
         {"wrap", Wrap}, {"onewait", OneWait}, {"newest", Newest}, {"nodraw", NoDraw}, {"queues", Queues}, {"unsplit", UnsplitPlain}, {"unsplit-barrier", UnsplitBarrier},
         {"unsplit-samebuffer", UnsplitSameBuffer}, {"unsplit-midbarrier", UnsplitMidBarrier},
-        {"unsplit-query", UnsplitQuery}, {"unsplit-segments", UnsplitSegments}, {"unsplit-attachment", UnsplitAttachment}, {"unsplit-uav", UnsplitUav}, {"unsplit-twice", UnsplitTwice}, {"deferred", Deferred}, {"zeroed", Zeroed}, {"fold", Fold}, {"fold-order", FoldOrder}, {"fence-reset", FenceReset}, {"fence-cpu-late", FenceCpuLate},
+        {"unsplit-query", UnsplitQuery}, {"unsplit-segments", UnsplitSegments}, {"unsplit-attachment", UnsplitAttachment}, {"unsplit-uav", UnsplitUav}, {"unsplit-uavwrite", UnsplitUavWrite}, {"unsplit-twice", UnsplitTwice}, {"deferred", Deferred}, {"zeroed", Zeroed}, {"fold", Fold}, {"fold-order", FoldOrder}, {"fence-reset", FenceReset}, {"fence-cpu-late", FenceCpuLate},
         {"fence-transitive", FenceTransitive}, {"fence-custom", FenceCustom}, {"fence-lower", FenceLower},
         {"fence-wait-first", FenceWaitFirst}, {"fence-order", FenceOrder}, {"two-heaps", TwoHeaps}, {"ts-start", TimestampStart}, {"after-own-blit", AfterOwnBlit}, {"fold-lists", FoldListsMode},
         {"fold-lists-barrier", FoldListsBarrier}, {"fold-m4", FoldM4}, {"fold-twice", FoldTwice}, {"fold-copy", FoldCopy},

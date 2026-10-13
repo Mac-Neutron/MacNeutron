@@ -12,6 +12,8 @@ float4 vsfull(uint id : SV_VertexID) : SV_Position {
 float4 psvalue() : SV_Target0 { return value; }
 // The source texel under the pixel, plus `value`.
 float4 pssample(float4 pos : SV_Position) : SV_Target0 { return Source.Load(int3(pos.xy, 0)) + value; }
+// `value` everywhere, each pixel adding 1 to word 2 (a pixel shader that writes a UAV).
+float4 psuav() : SV_Target0 { Data.InterlockedAdd(8, 1); return value; }
 // Every thread adds 1 to word 0.
 [numthreads(64, 1, 1)] void csfill() { Data.InterlockedAdd(0, 1); }
 // Copies word 0 to word 1.
