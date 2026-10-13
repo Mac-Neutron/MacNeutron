@@ -273,6 +273,9 @@ rm "$OUT/macho.list"
 [ -e "$R/share/wine/wine.inf" ] || die "no Resources/share/wine/wine.inf"
 v=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" 2> /dev/null || true)
 [ "$v" = "$VERSION" ] || die "Info.plist's CFBundleShortVersionString is '${v:-missing}', not $VERSION"
+# macOS turns Game Mode on for a full-screen app of the games category; the game runs in this bundle's process.
+c=$(/usr/libexec/PlistBuddy -c 'Print :LSApplicationCategoryType' "$APP/Contents/Info.plist" 2> /dev/null || true)
+[ "$c" = public.app-category.games ] || die "Info.plist's LSApplicationCategoryType is '${c:-missing}', not games"
 links=$(find "$APP" -type l ! -exec test -e {} \; -print)
 [ -z "$links" ] || die "dangling links: $(echo "$links" | tr '\n' ' ')"
 id=$(otool -D "$U/libmacneutron-present.dylib" | tail -n +2)
