@@ -149,6 +149,7 @@ stamp=$(stamp_of "$ROOT/wine-arm64/pins" "$PATCHES"/*.patch "$FEX_PATCHES"/*.pat
   "$ROOT/presenter/present.m" "$ROOT/presenter/cmaa2.metal" "$ROOT/presenter/sharpen.metal" \
   "$ROOT/presenter/CMAA2-LICENSE.txt" "$ROOT/LICENSE" \
   "$ROOT/wine-arm64/tools/xcrun-metal.sh" "$ROOT/dxmt/toolchain.sh" "$ROOT/dxmt/llvm-mingw.sh" \
+  "$ROOT/wine-arm64/tools/authenticode-sign.swift" \
   "$ROOT"/wine-arm64/patches/llvm/*.patch)
 # Another CPU, LTO setting or toolchain is another build.
 stamp=$(printf '%s %s %s %s' "$stamp" "$MACNEUTRON_CPU" "$MACNEUTRON_LTO" "$TOOLCHAIN_BIN" | shasum -a 256 \
@@ -494,6 +495,15 @@ else
 fi
 # The launcher's replay stamp reads the translator's key from DXMT/translator (ShaderPrecache).
 echo "$translator" > "$SRC/dxmt-install/translator"
+# DXMT's NVIDIA DLLs, Authenticode-signed with the bundle's identity (tools/authenticode-sign.swift): the NGX SDK every
+# DLSS game links loads nvngx.dll only when WinVerifyTrust accepts its signature, so an unsigned one meant no DLSS.
+if [ ! -x "$SRC/authenticode-sign" ] || [ "$ROOT/wine-arm64/tools/authenticode-sign.swift" -nt "$SRC/authenticode-sign" ]; then
+  xcrun swiftc -O -o "$SRC/authenticode-sign" "$ROOT/wine-arm64/tools/authenticode-sign.swift" > "$SRC/authenticode.log" 2>&1 \
+    || die "building authenticode-sign failed; see $SRC/authenticode.log"
+fi
+"$SRC/authenticode-sign" "$MACNEUTRON_SIGN_IDENTITY" "$SRC/dxmt-install/system32/nvngx.dll" \
+  "$SRC/dxmt-install/system32/nvapi64.dll" >> "$SRC/authenticode.log" 2>&1 \
+  || die "Authenticode-signing DXMT's NVIDIA DLLs failed; see $SRC/authenticode.log"
 # The DXIL host tools, arm64, next to wine.app (not in it).
 mkdir -p "$OUT"
 build_probe arm64 "$SRC/llvm-arm64" "$OUT" "$SRC"

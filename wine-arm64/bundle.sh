@@ -116,8 +116,10 @@ put "$S/fex" External/range-v3/LICENSE.txt "$L/fex/range-v3-LICENSE.txt"
 put "$S/fex" Source/Common/cpp-optparse/LICENSE "$L/fex/cpp-optparse-LICENSE"
 put "$B/dxmt-src/llvm-project/llvm" LICENSE.TXT "$L/llvm/"
 put "$B/dxmt-src/llvm-project/llvm" lib/Support/COPYRIGHT.regex "$L/llvm/"
-put "$B/dxmt-src/llvm-mingw" LICENSE.TXT "$L/llvm-mingw/"
-put "$B/dxmt-src/llvm-mingw" aarch64-w64-mingw32/share/mingw32/COPYING.MinGW-w64-runtime.txt "$L/llvm-mingw/"
+# The llvm-mingw that built the Windows side (dxmt/toolchain.sh: ours, or the pinned release).
+MINGW_ROOT=$(dirname "$(sh "$ROOT/dxmt/toolchain.sh")")
+put "$MINGW_ROOT" LICENSE.TXT "$L/llvm-mingw/"
+put "$MINGW_ROOT" aarch64-w64-mingw32/share/mingw32/COPYING.MinGW-w64-runtime.txt "$L/llvm-mingw/"
 # From the unpacked tarballs. libgnutls.30.dylib holds nettle, gmp and gnutls's own copy of libunistring (LGPL-3+):
 # gnutls's tarball has no LGPLv3 text, so its folder gets nettle's (the same GNU texts).
 DS="$S/deps-src"
@@ -174,7 +176,8 @@ if [ -n "$release" ]; then
   done
   llvm_strip="$(sh "$ROOT/dxmt/toolchain.sh")/llvm-strip"
   find "$R/lib/wine/aarch64-windows" "$R/DXMT/aarch64-windows" -type f -print0 | xargs -0 file \
-    | sed -n 's/: *PE32.*//p' > "$OUT/pe.list"
+    | sed -n 's/: *PE32.*//p' | LC_ALL=C /usr/bin/grep -v -e '/nvngx\.dll$' -e '/nvapi64\.dll$' > "$OUT/pe.list"
+  # (DXMT's NVIDIA DLLs are Authenticode-signed after DXMT's own stripped install: rewriting them breaks the signature.)
   [ -s "$OUT/pe.list" ] || die "no PE files found to strip"
   while IFS= read -r f; do
     "$llvm_strip" --strip-debug "$f" >> "$OUT/strip.log" 2>&1 \
@@ -289,6 +292,11 @@ builtin() { [ "$(dd if="$1" bs=1 skip=64 count=16 2> /dev/null)" = "Wine builtin
 builtin "$R/lib/wine/aarch64-windows/winemetal.dll" || die "winemetal.dll lacks Wine's builtin marker"
 for f in d3d11.dll d3d10core.dll dxgi.dll d3d12.dll nvapi64.dll nvngx.dll dxmt-replay.exe; do
   ! builtin "$R/DXMT/aarch64-windows/$f" || die "$f carries Wine's builtin marker"
+done
+# The NGX SDK refuses an unsigned nvngx.dll (build.sh signs both).
+for f in nvngx.dll nvapi64.dll; do
+  "$(sh "$ROOT/dxmt/toolchain.sh")/llvm-readobj" --file-headers "$R/DXMT/aarch64-windows/$f" \
+    | LC_ALL=C /usr/bin/grep -qE 'CertificateTableSize: 0x[1-9A-F]' || die "DXMT's $f carries no Authenticode signature"
 done
 ver=$(cat "$R/DXMT/version")
 case $ver in "$DXMT_COMMIT"+?*) ;; *) die "DXMT/version is '$ver', not $DXMT_COMMIT+<series or dev>" ;; esac
