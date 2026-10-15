@@ -19,8 +19,9 @@ needs Xcode 27 (Swift 6) and the Developer ID setup in `wine-arm64/README.md` (t
    launch gets a fresh Wine prefix that keeps the game's settings and local saves; the old prefix stays beside it as
    `pfx.rosetta`.
 2. Open MacNeutron. The setup window checks the requirements (Steam), installs the runtime automatically, and then
-   turns on Steam Play mode. After that, MacNeutron lives in the menu bar. It keeps Steam's mappings current so your
-   Mac games stay native, and its Games window sets the graphics backend and options per game.
+   turns on Steam Play mode. After that, MacNeutron lives in the menu bar (Shift-F9 opens that menu, so a fullscreen
+   game does not need the mouse). It keeps Steam's mappings current so your Mac games stay native, and its Games
+   window sets the graphics backend and options per game.
 
 The Rosetta-era runtime downloads in `~/Library/Caches/MacNeutron/runtime-v*.tar.gz` are no longer used and can be
 deleted.
@@ -79,7 +80,12 @@ Start launch options with `/usr/bin/env`. macOS Steam runs them without a shell,
 | `/usr/bin/env MACNEUTRON_NO_METALFX=1 %command%` | Don't upscale with MetalFX (macOS then stretches smaller images with its nearest-neighbour filter) |
 | `/usr/bin/env DXMT_MAX_ANISOTROPY=0\|4\|8\|16 %command%` | Anisotropic filtering on the game's trilinear textures: 16x by default, `0` keeps the game's own (also "Anisotropic filtering" in the Games window) |
 | `/usr/bin/env MACNEUTRON_POST_AA=cmaa2 %command%` | Anti-alias each frame with Intel's CMAA2 (for games without their own anti-aliasing; also "Anti-aliasing (post)" in the Games window) |
+| `/usr/bin/env MACNEUTRON_UPSCALE=ultra-quality\|quality\|balanced\|performance\|ultra-performance %command%` | Report the desktop to the game smaller than it is (XeSS's ratios) and upscale the window back with MetalFX: a large gain for a GPU-bound game (also "Upscaling" in the Games window). The game renders fewer pixels and lays its UI out for the smaller size, so the UI stays in proportion and the whole image softens. The upscale is the presenter's spatial one. A game that ignores the reported size (a window the player sized, an exclusive fullscreen mode) keeps its own resolution. Needs a Direct3D 12 game, and MetalFX on (not `MACNEUTRON_NO_METALFX=1`) |
+| `/usr/bin/env MACNEUTRON_SHARPEN=0\|0.5\|1 %command%` | How much the presenter sharpens what it upscales (contrast-adaptive, AMD's CAS): `0` off, `1` the most. `MACNEUTRON_UPSCALE` turns it on at 0.5 unless you set your own; it takes the softness off the spatial upscale for about what the copy of the frame it replaces cost |
+| `/usr/bin/env MTL_HUD_ENABLED=1 %command%` | Apple's Metal performance HUD over the game (FPS and frame-time graph), which also carries DXMT's own lines (its passes, queue waits and MetalFX upscales): the same as "Metal HUD" in the Games window. Its log and layout variables (`MTL_HUD_LOG_ENABLED`, `MTL_HUD_ALIGNMENT`, `MTL_HUD_SCALE`) stay launch options |
 | `/usr/bin/env MACNEUTRON_XESS=1 %command%` | Load the game's own Intel XeSS (for comparison: on Apple GPUs it is many times slower, SMITE 2 ~4 FPS). By default XeSS on D3D12 runs on MetalFX's upscaler |
+| `/usr/bin/env MACNEUTRON_DLSS=1 %command%` | Experimental, off by default (also "DLSS" in the Games window): the game sees an NVIDIA GPU and its DLSS option upscales with MetalFX's temporal upscaler, from the game's own motion vectors, depth and jitter. Direct3D 12 games on DXMT; DLSS frame generation and ray reconstruction stay unavailable. The game log's `macneutron-dlss:` lines say what the game asked for and what was refused |
+| `/usr/bin/env MACNEUTRON_DLSS=1 MACNEUTRON_FRAMEGEN=1 %command%` | Experimental, off by default (also "Frame generation" in the Games window): while the game runs DLSS on MetalFX, MetalFX's frame interpolator shows a frame between each two the game renders, about 3 ms of GPU time each at 1440p, for nearly twice the frames shown and about half a frame more latency. The HUD may wobble in generated frames while the camera moves |
 | `/usr/bin/env DXMT_D3D12_SM6=0 %command%` | On DXMT, report Shader Model 5.1 to a Direct3D 12 game instead of 6.8, with the 0.3 answers: feature level 11_1, binding tier 2, no wave ops or 64-bit atomics (for a game that worked in 0.3 and fails on its Shader Model 6 path) |
 | `/usr/bin/env DXMT_D3D12_OVERLAP=1 %command%` | On DXMT, let a Direct3D 12 game's GPU passes overlap between barriers (experimental: not faster on Apple GPUs so far) |
 | `/usr/bin/env MACNEUTRON_PRECACHE=0 %command%` | Don't record the game's pipelines or rebuild them after updates (shader pre-caching) |
@@ -128,7 +134,10 @@ cause is DXMT's ordering, so please report it. `DXMT_D3D12_MERGE=0` likewise tur
 split, and of a clear into the render pass after it. `DXMT_D3D12_COMPRESSION=0` turns off DXMT's lossless compression
 of Direct3D 12 textures, if a game shows corrupted textures with it. `DXMT_D3D12_INDIRECT=icb` makes DXMT write every
 indirect draw into a Metal indirect command buffer again, instead of reading the simple ones straight from the game's
-argument buffer, if indirect geometry (grass, particles) goes missing or flickers.
+argument buffer, if indirect geometry (grass, particles) goes missing or flickers. `DXMT_D3D12_CMDBUF_SLOTS=<n>` sets
+how many Metal command buffers DXMT keeps in flight (64 by default, at most 64): lower it for a game that behaves
+better with fewer (a game whose submission thread stalls waiting for one shows it in `DXMT_STATS=1` as
+"queue.(wait for a command buffer slot)").
 
 For DXMT development, `/usr/bin/env DXMT_DXIL_DUMP=/Users/<you>/dxil %command%` saves each DXIL shader a game creates
 into that folder. Give an absolute path: Steam runs launch options without a shell, so `~` and `$HOME` aren't expanded.
@@ -169,6 +178,12 @@ the size you picked, scaled to the screen with black bars where the shapes diffe
 when you switch to another app goes to the Dock until you come back. It costs about 1 ms of
 GPU time per frame while active and nothing when the game renders at full size; switch "MetalFX upscaling" off for a
 game in the Games window if it misbehaves.
+
+To render fewer pixels than the game asks for, `<prefix> MACNEUTRON_UPSCALE=quality %command%` (or "Upscaling" in the
+Games window) reports the desktop to the game smaller than it is and lets MetalFX upscale the window back; see the
+launch-option row above for the presets and what it gives up. The upscale is the presenter's spatial one. MetalFX's
+spatial upscaler has no sharpness control of its own, so the presenter sharpens the frame it upscales (contrast-adaptive, so flat areas and noise are left alone and edges gain without haloes) rather than
+copying it: `MACNEUTRON_SHARPEN` (0 to 1, 0.5 by default) sets how much.
 
 For games without their own anti-aliasing, "Anti-aliasing (post)" in the Games window runs Intel's CMAA2 on each
 frame (before any upscale; HDR frames are left alone). It is off by default: it softens HUD text slightly, and a game

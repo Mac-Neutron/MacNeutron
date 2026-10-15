@@ -24,10 +24,13 @@ public struct ToolLayout: Equatable, Sendable {
     public var wineserver: URL { resources.appending(path: "bin/wineserver") }
     public var dxmt: URL { resources.appending(path: "DXMT/aarch64-windows", directoryHint: .isDirectory) }
     /// The DLLs every prefix gets in `system32`.
-    public static let dxmtDLLs = ["d3d10core.dll", "d3d11.dll", "d3d12.dll", "dxgi.dll"]
+    public static let dxmtDLLs = ["d3d10core.dll", "d3d11.dll", "d3d12.dll", "dxgi.dll", "nvapi64.dll", "nvngx.dll"]
     /// The key of DXMT's shader translator: a hash of what changes translated output (wine-arm64/build.sh), not DXMT's
     /// version, so a DXMT update that leaves the translator alone keeps the game's translated shaders.
     public var dxmtTranslatorFile: URL { resources.appending(path: "DXMT/translator") }
+    /// The CPU the runtime was built for, then the `hw.optional.arm` features its code may use, one a line (absent
+    /// for the generic build: every Apple Silicon Mac runs it).
+    public var cpuFile: URL { resources.appending(path: "cpu") }
     public var dxmtTranslator: String? {
         (try? String(contentsOf: dxmtTranslatorFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
     }

@@ -5,6 +5,7 @@ import SwiftUI
 @main
 struct MacNeutronApp: App {
     @State private var model = AppModel()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)  // menu-bar app, even when run unbundled
@@ -65,4 +66,12 @@ struct MacNeutronApp: App {
 // windows lose out, activation still runs.
 func isWindow(_ identifier: String?, of scene: String) -> Bool {
     identifier?.hasPrefix(scene + "-AppWindow-") == true
+}
+
+/// Installs the app's global menu hot key, Shift-F9 (see MenuHotKey); an App has nowhere else to do it.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        MenuHotKey.shared.install()
+    }
 }

@@ -1,0 +1,247 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Thu, 15 Oct 2026 06:33:45 -0400
+Subject: [PATCH] winemac.drv: Report a scaled desktop and keep borderless full
+ screen over the Dock.
+
+MACNEUTRON_DISPLAY_SCALE reports the desktop at a fraction of its size so a game renders fewer pixels for MetalFX to upscale; a window covering the screen keeps its full-screen treatment despite the sub-point rounding that brings, and hides the Dock and the menu bar as a native full-screen game does.
+---
+ dlls/winemac.drv/cocoa_app.m    | 34 ++++++++++++++------
+ dlls/winemac.drv/cocoa_window.m |  6 ++++
+ dlls/winemac.drv/display.c      | 13 ++++++--
+ dlls/winemac.drv/macdrv_cocoa.h | 57 +++++++++++++++++++--------------
+ dlls/winemac.drv/macdrv_main.c  | 17 ++++++++++
+ 5 files changed, 91 insertions(+), 36 deletions(-)
+
+diff --git a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+index 0e3cbb5e..4c72fd46 100644
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -702,20 +702,23 @@ - (void) adjustWindowLevels
+ 
+     - (void) updateFullscreenWindows
+     {
+-        if (capture_displays_for_fullscreen && [NSApp isActive])
++        BOOL anyFullscreen = FALSE;
++        BOOL anyFullscreenOnScreen = FALSE;
++        NSNumber* windowNumber;
++
++        for (windowNumber in [NSWindow windowNumbersWithOptions:0])
+         {
+-            BOOL anyFullscreen = FALSE;
+-            NSNumber* windowNumber;
+-            for (windowNumber in [NSWindow windowNumbersWithOptions:0])
++            WineWindow* window = (WineWindow*)[NSApp windowWithWindowNumber:[windowNumber integerValue]];
++            if ([window isKindOfClass:[WineWindow class]] && window.fullscreen)
+             {
+-                WineWindow* window = (WineWindow*)[NSApp windowWithWindowNumber:[windowNumber integerValue]];
+-                if ([window isKindOfClass:[WineWindow class]] && window.fullscreen)
+-                {
+-                    anyFullscreen = TRUE;
+-                    break;
+-                }
++                anyFullscreen = TRUE;
++                if ([window isVisible] && [window isOnActiveSpace])
++                    anyFullscreenOnScreen = TRUE;
+             }
++        }
+ 
++        if (capture_displays_for_fullscreen && [NSApp isActive])
++        {
+             if (anyFullscreen)
+             {
+                 if ([self areDisplaysCaptured] || CGCaptureAllDisplays() == CGDisplayNoErr)
+@@ -727,6 +730,17 @@ - (void) updateFullscreenWindows
+                     displaysCapturedForFullscreen = FALSE;
+             }
+         }
++
++        /* MacNeutron: a window that covers the screen (a game's borderless full screen) must show over the Dock and
++         * the menu bar, as a native full screen game does; otherwise the Dock and the menu bar draw over it.  Wine
++         * captures the displays for a full screen window only when asked (CaptureDisplaysForFullscreen), which also
++         * stops other apps from showing, so hide just the two instead.  Setting this while another app is active is
++         * harmless (macOS applies it only to the active app), which keeps it from depending on when the window became
++         * full screen against when we were activated. */
++        if (anyFullscreenOnScreen && !displaysCapturedForFullscreen)
++            [NSApp setPresentationOptions:NSApplicationPresentationHideDock | NSApplicationPresentationHideMenuBar];
++        else
++            [NSApp setPresentationOptions:NSApplicationPresentationDefault];
+     }
+ 
+     - (void) activeSpaceDidChange
+diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
+index 4aec4dbc..5081f2dd 100644
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -99,6 +99,12 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
+ 
+ static NSScreen* screen_covered_by_rect(NSRect rect, NSArray* screens)
+ {
++    /* MacNeutron: this driver reports the desktop at the real size times the render scale (MACNEUTRON_DISPLAY_SCALE),
++     * so a window that covers the screen comes back a fraction of a point short of it, or off its origin (a ratio that
++     * divides evenly, such as 0.5, does not).  Such a window still covers the screen, and treating it as a windowed one
++     * costs it its window level and its place over the Dock and the menu bar, so allow that sub-point slack. */
++    rect = NSInsetRect(rect, -1, -1);
++
+     for (NSScreen* screen in screens)
+     {
+         if (NSContainsRect(rect, [screen frame]))
+diff --git a/dlls/winemac.drv/display.c b/dlls/winemac.drv/display.c
+index d045ff17..e3195ddb 100644
+--- a/dlls/winemac.drv/display.c
++++ b/dlls/winemac.drv/display.c
+@@ -111,8 +111,10 @@ static void display_mode_to_devmode_fields(CGDirectDisplayID display_id, CGDispl
+     if (devmode->dmBitsPerPel)
+         devmode->dmFields |= DM_BITSPERPEL;
+ 
+-    devmode->dmPelsWidth = CGDisplayModeGetWidth(display_mode);
+-    devmode->dmPelsHeight = CGDisplayModeGetHeight(display_mode);
++    /* MacNeutron: shrink every mode the game is offered with the render scale (see macdrv_cocoa.h).  The Retina
++       doubling for the original mode, further down, doubles these again. */
++    devmode->dmPelsWidth = (DWORD)(CGDisplayModeGetWidth(display_mode) * render_scale + 0.5);
++    devmode->dmPelsHeight = (DWORD)(CGDisplayModeGetHeight(display_mode) * render_scale + 0.5);
+     devmode->dmFields |= DM_PELSWIDTH | DM_PELSHEIGHT;
+ 
+     devmode->dmDisplayFlags = 0;
+@@ -707,6 +709,13 @@ static CGDisplayModeRef find_best_display_mode(DEVMODEW *devmode, CFArrayRef dis
+             height *= 2;
+         }
+ 
++        /* MacNeutron: the game requests a mode shrunk by the render scale, so shrink the candidates to match. */
++        if (render_scale != 1.0)
++        {
++            width = (size_t)(width * render_scale + 0.5);
++            height = (size_t)(height * render_scale + 0.5);
++        }
++
+         if (bpp != mode_bpp)
+             continue;
+ 
+diff --git a/dlls/winemac.drv/macdrv_cocoa.h b/dlls/winemac.drv/macdrv_cocoa.h
+index 215ed7bf..5ee644b5 100644
+--- a/dlls/winemac.drv/macdrv_cocoa.h
++++ b/dlls/winemac.drv/macdrv_cocoa.h
+@@ -116,29 +116,40 @@
+ extern bool retina_enabled;  /* Whether Retina mode is enabled via registry setting. */
+ extern bool retina_on;       /* Whether Retina mode is currently active (enabled and display is in default mode). */
+ extern bool enable_app_nap;
++/* MacNeutron: the fraction of its real size the driver reports the desktop at (the launcher's MACNEUTRON_UPSCALE,
++ * through MACNEUTRON_DISPLAY_SCALE).  The Mac/Win conversions below shrink everything the driver reports (the
++ * desktop, monitor and window rects, display modes and mouse positions) by this, so the game renders fewer pixels
++ * and lays out its UI, which shares the back buffer, for the smaller size; the presenter upscales it. 1.0: the real
++ * size, as before. */
++extern double render_scale;
++
++/* MacNeutron: Win coordinates are Mac points times this.  A Retina point is two Win pixels, and a virtualised
++ * desktop is reported 1/render_scale times its real size, so the window still covers the display. */
++static inline double cg_win_mac_scale(void)
++{
++    return retina_on ? render_scale * 2 : render_scale;
++}
+ 
+ static inline CGRect cgrect_mac_from_win(CGRect rect)
+ {
+-    if (retina_on)
+-    {
+-        rect.origin.x /= 2;
+-        rect.origin.y /= 2;
+-        rect.size.width /= 2;
+-        rect.size.height /= 2;
+-    }
++    double scale = cg_win_mac_scale();
++
++    rect.origin.x /= scale;
++    rect.origin.y /= scale;
++    rect.size.width /= scale;
++    rect.size.height /= scale;
+ 
+     return rect;
+ }
+ 
+ static inline CGRect cgrect_win_from_mac(CGRect rect)
+ {
+-    if (retina_on)
+-    {
+-        rect.origin.x *= 2;
+-        rect.origin.y *= 2;
+-        rect.size.width *= 2;
+-        rect.size.height *= 2;
+-    }
++    double scale = cg_win_mac_scale();
++
++    rect.origin.x *= scale;
++    rect.origin.y *= scale;
++    rect.size.width *= scale;
++    rect.size.height *= scale;
+ 
+     return rect;
+ }
+@@ -167,22 +178,20 @@ static inline CGSize cgsize_win_from_mac(CGSize size)
+ 
+ static inline CGPoint cgpoint_mac_from_win(CGPoint point)
+ {
+-    if (retina_on)
+-    {
+-        point.x /= 2;
+-        point.y /= 2;
+-    }
++    double scale = cg_win_mac_scale();
++
++    point.x /= scale;
++    point.y /= scale;
+ 
+     return point;
+ }
+ 
+ static inline CGPoint cgpoint_win_from_mac(CGPoint point)
+ {
+-    if (retina_on)
+-    {
+-        point.x *= 2;
+-        point.y *= 2;
+-    }
++    double scale = cg_win_mac_scale();
++
++    point.x *= scale;
++    point.y *= scale;
+ 
+     return point;
+ }
+diff --git a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
+index cc3d3b3f..c5db8fda 100644
+--- a/dlls/winemac.drv/macdrv_main.c
++++ b/dlls/winemac.drv/macdrv_main.c
+@@ -53,6 +53,7 @@ bool use_precise_scrolling = true;
+ int gl_surface_mode = GL_SURFACE_IN_FRONT_OPAQUE;
+ bool retina_enabled = false;
+ bool enable_app_nap = false;
++double render_scale = 1.0;
+ 
+ pthread_key_t macdrv_thread_data_key = 0;
+ UINT64 app_icon_callback = 0;
+@@ -368,6 +369,22 @@ static void setup_options(void)
+ 
+     retina_on = retina_enabled;
+ 
++    /* MacNeutron: the launcher's MACNEUTRON_UPSCALE, through MACNEUTRON_DISPLAY_SCALE, reports the desktop smaller so
++       the game renders fewer pixels and lays out its UI (which shares the back buffer) for that size; the presenter
++       upscales it.  Anything but a number in [0.25, 1] leaves the real size. */
++    {
++        const char *scale = getenv("MACNEUTRON_DISPLAY_SCALE");
++
++        if (scale && *scale)
++        {
++            char *end;
++            double value = strtod(scale, &end);
++
++            if (end != scale && !*end && value >= 0.25 && value <= 1.0)
++                render_scale = value;
++        }
++    }
++
+     if (appkey) NtClose(appkey);
+     if (hkey) NtClose(hkey);
+ }
+-- 
+2.54.0 (Apple Git-157)
+

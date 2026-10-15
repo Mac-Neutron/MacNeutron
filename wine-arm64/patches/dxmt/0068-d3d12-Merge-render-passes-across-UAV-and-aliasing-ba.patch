@@ -1,0 +1,261 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Tue, 13 Oct 2026 12:24:00 -0400
+Subject: [PATCH] d3d12: Merge render passes across UAV and aliasing barriers
+ where no pass writes a UAV.
+
+A render pass lists its attachments as its writes, not its shaders' UAV writes, so B6 kept every UAV barrier,
+UNORDERED_ACCESS move and aliasing barrier between passes from merging them: about 24 of SMITE 2's 35 refusals a
+frame, 28 of Palworld's 54. airconv's reflection now says whether a shader may write a UAV (WritesUAV: a DXIL store,
+atomic or counter op on one, or any UAV a DXBC shader declares), a graphics pipeline whether any of its shaders does,
+and a render pass whether any of its draws used such a pipeline. Those barriers stay opaque only among passes one of
+which writes a UAV; an aliasing barrier activating an unnamed resource, a split barrier's end, simultaneous access and
+COMMON stay opaque whatever the passes, and a call's strongest reason counts. The D3D12 reflection cache's tag moves
+on, as an older entry would read WritesUAV as 0.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/airconv/airconv_public.h          |  5 +++++
+ src/airconv/dxbc_converter.cpp        |  1 +
+ src/airconv/dxil/dxil_initialize.cpp  |  6 ++++++
+ src/d3d12/d3d12_command_encoder.hpp   |  1 +
+ src/d3d12/d3d12_command_list.cpp      | 28 ++++++++++++++-------------
+ src/d3d12/d3d12_command_queue.cpp     | 15 +++++++++-----
+ src/d3d12/d3d12_device.hpp            | 12 ++++++++----
+ src/d3d12/d3d12_pipeline_graphics.cpp |  2 ++
+ src/d3d12/d3d12_shader_cache.cpp      |  2 +-
+ 9 files changed, 49 insertions(+), 23 deletions(-)
+
+diff --git a/src/airconv/airconv_public.h b/src/airconv/airconv_public.h
+index 40df5be..0515f89 100644
+--- a/src/airconv/airconv_public.h
++++ b/src/airconv/airconv_public.h
+@@ -129,6 +129,11 @@ struct MTL_SHADER_REFLECTION {
+   uint32_t NumOutputElement;
+   uint32_t ThreadsPerPatch;
+   uint32_t ArgumentTableQwords;
++  /**
++  MacNeutron (B6): the shader may write a UAV (D3D12): a DXIL store, atomic or counter op on one, or any UAV a DXBC
++  shader declares.
++  */
++  uint32_t WritesUAV;
+ };
+ 
+ #if defined(__LP64__) || defined(_WIN64)
+diff --git a/src/airconv/dxbc_converter.cpp b/src/airconv/dxbc_converter.cpp
+index b190feb..6b1ca40 100644
+--- a/src/airconv/dxbc_converter.cpp
++++ b/src/airconv/dxbc_converter.cpp
+@@ -1269,6 +1269,7 @@ AIRCONV_API int SM50Initialize(
+     pRefl->SRVSlotMaskHi = binding_srv_hi_mask;
+     pRefl->SRVSlotMaskLo = binding_srv_lo_mask;
+     pRefl->UAVSlotMask = binding_uav_mask;
++    pRefl->WritesUAV = !shader_info->uavMap.empty(); // MacNeutron (B6)
+     pRefl->NumConstantBuffers = sm50_shader->args_reflection_cbuffer.size();
+     pRefl->NumArguments = sm50_shader->args_reflection.size();
+     if (sm50_shader->shader_type == microsoft::D3D11_SB_COMPUTE_SHADER) {
+diff --git a/src/airconv/dxil/dxil_initialize.cpp b/src/airconv/dxil/dxil_initialize.cpp
+index ad7cacc..b36008f 100644
+--- a/src/airconv/dxil/dxil_initialize.cpp
++++ b/src/airconv/dxil/dxil_initialize.cpp
+@@ -277,6 +277,11 @@ InitializeDXIL(const Container &container, SM50ShaderInternal *shader, MTL_SHADE
+   default: return llvm::make_error<UnsupportedFeature>("DXIL: only vertex, pixel, geometry and compute shaders are supported");
+   }
+   FillResourceMaps(*entry, **module, shader->shader_info);
++  // B6: D3D12 render passes list their attachments as their writes; whatever this writes, they can't.
++  bool writes_uav = false;
++  for (uint32_t o : {op::TextureStore, op::BufferStore, op::RawBufferStore, op::BufferUpdateCounter, op::AtomicBinOp,
++                     op::AtomicCompareExchange})
++    writes_uav |= ModuleCallsOp(**module, o);
+   // SM50Compile links airconv's msad and sample position libraries for these.
+   shader->shader_info.use_msad = ModuleCallsOp(**module, op::Msad);
+   shader->shader_info.use_samplepos = ModuleCallsOp(**module, op::Texture2DMSGetSamplePosition) ||
+@@ -332,6 +337,7 @@ InitializeDXIL(const Container &container, SM50ShaderInternal *shader, MTL_SHADE
+       refl->PixelShader.HasCoverageOutput = shader->ps_has_coverage_output;
+     }
+     refl->NumOutputElement = shader->max_output_register;
++    refl->WritesUAV = writes_uav;
+   }
+   return llvm::Error::success();
+ }
+diff --git a/src/d3d12/d3d12_command_encoder.hpp b/src/d3d12/d3d12_command_encoder.hpp
+index adeb211..e36270a 100644
+--- a/src/d3d12/d3d12_command_encoder.hpp
++++ b/src/d3d12/d3d12_command_encoder.hpp
+@@ -125,6 +125,7 @@ struct RenderEncoderData : EncoderData {
+   obj_handle_t visibility_buffer = 0; // MacNeutron: the occlusion query heap this pass counts samples into
+   bool use_tessellation = 0;
+   bool use_geometry = 0;
++  bool uav_writes = false; // MacNeutron (B6): a draw's pipeline may write a UAV, which `writes` doesn't list
+   // MacNeutron: compute commands run just before this pass (ExecuteIndirect's resolvers writing its ICBs).
+   wmtcmd_compute_nop pre_head;
+   wmtcmd_base *pre_tail = nullptr;
+diff --git a/src/d3d12/d3d12_command_list.cpp b/src/d3d12/d3d12_command_list.cpp
+index 0b2dbc8..88fdeeb 100644
+--- a/src/d3d12/d3d12_command_list.cpp
++++ b/src/d3d12/d3d12_command_list.cpp
+@@ -509,6 +509,8 @@ public:
+         return DrawCallStatus::Invalid;
+       static_cast<RenderEncoderData *>(allocator_->encoder_current)->use_geometry = true;
+     }
++    if (pso_graphics_->writes_uav)
++      static_cast<RenderEncoderData *>(allocator_->encoder_current)->uav_writes = true;
+     if (geometry != bound_geometry_) {
+       dirty_state_.set(DirtyState::VertexBuffer, DirtyState::GraphicsRootArguments, DirtyState::GraphicsRootSignature);
+       bound_geometry_ = geometry;
+@@ -1330,8 +1332,8 @@ public:
+     DXMT_STAT_COUNT("#resource barriers", Count);
+     transitioned_.clear();
+     bool join = false;
+-    int opaque = -1; // B6: why merges can't see through this call (a BarrierOpacity), its first barrier's that says
+-    for (UINT i = 0; i < Count && !(join && opaque >= 0); i++) {
++    int opaque = -1; // B6: why merges can't see through this call: its barriers' strongest BarrierOpacity
++    for (UINT i = 0; i < Count && !(join && opaque >= kOpaqueAlways); i++) {
+       auto &b = barriers[i];
+       if (b.Flags & D3D12_RESOURCE_BARRIER_FLAG_BEGIN_ONLY)
+         continue;
+@@ -1340,21 +1342,21 @@ public:
+           (static_cast<MTLD3D12Resource *>(b.Transition.pResource)->GetDesc().Flags &
+            D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS)) {
+         join = true;
+-        if (opaque < 0)
+-          opaque = b.Type == D3D12_RESOURCE_BARRIER_TYPE_UAV                ? kOpaqueUavBarrier
+-                   : b.Type == D3D12_RESOURCE_BARRIER_TYPE_ALIASING         ? kOpaqueAliasing
+-                   : (b.Flags & D3D12_RESOURCE_BARRIER_FLAG_END_ONLY) != 0 ? kOpaqueSplitEnd
+-                   : !key                                                   ? kOpaqueUnknown
+-                                                                            : kOpaqueSimultaneous;
+-        break;
++        bool activates = b.Type == D3D12_RESOURCE_BARRIER_TYPE_ALIASING && b.Aliasing.pResourceAfter;
++        opaque = std::max(opaque, int(b.Type == D3D12_RESOURCE_BARRIER_TYPE_UAV                ? kOpaqueUavBarrier
++                                      : activates                                              ? kOpaqueAliasing
++                                      : (b.Flags & D3D12_RESOURCE_BARRIER_FLAG_END_ONLY) != 0 ? kOpaqueSplitEnd
++                                      : !key                                                   ? kOpaqueUnknown
++                                                                                               : kOpaqueSimultaneous));
++        continue;
+       }
+       auto before = b.Transition.StateBefore, after = b.Transition.StateAfter;
+       if (ReadOnly(before) && ReadOnly(after))
+         continue;
+-      if (opaque < 0 && ((before | after) & D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
+-        opaque = kOpaqueUavState;
+-      else if (opaque < 0 && (before == D3D12_RESOURCE_STATE_COMMON || after == D3D12_RESOURCE_STATE_COMMON))
+-        opaque = kOpaqueCommon;
++      if ((before | after) & D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
++        opaque = std::max(opaque, int(kOpaqueUavState));
++      if (before == D3D12_RESOURCE_STATE_COMMON || after == D3D12_RESOURCE_STATE_COMMON)
++        opaque = std::max(opaque, int(kOpaqueCommon));
+       if (!WriteEnds(before) || after == D3D12_RESOURCE_STATE_COMMON) { // a join that names its resource (B6)
+         join = true;
+         continue;
+diff --git a/src/d3d12/d3d12_command_queue.cpp b/src/d3d12/d3d12_command_queue.cpp
+index b216e2b..d2e69ad 100644
+--- a/src/d3d12/d3d12_command_queue.cpp
++++ b/src/d3d12/d3d12_command_queue.cpp
+@@ -201,9 +201,10 @@ class MTLD3D12CommandQueueImpl : public MTLD3D12Pageable<MTLD3D12CommandQueue, I
+ 
+   // B6: barrier calls between merged passes may stay inside the merged pass in strict order (the default), which puts
+   // all earlier work behind the base (Order), when they order nothing between the passes: none is opaque (an unknown
+-  // resource, a split barrier's end, simultaneous access, COMMON, UNORDERED_ACCESS), and none names a resource the base,
+-  // a pass merged so far or `next` writes (their attachments among those writes). -1 when they may; otherwise why not,
+-  // for DXMT_STATS: the first opaque barrier's BarrierOpacity, kCrossOverlap or kCrossWrite.
++  // resource, a split barrier's end, simultaneous access, COMMON; a UAV barrier, UNORDERED_ACCESS or aliasing where one
++  // of those passes writes a UAV), and none names a resource the base, a pass merged so far or `next` writes (their
++  // attachments among those writes). The null names of UAV and aliasing barriers are their opacity's to judge. -1 when
++  // they may; otherwise why not, for DXMT_STATS: the first opaque barrier's BarrierOpacity, kCrossOverlap or kCrossWrite.
+   enum { kCrossOverlap = MTLD3D12GraphicsCommandList::kOpaqueKinds, kCrossWrite };
+   int
+   Crossable(RenderEncoderData *base, RenderEncoderData *next) {
+@@ -211,6 +212,10 @@ class MTLD3D12CommandQueueImpl : public MTLD3D12Pageable<MTLD3D12CommandQueue, I
+       return -1;
+     if (!serial_)
+       return kCrossOverlap;
++    auto by_uav = [](EncoderData *e) {
++      return e->type == EncoderType::Render && static_cast<RenderEncoderData *>(e)->uav_writes;
++    };
++    bool uav_writes = by_uav(base) || by_uav(next) || std::any_of(merged_.begin(), merged_.end(), by_uav);
+     auto writes = [&](const void *key) {
+       auto by = [&](EncoderData *e) {
+         if (e->writes_unknown)
+@@ -225,10 +230,10 @@ class MTLD3D12CommandQueueImpl : public MTLD3D12Pageable<MTLD3D12CommandQueue, I
+     };
+     for (auto &c : crossings_) {
+       for (auto [call, why] : c.list->barrier_opaque)
+-        if (call > c.after && call <= c.until)
++        if (call > c.after && call <= c.until && (why >= MTLD3D12GraphicsCommandList::kOpaqueAlways || uav_writes))
+           return why;
+       for (auto &[call, key] : c.list->barrier_names)
+-        if (call > c.after && call <= c.until && (!key || writes(key)))
++        if (call > c.after && call <= c.until && key && writes(key))
+           return kCrossWrite;
+     }
+     return -1;
+diff --git a/src/d3d12/d3d12_device.hpp b/src/d3d12/d3d12_device.hpp
+index a534cd0..eb44e42 100644
+--- a/src/d3d12/d3d12_device.hpp
++++ b/src/d3d12/d3d12_device.hpp
+@@ -70,14 +70,17 @@ public:
+   // MacNeutron (B6): the barrier calls (1-based) a merge can't see through, with why (BarrierOpacity). (A read state's
+   // move to another write state also joins, but only for the resource it names.)
+   enum BarrierOpacity : uint8_t {
+-    kOpaqueUavState, // a move into or out of UNORDERED_ACCESS: no render pass lists its UAV writes
++    // Opaque only among passes one of which writes a UAV (RenderEncoderData::uav_writes), as no pass lists those writes:
++    kOpaqueUavState, // a move into or out of UNORDERED_ACCESS
+     kOpaqueUavBarrier,
+-    kOpaqueAliasing,
++    kOpaqueAliasing, // one naming the resource it activates
++    // Opaque whatever the passes:
+     kOpaqueSplitEnd,
+-    kOpaqueUnknown,
++    kOpaqueUnknown, // an unknown resource, or an aliasing barrier activating any
+     kOpaqueSimultaneous,
+     kOpaqueCommon, // a move into or out of COMMON, which hides promoted writes
+-    kOpaqueKinds
++    kOpaqueKinds,
++    kOpaqueAlways = kOpaqueSplitEnd
+   };
+   std::vector<std::pair<uint32_t, BarrierOpacity>> barrier_opaque;
+ };
+@@ -230,6 +233,7 @@ public:
+   // function, the geometry shader as the mesh function); `pso` stays empty and GeometryPipeline gives the variant for a
+   // draw's strip topology and index format, made on first use (0 if it can't be).
+   bool geometry = false;
++  bool writes_uav = false; // MacNeutron (B6): a shader of it may write a UAV, so its draws do
+   virtual obj_handle_t GeometryPipeline(bool strip, SM50_INDEX_BUFFER_FORMAT index_format) { return 0; }
+ 
+   virtual WMT::DepthStencilState GetDepthStencilState(UINT DSVPlanar, UINT DSVReadonlyFlags) = 0;
+diff --git a/src/d3d12/d3d12_pipeline_graphics.cpp b/src/d3d12/d3d12_pipeline_graphics.cpp
+index 0b12fe8..1c0fd11 100644
+--- a/src/d3d12/d3d12_pipeline_graphics.cpp
++++ b/src/d3d12/d3d12_pipeline_graphics.cpp
+@@ -531,6 +531,7 @@ public:
+     if (pDesc->PS.pShaderBytecode &&
+         (FAILED(hr = shader_ps.Initialize(pDesc->PS)) || FAILED(hr = shader_ps.Reflection(&ref_ps))))
+       return hr;
++    writes_uav = ref_vs.WritesUAV || ref_gs.WritesUAV || ref_ps.WritesUAV;
+     WMT::InitializeMeshRenderPipelineInfo(geometry_info_);
+     bool dual_source_blending = false;
+     if (FAILED(hr = InitializePSO(pDesc, geometry_info_, dual_source_blending)))
+@@ -709,6 +710,7 @@ public:
+     if (pDesc->PS.pShaderBytecode &&
+         (FAILED(hr = shader_ps.Initialize(pDesc->PS)) || FAILED(hr = shader_ps.Reflection(&ref_ps))))
+       return hr;
++    writes_uav = ref_vs.WritesUAV || ref_ps.WritesUAV;
+ 
+     if (FAILED(hr = InitializePSO(pDesc, info, dual_source_blending)))
+       return hr;
+diff --git a/src/d3d12/d3d12_shader_cache.cpp b/src/d3d12/d3d12_shader_cache.cpp
+index bd6f97b..f299feb 100644
+--- a/src/d3d12/d3d12_shader_cache.cpp
++++ b/src/d3d12/d3d12_shader_cache.cpp
+@@ -94,7 +94,7 @@ CachedShader::Parse(sm50_shader_t *out) {
+ HRESULT
+ CachedShader::Reflection(MTL_SHADER_REFLECTION *out) {
+   if (!reflected_) {
+-    Key key{digest_, Tag("d3d12-reflection")};
++    Key key{digest_, Tag("d3d12-reflection 2")}; // 2: WritesUAV (B6), which an older entry would read as 0
+     bool enabled = false, cached = false;
+     if (auto reader = Store().getReader()) {
+       enabled = true;
+-- 
+2.54.0 (Apple Git-157)
+

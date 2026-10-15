@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Tue, 13 Oct 2026 15:37:18 -0400
+Subject: [PATCH] d3d12: DXMT_STATS counts a barrier against a render pass only
+ when it could join but for it.
+
+PlanMerge asked Crossable first, so a pass into another target behind a barrier naming the base's (a post-process
+chain: each pass samples the last one's output into a new target) counted as refused at a barrier, though it could
+never join: Palworld's 45-58 such refusals a frame were mostly that. Barriers are now asked last; a pass needs all
+three checks to join, so what merges is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/d3d12/d3d12_command_queue.cpp | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/src/d3d12/d3d12_command_queue.cpp b/src/d3d12/d3d12_command_queue.cpp
+index d2e69ad..e4f2405 100644
+--- a/src/d3d12/d3d12_command_queue.cpp
++++ b/src/d3d12/d3d12_command_queue.cpp
+@@ -342,22 +342,22 @@ class MTLD3D12CommandQueueImpl : public MTLD3D12Pageable<MTLD3D12CommandQueue, I
+       if (cursor->type != EncoderType::Render)
+         break;
+       auto *next = static_cast<RenderEncoderData *>(cursor);
+-      if (int why = Crossable(base, next); why >= 0) {
+-        RefuseMerge(next, kRefusedBarrier);
+-        RefuseCrossing(why);
+-        break;
+-      }
+       unsigned n = samples;
+       bool ok = !next->pre_tail && SameTarget(base, next);
+       for (auto *f : folds_)
+         ok = ok && fits(f, n);
+       ok = ok && fits(next, n);
+-      if (!ok) { // put back what `fits` wrote past the samples kept
++      int why = ok ? Crossable(base, next) : -1; // DXMT_STATS: barriers refuse only a pass that could join but for them
++      if (!ok || why >= 0) { // put back what `fits` wrote past the samples kept
+         for (unsigned j = samples; j < n; j++)
+           info.sample_buffers[j] = {};
+-        RefuseMerge(next, next->pre_tail            ? kRefusedResolver
+-                          : !SameTarget(base, next) ? kRefusedAttachments
+-                                                    : kRefusedTimestamps);
++        if (why >= 0) {
++          RefuseMerge(next, kRefusedBarrier);
++          RefuseCrossing(why);
++        } else
++          RefuseMerge(next, next->pre_tail            ? kRefusedResolver
++                            : !SameTarget(base, next) ? kRefusedAttachments
++                                                      : kRefusedTimestamps);
+         break;
+       }
+       samples = n;
+-- 
+2.54.0 (Apple Git-157)
+

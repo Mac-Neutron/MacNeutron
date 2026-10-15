@@ -628,7 +628,12 @@ static void Queues() {
 // they name what a pass writes (`attachment`), or concern UAVs (`uav`, `mid_barrier`) where a pass's shader writes one
 // (`uav_write`: the second pass also counts its pixels into the buffer the barriers move). `sampled`: the second list
 // renders T1 from T0, behind T0's move to PIXEL_SHADER_RESOURCE: another target, refused as such (prints T1, 257).
-enum UnsplitKind { kPlain, kBarrier, kSameBuffer, kMidBarrier, kQuery, kSegments, kAttachment, kUav, kUavWrite, kSampled };
+// `copy`: a copy of T0 (a blit) between the lists ends the walk, so the second pass doesn't join the first either (B6).
+// `resolve`: Palworld's base-pass segments (B7): `segments` with the first list's two timestamps resolved into a
+// GPU-only buffer at its end (a blit of resolves alone): the passes merge, the resolve moved after them. `resolve_read`:
+// the second list moves that buffer to a shader-read state before its pass: the passes stay apart.
+enum UnsplitKind { kPlain, kBarrier, kSameBuffer, kMidBarrier, kQuery, kSegments, kAttachment, kUav, kUavWrite, kSampled, kCopy,
+                   kResolve, kResolveRead };
 static void Unsplit(const char *name, UnsplitKind kind) {
     static ID3D12CommandAllocator *a2;
     static ID3D12GraphicsCommandList *l2;
@@ -647,7 +652,11 @@ static void Unsplit(const char *name, UnsplitKind kind) {
     Clear(T[0]);
     g->Submit();
     auto *l1 = g->list;
-    if (kind == kSegments) // the list's first encoder, so its pass isn't the list's join (SMITE 2's base pass)
+    bool segments = kind == kSegments || kind == kResolve || kind == kResolveRead;
+    static ID3D12Resource *resolved;
+    if ((kind == kResolve || kind == kResolveRead) && !resolved)
+        resolved = g->Buffer(D3D12_HEAP_TYPE_DEFAULT, 256, COPY_DEST);
+    if (segments) // the list's first encoder, so its pass isn't the list's join (SMITE 2's base pass)
         l1->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, 2);
     if (kind == kQuery) {
         Bind(T[0], add, 1);
@@ -657,8 +666,10 @@ static void Unsplit(const char *name, UnsplitKind kind) {
     } else {
         Pass(T[0], add, 1, 256);
     }
-    if (kind == kSameBuffer || kind == kSegments)
+    if (kind == kSameBuffer || segments)
         l1->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, 1); // at the open pass's end
+    if (kind == kResolve || kind == kResolveRead) // into GPU-only memory: a blit encoder of its own
+        l1->ResolveQueryData(heap, D3D12_QUERY_TYPE_TIMESTAMP, 1, 2, resolved, 0);
     // kBarrier's barriers name another texture; kAttachment's name the passes' own target.
     if (kind == kBarrier || kind == kAttachment)
         g->Barrier(T[kind == kBarrier ? 1 : 0].texture, RT, PSR);
@@ -666,9 +677,13 @@ static void Unsplit(const char *name, UnsplitKind kind) {
         g->Barrier(uav, UA, PSR);
     if (kind == kSampled)
         g->Barrier(T[0].texture, RT, PSR);
+    if (kind == kCopy)
+        Read(T[0], RT, 512, 512, 1); // a copy of T0 (a blit) between the lists: the second pass can't join the first
     g->list = l2;
     if (kind == kBarrier || kind == kAttachment)
         g->Barrier(T[kind == kBarrier ? 1 : 0].texture, PSR, RT);
+    if (kind == kResolveRead)
+        g->Barrier(resolved, COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     if (kind == kUav || kind == kUavWrite)
         g->Barrier(uav, PSR, UA);
     l2->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, 0); // a timestamp-only blit
@@ -678,8 +693,10 @@ static void Unsplit(const char *name, UnsplitKind kind) {
         Pass(T[1], sample, 1, 1, &T[0]);
     else
         Pass(T[0], add, 1, 1);
-    if (kind == kSegments)
+    if (segments)
         l2->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, 3);
+    if (kind == kResolveRead)
+        g->Barrier(resolved, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, COPY_DEST);
     if (kind == kQuery) {
         l2->BeginQuery(occlusion, D3D12_QUERY_TYPE_OCCLUSION, 1);
         l2->DrawInstanced(3, 1, 0, 0);
@@ -715,12 +732,12 @@ static void Unsplit(const char *name, UnsplitKind kind) {
         ReadBuffer(counts, COPY_DEST, 0, 8, 1);
         ReadBuffer(counts, COPY_DEST, 8, 8, 2);
     }
-    if (kind == kSegments)
+    if (segments)
         g->list->ResolveQueryData(heap, D3D12_QUERY_TYPE_TIMESTAMP, 0, 4, readback, 60 * 512);
     g->Submit();
     if (kind == kQuery)
         printf("hazard %s %g %llu %llu\n", name, Texel(0), Word(1, 8), Word(2, 8));
-    else if (kind == kSegments) { // in time: 2 (l1's start), 1 (its pass's end), 0 (l2's start), 3 (its pass's end)
+    else if (segments) { // in time: 2 (l1's start), 1 (its pass's end), 0 (l2's start), 3 (its pass's end)
         UINT64 t[4];
         uint8_t *p;
         D3D12_RANGE whole = {0, 64 * 512}, none = {0, 0};
@@ -742,6 +759,9 @@ static void UnsplitAttachment() { Unsplit("unsplit-attachment", kAttachment); }
 static void UnsplitUav() { Unsplit("unsplit-uav", kUav); }
 static void UnsplitUavWrite() { Unsplit("unsplit-uavwrite", kUavWrite); }
 static void UnsplitSampled() { Unsplit("unsplit-sampled", kSampled); }
+static void UnsplitCopy() { Unsplit("unsplit-copy", kCopy); }
+static void UnsplitResolve() { Unsplit("unsplit-resolve", kResolve); }
+static void UnsplitResolveRead() { Unsplit("unsplit-resolve-read", kResolveRead); }
 
 // One list, one pass adding 1 to T0, executed twice in one ExecuteCommandLists call: both runs draw (T0 2); M3 must
 // not merge a list into itself.
@@ -1587,7 +1607,7 @@ int main(int argc, char **argv) {
         {"many", Many},              {"clear-rects", ClearRects}, {"signal", Signal},
         {"wrap", Wrap}, {"onewait", OneWait}, {"newest", Newest}, {"nodraw", NoDraw}, {"queues", Queues}, {"unsplit", UnsplitPlain}, {"unsplit-barrier", UnsplitBarrier},
         {"unsplit-samebuffer", UnsplitSameBuffer}, {"unsplit-midbarrier", UnsplitMidBarrier},
-        {"unsplit-query", UnsplitQuery}, {"unsplit-segments", UnsplitSegments}, {"unsplit-attachment", UnsplitAttachment}, {"unsplit-uav", UnsplitUav}, {"unsplit-uavwrite", UnsplitUavWrite}, {"unsplit-sampled", UnsplitSampled}, {"unsplit-twice", UnsplitTwice}, {"deferred", Deferred}, {"zeroed", Zeroed}, {"fold", Fold}, {"fold-order", FoldOrder}, {"fence-reset", FenceReset}, {"fence-cpu-late", FenceCpuLate},
+        {"unsplit-query", UnsplitQuery}, {"unsplit-segments", UnsplitSegments}, {"unsplit-attachment", UnsplitAttachment}, {"unsplit-uav", UnsplitUav}, {"unsplit-uavwrite", UnsplitUavWrite}, {"unsplit-sampled", UnsplitSampled}, {"unsplit-copy", UnsplitCopy}, {"unsplit-resolve", UnsplitResolve}, {"unsplit-resolve-read", UnsplitResolveRead}, {"unsplit-twice", UnsplitTwice}, {"deferred", Deferred}, {"zeroed", Zeroed}, {"fold", Fold}, {"fold-order", FoldOrder}, {"fence-reset", FenceReset}, {"fence-cpu-late", FenceCpuLate},
         {"fence-transitive", FenceTransitive}, {"fence-custom", FenceCustom}, {"fence-lower", FenceLower},
         {"fence-wait-first", FenceWaitFirst}, {"fence-order", FenceOrder}, {"two-heaps", TwoHeaps}, {"ts-start", TimestampStart}, {"after-own-blit", AfterOwnBlit}, {"fold-lists", FoldListsMode},
         {"fold-lists-barrier", FoldListsBarrier}, {"fold-m4", FoldM4}, {"fold-twice", FoldTwice}, {"fold-copy", FoldCopy},

@@ -110,6 +110,8 @@ static double present(CAMetalLayer *layer, id<MTLTexture> img, id<MTLBuffer> in,
     [cb presentDrawable:d];
     if (out) copyOut(cb, d.texture, out);
     run(cb);
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.002, false);  // the presenter places its overlay on the main queue;
+                                                             // without it an upscale never runs and cost reads 0
     return (cb.GPUEndTime - cb.GPUStartTime) * 1e3;
 }
 

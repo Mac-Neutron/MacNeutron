@@ -11,6 +11,25 @@ import Testing
     #expect(GameSettings(postAA: "cmaa2").environment["MACNEUTRON_POST_AA"] == "cmaa2")
     #expect(GameSettings(postAA: "off").environment["MACNEUTRON_POST_AA"] == nil)
     #expect(GameSettings(postAA: "smaa").environment["MACNEUTRON_POST_AA"] == nil)  // unknown: off
+    // Apple's Metal HUD: on means MTL_HUD_ENABLED=1, off means nothing (its default).
+    #expect(GameSettings(metalHUD: true).environment["MTL_HUD_ENABLED"] == "1")
+    #expect(GameSettings(metalHUD: false).environment["MTL_HUD_ENABLED"] == nil)
+    #expect(GameSettings().environment["MTL_HUD_ENABLED"] == nil)
+    // DLSS answered by MetalFX: on means MACNEUTRON_DLSS=1, off means nothing.
+    #expect(GameSettings(dlss: true).environment["MACNEUTRON_DLSS"] == "1")
+    #expect(GameSettings(dlss: false).environment["MACNEUTRON_DLSS"] == nil)
+    #expect(GameSettings().environment["MACNEUTRON_DLSS"] == nil)
+    #expect(GameSettings(frameGen: true).environment["MACNEUTRON_FRAMEGEN"] == "1")
+    #expect(GameSettings(frameGen: false).environment["MACNEUTRON_FRAMEGEN"] == nil)
+}
+
+@Test func upscalingPresetsBecomeALaunchVariable() {
+    func preset(_ value: String?) -> String? { GameSettings(upscale: value).environment["MACNEUTRON_UPSCALE"] }
+    #expect(preset(nil) == nil)
+    #expect(preset("ultra-quality") == "ultra-quality")
+    #expect(preset("ultra-performance") == "ultra-performance")
+    #expect(preset("off") == nil)
+    #expect(preset("dlss") == nil)  // unknown: off
 }
 
 @Test func anisotropicFilteringDefaultsTo16x() {

@@ -46,6 +46,7 @@ static const char *dumpPath;      // test-only: write the 120th upscaled frame a
 static double scaleOverride;      // test-only: pretend the window has this backing scale
 static const char *refuseOutput;  // test-only: "<w>x<h>", an output size MetalFX is made to refuse; "all", every size
 static BOOL postAA, noMetalFX;    // MACNEUTRON_POST_AA=cmaa2, MACNEUTRON_NO_METALFX=1
+static float sharpenStrength;    // MACNEUTRON_SHARPEN, 0 (off: the presenter copies) to 1 (AMD's CAS maximum)
 
 static void note(MNLayerState *st, NSString *message)
 {
@@ -206,8 +207,17 @@ static NSString *prepareScaler(id<MTLDevice> device, MNLayerState *st, id<MTLTex
     return nil;
 }
 
-/* CMAA2's four kernels, from the metallib beside this library (wine-arm64/build.sh), for 8-bit frames (read through an
- * sRGB view) or 10-bit ones (the shader's kTenBit: sRGB by hand). nil: ready.
+/* The metallib beside this library (wine-arm64/build.sh): CMAA2's four kernels and the sharpening kernel. */
+static NSURL *metallibURL(void)
+{
+    Dl_info info;
+    if (!dladdr((const void *)note, &info) || !info.dli_fname) return nil;
+    return [[NSURL fileURLWithPath:@(info.dli_fname)].URLByDeletingLastPathComponent
+            URLByAppendingPathComponent:@"libmacneutron-present.metallib"];
+}
+
+/* CMAA2's four kernels, for 8-bit frames (read through an sRGB view) or 10-bit ones (the shader's kTenBit: sRGB by
+ * hand). nil: ready.
  * ponytail: one set of pipelines per depth for the first device that asks; Wine's games draw on one GPU. */
 static id<MTLComputePipelineState> aaPS[2][4];  // [tenBit][edges, args, process, apply]
 static NSString *loadCMAA2(id<MTLDevice> device, BOOL tenBit)
@@ -215,10 +225,8 @@ static NSString *loadCMAA2(id<MTLDevice> device, BOOL tenBit)
     static NSString *failure[2];
     static dispatch_once_t once[2];
     dispatch_once(&once[tenBit], ^{
-        Dl_info info;
-        if (!dladdr((const void *)loadCMAA2, &info) || !info.dli_fname) { failure[tenBit] = @"CMAA2 off (no library path)"; return; }
-        NSURL *url = [[NSURL fileURLWithPath:@(info.dli_fname)].URLByDeletingLastPathComponent
-                      URLByAppendingPathComponent:@"libmacneutron-present.metallib"];
+        NSURL *url = metallibURL();
+        if (!url) { failure[tenBit] = @"CMAA2 off (no library path)"; return; }
         NSError *error;
         id<MTLLibrary> lib = [device newLibraryWithURL:url error:&error];
         MTLFunctionConstantValues *constants = [MTLFunctionConstantValues new];
@@ -238,6 +246,26 @@ static NSString *loadCMAA2(id<MTLDevice> device, BOOL tenBit)
         for (NSUInteger i = 0; i < 4; i++) aaPS[tenBit][i] = ps[i];
     });
     return failure[tenBit];
+}
+
+/* The sharpening kernel, from the same metallib. nil: ready. */
+static id<MTLComputePipelineState> sharpenPS;
+static NSString *loadSharpen(id<MTLDevice> device)
+{
+    static NSString *failure;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSURL *url = metallibURL();
+        if (!url) { failure = @"sharpening off (no library path)"; return; }
+        NSError *error;
+        id<MTLLibrary> lib = [device newLibraryWithURL:url error:&error];
+        id<MTLFunction> f = [lib newFunctionWithName:@"sharpen"];
+        sharpenPS = f ? [device newComputePipelineStateWithFunction:f error:&error] : nil;
+        if (!sharpenPS)
+            failure = [NSString stringWithFormat:@"sharpening off (%@: %@)", lib ? @"sharpen" : url.lastPathComponent,
+                       error.localizedDescription ?: @"missing"];
+    });
+    return failure;
 }
 
 /* CMAA2's working set for this frame size (upstream's default sizes, vaCMAA2DX12.cpp), made once per size. */
@@ -341,6 +369,37 @@ static void dumpFrame(id<MTLCommandBuffer> cb, id<MTLTexture> t, MNLayerState *s
     }];
 }
 
+/* MetalFX's output into the layer's drawable: the copy the presenter makes anyway, sharpened in place when
+ * MACNEUTRON_SHARPEN asks for it, so the sharpening costs its arithmetic and neighbour reads, not a pass of its own.
+ * CAS works on gamma-encoded values and the presenter's layers are non-sRGB (DXMT's are), so no view is taken; a
+ * 10-bit or sRGB frame is copied as before. Returns the note's suffix, or nil for a plain copy. */
+static NSString *copyOut(id<MTLCommandBuffer> cb, MNLayerState *st, id<MTLTexture> src, id<MTLTexture> dst)
+{
+    BOOL eightBit = src.pixelFormat == MTLPixelFormatBGRA8Unorm || src.pixelFormat == MTLPixelFormatRGBA8Unorm;
+    if (sharpenStrength > 0 && eightBit && src.width == dst.width && src.height == dst.height) {
+        NSString *failure = loadSharpen(cb.device);
+        if (!failure) {
+            MTLSize tg = MTLSizeMake(16, 16, 1);
+            id<MTLComputeCommandEncoder> ce = [cb computeCommandEncoder];
+            [ce setComputePipelineState:sharpenPS];
+            [ce setTexture:src atIndex:0];
+            [ce setTexture:dst atIndex:1];
+            [ce setBytes:&sharpenStrength length:sizeof sharpenStrength atIndex:0];
+            [ce dispatchThreadgroups:MTLSizeMake((src.width + tg.width - 1) / tg.width,
+                                                 (src.height + tg.height - 1) / tg.height, 1)
+                threadsPerThreadgroup:tg];
+            [ce endEncoding];
+            return [NSString stringWithFormat:@", sharpen %.2f", sharpenStrength];
+        }
+        static BOOL noted;
+        if (!noted) { noted = YES; fprintf(stderr, "macneutron-present: %s\n", failure.UTF8String); }
+    }
+    id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
+    [blit copyFromTexture:src toTexture:dst];
+    [blit endEncoding];
+    return nil;
+}
+
 /* Upscales the game's drawable into the overlay and presents the overlay with `present`, the same kind of present the
  * game asked for. NO: present the game's drawable as usual. */
 static BOOL upscaleInto(id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, void (^present)(id<MTLDrawable>))
@@ -382,12 +441,11 @@ static BOOL upscaleInto(id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, v
     st.scaler.colorTexture = src;
     st.scaler.outputTexture = st.output;
     [st.scaler encodeToCommandBuffer:cb];
-    id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
-    [blit copyFromTexture:st.output toTexture:out.texture];
-    [blit endEncoding];
+    NSString *sharpened = copyOut(cb, st, st.output, out.texture);
     dumpFrame(cb, out.texture, st);
-    note(st, [NSString stringWithFormat:@"MetalFX %lux%lu -> %lux%lu", (unsigned long)src.width,
-              (unsigned long)src.height, (unsigned long)st.outWidth, (unsigned long)st.outHeight]);
+    note(st, [NSString stringWithFormat:@"MetalFX %lux%lu -> %lux%lu%@", (unsigned long)src.width,
+              (unsigned long)src.height, (unsigned long)st.outWidth, (unsigned long)st.outHeight,
+              sharpened ?: @""]);
     present(out);
     return YES;
 }
@@ -453,6 +511,8 @@ __attribute__((constructor)) static void mnInit(void)
     const char *aa = getenv("MACNEUTRON_POST_AA"), *noFX = getenv("MACNEUTRON_NO_METALFX");
     postAA = aa && !strcmp(aa, "cmaa2");
     noMetalFX = noFX && !strcmp(noFX, "1");
+    const char *sharpen = getenv("MACNEUTRON_SHARPEN");
+    sharpenStrength = sharpen ? (float)fmin(fmax(atof(sharpen), 0.0), 1.0) : 0.0f;
     Method m = class_getInstanceMethod(CAMetalLayer.class, @selector(nextDrawable));
     if (m) origNextDrawable = (void *)method_setImplementation(m, (IMP)mnNextDrawable);
 }

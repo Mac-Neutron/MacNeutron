@@ -16,13 +16,15 @@ fail=0
 expect() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got [$2], want [$3]"; fail=1; fi; }
 
 # run_loop <name> <inject 0|1> <scale> <present_loop args...>  →  output in $WORK/<name>.txt; $aa, when set, is
-# MACNEUTRON_POST_AA, $refuse MACNEUTRON_PRESENT_REFUSE (an output size MetalFX is made to refuse)
-aa= refuse=
+# MACNEUTRON_POST_AA, $refuse MACNEUTRON_PRESENT_REFUSE (an output size MetalFX is made to refuse), $sharpen
+# MACNEUTRON_SHARPEN
+aa= refuse= sharpen=
 run_loop() {
   name=$1 inject=$2 scale=$3; shift 3
   off=; [ "$inject" = 1 ] || off=1
   env STEAM_COMPAT_DATA_PATH="$WORK/compat/0" SteamAppId=0 MACNEUTRON_GRAPHICS=dxmt MACNEUTRON_NO_STEAM_BRIDGE=1 \
       ${off:+MACNEUTRON_NO_METALFX=1} ${aa:+MACNEUTRON_POST_AA=$aa} ${refuse:+MACNEUTRON_PRESENT_REFUSE=$refuse} \
+      ${sharpen:+MACNEUTRON_SHARPEN=$sharpen} \
       MACNEUTRON_PRESENT_SCALE="$scale" \
       MACNEUTRON_PRESENT_DUMP="$WORK/frame.ppm" \
       "$TOOL/bin/macneutron" launch waitforexitandrun "$B/present_loop.exe" "$@" > "$WORK/$name.out" 2>&1 &
@@ -34,6 +36,7 @@ run_loop() {
 }
 count() { LC_ALL=C /usr/bin/grep -c "$1" "$WORK/$2.txt" || true; }   # count <pattern> <run>
 frame_ms() { LC_ALL=C /usr/bin/grep -o 'avg frame [0-9.]*' "$WORK/$1.txt" | awk '{print $3}'; }
+edge() { python3 "$ROOT/presenter/tests/pixels.py" "$1" edges; }   # edge <ppm>: how hard its edges are
 
 # CMAA2 natively: wine.app's presenter on layers outside any window, under Metal's shader validation, then again under
 # its API validation (both at once crash inside MetalTools on a view of a drawable's texture). BGRA8 layers, then
@@ -83,6 +86,15 @@ for fmt in "" rgb10a2; do for size in "1728 1117" "2560 1440"; do  # the GPU tim
   MACNEUTRON_POST_AA=cmaa2 MACNEUTRON_PRESENT_SCALE=1 "$B/cmaa2_check" "$LIB" cost $size $fmt 2>/dev/null | sed 's/^/info /'
 done; done
 
+# What the sharpening costs, printed: it replaces the presenter's copy of the frame, so the difference against the run
+# without it is the pass's own cost. At a 2x upscale (1280x720 -> 2560x1440): at scale 1 nothing is upscaled, so
+# nothing is sharpened and every number would read 0.
+for s in "" 0.5 1; do
+  printf 'info sharpening %s: ' "${s:-off}"
+  env MACNEUTRON_PRESENT_SCALE=2 ${s:+MACNEUTRON_SHARPEN=$s} "$B/cmaa2_check" "$LIB" cost 1280 720 2>/dev/null |
+    sed -n '1s/^cost //p'
+done
+
 # The prefix, prepared before the timed runs (a no-op when it is current).
 env STEAM_COMPAT_DATA_PATH="$WORK/compat/0" SteamAppId=0 MACNEUTRON_GRAPHICS=dxmt \
     "$TOOL/bin/macneutron" launch getcompatpath "$WORK" > /dev/null 2>&1 \
@@ -96,6 +108,30 @@ run_loop up 1 1 1280 720 640 360 300 0
 expect "small swap chain is upscaled" "$(count 'macneutron-present: MetalFX 640x360 -> 1280x720' up)" 1
 expect "upscaled frame shows the whole checkerboard" \
   "$( [ -f "$WORK/frame.ppm" ] && python3 "$ROOT/presenter/tests/pixels.py" "$WORK/frame.ppm" || echo none)" "WNWNWNWN"
+
+# MACNEUTRON_SHARPEN sharpens what the presenter upscales, in place of its copy of MetalFX's output (CAS): the note
+# says so, a frame that isn't upscaled is left alone, and the same frames come out with harder edges. The edge metric
+# uses CMAA2's DENSE study image (1-px lines and glyphs on a low-contrast gradient), which is what CAS works on: on a
+# frame whose values are mostly clipped its contrast-adaptive weight nearly vanishes, by design.
+run_loop sharp_note 1 1 1280 720 640 360 300 0
+expect "no sharpening without MACNEUTRON_SHARPEN" "$(count 'sharpen' sharp_note)" 0
+sharpen=0.8
+run_loop sharp_on 1 1 1280 720 640 360 300 0
+expect "the note says what it sharpened" \
+  "$(count 'macneutron-present: MetalFX 640x360 -> 1280x720, sharpen 0.80' sharp_on)" 1
+run_loop sharp_pass 0 1 1280 720 0 0 200 0
+sharpen=
+expect "sharpening doesn't touch a frame that isn't upscaled" \
+  "$(count 'macneutron-present: MetalFX' sharp_pass):$(count 'sharpen' sharp_pass)" "0:0"
+rm -f "$WORK/sharp_off.ppm" "$WORK/sharp_on.ppm"
+native sharp_off MACNEUTRON_PRESENT_SCALE=2 MACNEUTRON_PRESENT_DUMP="$WORK/sharp_off.ppm" "$B/cmaa2_check" "$LIB" upscale
+native sharp_shot MACNEUTRON_PRESENT_SCALE=2 MACNEUTRON_SHARPEN=0.8 MACNEUTRON_PRESENT_DUMP="$WORK/sharp_on.ppm" \
+  "$B/cmaa2_check" "$LIB" upscale
+sharp_edge_off=$(edge "$WORK/sharp_off.ppm"); sharp_edge_on=$(edge "$WORK/sharp_on.ppm")
+expect "sharpening hardens the upscaled frames' edges" \
+  "$( [ "$sharp_edge_on" -gt "$sharp_edge_off" ] && echo up || echo down)" "up"
+echo "info sharpening edges: $sharp_edge_off -> $sharp_edge_on"
+statuses="$statuses$(cat "$WORK/sharp_off.status" "$WORK/sharp_shot.status" | tr -d '\n')"
 
 run_loop retina 1 2 1280 720 0 0 200 0
 expect "Retina density is upscaled" "$(count 'macneutron-present: MetalFX 1280x720 -> 2560x1440' retina)" 1

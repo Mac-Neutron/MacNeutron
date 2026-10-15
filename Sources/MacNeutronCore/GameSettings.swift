@@ -11,9 +11,25 @@ public struct GameSettings: Codable, Equatable, Sendable {
     public var postAA: String?
     /// Anisotropic filtering: nil (16x), "game" (the game's own samplers), "4", "8" or "16".
     public var anisotropy: String?
+    /// Upscaling (the launcher's MACNEUTRON_UPSCALE): the game renders into a back buffer this much smaller than its
+    /// window and the presenter upscales it with MetalFX. nil (off) or one of `upscalePresets`.
+    public var upscale: String?
+    /// Apple's Metal performance HUD over the game (MTL_HUD_ENABLED): FPS, frame times, and the labels DXMT and the
+    /// presenter publish. nil/false: off.
+    public var metalHUD: Bool?
+    /// DLSS answered by MetalFX (MACNEUTRON_DLSS): the game sees an NVIDIA GPU, and its DLSS option upscales with
+    /// MetalFX's temporal upscaler. nil/false: off.
+    public var dlss: Bool?
+    /// Frame generation on MetalFX (MACNEUTRON_FRAMEGEN): a frame interpolated between each two the game renders, when
+    /// it runs DLSS on MetalFX. nil/false: off.
+    public var frameGen: Bool?
+
+    /// MACNEUTRON_UPSCALE's presets, XeSS's ratios: the back buffer keeps this fraction of the window's pixels.
+    public static let upscalePresets = ["ultra-quality", "quality", "balanced", "performance", "ultra-performance"]
 
     public init(graphics: String? = nil, log: Bool? = nil, msync: Bool? = nil, runAs: RunAs? = nil, metalFX: Bool? = nil,
-                postAA: String? = nil, anisotropy: String? = nil) {
+                postAA: String? = nil, anisotropy: String? = nil, upscale: String? = nil, metalHUD: Bool? = nil,
+                dlss: Bool? = nil, frameGen: Bool? = nil) {
         self.graphics = graphics
         self.log = log
         self.msync = msync
@@ -21,6 +37,10 @@ public struct GameSettings: Codable, Equatable, Sendable {
         self.metalFX = metalFX
         self.postAA = postAA
         self.anisotropy = anisotropy
+        self.upscale = upscale
+        self.metalHUD = metalHUD
+        self.dlss = dlss
+        self.frameGen = frameGen
     }
 
     /// The launch-option variables these settings stand for (`runAs` is for the mapping planner only).
@@ -38,6 +58,15 @@ public struct GameSettings: Codable, Equatable, Sendable {
         case "4", "8": env["DXMT_MAX_ANISOTROPY"] = anisotropy
         default: env["DXMT_MAX_ANISOTROPY"] = "16"
         }
+        // The upscaler reports the desktop smaller than it is (its preset picks how much smaller) so the game renders
+        // fewer pixels; the launcher turns the preset into MACNEUTRON_DISPLAY_SCALE and drops it when MetalFX is off.
+        // Unknown values are off.
+        if let upscale, Self.upscalePresets.contains(upscale) { env["MACNEUTRON_UPSCALE"] = upscale }
+        // Apple's Metal HUD, the same variable a launch option sets (a user's own value wins where the launcher merges
+        // environments); its log (MTL_HUD_LOG_ENABLED) and layout variables stay launch options.
+        if metalHUD == true { env["MTL_HUD_ENABLED"] = "1" }
+        if dlss == true { env["MACNEUTRON_DLSS"] = "1" }
+        if frameGen == true { env["MACNEUTRON_FRAMEGEN"] = "1" }
         return env
     }
 }

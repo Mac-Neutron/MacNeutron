@@ -79,6 +79,48 @@ private let context = try! CompatContext(environment: ["STEAM_COMPAT_DATA_PATH":
     #expect(env["MACNEUTRON_POST_AA"] == "cmaa2")
 }
 
+// MACNEUTRON_UPSCALE reports a smaller desktop to the game (XeSS's ratios); the MetalFX presenter upscales the window
+// back up. Wine's Mac driver reads the ratio from MACNEUTRON_DISPLAY_SCALE.
+@Test func upscalePresetsReportASmallerDesktop() {
+    func ratio(_ base: [String: String]) -> String? {
+        LaunchEnvironment.build(base: base, context: context, backend: .dxmt, logging: false)["MACNEUTRON_DISPLAY_SCALE"]
+    }
+    #expect(ratio(["MACNEUTRON_UPSCALE": "ultra-quality"]) == "0.7692")
+    #expect(ratio(["MACNEUTRON_UPSCALE": "quality"]) == "0.6667")
+    #expect(ratio(["MACNEUTRON_UPSCALE": "balanced"]) == "0.5882")
+    #expect(ratio(["MACNEUTRON_UPSCALE": "performance"]) == "0.5")
+    #expect(ratio(["MACNEUTRON_UPSCALE": "ultra-performance"]) == "0.3333")
+    // Off by default; an unknown preset, the user's own ratio, or MetalFX off changes nothing.
+    #expect(ratio([:]) == nil)
+    #expect(ratio(["MACNEUTRON_UPSCALE": "nonsense"]) == nil)
+    #expect(ratio(["MACNEUTRON_UPSCALE": "quality", "MACNEUTRON_DISPLAY_SCALE": "0.9"]) == "0.9")
+    #expect(ratio(["MACNEUTRON_UPSCALE": "quality", "MACNEUTRON_NO_METALFX": "1"]) == nil)
+
+    // The presenter sharpens what it upscales (MetalFX's spatial scaler has no sharpness of its own), unless the user
+    // set their own strength; no upscale, no sharpening.
+    func sharpen(_ base: [String: String]) -> String? {
+        LaunchEnvironment.build(base: base, context: context, backend: .dxmt, logging: false)["MACNEUTRON_SHARPEN"]
+    }
+    #expect(sharpen(["MACNEUTRON_UPSCALE": "quality"]) == LaunchEnvironment.upscaleSharpness)
+    #expect(sharpen(["MACNEUTRON_UPSCALE": "quality", "MACNEUTRON_SHARPEN": "0.9"]) == "0.9")
+    #expect(sharpen(["MACNEUTRON_UPSCALE": "quality", "MACNEUTRON_SHARPEN": "0"]) == "0")
+    #expect(sharpen([:]) == nil)
+    #expect(sharpen(["MACNEUTRON_UPSCALE": "quality", "MACNEUTRON_NO_METALFX": "1"]) == nil)
+}
+
+// MACNEUTRON_DLSS=1 turns DXMT's NVIDIA extension on (an NVIDIA adapter, DXMT's nvapi64 and nvngx), on DXMT only;
+// the user's own DXMT_ENABLE_NVEXT wins.
+@Test func dlssTurnsOnDXMTsNvidiaExtension() {
+    func nvext(_ base: [String: String], _ backend: GraphicsBackend = .dxmt) -> String? {
+        LaunchEnvironment.build(base: base, context: context, backend: backend, logging: false)["DXMT_ENABLE_NVEXT"]
+    }
+    #expect(nvext([:]) == nil)
+    #expect(nvext(["MACNEUTRON_DLSS": "1"]) == "1")
+    #expect(nvext(["MACNEUTRON_DLSS": "0"]) == nil)
+    #expect(nvext(["MACNEUTRON_DLSS": "1"], .wined3d) == nil)
+    #expect(nvext(["MACNEUTRON_DLSS": "1", "DXMT_ENABLE_NVEXT": "0"]) == "0")
+}
+
 @Test func anisotropicFilteringReachesWine() {
     func forced(_ settings: GameSettings, _ options: [String: String] = [:]) -> String? {
         LaunchEnvironment.build(base: settings.environment.merging(options) { _, option in option }, context: context,

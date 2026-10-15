@@ -4,7 +4,8 @@
 // 64-bit atomics) and the average frame time. Then "resize flags <flags> <flags>": the swapchain's flags after a
 // ResizeBuffers given ALLOW_MODE_SWITCH, then after one given 0; and "resize waitable <flags> <object>": a second
 // swapchain created FRAME_LATENCY_WAITABLE_OBJECT keeps that flag (and its waitable object) through a ResizeBuffers
-// given ALLOW_MODE_SWITCH alone, as DXGI can't add or remove it after creation.
+// given ALLOW_MODE_SWITCH alone, as DXGI can't add or remove it after creation; then "resize size <w>x<h>": that
+// swapchain's size after a ResizeBuffers given 0x0 (its window's, times DXMT_RENDER_SCALE).
 #define WIDL_EXPLICIT_AGGREGATE_RETURNS  // D3D12 methods that return structs: the MSVC ABI under mingw
 #include <windows.h>
 #include <d3d12.h>
@@ -149,6 +150,7 @@ int main(int argc, char **argv) {
     CHECK(waitable->GetDesc1(&resized));
     HANDLE object = waitable->GetFrameLatencyWaitableObject();
     printf("resize waitable 0x%x %d\n", resized.Flags, object != nullptr);
+    printf("resize size %ux%u\n", resized.Width, resized.Height);
     if (object) CloseHandle(object);
     return 0;
 }

@@ -286,7 +286,7 @@ LANE=B
 want=$(printf 'hazard %s\n' "rt-read 257" "same-target 7 5" "uav 1048576" "copy-read 6" "indirect 9" "aliasing 2" \
   "occlusion 268435456" "independent 256 256" "precise 257" "mid-pass 77" "twice 514" "many 1200 1200" "clear-rects 3 256" \
   "signal 0" "wrap 4194304" "onewait 256 5 6" "newest 3 2" "nodraw 257" "queues 257 257" "unsplit 257" "unsplit-barrier 257" \
-  "unsplit-samebuffer 257" "unsplit-midbarrier 258" "unsplit-query 258 268435456 1048576" "unsplit-segments 257 1" "unsplit-attachment 257" "unsplit-uav 257" "unsplit-uavwrite 257" "unsplit-sampled 257" "unsplit-twice 2" "deferred 1" "zeroed 0 0" "fold 6 2 9 5" "fold-order 6 7" \
+  "unsplit-samebuffer 257" "unsplit-midbarrier 258" "unsplit-query 258 268435456 1048576" "unsplit-segments 257 1" "unsplit-attachment 257" "unsplit-uav 257" "unsplit-uavwrite 257" "unsplit-sampled 257" "unsplit-copy 257" "unsplit-resolve 257 1" "unsplit-resolve-read 257 1" "unsplit-twice 2" "deferred 1" "zeroed 0 0" "fold 6 2 9 5" "fold-order 6 7" \
   "fence-reset 1" "fence-cpu-late 1" "fence-transitive 0 0" "fence-custom 1" "fence-lower 0 1" "fence-wait-first 257" "fence-order 1 1" "two-heaps 1 1" "ts-start 1" "after-own-blit 7" \
   "fold-lists 6 2" "fold-lists-barrier 6 2" "fold-m4 11 7" "fold-twice 10 14" "fold-copy 2 6 2" "indirect-war 265" \
   "merge-indirect 10" "placed-uav 1048576" "heap-released 257" "ts-many 1" "sampled 1" "ts-queues 1")
@@ -363,31 +363,38 @@ expect "and on the newest writer alone" \
 # M3 (GPU overlap spec §3.5): two lists' passes into one target with only timestamps between them are one Metal render
 # pass, the timestamp ring (the default) taking all their samples at one point, and in strict order (the default) out
 # of a pass that isn't its list's join too (unsplit-segments, SMITE 2's base-pass segments: B6), and across barriers
-# that name nothing the passes write (unsplit-barrier: B6, SMITE 2's 35 refusals a frame), UAV barriers and
-# UNORDERED_ACCESS moves among them when no pass's shader writes a UAV (unsplit-midbarrier, unsplit-uav); not across a
-# barrier that names their target (unsplit-attachment) or a UAV move where a pass's shader writes one (unsplit-uavwrite:
-# no pass lists its shaders' UAV writes), nor out of a pass counting into an occlusion query, nor a list into itself.
-# A pass into another target counts as that whatever the barriers before it (unsplit-sampled: B6).
-m3_modes="unsplit unsplit-barrier unsplit-samebuffer unsplit-midbarrier unsplit-query unsplit-segments unsplit-attachment unsplit-uav unsplit-uavwrite unsplit-sampled unsplit-twice"
+# that name nothing the passes write (unsplit-barrier: B6, SMITE 2's 35 refusals a frame), a barrier naming the
+# passes' own target (unsplit-attachment: B6, Palworld's 56 refusals a frame), UAV barriers and UNORDERED_ACCESS moves
+# among them when no pass's shader writes a UAV (unsplit-midbarrier, unsplit-uav); not across a UAV move where a pass's
+# shader writes one (unsplit-uavwrite: no pass lists its shaders' UAV writes), nor out of a pass counting into an
+# occlusion query, nor a list into itself. A pass into another target counts as that whatever the barriers before it
+# (unsplit-sampled), and a copy (a blit) between the lists ends the walk (unsplit-copy: B6). A blit of timestamp resolves
+# into GPU memory alone (Palworld's at each base-pass segment's end: B7) moves after the merged pass (unsplit-resolve),
+# unless a barrier between names its destination (unsplit-resolve-read: the next pass may read it).
+m3_modes="unsplit unsplit-barrier unsplit-samebuffer unsplit-midbarrier unsplit-query unsplit-segments unsplit-attachment unsplit-uav unsplit-uavwrite unsplit-sampled unsplit-copy unsplit-twice unsplit-resolve unsplit-resolve-read"
 rm -rf "$WORK/m3-stats"; export DXMT_DXIL_DUMP="$WORK/m3-stats" DXMT_STATS=1
 run ours m3-stats dxmt "$TESTS/d3d12_hazards.exe" "Z:$S" $m3_modes
 unset DXMT_DXIL_DUMP DXMT_STATS
 m3() { grep -oE '(render passes merged|timestamp blits folded|render pass merges refused \([a-z]+\)) [0-9]+' \
   "$WORK/$1/stats.txt" 2> /dev/null | tr '\n' ';'; }
 expect "render passes into one target across lists are one Metal render pass" "$(m3 m3-stats)" \
-  "render pass merges refused (attachments) 1;render pass merges refused (barrier) 2;render pass merges refused (other) 2;render passes merged 6;timestamp blits folded 6;"
-# DXMT_STATS says which barrier refused each (B6): unsplit-uavwrite's UNORDERED_ACCESS, unsplit-attachment's target.
+  "render pass merges refused (attachments) 1;render pass merges refused (barrier) 2;render pass merges refused (other) 2;render passes merged 8;timestamp blits folded 8;"
+expect "and a blit of timestamp resolves alone moves after the merged pass" \
+  "$(grep -oE 'timestamp resolves moved after a merged pass [0-9]+' "$WORK/m3-stats/stats.txt" 2> /dev/null):$(grep '^hazard unsplit-resolve' "$WORK/m3-stats.txt" | tr '\n' ';')" \
+  "timestamp resolves moved after a merged pass 1:hazard unsplit-resolve 257 1;hazard unsplit-resolve-read 257 1;"
+# DXMT_STATS says which barrier refused each (B6): the UAV-write pass's UNORDERED_ACCESS and the barrier naming the
+# moved resolve's destination (B7), as a barrier naming the passes' own target crosses (unsplit-attachment: B6).
 expect "and which barrier kept each apart" \
   "$(grep -oE 'render pass merges refused \(barrier\): [^0-9]+ [0-9]+' "$WORK/m3-stats/stats.txt" 2> /dev/null | tr '\n' ';')" \
   "render pass merges refused (barrier): UNORDERED_ACCESS 1;render pass merges refused (barrier): a resource the passes write 1;"
 # With a counter buffer per pass (DXMT_D3D12_TIMESTAMP_BLITS=1), a buffer sampled at the base pass's end can't be
-# sampled again in it: unsplit-samebuffer and unsplit-segments stay apart. DXMT_STATS says why each didn't join (B6,
-# Task F4): unsplit-attachment's and unsplit-uavwrite's barriers, unsplit-query's query and unsplit-twice's list.
+# sampled again in it: unsplit-samebuffer, unsplit-segments and the two unsplit-resolve modes stay apart. DXMT_STATS says why each didn't join (B6,
+# Task F4): unsplit-uavwrite's barrier, unsplit-query's query and unsplit-twice's list.
 rm -rf "$WORK/m3-blits-stats"; export DXMT_DXIL_DUMP="$WORK/m3-blits-stats" DXMT_STATS=1 DXMT_D3D12_TIMESTAMP_BLITS=1
 run ours m3-blits-stats dxmt "$TESTS/d3d12_hazards.exe" "Z:$S" $m3_modes
 unset DXMT_DXIL_DUMP DXMT_STATS DXMT_D3D12_TIMESTAMP_BLITS
 expect "and with a counter buffer per pass, not when that buffer is already sampled" "$(m3 m3-blits-stats)" \
-  "render pass merges refused (attachments) 1;render pass merges refused (barrier) 2;render pass merges refused (other) 2;render pass merges refused (timestamps) 2;render passes merged 4;timestamp blits folded 4;"
+  "render pass merges refused (attachments) 1;render pass merges refused (barrier) 1;render pass merges refused (other) 2;render pass merges refused (timestamps) 4;render passes merged 5;timestamp blits folded 5;"
 expect "and the merged passes' timestamps stay in order, with each run's picture right" \
   "$(grep '^hazard unsplit-segments' "$WORK/m3-stats.txt"; grep '^hazard unsplit-segments' "$WORK/m3-blits-stats.txt")" \
   "$(printf 'hazard unsplit-segments 257 1\nhazard unsplit-segments 257 1')"
@@ -396,6 +403,13 @@ run ours m3-off-stats dxmt "$TESTS/d3d12_hazards.exe" "Z:$S" unsplit
 unset DXMT_DXIL_DUMP DXMT_STATS DXMT_D3D12_MERGE
 expect "and none with DXMT_D3D12_MERGE=0" \
   "$(grep -c 'render passes merged' "$WORK/m3-off-stats/stats.txt" 2> /dev/null || true):$(grep '^hazard ' "$WORK/m3-off-stats.txt")" "0:hazard unsplit 257"
+# B6: DXMT_D3D12_CMDBUF_SLOTS sets the command buffers kept in flight (32 by default, clamped to [1, 64]). One slot is
+# the harshest setting (the queue waits for each buffer before opening the next): the work still comes out right.
+rm -rf "$WORK/slots-stats"; export DXMT_DXIL_DUMP="$WORK/slots-stats" DXMT_STATS=1 DXMT_D3D12_CMDBUF_SLOTS=1
+run ours slots-stats dxmt "$TESTS/d3d12_hazards.exe" "Z:$S" unsplit
+unset DXMT_DXIL_DUMP DXMT_STATS DXMT_D3D12_CMDBUF_SLOTS
+expect "DXMT_D3D12_CMDBUF_SLOTS=1 still runs the work right" \
+  "$(grep '^hazard ' "$WORK/slots-stats.txt")" "hazard unsplit 257"
 # M4 (GPU overlap spec §3.6): a clear then a pass into the cleared target, no barrier between: one Metal render pass
 # with the clear as its load action. Not across a barrier, nor with DXMT_D3D12_MERGE=0.
 rm -rf "$WORK/m4-stats"; export DXMT_DXIL_DUMP="$WORK/m4-stats" DXMT_STATS=1
@@ -421,8 +435,8 @@ expect "a lone timestamp is taken at the next encoder's start" \
   "$(grep -oE "timestamps at the next encoder's start [0-9]+" "$WORK/e4-stats/stats.txt" 2> /dev/null):$(grep '^hazard ' "$WORK/e4-stats.txt")" \
   "timestamps at the next encoder's start 2:hazard ts-start 1"
 # E7: a clear-only pass folds into the first pass binding its view later in the same call, across lists, timestamps
-# and barriers on other textures (fold-lists); not across a barrier naming its texture (fold-lists-barrier) or a copy
-# of it (fold-copy). d3d12_hazards, each mode alone.
+# and barriers (fold-lists, and fold-lists-barrier: a barrier naming the cleared texture crosses too, B6); not across a
+# copy of it (fold-copy). d3d12_hazards, each mode alone.
 # Task F4 (Ruling 23): every timestamp rides an encoder of its call, whatever its query heap. d3d12_hazards ts-many
 # alone (203 timestamps from two heaps between render passes, dispatches and copies, in order and bracketing a heavy
 # dispatch) takes no blit of its own; with DXMT_D3D12_TIMESTAMP_BLITS=1 (the heaps' own counter buffers, one an
@@ -441,10 +455,11 @@ for m in fold-lists fold-lists-barrier fold-copy; do
   run ours "e7-$m" dxmt "$TESTS/d3d12_hazards.exe" "Z:$S" $m
   unset DXMT_DXIL_DUMP DXMT_STATS
 done
-e7() { grep -oE '(clears folded at execute|clear folds refused \([a-z ]+\)) [0-9]+' "$WORK/e7-$1/stats.txt" 2> /dev/null | tr '\n' ';'; }
+e7() { grep -oE '((clears folded at execute|clear folds across a barrier naming its texture)|clear folds refused \([a-z ]+\)) [0-9]+' "$WORK/e7-$1/stats.txt" 2> /dev/null | tr '\n' ';'; }
 expect "a clear folds into its pass across lists" "$(e7 fold-lists)" "clears folded at execute 1;"
-expect "but not across a barrier naming its texture" "$(e7 fold-lists-barrier)" "clear folds refused (barrier) 1;"
-expect "nor across a copy of it" "$(e7 fold-copy)" "clear folds refused (barrier) 1;"
+expect "and across a barrier naming its texture, same pixels (B6)" "$(e7 fold-lists-barrier)" \
+  "clear folds across a barrier naming its texture 1;clears folded at execute 1;"
+expect "but not across a copy of it" "$(e7 fold-copy)" "clear folds refused (no target) 1;"
 # E10: two lists' passes into one target, each an indirect draw read from the argument buffer, are one Metal render
 # pass (no resolver pass before the second); with DXMT_D3D12_INDIRECT=icb, two.
 for m in native icb; do
@@ -468,6 +483,16 @@ expect "ResizeBuffers keeps the swapchain flags it's given (0: those it had)" \
   "$(grep '^resize flags' "$WORK/clear.txt" || echo none)" "resize flags 0x2 0x2"
 expect "and the waitable object it was created with" "$(grep '^resize waitable' "$WORK/clear.txt" || echo none)" \
   "resize waitable 0x42 1"
+expect "the swapchain reports the window's size" \
+  "$(grep -c '^resize size [0-9][0-9]*x[0-9][0-9]*$' "$WORK/clear.txt" || true)" 1
+# MacNeutron: DXMT_RENDER_SCALE (the launcher's MACNEUTRON_UPSCALE) makes the game render into a back buffer smaller
+# than its window; the MetalFX presenter upscales it. 0.5 halves the reported back buffer, whatever the window's size.
+rm -rf "$WORK/clear-scale"; export DXMT_DXIL_DUMP="$WORK/clear-scale" DXMT_RENDER_SCALE=0.5
+run ours clear-scale dxmt "$TESTS/d3d12_clear.exe" 20
+unset DXMT_DXIL_DUMP DXMT_RENDER_SCALE
+size() { awk '/^resize size/ {print $3}' "$WORK/$1.txt" 2> /dev/null || echo none; }
+halved() { echo "$1" | awk -F'x' '{printf "%dx%d", int($1 / 2 + 0.5), int($2 / 2 + 0.5)}'; }
+expect "DXMT_RENDER_SCALE=0.5 halves the swapchain" "$(size clear-scale)" "$(halved "$(size clear)")"
 # DXMT_DUMP_FRAMES=<n>: a pass dump takes n consecutive frames (a one-frame glitch is hard to catch with one F9).
 rm -rf "$WORK/clear-dump"; export DXMT_DXIL_DUMP="$WORK/clear-dump" DXMT_DUMP_FRAME=5 DXMT_DUMP_FRAMES=3
 run ours clear-dump dxmt "$TESTS/d3d12_clear.exe" 20
@@ -1206,6 +1231,65 @@ expect "nor in its flags, Unreal's call without depth included" \
   "$(invalid xess-valf):$(grep -c '^xess flags ok' "$WORK/xess-valf.txt" || true)" "0:1"
 expect "nor without depth on a COMPUTE list or with inverted depth" \
   "$(invalid xess-valn):$(grep -c '^xess nodepth ok' "$WORK/xess-valn.txt" || true)" "0:1"
+# DLSS answered by MetalFX: MACNEUTRON_DLSS=1 turns DXMT's NVIDIA extension on, so the adapter is NVIDIA's (10de),
+# DXMT's nvapi64 initialises, and DXMT's nvngx.dll (in system32, loaded by full path as the NGX SDK does) upscales
+# DLSS super resolution with MetalFX: every quality mode at the render size the capability map's callback picks beats
+# bilinear, as does inverted depth with the inputs at an offset; frame generation, a 4x feature and an evaluation
+# without motion vectors are refused. Without it, nvngx.dll refuses to load and the adapter stays Apple's (106b).
+dlssed() {
+  grep -q "^dlss $2.* ok" "$WORK/$1.txt" && echo yes ||
+    { grep -m1 -E "^dlss( $2)? FAIL|failed" "$WORK/$1.txt" || grep -m1 '^dlss' "$WORK/$1.txt" || echo none; }
+}
+NGX='C:\windows\system32\nvngx.dll'
+export MACNEUTRON_DLSS=1
+run ours dlss-vendor dxmt "$TESTS/d3d12_dlss.exe" "$NGX" vendor
+expect "MACNEUTRON_DLSS=1 shows an NVIDIA adapter and initialises NVAPI" \
+  "$(grep -m1 '^dlss vendor' "$WORK/dlss-vendor.txt" || echo none)" "dlss vendor 10de nvapi 0"
+for m in quality:1707x960 balanced:1485x836 performance:1280x720 ultraperf:854x480 dlaa:2560x1440; do
+  run ours "dlss-${m%:*}" dxmt "$TESTS/d3d12_dlss.exe" "$NGX" "${m%:*}"
+  expect "DLSS ${m%:*} renders at ${m#*:} and upscales on MetalFX" \
+    "$(grep -m1 -oE "^dlss ${m%:*} render [0-9]+x[0-9]+" "$WORK/dlss-${m%:*}.txt" || echo none):$(dlssed "dlss-${m%:*}" "${m%:*}")" \
+    "dlss ${m%:*} render ${m#*:}:yes"
+done
+run ours dlss-inverted dxmt "$TESTS/d3d12_dlss.exe" "$NGX" inverted
+expect "DLSS with inverted depth and offset inputs" "$(dlssed dlss-inverted inverted)" yes
+run ours dlss-refuse dxmt "$TESTS/d3d12_dlss.exe" "$NGX" refuse
+expect "DLSS refuses frame generation, a 4x feature and a call without motion vectors" \
+  "$(grep -m1 '^dlss refuse' "$WORK/dlss-refuse.txt" || echo none)" "dlss refuse refused,refused,refused"
+# What one upscale holds the GPU queue for with Palworld's inputs, printed: MetalFX runs its network on the Neural
+# Engine between two GPU passes, and the GPU waits for it unless other work is ready.
+run ours dlss-cost dxmt "$TESTS/d3d12_dlss.exe" "$NGX" cost
+grep '^dlss cost' "$WORK/dlss-cost.txt" | sed 's/^/info /'
+export MTL_DEBUG_LAYER=1 MTL_DEBUG_LAYER_ERROR_MODE=nslog
+run ours dlss-val dxmt "$TESTS/d3d12_dlss.exe" "$NGX" balanced inverted
+unset MTL_DEBUG_LAYER MTL_DEBUG_LAYER_ERROR_MODE MACNEUTRON_DLSS
+expect "Metal's validation rejects nothing in DLSS" \
+  "$(invalid dlss-val):$(grep -cE '^dlss [a-z]+ .*ok' "$WORK/dlss-val.txt" || true)" "0:2"
+# Frame generation on MetalFX (MACNEUTRON_FRAMEGEN=1, with DLSS on MetalFX): each present after the first shows a frame
+# MetalFX's frame interpolator made between it and the last (paired with the DLSS upscaler) before the real one; the
+# swap chain still presents every frame, Metal's validation rejects nothing, and without the variable nothing is generated.
+generated() { awk '/^  frames generated /{n += $3} END {print n + 0}' "$WORK/$1/stats.txt" 2> /dev/null || echo 0; }
+rm -rf "$WORK/dlss-fg"; export DXMT_DXIL_DUMP="$WORK/dlss-fg" DXMT_STATS=1 MACNEUTRON_DLSS=1 MACNEUTRON_FRAMEGEN=1 \
+  MTL_DEBUG_LAYER=1 MTL_DEBUG_LAYER_ERROR_MODE=nslog
+run ours dlss-fg dxmt "$TESTS/d3d12_dlss.exe" "$NGX" framegen
+rm -rf "$WORK/dlss-nofg"; export DXMT_DXIL_DUMP="$WORK/dlss-nofg"; unset MACNEUTRON_FRAMEGEN MTL_DEBUG_LAYER MTL_DEBUG_LAYER_ERROR_MODE
+run ours dlss-nofg dxmt "$TESTS/d3d12_dlss.exe" "$NGX" framegen
+unset DXMT_DXIL_DUMP DXMT_STATS MACNEUTRON_DLSS
+expect "MetalFX generates a frame between each two presents, under Metal's validation" \
+  "$(grep -c 'macneutron-framegen: generating a frame between each two, 1280x720' "$WORK/dlss-fg.txt" || true):$(grep -m1 '^dlss framegen' "$WORK/dlss-fg.txt" || echo none):$(invalid dlss-fg):$(generated dlss-fg | awk '{print ($1 >= 80) ? "most" : $1}')" \
+  "1:dlss framegen presented 120:0:most"
+expect "and none without MACNEUTRON_FRAMEGEN" \
+  "$(grep -m1 '^dlss framegen' "$WORK/dlss-nofg.txt" || echo none):$(generated dlss-nofg)" "dlss framegen presented 120:0"
+# The soak: 1500 presents with frame generation, GPU memory flat from the 60th on (a resource per frame would show).
+export MACNEUTRON_DLSS=1 MACNEUTRON_FRAMEGEN=1
+run ours dlss-fgsoak dxmt "$TESTS/d3d12_dlss.exe" "$NGX" framegen-soak
+unset MACNEUTRON_DLSS MACNEUTRON_FRAMEGEN
+expect "and holds no more GPU memory after 1500 presents" \
+  "$(grep -m1 '^dlss framegen presented' "$WORK/dlss-fgsoak.txt" || echo none):$(awk '/^dlss framegen growth/{print ($4 < 20) ? "flat" : $4 " MB"}' "$WORK/dlss-fgsoak.txt")" \
+  "dlss framegen presented 1500:flat"
+run ours dlss-off dxmt "$TESTS/d3d12_dlss.exe" "$NGX" off vendor
+expect "without MACNEUTRON_DLSS, nvngx.dll doesn't load and the adapter is Apple's" \
+  "$(dlssed dlss-off off):$(grep -m1 -oE '^dlss vendor [0-9a-f]+' "$WORK/dlss-off.txt" || echo none)" "yes:dlss vendor 106b"
 exit $fail
 ) > "$WORK/lane-E.log" 2>&1 & pE=$!
 
