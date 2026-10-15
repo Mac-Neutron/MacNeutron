@@ -5,6 +5,7 @@ public enum PreflightError: Error, Equatable, CustomStringConvertible {
     case runtimeMissing
     case thirtyTwoBit
     case unsupportedMachine(UInt16)
+    case unsupportedCPU(String, [String])
 
     public var description: String {
         switch self {
@@ -13,7 +14,16 @@ public enum PreflightError: Error, Equatable, CustomStringConvertible {
         case .thirtyTwoBit: "This game is 32-bit. MacNeutron 0.1 runs 64-bit games only; 32-bit support is planned."
         case .unsupportedMachine(let machine):
             "This game is built for \(Self.name(of: machine)), which MacNeutron can't run."
+        case .unsupportedCPU(let cpu, let missing):
+            "This MacNeutron runtime is built for \(Self.name(ofCPU: cpu)), and this Mac's processor lacks "
+                + missing.joined(separator: ", ") + ". Install the MacNeutron build for this Mac."
         }
+    }
+
+    /// "apple-m5" → "Apple M5"; another name as it is.
+    static func name(ofCPU cpu: String) -> String {
+        guard cpu.hasPrefix("apple-") else { return cpu }
+        return "Apple " + cpu.dropFirst("apple-".count).uppercased()
     }
 
     static func name(of machine: UInt16) -> String {
@@ -30,11 +40,21 @@ public enum PreflightError: Error, Equatable, CustomStringConvertible {
 public struct Preflight: Sendable {
     public let systemSupported: @Sendable () -> Bool
     public let identity: @Sendable (ToolLayout) -> String?
+    public let cpuHas: @Sendable (String) -> Bool
 
     public init(systemSupported: @escaping @Sendable () -> Bool = Preflight.isSupportedSystem,
-                identity: @escaping @Sendable (ToolLayout) -> String? = { $0.identity }) {
+                identity: @escaping @Sendable (ToolLayout) -> String? = { $0.identity },
+                cpuHas: @escaping @Sendable (String) -> Bool = Preflight.cpuHas) {
         self.systemSupported = systemSupported
         self.identity = identity
+        self.cpuHas = cpuHas
+    }
+
+    /// `hw.optional.arm.<feature>` reads 1.
+    public static func cpuHas(_ feature: String) -> Bool {
+        var value: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        return sysctlbyname("hw.optional.arm." + feature, &value, &size, nil, 0) == 0 && value == 1
     }
 
     /// macOS 27 or later on Apple Silicon.
@@ -58,6 +78,14 @@ public struct Preflight: Sendable {
         else {
             try? Data().write(to: layout.runtimeDamagedMarker)
             throw .runtimeMissing
+        }
+        // A runtime built for a newer CPU (wine-arm64/build.sh's MACNEUTRON_CPU) would die on an illegal instruction.
+        if let text = try? String(contentsOf: layout.cpuFile, encoding: .utf8) {
+            let lines = text.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty }
+            if let cpu = lines.first {
+                let missing = lines.dropFirst().filter { !cpuHas($0) }
+                if !missing.isEmpty { throw .unsupportedCPU(cpu, Array(missing)) }
+            }
         }
         if request.verb == .waitforexitandrun, let machine = PEImage.machine(of: URL(filePath: request.target)) {
             switch machine {

@@ -1,9 +1,15 @@
 #!/bin/sh
-# Prints the bin folder of the pinned llvm-mingw (Clang) toolchain, fetching it into build/dxmt-src when it's missing
+# Prints the bin folder of the llvm-mingw (Clang) toolchain: MacNeutron's own, or the pinned release, fetched into
+# build/dxmt-src when it's missing
 # or from another pin (llvm-mingw/.pin names the LLVM_MINGW_SHA256 it was unpacked from). Messages go to stderr.
 # Every Windows-side binary is built with it: Wine's and DXMT's (wine-arm64/build.sh), steam.exe and the test programs.
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# MacNeutron's own llvm-mingw, Apple-tuned (dxmt/llvm-mingw.sh: built once, about 40 minutes), unless
+# MACNEUTRON_TOOLCHAIN=upstream asks for the pinned release below.
+if [ "${MACNEUTRON_TOOLCHAIN:-own}" != upstream ]; then
+  exec sh "$ROOT/dxmt/llvm-mingw.sh"
+fi
 . "$ROOT/dxmt/pins"
 . "$ROOT/dxmt/lib.sh"
 SRC="${BUILD_DIR:-$ROOT/build}/dxmt-src"

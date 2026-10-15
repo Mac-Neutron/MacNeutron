@@ -1,0 +1,25 @@
+From 1ca1fbbdbfdaffaa7f9fd40faf9ba3d9eeb1e822 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Wed, 14 Oct 2026 23:39:11 -0400
+Subject: [PATCH] Windows: build the CRT and Win32 API runtime without LTO
+
+Code generation adds calls into them (__clear_cache calls FlushInstructionCache) after LTO has dropped the definitions bitcode alone didn't call, which left ARM64EC links with undefined symbols.
+---
+ Source/Windows/Common/CMakeLists.txt | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/Source/Windows/Common/CMakeLists.txt b/Source/Windows/Common/CMakeLists.txt
+index 9ed94c6..3c41982 100644
+--- a/Source/Windows/Common/CMakeLists.txt
++++ b/Source/Windows/Common/CMakeLists.txt
+@@ -20,3 +20,7 @@ add_library(CommonWindows STATIC
+ 
+ target_link_libraries(CommonWindows FEXCore_Base)
+ target_include_directories(CommonWindows PRIVATE "${CMAKE_SOURCE_DIR}/Source/Windows/include/")
++
++# The CRT and Win32 API this runtime provides stay native code, as a libc does: code generation adds calls into them
++# (__clear_cache's FlushInstructionCache, memcpy) after LTO has dropped what bitcode alone didn't call.
++set_target_properties(CommonWindowsRuntime PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
+-- 
+2.54.0 (Apple Git-157)
+

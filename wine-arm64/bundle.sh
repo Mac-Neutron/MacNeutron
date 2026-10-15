@@ -74,12 +74,15 @@ put() { [ -f "$1/$2" ] || die "no $1/$2"; cp "$1/$2" "$3"; }  # put <dir> <file>
 mkdir -p "$R/DXMT/aarch64-windows"
 put "$DXMT_IN" aarch64-windows/winemetal.dll "$R/lib/wine/aarch64-windows/"
 put "$DXMT_IN" aarch64-unix/winemetal.so "$R/lib/wine/aarch64-unix/"
-for f in d3d11.dll d3d10core.dll dxgi.dll d3d12.dll dxmt-replay.exe; do
+for f in d3d11.dll d3d10core.dll dxgi.dll d3d12.dll nvapi64.dll nvngx.dll dxmt-replay.exe; do
   put "$DXMT_IN" "system32/$f" "$R/DXMT/aarch64-windows/"
 done
 for f in COPYING.LIB LICENSE LICENSE.OLD; do put "$DXMT_TREE" "$f" "$R/DXMT/"; done
 put "$DXMT_IN" version "$R/DXMT/"
 put "$DXMT_IN" translator "$R/DXMT/"
+# The CPU the runtime was built for and the features its code may use (build.sh: MACNEUTRON_CPU), for the launcher's
+# check; none for the generic build.
+[ ! -f "$B/wine-arm64-src/cpu" ] || cp "$B/wine-arm64-src/cpu" "$R/cpu"
 # FreeType and gnutls (ship-base spec §5): beside the unix libraries that dlopen them by name, which find them through
 # their LC_RPATH @loader_path/.
 U="$R/lib/wine/aarch64-unix"
@@ -284,7 +287,7 @@ id=$(otool -D "$U/libmacneutron-present.dylib" | tail -n +2)
 # DXMT: Wine's builtin marker (bytes 64-79, in the DOS stub), the version token, the pin's place in the tree.
 builtin() { [ "$(dd if="$1" bs=1 skip=64 count=16 2> /dev/null)" = "Wine builtin DLL" ]; }
 builtin "$R/lib/wine/aarch64-windows/winemetal.dll" || die "winemetal.dll lacks Wine's builtin marker"
-for f in d3d11.dll d3d10core.dll dxgi.dll d3d12.dll dxmt-replay.exe; do
+for f in d3d11.dll d3d10core.dll dxgi.dll d3d12.dll nvapi64.dll nvngx.dll dxmt-replay.exe; do
   ! builtin "$R/DXMT/aarch64-windows/$f" || die "$f carries Wine's builtin marker"
 done
 ver=$(cat "$R/DXMT/version")

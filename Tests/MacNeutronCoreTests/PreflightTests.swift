@@ -46,6 +46,24 @@ private func markerExists(_ layout: ToolLayout) -> Bool {
     #expect(markerExists(layout))
 }
 
+// A runtime built for one CPU (Resources/cpu: its name, then the features its code may use) refuses a Mac without one
+// of them, before anything runs; the generic build has no such file.
+@Test func aRuntimeBuiltForANewerCPUIsRefused() throws {
+    let layout = try makeToolLayout()
+    try "apple-m5\nFEAT_CSSC\nFEAT_SME2\nFEAT_HBC\n".write(to: layout.cpuFile, atomically: true, encoding: .utf8)
+    let m4 = Preflight(systemSupported: { true }, identity: { _ in testIdentity }, cpuHas: { $0 != "FEAT_SME2" && $0 != "FEAT_HBC" })
+    #expect(throws: PreflightError.unsupportedCPU("apple-m5", ["FEAT_SME2", "FEAT_HBC"])) {
+        try m4.check(layout, request: request(.run, layout.wine))
+    }
+    #expect(PreflightError.unsupportedCPU("apple-m5", ["FEAT_SME2"]).description
+        == "This MacNeutron runtime is built for Apple M5, and this Mac's processor lacks FEAT_SME2. Install the MacNeutron build for this Mac.")
+    let m5 = Preflight(systemSupported: { true }, identity: { _ in testIdentity }, cpuHas: { _ in true })
+    #expect(try m5.check(layout, request: request(.run, layout.wine)) == testIdentity)
+    try FileManager.default.removeItem(at: layout.cpuFile)
+    #expect(try m4.check(layout, request: request(.run, layout.wine)) == testIdentity)
+    #expect(!markerExists(layout))
+}
+
 @Test func x64AndArm64TargetsPass() throws {
     let layout = try makeToolLayout()
     for machine in [PEImage.amd64, PEImage.arm64] {

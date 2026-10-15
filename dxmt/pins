@@ -12,3 +12,8 @@ DXC_SHA256=a1dfb116ba3eeae6a1582291b53a8e7bf65ad760676bd3194685c8f7367cd241
 # Clang-based mingw cross toolchain for every Windows-side binary; the release DXMT's CI pins. SHA-256 recorded at first download.
 LLVM_MINGW_URL=https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/llvm-mingw-20261006-ucrt-macos-universal.tar.xz
 LLVM_MINGW_SHA256=a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6
+# MacNeutron's own llvm-mingw (dxmt/llvm-mingw.sh, the default; MACNEUTRON_TOOLCHAIN=upstream takes the release above):
+# llvm-mingw's build scripts at this tag, the LLVM they pin, wine-arm64/patches/llvm on top.
+LLVM_MINGW_REPO=https://github.com/mstorsjo/llvm-mingw.git
+LLVM_MINGW_TAG=20261006
+LLVM_MINGW_LLVM=llvmorg-23.1.3

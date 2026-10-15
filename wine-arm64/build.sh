@@ -41,14 +41,42 @@ xcrun metal --version > /dev/null 2>&1 || missing="$missing, Metal Toolchain (xc
 die_if_missing
 check_signing  # before anything is fetched or built
 # llvm-mingw's arm64ec- and aarch64-w64-mingw32 wrappers, for the Windows side of Wine.
-PATH="$(sh "$ROOT/dxmt/toolchain.sh"):$PATH"
+TOOLCHAIN_BIN=$(sh "$ROOT/dxmt/toolchain.sh")
+PATH="$TOOLCHAIN_BIN:$PATH"
 export PATH
 export MACOSX_DEPLOYMENT_TARGET=27.0
-# The Windows (PE) side's instruction set, Apple M1's, which every macOS 27 Mac has: LSE atomics instead of LL/SC
-# loops. Wine's and FEX's PE code take it here, DXMT's from its cross file (patch 0038), the Makefile's programs from
-# its own PE_MARCH. Tuning stays generic: Apple tuning (-mcpu=apple-m1, -mtune=apple-*, -falign-loops) crashes
-# llvm-mingw's SEH unwind emitter ("Failed to evaluate function length in SEH unwind info"). One token, for FEX's cmake.
-PE_MARCH=-march=armv8.5-a+fp16fml+aes+sha3
+# The CPU the runtime is built for (MACNEUTRON_CPU, one of clang's -mcpu names): every compiler tunes for it and
+# uses what it has, the PE side (Wine's and FEX's PE code here, DXMT's through an extra cross file, step 7) and the
+# unix side (Wine's, FEX's unixlib, winemetal.so, the presenter). The M5 stack is the default: apple-m5 (ARMv9.2-A
+# with CSSC, HBC, LSE2, BF16/I8MM and SME2). A runtime built for one CPU says so in Resources/cpu, with the
+# hw.optional.arm features it may use, and the launcher refuses a Mac without them (Preflight) instead of crashing
+# on an illegal instruction. MACNEUTRON_CPU=generic builds the M1 baseline every macOS 27 Mac has (LSE atomics
+# instead of LL/SC loops). The PE side tunes for the CPU too with MacNeutron's own llvm-mingw (dxmt/llvm-mingw.sh,
+# patches/llvm/0001); the release's (MACNEUTRON_TOOLCHAIN=upstream) keeps generic tuning (-mtune=generic) with the
+# CPU's instruction set, since Apple tuning crashes its SEH unwind emitter ("Failed to evaluate function length in SEH
+# unwind info", Wine's libs/winecrt0/debug.c).
+MACNEUTRON_CPU=${MACNEUTRON_CPU:-apple-m5}
+if [ "$MACNEUTRON_CPU" = generic ]; then
+  PE_MARCH=-march=armv8.5-a+fp16fml+aes+sha3
+  UNIX_CPU=
+elif [ "${MACNEUTRON_TOOLCHAIN:-own}" = upstream ]; then
+  PE_MARCH="-mcpu=$MACNEUTRON_CPU -mtune=generic"
+  UNIX_CPU=-mcpu=$MACNEUTRON_CPU
+else
+  PE_MARCH="-mcpu=$MACNEUTRON_CPU"
+  UNIX_CPU=-mcpu=$MACNEUTRON_CPU
+fi
+# Link-time optimization (MACNEUTRON_LTO, on unless 0): ThinLTO for FEX (its ARM64EC DLL and its unixlib), DXMT (its
+# ARM64EC DLLs and its native side, winemetal.so with the shader translator and LLVM in it; step 7), the DXIL host
+# tools and the presenter. ARM64EC bitcode links against static ARM64EC libraries (libc++) only with our llvm-mingw's
+# lld (patches/llvm/0002; the release's says "undefined symbol: ... (EC symbol)"), so the upstream toolchain keeps
+# FEX's DLL without it. Not Wine: with ThinLTO on its unix side, wineboot.exe spun forever in an exception loop
+# (ntdll.so's signal handlers and syscall dispatcher, which compare code addresses and run hand-written assembly); its
+# PE side's ARM64EC thunks and entry points rely on what each object file defines.
+MACNEUTRON_LTO=${MACNEUTRON_LTO:-1}
+if [ "$MACNEUTRON_LTO" = 0 ]; then UNIX_LTO= LTO_ON=False; else UNIX_LTO=-flto=thin LTO_ON=True; fi
+EC_LTO=$UNIX_LTO EC_LTO_ON=$LTO_ON
+[ "${MACNEUTRON_TOOLCHAIN:-own}" != upstream ] || { EC_LTO=; EC_LTO_ON=False; }
 
 # 2. Fetch and patch, once per series. A tree with work in it is never touched; a clean one follows the patches.
 # patch_tree <tmp-tree> <repo> <patch-dir> <series> <base>: git am the series on branch macneutron, record it, and
@@ -118,8 +146,13 @@ stamp=$(stamp_of "$ROOT/wine-arm64/pins" "$PATCHES"/*.patch "$FEX_PATCHES"/*.pat
   "$ROOT/dxmt/tools/dxil-probe.cpp" "$ROOT/dxmt/tools/dxil-translate.mm" "$ROOT/wine-arm64/licenses/NOTICES.md" \
   "$ROOT/wine-arm64/licenses/README" "$ROOT/wine-arm64/tests/licences_test.sh" "$ROOT/wine-arm64/deps.pins" \
   "$ROOT/dxmt/fetch.sh" "$ROOT/wine-arm64/x18-allow.txt" "$ROOT/wine-arm64/tools/x18scan.sh" "$LSC_PATCHES"/*.patch \
-  "$ROOT/presenter/present.m" "$ROOT/presenter/cmaa2.metal" "$ROOT/presenter/CMAA2-LICENSE.txt" "$ROOT/LICENSE" \
-  "$ROOT/wine-arm64/tools/xcrun-metal.sh")
+  "$ROOT/presenter/present.m" "$ROOT/presenter/cmaa2.metal" "$ROOT/presenter/sharpen.metal" \
+  "$ROOT/presenter/CMAA2-LICENSE.txt" "$ROOT/LICENSE" \
+  "$ROOT/wine-arm64/tools/xcrun-metal.sh" "$ROOT/dxmt/toolchain.sh" "$ROOT/dxmt/llvm-mingw.sh" \
+  "$ROOT"/wine-arm64/patches/llvm/*.patch)
+# Another CPU, LTO setting or toolchain is another build.
+stamp=$(printf '%s %s %s %s' "$stamp" "$MACNEUTRON_CPU" "$MACNEUTRON_LTO" "$TOOLCHAIN_BIN" | shasum -a 256 \
+  | cut -d ' ' -f 1)
 mkdir -p "$SRC"
 wine_mode=$(build_mode "$W" "$SRC/wine.applied" "$SRC/wine.series" "$wine_series")
 fex_mode=$(build_mode "$F" "$SRC/fex.applied" "$SRC/fex.series" "$fex_series")
@@ -322,7 +355,8 @@ fi
 #    GStreamer: winedmo demuxes. Redone in a new build folder (a full Wine build) when the options or the deps change:
 #    both are recorded in wine-build/.configure-inputs.
 #    Both compilers (Apple clang for the unix side, llvm-mingw for the PE side) map $SRC/ away, so __FILE__ and the
-#    debug info name wine/dlls/..., not the build folder (arm64 release Ruling 20); otherwise Wine's default -g -O2.
+#    debug info name wine/dlls/..., not the build folder (arm64 release Ruling 20); otherwise -g -O3 (Wine's default
+#    is -O2), with MACNEUTRON_CPU's flags.
 #    $PE_MARCH goes to the aarch64 and arm64ec PE compilers only, as their own CFLAGS (configure copies them to
 #    CXXFLAGS), not in CROSSCFLAGS: arm64ec brings in an x86_64 extra arch, for ARM64EC modules' x64 sources, and
 #    CROSSCFLAGS reaches its compiler too.
@@ -332,10 +366,10 @@ set -- --enable-archs=arm64ec,aarch64 --with-mingw=llvm-mingw --disable-tests --
   CC=/usr/bin/clang CXX=/usr/bin/clang++ \
   PKG_CONFIG_LIBDIR="$DEPS/lib/pkgconfig" FREETYPE_CFLAGS="-I$DEPS/include/freetype2" \
   FREETYPE_LIBS="-L$DEPS/lib -lfreetype -Wl,-rpath,$DEPS/lib" GNUTLS_CFLAGS="-I$DEPS/include" \
-  GNUTLS_LIBS="-L$DEPS/lib -lgnutls" CFLAGS="-g -O2 -ffile-prefix-map=$SRC/=" \
-  CROSSCFLAGS="-g -O2 -ffile-prefix-map=$SRC/=" aarch64_CFLAGS="-g -O2 -ffile-prefix-map=$SRC/= $PE_MARCH" \
-  arm64ec_CFLAGS="-g -O2 -ffile-prefix-map=$SRC/= $PE_MARCH"
-inputs=$(printf '%s\n' "$@"; cat "$DEPS/.complete")
+  GNUTLS_LIBS="-L$DEPS/lib -lgnutls" CFLAGS="-g -O3 -ffile-prefix-map=$SRC/= $UNIX_CPU" \
+  CROSSCFLAGS="-g -O3 -ffile-prefix-map=$SRC/=" aarch64_CFLAGS="-g -O3 -ffile-prefix-map=$SRC/= $PE_MARCH" \
+  arm64ec_CFLAGS="-g -O3 -ffile-prefix-map=$SRC/= $PE_MARCH"
+inputs=$(printf '%s\n' "$@" "$TOOLCHAIN_BIN"; cat "$DEPS/.complete")
 if [ -f "$SRC/wine-build/Makefile" ] && [ "$(cat "$SRC/wine-build/.configure-inputs" 2> /dev/null)" = "$inputs" ]; then
   echo "wine-arm64: Wine's configure is up to date" >&2
 else
@@ -382,12 +416,13 @@ fex_setup() {  # fex_setup <what> <build folder> <cmake arguments...>
   fi
 }
 fex_setup FEX "$SRC/fex-ec" -S "$F" -G Ninja -DCMAKE_TOOLCHAIN_FILE="$F/Data/CMake/toolchain_mingw.cmake" \
-  -DMINGW_TRIPLE=arm64ec-w64-mingw32 -DCMAKE_BUILD_TYPE=Release -DTUNE_CPU=none -DCMAKE_C_FLAGS=$PE_MARCH \
-  -DCMAKE_CXX_FLAGS=$PE_MARCH -DENABLE_LTO=False \
+  -DMINGW_TRIPLE=arm64ec-w64-mingw32 -DCMAKE_BUILD_TYPE=Release -DTUNE_CPU=none -DCMAKE_C_FLAGS="$PE_MARCH" \
+  -DCMAKE_CXX_FLAGS="$PE_MARCH" -DENABLE_LTO=$EC_LTO_ON \
   -DBUILD_TESTING=False -DBUILD_FEXCONFIG=False -DENABLE_JEMALLOC_GLIBC_ALLOC=False -DENABLE_CCACHE=False
 ninja -C "$SRC/fex-ec" arm64ecfex >> "$SRC/fex.log" 2>&1 || die "building libarm64ecfex.dll failed; see $SRC/fex.log"
 fex_setup "FEX's unixlib" "$SRC/fex-unixlib" -S "$F/Source/Windows/UnixLib" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_OSX_DEPLOYMENT_TARGET=27.0
+  -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_OSX_DEPLOYMENT_TARGET=27.0 ${UNIX_CPU:+-DCMAKE_CXX_FLAGS=$UNIX_CPU} \
+  -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=$LTO_ON
 ninja -C "$SRC/fex-unixlib" >> "$SRC/fex.log" 2>&1 || die "building FEX's unixlib failed; see $SRC/fex.log"
 # Wine loads it only as a builtin (it ignores other DLLs in its own directories). Spec §6.3: it imports ntdll.dll alone
 # and has no TLS directory (libc++ is linked statically).
@@ -399,7 +434,7 @@ if llvm-readobj --coff-tls-directory "$dll" | grep -q StartAddressOfRawData; the
 fi
 [ "$(grep -c 'Wine builtin DLL' "$dll")" = 1 ] || die "libarm64ecfex.dll lacks Wine's builtin marker"
 
-# 7. DXMT (arm64 DXMT spec §4): ARM64X front ends and winemetal.dll from DXMT's own cross file, linked against this
+# 7. DXMT (arm64 DXMT spec §4): ARM64EC front ends and winemetal.dll from DXMT's own cross file, linked against this
 #    Wine's build tree, and an aarch64 winemetal.so against an arm64 LLVM 15 (dxmt/llvm.sh, built once). Its .metal
 #    files compile through tools/xcrun-metal.sh (a second cross file names it as xcrun), so the AIR modules embedded in
 #    winemetal.so name no build path. Set up again in a new build folder when the options, a cross file or the wrapper
@@ -414,16 +449,34 @@ echo "wine-arm64: building DXMT (log: $SRC/dxmt.log)" >&2
 printf "[binaries]\nxcrun = ['/bin/sh', '%s']\n" "$ROOT/wine-arm64/tools/xcrun-metal.sh" > "$SRC/dxmt-xcrun.txt.new"
 if cmp -s "$SRC/dxmt-xcrun.txt.new" "$SRC/dxmt-xcrun.txt"; then rm "$SRC/dxmt-xcrun.txt.new"
 else mv "$SRC/dxmt-xcrun.txt.new" "$SRC/dxmt-xcrun.txt"; fi
+# The CPU (MACNEUTRON_CPU) and LTO (MACNEUTRON_LTO): a third cross file, after DXMT's own, whose arguments replace
+# its PE ones and join the native ones (winemetal.so's and the shader translator's; build.*). DXMT's PE DLLs are
+# ARM64EC alone, not ARM64X (DXMT's own cross file's -marm64x is replaced): x64 games run them through FEX, and
+# -marm64x and -flto don't go together ("unsupported option '-marm64x'"). A native arm64 process that loads them
+# gets Wine's builtins instead (the launcher's n,b order).
+{
+  pe_args=$(printf "'%s', " $PE_MARCH $EC_LTO); pe_args=${pe_args%, }  # each word its own argument
+  printf "[built-in options]\nc_args = [%s]\ncpp_args = [%s]\n" "$pe_args" "$pe_args"
+  printf "c_link_args = [%s]\ncpp_link_args = [%s]\n" "${EC_LTO:+'$EC_LTO'}" "${EC_LTO:+'$EC_LTO'}"
+  native=$(printf ", '%s'" $UNIX_CPU $UNIX_LTO); native=${native#, }
+  [ -z "$native" ] || printf "build.c_args = [%s]\nbuild.cpp_args = [%s]\n" "$native" "$native"
+  [ -z "$UNIX_LTO" ] || printf "build.c_link_args = ['%s']\nbuild.cpp_link_args = ['%s']\n" "$UNIX_LTO" "$UNIX_LTO"
+} > "$SRC/dxmt-cpu.txt.new"
+if cmp -s "$SRC/dxmt-cpu.txt.new" "$SRC/dxmt-cpu.txt"; then rm "$SRC/dxmt-cpu.txt.new"
+else mv "$SRC/dxmt-cpu.txt.new" "$SRC/dxmt-cpu.txt"; fi
 dxmt_buildtype=release
 translator=$(translator_key "$D" "$dxmt_buildtype")
 echo "$translator" > "$SRC/dxmt-translator-key.new"
 if cmp -s "$SRC/dxmt-translator-key.new" "$SRC/dxmt-translator-key"; then rm "$SRC/dxmt-translator-key.new"
 else mv "$SRC/dxmt-translator-key.new" "$SRC/dxmt-translator-key"; fi
 set -- "$SRC/dxmt-build" "$D" --cross-file "$D/build-arm64ec.txt" --cross-file "$SRC/dxmt-xcrun.txt" \
+  --cross-file "$SRC/dxmt-cpu.txt" \
   --buildtype "$dxmt_buildtype" --strip --prefix "$SRC/dxmt-install" -Dwine_builtin_dll=false -Denable_d3d12=true \
+  -Denable_nvapi=true -Denable_nvngx=true \
   -Dnative_llvm_path="$SRC/llvm-arm64" -Dwine_build_path="$SRC/wine-build" \
   -Dtranslator_key_file="$SRC/dxmt-translator-key"
-inputs=$(printf '%s\n' "$@"; cat "$D/build-arm64ec.txt" "$SRC/dxmt-xcrun.txt" "$ROOT/wine-arm64/tools/xcrun-metal.sh")
+inputs=$(printf '%s\n' "$@"; cat "$D/build-arm64ec.txt" "$SRC/dxmt-xcrun.txt" "$SRC/dxmt-cpu.txt" \
+  "$ROOT/wine-arm64/tools/xcrun-metal.sh")
 if [ ! -f "$SRC/dxmt-build/build.ninja" ] || [ "$(cat "$SRC/dxmt-build/.setup-inputs" 2> /dev/null)" != "$inputs" ]; then
   rm -rf "$SRC/dxmt-build"
   meson setup "$@" >> "$SRC/dxmt.log" 2>&1 \
@@ -446,20 +499,42 @@ mkdir -p "$OUT"
 build_probe arm64 "$SRC/llvm-arm64" "$OUT" "$SRC"
 build_translate arm64 "$SRC/llvm-arm64" "$D" "$SRC/dxmt-build" "$OUT" "$SRC"
 # The MetalFX presenter (arm64 release spec §5.3), which winemetal.so loads from beside itself (DXMT patch 0002).
+# -ffast-math here alone: Wine's msvcrt and D3D, FEX's x87/SSE emulation and DXMT's shader translator must keep the
+# IEEE NaN, infinity and rounding behaviour games observe.
 mkdir -p "$SRC/presenter"
-/usr/bin/clang -arch arm64 -mmacosx-version-min=27.0 -fobjc-arc -O2 -dynamiclib \
+/usr/bin/clang -arch arm64 -mmacosx-version-min=27.0 -fobjc-arc -O3 -ffast-math $UNIX_CPU $UNIX_LTO -dynamiclib \
   -install_name @rpath/libmacneutron-present.dylib -framework Foundation -framework AppKit -framework QuartzCore \
   -framework Metal -framework MetalFX -o "$SRC/presenter/libmacneutron-present.dylib" "$ROOT/presenter/present.m" \
   > "$SRC/presenter.log" 2>&1 || die "building the presenter failed; see $SRC/presenter.log"
-# Its CMAA2 shaders, beside it; compiled from stdin by tools/xcrun-metal.sh, so no build path ships in them (Ruling 20).
+# Its shaders, beside it; compiled from stdin by tools/xcrun-metal.sh, so no build path ships in them (Ruling 20):
+# CMAA2's four kernels and the sharpening kernel.
 sh "$ROOT/wine-arm64/tools/xcrun-metal.sh" -sdk macosx metal -o "$SRC/presenter/cmaa2.air" -c "$ROOT/presenter/cmaa2.metal" \
   -mmacosx-version-min=27.0 >> "$SRC/presenter.log" 2>&1 \
-  && /usr/bin/xcrun -sdk macosx metallib -o "$SRC/presenter/libmacneutron-present.metallib" "$SRC/presenter/cmaa2.air" \
+  && sh "$ROOT/wine-arm64/tools/xcrun-metal.sh" -sdk macosx metal -o "$SRC/presenter/sharpen.air" \
+     -c "$ROOT/presenter/sharpen.metal" -mmacosx-version-min=27.0 >> "$SRC/presenter.log" 2>&1 \
+  && /usr/bin/xcrun -sdk macosx metallib -o "$SRC/presenter/libmacneutron-present.metallib" \
+     "$SRC/presenter/cmaa2.air" "$SRC/presenter/sharpen.air" \
   >> "$SRC/presenter.log" 2>&1 || die "building the presenter's shaders failed; see $SRC/presenter.log"
 
 # 8. Bundle and sign (make install into wine.app, the loader's entitlements, every check on the result). First the
 #    bundle's licenses/SOURCE (ship-base spec §4): the inputs it is built from, each tree's series or dev.
 write_source "$SRC/SOURCE" "$mac"
+# Resources/cpu: the CPU this runtime is built for, then the hw.optional.arm features its code may use: the
+# extensions clang enables for it that this Mac has (its sysctl reads 1; the launcher checks the player's Mac has
+# each). One that reads 0 here is left out: clang's apple-m5 claims FEAT_SPECRES and FEAT_SPECRES2, which an M5 Pro
+# reports as 0, and no compiled code issues those system instructions. None for the generic build.
+if [ -n "$UNIX_CPU" ]; then
+  {
+    echo "$MACNEUTRON_CPU"
+    cpu_features=$(aarch64-w64-mingw32-clang --target=aarch64-w64-mingw32 $PE_MARCH --print-enabled-extensions \
+      2> /dev/null | grep -oE 'FEAT_[A-Za-z0-9_]+' | sort -u)
+    for f in $cpu_features; do
+      if [ "$(sysctl -n "hw.optional.arm.$f" 2> /dev/null)" = 1 ]; then printf '%s\n' "$f"; fi
+    done
+  } > "$SRC/cpu"
+else
+  rm -f "$SRC/cpu"
+fi
 echo "wine-arm64: bundling (log: $OUT/install.log)" >&2
 sh "$ROOT/wine-arm64/bundle.sh"
 

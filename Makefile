@@ -1,13 +1,15 @@
 .PHONY: build test smoke app release bridge bridge-check presenter presenter-check dxmt-tests dxmt-tests-arm64ec dxmt-check dxil-corpus wine-arm64 wine-arm64-export wine-arm64-tests wine-arm64-check media-check lanes-check wine-arm64-winetests
 
 APP = build/MacNeutron.app
-# Every Windows-side binary is built with the pinned llvm-mingw (Clang); dxmt/toolchain.sh fetches it once.
+# Every Windows-side binary is built with MacNeutron's own llvm-mingw (Clang); dxmt/toolchain.sh builds it once.
 MINGW_BIN = $(shell sh dxmt/toolchain.sh)
-# The arm64 Windows side's instruction set, Apple M1's (wine-arm64/build.sh's PE_MARCH: generic tuning, never Apple's).
-PE_MARCH = -march=armv8.5-a+fp16fml+aes+sha3
-MINGW = $(MINGW_BIN)/x86_64-w64-mingw32-clang -O2 -static -s
-MINGWXX = $(MINGW_BIN)/x86_64-w64-mingw32-clang++ -O2 -static -s
-MINGW_A64 = $(MINGW_BIN)/aarch64-w64-mingw32-clang -O2 -static -s $(PE_MARCH)
+# The arm64 Windows side's CPU, wine-arm64/build.sh's MACNEUTRON_CPU (the M1 baseline for generic). -O3 and
+# ThinLTO throughout (ARM64EC's needs our llvm-mingw's lld, wine-arm64/patches/llvm/0002).
+MACNEUTRON_CPU ?= apple-m5
+PE_MARCH = $(if $(filter generic,$(MACNEUTRON_CPU)),-march=armv8.5-a+fp16fml+aes+sha3,-mcpu=$(MACNEUTRON_CPU))
+MINGW = $(MINGW_BIN)/x86_64-w64-mingw32-clang -O3 -flto=thin -static -s
+MINGWXX = $(MINGW_BIN)/x86_64-w64-mingw32-clang++ -O3 -flto=thin -static -s
+MINGW_A64 = $(MINGW_BIN)/aarch64-w64-mingw32-clang -O3 -flto=thin -static -s $(PE_MARCH)
 BRIDGE = build/bridge
 PRESENTER = build/presenter
 
@@ -41,7 +43,7 @@ bridge-check: build bridge wine-arm64
 presenter:
 	mkdir -p $(PRESENTER)
 	$(MINGW) -o $(PRESENTER)/present_loop.exe presenter/tests/present_loop.c -ld3d11 -ldxgi -luser32 -lgdi32 -ldxguid -luuid
-	/usr/bin/clang -fobjc-arc -O1 -o $(PRESENTER)/cmaa2_check presenter/tests/cmaa2_check.m -framework Foundation \
+	/usr/bin/clang -fobjc-arc -O3 -o $(PRESENTER)/cmaa2_check presenter/tests/cmaa2_check.m -framework Foundation \
 		-framework Metal -framework QuartzCore
 
 # The presenter in wine.app through the launcher on DXMT (real Wine, no Steam).
@@ -57,8 +59,8 @@ build/dxmt-tests/%.exe: dxmt/tests/%.cpp dxmt/tests/d3d12_common.hpp
 	$(MINGWXX) -std=c++17 -o $@ $< -ld3d12 -ld3d11 -ld3dcompiler -ldxgi -luser32 -lpsapi
 
 # The same programs and present_loop for ARM64EC, for the arm64 runtime (arm64 DXMT spec §7), built in parallel.
-MINGW_EC = $(MINGW_BIN)/arm64ec-w64-mingw32-clang -O2 -static -s $(PE_MARCH)
-MINGWXX_EC = $(MINGW_BIN)/arm64ec-w64-mingw32-clang++ -O2 -static -s $(PE_MARCH)
+MINGW_EC = $(MINGW_BIN)/arm64ec-w64-mingw32-clang -O3 -flto=thin -static -s $(PE_MARCH)
+MINGWXX_EC = $(MINGW_BIN)/arm64ec-w64-mingw32-clang++ -O3 -flto=thin -static -s $(PE_MARCH)
 DXMT_TESTS_EC = $(patsubst dxmt/tests/%.cpp,build/dxmt-tests-arm64ec/%.exe,$(wildcard dxmt/tests/d3d1[12]_*.cpp)) \
 	build/dxmt-tests-arm64ec/present_loop.exe
 dxmt-tests-arm64ec:

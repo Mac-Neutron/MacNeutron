@@ -1,0 +1,32 @@
+From 1ea3af465d280766e832ac5ffbd53e25872d8a5f Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Wed, 14 Oct 2026 22:39:35 -0400
+Subject: [PATCH] [AArch64] Don't align CMP/CSEL pairs on Windows: SEH unwind
+ info needs function lengths
+
+---
+ llvm/lib/Target/AArch64/AArch64CodeLayoutOpt.cpp | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/llvm/lib/Target/AArch64/AArch64CodeLayoutOpt.cpp b/llvm/lib/Target/AArch64/AArch64CodeLayoutOpt.cpp
+index 92ebd8592..b6129ff8f 100644
+--- a/llvm/lib/Target/AArch64/AArch64CodeLayoutOpt.cpp
++++ b/llvm/lib/Target/AArch64/AArch64CodeLayoutOpt.cpp
+@@ -169,6 +169,14 @@ bool AArch64CodeLayoutOpt::runOnMachineFunction(MachineFunction &MF) {
+   const auto *Subtarget = &MF.getSubtarget<AArch64Subtarget>();
+   TII = Subtarget->getInstrInfo();
+ 
++  // Windows' ARM64 unwind information (SEH) records each function's length,
++  // which MC must know when it emits it; padding inside a function leaves the
++  // length unknown at that point ("Failed to evaluate function length in SEH
++  // unwind info", MCWin64EH). AArch64ISelLowering doesn't align loops on
++  // Windows for the same reason.
++  if (Subtarget->isTargetWindows())
++    return false;
++
+   // Default: enable when the subtarget opts in via FeatureAlignCmpCSelPairs.
+   if (!EnableCodeAlignment.getBits() && Subtarget->hasAlignCmpCSelPairs()) {
+     if (Subtarget->hasFuseCmpCSel())
+-- 
+2.54.0 (Apple Git-157)
+
