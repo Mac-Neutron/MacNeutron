@@ -10,6 +10,8 @@
 #                 bootstrapper it also logs 301 without PROTON_EAC_RUNTIME, because it only launches the game.
 #   client        easyanticheat_x64.so (the runtime's native client) is mapped in a Wine process: the game's EOS SDK
 #                 loads it in-game through the runtime's easyanticheat_x64.dll.
+# Steam itself doesn't take this path for SMITE 2: its launch entries run Windows/Hemingway.exe, and the public ones
+# pass -NOEAC. The bootstrapper gets the same arguments without -NOEAC.
 # Rendering is software (Mesa's llvmpipe) until milestone 4. Exits 1 if a row misses.
 export WINEPREFIX=/home/mn/smite2 SteamAppId=2437170 SteamGameId=2437170 DISPLAY=:0 PATH=/opt/mn-wine/bin:$PATH
 export PROTON_EAC_RUNTIME=/mnt/share/eac-runtime WINEDEBUG=-all
@@ -23,8 +25,11 @@ for f in "$G/start_protected_game.exe" "$PROTON_EAC_RUNTIME/v2/lib64/easyantiche
 done
 Xvfb :0 -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &
 mkdir -p /home/mn
-# Create, or update after a Wine change, with MacNeutron's override: the Mono prompt would wait on Xvfb.
-WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1
+# Create, or update after a Wine change, with MacNeutron's override: the Mono prompt would wait on Xvfb. Without
+# PROTON_EAC_RUNTIME, as Proton fills prefixes from its default prefix: a wineboot that sees the runtime copies its
+# easyanticheat*.dll into system32 (earlier runs left them there).
+rm -f "$WINEPREFIX"/drive_c/windows/system32/easyanticheat*.dll "$WINEPREFIX"/drive_c/windows/syswow64/easyanticheat*.dll
+env -u PROTON_EAC_RUNTIME WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1
 STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
@@ -32,7 +37,8 @@ cp /mnt/share/valve/steamclient64.dll "$STEAM/steamclient64.dll"
 EACLOG="$WINEPREFIX/drive_c/users/$(id -un)/AppData/Roaming/EasyAntiCheat"
 rm -rf "$EACLOG"
 # The game's own logs too: a log left by an earlier run must not pass for this one.
-rm -rf "$WINEPREFIX/drive_c/users/$(id -un)/AppData/Local/Hemingway/Saved/Logs"
+rm -rf "$WINEPREFIX/drive_c/users/$(id -un)/AppData/Local/Hemingway/Saved/Logs" \
+  "$WINEPREFIX/drive_c/users/$(id -un)/AppData/Local/SMITE2Alpha/Saved/Logs"
 # Every second, the EAC files each Wine process maps (the client loads late, into the game).
 ( end=$(( $(date +%s) + RUN )); while [ "$(date +%s)" -lt "$end" ]; do
     for m in /proc/[0-9]*/maps; do grep -o "[^ /]*easyanticheat[^ ]*\.so" "$m" 2>/dev/null; done
@@ -42,6 +48,7 @@ sampler=$!
 cd "$G"
 start=$(date +%s)
 timeout -s KILL "$RUN" wine 'C:\Program Files (x86)\Steam\steam.exe' 'Z:\mnt\games\SMITE 2\Windows\start_protected_game.exe' \
+  -homedir=SMITE2Alpha -d3d12 -game -oss=SteamV2 -RallyHereURL=https://api-smite2.titanforgegames.com \
   > /home/mn/eac-run.log 2>&1
 echo "ran $(( $(date +%s) - start )) s"
 wait "$sampler"

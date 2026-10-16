@@ -237,3 +237,17 @@ Questions for Epic before building 2-5, since a VM can comply only if Epic accep
 
 Games keep the choice between EAC Linux v1 and v2, so SMITE 2 (v1, still 301 → client never mapped here) is not
 affected yet.
+
+**SMITE 2's EAC setup against Proton's** (2026-10-16, after 301 → 60101 again):
+- The anti-cheat is the right one. The Proton EasyAntiCheat Runtime in the share is byte-identical to the builder's
+  Steam install (build 10437216, updated 2026-10-15). The bootstrapper (1.9.0) runs in Wine mode (`linux64`), and
+  fetches SMITE 2's Linux module for its deployment from Epic's CDN into the prefix's AppData, not into the read-only
+  game folder.
+- The prefix wasn't Proton's. `eac.sh` ran `wineboot -u` with `PROTON_EAC_RUNTIME` set, which copied the runtime's
+  `easyanticheat_x64.dll` and `easyanticheat.dll` into system32. Proton fills prefixes from its default prefix, which
+  has neither. `eac.sh` now removes them and runs wineboot without the variable. Same result.
+- The launch wasn't Steam's. SMITE 2's Steam launch entries run `Windows/Hemingway.exe -homedir=SMITE2Alpha -d3d12
+  -game -oss=SteamV2 -RallyHereURL=…`, and the public ones add `-NOEAC`: Steam doesn't take SMITE 2 through EAC's
+  bootstrapper. Launched that way in the guest, the game starts and logs up to D3D12 adapter selection (no adapter
+  until milestone 4). Through the bootstrapper, with the same arguments minus `-NOEAC` (now in `eac.sh`), the game
+  executable exits before writing a log, and the bootstrapper ends with 60101.
