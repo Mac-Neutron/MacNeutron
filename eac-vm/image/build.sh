@@ -21,13 +21,15 @@ CACHE=${CACHE:-/var/cache/mn-image-rpms}
 mountpoint -q "$OUT" || { sudo mkdir -p "$OUT"; sudo mount -t virtiofs out "$OUT"; }
 sudo rm -rf "$WORK"; sudo mkdir -p "$WORK/root" "$WORK/x86" "$WORK/x86-rpm"
 
-if [ ! -f "$CACHE/.complete" ]; then
+# The cache is for one packages.txt: a changed list refetches (otherwise an added package would silently be missing).
+if [ ! -f "$CACHE/.complete" ] || ! cmp -s "$HERE/packages.txt" "$CACHE/packages.txt"; then
   sudo rm -rf "$CACHE"; sudo mkdir -p "$CACHE/base" "$CACHE/x86"
   sudo dnf -y -q download --destdir="$CACHE/base" --resolve --alldeps --setopt=install_weak_deps=False \
     $(grep -v '^#' "$HERE/packages.txt")
   sudo dnf -y -q download --destdir="$CACHE/x86" fex-emu-rootfs-fedora
   bad=$(rpmkeys --checksig "$CACHE"/base/*.rpm "$CACHE"/x86/*.rpm | grep -v ': digests signatures OK$' || true)
   [ -z "$bad" ] || { echo "$bad"; echo "packages without a valid Fedora signature; cache removed" >&2; sudo rm -rf "$CACHE"; exit 1; }
+  sudo cp "$HERE/packages.txt" "$CACHE/packages.txt"
   sudo touch "$CACHE/.complete"
 fi
 

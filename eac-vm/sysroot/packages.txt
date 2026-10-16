@@ -2,3 +2,18 @@
 glibc-devel
 kernel-headers
 gcc
+# Wine's build dependencies (eac-vm/wine/build.sh)
+freetype-devel
+gnutls-devel
+libX11-devel
+libXext-devel
+libXrandr-devel
+libXi-devel
+libXcursor-devel
+libXfixes-devel
+libXinerama-devel
+libXcomposite-devel
+libXrender-devel
+mesa-libGL-devel
+alsa-lib-devel
+fontconfig-devel

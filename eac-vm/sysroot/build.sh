@@ -8,12 +8,14 @@ set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 CACHE=${CACHE:-/var/cache/mn-sysroot-rpms}
 ROOT=${ROOT:-/var/cache/mn-sysroot-x86_64}
-if [ ! -f "$CACHE/.complete" ]; then
+# The cache is for one packages.txt: a changed list refetches (otherwise an added package would silently be missing).
+if [ ! -f "$CACHE/.complete" ] || ! cmp -s "$HERE/packages.txt" "$CACHE/packages.txt"; then
   sudo rm -rf "$CACHE"; sudo mkdir -p "$CACHE"
   sudo dnf -y -q download --forcearch=x86_64 --arch=x86_64 --arch=noarch --destdir="$CACHE" --resolve --alldeps \
     --setopt=install_weak_deps=False $(grep -v '^#' "$HERE/packages.txt")
   bad=$(rpmkeys --checksig "$CACHE"/*.rpm | grep -v ': digests signatures OK$' || true)
   [ -z "$bad" ] || { echo "$bad"; echo "packages without a valid Fedora signature; cache removed" >&2; sudo rm -rf "$CACHE"; exit 1; }
+  sudo cp "$HERE/packages.txt" "$CACHE/packages.txt"
   sudo touch "$CACHE/.complete"
 fi
 sudo rm -rf "$ROOT"; sudo mkdir -p "$ROOT/usr/bin" "$ROOT/usr/sbin" "$ROOT/usr/lib" "$ROOT/usr/lib64"
