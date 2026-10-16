@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <time.h>
 #include "executor.h"
 #include "../ring.h"
@@ -18,7 +19,7 @@ struct mn_dxmt_ops {
     void (*context_create)(void *ctx, uint32_t ctx_id);
     void (*context_destroy)(void *ctx, uint32_t ctx_id);
     void (*blob_created)(void *ctx, uint32_t ctx_id, uint64_t blob_id, void *host_ptr, uint64_t size);
-    void (*blob_destroyed)(void *ctx, uint32_t ctx_id, uint64_t blob_id);
+    void (*blob_destroyed)(void *ctx, uint32_t ctx_id, uint64_t blob_id, void *host_ptr, uint64_t size);
     void (*submit)(void *ctx, uint32_t ctx_id, const void *cmd, uint32_t len);
     void (*fence)(void *ctx, uint32_t ctx_id, uint32_t ring_idx, uint64_t fence_id);
 };
@@ -28,9 +29,11 @@ void mn_dxmt_fence_done(uint32_t ctx_id, uint32_t ring_idx, uint64_t fence_id);
 #define SPIN_NS 2000000ull /* spec §5.6: a consumer spins 2 ms after its last record, then parks */
 #define MAX_WAITERS 64
 
-struct blob { uint32_t ctx_id; uint64_t blob_id; void *ptr; uint64_t size; };
+/* A blob's memory is ours once the guest frees it (patch 0005): the table holds one reference, each hold one more,
+ * and the last release unmaps it. */
+struct blob { uint32_t ctx_id; uint64_t blob_id; void *ptr; uint64_t size; atomic_int refs; };
 /* ponytail: a linear scan; a hash map when milestone 4b's thousands of buffers make lookups show up */
-static struct blob *blobs;
+static struct blob **blobs;
 static size_t nblobs, cap_blobs;
 static pthread_mutex_t blob_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -42,7 +45,8 @@ struct ring {
     pthread_t thread;
     pthread_mutex_t m;
     pthread_cond_t c;
-    int wake_pending, stop;
+    int wake_pending;
+    atomic_int stop;
     atomic_uint nwaiters;
     atomic_int in_op; /* the handler may be using a blob: blob_destroyed waits it out */
     struct waiter waiters[MAX_WAITERS];
@@ -61,16 +65,43 @@ static void error(const char *what, uint64_t a, uint64_t b) {
     fprintf(stderr, "mn-executor: error: %s (%" PRIu64 ", %" PRIu64 ")\n", what, a, b);
 }
 
+/* The blob and the address of [offset, offset + len) in it, or NULL; under blob_lock. */
+static struct blob *find_blob(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len, void **p) {
+    for (size_t i = 0; i < nblobs; i++)
+        if (blobs[i]->ctx_id == ctx_id && blobs[i]->blob_id == blob_id) {
+            if (offset > blobs[i]->size || len > blobs[i]->size - offset) return NULL;
+            *p = (char *)blobs[i]->ptr + offset;
+            return blobs[i];
+        }
+    return NULL;
+}
+
 void *mn_executor_blob(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len) {
     void *p = NULL;
     pthread_mutex_lock(&blob_lock);
-    for (size_t i = 0; i < nblobs; i++)
-        if (blobs[i].ctx_id == ctx_id && blobs[i].blob_id == blob_id) {
-            if (offset <= blobs[i].size && len <= blobs[i].size - offset) p = (char *)blobs[i].ptr + offset;
-            break;
-        }
+    find_blob(ctx_id, blob_id, offset, len, &p);
     pthread_mutex_unlock(&blob_lock);
     return p;
+}
+
+void *mn_executor_blob_hold(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len, void **hold) {
+    void *p = NULL;
+    pthread_mutex_lock(&blob_lock);
+    struct blob *b = find_blob(ctx_id, blob_id, offset, len, &p);
+    if (b) {
+        atomic_fetch_add(&b->refs, 1);
+        *hold = b;
+    }
+    pthread_mutex_unlock(&blob_lock);
+    return b ? p : NULL;
+}
+
+void mn_executor_blob_release(void *hold) {
+    struct blob *b = hold;
+    if (atomic_fetch_sub(&b->refs, 1) == 1) {
+        munmap(b->ptr, b->size);
+        free(b);
+    }
 }
 
 /* Completes the waits the ring's progress satisfies (all of them when it stops). Under r->m. */
@@ -127,12 +158,12 @@ static void *consume(void *arg) {
             idle = now_ns();
             continue;
         }
-        if (__atomic_load_n(&r->stop, __ATOMIC_ACQUIRE)) return NULL;
+        if (atomic_load(&r->stop)) return NULL;
         if (r->v.broken) {
             /* A header or padding that didn't fit what the guest published: stop reading this ring. */
             error("ring broken: a record didn't fit what was published", r->ctx_id, r->blob_id);
             pthread_mutex_lock(&r->m);
-            while (!r->stop) pthread_cond_wait(&r->c, &r->m);
+            while (!atomic_load(&r->stop)) pthread_cond_wait(&r->c, &r->m);
             pthread_mutex_unlock(&r->m);
             return NULL;
         }
@@ -142,12 +173,19 @@ static void *consume(void *arg) {
         }
         if (!mn_ring_try_park(&r->v, r->tail)) continue;
         pthread_mutex_lock(&r->m);
-        while (!r->wake_pending && !r->stop) pthread_cond_wait(&r->c, &r->m);
+        while (!r->wake_pending && !atomic_load(&r->stop)) pthread_cond_wait(&r->c, &r->m);
         r->wake_pending = 0;
         pthread_mutex_unlock(&r->m);
         mn_ring_unpark(&r->v);
         idle = now_ns();
     }
+}
+
+static void wake(struct ring *r) {
+    pthread_mutex_lock(&r->m);
+    r->wake_pending = 1;
+    pthread_cond_signal(&r->c);
+    pthread_mutex_unlock(&r->m);
 }
 
 static struct ring *find(uint32_t ctx_id, uint64_t blob_id) {
@@ -156,18 +194,31 @@ static struct ring *find(uint32_t ctx_id, uint64_t blob_id) {
     return NULL;
 }
 
+/* Attaches a ring and tells the guest through its header (reply_len = MN_ATTACHED), which it reads once the attach's
+ * fence completes; a refused attach leaves the header alone. */
 static void attach(uint32_t ctx_id, uint64_t blob_id) {
     void *p = mn_executor_blob(ctx_id, blob_id, 0, MN_RING_BLOB_BYTES);
-    if (!p || find(ctx_id, blob_id)) return error("attach: not a free ring blob", ctx_id, blob_id);
+    if (!p || find(ctx_id, blob_id)) { error("attach: not a free ring blob", ctx_id, blob_id); return; }
+    unsigned count = 0;
+    for (struct ring *r = rings; r; r = r->next) count += r->ctx_id == ctx_id;
+    if (count >= MN_MAX_RINGS) { error("attach: the context has its maximum of rings", ctx_id, MN_MAX_RINGS); return; }
     struct ring *r = calloc(1, sizeof *r);
+    if (!r) { error("attach: no memory", ctx_id, blob_id); return; }
     r->ctx_id = ctx_id;
     r->blob_id = blob_id;
     mn_ring_view_init(&r->v, p);
     pthread_mutex_init(&r->m, NULL);
     pthread_cond_init(&r->c, NULL);
-    pthread_create(&r->thread, NULL, consume, r);
+    if (pthread_create(&r->thread, NULL, consume, r)) {
+        pthread_mutex_destroy(&r->m);
+        pthread_cond_destroy(&r->c);
+        free(r);
+        error("attach: no consumer thread", ctx_id, blob_id);
+        return;
+    }
     r->next = rings;
     rings = r;
+    r->v.hdr->reply_len = MN_ATTACHED;
 }
 
 static void stop(struct ring *r) {
@@ -175,7 +226,7 @@ static void stop(struct ring *r) {
     while (*pp != r) pp = &(*pp)->next;
     *pp = r->next;
     pthread_mutex_lock(&r->m);
-    r->stop = 1;
+    atomic_store(&r->stop, 1);
     pthread_cond_signal(&r->c);
     pthread_mutex_unlock(&r->m);
     pthread_join(r->thread, NULL);
@@ -193,7 +244,8 @@ static void add_waiter(struct ring *r, uint64_t seq, uint32_t ring_idx, uint64_t
     unsigned n = atomic_load(&r->nwaiters);
     if (n == MAX_WAITERS) {
         pthread_mutex_unlock(&r->m);
-        return mn_dxmt_fence_done(r->ctx_id, ring_idx, fence_id); /* the guest rechecks and waits again */
+        mn_dxmt_fence_done(r->ctx_id, ring_idx, fence_id); /* the guest rechecks and waits again */
+        return;
     }
     r->waiters[n] = (struct waiter){ seq, fence_id, ring_idx };
     atomic_store(&r->nwaiters, n + 1);
@@ -221,19 +273,31 @@ static void context_destroy(void *ctx, uint32_t ctx_id) {
 
 static void blob_created(void *ctx, uint32_t ctx_id, uint64_t blob_id, void *ptr, uint64_t size) {
     (void)ctx;
+    struct blob *b = malloc(sizeof *b);
     pthread_mutex_lock(&blob_lock);
-    if (nblobs == cap_blobs) blobs = realloc(blobs, (cap_blobs = cap_blobs ? cap_blobs * 2 : 256) * sizeof *blobs);
-    blobs[nblobs++] = (struct blob){ ctx_id, blob_id, ptr, size };
+    if (b && nblobs == cap_blobs) {
+        struct blob **grown = realloc(blobs, (cap_blobs ? cap_blobs * 2 : 256) * sizeof *blobs);
+        if (grown) blobs = grown, cap_blobs = cap_blobs ? cap_blobs * 2 : 256;
+    }
+    if (b && nblobs < cap_blobs) {
+        *b = (struct blob){ ctx_id, blob_id, ptr, size, 1 };
+        blobs[nblobs++] = b;
+    } else {
+        free(b); /* out of memory: the blob stays unknown here, so the guest's ops on it fail */
+        error("no memory to track a blob", ctx_id, blob_id);
+    }
     pthread_mutex_unlock(&blob_lock);
 }
 
-static void blob_destroyed(void *ctx, uint32_t ctx_id, uint64_t blob_id) {
+static void blob_destroyed(void *ctx, uint32_t ctx_id, uint64_t blob_id, void *ptr, uint64_t size) {
     (void)ctx;
     struct ring *r = find(ctx_id, blob_id);
     if (r) stop(r); /* a ring blob closed without a detach: its consumer goes before its memory */
+    struct blob *b = NULL;
     pthread_mutex_lock(&blob_lock);
     for (size_t i = 0; i < nblobs; i++)
-        if (blobs[i].ctx_id == ctx_id && blobs[i].blob_id == blob_id) {
+        if (blobs[i]->ctx_id == ctx_id && blobs[i]->blob_id == blob_id) {
+            b = blobs[i];
             blobs[i] = blobs[--nblobs];
             break;
         }
@@ -241,43 +305,44 @@ static void blob_destroyed(void *ctx, uint32_t ctx_id, uint64_t blob_id) {
     /* Lookups fail from here on; an op that found the blob before set in_op before its lookup (under blob_lock), so
      * waiting for every ring's in_op to clear means no handler still uses the memory libkrun unmaps next.
      * ponytail: waits out every ring's op, not just this blob's; per-blob pins when 4b's long ops make it show */
-    for (struct ring *r = rings; r; r = r->next)
-        while (atomic_load_explicit(&r->in_op, memory_order_acquire)) sched_yield();
+    for (struct ring *rr = rings; rr; rr = rr->next)
+        while (atomic_load_explicit(&rr->in_op, memory_order_acquire)) sched_yield();
+    if (b) mn_executor_blob_release(b); /* the table's reference: unmapped now unless something holds it */
+    else munmap(ptr, size);             /* never tracked: still ours to unmap */
 }
 
 static void submit(void *ctx, uint32_t ctx_id, const void *cmd, uint32_t len) {
     (void)ctx;
     struct mn_ctrl c;
     wait_ring = NULL;
-    if (len < sizeof c) return error("short control message", ctx_id, len);
+    if (len < sizeof c) { error("short control message", ctx_id, len); return; }
     memcpy(&c, cmd, sizeof c);
     struct ring *r = c.type == MN_CTRL_RING_ATTACH || c.type == MN_CTRL_PEEK ? NULL : find(ctx_id, c.ring_blob);
     switch (c.type) {
     case MN_CTRL_RING_ATTACH:
-        return attach(ctx_id, c.ring_blob);
+        attach(ctx_id, c.ring_blob);
+        return;
     case MN_CTRL_RING_DETACH:
         if (r) stop(r);
         return;
     case MN_CTRL_WAKE:
-        if (!r) return error("wake: no such ring", ctx_id, c.ring_blob);
-        pthread_mutex_lock(&r->m);
-        r->wake_pending = 1;
-        pthread_cond_signal(&r->c);
-        pthread_mutex_unlock(&r->m);
+        if (!r) { error("wake: no such ring", ctx_id, c.ring_blob); return; }
+        wake(r);
         return;
     case MN_CTRL_WAIT:
-        if (!r) return error("wait: no such ring", ctx_id, c.ring_blob);
+        if (!r) { error("wait: no such ring", ctx_id, c.ring_blob); return; }
         wait_ring = r;
         wait_seq = c.arg;
+        wake(r); /* the guest waits for this ring: a lost doorbell must not leave its consumer asleep */
         return;
     case MN_CTRL_PEEK: {
         uint64_t *p = mn_executor_blob(ctx_id, c.ring_blob, c.arg, sizeof *p);
-        if (!p) return error("peek outside a blob", ctx_id, c.ring_blob);
+        if (!p) { error("peek outside a blob", ctx_id, c.ring_blob); return; }
         if (*p == MN_PROBE_MAGIC) *p = MN_PROBE_MAGIC + 1;
         return;
     }
     default:
-        return error("unknown control message", ctx_id, c.type);
+        { error("unknown control message", ctx_id, c.type); return; }
     }
 }
 

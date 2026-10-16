@@ -3,6 +3,7 @@
 #ifndef MN_TRANSPORT_H
 #define MN_TRANSPORT_H
 #include <stdint.h>
+#include "../proto.h"
 
 struct mn_blob { uint32_t gem; uint64_t blob_id, size; void *ptr; };
 
@@ -17,6 +18,8 @@ int mn_call(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap,
 void mn_ring_stats(uint64_t *sent, uint64_t *done);
 /* 1 if this thread's ring waits on fences, 0 if it polls (all 63 fence ring indexes leased), -1 without a ring. */
 int mn_ring_fenced(void);
+/* This thread's ring header (diagnostics), or NULL without a ring. */
+struct mn_ring *mn_ring_header(void);
 /* How long mn_call spins on its reply before waiting on a fence (default 50 µs): the calibration knob. */
 void mn_set_spin_us(uint32_t us);
 

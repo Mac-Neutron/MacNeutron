@@ -1,7 +1,7 @@
 // MacNeutronVM: boots the EAC guest (Fedora's signed kernel, our EROFS images) in a libkrun microVM, in this process.
 // The guest's virtio-gpu has the dxmt context (spec §5.6), served by the Metal transport's executor in this process.
 //   macneutron-vm --images <dir> --share <dir> [--cpus N] [--ram-mib M] [--console <file>] [--timeout <s>]
-//                 [--steam-appid <id> [--steam-map <host dir>=<guest dir>]]
+//                 [--steam-appid <id> [--steam-map <host dir>=<guest dir>]] [--metal-test-ops]
 // --steam-appid starts mn-steam-host (steam-forward/host/ beside this binary) for the guest's Steam forwarding
 // (spec §5.9) and maps guest vsock port 5101 to it; the map defaults to the Mac Steam library's common folder as
 // /mnt/games. The map's host side is shared read-only (virtiofs tag `games`) whether or not Steam is forwarded.
@@ -48,7 +48,9 @@ func made<T>(_ handle: T?, _ what: String) -> T {
 }
 
 var opts: [String: String] = [:]
-let argv = CommandLine.arguments
+// --metal-test-ops (a bare flag): the Metal transport's test ops (eac-vm/metal/gate.sh); a game's VM never has them.
+let metalTestOps = CommandLine.arguments.contains("--metal-test-ops")
+let argv = CommandLine.arguments.filter { $0 != "--metal-test-ops" }
 for i in stride(from: 1, to: argv.count - 1, by: 2) { opts[argv[i]] = argv[i + 1] }
 guard let images = opts["--images"], let share = opts["--share"] else {
   fail(64, "usage: macneutron-vm --images <dir> --share <dir> [--cpus N] [--ram-mib M] [--console <file>] [--timeout <s>]")
@@ -110,7 +112,7 @@ add(krun_rng_device_new(&err), "rng")
 // Free page reporting gives the guest's freed memory back to macOS (our libkrun's balloon patch).
 add(krun_balloon_device_new(&err), "balloon")
 // The Metal transport (spec §5.6): virtio-gpu with the dxmt context and an 8 GiB host-visible window for its blobs.
-mn_executor_start(mn_testops)  // 4a: the transport's test ops; 4b: winemetal
+if metalTestOps { mn_executor_start(mn_testops) } else { mn_executor_start(nil) }  // 4b: winemetal's handler
 add(krun_gpu_device_without_display(8 << 30), "gpu")
 // Steam forwarding: mn-steam-host serves the guest's lsteamclient calls against the Mac's Steam (spec §5.9).
 var steamHostPID: pid_t = 0

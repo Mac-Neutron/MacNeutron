@@ -3,6 +3,7 @@
  * (struct mn_ctrl) sent with EXECBUFFER. Shared by both sides (C11). */
 #ifndef MN_PROTO_H
 #define MN_PROTO_H
+#include <stddef.h>
 #include <stdint.h>
 
 #define MN_CAPSET_DXMT 24 /* under 32: the guest driver builds its capset mask with `1 << id` on an int */
@@ -15,6 +16,8 @@
 #define MN_RING_REPLY (MN_RING_DATA + MN_RING_BYTES)
 #define MN_RING_BLOB_BYTES ((MN_RING_REPLY + MN_REPLY_BYTES + MN_PAGE - 1) / MN_PAGE * MN_PAGE)
 #define MN_REC_MAX (MN_RING_BYTES / 4) /* the largest payload; larger data goes through a blob */
+#define MN_MAX_RINGS 256          /* per context: the host refuses more */
+#define MN_ATTACHED 0x41545441u   /* reply_len after the host attached the ring ("ATTA") */
 
 struct mn_ring {
     _Alignas(64) _Atomic uint64_t head;     /* bytes the guest has published */
@@ -31,10 +34,10 @@ struct mn_rec { uint32_t op, len; uint64_t seq; };
 
 struct mn_ctrl { uint32_t type, reserved; uint64_t ring_blob, arg; };
 enum {
-    MN_CTRL_RING_ATTACH = 1, /* ring_blob is now a thread's ring */
+    MN_CTRL_RING_ATTACH = 1, /* ring_blob is now a thread's ring: the host sets reply_len to MN_ATTACHED */
     MN_CTRL_RING_DETACH,     /* and no longer: the host stops its consumer before the next control message */
     MN_CTRL_WAKE,            /* the ring's consumer is parked and has work */
-    MN_CTRL_WAIT,            /* this message's fence completes once the ring's done_seq >= arg */
+    MN_CTRL_WAIT,            /* this message's fence completes once the ring's done_seq >= arg; wakes the ring */
     MN_CTRL_PEEK,            /* the probe's: host reads u64 MN_PROBE_MAGIC at blob ring_blob + arg, writes magic + 1 */
 };
 
@@ -55,5 +58,15 @@ struct mn_test_hold { uint64_t blob_id, ns; };
 enum { MN_E2BIG = -7, MN_EINVAL = -22, MN_ENOSYS = -38 };
 
 #define MN_PROBE_MAGIC 0x4d4e44584d540001ull
+
+/* The x86-64 guest and the arm64 host must agree on every byte of these. */
+_Static_assert(sizeof(struct mn_rec) == 16, "mn_rec");
+_Static_assert(sizeof(struct mn_ctrl) == 24, "mn_ctrl");
+_Static_assert(offsetof(struct mn_ring, head) == 0 && offsetof(struct mn_ring, tail) == 64 &&
+               offsetof(struct mn_ring, done_seq) == 128 && offsetof(struct mn_ring, parked) == 192 &&
+               offsetof(struct mn_ring, reply_len) == 256 && offsetof(struct mn_ring, reply_status) == 260 &&
+               sizeof(struct mn_ring) == 320 && sizeof(struct mn_ring) <= MN_RING_DATA, "mn_ring");
+_Static_assert(sizeof(struct mn_test_fill) == 32 && sizeof(struct mn_test_sum) == 24 &&
+               sizeof(struct mn_test_hold) == 16, "test op payloads");
 
 #endif

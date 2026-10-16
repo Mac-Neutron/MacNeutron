@@ -1,5 +1,7 @@
 /* Milestone 4a Task 3 test in the guest: the Metal transport (guest/transport.c) against the executor's test ops.
- *   metal-transport-test order | blob | free-in-flight | cross-free | gap | threads <n> | invalid | errors | bench
+ *   metal-transport-test order | blob | free-in-flight | cross-free | gap [bursts] | threads <n> | invalid | errors | lost-wake |
+ *                        ring-cap | exit-drain | bench      (the host started with --metal-test-ops)
+ *   metal-transport-test no-test-ops                          (the host started without it)
  * Every case but errors also requires that no asynchronous record failed on the host (MN_OP_TEST_ERRORS).
  * A case prints "<case> ok" (bench prints its numbers first), or "FAIL <case>: <why>" and exits 1. */
 #include <errno.h>
@@ -85,9 +87,9 @@ static void free_in_flight(void) {
     puts("free-in-flight ok");
 }
 
-static void gap(void) {
+static void gap(int bursts) {
     srand(11);
-    for (uint64_t b = 0; b < 100; b++) {
+    for (uint64_t b = 0; b < (uint64_t)bursts; b++) {
         for (uint64_t k = 0; k < 1000; k++)
             if (mn_send(MN_OP_TEST_SET, &k, sizeof k)) failf("gap", "send", (long long)b, (long long)k);
         usleep(1500 + rand() % 1000);
@@ -166,6 +168,105 @@ static void cross_free(void) {
     puts("cross-free ok");
 }
 
+/* A doorbell that went out and was lost: the ring reads "parked, woken" (2) while its consumer still sleeps. The next
+ * call's fence wait must wake it. */
+static void lost_wake(void) {
+    uint32_t n;
+    if (mn_call(MN_OP_NOP, NULL, 0, NULL, 0, &n)) failf("lost-wake", "first call", 0, 0);
+    usleep(5000); /* the consumer parks after 2 ms */
+    atomic_store(&mn_ring_header()->parked, 2);
+    alarm(3);
+    double t0 = now_us();
+    if (mn_call(MN_OP_NOP, NULL, 0, NULL, 0, &n)) failf("lost-wake", "call", 0, 0);
+    double us = now_us() - t0;
+    alarm(0);
+    if (us > 500000) failf("lost-wake", "call took (us)", (long long)us, 500000);
+    puts("lost-wake ok");
+}
+
+#define RING_THREADS 300
+static pthread_barrier_t cap_barrier;
+static atomic_int cap_ok, cap_refused, cap_fenced;
+
+static void *cap_thread(void *arg) {
+    (void)arg;
+    uint32_t n;
+    int r = mn_call(MN_OP_NOP, NULL, 0, NULL, 0, &n);
+    if (r == 0) atomic_fetch_add(&cap_ok, 1);
+    else if (r == -ENODEV) atomic_fetch_add(&cap_refused, 1);
+    else failf("ring-cap", "call", r, 0);
+    pthread_barrier_wait(&cap_barrier); /* every ring is held at once */
+    return NULL;
+}
+
+static void *fenced_thread(void *arg) {
+    (void)arg;
+    uint32_t n;
+    if (mn_call(MN_OP_NOP, NULL, 0, NULL, 0, &n)) failf("ring-cap", "call after", 0, 0);
+    if (mn_ring_fenced() == 1) atomic_fetch_add(&cap_fenced, 1);
+    pthread_barrier_wait(&cap_barrier);
+    return NULL;
+}
+
+/* The host attaches at most 256 rings per context and says so when it refuses one; leased fence indexes come back. */
+static void ring_cap(void) {
+    pthread_t t[RING_THREADS];
+    alarm(60);
+    pthread_barrier_init(&cap_barrier, NULL, RING_THREADS);
+    for (int i = 0; i < RING_THREADS; i++) pthread_create(&t[i], NULL, cap_thread, NULL);
+    for (int i = 0; i < RING_THREADS; i++) pthread_join(t[i], NULL);
+    if (atomic_load(&cap_ok) != 256 || atomic_load(&cap_refused) != RING_THREADS - 256)
+        failf("ring-cap", "rings attached and refused", atomic_load(&cap_ok), atomic_load(&cap_refused));
+    pthread_barrier_destroy(&cap_barrier);
+    pthread_barrier_init(&cap_barrier, NULL, 63);
+    for (int i = 0; i < 63; i++) pthread_create(&t[i], NULL, fenced_thread, NULL);
+    for (int i = 0; i < 63; i++) pthread_join(t[i], NULL);
+    if (atomic_load(&cap_fenced) != 63) failf("ring-cap", "fence indexes back after the refusals", atomic_load(&cap_fenced), 63);
+    alarm(0);
+    puts("ring-cap ok");
+}
+
+static atomic_int drain_queued;
+static struct mn_blob drain_blob;
+
+static void *drain_thread(void *arg) {
+    (void)arg;
+    struct mn_test_hold h = { drain_blob.blob_id, 5000000 };
+    for (int i = 0; i < 400; i++) /* 2 s of host work */
+        if (mn_send(MN_OP_TEST_HOLD, &h, sizeof h)) failf("exit-drain", "send", i, 0);
+    atomic_store(&drain_queued, 1);
+    return NULL; /* exits with its ring full */
+}
+
+/* A thread that exits with work queued must not stall the other threads' control messages while its ring drains. */
+static void exit_drain(void) {
+    uint32_t n;
+    if (mn_blob_alloc(MN_PAGE, &drain_blob)) failf("exit-drain", "alloc", 0, 0);
+    if (mn_call(MN_OP_NOP, NULL, 0, NULL, 0, &n)) failf("exit-drain", "first call", 0, 0);
+    pthread_t t;
+    pthread_create(&t, NULL, drain_thread, NULL);
+    while (!atomic_load(&drain_queued)) usleep(100);
+    double worst = 0;
+    for (int i = 0; i < 20; i++) {
+        usleep(5000); /* this thread's consumer parks: each call needs a doorbell */
+        double t0 = now_us();
+        if (mn_call(MN_OP_NOP, NULL, 0, NULL, 0, &n)) failf("exit-drain", "call", i, 0);
+        if (now_us() - t0 > worst) worst = now_us() - t0;
+    }
+    pthread_join(t, NULL);
+    if (mn_blob_free(&drain_blob)) failf("exit-drain", "free", 0, 0);
+    if (worst > 200000) failf("exit-drain", "slowest call while another thread drained (us)", (long long)worst, 200000);
+    puts("exit-drain ok");
+}
+
+static void no_test_ops(void) {
+    uint8_t b = 1;
+    uint32_t n;
+    int r = mn_call(MN_OP_TEST_ECHO, &b, 1, &b, 1, &n);
+    if (r != MN_ENOSYS) failf("no-test-ops", "a test op without --metal-test-ops", r, MN_ENOSYS);
+    puts("no-test-ops ok");
+}
+
 static uint64_t host_errors(void) {
     uint64_t count = ~0ull;
     uint32_t n;
@@ -235,16 +336,20 @@ static void bench(void) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2) return fprintf(stderr, "usage: %s order|blob|free-in-flight|cross-free|gap|threads <n>|invalid|errors|bench\n", argv[0]), 2;
+    if (argc < 2) return fprintf(stderr, "usage: %s <case> (see the top of transport-test.c)\n", argv[0]), 2;
     if (mn_open()) return printf("FAIL %s: mn_open\n", argv[1]), 1;
     if (!strcmp(argv[1], "order")) order();
     else if (!strcmp(argv[1], "blob")) blob();
     else if (!strcmp(argv[1], "free-in-flight")) free_in_flight();
-    else if (!strcmp(argv[1], "gap")) gap();
+    else if (!strcmp(argv[1], "gap")) gap(argc > 2 ? atoi(argv[2]) : 100);
     else if (!strcmp(argv[1], "threads") && argc > 2) threads(atoi(argv[2]));
     else if (!strcmp(argv[1], "cross-free")) cross_free();
     else if (!strcmp(argv[1], "invalid")) invalid();
     else if (!strcmp(argv[1], "errors")) return errors(), 0;
+    else if (!strcmp(argv[1], "lost-wake")) lost_wake();
+    else if (!strcmp(argv[1], "ring-cap")) ring_cap();
+    else if (!strcmp(argv[1], "exit-drain")) exit_drain();
+    else if (!strcmp(argv[1], "no-test-ops")) return no_test_ops(), 0;
     else if (!strcmp(argv[1], "bench")) bench();
     else return fprintf(stderr, "unknown case %s\n", argv[1]), 2;
     uint64_t count = host_errors();

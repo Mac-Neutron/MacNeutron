@@ -51,8 +51,14 @@ static void blob_close(struct mn_blob *b) {
     ioctl(fd, DRM_IOCTL_GEM_CLOSE, &gc);
 }
 
+static void wait_done(struct thread_ring *t, uint64_t seq);
+static uint64_t put(struct thread_ring *t, uint32_t op, const void *p, uint32_t len);
+
 static void thread_exit(void *p) {
     struct thread_ring *t = p;
+    /* Drain here, in this thread: a DETACH with records queued would drain them on the host's gpu worker, stalling
+     * every other thread's control messages meanwhile. */
+    wait_done(t, put(t, MN_OP_NOP | MN_REC_SYNC, NULL, 0));
     ctrl(MN_CTRL_RING_DETACH, t->blob.blob_id, 0, 0, NULL); /* the host stops its consumer before the close */
     blob_close(&t->blob);
     pthread_mutex_lock(&idx_lock);
@@ -62,7 +68,9 @@ static void thread_exit(void *p) {
     tr = NULL;
 }
 
-int mn_open(void) {
+static pthread_mutex_t open_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int open_locked(void) {
     if (fd >= 0) return 0;
     int f = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
     if (f < 0) return -errno;
@@ -79,6 +87,13 @@ int mn_open(void) {
     pthread_key_create(&ring_key, thread_exit);
     fd = f;
     return 0;
+}
+
+int mn_open(void) {
+    pthread_mutex_lock(&open_lock);
+    int r = open_locked();
+    pthread_mutex_unlock(&open_lock);
+    return r;
 }
 
 int mn_blob_alloc(uint64_t size, struct mn_blob *b) {
@@ -111,7 +126,18 @@ static struct thread_ring *ring(void) {
     for (int i = 1; i < 64 && !t->fence_idx; i++)
         if (!(idx_used & (1ull << i))) idx_used |= 1ull << i, t->fence_idx = i;
     pthread_mutex_unlock(&idx_lock);
-    if (ctrl(MN_CTRL_RING_ATTACH, t->blob.blob_id, 0, 0, NULL)) {
+    /* Fenced on ring index 0, which no wait uses: the host has attached (or refused) the ring once it signals. */
+    int ffd = -1, attached = 0;
+    if (!ctrl(MN_CTRL_RING_ATTACH, t->blob.blob_id, 0, 0, &ffd)) {
+        struct pollfd pf = { .fd = ffd, .events = POLLIN };
+        poll(&pf, 1, 5000);
+        close(ffd);
+        attached = t->v.hdr->reply_len == MN_ATTACHED;
+    }
+    if (!attached) {
+        pthread_mutex_lock(&idx_lock);
+        idx_used &= ~(1ull << t->fence_idx);
+        pthread_mutex_unlock(&idx_lock);
         blob_close(&t->blob);
         free(t);
         return NULL;
@@ -188,6 +214,8 @@ void mn_ring_stats(uint64_t *sent, uint64_t *done) {
     *sent = tr ? tr->seq : 0;
     *done = tr ? done_seq(tr) : 0;
 }
+
+struct mn_ring *mn_ring_header(void) { return tr ? tr->v.hdr : NULL; }
 
 int mn_ring_fenced(void) { return tr ? !!tr->fence_idx : -1; }
 

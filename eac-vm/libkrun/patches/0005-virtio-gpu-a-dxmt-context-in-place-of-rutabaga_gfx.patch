@@ -1,4 +1,4 @@
-From 5975be1c35864af352328e961717a14375b1fa7a Mon Sep 17 00:00:00 2001
+From e661e506c9c6a3cbfe12b017a729b21a7460527a Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Fri, 16 Oct 2026 11:36:34 -0400
 Subject: [PATCH 5/6] virtio/gpu: a dxmt context in place of rutabaga_gfx
@@ -20,11 +20,11 @@ scanouts or virgl capsets, so the device offers one capset: the context's.
  include/libkrun.h                        |   2 +
  src/devices/src/virtio/gpu/device.rs     |  16 +
  src/devices/src/virtio/gpu/mod.rs        |   1 +
- src/devices/src/virtio/gpu/virtio_gpu.rs |  20 +-
+ src/devices/src/virtio/gpu/virtio_gpu.rs |  28 +-
  src/libkrun/src/api/device_builders.rs   |  19 +
  src/rutabaga_dxmt/Cargo.toml             |  15 +
- src/rutabaga_dxmt/src/lib.rs             | 636 +++++++++++++++++++++++
- 9 files changed, 721 insertions(+), 65 deletions(-)
+ src/rutabaga_dxmt/src/lib.rs             | 684 +++++++++++++++++++++++
+ 9 files changed, 776 insertions(+), 66 deletions(-)
  create mode 100644 src/rutabaga_dxmt/Cargo.toml
  create mode 100644 src/rutabaga_dxmt/src/lib.rs
 
@@ -271,7 +271,7 @@ index 649638f0..f2ac683e 100644
  mod defs {
      pub const GPU_DEV_ID: &str = "virtio_gpu";
 diff --git a/src/devices/src/virtio/gpu/virtio_gpu.rs b/src/devices/src/virtio/gpu/virtio_gpu.rs
-index fa09f59b..bdc379d6 100644
+index fa09f59b..bcfcc96d 100644
 --- a/src/devices/src/virtio/gpu/virtio_gpu.rs
 +++ b/src/devices/src/virtio/gpu/virtio_gpu.rs
 @@ -51,7 +51,7 @@ use crate::virtio::{InterruptTransport, VirtioShmRegion};
@@ -295,7 +295,22 @@ index fa09f59b..bdc379d6 100644
          let map_info = self.rutabaga.map_info(resource_id).map_err(|_| ErrUnspec)?;
          let map_ptr = self.rutabaga.map(resource_id).map_err(|_| ErrUnspec)?.ptr;
  
-@@ -1063,6 +1068,11 @@ impl VirtioGpu {
+@@ -956,7 +961,13 @@ impl VirtioGpu {
+                     resource.size,
+                     shm_region.size as u64,
+                 )
+-                .ok_or(ErrUnspec)?;
++                .ok_or_else(|| {
++                    error!(
++                        "blob {resource_id}: offset {offset:#x} and size {} leave the {}-byte host-visible window",
++                        resource.size, shm_region.size
++                    );
++                    ErrUnspec
++                })?;
+                 debug!(
+                     "mapping: map_ptr={:x}, guest_addr={:x}, size={}",
+                     map_ptr, guest_addr, resource.size
+@@ -1063,6 +1074,11 @@ impl VirtioGpu {
  
  // A guest-controlled `offset` that wraps `offset + size` or `base + offset` would
  // otherwise pass the size guard and place the mmap(MAP_FIXED) out of bounds.
@@ -307,7 +322,7 @@ index fa09f59b..bdc379d6 100644
  fn checked_blob_map_addr(base: u64, offset: u64, size: u64, shm_size: u64) -> Option<u64> {
      if offset.checked_add(size)? > shm_size {
          return None;
-@@ -1074,6 +1084,14 @@ fn checked_blob_map_addr(base: u64, offset: u64, size: u64, shm_size: u64) -> Op
+@@ -1074,6 +1090,14 @@ fn checked_blob_map_addr(base: u64, offset: u64, size: u64, shm_size: u64) -> Op
  mod test {
      use crate::virtio::gpu::protocol::VIRTIO_GPU_MAX_SCANOUTS;
  
@@ -382,14 +397,14 @@ index 00000000..3c2d3057
 +log = "0.4"
 diff --git a/src/rutabaga_dxmt/src/lib.rs b/src/rutabaga_dxmt/src/lib.rs
 new file mode 100644
-index 00000000..2d934f80
+index 00000000..8242d302
 --- /dev/null
 +++ b/src/rutabaga_dxmt/src/lib.rs
-@@ -0,0 +1,636 @@
+@@ -0,0 +1,684 @@
 +//! MacNeutron's stand-in for rutabaga_gfx 0.1.85: the subset of its API that libkrun's virtio-gpu device uses, with
 +//! one context type, dxmt (capset 24). Blobs are host memory the VM host's executor shares with the guest; command
 +//! buffers and fences go to the callbacks it registers with `mn_dxmt_set_ops`, and it completes fences with
-+//! `mn_dxmt_fence_done`. No virglrenderer, no scanouts: 2D, 3D and transfer calls succeed and do nothing.
++//! `mn_dxmt_fence_done`. A freed blob's memory goes to the executor too, which unmaps it once nothing uses it. No virglrenderer, no scanouts: 2D, 3D and transfer calls succeed and do nothing.
 +//! macOS only (the export handle carries no descriptor).
 +
 +use std::collections::{HashMap, HashSet};
@@ -589,7 +604,8 @@ index 00000000..2d934f80
 +    pub context_create: Option<extern "C" fn(*mut c_void, u32)>,
 +    pub context_destroy: Option<extern "C" fn(*mut c_void, u32)>,
 +    pub blob_created: Option<extern "C" fn(*mut c_void, u32, u64, *mut c_void, u64)>,
-+    pub blob_destroyed: Option<extern "C" fn(*mut c_void, u32, u64)>,
++    /// The guest freed the blob: the mapping (host_ptr, size) is the executor's now, to unmap once nothing uses it.
++    pub blob_destroyed: Option<extern "C" fn(*mut c_void, u32, u64, *mut c_void, u64)>,
 +    pub submit: Option<extern "C" fn(*mut c_void, u32, *const c_void, u32)>,
 +    pub fence: Option<extern "C" fn(*mut c_void, u32, u32, u64)>,
 +}
@@ -844,12 +860,13 @@ index 00000000..2d934f80
 +            return Ok(());
 +        }
 +        let blob = self.blobs.remove(&resource_id).ok_or(RutabagaError::InvalidResourceId)?;
-+        if let Some(o) = ops() {
-+            if let Some(f) = o.blob_destroyed {
-+                f(o.ctx, blob.ctx_id, blob.blob_id);
-+            }
++        // Metal may still read a blob it wraps after the guest frees it: the executor unmaps it when it's done.
++        match ops().and_then(|o| o.blob_destroyed.map(|f| (o.ctx, f))) {
++            Some((ctx, f)) => f(ctx, blob.ctx_id, blob.blob_id, blob.ptr, blob.size),
++            None => unsafe {
++                libc::munmap(blob.ptr, blob.size as usize);
++            },
 +        }
-+        unsafe { libc::munmap(blob.ptr, blob.size as usize) };
 +        Ok(())
 +    }
 +
@@ -989,6 +1006,52 @@ index 00000000..2d934f80
 +        let handle = r.export_blob(10).unwrap();
 +        assert_eq!(handle.as_mesa_handle().unwrap().handle_type, RUTABAGA_HANDLE_TYPE_MEM_DMABUF);
 +        r.unref_resource(10).unwrap();
++    }
++
++    static mut DESTROYED: (u64, u64) = (0, 0);
++    extern "C" fn take_blob(_ctx: *mut c_void, _ctx_id: u32, _blob_id: u64, ptr: *mut c_void, size: u64) {
++        unsafe { DESTROYED = (ptr as u64, size) };
++    }
++
++    fn mapped(ptr: u64, size: u64) -> bool {
++        unsafe { libc::msync(ptr as *mut c_void, size as usize, libc::MS_ASYNC) == 0 }
++    }
++
++    #[test]
++    fn unref_hands_the_mapping_to_the_executor() {
++        let _l = LOCK.lock().unwrap();
++        let ops = MnDxmtOps {
++            ctx: std::ptr::null_mut(),
++            context_create: None,
++            context_destroy: None,
++            blob_created: None,
++            blob_destroyed: Some(take_blob),
++            submit: None,
++            fence: None,
++        };
++        unsafe { mn_dxmt_set_ops(&ops) };
++        let mut r = rutabaga(Default::default());
++        r.create_context(1, MN_CAPSET_DXMT, None).unwrap();
++        r.resource_create_blob(1, 10, host3d(1, 16384), None, None).unwrap();
++        let m = r.map(10).unwrap();
++        r.unref_resource(10).unwrap();
++        let (ptr, size) = unsafe { DESTROYED };
++        assert_eq!((ptr, size), (m.ptr, 16384));
++        assert!(mapped(ptr, size), "the executor unmaps it, once nothing uses it");
++        unsafe { libc::munmap(ptr as *mut c_void, size as usize) };
++        unsafe { mn_dxmt_set_ops(std::ptr::null()) };
++    }
++
++    #[test]
++    fn unref_without_an_executor_unmaps() {
++        let _l = LOCK.lock().unwrap();
++        unsafe { mn_dxmt_set_ops(std::ptr::null()) };
++        let mut r = rutabaga(Default::default());
++        r.create_context(1, MN_CAPSET_DXMT, None).unwrap();
++        r.resource_create_blob(1, 10, host3d(1, 16384), None, None).unwrap();
++        let m = r.map(10).unwrap();
++        r.unref_resource(10).unwrap();
++        assert!(!mapped(m.ptr, 16384));
 +    }
 +
 +    extern "C" fn keep_fence(ctx: *mut c_void, _ctx_id: u32, _ring_idx: u32, _fence_id: u64) {

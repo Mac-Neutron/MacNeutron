@@ -291,3 +291,24 @@ Findings:
 - **Cache-line traffic.** Per-record cache-line traffic, not the ring code, cost the first 86 ns per record. Each
   side now caches the other's position, and the consumer publishes its progress per batch.
 - **Clock reads.** `clock_gettime` costs about 270 ns under FEX, so spin loops read the clock every 1,024 checks.
+
+**Hardening after the 4a review** (2026-10-16), each with a test that failed first:
+- **Freed blobs.** A blob the guest frees now belongs to the executor, which unmaps it once nothing uses it.
+  `mn_executor_blob_hold`/`_release` keep one alive past the free; that is what 4b's `newBufferWithBytesNoCopy`
+  buffers need (`executor-test`).
+- **Ring limits.** A context gets at most 256 rings. An attach is fenced and stamped in the ring header, so a refusal
+  reaches the guest and the thread's fence index comes back (`ring-cap`).
+- **Lost doorbells.** A WAIT wakes its ring's consumer, so a lost doorbell can't leave a waiting thread stuck
+  (`lost-wake`).
+- **Thread exit.** An exiting thread drains its own ring before detaching, instead of draining it on the gpu worker
+  (`exit-drain`: the slowest call from another thread dropped from 2.0 s to under 200 ms).
+- **Test ops.** They exist only with the host's `--metal-test-ops` flag (`no-test-ops`).
+- **Smaller fixes.** Layout asserts on every struct shared by the x86-64 guest and the arm64 host, a serialised
+  `mn_open`, checked allocations, and a log line for an out-of-window blob offset.
+
+`eac-vm/metal/gate.sh` runs all the gates from the Mac.
+
+**FEX and the doorbell handshake.** The guest's `seq_cst` fence (x86 `mfence`) becomes `dmb sy` in FEX
+(`OpcodeDispatcher.cpp` MFENCE → `_Fence(LoadStore)`, `JIT/MiscOps.cpp`). No TSO setting touches fences, our
+HostTSO patch included; it only turns off the atomic load and store emulation. Locked read-modify-writes become `*AL`
+LSE atomics. Empirically, `gap 5000` (5,000 park and wake races) loses no wake.

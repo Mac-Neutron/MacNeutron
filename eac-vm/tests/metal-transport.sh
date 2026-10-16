@@ -1,11 +1,12 @@
 # Milestone 4a gate in the guest: the Metal transport's rings, blobs, waits and wakes against the executor's test ops
-# (spec §5.6). Needs bin/metal-transport-test in the share (eac-vm/metal/build-guest.sh). Exits 1 on a miss; every case
+# (spec §5.6), with the host started with --metal-test-ops (eac-vm/metal/gate.sh does). Needs bin/metal-transport-test
+# in the share (eac-vm/metal/build-guest.sh). Exits 1 on a miss; every case
 # also fails if an asynchronous record failed on the host (MN_OP_TEST_ERRORS).
 # Thresholds (research README §3, a native producer: 19.8 ns per command, 114 ns per spinning round trip): async
 # ns/cmd <= 40 and sync spin ns <= 2,000; the fenced wait and the wake are printed, not asserted (doorbell: 37 µs).
 T=/mnt/share/bin/metal-transport-test
 fail=0
-for c in order blob free-in-flight cross-free gap "threads 100" invalid errors bench; do
+for c in order blob free-in-flight cross-free gap "threads 100" invalid errors lost-wake ring-cap exit-drain bench; do
   out=$($T $c 2>&1)
   echo "$out"
   echo "$out" | grep -qx "${c%% *} ok" || { echo "FAIL $c"; fail=1; }

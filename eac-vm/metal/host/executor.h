@@ -12,8 +12,13 @@ typedef int32_t (*mn_op_fn)(uint32_t ctx_id, void *ring_state, uint32_t op, cons
 
 /* Registers with libkrun's dxmt context; call before the VM starts. */
 void mn_executor_start(mn_op_fn handler);
-/* The host address of [offset, offset + len) in one of a context's blobs, or NULL if it isn't one. */
+/* The host address of [offset, offset + len) in one of a context's blobs, or NULL if it isn't one. Valid while the
+ * calling op runs (the executor waits out running ops before a freed blob goes). */
 void *mn_executor_blob(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len);
+/* The same, valid until mn_executor_blob_release(*hold), even after the guest frees the blob (e.g. while a Metal buffer
+ * wraps it). NULL, and *hold untouched, if it isn't one. */
+void *mn_executor_blob_hold(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len, void **hold);
+void mn_executor_blob_release(void *hold);
 
 /* Asynchronous records that failed since the last context began (they have no caller to tell). */
 uint64_t mn_executor_async_failures(void);

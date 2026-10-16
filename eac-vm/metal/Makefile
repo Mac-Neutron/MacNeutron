@@ -9,3 +9,11 @@ $(OUT)/ring-test: tests/ring-test.c ring.c ring.h proto.h
 ring-test: $(OUT)/ring-test
 	$(OUT)/ring-test
 .PHONY: ring-test
+
+$(OUT)/executor-test: tests/executor-test.c host/executor.c host/executor.h ring.c ring.h proto.h
+	mkdir -p $(OUT)
+	$(CC) $(CFLAGS) -o $@ tests/executor-test.c host/executor.c ring.c -lpthread
+
+executor-test: $(OUT)/executor-test
+	$(OUT)/executor-test
+.PHONY: executor-test
