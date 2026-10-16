@@ -237,3 +237,40 @@ libkrun a guest notification is one vCPU exit handled in process; milestone 2 me
 - BattlEye's Proton path.
 - Titles whose developers have not enabled EAC on Proton, and kernel-mode anti-cheats.
 - Rosetta for Linux: it cannot trace translated binaries, which EAC's injection needs.
+
+## 12. Deferred from milestones 1-2
+
+From the final review of milestones 1-2 (2026-10-15). The first two belong in milestone 3's plan.
+
+- **HostTSO can be forced.** It sits in FEX's lowest config layer, so a user or app config on `state.img`, or
+  `FEX_HOSTTSO` in a launch environment, enables it whatever the litmus test found. FEX should honour it only when
+  `mn-tso-check` has left a marker (e.g. under `/run`).
+- **`/var` is volatile.** §5.2 puts `/home` and `/var` on `state.img` with an overlay for `/etc`; the image puts only
+  `/home` there. Decide before Steam keeps state in `/var`.
+- **vCPU default and the Metal executor.** The default is every non-efficiency core (18 on an M5 Pro). Milestone 4's
+  host consumer thread spins during frames and may need a core left free.
+- **Host errors.**
+  - Unknown or malformed `macneutron-vm` flags are ignored silently, and `UInt8(cpus)` traps outside 1-255.
+  - Any `open`/`flock` failure on `state.img` reads "in use"; the lock fd needs `O_CLOEXEC`.
+  - An unreadable `cmdline.txt` boots without the lockdown flags; the host should fail or append them.
+  - A kernel the loader rejects isn't named in the error.
+  - A guest panic and a clean power-off both exit 0, because libkrun maps SYSTEM_RESET to shutdown.
+- **libkrun patches.**
+  - 0003 logs EnTSO at debug level only.
+  - 0002 calls `hv_vm_map`/`hv_vm_unmap` from the event loop, not the vmm worker thread; revisit with milestone 4's
+    blob mappings.
+  - 0002 bounds only the start of a reported range (use `get_slice`).
+- **TSO check.**
+  - `mn-tso-check` doesn't verify its `sed` took effect.
+  - The litmus threads aren't pinned to distinct vCPUs.
+  - Gates read the config file rather than FEX's effective config (`FEXGetConfig`).
+- **Image build.**
+  - `packages.lock` doesn't identify our FEX build.
+  - The output set isn't replaced atomically, and a failed `mkfs.ext4` leaves an unformatted `state.img` that is kept.
+  - dracut still runs the builder's own userspace (its modules now come from the pinned kernel).
+- **Helpers.**
+  - `builder.sh sync` (`rsync --delete`) accepts `~` or an empty target, which would wipe the builder's home, where
+    the Steam sign-in lives.
+  - `builder.sh` rebuilds only when `vmhost.swift` changes.
+  - `run-all.sh` can't tell a replaced-but-not-re-registered binfmt interpreter (the F flag keeps the old file).
+  - `libkrun/build.sh` drops commits on branch `macneutron` that haven't been exported as patches.
