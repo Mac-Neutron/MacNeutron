@@ -1,0 +1,6 @@
+walk pass-through: median 542 ns per frame of 9465 handles (sink 0)
+walk translated  : median 4292 ns per frame of 9465 handles (sink 0)
+lookups alone: 3.75 µs per frame, 0.40 ns per handle
+pass-through: median 23667 ns/frame, p99 34792 ns (sink 0)
+translated  : median 25708 ns/frame, p99 41584 ns (sink 0)
+translation adds 2.0 µs per frame: 0.20 ns per handle, 10165 handles per frame

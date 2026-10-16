@@ -312,3 +312,17 @@ Findings:
 (`OpcodeDispatcher.cpp` MFENCE → `_Fence(LoadStore)`, `JIT/MiscOps.cpp`). No TSO setting touches fences, our
 HostTSO patch included; it only turns off the atomic load and store emulation. Locked read-modify-writes become `*AL`
 LSE atomics. Empirically, `gap 5000` (5,000 park and wake races) loses no wake.
+
+**Handles for milestone 4b, measured** (`harness/handles-bench.c`, `results/handles-bench.txt`, on the host). The
+question is whether the guest should pass the host's object pointers through, or pick its own handles and have the
+host translate them.
+
+- **What translation costs.** Guest handles are a generation and an index into a dense host table, so translating
+  one is a bounds check, a generation check and a load; a stale or forged handle fails. A SMITE 2 frame carries about
+  9,500 handles: one per call over about 2,770 calls, and about 1.3 per command node over about 5,150 nodes. Looking
+  them all up costs **3.8 µs per frame**, about 0.4 ns per handle, from a 30,000-object table held in cache. With
+  700 creations and releases per frame added, it costs 2 to 4 µs more than passing pointers through.
+- **What passing pointers through costs.** Every call that returns a new handle must wait for the host: about 250 a
+  frame, mostly render encoders and autorelease pools. At the 310 ns a spinning round trip takes (§7), that is about
+  **78 µs per frame** on the game's render thread. Creations that return GPU addresses (buffers, textures, samplers)
+  and those that can fail with an error (pipeline states) wait in both designs.
