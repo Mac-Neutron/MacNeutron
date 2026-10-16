@@ -6,7 +6,8 @@
 #   base.erofs           label mn-base: packages.txt + our FEX + rootfs/ (read-only, shared by every game)
 #   x86-64-rootfs.erofs  label mn-x86-64: Fedora's FEX x86-64 RootFS (read-only, shared)
 #   wine.erofs           label mn-wine: our Wine (eac-vm/wine/build.sh install), /opt/mn-wine (read-only, shared), with
-#                        our DXMT and the guest winemetal.so over Wine's own D3D (eac-vm/dxmt/stage.sh)
+#                        our DXMT and the guest winemetal.so over Wine's own D3D (eac-vm/dxmt/stage.sh); with
+#                        DXMT_GUEST=none, Wine's own D3D (llvmpipe), for games that present before milestone 4c
 #   state.img            label mn-state: 16 GiB sparse ext4 for /home, created only when missing
 #   cmdline.txt, packages.lock
 # Pinning: the first build downloads packages.txt's closure and the x86-64 RootFS into $CACHE and checks every
@@ -27,12 +28,16 @@ STEAM_FORWARDER=${STEAM_FORWARDER:-$HOME/mn-steam-out/lsteamclient.so}
 DXMT_GUEST=${DXMT_GUEST:-$HOME/mn-dxmt-guest}
 wine_image() {
   [ -f "$STEAM_FORWARDER" ] || { echo "no Steam forwarder at $STEAM_FORWARDER" >&2; exit 1; }
-  [ -f "$DXMT_GUEST/x86_64-unix/winemetal.so" ] || { echo "no DXMT guest stage at $DXMT_GUEST" >&2; exit 1; }
+  [ "$DXMT_GUEST" = none ] || [ -f "$DXMT_GUEST/x86_64-unix/winemetal.so" ] \
+    || { echo "no DXMT guest stage at $DXMT_GUEST" >&2; exit 1; }
   sudo rm -rf "$WORK/wine"; sudo mkdir -p "$WORK"; sudo cp -a "$WINE_STAGE" "$WORK/wine"
   sudo install -m755 "$STEAM_FORWARDER" "$WORK/wine/lib/wine/x86_64-unix/lsteamclient.so"
-  # Milestone 4b-2: D3D through DXMT and the Metal transport, not wined3d/vkd3d on llvmpipe.
-  sudo install -m644 "$DXMT_GUEST"/x86_64-windows/*.dll "$WORK/wine/lib/wine/x86_64-windows/"
-  sudo install -m755 "$DXMT_GUEST/x86_64-unix/winemetal.so" "$WORK/wine/lib/wine/x86_64-unix/"
+  # Milestone 4b-2: D3D through DXMT and the Metal transport, not wined3d/vkd3d on llvmpipe. Presenting is refused
+  # until 4c, so a game that presents needs DXMT_GUEST=none until then.
+  if [ "$DXMT_GUEST" != none ]; then
+    sudo install -m644 "$DXMT_GUEST"/x86_64-windows/*.dll "$WORK/wine/lib/wine/x86_64-windows/"
+    sudo install -m755 "$DXMT_GUEST/x86_64-unix/winemetal.so" "$WORK/wine/lib/wine/x86_64-unix/"
+  fi
   sudo rm -f "$OUT/wine.erofs"; sudo mkfs.erofs -L mn-wine -zlz4hc "$OUT/wine.erofs" "$WORK/wine" > /dev/null
   ls -la "$OUT/wine.erofs"
 }

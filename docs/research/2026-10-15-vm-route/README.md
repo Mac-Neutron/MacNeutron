@@ -380,9 +380,12 @@ the memory DXMT hands to Metal itself (`dxmt_buffer.cpp:44-46`, `d3d12_command_a
     `WMTMemoryFree` (slots 153 and 154). The four: placed buffers, a command allocator's 4 MiB GPU heap, the dummy
     constant buffer and staging blocks.
   - Texture and visibility-result buffers do the same on i386 only, so they are left unchanged.
-- **The product build is unchanged.** It compiles the same source:
+- **The product build compiles the same source:**
   - each of its 171 translation units preprocesses identically with and without the patch (`eac-vm/dxmt/inert.sh`);
-  - its compile commands, meson targets and installed files are identical too.
+  - its compile commands, meson targets and list of installed files are identical too.
+- **But its translator key changes.** The key (`wine-arm64/lib.sh`) hashes `meson.build`, `meson.options` and
+  `src/airconv`, and a new meson option has to touch `meson.options`. So the release that ships 0071 rebuilds every
+  user's DXMT shader cache once, as any release that changes those files does. `inert.sh` reports both keys.
 - **Build script.** `eac-vm/dxmt/build.sh` builds the guest DXMT on the Mac:
   - with MacNeutron's llvm-mingw, against the guest Wine's import libraries;
   - with no CPU flags, so the x86-64 baseline that FEX runs;
@@ -393,6 +396,9 @@ the memory DXMT hands to Metal itself (`dxmt_buffer.cpp:44-46`, `d3d12_command_a
 - **Image.** `wine.erofs` replaces Wine's own d3d10core, d3d11, d3d12 and dxgi with our DXMT's (`eac-vm/dxmt/stage.sh`,
   `image/build.sh`). It also has `winemetal.dll` as a builtin and the guest `winemetal.so`. D3D in the guest now goes
   through the Metal transport to the host's GPU, no longer through wined3d and vkd3d on llvmpipe.
+- **Software rendering.** Presenting stays refused until 4c, so SMITE 2 and 3c's `eac.sh` need an image built with
+  `DXMT_GUEST=none`, which keeps Wine's own D3D. `eac.sh` hasn't been run on the DXMT image: it needs the Mac's
+  Steam.
 
 **Gate** (`eac-vm/dxmt/gate.sh`).
 - **Programs.** 20 of DXMT's headless test programs: `d3d11_vsia`, and d3d12 `api`, `bounds`, `cache`, `compress`,
