@@ -1,0 +1,57 @@
+From ca7a3e701442a1b73c3f9343357519096f58a310 Mon Sep 17 00:00:00 2001
+From: Derek Lesho <dlesho@codeweavers.com>
+Date: Mon, 6 Dec 2021 15:13:40 +0100
+Subject: [PATCH 2/4] ntdll: Load EAC bridge files from PROTON_EAC_RUNTIME
+ path.
+
+Proton: ValveSoftware/wine 94b768eae185 (proton_11.0), ported to upstream master without the
+BattlEye runtime path, which MacNeutron's EAC mode does not use.
+---
+ dlls/ntdll/unix/loader.c | 23 ++++++++++++++++++++++-
+ 1 file changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index 45b0d6d3..dcfb95bf 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -298,11 +298,14 @@ static WORD get_alt_machine( WORD machine )
+ 
+ static void set_dll_path(void)
+ {
+-    char *p, *path = getenv( "WINEDLLPATH" );
++    char *p, *path = getenv( "WINEDLLPATH" ), *eac_runtime = getenv( "PROTON_EAC_RUNTIME" );
+     int i, count = 0;
+ 
+     if (path) for (p = path, count = 1; *p; p++) if (*p == ':') count++;
+ 
++    if (eac_runtime)
++        count += 2;
++
+     dll_paths = malloc( (count + 2) * sizeof(*dll_paths) );
+     count = 0;
+ 
+@@ -315,6 +318,24 @@ static void set_dll_path(void)
+         free( path );
+     }
+ 
++    if (eac_runtime)
++    {
++        const char lib32[] = "/v2/lib32/";
++        const char lib64[] = "/v2/lib64/";
++
++        p = malloc( strlen(eac_runtime) + strlen(lib32) + 1 );
++        strcpy(p, eac_runtime);
++        strcat(p, lib32);
++
++        dll_paths[count++] = p;
++
++        p = malloc( strlen(eac_runtime) + strlen(lib64) + 1 );
++        strcpy(p, eac_runtime);
++        strcat(p, lib64);
++
++        dll_paths[count++] = p;
++    }
++
+     for (i = 0; i < count; i++) dll_path_maxlen = max( dll_path_maxlen, strlen(dll_paths[i]) );
+     dll_paths[count] = NULL;
+ }
