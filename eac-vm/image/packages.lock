@@ -45,6 +45,7 @@ grep-3.12-3.fc44.aarch64
 gzip-1.14-2.fc44.aarch64
 harfbuzz-14.1.0-2.fc44.aarch64
 hwdata-0.412-1.fc44.noarch
+iproute-6.17.0-2.fc44.aarch64
 json-c-0.18-8.fc44.aarch64
 kbd-2.9.0-4.fc44.aarch64
 kbd-legacy-2.9.0-4.fc44.noarch
@@ -58,6 +59,7 @@ krb5-libs-1.22.2-4.fc44.aarch64
 libacl-2.4.0-1.fc44.aarch64
 libattr-2.6.0-1.fc44.aarch64
 libblkid-2.41.5-1.fc44.aarch64
+libbpf-1.6.3-2.fc44.aarch64
 libbrotli-1.2.0-3.fc44.aarch64
 libcap-2.78-1.fc44.aarch64
 libcap-ng-0.9.6-1.fc44.aarch64
@@ -77,6 +79,7 @@ libkcapi-1.5.0-7.fc44.aarch64
 libkcapi-hasher-1.5.0-7.fc44.aarch64
 libkcapi-hmaccalc-1.5.0-7.fc44.aarch64
 liblastlog2-2.41.5-1.fc44.aarch64
+libmnl-1.0.5-9.fc44.aarch64
 libmount-2.41.5-1.fc44.aarch64
 libnsl2-2.0.1-5.fc44.aarch64
 libpciaccess-0.16-17.fc44.aarch64
@@ -135,6 +138,7 @@ pkgconf-m4-2.5.1-1.fc44.noarch
 pkgconf-pkg-config-2.5.1-1.fc44.aarch64
 popt-1.19-10.fc44.aarch64
 procps-ng-4.0.6-1.fc44.aarch64
+psmisc-23.7-7.fc44.aarch64
 readline-8.3-4.fc44.aarch64
 sed-4.9-7.fc44.aarch64
 setup-2.15.0-28.fc44.noarch

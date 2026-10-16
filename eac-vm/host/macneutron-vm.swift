@@ -60,6 +60,7 @@ let steamAppID = opts["--steam-appid"]
 let steamMap = opts["--steam-map"]
   ?? FileManager.default.homeDirectoryForCurrentUser.path + "/Library/Application Support/Steam/steamapps/common=/mnt/games"
 func path(_ n: String) -> String { images + "/" + n }
+let exeDir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().path
 
 for n in ["vmlinuz", "initramfs.img", "cmdline.txt", "base.erofs", "x86-64-rootfs.erofs", "wine.erofs", "state.img"]
 where access(path(n), R_OK) != 0 {
@@ -110,7 +111,6 @@ add(krun_balloon_device_new(&err), "balloon")
 // Steam forwarding: mn-steam-host serves the guest's lsteamclient calls against the Mac's Steam (spec §5.9).
 var steamHostPID: pid_t = 0
 if let appid = steamAppID {
-  let exeDir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().path
   let sock = NSTemporaryDirectory() + "mn-steam-\(getpid()).sock"
   unlink(sock)
   let host = Process()
@@ -127,6 +127,34 @@ if let appid = steamAppID {
   let vsock = made(krun_vsock_device_new(3, 0, &err), "vsock device")
   krun_vsock_device_add_unix_port(vsock, 5101, kstr(sock), false)
   add(vsock, "vsock")
+}
+// Network (spec §5.7): gvproxy (eac-vm/net/fetch.sh, beside this binary) answers the guest's frames with the Mac's own
+// sockets, over a unixgram socket in vfkit's framing. The guest takes gvproxy's static lease for this MAC
+// (192.168.127.2, gateway and DNS 192.168.127.1). No gvproxy, no network.
+if access(exeDir + "/gvproxy", X_OK) == 0 {
+  let sock = NSTemporaryDirectory() + "mn-net-\(getpid()).sock"
+  unlink(sock)
+  let gvproxy = Process()
+  gvproxy.executableURL = URL(fileURLWithPath: "/bin/sh")
+  // libkrun ends this process with _exit, so a watchdog stops gvproxy once the VM host is gone.
+  gvproxy.arguments = ["-c", """
+    "$0" -listen-vfkit "unixgram://$1" -ssh-port -1 -log-file "$1.log" & g=$!
+    while kill -0 "$2" 2>/dev/null && kill -0 $g 2>/dev/null; do sleep 1; done
+    kill $g 2>/dev/null; rm -f "$1" "$1.log"
+    """, exeDir + "/gvproxy", sock, String(getpid())]
+  do { try gvproxy.run() } catch { fail(6, "gvproxy: \(error)") }
+  var waited = 0
+  while access(sock, F_OK) != 0 {
+    if waited >= 50 || !gvproxy.isRunning { fail(6, "gvproxy did not start, see \(sock).log") }
+    usleep(100_000); waited += 1
+  }
+  // No offloads: gvproxy takes ordinary MTU-sized frames.
+  let mac: [UInt8] = [0x5a, 0x94, 0xef, 0xe4, 0x0c, 0xee]
+  let net = mac.withUnsafeBufferPointer {
+    krun_net_device_new_unixgram_path(kstr("net0"), kstr(sock), KrunBytes(data: $0.baseAddress, len: 6), 0,
+                                      UInt32(KRUN_NET_FLAGS_VFKIT), &err)
+  }
+  add(net, "network")
 }
 // Fedora's vmlinuz is an EFI zboot image; our libkrun's PE loader reads its header (gzip or zstd payload).
 let payload = made(krun_payload_load_external(kstr(path("vmlinuz")), UInt32(KRUN_KERNEL_FORMAT_PE_GZ),

@@ -18,7 +18,7 @@ for p in "$HERE"/patches/*.patch; do
   [ -e "$p" ] || continue
   git -C "$SRC" am -q --committer-date-is-author-date "$p" || { git -C "$SRC" am --abort; echo "patch failed: $p" >&2; exit 1; }
 done
-(cd "$SRC" && PATH=$(dirname "$CARGO"):$PATH "$CARGO" build --release -p libkrun --no-default-features --features blk,ffi)
+(cd "$SRC" && PATH=$(dirname "$CARGO"):$PATH "$CARGO" build --release -p libkrun --no-default-features --features blk,net,ffi)
 mkdir -p "$OUT/include"
 cp "$SRC/target/release/libkrun.dylib" "$OUT/libkrun.1.dylib"
 install_name_tool -id @rpath/libkrun.1.dylib "$OUT/libkrun.1.dylib"

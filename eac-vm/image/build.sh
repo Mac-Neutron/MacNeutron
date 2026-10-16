@@ -59,12 +59,13 @@ cp "$WORK/packages.lock" "$OUT/packages.lock"
 cp "$WORK/root/lib/modules/$KVER/vmlinuz" "$OUT/vmlinuz"
 sudo rm -f "$WORK/root/lib/modules/$KVER/vmlinuz"  # it boots from outside the image
 for b in FEX FEXServer FEXBash FEXGetConfig FEXpidof; do sudo install -m755 "$FEX_BIN/$b" "$WORK/root/usr/bin/"; done
+sudo rm -f "$WORK/root/etc/resolv.conf"  # ours replaces whatever the packages left, a symlink included
 sudo cp -R "$HERE/rootfs/." "$WORK/root/"
-sudo chown -R root:root "$WORK/root/etc/fstab" "$WORK/root/etc/asound.conf" "$WORK/root/etc/systemd/system" "$WORK/root/usr/libexec/mn-runner" \
+sudo chown -R root:root "$WORK/root/etc/fstab" "$WORK/root/etc/asound.conf" "$WORK/root/etc/resolv.conf" "$WORK/root/etc/systemd/system" "$WORK/root/usr/libexec/mn-runner" \
   "$WORK/root/usr/libexec/mn-tso-check" "$WORK/root/usr/share/fex-emu/Config.json"
 sudo mkdir -p "$WORK/root/usr/share/fex-emu/RootFS/fedora" "$WORK/root/mnt/share" "$WORK/root/mnt/games" "$WORK/root/opt/mn-wine"
 sudo gcc -O2 -pthread -o "$WORK/root/usr/libexec/tso-litmus" "$HERE/tso-litmus.c"
-sudo systemctl --root="$WORK/root" enable mn-runner.service mn-tso-check.service
+sudo systemctl --root="$WORK/root" enable mn-runner.service mn-tso-check.service mn-net.service
 sudo systemd-hwdb update --root="$WORK/root"  # its scriptlet cannot write hwdb.bin inside the install root
 sudo rm -f "$OUT/base.erofs"; sudo mkfs.erofs -L mn-base -zlz4hc "$OUT/base.erofs" "$WORK/root" > /dev/null
 
@@ -87,6 +88,6 @@ fi
 
 # rd.*: an initrd that cannot find or mount its root reboots after 30 s (ending the host) instead of waiting forever
 # or opening a shell.
-printf '%s\n' "root=LABEL=mn-base rootfstype=erofs ro systemd.volatile=overlay lockdown=integrity module.sig_enforce=1 rd.timeout=30 rd.shell=0 rd.emergency=reboot panic=5 console=hvc0" > "$OUT/cmdline.txt"
+printf '%s\n' "root=LABEL=mn-base rootfstype=erofs ro systemd.volatile=overlay lockdown=integrity module.sig_enforce=1 rd.timeout=30 rd.shell=0 rd.emergency=reboot panic=5 console=hvc0 net.ifnames=0" > "$OUT/cmdline.txt"
 file "$OUT/vmlinuz"
 ls -la "$OUT"
