@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include "client.h"
 
@@ -39,12 +41,18 @@ static void drop(void) { if (conn >= 0) close(conn); conn = -1; }
 static int ensure_connected(void) {
     if (conn >= 0) return 0;
     if (!connect_fn || (conn = connect_fn()) < 0) { conn = -1; return -1; }
+    /* The handshake is bounded (2 s): a transport can accept the connection with nobody behind it (libkrun's vsock does
+     * when mn-steam-host is gone), and a forwarded call must fail, not hang. Calls themselves are not bounded. */
+    struct timeval two = { 2, 0 }, none = { 0, 0 };
+    setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &two, sizeof two);
     uint32_t mine = mn_table_checksum(mn_calls, mn_ncalls), theirs = 0;
     if (mn_write_full(conn, &mine, 4) || mn_read_full(conn, &theirs, 4) || theirs != mine) {
-        fprintf(stderr, "mn-steam: host table %08x differs from ours %08x\n", theirs, mine);
+        if (theirs && theirs != mine) fprintf(stderr, "mn-steam: host table %08x differs from ours %08x\n", theirs, mine);
+        else fprintf(stderr, "mn-steam: no answer from the host\n");
         drop();
         return -1;
     }
+    setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &none, sizeof none);
     return 0;
 }
 

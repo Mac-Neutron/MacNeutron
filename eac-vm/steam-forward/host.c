@@ -1,5 +1,6 @@
 /* mn-steam-host: runs the guest's forwarded lsteamclient Unix calls against the Mac's Steam (spec §5.9).
  *   mn-steam-host --socket <path> --appid <id> --map <host dir>=<guest dir> [--client-dir <Mac Steam folder>]
+ *                 [--parent <pid>]
  * It loads the copy of MacNeutron's macOS lsteamclient.so beside it (whose ntdll.so imports resolve to our stand-ins,
  * host_wine.c), which loads Mac Steam's steamclient.dylib. One thread per connection: each guest thread gets its own,
  * so replies never cross. A malformed message closes that connection. Exit 2 on bad arguments, 3 when the Mac Steam
@@ -63,13 +64,21 @@ static void *serve(void *arg) {
     return NULL;
 }
 
+/* --parent: exit when the VM host is gone, however it ended. */
+static void *watch_parent(void *arg) {
+    pid_t parent = (pid_t)(intptr_t)arg;
+    while (kill(parent, 0) == 0 || errno == EPERM) sleep(1);
+    _exit(0);
+}
+
 int main(int argc, char **argv) {
-    const char *sock = NULL, *appid = NULL, *map = NULL, *client_dir = NULL;
+    const char *sock = NULL, *appid = NULL, *map = NULL, *client_dir = NULL, *parent = NULL;
     for (int i = 1; i + 1 < argc; i += 2) {
         if (!strcmp(argv[i], "--socket")) sock = argv[i + 1];
         else if (!strcmp(argv[i], "--appid")) appid = argv[i + 1];
         else if (!strcmp(argv[i], "--map")) map = argv[i + 1];
         else if (!strcmp(argv[i], "--client-dir")) client_dir = argv[i + 1];
+        else if (!strcmp(argv[i], "--parent")) parent = argv[i + 1];
         else { fprintf(stderr, "mn-steam-host: unknown option %s\n", argv[i]); return 2; }
     }
     const char *eq = map ? strchr(map, '=') : NULL;
@@ -104,6 +113,7 @@ int main(int argc, char **argv) {
     }
 
     signal(SIGPIPE, SIG_IGN);
+    if (parent) { pthread_t w; pthread_create(&w, NULL, watch_parent, (void *)(intptr_t)atoi(parent)); pthread_detach(w); }
     int s = socket(AF_UNIX, SOCK_STREAM, 0);
     struct sockaddr_un a = { .sun_family = AF_UNIX };
     if (strlen(sock) >= sizeof a.sun_path) { fprintf(stderr, "mn-steam-host: socket path too long\n"); return 2; }

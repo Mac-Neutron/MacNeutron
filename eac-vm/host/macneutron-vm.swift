@@ -1,5 +1,9 @@
 // MacNeutronVM: boots the EAC guest (Fedora's signed kernel, our EROFS images) in a libkrun microVM, in this process.
 //   macneutron-vm --images <dir> --share <dir> [--cpus N] [--ram-mib M] [--console <file>] [--timeout <s>]
+//                 [--steam-appid <id> [--steam-map <host dir>=<guest dir>]]
+// --steam-appid starts mn-steam-host (steam-forward/host/ beside this binary) for the guest's Steam forwarding
+// (spec §5.9) and maps guest vsock port 5101 to it; the map defaults to the Mac Steam library's common folder as
+// /mnt/games.
 // <dir> holds eac-vm/image/build.sh's output. The share is virtiofs tag `share` (/mnt/share in the guest). The process
 // exits when the guest powers off.
 import Foundation
@@ -41,6 +45,9 @@ let cpus = Int(opts["--cpus"] ?? "") ?? defaultCPUs()
 let ramMiB = UInt32(opts["--ram-mib"] ?? "") ?? 8192
 let console = opts["--console"] ?? share + "/console.log"
 let timeout = Int(opts["--timeout"] ?? "") ?? 0  // seconds; 0 = run until the guest stops
+let steamAppID = opts["--steam-appid"]
+let steamMap = opts["--steam-map"]
+  ?? FileManager.default.homeDirectoryForCurrentUser.path + "/Library/Application Support/Steam/steamapps/common=/mnt/games"
 func path(_ n: String) -> String { images + "/" + n }
 
 for n in ["vmlinuz", "initramfs.img", "cmdline.txt", "base.erofs", "x86-64-rootfs.erofs", "state.img"]
@@ -66,6 +73,26 @@ check(krun_add_disk2(id, "x86-64", path("x86-64-rootfs.erofs"), UInt32(KRUN_DISK
 check(krun_add_disk2(id, "state", path("state.img"), UInt32(KRUN_DISK_FORMAT_RAW), false), "state.img")
 check(krun_add_virtiofs(id, "share", share), "share")
 check(krun_disable_implicit_vsock(id), "vsock")
+// Steam forwarding: mn-steam-host serves the guest's lsteamclient calls against the Mac's Steam (spec §5.9).
+var steamHostPID: pid_t = 0
+if let appid = steamAppID {
+  let exeDir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().path
+  let sock = NSTemporaryDirectory() + "mn-steam-\(getpid()).sock"
+  unlink(sock)
+  let host = Process()
+  host.executableURL = URL(fileURLWithPath: exeDir + "/steam-forward/host/mn-steam-host")
+  host.arguments = ["--socket", sock, "--appid", appid, "--map", steamMap, "--parent", String(getpid())]
+  do { try host.run() } catch { fail(5, "mn-steam-host: \(error)") }
+  steamHostPID = host.processIdentifier
+  atexit { if steamHostPID > 0 { kill(steamHostPID, SIGTERM) } }
+  var waited = 0
+  while access(sock, F_OK) != 0 {
+    if waited >= 50 || !host.isRunning { fail(5, "mn-steam-host did not start") }
+    usleep(100_000); waited += 1
+  }
+  check(krun_add_vsock(id, 0), "vsock device")
+  check(krun_add_vsock_port2(id, 5101, sock, false), "vsock port 5101")
+}
 check(krun_set_console_output(id, console), "console")
 FileHandle.standardError.write("macneutron-vm: \(cpus) vCPUs, \(ramMiB) MiB\n".data(using: .utf8)!)
 if timeout > 0 {

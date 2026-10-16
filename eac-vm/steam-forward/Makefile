@@ -14,7 +14,7 @@ marshal-test: $(OUT)/marshal-test
 LSC ?= ../../build/wine-arm64-src/lsteamclient/lsteamclient
 WINEINC ?= ../../build/wine-arm64-src/wine/include
 MAC_UNIXLIB ?= ../../build/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/lsteamclient.so
-LSCFLAGS = -DWINE_UNIX_LIB -I. -I$(LSC) -I$(WINEINC) -Wno-unused-parameter -Wno-sign-compare
+LSCFLAGS = -DWINE_UNIX_LIB -I. -I$(LSC) -I$(WINEINC) -Wno-unused-parameter -Wno-sign-compare -Wno-pragma-pack -Wno-macro-redefined
 
 $(OUT)/descriptors.c: gen.py $(LSC)/unixlib_generated.h $(LSC)/unixlib.h
 	python3 -I gen.py $(LSC) $(OUT)
