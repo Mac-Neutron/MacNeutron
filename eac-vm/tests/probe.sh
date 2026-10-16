@@ -14,8 +14,10 @@ mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
 cp /opt/mn-wine/lib/wine/x86_64-windows/lsteamclient.dll "$STEAM/steamclient64.dll"
 # To a file, not $(...): Wine's services outlive a killed launcher and would hold the pipe open.
-timeout -s KILL 120 wine 'C:\Program Files (x86)\Steam\steam.exe' 'Z:\mnt\share\bin\steamprobe.exe' \
+timeout -s KILL ${PROBE_TIMEOUT:-120} wine 'C:\Program Files (x86)\Steam\steam.exe' 'Z:\mnt\share\bin\steamprobe.exe' \
   'Z:\mnt\share\bin\steam_api64.dll' fault > /tmp/probe.out 2>&1
+ran=$?  # 137: killed, the probe never finished (an assertion dialog waits on the invisible display)
+echo "probe exit: $ran"
 rows=$(LC_ALL=C tr -d '\r' < /tmp/probe.out | LC_ALL=C grep -E '^(load|init|SteamUser|auth ticket|fault|steamid)' |
   LC_ALL=C sed -E 's/^steamid: [1-9][0-9]*$/steamid ok/; s/7656119[0-9]{10}/<steamid>/g')
 printf '%s\n' "$rows"
@@ -26,8 +28,8 @@ lang=$(timeout -s KILL 60 wine reg query 'HKCU\Software\Valve\Steam' /v language
 echo "registry language value: $lang"
 wineserver -k
 if [ "$EXPECT" = ok ]; then
-  printf '%s\n' "$rows" | grep -q '^init: ok' && printf '%s\n' "$rows" | grep -q '^steamid ok' &&
+  [ "$ran" != 137 ] && printf '%s\n' "$rows" | grep -q '^init: ok' && printf '%s\n' "$rows" | grep -q '^steamid ok' &&
     printf '%s\n' "$rows" | grep -q '^auth ticket: handle [1-9][0-9]*, 234 bytes' && [ "$lang" -ge 1 ]
 else
-  ! printf '%s\n' "$rows" | grep -q '^init: ok' && grep -q 'mn-steam' /tmp/probe.out && [ "$lang" = 0 ]
+  [ "$ran" != 137 ] && printf '%s\n' "$rows" | grep -q '^init: FAIL' && grep -q 'mn-steam' /tmp/probe.out && [ "$lang" = 0 ]
 fi
