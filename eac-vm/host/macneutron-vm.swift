@@ -1,4 +1,5 @@
 // MacNeutronVM: boots the EAC guest (Fedora's signed kernel, our EROFS images) in a libkrun microVM, in this process.
+// The guest's virtio-gpu has the dxmt context (spec §5.6), served by the Metal transport's executor in this process.
 //   macneutron-vm --images <dir> --share <dir> [--cpus N] [--ram-mib M] [--console <file>] [--timeout <s>]
 //                 [--steam-appid <id> [--steam-map <host dir>=<guest dir>]]
 // --steam-appid starts mn-steam-host (steam-forward/host/ beside this binary) for the guest's Steam forwarding
@@ -108,6 +109,9 @@ if access(games, R_OK) == 0 { add(krun_fs_device_new_read_only(kstr("games"), ks
 add(krun_rng_device_new(&err), "rng")
 // Free page reporting gives the guest's freed memory back to macOS (our libkrun's balloon patch).
 add(krun_balloon_device_new(&err), "balloon")
+// The Metal transport (spec §5.6): virtio-gpu with the dxmt context and an 8 GiB host-visible window for its blobs.
+mn_executor_start()
+add(krun_gpu_device_without_display(8 << 30), "gpu")
 // Steam forwarding: mn-steam-host serves the guest's lsteamclient calls against the Mac's Steam (spec §5.9).
 var steamHostPID: pid_t = 0
 if let appid = steamAppID {
@@ -173,4 +177,10 @@ if timeout > 0 {
     _exit(4)
   }
 }
-krun_vmm_run(made(krun_vmm_builder_build(&builder, &err), "build the VM"))
+let vmm = made(krun_vmm_builder_build(&builder, &err), "build the VM")
+// The VM runs off the main thread: the executor needs the main queue for Metal's main-thread calls (spec §5.6).
+Thread.detachNewThread {
+  krun_vmm_run(vmm)
+  exit(0)
+}
+dispatchMain()

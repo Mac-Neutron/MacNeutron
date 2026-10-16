@@ -1,10 +1,10 @@
-From 9bb9fb37922ab713061dacd2871e4680ff104bf2 Mon Sep 17 00:00:00 2001
+From 689a3c697beef11dd492d8cf9bc1095b413624e0 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Fri, 16 Oct 2026 11:36:34 -0400
-Subject: [PATCH 5/5] virtio/gpu: a dxmt context in place of rutabaga_gfx
+Subject: [PATCH 5/6] virtio/gpu: a dxmt context in place of rutabaga_gfx
 
 MacNeutron's EAC microVM forwards DXMT's Metal calls from the guest to the
-host through a virtio-gpu context type, dxmt (capset 63). rutabaga_gfx needs
+host through a virtio-gpu context type, dxmt (capset 24). rutabaga_gfx needs
 virglrenderer and keeps its component traits private, so a stand-in crate,
 src/rutabaga_dxmt (patched in for rutabaga_gfx), implements the API subset
 the gpu device uses: dxmt contexts, HOST3D blobs as 16 KiB-aligned host
@@ -13,16 +13,18 @@ memory, command buffers and fences handed to callbacks the VM host registers
 
 The macOS blob map refuses an offset off a host page (Hypervisor.framework
 maps whole pages), and GpuDevice::without_display builds a device without
-scanouts.
+scanouts or virgl capsets, so the device offers one capset: the context's.
 ---
  Cargo.lock                               |  72 +--
  Cargo.toml                               |   5 +
  include/libkrun.h                        |   2 +
- src/devices/src/virtio/gpu/virtio_gpu.rs |  18 +
- src/libkrun/src/api/device_builders.rs   |  16 +
+ src/devices/src/virtio/gpu/device.rs     |  16 +
+ src/devices/src/virtio/gpu/mod.rs        |   1 +
+ src/devices/src/virtio/gpu/virtio_gpu.rs |  20 +-
+ src/libkrun/src/api/device_builders.rs   |  19 +
  src/rutabaga_dxmt/Cargo.toml             |  15 +
- src/rutabaga_dxmt/src/lib.rs             | 620 +++++++++++++++++++++++
- 7 files changed, 684 insertions(+), 64 deletions(-)
+ src/rutabaga_dxmt/src/lib.rs             | 621 +++++++++++++++++++++++
+ 9 files changed, 706 insertions(+), 65 deletions(-)
  create mode 100644 src/rutabaga_dxmt/Cargo.toml
  create mode 100644 src/rutabaga_dxmt/src/lib.rs
 
@@ -224,10 +226,63 @@ index 9bef7493..2139fe1e 100644
  void krun_gpu_device_destroy(KrunGpuDevice handle);
  typedef void (*krun_gpu_device_destroy_fn)(KrunGpuDevice handle);
  
+diff --git a/src/devices/src/virtio/gpu/device.rs b/src/devices/src/virtio/gpu/device.rs
+index 11a2d9c1..329866fc 100644
+--- a/src/devices/src/virtio/gpu/device.rs
++++ b/src/devices/src/virtio/gpu/device.rs
+@@ -246,6 +246,7 @@ impl VirtioDevice for Gpu {
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++    use super::super::VIRGLRENDERER_NO_VIRGL;
+     use crate::display::NoopDisplayBackend;
+     use krun_display::IntoDisplayBackend;
+ 
+@@ -268,4 +269,19 @@ mod tests {
+         let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u32;
+         assert_eq!(u32::from_le_bytes(data), page_size);
+     }
++
++    #[test]
++    fn no_virgl_offers_one_capset() {
++        let gpu = Gpu::new(
++            VIRGLRENDERER_NO_VIRGL,
++            Box::new([]),
++            NoopDisplayBackend::into_display_backend(None),
++            #[cfg(target_os = "macos")]
++            crossbeam_channel::unbounded().0,
++        )
++        .unwrap();
++        let mut data = [0u8; 4];
++        gpu.read_config(12, &mut data);
++        assert_eq!(u32::from_le_bytes(data), 1);
++    }
+ }
+diff --git a/src/devices/src/virtio/gpu/mod.rs b/src/devices/src/virtio/gpu/mod.rs
+index 649638f0..f2ac683e 100644
+--- a/src/devices/src/virtio/gpu/mod.rs
++++ b/src/devices/src/virtio/gpu/mod.rs
+@@ -7,6 +7,7 @@ use super::descriptor_utils::Error as DescriptorError;
+ 
+ pub use self::defs::uapi::VIRTIO_ID_GPU as TYPE_GPU;
+ pub use self::device::Gpu;
++pub use self::virtio_gpu::VIRGLRENDERER_NO_VIRGL;
+ 
+ mod defs {
+     pub const GPU_DEV_ID: &str = "virtio_gpu";
 diff --git a/src/devices/src/virtio/gpu/virtio_gpu.rs b/src/devices/src/virtio/gpu/virtio_gpu.rs
-index fa09f59b..bf24148d 100644
+index fa09f59b..bdc379d6 100644
 --- a/src/devices/src/virtio/gpu/virtio_gpu.rs
 +++ b/src/devices/src/virtio/gpu/virtio_gpu.rs
+@@ -51,7 +51,7 @@ use crate::virtio::{InterruptTransport, VirtioShmRegion};
+ const VIRGLRENDERER_USE_EGL: u32 = 1 << 0;
+ const VIRGLRENDERER_USE_GLES: u32 = 1 << 4;
+ const VIRGLRENDERER_VENUS: u32 = 1 << 6;
+-const VIRGLRENDERER_NO_VIRGL: u32 = 1 << 7;
++pub const VIRGLRENDERER_NO_VIRGL: u32 = 1 << 7;
+ const VIRGLRENDERER_RENDER_SERVER: u32 = 1 << 9;
+ const VIRGLRENDERER_DRM: u32 = 1 << 10;
+ 
 @@ -943,6 +943,11 @@ impl VirtioGpu {
              .get_mut(&resource_id)
              .ok_or(ErrInvalidResourceId)?;
@@ -268,21 +323,23 @@ index fa09f59b..bf24148d 100644
      fn checked_blob_map_addr_rejects_out_of_range_and_wrapping_offsets() {
          use super::checked_blob_map_addr;
 diff --git a/src/libkrun/src/api/device_builders.rs b/src/libkrun/src/api/device_builders.rs
-index 71936050..7529ce39 100644
+index 71936050..e4c4e16e 100644
 --- a/src/libkrun/src/api/device_builders.rs
 +++ b/src/libkrun/src/api/device_builders.rs
-@@ -22,6 +22,10 @@ use crate::vmm::builder::{attach_mmio_device, setup_terminal_raw_mode};
+@@ -22,6 +22,12 @@ use crate::vmm::builder::{attach_mmio_device, setup_terminal_raw_mode};
  use crate::vmm::device_manager::shm::ShmManager;
  #[cfg(any(feature = "gpu", feature = "vhost-user"))]
  use devices::display::{DisplayInfo, DisplayInfoEdid, PhysicalSize};
 +#[cfg(feature = "gpu")]
 +use devices::display::NoopDisplayBackend;
 +#[cfg(feature = "gpu")]
++use devices::virtio::gpu::VIRGLRENDERER_NO_VIRGL;
++#[cfg(feature = "gpu")]
 +use krun_display::IntoDisplayBackend;
  use devices::legacy::IrqChip;
  #[cfg(feature = "blk")]
  use devices::virtio::block::{DiskFormat, SyncMode};
-@@ -1646,6 +1650,18 @@ impl GpuDevice {
+@@ -1646,6 +1652,19 @@ impl GpuDevice {
          self.shm_size = size;
          self
      }
@@ -290,7 +347,8 @@ index 71936050..7529ce39 100644
 +    /// A gpu device without scanouts, for a guest that only uses its contexts and blobs.
 +    pub fn without_display(shm_size: usize) -> Self {
 +        Self {
-+            virgl_flags: 0,
++            // No virgl capsets: the device then offers one, the context's.
++            virgl_flags: VIRGLRENDERER_NO_VIRGL,
 +            backend: DisplayBackend {
 +                inner: NoopDisplayBackend::into_display_backend(None),
 +                displays: Vec::new(),
@@ -324,12 +382,12 @@ index 00000000..3c2d3057
 +log = "0.4"
 diff --git a/src/rutabaga_dxmt/src/lib.rs b/src/rutabaga_dxmt/src/lib.rs
 new file mode 100644
-index 00000000..42bf2683
+index 00000000..3a0c604e
 --- /dev/null
 +++ b/src/rutabaga_dxmt/src/lib.rs
-@@ -0,0 +1,620 @@
+@@ -0,0 +1,621 @@
 +//! MacNeutron's stand-in for rutabaga_gfx 0.1.85: the subset of its API that libkrun's virtio-gpu device uses, with
-+//! one context type, dxmt (capset 63). Blobs are host memory the VM host's executor shares with the guest; command
++//! one context type, dxmt (capset 24). Blobs are host memory the VM host's executor shares with the guest; command
 +//! buffers and fences go to the callbacks it registers with `mn_dxmt_set_ops`, and it completes fences with
 +//! `mn_dxmt_fence_done`. No virglrenderer, no scanouts: 2D, 3D and transfer calls succeed and do nothing.
 +//! macOS only (the export handle carries no descriptor).
@@ -345,7 +403,8 @@ index 00000000..42bf2683
 +
 +use log::warn;
 +
-+pub const MN_CAPSET_DXMT: u32 = 63;
++// Under 32: the guest driver builds its capset mask with `1 << id` on an int.
++pub const MN_CAPSET_DXMT: u32 = 24;
 +// The host page size (Apple silicon): hv_vm_map needs blobs that start and end on it.
 +const BLOB_ALIGN: u64 = 16384;
 +const CONTEXT_INIT_CAPSET_ID_MASK: u32 = 0xff;

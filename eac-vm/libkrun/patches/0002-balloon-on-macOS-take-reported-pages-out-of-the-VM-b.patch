@@ -1,7 +1,7 @@
 From c9f8a378b742a6a844fa0a14ecf0a506ad24578b Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Thu, 15 Oct 2026 20:58:17 -0400
-Subject: [PATCH 2/5] balloon: on macOS, take reported pages out of the VM
+Subject: [PATCH 2/6] balloon: on macOS, take reported pages out of the VM
  before freeing them
 
 While Hypervisor.framework maps a page a vCPU has written, madvise frees nothing (MADV_FREE and MADV_FREE_REUSABLE

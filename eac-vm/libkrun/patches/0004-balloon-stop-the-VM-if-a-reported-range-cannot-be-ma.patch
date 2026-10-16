@@ -1,7 +1,7 @@
 From a2424a66765b09015a57784f89183c4b5f6e496b Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Thu, 15 Oct 2026 21:38:08 -0400
-Subject: [PATCH 4/5] balloon: stop the VM if a reported range cannot be mapped
+Subject: [PATCH 4/6] balloon: stop the VM if a reported range cannot be mapped
  back
 
 After patch 0002 unmaps a reported range, a failed hv_vm_map only logged, and the descriptor went back to the guest
