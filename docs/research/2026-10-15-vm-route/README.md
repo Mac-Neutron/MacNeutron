@@ -141,7 +141,7 @@ Boot to the test runner: 3.56 s.
 |---|---|
 | `vmlinuz` | 16.5 MB |
 | `initramfs.img` (dracut) | 41.3 MB |
-| `base.erofs` (systemd, udev, kernel modules, FEX) | 279.9 MB |
+| `base.erofs` (systemd, udev, kernel modules, FEX; 107 pinned packages) | 216.5 MB |
 | `x86-64-rootfs.erofs` (Fedora's FEX RootFS) | 1,643 MB |
 | `state.img` | 16 GiB sparse, 6.5 MB used |
 

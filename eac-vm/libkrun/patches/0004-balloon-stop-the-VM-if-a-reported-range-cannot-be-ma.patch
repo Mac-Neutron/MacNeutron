@@ -1,0 +1,42 @@
+From 84ba9c7eb625549b86b7651ee74c5b3b38a35852 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Thu, 15 Oct 2026 21:38:08 -0400
+Subject: [PATCH 4/4] balloon: stop the VM if a reported range cannot be mapped
+ back
+
+After patch 0002 unmaps a reported range, a failed hv_vm_map only logged, and the descriptor went back to the guest
+with the pages unmapped: its next accesses became MMIO exits to no device (reads garbage, writes dropped). Abort
+instead. An unmap Hypervisor.framework refuses (e.g. a range below the 16 KB host page) now warns once.
+---
+ src/devices/src/virtio/balloon/device.rs | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/devices/src/virtio/balloon/device.rs b/src/devices/src/virtio/balloon/device.rs
+index f2a5622b..c0b98c7f 100644
+--- a/src/devices/src/virtio/balloon/device.rs
++++ b/src/devices/src/virtio/balloon/device.rs
+@@ -110,6 +110,8 @@ impl Balloon {
+                     use hvf::bindings::{
+                         hv_vm_map, hv_vm_unmap, HV_MEMORY_EXEC, HV_MEMORY_READ, HV_MEMORY_WRITE,
+                     };
++                    static UNMAP_REFUSED: std::sync::atomic::AtomicBool =
++                        std::sync::atomic::AtomicBool::new(false);
+                     let len: usize = desc.len.try_into().unwrap();
+                     if hv_vm_unmap(desc.addr.0, len) == 0 {
+                         libc::madvise(host_addr as *mut libc::c_void, len, libc::MADV_FREE);
+@@ -120,8 +122,14 @@ impl Balloon {
+                             (HV_MEMORY_READ | HV_MEMORY_WRITE | HV_MEMORY_EXEC).into(),
+                         ) != 0
+                         {
+-                            error!("balloon: cannot map {:?}+{len} back into the VM", desc.addr);
++                            // The guest would get these pages back unmapped: its accesses would turn into MMIO to
++                            // nothing, reads garbage and writes lost. Stop the VM rather than run it corrupted.
++                            error!("balloon: cannot map {:?}+{len} back into the VM; stopping", desc.addr);
++                            std::process::abort();
+                         }
++                    } else if !UNMAP_REFUSED.swap(true, std::sync::atomic::Ordering::Relaxed) {
++                        // e.g. a range below the host's 16 KB page: the pages stay charged to the host.
++                        warn!("balloon: Hypervisor.framework refused to unmap {:?}+{len}; reported pages stay charged", desc.addr);
+                     }
+                 }
+             }
