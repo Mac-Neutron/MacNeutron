@@ -1,0 +1,12 @@
+[Unit]
+Description=MacNeutron test runner: runs /mnt/share/run.sh, then powers off
+After=local-fs.target systemd-binfmt.service
+ConditionPathExists=/mnt/share/run.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/mn-runner
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

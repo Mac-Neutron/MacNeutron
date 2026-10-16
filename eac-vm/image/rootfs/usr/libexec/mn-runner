@@ -1,0 +1,7 @@
+#!/bin/sh
+# Runs the host's script from the share as root, keeps its output and status there, and powers the guest off.
+echo "mn-runner: start at $(cut -d' ' -f1 /proc/uptime) s"
+sh /mnt/share/run.sh > /mnt/share/run.log 2>&1
+echo $? > /mnt/share/run.status
+sync
+systemctl poweroff --no-block

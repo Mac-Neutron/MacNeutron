@@ -1,0 +1,10 @@
+# base.erofs (arm64): what milestone 2's gates need. Milestone 3 adds Steam's packages, cage and Xwayland.
+systemd
+systemd-udev
+util-linux
+e2fsprogs
+kmod
+procps-ng
+kernel-modules-core-7.2.10-200.fc44
+fex-emu
+fex-emu-filesystem
