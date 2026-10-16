@@ -68,6 +68,14 @@ config.serialPorts = [serial]
 let share = VZVirtioFileSystemDeviceConfiguration(tag: "share")
 share.share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: dir.appendingPathComponent("share"), readOnly: false))
 var shares: [VZDirectorySharingDeviceConfiguration] = [share]
+// More shares: VM_SHARES="tag=/host/path,tag2=/other/path"
+for item in (ProcessInfo.processInfo.environment["VM_SHARES"] ?? "").split(separator: ",") {
+  let parts = item.split(separator: "=", maxSplits: 1).map(String.init)
+  guard parts.count == 2 else { continue }
+  let d = VZVirtioFileSystemDeviceConfiguration(tag: parts[0])
+  d.share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: URL(fileURLWithPath: parts[1]), readOnly: false))
+  shares.append(d)
+}
 if ProcessInfo.processInfo.environment["VM_ROSETTA"] == "1" {
   let rosetta = VZVirtioFileSystemDeviceConfiguration(tag: "rosetta")
   rosetta.share = try! VZLinuxRosettaDirectoryShare()
