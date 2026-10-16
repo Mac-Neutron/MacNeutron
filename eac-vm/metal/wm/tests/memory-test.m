@@ -25,7 +25,9 @@
  *                         device pointer is nowhere in the reply, and the drawable size is 320x180
  *   nil-drawable          a layer with no device: nextDrawable gives handle 0 and status 0 (in a window, a 0x0
  *                         drawable takes the view's size instead)
- *   view-left             a context ending with a view still bound leaves no metal view in the window */
+ *   view-left             a context ending with a view still bound leaves no metal view in the window
+ *   hud                   DeveloperHUDProperties_instance (62), which every swapchain asks for, answers nil here
+ *                         without a failed call */
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
@@ -479,6 +481,13 @@ static NTSTATUS_T call_on(struct mn_wm_ctx *c, unsigned slot, void *params) {
     return mn_wm_unpack(slot, params, &o, reply, n);
 }
 
+static void hud(void) {
+    uint64_t before = loop_ctx.failures;
+    struct unixcall_generic_obj_ret h = {0};
+    CHECK(W(62, &h) == 0 && h.ret == 0); /* no HUD in a process like this one or macneutron-vm */
+    CHECK(loop_ctx.failures == before);
+}
+
 static void view_left(void) {
     struct mn_ht_rings rings = {NULL, no_marks, all_passed};
     struct mn_wm_ctx c2 = {.ctx_id = 2, .ht = mn_ht_new(&rings, mn_wm_release_object)};
@@ -506,7 +515,7 @@ static void *run(void *arg) {
         {"heap", heap},               {"wmt-memory", wmt_memory}, {"big-blob", big_blob},
         {"sequence", sequence},
         {"present", present},         {"probe", probe},           {"props", props},
-        {"nil-drawable", nil_drawable}, {"view-left", view_left},
+        {"nil-drawable", nil_drawable}, {"view-left", view_left}, {"hud", hud},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         @autoreleasepool {

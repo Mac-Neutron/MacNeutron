@@ -201,7 +201,7 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
       HOUT(unixcall_nsstring_string, ret, AR)),
     C(61, NSString_alloc_init, unixcall_nsstring_string, Q, MN_SP_NONE, STR(unixcall_nsstring_string, buffer_ptr),
       HOUT(unixcall_nsstring_string, ret, P1)),
-    C(62, DeveloperHUDProperties_instance, G_R, Q, MN_SP_NONE, HOUT(G_R, ret, BR)),
+    C(62, DeveloperHUDProperties_instance, G_R, S, MN_SP_NONE, HOUT(G_R, ret, BR)), /* nil is an answer (no HUD) */
     C(63, DeveloperHUDProperties_addLabel, unixcall_generic_obj_obj_obj_uint64_ret, S, MN_SP_NONE,
       HIN(unixcall_generic_obj_obj_obj_uint64_ret, handle), HIN(unixcall_generic_obj_obj_obj_uint64_ret, arg0),
       HIN(unixcall_generic_obj_obj_obj_uint64_ret, arg1)),

@@ -4,10 +4,11 @@
 # build/wine-arm64/wine.app in ${TMPDIR}/macneutron dxmt-guest-ref (never a user's; Steam is never started), check.sh's
 # environment, a fresh shader cache per run, the share's timeout as a watchdog. Writes
 # build/eac-vm-work/share/dxmt-ref/<name>.<1|2>.txt, .status (the launcher's exit status, or "timeout") and .time.
+# The 4c gate (present-gate.sh) sets MN_REF_INVOCATIONS (its own programs), MN_REF_OUT and MN_REF_RUNS=1.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 WORK="${TMPDIR:-/tmp}/macneutron dxmt-guest-ref"
-OUT=$ROOT/build/eac-vm-work/share/dxmt-ref
+OUT=${MN_REF_OUT:-$ROOT/build/eac-vm-work/share/dxmt-ref}
 T=$ROOT/dxmt/tests
 I=$ROOT/build/eac-vm-work/share/dxmt-tests
 TO=$(cat "$I/timeout")
@@ -23,12 +24,12 @@ env STEAM_COMPAT_DATA_PATH="$WORK/compat" SteamAppId=0 "$WORK/ours/bin/macneutro
   > /dev/null 2>&1
 while IFS='|' read -r name exe args prefixes; do
   args=$(printf '%s' "$args" | sed "s|@S|Z:$T/shaders|g; s|@T|Z:$T|g")
-  for i in 1 2; do
+  for i in $(seq 1 "${MN_REF_RUNS:-2}"); do
     start=$(now)
     # shellcheck disable=SC2086  # the arguments, one word each
     env STEAM_COMPAT_DATA_PATH="$WORK/compat" SteamAppId=0 MACNEUTRON_GRAPHICS=dxmt MACNEUTRON_NO_STEAM_BRIDGE=1 \
       MACNEUTRON_NO_METALFX=1 DXMT_SHADER_CACHE_PATH="$WORK/cache/$name.$i" DXMT_MAX_ANISOTROPY=0 \
-      "$WORK/ours/bin/macneutron" launch waitforexitandrun "$ROOT/build/dxmt-tests/$exe" $args \
+      "$WORK/ours/bin/macneutron" launch waitforexitandrun "$I/$exe" $args \
       < /dev/null > "$WORK/out" 2>&1 &
     pid=$!
     ( sleep "$TO"; touch "$WORK/timed-out"; kill "$pid" 2> /dev/null ) > /dev/null 2>&1 & dog=$!
@@ -40,4 +41,4 @@ while IFS='|' read -r name exe args prefixes; do
     echo "$start $(now)" | awk '{printf "%.2f\n", $2 - $1}' > "$OUT/$name.$i.time"
   done
   echo "ref: $name $(cat "$OUT/$name.1.time") s, status $(cat "$OUT/$name.1.status")"
-done < "$I/invocations"
+done < "${MN_REF_INVOCATIONS:-$I/invocations}"

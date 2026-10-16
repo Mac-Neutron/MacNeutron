@@ -651,7 +651,7 @@ static const unsigned sync_slots[] = {
     99, 111, 119, 125, 128, 130, 139, 140, 145, 148, 149, 150,  /* data comes back */
     18, 19, 21, 22, 23, 141, 142, 143,                          /* GPU addresses or resource ids */
     25, 29, 34, 35, 98, 112, 113, 131, 132, 144,                /* error handles */
-    56, 89, 115, 116, 127, 151,                                 /* nil is an answer */
+    56, 62, 89, 115, 116, 127, 151,                             /* nil is an answer */
     74, 76, 81, 82, 84, 85,                                     /* SM50 with outputs */
     13, 117, 126,                                               /* blocking */
     67, 71, 72, 93, 97, 101,                                    /* presentation (4c): nil, layer props, display */
@@ -671,7 +671,7 @@ static void modes(void) {
             failures++;
         }
     }
-    CHECK(n[MN_WM_SYNC] == 80 && n[MN_WM_QUEUED] == 67 && n[MN_WM_REFUSED] == 6 && n[MN_WM_LOCAL] == 2);
+    CHECK(n[MN_WM_SYNC] == 81 && n[MN_WM_QUEUED] == 66 && n[MN_WM_REFUSED] == 6 && n[MN_WM_LOCAL] == 2);
 }
 
 int main(void) {

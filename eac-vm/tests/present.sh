@@ -1,0 +1,21 @@
+# Milestone 4c gate, the guest's half: one presenting program from the share's dxmt-tests/ under our Wine, its frames
+# presented in the host's window. present-gate.sh puts `set -- <name> <exe> <arguments...>` before this. Writes
+# /mnt/share/traces/present/<name>.txt, .status (the exit status, or "timeout": a run that lasted the whole timeout)
+# and .time.
+export PATH=/opt/mn-wine/bin:$PATH WINEDEBUG=-all DISPLAY=:0 WINEPREFIX=/home/mn/dxmt DXMT_MAX_ANISOTROPY=0
+T=/mnt/share/dxmt-tests O=/mnt/share/traces/present TO=300
+name=$1 exe=$2; shift 2
+mkdir -p "$O"; rm -f "$O/$name".*
+Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
+WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1
+cd "$T"
+start=$(date +%s%N)
+DXMT_SHADER_CACHE_PATH=/home/mn/dxmt-cache/present-$name timeout -k 10 "$TO" wine "$T/$exe" "$@" < /dev/null \
+  > "$O/$name.raw" 2>&1
+rc=$?
+cs=$(( ($(date +%s%N) - start) / 10000000 ))  # the image has no awk
+if [ "$cs" -ge $((TO * 100)) ]; then echo timeout; else echo "$rc"; fi > "$O/$name.status"
+timeout 20 wineserver -k
+tr -d '\r' < "$O/$name.raw" > "$O/$name.txt"; rm -f "$O/$name.raw"
+printf '%d.%02d\n' $((cs / 100)) $((cs % 100)) > "$O/$name.time"
+echo "guest: $name $(cat "$O/$name.time") s, status $(cat "$O/$name.status")"
