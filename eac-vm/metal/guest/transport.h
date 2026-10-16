@@ -1,0 +1,21 @@
+/* The Metal transport's guest side (spec §5.6): one dxmt context per process on /dev/dri/renderD128, and one command
+ * ring per thread (attached on its first call, detached when it exits). x86-64 Linux, under FEX. */
+#ifndef MN_TRANSPORT_H
+#define MN_TRANSPORT_H
+#include <stdint.h>
+
+struct mn_blob { uint32_t gem; uint64_t blob_id, size; void *ptr; };
+
+int mn_open(void);                                   /* once per process: 0 or -errno */
+int mn_blob_alloc(uint64_t size, struct mn_blob *b); /* rounded up to MN_PAGE; guest and host share ptr's memory */
+int mn_blob_free(struct mn_blob *b);                 /* a synchronous MN_OP_BLOB_RELEASE, then GEM_CLOSE */
+int mn_send(uint32_t op, const void *p, uint32_t len); /* asynchronous, on this thread's ring: 0 or -errno */
+/* Synchronous: returns the host's status (negative: an error), with up to cap reply bytes in reply. */
+int mn_call(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap, uint32_t *reply_len);
+
+/* This thread's ring: records sent, and the last one the host finished. */
+void mn_ring_stats(uint64_t *sent, uint64_t *done);
+/* How long mn_call spins on its reply before waiting on a fence (default 50 µs): the calibration knob. */
+void mn_set_spin_us(uint32_t us);
+
+#endif

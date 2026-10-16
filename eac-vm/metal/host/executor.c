@@ -1,11 +1,15 @@
-/* The executor (see executor.h). For now: it tracks contexts and blobs, answers the probe's MN_CTRL_PEEK and completes
- * every fence at once. */
+/* The executor (see executor.h). libkrun's gpu worker thread delivers control messages, fences and blob events, one at
+ * a time; the ring list is that thread's alone. A fence follows the message it belongs to at once, so an MN_CTRL_WAIT
+ * is paired with the next fence; any other fence completes immediately. */
 #include <inttypes.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "executor.h"
-#include "../proto.h"
+#include "../ring.h"
 
 /* libkrun's dxmt context (patch 0005, rutabaga_dxmt's MnDxmtOps): not in libkrun.h, which ffier generates. */
 struct mn_dxmt_ops {
@@ -20,64 +24,248 @@ struct mn_dxmt_ops {
 void mn_dxmt_set_ops(const struct mn_dxmt_ops *ops);
 void mn_dxmt_fence_done(uint32_t ctx_id, uint32_t ring_idx, uint64_t fence_id);
 
-#define MAX_BLOBS 4096
+#define SPIN_NS 2000000ull /* spec §5.6: a consumer spins 2 ms after its last record, then parks */
+#define MAX_WAITERS 64
+
 struct blob { uint32_t ctx_id; uint64_t blob_id; void *ptr; uint64_t size; };
-static struct blob blobs[MAX_BLOBS];
-static unsigned nblobs;
-static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+/* ponytail: a linear scan; a hash map when milestone 4b's thousands of buffers make lookups show up */
+static struct blob *blobs;
+static size_t nblobs, cap_blobs;
+static pthread_mutex_t blob_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static void context_create(void *ctx, uint32_t ctx_id) { (void)ctx; fprintf(stderr, "mn-executor: context %u\n", ctx_id); }
-static void context_destroy(void *ctx, uint32_t ctx_id) { (void)ctx; fprintf(stderr, "mn-executor: context %u gone\n", ctx_id); }
+struct waiter { uint64_t seq, fence_id; uint32_t ring_idx; };
+struct ring {
+    uint32_t ctx_id;
+    uint64_t blob_id, tail;
+    struct mn_ring_view v;
+    pthread_t thread;
+    pthread_mutex_t m;
+    pthread_cond_t c;
+    int wake_pending, stop;
+    atomic_uint nwaiters;
+    struct waiter waiters[MAX_WAITERS];
+    uint64_t state[8];
+    struct ring *next;
+};
+static struct ring *rings;
+static mn_op_fn handler;
+static struct ring *wait_ring; /* the MN_CTRL_WAIT the next fence belongs to */
+static uint64_t wait_seq;
 
-static void blob_created(void *ctx, uint32_t ctx_id, uint64_t blob_id, void *ptr, uint64_t size) {
-    (void)ctx;
-    pthread_mutex_lock(&lock);
-    if (nblobs < MAX_BLOBS) blobs[nblobs++] = (struct blob){ ctx_id, blob_id, ptr, size };
-    else fprintf(stderr, "mn-executor: error: more than %d blobs\n", MAX_BLOBS);
-    pthread_mutex_unlock(&lock);
+static uint64_t now_ns(void) { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }
+
+static void error(const char *what, uint64_t a, uint64_t b) {
+    fprintf(stderr, "mn-executor: error: %s (%" PRIu64 ", %" PRIu64 ")\n", what, a, b);
 }
 
-static void blob_destroyed(void *ctx, uint32_t ctx_id, uint64_t blob_id) {
-    (void)ctx;
-    pthread_mutex_lock(&lock);
-    for (unsigned i = 0; i < nblobs; i++)
-        if (blobs[i].ctx_id == ctx_id && blobs[i].blob_id == blob_id) { blobs[i] = blobs[--nblobs]; break; }
-    pthread_mutex_unlock(&lock);
-}
-
-/* The host address of [offset, offset + len) in a blob, or NULL. */
-static void *blob_at(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len) {
+void *mn_executor_blob(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len) {
     void *p = NULL;
-    pthread_mutex_lock(&lock);
-    for (unsigned i = 0; i < nblobs; i++)
+    pthread_mutex_lock(&blob_lock);
+    for (size_t i = 0; i < nblobs; i++)
         if (blobs[i].ctx_id == ctx_id && blobs[i].blob_id == blob_id) {
             if (offset <= blobs[i].size && len <= blobs[i].size - offset) p = (char *)blobs[i].ptr + offset;
             break;
         }
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(&blob_lock);
     return p;
+}
+
+/* Completes the waits the ring's progress satisfies (all of them when it stops). Under r->m. */
+static void complete_waiters(struct ring *r, int all) {
+    uint64_t done = atomic_load_explicit(&r->v.hdr->done_seq, memory_order_acquire);
+    unsigned n = atomic_load(&r->nwaiters);
+    for (unsigned i = 0; i < n;) {
+        if (all || r->waiters[i].seq <= done) {
+            mn_dxmt_fence_done(r->ctx_id, r->waiters[i].ring_idx, r->waiters[i].fence_id);
+            r->waiters[i] = r->waiters[--n];
+        } else {
+            i++;
+        }
+    }
+    atomic_store(&r->nwaiters, n);
+}
+
+static void run(struct ring *r, const struct mn_rec *rec) {
+    uint32_t op = rec->op & ~MN_REC_SYNC, n = 0;
+    int sync = !!(rec->op & MN_REC_SYNC);
+    int32_t status = 0;
+    if (op != MN_OP_NOP && op != MN_OP_BLOB_RELEASE)
+        status = handler ? handler(r->ctx_id, r->state, op, rec + 1, rec->len, sync ? r->v.reply : NULL,
+                                   sync ? MN_REPLY_BYTES : 0, &n)
+                         : MN_ENOSYS;
+    if (sync) {
+        r->v.hdr->reply_len = n;
+        r->v.hdr->reply_status = status;
+    } else if (status < 0) {
+        error("asynchronous op failed", op, (uint64_t)-status);
+    }
+    mn_ring_done(&r->v, &r->tail, rec);
+    atomic_thread_fence(memory_order_seq_cst); /* done_seq, then nwaiters: pairs with add_waiter */
+    if (atomic_load_explicit(&r->nwaiters, memory_order_relaxed)) {
+        pthread_mutex_lock(&r->m);
+        complete_waiters(r, 0);
+        pthread_mutex_unlock(&r->m);
+    }
+}
+
+static void *consume(void *arg) {
+    struct ring *r = arg;
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+    uint64_t idle = now_ns();
+    for (;;) {
+        const struct mn_rec *rec = mn_ring_next(&r->v, &r->tail);
+        if (rec) {
+            run(r, rec);
+            idle = now_ns();
+            continue;
+        }
+        if (__atomic_load_n(&r->stop, __ATOMIC_ACQUIRE)) return NULL;
+        if (now_ns() - idle < SPIN_NS) {
+            __asm__ volatile("yield");
+            continue;
+        }
+        if (!mn_ring_try_park(&r->v)) continue;
+        pthread_mutex_lock(&r->m);
+        while (!r->wake_pending && !r->stop) pthread_cond_wait(&r->c, &r->m);
+        r->wake_pending = 0;
+        pthread_mutex_unlock(&r->m);
+        mn_ring_unpark(&r->v);
+        idle = now_ns();
+    }
+}
+
+static struct ring *find(uint32_t ctx_id, uint64_t blob_id) {
+    for (struct ring *r = rings; r; r = r->next)
+        if (r->ctx_id == ctx_id && r->blob_id == blob_id) return r;
+    return NULL;
+}
+
+static void attach(uint32_t ctx_id, uint64_t blob_id) {
+    void *p = mn_executor_blob(ctx_id, blob_id, 0, MN_RING_BLOB_BYTES);
+    if (!p || find(ctx_id, blob_id)) return error("attach: not a free ring blob", ctx_id, blob_id);
+    struct ring *r = calloc(1, sizeof *r);
+    r->ctx_id = ctx_id;
+    r->blob_id = blob_id;
+    mn_ring_view_init(&r->v, p);
+    pthread_mutex_init(&r->m, NULL);
+    pthread_cond_init(&r->c, NULL);
+    pthread_create(&r->thread, NULL, consume, r);
+    r->next = rings;
+    rings = r;
+}
+
+static void stop(struct ring *r) {
+    struct ring **pp = &rings;
+    while (*pp != r) pp = &(*pp)->next;
+    *pp = r->next;
+    pthread_mutex_lock(&r->m);
+    r->stop = 1;
+    pthread_cond_signal(&r->c);
+    pthread_mutex_unlock(&r->m);
+    pthread_join(r->thread, NULL);
+    pthread_mutex_lock(&r->m);
+    complete_waiters(r, 1);
+    pthread_mutex_unlock(&r->m);
+    pthread_mutex_destroy(&r->m);
+    pthread_cond_destroy(&r->c);
+    if (wait_ring == r) wait_ring = NULL;
+    free(r);
+}
+
+static void add_waiter(struct ring *r, uint64_t seq, uint32_t ring_idx, uint64_t fence_id) {
+    pthread_mutex_lock(&r->m);
+    unsigned n = atomic_load(&r->nwaiters);
+    if (n == MAX_WAITERS) {
+        pthread_mutex_unlock(&r->m);
+        return mn_dxmt_fence_done(r->ctx_id, ring_idx, fence_id); /* the guest rechecks and waits again */
+    }
+    r->waiters[n] = (struct waiter){ seq, fence_id, ring_idx };
+    atomic_store(&r->nwaiters, n + 1); /* then done_seq: pairs with run() */
+    complete_waiters(r, 0);
+    pthread_mutex_unlock(&r->m);
+}
+
+static void context_create(void *ctx, uint32_t ctx_id) { (void)ctx; fprintf(stderr, "mn-executor: context %u\n", ctx_id); }
+
+static void context_destroy(void *ctx, uint32_t ctx_id) {
+    (void)ctx;
+    for (struct ring *r = rings, *next; r; r = next) {
+        next = r->next;
+        if (r->ctx_id == ctx_id) stop(r);
+    }
+    fprintf(stderr, "mn-executor: context %u gone\n", ctx_id);
+}
+
+static void blob_created(void *ctx, uint32_t ctx_id, uint64_t blob_id, void *ptr, uint64_t size) {
+    (void)ctx;
+    pthread_mutex_lock(&blob_lock);
+    if (nblobs == cap_blobs) blobs = realloc(blobs, (cap_blobs = cap_blobs ? cap_blobs * 2 : 256) * sizeof *blobs);
+    blobs[nblobs++] = (struct blob){ ctx_id, blob_id, ptr, size };
+    pthread_mutex_unlock(&blob_lock);
+}
+
+static void blob_destroyed(void *ctx, uint32_t ctx_id, uint64_t blob_id) {
+    (void)ctx;
+    struct ring *r = find(ctx_id, blob_id);
+    if (r) stop(r); /* a ring blob closed without a detach: its consumer goes before its memory */
+    pthread_mutex_lock(&blob_lock);
+    for (size_t i = 0; i < nblobs; i++)
+        if (blobs[i].ctx_id == ctx_id && blobs[i].blob_id == blob_id) {
+            blobs[i] = blobs[--nblobs];
+            break;
+        }
+    pthread_mutex_unlock(&blob_lock);
 }
 
 static void submit(void *ctx, uint32_t ctx_id, const void *cmd, uint32_t len) {
     (void)ctx;
     struct mn_ctrl c;
-    if (len < sizeof c) { fprintf(stderr, "mn-executor: error: %u-byte command\n", len); return; }
+    wait_ring = NULL;
+    if (len < sizeof c) return error("short control message", ctx_id, len);
     memcpy(&c, cmd, sizeof c);
-    if (c.type != MN_CTRL_PEEK) { fprintf(stderr, "mn-executor: error: command %u\n", c.type); return; }
-    uint64_t *p = blob_at(ctx_id, c.ring_blob, c.arg, sizeof *p);
-    if (!p) { fprintf(stderr, "mn-executor: error: peek outside blob %" PRIu64 "\n", c.ring_blob); return; }
-    if (*p == MN_PROBE_MAGIC) *p = MN_PROBE_MAGIC + 1;
+    struct ring *r = c.type == MN_CTRL_RING_ATTACH || c.type == MN_CTRL_PEEK ? NULL : find(ctx_id, c.ring_blob);
+    switch (c.type) {
+    case MN_CTRL_RING_ATTACH:
+        return attach(ctx_id, c.ring_blob);
+    case MN_CTRL_RING_DETACH:
+        if (r) stop(r);
+        return;
+    case MN_CTRL_WAKE:
+        if (!r) return error("wake: no such ring", ctx_id, c.ring_blob);
+        pthread_mutex_lock(&r->m);
+        r->wake_pending = 1;
+        pthread_cond_signal(&r->c);
+        pthread_mutex_unlock(&r->m);
+        return;
+    case MN_CTRL_WAIT:
+        if (!r) return error("wait: no such ring", ctx_id, c.ring_blob);
+        wait_ring = r;
+        wait_seq = c.arg;
+        return;
+    case MN_CTRL_PEEK: {
+        uint64_t *p = mn_executor_blob(ctx_id, c.ring_blob, c.arg, sizeof *p);
+        if (!p) return error("peek outside a blob", ctx_id, c.ring_blob);
+        if (*p == MN_PROBE_MAGIC) *p = MN_PROBE_MAGIC + 1;
+        return;
+    }
+    default:
+        return error("unknown control message", ctx_id, c.type);
+    }
 }
 
 static void fence(void *ctx, uint32_t ctx_id, uint32_t ring_idx, uint64_t fence_id) {
     (void)ctx;
-    mn_dxmt_fence_done(ctx_id, ring_idx, fence_id);
+    struct ring *r = wait_ring;
+    wait_ring = NULL;
+    if (r && r->ctx_id == ctx_id) add_waiter(r, wait_seq, ring_idx, fence_id);
+    else mn_dxmt_fence_done(ctx_id, ring_idx, fence_id);
 }
 
-void mn_executor_start(void) {
+void mn_executor_start(mn_op_fn h) {
     static const struct mn_dxmt_ops ops = {
         .context_create = context_create, .context_destroy = context_destroy, .blob_created = blob_created,
         .blob_destroyed = blob_destroyed, .submit = submit, .fence = fence,
     };
+    handler = h;
     mn_dxmt_set_ops(&ops);
 }

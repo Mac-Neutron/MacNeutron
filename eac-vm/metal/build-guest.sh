@@ -7,8 +7,11 @@ B="$ROOT/eac-vm/builder.sh"
 OUT=$ROOT/build/eac-vm-work/share/bin
 "$B" sync "$ROOT/eac-vm/metal" /home/bench/mn-metal
 mkdir -p "$OUT"
-for prog in probe; do
-  "$B" ssh "sh ~/mn-sysroot/cc-x86_64.sh -O2 -g -std=gnu11 -Wall -Wextra -I ~/mn-metal -o /tmp/metal-$prog ~/mn-metal/tests/$prog.c -lpthread && cat /tmp/metal-$prog" > "$OUT/metal-$prog.tmp"
+build() {  # <program> <sources relative to eac-vm/metal...>
+  prog=$1; shift
+  "$B" ssh "cd ~/mn-metal && sh ~/mn-sysroot/cc-x86_64.sh -O2 -g -std=gnu11 -Wall -Wextra -I . -o /tmp/metal-$prog $* -lpthread && cat /tmp/metal-$prog" > "$OUT/metal-$prog.tmp"
   mv "$OUT/metal-$prog.tmp" "$OUT/metal-$prog"; chmod +x "$OUT/metal-$prog"
-done
+}
+build probe tests/probe.c
+build transport-test tests/transport-test.c guest/transport.c ring.c
 file "$OUT"/metal-*
