@@ -12,3 +12,5 @@ fex-emu-filesystem
 xorg-x11-server-Xvfb
 alsa-lib
 iproute
+# Development: traces the EAC bootstrapper's Linux system calls under FEX
+strace

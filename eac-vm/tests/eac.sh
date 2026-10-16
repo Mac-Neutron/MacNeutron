@@ -23,7 +23,8 @@ for f in "$G/start_protected_game.exe" "$PROTON_EAC_RUNTIME/v2/lib64/easyantiche
 done
 Xvfb :0 -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &
 mkdir -p /home/mn
-[ -d "$WINEPREFIX" ] || WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -i >/dev/null 2>&1
+# Create, or update after a Wine change, with MacNeutron's override: the Mono prompt would wait on Xvfb.
+WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1
 STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
