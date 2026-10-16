@@ -31,6 +31,8 @@ cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
 cp /mnt/share/valve/steamclient64.dll "$STEAM/steamclient64.dll"
 EACLOG="$WINEPREFIX/drive_c/users/$(id -un)/AppData/Roaming/EasyAntiCheat"
 rm -rf "$EACLOG"
+# The game's own logs too: a log left by an earlier run must not pass for this one.
+rm -rf "$WINEPREFIX/drive_c/users/$(id -un)/AppData/Local/Hemingway/Saved/Logs"
 # Every second, the EAC files each Wine process maps (the client loads late, into the game).
 ( end=$(( $(date +%s) + RUN )); while [ "$(date +%s)" -lt "$end" ]; do
     for m in /proc/[0-9]*/maps; do grep -o "[^ /]*easyanticheat[^ ]*\.so" "$m" 2>/dev/null; done
