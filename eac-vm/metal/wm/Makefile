@@ -37,7 +37,7 @@ handles-test: $(OUT)/handles-test
 	$(OUT)/handles-test
 .PHONY: handles-test
 
-MARSHAL_SRC := calls.c marshal.c guest/ghandles.c guest/galloc.c host/htable.c host/invoke.m host/memory.m \
+MARSHAL_SRC := calls.c cmdlist.c marshal.c guest/ghandles.c guest/galloc.c host/htable.c host/invoke.m host/memory.m \
   host/loader.c tests/loopback.c
 $(OUT)/marshal-test: tests/marshal-test.m $(MARSHAL_SRC) calls.h marshal.h handles.h notify.h ../proto.h
 	mkdir -p $(OUT)
@@ -49,7 +49,7 @@ marshal-test: $(OUT)/marshal-test
 .PHONY: marshal-test
 
 # The guest's code and the host's in one process (tests/loopback.c), against the real winemetal.so.
-LOOP_SRC := calls.c marshal.c guest/ghandles.c guest/galloc.c guest/winemetal.c host/htable.c host/invoke.m \
+LOOP_SRC := calls.c cmdlist.c marshal.c guest/ghandles.c guest/galloc.c guest/winemetal.c host/htable.c host/invoke.m \
   host/memory.m host/loader.c tests/loopback.c tests/sequence.c tests/galloc-cases.c
 $(OUT)/memory-test: tests/memory-test.m $(LOOP_SRC) calls.h marshal.h handles.h notify.h guest/galloc.h ../proto.h
 	mkdir -p $(OUT)

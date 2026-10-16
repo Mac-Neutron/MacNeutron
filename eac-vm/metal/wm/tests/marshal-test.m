@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "../host/loader.h"
+#include "../cmdlist.h"
 #include "../marshal.h"
 #include "winemetal_thunks.h"
 
@@ -115,7 +116,48 @@ static NTSTATUS_T f_end(void *p) {
     return 0;
 }
 
+/* Command lists: the guest's nodes, kept to compare with what the host's list holds. */
+#define MAX_TEST_NODES 64
+static uint8_t sent[3][MAX_TEST_NODES][128];
+static unsigned nsent[3];
+static uint8_t payload_bytes[3][MAX_TEST_NODES][256];
+static int list_ok[3];
+static NTSTATUS_T f_encode(unsigned which, void *p) {
+    struct unixcall_generic_obj_cmd_noret *a = p;
+    unsigned ntypes, i = 0;
+    const struct mn_wm_node *tab = mn_wm_nodes(36 + which, &ntypes);
+    int ok = a->encoder == OBJ(DEVICE); /* any live object stands in for the encoder */
+    for (const struct wmtcmd_base *n = a->cmd_head.ptr; n && ok; n = n->next.ptr, i++) {
+        const uint8_t *g = sent[which][i], *h = (const uint8_t *)n;
+        const struct mn_wm_node *t = &tab[n->type];
+        ok = i < nsent[which] && n->type == ((const struct wmtcmd_base *)g)->type && t->size;
+        for (unsigned b = 16; ok && b < t->size; b++) {
+            int special = 0;
+            for (unsigned k = 0; k < t->nhandles; k++) special |= b >= t->handles[k] && b < t->handles[k] + 8u;
+            if (t->payload) special |= b >= t->payload && b < t->payload + 8u;
+            if (!special) ok = g[b] == h[b];
+        }
+        for (unsigned k = 0; ok && k < t->nhandles; k++) {
+            obj_handle_t v;
+            memcpy(&v, h + t->handles[k], 8);
+            ok = v == OBJ(STRING); /* every handle in the guest's list is the string's */
+        }
+        if (ok && t->payload) {
+            const uint8_t *pp;
+            memcpy(&pp, h + t->payload, 8);
+            uint64_t len = mn_wm_node_payload(t, h);
+            ok = len && pp && !memcmp(pp, payload_bytes[which][i], len);
+        }
+    }
+    list_ok[which] = ok && i == nsent[which];
+    return 0;
+}
+static NTSTATUS_T f_blit_encode(void *p) { return f_encode(0, p); }
+static NTSTATUS_T f_compute_encode(void *p) { return f_encode(1, p); }
+static NTSTATUS_T f_render_encode(void *p) { return f_encode(2, p); }
+
 static wm_unix_fn fakes[MN_WM_SLOTS] = {
+    [36] = f_blit_encode, [37] = f_compute_encode, [38] = f_render_encode,
     [0] = f_retain, [1] = f_release, [2] = f_object, [4] = f_devices, [7] = f_name, [8] = f_getcstring,
     [9] = f_queue, [10] = f_pool, [11] = f_cmdbuf, [12] = f_commit, [19] = f_sampler, [26] = f_function,
     [29] = f_pso, [33] = f_end, [92] = f_colorspace, [116] = f_cache_get, [129] = f_blit_samples,
@@ -249,6 +291,90 @@ static void pool(void) {
     CHECK(!ok && mn_gh_retain(cb.ret) == -1); /* gone on both sides */
 }
 
+/* Every node type of each encoder, each node's bytes a pattern, its handles the string's and its payload bytes. */
+static uint8_t lists[3][MAX_TEST_NODES][128];
+static void build_list(unsigned which) {
+    unsigned ntypes, n = 0;
+    const struct mn_wm_node *tab = mn_wm_nodes(36 + which, &ntypes);
+    for (unsigned type = 0; type < ntypes; type++) {
+        const struct mn_wm_node *t = &tab[type];
+        if (!t->size) continue;
+        uint8_t *node = lists[which][n];
+        for (unsigned b = 0; b < t->size; b++) node[b] = (uint8_t)(type * 7 + b);
+        uint16_t ty = (uint16_t)type;
+        memcpy(node, &ty, 2);
+        for (unsigned k = 0; k < t->nhandles; k++) memcpy(node + t->handles[k], &string, 8);
+        if (t->payload) {
+            uint64_t count = t->elem == 1 ? 40 : 3;
+            memset(node + t->count, 0, t->count_width);
+            memcpy(node + t->count, &count, t->count_width);
+            for (unsigned b = 0; b < 256; b++) payload_bytes[which][n][b] = (uint8_t)(b * 3 + type);
+            const void *pp = payload_bytes[which][n];
+            memcpy(node + t->payload, &pp, 8);
+        }
+        memcpy(sent[which][n], node, t->size);
+        n++;
+    }
+    for (unsigned i = 0; i < n; i++) {
+        void *next = i + 1 < n ? lists[which][i + 1] : NULL;
+        memcpy(lists[which][i] + 8, &next, 8);
+    }
+    nsent[which] = n;
+}
+
+static void cmdlist_roundtrip(void) {
+    for (unsigned which = 0; which < 3; which++) {
+        build_list(which);
+        struct unixcall_generic_obj_cmd_noret e = {device, {lists[which][0]}};
+        CHECK(call(36 + which, &e) == 0 && host_status == 0 && list_ok[which]);
+    }
+    CHECK(nsent[0] == 14 && nsent[1] == 14 && nsent[2] == 43);
+}
+
+/* A host record by hand: params, then the flat list's region (inline). */
+static int32_t forged_list(unsigned slot, uint32_t count, uint16_t type, unsigned nodes) {
+    static uint8_t r[1 << 21];
+    struct unixcall_generic_obj_cmd_noret e = {device, {NULL}};
+    uint32_t len = 16 + 8, body = 8 + nodes * 16;
+    memcpy(r, &e, 16);
+    struct mn_wm_rhdr h = {body, MN_RH_INLINE};
+    memcpy(r + 16, &h, 8);
+    memset(r + len, 0, body);
+    memcpy(r + len, &count, 4);
+    for (unsigned i = 0; i < nodes; i++) memcpy(r + len + 8 + i * 16, &type, 2);
+    return mn_wm_host_call(&ctx, ring_state, slot, r, len + body, NULL, 0, &(uint32_t){0});
+}
+
+static void cmdlist_loop(void) {
+    static uint8_t loop[16];
+    struct wmtcmd_compute_nop *n = (void *)loop;
+    n->type = WMTComputeCommandNop;
+    n->next.ptr = n; /* a cycle */
+    struct unixcall_generic_obj_cmd_noret e = {device, {n}};
+    list_ok[1] = 0;
+    CHECK(call(37, &e) == MN_STATUS_INVALID_PARAMETER);
+    static struct wmtcmd_compute_nop many[MN_WM_MAX_NODES + 1];
+    for (unsigned i = 0; i <= MN_WM_MAX_NODES; i++) many[i] = (struct wmtcmd_compute_nop){.next = {i < MN_WM_MAX_NODES ? &many[i + 1] : NULL}};
+    e.cmd_head.ptr = many;
+    CHECK(call(37, &e) == MN_STATUS_INVALID_PARAMETER);
+    uint64_t before = ctx.failures;
+    CHECK(forged_list(37, MN_WM_MAX_NODES + 1, 0, MN_WM_MAX_NODES + 1) == (int32_t)MN_STATUS_INVALID_PARAMETER);
+    CHECK(forged_list(37, 4, 0, 2) == (int32_t)MN_STATUS_INVALID_PARAMETER); /* more nodes than the region holds */
+    CHECK(ctx.failures == before + 2 && !list_ok[1]);
+}
+
+static void cmdlist_unknown_type(void) {
+    static uint8_t node[16];
+    uint16_t unused = 26; /* Unused0 */
+    memcpy(node, &unused, 2);
+    struct unixcall_generic_obj_cmd_noret e = {device, {node}};
+    list_ok[2] = 0;
+    CHECK(call(38, &e) == MN_STATUS_INVALID_PARAMETER);
+    CHECK(forged_list(38, 1, 27, 1) == (int32_t)MN_STATUS_INVALID_PARAMETER);
+    CHECK(forged_list(36, 1, 14, 1) == (int32_t)MN_STATUS_INVALID_PARAMETER); /* past blit's last type */
+    CHECK(!list_ok[2]);
+}
+
 /* The params struct sizes, from the call catalog's table (its own clang run on DXMT's headers). */
 static const uint32_t catalog_sizes[MN_WM_SLOTS] = {
     8, 8, 24, 16, 8, 16, 16, 16, 40, 24, 8, 16, 8, 8, 16, 16, 16, 24, 24, 24, 24, 24, 40, 48, 24, 32, 24, 24, 16, 32,
@@ -302,7 +428,9 @@ int main(void) {
         ctx.ht = mn_ht_new(&rings, mn_wm_release_object);
         struct { const char *name; void (*fn)(void); } tests[] = {
             {"roundtrip", roundtrip}, {"bad-handle", bad_handle}, {"create-fails", create_fails},
-            {"nil-answer", nil_answer}, {"exception", exception}, {"pool", pool}, {"coverage", coverage},
+            {"nil-answer", nil_answer}, {"exception", exception}, {"pool", pool},
+            {"cmdlist-roundtrip", cmdlist_roundtrip}, {"cmdlist-loop", cmdlist_loop},
+            {"cmdlist-unknown-type", cmdlist_unknown_type}, {"coverage", coverage},
             {"modes", modes},
         };
         for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {

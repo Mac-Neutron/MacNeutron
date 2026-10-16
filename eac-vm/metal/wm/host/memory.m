@@ -372,6 +372,9 @@ NTSTATUS_T mn_wm_special(struct mn_wm_state *k) {
         case 107: return update_contents(k);
         case 45:
         case 145: return texture_data(k);
+        case 36:
+        case 37:
+        case 38: return mn_wm_encode(k);
         default: return MN_STATUS_NOT_IMPLEMENTED;
         }
     } @catch (id e) {

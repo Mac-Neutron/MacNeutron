@@ -11,6 +11,7 @@
 #import <Metal/Metal.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include "../guest/galloc.h"
 #include "../host/loader.h"
 #include "galloc-cases.h"
@@ -18,7 +19,7 @@
 #include "sequence.h"
 #include "winemetal_thunks.h"
 
-#define SEQUENCE_STEPS 5 /* as metal-wm.sh's STEPS */
+#define SEQUENCE_STEPS 7 /* as metal-wm.sh's STEPS */
 
 typedef NTSTATUS_T (*entry_t)(void *params);
 extern const entry_t __wine_unix_call_funcs[MN_WM_SLOTS];
@@ -91,8 +92,8 @@ static void buffer_outlives_free(void) {
         [dst release];
         [gate release];
         [q release];
-    } /* the command buffer goes with the pool, and the buffer with it */
-    mn_gdrain();
+    } /* the command buffer goes with the pool, and the buffer with it, once Metal's completion thread lets go */
+    for (int i = 0; i < 1000 && (mn_gdrain(), mn_gholders(region)); i++) usleep(1000);
     CHECK(mn_gholders(region) == 0);
     CHECK(!loop_mapped(p));
 }

@@ -35,7 +35,7 @@ static size_t snapshot(void *ctx, void *except, struct mn_mark *m, size_t cap) {
     struct fake *f = ctx;
     size_t n = 0;
     for (int i = 0; i < f->n && n < cap; i++)
-        if ((void *)&f->published[i] != except) m[n++] = (struct mn_mark){&f->published[i], f->published[i]};
+        if ((void *)&f->published[i] != except) m[n++] = (struct mn_mark){&f->published[i], f->published[i], 0};
     return n;
 }
 static int passed(void *ctx, const struct mn_mark *m, size_t n) {

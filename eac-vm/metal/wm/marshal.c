@@ -5,6 +5,7 @@
  * from the host: when the Metal object made over it goes, or at once if the call fails. */
 #include "marshal.h"
 #include <stdatomic.h>
+#include "cmdlist.h"
 #include <stdlib.h>
 #include <string.h>
 #include "notify.h"
@@ -50,7 +51,7 @@ static const struct mn_wm_nested *nested_of(const struct mn_wm_field *f) {
 /* The specials each side has code for so far (Tasks 6-8 add the rest). */
 static int ready(uint8_t sp) {
     return sp == MN_SP_NONE || sp == MN_SP_BUFFER || sp == MN_SP_HEAP || sp == MN_SP_REGION || sp == MN_SP_UPDATE ||
-           sp == MN_SP_RESIDENCY;
+           sp == MN_SP_RESIDENCY || sp == MN_SP_ENCODE;
 }
 
 /* ---- guest ---- */
@@ -127,6 +128,67 @@ static NTSTATUS_T emit_data(struct mn_wm_out *o, const void *ptr, uint64_t len, 
     if (back) {
         if (o->nregions == MN_WM_MAX_REGIONS) return MN_STATUS_BUFFER_TOO_SMALL;
         o->regions[o->nregions++] = (struct mn_wm_region){(void *)ptr, src, (uint32_t)len, kind};
+    }
+    return 0;
+}
+
+/* Room for len bytes the host reads, written in place: in the record, or in the scratch blob. */
+static NTSTATUS_T emit_reserve(struct mn_wm_out *o, uint64_t len, uint8_t **dst) {
+    NTSTATUS_T s;
+    if (len > MN_WM_SCRATCH_IN) {
+        uint64_t v[2];
+        if (!(*dst = scratch_alloc(len, &v[0], &v[1]))) return MN_STATUS_UNSUCCESSFUL;
+        o->sync = 1;
+        if ((s = emit_hdr(o, len, MN_RH_SCRATCH))) return s;
+        return emit(o, v, sizeof v);
+    }
+    if ((s = emit_hdr(o, len, MN_RH_INLINE))) return s;
+    if (PAD8(len) > o->cap - o->len) return MN_STATUS_BUFFER_TOO_SMALL;
+    *dst = o->buf + o->len;
+    memset(*dst + len, 0, PAD8(len) - len);
+    o->len += (uint32_t)PAD8(len);
+    return 0;
+}
+
+/* 36-38: the encoder's list, flat (cmdlist.h). At most MN_WM_MAX_NODES nodes of known types: a longer list, or one
+ * that loops, is refused. */
+static NTSTATUS_T emit_list(unsigned slot, const struct wmtcmd_base *head, struct mn_wm_out *o) {
+    unsigned ntypes;
+    const struct mn_wm_node *tab = mn_wm_nodes(slot, &ntypes);
+    uint64_t count = 0, nodes = 0, payloads = 0;
+    for (const struct wmtcmd_base *n = head; n; n = n->next.ptr) {
+        if (++count > MN_WM_MAX_NODES || n->type >= ntypes || !tab[n->type].size) return MN_STATUS_INVALID_PARAMETER;
+        nodes += PAD8(tab[n->type].size);
+        payloads += PAD8(mn_wm_node_payload(&tab[n->type], (const uint8_t *)n));
+    }
+    if (!count) return emit_hdr(o, 0, MN_RH_NONE);
+    uint64_t total = 8 + nodes + payloads, at = 8, pat = 8 + nodes;
+    uint8_t *w;
+    NTSTATUS_T s = emit_reserve(o, total, &w);
+    if (s) return s;
+    uint32_t c32 = (uint32_t)count, zero = 0;
+    memcpy(w, &c32, 4);
+    memcpy(w + 4, &zero, 4);
+    for (const struct wmtcmd_base *n = head; n && count--; n = n->next.ptr) {
+        const struct mn_wm_node *t = &tab[n->type];
+        if (PAD8(t->size) > 8 + nodes - at) return MN_STATUS_INVALID_PARAMETER; /* the list changed under us */
+        memcpy(w + at, n, t->size);
+        memset(w + at + t->size, 0, PAD8(t->size) - t->size);
+        memset(w + at + 8, 0, 8); /* next */
+        if (t->payload) {
+            uint64_t len = mn_wm_node_payload(t, (const uint8_t *)n), off = ~0ull;
+            const void *src;
+            memcpy(&src, (const uint8_t *)n + t->payload, sizeof src);
+            if (len) {
+                if (!src || PAD8(len) > total - pat) return MN_STATUS_INVALID_PARAMETER;
+                memcpy(w + pat, src, len);
+                memset(w + pat + len, 0, PAD8(len) - len);
+                off = pat;
+                pat += PAD8(len);
+            }
+            memcpy(w + at + t->payload, &off, 8);
+        }
+        at += PAD8(t->size);
     }
     return 0;
 }
@@ -212,6 +274,9 @@ static NTSTATUS_T guest_special(unsigned slot, uint8_t *params, struct mn_wm_out
         o->fix_value = base + a->offset;
         return emit_hold(o, 0, 0, 0, MN_GH_VALUE(att)); /* the buffer holds the heap's region */
     }
+    case 36:
+    case 37:
+    case 38: return emit_list(slot, ((struct unixcall_generic_obj_cmd_noret *)params)->cmd_head.ptr, o);
     case 45:
     case 145: {
         struct unixcall_mtltexture_replaceregion *a = (void *)params;
@@ -345,6 +410,8 @@ static void *arena_alloc(struct arena *a, size_t n) {
     c->used = at + n;
     return c->data + at;
 }
+
+void *mn_wm_alloc(struct mn_wm_state *k, size_t n) { return arena_alloc(k->arena, n); }
 
 void mn_wm_ring_end(void *ring) {
     struct arena **slot = (struct arena **)ring + 1;
@@ -503,6 +570,9 @@ static NTSTATUS_T take_prefix(struct mn_wm_state *k) {
     switch (k->slot) {
     case 138:
     case 141: return take_blob(k, UINT64_MAX, &k->prefix_hold);
+    case 36:
+    case 37:
+    case 38:
     case 45: return take_data(k, NULL, WMF_IN, UINT64_MAX, 0, &k->data, &k->data_len);
     case 145: return take_data(k, NULL, WMF_OUT, UINT64_MAX, 0, &k->data, &k->data_len);
     default: return 0;

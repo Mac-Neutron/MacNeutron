@@ -5,6 +5,9 @@
 
 int32_t mn_wm_dispatch(uint32_t ctx_id, void *ring_state, uint32_t op, const void *p, uint32_t len, void *reply,
                        uint32_t cap, uint32_t *reply_len);
+/* The same, with 4a's test ops too (--metal-test-ops): what the gates need to hold a ring back on the host. */
+int32_t mn_wm_dispatch_test(uint32_t ctx_id, void *ring_state, uint32_t op, const void *p, uint32_t len, void *reply,
+                            uint32_t cap, uint32_t *reply_len);
 extern const struct mn_executor_hooks mn_wm_hooks;
 
 #endif

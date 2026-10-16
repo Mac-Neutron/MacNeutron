@@ -50,6 +50,12 @@ int32_t mn_wm_dispatch(uint32_t ctx_id, void *ring_state, uint32_t op, const voi
     return mn_wm_host_call(&c->wm, ring_state, op - MN_OP_WM, p, len, reply, cap, reply_len);
 }
 
+int32_t mn_wm_dispatch_test(uint32_t ctx_id, void *ring_state, uint32_t op, const void *p, uint32_t len, void *reply,
+                            uint32_t cap, uint32_t *reply_len) {
+    return op >= MN_OP_WM ? mn_wm_dispatch(ctx_id, ring_state, op, p, len, reply, cap, reply_len)
+                          : mn_testops(ctx_id, ring_state, op, p, len, reply, cap, reply_len);
+}
+
 static void progress(uint32_t ctx_id, void *ring_state) {
     (void)ctx_id;
     struct ctx *c = *(struct ctx **)ring_state;

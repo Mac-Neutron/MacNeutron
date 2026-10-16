@@ -1,4 +1,5 @@
-/* 4a's test ops (proto.h), run by the executor for the guest's transport test. ring_state[0] holds the ring's SET. */
+/* 4a's test ops (proto.h), run by the executor for the guest's transport test. ring_state[7] holds the ring's SET (words 0
+ * and 1 are the winemetal dispatcher's, which runs beside them with --metal-test-ops). */
 #include <string.h>
 #include <time.h>
 #include "executor.h"
@@ -6,7 +7,7 @@
 
 int32_t mn_testops(uint32_t ctx_id, void *ring_state, uint32_t op, const void *p, uint32_t len, void *reply,
                    uint32_t cap, uint32_t *reply_len) {
-    uint64_t *state = ring_state;
+    uint64_t *state = (uint64_t *)ring_state + 7;
     switch (op) {
     case MN_OP_TEST_ECHO:
         if (len > cap) return MN_E2BIG;

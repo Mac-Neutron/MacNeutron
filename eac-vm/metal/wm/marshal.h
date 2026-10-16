@@ -96,6 +96,10 @@ struct mn_wm_state {
     uint8_t out_kind[MN_WM_MAX_OUTS]; /* each handle out is bound with this kind (a special may change it) */
     void *arena;
 };
+/* Memory for the rest of a host call. */
+void *mn_wm_alloc(struct mn_wm_state *k, size_t n);
+/* cmdlist.c: slots 36-38's host side, the guest's flat list rebuilt as winemetal's. */
+NTSTATUS_T mn_wm_encode(struct mn_wm_state *k);
 /* memory.m: a special slot's host side, in place of calling winemetal. */
 NTSTATUS_T mn_wm_special(struct mn_wm_state *k);
 /* memory.m: blob memory nothing took: released, and its region freed for the guest. */
