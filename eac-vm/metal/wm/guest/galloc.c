@@ -195,3 +195,9 @@ void mn_gdrain(void) {
     drain_locked();
     pthread_mutex_unlock(&lock);
 }
+
+void mn_galloc_forget(void) {
+    blobs = NULL, nblobs = 0; /* ponytail: the parent's mappings stay in the child, unused */
+    queue = NULL, queue_tried = 0;
+    pthread_mutex_init(&lock, NULL);
+}

@@ -18,6 +18,9 @@ int mn_call(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap,
  * index), or timeout_ms passes; without a fence index, a short sleep. The caller rechecks the queue. */
 int mn_notify_wait(uint64_t blob_id, uint64_t seen, int timeout_ms);
 
+/* In a child after fork: the parent's DRM file, context and rings are the parent's; the next call opens our own. */
+void mn_forget(void);
+
 /* This thread's ring: records sent, and the last one the host finished. */
 void mn_ring_stats(uint64_t *sent, uint64_t *done);
 /* 1 if this thread's ring waits on fences, 0 if it polls (all 63 fence ring indexes leased), -1 without a ring. */

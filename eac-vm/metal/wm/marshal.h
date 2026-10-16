@@ -35,6 +35,7 @@ struct mn_wm_out {
     uint64_t holds[MN_WM_MAX_HOLDS]; /* regions this call holds for the host (mn_ghold), undone if it never gets there */
     void **fix;                      /* after the reply, if the call's first handle came back: *fix = fix_value */
     void *fix_value;
+    void *out_at[MN_WM_MAX_OUTS];    /* SM50: where each picked handle goes, through the caller's out-pointers */
 };
 /* Builds slot's record from params, picking the handles it returns and writing them into params at once. 0, or an
  * NTSTATUS to return without sending: a refused slot, a dead handle, or a record past cap. */
@@ -47,6 +48,19 @@ void mn_wm_unwind(const struct mn_wm_out *out, int reached_host);
 /* A listener handle's notify queue, and its blob (for mn_notify_wait); NULL if h isn't one. */
 struct mn_notify;
 struct mn_notify *mn_wm_listener_queue(mn_handle h, uint64_t *blob_id);
+/* For the special slots' own code (slots.c). Guest: */
+NTSTATUS_T mn_wm_emit(struct mn_wm_out *o, const void *p, uint64_t n);
+NTSTATUS_T mn_wm_emit_none(struct mn_wm_out *o);
+NTSTATUS_T mn_wm_emit_data(struct mn_wm_out *o, const void *ptr, uint64_t len, uint8_t kind); /* IN, OUT, STR_IN */
+NTSTATUS_T mn_wm_copy_back(const struct mn_wm_out *o, const uint8_t *reply, uint32_t len, uint64_t pos);
+void mn_wm_scratch_done(void);
+void mn_wm_forget(void); /* in a child after fork: the thread's scratch blob is the parent context's */
+/* slots.c, guest: SM50 slots' records and replies; slot 91's handles; slot 98's constants (after the params). */
+NTSTATUS_T mn_wm_sm50_pack(unsigned slot, void *params, struct mn_wm_out *o);
+NTSTATUS_T mn_wm_sm50_unpack(unsigned slot, void *params, const struct mn_wm_out *o, const void *reply, uint32_t len);
+NTSTATUS_T mn_wm_enumerate_pack(void *params, struct mn_wm_out *o);
+NTSTATUS_T mn_wm_enumerate_unpack(void *params, const struct mn_wm_out *o, const void *reply, uint32_t len);
+NTSTATUS_T mn_wm_constants_emit(void *params, struct mn_wm_out *o);
 /* The guest's pixel format for a texture handle (slots 45 and 145), or 0 when unknown: winemetal.c's, which asks the
  * host once per texture. */
 extern uint32_t (*mn_wm_texture_format)(mn_handle texture);
@@ -99,8 +113,17 @@ struct mn_wm_state {
     uint8_t out_kind[MN_WM_MAX_OUTS]; /* each handle out is bound with this kind (a special may change it) */
     void *arena;
 };
-/* Memory for the rest of a host call. */
+/* Memory for the rest of a host call; the record's next region (take_data in marshal.c), and a nil-or-bound handle
+ * out for a special (0 if it couldn't be bound: the object is then released). */
 void *mn_wm_alloc(struct mn_wm_state *k, size_t n);
+NTSTATUS_T mn_wm_take(struct mn_wm_state *k, uint8_t kind, uint64_t want, int copy, uint8_t **host, uint32_t *len);
+mn_handle mn_wm_bind_out(struct mn_wm_state *k, mn_handle h, enum mn_hkind kind, void *obj, enum mn_own own);
+/* slots.c, host: SM50 (74-88), slot 91, slot 98, and host paths (54, 112, 113, 115, 117, 119). */
+NTSTATUS_T mn_wm_sm50(struct mn_wm_state *k);
+NTSTATUS_T mn_wm_enumerate(struct mn_wm_state *k);
+NTSTATUS_T mn_wm_constants(struct mn_wm_state *k);
+NTSTATUS_T mn_wm_paths(struct mn_wm_state *k);
+void mn_wm_sm50_release(enum mn_hkind kind, void *obj);
 /* cmdlist.c: slots 36-38's host side, the guest's flat list rebuilt as winemetal's. */
 NTSTATUS_T mn_wm_encode(struct mn_wm_state *k);
 /* memory.m: a special slot's host side, in place of calling winemetal. */

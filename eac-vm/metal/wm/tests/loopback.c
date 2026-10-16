@@ -75,6 +75,8 @@ int mn_call(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap,
                            reply_len);
 }
 
+void mn_forget(void) {}
+
 int mn_notify_wait(uint64_t blob_id, uint64_t seen, int timeout_ms) {
     (void)blob_id, (void)seen, (void)timeout_ms;
     usleep(1000); /* no fences here: the caller polls */

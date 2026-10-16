@@ -326,3 +326,47 @@ host translate them.
   frame, mostly render encoders and autorelease pools. At the 310 ns a spinning round trip takes (§7), that is about
   **78 µs per frame** on the game's render thread. Creations that return GPU addresses (buffers, textures, samplers)
   and those that can fail with an error (pipeline states) wait in both designs.
+
+## 8. Winemetal forwarding (milestone 4b-1, 2026-10-16)
+
+**What exists.**
+- **Guest library.** The guest `winemetal.so` (`eac-vm/metal/wm`, x86-64 under FEX) exports winemetal's 153-slot
+  Unix-call table. Each slot is packed by one walk over a per-slot descriptor (`calls.c`, from the call catalog) and
+  sent on the thread's ring. 74 slots wait for the host, 62 are queued, and the guest answers 17 itself (presentation
+  is 4c's, Mach ports are host-only).
+- **Host.** `macneutron-vm` loads MacNeutron's own `aarch64-unix/winemetal.so`, unchanged, beside stand-ins for its
+  `ntdll.so` and `winemac.so`.
+- **Handles.** The guest picks every handle, (generation << 32) | index. The host table binds it with a kind and
+  translates it without a lock on the hot path. A handle used on one ring before its creation has run on another
+  waits for it. A last release waits, in two phases, until the context's other rings have finished what they had
+  published, so queued uses still find the object and in-flight lookups never see it released.
+- **Memory.** CPU-visible buffers and heaps live in blob regions the guest sub-allocates (whole 16 KiB pages). The
+  host maps them in place (`newBufferWithBytesNoCopy`); a holder on each Metal object over a region tells the guest
+  when Metal deallocates it, and only then is the region reused. Shared heaps are emulated over a region. Bulk data
+  goes through a per-thread scratch blob.
+- **Command lists** go flat (at most 65,536 nodes of known types) and are rebuilt on the host.
+- **Shared events.** The host runs each listener on a thread of its own. NtSetEvent posts to the listener's notify
+  queue, and the guest's slot-109 stub sets the Win32 events, sleeping on an `MN_CTRL_NOTIFY_WAIT` fence between them.
+
+**Gates.**
+- On the Mac: `handles-test`, `marshal-test` (with fakes) and `memory-test` (the guest's and the host's code in one
+  process against real Metal).
+- In the guest: `metal-wm.sh` runs the 4b-1 sequence (device, buffers, a blit, a compute dispatch from MSL source, a
+  shared event that sets a Win32 event) and must print `host-test`'s 14 lines from the Mac, then clean stats
+  (`failures=0 live=1 deferred=0`). It also runs the allocator's cases, the refused slots and a fork. A boot with
+  `--metal-test-ops` runs the cross-ring case, holding one thread's ring in a 200 ms host delay.
+
+**Findings** (each with a test that failed first):
+- **Placed buffers.** DXMT leaves `info.memory` uninitialised for buffers placed in heaps (slot 141): only an output
+  there. Reading it as guest memory would have refused every placed buffer.
+- **Autoreleased holders.** An atomic associated-object getter autoreleases what it returns. That kept a buffer's
+  holder, and its region, alive until some pool drained: never, on a ring's consumer thread.
+- **Listener destroy.** Winemetal's listener destroy does nothing until slot 109 has published the listener's run
+  loop, and the thread running it would never return. The host waits for the run loop first.
+- **Queued calls can't race.** The host drains a ring faster than a guest thread fills it, so queued calls alone
+  never hold a ring back. The cross-ring case needs a host-side delay to show that the ordering rules work, and mutating
+  either rule fails it.
+
+**Left for 4b-2** (its own plan, after this one). DXMT's x86-64 PE build in the guest's Wine, `WMTMemoryAlloc` for
+the memory DXMT hands to Metal itself (`dxmt_buffer.cpp:44-46`, `d3d12_command_allocator.cpp:63`,
+`dxmt_context.cpp:60`, `dxmt_ring_bump_allocator.hpp:119`), and the 17 headless tests as the gate.

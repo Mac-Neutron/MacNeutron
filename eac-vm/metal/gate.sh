@@ -8,7 +8,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=$ROOT/build/eac-vm-work
 fail=0
 make -s -C "$ROOT/eac-vm/metal" ring-test executor-test || fail=1
-make -s -C "$ROOT/eac-vm/metal/wm" handles-test marshal-test || fail=1
+make -s -C "$ROOT/eac-vm/metal/wm" handles-test marshal-test memory-test || fail=1
 make -s -C "$ROOT/eac-vm/metal/wm" host-test > "$W/share/metal-wm-host.txt" || fail=1
 MN_RUN_TIMEOUT=120 "$ROOT/eac-vm/run-guest.sh" "$ROOT/eac-vm/tests/metal-probe.sh" || fail=1
 MN_RUN_TIMEOUT=900 "$ROOT/eac-vm/run-guest.sh" "$ROOT/eac-vm/tests/metal-transport.sh" --metal-test-ops || fail=1

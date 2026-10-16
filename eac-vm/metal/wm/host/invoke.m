@@ -27,8 +27,13 @@ void mn_wm_release_object(enum mn_hkind kind, void *obj) {
     case MN_HK_LISTENER: /* our wrapper (events.m) */
         mn_wm_listener_release(obj);
         return;
-    default: /* ponytail: SM50 objects get theirs in Task 8 */
-        fprintf(stderr, "mn-winemetal: no release yet for a kind-%d object\n", kind);
+    case MN_HK_SM50_SHADER:
+    case MN_HK_SM50_BITCODE:
+    case MN_HK_SM50_ERROR: /* slots.c */
+        mn_wm_sm50_release(kind, obj);
+        return;
+    default:
+        fprintf(stderr, "mn-winemetal: no release for a kind-%d object\n", kind);
         return;
     }
 }

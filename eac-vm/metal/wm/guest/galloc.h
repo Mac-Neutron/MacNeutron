@@ -17,5 +17,6 @@ int mn_glookup(const void *p, uint64_t len, uint64_t *id, uint64_t *blob_id, uin
 void *mn_gptr(uint64_t id);        /* the region's guest address, or NULL */
 unsigned mn_gholders(uint64_t id); /* for tests */
 void mn_gdrain(void);              /* reads the context's notify queue now */
+void mn_galloc_forget(void);       /* in a child after fork: the parent's blobs are the parent context's */
 
 #endif

@@ -8,6 +8,9 @@
 #include "../host/loader.h"
 #include "../cmdlist.h"
 #include "../marshal.h"
+#include "../../guest/transport.h"
+#include "airconv_thunks.h"
+#include "loopback.h"
 #include "winemetal_thunks.h"
 
 static int failures;
@@ -19,7 +22,8 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
-enum { ARRAY, DEVICE, QUEUE, STRING, SAMPLER, FUNCTION, ARCHIVE, PSO, POOL, CMDBUF, ENCODER, NOBJS };
+enum { ARRAY, DEVICE, QUEUE, STRING, SAMPLER, FUNCTION, ARCHIVE, PSO, POOL, CMDBUF, ENCODER, SHADER, BITCODE, LOG0, LOG1,
+       CONSTFN, NOBJS };
 static int objs[NOBJS];
 static int retains[NOBJS], releases[NOBJS], calls[MN_WM_SLOTS], checked[MN_WM_SLOTS];
 static int fail_next, raise_next;
@@ -156,18 +160,122 @@ static NTSTATUS_T f_blit_encode(void *p) { return f_encode(0, p); }
 static NTSTATUS_T f_compute_encode(void *p) { return f_encode(1, p); }
 static NTSTATUS_T f_render_encode(void *p) { return f_encode(2, p); }
 
+/* SM50: a shader whose reflection says 2 constant buffers and 3 arguments, bitcode of 100 bytes. */
+static uint8_t bytecode[300], bitcode_bytes[100];
+static int sm50_released[3];
+static NTSTATUS_T f_sm50_init(void *p) {
+    struct sm50_initialize_params *a = p;
+    checked[74] = a->bytecode_size == sizeof bytecode && !memcmp(a->bytecode, bytecode, sizeof bytecode) && a->shader;
+    *a->shader = (sm50_shader_t)OBJ(SHADER);
+    struct MTL_SHADER_REFLECTION *r = a->reflection;
+    if (r) r->NumConstantBuffers = 2, r->NumArguments = 3, r->ThreadgroupSize[0] = 64;
+    if (a->error) *a->error = NULL;
+    a->ret = 0;
+    return 0;
+}
+static NTSTATUS_T f_sm50_destroy(void *p) { sm50_released[0] += ((struct sm50_destroy_params *)p)->shader == (void *)OBJ(SHADER); return 0; }
+static NTSTATUS_T f_sm50_compile(void *p) {
+    struct sm50_compile_params *a = p;
+    const struct SM50_SHADER_COMPILATION_ARGUMENT_DATA *n = a->args;
+    const struct SM50_SHADER_COMMON_DATA *common = (const void *)n;
+    const struct SM50_SHADER_IA_INPUT_LAYOUT_DATA *ia = n ? n->next : NULL;
+    checked[76] = a->shader == (void *)OBJ(SHADER) && !strcmp(a->func_name, "main") && n &&
+                  n->type == SM50_SHADER_COMMON && common->metal_version == SM50_SHADER_METAL_320 && ia &&
+                  ia->type == SM50_SHADER_IA_INPUT_LAYOUT && ia->num_elements == 2 && ia->elements[1].reg == 7 &&
+                  !((const struct SM50_SHADER_COMPILATION_ARGUMENT_DATA *)ia)->next;
+    *a->bitcode = (sm50_bitcode_t)OBJ(BITCODE);
+    if (a->error) *a->error = NULL;
+    a->ret = 0;
+    return 0;
+}
+static NTSTATUS_T f_sm50_bitcode(void *p) {
+    struct sm50_get_compiled_bitcode_params *a = p;
+    checked[77] = a->bitcode == (void *)OBJ(BITCODE);
+    a->data_out->Data = bitcode_bytes;
+    a->data_out->Size = sizeof bitcode_bytes;
+    return 0;
+}
+static NTSTATUS_T f_sm50_destroy_bitcode(void *p) { sm50_released[1] += ((struct sm50_destroy_bitcode_params *)p)->bitcode == (void *)OBJ(BITCODE); return 0; }
+static NTSTATUS_T f_sm50_message(void *p) {
+    struct sm50_get_error_message_params *a = p;
+    snprintf(a->buffer, a->buffer_size, "bad shader");
+    a->ret_size = strlen(a->buffer);
+    return 0;
+}
+static NTSTATUS_T f_sm50_args_info(void *p) {
+    struct sm50_get_arguments_info_params *a = p;
+    checked[88] = a->shader == (void *)OBJ(SHADER);
+    if (a->constant_buffers) memset(a->constant_buffers, 0xc1, 2 * sizeof *a->constant_buffers);
+    if (a->arguments) memset(a->arguments, 0xa3, 3 * sizeof *a->arguments);
+    return 0;
+}
+/* Paths: what the host was given. */
+static char host_path[1024];
+static NTSTATUS_T f_cache_open(void *p) {
+    struct unixcall_cache_alloc_init *a = p;
+    snprintf(host_path, sizeof host_path, "%s", (const char *)a->path.ptr);
+    a->ret_cache = OBJ(ARCHIVE);
+    return 0;
+}
+static NTSTATUS_T f_cache_path(void *p) {
+    struct unixcall_setmetalcachepath *a = p;
+    snprintf(host_path, sizeof host_path, "%s", (const char *)a->path.ptr);
+    a->ret_success = 1;
+    return 0;
+}
+static NTSTATUS_T f_new_archive(void *p) {
+    struct unixcall_mtldevice_newbinaryarchive *a = p;
+    snprintf(host_path, sizeof host_path, "%s", a->url.ptr ? (const char *)a->url.ptr : "(null)");
+    a->ret_archive = OBJ(ARCHIVE);
+    return 0;
+}
+/* Strings. */
+static NTSTATUS_T f_string(void *p) {
+    struct unixcall_nsstring_string *a = p;
+    checked[60] = !strcmp(a->buffer_ptr.ptr, "héllo") && a->encoding == WMTUTF8StringEncoding;
+    a->ret = OBJ(STRING);
+    return 0;
+}
+static NTSTATUS_T f_length(void *p) {
+    struct unixcall_generic_obj_uint64_uint64_ret *a = p;
+    a->ret = a->handle == OBJ(STRING) ? 6 : 0;
+    return 0;
+}
+/* Logs: two of them. */
+static NTSTATUS_T f_enumerate(void *p) {
+    struct unixcall_enumerate *a = p;
+    obj_handle_t *v = a->buffer.ptr;
+    checked[91] = a->enumerable == OBJ(DEVICE) && a->buffer_size == 4;
+    v[0] = OBJ(LOG0), v[1] = OBJ(LOG1);
+    a->ret_read = 2;
+    return 0;
+}
+/* Function constants: a bool and an int. */
+static NTSTATUS_T f_constants(void *p) {
+    struct unixcall_mtllibrary_newfunction_with_constants *a = p;
+    const struct WMTFunctionConstant *c = a->constants.ptr;
+    checked[98] = !strcmp(a->name.ptr, "frag") && a->num_constants == 2 && c[0].type == WMTDataTypeBool &&
+                  *(const uint8_t *)c[0].data.ptr == 1 && c[1].type == WMTDataTypeInt && c[1].index == 5 &&
+                  *(const int32_t *)c[1].data.ptr == 42;
+    a->ret = OBJ(CONSTFN);
+    return 0;
+}
+
 static wm_unix_fn fakes[MN_WM_SLOTS] = {
+    [74] = f_sm50_init, [75] = f_sm50_destroy, [76] = f_sm50_compile, [77] = f_sm50_bitcode,
+    [78] = f_sm50_destroy_bitcode, [79] = f_sm50_message, [88] = f_sm50_args_info, [115] = f_cache_open,
+    [117] = f_cache_open, [119] = f_cache_path, [112] = f_new_archive, [60] = f_string, [61] = f_string,
+    [27] = f_length, [91] = f_enumerate, [98] = f_constants,
     [36] = f_blit_encode, [37] = f_compute_encode, [38] = f_render_encode,
     [0] = f_retain, [1] = f_release, [2] = f_object, [4] = f_devices, [7] = f_name, [8] = f_getcstring,
     [9] = f_queue, [10] = f_pool, [11] = f_cmdbuf, [12] = f_commit, [19] = f_sampler, [26] = f_function,
     [29] = f_pso, [33] = f_end, [92] = f_colorspace, [116] = f_cache_get, [129] = f_blit_samples,
 };
 
-static size_t no_rings(void *ctx, void *except, struct mn_mark *m, size_t cap) { (void)ctx, (void)except, (void)m, (void)cap; return 0; }
-static int all_passed(void *ctx, const struct mn_mark *m, size_t n) { (void)ctx, (void)m, (void)n; return 1; }
-static struct mn_ht_rings rings = {NULL, no_rings, all_passed};
-static struct mn_wm_ctx ctx;
-static uint64_t ring_state[8];
+/* The loopback's context and this thread's ring (no other rings: releases pass at once), which the guest code's own
+ * transport calls (slot 77's second step) reach too. */
+#define ctx loop_ctx
+#define ring_state ((uint64_t *)loop_ring())
 static uint8_t rec[1 << 20], reply[MN_REPLY_BYTES];
 static int32_t host_status;
 
@@ -375,6 +483,116 @@ static void cmdlist_unknown_type(void) {
     CHECK(!list_ok[2]);
 }
 
+static sm50_shader_t shader;
+
+static void sm50_sizes(void) {
+    for (size_t i = 0; i < sizeof bytecode; i++) bytecode[i] = (uint8_t)i;
+    struct MTL_SHADER_REFLECTION refl = {0};
+    sm50_error_t err = (sm50_error_t)1;
+    struct sm50_initialize_params in = {bytecode, sizeof bytecode, &shader, &refl, &err, -1};
+    CHECK(call(74, &in) == 0 && in.ret == 0 && shader && !err && checked[74]);
+    CHECK(refl.NumConstantBuffers == 2 && refl.NumArguments == 3 && refl.ThreadgroupSize[0] == 64);
+    struct MTL_SM50_SHADER_ARGUMENT cb[2], args[3];
+    struct sm50_get_arguments_info_params ai = {shader, cb, args};
+    CHECK(call(88, &ai) == 0 && checked[88] && ((uint8_t *)cb)[31] == 0xc1 && ((uint8_t *)args)[47] == 0xa3);
+    CHECK(ai.constant_buffers == cb && ai.arguments == args);
+    /* A guest claiming more than the reflection said: refused on the host. */
+    static uint8_t r[256];
+    struct sm50_get_arguments_info_params forged = {shader, (void *)8, (void *)8};
+    memcpy(r, &forged, sizeof forged);
+    struct mn_wm_rhdr h1 = {5 * 16, MN_RH_INLINE}, h2 = {3 * 16, MN_RH_INLINE};
+    memcpy(r + 24, &h1, 8);
+    memcpy(r + 32, &h2, 8);
+    uint32_t n;
+    CHECK(mn_wm_host_call(&ctx, ring_state, 88, r, 40, reply, sizeof reply, &n) == (int32_t)MN_STATUS_INVALID_PARAMETER);
+    /* 79 with no room for the NUL is refused, on both sides. */
+    char msg[64];
+    struct sm50_get_error_message_params em = {(sm50_error_t)shader, msg, 0, 0};
+    CHECK(call(79, &em) == MN_STATUS_INVALID_PARAMETER);
+    memcpy(r, &em, sizeof em);
+    CHECK(mn_wm_host_call(&ctx, ring_state, 79, r, sizeof em, reply, sizeof reply, &n) ==
+          (int32_t)MN_STATUS_INVALID_PARAMETER);
+}
+
+static void sm50_args(void) {
+    struct SM50_IA_INPUT_ELEMENT elements[2] = {{.reg = 1}, {.reg = 7}};
+    struct SM50_SHADER_IA_INPUT_LAYOUT_DATA ia = {.type = SM50_SHADER_IA_INPUT_LAYOUT, .num_elements = 2,
+                                                  .elements = elements};
+    struct SM50_SHADER_COMMON_DATA common = {.next = &ia, .type = SM50_SHADER_COMMON,
+                                             .metal_version = SM50_SHADER_METAL_320};
+    sm50_bitcode_t bc = NULL;
+    sm50_error_t err = NULL;
+    struct sm50_compile_params c = {shader, &common, "main", &bc, &err, -1};
+    CHECK(call(76, &c) == 0 && c.ret == 0 && bc && !err && checked[76]);
+    struct SM50_COMPILED_BITCODE out = {0};
+    struct sm50_get_compiled_bitcode_params gb = {bc, &out};
+    for (size_t i = 0; i < sizeof bitcode_bytes; i++) bitcode_bytes[i] = (uint8_t)(i ^ 0x5a);
+    CHECK(call(77, &gb) == 0 && checked[77] && out.Size == sizeof bitcode_bytes && out.Data &&
+          out.Data != bitcode_bytes && !memcmp(out.Data, bitcode_bytes, sizeof bitcode_bytes));
+    struct sm50_destroy_bitcode_params db = {bc};
+    CHECK(call(78, &db) == 0);
+    mn_ht_sweep(ctx.ht, ring_state);
+    CHECK(sm50_released[1] == 1);
+    /* A list that loops is refused before it leaves the guest. */
+    ia.next = &common;
+    CHECK(call(76, &c) == MN_STATUS_INVALID_PARAMETER);
+    ia.next = NULL;
+    struct sm50_destroy_params ds = {shader};
+    CHECK(call(75, &ds) == 0);
+    mn_ht_sweep(ctx.ht, ring_state);
+    CHECK(sm50_released[0] == 1);
+}
+
+static void paths(void) {
+    char a[1024], b[1024];
+    struct unixcall_cache_alloc_init open = {{"dxmt/shaders.db"}, 3, 0};
+    CHECK(call(115, &open) == 0 && open.ret_cache);
+    snprintf(a, sizeof a, "%s", host_path);
+    CHECK(call(117, &open) == 0 && !strcmp(a, host_path)); /* the same guest path: the same file */
+    open.path.ptr = "dxmt/other.db";
+    CHECK(call(115, &open) == 0 && strcmp(a, host_path));
+    snprintf(b, sizeof b, "%s", host_path);
+    const char *root = getenv("MN_WM_CACHE_DIR");
+    CHECK(root && !strncmp(a, root, strlen(root)) && !strncmp(b, root, strlen(root)));
+    CHECK(strstr(a, "shaders.db") && !strstr(a, "dxmt/")); /* named by the guest's file, never its directories */
+    struct unixcall_setmetalcachepath cp = {{"/home/mn/.cache/dxmt"}, 0};
+    CHECK(call(119, &cp) == 0 && cp.ret_success == 1 && !strncmp(host_path, root, strlen(root)));
+    struct unixcall_mtldevice_newbinaryarchive na = {device, {NULL}, 0, 0};
+    CHECK(call(112, &na) == 0 && na.ret_archive && !strcmp(host_path, "(null)")); /* in memory: no path */
+}
+
+static void strings(void) {
+    struct unixcall_nsstring_string str = {{"héllo"}, WMTUTF8StringEncoding, 0};
+    CHECK(call(60, &str) == 0 && str.ret && checked[60]);
+    struct unixcall_generic_obj_uint64_uint64_ret len = {str.ret, WMTUTF8StringEncoding, 0};
+    CHECK(call(27, &len) == 0 && len.ret == 6);
+    checked[60] = 0;
+    struct unixcall_nsstring_string str2 = {{"héllo"}, WMTUTF8StringEncoding, 0};
+    CHECK(call(61, &str2) == 0 && str2.ret && checked[60]);
+}
+
+static void enumerate(void) {
+    obj_handle_t logs[4] = {0};
+    struct unixcall_enumerate e = {device, 0, 4, {logs}, 0};
+    CHECK(call(91, &e) == 0 && checked[91] && e.ret_read == 2 && logs[0] && logs[1] && !logs[2]);
+    int ok;
+    CHECK(mn_ht_get(ctx.ht, logs[1], MN_HK_OBJC, &ok) == (void *)OBJ(LOG1) && ok && retains[LOG1] == 1);
+    CHECK(e.buffer.ptr == logs && e.buffer_size == 4);
+}
+
+static void constants(void) {
+    uint8_t yes = 1;
+    int32_t answer = 42;
+    struct WMTFunctionConstant c[2] = {{{&yes}, WMTDataTypeBool, 0, 0}, {{&answer}, WMTDataTypeInt, 5, 0}};
+    struct unixcall_mtllibrary_newfunction_with_constants nf = {queue, {"frag"}, {c}, 2, 0, 0};
+    nf.library = device; /* any live object stands in for the library */
+    CHECK(call(98, &nf) == 0 && nf.ret && !nf.ret_error && checked[98]);
+    CHECK(c[0].data.ptr == &yes);
+    struct WMTFunctionConstant bad = {{&yes}, (enum WMTDataType)2 /* Array */, 0, 0};
+    nf.constants.ptr = &bad, nf.num_constants = 1;
+    CHECK(call(98, &nf) == MN_STATUS_INVALID_PARAMETER);
+}
+
 /* The params struct sizes, from the call catalog's table (its own clang run on DXMT's headers). */
 static const uint32_t catalog_sizes[MN_WM_SLOTS] = {
     8, 8, 24, 16, 8, 16, 16, 16, 40, 24, 8, 16, 8, 8, 16, 16, 16, 24, 24, 24, 24, 24, 40, 48, 24, 32, 24, 24, 16, 32,
@@ -425,12 +643,14 @@ static void modes(void) {
 int main(void) {
     @autoreleasepool {
         mn_wm_funcs = fakes;
-        ctx.ht = mn_ht_new(&rings, mn_wm_release_object);
+        mn_open(); /* the loopback's context */
         struct { const char *name; void (*fn)(void); } tests[] = {
             {"roundtrip", roundtrip}, {"bad-handle", bad_handle}, {"create-fails", create_fails},
             {"nil-answer", nil_answer}, {"exception", exception}, {"pool", pool},
             {"cmdlist-roundtrip", cmdlist_roundtrip}, {"cmdlist-loop", cmdlist_loop},
-            {"cmdlist-unknown-type", cmdlist_unknown_type}, {"coverage", coverage},
+            {"cmdlist-unknown-type", cmdlist_unknown_type}, {"sm50-sizes", sm50_sizes}, {"sm50-args", sm50_args},
+            {"paths", paths}, {"strings", strings}, {"enumerate", enumerate}, {"constants", constants},
+            {"coverage", coverage},
             {"modes", modes},
         };
         for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {

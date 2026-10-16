@@ -2,12 +2,16 @@
  * RTLD_NOW), with the stub ntdll.so on LD_LIBRARY_PATH. Prints the sequence's lines, then the host's stats.
  *   metal-wm-test [--steps N]   the sequence, then the stats line
  *   metal-wm-test galloc        the guest allocator's cases (galloc-cases.c)
+ *   metal-wm-test refused       each slot the guest refuses answers its status, twice (it logs once: the gate counts)
+ *   metal-wm-test fork          a child after fork makes calls through a context of its own; the parent's still work
  *   metal-wm-test cross-thread  the ordering rules across rings (Review Focus 1), with the host started with
  *                               --metal-test-ops: a fence made on one thread's ring while the host holds that ring in
  *                               a 200 ms MN_OP_TEST_DELAY, and used at once on another's; and a buffer released on one
  *                               ring while another, held the same way, still has a blit from it queued */
 #include <dlfcn.h>
 #include <pthread.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -145,6 +149,40 @@ static int cross_thread(int (*stats)(struct mn_wm_stats *)) {
     return !ok;
 }
 
+/* ---- refused, fork ---- */
+static int refused(void) {
+    static const unsigned presentation[] = {47, 48, 66, 67, 70, 71, 72, 73, 93, 97, 101};
+    static const unsigned unsupported[] = {120, 121, 122, 123, 124, 83};
+    uint8_t params[256] = {0};
+    int ok = 1;
+    for (int pass = 0; pass < 2; pass++) {
+        for (size_t i = 0; i < sizeof presentation / sizeof *presentation; i++)
+            ok &= call(presentation[i], params) == 0xC0000002u; /* STATUS_NOT_IMPLEMENTED */
+        for (size_t i = 0; i < sizeof unsupported / sizeof *unsupported; i++)
+            ok &= call(unsupported[i], params) == 0xC00000BBu; /* STATUS_NOT_SUPPORTED */
+    }
+    printf(ok ? "refused ok\n" : "FAIL refused\n");
+    return !ok;
+}
+
+static int fork_case(void) {
+    struct unixcall_generic_obj_ret all = {0};
+    call(4, &all);
+    pid_t pid = fork();
+    if (!pid) {
+        struct unixcall_generic_obj_ret mine = {0};
+        call(4, &mine);
+        struct unixcall_generic_obj_uint64_ret count = {mine.ret, 0};
+        _exit(call(3, &count) == 0 && count.ret ? 0 : 1);
+    }
+    int st = 0;
+    waitpid(pid, &st, 0);
+    struct unixcall_generic_obj_uint64_ret count = {all.ret, 0};
+    int ok = pid > 0 && WIFEXITED(st) && !WEXITSTATUS(st) && call(3, &count) == 0 && count.ret;
+    printf(ok ? "fork ok\n" : "FAIL fork\n");
+    return !ok;
+}
+
 int main(int argc, char **argv) {
     int steps = argc == 3 && !strcmp(argv[1], "--steps") ? atoi(argv[2]) : 0;
     void *wm = dlopen("winemetal.so", RTLD_NOW);
@@ -162,6 +200,8 @@ int main(int argc, char **argv) {
     }
     send_op = (int (*)(uint32_t, const void *, uint32_t))dlsym(wm, "mn_send");
     if (argc == 2 && !strcmp(argv[1], "cross-thread")) return send_op ? cross_thread(stats) : 2;
+    if (argc == 2 && !strcmp(argv[1], "refused")) return refused();
+    if (argc == 2 && !strcmp(argv[1], "fork")) return fork_case();
     if (argc == 2 && !strcmp(argv[1], "galloc")) {
         struct mn_galloc_env g = {call, stats, print};
         return mn_galloc_cases(&g) ? 1 : 0;

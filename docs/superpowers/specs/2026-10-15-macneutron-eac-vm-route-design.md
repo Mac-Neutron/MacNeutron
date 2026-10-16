@@ -246,8 +246,12 @@ A systemd service in `base.erofs` on the virtio-console port. It launches the ga
 4. **Metal transport,** in three parts, each with its own plan:
    - **4a, transport (done 2026-10-16).** A guest program's commands, blobs, waits and wakes reach the host executor
      through the dxmt context; numbers in research README §7.
-   - **4b, winemetal forwarding.** DXMT's check suite passes in the guest as it does on macOS (the headless tests
-     give the same lines and pixels).
+   - **4b, winemetal forwarding,** in two plans:
+     - **4b-1 (done 2026-10-16):** winemetal's 153 slots forwarded, with guest-chosen handles. A Linux program in the
+       guest prints the same lines as on the Mac for a device, buffers, a blit, compute and a shared event; research
+       README §8.
+     - **4b-2:** DXMT's check suite passes in the guest as it does on macOS (the headless tests give the same lines
+       and pixels).
    - **4c, presentation.** SMITE 2 renders through the host.
 5. **Devices and product.** Audio, input, gamepads, the shared library, launch from MacNeutron, sizing. Pass: an
    online SMITE 2 match within 5% of today's frame rate, and key-to-presented-frame latency within 5 ms of today's.

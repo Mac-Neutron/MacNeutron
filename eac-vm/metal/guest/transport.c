@@ -179,6 +179,16 @@ static void wait_done(struct thread_ring *t, uint64_t seq) {
     }
 }
 
+void mn_forget(void) {
+    if (fd >= 0) close(fd); /* our reference only: the parent keeps its own */
+    fd = -1;
+    if (tr) pthread_setspecific(ring_key, NULL); /* the parent's ring is not ours to detach */
+    tr = NULL;
+    idx_used = 1;
+    pthread_mutex_init(&idx_lock, NULL);
+    pthread_mutex_init(&open_lock, NULL);
+}
+
 int mn_notify_wait(uint64_t blob_id, uint64_t seen, int timeout_ms) {
     struct thread_ring *t = ring();
     if (!t) return -ENODEV;

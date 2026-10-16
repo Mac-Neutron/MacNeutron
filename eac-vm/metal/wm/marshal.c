@@ -49,10 +49,7 @@ static const struct mn_wm_nested *nested_of(const struct mn_wm_field *f) {
 }
 
 /* The specials each side has code for so far (Tasks 6-8 add the rest). */
-static int ready(uint8_t sp) {
-    return sp == MN_SP_NONE || sp == MN_SP_BUFFER || sp == MN_SP_HEAP || sp == MN_SP_REGION || sp == MN_SP_UPDATE ||
-           sp == MN_SP_RESIDENCY || sp == MN_SP_ENCODE || sp == MN_SP_LISTENER;
-}
+static inline int ready(uint8_t sp) { return sp != MN_SP_RETAIN && sp != MN_SP_RELEASE; } /* every special has its code */
 
 /* ---- guest ---- */
 #ifndef MN_WM_HOST /* macneutron-vm has no guest table */
@@ -98,7 +95,9 @@ static void *scratch_alloc(uint64_t len, uint64_t *blob, uint64_t *off) {
     return (uint8_t *)scr.cur.ptr + at;
 }
 
-static void scratch_done(void) {
+void mn_wm_forget(void) { memset(&scr, 0, sizeof scr); }
+
+void mn_wm_scratch_done(void) {
     scr.used = 0;
     if (scr.old.ptr) {
         mn_blob_free(&scr.old);
@@ -106,7 +105,7 @@ static void scratch_done(void) {
     }
 }
 
-static NTSTATUS_T emit(struct mn_wm_out *o, const void *p, uint64_t n) {
+NTSTATUS_T mn_wm_emit(struct mn_wm_out *o, const void *p, uint64_t n) {
     if (n > o->cap - o->len) return MN_STATUS_BUFFER_TOO_SMALL;
     memcpy(o->buf + o->len, p, n);
     memset(o->buf + o->len + n, 0, PAD8(n) - n);
@@ -114,13 +113,16 @@ static NTSTATUS_T emit(struct mn_wm_out *o, const void *p, uint64_t n) {
     return 0;
 }
 
+#define emit mn_wm_emit
 static NTSTATUS_T emit_hdr(struct mn_wm_out *o, uint64_t len, uint32_t how) {
     struct mn_wm_rhdr h = {(uint32_t)len, how};
     return len > UINT32_MAX ? MN_STATUS_BUFFER_TOO_SMALL : emit(o, &h, sizeof h);
 }
 
+NTSTATUS_T mn_wm_emit_none(struct mn_wm_out *o) { return emit_hdr(o, 0, MN_RH_NONE); }
+
 /* len bytes at ptr that the host reads (IN, INOUT, strings) or writes (OUT): inline, or through the scratch blob. */
-static NTSTATUS_T emit_data(struct mn_wm_out *o, const void *ptr, uint64_t len, uint8_t kind) {
+NTSTATUS_T mn_wm_emit_data(struct mn_wm_out *o, const void *ptr, uint64_t len, uint8_t kind) {
     if (!ptr) return emit_hdr(o, 0, MN_RH_NONE);
     int back = kind == WMF_OUT || kind == WMF_INOUT;
     const void *src = NULL;
@@ -235,7 +237,7 @@ static NTSTATUS_T pack_fields(struct mn_wm_out *o, const struct mn_wm_field *fie
             if (s) return s;
             continue;
         }
-        if ((s = emit_data(o, ptr, len, f->kind))) return s;
+        if ((s = mn_wm_emit_data(o, ptr, len, f->kind))) return s;
         const struct mn_wm_nested *nest = ptr ? nested_of(f) : NULL;
         uint64_t elem = f->flags & WMF_ARRAY ? f->size : len;
         for (uint64_t e = 0; nest && elem && e < len / elem; e++)
@@ -298,8 +300,9 @@ static NTSTATUS_T guest_special(unsigned slot, uint8_t *params, struct mn_wm_out
         memset(l->blob.ptr, 0, MN_NOTIFY_BYTES);
         mn_gh_attach(o->outs[0], MN_GH_PTR | (uintptr_t)l);
         uint64_t id = l->blob.blob_id;
-        return emit_data(o, &id, sizeof id, WMF_IN);
+        return mn_wm_emit_data(o, &id, sizeof id, WMF_IN);
     }
+    case 98: return mn_wm_constants_emit(params, o);
     case 110: { /* destroying it is its release: the host unbinds it too */
         mn_handle h;
         memcpy(&h, params, sizeof h);
@@ -313,7 +316,7 @@ static NTSTATUS_T guest_special(unsigned slot, uint8_t *params, struct mn_wm_out
                                                  a->bytes_per_image)
                            : UINT64_MAX;
         if (ext == UINT64_MAX) return MN_STATUS_INVALID_PARAMETER;
-        return emit_data(o, ext ? a->data.ptr : NULL, ext, slot == 45 ? WMF_IN : WMF_OUT);
+        return mn_wm_emit_data(o, ext ? a->data.ptr : NULL, ext, slot == 45 ? WMF_IN : WMF_OUT);
     }
     default:
         return 0;
@@ -324,7 +327,7 @@ void mn_wm_unwind(const struct mn_wm_out *out, int reached_host) {
     for (unsigned i = 0; i < out->nouts; i++) mn_gh_drop(out->outs[i]);
     if (!reached_host) /* else the host frees each region the record named */
         for (unsigned i = 0; i < out->nholds; i++) mn_gunhold(out->holds[i]);
-    scratch_done();
+    mn_wm_scratch_done();
 }
 
 NTSTATUS_T mn_wm_pack(unsigned slot, void *params, struct mn_wm_out *out) {
@@ -339,7 +342,8 @@ NTSTATUS_T mn_wm_pack(unsigned slot, void *params, struct mn_wm_out *out) {
         if ((c->special == MN_SP_RETAIN ? mn_gh_retain(h) : mn_gh_release(h)) < 0) return MN_STATUS_INVALID_HANDLE;
         return emit(out, &h, sizeof h);
     }
-    if (!ready(c->special)) return MN_STATUS_NOT_IMPLEMENTED; /* Tasks 6-8 */
+    if (c->special == MN_SP_SM50) return mn_wm_sm50_pack(slot, params, out);
+    if (c->special == MN_SP_ENUMERATE) return mn_wm_enumerate_pack(params, out);
     for (unsigned i = 0; i < c->nfields; i++) {
         const struct mn_wm_field *f = &c->fields[i];
         if (f->kind != WMF_HANDLE_OUT) continue;
@@ -361,6 +365,8 @@ NTSTATUS_T mn_wm_pack(unsigned slot, void *params, struct mn_wm_out *out) {
 
 NTSTATUS_T mn_wm_unpack(unsigned slot, void *params, const struct mn_wm_out *out, const void *reply, uint32_t len) {
     const struct mn_wm_call *c = &mn_wm_calls[slot];
+    if (c->special == MN_SP_SM50) return mn_wm_sm50_unpack(slot, params, out, reply, len);
+    if (c->special == MN_SP_ENUMERATE) return mn_wm_enumerate_unpack(params, out, reply, len);
     const uint8_t *r = reply;
     uint64_t pos = PAD8(c->params_size);
     if (len < pos) {
@@ -377,27 +383,29 @@ NTSTATUS_T mn_wm_unpack(unsigned slot, void *params, const struct mn_wm_out *out
         if (!h) mn_gh_drop(out->outs[k]);
         if (!k++) first = h;
     }
-    NTSTATUS_T s = 0;
-    for (unsigned i = 0; i < out->nregions && !s; i++) {
+    NTSTATUS_T s = mn_wm_copy_back(out, r, len, pos);
+    if (out->fix && first) *out->fix = out->fix_value;
+    mn_wm_scratch_done();
+    return s;
+}
+
+/* The regions a reply carries, from pos, back to the memory they came from. */
+NTSTATUS_T mn_wm_copy_back(const struct mn_wm_out *out, const uint8_t *r, uint32_t len, uint64_t pos) {
+    for (unsigned i = 0; i < out->nregions; i++) {
         struct mn_wm_rhdr h;
-        if (len - pos < sizeof h) {
-            s = MN_STATUS_UNSUCCESSFUL;
-            break;
-        }
+        if (len < pos || len - pos < sizeof h) return MN_STATUS_UNSUCCESSFUL;
         memcpy(&h, r + pos, sizeof h);
         pos += sizeof h;
         uint32_t n = h.len < out->regions[i].len ? h.len : out->regions[i].len;
         if (h.how == MN_RH_INLINE) {
-            if (h.len > len - pos) s = MN_STATUS_UNSUCCESSFUL;
-            else memcpy(out->regions[i].ptr, r + pos, n);
+            if (h.len > len - pos) return MN_STATUS_UNSUCCESSFUL;
+            memcpy(out->regions[i].ptr, r + pos, n);
             pos += PAD8(h.len);
         } else if (h.how == MN_RH_SCRATCH && out->regions[i].scratch) {
             memcpy(out->regions[i].ptr, out->regions[i].scratch, n);
         }
     }
-    if (out->fix && first) *out->fix = out->fix_value;
-    scratch_done();
-    return s;
+    return 0;
 }
 
 #endif
@@ -470,7 +478,7 @@ static NTSTATUS_T take_data(struct mn_wm_state *k, const struct mn_wm_field *f, 
             if (h.len > k->len - k->pos) return MN_STATUS_INVALID_PARAMETER;
             src = k->rec + k->pos;
             k->pos += (uint32_t)PAD8(h.len);
-        } else if (h.len > MN_REPLY_BYTES - k->out_bytes) {
+        } else if (h.len > MN_REPLY_BYTES - 1024 - k->out_bytes) { /* the params come first */
             return MN_STATUS_BUFFER_TOO_SMALL;
         }
     } else if (h.how == MN_RH_SCRATCH) {
@@ -496,6 +504,18 @@ static NTSTATUS_T take_data(struct mn_wm_state *k, const struct mn_wm_field *f, 
         k->out_bytes += sizeof h + (h.how == MN_RH_INLINE ? (uint32_t)PAD8(h.len) : 0);
     }
     *host = dst, *len = h.len;
+    return 0;
+}
+
+NTSTATUS_T mn_wm_take(struct mn_wm_state *k, uint8_t kind, uint64_t want, int copy, uint8_t **host, uint32_t *len) {
+    return take_data(k, NULL, kind, want, copy, host, len);
+}
+
+mn_handle mn_wm_bind_out(struct mn_wm_state *k, mn_handle h, enum mn_hkind kind, void *obj, enum mn_own own) {
+    if (!obj) return 0;
+    if (own == MN_OWN_AUTORELEASED || own == MN_OWN_BORROWED) mn_wm_invoke(0, &obj);
+    if (!mn_ht_bind(k->c->ht, k->ring, h, kind, obj, own)) return h;
+    mn_wm_release_object(kind, obj);
     return 0;
 }
 

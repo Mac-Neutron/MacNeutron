@@ -390,7 +390,15 @@ NTSTATUS_T mn_wm_special(struct mn_wm_state *k) {
         case 109:
         case 110:
         case 146: return mn_wm_listener_special(k);
-        default: return MN_STATUS_NOT_IMPLEMENTED;
+        case 91: return mn_wm_enumerate(k);
+        case 98: return mn_wm_constants(k);
+        case 54:
+        case 112:
+        case 113:
+        case 115:
+        case 117:
+        case 119: return mn_wm_paths(k);
+        default: return k->slot >= 74 && k->slot <= 88 ? mn_wm_sm50(k) : MN_STATUS_NOT_IMPLEMENTED;
         }
     } @catch (id e) {
         fprintf(stderr, "mn-winemetal: slot %u raised %s\n", k->slot, [[e description] UTF8String]);

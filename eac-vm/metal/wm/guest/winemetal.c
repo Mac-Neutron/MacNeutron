@@ -8,6 +8,7 @@
 #include "../../guest/transport.h"
 #include "../marshal.h"
 #include "../notify.h"
+#include "galloc.h"
 #include "winemetal_thunks.h"
 
 struct buffers { uint8_t rec[MN_REC_MAX]; uint8_t reply[MN_REPLY_BYTES]; };
@@ -83,7 +84,17 @@ static uint32_t texture_format(mn_handle t) {
     return (uint32_t)r.ret;
 }
 
-__attribute__((constructor)) static void init(void) { mn_wm_texture_format = texture_format; }
+/* A child after fork opens its own context on its next call (Wine forks to start processes, which then exec). */
+static void forget(void) {
+    mn_forget();
+    mn_galloc_forget();
+    mn_wm_forget();
+}
+
+__attribute__((constructor)) static void init(void) {
+    mn_wm_texture_format = texture_format;
+    pthread_atfork(NULL, NULL, forget);
+}
 
 /* The context's live handles, deferred releases and failed queued calls (the gates' check). */
 int mn_wm_stats(struct mn_wm_stats *st) {
