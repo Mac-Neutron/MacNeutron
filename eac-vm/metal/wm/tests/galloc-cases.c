@@ -1,9 +1,11 @@
 /* The guest allocator's cases (plan Task 5), through the forwarder: run by memory-test on the Mac (loopback) and by
  * metal-wm-test in the guest. Buffers over blob memory start on a 16 KiB page and span whole pages, and a freed
- * buffer's memory comes back only after the host says the Metal buffer is gone (the stats call sweeps releases). */
+ * buffer's memory comes back only after the host says the Metal buffer is gone (the stats call sweeps releases), and
+ * comes back zeroed, as a new Metal buffer's does (D3D12's committed resources start zeroed: DXMT relies on it). */
 #include "galloc-cases.h"
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include "winemetal_thunks.h"
 
 #define PAGE 16384u
@@ -38,6 +40,7 @@ int mn_galloc_cases(const struct mn_galloc_env *env) {
     EXPECT(!((uintptr_t)p1 % PAGE) && !((uintptr_t)p2 % PAGE), "16 KiB alignment");
     /* p1 covers one page, p2 two (20,000 bytes rounded up): they don't overlap. */
     EXPECT((char *)p2 >= (char *)p1 + PAGE || (char *)p1 >= (char *)p2 + 2 * PAGE, "whole pages");
+    memset(p1, 0xAB, PAGE);
     env->call(1, &b1);
     obj_handle_t b3 = new_buffer(env, device, PAGE, &p3);
     EXPECT(b3 && p3 != p1, "reused before the host freed it");
@@ -45,6 +48,9 @@ int mn_galloc_cases(const struct mn_galloc_env *env) {
     env->stats(&st); /* sweeps: the host's buffer goes, and with it the region */
     obj_handle_t b4 = new_buffer(env, device, PAGE, &p4);
     EXPECT(b4 && p4 == p1, "not reused after the host freed it");
+    int zeroed = 1;
+    for (unsigned i = 0; b4 && i < PAGE; i++) zeroed &= ((unsigned char *)p4)[i] == 0;
+    EXPECT(zeroed, "reused memory not zeroed");
     env->call(1, &b2);
     env->call(1, &b3);
     env->call(1, &b4);

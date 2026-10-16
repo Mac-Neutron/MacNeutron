@@ -13,10 +13,11 @@
 #define BLOB_PAGES ((uint32_t)(BLOB_BYTES / MN_PAGE))
 
 struct rinfo { uint32_t pages, holders; uint8_t live, freed; };
+enum { FREE, USED, DIRTY };
 struct gblob {
     struct mn_blob b;
     uint32_t npages;
-    uint8_t *used;     /* per page */
+    uint8_t *used;     /* per page: FREE, USED or DIRTY (free, and written since the blob was made) */
     struct rinfo *r;   /* per page: a region's record at its first page */
 };
 static struct gblob **blobs;
@@ -56,7 +57,7 @@ static struct rinfo *region(uint64_t id, struct gblob **gb) {
 }
 
 static void release_pages(struct gblob *b, uint32_t page) {
-    memset(b->used + page, 0, b->r[page].pages);
+    memset(b->used + page, DIRTY, b->r[page].pages);
     b->r[page] = (struct rinfo){0};
 }
 
@@ -94,7 +95,7 @@ static struct gblob *new_blob(uint32_t pages) {
 
 static int fit(struct gblob *b, uint32_t pages, uint32_t *at) {
     for (uint32_t p = 0, run = 0; p < b->npages; p++) {
-        run = b->used[p] ? 0 : run + 1;
+        run = b->used[p] == USED ? 0 : run + 1;
         if (run == pages) {
             *at = p + 1 - pages;
             return 1;
@@ -122,7 +123,10 @@ int mn_galloc(uint64_t len, struct mn_region *out) {
         pthread_mutex_unlock(&lock);
         return -ENOMEM;
     }
-    memset(b->used + at, 1, pages);
+    /* As a new Metal buffer's: zeroed (D3D12's committed resources start so, and DXMT relies on fresh memory). */
+    for (uint32_t p = at; p < at + pages; p++)
+        if (b->used[p] == DIRTY) memset((uint8_t *)b->b.ptr + (uint64_t)p * MN_PAGE, 0, MN_PAGE);
+    memset(b->used + at, USED, pages);
     b->r[at] = (struct rinfo){.pages = pages, .live = 1};
     *out = (struct mn_region){MN_REGION(b->b.blob_id, at), (uint8_t *)b->b.ptr + (uint64_t)at * MN_PAGE,
                               (uint64_t)pages * MN_PAGE};

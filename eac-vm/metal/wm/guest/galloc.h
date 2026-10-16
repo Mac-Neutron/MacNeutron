@@ -1,7 +1,8 @@
 /* The guest's memory that the host maps too (milestone 4b-1): regions of whole 16 KiB pages in 64 MiB blobs, a larger
  * request getting a blob of its own. A region comes back for reuse only once the guest freed it and every host holder
  * (a Metal object made over it) is gone: the host says so with MN_NOTIFY_REGION_FREE, one per holder, which the
- * allocator reads from the context's notify queue whenever it allocates. */
+ * allocator reads from the context's notify queue whenever it allocates. A region comes back zeroed, as a new Metal
+ * buffer's memory does. */
 #ifndef MN_WM_GALLOC_H
 #define MN_WM_GALLOC_H
 #include <stdint.h>
