@@ -40,6 +40,7 @@ static const struct mn_wm_nested *nested_of(const struct mn_wm_field *f) {
 }
 
 /* ---- guest ---- */
+#ifndef MN_WM_HOST /* macneutron-vm has no guest table */
 
 static NTSTATUS_T emit(struct mn_wm_out *o, const void *p, uint32_t n) {
     if (n > o->cap - o->len) return MN_STATUS_BUFFER_TOO_SMALL;
@@ -146,7 +147,10 @@ NTSTATUS_T mn_wm_unpack(unsigned slot, void *params, const struct mn_wm_out *out
     return 0;
 }
 
+#endif
+
 /* ---- host ---- */
+#ifndef MN_WM_GUEST /* the guest's winemetal.so has no host table and no winemetal to call */
 
 /* The marshaller's memory per ring (ring_state word 1): reserved once per call, so pointers into it stay valid. */
 struct arena { uint8_t *buf; size_t cap, used; };
@@ -282,7 +286,7 @@ int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const vo
     *reply_len = 0;
     if (slot == MN_WM_STATS) {
         if (!sync || cap < sizeof(struct mn_wm_stats)) return MN_EINVAL;
-        mn_ht_sweep(c->ht);
+        mn_ht_sweep(c->ht, ring);
         struct mn_wm_stats st = {mn_ht_live(c->ht), mn_ht_deferred(c->ht), atomic_load(&c->failures)};
         memcpy(reply, &st, sizeof st);
         *reply_len = sizeof st;
@@ -377,3 +381,4 @@ int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const vo
     *reply_len = pos;
     return (int32_t)s;
 }
+#endif

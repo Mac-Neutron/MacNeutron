@@ -311,7 +311,7 @@ int mn_ht_release(struct mn_ht *t, void *ring, mn_handle h) {
     return r;
 }
 
-void mn_ht_sweep(struct mn_ht *t) {
+void mn_ht_sweep(struct mn_ht *t, void *ring) {
     if (!t->ndeferred) return;
     struct pendings run = {0};
     pthread_mutex_lock(&t->lock);
@@ -322,8 +322,8 @@ void mn_ht_sweep(struct mn_ht *t) {
         t->ndeferred--;
         struct hentry *e = entry(t, d->index, 0);
         if (d->phase == 1 && !e->refs && S_GEN(e->state) == d->gen) {
-            unbind(t, e); /* no new use can find it now; one still in flight is waited out next */
-            defer(t, d->index, d->gen, 2, NULL);
+            unbind(t, e); /* no new use can find it now; one still in flight (not on this ring) is waited out next */
+            defer(t, d->index, d->gen, 2, ring);
         } else if (d->phase == 2) {
             pend(&run, S_KIND(e->state), e->obj);
             e->obj = NULL;

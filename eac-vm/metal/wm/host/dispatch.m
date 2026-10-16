@@ -2,8 +2,8 @@
  * call; a ring's state caches its context (word 0; the marshaller has word 1). */
 #include <pthread.h>
 #include <stdlib.h>
-#include "../../host/executor.h"
 #include "../marshal.h"
+#include "dispatch.h"
 
 struct ctx {
     struct mn_wm_ctx wm;
@@ -52,7 +52,7 @@ int32_t mn_wm_dispatch(uint32_t ctx_id, void *ring_state, uint32_t op, const voi
 static void progress(uint32_t ctx_id, void *ring_state) {
     (void)ctx_id;
     struct ctx *c = *(struct ctx **)ring_state;
-    if (c) mn_ht_sweep(c->wm.ht);
+    if (c) mn_ht_sweep(c->wm.ht, ring_state);
 }
 
 static void ring_end(uint32_t ctx_id, void *ring_state) {

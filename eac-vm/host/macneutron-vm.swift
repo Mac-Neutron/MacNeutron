@@ -112,7 +112,20 @@ add(krun_rng_device_new(&err), "rng")
 // Free page reporting gives the guest's freed memory back to macOS (our libkrun's balloon patch).
 add(krun_balloon_device_new(&err), "balloon")
 // The Metal transport (spec §5.6): virtio-gpu with the dxmt context and an 8 GiB host-visible window for its blobs.
-if metalTestOps { mn_executor_start(mn_testops, nil) } else { mn_executor_start(nil, nil) }  // 4b: winemetal's handler
+if metalTestOps {
+  mn_executor_start(mn_testops, nil)
+} else {
+  // MacNeutron's winemetal.so beside our stand-ins for its Wine libraries (eac-vm/metal/wm, milestone 4b-1).
+  let metalHost = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+    .deletingLastPathComponent().appendingPathComponent("metal-host").path
+  if mn_wm_load(metalHost) == 0 {
+    var hooks = mn_wm_hooks
+    mn_executor_start(mn_wm_dispatch, &hooks)
+  } else {
+    FileHandle.standardError.write("macneutron-vm: no winemetal.so in \(metalHost): Metal calls are refused\n".data(using: .utf8)!)
+    mn_executor_start(nil, nil)
+  }
+}
 add(krun_gpu_device_without_display(8 << 30), "gpu")
 // Steam forwarding: mn-steam-host serves the guest's lsteamclient calls against the Mac's Steam (spec §5.9).
 var steamHostPID: pid_t = 0

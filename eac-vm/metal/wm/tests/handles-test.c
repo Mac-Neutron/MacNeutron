@@ -79,7 +79,7 @@ static void stale(void) {
     int ok;
     mn_ht_bind(t, ring(0), H(1, 5), MN_HK_OBJC, obj(5), MN_OWN_PLUS1);
     CHECK(mn_ht_release(t, ring(0), H(1, 5)) == 0);
-    mn_ht_sweep(t); /* the rings are idle: both phases pass */
+    mn_ht_sweep(t, NULL); /* the rings are idle: both phases pass */
     CHECK(released[5] == 1);
     mn_ht_get(t, H(1, 5), MN_HK_OBJC, &ok);
     CHECK(!ok);
@@ -129,10 +129,10 @@ static void refs(void) {
     mn_ht_bind(t, ring(0), H(1, 3), MN_HK_OBJC, obj(3), MN_OWN_PLUS1);
     CHECK(mn_ht_retain(t, H(1, 3)) == 0);
     mn_ht_release(t, ring(0), H(1, 3));
-    mn_ht_sweep(t);
+    mn_ht_sweep(t, NULL);
     CHECK(released[3] == 0);
     mn_ht_release(t, ring(0), H(1, 3));
-    mn_ht_sweep(t);
+    mn_ht_sweep(t, NULL);
     CHECK(released[3] == 1);
     CHECK(mn_ht_live(t) == 0);
     mn_ht_free(t);
@@ -152,7 +152,7 @@ static void pool(void) {
     CHECK(mn_ht_release(t, ring(1), H(1, 10)) == -1); /* another ring's pool */
     CHECK(mn_ht_release(t, ring(0), H(1, 10)) == 0);  /* pops it */
     CHECK(released[10] == 1);                         /* at once, on its own ring */
-    mn_ht_sweep(t);
+    mn_ht_sweep(t, NULL);
     CHECK(released[12] == 1 && released[11] == 0);
     CHECK(mn_ht_get(t, H(1, 11), MN_HK_OBJC, &ok) == obj(11) && ok);
     mn_ht_get(t, H(1, 12), MN_HK_OBJC, &ok);
@@ -183,7 +183,7 @@ static void nested_pools(void) {
     /* The outer pool takes the inner one with it: draining the outer NSAutoreleasePool releases the inner one, so the
      * table only unbinds it. */
     mn_ht_release(t, ring(0), H(1, 20));
-    mn_ht_sweep(t);
+    mn_ht_sweep(t, NULL);
     CHECK(released[20] == 1 && released[21] == 1 && released[22] == 0 && released[23] == 1);
     CHECK(mn_ht_live(t) == 0);
     mn_ht_free(t);
@@ -204,7 +204,7 @@ static void borrowed(void) {
     mn_ht_pool_push(t, ring(0), H(1, 30));
     mn_ht_bind(t, ring(0), H(1, 31), MN_HK_OBJC, obj(31), MN_OWN_BORROWED);
     mn_ht_release(t, ring(0), H(1, 30));
-    mn_ht_sweep(t);
+    mn_ht_sweep(t, NULL);
     CHECK(released[31] == 0);
     CHECK(mn_ht_get(t, H(1, 31), MN_HK_OBJC, &ok) == obj(31) && ok);
     mn_ht_free(t);
@@ -231,7 +231,7 @@ static void cross_ring_use(void) {
     pthread_join(th, NULL);
     /* The same index rebound later: a use of the next generation waits for it too. */
     mn_ht_release(t, ring(0), H(1, 40));
-    mn_ht_sweep(t);
+    mn_ht_sweep(t, NULL);
     l = (struct late){t, H(2, 40), 41};
     pthread_create(&th, NULL, bind_late, &l);
     CHECK(mn_ht_get(t, H(2, 40), MN_HK_OBJC, &ok) == obj(41) && ok);
@@ -249,12 +249,12 @@ static void cross_ring_release(void) {
     mn_ht_bind(t, ring(0), H(1, 50), MN_HK_OBJC, obj(50), MN_OWN_PLUS1);
     rings.published[1] = 10, rings.finished[1] = 5; /* ring 1 still has a use of it queued */
     mn_ht_release(t, ring(0), H(1, 50));
-    mn_ht_sweep(t);
+    mn_ht_sweep(t, NULL);
     CHECK(released[50] == 0);
     CHECK(mn_ht_get(t, H(1, 50), MN_HK_OBJC, &ok) == obj(50) && ok);
     CHECK(mn_ht_deferred(t) == 1);
     rings.finished[1] = 10;
-    mn_ht_sweep(t);
+    mn_ht_sweep(t, NULL);
     CHECK(released[50] == 1);
     CHECK(mn_ht_deferred(t) == 0 && mn_ht_live(t) == 0);
     /* A retain from the other ring that ran after the release keeps it. */
@@ -263,7 +263,7 @@ static void cross_ring_release(void) {
     mn_ht_release(t, ring(0), H(1, 51));
     CHECK(mn_ht_retain(t, H(1, 51)) == 0);
     rings.finished[1] = 20;
-    mn_ht_sweep(t);
+    mn_ht_sweep(t, NULL);
     CHECK(released[51] == 0);
     CHECK(mn_ht_get(t, H(1, 51), MN_HK_OBJC, &ok) == obj(51) && ok);
     mn_ht_free(t);
@@ -299,7 +299,7 @@ static void *work(void *p) {
         for (uint32_t i = 1; i < 200; i++)
             mn_ht_bind(w->t, ring(w->r), H(gen, base + i), MN_HK_OBJC, obj((int)(base + i)), MN_OWN_AUTORELEASED);
         mn_ht_release(w->t, ring(w->r), H(gen, base));
-        mn_ht_sweep(w->t);
+        mn_ht_sweep(w->t, ring(w->r));
         /* the guest's side too, one table per process */
         mn_handle p2 = mn_gh_alloc(MN_OWN_PLUS1);
         mn_gh_pool_push(p2);
@@ -315,7 +315,7 @@ static void threads(void) {
     pthread_t th[2];
     for (int i = 0; i < 2; i++) pthread_create(&th[i], NULL, work, &w[i]);
     for (int i = 0; i < 2; i++) pthread_join(th[i], NULL);
-    mn_ht_sweep(t);
+    mn_ht_sweep(t, NULL);
     CHECK(mn_ht_live(t) == 0 && mn_ht_deferred(t) == 0);
     int all = 1;
     for (int r = 0; r < 2; r++)
@@ -333,7 +333,7 @@ static void ring_end(void) {
     mn_ht_pool_push(t, ring(0), H(1, 70));
     mn_ht_bind(t, ring(0), H(1, 71), MN_HK_OBJC, obj(71), MN_OWN_AUTORELEASED);
     mn_ht_ring_end(t, ring(0));
-    mn_ht_sweep(t);
+    mn_ht_sweep(t, NULL);
     CHECK(released[71] == 1 && released[70] == 0); /* the thread drained the pool itself */
     mn_ht_get(t, H(1, 70), MN_HK_POOL, &ok);
     CHECK(!ok);
@@ -341,6 +341,18 @@ static void ring_end(void) {
     CHECK(mn_ht_live(t) == 1);
     mn_ht_free(t);
     CHECK(released[72] == 1);
+}
+
+/* The second phase waits for lookups in flight on other rings; the ring that sweeps has none (it is sweeping), even
+ * while it has records queued after the one it is running. */
+static void sweep_phase2(void) {
+    struct mn_ht *t = table();
+    mn_ht_bind(t, ring(0), H(1, 80), MN_HK_OBJC, obj(80), MN_OWN_PLUS1);
+    mn_ht_release(t, ring(0), H(1, 80)); /* ring 1 had published nothing */
+    rings.published[1] = 10, rings.finished[1] = 5;
+    mn_ht_sweep(t, ring(1));
+    CHECK(released[80] == 1);
+    mn_ht_free(t);
 }
 
 static void free_all(void) {
@@ -359,7 +371,8 @@ int main(void) {
         {"bind-get", bind_get}, {"stale", stale}, {"unbound", unbound}, {"out-of-range", out_of_range},
         {"kind-mismatch", kind_mismatch}, {"refs", refs}, {"pool", pool}, {"nested-pools", nested_pools},
         {"borrowed", borrowed}, {"cross-ring-use", cross_ring_use}, {"cross-ring-release", cross_ring_release},
-        {"reuse-fifo", reuse_fifo}, {"threads", threads}, {"ring-end", ring_end}, {"free-all", free_all},
+        {"reuse-fifo", reuse_fifo}, {"threads", threads}, {"ring-end", ring_end}, {"sweep-phase2", sweep_phase2},
+        {"free-all", free_all},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         int before = failures;

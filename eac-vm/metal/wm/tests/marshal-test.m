@@ -187,7 +187,7 @@ static void roundtrip(void) {
 static void bad_handle(void) {
     obj_handle_t q = queue;
     CHECK(call(1, &q) == 0); /* the queue's last reference */
-    mn_ht_sweep(ctx.ht);
+    mn_ht_sweep(ctx.ht, ring_state);
     CHECK(releases[QUEUE] == 1);
     uint64_t before = ctx.failures;
     /* The guest refuses its own dead handle without sending; a forged record reaches the host and is refused there. */
@@ -239,7 +239,7 @@ static void pool(void) {
     CHECK(call(11, &cb) == 0 && cb.ret && retains[CMDBUF] == 1);
     obj_handle_t h = p.ret;
     CHECK(call(1, &h) == 0);
-    mn_ht_sweep(ctx.ht);
+    mn_ht_sweep(ctx.ht, ring_state);
     CHECK(releases[POOL] == 1 && releases[CMDBUF] == 1);
     int ok;
     mn_ht_get(ctx.ht, cb.ret, MN_HK_OBJC, &ok);

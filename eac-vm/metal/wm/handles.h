@@ -49,7 +49,9 @@ int mn_ht_bind(struct mn_ht *t, void *ring, mn_handle h, enum mn_hkind kind, voi
 void *mn_ht_get(struct mn_ht *t, mn_handle h, enum mn_hkind kind, int *ok);
 int mn_ht_retain(struct mn_ht *t, mn_handle h);            /* 0, or -1 (and nothing changes) */
 int mn_ht_release(struct mn_ht *t, void *ring, mn_handle h); /* the last one is deferred; 0 or -1 */
-void mn_ht_sweep(struct mn_ht *t); /* runs the deferred releases whose rings have passed */
+/* Runs the deferred releases whose rings have passed; ring is the caller's (NULL off a ring), which has no lookup in
+ * flight. */
+void mn_ht_sweep(struct mn_ht *t, void *ring);
 void mn_ht_pool_push(struct mn_ht *t, void *ring, mn_handle pool); /* pool is bound, kind MN_HK_POOL */
 void mn_ht_pool_pop(struct mn_ht *t, void *ring, mn_handle pool);
 /* ring's thread is gone, and its open pools with it: their handles lose that reference. */
