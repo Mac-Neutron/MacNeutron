@@ -1,7 +1,7 @@
 From a1d09cd2ea8519b85fdb04e70409efa0f66a7a81 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Thu, 15 Oct 2026 20:37:41 -0400
-Subject: [PATCH] vmm: boot EFI zboot kernels whatever their payload's
+Subject: [PATCH 1/2] vmm: boot EFI zboot kernels whatever their payload's
  compressor
 
 arm64 distribution kernels (Fedora's vmlinuz among them) are EFI zboot images whose header names the payload's

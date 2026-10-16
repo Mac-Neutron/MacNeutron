@@ -39,7 +39,8 @@ if stateLock < 0 || flock(stateLock, LOCK_EX | LOCK_NB) != 0 { fail(3, "state.im
 let cmdline = (try? String(contentsOfFile: path("cmdline.txt"), encoding: .utf8))?
   .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-check(krun_set_log_level(2), "log level")  // warnings and errors
+// MN_KRUN_LOG: libkrun log level, 0 (off) to 5 (trace); warnings and errors by default.
+check(krun_set_log_level(UInt32(ProcessInfo.processInfo.environment["MN_KRUN_LOG"] ?? "") ?? 2), "log level")
 let ctx = krun_create_ctx()
 check(ctx, "create context")
 let id = UInt32(ctx)
