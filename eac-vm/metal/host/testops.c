@@ -27,9 +27,10 @@ int32_t mn_testops(uint32_t ctx_id, void *ring_state, uint32_t op, const void *p
         struct mn_test_fill f;
         if (len != sizeof f) return MN_EINVAL;
         memcpy(&f, p, sizeof f);
-        void *dst = mn_executor_blob(ctx_id, f.blob_id, f.offset, f.len);
+        void *hold, *dst = mn_executor_blob_hold(ctx_id, f.blob_id, f.offset, f.len, &hold);
         if (!dst) return MN_EINVAL;
         memset(dst, (int)f.byte, f.len);
+        mn_executor_blob_release(hold);
         return 0;
     }
     case MN_OP_TEST_SUM: {
@@ -37,9 +38,11 @@ int32_t mn_testops(uint32_t ctx_id, void *ring_state, uint32_t op, const void *p
         uint64_t sum = 0;
         if (len != sizeof s || cap < sizeof sum) return MN_EINVAL;
         memcpy(&s, p, sizeof s);
-        const uint8_t *src = mn_executor_blob(ctx_id, s.blob_id, s.offset, s.len);
+        void *hold;
+        const uint8_t *src = mn_executor_blob_hold(ctx_id, s.blob_id, s.offset, s.len, &hold);
         if (!src) return MN_EINVAL;
         for (uint64_t i = 0; i < s.len; i++) sum += src[i];
+        mn_executor_blob_release(hold);
         memcpy(reply, &sum, sizeof sum);
         *reply_len = sizeof sum;
         return 0;
@@ -62,10 +65,12 @@ int32_t mn_testops(uint32_t ctx_id, void *ring_state, uint32_t op, const void *p
         struct mn_test_hold h;
         if (len != sizeof h) return MN_EINVAL;
         memcpy(&h, p, sizeof h);
-        volatile uint8_t *b = mn_executor_blob(ctx_id, h.blob_id, 0, 1);
+        void *hold;
+        volatile uint8_t *b = mn_executor_blob_hold(ctx_id, h.blob_id, 0, 1, &hold);
         if (!b) return MN_EINVAL;
         for (uint64_t until = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) + h.ns; clock_gettime_nsec_np(CLOCK_UPTIME_RAW) < until;)
             *b += 1;
+        mn_executor_blob_release(hold);
         return 0;
     }
     default:

@@ -3,6 +3,7 @@
  * outputs), and the guest unpacks the reply. Fake objects are slots of objs[]; their retains and releases are
  * counted. Mac, ASan; Objective-C for the fake that raises. */
 #import <Foundation/Foundation.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include "../host/loader.h"
@@ -241,9 +242,11 @@ static NTSTATUS_T f_length(void *p) {
     a->ret = a->handle == OBJ(STRING) ? 6 : 0;
     return 0;
 }
-/* Logs: two of them. */
+/* Logs: two of them, or a failure. */
+static int fail_enumerate;
 static NTSTATUS_T f_enumerate(void *p) {
     struct unixcall_enumerate *a = p;
+    if (fail_enumerate) return MN_STATUS_UNSUCCESSFUL;
     obj_handle_t *v = a->buffer.ptr;
     checked[91] = a->enumerable == OBJ(DEVICE) && a->buffer_size == 4;
     v[0] = OBJ(LOG0), v[1] = OBJ(LOG1);
@@ -580,6 +583,33 @@ static void enumerate(void) {
     CHECK(e.buffer.ptr == logs && e.buffer_size == 4);
 }
 
+/* Slots 153 and 154 are the guest's own: the host refuses them, queued or not, and never calls past the real
+ * winemetal.so's 153 entries. */
+static void local_refused(void) {
+    uint8_t r[16] = {0}, out[64];
+    uint32_t n = 0;
+    for (unsigned slot = 153; slot <= 154; slot++) {
+        uint64_t before = atomic_load(&ctx.failures);
+        CHECK(mn_wm_host_call(&ctx, ring_state, slot, r, sizeof r, NULL, 0, &n) == (int32_t)MN_STATUS_INVALID_PARAMETER);
+        CHECK(atomic_load(&ctx.failures) == before + 1);
+        CHECK(mn_wm_host_call(&ctx, ring_state, slot, r, sizeof r, out, sizeof out, &n) ==
+              (int32_t)MN_STATUS_INVALID_PARAMETER);
+        CHECK(atomic_load(&ctx.failures) == before + 1 && n == 0);
+    }
+}
+
+/* A slot 91 the host fails: the log handles the guest picked for it (the next fresh indexes) are freed. */
+static void enumerate_fails(void) {
+    mn_handle probe = mn_gh_alloc(MN_OWN_PLUS1);
+    obj_handle_t logs[4] = {0};
+    struct unixcall_enumerate e = {device, 0, 4, {logs}, 0};
+    fail_enumerate = 1;
+    CHECK(call(91, &e) == MN_STATUS_UNSUCCESSFUL);
+    fail_enumerate = 0;
+    for (uint32_t i = 1; i <= 4; i++) CHECK(mn_gh_retain(1ull << 32 | (MN_H_INDEX(probe) + i)) == -1);
+    mn_gh_drop(probe);
+}
+
 static void constants(void) {
     uint8_t yes = 1;
     int32_t answer = 42;
@@ -652,7 +682,9 @@ int main(void) {
             {"nil-answer", nil_answer}, {"exception", exception}, {"pool", pool},
             {"cmdlist-roundtrip", cmdlist_roundtrip}, {"cmdlist-loop", cmdlist_loop},
             {"cmdlist-unknown-type", cmdlist_unknown_type}, {"sm50-sizes", sm50_sizes}, {"sm50-args", sm50_args},
-            {"paths", paths}, {"strings", strings}, {"enumerate", enumerate}, {"constants", constants},
+            {"paths", paths}, {"strings", strings}, {"enumerate", enumerate}, {"enumerate-fails", enumerate_fails},
+            {"local-refused", local_refused},
+            {"constants", constants},
             {"coverage", coverage},
             {"modes", modes},
         };

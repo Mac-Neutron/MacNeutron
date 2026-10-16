@@ -48,7 +48,6 @@ struct ring {
     int wake_pending;
     atomic_int stop;
     atomic_uint nwaiters;
-    atomic_int in_op; /* the handler may be using a blob: blob_destroyed waits it out */
     _Atomic uint64_t finished; /* tail after the last record the handler finished */
     uint64_t serial;
     unsigned since_progress;
@@ -137,11 +136,9 @@ static void run(struct ring *r, const struct mn_rec *rec) {
     int sync = !!(rec->op & MN_REC_SYNC);
     int32_t status = 0;
     if (op != MN_OP_NOP && op != MN_OP_BLOB_RELEASE) {
-        atomic_store(&r->in_op, 1); /* before any blob lookup: pairs with blob_destroyed */
         status = handler ? handler(r->ctx_id, r->state, op, r->v.payload, rec->len, sync ? r->v.reply : NULL,
                                    sync ? MN_REPLY_BYTES : 0, &n)
                          : MN_ENOSYS;
-        atomic_store_explicit(&r->in_op, 0, memory_order_release);
     }
     if (n > MN_REPLY_BYTES) n = MN_REPLY_BYTES;
     if (sync) {
@@ -329,11 +326,8 @@ static void blob_destroyed(void *ctx, uint32_t ctx_id, uint64_t blob_id, void *p
             break;
         }
     pthread_mutex_unlock(&blob_lock);
-    /* Lookups fail from here on; an op that found the blob before set in_op before its lookup (under blob_lock), so
-     * waiting for every ring's in_op to clear means no handler still uses the memory libkrun unmaps next.
-     * ponytail: waits out every ring's op, not just this blob's; per-blob pins when 4b's long ops make it show */
-    for (struct ring *rr = rings; rr; rr = rr->next)
-        while (atomic_load_explicit(&rr->in_op, memory_order_acquire)) sched_yield();
+    /* Lookups fail from here on. A handler that uses blob memory holds it (mn_executor_blob_hold), so a blob
+     * another ring's op is still using stays mapped until that op lets go, and no op waits for another's. */
     if (b) mn_executor_blob_release(b); /* the table's reference: unmapped now unless something holds it */
     else munmap(ptr, size);             /* never tracked: still ours to unmap */
 }

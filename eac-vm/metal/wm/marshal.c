@@ -325,6 +325,7 @@ static NTSTATUS_T guest_special(unsigned slot, uint8_t *params, struct mn_wm_out
 
 void mn_wm_unwind(const struct mn_wm_out *out, int reached_host) {
     for (unsigned i = 0; i < out->nouts; i++) mn_gh_drop(out->outs[i]);
+    mn_wm_enumerate_unwind(); /* slot 91's handles aren't outs: the host binds as many as it reads */
     if (!reached_host) /* else the host frees each region the record named */
         for (unsigned i = 0; i < out->nholds; i++) mn_gunhold(out->holds[i]);
     mn_wm_scratch_done();
@@ -413,9 +414,11 @@ NTSTATUS_T mn_wm_copy_back(const struct mn_wm_out *out, const uint8_t *r, uint32
 /* ---- host ---- */
 #ifndef MN_WM_GUEST /* the guest's winemetal.so has no host table and no winemetal to call */
 
-/* The marshaller's memory per ring (ring_state word 1): chunks, so that pointers into it stay valid for a call. */
+/* The marshaller's memory per ring (ring_state word 1): chunks, so that pointers into it stay valid for a call, and
+ * the scratch blobs the call uses, held until the next call (a blob the guest frees meanwhile stays mapped). */
 struct chunk { struct chunk *next; size_t cap, used; _Alignas(16) uint8_t data[]; };
-struct arena { struct chunk *head; };
+#define ARENA_HOLDS 4
+struct arena { struct chunk *head; unsigned nholds; uint64_t held[ARENA_HOLDS]; void *holds[ARENA_HOLDS]; };
 #define CHUNK_BYTES (1u << 20)
 
 static struct arena *arena_of(void *ring) {
@@ -425,6 +428,7 @@ static struct arena *arena_of(void *ring) {
 }
 
 static void arena_reset(struct arena *a) {
+    while (a->nholds) mn_executor_blob_release(a->holds[--a->nholds]);
     while (a->head && a->head->next) { /* the oldest chunk stays */
         struct chunk *c = a->head;
         a->head = c->next;
@@ -448,6 +452,23 @@ static void *arena_alloc(struct arena *a, size_t n) {
 }
 
 void *mn_wm_alloc(struct mn_wm_state *k, size_t n) { return arena_alloc(k->arena, n); }
+
+/* [offset, offset + len) of a scratch blob, which the call's arena holds; a call names a few blobs at most. */
+static uint8_t *scratch_of(struct mn_wm_state *k, uint64_t blob, uint64_t offset, uint64_t len) {
+    struct arena *a = k->arena;
+    unsigned i = 0;
+    while (i < a->nholds && a->held[i] != blob) i++;
+    if (i == ARENA_HOLDS) return NULL;
+    void *hold, *p = mn_executor_blob_hold(k->c->ctx_id, blob, offset, len, &hold);
+    if (!p) return NULL;
+    if (i < a->nholds) {
+        mn_executor_blob_release(hold); /* already held for this call */
+    } else {
+        a->held[i] = blob, a->holds[i] = hold;
+        a->nholds++;
+    }
+    return p;
+}
 
 void mn_wm_ring_end(void *ring) {
     struct arena **slot = (struct arena **)ring + 1;
@@ -486,7 +507,7 @@ static NTSTATUS_T take_data(struct mn_wm_state *k, const struct mn_wm_field *f, 
         if (k->len - k->pos < sizeof v) return MN_STATUS_INVALID_PARAMETER;
         memcpy(v, k->rec + k->pos, sizeof v);
         k->pos += sizeof v;
-        if (!(scratch = mn_executor_blob(k->c->ctx_id, v[0], v[1], h.len))) return MN_STATUS_INVALID_PARAMETER;
+        if (!(scratch = scratch_of(k, v[0], v[1], h.len))) return MN_STATUS_INVALID_PARAMETER;
         src = scratch;
     } else {
         return MN_STATUS_INVALID_PARAMETER;

@@ -25,8 +25,8 @@ void mn_executor_start(mn_op_fn handler, const struct mn_executor_hooks *hooks);
 size_t mn_executor_snapshot(uint32_t ctx_id, void *except, struct mn_mark *marks, size_t cap);
 /* 1 once every ring in marks has finished past its mark, or is gone. */
 int mn_executor_passed(uint32_t ctx_id, const struct mn_mark *marks, size_t n);
-/* The host address of [offset, offset + len) in one of a context's blobs, or NULL if it isn't one. Valid while the
- * calling op runs (the executor waits out running ops before a freed blob goes). */
+/* The host address of [offset, offset + len) in one of a context's blobs, or NULL if it isn't one. Valid only on
+ * libkrun's gpu worker thread, which is the one that frees blobs; anywhere else (an op on a ring) hold it instead. */
 void *mn_executor_blob(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len);
 /* The same, valid until mn_executor_blob_release(*hold), even after the guest frees the blob (e.g. while a Metal buffer
  * wraps it). NULL, and *hold untouched, if it isn't one. */

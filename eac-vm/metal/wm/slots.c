@@ -334,9 +334,13 @@ NTSTATUS_T mn_wm_enumerate_pack(void *params, struct mn_wm_out *o) {
     rec.buffer_size = nlogs;
     NTSTATUS_T s = mn_wm_emit(o, &rec, sizeof rec);
     if (!s) s = mn_wm_emit_data(o, logs, nlogs * sizeof *logs, WMF_IN);
-    if (s)
-        for (unsigned i = 0; i < nlogs; i++) mn_gh_drop(logs[i]);
+    if (s) mn_wm_enumerate_unwind();
     return s;
+}
+
+void mn_wm_enumerate_unwind(void) {
+    for (unsigned i = 0; i < nlogs; i++) mn_gh_drop(logs[i]);
+    nlogs = 0;
 }
 
 NTSTATUS_T mn_wm_enumerate_unpack(void *params, const struct mn_wm_out *o, const void *reply, uint32_t len) {
@@ -348,6 +352,7 @@ NTSTATUS_T mn_wm_enumerate_unpack(void *params, const struct mn_wm_out *o, const
     for (unsigned i = 0; i < nlogs; i++)
         if (i < read) out[i] = logs[i];
         else mn_gh_drop(logs[i]);
+    nlogs = 0;
     a->ret_read = read;
     mn_wm_scratch_done();
     return 0;

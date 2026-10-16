@@ -3,11 +3,13 @@
  *   freed      a blob the guest frees, with nothing holding it, is unmapped at once
  *   held       a held blob stays mapped (and out of the table) until its last hold is released
  *   marks      a snapshot of two rings passes only once the second has finished past its mark
+ *   unrelated  a blob destroyed while another ring's op is blocked is unmapped at once, not after that op
  *   hooks      progress runs before a consumer parks; ring_end for each ring that stops, then context_end
  *   notify     an MN_CTRL_NOTIFY_WAIT fence completes once the queue's head passes arg: at once if it already has,
  *              else when mn_executor_notified says the queue moved */
 #include <assert.h>
 #include <errno.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdatomic.h>
@@ -84,6 +86,13 @@ static void on_end(uint32_t ctx_id) {
 
 static int mapped(void *p) { return msync(p, 16384, MS_ASYNC) == 0; }
 
+static atomic_int destroyed;
+static void *destroy_40(void *p) {
+    ops->blob_destroyed(ops->ctx, 1, 40, p, 16384);
+    destroyed = 1;
+    return NULL;
+}
+
 int main(void) {
     static const struct mn_executor_hooks hooks = {on_progress, on_end, on_ring_end};
     mn_executor_start(blocker, &hooks);
@@ -116,6 +125,15 @@ int main(void) {
     send_op(&b, OP_BLOCK); /* ring b's consumer holds this record until gate opens */
     send_op(&a, MN_OP_NOP + 0x400);
     usleep(20000);
+    void *u = new_blob(1, 40);
+    pthread_t t;
+    pthread_create(&t, NULL, destroy_40, u);
+    for (int i = 0; i < 100 && !destroyed; i++) usleep(1000);
+    int unrelated = destroyed && !mapped(u);
+    if (!unrelated) gate = 1; /* let the blocked op go, so the destroy can finish */
+    pthread_join(t, NULL);
+    printf("%s unrelated\n", unrelated ? "ok  " : "FAIL");
+    assert(unrelated);
     struct mn_mark m[4];
     size_t n = mn_executor_snapshot(1, NULL, m, 4);
     assert(n == 2);

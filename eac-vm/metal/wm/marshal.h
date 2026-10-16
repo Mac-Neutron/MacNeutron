@@ -60,6 +60,7 @@ NTSTATUS_T mn_wm_sm50_pack(unsigned slot, void *params, struct mn_wm_out *o);
 NTSTATUS_T mn_wm_sm50_unpack(unsigned slot, void *params, const struct mn_wm_out *o, const void *reply, uint32_t len);
 NTSTATUS_T mn_wm_enumerate_pack(void *params, struct mn_wm_out *o);
 NTSTATUS_T mn_wm_enumerate_unpack(void *params, const struct mn_wm_out *o, const void *reply, uint32_t len);
+void mn_wm_enumerate_unwind(void); /* a slot 91 that never came back: frees the log handles it picked */
 NTSTATUS_T mn_wm_constants_emit(void *params, struct mn_wm_out *o);
 /* The guest's pixel format for a texture handle (slots 45 and 145), or 0 when unknown: winemetal.c's, which asks the
  * host once per texture. */
