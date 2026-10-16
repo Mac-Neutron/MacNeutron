@@ -1,6 +1,7 @@
 /* The executor's handler for winemetal ops (milestone 4b-1): one handle table per guest context, made on its first
  * call; a ring's state caches its context (word 0; the marshaller has word 1). */
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include "../marshal.h"
 #include "../notify.h"
@@ -77,6 +78,8 @@ static void context_end(uint32_t ctx_id) {
     if (c) *pp = c->next;
     pthread_mutex_unlock(&ctx_lock);
     if (!c) return;
+    uint64_t failed = atomic_load(&c->wm.failures); /* nobody waited on them: the gates read this */
+    if (failed) fprintf(stderr, "mn-winemetal: context %u: %llu queued calls failed\n", ctx_id, (unsigned long long)failed);
     mn_ht_free(c->wm.ht);
     mn_wm_ctx_end(&c->wm);
     free(c);

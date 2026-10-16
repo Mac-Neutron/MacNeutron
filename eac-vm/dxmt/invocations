@@ -1,0 +1,24 @@
+# DXMT's headless programs for the 4b-2 gate (gate.sh): name|exe|arguments|prefixes. The arguments are those of
+# dxmt/check.sh's first `run ours` line for the program; @T is the tests folder (dxmt/tests, or its copy in the VM
+# share) and @S its shaders, which each side passes as Z: paths. A line of output is compared when it starts with one
+# of the program's prefixes (its own printf lines; Wine's, DXMT's and the launcher's never count).
+d3d11_vsia|d3d11_vsia.exe||d3d11
+d3d12_api|d3d12_api.exe|@S/depth.vs.dxil @S/depth.ps.dxil|library residency nulldsv multifence markers list1 heap1 feature caps cachedblob map
+d3d12_bounds|d3d12_bounds.exe|@S/bounds.cs.dxil|bounds
+d3d12_cache|d3d12_cache.exe|@S/cache.vs.dxil @S/cache.ps.dxil @S/cache.cs.dxil a|cache timing
+d3d12_compress|d3d12_compress.exe||compress
+d3d12_copy|d3d12_copy.exe||copy
+d3d12_depth|d3d12_depth.exe|@S/depth.vs.dxil @S/depth.ps.dxil @S/depth.psdepth.dxil|depth
+d3d12_dxil|d3d12_dxil.exe|@S/triangle.vs.dxil @S/triangle.ps.dxil @S/compute.cs.dxil @T/dxil/reject/gatherraw.dxil|graphics device compute canary
+d3d12_dxil_exec|d3d12_dxil_exec.exe|@T/dxil|group threads
+d3d12_hazards|d3d12_hazards.exe|@S|hazard ts-many
+d3d12_indirect|d3d12_indirect.exe|@S/indirect.vs.dxil @S/indirect.ps.dxil @S/indirect.cs.dxil @S/indirect.vsid.dxil @S/indirect.psid.dxil @S/indirect.vsvid.dxil @S/indirect.vsstart.dxil|indirect
+d3d12_layered|d3d12_layered.exe|@S/layered.vs.dxil @S/layered.ps.dxil|layered
+d3d12_lod|d3d12_lod.exe|@S/lod.vs.dxil @S/lod.ps.dxil|lod
+d3d12_null|d3d12_null.exe|@S/null.cs.dxil|null
+d3d12_query|d3d12_query.exe|@S/depth.vs.dxil @S/depth.ps.dxil|query
+d3d12_timestamp|d3d12_timestamp.exe|@S/depth.vs.dxil @S/depth.ps.dxil|timestamp
+d3d12_triangle|d3d12_triangle.exe|@S/triangle2.vs.dxil @S/triangle2.ps.dxil|triangle atomic64
+d3d12_upscale|d3d12_upscale.exe|ratio 1.5|upscale range
+d3d12_volume|d3d12_volume.exe|@S/volume.fill.dxil @S/volume.sample.dxil|volume
+d3d12_vsread|d3d12_vsread.exe|@S/vsread.vs.dxil @S/vsread.ps.dxil|vsread
