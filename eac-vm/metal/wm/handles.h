@@ -52,6 +52,8 @@ int mn_ht_release(struct mn_ht *t, void *ring, mn_handle h); /* the last one is 
 void mn_ht_sweep(struct mn_ht *t); /* runs the deferred releases whose rings have passed */
 void mn_ht_pool_push(struct mn_ht *t, void *ring, mn_handle pool); /* pool is bound, kind MN_HK_POOL */
 void mn_ht_pool_pop(struct mn_ht *t, void *ring, mn_handle pool);
+/* ring's thread is gone, and its open pools with it: their handles lose that reference. */
+void mn_ht_ring_end(struct mn_ht *t, void *ring);
 size_t mn_ht_live(struct mn_ht *t);     /* bound handles */
 size_t mn_ht_deferred(struct mn_ht *t); /* releases waiting for rings */
 

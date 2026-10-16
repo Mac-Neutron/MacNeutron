@@ -112,7 +112,7 @@ add(krun_rng_device_new(&err), "rng")
 // Free page reporting gives the guest's freed memory back to macOS (our libkrun's balloon patch).
 add(krun_balloon_device_new(&err), "balloon")
 // The Metal transport (spec §5.6): virtio-gpu with the dxmt context and an 8 GiB host-visible window for its blobs.
-if metalTestOps { mn_executor_start(mn_testops) } else { mn_executor_start(nil) }  // 4b: winemetal's handler
+if metalTestOps { mn_executor_start(mn_testops, nil) } else { mn_executor_start(nil, nil) }  // 4b: winemetal's handler
 add(krun_gpu_device_without_display(8 << 30), "gpu")
 // Steam forwarding: mn-steam-host serves the guest's lsteamclient calls against the Mac's Steam (spec §5.9).
 var steamHostPID: pid_t = 0

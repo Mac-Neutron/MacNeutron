@@ -36,3 +36,13 @@ $(OUT)/handles-test: tests/handles-test.c guest/ghandles.c host/htable.c handles
 handles-test: $(OUT)/handles-test
 	$(OUT)/handles-test
 .PHONY: handles-test
+
+MARSHAL_SRC := calls.c marshal.c guest/ghandles.c host/htable.c host/invoke.m host/loader.c
+$(OUT)/marshal-test: tests/marshal-test.m $(MARSHAL_SRC) calls.h marshal.h handles.h ../proto.h
+	mkdir -p $(OUT)
+	$(CC) $(CFLAGS) $(INC) -I$(DXMT)/airconv -o $@ tests/marshal-test.m $(MARSHAL_SRC) \
+	  -framework Foundation -lpthread
+
+marshal-test: $(OUT)/marshal-test
+	$(OUT)/marshal-test
+.PHONY: marshal-test

@@ -1,5 +1,5 @@
 /* The executor (see executor.h). libkrun's gpu worker thread delivers control messages, fences and blob events, one at
- * a time; the ring list is that thread's alone. A fence follows the message it belongs to at once, so an MN_CTRL_WAIT
+ * a time; only it changes the ring list, under rings_lock for the consumers' snapshots. A fence follows the message it belongs to at once, so an MN_CTRL_WAIT
  * is paired with the next fence; any other fence completes immediately. */
 #include <inttypes.h>
 #include <pthread.h>
@@ -49,12 +49,18 @@ struct ring {
     atomic_int stop;
     atomic_uint nwaiters;
     atomic_int in_op; /* the handler may be using a blob: blob_destroyed waits it out */
+    _Atomic uint64_t finished; /* tail after the last record the handler finished */
+    uint64_t serial;
+    unsigned since_progress;
     struct waiter waiters[MAX_WAITERS];
     uint64_t state[8];
     struct ring *next;
 };
 static struct ring *rings;
+static pthread_mutex_t rings_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t next_serial;
 static mn_op_fn handler;
+static struct mn_executor_hooks hooks;
 static struct ring *wait_ring; /* the MN_CTRL_WAIT the next fence belongs to */
 static atomic_uint_fast64_t async_failures; /* since the last context began (MN_OP_TEST_ERRORS) */
 static uint64_t wait_seq;
@@ -139,6 +145,7 @@ static void run(struct ring *r, const struct mn_rec *rec) {
         error("asynchronous op failed", op, (uint64_t)-status);
     }
     mn_ring_done(&r->v, &r->tail);
+    atomic_store_explicit(&r->finished, r->tail, memory_order_release);
     atomic_thread_fence(memory_order_seq_cst); /* done_seq, then nwaiters: pairs with add_waiter */
     if (atomic_load_explicit(&r->nwaiters, memory_order_relaxed)) {
         pthread_mutex_lock(&r->m);
@@ -155,6 +162,10 @@ static void *consume(void *arg) {
         const struct mn_rec *rec = mn_ring_next(&r->v, &r->tail);
         if (rec) {
             run(r, rec);
+            if (hooks.progress && ++r->since_progress == 64) {
+                r->since_progress = 0;
+                hooks.progress(r->ctx_id, r->state);
+            }
             idle = now_ns();
             continue;
         }
@@ -171,6 +182,7 @@ static void *consume(void *arg) {
             __asm__ volatile("yield");
             continue;
         }
+        if (hooks.progress) hooks.progress(r->ctx_id, r->state);
         if (!mn_ring_try_park(&r->v, r->tail)) continue;
         pthread_mutex_lock(&r->m);
         while (!r->wake_pending && !atomic_load(&r->stop)) pthread_cond_wait(&r->c, &r->m);
@@ -216,15 +228,20 @@ static void attach(uint32_t ctx_id, uint64_t blob_id) {
         error("attach: no consumer thread", ctx_id, blob_id);
         return;
     }
+    pthread_mutex_lock(&rings_lock);
+    r->serial = ++next_serial;
     r->next = rings;
     rings = r;
+    pthread_mutex_unlock(&rings_lock);
     r->v.hdr->reply_len = MN_ATTACHED;
 }
 
 static void stop(struct ring *r) {
+    pthread_mutex_lock(&rings_lock); /* unlinked before the join: its consumer may be in a snapshot */
     struct ring **pp = &rings;
     while (*pp != r) pp = &(*pp)->next;
     *pp = r->next;
+    pthread_mutex_unlock(&rings_lock);
     pthread_mutex_lock(&r->m);
     atomic_store(&r->stop, 1);
     pthread_cond_signal(&r->c);
@@ -236,6 +253,7 @@ static void stop(struct ring *r) {
     pthread_mutex_destroy(&r->m);
     pthread_cond_destroy(&r->c);
     if (wait_ring == r) wait_ring = NULL;
+    if (hooks.ring_end) hooks.ring_end(r->ctx_id, r->state);
     free(r);
 }
 
@@ -268,6 +286,7 @@ static void context_destroy(void *ctx, uint32_t ctx_id) {
         next = r->next;
         if (r->ctx_id == ctx_id) stop(r);
     }
+    if (hooks.context_end) hooks.context_end(ctx_id);
     fprintf(stderr, "mn-executor: context %u gone\n", ctx_id);
 }
 
@@ -354,11 +373,36 @@ static void fence(void *ctx, uint32_t ctx_id, uint32_t ring_idx, uint64_t fence_
     else mn_dxmt_fence_done(ctx_id, ring_idx, fence_id);
 }
 
-void mn_executor_start(mn_op_fn h) {
+size_t mn_executor_snapshot(uint32_t ctx_id, void *except, struct mn_mark *marks, size_t cap) {
+    size_t n = 0;
+    pthread_mutex_lock(&rings_lock);
+    for (struct ring *r = rings; r && n < cap; r = r->next)
+        if (r->ctx_id == ctx_id && (void *)r->state != except)
+            marks[n++] = (struct mn_mark){r->state, atomic_load_explicit(&r->v.hdr->head, memory_order_acquire),
+                                          r->serial};
+    pthread_mutex_unlock(&rings_lock);
+    return n;
+}
+
+int mn_executor_passed(uint32_t ctx_id, const struct mn_mark *marks, size_t n) {
+    int passed = 1;
+    pthread_mutex_lock(&rings_lock);
+    for (size_t i = 0; i < n && passed; i++)
+        for (struct ring *r = rings; r; r = r->next)
+            if ((void *)r->state == marks[i].ring && r->serial == marks[i].serial && r->ctx_id == ctx_id) {
+                passed = atomic_load_explicit(&r->finished, memory_order_acquire) >= marks[i].pos;
+                break;
+            }
+    pthread_mutex_unlock(&rings_lock);
+    return passed;
+}
+
+void mn_executor_start(mn_op_fn h, const struct mn_executor_hooks *k) {
     static const struct mn_dxmt_ops ops = {
         .context_create = context_create, .context_destroy = context_destroy, .blob_created = blob_created,
         .blob_destroyed = blob_destroyed, .submit = submit, .fence = fence,
     };
     handler = h;
+    if (k) hooks = *k;
     mn_dxmt_set_ops(&ops);
 }

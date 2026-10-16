@@ -3,15 +3,28 @@
  * and then parking until the guest's MN_CTRL_WAKE. */
 #ifndef MN_EXECUTOR_H
 #define MN_EXECUTOR_H
+#include <stddef.h>
 #include <stdint.h>
+#include "../proto.h"
 
 /* Runs one record (an op the transport doesn't handle itself). ring_state is 64 zeroed bytes per ring, the handler's;
  * reply is NULL with cap 0 for an asynchronous record. Returns the status a synchronous caller gets. */
 typedef int32_t (*mn_op_fn)(uint32_t ctx_id, void *ring_state, uint32_t op, const void *p, uint32_t len,
                             void *reply, uint32_t cap, uint32_t *reply_len);
 
-/* Registers with libkrun's dxmt context; call before the VM starts. */
-void mn_executor_start(mn_op_fn handler);
+/* What a handler learns besides its records. */
+struct mn_executor_hooks {
+    void (*progress)(uint32_t ctx_id, void *ring_state); /* on a consumer, every 64 records and before it parks */
+    void (*context_end)(uint32_t ctx_id);                 /* after the context's rings have stopped */
+    void (*ring_end)(uint32_t ctx_id, void *ring_state);  /* a ring stopped: its state goes next */
+};
+
+/* Registers with libkrun's dxmt context; call before the VM starts. hooks may be NULL. */
+void mn_executor_start(mn_op_fn handler, const struct mn_executor_hooks *hooks);
+/* Every attached ring of the context but except (a ring_state), with its published position: up to cap marks. */
+size_t mn_executor_snapshot(uint32_t ctx_id, void *except, struct mn_mark *marks, size_t cap);
+/* 1 once every ring in marks has finished past its mark, or is gone. */
+int mn_executor_passed(uint32_t ctx_id, const struct mn_mark *marks, size_t n);
 /* The host address of [offset, offset + len) in one of a context's blobs, or NULL if it isn't one. Valid while the
  * calling op runs (the executor waits out running ops before a freed blob goes). */
 void *mn_executor_blob(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len);

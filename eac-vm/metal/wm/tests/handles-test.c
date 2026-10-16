@@ -324,6 +324,25 @@ static void threads(void) {
     mn_ht_free(t);
 }
 
+/* A ring whose thread ended with a pool open: the pool went with the thread, its handles lose that reference, and a
+ * later ring at the same address starts with no pools. */
+static void ring_end(void) {
+    struct mn_ht *t = table();
+    int ok;
+    mn_ht_bind(t, ring(0), H(1, 70), MN_HK_POOL, obj(70), MN_OWN_PLUS1);
+    mn_ht_pool_push(t, ring(0), H(1, 70));
+    mn_ht_bind(t, ring(0), H(1, 71), MN_HK_OBJC, obj(71), MN_OWN_AUTORELEASED);
+    mn_ht_ring_end(t, ring(0));
+    mn_ht_sweep(t);
+    CHECK(released[71] == 1 && released[70] == 0); /* the thread drained the pool itself */
+    mn_ht_get(t, H(1, 70), MN_HK_POOL, &ok);
+    CHECK(!ok);
+    mn_ht_bind(t, ring(0), H(1, 72), MN_HK_OBJC, obj(72), MN_OWN_AUTORELEASED); /* the next ring there: no pool */
+    CHECK(mn_ht_live(t) == 1);
+    mn_ht_free(t);
+    CHECK(released[72] == 1);
+}
+
 static void free_all(void) {
     struct mn_ht *t = table();
     mn_ht_bind(t, ring(0), H(1, 60), MN_HK_OBJC, obj(60), MN_OWN_PLUS1);
@@ -340,7 +359,7 @@ int main(void) {
         {"bind-get", bind_get}, {"stale", stale}, {"unbound", unbound}, {"out-of-range", out_of_range},
         {"kind-mismatch", kind_mismatch}, {"refs", refs}, {"pool", pool}, {"nested-pools", nested_pools},
         {"borrowed", borrowed}, {"cross-ring-use", cross_ring_use}, {"cross-ring-release", cross_ring_release},
-        {"reuse-fifo", reuse_fifo}, {"threads", threads}, {"free-all", free_all},
+        {"reuse-fifo", reuse_fifo}, {"threads", threads}, {"ring-end", ring_end}, {"free-all", free_all},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         int before = failures;

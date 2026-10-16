@@ -266,6 +266,25 @@ void mn_ht_pool_pop(struct mn_ht *t, void *ring, mn_handle pool) {
     pthread_mutex_unlock(&t->lock);
 }
 
+void mn_ht_ring_end(struct mn_ht *t, void *ring) {
+    pthread_mutex_lock(&t->lock);
+    struct ringpools *rp = ringpools(t, ring, 0);
+    if (rp) {
+        if (rp->n) {
+            mn_handle bottom = rp->stack[0].h;
+            pop(t, ring, bottom);
+            struct hentry *e = entry(t, MN_H_INDEX(bottom), 0);
+            unbind(t, e); /* drained by the thread's exit, like the pools above it */
+            e->busy = 0;
+            e->obj = NULL;
+        }
+        free(rp->stack);
+        *rp = t->rp[--t->nrp];
+        pthread_cond_broadcast(&t->cond);
+    }
+    pthread_mutex_unlock(&t->lock);
+}
+
 int mn_ht_release(struct mn_ht *t, void *ring, mn_handle h) {
     struct pendings run = {0};
     pthread_mutex_lock(&t->lock);
