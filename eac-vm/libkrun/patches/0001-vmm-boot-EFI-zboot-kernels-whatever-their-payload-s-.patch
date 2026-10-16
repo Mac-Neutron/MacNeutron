@@ -1,0 +1,70 @@
+From a1d09cd2ea8519b85fdb04e70409efa0f66a7a81 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Thu, 15 Oct 2026 20:37:41 -0400
+Subject: [PATCH] vmm: boot EFI zboot kernels whatever their payload's
+ compressor
+
+arm64 distribution kernels (Fedora's vmlinuz among them) are EFI zboot images whose header names the payload's
+offset, size and compressor; Fedora's is zstd, which the PeGz loader's gzip scan cannot find (PeGzInvalid). Read the
+header and decode gzip or zstd; images without it keep the old scan. zstd becomes a dependency on every arch.
+---
+ src/vmm/Cargo.toml     |  2 +-
+ src/vmm/src/builder.rs | 25 ++++++++++++++++++++++++-
+ 2 files changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/src/vmm/Cargo.toml b/src/vmm/Cargo.toml
+index 7f691dca..00cb7f0c 100644
+--- a/src/vmm/Cargo.toml
++++ b/src/vmm/Cargo.toml
+@@ -23,6 +23,7 @@ aws-nitro = []
+ [dependencies]
+ crossbeam-channel = ">=0.5.15"
+ flate2 = "1.0.35"
++zstd = "0.13"
+ libc = ">=0.2.39"
+ linux-loader = { version = "0.13.2", features = ["bzimage", "elf", "pe"] }
+ log = "0.4.0"
+@@ -50,7 +51,6 @@ bitflags = { version = "2.10.0", optional = true }
+ [target.'cfg(target_arch = "x86_64")'.dependencies]
+ bzip2 = "0.5"
+ cpuid = { package = "krun-cpuid", version = "=0.1.0-1.19.6", path = "../cpuid" }
+-zstd = "0.13"
+ 
+ [target.'cfg(target_os = "linux")'.dependencies]
+ tdx = { version = "0.1.0", optional = true }
+diff --git a/src/vmm/src/builder.rs b/src/vmm/src/builder.rs
+index 72831f1f..be29182f 100644
+--- a/src/vmm/src/builder.rs
++++ b/src/vmm/src/builder.rs
+@@ -1173,7 +1173,30 @@ fn load_external_kernel(
+         KernelFormat::PeGz => {
+             let data: Vec<u8> = std::fs::read(external_kernel.path.clone())
+                 .map_err(StartMicrovmError::PeGzOpenKernel)?;
+-            if let Some(magic) = data
++            // An EFI zboot image (arm64 distribution kernels, Fedora's among them) describes its payload: "zimg" at 4,
++            // the payload's offset and size at 8 and 12, its compressor's name at 0x18.
++            if data.len() >= 0x20 && &data[4..8] == b"zimg" {
++                let field = |at: usize| u32::from_le_bytes(data[at..at + 4].try_into().unwrap()) as usize;
++                let (offset, size) = (field(8), field(12));
++                let payload = data
++                    .get(offset..offset + size)
++                    .ok_or(StartMicrovmError::PeGzInvalid)?;
++                let mut kernel_data: Vec<u8> = Vec::new();
++                match &data[0x18..0x1c] {
++                    b"gzip" => GzDecoder::new(payload)
++                        .read_to_end(&mut kernel_data)
++                        .map(|_| ())
++                        .map_err(StartMicrovmError::PeGzDecoder)?,
++                    b"zstd" => zstd::stream::copy_decode(payload, &mut kernel_data)
++                        .map_err(StartMicrovmError::PeGzDecoder)?,
++                    _ => return Err(StartMicrovmError::PeGzInvalid),
++                }
++                debug!("EFI zboot payload: {size} bytes at 0x{offset:x}, {} decompressed", kernel_data.len());
++                guest_mem
++                    .write(&kernel_data, GuestAddress(0x8000_0000))
++                    .unwrap();
++                GuestAddress(0x8000_0000)
++            } else if let Some(magic) = data
+                 .windows(3)
+                 .position(|window| window == [0x1f, 0x8b, 0x8])
+             {
