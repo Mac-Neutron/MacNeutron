@@ -1,0 +1,9 @@
+#!/bin/sh
+# FEX skips its TSO barriers (HostTSO) only when this boot's vCPUs order memory like x86: the host sets Apple's EnTSO
+# on each of them, and nothing in the guest can. Any violation keeps FEX on software TSO.
+if out=$(/usr/libexec/tso-litmus 200); then
+  sed -i 's/{"Config":{/{"Config":{"HostTSO":"1",/' /usr/share/fex-emu/Config.json
+  echo "mn-tso-check: $out, FEX uses the host's TSO"
+else
+  echo "mn-tso-check: $out, FEX keeps software TSO"
+fi

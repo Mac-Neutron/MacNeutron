@@ -1,0 +1,13 @@
+[Unit]
+Description=Let FEX use the host's TSO only if a litmus test sees TSO ordering (spec §7)
+After=local-fs.target
+Before=multi-user.target mn-runner.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/mn-tso-check
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target
