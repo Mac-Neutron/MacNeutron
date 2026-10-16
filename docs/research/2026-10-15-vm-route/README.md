@@ -251,3 +251,9 @@ affected yet.
   bootstrapper. Launched that way in the guest, the game starts and logs up to D3D12 adapter selection (no adapter
   until milestone 4). Through the bootstrapper, with the same arguments minus `-NOEAC` (now in `eac.sh`), the game
   executable exits before writing a log, and the bootstrapper ends with 60101.
+- Where the EAC screen comes from: screenshots of the guest's display (Xvfb `-fbdir`) show the SMITE 2 splash with
+  Easy Anti-Cheat's logo and "INITIALIZING..." from `start_protected_game.exe`; then nothing, no game window and no
+  dialog. `Hemingway.exe` without `-NOEAC` stops at an "Invalid handle." dialog and never starts the game. The
+  builder's Linux Steam (Proton Experimental, 2026-10-15) launched `Hemingway.exe ... -NOEAC` too, and that Proton
+  prefix has no EAC files or bootstrapper log. Its 2-step install script is the Steamworks redistributables
+  (depots 228989 and 228990), not EAC.
