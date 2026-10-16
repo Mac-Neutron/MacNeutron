@@ -11,10 +11,11 @@ INC := -DDXMT_GUEST_VM -I$(DXMT)/winemetal -I.. -I.
 # The shipped winemetal.so beside stand-ins for the Wine libraries it links (its LC_RPATH has @loader_path/).
 $(HOST)/ntdll.so: host/stand-ins.c
 	mkdir -p $(HOST)
-	$(CC) -O2 -Wall -dynamiclib -DMN_NTDLL -install_name @rpath/ntdll.so -o $@ host/stand-ins.c
-$(HOST)/winemac.so: host/stand-ins.c
+	$(CC) -O2 -Wall -dynamiclib -install_name @rpath/ntdll.so -o $@ host/stand-ins.c
+$(HOST)/winemac.so: host/winemac.m
 	mkdir -p $(HOST)
-	$(CC) -O2 -Wall -dynamiclib -install_name @rpath/winemac.so -o $@ host/stand-ins.c
+	$(CC) -O2 -Wall -dynamiclib -install_name @rpath/winemac.so -o $@ host/winemac.m -framework AppKit -framework Metal \
+	  -framework QuartzCore
 $(HOST)/winemetal.so: $(WINEMETAL)
 	mkdir -p $(HOST)
 	cp $(WINEMETAL) $@
@@ -59,3 +60,13 @@ $(OUT)/memory-test: tests/memory-test.m $(LOOP_SRC) calls.h marshal.h handles.h 
 memory-test: metal-host $(OUT)/memory-test
 	$(OUT)/memory-test $(HOST)
 .PHONY: memory-test
+
+# The game window (milestone 4c): the stand-in winemac.so under the real winemetal.so, its slots called directly.
+$(OUT)/window-test: tests/window-test.m host/loader.c host/loader.h
+	mkdir -p $(OUT)
+	$(CC) $(CFLAGS) $(INC) -o $@ tests/window-test.m host/loader.c -framework AppKit -framework Metal \
+	  -framework QuartzCore -lpthread
+
+window-test: metal-host $(OUT)/window-test
+	$(OUT)/window-test $(HOST)
+.PHONY: window-test

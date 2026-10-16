@@ -7,6 +7,7 @@
 // /mnt/games. The map's host side is shared read-only (virtiofs tag `games`) whether or not Steam is forwarded.
 // <dir> holds eac-vm/image/build.sh's output. The share is virtiofs tag `share` (/mnt/share in the guest). The process
 // exits when the guest powers off.
+import AppKit
 import Foundation
 
 func fail(_ code: Int32, _ s: String) -> Never {
@@ -197,9 +198,12 @@ if timeout > 0 {
   }
 }
 let vmm = made(krun_vmm_builder_build(&builder, &err), "build the VM")
-// The VM runs off the main thread: the executor needs the main queue for Metal's main-thread calls (spec §5.6).
+// The VM runs off the main thread. The main thread runs AppKit: the game window (metal-host's stand-in winemac.so,
+// eac-vm/metal/wm/host/winemac.m) and Metal's main-thread calls share its run loop (spec §5.6). No Dock icon until the
+// window shows.
 Thread.detachNewThread {
   krun_vmm_run(vmm)
   exit(0)
 }
-dispatchMain()
+NSApplication.shared.setActivationPolicy(.accessory)
+NSApplication.shared.run()
