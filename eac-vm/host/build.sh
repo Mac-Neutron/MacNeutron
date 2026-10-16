@@ -16,6 +16,8 @@ for f in wm/calls.c wm/cmdlist.c wm/marshal.c wm/slots.c wm/host/htable.c wm/hos
   clang -O2 -std=gnu2x -Wall -DMN_WM_HOST -DDXMT_GUEST_VM -c -I"$M" -I"$DXMT/winemetal" -I"$DXMT/airconv" -o "$o" "$M/$f"
   objs="$objs $o"
 done
+clang -O2 -std=gnu2x -Wall -c -I"$W/libkrun/include" -o "$W/obj/input.c.o" "$ROOT/eac-vm/host/input.c"
+objs="$objs $W/obj/input.c.o"
 # shellcheck disable=SC2086
 swiftc -O -o "$W/macneutron-vm" "$ROOT/eac-vm/host/macneutron-vm.swift" "$ROOT/eac-vm/metal/host/executor.c" \
   "$ROOT/eac-vm/metal/host/testops.c" "$ROOT/eac-vm/metal/ring.c" $objs \

@@ -16,6 +16,8 @@ for f in "$G/Hemingway.exe" /mnt/share/valve/steamclient64.dll /mnt/share/bin/st
   [ -f "$f" ] || { echo "missing: $f"; exit 2; }
 done
 Xvfb :0 -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &
+# The window's keyboard and mouse (eac-vm/guest/mn-input.c), into Xvfb.
+[ -x /mnt/share/bin/mn-input ] && /mnt/share/bin/mn-input :0 > /home/mn/mn-input.log 2>&1 &
 mkdir -p /home/mn
 # A VM that died mid-wineboot leaves DLLs of 0 bytes on the state disk, which wineboot then keeps (they aren't its fake
 # DLLs): remove them, and it writes them again.

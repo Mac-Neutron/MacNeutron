@@ -132,6 +132,9 @@ if wmLoaded && metalTestOps {
   mn_executor_start(nil, nil)
 }
 add(krun_gpu_device_without_display(8 << 30), "gpu")
+// The keyboard and mouse (spec §5.7): virtio-input, fed by the game window (metal-host's winemac.so), which the guest's
+// agent (eac-vm/guest/mn-input.c) replays into Xvfb.
+add(mn_input_device(&err), "input")
 // Steam forwarding: mn-steam-host serves the guest's lsteamclient calls against the Mac's Steam (spec §5.9).
 var steamHostPID: pid_t = 0
 if let appid = steamAppID {

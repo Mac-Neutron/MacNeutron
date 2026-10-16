@@ -1,0 +1,3 @@
+# The host's keyboard and mouse (eac-vm/host/input.c): readable by the unprivileged user mn, whose input agent
+# (eac-vm/guest/mn-input.c) replays them into Xvfb. Other input devices stay root's.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="MacNeutron VM input", MODE="0644"
