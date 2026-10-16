@@ -435,3 +435,78 @@ the memory DXMT hands to Metal itself (`dxmt_buffer.cpp:44-46`, `d3d12_command_a
     this.
 - **Six places, not four.** DXMT has six places where it gives Metal memory of its own; two of them do so on i386
   only (above).
+
+## 10. Presentation (milestone 4c, 2026-10-16)
+
+**What exists.**
+- **The window.** The VM host's stand-in for winemac.so (`eac-vm/metal/wm/host/winemac.m`) is the host's window code:
+  - MacNeutron's winemetal.so finds it through `macdrv_functions`, as on macOS;
+  - every guest HWND maps to one window, "MacNeutron VM" (`MN_VM_WINDOW=WxH` points, 1280x720 by default), made on the
+    main thread at the first present;
+  - a metal view is a `CAMetalLayer`-backed view over the content view, the newest on top.
+  - `macneutron-vm`'s main thread runs AppKit instead of `dispatchMain`: the window and Metal's main-thread calls share
+    its run loop.
+- **The 11 presentation slots are forwarded** (47, 48, 66, 67, 70-73, 93, 97, 101). The guest refuses 6 slots now: the
+  Mach-port ones (120-124) and the empty 83.
+  - A view is a handle kind of its own whose release is winemetal's slot 73, so a context's end takes its views off the
+    window.
+  - The drawable's texture is autoreleased with the frame's pool: DXMT asks for it every frame and never releases it.
+  - getProps' reply carries the guest's own device value, never the host's pointer.
+  - `nextDrawable` waits for its answer: nil is one.
+- **Frames.** They go straight to the host's `CAMetalLayer`, as the spec says (§5.6). The host counts the drawables each
+  context presents and logs the count when the context ends.
+- **The probe** (`MN_PRESENT_PROBE=1`, the gate's): every 60th present first blits the drawable into a Shared buffer in
+  the same command buffer, and the host logs winshot's measures of it: green (60-95), white (all above 200), colours at
+  4 bits a channel. It reads 8-bit BGRA and RGBA and 10-bit RGB10A2 and BGR10A2 (SMITE 2's). This session couldn't
+  capture the screen at first, so the host checks its own frames; winshot is a row of the gate when it can.
+- **Input** (milestone 5's, done here to play): the window's content view posts its keys, buttons, wheel and pointer to
+  a virtio-input device (libkrun built with `input`; `eac-vm/host/input.c`).
+  - The pointer is absolute, the Mac cursor being the game's, until Control+Option captures it for mouse look (relative
+    deltas, the cursor hidden).
+  - In the guest, `mn-input` (aarch64, libxcb's XTEST: base.erofs has no libXtst) replays the device into Xvfb, which
+    reads no input devices of its own. A udev rule lets the user `mn` read that one device.
+  - `eac-vm/tests/input.sh` checks it end to end: the host's `MN_INPUT_SELFTEST` sequence arrives in an X client as
+    absolute motion, a key, a click, a relative move and a wheel notch.
+  - `eac-vm/play-smite2.sh` plays SMITE 2 until the game exits.
+
+**Gate** (`eac-vm/dxmt/present-gate.sh`), all rows passed:
+
+| Program | macOS frame | Guest frame | Host counted | Probes |
+|---|---|---|---|---|
+| `d3d12_clear` (600 frames) | 8.00 ms | 8.34 ms | 600 | 10, each green 100 |
+| `present_loop` (D3D11, 600 frames) | 7.90 ms | 8.30 ms | 600 | median green 74, white 25 |
+| SMITE 2 (180 s, Steam's launch entry) | - | - | 1555 | 116 colours after 60 s |
+
+- `d3d12_clear`'s ResizeBuffers lines are macOS's, and the host logged no error of its own in any run.
+- winshot read the window ("MacNeutron VM", green 95) once Screen Recording was allowed.
+- SMITE 2 starts through the Mac's Steam (forwarded), reaches its lobby and presents there.
+
+**Findings** (each with a test that failed first, but the shutdown race):
+- **The shader cache's writer raced.** SMITE 2's first run crashed the VM host in SQLite (`sqlite3BtreeInsert` under
+  `CacheWriter_set`). DXMT guards its writer with a lock, but slot 118 was queued: it returned before the host ran it,
+  so two rings inserted into one connection opened without SQLite's own mutex. Slot 118 now waits for the host.
+- **The HUD's instance (slot 62) is nil in the VM host.** A queued creation that comes back nil counted as a failed
+  call. Nil is an answer, so the slot waits too.
+- **A crash left a DLL of 0 bytes.** The VM died seconds after wineboot wrote `winemetal.dll` to the state disk, before
+  its data reached it. Wineboot keeps a file it didn't make, so `dxgi.dll`'s import of it failed from then on. The
+  guest scripts remove empty DLLs before wineboot.
+- **The Steam forwarder couldn't carry a buffer whose count is behind a pointer.** SMITE 2's lobby calls ISteamInventory's
+  `GetItemDefinitionProperty`, which failed in the game's lsteamclient, and the game thread stopped at engine frame 9.
+  `MN_COUNT_PTR` now carries 12 such calls, the copy back bounded by the request's size.
+- **The poweroff raced the host.** A killed SMITE 2 takes seconds to go; the guest powered off before its GPU context
+  ended on the host, so no count came. The script waits for the game's processes.
+- **XeSS was Intel's own.** With XeSS on, SMITE 2's lobby ran at 7 fps: the GPU was saturated (Device Utilization 100%,
+  Renderer 0%) by a few compute passes, about 30-50 ms each a frame, with sane dispatch sizes. Ruled out first: blob
+  memory (a Metal buffer over `MAP_SHARED` memory mapped into an HVF VM streams at 274 GB/s, as Metal's own), the
+  transport and the dispatch sizes. The cause: the guest loaded the game's Intel XeSS, whose non-Intel (DP4a) path is
+  this slow, where MacNeutron's launcher sets `libxess,libxess_dx11=b` for Wine's builtin, which answers with MetalFX
+  through DXMT. With XeSS off, the game played at 110-135 fps in a match (the user's report). `smite2-render.sh` now
+  sets the launcher's override, and the 4b-2 gate gains check.sh's five `d3d12_xess` rows; neither has run yet (the VM
+  was in use), so XeSS on MetalFX in the guest is still unmeasured.
+
+**Open.**
+- `mn-steam-host` takes the guest's interface values (`u_iface`) as host pointers unchecked: one run crashed it
+  (EXC_BAD_ACCESS at a guest value in ISteamInventory's `GetResultStatus`). A trust boundary for 3a's design.
+- A killed game that lingers in the guest holds the poweroff for minutes.
+- A swapchain's layer stays retained until its context ends (DXMT never releases it).
+- No audio, gamepads or window life yet (milestone 5).

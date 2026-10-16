@@ -12,8 +12,8 @@
 #                 loads it in-game through the runtime's easyanticheat_x64.dll.
 # Steam itself doesn't take this path for SMITE 2: its launch entries run Windows/Hemingway.exe, and the public ones
 # pass -NOEAC. The bootstrapper gets the same arguments without -NOEAC.
-# Rendering is software (Mesa's llvmpipe): DXMT in the guest presents nothing until milestone 4c, so run this on a
-# wine.erofs built with DXMT_GUEST=none (image/build.sh). Exits 1 if a row misses.
+# It renders through DXMT and the host's window since milestone 4c; a wine.erofs built with DXMT_GUEST=none
+# (image/build.sh) renders in software instead (Mesa's llvmpipe), which these rows don't need. Exits 1 if a row misses.
 export WINEPREFIX=/home/mn/smite2 SteamAppId=2437170 SteamGameId=2437170 DISPLAY=:0 PATH=/opt/mn-wine/bin:$PATH
 export PROTON_EAC_RUNTIME=/mnt/share/eac-runtime WINEDEBUG=-all
 # Under FEX Mesa's CPU detection picks AVX2 paths that LLVM then fails to select (llvmpipe compute shaders).

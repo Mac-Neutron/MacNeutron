@@ -253,7 +253,9 @@ A systemd service in `base.erofs` on the virtio-console port. It launches the ga
      - **4b-2 (done 2026-10-16):** DXMT's check suite passes in the guest as it does on macOS (the headless tests give
        the same lines and pixels): our DXMT's x86-64 build in the guest's Wine, 20 programs line for line; research
        README §9. Next: 4c.
-   - **4c, presentation.** SMITE 2 renders through the host.
+   - **4c, presentation (done 2026-10-16).** SMITE 2 renders through the host: DXMT's presenting programs present in
+     the host's window as on macOS, and SMITE 2 reaches its lobby and plays there through the Mac's Steam; research
+     README §10. Input (milestone 5's keyboard and mouse) came with it. Next: milestone 5.
 5. **Devices and product.** Audio, input, gamepads, the shared library, launch from MacNeutron, sizing. Pass: an
    online SMITE 2 match within 5% of today's frame rate, and key-to-presented-frame latency within 5 ms of today's.
 6. **Secure Boot spike.** EDK2 with Secure Boot and built-in keys boots shim, GRUB and the same kernel in the
