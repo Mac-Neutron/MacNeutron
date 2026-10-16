@@ -10,6 +10,9 @@
 # Exits 2 if a file is missing.
 export WINEPREFIX=/home/mn/smite2 SteamAppId=2437170 SteamGameId=2437170 DISPLAY=:0 PATH=/opt/mn-wine/bin:$PATH
 export WINEDEBUG=-all
+# As MacNeutron's launcher (LaunchEnvironment.swift): Wine's builtin libxess answers XeSS with MetalFX's upscaler
+# through DXMT. Intel's own XeSS takes its non-Intel (DP4a) path, a few frames a second.
+export WINEDLLOVERRIDES="libxess,libxess_dx11=b"
 RUN=${SMITE2_RUN_SECONDS:-180}
 G="/mnt/games/SMITE 2/Windows"
 for f in "$G/Hemingway.exe" /mnt/share/valve/steamclient64.dll /mnt/share/bin/steam.exe; do

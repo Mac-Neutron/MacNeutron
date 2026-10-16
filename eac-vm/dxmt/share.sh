@@ -9,6 +9,7 @@ D=$ROOT/build/eac-vm-work/share/dxmt-tests
 rm -rf "$D"; mkdir -p "$D"
 cp "$ROOT"/build/dxmt-tests/*.exe "$ROOT/build/presenter/present_loop.exe" "$D/"
 cp -R "$ROOT/dxmt/tests/shaders" "$ROOT/dxmt/tests/dxil" "$ROOT/dxmt/tests/dxbc" "$D/"
+mkdir -p "$D/xess" && cp "$D/d3d12_xess.exe" "$D/xess/libxess.dll"  # invocations' @X/xess/libxess.dll
 /usr/bin/grep -v '^#' "$ROOT/eac-vm/dxmt/invocations" | while IFS='|' read -r name rest; do
   case " ${MN_DXMT_ONLY:-$name} " in *" $name "*) printf '%s|%s\n' "$name" "$rest" ;; esac
 done > "$D/invocations"

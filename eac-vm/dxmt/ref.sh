@@ -23,7 +23,7 @@ trap stop EXIT
 env STEAM_COMPAT_DATA_PATH="$WORK/compat" SteamAppId=0 "$WORK/ours/bin/macneutron" launch getcompatpath "$WORK" \
   > /dev/null 2>&1
 while IFS='|' read -r name exe args prefixes; do
-  args=$(printf '%s' "$args" | sed "s|@S|Z:$T/shaders|g; s|@T|Z:$T|g")
+  args=$(printf '%s' "$args" | sed "s|@S|Z:$T/shaders|g; s|@T|Z:$T|g; s|@X|Z:$I|g")
   for i in $(seq 1 "${MN_REF_RUNS:-2}"); do
     start=$(now)
     # shellcheck disable=SC2086  # the arguments, one word each
