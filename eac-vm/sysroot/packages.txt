@@ -17,3 +17,5 @@ libXrender-devel
 mesa-libGL-devel
 alsa-lib-devel
 fontconfig-devel
+libstdc++-devel
+gcc-c++

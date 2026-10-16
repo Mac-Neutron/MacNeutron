@@ -38,6 +38,7 @@ fonts-filesystem-5.0.0-2.fc44.noarch
 freetype-2.14.3-1.fc44.x86_64
 freetype-devel-2.14.3-1.fc44.x86_64
 gcc-16.2.1-2.fc44.x86_64
+gcc-c++-16.2.1-2.fc44.x86_64
 gdbm-libs-1.23-11.fc44.x86_64
 gettext-0.26-5.fc44.x86_64
 gettext-envsubst-0.26-5.fc44.x86_64
@@ -128,6 +129,7 @@ libsepol-devel-3.11-1.fc44.x86_64
 libssh-0.12.2-1.fc44.x86_64
 libssh-config-0.12.2-1.fc44.noarch
 libstdc++-16.2.1-2.fc44.x86_64
+libstdc++-devel-16.2.1-2.fc44.x86_64
 libtasn1-4.21.0-1.fc44.x86_64
 libtasn1-devel-4.21.0-1.fc44.x86_64
 libtasn1-tools-4.21.0-1.fc44.x86_64

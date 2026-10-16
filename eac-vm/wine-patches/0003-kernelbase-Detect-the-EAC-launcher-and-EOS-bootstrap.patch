@@ -1,4 +1,4 @@
-From 4dc13058d863cc4069bf7762bc877e5f9230a4f4 Mon Sep 17 00:00:00 2001
+From bea73ddf759718b0f015d933a84da2712adc8690 Mon Sep 17 00:00:00 2001
 From: Derek Lesho <dlesho@codeweavers.com>
 Date: Thu, 15 Oct 2026 22:55:43 -0400
 Subject: [PATCH 3/4] kernelbase: Detect the EAC launcher and EOS bootstrapper
@@ -12,9 +12,9 @@ Proton: ValveSoftware/wine (proton_11.0) cc9a65cb0cfc (kernelbase half), ad5919f
 as they stand together on proton_11.0, ported to upstream master. Left out: the BattlEye launcher
 redirect and the Uplay environment sync, which MacNeutron's EAC mode does not use.
 ---
- dlls/kernelbase/locale.c  | 17 +++++++
- dlls/kernelbase/process.c | 99 +++++++++++++++++++++++++++++++++++++++
- 2 files changed, 116 insertions(+)
+ dlls/kernelbase/locale.c  |  17 +++++++
+ dlls/kernelbase/process.c | 100 ++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 117 insertions(+)
 
 diff --git a/dlls/kernelbase/locale.c b/dlls/kernelbase/locale.c
 index 798e4bed..ad178b52 100644
@@ -52,10 +52,18 @@ index 798e4bed..ad178b52 100644
      {
          SetLastError( ERROR_INVALID_PARAMETER );
 diff --git a/dlls/kernelbase/process.c b/dlls/kernelbase/process.c
-index 25b3f4ff..992e8cdf 100644
+index 25b3f4ff..3f75b74a 100644
 --- a/dlls/kernelbase/process.c
 +++ b/dlls/kernelbase/process.c
-@@ -505,6 +505,60 @@ done:
+@@ -27,6 +27,7 @@
+ #include "winnls.h"
+ #include "wincontypes.h"
+ #include "winternl.h"
++#include "winver.h"
+ #include "processsnapshot.h"
+ 
+ #include "kernelbase.h"
+@@ -505,6 +506,60 @@ done:
  /**********************************************************************
   *           CreateProcessInternalW   (kernelbase.@)
   */
@@ -116,7 +124,7 @@ index 25b3f4ff..992e8cdf 100644
  BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR *app_name, WCHAR *cmd_line,
                                                        SECURITY_ATTRIBUTES *process_attr,
                                                        SECURITY_ATTRIBUTES *thread_attr,
-@@ -518,6 +572,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+@@ -518,6 +573,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
      RTL_USER_PROCESS_PARAMETERS *params = NULL;
      RTL_USER_PROCESS_INFORMATION rtl_info = { 0 };
      HANDLE parent = 0, debug = 0;
@@ -124,7 +132,7 @@ index 25b3f4ff..992e8cdf 100644
      ULONG nt_flags = 0;
      USHORT machine = 0;
      NTSTATUS status;
-@@ -543,6 +598,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+@@ -543,6 +599,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
          app_name = name;
      }
  
@@ -133,7 +141,7 @@ index 25b3f4ff..992e8cdf 100644
      /* Warn if unsupported features are used */
  
      if (flags & (IDLE_PRIORITY_CLASS | HIGH_PRIORITY_CLASS | REALTIME_PRIORITY_CLASS |
-@@ -568,6 +625,47 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+@@ -568,6 +626,47 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
          goto done;
      }
  
@@ -181,7 +189,7 @@ index 25b3f4ff..992e8cdf 100644
      if (flags & (DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS))
      {
          if ((status = DbgUiConnectToDbg())) goto done;
-@@ -686,6 +784,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+@@ -686,6 +785,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
  
   done:
      RtlDestroyProcessParameters( params );

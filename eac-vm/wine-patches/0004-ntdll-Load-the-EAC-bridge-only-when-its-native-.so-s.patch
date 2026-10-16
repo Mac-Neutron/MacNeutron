@@ -1,4 +1,4 @@
-From bda220f40c576af087a8fd8736ad3c933a74ceda Mon Sep 17 00:00:00 2001
+From e5f3a3b4a5d0091390611e41eedbbe056574e374 Mon Sep 17 00:00:00 2001
 From: Derek Lesho <dlesho@codeweavers.com>
 Date: Tue, 18 Jan 2022 17:16:15 -0500
 Subject: [PATCH 4/4] ntdll: Load the EAC bridge only when its native .so sits
