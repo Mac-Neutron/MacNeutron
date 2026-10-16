@@ -1,11 +1,19 @@
-# Milestone 4a Task 3 gate in the guest: the Metal transport's rings, blobs, waits and wakes against the executor's test
-# ops (spec §5.6). Needs bin/metal-transport-test in the share (eac-vm/metal/build-guest.sh). Exits 1 on a miss; the
-# host's output (run-guest.sh) must also have no `mn-executor: error` line.
+# Milestone 4a gate in the guest: the Metal transport's rings, blobs, waits and wakes against the executor's test ops
+# (spec §5.6). Needs bin/metal-transport-test in the share (eac-vm/metal/build-guest.sh). Exits 1 on a miss; the host's
+# output (run-guest.sh) must also have no `mn-executor: error` line.
+# Thresholds (research README §3, a native producer: 19.8 ns per command, 114 ns per spinning round trip): async
+# ns/cmd <= 40 and sync spin ns <= 2,000; the fenced wait and the wake are printed, not asserted (doorbell: 37 µs).
 T=/mnt/share/bin/metal-transport-test
 fail=0
 for c in order blob free-in-flight gap "threads 100" bench; do
   out=$($T $c 2>&1)
   echo "$out"
   echo "$out" | grep -qx "${c%% *} ok" || { echo "FAIL $c"; fail=1; }
+  [ "$c" = bench ] || continue
+  # The guest has no awk: integer parts are enough for these bounds.
+  async=$(echo "$out" | sed -n 's/^async ns\/cmd \([0-9]*\).*/\1/p')
+  spin=$(echo "$out" | sed -n 's/^sync spin ns \([0-9]*\).*/\1/p')
+  [ -n "$async" ] && [ "$async" -le 40 ] || { echo "FAIL async ns/cmd $async > 40"; fail=1; }
+  [ -n "$spin" ] && [ "$spin" -le 2000 ] || { echo "FAIL sync spin ns $spin > 2000"; fail=1; }
 done
 exit $fail

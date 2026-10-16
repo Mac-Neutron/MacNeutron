@@ -138,7 +138,9 @@ static uint64_t done_seq(struct thread_ring *t) {
 
 static void wait_done(struct thread_ring *t, uint64_t seq) {
     uint64_t until = now_ns() + atomic_load(&spin_us) * 1000ull;
-    while (done_seq(t) < seq && now_ns() < until) {}
+    /* A clock read costs about 270 ns under FEX: check it every 1,024 spins. */
+    for (unsigned i = 1; done_seq(t) < seq; i++)
+        if (!(i & 1023) && now_ns() >= until) break;
     while (done_seq(t) < seq) {
         int ffd;
         if (t->fence_idx && !ctrl(MN_CTRL_WAIT, t->blob.blob_id, seq, (uint32_t)t->fence_idx, &ffd)) {

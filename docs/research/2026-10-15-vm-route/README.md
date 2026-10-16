@@ -257,3 +257,37 @@ affected yet.
   builder's Linux Steam (Proton Experimental, 2026-10-15) launched `Hemingway.exe ... -NOEAC` too, and that Proton
   prefix has no EAC files or bootstrapper log. Its 2-step install script is the Steamworks redistributables
   (depots 228989 and 228990), not EAC.
+
+## 7. Metal transport (milestone 4a, 2026-10-16)
+
+**What exists.**
+- **Device.** A virtio-gpu context of capset 24 (`dxmt`) in our libkrun. Patch 0005 replaces rutabaga_gfx with a
+  stand-in that has only this context and no virglrenderer. Patch 0006 starts libkrun's vmm worker on macOS.
+- **Guest driver.** Fedora's signed `virtio-gpu.ko`, from `kernel-modules-core`.
+- **Executor.** In `macneutron-vm` (`eac-vm/metal/host`).
+- **Guest library.** `eac-vm/metal/guest`, x86-64 under FEX.
+- **Rings.** One ring blob per guest thread: 1 MiB of records and a 64 KiB reply area. The host consumer spins 2 ms
+  after its last record and then parks. The guest sends one doorbell per park. Synchronous calls spin 50 µs, then wait
+  on a fence.
+
+Gates: `ring-test` (on the Mac, ASan and UBSan), `metal-probe.sh` and `metal-transport.sh` (in the guest).
+
+| Measurement | 4a: x86-64 guest code under FEX | Research §3: native guest module |
+|---|---|---|
+| Asynchronous record | **14.1 ns** | 19.8 ns per 64-byte command |
+| Synchronous call, consumer spinning | 310 ns | 114 ns fence round trip |
+| Synchronous call answered through a fence | 27.5 µs | |
+| Call to a parked consumer (doorbell, wake, reply) | 35.6 µs | 37 µs doorbell |
+
+At SMITE 2's 2,772 calls per frame, submission costs about 0.04 ms of the render thread.
+
+Findings:
+- **Capset id.** The dxmt capset id must be under 32. The guest driver builds its capset mask with `1 << id` on an
+  int, so capset 63 was never offered.
+- **No virgl capsets.** The device must not count virgl's capsets: the driver asks for each one and waits 5 s per
+  missing reply.
+- **The vmm worker.** libkrun main's v2 builder never started the vmm worker on macOS, so the first blob map panicked
+  the gpu worker.
+- **Cache-line traffic.** Per-record cache-line traffic, not the ring code, cost the first 86 ns per record. Each
+  side now caches the other's position, and the consumer publishes its progress per batch.
+- **Clock reads.** `clock_gettime` costs about 270 ns under FEX, so spin loops read the clock every 1,024 checks.

@@ -5,7 +5,12 @@
 #define MN_RING_H
 #include "proto.h"
 
-struct mn_ring_view { struct mn_ring *hdr; uint8_t *data, *reply; };
+struct mn_ring_view {
+    struct mn_ring *hdr;
+    uint8_t *data, *reply;
+    uint64_t seen;    /* this side's last read of the other side's position: tail (producer) or head (consumer) */
+    uint32_t pending; /* consumer: records finished but not yet published */
+};
 void mn_ring_view_init(struct mn_ring_view *v, void *blob);
 
 /* Producer: a record for len payload bytes at *head, which moves past it; NULL while the ring lacks the space or
@@ -16,7 +21,8 @@ void mn_ring_publish(struct mn_ring_view *v, uint64_t head, void (*wake)(void *)
 
 /* Consumer: the record at *tail (moved past padding), or NULL if there is none. */
 const struct mn_rec *mn_ring_next(struct mn_ring_view *v, uint64_t *tail);
-/* Consumer: the record is finished (its reply written): publishes done_seq, then frees its space. */
+/* Consumer: the record is finished (its reply written). Publishes done_seq, then frees the space, for a synchronous
+ * record, every 64 records, and when it has caught up with the head it last read. */
 void mn_ring_done(struct mn_ring_view *v, uint64_t *tail, const struct mn_rec *r);
 /* Consumer: 1 if it may sleep (parked, and no record arrived meanwhile); 0 if work arrived (not parked). */
 int mn_ring_try_park(struct mn_ring_view *v);

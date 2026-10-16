@@ -9,6 +9,7 @@
 static uint32_t rec_size(uint32_t len) { return (uint32_t)sizeof(struct mn_rec) + ((len + 7u) & ~7u); }
 
 void mn_ring_view_init(struct mn_ring_view *v, void *blob) {
+    *v = (struct mn_ring_view){ 0 };
     v->hdr = blob;
     v->data = (uint8_t *)blob + MN_RING_DATA;
     v->reply = (uint8_t *)blob + MN_RING_REPLY;
@@ -18,7 +19,10 @@ struct mn_rec *mn_ring_reserve(struct mn_ring_view *v, uint64_t *head, uint32_t 
     if (len > MN_REC_MAX) return NULL;
     uint32_t size = rec_size(len);
     uint64_t off = *head & MASK, pad = off + size > MN_RING_BYTES ? MN_RING_BYTES - off : 0;
-    if (*head + pad + size - atomic_load_explicit(&v->hdr->tail, memory_order_acquire) > MN_RING_BYTES) return NULL;
+    if (*head + pad + size - v->seen > MN_RING_BYTES) {
+        v->seen = atomic_load_explicit(&v->hdr->tail, memory_order_acquire);
+        if (*head + pad + size - v->seen > MN_RING_BYTES) return NULL;
+    }
     if (pad) {
         if (pad >= sizeof(struct mn_rec)) ((struct mn_rec *)(v->data + off))->op = MN_OP_WRAP;
         *head += pad;
@@ -34,12 +38,14 @@ void mn_ring_publish(struct mn_ring_view *v, uint64_t head, void (*wake)(void *)
     atomic_store_explicit(&v->hdr->head, head, memory_order_release);
     atomic_thread_fence(memory_order_seq_cst);
     uint32_t parked = 1; /* one doorbell per park: the first producer to see it parked marks it woken (2) */
-    if (atomic_compare_exchange_strong(&v->hdr->parked, &parked, 2) && wake) wake(ctx);
+    if (atomic_load_explicit(&v->hdr->parked, memory_order_relaxed) == 1 &&
+        atomic_compare_exchange_strong(&v->hdr->parked, &parked, 2) && wake)
+        wake(ctx);
 }
 
 const struct mn_rec *mn_ring_next(struct mn_ring_view *v, uint64_t *tail) {
-    uint64_t head = atomic_load_explicit(&v->hdr->head, memory_order_acquire);
-    while (*tail != head) {
+    if (*tail == v->seen) v->seen = atomic_load_explicit(&v->hdr->head, memory_order_acquire);
+    while (*tail != v->seen) {
         uint64_t off = *tail & MASK;
         const struct mn_rec *r = (const struct mn_rec *)(v->data + off);
         if (MN_RING_BYTES - off < sizeof(struct mn_rec) || r->op == MN_OP_WRAP) {
@@ -53,7 +59,10 @@ const struct mn_rec *mn_ring_next(struct mn_ring_view *v, uint64_t *tail) {
 
 void mn_ring_done(struct mn_ring_view *v, uint64_t *tail, const struct mn_rec *r) {
     uint64_t seq = r->seq; /* the producer may reuse the record's space once tail moves */
+    int sync = !!(r->op & MN_REC_SYNC);
     *tail += rec_size(r->len);
+    if (!sync && ++v->pending < 64 && *tail != v->seen) return;
+    v->pending = 0;
     atomic_store_explicit(&v->hdr->done_seq, seq, memory_order_release);
     atomic_store_explicit(&v->hdr->tail, *tail, memory_order_release);
 }

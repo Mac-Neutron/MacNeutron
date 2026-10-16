@@ -16,7 +16,7 @@
 #include "../ring.h"
 
 #define N_RECORDS 1000000u
-static struct mn_ring_view v;
+static struct mn_ring_view pv, cv; /* each side's own view (its caches) of one ring blob */
 static pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t c = PTHREAD_COND_INITIALIZER;
 static int wake_pending, wakes;
@@ -40,11 +40,11 @@ static uint32_t len_of(uint64_t i) { return (uint32_t)((i * 7919u) % 4097u); }
 
 static void put(uint64_t *head, uint64_t seq, uint32_t len) {
     struct mn_rec *r;
-    while (!(r = mn_ring_reserve(&v, head, len))) sched_yield();
+    while (!(r = mn_ring_reserve(&pv, head, len))) sched_yield();
     r->op = 0x100 + (uint32_t)(seq % 7);
     r->seq = seq;
     for (uint32_t j = 0; j < len; j++) ((uint8_t *)(r + 1))[j] = (uint8_t)(seq + j);
-    mn_ring_publish(&v, *head, wake, NULL);
+    mn_ring_publish(&pv, *head, wake, NULL);
 }
 
 static uint64_t consumed;
@@ -54,30 +54,33 @@ static int stop;
 static void *consumer(void *parks) {
     uint64_t tail = 0, idle = now_ns();
     for (;;) {
-        const struct mn_rec *r = mn_ring_next(&v, &tail);
+        const struct mn_rec *r = mn_ring_next(&cv, &tail);
         if (r) {
             assert(r->seq == consumed + 1);
             assert(r->op == 0x100 + (uint32_t)(r->seq % 7));
             for (uint32_t j = 0; j < r->len; j++) assert(((const uint8_t *)(r + 1))[j] == (uint8_t)(r->seq + j));
             consumed = r->seq;
-            mn_ring_done(&v, &tail, r);
+            mn_ring_done(&cv, &tail, r);
             idle = now_ns();
             continue;
         }
-        if (__atomic_load_n(&stop, __ATOMIC_ACQUIRE) && !mn_ring_next(&v, &tail)) return NULL;
+        if (__atomic_load_n(&stop, __ATOMIC_ACQUIRE) && !mn_ring_next(&cv, &tail)) return NULL;
         if (!parks || now_ns() - idle < 500000) continue;
-        if (!mn_ring_try_park(&v)) continue;
+        if (!mn_ring_try_park(&cv)) continue;
         pthread_mutex_lock(&m);
         while (!wake_pending && !__atomic_load_n(&stop, __ATOMIC_ACQUIRE)) pthread_cond_wait(&c, &m);
         wake_pending = 0;
         pthread_mutex_unlock(&m);
-        mn_ring_unpark(&v);
+        mn_ring_unpark(&cv);
         idle = now_ns();
     }
 }
 
 static void reset(void) {
-    memset(v.hdr, 0, sizeof *v.hdr);
+    void *blob = pv.hdr;
+    memset(blob, 0, sizeof *pv.hdr);
+    mn_ring_view_init(&pv, blob);
+    mn_ring_view_init(&cv, blob);
     consumed = 0;
     stop = 0;
     wake_pending = 0;
@@ -96,7 +99,7 @@ static void records(void) {
     pthread_create(&t, NULL, consumer, (void *)0);
     uint64_t head = 0;
     for (uint64_t i = 1; i <= N_RECORDS; i++) put(&head, i, len_of(i));
-    while (atomic_load_explicit(&v.hdr->done_seq, memory_order_acquire) != N_RECORDS) sched_yield();
+    while (atomic_load_explicit(&pv.hdr->done_seq, memory_order_acquire) != N_RECORDS) sched_yield();
     finish(t);
     assert(consumed == N_RECORDS);
     assert(head > 100ull * MN_RING_BYTES);
@@ -115,8 +118,8 @@ static void park(void) {
         usleep((useconds_t)(rand() % 3000));
     }
     uint64_t t0 = now_ns();
-    while (atomic_load_explicit(&v.hdr->done_seq, memory_order_acquire) != seq && now_ns() - t0 < 100000000ull) usleep(100);
-    assert(atomic_load_explicit(&v.hdr->done_seq, memory_order_acquire) == seq);
+    while (atomic_load_explicit(&pv.hdr->done_seq, memory_order_acquire) != seq && now_ns() - t0 < 100000000ull) usleep(100);
+    assert(atomic_load_explicit(&pv.hdr->done_seq, memory_order_acquire) == seq);
     finish(t);
     assert(wakes > 0 && wakes <= 400); /* one doorbell per park, not one per record */
     printf("park ok (%llu records, %d wakes)\n", (unsigned long long)seq, wakes);
@@ -125,7 +128,7 @@ static void park(void) {
 int main(void) {
     void *blob = mmap(NULL, MN_RING_BLOB_BYTES, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
     assert(blob != MAP_FAILED);
-    mn_ring_view_init(&v, blob);
+    mn_ring_view_init(&pv, blob);
     records();
     park();
     return 0;

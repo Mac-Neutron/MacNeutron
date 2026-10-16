@@ -85,7 +85,8 @@ Each unit has one job and a narrow interface, so it can be built and tested on i
   - `EnTSO` on every vCPU at creation; read back once and logged.
   - Direct boot of Fedora's `vmlinuz` (an EFI zboot image) with our initramfs and command line, through libkrun's
     external-kernel loader (we add the zboot format if it lacks it).
-  - The `dxmt` context type in its virtio-gpu device (rutabaga), section 5.6.
+  - The `dxmt` context type (capset 24) in its virtio-gpu device, section 5.6: a stand-in for rutabaga_gfx in our
+    fork (patch 0005), since rutabaga needs virglrenderer and keeps its component traits private.
   - virtio-snd with a CoreAudio backend (upstream libkrun has no sound device).
   - Blob memory aligned to 16 KB, the host page size, so Metal can wrap it without copies.
 - **Entitlements:** `com.apple.security.hypervisor`, signed with our Developer ID. No virtualization entitlement and
@@ -140,12 +141,13 @@ Size targets are set in the plan from the first build and become gates.
 
 ### 5.6 Metal transport
 
-- **Boundary:** winemetal's 198 Unix calls (`__wine_unix_call_funcs` in `src/winemetal/unix/winemetal_unix.c`,
+- **Boundary:** winemetal's 153 Unix calls (`__wine_unix_call_funcs` in `src/winemetal/unix/winemetal_unix.c`,
   including airconv's shader compiles). The guest `winemetal.so` implements the same table by encoding each call into a
   ring; the host decodes it and runs today's Metal code unchanged.
-- **Ring:** a blob resource mapped into the guest and the host (19.8 ns per 64-byte command in the benchmarks). A host
-  thread consumes it, spinning while frames arrive and parking after 2 ms idle; the guest wakes it with one
-  virtio-gpu submit.
+- **Ring:** one blob per guest thread, mapped into the guest and the host (19.8 ns per 64-byte command in the
+  benchmarks; 14 ns from x86-64 guest code under FEX in milestone 4a). A host thread consumes it, spinning while frames
+  arrive and parking after 2 ms idle; the guest wakes it with one virtio-gpu submit per park. Synchronous calls spin
+  50 µs, then wait on a fence. Implemented in `eac-vm/metal/` (research README §7).
 - **Calls fall into four kinds:**
   - Fire-and-forget (encoders, commits, releases): queued.
   - Object creation: the guest picks the handle, so creation is queued too.
@@ -241,8 +243,12 @@ A systemd service in `base.erofs` on the virtio-console port. It launches the ga
      image. Pass: the bridge's probe under our Wine in the guest reports Steam initialised and the auth ticket.
    - **3c, EAC 301.** First the reference: SMITE 2 under Valve's Proton in the builder VM reaches
      `Launcherfinishedwith:301`. Then SMITE 2 under our Wine in the microVM, rendering in software, reaches 301.
-4. **Metal transport.** DXMT's check suite passes in the guest as it does on macOS, and SMITE 2 renders through
-   the host.
+4. **Metal transport,** in three parts, each with its own plan:
+   - **4a, transport (done 2026-10-16).** A guest program's commands, blobs, waits and wakes reach the host executor
+     through the dxmt context; numbers in research README §7.
+   - **4b, winemetal forwarding.** DXMT's check suite passes in the guest as it does on macOS (the headless tests
+     give the same lines and pixels).
+   - **4c, presentation.** SMITE 2 renders through the host.
 5. **Devices and product.** Audio, input, gamepads, the shared library, launch from MacNeutron, sizing. Pass: an
    online SMITE 2 match within 5% of today's frame rate, and key-to-presented-frame latency within 5 ms of today's.
 6. **Secure Boot spike.** EDK2 with Secure Boot and built-in keys boots shim, GRUB and the same kernel in the
