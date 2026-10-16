@@ -2,7 +2,7 @@
 # Builds MacNeutron's libkrun: upstream main at the pinned commit (PIN) plus patches/*.patch, as a dylib for the microVM host.
 # Output: build/eac-vm-work/libkrun/{libkrun.1.dylib,include/libkrun.h}. Source: build/eac-vm-work/libkrun-src, where
 # branch `macneutron` is reset to the pin and the patches are applied with `git am` (so new patches are made there).
-# ffi exports the v2 C API (include/libkrun.h). The Makefile is skipped on purpose: on macOS it downloads a Debian sysroot for the guest init blob, which we don't use.
+# ffi exports the v2 C API (include/libkrun.h); gpu is the virtio-gpu device on patch 0005's dxmt context. The Makefile is skipped on purpose: on macOS it downloads a Debian sysroot for the guest init blob, which we don't use.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 HERE=$ROOT/eac-vm/libkrun
@@ -18,7 +18,7 @@ for p in "$HERE"/patches/*.patch; do
   [ -e "$p" ] || continue
   git -C "$SRC" am -q --committer-date-is-author-date "$p" || { git -C "$SRC" am --abort; echo "patch failed: $p" >&2; exit 1; }
 done
-(cd "$SRC" && PATH=$(dirname "$CARGO"):$PATH "$CARGO" build --release -p libkrun --no-default-features --features blk,net,ffi)
+(cd "$SRC" && PATH=$(dirname "$CARGO"):$PATH "$CARGO" build --release -p libkrun --no-default-features --features blk,net,ffi,gpu)
 mkdir -p "$OUT/include"
 cp "$SRC/target/release/libkrun.dylib" "$OUT/libkrun.1.dylib"
 install_name_tool -id @rpath/libkrun.1.dylib "$OUT/libkrun.1.dylib"
