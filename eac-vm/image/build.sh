@@ -61,11 +61,12 @@ sudo rm -f "$WORK/root/lib/modules/$KVER/vmlinuz"  # it boots from outside the i
 for b in FEX FEXServer FEXBash FEXGetConfig FEXpidof; do sudo install -m755 "$FEX_BIN/$b" "$WORK/root/usr/bin/"; done
 sudo rm -f "$WORK/root/etc/resolv.conf"  # ours replaces whatever the packages left, a symlink included
 sudo cp -R "$HERE/rootfs/." "$WORK/root/"
-sudo chown -R root:root "$WORK/root/etc/fstab" "$WORK/root/etc/asound.conf" "$WORK/root/etc/resolv.conf" "$WORK/root/etc/systemd/system" "$WORK/root/usr/libexec/mn-runner" \
+sudo chown -R root:root "$WORK/root/etc/fstab" "$WORK/root/etc/asound.conf" "$WORK/root/etc/resolv.conf" "$WORK/root/usr/lib/sysusers.d/mn.conf" "$WORK/root/etc/systemd/system" "$WORK/root/usr/libexec/mn-runner" \
   "$WORK/root/usr/libexec/mn-tso-check" "$WORK/root/usr/share/fex-emu/Config.json"
 sudo mkdir -p "$WORK/root/usr/share/fex-emu/RootFS/fedora" "$WORK/root/mnt/share" "$WORK/root/mnt/games" "$WORK/root/opt/mn-wine"
 sudo gcc -O2 -pthread -o "$WORK/root/usr/libexec/tso-litmus" "$HERE/tso-litmus.c"
 sudo systemctl --root="$WORK/root" enable mn-runner.service mn-tso-check.service mn-net.service
+sudo systemd-sysusers --root="$WORK/root"  # our mn user (rootfs/usr/lib/sysusers.d) in the image's passwd
 sudo systemd-hwdb update --root="$WORK/root"  # its scriptlet cannot write hwdb.bin inside the install root
 sudo rm -f "$OUT/base.erofs"; sudo mkfs.erofs -L mn-base -zlz4hc "$OUT/base.erofs" "$WORK/root" > /dev/null
 

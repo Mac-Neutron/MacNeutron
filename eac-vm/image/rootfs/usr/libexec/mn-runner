@@ -1,7 +1,15 @@
 #!/bin/sh
-# Runs the host's script from the share as root, keeps its output and status there, and powers the guest off.
+# Runs the host's script from the share as the unprivileged user mn (never root), keeps its output and status there,
+# and powers the guest off. Root only prepares mn's home on the state disk.
 echo "mn-runner: start at $(cut -d' ' -f1 /proc/uptime) s"
-sh /mnt/share/run.sh > /mnt/share/run.log 2>&1
+install -d -o mn -g mn -m 755 /home/mn
+find /home/mn -xdev ! -user mn -exec chown -h mn:mn {} + 2>/dev/null
+# Where scripts leave larger outputs for the host (the share itself stays root's: run.sh, run.log, run.status).
+install -d -o mn -g mn /mnt/share/traces
+find /mnt/share/traces ! -user mn -exec chown -h mn:mn {} + 2>/dev/null
+cd /home/mn
+setpriv --reuid=mn --regid=mn --init-groups --reset-env sh -c 'export DISPLAY=:0; exec sh /mnt/share/run.sh' \
+  > /mnt/share/run.log 2>&1
 echo $? > /mnt/share/run.status
 sync
 systemctl poweroff --no-block
