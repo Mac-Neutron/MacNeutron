@@ -126,3 +126,42 @@ Costs not measured here:
   real time to this. This is a candidate for a FEX fast path, or x64 builds of the hottest ucrtbase functions.
 - **ARM64 Windows builds without `-mcpu` use LL/SC atomics.** Our own native ARM64 build ran 3.4 ms with them against
   2.0 ms with LSE (`-mcpu=apple-m5`). Every ARM64 PE we build must keep `PE_MARCH`.
+
+## 4. The microVM (milestones 1-2, 2026-10-15)
+
+The design moved to a libkrun microVM in our own host process (spec
+`docs/superpowers/specs/2026-10-15-macneutron-eac-vm-route-design.md`). Same M5 Pro, macOS 27.0.1; guest with 16 vCPUs
+and 16 GiB unless noted. Commands are in `eac-vm/tests/`, run through `eac-vm/run-guest.sh`.
+
+**Guest.** Fedora's signed `kernel-core` 7.2.10-200.fc44, unmodified, booted directly by libkrun (patch 0001 reads its
+EFI zboot header; the payload is zstd). `m2-gate.sh` reports `[integrity]` lockdown, `sig_enforce` `Y`, 4 KB pages.
+Boot to the test runner: 3.56 s.
+
+| Image | Size |
+|---|---|
+| `vmlinuz` | 16.5 MB |
+| `initramfs.img` (dracut) | 41.3 MB |
+| `base.erofs` (systemd, udev, kernel modules, FEX) | 279.9 MB |
+| `x86-64-rootfs.erofs` (Fedora's FEX RootFS) | 1,643 MB |
+| `state.img` | 16 GiB sparse, 6.5 MB used |
+
+**FEX fidelity.** All 19 runs of the PoC's tests give their expected result on our FEX (macneutron + 27 patches),
+in the builder and in the microVM. The earlier `ptrace-inject` failure was a mixed setup: the tracer ran under our
+FEX, the exec'd payload under the PoC's FEX registered in binfmt. `run-all.sh` now refuses that mix.
+
+**Hardware TSO from the host** (libkrun patch 0003, `tso.sh`):
+
+| | Litmus violations | FEX `mem_seq_read` |
+|---|---|---|
+| Without EnTSO | 1,363,792,963 of 2.8 G | 0.90 s (software TSO) |
+| EnTSO on every vCPU | 0 of 186 M | 0.456 s (`HostTSO`, no barriers) |
+
+**Game-shaped frame loop** (`gameframe.x86_64` under FEX): 2.112, 2.116, 2.141 ms per frame, median 2.116 ms, against
+2.14 ms for FEX with hardware TSO in the Virtualization.framework VM and 4.94 ms for MacNeutron today.
+
+**Memory returns to macOS** (libkrun patch 0002, `footprint.sh`, 8 GiB guest): touching 4 GiB and freeing it took the
+host's physical footprint from 5,120 MB to 972 MB within 14 s. Before the patch it stayed at 5,222 MB. While
+Hypervisor.framework maps a page a vCPU has written, `madvise` frees nothing, whether `MADV_FREE` or
+`MADV_FREE_REUSABLE`. Unmapping the reported range from the VM, `MADV_FREE`, and mapping it back frees it in about
+30 µs per 4 MB, and pages the guest touches again are charged again. macOS's `footprint` tool leaves guest memory out;
+`vmmap -summary`'s physical footprint includes it.

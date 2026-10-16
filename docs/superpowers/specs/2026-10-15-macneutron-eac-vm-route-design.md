@@ -1,6 +1,7 @@
 # MacNeutron EAC mode: the microVM route
 
-Status: design approved 2026-10-15. Benchmarks are in `docs/research/2026-10-15-vm-route/`. This version replaces the
+Status: design approved 2026-10-15; milestones 1 and 2 done the same day (results in
+`docs/research/2026-10-15-vm-route/README.md` §4). Benchmarks are in `docs/research/2026-10-15-vm-route/`. This version replaces the
 first draft (a Virtualization.framework VM running Fedora Cloud); section 3 says what changed and why.
 
 ## 1. Goal
