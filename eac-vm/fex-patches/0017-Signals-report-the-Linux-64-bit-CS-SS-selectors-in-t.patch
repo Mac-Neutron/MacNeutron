@@ -1,7 +1,7 @@
 From 8711630b123075f8864441fabd2345ea1dbdb10d Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Thu, 8 Oct 2026 22:07:36 +0300
-Subject: [PATCH 17/27] Signals: report the Linux 64-bit CS/SS selectors in the
+Subject: [PATCH 17/28] Signals: report the Linux 64-bit CS/SS selectors in the
  frame and to mov %cs/%ss
 
 FEX stored cs_idx/ss_idx as a bare GDT index shifted left, so `mov %cs` and the signal frame's CSGSFS read 0x30

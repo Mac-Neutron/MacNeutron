@@ -1,7 +1,7 @@
 From a9ad16526aa772247db6a88632ad39ab0b37711d Mon Sep 17 00:00:00 2001
 From: build <build@invalid>
 Date: Thu, 8 Oct 2026 19:40:38 +0300
-Subject: [PATCH 10/27] Seccomp: report SECCOMP_RET_TRAP at the instruction
+Subject: [PATCH 10/28] Seccomp: report SECCOMP_RET_TRAP at the instruction
  after the syscall
 
 Linux enters a SECCOMP_RET_TRAP handler with RIP and si_call_addr pointing just past the syscall instruction, and rt_sigreturn resumes the guest there with the value the handler left in the return register.

@@ -1,7 +1,7 @@
 From 90180c2ea322ef372c7bbd4fa3f5235c3ec805fc Mon Sep 17 00:00:00 2001
 From: build <build@invalid>
 Date: Thu, 8 Oct 2026 20:36:49 +0300
-Subject: [PATCH 11/27] arch_prctl: honour ARCH_SET_CPUID/ARCH_GET_CPUID
+Subject: [PATCH 11/28] arch_prctl: honour ARCH_SET_CPUID/ARCH_GET_CPUID
 
 Real Linux on a CPU with X86_FEATURE_CPUID_FAULT: arch_prctl(ARCH_SET_CPUID, 0)
 returns 0, CPUID from that thread then raises #GP, and a user-mode #GP is

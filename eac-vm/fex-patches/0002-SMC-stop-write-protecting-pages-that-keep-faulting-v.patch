@@ -1,7 +1,7 @@
 From 9a5da5b4449dc81943d3a0f3fc8603c90ceaf751 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 01:52:28 +0300
-Subject: [PATCH 02/27] SMC: stop write-protecting pages that keep faulting,
+Subject: [PATCH 02/28] SMC: stop write-protecting pages that keep faulting,
  verify their code in the JIT instead
 
 With SMCChecks=mtrack a page that mixes code with data that is written all the time (trampoline pools, JIT heaps,

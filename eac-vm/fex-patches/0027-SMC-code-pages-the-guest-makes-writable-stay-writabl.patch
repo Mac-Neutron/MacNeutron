@@ -1,7 +1,7 @@
 From 6f6dc9066cf77caf1824e150aa8492ccefed1c21 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Sun, 11 Oct 2026 16:01:09 +0300
-Subject: [PATCH 27/27] SMC: code pages the guest makes writable stay writable
+Subject: [PATCH 27/28] SMC: code pages the guest makes writable stay writable
  for other processes
 
 On Linux a page the process has mapped writable can be written by another

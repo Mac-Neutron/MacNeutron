@@ -1,7 +1,7 @@
 From de2e35fd78aa0040d886f6997b5571b576689dff Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Sun, 11 Oct 2026 13:01:24 +0300
-Subject: [PATCH 26/27] proc: list only the emulated process's mappings in
+Subject: [PATCH 26/28] proc: list only the emulated process's mappings in
  /proc/<pid>/maps
 
 On x86-64 Linux every user mapping of a process lies below TASK_SIZE_MAX,

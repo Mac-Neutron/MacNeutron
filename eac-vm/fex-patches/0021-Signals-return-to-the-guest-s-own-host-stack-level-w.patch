@@ -1,7 +1,7 @@
 From e17bd5faa55eadf078c41fd13a3754d6e6f593d9 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 20:29:03 +0300
-Subject: [PATCH 21/27] Signals: return to the guest's own host stack level
+Subject: [PATCH 21/28] Signals: return to the guest's own host stack level
  when rt_sigreturn abandons a syscall handler
 
 A guest signal handler that interrupts the C++ half of a syscall handler (the host signal arrives while HandleSyscall is on

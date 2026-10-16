@@ -1,7 +1,7 @@
 From a484a88204371f7accf01b3645f59842ba87ec34 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Thu, 8 Oct 2026 22:37:55 +0300
-Subject: [PATCH 20/27] Signals: write the interrupted mask into the frame's
+Subject: [PATCH 20/28] Signals: write the interrupted mask into the frame's
  uc_sigmask
 
 Linux x64_setup_rt_frame stores sigmask_to_save() in frame->uc.uc_sigmask (signal_64.c:166,190), and rt_sigreturn

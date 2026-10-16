@@ -1,7 +1,7 @@
 From a0fcefcb8a193684dd0257d2fb6b2fbff50e0ee1 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 07:25:50 +0300
-Subject: [PATCH 05/27] Add an in-process sampling profiler
+Subject: [PATCH 05/28] Add an in-process sampling profiler
  (FEX_PROFILESAMPLEHZ)
 
 Anti-cheat clients detect debuggers and `perf`, so a game under one cannot be profiled from outside. This adds a

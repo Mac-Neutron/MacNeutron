@@ -1,7 +1,7 @@
 From d6bd10f22c608b15a9a566e1dc8408008d15631a Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 21:57:46 +0300
-Subject: [PATCH 24/27] JIT: raise the single-step trap on the target of an
+Subject: [PATCH 24/28] JIT: raise the single-step trap on the target of an
  IRETQ that loads TF, and never leave single-step mode through the lookup
  caches
 

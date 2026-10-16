@@ -1,7 +1,7 @@
 From 40252e994c841fcc9a4b76e0875da6f4c8b793bb Mon Sep 17 00:00:00 2001
 From: build <build@invalid>
 Date: Thu, 8 Oct 2026 20:37:07 +0300
-Subject: [PATCH 15/27] syscalls: restart_syscall returns -EINTR instead of
+Subject: [PATCH 15/28] syscalls: restart_syscall returns -EINTR instead of
  aborting the process
 
 Linux reaches restart_syscall only when the kernel restarted a signal-interrupted

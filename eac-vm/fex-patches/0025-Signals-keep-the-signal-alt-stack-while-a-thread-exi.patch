@@ -1,7 +1,7 @@
 From 8031923202f351d35afcb21ba6dfd9bc7c9357fb Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 22:35:05 +0300
-Subject: [PATCH 25/27] Signals: keep the signal alt stack while a thread exits
+Subject: [PATCH 25/28] Signals: keep the signal alt stack while a thread exits
  on it
 
 A guest thread can leave from inside a signal handler that FEX runs on the thread's host alt stack. Wine does this whenever

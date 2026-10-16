@@ -1,7 +1,7 @@
 From c1f6998afc31fa029bdd03ec2b3ec4ceb3cb0adb Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 21:40:02 +0300
-Subject: [PATCH 23/27] SamplingProfiler: FEX_PROFILESAMPLEMINTHREADS and
+Subject: [PATCH 23/28] SamplingProfiler: FEX_PROFILESAMPLEMINTHREADS and
  external SIGPROF snapshots
 
 The sampler (0005/0006) starts only in the process that reaches 100 guest threads, so it is blind to a process that spins

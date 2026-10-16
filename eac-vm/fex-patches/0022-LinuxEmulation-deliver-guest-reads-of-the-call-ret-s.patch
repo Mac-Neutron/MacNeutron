@@ -1,7 +1,7 @@
 From 3512e21cbaf19941d5079471f5710fd42d433e4f Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 21:40:02 +0300
-Subject: [PATCH 22/27] LinuxEmulation: deliver guest reads of the call/ret
+Subject: [PATCH 22/28] LinuxEmulation: deliver guest reads of the call/ret
  shadow-stack guard pages instead of spinning
 
 The SIGSEGV handler took every fault inside a thread's call/ret shadow-stack allocation (the stack and its two guard pages)

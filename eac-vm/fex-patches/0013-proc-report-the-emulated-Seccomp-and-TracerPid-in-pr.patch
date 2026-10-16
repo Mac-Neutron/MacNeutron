@@ -1,7 +1,7 @@
 From 13e39cabb53ebe5a404cce3fb6edc90f5cb6f1f0 Mon Sep 17 00:00:00 2001
 From: build <build@invalid>
 Date: Thu, 8 Oct 2026 20:37:02 +0300
-Subject: [PATCH 13/27] proc: report the emulated Seccomp: and TracerPid: in
+Subject: [PATCH 13/28] proc: report the emulated Seccomp: and TracerPid: in
  /proc/<pid>/status
 
 A real kernel's /proc/<pid>/status describes that process: Seccomp: is its own

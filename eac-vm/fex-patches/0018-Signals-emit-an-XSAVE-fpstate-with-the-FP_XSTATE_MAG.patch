@@ -1,7 +1,7 @@
 From b421325518558868c25440f2e2be3787f551daa5 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Thu, 8 Oct 2026 22:07:41 +0300
-Subject: [PATCH 18/27] Signals: emit an XSAVE fpstate with the
+Subject: [PATCH 18/28] Signals: emit an XSAVE fpstate with the
  FP_XSTATE_MAGIC1/2 trailer on x86-64
 
 arch/x86/kernel/fpu/signal.c writes FP_XSTATE_MAGIC1 into sw_reserved and FP_XSTATE_MAGIC2 immediately after the

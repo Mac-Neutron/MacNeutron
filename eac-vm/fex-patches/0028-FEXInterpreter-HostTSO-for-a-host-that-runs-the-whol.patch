@@ -1,0 +1,58 @@
+From 50fabb3595832ca37c272b79107de4a2a1f369f8 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Thu, 15 Oct 2026 20:26:43 -0400
+Subject: [PATCH 28/28] FEXInterpreter: HostTSO, for a host that runs the whole
+ VM with TSO
+
+MacNeutron's microVM sets Apple's ACTLR_EL1.EnTSO on every vCPU from the host, so a stock guest kernel
+(no PR_SET_MEM_MODEL) runs everything with TSO ordering. HostTSO (FEX_HOSTTSO) tells FEX so: it calls
+SetHardwareTSOSupport(true) and emits no ordering barriers, as it does after a successful
+PR_SET_MEM_MODEL. The guest image sets it only after a boot-time litmus test sees no violation.
+
+x64-bench mem_seq_read under FEX in a VM without TSO: 0.996 s plain, 0.480 s TSOEnabled=0, 0.479 s
+HostTSO=1.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+---
+ FEXCore/Source/Interface/Config/Config.json.in | 9 +++++++++
+ Source/Tools/FEXInterpreter/FEXInterpreter.cpp | 7 +++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/FEXCore/Source/Interface/Config/Config.json.in b/FEXCore/Source/Interface/Config/Config.json.in
+index c153789..af041ed 100644
+--- a/FEXCore/Source/Interface/Config/Config.json.in
++++ b/FEXCore/Source/Interface/Config/Config.json.in
+@@ -639,6 +639,15 @@
+           "Highly likely to break any multithreaded application if disabled."
+         ]
+       },
++      "HostTSO": {
++        "Type": "bool",
++        "Default": "false",
++        "AffectsCodeGen": "true",
++        "Desc": [
++          "The host already runs this process with TSO memory ordering (a VM whose vCPUs have Apple's EnTSO set).",
++          "FEX then emits no ordering barriers."
++        ]
++      },
+       "VectorTSOEnabled": {
+         "Type": "bool",
+         "Default": "false",
+diff --git a/Source/Tools/FEXInterpreter/FEXInterpreter.cpp b/Source/Tools/FEXInterpreter/FEXInterpreter.cpp
+index 20564c3..029c668 100644
+--- a/Source/Tools/FEXInterpreter/FEXInterpreter.cpp
++++ b/Source/Tools/FEXInterpreter/FEXInterpreter.cpp
+@@ -266,6 +266,13 @@ bool QueryInterpreterInstalled(bool ExecutedWithFD, const FEX::Config::PortableI
+ namespace FEX::Kernel {
+ namespace TSO {
+   void SetupTSOEmulation(FEXCore::Context::Context* CTX) {
++    FEX_CONFIG_OPT(HostTSO, HOSTTSO);
++    if (HostTSO()) {
++      // The host set TSO on every vCPU of this VM (nothing in the guest can switch it), so emulate nothing.
++      CTX->SetHardwareTSOSupport(true);
++      return;
++    }
++
+     // Check to see if this is supported.
+     auto Result = prctl(PR_GET_MEM_MODEL, 0, 0, 0, 0);
+     if (Result == -1) {
