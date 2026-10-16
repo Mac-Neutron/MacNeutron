@@ -47,6 +47,8 @@ OVERRIDES = {
         'inner_ptr': 'offsetof(w_CallbackMsg_t, m_pubParam)', 'inner_size': 'offsetof(w_CallbackMsg_t, m_cubParam)'}},
 }
 CHECKED = set()
+# Calls the Windows half makes with NULL params.
+NO_PARAMS = {'steamclient_init_registry'}
 
 
 def strip_comments(s):
@@ -117,7 +119,10 @@ def main():
         sname = name + '_params'
         fields = structs.get(sname)
         if fields is None:
-            descs.append((name, sname, None, ['no params struct']))
+            if name in NO_PARAMS:
+                descs.append((name, None, [], []))
+            else:
+                descs.append((name, sname, None, ['no params struct']))
             continue
         parsed = [field_name(f) for f in fields]
         out, reasons = [], []
@@ -215,6 +220,8 @@ def main():
         for idx, (name, sname, out, _) in enumerate(descs):
             if out is None:
                 f.write(f'    {{ "{name}", 0, 1, mn_unsupported_field }},\n')
+            elif sname is None:
+                f.write(f'    {{ "{name}", 0, 0, NULL }},\n')
             else:
                 f.write(f'    {{ "{name}", sizeof(struct {sname}), {len(out)}, {f"f{idx}" if out else "NULL"} }},\n')
         f.write('};\nconst unsigned int mn_ncalls = sizeof(mn_calls) / sizeof(mn_calls[0]);\n')
