@@ -9,7 +9,9 @@
  *                         joins the residency set the heap was added to
  *   wmt-memory            DXMT 0071's WMTMemoryAlloc (slot 153) gives page-aligned memory a buffer can be made
  *                         over; WMTMemoryFree (154) while the buffer lives keeps the memory from a new allocation
- *                         until the host says the buffer is gone; neither reaches the host
+ *                         until the host says the buffer is gone; neither reaches the host; a length too large to
+ *                         round up to whole pages is refused
+ *   big-blob              an allocation past 64 MiB, which gets a blob of its own, gives the blob back when freed
  *   sequence              the 4b-1 sequence, as far as the gate runs it */
 #import <Metal/Metal.h>
 #include <pthread.h>
@@ -238,7 +240,17 @@ static void wmt_memory(void) {
     }
     for (int i = 0; i < 1000 && (sweep(), mn_gdrain(), mn_glookup(p, 1, &region, &blob, &off) == 0); i++) usleep(1000);
     CHECK(mn_glookup(p, 1, &region, &blob, &off) != 0); /* back for reuse */
+    struct unixcall_wmtmemory huge = {UINT64_MAX - 100, {NULL}};
+    CHECK(W(153, &huge) == MN_STATUS_NO_MEMORY && !huge.ptr.ptr);
     CHECK(loop_ctx.failures == before);
+}
+
+static void big_blob(void) {
+    struct unixcall_wmtmemory m = {65u << 20, {NULL}};
+    CHECK(W(153, &m) == 0 && m.ptr.ptr && loop_mapped(m.ptr.ptr));
+    void *p = m.ptr.ptr;
+    CHECK(W(154, &m) == 0);
+    CHECK(!loop_mapped(p)); /* nothing held it: its blob went with it */
 }
 
 static void sequence(void) {
@@ -254,7 +266,8 @@ int main(int argc, char **argv) {
     struct { const char *name; void (*fn)(void); } tests[] = {
         {"galloc", galloc},           {"buffer-outlives-free", buffer_outlives_free},
         {"update-bounds", update_bounds}, {"region-bounds", region_bounds},
-        {"heap", heap},               {"wmt-memory", wmt_memory}, {"sequence", sequence},
+        {"heap", heap},               {"wmt-memory", wmt_memory}, {"big-blob", big_blob},
+        {"sequence", sequence},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         @autoreleasepool {

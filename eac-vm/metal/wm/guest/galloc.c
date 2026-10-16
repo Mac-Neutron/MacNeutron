@@ -1,5 +1,7 @@
-/* The guest's blob sub-allocator (galloc.h): first fit over each blob's 16 KiB pages, one lock.
- * ponytail: blobs are kept until the process ends; free empty ones if guest memory pressure shows. */
+/* The guest's blob sub-allocator (galloc.h): first fit over each blob's 16 KiB pages, one lock. A region past 64 MiB
+ * has a blob of its own, freed with it.
+ * ponytail: 64 MiB blobs are kept until the process ends; free empty ones if guest memory pressure shows. Zeroing a
+ * reused region happens under the lock: per-blob locks if allocation-heavy threads contend (milestone 5). */
 #include "galloc.h"
 #include <errno.h>
 #include <pthread.h>
@@ -56,7 +58,21 @@ static struct rinfo *region(uint64_t id, struct gblob **gb) {
     return &b->r[page];
 }
 
+/* A blob of its own (past 64 MiB): gone with its region. */
+static void free_blob(struct gblob *b) {
+    for (size_t i = 0; i < nblobs; i++)
+        if (blobs[i] == b) {
+            blobs[i] = blobs[--nblobs];
+            break;
+        }
+    mn_blob_free(&b->b);
+    free(b->used);
+    free(b->r);
+    free(b);
+}
+
 static void release_pages(struct gblob *b, uint32_t page) {
+    if (b->npages > BLOB_PAGES) return free_blob(b);
     memset(b->used + page, DIRTY, b->r[page].pages);
     b->r[page] = (struct rinfo){0};
 }
@@ -105,6 +121,7 @@ static int fit(struct gblob *b, uint32_t pages, uint32_t *at) {
 }
 
 int mn_galloc(uint64_t len, struct mn_region *out) {
+    if (len > (uint64_t)UINT32_MAX * MN_PAGE) return -ENOMEM; /* else rounding up wraps */
     uint64_t pages64 = len ? (len + MN_PAGE - 1) / MN_PAGE : 1;
     if (pages64 > UINT32_MAX) return -ENOMEM;
     uint32_t pages = (uint32_t)pages64, at = 0;
