@@ -6,7 +6,7 @@ HOST := $(W)/metal-host
 WINEMETAL := $(ROOT)/build/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/winemetal.so
 DXMT := $(ROOT)/build/wine-arm64-src/dxmt/src
 CFLAGS ?= -O1 -g -Wall -Wextra -std=gnu2x -fsanitize=address,undefined
-INC := -I$(DXMT)/winemetal -I..
+INC := -I$(DXMT)/winemetal -I.. -I.
 
 # The shipped winemetal.so beside stand-ins for the Wine libraries it links (its LC_RPATH has @loader_path/).
 $(HOST)/ntdll.so: host/stand-ins.c
@@ -28,3 +28,11 @@ $(OUT)/host-test: tests/host-test.c tests/sequence.c tests/sequence.h host/loade
 host-test: metal-host $(OUT)/host-test
 	$(OUT)/host-test $(HOST)
 .PHONY: host-test
+
+$(OUT)/handles-test: tests/handles-test.c guest/ghandles.c host/htable.c handles.h ../proto.h
+	mkdir -p $(OUT)
+	$(CC) $(CFLAGS) $(INC) -o $@ tests/handles-test.c guest/ghandles.c host/htable.c -lpthread
+
+handles-test: $(OUT)/handles-test
+	$(OUT)/handles-test
+.PHONY: handles-test

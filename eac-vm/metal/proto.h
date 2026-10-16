@@ -54,6 +54,10 @@ struct mn_test_fill { uint64_t blob_id, offset, len; uint32_t byte, reserved; };
 struct mn_test_sum { uint64_t blob_id, offset, len; };
 struct mn_test_hold { uint64_t blob_id, ns; };
 
+/* Host side only: how far a ring had got (its published head, in bytes), for work that must wait until each ring has
+ * finished past a mark (the executor and the winemetal handle table). */
+struct mn_mark { void *ring; uint64_t pos; };
+
 /* Host statuses (negative errno values, the same on both sides). */
 enum { MN_E2BIG = -7, MN_EINVAL = -22, MN_ENOSYS = -38 };
 
