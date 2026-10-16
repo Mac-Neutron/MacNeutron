@@ -24,6 +24,8 @@ tools)
   "$SRC/configure" --without-x --without-gnutls --disable-tests \
     aarch64_CC="clang --target=aarch64-windows -fuse-ld=lld" > configure.log 2>&1 || { tail -5 configure.log; exit 1; }
   make -j"$JOBS" __tooldeps__ > make.log 2>&1
+  # wrc reads its NLS tables from <tools>/nls (its own ../../nls): an out-of-tree tools build has only a Makefile there.
+  mkdir -p "$TOOLS/nls" && ln -sf "$SRC"/nls/*.nls "$TOOLS/nls/"
   ls tools/winebuild/winebuild tools/widl/widl tools/wrc/wrc ;;
 wine)
   mkdir -p "$BUILD" && cd "$BUILD"

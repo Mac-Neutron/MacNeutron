@@ -1,0 +1,35 @@
+From 97818d4143b5e28d10c90046a1eb54bb5c0a2ec3 Mon Sep 17 00:00:00 2001
+From: Paul Gofman <pgofman@codeweavers.com>
+Date: Fri, 16 Oct 2026 07:30:14 -0400
+Subject: [PATCH 6/6] loader: Let a wine64 loader in i386-unix find the x86_64
+ ntdll.so.
+
+Proton installs wine64 and wine64-preloader in i386-unix too; started from there, the loader loads
+x86_64-unix/ntdll.so.
+
+Proton: ValveSoftware/wine 3e5eb3bcebac (proton_11.0, "fixup! loader: HACK: Build wine64 and wine64-preloader.").
+---
+ loader/main.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/loader/main.c b/loader/main.c
+index 71ba308c..8302316b 100644
+--- a/loader/main.c
++++ b/loader/main.c
+@@ -149,6 +149,16 @@ static void *try_dlopen( const char *argv0 )
+     void *handle;
+ 
+     if (!argv0) return NULL;
++
++    if ((p = remove_tail( argv0, "i386-unix/wine64")))
++    {
++        path = build_path( p, "x86_64-unix/ntdll.so" );
++        free( p );
++        handle = dlopen( path, RTLD_NOW );
++        free( path );
++        return handle;
++    }
++
+     if (!(dir = realpath_dirname( argv0 ))) return NULL;
+ 
+     if ((p = remove_tail( dir, "/loader" )))
