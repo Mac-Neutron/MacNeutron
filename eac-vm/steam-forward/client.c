@@ -7,6 +7,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include "client.h"
+#include "unixlib.h"
 
 static mn_connect_fn connect_fn;
 static mn_reg_fn reg_apply;
@@ -56,6 +57,18 @@ static int ensure_connected(void) {
     return 0;
 }
 
+/* With no host to reach, answer as lsteamclient does when Steam isn't running: init and the registry setup succeed and
+ * CreateInterface finds no interface, so SteamAPI_Init returns false. lsteamclient's PE side asserts on any failed
+ * call, which would stop the game at an assertion dialog instead. */
+static uint32_t no_steam(const struct mn_call_desc *d, void *params) {
+    if (!strcmp(d->name, "steamclient_init") || !strcmp(d->name, "steamclient_init_registry")) return 0;
+    if (!strcmp(d->name, "steamclient_CreateInterface")) {
+        ((struct steamclient_CreateInterface_params *)params)->_ret.handle = 0;
+        return 0;
+    }
+    return MN_STATUS_DISCONNECTED; /* ponytail: a host lost mid-game still asserts, as a Steam crash would */
+}
+
 uint32_t mn_client_call(uint32_t index, void *params) {
     if (index >= mn_ncalls) return MN_STATUS_INVALID_PARAMETER;
     const struct mn_call_desc *d = &mn_calls[index];
@@ -85,5 +98,5 @@ uint32_t mn_client_call(uint32_t index, void *params) {
     }
     free(msg);
     mn_buf_free(&req);
-    return status;
+    return status == MN_STATUS_DISCONNECTED ? no_steam(d, params) : status;
 }

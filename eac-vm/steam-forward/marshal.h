@@ -13,6 +13,7 @@ enum mn_kind {
     MN_FIXED,        /* pointer to `size` bytes (a scalar, struct or array), copied in and back */
     MN_BUF,          /* pointer to (count at size_offset) x `size` bytes, copied in and back */
     MN_UNSUPPORTED,  /* this call can't be carried: it fails before anything is sent */
+    MN_RET_BUF,      /* a returned struct u_buffer { u64 ptr, len }: the host's bytes come back as a guest copy */
 };
 enum { MN_IN_ONLY = 1,  /* const pointee: not copied back */
        MN_INNER = 2 };  /* MN_FIXED whose pointee holds a pointer (inner_ptr) to inner_size_field bytes, copied back */

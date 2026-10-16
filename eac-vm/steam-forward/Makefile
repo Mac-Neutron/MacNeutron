@@ -34,6 +34,11 @@ $(OUT)/host-client: tests/host-client.c tests/script.c client.c marshal.c $(OUT)
 
 host: $(OUT)/host/mn-steam-host $(OUT)/host-client
 .PHONY: host
+$(OUT)/offline-test: tests/offline-test.c client.c marshal.c $(OUT)/descriptors.c $(OUT)/guest_table.c
+	$(CC) $(CFLAGS) $(LSCFLAGS) -o $@ tests/offline-test.c client.c marshal.c $(OUT)/descriptors.c $(OUT)/guest_table.c
+offline-test: $(OUT)/offline-test
+	$(OUT)/offline-test
+.PHONY: offline-test
 $(OUT)/path-test: tests/path-test.c $(OUT)/host/ntdll.so
 	$(CC) $(CFLAGS) $(LSCFLAGS) -o $@ tests/path-test.c $(OUT)/host/ntdll.so -Wl,-rpath,@executable_path/host
 path-test: $(OUT)/path-test

@@ -19,6 +19,7 @@ struct ticket_params { uint64_t iface; uint32_t _ret; void *pTicket; int32_t cbM
 struct cbmsg { int32_t user, id; void *pub; int32_t cub; };
 struct cb_params { uint64_t cookie; struct cbmsg *msg; };
 struct bad_params { void **pp; };
+struct retbuf_params { uint64_t iface; struct { uint64_t ptr, len; } _ret; };
 #pragma pack(pop)
 
 static const struct mn_field str_fields[] = { { offsetof(struct str_params, name), MN_STR_IN, MN_IN_ONLY } };
@@ -31,13 +32,16 @@ static const struct mn_field ticket_fields[] = {
 static const struct mn_field cb_fields[] = { { offsetof(struct cb_params, msg), MN_FIXED, MN_INNER, sizeof(struct cbmsg),
     0, 0, 0, offsetof(struct cbmsg, pub), offsetof(struct cbmsg, cub) } };
 static const struct mn_field bad_fields[] = { { offsetof(struct bad_params, pp), MN_UNSUPPORTED } };
+static const struct mn_field retbuf_fields[] = { { offsetof(struct retbuf_params, _ret), MN_RET_BUF } };
 static const struct mn_call_desc descs[] = {
     { "str", sizeof(struct str_params), 1, str_fields },
     { "out", sizeof(struct out_params), 1, out_fields },
     { "ticket", sizeof(struct ticket_params), 3, ticket_fields },
     { "cb", sizeof(struct cb_params), 1, cb_fields },
     { "bad", sizeof(struct bad_params), 1, bad_fields },
+    { "retbuf", sizeof(struct retbuf_params), 1, retbuf_fields },
 };
+#define NDESCS (sizeof descs / sizeof *descs)
 
 static int reg_seen;
 static void reg_apply(void *ctx, uint32_t type, const char *key, size_t key_len, const char *name, size_t name_len,
@@ -50,7 +54,7 @@ static void reg_apply(void *ctx, uint32_t type, const char *key, size_t key_len,
 /* The host's side of one call: unpack, run `call` on the host copy, pack the reply. */
 static int host_roundtrip(const struct mn_buf *req, void (*call)(void *), struct mn_reg_log *log, struct mn_buf *rep) {
     uint32_t index; void *hp; struct mn_arena arena = {0};
-    int r = mn_unpack_request(descs, 5, req->data, req->len, &index, &hp, &arena);
+    int r = mn_unpack_request(descs, NDESCS, req->data, req->len, &index, &hp, &arena);
     if (!r) { call(hp); r = mn_pack_reply(&descs[index], 0, hp, log, rep); }
     mn_arena_free(&arena);
     return r;
@@ -70,6 +74,9 @@ static void call_cb(void *p) {
     s->msg->id = 703;
 }
 static void call_none(void *p) { (void)p; }
+static const char persona[] = "Persona";
+static void call_retbuf(void *p) { struct retbuf_params *s = p; s->_ret.ptr = (uintptr_t)persona; s->_ret.len = sizeof persona; }
+static void call_retbuf_null(void *p) { struct retbuf_params *s = p; s->_ret.ptr = 0; s->_ret.len = 0; }
 
 static int roundtrip(uint32_t index, void *params, void (*call)(void *), struct mn_reg_log *log) {
     struct mn_buf req = {0}, rep = {0};
@@ -115,6 +122,16 @@ int main(void) {
       CHECK(roundtrip(0, &p, call_str, &log) == 0 && reg_seen, "registry write replayed");
       mn_buf_free(&log.entries); }
 
+    { /* A returned u_buffer points into the host's memory: the guest gets its own copy, the same one for the same
+       * bytes (Steam's strings live as long as the client, so copies are kept), and NULL stays NULL. */
+      struct retbuf_params p = {0}, q = {0}, z = {0};
+      int r = roundtrip(5, &p, call_retbuf, NULL);
+      CHECK(r == 0 && p._ret.ptr && p._ret.ptr != (uintptr_t)persona && p._ret.len == sizeof persona &&
+            !memcmp((const void *)(uintptr_t)p._ret.ptr, persona, sizeof persona), "returned buffer copied to the guest");
+      CHECK(roundtrip(5, &q, call_retbuf, NULL) == 0 && q._ret.ptr == p._ret.ptr, "returned buffer kept once");
+      z._ret.ptr = 1;
+      CHECK(roundtrip(5, &z, call_retbuf_null, NULL) == 0 && !z._ret.ptr && !z._ret.len, "returned NULL buffer"); }
+
     { /* Every truncation of a valid request and reply fails cleanly (ASan catches any out-of-bounds read). */
       uint8_t ticket[300]; uint32_t cb = 0; uint64_t id = 77;
       struct ticket_params p; p.iface = 1; p._ret = 0; p.pTicket = ticket; p.cbMaxTicket = sizeof ticket; p.pcbTicket = &cb; p.identity = &id;
@@ -123,7 +140,7 @@ int main(void) {
       for (size_t n = 0; n < req.len; n++) {
           uint8_t *copy = malloc(n ? n : 1); memcpy(copy, req.data, n);
           uint32_t index; void *hp; struct mn_arena arena = {0};
-          if (mn_unpack_request(descs, 5, copy, n, &index, &hp, &arena) == 0) bad++;
+          if (mn_unpack_request(descs, NDESCS, copy, n, &index, &hp, &arena) == 0) bad++;
           mn_arena_free(&arena); free(copy);
       }
       CHECK(bad == 0, "truncated request refused");
@@ -144,18 +161,18 @@ int main(void) {
     { /* A request naming an index past the table, or with the wrong magic, is refused. */
       struct str_params p; p._ret = 0; p.name = "x"; struct mn_buf req = {0};
       mn_pack_request(&descs[0], 0, &p, &req);
-      ((struct mn_req_hdr *)req.data)->index = 5;
+      ((struct mn_req_hdr *)req.data)->index = NDESCS;
       uint32_t index; void *hp; struct mn_arena arena = {0};
-      CHECK(mn_unpack_request(descs, 5, req.data, req.len, &index, &hp, &arena) == MN_E_FORMAT, "index out of range");
+      CHECK(mn_unpack_request(descs, NDESCS, req.data, req.len, &index, &hp, &arena) == MN_E_FORMAT, "index out of range");
       ((struct mn_req_hdr *)req.data)->index = 0; ((struct mn_req_hdr *)req.data)->magic = 0;
-      CHECK(mn_unpack_request(descs, 5, req.data, req.len, &index, &hp, &arena) == MN_E_FORMAT, "bad magic");
+      CHECK(mn_unpack_request(descs, NDESCS, req.data, req.len, &index, &hp, &arena) == MN_E_FORMAT, "bad magic");
       mn_arena_free(&arena); mn_buf_free(&req); }
 
     { /* The table checksum changes with any size or offset, so mismatched builds can refuse each other. */
-      uint32_t a = mn_table_checksum(descs, 5);
+      uint32_t a = mn_table_checksum(descs, NDESCS);
       struct mn_field changed[3]; memcpy(changed, ticket_fields, sizeof changed); changed[0].size_offset++;
-      struct mn_call_desc d2[5]; memcpy(d2, descs, sizeof d2); d2[2].fields = changed;
-      CHECK(a == mn_table_checksum(descs, 5) && a != mn_table_checksum(d2, 5), "table checksum"); }
+      struct mn_call_desc d2[NDESCS]; memcpy(d2, descs, sizeof d2); d2[2].fields = changed;
+      CHECK(a == mn_table_checksum(descs, NDESCS) && a != mn_table_checksum(d2, NDESCS), "table checksum"); }
 
     printf(failures ? "marshal-test: %d failure(s)\n" : "marshal-test: all passed\n", failures);
     return failures != 0;

@@ -1,4 +1,5 @@
 /* Marshalling of lsteamclient's Unix-call params (see marshal.h and wire.h). */
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include "marshal.h"
@@ -89,6 +90,32 @@ static int64_t field_bytes(const struct mn_field *f, const void *params, const v
     return MN_E_UNSUPPORTED;
 }
 
+/* A returned u_buffer, at `off` in the params. */
+static void get_ubuf(const void *base, uint16_t off, uint64_t *ptr, uint64_t *len) {
+    memcpy(ptr, (const uint8_t *)base + off, 8); memcpy(len, (const uint8_t *)base + off + 8, 8);
+}
+static void set_ubuf(void *base, uint16_t off, uint64_t ptr, uint64_t len) {
+    memcpy((uint8_t *)base + off, &ptr, 8); memcpy((uint8_t *)base + off + 8, &len, 8);
+}
+
+/* Guest copies of returned buffers, one per distinct content, kept for the life of the process: lsteamclient hands the
+ * pointer to the game as Steam's own, which stays valid. ponytail: a linear list; a hash if a game returns thousands
+ * of distinct strings. */
+struct kept { struct kept *next; uint64_t len; uint8_t data[]; };
+static struct kept *kept_list;
+static pthread_mutex_t kept_lock = PTHREAD_MUTEX_INITIALIZER;
+static const void *keep(const uint8_t *src, uint64_t n) {
+    pthread_mutex_lock(&kept_lock);
+    struct kept *k = kept_list;
+    while (k && (k->len != n || memcmp(k->data, src, n))) k = k->next;
+    if (!k && (k = malloc(sizeof *k + n))) {
+        k->len = n; memcpy(k->data, src, n);
+        k->next = kept_list; kept_list = k;
+    }
+    pthread_mutex_unlock(&kept_lock);
+    return k ? k->data : NULL;
+}
+
 /* ---- guest: request ---- */
 
 int mn_pack_request(const struct mn_call_desc *d, uint32_t index, const void *params, struct mn_buf *out) {
@@ -99,6 +126,7 @@ int mn_pack_request(const struct mn_call_desc *d, uint32_t index, const void *pa
     if (!r) r = buf_put(out, params, d->params_size);
     for (uint16_t i = 0; !r && i < d->nfields; i++) {
         const struct mn_field *f = &d->fields[i];
+        if (f->kind == MN_RET_BUF) continue; /* output only */
         const void *p = get_ptr(params, f->offset);
         if (!p) { r = buf_u32(out, MN_NULL); continue; }
         int64_t n = field_bytes(f, params, p);
@@ -135,6 +163,7 @@ int mn_unpack_request(const struct mn_call_desc *descs, uint32_t ndescs, const v
     memcpy(params, pb, d->params_size);
     for (uint16_t i = 0; i < d->nfields; i++) {
         const struct mn_field *f = &d->fields[i];
+        if (f->kind == MN_RET_BUF) continue;
         uint32_t n;
         if (take_u32(&c, &n)) return MN_E_FORMAT;
         if (n == MN_NULL) { set_ptr(params, f->offset, NULL); continue; }
@@ -188,6 +217,14 @@ int mn_pack_reply(const struct mn_call_desc *d, uint32_t status, const void *hos
     if (!r) r = buf_put(out, host_params, d->params_size);
     for (uint16_t i = 0; !r && i < d->nfields; i++) {
         const struct mn_field *f = &d->fields[i];
+        if (f->kind == MN_RET_BUF) {
+            uint64_t ptr, len;
+            get_ubuf(host_params, f->offset, &ptr, &len);
+            if (!ptr || !len) r = buf_u32(out, MN_NULL);
+            else if (len > MN_MAX_MESSAGE) r = MN_E_TOO_BIG;
+            else if (!(r = buf_u32(out, (uint32_t)len))) r = buf_put(out, (const void *)(uintptr_t)ptr, (size_t)len);
+            continue;
+        }
         const void *p = get_ptr(host_params, f->offset);
         if (!p || (f->flags & MN_IN_ONLY)) continue;
         int64_t n = field_bytes(f, host_params, p);
@@ -214,6 +251,15 @@ int mn_pack_reply(const struct mn_call_desc *d, uint32_t status, const void *hos
 static int reply_fields(const struct mn_call_desc *d, struct cur *c, void *params, int apply) {
     for (uint16_t i = 0; i < d->nfields; i++) {
         const struct mn_field *f = &d->fields[i];
+        if (f->kind == MN_RET_BUF) {
+            uint32_t n;
+            if (take_u32(c, &n)) return MN_E_FORMAT;
+            const uint8_t *src = n == MN_NULL ? NULL : take(c, n);
+            if (n != MN_NULL && !src) return MN_E_FORMAT;
+            const void *copy = src && apply ? keep(src, n) : NULL;
+            if (apply) set_ubuf(params, f->offset, (uintptr_t)copy, copy ? n : 0);
+            continue;
+        }
         void *p = get_ptr(params, f->offset);
         if (!p || (f->flags & MN_IN_ONLY)) continue;
         uint32_t n;

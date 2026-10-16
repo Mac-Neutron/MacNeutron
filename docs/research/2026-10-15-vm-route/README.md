@@ -165,3 +165,33 @@ Hypervisor.framework maps a page a vCPU has written, `madvise` frees nothing, wh
 `MADV_FREE_REUSABLE`. Unmapping the reported range from the VM, `MADV_FREE`, and mapping it back frees it in about
 30 µs per 4 MB, and pages the guest touches again are charged again. macOS's `footprint` tool leaves guest memory out;
 `vmmap -summary`'s physical footprint includes it.
+
+**libkrun at main** (2026-10-16). libkrun moved from v1.19.6 to upstream `main` (a4d501ef), with our four patches
+rebased; main's v2 C API (ffier) replaces the old one, and the host builds a device manager, payload and VMM. Every
+gate above passes again on it: identity, `m2-gate.sh` (litmus 0, `HostTSO`, gameframe, fex-tests), the 4 GiB
+footprint drop (5,222 → 1,126 MB), and Steam forwarding (72 µs median round trip).
+
+## 5. Our Wine and Steam in the guest (milestones 3a-3b, 2026-10-16)
+
+**Our Wine for x86-64 Linux** (`eac-vm/wine/`): upstream master plus our macOS series plus Proton 11's EAC changes,
+cross-built in the Fedora builder against a pinned sysroot (clang + lld on both sides). `notes.md` sorts the macOS
+patches: most compile out on x86-64 Linux, winemac.drv and msync aren't built, libxess builds but stays inert without
+DXMT. Installed: 760 MB; `wine.erofs` (lz4hc): 333 MB, read-only at `/opt/mn-wine` and shared by every game. FEX runs
+it against Fedora's x86-64 RootFS, which has every library Wine links or loads except libodbc.
+
+**Prefix** (`wine.sh`, under Xvfb): a fresh `wineboot -i` on `/home` takes 5 s with MacNeutron's `mscoree,mshtml=`
+override. Without it the Wine Mono prompt waits on the invisible display and wineboot gives up after 300 s.
+
+**Steam through the forwarder** (`probe.sh`, our x86-64 `steam.exe` and lsteamclient as `steamclient64.dll`, the probe
+with a game's `steam_api64.dll`): with `--steam-appid 480`, `init: ok`, `steamid ok`, a 234-byte auth ticket, the
+probe's SEH fault caught, and `steamclient_init_registry`'s `language` value replayed into the prefix's HKCU. Without
+it, `SteamAPI_Init` fails cleanly ("No SteamClient021") and Wine keeps running. Two fixes came out of it:
+- Strings Steam returns (`struct u_buffer _ret`, 262 calls) were host pointers, which lsteamclient's 64-bit PE side
+  reads directly. They now come back as guest copies, one per distinct content, kept for the process's life.
+- lsteamclient's PE side asserts on any failed call, so a missing host stopped the game at an invisible assertion
+  dialog. With no host, the forwarder now answers as lsteamclient does when Steam isn't running: init and the registry
+  setup succeed, and `CreateInterface` finds no interface.
+
+The ticket's `GetAuthSessionTicketResponse_t` didn't arrive in 10 s. The same happens against `mn-steam-host` on the
+Mac with no VM, and `ISteamUser::BLoggedOn` reported 0: Mac Steam wasn't connected to Steam's servers then. A run
+with Steam online still has to show it.

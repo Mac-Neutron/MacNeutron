@@ -20,8 +20,14 @@ OUT=${OUT:-/mnt/out}
 WORK=${WORK:-/var/tmp/mn-image}
 CACHE=${CACHE:-/var/cache/mn-image-rpms}
 WINE_STAGE=${WINE_STAGE:-$HOME/wine-stage/opt/mn-wine}
+# The Steam forwarder (eac-vm/steam-forward/build-guest.sh with WINEBUILD) replaces lsteamclient's Unix half: the guest
+# has no Steam of its own, every call goes to the Mac's.
+STEAM_FORWARDER=${STEAM_FORWARDER:-$HOME/mn-steam-out/lsteamclient.so}
 wine_image() {
-  sudo rm -f "$OUT/wine.erofs"; sudo mkfs.erofs -L mn-wine -zlz4hc "$OUT/wine.erofs" "$WINE_STAGE" > /dev/null
+  [ -f "$STEAM_FORWARDER" ] || { echo "no Steam forwarder at $STEAM_FORWARDER" >&2; exit 1; }
+  sudo rm -rf "$WORK/wine"; sudo mkdir -p "$WORK"; sudo cp -a "$WINE_STAGE" "$WORK/wine"
+  sudo install -m755 "$STEAM_FORWARDER" "$WORK/wine/lib/wine/x86_64-unix/lsteamclient.so"
+  sudo rm -f "$OUT/wine.erofs"; sudo mkfs.erofs -L mn-wine -zlz4hc "$OUT/wine.erofs" "$WORK/wine" > /dev/null
   ls -la "$OUT/wine.erofs"
 }
 

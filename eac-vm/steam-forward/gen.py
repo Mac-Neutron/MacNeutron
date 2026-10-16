@@ -134,6 +134,11 @@ def main():
                     counts['override'] = counts.get('override', 0) + 1
                 continue
             t = ftype.replace('struct ', '').strip()
+            if t == 'u_buffer' and fname == '_ret':
+                # A host pointer and length (a string Steam returned): the bytes come back as a guest copy.
+                out.append((fname, {'kind': 'MN_RET_BUF'}))
+                counts['returned buffer'] = counts.get('returned buffer', 0) + 1
+                continue
             if '(*)' in t and '(' in t.split('(*)')[1][:2]:
                 continue  # function pointer: a guest value the host carries back
             if '*' not in t:
