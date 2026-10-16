@@ -654,6 +654,7 @@ static const unsigned sync_slots[] = {
     56, 62, 89, 115, 116, 127, 151,                             /* nil is an answer */
     74, 76, 81, 82, 84, 85,                                     /* SM50 with outputs */
     13, 117, 126,                                               /* blocking */
+    118,                       /* the guest's lock on its cache writer must cover the host's insert (not thread-safe) */
     67, 71, 72, 93, 97, 101,                                    /* presentation (4c): nil, layer props, display */
 };
 static const unsigned refused_slots[] = {120, 121, 122, 123, 124, 83};
@@ -671,7 +672,7 @@ static void modes(void) {
             failures++;
         }
     }
-    CHECK(n[MN_WM_SYNC] == 81 && n[MN_WM_QUEUED] == 66 && n[MN_WM_REFUSED] == 6 && n[MN_WM_LOCAL] == 2);
+    CHECK(n[MN_WM_SYNC] == 82 && n[MN_WM_QUEUED] == 65 && n[MN_WM_REFUSED] == 6 && n[MN_WM_LOCAL] == 2);
 }
 
 int main(void) {

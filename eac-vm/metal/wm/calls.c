@@ -292,7 +292,8 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
       ARR(WMF_IN, unixcall_cache_get, key, 1, key_length, 0), HOUT(unixcall_cache_get, ret_data, P1)),
     C(117, CacheWriter_alloc_init, unixcall_cache_alloc_init, S, MN_SP_PATH, STR(unixcall_cache_alloc_init, path),
       HOUT(unixcall_cache_alloc_init, ret_cache, P1)),
-    C(118, CacheWriter_set, unixcall_cache_set, Q, MN_SP_NONE, HIN(unixcall_cache_set, cache),
+    /* Waits: DXMT's lock on the writer must cover the host's insert (its SQLite connection is NOMUTEX). */
+    C(118, CacheWriter_set, unixcall_cache_set, S, MN_SP_NONE, HIN(unixcall_cache_set, cache),
       ARR(WMF_IN, unixcall_cache_set, key, 1, key_length, 0), HIN(unixcall_cache_set, value_data)),
     C(119, WMTSetMetalShaderCachePath, unixcall_setmetalcachepath, S, MN_SP_PATH,
       STR(unixcall_setmetalcachepath, path)),

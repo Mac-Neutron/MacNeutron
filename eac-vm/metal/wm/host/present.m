@@ -3,7 +3,8 @@
  * calls winemetal's slot 73: invoke.m).
  * With MN_PRESENT_PROBE=1, every 60th present (the 30th, 90th, ...) first blits the drawable's texture into a Shared
  * buffer in the same command buffer; when it completes, the host logs the frame's pixels as winshot measures a window:
- * green (the green channel 60-95), white (every channel above 200), and colours at 4 bits a channel. */
+ * green (the green channel 60-95), white (every channel above 200), and colours at 4 bits a channel. The pixels are
+ * read as stored: 8-bit BGRA or RGBA, or 10-bit RGB10A2 or BGR10A2 (SMITE 2's), of which the top 8 bits a channel. */
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
 #include <stdatomic.h>
@@ -27,8 +28,14 @@ static void probe(id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, uint64_
     @autoreleasepool {
         id<MTLTexture> t = drawable.texture;
         MTLPixelFormat f = t.pixelFormat;
-        int bgra = f == MTLPixelFormatBGRA8Unorm || f == MTLPixelFormatBGRA8Unorm_sRGB;
-        if ((!bgra && f != MTLPixelFormatRGBA8Unorm && f != MTLPixelFormatRGBA8Unorm_sRGB) || t.framebufferOnly) {
+        /* Where red, green and blue are in a pixel's 32 bits, and how many bits each has. */
+        unsigned rs, gs = 8, bs, bits = 8;
+        if (f == MTLPixelFormatRGBA8Unorm || f == MTLPixelFormatRGBA8Unorm_sRGB) rs = 0, bs = 16;
+        else if (f == MTLPixelFormatBGRA8Unorm || f == MTLPixelFormatBGRA8Unorm_sRGB) rs = 16, bs = 0;
+        else if (f == MTLPixelFormatRGB10A2Unorm) rs = 0, gs = 10, bs = 20, bits = 10;
+        else if (f == MTLPixelFormatBGR10A2Unorm) rs = 20, gs = 10, bs = 0, bits = 10;
+        else rs = bs = 32; /* not read */
+        if (rs == 32 || t.framebufferOnly) {
             fprintf(stderr, "mn-present: probe %llu format %lu%s not read\n", (unsigned long long)frame,
                     (unsigned long)f, t.framebufferOnly ? " framebuffer-only" : "");
             return;
@@ -45,11 +52,12 @@ static void probe(id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, uint64_
             if (done.status != MTLCommandBufferStatusCompleted) {
                 fprintf(stderr, "mn-present: probe %llu failed\n", (unsigned long long)frame);
             } else {
-                const uint8_t *p = buf.contents;
+                const uint32_t *p = buf.contents;
                 size_t n = w * h, green = 0, white = 0, colors = 0;
                 uint64_t seen[4096 / 64] = {0};
-                for (size_t i = 0; i < n; i++, p += 4) {
-                    unsigned r = bgra ? p[2] : p[0], g = p[1], b = bgra ? p[0] : p[2];
+                unsigned top = bits - 8; /* each channel's top 8 bits */
+                for (size_t i = 0; i < n; i++) {
+                    unsigned r = p[i] >> (rs + top) & 255, g = p[i] >> (gs + top) & 255, b = p[i] >> (bs + top) & 255;
                     green += g >= 60 && g <= 95;
                     white += r > 200 && g > 200 && b > 200;
                     unsigned c = (r >> 4) << 8 | (g >> 4) << 4 | b >> 4;

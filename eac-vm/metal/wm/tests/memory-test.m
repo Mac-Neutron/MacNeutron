@@ -21,6 +21,7 @@
  *                         crashes, and the view is gone from the window (loopback runs each call at once, so this is
  *                         the drawable keeping its layer; deferral across rings is handles-test's)
  *   probe                 with MN_PRESENT_PROBE=1, 60 frames give one probe line: pixels 57600 green 100
+ *   probe-10bit           the same with an RGB10A2 drawable (SMITE 2's): each channel's top 8 bits are read
  *   props                 getProps (71) after setProps (70): the guest's device value comes back as it was, the host's
  *                         device pointer is nowhere in the reply, and the drawable size is 320x180
  *   nil-drawable          a layer with no device: nextDrawable gives handle 0 and status 0 (in a window, a 0x0
@@ -292,15 +293,19 @@ static obj_handle_t new_queue(void) {
 
 struct swapchain { obj_handle_t view, layer; };
 
-/* A view for hwnd with a w x h BGRA8 drawable, as DXMT's presenter sets it up. */
-static struct swapchain make_view(uint64_t hwnd, double w, double h) {
+/* A view for hwnd with a w x h drawable of format, as DXMT's presenter sets it up. */
+static struct swapchain make_view_as(uint64_t hwnd, double w, double h, enum WMTPixelFormat format) {
     struct unixcall_create_metal_view_from_hwnd c = {hwnd, device, 0, 0};
     CHECK(W(72, &c) == 0 && c.ret_view && c.ret_layer);
     struct WMTLayerProps props = {.device = device, .contents_scale = 1, .drawable_width = w, .drawable_height = h,
-                                  .opaque = 1, .framebuffer_only = 0, .pixel_format = WMTPixelFormatBGRA8Unorm};
+                                  .opaque = 1, .framebuffer_only = 0, .pixel_format = format};
     struct unixcall_generic_obj_constptr_noret sp = {c.ret_layer, {&props}};
     CHECK(W(70, &sp) == 0);
     return (struct swapchain){c.ret_view, c.ret_layer};
+}
+
+static struct swapchain make_view(uint64_t hwnd, double w, double h) {
+    return make_view_as(hwnd, w, h, WMTPixelFormatBGRA8Unorm);
 }
 
 static void release_view(obj_handle_t view) {
@@ -391,8 +396,8 @@ static int stderr_to(const char *path) {
     return saved;
 }
 
-static void probe(void) {
-    struct swapchain s = make_view(0x1234, 320, 180);
+static void probe_as(enum WMTPixelFormat format) {
+    struct swapchain s = make_view_as(0x1234, 320, 180, format);
     if (!s.layer) return;
     obj_handle_t q = new_queue();
     char path[] = "/tmp/memory-test-probe-XXXXXX";
@@ -422,6 +427,9 @@ static void probe(void) {
     release_view(s.view);
     release(q);
 }
+
+static void probe(void) { probe_as(WMTPixelFormatBGRA8Unorm); }
+static void probe_10bit(void) { probe_as(WMTPixelFormatRGB10A2Unorm); } /* SMITE 2's swapchain */
 
 static void props(void) {
     struct swapchain s = make_view(0x1234, 320, 180);
@@ -514,7 +522,8 @@ static void *run(void *arg) {
         {"update-bounds", update_bounds}, {"region-bounds", region_bounds},
         {"heap", heap},               {"wmt-memory", wmt_memory}, {"big-blob", big_blob},
         {"sequence", sequence},
-        {"present", present},         {"probe", probe},           {"props", props},
+        {"present", present},         {"probe", probe},           {"probe-10bit", probe_10bit},
+        {"props", props},
         {"nil-drawable", nil_drawable}, {"view-left", view_left}, {"hud", hud},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {

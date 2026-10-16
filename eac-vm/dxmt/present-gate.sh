@@ -5,6 +5,8 @@
 # dxmt-tests and the presenter, eac-vm/host/build.sh, and the guest image (eac-vm/metal/build-guest.sh,
 # eac-vm/dxmt/stage.sh, image/build.sh wine in the builder). Prints a line a row, and both sides' frame times
 # (recorded, not graded). Exits 1 on any FAIL.
+# Last, SMITE 2 (eac-vm/tests/smite2-render.sh) as Steam runs it, through the Mac's Steam (never started or quit here):
+# it skips, by name, when Mac Steam isn't running, SMITE 2 isn't installed or Steam didn't initialise in the guest.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=$ROOT/build/eac-vm-work
@@ -21,8 +23,8 @@ guest() {
   { printf 'set -- %s %s %s\n' "$1" "$2" "$3"; cat "$ROOT/eac-vm/tests/present.sh"; } > "$W/present-run.sh"
   MN_PRESENT_PROBE=1 MN_RUN_TIMEOUT=600 "$ROOT/eac-vm/run-guest.sh" "$W/present-run.sh" > "$W/present-$1.txt" 2>&1
 }
-presented() {
-  sed -n 's/^mn-present: context [0-9]*: \([0-9]*\) drawables presented$/\1/p' "$1" | awk '{n += $1} END {print n + 0}'
+presented() { # (a line may start with smite2's time stamp)
+  sed -n 's/.*mn-present: context [0-9]*: \([0-9]*\) drawables presented$/\1/p' "$1" | awk '{n += $1} END {print n + 0}'
 }
 probes() { /usr/bin/grep '^mn-present: probe [0-9]* pixels ' "$1"; } # frame $3, pixels $5, green $7, white $9, colors $11
 median() { sort -n | awk '{v[NR] = $1} END {print NR ? v[int((NR + 1) / 2)] : -1}'; }
@@ -88,6 +90,34 @@ else no "present_loop: median probe green $g (56), white $w (12)"; fi
 counted present_loop "$H"
 python3 -I "$D/compare.py" host "$H" || fail=1
 echo "     time: macOS $(frame_time "$R") ms, guest $(frame_time "$C") ms a frame"
+
+# SMITE 2: 180 s in the guest; its host output, each line after the seconds since the boot began, is kept.
+L=$W/smite2-render.txt
+if ! pgrep -x steam_osx > /dev/null; then echo "skip: Mac Steam isn't running"
+elif [ ! -f "$HOME/Library/Application Support/Steam/steamapps/common/SMITE 2/Windows/Hemingway.exe" ]; then
+  echo "skip: SMITE 2 isn't installed"
+else
+  rm -rf "$W/share/traces/smite2"  # a run that never got there leaves no log to blame
+  MN_PRESENT_PROBE=1 MN_RUN_TIMEOUT=900 "$ROOT/eac-vm/run-guest.sh" "$ROOT/eac-vm/tests/smite2-render.sh" \
+    --steam-appid 2437170 --ram-mib 16384 2>&1 | perl -ne 'BEGIN { $| = 1; $t = time } print time - $t, " ", $_' > "$L"
+  if ! /usr/bin/grep -q '^[0-9]* steam: initialised$' "$L"; then echo "skip: Steam didn't initialise in the guest"
+  else
+    counted smite2 "$L"
+    # Game content: a probe after the first 60 s (past the splash and loading screens) with 64 colours or more.
+    c=$(awk '$2 == "mn-present:" && $3 == "probe" && $5 == "pixels" && $1 >= 60 && $12 > m {m = $12} END {print m + 0}' "$L")
+    if [ "$c" -ge 64 ]; then ok "smite2: a probe after 60 s has $c colours (64)"
+    else no "smite2: no probe after 60 s with 64 colours (most: $c), see $L"; fi
+    # A Steam call the forwarder can't carry fails in the game, whose lsteamclient then stops at an assertion: name it.
+    uncarried=$(/usr/bin/grep -h 'mn-steam: .* is not carried to the host' "$W/share/traces/smite2/wine.log" 2>/dev/null |
+      sort -u)
+    while read -r line; do [ -z "$line" ] || no "smite2: $line"; done <<EOF
+$uncarried
+EOF
+    sed 's/^[0-9]* //' "$L" > "$L.host"
+    python3 -I "$D/compare.py" host "$L.host" || fail=1
+    rm -f "$L.host"
+  fi
+fi
 
 [ $fail -eq 0 ] && echo "present gate: all passed" || echo "present gate: FAIL"
 exit $fail
