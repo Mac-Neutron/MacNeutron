@@ -370,3 +370,62 @@ host translate them.
 **Left for 4b-2** (its own plan, after this one). DXMT's x86-64 PE build in the guest's Wine, `WMTMemoryAlloc` for
 the memory DXMT hands to Metal itself (`dxmt_buffer.cpp:44-46`, `d3d12_command_allocator.cpp:63`,
 `dxmt_context.cpp:60`, `dxmt_ring_bump_allocator.hpp:119`), and the 17 headless tests as the gate.
+
+## 9. DXMT in the guest (milestone 4b-2, 2026-10-16)
+
+**What exists.**
+- **DXMT build.** DXMT patch 0071 adds `-Dguest_vm=true`, off by default. With it on:
+  - DXMT is built for x86-64, with no Unix side of its own.
+  - DXMT's four allocations that Metal makes buffers over use two new winemetal calls, `WMTMemoryAlloc` and
+    `WMTMemoryFree` (slots 153 and 154). The four: placed buffers, a command allocator's 4 MiB GPU heap, the dummy
+    constant buffer and staging blocks.
+  - Texture and visibility-result buffers do the same on i386 only, so they are left unchanged.
+- **The product build is unchanged.** It compiles the same source:
+  - each of its 171 translation units preprocesses identically with and without the patch (`eac-vm/dxmt/inert.sh`);
+  - its compile commands, meson targets and installed files are identical too.
+- **Build script.** `eac-vm/dxmt/build.sh` builds the guest DXMT on the Mac:
+  - with MacNeutron's llvm-mingw, against the guest Wine's import libraries;
+  - with no CPU flags, so the x86-64 baseline that FEX runs;
+  - with the product's translator key, since the host's translator compiles the guest's shaders.
+- **Guest library.** The guest `winemetal.so` answers slots 153 and 154 from its blob allocator, so the host maps that
+  memory too. A freed allocation stays reserved until every Metal buffer over it is gone. The host refuses both slots
+  if they ever reach it.
+- **Image.** `wine.erofs` replaces Wine's own d3d10core, d3d11, d3d12 and dxgi with our DXMT's (`eac-vm/dxmt/stage.sh`,
+  `image/build.sh`). It also has `winemetal.dll` as a builtin and the guest `winemetal.so`. D3D in the guest now goes
+  through the Metal transport to the host's GPU, no longer through wined3d and vkd3d on llvmpipe.
+
+**Gate** (`eac-vm/dxmt/gate.sh`).
+- **Programs.** 20 of DXMT's headless test programs: `d3d11_vsia`, and d3d12 `api`, `bounds`, `cache`, `compress`,
+  `copy`, `depth`, `dxil`, `dxil_exec`, `hazards`, `indirect`, `layered`, `lod`, `null`, `query`, `timestamp`,
+  `triangle`, `upscale`, `volume` and `vsread`. Each runs with the arguments of `dxmt/check.sh`'s first run of it.
+- **Left out:**
+  - the four that present (`clear`, `fullscreen`, `ffx_swapchain`, `present_loop`), which wait for 4c;
+  - `xess`, which needs Intel's DLL;
+  - `dlss`, part of the cancelled NVIDIA route.
+- **Runs.** Each program runs twice on macOS through MacNeutron's launcher, in a scratch tool folder with check.sh's
+  environment, and once in the guest under our Wine.
+- **Comparison rule** (`compare.py`), fixed before the first run:
+  - only lines starting with the program's own output prefixes count;
+  - lines where the two macOS runs agree are required, byte for byte;
+  - the guest must give as many lines as macOS;
+  - a program with no required lines fails, and so does a timeout or an error line from the VM host.
+- **Host errors.** The host now logs, when a context ends, how many of its queued calls failed.
+
+**Result: all 20 programs match macOS.**
+- 283 of their 288 lines are required. The 5 masked ones are timings.
+- No slot was refused, and the host logged no errors.
+- **Run times.** Most programs take about 1.05 s each in the guest, and `d3d12_upscale` takes 8.3 s. On macOS they
+  take 3.8 s and 14.6 s, but a macOS run includes the launcher, so this is not a speed comparison. It only shows that
+  nothing in the guest is slow.
+
+**Findings** (each with a test that failed first):
+- **Reused memory must come back zeroed.**
+  - **Symptom.** 19 of the 20 programs matched on the first run. `d3d12_hazards`' `zeroed` case read 33554432 non-zero
+    bytes in eight new 4 MiB buffers, against 0 on macOS.
+  - **Cause.** A CPU-visible buffer's memory comes from the guest's blob allocator, which handed out a freed region
+    with its old bytes. A new Metal buffer's memory is zeroed, and DXMT relies on that for D3D12's committed
+    resources, which start zeroed.
+  - **Fix and tests.** Freed pages are marked dirty and zeroed when handed out again. The allocator's cases now check
+    this.
+- **Six places, not four.** DXMT has six places where it gives Metal memory of its own; two of them do so on i386
+  only (above).
