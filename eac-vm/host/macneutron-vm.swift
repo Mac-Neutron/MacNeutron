@@ -3,7 +3,7 @@
 //                 [--steam-appid <id> [--steam-map <host dir>=<guest dir>]]
 // --steam-appid starts mn-steam-host (steam-forward/host/ beside this binary) for the guest's Steam forwarding
 // (spec §5.9) and maps guest vsock port 5101 to it; the map defaults to the Mac Steam library's common folder as
-// /mnt/games.
+// /mnt/games. The map's host side is shared read-only (virtiofs tag `games`) whether or not Steam is forwarded.
 // <dir> holds eac-vm/image/build.sh's output. The share is virtiofs tag `share` (/mnt/share in the guest). The process
 // exits when the guest powers off.
 import Foundation
@@ -101,6 +101,9 @@ disk("x86-64", "x86-64-rootfs.erofs", readOnly: true)
 disk("wine", "wine.erofs", readOnly: true)
 disk("state", "state.img", readOnly: false)
 add(krun_fs_device_new(kstr("share"), kstr(share), &err), "share")
+// The Mac's Steam library (the map's host side), read-only as tag `games` at /mnt/games: game files stay the Mac's.
+let games = String(steamMap.prefix { $0 != "=" })
+if access(games, R_OK) == 0 { add(krun_fs_device_new_read_only(kstr("games"), kstr(games), &err), "games") }
 add(krun_rng_device_new(&err), "rng")
 // Free page reporting gives the guest's freed memory back to macOS (our libkrun's balloon patch).
 add(krun_balloon_device_new(&err), "balloon")

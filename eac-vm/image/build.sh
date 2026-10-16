@@ -62,7 +62,7 @@ for b in FEX FEXServer FEXBash FEXGetConfig FEXpidof; do sudo install -m755 "$FE
 sudo cp -R "$HERE/rootfs/." "$WORK/root/"
 sudo chown -R root:root "$WORK/root/etc/fstab" "$WORK/root/etc/systemd/system" "$WORK/root/usr/libexec/mn-runner" \
   "$WORK/root/usr/libexec/mn-tso-check" "$WORK/root/usr/share/fex-emu/Config.json"
-sudo mkdir -p "$WORK/root/usr/share/fex-emu/RootFS/fedora" "$WORK/root/mnt/share" "$WORK/root/opt/mn-wine"
+sudo mkdir -p "$WORK/root/usr/share/fex-emu/RootFS/fedora" "$WORK/root/mnt/share" "$WORK/root/mnt/games" "$WORK/root/opt/mn-wine"
 sudo gcc -O2 -pthread -o "$WORK/root/usr/libexec/tso-litmus" "$HERE/tso-litmus.c"
 sudo systemctl --root="$WORK/root" enable mn-runner.service mn-tso-check.service
 sudo systemd-hwdb update --root="$WORK/root"  # its scriptlet cannot write hwdb.bin inside the install root
