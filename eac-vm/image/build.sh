@@ -60,7 +60,7 @@ cp "$WORK/root/lib/modules/$KVER/vmlinuz" "$OUT/vmlinuz"
 sudo rm -f "$WORK/root/lib/modules/$KVER/vmlinuz"  # it boots from outside the image
 for b in FEX FEXServer FEXBash FEXGetConfig FEXpidof; do sudo install -m755 "$FEX_BIN/$b" "$WORK/root/usr/bin/"; done
 sudo cp -R "$HERE/rootfs/." "$WORK/root/"
-sudo chown -R root:root "$WORK/root/etc/fstab" "$WORK/root/etc/systemd/system" "$WORK/root/usr/libexec/mn-runner" \
+sudo chown -R root:root "$WORK/root/etc/fstab" "$WORK/root/etc/asound.conf" "$WORK/root/etc/systemd/system" "$WORK/root/usr/libexec/mn-runner" \
   "$WORK/root/usr/libexec/mn-tso-check" "$WORK/root/usr/share/fex-emu/Config.json"
 sudo mkdir -p "$WORK/root/usr/share/fex-emu/RootFS/fedora" "$WORK/root/mnt/share" "$WORK/root/mnt/games" "$WORK/root/opt/mn-wine"
 sudo gcc -O2 -pthread -o "$WORK/root/usr/libexec/tso-litmus" "$HERE/tso-litmus.c"

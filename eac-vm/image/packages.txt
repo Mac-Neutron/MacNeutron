@@ -10,3 +10,4 @@ fex-emu
 fex-emu-filesystem
 # Wine needs a display; nothing is shown from the guest (spec §5.7)
 xorg-x11-server-Xvfb
+alsa-lib
