@@ -1,4 +1,4 @@
-From 84ba9c7eb625549b86b7651ee74c5b3b38a35852 Mon Sep 17 00:00:00 2001
+From a2424a66765b09015a57784f89183c4b5f6e496b Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Thu, 15 Oct 2026 21:38:08 -0400
 Subject: [PATCH 4/4] balloon: stop the VM if a reported range cannot be mapped
@@ -12,10 +12,10 @@ instead. An unmap Hypervisor.framework refuses (e.g. a range below the 16 KB hos
  1 file changed, 9 insertions(+), 1 deletion(-)
 
 diff --git a/src/devices/src/virtio/balloon/device.rs b/src/devices/src/virtio/balloon/device.rs
-index f2a5622b..c0b98c7f 100644
+index 959e16ce..1530d472 100644
 --- a/src/devices/src/virtio/balloon/device.rs
 +++ b/src/devices/src/virtio/balloon/device.rs
-@@ -110,6 +110,8 @@ impl Balloon {
+@@ -113,6 +113,8 @@ impl Balloon {
                      use hvf::bindings::{
                          hv_vm_map, hv_vm_unmap, HV_MEMORY_EXEC, HV_MEMORY_READ, HV_MEMORY_WRITE,
                      };
@@ -24,7 +24,7 @@ index f2a5622b..c0b98c7f 100644
                      let len: usize = desc.len.try_into().unwrap();
                      if hv_vm_unmap(desc.addr.0, len) == 0 {
                          libc::madvise(host_addr as *mut libc::c_void, len, libc::MADV_FREE);
-@@ -120,8 +122,14 @@ impl Balloon {
+@@ -123,8 +125,14 @@ impl Balloon {
                              (HV_MEMORY_READ | HV_MEMORY_WRITE | HV_MEMORY_EXEC).into(),
                          ) != 0
                          {
@@ -39,4 +39,4 @@ index f2a5622b..c0b98c7f 100644
 +                        warn!("balloon: Hypervisor.framework refused to unmap {:?}+{len}; reported pages stay charged", desc.addr);
                      }
                  }
-             }
+                 #[cfg(target_os = "windows")]

@@ -1,4 +1,4 @@
-From 92b63106496abe7eaeab03cb22fdcb46498b0cc5 Mon Sep 17 00:00:00 2001
+From d76f975d486ee02b501da15e14442bea2d409e9c Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Thu, 15 Oct 2026 21:05:16 -0400
 Subject: [PATCH 3/4] hvf: run every vCPU with Apple's TSO memory ordering
@@ -13,10 +13,10 @@ vCPU creation fails if the bit does not read back as set.
  1 file changed, 14 insertions(+)
 
 diff --git a/src/hvf/src/lib.rs b/src/hvf/src/lib.rs
-index b2d6d0d0..6bdd5ec6 100644
+index 83b39d2f..66976766 100644
 --- a/src/hvf/src/lib.rs
 +++ b/src/hvf/src/lib.rs
-@@ -406,6 +406,20 @@ impl HvfVcpu<'_> {
+@@ -412,6 +412,20 @@ impl HvfVcpu<'_> {
              return Err(Error::VcpuCreate);
          }
  

@@ -1,4 +1,4 @@
-From a1d09cd2ea8519b85fdb04e70409efa0f66a7a81 Mon Sep 17 00:00:00 2001
+From 59a5c0ea73e5ea4a0986247f03d8bbbe42ad9714 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Thu, 15 Oct 2026 20:37:41 -0400
 Subject: [PATCH 1/4] vmm: boot EFI zboot kernels whatever their payload's
@@ -8,35 +8,35 @@ arm64 distribution kernels (Fedora's vmlinuz among them) are EFI zboot images wh
 offset, size and compressor; Fedora's is zstd, which the PeGz loader's gzip scan cannot find (PeGzInvalid). Read the
 header and decode gzip or zstd; images without it keep the old scan. zstd becomes a dependency on every arch.
 ---
- src/vmm/Cargo.toml     |  2 +-
- src/vmm/src/builder.rs | 25 ++++++++++++++++++++++++-
+ src/libkrun/Cargo.toml         |  2 +-
+ src/libkrun/src/vmm/builder.rs | 25 ++++++++++++++++++++++++-
  2 files changed, 25 insertions(+), 2 deletions(-)
 
-diff --git a/src/vmm/Cargo.toml b/src/vmm/Cargo.toml
-index 7f691dca..00cb7f0c 100644
---- a/src/vmm/Cargo.toml
-+++ b/src/vmm/Cargo.toml
-@@ -23,6 +23,7 @@ aws-nitro = []
- [dependencies]
+diff --git a/src/libkrun/Cargo.toml b/src/libkrun/Cargo.toml
+index 7d523624..3e05b3e6 100644
+--- a/src/libkrun/Cargo.toml
++++ b/src/libkrun/Cargo.toml
+@@ -28,6 +28,7 @@ bitflags = "2.10.0"
  crossbeam-channel = ">=0.5.15"
+ env_logger = "0.11"
  flate2 = "1.0.35"
 +zstd = "0.13"
- libc = ">=0.2.39"
- linux-loader = { version = "0.13.2", features = ["bzimage", "elf", "pe"] }
- log = "0.4.0"
-@@ -50,7 +51,6 @@ bitflags = { version = "2.10.0", optional = true }
+ ffier = { git = "https://github.com/mtjhrc/ffier.git", tag = "v0.2.0-rc2", optional = true }
+ ffier-builtins = { git = "https://github.com/mtjhrc/ffier.git", tag = "v0.2.0-rc2", optional = true }
+ iocuddle = { version = "0.1.1", optional = true }
+@@ -55,7 +56,6 @@ utils = { package = "krun-utils", version = "=0.1.0-2.0.0-dev", path = "../utils
  [target.'cfg(target_arch = "x86_64")'.dependencies]
  bzip2 = "0.5"
- cpuid = { package = "krun-cpuid", version = "=0.1.0-1.19.6", path = "../cpuid" }
+ cpuid = { package = "krun-cpuid", version = "=0.1.0-2.0.0-dev", path = "../cpuid" }
 -zstd = "0.13"
  
- [target.'cfg(target_os = "linux")'.dependencies]
- tdx = { version = "0.1.0", optional = true }
-diff --git a/src/vmm/src/builder.rs b/src/vmm/src/builder.rs
-index 72831f1f..be29182f 100644
---- a/src/vmm/src/builder.rs
-+++ b/src/vmm/src/builder.rs
-@@ -1173,7 +1173,30 @@ fn load_external_kernel(
+ [target.'cfg(unix)'.dependencies]
+ linux-loader = { version = "0.14.0", features = ["bzimage", "elf", "pe"] }
+diff --git a/src/libkrun/src/vmm/builder.rs b/src/libkrun/src/vmm/builder.rs
+index df64ef2d..dc7a841d 100644
+--- a/src/libkrun/src/vmm/builder.rs
++++ b/src/libkrun/src/vmm/builder.rs
+@@ -1429,7 +1429,30 @@ fn load_external_kernel(
          KernelFormat::PeGz => {
              let data: Vec<u8> = std::fs::read(external_kernel.path.clone())
                  .map_err(StartMicrovmError::PeGzOpenKernel)?;

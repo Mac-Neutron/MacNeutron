@@ -1,4 +1,4 @@
-From 416f63c56339dbb8183818345f3c838bff79188f Mon Sep 17 00:00:00 2001
+From c9f8a378b742a6a844fa0a14ecf0a506ad24578b Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Thu, 15 Oct 2026 20:58:17 -0400
 Subject: [PATCH 2/4] balloon: on macOS, take reported pages out of the VM
@@ -10,20 +10,21 @@ reached the device. The guest holds reported pages back until the descriptor is 
 VM, MADV_FREE it and map it back: the footprint drops at once, and the guest's next write faults in a zero page that is
 charged again. About 30 us per 4 MB report on an M5 Pro.
 ---
- src/devices/src/virtio/balloon/device.rs | 28 ++++++++++++++++++++----
- 1 file changed, 24 insertions(+), 4 deletions(-)
+ src/devices/src/virtio/balloon/device.rs | 29 ++++++++++++++++++++----
+ 1 file changed, 24 insertions(+), 5 deletions(-)
 
 diff --git a/src/devices/src/virtio/balloon/device.rs b/src/devices/src/virtio/balloon/device.rs
-index 85b2812c..f2a5622b 100644
+index 53250244..959e16ce 100644
 --- a/src/devices/src/virtio/balloon/device.rs
 +++ b/src/devices/src/virtio/balloon/device.rs
-@@ -94,16 +94,36 @@ impl Balloon {
+@@ -97,17 +97,36 @@ impl Balloon {
                      desc.addr, host_addr, desc.len
                  );
                  #[cfg(target_os = "linux")]
 -                let advice = libc::MADV_DONTNEED;
 -                #[cfg(target_os = "macos")]
 -                let advice = libc::MADV_FREE;
+-                #[cfg(unix)]
                  unsafe {
                      libc::madvise(
                          host_addr as *mut libc::c_void,
@@ -55,6 +56,6 @@ index 85b2812c..f2a5622b 100644
 +                        }
 +                    }
 +                }
-             }
- 
-             have_used = true;
+                 #[cfg(target_os = "windows")]
+                 unsafe {
+                     DiscardVirtualMemory(host_addr as *mut core::ffi::c_void, desc.len as usize)

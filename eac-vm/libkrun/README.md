@@ -1,8 +1,10 @@
 # libkrun for the EAC microVM
 
-The microVM host links libkrun (Apache-2.0, github.com/containers/libkrun) at the release in `PIN`, plus the patches
-here. `build.sh` builds it into `build/eac-vm-work/libkrun/`. Make a new patch in `build/eac-vm-work/libkrun-src`
-(branch `macneutron`), then `git format-patch --no-signature -o patches <pin>..macneutron`.
+The microVM host links libkrun (Apache-2.0, github.com/containers/libkrun) at the `main` commit in `PIN`, plus the
+patches here; the fork's `macneutron` branch (github.com/Mac-Neutron/libkrun) carries the same commits. Stable releases
+come later. `build.sh` builds it into `build/eac-vm-work/libkrun/` with the `ffi` feature, which exports main's v2 C API
+(device manager, payload, VMM builder). Make a new patch in `build/eac-vm-work/libkrun-src` (branch `macneutron`), then
+`git format-patch --no-signature -o patches <pin>..macneutron`.
 
 Patches:
 - 0001: boot EFI zboot kernels (Fedora's vmlinuz has a zstd payload; the PE loader only scanned for gzip).

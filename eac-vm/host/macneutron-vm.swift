@@ -31,8 +31,19 @@ func defaultCPUs() -> Int {
     return total + (sysctlString("hw.perflevel\(level).name") == "Efficiency" ? cores / 2 : cores)
   }
 }
-func check(_ r: Int32, _ what: String) {
-  if r < 0 { fail(1, "\(what): \(String(cString: strerror(-r)))") }
+// libkrun's v2 API: strings are (pointer, length) pairs, and a failing call leaves a KrunError in `err`.
+var err: KrunError? = nil
+func kstr(_ s: String) -> KrunStr {
+  let p = strdup(s)!  // ponytail: never freed, a handful of strings for the life of the process
+  return KrunStr(data: UnsafePointer(p), len: strlen(p))
+}
+func check(_ r: KrunResult, _ what: String) {
+  if r != KrunResult(KRUN_RESULT_SUCCESS) { fail(1, "\(what): \(String(cString: krun_result_name_cstr(r)))") }
+}
+func made<T>(_ handle: T?, _ what: String) -> T {
+  if let e = err { check(krun_error_result(e), what) }
+  guard let h = handle else { fail(1, "\(what): no handle") }
+  return h
 }
 
 var opts: [String: String] = [:]
@@ -61,18 +72,37 @@ let cmdline = (try? String(contentsOfFile: path("cmdline.txt"), encoding: .utf8)
   .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
 // MN_KRUN_LOG: libkrun log level, 0 (off) to 5 (trace); warnings and errors by default.
-check(krun_set_log_level(UInt32(ProcessInfo.processInfo.environment["MN_KRUN_LOG"] ?? "") ?? 2), "log level")
-let ctx = krun_create_ctx()
-check(ctx, "create context")
-let id = UInt32(ctx)
-check(krun_set_vm_config(id, UInt8(cpus), ramMiB), "vm config (\(cpus) vCPUs, \(ramMiB) MiB)")
-// Fedora's vmlinuz is an EFI zboot image; our libkrun's PE loader reads its header (gzip or zstd payload).
-check(krun_set_kernel(id, path("vmlinuz"), UInt32(KRUN_KERNEL_FORMAT_PE_GZ), path("initramfs.img"), cmdline), "kernel")
-check(krun_add_disk2(id, "base", path("base.erofs"), UInt32(KRUN_DISK_FORMAT_RAW), true), "base.erofs")
-check(krun_add_disk2(id, "x86-64", path("x86-64-rootfs.erofs"), UInt32(KRUN_DISK_FORMAT_RAW), true), "x86-64-rootfs.erofs")
-check(krun_add_disk2(id, "state", path("state.img"), UInt32(KRUN_DISK_FORMAT_RAW), false), "state.img")
-check(krun_add_virtiofs(id, "share", share), "share")
-check(krun_disable_implicit_vsock(id), "vsock")
+let logLevel = UInt32(ProcessInfo.processInfo.environment["MN_KRUN_LOG"] ?? "") ?? UInt32(KRUN_LOG_LEVEL_WARN)
+check(krun_init_log(-1, logLevel, UInt32(KRUN_LOG_STYLE_AUTO), 0, &err), "log level")
+let devices = krun_mmio_device_manager_new()
+func add(_ device: KrunAttachDevice?, _ what: String) { krun_mmio_device_manager_add(devices, made(device, what)) }
+func disk(_ id: String, _ name: String, readOnly: Bool) {
+  let d = made(krun_block_device_new(kstr(id), kstr(path(name)), UInt32(KRUN_DISK_FORMAT_RAW), &err), name)
+  krun_block_device_set_read_only(d, readOnly)
+  add(d, name)
+}
+// The guest console (hvc0) goes to the console file. libkrun makes port 0 hvc0 only for a terminal, so it gets a pty
+// whose other side is copied into the file.
+let consoleFD = open(console, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+var ptyMaster: Int32 = -1, ptySlave: Int32 = -1
+if consoleFD < 0 || openpty(&ptyMaster, &ptySlave, nil, nil, nil) != 0 {
+  fail(1, "console: \(String(cString: strerror(errno)))")
+}
+Thread.detachNewThread {
+  var buf = [UInt8](repeating: 0, count: 65536)
+  while case let n = read(ptyMaster, &buf, buf.count), n > 0 { _ = write(consoleFD, buf, n) }
+}
+let consoles = krun_console_device_builder()
+var port: UInt32 = 0
+check(krun_console_builder_add_tty_port(consoles, kstr(""), ptySlave, &port, &err), "console port")
+add(krun_console_builder_build(consoles, &err), "console")
+disk("base", "base.erofs", readOnly: true)
+disk("x86-64", "x86-64-rootfs.erofs", readOnly: true)
+disk("state", "state.img", readOnly: false)
+add(krun_fs_device_new(kstr("share"), kstr(share), &err), "share")
+add(krun_rng_device_new(&err), "rng")
+// Free page reporting gives the guest's freed memory back to macOS (our libkrun's balloon patch).
+add(krun_balloon_device_new(&err), "balloon")
 // Steam forwarding: mn-steam-host serves the guest's lsteamclient calls against the Mac's Steam (spec §5.9).
 var steamHostPID: pid_t = 0
 if let appid = steamAppID {
@@ -90,10 +120,18 @@ if let appid = steamAppID {
     if waited >= 50 || !host.isRunning { fail(5, "mn-steam-host did not start") }
     usleep(100_000); waited += 1
   }
-  check(krun_add_vsock(id, 0), "vsock device")
-  check(krun_add_vsock_port2(id, 5101, sock, false), "vsock port 5101")
+  let vsock = made(krun_vsock_device_new(3, 0, &err), "vsock device")
+  krun_vsock_device_add_unix_port(vsock, 5101, kstr(sock), false)
+  add(vsock, "vsock")
 }
-check(krun_set_console_output(id, console), "console")
+// Fedora's vmlinuz is an EFI zboot image; our libkrun's PE loader reads its header (gzip or zstd payload).
+let payload = made(krun_payload_load_external(kstr(path("vmlinuz")), UInt32(KRUN_KERNEL_FORMAT_PE_GZ),
+  kstr(path("initramfs.img")), kstr(cmdline), &err), "kernel")
+var builder = krun_vmm_builder_new()
+check(krun_vmm_builder_vcpus(&builder, UInt8(cpus), &err), "\(cpus) vCPUs")
+check(krun_vmm_builder_ram_mib(&builder, ramMiB, &err), "\(ramMiB) MiB")
+krun_vmm_builder_payload(&builder, payload)
+krun_vmm_builder_devices(&builder, devices)
 FileHandle.standardError.write("macneutron-vm: \(cpus) vCPUs, \(ramMiB) MiB\n".data(using: .utf8)!)
 if timeout > 0 {
   // A guest that never powers off (an initrd that cannot find its root, a failed mount) must not hold the host and
@@ -103,4 +141,4 @@ if timeout > 0 {
     _exit(4)
   }
 }
-check(krun_start_enter(id), "start")
+krun_vmm_run(made(krun_vmm_builder_build(&builder, &err), "build the VM"))
