@@ -1,13 +1,16 @@
 #!/bin/sh
-# ref.sh: the 4b-2 gate's macOS reference. Each program in invocations runs twice through MacNeutron's launcher, as
-# dxmt/check.sh's `run ours` does: a tool folder `macneutron install` assembles from build/wine-arm64/wine.app in
-# ${TMPDIR}/macneutron dxmt-guest-ref (never a user's; Steam is never started), check.sh's environment, a fresh
-# shader cache per run, a 300 s watchdog. Writes build/eac-vm-work/share/dxmt-ref/<name>.<1|2>.txt and .time.
+# ref.sh: the 4b-2 gate's macOS reference. Each program in the share's invocations (share.sh) runs twice through
+# MacNeutron's launcher, as dxmt/check.sh's `run ours` does: a tool folder `macneutron install` assembles from
+# build/wine-arm64/wine.app in ${TMPDIR}/macneutron dxmt-guest-ref (never a user's; Steam is never started), check.sh's
+# environment, a fresh shader cache per run, the share's timeout as a watchdog. Writes
+# build/eac-vm-work/share/dxmt-ref/<name>.<1|2>.txt, .status (the launcher's exit status, or "timeout") and .time.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 WORK="${TMPDIR:-/tmp}/macneutron dxmt-guest-ref"
 OUT=$ROOT/build/eac-vm-work/share/dxmt-ref
 T=$ROOT/dxmt/tests
+I=$ROOT/build/eac-vm-work/share/dxmt-tests
+TO=$(cat "$I/timeout")
 now() { perl -MTime::HiRes=time -e 'printf "%.2f\n", time'; }
 rm -rf "$WORK" "$OUT"; mkdir -p "$WORK/compat" "$OUT"
 "$ROOT/.build/release/macneutron" install --tool-dir "$WORK/ours" --wine-app "$ROOT/build/wine-arm64/wine.app" > /dev/null
@@ -18,7 +21,7 @@ stop() {
 trap stop EXIT
 env STEAM_COMPAT_DATA_PATH="$WORK/compat" SteamAppId=0 "$WORK/ours/bin/macneutron" launch getcompatpath "$WORK" \
   > /dev/null 2>&1
-/usr/bin/grep -v '^#' "$ROOT/eac-vm/dxmt/invocations" | while IFS='|' read -r name exe args prefixes; do
+while IFS='|' read -r name exe args prefixes; do
   args=$(printf '%s' "$args" | sed "s|@S|Z:$T/shaders|g; s|@T|Z:$T|g")
   for i in 1 2; do
     start=$(now)
@@ -28,11 +31,13 @@ env STEAM_COMPAT_DATA_PATH="$WORK/compat" SteamAppId=0 "$WORK/ours/bin/macneutro
       "$WORK/ours/bin/macneutron" launch waitforexitandrun "$ROOT/build/dxmt-tests/$exe" $args \
       < /dev/null > "$WORK/out" 2>&1 &
     pid=$!
-    ( sleep 300; kill "$pid" 2> /dev/null ) > /dev/null 2>&1 & dog=$!
-    wait "$pid" || true
+    ( sleep "$TO"; touch "$WORK/timed-out"; kill "$pid" 2> /dev/null ) > /dev/null 2>&1 & dog=$!
+    rc=0; wait "$pid" || rc=$?
     kill "$dog" 2> /dev/null || true
+    if [ -f "$WORK/timed-out" ]; then echo timeout; else echo "$rc"; fi > "$OUT/$name.$i.status"
+    rm -f "$WORK/timed-out"
     tr -d '\r' < "$WORK/out" > "$OUT/$name.$i.txt"
     echo "$start $(now)" | awk '{printf "%.2f\n", $2 - $1}' > "$OUT/$name.$i.time"
   done
-  echo "ref: $name $(cat "$OUT/$name.1.time") s"
-done
+  echo "ref: $name $(cat "$OUT/$name.1.time") s, status $(cat "$OUT/$name.1.status")"
+done < "$I/invocations"
