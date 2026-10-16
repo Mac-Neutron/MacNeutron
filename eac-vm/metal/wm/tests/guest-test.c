@@ -1,11 +1,13 @@
 /* Milestone 4b-1: the 4b-1 sequence in the guest, through the guest winemetal.so as Wine would load it (dlopen,
  * RTLD_NOW), with the stub ntdll.so on LD_LIBRARY_PATH. Prints the sequence's lines, then the host's stats.
- *   metal-wm-test [--steps N] */
+ *   metal-wm-test [--steps N]   the sequence, then the stats line
+ *   metal-wm-test galloc        the guest allocator's cases (galloc-cases.c) */
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "../calls.h"
+#include "galloc-cases.h"
 #include "sequence.h"
 
 typedef NTSTATUS_T (*entry_t)(void *params);
@@ -31,6 +33,10 @@ int main(int argc, char **argv) {
     if (!funcs || !stats || !env.signalled) {
         fprintf(stderr, "metal-wm-test: missing symbols\n");
         return 2;
+    }
+    if (argc == 2 && !strcmp(argv[1], "galloc")) {
+        struct mn_galloc_env g = {call, stats, print};
+        return mn_galloc_cases(&g) ? 1 : 0;
     }
     int r = mn_wm_sequence(&env, steps);
     struct mn_wm_stats st;

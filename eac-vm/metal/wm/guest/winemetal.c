@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include "../../guest/transport.h"
 #include "../marshal.h"
+#include "winemetal_thunks.h"
 
 struct buffers { uint8_t rec[MN_REC_MAX]; uint8_t reply[MN_REPLY_BYTES]; };
 static pthread_key_t key;
@@ -35,17 +36,32 @@ static NTSTATUS_T forward(unsigned slot, void *params) {
     }
     if (!out.sync) {
         if (!mn_send(MN_OP_WM + slot, out.buf, out.len)) return 0;
-        mn_wm_unwind(&out);
+        mn_wm_unwind(&out, 0);
         return MN_STATUS_UNSUCCESSFUL;
     }
     uint32_t len = 0;
     int r = mn_call(MN_OP_WM + slot, out.buf, out.len, b->reply, sizeof b->reply, &len);
     if (r) {
-        mn_wm_unwind(&out);
-        return r > -4096 && r < 0 ? MN_STATUS_UNSUCCESSFUL : (NTSTATUS_T)r; /* a transport error, or the host's */
+        int transport = r > -4096 && r < 0; /* else the host's status: it saw the record */
+        mn_wm_unwind(&out, !transport);
+        return transport ? MN_STATUS_UNSUCCESSFUL : (NTSTATUS_T)r;
     }
     return mn_wm_unpack(slot, params, &out, b->reply, len);
 }
+
+/* A texture's pixel format, for the extent of its data in slots 45 and 145: asked of the host once (slot 39), then
+ * kept with the handle. */
+static uint32_t texture_format(mn_handle t) {
+    uint64_t att = mn_gh_attached(t);
+    if (MN_GH_TAG(att) == MN_GH_FORMAT) return (uint32_t)MN_GH_VALUE(att);
+    struct unixcall_generic_obj_uint64_ret q = {t, 0}, r = {0, 0};
+    uint32_t n = 0;
+    if (mn_call(MN_OP_WM + 39, &q, sizeof q, &r, sizeof r, &n) || n < sizeof r || !r.ret) return 0;
+    mn_gh_attach(t, MN_GH_FORMAT | r.ret);
+    return (uint32_t)r.ret;
+}
+
+__attribute__((constructor)) static void init(void) { mn_wm_texture_format = texture_format; }
 
 /* The context's live handles, deferred releases and failed queued calls (the gates' check). */
 int mn_wm_stats(struct mn_wm_stats *st) {

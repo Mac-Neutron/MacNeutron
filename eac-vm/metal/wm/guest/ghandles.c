@@ -11,7 +11,10 @@ struct gentry {
     _Atomic uint32_t refs;
     _Atomic uint32_t gen; /* the handle's generation is gen + 1 */
     _Atomic uint8_t pool;
+    _Atomic uint64_t attached;
 };
+
+void (*mn_gh_on_free)(uint64_t value);
 
 static struct gentry *_Atomic chunks[MN_H_MAX / CHUNK];
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -60,6 +63,7 @@ mn_handle mn_gh_alloc(enum mn_own own) {
     }
     struct gentry *e = entry(i);
     e->pool = 0;
+    e->attached = 0;
     e->refs = 1;
     mn_handle h = (uint64_t)(e->gen + 1) << 32 | i;
     pthread_mutex_unlock(&lock);
@@ -76,12 +80,24 @@ mn_handle mn_gh_alloc(enum mn_own own) {
 }
 
 static void free_index(struct gentry *e, uint32_t i) {
+    uint64_t attached = atomic_exchange(&e->attached, 0);
     pthread_mutex_lock(&lock);
     e->pool = 0;
     e->gen++;
     fifo[(fifo_head + fifo_count) % MN_H_MAX] = i;
     fifo_count++;
     pthread_mutex_unlock(&lock);
+    if (attached && mn_gh_on_free) mn_gh_on_free(attached);
+}
+
+void mn_gh_attach(mn_handle h, uint64_t value) {
+    struct gentry *e = live(h);
+    if (e) e->attached = value;
+}
+
+uint64_t mn_gh_attached(mn_handle h) {
+    struct gentry *e = live(h);
+    return e ? e->attached : 0;
 }
 
 int mn_gh_retain(mn_handle h) {

@@ -20,6 +20,7 @@ enum mn_hkind {
     MN_HK_ANY = 0, /* lookups only: slots 0 and 1 take any kind */
     MN_HK_OBJC = 1, MN_HK_SM50_SHADER, MN_HK_SM50_BITCODE, MN_HK_SM50_ERROR, MN_HK_LISTENER, MN_HK_HEAP_EMU,
     MN_HK_POOL, /* an NSAutoreleasePool: only its own ring may release it, and nothing else takes it */
+    MN_HK_ANY_OBJC, /* lookups only: an Objective-C object or an emulated heap (residency sets, heap slots) */
 };
 enum mn_own { MN_OWN_PLUS1, MN_OWN_AUTORELEASED, MN_OWN_BORROWED };
 
@@ -30,6 +31,15 @@ int mn_gh_release(mn_handle h);         /* 1 when the index was freed (a pool's 
 void mn_gh_drop(mn_handle h);           /* a synchronous reply said nil: free the index, no host release */
 void mn_gh_pool_push(mn_handle pool);   /* slot 10 made pool on this thread */
 void mn_gh_pool_pop(mn_handle pool);    /* pops it and the pools inside it: one reference less for each handle */
+/* A value kept with a live handle (0: none): a buffer's or heap's region, a texture's pixel format. When the index is
+ * freed, mn_gh_on_free gets it. */
+void mn_gh_attach(mn_handle h, uint64_t value);
+uint64_t mn_gh_attached(mn_handle h);
+extern void (*mn_gh_on_free)(uint64_t value);
+#define MN_GH_REGION (1ull << 62) /* | region id */
+#define MN_GH_FORMAT (2ull << 62) /* | pixel format */
+#define MN_GH_TAG(v) ((v) & (3ull << 62))
+#define MN_GH_VALUE(v) ((v) & ~(3ull << 62))
 
 /* Host side, one table per context; rings are the executor's ring_state pointers. */
 struct mn_ht_rings {

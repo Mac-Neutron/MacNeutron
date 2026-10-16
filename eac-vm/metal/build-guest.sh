@@ -24,9 +24,9 @@ build() {  # <output under bin/> <compiler arguments...>
 }
 build metal-probe -std=gnu11 tests/probe.c -lpthread
 build metal-transport-test -std=gnu11 tests/transport-test.c guest/transport.c ring.c -lpthread
-WM="wm/calls.c wm/marshal.c wm/guest/ghandles.c guest/transport.c ring.c"
+WM="wm/calls.c wm/marshal.c wm/guest/ghandles.c wm/guest/galloc.c guest/transport.c ring.c"
 build wm/winemetal.so -std=gnu2x -DMN_WM_GUEST -fPIC -shared wm/guest/winemetal.c $WM $WINEBUILD/dlls/ntdll/ntdll.so \
   -lpthread
 build wm/ntdll.so -std=gnu2x -fPIC -shared -Wl,-soname,ntdll.so wm/guest/stub-ntdll.c -lpthread
-build metal-wm-test -std=gnu2x wm/tests/guest-test.c wm/tests/sequence.c -ldl -lpthread
+build metal-wm-test -std=gnu2x wm/tests/guest-test.c wm/tests/sequence.c wm/tests/galloc-cases.c -ldl -lpthread
 file "$OUT"/metal-* "$OUT"/wm/*

@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include "../marshal.h"
+#include "../notify.h"
 #include "dispatch.h"
 
 struct ctx {
@@ -43,7 +44,7 @@ static struct ctx *ctx_of(uint32_t ctx_id, void *ring_state) {
 
 int32_t mn_wm_dispatch(uint32_t ctx_id, void *ring_state, uint32_t op, const void *p, uint32_t len, void *reply,
                        uint32_t cap, uint32_t *reply_len) {
-    if (op < MN_OP_WM || op > MN_OP_WM + MN_WM_STATS) return MN_ENOSYS;
+    if (op < MN_OP_WM || op > MN_OP_WM + MN_WM_NOTIFY_ATTACH) return MN_ENOSYS; /* the slots, stats, notify */
     struct ctx *c = ctx_of(ctx_id, ring_state);
     if (!c) return (int32_t)MN_STATUS_UNSUCCESSFUL;
     return mn_wm_host_call(&c->wm, ring_state, op - MN_OP_WM, p, len, reply, cap, reply_len);
@@ -71,6 +72,7 @@ static void context_end(uint32_t ctx_id) {
     pthread_mutex_unlock(&ctx_lock);
     if (!c) return;
     mn_ht_free(c->wm.ht);
+    mn_wm_ctx_end(&c->wm);
     free(c);
 }
 

@@ -17,10 +17,14 @@ NTSTATUS_T mn_wm_invoke(unsigned slot, void *params) {
 void mn_wm_release_object(enum mn_hkind kind, void *obj) {
     switch (kind) {
     case MN_HK_OBJC:
-    case MN_HK_POOL: /* releasing a pool drains it: the table calls this on the pool's own ring */
+        mn_wm_will_release(obj);
         mn_wm_invoke(1, &obj);
         return;
-    default: /* ponytail: SM50 objects, listeners and emulated heaps get theirs in Tasks 5, 7 and 8 */
+    case MN_HK_POOL:     /* releasing a pool drains it: the table calls this on the pool's own ring */
+    case MN_HK_HEAP_EMU: /* an MNHeap (memory.m) */
+        mn_wm_invoke(1, &obj);
+        return;
+    default: /* ponytail: SM50 objects and listeners get theirs in Tasks 7 and 8 */
         fprintf(stderr, "mn-winemetal: no release yet for a kind-%d object\n", kind);
         return;
     }

@@ -18,7 +18,7 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
-enum { ARRAY, DEVICE, QUEUE, STRING, SAMPLER, FUNCTION, ARCHIVE, PSO, POOL, CMDBUF, NOBJS };
+enum { ARRAY, DEVICE, QUEUE, STRING, SAMPLER, FUNCTION, ARCHIVE, PSO, POOL, CMDBUF, ENCODER, NOBJS };
 static int objs[NOBJS];
 static int retains[NOBJS], releases[NOBJS], calls[MN_WM_SLOTS], checked[MN_WM_SLOTS];
 static int fail_next, raise_next;
@@ -91,10 +91,12 @@ static NTSTATUS_T f_colorspace(void *p) {
     a->ret = 1;
     return 0;
 }
-static NTSTATUS_T f_add_allocations(void *p) {
-    struct unixcall_mtlresidencyset_addallocations *a = p;
-    const obj_handle_t *v = a->allocations.ptr;
-    checked[133] = a->set == OBJ(DEVICE) && a->count == 2 && v[0] == OBJ(QUEUE) && v[1] == OBJ(STRING);
+static NTSTATUS_T f_blit_samples(void *p) {
+    struct unixcall_mtlcommandbuffer_blitcommandencoderwithsamplebuffers *a = p;
+    const struct WMTSampleBufferAttachmentInfo *v = a->attachments.ptr;
+    checked[129] = a->cmdbuf == OBJ(DEVICE) && a->num_attachments == 2 && v[0].sample_buffer == OBJ(QUEUE) &&
+                   v[1].sample_buffer == OBJ(STRING);
+    a->ret = OBJ(ENCODER);
     return 0;
 }
 static NTSTATUS_T f_cache_get(void *p) {
@@ -116,7 +118,7 @@ static NTSTATUS_T f_end(void *p) {
 static wm_unix_fn fakes[MN_WM_SLOTS] = {
     [0] = f_retain, [1] = f_release, [2] = f_object, [4] = f_devices, [7] = f_name, [8] = f_getcstring,
     [9] = f_queue, [10] = f_pool, [11] = f_cmdbuf, [12] = f_commit, [19] = f_sampler, [26] = f_function,
-    [29] = f_pso, [33] = f_end, [92] = f_colorspace, [116] = f_cache_get, [133] = f_add_allocations,
+    [29] = f_pso, [33] = f_end, [92] = f_colorspace, [116] = f_cache_get, [129] = f_blit_samples,
 };
 
 static size_t no_rings(void *ctx, void *except, struct mn_mark *m, size_t cap) { (void)ctx, (void)except, (void)m, (void)cap; return 0; }
@@ -137,7 +139,7 @@ static NTSTATUS_T call(unsigned slot, void *params) {
                                   out.sync ? sizeof reply : 0, &rl);
     if (!out.sync) return 0;
     if (host_status) {
-        mn_wm_unwind(&out);
+        mn_wm_unwind(&out, 1);
         return (NTSTATUS_T)host_status;
     }
     return mn_wm_unpack(slot, params, &out, reply, rl);
@@ -179,9 +181,10 @@ static void roundtrip(void) {
     CHECK(pi.compute_function == fn.ret); /* untouched in the guest */
     struct unixcall_generic_obj_uint64_ret cs = {7, 0};
     CHECK(call(92, &cs) == 0 && cs.ret == 1 && cs.handle == 7 && checked[92]);
-    obj_handle_t allocs[2] = {queue, string};
-    struct unixcall_mtlresidencyset_addallocations aa = {device, {allocs}, 2};
-    CHECK(call(133, &aa) == 0 && host_status == 0 && checked[133]);
+    struct WMTSampleBufferAttachmentInfo at[2] = {{.sample_buffer = queue}, {.sample_buffer = string}};
+    struct unixcall_mtlcommandbuffer_blitcommandencoderwithsamplebuffers bs = {device, {at}, 2, 0};
+    CHECK(call(129, &bs) == 0 && host_status == 0 && bs.ret && checked[129]); /* an array of structs, handles in */
+    CHECK(at[0].sample_buffer == queue); /* untouched in the guest */
 }
 
 static void bad_handle(void) {

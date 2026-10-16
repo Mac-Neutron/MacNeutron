@@ -26,6 +26,7 @@ enum mn_wm_field_kind {
     WMF_INOUT,         /* ... both */
     WMF_STR_IN,        /* a pointer to a NUL-terminated string */
     WMF_VALUE_HANDLE,  /* typed obj_handle_t, but a value: passed through */
+    WMF_BLOB_PTR,      /* a pointer into blob memory both sides map (count bytes): the host maps it, never copies */
 };
 #define WMF_ARRAY 1
 
@@ -73,5 +74,11 @@ struct mn_wm_call {
 extern const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS];
 
 struct mn_wm_stats { uint64_t live, deferred, failures; };
+
+/* A pixel format's block: bytes, width and height (1 x 1 for uncompressed); -1 for a format the forwarder doesn't
+ * know. The bytes a texture region's data covers (slots 45 and 145), or UINT64_MAX if its pitches are too small. */
+int mn_wm_format_block(uint32_t format, uint32_t *bytes, uint32_t *w, uint32_t *h);
+uint64_t mn_wm_region_extent(uint32_t format, uint64_t width, uint64_t height, uint64_t depth, uint64_t bytes_per_row,
+                             uint64_t bytes_per_image);
 
 #endif

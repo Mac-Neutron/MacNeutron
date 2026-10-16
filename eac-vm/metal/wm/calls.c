@@ -33,7 +33,7 @@
 #define RMACH(slot, nm, st) R(slot, nm, sizeof(struct st), MN_STATUS_NOT_SUPPORTED)  /* Mach ports: host-only */
 
 /* Fields inside pointed-to structs (nested), 1-based. */
-enum { N_HANDLES = 1, N_COMPUTE, N_RENDER, N_MESH, N_TILE, N_PASS, N_CAPTURE, N_INTERP, N_ATTACH };
+enum { N_HANDLES = 1, N_COMPUTE, N_RENDER, N_MESH, N_TILE, N_PASS, N_CAPTURE, N_INTERP, N_ATTACH, N_ANY, N_BUFFER };
 #define PASS_COLOR(i) HIN(WMTRenderPassInfo, colors[i].texture), HIN(WMTRenderPassInfo, colors[i].resolve_texture)
 const struct mn_wm_nested mn_wm_nested[] = {
     [N_HANDLES - 1] = {FIELDS({0, WMF_HANDLE_IN, MN_HK_OBJC, 0, 0, 0, 0, 0, 0})},
@@ -65,6 +65,8 @@ const struct mn_wm_nested mn_wm_nested[] = {
     [N_CAPTURE - 1] = {FIELDS(HIN(WMTCaptureInfo, capture_object), STR(WMTCaptureInfo, output_url))},
     [N_INTERP - 1] = {FIELDS(HIN(WMTFXFrameInterpolatorInfo, scaler))},
     [N_ATTACH - 1] = {FIELDS(HIN(WMTSampleBufferAttachmentInfo, sample_buffer))},
+    [N_ANY - 1] = {FIELDS({0, WMF_HANDLE_IN, MN_HK_ANY_OBJC, 0, 0, 0, 0, 0, 0})}, /* residency: emulated heaps too */
+    [N_BUFFER - 1] = {FIELDS(ARR(WMF_BLOB_PTR, WMTBufferInfo, memory, 1, length, 0))},
 };
 
 #define G_R unixcall_generic_obj_ret
@@ -104,7 +106,7 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
     C(17, MTLCommandBuffer_encodeSignalEvent, G_OUNR, Q, MN_SP_NONE, HIN(G_OUNR, handle), HIN(G_OUNR, arg0)),
     C(18, MTLDevice_newBuffer, unixcall_mtldevice_newbuffer, S, MN_SP_BUFFER,
       HIN(unixcall_mtldevice_newbuffer, device),
-      PTR(WMF_INOUT, unixcall_mtldevice_newbuffer, info, sizeof(struct WMTBufferInfo), 0),
+      PTR(WMF_INOUT, unixcall_mtldevice_newbuffer, info, sizeof(struct WMTBufferInfo), N_BUFFER),
       HOUT(unixcall_mtldevice_newbuffer, ret, P1)),
     C(19, MTLDevice_newSamplerState, unixcall_mtldevice_newsamplerstate, S, MN_SP_NONE,
       HIN(unixcall_mtldevice_newsamplerstate, device),
@@ -308,10 +310,10 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
       HOUT(unixcall_mtldevice_newresidencyset, ret_set, P1)),
     C(133, MTLResidencySet_addAllocations, unixcall_mtlresidencyset_addallocations, Q, MN_SP_RESIDENCY,
       HIN(unixcall_mtlresidencyset_addallocations, set),
-      ARR(WMF_IN, unixcall_mtlresidencyset_addallocations, allocations, 8, count, N_HANDLES)),
+      ARR(WMF_IN, unixcall_mtlresidencyset_addallocations, allocations, 8, count, N_ANY)),
     C(134, MTLResidencySet_removeAllocations, unixcall_mtlresidencyset_addallocations, Q, MN_SP_RESIDENCY,
       HIN(unixcall_mtlresidencyset_addallocations, set),
-      ARR(WMF_IN, unixcall_mtlresidencyset_addallocations, allocations, 8, count, N_HANDLES)),
+      ARR(WMF_IN, unixcall_mtlresidencyset_addallocations, allocations, 8, count, N_ANY)),
     C(135, MTLResidencySet_removeAllAllocations, G_NR, Q, MN_SP_RESIDENCY, HIN(G_NR, handle)),
     ON(136, MTLResidencySet_commit, Q),
     C(137, MTLCommandQueue_addResidencySet, G_ONR, Q, MN_SP_NONE, HIN(G_ONR, handle), HIN(G_ONR, arg)),
@@ -323,10 +325,12 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
     C(140, MTLDevice_heapTextureSizeAndAlign, unixcall_mtldevice_heaptexturesizeandalign, S, MN_SP_NONE,
       HIN(unixcall_mtldevice_heaptexturesizeandalign, device),
       PTR(WMF_IN, unixcall_mtldevice_heaptexturesizeandalign, info, sizeof(struct WMTTextureInfo), 0)),
-    C(141, MTLHeap_newBuffer, unixcall_mtlheap_newbuffer, S, MN_SP_HEAP, HIN(unixcall_mtlheap_newbuffer, heap),
+    C(141, MTLHeap_newBuffer, unixcall_mtlheap_newbuffer, S, MN_SP_HEAP,
+      HINK(unixcall_mtlheap_newbuffer, heap, MN_HK_ANY_OBJC), /* info.memory is only an output here */
       PTR(WMF_INOUT, unixcall_mtlheap_newbuffer, info, sizeof(struct WMTBufferInfo), 0),
       HOUT(unixcall_mtlheap_newbuffer, ret, P1)),
-    C(142, MTLHeap_newTexture, unixcall_mtlheap_newtexture, S, MN_SP_HEAP, HIN(unixcall_mtlheap_newtexture, heap),
+    C(142, MTLHeap_newTexture, unixcall_mtlheap_newtexture, S, MN_SP_HEAP,
+      HINK(unixcall_mtlheap_newtexture, heap, MN_HK_ANY_OBJC),
       PTR(WMF_INOUT, unixcall_mtlheap_newtexture, info, sizeof(struct WMTTextureInfo), 0),
       HOUT(unixcall_mtlheap_newtexture, ret, P1)),
     C(143, MTLDevice_newIndirectCommandBuffer, unixcall_mtldevice_newicb, S, MN_SP_NONE,
@@ -370,3 +374,55 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
       HIN(unixcall_mtlcommandbuffer_frame_interpolate, output), HIN(unixcall_mtlcommandbuffer_frame_interpolate, fence),
       PTR(WMF_IN, unixcall_mtlcommandbuffer_frame_interpolate, props, sizeof(struct WMTFXFrameInterpolatorProps), 0)),
 };
+
+/* MTLPixelFormat's values (WMTPixelFormat mirrors them). */
+int mn_wm_format_block(uint32_t f, uint32_t *bytes, uint32_t *w, uint32_t *h) {
+    static const struct { uint16_t lo, hi; uint8_t bytes, w, h; } ranges[] = {
+        {1, 1, 1, 1, 1},       /* A8 */
+        {10, 14, 1, 1, 1},     /* R8 */
+        {20, 25, 2, 1, 1},     /* R16 */
+        {30, 34, 2, 1, 1},     /* RG8 */
+        {40, 43, 2, 1, 1},     /* packed 16-bit */
+        {53, 55, 4, 1, 1},     /* R32 */
+        {60, 65, 4, 1, 1},     /* RG16 */
+        {70, 75, 4, 1, 1},     /* RGBA8 */
+        {80, 81, 4, 1, 1},     /* BGRA8 */
+        {90, 94, 4, 1, 1},     /* RGB10A2, RG11B10F, RGB9E5, BGR10A2 */
+        {103, 105, 8, 1, 1},   /* RG32 */
+        {110, 115, 8, 1, 1},   /* RGBA16 */
+        {123, 125, 16, 1, 1},  /* RGBA32 */
+        {130, 131, 8, 4, 4},   /* BC1 */
+        {132, 135, 16, 4, 4},  /* BC2, BC3 */
+        {140, 141, 8, 4, 4},   /* BC4 */
+        {142, 143, 16, 4, 4},  /* BC5 */
+        {150, 153, 16, 4, 4},  /* BC6H, BC7 */
+        {240, 241, 4, 2, 1},   /* GBGR422, BGRG422 */
+        {250, 250, 2, 1, 1},   /* Depth16Unorm */
+        {252, 252, 4, 1, 1},   /* Depth32Float */
+        {253, 253, 1, 1, 1},   /* Stencil8 */
+        {255, 255, 4, 1, 1},   /* Depth24Unorm_Stencil8 */
+        {260, 260, 8, 1, 1},   /* Depth32Float_Stencil8 */
+        {261, 262, 8, 1, 1},   /* X32_Stencil8, X24_Stencil8 */
+        {552, 553, 8, 1, 1},   /* BGRA10_XR(_sRGB) */
+        {554, 555, 4, 1, 1},   /* BGR10_XR(_sRGB) */
+    };
+    for (size_t i = 0; i < sizeof ranges / sizeof *ranges; i++)
+        if (f >= ranges[i].lo && f <= ranges[i].hi) {
+            *bytes = ranges[i].bytes, *w = ranges[i].w, *h = ranges[i].h;
+            return 0;
+        }
+    return -1;
+}
+
+uint64_t mn_wm_region_extent(uint32_t format, uint64_t width, uint64_t height, uint64_t depth, uint64_t bytes_per_row,
+                             uint64_t bytes_per_image) {
+    uint32_t bytes, bw, bh;
+    if (mn_wm_format_block(format, &bytes, &bw, &bh)) return UINT64_MAX;
+    if (!width || !height || !depth) return 0;
+    if (width > UINT32_MAX || height > UINT32_MAX || depth > UINT32_MAX) return UINT64_MAX;
+    uint64_t rows = (height + bh - 1) / bh, row_bytes = (width + bw - 1) / bw * bytes;
+    if (bytes_per_row < row_bytes) return UINT64_MAX;
+    uint64_t image = (rows - 1) * bytes_per_row + row_bytes;
+    if (depth > 1 && bytes_per_image < image) return UINT64_MAX;
+    return (depth - 1) * bytes_per_image + image;
+}

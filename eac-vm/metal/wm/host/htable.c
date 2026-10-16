@@ -92,7 +92,9 @@ static struct hentry *entry(struct mn_ht *t, uint32_t i, int create) {
 }
 
 static int kind_ok(enum mn_hkind have, enum mn_hkind want) {
-    return want == MN_HK_ANY ? have != MN_HK_POOL : have == want;
+    if (want == MN_HK_ANY) return have != MN_HK_POOL;
+    if (want == MN_HK_ANY_OBJC) return have == MN_HK_OBJC || have == MN_HK_HEAP_EMU;
+    return have == want;
 }
 
 static struct timespec deadline(void) {
@@ -164,7 +166,7 @@ static void push_item(struct hpool *p, mn_handle h) {
 
 int mn_ht_bind(struct mn_ht *t, void *ring, mn_handle h, enum mn_hkind kind, void *obj, enum mn_own own) {
     uint32_t i = MN_H_INDEX(h), g = MN_H_GEN(h);
-    if (!i || i >= MN_H_MAX || !g || kind == MN_HK_ANY) return -1;
+    if (!i || i >= MN_H_MAX || !g || kind == MN_HK_ANY || kind == MN_HK_ANY_OBJC) return -1;
     pthread_mutex_lock(&t->lock);
     struct hentry *e = entry(t, i, 1);
     struct timespec end = deadline();
