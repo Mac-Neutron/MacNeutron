@@ -62,6 +62,13 @@ static uint64_t next_serial;
 static mn_op_fn handler;
 static struct mn_executor_hooks hooks;
 static struct ring *wait_ring; /* the MN_CTRL_WAIT the next fence belongs to */
+static struct { int set; uint64_t blob, arg; } notify_wait; /* the MN_CTRL_NOTIFY_WAIT the next fence belongs to */
+/* Fences waiting on notify queues; completed by mn_executor_notified (any thread) or the context's end. */
+struct nwaiter { uint32_t ctx_id, ring_idx; uint64_t blob, arg, fence_id; };
+#define MAX_NWAITERS 256
+static struct nwaiter nwaiters[MAX_NWAITERS];
+static unsigned nnwaiters;
+static pthread_mutex_t nw_lock = PTHREAD_MUTEX_INITIALIZER;
 static atomic_uint_fast64_t async_failures; /* since the last context began (MN_OP_TEST_ERRORS) */
 static uint64_t wait_seq;
 
@@ -286,6 +293,7 @@ static void context_destroy(void *ctx, uint32_t ctx_id) {
         next = r->next;
         if (r->ctx_id == ctx_id) stop(r);
     }
+    mn_executor_notified(ctx_id, 0); /* its notify waits complete: the guest is gone */
     if (hooks.context_end) hooks.context_end(ctx_id);
     fprintf(stderr, "mn-executor: context %u gone\n", ctx_id);
 }
@@ -330,10 +338,46 @@ static void blob_destroyed(void *ctx, uint32_t ctx_id, uint64_t blob_id, void *p
     else munmap(ptr, size);             /* never tracked: still ours to unmap */
 }
 
+/* A notify queue's head (UINT64_MAX for no such blob: its waiters then complete rather than hang). */
+static uint64_t queue_head(uint32_t ctx_id, uint64_t blob) {
+    _Atomic uint64_t *h = mn_executor_blob(ctx_id, blob, 0, sizeof *h);
+    return h ? atomic_load_explicit(h, memory_order_acquire) : UINT64_MAX;
+}
+
+/* Under nw_lock: completes the waiters of (ctx_id, blob) that are satisfied, all of a context's when blob is 0. */
+static void complete_nwaiters(uint32_t ctx_id, uint64_t blob) {
+    for (unsigned i = 0; i < nnwaiters;) {
+        struct nwaiter *w = &nwaiters[i];
+        if (w->ctx_id == ctx_id && (!blob || (w->blob == blob && queue_head(ctx_id, blob) > w->arg))) {
+            mn_dxmt_fence_done(w->ctx_id, w->ring_idx, w->fence_id);
+            *w = nwaiters[--nnwaiters];
+        } else {
+            i++;
+        }
+    }
+}
+
+void mn_executor_notified(uint32_t ctx_id, uint64_t blob_id) {
+    pthread_mutex_lock(&nw_lock);
+    complete_nwaiters(ctx_id, blob_id);
+    pthread_mutex_unlock(&nw_lock);
+}
+
+static void add_nwaiter(uint32_t ctx_id, uint64_t blob, uint64_t arg, uint32_t ring_idx, uint64_t fence_id) {
+    pthread_mutex_lock(&nw_lock); /* the poster writes head, then takes the lock: one of us sees the other */
+    if (queue_head(ctx_id, blob) > arg || nnwaiters == MAX_NWAITERS) {
+        mn_dxmt_fence_done(ctx_id, ring_idx, fence_id); /* the guest rechecks and waits again */
+    } else {
+        nwaiters[nnwaiters++] = (struct nwaiter){ctx_id, ring_idx, blob, arg, fence_id};
+    }
+    pthread_mutex_unlock(&nw_lock);
+}
+
 static void submit(void *ctx, uint32_t ctx_id, const void *cmd, uint32_t len) {
     (void)ctx;
     struct mn_ctrl c;
     wait_ring = NULL;
+    notify_wait.set = 0;
     if (len < sizeof c) { error("short control message", ctx_id, len); return; }
     memcpy(&c, cmd, sizeof c);
     struct ring *r = c.type == MN_CTRL_RING_ATTACH || c.type == MN_CTRL_PEEK ? NULL : find(ctx_id, c.ring_blob);
@@ -354,6 +398,9 @@ static void submit(void *ctx, uint32_t ctx_id, const void *cmd, uint32_t len) {
         wait_seq = c.arg;
         wake(r); /* the guest waits for this ring: a lost doorbell must not leave its consumer asleep */
         return;
+    case MN_CTRL_NOTIFY_WAIT:
+        notify_wait.set = 1, notify_wait.blob = c.ring_blob, notify_wait.arg = c.arg;
+        return;
     case MN_CTRL_PEEK: {
         uint64_t *p = mn_executor_blob(ctx_id, c.ring_blob, c.arg, sizeof *p);
         if (!p) { error("peek outside a blob", ctx_id, c.ring_blob); return; }
@@ -369,6 +416,11 @@ static void fence(void *ctx, uint32_t ctx_id, uint32_t ring_idx, uint64_t fence_
     (void)ctx;
     struct ring *r = wait_ring;
     wait_ring = NULL;
+    if (notify_wait.set) {
+        notify_wait.set = 0;
+        add_nwaiter(ctx_id, notify_wait.blob, notify_wait.arg, ring_idx, fence_id);
+        return;
+    }
     if (r && r->ctx_id == ctx_id) add_waiter(r, wait_seq, ring_idx, fence_id);
     else mn_dxmt_fence_done(ctx_id, ring_idx, fence_id);
 }

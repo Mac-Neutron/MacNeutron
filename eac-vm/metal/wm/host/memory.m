@@ -12,6 +12,7 @@
 #include "../../host/executor.h"
 #include "../marshal.h"
 #include "../notify.h"
+#include "notifyq.h"
 #include "winemetal_thunks.h"
 
 #define STORAGE(o) ((uint64_t)(o) & 0xf0)
@@ -22,6 +23,8 @@
 
 struct mn_notifyq {
     _Atomic int refs;
+    uint32_t ctx_id;
+    uint64_t blob_id;
     pthread_mutex_t m;
     struct mn_notify *n;
     void *hold;
@@ -30,7 +33,7 @@ struct mn_notifyq {
 };
 static pthread_mutex_t notify_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static void q_put(struct mn_notifyq *q) {
+void mn_notifyq_put(struct mn_notifyq *q) {
     if (!q || atomic_fetch_sub(&q->refs, 1) != 1) return;
     mn_executor_blob_release(q->hold);
     pthread_mutex_destroy(&q->m);
@@ -57,7 +60,7 @@ static int q_write(struct mn_notifyq *q, struct mn_notify_rec r) {
 }
 
 /* ponytail: the backlog drains on the next post; a flush on the guest's read if a stuck tail ever shows. */
-static void q_post(struct mn_notifyq *q, uint32_t type, uint64_t value) {
+void mn_notifyq_post(struct mn_notifyq *q, uint32_t type, uint64_t value) {
     if (!q) return;
     pthread_mutex_lock(&q->m);
     size_t i = 0;
@@ -74,23 +77,30 @@ static void q_post(struct mn_notifyq *q, uint32_t type, uint64_t value) {
         else fprintf(stderr, "mn-winemetal: notify queue full, a record lost\n");
     }
     pthread_mutex_unlock(&q->m);
+    mn_executor_notified(q->ctx_id, q->blob_id);
+}
+
+struct mn_notifyq *mn_notifyq_new(struct mn_wm_ctx *c, uint64_t blob_id) {
+    struct mn_notifyq *q = calloc(1, sizeof *q);
+    if (!q) return NULL;
+    if (!(q->n = mn_executor_blob_hold(c->ctx_id, blob_id, 0, MN_NOTIFY_BYTES, &q->hold))) {
+        free(q);
+        return NULL;
+    }
+    q->refs = 1, q->ctx_id = c->ctx_id, q->blob_id = blob_id;
+    pthread_mutex_init(&q->m, NULL);
+    return q;
 }
 
 NTSTATUS_T mn_wm_notify_attach(struct mn_wm_ctx *c, uint64_t blob_id, uint64_t listener) {
-    if (listener) return MN_STATUS_NOT_IMPLEMENTED; /* listeners' queues: Task 7 */
-    struct mn_notifyq *q = calloc(1, sizeof *q);
-    if (!q) return MN_STATUS_UNSUCCESSFUL;
-    if (!(q->n = mn_executor_blob_hold(c->ctx_id, blob_id, 0, MN_NOTIFY_BYTES, &q->hold))) {
-        free(q);
-        return MN_STATUS_INVALID_PARAMETER;
-    }
-    q->refs = 1;
-    pthread_mutex_init(&q->m, NULL);
+    if (listener) return MN_STATUS_INVALID_PARAMETER; /* a listener's queue comes with slot 108 */
+    struct mn_notifyq *q = mn_notifyq_new(c, blob_id);
+    if (!q) return MN_STATUS_INVALID_PARAMETER;
     pthread_mutex_lock(&notify_lock);
     struct mn_notifyq *old = c->notify;
     c->notify = q;
     pthread_mutex_unlock(&notify_lock);
-    q_put(old);
+    mn_notifyq_put(old);
     return 0;
 }
 
@@ -99,14 +109,14 @@ void mn_wm_ctx_end(struct mn_wm_ctx *c) {
     struct mn_notifyq *q = c->notify;
     c->notify = NULL;
     pthread_mutex_unlock(&notify_lock);
-    q_put(q); /* holders still alive keep it until they go */
+    mn_notifyq_put(q); /* holders still alive keep it until they go */
 }
 
 void mn_wm_drop_hold(struct mn_wm_ctx *c, struct mn_wm_hold *h) {
     if (h->hold) mn_executor_blob_release(h->hold);
     struct mn_notifyq *q = q_get(c);
-    q_post(q, MN_NOTIFY_REGION_FREE, h->region);
-    q_put(q);
+    mn_notifyq_post(q, MN_NOTIFY_REGION_FREE, h->region);
+    mn_notifyq_put(q);
     h->hold = NULL;
     h->taken = 1;
 }
@@ -145,8 +155,8 @@ static char holder_key;
     [heaps removeObject:self];
     pthread_mutex_unlock(&heaps_lock);
     mn_executor_blob_release(hold);
-    q_post(q, MN_NOTIFY_REGION_FREE, region);
-    q_put(q);
+    mn_notifyq_post(q, MN_NOTIFY_REGION_FREE, region);
+    mn_notifyq_put(q);
     [device release];
     [sets release];
     [subs release];
@@ -157,8 +167,8 @@ static char holder_key;
 @implementation MNHolder
 - (void)dealloc {
     if (hold) mn_executor_blob_release(hold);
-    q_post(q, MN_NOTIFY_REGION_FREE, region);
-    q_put(q);
+    mn_notifyq_post(q, MN_NOTIFY_REGION_FREE, region);
+    mn_notifyq_put(q);
     [heap release];
     [sets release];
     [super dealloc];
@@ -375,6 +385,11 @@ NTSTATUS_T mn_wm_special(struct mn_wm_state *k) {
         case 36:
         case 37:
         case 38: return mn_wm_encode(k);
+        case 104:
+        case 108:
+        case 109:
+        case 110:
+        case 146: return mn_wm_listener_special(k);
         default: return MN_STATUS_NOT_IMPLEMENTED;
         }
     } @catch (id e) {

@@ -39,6 +39,8 @@ enum {
     MN_CTRL_WAKE,            /* the ring's consumer is parked and has work */
     MN_CTRL_WAIT,            /* this message's fence completes once the ring's done_seq >= arg; wakes the ring */
     MN_CTRL_PEEK,            /* the probe's: host reads u64 MN_PROBE_MAGIC at blob ring_blob + arg, writes magic + 1 */
+    MN_CTRL_NOTIFY_WAIT,     /* this message's fence completes once the notify queue in blob ring_blob has a head
+                              * (its first u64) past arg (winemetal's listeners, milestone 4b-1) */
 };
 
 enum {

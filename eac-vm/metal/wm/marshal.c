@@ -51,13 +51,25 @@ static const struct mn_wm_nested *nested_of(const struct mn_wm_field *f) {
 /* The specials each side has code for so far (Tasks 6-8 add the rest). */
 static int ready(uint8_t sp) {
     return sp == MN_SP_NONE || sp == MN_SP_BUFFER || sp == MN_SP_HEAP || sp == MN_SP_REGION || sp == MN_SP_UPDATE ||
-           sp == MN_SP_RESIDENCY || sp == MN_SP_ENCODE;
+           sp == MN_SP_RESIDENCY || sp == MN_SP_ENCODE || sp == MN_SP_LISTENER;
 }
 
 /* ---- guest ---- */
 #ifndef MN_WM_HOST /* macneutron-vm has no guest table */
 
 uint32_t (*mn_wm_texture_format)(mn_handle texture);
+
+/* A listener's notify queue, which the host's listener thread fills.
+ * ponytail: it lives until the process ends (DXMT makes a couple per device). */
+struct listener_queue { struct mn_blob blob; };
+
+struct mn_notify *mn_wm_listener_queue(mn_handle h, uint64_t *blob_id) {
+    uint64_t att = mn_gh_attached(h);
+    if (MN_GH_TAG(att) != MN_GH_PTR) return NULL;
+    struct listener_queue *l = (void *)(uintptr_t)MN_GH_VALUE(att);
+    *blob_id = l->blob.blob_id;
+    return l->blob.ptr;
+}
 
 /* The thread's scratch blob: a call's bulk data, reused once the call returns. A call that outgrows it keeps the old
  * one (its earlier regions are there) until it returns.
@@ -277,6 +289,22 @@ static NTSTATUS_T guest_special(unsigned slot, uint8_t *params, struct mn_wm_out
     case 36:
     case 37:
     case 38: return emit_list(slot, ((struct unixcall_generic_obj_cmd_noret *)params)->cmd_head.ptr, o);
+    case 108: { /* its notify queue, whose blob id comes first */
+        struct listener_queue *l = calloc(1, sizeof *l);
+        if (!l || mn_blob_alloc(MN_NOTIFY_BYTES, &l->blob)) {
+            free(l);
+            return MN_STATUS_UNSUCCESSFUL;
+        }
+        memset(l->blob.ptr, 0, MN_NOTIFY_BYTES);
+        mn_gh_attach(o->outs[0], MN_GH_PTR | (uintptr_t)l);
+        uint64_t id = l->blob.blob_id;
+        return emit_data(o, &id, sizeof id, WMF_IN);
+    }
+    case 110: { /* destroying it is its release: the host unbinds it too */
+        mn_handle h;
+        memcpy(&h, params, sizeof h);
+        return mn_gh_release(h) < 0 ? MN_STATUS_INVALID_HANDLE : 0;
+    }
     case 45:
     case 145: {
         struct unixcall_mtltexture_replaceregion *a = (void *)params;
@@ -573,7 +601,8 @@ static NTSTATUS_T take_prefix(struct mn_wm_state *k) {
     case 36:
     case 37:
     case 38:
-    case 45: return take_data(k, NULL, WMF_IN, UINT64_MAX, 0, &k->data, &k->data_len);
+    case 45:
+    case 108: return take_data(k, NULL, WMF_IN, UINT64_MAX, 0, &k->data, &k->data_len);
     case 145: return take_data(k, NULL, WMF_OUT, UINT64_MAX, 0, &k->data, &k->data_len);
     default: return 0;
     }

@@ -11,7 +11,7 @@ M=$ROOT/eac-vm/metal
 mkdir -p "$W/obj"
 objs=
 for f in wm/calls.c wm/cmdlist.c wm/marshal.c wm/host/htable.c wm/host/loader.c wm/host/invoke.m wm/host/memory.m \
-  wm/host/dispatch.m; do
+  wm/host/events.m wm/host/dispatch.m; do
   o="$W/obj/$(basename "$f").o"
   clang -O2 -std=gnu2x -Wall -DMN_WM_HOST -c -I"$M" -I"$DXMT/winemetal" -I"$DXMT/airconv" -o "$o" "$M/$f"
   objs="$objs $o"

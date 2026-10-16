@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <unistd.h>
 #include "../../guest/transport.h"
 #include "../../host/executor.h"
 #include "../marshal.h"
@@ -74,6 +75,12 @@ int mn_call(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap,
                            reply_len);
 }
 
+int mn_notify_wait(uint64_t blob_id, uint64_t seen, int timeout_ms) {
+    (void)blob_id, (void)seen, (void)timeout_ms;
+    usleep(1000); /* no fences here: the caller polls */
+    return 0;
+}
+
 static struct fblob *find(uint64_t id) {
     for (int i = 0; i < nblobs; i++)
         if (blobs[i]->id == id && !blobs[i]->freed) return blobs[i];
@@ -113,6 +120,7 @@ int mn_executor_passed(uint32_t ctx_id, const struct mn_mark *marks, size_t n) {
     return 1;
 }
 uint64_t mn_executor_async_failures(void) { return 0; }
+void mn_executor_notified(uint32_t ctx_id, uint64_t blob_id) { (void)ctx_id, (void)blob_id; } /* the guest polls */
 
 int loop_mapped(const void *p) {
     long page = 16384;

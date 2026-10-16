@@ -55,7 +55,7 @@ enum mn_wm_special {
     MN_SP_UPDATE,    /* 107: buffer data within bounds (Task 5) */
     MN_SP_HEAP,      /* 138, 141, 142: emulated heaps (Task 5) */
     MN_SP_RESIDENCY, /* 133-135: residency sets with emulated heaps (Task 5) */
-    MN_SP_LISTENER,  /* 108-110 (Task 7) */
+    MN_SP_LISTENER,  /* 104, 108-110, 146: winemetal's listener behind our own (events.m) */
     MN_SP_PATH,      /* 54, 112, 113, 115, 117, 119: host paths (Task 8) */
     MN_SP_SM50,      /* 74-88 (Task 8; 77 in Task 5) */
     MN_SP_ENUMERATE, /* 91 (Task 8) */

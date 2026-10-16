@@ -33,6 +33,9 @@ void *mn_executor_blob(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint6
 void *mn_executor_blob_hold(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len, void **hold);
 void mn_executor_blob_release(void *hold);
 
+/* A notify queue in one of the context's blobs moved: completes the MN_CTRL_NOTIFY_WAITs it satisfies. */
+void mn_executor_notified(uint32_t ctx_id, uint64_t blob_id);
+
 /* Asynchronous records that failed since the last context began (they have no caller to tell). */
 uint64_t mn_executor_async_failures(void);
 

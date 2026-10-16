@@ -179,6 +179,20 @@ static void wait_done(struct thread_ring *t, uint64_t seq) {
     }
 }
 
+int mn_notify_wait(uint64_t blob_id, uint64_t seen, int timeout_ms) {
+    struct thread_ring *t = ring();
+    if (!t) return -ENODEV;
+    int ffd;
+    if (t->fence_idx && !ctrl(MN_CTRL_NOTIFY_WAIT, blob_id, seen, (uint32_t)t->fence_idx, &ffd)) {
+        struct pollfd pf = { .fd = ffd, .events = POLLIN };
+        poll(&pf, 1, timeout_ms);
+        close(ffd);
+    } else {
+        usleep(100);
+    }
+    return 0;
+}
+
 /* Op 0 is ring padding and the top bit marks synchronous records: neither is the caller's. */
 static int bad_op(uint32_t op) { return op == MN_OP_WRAP || (op & MN_REC_SYNC); }
 

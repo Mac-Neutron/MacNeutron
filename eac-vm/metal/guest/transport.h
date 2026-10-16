@@ -14,6 +14,10 @@ int mn_send(uint32_t op, const void *p, uint32_t len); /* asynchronous, on this 
 /* Synchronous: returns the host's status (negative: an error), with up to cap reply bytes in reply. */
 int mn_call(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap, uint32_t *reply_len);
 
+/* Sleeps until the notify queue in blob blob_id has a head past seen (MN_CTRL_NOTIFY_WAIT on this thread's fence
+ * index), or timeout_ms passes; without a fence index, a short sleep. The caller rechecks the queue. */
+int mn_notify_wait(uint64_t blob_id, uint64_t seen, int timeout_ms);
+
 /* This thread's ring: records sent, and the last one the host finished. */
 void mn_ring_stats(uint64_t *sent, uint64_t *done);
 /* 1 if this thread's ring waits on fences, 0 if it polls (all 63 fence ring indexes leased), -1 without a ring. */

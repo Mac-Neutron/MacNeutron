@@ -44,6 +44,9 @@ NTSTATUS_T mn_wm_unpack(unsigned slot, void *params, const struct mn_wm_out *out
 /* The call failed: frees the handles mn_wm_pack picked, and, if it never reached the host, its holds (else the host
  * frees each region the record named). */
 void mn_wm_unwind(const struct mn_wm_out *out, int reached_host);
+/* A listener handle's notify queue, and its blob (for mn_notify_wait); NULL if h isn't one. */
+struct mn_notify;
+struct mn_notify *mn_wm_listener_queue(mn_handle h, uint64_t *blob_id);
 /* The guest's pixel format for a texture handle (slots 45 and 145), or 0 when unknown: winemetal.c's, which asks the
  * host once per texture. */
 extern uint32_t (*mn_wm_texture_format)(mn_handle texture);
@@ -107,6 +110,10 @@ void mn_wm_drop_hold(struct mn_wm_ctx *c, struct mn_wm_hold *h);
 /* memory.m: attaches the context's notify queue (op MN_OP_WM + MN_WM_NOTIFY_ATTACH); its end with the context. */
 NTSTATUS_T mn_wm_notify_attach(struct mn_wm_ctx *c, uint64_t blob_id, uint64_t listener);
 void mn_wm_ctx_end(struct mn_wm_ctx *c);
+
+/* events.m: slots 104, 108-110 and 146; and the table's release of a listener. */
+NTSTATUS_T mn_wm_listener_special(struct mn_wm_state *k);
+void mn_wm_listener_release(void *obj);
 
 /* memory.m: before the table's last release of an object (an emulated heap's buffer leaves its residency sets). */
 void mn_wm_will_release(void *obj);

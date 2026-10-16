@@ -38,6 +38,7 @@ uint64_t mn_gh_attached(mn_handle h);
 extern void (*mn_gh_on_free)(uint64_t value);
 #define MN_GH_REGION (1ull << 62) /* | region id */
 #define MN_GH_FORMAT (2ull << 62) /* | pixel format */
+#define MN_GH_PTR (3ull << 62)    /* | a pointer of the forwarder's (a listener's queue) */
 #define MN_GH_TAG(v) ((v) & (3ull << 62))
 #define MN_GH_VALUE(v) ((v) & ~(3ull << 62))
 

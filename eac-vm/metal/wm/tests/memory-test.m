@@ -9,8 +9,10 @@
  *                         joins the residency set the heap was added to
  *   sequence              the 4b-1 sequence, as far as the gate runs it */
 #import <Metal/Metal.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include "../guest/galloc.h"
 #include "../host/loader.h"
@@ -19,7 +21,7 @@
 #include "sequence.h"
 #include "winemetal_thunks.h"
 
-#define SEQUENCE_STEPS 7 /* as metal-wm.sh's STEPS */
+#define SEQUENCE_STEPS 0 /* as metal-wm.sh's STEPS: all */
 
 typedef NTSTATUS_T (*entry_t)(void *params);
 extern const entry_t __wine_unix_call_funcs[MN_WM_SLOTS];
@@ -174,8 +176,38 @@ static void heap(void) {
     CHECK(mn_gholders(region) == 0);
 }
 
+/* The guest's NtSetEvent (Wine's, in the guest): the listener loop calls it for each event the host posts. */
+static pthread_mutex_t ev_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t ev_cond = PTHREAD_COND_INITIALIZER;
+static uint64_t events[16];
+static int nevents;
+unsigned int NtSetEvent(void *handle, int *prev) {
+    if (prev) *prev = 0;
+    pthread_mutex_lock(&ev_lock);
+    if (nevents < 16) events[nevents++] = (uint64_t)(uintptr_t)handle;
+    pthread_cond_broadcast(&ev_cond);
+    pthread_mutex_unlock(&ev_lock);
+    return 0;
+}
+static int signalled(uint64_t h, int timeout_ms) {
+    int found = 0;
+    pthread_mutex_lock(&ev_lock);
+    for (int waited = 0; !found && waited <= timeout_ms; waited += 10) {
+        for (int i = 0; i < nevents; i++) found |= events[i] == h;
+        if (!found) {
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_nsec += 10000000;
+            if (ts.tv_nsec >= 1000000000) ts.tv_sec++, ts.tv_nsec -= 1000000000;
+            pthread_cond_timedwait(&ev_cond, &ev_lock, &ts);
+        }
+    }
+    pthread_mutex_unlock(&ev_lock);
+    return found;
+}
+
 static void sequence(void) {
-    struct mn_wm_env env = {W, print, NULL};
+    struct mn_wm_env env = {W, print, signalled};
     CHECK(mn_wm_sequence(&env, SEQUENCE_STEPS) == 0);
 }
 

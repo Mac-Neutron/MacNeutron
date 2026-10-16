@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include "../../guest/transport.h"
 #include "../marshal.h"
+#include "../notify.h"
 #include "winemetal_thunks.h"
 
 struct buffers { uint8_t rec[MN_REC_MAX]; uint8_t reply[MN_REPLY_BYTES]; };
@@ -15,6 +16,24 @@ static pthread_once_t once = PTHREAD_ONCE_INIT;
 static _Atomic uint64_t refused_logged[(MN_WM_SLOTS + 63) / 64];
 
 static void make_key(void) { pthread_key_create(&key, free); }
+
+extern unsigned int NtSetEvent(void *handle, void *prev_state); /* Wine's ntdll.so */
+
+/* Slot 109 natively runs the listener until slot 110: here the host runs it, and this thread sets the Win32 events
+ * it posts, sleeping on the queue between them. */
+static void listener_loop(mn_handle h) {
+    uint64_t blob;
+    struct mn_notify *q = mn_wm_listener_queue(h, &blob);
+    if (!q) return;
+    for (;;) {
+        struct mn_notify_rec r;
+        while (mn_notify_next(q, &r)) {
+            if (r.type == MN_NOTIFY_STOP) return;
+            if (r.type == MN_NOTIFY_EVENT) NtSetEvent((void *)(uintptr_t)r.value, NULL);
+        }
+        mn_notify_wait(blob, atomic_load_explicit(&q->tail, memory_order_relaxed), 1000);
+    }
+}
 
 static struct buffers *buffers(void) {
     pthread_once(&once, make_key);
@@ -35,7 +54,10 @@ static NTSTATUS_T forward(unsigned slot, void *params) {
         return s;
     }
     if (!out.sync) {
-        if (!mn_send(MN_OP_WM + slot, out.buf, out.len)) return 0;
+        if (!mn_send(MN_OP_WM + slot, out.buf, out.len)) {
+            if (slot == 109) listener_loop(((struct unixcall_generic_obj_noret *)params)->handle);
+            return 0;
+        }
         mn_wm_unwind(&out, 0);
         return MN_STATUS_UNSUCCESSFUL;
     }

@@ -3,7 +3,9 @@
  *   freed      a blob the guest frees, with nothing holding it, is unmapped at once
  *   held       a held blob stays mapped (and out of the table) until its last hold is released
  *   marks      a snapshot of two rings passes only once the second has finished past its mark
- *   hooks      progress runs before a consumer parks; ring_end for each ring that stops, then context_end */
+ *   hooks      progress runs before a consumer parks; ring_end for each ring that stops, then context_end
+ *   notify     an MN_CTRL_NOTIFY_WAIT fence completes once the queue's head passes arg: at once if it already has,
+ *              else when mn_executor_notified says the queue moved */
 #include <assert.h>
 #include <errno.h>
 #include <stdint.h>
@@ -26,7 +28,13 @@ struct mn_dxmt_ops {
 };
 static const struct mn_dxmt_ops *ops;
 void mn_dxmt_set_ops(const struct mn_dxmt_ops *o) { ops = o; }
-void mn_dxmt_fence_done(uint32_t ctx_id, uint32_t ring_idx, uint64_t fence_id) { (void)ctx_id, (void)ring_idx, (void)fence_id; }
+static atomic_int fences_done;
+static uint64_t last_fence;
+void mn_dxmt_fence_done(uint32_t ctx_id, uint32_t ring_idx, uint64_t fence_id) {
+    (void)ctx_id, (void)ring_idx;
+    last_fence = fence_id;
+    fences_done++;
+}
 
 static void *new_blob_sized(uint32_t ctx_id, uint64_t blob_id, uint64_t size) {
     void *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0);
@@ -120,6 +128,21 @@ int main(void) {
 
     usleep(10000); /* past the 2 ms spin: both consumers park */
     assert(progressed >= 2);
+    /* A notify queue: head is its first word (notify.h). */
+    _Atomic uint64_t *head = new_blob_sized(1, 30, 16384);
+    struct mn_ctrl w = {MN_CTRL_NOTIFY_WAIT, 0, 30, 0};
+    int before = fences_done;
+    ops->submit(ops->ctx, 1, &w, sizeof w);
+    ops->fence(ops->ctx, 1, 3, 77);
+    assert(fences_done == before); /* nothing past 0 yet */
+    *head = 1;
+    mn_executor_notified(1, 30);
+    assert(fences_done == before + 1 && last_fence == 77);
+    ops->submit(ops->ctx, 1, &w, sizeof w); /* already past: at once */
+    ops->fence(ops->ctx, 1, 3, 78);
+    assert(fences_done == before + 2 && last_fence == 78);
+    puts("notify ok");
+
     ops->context_destroy(ops->ctx, 1);
     assert(ended == 1 && rings_ended == 2);
     puts("hooks ok");
