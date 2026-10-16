@@ -7,6 +7,13 @@
 # Environment: NATIVE=1 for the reference run on x86-64 Linux (every test then expects PASS), CC (default clang), OUT (build directory, default ./build), TIMEOUT (seconds per run, default 60).
 # Exit status: 0 when every run gives its expected result, 1 otherwise.
 HERE=$(cd "$(dirname "$0")" && pwd)
+# Children the tests exec run under the binfmt-registered FEX, not the runner: a different runner mixes two FEX builds
+# (ptrace-inject then fails although each build passes on its own).
+INTERP=$(sed -n 's/^interpreter //p' /proc/sys/fs/binfmt_misc/FEX-x86_64 2>/dev/null)
+if [ $# -gt 0 ] && [ -n "$INTERP" ] && ! cmp -s "$(command -v "$1")" "$INTERP"; then
+  echo "run-all: runner $1 is not the binfmt interpreter $INTERP; install it there or run without a runner" >&2
+  exit 2
+fi
 CC=${CC:-clang}; OUT=${OUT:-$HERE/build}; TIMEOUT=${TIMEOUT:-60}
 mkdir -p "$OUT"; bad=0
 
