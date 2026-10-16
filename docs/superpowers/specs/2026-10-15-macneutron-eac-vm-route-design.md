@@ -2,7 +2,9 @@
 
 Status: design approved 2026-10-15; milestones 1 and 2 done the same day (results in
 `docs/research/2026-10-15-vm-route/README.md` §4). Benchmarks are in `docs/research/2026-10-15-vm-route/`. This version replaces the
-first draft (a Virtualization.framework VM running Fedora Cloud); section 3 says what changed and why.
+first draft (a Virtualization.framework VM running Fedora Cloud); section 3 says what changed and why. Revised the same
+day: the guest runs our Wine instead of Valve's Proton, and the game's Steam calls go to the Mac's own Steam client
+(§3, §5.5, §5.9).
 
 ## 1. Goal
 
@@ -19,12 +21,14 @@ These follow the paper "Anti-Cheat Compatibility on Apple Silicon" (NZ-Linix and
 eac-arm64-emulation-poc project, and they are not negotiable:
 
 - **Fidelity, not evasion.** Every layer behaves like the environment it claims to be: an x86-64 Linux process tree
-  under FEX, a real Linux kernel in a VM, and Valve's Proton and EAC runtime. The only Proton files we replace are the
-  graphics DLLs it installs for DXVK and vkd3d-proton.
+  under FEX, a real Linux kernel in a VM, a Wine with Proton's EAC loader support, and Valve's EAC runtime as shipped.
+  Valve's Proton is the reference: a title that reaches EAC under Proton must reach it under our Wine, and a difference
+  is a defect in our Wine.
 - **Nothing hides that this is a VM or a translator.** No hidden hypervisor, no spoofed hardware identity, DMI/SMBIOS
-  or CPUID, no null client.
-- **EAC and the game's files stay stock.** No hooks, shims, replay or offline overrides of EAC. Graphics DLLs go where
-  Proton puts DXVK (the prefix's `system32`), never into the game folder. A rejected title stays rejected.
+  or CPUID, no null client. The game's Steam calls reach a real Steam client (the Mac's); a call the forwarder does not
+  carry fails loudly and is never answered in the guest.
+- **EAC and the game's files stay stock.** No hooks, shims, replay or offline overrides of EAC. DXMT's DLLs are our
+  Wine's builtins in the prefix's `system32`, never in the game folder. A rejected title stays rejected.
 - **Nothing ptrace-based touches a protected process.** Diagnostics use in-process tools (FEX's sampler) only.
 - **A launch failure that looks like detection is treated as a fidelity defect first**, and fixed in the emulator.
 
@@ -38,6 +42,10 @@ eac-arm64-emulation-poc project, and they are not negotiable:
 | Guest system | No distribution install. Two read-only EROFS images built from pinned Fedora packages, shared by every game, plus one small writable state disk | The first draft's Fedora Cloud install took 11 GB and a full boot. The kernel signature is what Epic checks; the root filesystem is ours to keep small. |
 | Graphics | DXMT, with its Metal calls forwarded to the host over a virtio-gpu context type of our own | Fedora's in-tree, signed `virtio_gpu` driver carries it (as Venus and gfxstream do), so the guest needs no module of ours. D3D goes straight to Metal: no Vulkan, MoltenVK or SPIR-V layer, and shader compilation stays on the host with our existing caches. |
 | Secure Boot | Not enforced in milestones 1-5. The kernel boots with `lockdown=integrity module.sig_enforce=1`. Milestone 6 is a spike: EDK2 with Secure Boot and Microsoft's and Fedora's keys built in, booting shim, GRUB and the same kernel. Fallback: Virtualization.framework, which has Secure Boot, with software TSO. | Proton EAC today (v1) does not require Secure Boot: it runs on the Steam Deck, which boots without it. libkrun has no UEFI variable store, so keys must be built into the firmware. |
+| Wine | Our Wine (the tree MacNeutron ships on the Mac: upstream master plus our patches) built for x86-64 Linux, plus Proton 11's four EAC changes: the runtime's DLL path for `PROTON_EAC_RUNTIME` (`ntdll/unix/loader.c`), the bridge load-order rule (`ntdll/unix/loadorder.c`), the launcher-process marker (`kernelbase/process.c`) and one per-game DNS workaround (`ws2_32/protocol.c`) | One Wine for both of MacNeutron's paths, and SMITE 2 already runs on it. EAC's Linux mode needs the loader support, not Valve's build. Valve's Proton stays as the reference run. |
+| Steam | The Mac's Steam client. lsteamclient's Windows half runs in the guest; its Unix-call table is forwarded over vsock to the host, where MacNeutron's existing macOS Unix half calls Mac Steam's `steamclient.dylib` (§5.9) | One Steam and one sign-in, no "playing on another computer", no Steam client or Steam UI in the guest. The host half is code we already ship and test. |
+| Synchronisation | ntsync (`/dev/ntsync`, Fedora's signed module) | Upstream Wine uses it; msync is macOS-only. |
+| Steam Linux Runtime | Not used | Our x86-64 image carries Wine's libraries: one container layer fewer. |
 | EAC Linux v2 | Out of scope; a later phase | Announced 2026-10-14. It adds TPM 2.0, measured boot, an IOMMU without passthrough, kexec disabled and the BPF LSM. Neither libkrun nor Virtualization.framework gives a guest a TPM or a virtual IOMMU. Nothing in this design rules them out. |
 
 ## 4. Architecture
@@ -48,7 +56,8 @@ macOS: MacNeutron
     Hypervisor.framework vCPUs, EnTSO set on each; hv_gic
     virtio-blk ×3   base.erofs, x86-64-rootfs.erofs (read-only, shared), state.img (writable)
     virtio-fs       the Mac's Steam library (game files), per game
-    virtio-gpu      2D scanout (Steam's UI) + context type "dxmt" -> Metal executor (winemetal's Metal code)
+    virtio-gpu      context type "dxmt" -> Metal executor (winemetal's Metal code)
+    virtio-vsock    Steam forwarding -> MacNeutron's macOS lsteamclient Unix half -> Mac Steam's steamclient.dylib
     virtio-snd      -> CoreAudio
     virtio-input    keyboard and mouse from the MacNeutron window
     virtio-console  agent port (launch, focus, clock, gamepads)
@@ -56,11 +65,11 @@ macOS: MacNeutron
     virtio-balloon  free-page reporting -> pages handed back to macOS
     virtio-rng
 Linux guest (arm64, Fedora signed kernel, 4 KB pages, whole-VM TSO)
-  systemd, cage + Xwayland (Steam's UI, Wine's windows), ALSA
+  systemd, Xvfb (Wine's windows: nothing is displayed from the guest), ALSA
   FEX (ours + eac-vm/fex-patches) as the binfmt interpreter for x86 and x86-64
-  x86-64: Steam (Linux) -> Steam Linux Runtime -> Proton-MacNeutron -> game + EAC bootstrapper + EAC client
-    Proton-MacNeutron = Valve's Proton from the guest's Steam, DXMT's DLLs in DXVK's and vkd3d-proton's place
-    DXMT (x86-64 PE) -> winemetal.so (x86-64 ELF) -> /dev/dri/renderD128 (context "dxmt")
+  x86-64: our Wine (+ Proton's EAC loader changes) -> EAC bootstrapper -> game + EAC client
+    DXMT (x86-64 PE builtins) -> winemetal.so (x86-64 ELF) -> /dev/dri/renderD128 (context "dxmt")
+    lsteamclient (x86-64 PE half) -> forwarding Unix half -> vsock -> host
 ```
 
 ## 5. Components
@@ -97,14 +106,14 @@ Each unit has one job and a narrow interface, so it can be built and tested on i
 ### 5.3 Guest images
 
 All three are built by `eac-vm/image/build.sh` in a Fedora aarch64 builder (today's Virtualization.framework VM) from
-pinned package versions, with `dnf --installroot`. Nothing is downloaded on the Mac at run time beyond what Steam itself
-fetches inside the guest.
+pinned package versions, with `dnf --installroot`. The EAC runtime (Steam app 1826330) is fetched once through the
+user's Steam account (§10) and kept on `state.img`; it is never shipped.
 
 | Image | Contents | Shared |
 |---|---|---|
-| `base.erofs` (arm64) | systemd, glibc, kernel modules, FEX and its binfmt units, cage, Xwayland, Mesa llvmpipe (Steam's UI), alsa-lib, the agent, CA bundle | Read-only, all games |
-| `x86-64-rootfs.erofs` | The x86-64 libraries Steam (Linux) needs outside its runtime, as FEX's RootFS | Read-only, all games |
-| `state.img` | The Steam client, its compat tools (Steam Linux Runtime, Proton, Proton EasyAntiCheat Runtime, Proton-MacNeutron), prefixes, logs | Writable, one per user |
+| `base.erofs` (arm64) | systemd, glibc, kernel modules, FEX and its binfmt units, Xvfb, alsa-lib, the agent, CA bundle | Read-only, all games |
+| `x86-64-rootfs.erofs` | Our Wine and its x86-64 libraries, as FEX's RootFS | Read-only, all games |
+| `state.img` | Wine prefixes, the EAC runtime, logs | Writable, one per user |
 
 Size targets are set in the plan from the first build and become gates.
 
@@ -113,17 +122,21 @@ Size targets are set in the plan from the first build and become gates.
 - Our FEX (`macneutron` branch) with `eac-vm/fex-patches/` (the paper's fidelity series), built for Linux arm64.
 - New option `HostTSO` (`FEX_HOSTTSO`): the VM already runs TSO, so FEX calls `SetHardwareTSOSupport(true)` without
   `PR_SET_MEM_MODEL`. The image's FEX config sets it only after a boot-time litmus check (section 7) passes.
-- Registered through binfmt_misc for x86 and x86-64, so the whole tree (Steam, the runtime, Proton, Wine, the game,
-  the bootstrapper and the injected EAC client) runs under it.
+- Registered through binfmt_misc for x86 and x86-64, so the whole tree (Wine, the game, the bootstrapper and the
+  injected EAC client) runs under it.
 
-### 5.5 Proton-MacNeutron
+### 5.5 Our Wine in the guest
 
-- A compat tool the agent creates in the guest from the Proton that the guest's Steam installed: a copy of Valve's
-  Proton with DXMT's x86-64 DLLs in the files Proton installs for DXVK (`d3d11`, `dxgi`, `d3d10core`) and vkd3d-proton
-  (`d3d12`, `d3d12core`), plus `winemetal.dll` and `winemetal.so`. Nothing else in Proton changes, and we
-  redistribute none of it.
-- Launch environment: Proton's own `PROTON_EAC_RUNTIME` and `EAC_LAUNCHERDIR`, as the paper's appendix B.
+- Built from the tree MacNeutron's macOS Wine comes from (`build/wine-arm64-src/wine`: upstream master plus
+  `wine-arm64/patches/wine`), for `x86_64-linux-gnu`, cross-compiled in the builder; macOS-only patches (msync, winemac,
+  x18, the ARM64EC work) stay out. `eac-vm/wine-patches/` adds Proton 11's EAC changes (§3).
+- Builtins: DXMT (`d3d11`, `dxgi`, `d3d10core`, `d3d12`, `d3d12core`, `winemetal`), lsteamclient (`steamclient64.dll`
+  and its forwarding Unix half, §5.9), and our `steam.exe`.
+- Launch: the agent runs the game's `start_protected_game.exe` with `PROTON_EAC_RUNTIME`, `EAC_LAUNCHERDIR`,
+  `SteamAppId` and `SteamGameId` set, the prefix on `state.img`, and sync through ntsync.
 - The game folder is never written.
+- Reference: Valve's Proton 11, run in the builder VM through its Linux Steam, defines the expected behaviour of each
+  milestone-3 title.
 
 ### 5.6 Metal transport
 
@@ -150,7 +163,8 @@ Size targets are set in the plan from the first build and become gates.
 
 | Need | Device | Host side |
 |---|---|---|
-| Steam's UI, Wine's windows | virtio-gpu 2D scanout | Shown in the MacNeutron window when no game layer is up |
+| Wine's windows | none: Xvfb in the guest | Nothing is shown from the guest |
+| Steam API | vsock port | MacNeutron's lsteamclient Unix half and Mac Steam (§5.9) |
 | Game frames | context `dxmt` | `CAMetalLayer` in the same window |
 | Keyboard, mouse | virtio-input | MacNeutron window events; relative motion while the game has the mouse |
 | Gamepads | agent port -> `uhid` in the guest | GameController framework, real vendor and product IDs |
@@ -161,20 +175,41 @@ Size targets are set in the plan from the first build and become gates.
 
 ### 5.8 Agent
 
-A systemd service in `base.erofs` on the virtio-console port. It creates Proton-MacNeutron when Proton updates,
-launches games (`steam -applaunch <appid>`), reports progress and focus, applies the host's time zone and wall clock,
-and creates gamepads.
+A systemd service in `base.erofs` on the virtio-console port. It launches the game's EAC bootstrapper under our Wine
+(§5.5), reports progress and focus, applies the host's time zone and wall clock, and creates gamepads.
+
+### 5.9 Steam forwarding
+
+- **Cut:** lsteamclient's Unix-call table (`__wine_unix_call_funcs`, 6,539 calls for 64-bit games). In the guest, the
+  Unix half is a forwarder: each entry serialises its params struct and sends it over vsock (a libkrun vsock port mapped
+  to a host Unix socket). The host executor calls the same entry in MacNeutron's macOS lsteamclient Unix half, which
+  loads Mac Steam's `steamclient.dylib` as the Mac bridge does today. Both halves come from one lsteamclient tree, so
+  the table matches.
+- **Marshalling,** generated from `unixlib_generated.h` (84 distinct pointer types, most of them a handful of shapes):
+  strings go in; fixed-size scalars and structs are copied both ways; buffer-and-size pairs are found by naming rules
+  (`cb*`, `cch*`, `*Size`, `unMax*`, …) with an override table; interface pointers (`u_iface`) and `u_buffer` values
+  pass through as opaque host values (`steamclient_get_unix_buffer` copies their contents back); function pointers and
+  pointers to pointers are written by hand per call. A call whose shape is not covered fails with a logged error naming
+  it.
+- **Coverage is trace-driven:** every call SMITE 2 makes (traced through today's Mac bridge) must be covered for
+  milestone 3a; each further title widens it.
+- **Paths:** the host provides the four ntdll helpers lsteamclient's Unix half uses (Unix↔DOS paths, two string
+  conversions). Host paths under the shared library map to the guest's mount (`/mnt/games/…`, `Z:\mnt\games\…`);
+  paths outside it are refused.
+- **Steam must be running** on the Mac and signed in; the executor sets `SteamAppId` for the launched game, as the Mac
+  bridge does.
+- **Parity deviation** (the maintainer's rule: the Steam connection follows Proton 11): Valve's `steamclient.so` is
+  replaced by Mac Steam behind the forwarder, because the guest has no Steam client by design.
 
 ## 6. Launch flow
 
-1. The user starts an EAC game from MacNeutron. MacNeutron decides on EAC mode when the game's Proton EAC support is
-   known to work.
-2. MacNeutronVM boots the guest (cold boot target set in the plan), with the game's folder shared.
-3. The agent starts Steam (Linux) if it isn't running and asks it to launch the game with Proton-MacNeutron.
-4. Steam runs the Steam Linux Runtime, Proton and the EAC bootstrapper. The bootstrapper injects EAC's client through
-   ptrace, which FEX emulates.
-5. DXMT's calls reach the host. The window shows the game's layer.
-6. When the game exits, the guest stays up for 5 minutes for a relaunch, then shuts down.
+1. The user starts the game from Mac Steam, as today. Mac Steam runs MacNeutron as the game's compatibility tool, and
+   MacNeutron chooses EAC mode when the title's Proton EAC support is known to work.
+2. MacNeutronVM boots the guest with the game's folder shared and the Steam forwarder's socket listening.
+3. The agent runs the EAC bootstrapper under our Wine. The bootstrapper injects EAC's client through ptrace, which FEX
+   emulates.
+4. The game's Steam calls reach Mac Steam through the forwarder; DXMT's calls reach the host's Metal executor.
+5. When the game exits, the guest shuts down and MacNeutron exits, so Mac Steam sees the game end.
 
 ## 7. Errors
 
@@ -199,8 +234,13 @@ and creates gamepads.
    - the litmus test shows 0 violations with no guest module, and FEX reports hardware TSO;
    - the game-shaped frame loop (`harness/gameframe.cpp`) runs within 5% of 2.14 ms;
    - freeing 4 GB in the guest lowers the host process footprint by at least 3 GB within 30 s.
-3. **EAC launches.** Steam, the runtime, Proton and EAC in the guest, rendering in software. Pass: SMITE 2's
-   `Launcherfinishedwith:301`.
+3. **EAC launches,** in three parts, each with its own plan:
+   - **3a, Steam forwarding.** A Linux test program in the guest gets Steam initialised and a 234-byte auth ticket from
+     Mac Steam through the forwarder (the Mac bridge's acceptance check), and every call in SMITE 2's trace is covered.
+   - **3b, our Wine for x86-64 Linux,** with Proton's EAC changes, DXMT, lsteamclient and `steam.exe`, in the guest
+     image. Pass: the bridge's probe under our Wine in the guest reports Steam initialised and the auth ticket.
+   - **3c, EAC 301.** First the reference: SMITE 2 under Valve's Proton in the builder VM reaches
+     `Launcherfinishedwith:301`. Then SMITE 2 under our Wine in the microVM, rendering in software, reaches 301.
 4. **Metal transport.** DXMT's check suite passes in the guest as it does on macOS, and SMITE 2 renders through
    the host.
 5. **Devices and product.** Audio, input, gamepads, the shared library, launch from MacNeutron, sizing. Pass: an
@@ -224,12 +264,13 @@ libkrun a guest notification is one vCPU exit handled in process; milestone 2 me
 
 ## 10. Open questions
 
-- **Two Steam clients, one account.** The guest runs its own Steam (Linux), logged into the user's account. If Mac
-  Steam launches the game while the guest's Steam also runs it, Steam will likely refuse ("playing on another
-  computer"). Milestone 5 decides whether EAC games launch only from MacNeutron.
-- **Library sharing.** Both clients download the same Windows depot into the shared folder, but each keeps its own
-  manifest. Milestone 5 measures what happens when one updates the game and the other sees the new files.
-- **Steam's sign-in** happens once in the guest's UI (or its QR code). It stays on `state.img`.
+- **The EAC runtime's download.** It is a Linux Steam Tool (app 1826330), and Mac Steam may not install a Linux tool.
+  Probes, cheapest first: `steamcmd +login anonymous +app_update 1826330`; Mac Steam's console `app_install 1826330`;
+  SteamCMD forced to the Linux platform with the user's sign-in; the builder VM's signed-in Linux Steam (development
+  only). Whatever works, the runtime is never committed or shipped.
+- **Steam overlay and Steam Input** are not available to the game in the VM.
+- **Valve's genuine `steamclient64.dll`** (SteamStub-wrapped games check its signature) comes as the Mac bridge gets it
+  today (Valve's CDN, never committed) and goes into the guest prefix.
 
 ## 11. Out of scope
 
