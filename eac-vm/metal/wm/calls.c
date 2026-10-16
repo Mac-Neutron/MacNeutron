@@ -29,11 +29,12 @@
 #define C0(slot, nm, st, md, sp) [slot] = {.name = #nm, .params_size = sizeof(struct st), .mode = md, .special = sp}
 #define R(slot, nm, size, status)                                                                                      \
     [slot] = {.name = #nm, .params_size = size, .mode = MN_WM_REFUSED, .refuse_status = status}
-#define R4C(slot, nm, st) R(slot, nm, sizeof(struct st), MN_STATUS_NOT_IMPLEMENTED) /* presentation: milestone 4c */
 #define RMACH(slot, nm, st) R(slot, nm, sizeof(struct st), MN_STATUS_NOT_SUPPORTED)  /* Mach ports: host-only */
 
 /* Fields inside pointed-to structs (nested), 1-based. */
-enum { N_HANDLES = 1, N_COMPUTE, N_RENDER, N_MESH, N_TILE, N_PASS, N_CAPTURE, N_INTERP, N_ATTACH, N_ANY, N_BUFFER };
+enum {
+    N_HANDLES = 1, N_COMPUTE, N_RENDER, N_MESH, N_TILE, N_PASS, N_CAPTURE, N_INTERP, N_ATTACH, N_ANY, N_BUFFER, N_LAYER
+};
 #define PASS_COLOR(i) HIN(WMTRenderPassInfo, colors[i].texture), HIN(WMTRenderPassInfo, colors[i].resolve_texture)
 const struct mn_wm_nested mn_wm_nested[] = {
     [N_HANDLES - 1] = {FIELDS({0, WMF_HANDLE_IN, MN_HK_OBJC, 0, 0, 0, 0, 0, 0})},
@@ -67,6 +68,7 @@ const struct mn_wm_nested mn_wm_nested[] = {
     [N_ATTACH - 1] = {FIELDS(HIN(WMTSampleBufferAttachmentInfo, sample_buffer))},
     [N_ANY - 1] = {FIELDS({0, WMF_HANDLE_IN, MN_HK_ANY_OBJC, 0, 0, 0, 0, 0, 0})}, /* residency: emulated heaps too */
     [N_BUFFER - 1] = {FIELDS(ARR(WMF_BLOB_PTR, WMTBufferInfo, memory, 1, length, 0))},
+    [N_LAYER - 1] = {FIELDS(HIN(WMTLayerProps, device))},
 };
 
 #define G_R unixcall_generic_obj_ret
@@ -164,8 +166,9 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
     C(45, MTLTexture_replaceRegion, unixcall_mtltexture_replaceregion, Q, MN_SP_REGION,
       HIN(unixcall_mtltexture_replaceregion, texture)),
     C(46, MTLBuffer_didModifyRange, G_UUR, Q, MN_SP_NONE, HIN(G_UUR, handle)),
-    R4C(47, MTLCommandBuffer_presentDrawable, unixcall_generic_obj_obj_noret),
-    R4C(48, MTLCommandBuffer_presentDrawableAfterMinimumDuration, unixcall_generic_obj_obj_double_noret),
+    C(47, MTLCommandBuffer_presentDrawable, G_ONR, Q, MN_SP_PRESENT, HIN(G_ONR, handle), HIN(G_ONR, arg)),
+    C(48, MTLCommandBuffer_presentDrawableAfterMinimumDuration, unixcall_generic_obj_obj_double_noret, Q, MN_SP_PRESENT,
+      HIN(unixcall_generic_obj_obj_double_noret, handle), HIN(unixcall_generic_obj_obj_double_noret, arg0)),
     QUERY2(49, MTLDevice_supportsFamily),
     QUERY(50, MTLDevice_supportsBCTextureCompression),
     QUERY2(51, MTLDevice_supportsTextureSampleCount),
@@ -206,14 +209,24 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
       HIN(unixcall_generic_obj_obj_obj_noret, handle), HIN(unixcall_generic_obj_obj_obj_noret, arg0),
       HIN(unixcall_generic_obj_obj_obj_noret, arg1)),
     C(65, DeveloperHUDProperties_remove, G_ONR, Q, MN_SP_NONE, HIN(G_ONR, handle), HIN(G_ONR, arg)),
-    R4C(66, MetalDrawable_texture, unixcall_generic_obj_obj_ret),
-    R4C(67, MetalLayer_nextDrawable, unixcall_generic_obj_obj_ret),
+    /* The drawable's texture is a property (borrowed), but DXMT asks for it every frame and never releases it: an
+     * autoreleased handle goes with the frame's pool, as the drawable's. */
+    NEW(66, MetalDrawable_texture, AR),
+    C(67, MetalLayer_nextDrawable, G_OR, S, MN_SP_NONE, HIN(G_OR, handle), HOUT(G_OR, ret, AR)), /* nil is an answer */
     QUERY(68, MTLDevice_supportsFXSpatialScaler),
     QUERY(69, MTLDevice_supportsFXTemporalScaler),
-    R4C(70, MetalLayer_setProps, unixcall_generic_obj_constptr_noret),
-    R4C(71, MetalLayer_getProps, unixcall_generic_obj_ptr_noret),
-    R4C(72, CreateMetalViewFromHWND, unixcall_create_metal_view_from_hwnd),
-    R4C(73, ReleaseMetalView, unixcall_generic_obj_noret),
+    C(70, MetalLayer_setProps, unixcall_generic_obj_constptr_noret, Q, MN_SP_NONE,
+      HIN(unixcall_generic_obj_constptr_noret, handle),
+      PTR(WMF_IN, unixcall_generic_obj_constptr_noret, arg, sizeof(struct WMTLayerProps), N_LAYER)),
+    C(71, MetalLayer_getProps, G_PNR, S, MN_SP_LAYER, HIN(G_PNR, handle),
+      PTR(WMF_OUT, G_PNR, arg, sizeof(struct WMTLayerProps), 0)),
+    /* hwnd is a value: every HWND is the host's one window. The layer is the view's (borrowed).
+     * ponytail: DXMT never releases it, so a swapchain's layer stays retained until the context ends. */
+    C(72, CreateMetalViewFromHWND, unixcall_create_metal_view_from_hwnd, S, MN_SP_NONE,
+      HIN(unixcall_create_metal_view_from_hwnd, device),
+      HOUTK(unixcall_create_metal_view_from_hwnd, ret_view, MN_HK_VIEW, P1),
+      HOUT(unixcall_create_metal_view_from_hwnd, ret_layer, BR)),
+    C(73, ReleaseMetalView, G_NR, Q, MN_SP_VIEW, HINK(G_NR, handle, MN_HK_VIEW)),
     C0(74, SM50Initialize, sm50_initialize_params, S, MN_SP_SM50),
     C0(75, SM50Destroy, sm50_destroy_params, Q, MN_SP_SM50),
     C0(76, SM50Compile, sm50_compile_params, S, MN_SP_SM50),
@@ -233,12 +246,13 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
     NEW(90, MTLCommandBuffer_logs, AR),
     C(91, MTLLogContainer_enumerate, unixcall_enumerate, S, MN_SP_ENUMERATE, HIN(unixcall_enumerate, enumerable)),
     C(92, CGColorSpace_checkColorSpaceSupported, G_UR, S, MN_SP_NONE, VAL(G_UR, handle)),
-    R4C(93, MetalLayer_setColorSpace, unixcall_generic_obj_uint64_uint64_ret),
+    C(93, MetalLayer_setColorSpace, G_UUR, S, MN_SP_NONE, HIN(G_UUR, handle)),
     C0(94, WMTGetPrimaryDisplayId, G_R, S, MN_SP_NONE),   /* ret is a display id */
     C0(95, WMTGetSecondaryDisplayId, G_R, S, MN_SP_NONE), /* ret is a display id */
     C(96, WMTGetDisplayDescription, G_PNR, S, MN_SP_NONE, VAL(G_PNR, handle),
       PTR(WMF_OUT, G_PNR, arg, sizeof(struct WMTDisplayDescription), 0)),
-    R4C(97, MetalLayer_getEDRValue, unixcall_generic_obj_ptr_noret),
+    C(97, MetalLayer_getEDRValue, G_PNR, S, MN_SP_NONE, HIN(G_PNR, handle),
+      PTR(WMF_OUT, G_PNR, arg, sizeof(struct WMTEDRValue), 0)),
     C(98, MTLLibrary_newFunctionWithConstants, unixcall_mtllibrary_newfunction_with_constants, S, MN_SP_CONSTANTS,
       HIN(unixcall_mtllibrary_newfunction_with_constants, library),
       HOUT(unixcall_mtllibrary_newfunction_with_constants, ret, P1),
@@ -247,7 +261,9 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
       PTR(WMF_OUT, unixcall_query_display_setting, hdr_metadata, sizeof(struct WMTHDRMetadata), 0)),
     C(100, WMTUpdateDisplaySetting, unixcall_update_display_setting, Q, MN_SP_NONE,
       PTR(WMF_IN, unixcall_update_display_setting, hdr_metadata, sizeof(struct WMTHDRMetadata), 0)),
-    R4C(101, WMTQueryDisplaySettingForLayer, unixcall_query_display_setting_for_layer),
+    C(101, WMTQueryDisplaySettingForLayer, unixcall_query_display_setting_for_layer, S, MN_SP_NONE,
+      HIN(unixcall_query_display_setting_for_layer, layer),
+      PTR(WMF_OUT, unixcall_query_display_setting_for_layer, hdr_metadata, sizeof(struct WMTHDRMetadata), 0)),
     C(102, MTLCommandBuffer_encodeWaitForEvent, G_OUNR, Q, MN_SP_NONE, HIN(G_OUNR, handle), HIN(G_OUNR, arg0)),
     C(103, MTLSharedEvent_signalValue, G_UNR, Q, MN_SP_NONE, HIN(G_UNR, handle)),
     C(104, MTLSharedEvent_setWin32EventAtValue, unixcall_mtlsharedevent_setevent, Q, MN_SP_LISTENER,

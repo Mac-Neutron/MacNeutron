@@ -24,6 +24,9 @@ void mn_wm_release_object(enum mn_hkind kind, void *obj) {
     case MN_HK_HEAP_EMU: /* an MNHeap (memory.m) */
         mn_wm_invoke(1, &obj);
         return;
+    case MN_HK_VIEW: /* winemetal's ReleaseMetalView: off the window, then released */
+        mn_wm_invoke(73, &obj);
+        return;
     case MN_HK_LISTENER: /* our wrapper (events.m) */
         mn_wm_listener_release(obj);
         return;

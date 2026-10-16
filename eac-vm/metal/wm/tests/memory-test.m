@@ -12,8 +12,24 @@
  *                         until the host says the buffer is gone; neither reaches the host; a length too large to
  *                         round up to whole pages is refused
  *   big-blob              an allocation past 64 MiB, which gets a blob of its own, gives the blob back when freed
- *   sequence              the 4b-1 sequence, as far as the gate runs it */
+ *   sequence              the 4b-1 sequence, as far as the gate runs it
+ * Milestone 4c, presentation, in the real window (the stand-in winemac.so): the main thread runs NSApp, as in
+ * macneutron-vm, and the cases run on a worker thread. Each frame is the forwarded slots: nextDrawable (67), its
+ * texture (66) cleared to (0, 0.3, 0) in a render pass, presentDrawable (47), commit.
+ *   present               a frame for HWND 0x1234 counts one drawable presented; the view released (73) on another
+ *                         thread before the frame's command buffer is committed: the present still runs, nothing
+ *                         crashes, and the view is gone from the window (loopback runs each call at once, so this is
+ *                         the drawable keeping its layer; deferral across rings is handles-test's)
+ *   probe                 with MN_PRESENT_PROBE=1, 60 frames give one probe line: pixels 57600 green 100
+ *   props                 getProps (71) after setProps (70): the guest's device value comes back as it was, the host's
+ *                         device pointer is nowhere in the reply, and the drawable size is 320x180
+ *   nil-drawable          a layer with no device: nextDrawable gives handle 0 and status 0 (in a window, a 0x0
+ *                         drawable takes the view's size instead)
+ *   view-left             a context ending with a view still bound leaves no metal view in the window */
+#import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
+#import <QuartzCore/QuartzCore.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -258,16 +274,239 @@ static void sequence(void) {
     CHECK(mn_wm_sequence(&env, SEQUENCE_STEPS) == 0);
 }
 
-int main(int argc, char **argv) {
-    if (argc != 2 || mn_wm_load(argv[1])) {
-        fprintf(stderr, "memory-test: FAIL loading winemetal.so\n");
-        return 1;
+/* ---- presentation (4c) ---- */
+
+static obj_handle_t pool_push(void) {
+    struct unixcall_generic_obj_ret p = {0};
+    CHECK(W(10, &p) == 0 && p.ret);
+    return p.ret;
+}
+
+static obj_handle_t new_queue(void) {
+    struct unixcall_generic_obj_uint64_obj_ret q = {device, 64, 0};
+    CHECK(W(9, &q) == 0 && q.ret);
+    return q.ret;
+}
+
+struct swapchain { obj_handle_t view, layer; };
+
+/* A view for hwnd with a w x h BGRA8 drawable, as DXMT's presenter sets it up. */
+static struct swapchain make_view(uint64_t hwnd, double w, double h) {
+    struct unixcall_create_metal_view_from_hwnd c = {hwnd, device, 0, 0};
+    CHECK(W(72, &c) == 0 && c.ret_view && c.ret_layer);
+    struct WMTLayerProps props = {.device = device, .contents_scale = 1, .drawable_width = w, .drawable_height = h,
+                                  .opaque = 1, .framebuffer_only = 0, .pixel_format = WMTPixelFormatBGRA8Unorm};
+    struct unixcall_generic_obj_constptr_noret sp = {c.ret_layer, {&props}};
+    CHECK(W(70, &sp) == 0);
+    return (struct swapchain){c.ret_view, c.ret_layer};
+}
+
+static void release_view(obj_handle_t view) {
+    struct unixcall_generic_obj_noret r = {view};
+    CHECK(W(73, &r) == 0);
+    sweep();
+}
+
+/* One frame (the caller's pool open); the command buffer, committed and completed unless commit is 0. */
+static obj_handle_t frame(obj_handle_t queue, obj_handle_t layer, int commit) {
+    struct unixcall_generic_obj_obj_ret nd = {layer, 0};
+    CHECK(W(67, &nd) == 0 && nd.ret);
+    if (!nd.ret) return 0;
+    struct unixcall_generic_obj_obj_ret tx = {nd.ret, 0};
+    CHECK(W(66, &tx) == 0 && tx.ret);
+    struct unixcall_generic_obj_obj_ret cb = {queue, 0};
+    CHECK(W(11, &cb) == 0 && cb.ret);
+    struct WMTRenderPassInfo rp;
+    memset(&rp, 0, sizeof rp);
+    rp.colors[0].texture = tx.ret;
+    rp.colors[0].load_action = WMTLoadActionClear;
+    rp.colors[0].store_action = WMTStoreActionStore;
+    rp.colors[0].clear_color = (struct WMTClearColor){0, 0.3, 0, 1};
+    struct unixcall_generic_obj_uint64_obj_ret enc = {cb.ret, (uint64_t)(uintptr_t)&rp, 0};
+    CHECK(W(32, &enc) == 0 && enc.ret);
+    struct unixcall_generic_obj_noret end = {enc.ret};
+    CHECK(W(33, &end) == 0);
+    struct unixcall_generic_obj_obj_noret pd = {cb.ret, nd.ret};
+    CHECK(W(47, &pd) == 0);
+    if (commit) {
+        struct unixcall_generic_obj_noret c = {cb.ret};
+        CHECK(W(12, &c) == 0 && W(13, &c) == 0);
     }
+    return cb.ret;
+}
+
+/* The window's content view, from a layer's host object. */
+static NSView *content_of(obj_handle_t layer) {
+    CAMetalLayer *l = host_obj(layer);
+    __block NSView *v = nil;
+    dispatch_sync(dispatch_get_main_queue(), ^{ v = [((NSView *)l.delegate).superview retain]; });
+    return [v autorelease];
+}
+
+static unsigned metal_views(NSView *content) {
+    __block unsigned n = 0;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        for (NSView *v in content.subviews) n += [v.layer isKindOfClass:[CAMetalLayer class]];
+    });
+    return n;
+}
+
+static obj_handle_t other_view;
+static void *release_other(void *arg) {
+    (void)arg;
+    release_view(other_view);
+    return NULL;
+}
+
+static void present(void) {
+    uint64_t before = loop_ctx.presented;
+    struct swapchain s = make_view(0x1234, 320, 180);
+    if (!s.layer) return;
+    NSView *content = content_of(s.layer);
+    CHECK(content && metal_views(content) == 1);
+    obj_handle_t q = new_queue(), pool = pool_push();
+    obj_handle_t cb = frame(q, s.layer, 0);
+    CHECK(loop_ctx.presented == before + 1);
+    other_view = s.view; /* released on another thread (its own ring) while the present waits for its commit */
+    pthread_t t;
+    pthread_create(&t, NULL, release_other, NULL);
+    pthread_join(t, NULL);
+    CHECK(metal_views(content) == 0);
+    struct unixcall_generic_obj_noret c = {cb};
+    CHECK(cb && W(12, &c) == 0 && W(13, &c) == 0);
+    struct unixcall_generic_obj_uint64_ret st = {cb, 0};
+    CHECK(W(14, &st) == 0 && st.ret == MTLCommandBufferStatusCompleted);
+    release(pool);
+    release(q);
+}
+
+/* stderr, into a file, while the probe case runs. */
+static int stderr_to(const char *path) {
+    fflush(stderr);
+    int saved = dup(2), fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    dup2(fd, 2);
+    close(fd);
+    return saved;
+}
+
+static void probe(void) {
+    struct swapchain s = make_view(0x1234, 320, 180);
+    if (!s.layer) return;
+    obj_handle_t q = new_queue();
+    char path[] = "/tmp/memory-test-probe-XXXXXX";
+    close(mkstemp(path));
+    int saved = stderr_to(path);
+    for (int i = 0; i < 60; i++) {
+        obj_handle_t pool = pool_push();
+        frame(q, s.layer, 1);
+        release(pool);
+    }
+    char text[4096] = "";
+    for (int i = 0; i < 200 && !strstr(text, "colors"); i++) { /* the completed handler logs it */
+        usleep(10000);
+        FILE *f = fopen(path, "r");
+        size_t n = f ? fread(text, 1, sizeof text - 1, f) : 0;
+        text[n] = 0;
+        if (f) fclose(f);
+    }
+    fflush(stderr);
+    dup2(saved, 2);
+    close(saved);
+    unlink(path);
+    const char *line = strstr(text, "mn-present: probe ");
+    CHECK(line && !strstr(line + 1, "mn-present: probe ")); /* one in 60 frames */
+    CHECK(line && strstr(line, " pixels 57600 green 100 white 0 colors 1\n"));
+    if (line) fprintf(stderr, "  %.*s", (int)(strchr(line, '\n') ? strchr(line, '\n') - line + 1 : 0), line);
+    release_view(s.view);
+    release(q);
+}
+
+static void props(void) {
+    struct swapchain s = make_view(0x1234, 320, 180);
+    if (!s.layer) return;
+    struct WMTLayerProps p;
+    memset(&p, 0xab, sizeof p); /* DXMT's are uninitialised before its first getProps */
+    obj_handle_t guest_value = p.device;
+    struct unixcall_generic_obj_ptr_noret gp = {s.layer, {&p}};
+    /* The record and the host's reply, by hand: the host's device pointer must be nowhere in it. */
+    static uint8_t rec[MN_REC_MAX], reply[MN_REPLY_BYTES];
+    struct mn_wm_out o = {.buf = rec, .cap = sizeof rec};
+    uint32_t n = 0;
+    void *host_device = host_obj(device);
+    CHECK(mn_wm_pack(71, &gp, &o) == 0 && o.sync);
+    CHECK(mn_wm_host_call(&loop_ctx, loop_ring(), 71, rec, o.len, reply, sizeof reply, &n) == 0 && n > 16);
+    CHECK(!memmem(reply, n, &host_device, sizeof host_device));
+    CHECK(mn_wm_unpack(71, &gp, &o, reply, n) == 0);
+    CHECK(p.device == guest_value);
+    CHECK(p.drawable_width == 320 && p.drawable_height == 180 && p.pixel_format == WMTPixelFormatBGRA8Unorm &&
+          !p.framebuffer_only && p.opaque);
+    p.device = guest_value;
+    CHECK(W(71, &gp) == 0 && p.device == guest_value); /* and through the guest's table */
+    release_view(s.view);
+}
+
+static void nil_drawable(void) {
+    struct swapchain s = make_view(0x1234, 320, 180);
+    if (!s.layer) return;
+    struct WMTLayerProps none = {.contents_scale = 1, .drawable_width = 320, .drawable_height = 180,
+                                 .pixel_format = WMTPixelFormatBGRA8Unorm}; /* device 0: nil */
+    struct unixcall_generic_obj_constptr_noret sp = {s.layer, {&none}};
+    CHECK(W(70, &sp) == 0);
+    obj_handle_t pool = pool_push();
+    struct unixcall_generic_obj_obj_ret nd = {s.layer, 0};
+    CHECK(W(67, &nd) == 0 && nd.ret == 0);
+    release(pool);
+    release_view(s.view);
+}
+
+/* view-left: a second context of its own (the loopback's ends with the process), its calls packed and answered by
+ * hand on this thread's ring. */
+static size_t no_marks(void *c, void *e, struct mn_mark *m, size_t cap) { (void)c, (void)e, (void)m, (void)cap; return 0; }
+static int all_passed(void *c, const struct mn_mark *m, size_t n) { (void)c, (void)m, (void)n; return 1; }
+
+static NTSTATUS_T call_on(struct mn_wm_ctx *c, unsigned slot, void *params) {
+    static uint8_t rec[MN_REC_MAX], reply[MN_REPLY_BYTES];
+    struct mn_wm_out o = {.buf = rec, .cap = sizeof rec};
+    NTSTATUS_T s = mn_wm_pack(slot, params, &o);
+    if (s) return s;
+    uint32_t n = 0;
+    int32_t r = mn_wm_host_call(c, loop_ring(), slot, rec, o.len, o.sync ? reply : NULL, o.sync ? sizeof reply : 0, &n);
+    if (!o.sync) return 0;
+    if (r) {
+        mn_wm_unwind(&o, 1);
+        return (NTSTATUS_T)r;
+    }
+    return mn_wm_unpack(slot, params, &o, reply, n);
+}
+
+static void view_left(void) {
+    struct mn_ht_rings rings = {NULL, no_marks, all_passed};
+    struct mn_wm_ctx c2 = {.ctx_id = 2, .ht = mn_ht_new(&rings, mn_wm_release_object)};
+    struct unixcall_generic_obj_ret all = {0};
+    CHECK(call_on(&c2, 4, &all) == 0 && all.ret);
+    struct unixcall_generic_obj_uint64_obj_ret first = {all.ret, 0, 0};
+    CHECK(call_on(&c2, 2, &first) == 0 && first.ret);
+    struct unixcall_create_metal_view_from_hwnd v = {0x9abc, first.ret, 0, 0};
+    CHECK(call_on(&c2, 72, &v) == 0 && v.ret_view && v.ret_layer);
+    int ok;
+    CAMetalLayer *l = mn_ht_get(c2.ht, v.ret_layer, MN_HK_OBJC, &ok);
+    __block NSView *content = nil;
+    if (l) dispatch_sync(dispatch_get_main_queue(), ^{ content = [((NSView *)l.delegate).superview retain]; });
+    CHECK(content && metal_views(content) == 1);
+    mn_ht_free(c2.ht); /* the context's end, as dispatch.m's */
+    CHECK(content && metal_views(content) == 0);
+    [content release];
+}
+
+static void *run(void *arg) {
+    (void)arg;
     struct { const char *name; void (*fn)(void); } tests[] = {
         {"galloc", galloc},           {"buffer-outlives-free", buffer_outlives_free},
         {"update-bounds", update_bounds}, {"region-bounds", region_bounds},
         {"heap", heap},               {"wmt-memory", wmt_memory}, {"big-blob", big_blob},
         {"sequence", sequence},
+        {"present", present},         {"probe", probe},           {"props", props},
+        {"nil-drawable", nil_drawable}, {"view-left", view_left},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         @autoreleasepool {
@@ -288,5 +527,22 @@ int main(int argc, char **argv) {
     mn_wm_stats(&st);
     CHECK(st.failures == loop_ctx.failures);
     printf("memory-test: %s\n", failures ? "FAIL" : "all passed");
-    return failures != 0;
+    fflush(stdout);
+    exit(failures != 0);
+}
+
+int main(int argc, char **argv) {
+    if (argc != 2 || mn_wm_load(argv[1])) {
+        fprintf(stderr, "memory-test: FAIL loading winemetal.so\n");
+        return 1;
+    }
+    setenv("MN_PRESENT_PROBE", "1", 1); /* before the first present: the host reads it once */
+    alarm(600);                         /* a main-thread deadlock fails the test instead of hanging it */
+    [NSApplication sharedApplication];
+    dispatch_async(dispatch_get_main_queue(), ^{ /* the cases start once the main thread runs the application */
+        pthread_t t;
+        pthread_create(&t, NULL, run, NULL);
+    });
+    [NSApp run];
+    return 1;
 }

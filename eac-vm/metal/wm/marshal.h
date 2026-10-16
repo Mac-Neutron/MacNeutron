@@ -33,7 +33,7 @@ struct mn_wm_out {
     struct mn_wm_region regions[MN_WM_MAX_REGIONS]; /* the memory a reply's regions go back to */
     unsigned nholds;
     uint64_t holds[MN_WM_MAX_HOLDS]; /* regions this call holds for the host (mn_ghold), undone if it never gets there */
-    void **fix;                      /* after the reply, if the call's first handle came back: *fix = fix_value */
+    void **fix;                      /* after the reply, if its first handle came back (71: always): *fix = fix_value */
     void *fix_value;
     void *out_at[MN_WM_MAX_OUTS];    /* SM50: where each picked handle goes, through the caller's out-pointers */
 };
@@ -72,6 +72,7 @@ struct mn_wm_ctx {
     uint32_t ctx_id;
     struct mn_ht *ht;
     _Atomic uint64_t failures;       /* queued calls that failed: they have no caller to tell */
+    _Atomic uint64_t presented;      /* drawables presented (slots 47 and 48, present.m) */
     struct mn_notifyq *_Atomic notify; /* MN_NOTIFY_REGION_FREE goes here (memory.m) */
 };
 int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const void *rec, uint32_t len, void *reply,
@@ -134,6 +135,10 @@ void mn_wm_drop_hold(struct mn_wm_ctx *c, struct mn_wm_hold *h);
 /* memory.m: attaches the context's notify queue (op MN_OP_WM + MN_WM_NOTIFY_ATTACH); its end with the context. */
 NTSTATUS_T mn_wm_notify_attach(struct mn_wm_ctx *c, uint64_t blob_id, uint64_t listener);
 void mn_wm_ctx_end(struct mn_wm_ctx *c);
+
+/* present.m: slots 47 and 48 (the count, and the probe with MN_PRESENT_PROBE=1), 71 (the reply's device is 0) and 73
+ * (a view's release is its handle's). */
+NTSTATUS_T mn_wm_present_special(struct mn_wm_state *k);
 
 /* events.m: slots 104, 108-110 and 146; and the table's release of a listener. */
 NTSTATUS_T mn_wm_listener_special(struct mn_wm_state *k);

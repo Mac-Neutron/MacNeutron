@@ -9,7 +9,7 @@ compare.py <name> <macOS run 1> <macOS run 2> <guest run> <prefix>...
     guest winemetal.so ("mn-winemetal: ...", a refused call) is a failure.
 compare.py host <host output>
     The VM host's own error lines fail the gate: the executor's (each failed queued call is one) and the host
-    winemetal forwarder's.
+    winemetal forwarder's. The presentation counts and probes ("mn-present: ...", milestone 4c) aren't errors.
 compare.py self-test
     Each rule's failure case must fail, and an agreeing run pass.
 Prints "ok ..." or "FAIL ...", and exits 1 on a failure.
@@ -95,12 +95,14 @@ def self_test():
             failures += 1
     for name, text, want in [('host-clean', 'mn-executor: context 1\nmn-executor: context 1 gone\n', 'ok'),
                              ('host-error', 'mn-executor: context 1\nmn-executor: error: asynchronous op failed (4114, 3221225485)\n', 'FAIL'),
-                             ('host-winemetal', 'mn-winemetal: slot 18 raised NSInvalidArgumentException\n', 'FAIL')]:
+                             ('host-winemetal', 'mn-winemetal: slot 18 raised NSInvalidArgumentException\n', 'FAIL'),
+                             ('host-present', 'mn-present: probe 30 pixels 921600 green 98 white 0 colors 2\n'
+                              'mn-present: context 1: 600 drawables presented\n', 'ok')]:
         got = host(f(name, text, None))
         if not got.startswith(want):
             print(f'FAIL self-test {name}: {got}')
             failures += 1
-    print('self-test: ' + ('FAIL' if failures else f'ok ({len(cases) + 3} cases)'))
+    print('self-test: ' + ('FAIL' if failures else f'ok ({len(cases) + 4} cases)'))
     return failures == 0
 
 

@@ -62,6 +62,9 @@ enum mn_wm_special {
     MN_SP_SM50,      /* 74-88 (Task 8; 77 in Task 5) */
     MN_SP_ENUMERATE, /* 91 (Task 8) */
     MN_SP_CONSTANTS, /* 98 (Task 8) */
+    MN_SP_PRESENT,   /* 47, 48: drawables presented, counted, and the frame probe (milestone 4c, host/present.m) */
+    MN_SP_LAYER,     /* 71: the layer's device isn't the host's pointer in the reply, but the guest's own value */
+    MN_SP_VIEW,      /* 73: a view's release, the handle's own */
 };
 
 struct mn_wm_call {

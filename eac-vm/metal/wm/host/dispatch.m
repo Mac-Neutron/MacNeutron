@@ -1,6 +1,8 @@
 /* The executor's handler for winemetal ops (milestone 4b-1): one handle table per guest context, made on its first
  * call; a ring's state caches its context (word 0; the marshaller has word 1). */
 #include <pthread.h>
+#include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include "../marshal.h"
 #include "../notify.h"
@@ -77,6 +79,9 @@ static void context_end(uint32_t ctx_id) {
     if (c) *pp = c->next;
     pthread_mutex_unlock(&ctx_lock);
     if (!c) return;
+    uint64_t presented = atomic_load(&c->wm.presented);
+    if (presented)
+        fprintf(stderr, "mn-present: context %u: %llu drawables presented\n", ctx_id, (unsigned long long)presented);
     mn_ht_free(c->wm.ht);
     mn_wm_ctx_end(&c->wm);
     free(c);

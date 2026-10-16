@@ -303,6 +303,14 @@ static NTSTATUS_T guest_special(unsigned slot, uint8_t *params, struct mn_wm_out
         return mn_wm_emit_data(o, &id, sizeof id, WMF_IN);
     }
     case 98: return mn_wm_constants_emit(params, o);
+    case 71: { /* the guest's own device value goes back in place of the host's (none comes) */
+        struct WMTLayerProps *props = ((struct unixcall_generic_obj_ptr_noret *)params)->arg.ptr;
+        if (!props) return MN_STATUS_INVALID_PARAMETER;
+        o->fix = (void **)&props->device;
+        o->fix_value = (void *)(uintptr_t)props->device;
+        return 0;
+    }
+    case 73:  /* releasing a view (milestone 4c) */
     case 110: { /* destroying it is its release: the host unbinds it too */
         mn_handle h;
         memcpy(&h, params, sizeof h);
@@ -385,7 +393,7 @@ NTSTATUS_T mn_wm_unpack(unsigned slot, void *params, const struct mn_wm_out *out
         if (!k++) first = h;
     }
     NTSTATUS_T s = mn_wm_copy_back(out, r, len, pos);
-    if (out->fix && first) *out->fix = out->fix_value;
+    if (out->fix && (first || c->special == MN_SP_LAYER)) *out->fix = out->fix_value;
     mn_wm_scratch_done();
     return s;
 }
