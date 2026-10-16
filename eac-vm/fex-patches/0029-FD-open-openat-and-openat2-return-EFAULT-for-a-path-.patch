@@ -1,0 +1,74 @@
+From 90061333fe08abb90d3113c56cbcb9697a2ebed2 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Fri, 16 Oct 2026 07:59:17 -0400
+Subject: [PATCH] FD: open, openat and openat2 return EFAULT for a path pointer
+ in the never-mapped low range
+
+The Easy Anti-Cheat Linux launcher injects its client by stopping the child at a syscall-entry stop, loading the
+registers for a dlopen() call and resuming. On Linux the interrupted syscall still runs with those registers; for an
+openat the "path" is dlopen's flags (2, 0x102), copy_from_user fails and the call returns -EFAULT before the child
+continues at the new rip. FEX's openat dereferenced the pointer on the host and crashed the child (launcher 210, #1).
+
+Linux never maps the first 64 KiB (vm.mmap_min_addr), so such a pointer can only fail with EFAULT. A mapped but
+unreadable pointer still faults inside FEX; a fault-safe string probe would cover it.
+
+Test: eac-tests/open-efault (passes natively and on this branch; the process dies on the unpatched one).
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01MxAzWmRRXV6WQvusmLmDK4
+---
+ .../LinuxSyscalls/Syscalls/FD.cpp             | 20 +++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/FD.cpp b/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/FD.cpp
+index 9acf01f..9cdb07c 100644
+--- a/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/FD.cpp
++++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/FD.cpp
+@@ -11,6 +11,17 @@ $end_info$
+ 
+ #include <FEXHeaderUtils/Syscalls.h>
+ 
++namespace {
++// Linux never maps the first 64 KiB (vm.mmap_min_addr), so a path pointer there can only fail with EFAULT. A ptrace
++// injector that redirects a stopped openat to dlopen leaves dlopen's flags (2, 0x102) in the path register; the kernel
++// answers EFAULT, where FEX's handlers would dereference the pointer and crash the process.
++// ponytail: only the never-mappable range; a mapped-but-unreadable pointer still faults in FEX (a fault-safe string probe
++// is the upgrade).
++inline bool IsUnmappableUserPointer(const void* Ptr) {
++  return reinterpret_cast<uintptr_t>(Ptr) < 0x10000;
++}
++} // namespace
++
+ #include <fcntl.h>
+ #include <stdint.h>
+ #include <sys/file.h>
+@@ -38,6 +49,9 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
+   });
+ 
+   REGISTER_SYSCALL_IMPL(open, [](FEXCore::Core::CpuStateFrame* Frame, const char* pathname, int flags, uint32_t mode) -> uint64_t {
++    if (IsUnmappableUserPointer(pathname)) {
++      return -EFAULT;
++    }
+     flags = FEX::HLE::RemapFromX86Flags(flags);
+     uint64_t Result = FEX::HLE::_SyscallHandler->FM.Open(pathname, flags, mode);
+     SYSCALL_ERRNO();
+@@ -80,6 +94,9 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
+   });
+ 
+   REGISTER_SYSCALL_IMPL(openat, [](FEXCore::Core::CpuStateFrame* Frame, int dirfs, const char* pathname, int flags, uint32_t mode) -> uint64_t {
++    if (IsUnmappableUserPointer(pathname)) {
++      return -EFAULT;
++    }
+     flags = FEX::HLE::RemapFromX86Flags(flags);
+     uint64_t Result = FEX::HLE::_SyscallHandler->FM.Openat(dirfs, pathname, flags, mode);
+     SYSCALL_ERRNO();
+@@ -102,6 +119,9 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
+ 
+   REGISTER_SYSCALL_IMPL(
+     openat2, [](FEXCore::Core::CpuStateFrame* Frame, int dirfs, const char* pathname, struct open_how* how, size_t usize) -> uint64_t {
++      if (IsUnmappableUserPointer(pathname)) {
++        return -EFAULT;
++      }
+       open_how HostHow {};
+       size_t HostSize = std::min(sizeof(open_how), usize);
+       memcpy(&HostHow, how, HostSize);

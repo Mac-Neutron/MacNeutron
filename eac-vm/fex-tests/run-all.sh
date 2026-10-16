@@ -33,6 +33,7 @@ smc-remote-write    smc_remote_write_test       PASS -
 ptrace-dregs        ptrace_dregs_test           PASS -
 ptrace-regsets      ptrace_regsets_test         PASS -
 restart-syscall     restart_syscall_test        PASS -
+open-efault         open_efault_test            PASS -
 signal-frame        signal_frame_test           PASS -
 signal-frame        signal_frame_test           PASS FEX_HOSTFEATURES=disableavx
 sigreturn-eflags    sigreturn_eflags_test       PASS -
