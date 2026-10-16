@@ -89,6 +89,6 @@ fi
 
 # rd.*: an initrd that cannot find or mount its root reboots after 30 s (ending the host) instead of waiting forever
 # or opening a shell.
-printf '%s\n' "root=LABEL=mn-base rootfstype=erofs ro systemd.volatile=overlay lockdown=integrity module.sig_enforce=1 rd.timeout=30 rd.shell=0 rd.emergency=reboot panic=5 console=hvc0 net.ifnames=0" > "$OUT/cmdline.txt"
+printf '%s\n' "root=LABEL=mn-base rootfstype=erofs ro systemd.volatile=overlay lockdown=integrity sysctl.kernel.kexec_load_disabled=1 module.sig_enforce=1 rd.timeout=30 rd.shell=0 rd.emergency=reboot panic=5 console=hvc0 net.ifnames=0" > "$OUT/cmdline.txt"
 file "$OUT/vmlinuz"
 ls -la "$OUT"

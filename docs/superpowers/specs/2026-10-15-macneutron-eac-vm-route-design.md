@@ -46,7 +46,7 @@ eac-arm64-emulation-poc project, and they are not negotiable:
 | Steam | The Mac's Steam client. lsteamclient's Windows half runs in the guest; its Unix-call table is forwarded over vsock to the host, where MacNeutron's existing macOS Unix half calls Mac Steam's `steamclient.dylib` (§5.9) | One Steam and one sign-in, no "playing on another computer", no Steam client or Steam UI in the guest. The host half is code we already ship and test. |
 | Synchronisation | ntsync (`/dev/ntsync`, Fedora's signed module) | Upstream Wine uses it; msync is macOS-only. |
 | Steam Linux Runtime | Not used | Our x86-64 image carries Wine's libraries: one container layer fewer. |
-| EAC Linux v2 | Out of scope; a later phase | Announced 2026-10-14. It adds TPM 2.0, measured boot, an IOMMU without passthrough, kexec disabled and the BPF LSM. Neither libkrun nor Virtualization.framework gives a guest a TPM or a virtual IOMMU. Nothing in this design rules them out. |
+| EAC Linux v2 | A later phase; mapped requirement by requirement in the research README §6 (2026-10-16) | Announced 2026-10-14. It adds TPM 2.0, measured boot, an IOMMU without passthrough, kexec disabled and the BPF LSM, and accepts only kernels signed with a well-known key (Fedora's CA is one), which rules out a self-built guest kernel. The guest already has lockdown integrity, kexec disabled at boot, the BPF LSM and Fedora-signed binaries. Neither libkrun nor Virtualization.framework gives a guest a TPM or a virtual IOMMU. Nothing in this design rules them out. |
 
 ## 4. Architecture
 

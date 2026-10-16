@@ -195,3 +195,45 @@ it, `SteamAPI_Init` fails cleanly ("No SteamClient021") and Wine keeps running. 
 The ticket's `GetAuthSessionTicketResponse_t` didn't arrive in 10 s. The same happens against `mn-steam-host` on the
 Mac with no VM, and `ISteamUser::BLoggedOn` reported 0: Mac Steam wasn't connected to Steam's servers then. A run
 with Steam online still has to show it.
+
+## 6. Guest kernel and EAC Linux v2 (2026-10-16)
+
+**Kernel.** The guest stays on Fedora's signed kernel (7.2.10-200.fc44). What was tried first:
+- **SteamOS.** SteamOS 3.9 (3.9.2 on the Deck's beta and preview channels) ships linux-neptune-72 7.2.7-valve1, an
+  x86-64 bzImage; Hypervisor.framework runs arm64 guests only. Valve's only arm64 kernel is the Steam Frame's (SteamOS
+  0.4.5, 6.18.0 `linux-618-deckard`, from the signed RAUC bundle): it has no virtio-mmio, virtio-blk, virtio-console or
+  virtio-net, no module signing and no lockdown LSM, so libkrun can't boot it.
+- **Our own build.** Linux 7.2.11 with everything built in and no modules (Fedora's config through `localyesconfig`
+  with the guest's lsmod) booted, passed identity and `m2-gate.sh` (gameframe 2.098 ms), and shrank base.erofs from
+  345 to 220 MB. It was dropped because EAC Linux v2 accepts only kernels signed with a well-known key (below).
+- **Epic's well-known keys** are distribution CAs (Canonical, Fedora, Universal Blue, Debian, openSUSE, SUSE, Rocky,
+  AlmaLinux) and the Microsoft UEFI CA that signs shim. Universal Blue's gaming kernel (OGC, Bazzite's) is built for
+  x86-64 only; on aarch64 Universal Blue ships Fedora's kernel (its `main` flavor: Fedora's binary from Koji, Fedora's
+  signature kept and Universal Blue's added). Fedora's kernel is therefore both the best arm64 choice on the list and
+  the one Universal Blue would give us.
+
+**EAC Linux v2 against the microVM.** Epic's eight requirements (announced 2026-10-14). The goal is to meet them as a VM
+that says it is one, never to imitate hardware.
+
+| # | Requirement | The guest today | What meeting it takes |
+|---|---|---|---|
+| 1 | Kernel and modules signed with a well-known key | Fedora's kernel (Authenticode signer `kernel-signer`, issued by Fedora Secure Boot CA 20200709) and in-tree modules, `module.sig_enforce=1`, no out-of-tree modules | Done for the binaries; it counts only once Secure Boot verifies the chain (3) |
+| 2 | TPM 2.0 | None: libkrun has no TPM device | A CRB TPM in our libkrun fork (Fedora's kernel has `TCG_CRB=y`), backed by a software TPM on the host (libtpms) with per-VM state. Its endorsement key is certified by MacNeutron as a virtual TPM, never as a vendor's chip |
+| 3 | Secure Boot, booting only from well-known keys | Direct kernel boot, no firmware | EDK2 (ArmVirt) with Secure Boot on, `db` holding only the Microsoft UEFI CAs and Fedora's CA, current `dbx`; Fedora's Microsoft-signed shim, then GRUB and the kernel, both Fedora-signed. libkrun main has no firmware loader, so this is a libkrun patch plus our EDK2 build (spec milestone 6) |
+| 4 | Measured boot | Nothing measured | Comes with 2 and 3: EDK2's TCG2 measures shim, shim measures GRUB, GRUB measures the kernel, initramfs and command line |
+| 5 | IOMMU on, passthrough off (non-handheld devices) | No IOMMU: libkrun's virtio devices write straight into guest memory | A virtio-iommu device in our libkrun with every virtio-mmio device behind it (Fedora's kernel has `VIRTIO_IOMMU=y`), and `iommu.passthrough=0` on the command line. Each DMA buffer then needs a map request: measure the frame loop, disk and network |
+| 6 | Lockdown integrity, set explicitly at boot | `lockdown=integrity` on the command line; the identity gate checks `[integrity]` | Done; with 3 the command line moves into GRUB's configuration, where it is measured |
+| 7 | kexec disabled, set explicitly at boot | `sysctl.kernel.kexec_load_disabled=1` on the command line since 2026-10-16; the gate checks it (and fails without it) | Done |
+| 8 | BPF LSM loaded and active | `bpf` is in Fedora's LSM order; the gate checks it | Done |
+
+EAC v2's client also runs a systemd service during play. The guest has systemd but no D-Bus (systemd-logind fails at
+every boot for that reason); D-Bus comes in when that service needs it.
+
+Questions for Epic before building 2-5, since a VM can comply only if Epic accepts one:
+- Can a protected game run in a VM at all? Epic describes the TPM as hardware "enabled in the BIOS".
+- Does a virtual TPM count when its endorsement key is certified by the VM's maker rather than a TPM vendor?
+- Is a virtio-iommu with passthrough off what requirement 5 asks of a VM, which has no DMA-capable hardware?
+- Is aarch64 in scope? Fedora signs arm64 kernels with the same CA.
+
+Games keep the choice between EAC Linux v1 and v2, so SMITE 2 (v1, still 301 → client never mapped here) is not
+affected yet.
