@@ -1,7 +1,7 @@
 [Unit]
 Description=MacNeutron test runner: runs /mnt/share/run.sh, then powers off
 After=local-fs.target systemd-binfmt.service
-RequiresMountsFor=/mnt/share /home /usr/share/fex-emu/RootFS/fedora
+RequiresMountsFor=/mnt/share /home /usr/share/fex-emu/RootFS/fedora /opt/mn-wine
 ConditionPathExists=/mnt/share/run.sh
 
 [Service]

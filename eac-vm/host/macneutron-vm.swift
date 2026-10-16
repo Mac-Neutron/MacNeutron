@@ -61,7 +61,7 @@ let steamMap = opts["--steam-map"]
   ?? FileManager.default.homeDirectoryForCurrentUser.path + "/Library/Application Support/Steam/steamapps/common=/mnt/games"
 func path(_ n: String) -> String { images + "/" + n }
 
-for n in ["vmlinuz", "initramfs.img", "cmdline.txt", "base.erofs", "x86-64-rootfs.erofs", "state.img"]
+for n in ["vmlinuz", "initramfs.img", "cmdline.txt", "base.erofs", "x86-64-rootfs.erofs", "wine.erofs", "state.img"]
 where access(path(n), R_OK) != 0 {
   fail(2, "missing image: \(path(n))")
 }
@@ -98,6 +98,7 @@ check(krun_console_builder_add_tty_port(consoles, kstr(""), ptySlave, &port, &er
 add(krun_console_builder_build(consoles, &err), "console")
 disk("base", "base.erofs", readOnly: true)
 disk("x86-64", "x86-64-rootfs.erofs", readOnly: true)
+disk("wine", "wine.erofs", readOnly: true)
 disk("state", "state.img", readOnly: false)
 add(krun_fs_device_new(kstr("share"), kstr(share), &err), "share")
 add(krun_rng_device_new(&err), "rng")

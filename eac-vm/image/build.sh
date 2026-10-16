@@ -5,11 +5,13 @@
 #   initramfs.img        dracut, from the same kernel's signed modules
 #   base.erofs           label mn-base: packages.txt + our FEX + rootfs/ (read-only, shared by every game)
 #   x86-64-rootfs.erofs  label mn-x86-64: Fedora's FEX x86-64 RootFS (read-only, shared)
+#   wine.erofs           label mn-wine: our Wine (eac-vm/wine/build.sh install), /opt/mn-wine (read-only, shared)
 #   state.img            label mn-state: 16 GiB sparse ext4 for /home, created only when missing
 #   cmdline.txt, packages.lock
 # Pinning: the first build downloads packages.txt's closure and the x86-64 RootFS into $CACHE and checks every
 # package's Fedora signature; builds install from that cache only, never from the live repositories, and fail if the
 # result differs from packages.lock beside this script (UPDATE_LOCK=1 accepts a new set; copy $OUT/packages.lock here).
+# `build.sh wine` remakes wine.erofs only. Wine's x86-64 libraries come from the RootFS (all there but libodbc).
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 KVER=7.2.10-200.fc44.aarch64
@@ -17,8 +19,14 @@ FEX_BIN=${FEX_BIN:-$HOME/fex-linux/build/Bin}
 OUT=${OUT:-/mnt/out}
 WORK=${WORK:-/var/tmp/mn-image}
 CACHE=${CACHE:-/var/cache/mn-image-rpms}
+WINE_STAGE=${WINE_STAGE:-$HOME/wine-stage/opt/mn-wine}
+wine_image() {
+  sudo rm -f "$OUT/wine.erofs"; sudo mkfs.erofs -L mn-wine -zlz4hc "$OUT/wine.erofs" "$WINE_STAGE" > /dev/null
+  ls -la "$OUT/wine.erofs"
+}
 
 mountpoint -q "$OUT" || { sudo mkdir -p "$OUT"; sudo mount -t virtiofs out "$OUT"; }
+[ "${1:-}" = wine ] && { wine_image; exit 0; }
 sudo rm -rf "$WORK"; sudo mkdir -p "$WORK/root" "$WORK/x86" "$WORK/x86-rpm"
 
 # The cache is for one packages.txt: a changed list refetches (otherwise an added package would silently be missing).
@@ -48,7 +56,7 @@ for b in FEX FEXServer FEXBash FEXGetConfig FEXpidof; do sudo install -m755 "$FE
 sudo cp -R "$HERE/rootfs/." "$WORK/root/"
 sudo chown -R root:root "$WORK/root/etc/fstab" "$WORK/root/etc/systemd/system" "$WORK/root/usr/libexec/mn-runner" \
   "$WORK/root/usr/libexec/mn-tso-check" "$WORK/root/usr/share/fex-emu/Config.json"
-sudo mkdir -p "$WORK/root/usr/share/fex-emu/RootFS/fedora" "$WORK/root/mnt/share"
+sudo mkdir -p "$WORK/root/usr/share/fex-emu/RootFS/fedora" "$WORK/root/mnt/share" "$WORK/root/opt/mn-wine"
 sudo gcc -O2 -pthread -o "$WORK/root/usr/libexec/tso-litmus" "$HERE/tso-litmus.c"
 sudo systemctl --root="$WORK/root" enable mn-runner.service mn-tso-check.service
 sudo systemd-hwdb update --root="$WORK/root"  # its scriptlet cannot write hwdb.bin inside the install root
@@ -64,6 +72,8 @@ sudo cp "$WORK/initramfs.img" "$OUT/initramfs.img"
 sudo mount -o loop,ro "$WORK/x86-rpm/usr/share/fex-emu/RootFS/default.erofs" "$WORK/x86"
 sudo rm -f "$OUT/x86-64-rootfs.erofs"; sudo mkfs.erofs -L mn-x86-64 -zlz4hc "$OUT/x86-64-rootfs.erofs" "$WORK/x86" > /dev/null
 sudo umount "$WORK/x86"
+
+wine_image
 
 if [ ! -e "$OUT/state.img" ]; then
   truncate -s 16G "$OUT/state.img"; sudo mkfs.ext4 -q -F -L mn-state "$OUT/state.img"
