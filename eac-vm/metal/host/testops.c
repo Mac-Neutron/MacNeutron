@@ -50,6 +50,23 @@ int32_t mn_testops(uint32_t ctx_id, void *ring_state, uint32_t op, const void *p
         for (uint64_t until = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) + ns; clock_gettime_nsec_np(CLOCK_UPTIME_RAW) < until;) {}
         return 0;
     }
+    case MN_OP_TEST_ERRORS: {
+        uint64_t count = mn_executor_async_failures();
+        if (cap < sizeof count) return MN_E2BIG;
+        memcpy(reply, &count, sizeof count);
+        *reply_len = sizeof count;
+        return 0;
+    }
+    case MN_OP_TEST_HOLD: {
+        struct mn_test_hold h;
+        if (len != sizeof h) return MN_EINVAL;
+        memcpy(&h, p, sizeof h);
+        volatile uint8_t *b = mn_executor_blob(ctx_id, h.blob_id, 0, 1);
+        if (!b) return MN_EINVAL;
+        for (uint64_t until = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) + h.ns; clock_gettime_nsec_np(CLOCK_UPTIME_RAW) < until;)
+            *b += 1;
+        return 0;
+    }
     default:
         return MN_ENOSYS;
     }

@@ -1,7 +1,10 @@
 /* Milestone 4a Task 3 test in the guest: the Metal transport (guest/transport.c) against the executor's test ops.
- *   metal-transport-test order | blob | free-in-flight | gap | threads <n> | bench
+ *   metal-transport-test order | blob | free-in-flight | cross-free | gap | threads <n> | invalid | errors | bench
+ * Every case but errors also requires that no asynchronous record failed on the host (MN_OP_TEST_ERRORS).
  * A case prints "<case> ok" (bench prints its numbers first), or "FAIL <case>: <why>" and exits 1. */
+#include <errno.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -100,9 +103,17 @@ static void gap(void) {
     puts("gap ok");
 }
 
+static pthread_barrier_t threads_barrier;
+static atomic_int polling;
+
 static void *threads_thread(void *arg) {
     unsigned seed = (unsigned)(uintptr_t)arg;
     uint8_t in[256], out[256];
+    uint32_t n0;
+    /* Every thread holds its ring before any starts its loop, so all of them are attached at once. */
+    if (mn_call(MN_OP_NOP, NULL, 0, NULL, 0, &n0)) failf("threads", "first call", 0, 0);
+    if (mn_ring_fenced() == 0) atomic_fetch_add(&polling, 1);
+    pthread_barrier_wait(&threads_barrier);
     for (int i = 0; i < 1000; i++) {
         uint32_t len = (uint32_t)(rand_r(&seed) % 257), n = 0;
         for (uint32_t j = 0; j < len; j++) in[j] = (uint8_t)rand_r(&seed);
@@ -114,9 +125,60 @@ static void *threads_thread(void *arg) {
 
 static void threads(int count) {
     pthread_t *t = calloc((size_t)count, sizeof *t);
+    pthread_barrier_init(&threads_barrier, NULL, (unsigned)count);
     for (int i = 0; i < count; i++) pthread_create(&t[i], NULL, threads_thread, (void *)(uintptr_t)(i + 1));
     for (int i = 0; i < count; i++) pthread_join(t[i], NULL);
+    /* 63 fence ring indexes: beyond that, threads wait by polling. */
+    if (count > 63 && atomic_load(&polling) != count - 63) failf("threads", "threads polling", atomic_load(&polling), count - 63);
+    printf("threads: %d polling\n", atomic_load(&polling));
     puts("threads ok");
+}
+
+static void invalid(void) {
+    uint32_t n;
+    if (mn_send(MN_OP_WRAP, NULL, 0) != -EINVAL) failf("invalid", "op 0 sent", 0, 0);
+    if (mn_send(MN_REC_SYNC | MN_OP_NOP, NULL, 0) != -EINVAL) failf("invalid", "the sync bit sent", 0, 0);
+    if (mn_call(MN_OP_WRAP, NULL, 0, NULL, 0, &n) != -EINVAL) failf("invalid", "op 0 called", 0, 0);
+    puts("invalid ok");
+}
+
+static struct mn_blob held;
+
+static void *cross_hold(void *arg) {
+    (void)arg;
+    uint32_t n;
+    struct mn_test_hold h = { held.blob_id, 50000000 }; /* the host writes the blob for 50 ms */
+    if (mn_call(MN_OP_TEST_HOLD, &h, sizeof h, NULL, 0, &n)) failf("cross-free", "hold", 0, 0);
+    return NULL;
+}
+
+/* Another thread frees a blob while this one's host op is writing it (through its own ring): the host must finish the
+ * op before the blob's memory goes. */
+static void cross_free(void) {
+    uint32_t n;
+    if (mn_blob_alloc(MN_PAGE, &held)) failf("cross-free", "alloc", 0, 0);
+    pthread_t t;
+    pthread_create(&t, NULL, cross_hold, NULL);
+    usleep(10000);
+    if (mn_blob_free(&held)) failf("cross-free", "free", 0, 0);
+    pthread_join(t, NULL);
+    if (mn_call(MN_OP_NOP, NULL, 0, NULL, 0, &n)) failf("cross-free", "call after", 0, 0);
+    puts("cross-free ok");
+}
+
+static uint64_t host_errors(void) {
+    uint64_t count = ~0ull;
+    uint32_t n;
+    if (mn_call(MN_OP_TEST_ERRORS, NULL, 0, &count, sizeof count, &n) || n != sizeof count) return ~0ull;
+    return count;
+}
+
+static void errors(void) {
+    struct mn_test_fill f = { 999999, 0, 1, 0, 0 }; /* no such blob: fails on the host, asynchronously */
+    if (mn_send(MN_OP_TEST_FILL, &f, sizeof f)) failf("errors", "send", 0, 0);
+    uint64_t count = host_errors();
+    if (count != 1) failf("errors", "host's count of failed asynchronous records", (long long)count, 1);
+    puts("errors ok");
 }
 
 static double async_ns(void) {
@@ -173,14 +235,19 @@ static void bench(void) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2) return fprintf(stderr, "usage: %s order|blob|free-in-flight|gap|threads <n>|bench\n", argv[0]), 2;
+    if (argc < 2) return fprintf(stderr, "usage: %s order|blob|free-in-flight|cross-free|gap|threads <n>|invalid|errors|bench\n", argv[0]), 2;
     if (mn_open()) return printf("FAIL %s: mn_open\n", argv[1]), 1;
     if (!strcmp(argv[1], "order")) order();
     else if (!strcmp(argv[1], "blob")) blob();
     else if (!strcmp(argv[1], "free-in-flight")) free_in_flight();
     else if (!strcmp(argv[1], "gap")) gap();
     else if (!strcmp(argv[1], "threads") && argc > 2) threads(atoi(argv[2]));
+    else if (!strcmp(argv[1], "cross-free")) cross_free();
+    else if (!strcmp(argv[1], "invalid")) invalid();
+    else if (!strcmp(argv[1], "errors")) return errors(), 0;
     else if (!strcmp(argv[1], "bench")) bench();
     else return fprintf(stderr, "unknown case %s\n", argv[1]), 2;
+    uint64_t count = host_errors();
+    if (count) return printf("FAIL %s: %lld asynchronous records failed on the host\n", argv[1], (long long)count), 1;
     return 0;
 }

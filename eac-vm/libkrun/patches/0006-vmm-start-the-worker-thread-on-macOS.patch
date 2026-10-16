@@ -1,4 +1,4 @@
-From 5a39b54ae9a6d4cdb644b31b277fd161c6ba63c2 Mon Sep 17 00:00:00 2001
+From c98be11a786ccfda7063fb2f74806c5611d3a939 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Fri, 16 Oct 2026 12:05:21 -0400
 Subject: [PATCH 6/6] vmm: start the worker thread on macOS

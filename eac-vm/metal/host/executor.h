@@ -15,6 +15,9 @@ void mn_executor_start(mn_op_fn handler);
 /* The host address of [offset, offset + len) in one of a context's blobs, or NULL if it isn't one. */
 void *mn_executor_blob(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len);
 
+/* Asynchronous records that failed since the last context began (they have no caller to tell). */
+uint64_t mn_executor_async_failures(void);
+
 /* 4a's test ops (testops.c). */
 int32_t mn_testops(uint32_t ctx_id, void *ring_state, uint32_t op, const void *p, uint32_t len, void *reply,
                    uint32_t cap, uint32_t *reply_len);

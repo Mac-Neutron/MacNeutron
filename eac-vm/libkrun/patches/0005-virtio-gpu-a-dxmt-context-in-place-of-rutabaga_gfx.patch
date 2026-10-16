@@ -1,4 +1,4 @@
-From 689a3c697beef11dd492d8cf9bc1095b413624e0 Mon Sep 17 00:00:00 2001
+From 5975be1c35864af352328e961717a14375b1fa7a Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Fri, 16 Oct 2026 11:36:34 -0400
 Subject: [PATCH 5/6] virtio/gpu: a dxmt context in place of rutabaga_gfx
@@ -23,8 +23,8 @@ scanouts or virgl capsets, so the device offers one capset: the context's.
  src/devices/src/virtio/gpu/virtio_gpu.rs |  20 +-
  src/libkrun/src/api/device_builders.rs   |  19 +
  src/rutabaga_dxmt/Cargo.toml             |  15 +
- src/rutabaga_dxmt/src/lib.rs             | 621 +++++++++++++++++++++++
- 9 files changed, 706 insertions(+), 65 deletions(-)
+ src/rutabaga_dxmt/src/lib.rs             | 636 +++++++++++++++++++++++
+ 9 files changed, 721 insertions(+), 65 deletions(-)
  create mode 100644 src/rutabaga_dxmt/Cargo.toml
  create mode 100644 src/rutabaga_dxmt/src/lib.rs
 
@@ -382,10 +382,10 @@ index 00000000..3c2d3057
 +log = "0.4"
 diff --git a/src/rutabaga_dxmt/src/lib.rs b/src/rutabaga_dxmt/src/lib.rs
 new file mode 100644
-index 00000000..3a0c604e
+index 00000000..2d934f80
 --- /dev/null
 +++ b/src/rutabaga_dxmt/src/lib.rs
-@@ -0,0 +1,621 @@
+@@ -0,0 +1,636 @@
 +//! MacNeutron's stand-in for rutabaga_gfx 0.1.85: the subset of its API that libkrun's virtio-gpu device uses, with
 +//! one context type, dxmt (capset 24). Blobs are host memory the VM host's executor shares with the guest; command
 +//! buffers and fences go to the callbacks it registers with `mn_dxmt_set_ops`, and it completes fences with
@@ -812,6 +812,10 @@ index 00000000..3a0c604e
 +        if self.blobs.contains_key(&resource_id) || self.plain.contains(&resource_id) {
 +            return Err(RutabagaError::InvalidResourceId);
 +        }
++        // The executor finds blobs by (context, blob id), which the guest chooses: one per id.
++        if self.blobs.values().any(|b| b.ctx_id == ctx_id && b.blob_id == info.blob_id) {
++            return Err(RutabagaError::InvalidBlob("blob id already in use in this context"));
++        }
 +        let ptr = unsafe {
 +            libc::mmap(
 +                ptr::null_mut(),
@@ -955,6 +959,17 @@ index 00000000..3a0c604e
 +        r.create_context(1, MN_CAPSET_DXMT, None).unwrap();
 +        assert!(r.resource_create_blob(1, 10, host3d(1, 16384), None, None).is_ok());
 +        assert!(r.resource_create_blob(1, 11, host3d(2, 4096), None, None).is_err());
++    }
++
++    #[test]
++    fn duplicate_blob_id_refused() {
++        let _l = LOCK.lock().unwrap();
++        let mut r = rutabaga(Default::default());
++        r.create_context(1, MN_CAPSET_DXMT, None).unwrap();
++        r.create_context(2, MN_CAPSET_DXMT, None).unwrap();
++        r.resource_create_blob(1, 10, host3d(5, 16384), None, None).unwrap();
++        assert!(r.resource_create_blob(1, 11, host3d(5, 16384), None, None).is_err());
++        assert!(r.resource_create_blob(2, 12, host3d(5, 16384), None, None).is_ok(), "blob ids are per context");
 +    }
 +
 +    #[test]

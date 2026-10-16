@@ -15,6 +15,8 @@ int mn_call(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap,
 
 /* This thread's ring: records sent, and the last one the host finished. */
 void mn_ring_stats(uint64_t *sent, uint64_t *done);
+/* 1 if this thread's ring waits on fences, 0 if it polls (all 63 fence ring indexes leased), -1 without a ring. */
+int mn_ring_fenced(void);
 /* How long mn_call spins on its reply before waiting on a fence (default 50 µs): the calibration knob. */
 void mn_set_spin_us(uint32_t us);
 

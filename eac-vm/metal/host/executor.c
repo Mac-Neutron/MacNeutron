@@ -3,6 +3,7 @@
  * is paired with the next fence; any other fence completes immediately. */
 #include <inttypes.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,7 @@ struct ring {
     pthread_cond_t c;
     int wake_pending, stop;
     atomic_uint nwaiters;
+    atomic_int in_op; /* the handler may be using a blob: blob_destroyed waits it out */
     struct waiter waiters[MAX_WAITERS];
     uint64_t state[8];
     struct ring *next;
@@ -50,6 +52,7 @@ struct ring {
 static struct ring *rings;
 static mn_op_fn handler;
 static struct ring *wait_ring; /* the MN_CTRL_WAIT the next fence belongs to */
+static atomic_uint_fast64_t async_failures; /* since the last context began (MN_OP_TEST_ERRORS) */
 static uint64_t wait_seq;
 
 static uint64_t now_ns(void) { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }
@@ -89,17 +92,22 @@ static void run(struct ring *r, const struct mn_rec *rec) {
     uint32_t op = rec->op & ~MN_REC_SYNC, n = 0;
     int sync = !!(rec->op & MN_REC_SYNC);
     int32_t status = 0;
-    if (op != MN_OP_NOP && op != MN_OP_BLOB_RELEASE)
-        status = handler ? handler(r->ctx_id, r->state, op, rec + 1, rec->len, sync ? r->v.reply : NULL,
+    if (op != MN_OP_NOP && op != MN_OP_BLOB_RELEASE) {
+        atomic_store(&r->in_op, 1); /* before any blob lookup: pairs with blob_destroyed */
+        status = handler ? handler(r->ctx_id, r->state, op, r->v.payload, rec->len, sync ? r->v.reply : NULL,
                                    sync ? MN_REPLY_BYTES : 0, &n)
                          : MN_ENOSYS;
+        atomic_store_explicit(&r->in_op, 0, memory_order_release);
+    }
+    if (n > MN_REPLY_BYTES) n = MN_REPLY_BYTES;
     if (sync) {
         r->v.hdr->reply_len = n;
         r->v.hdr->reply_status = status;
     } else if (status < 0) {
+        atomic_fetch_add(&async_failures, 1);
         error("asynchronous op failed", op, (uint64_t)-status);
     }
-    mn_ring_done(&r->v, &r->tail, rec);
+    mn_ring_done(&r->v, &r->tail);
     atomic_thread_fence(memory_order_seq_cst); /* done_seq, then nwaiters: pairs with add_waiter */
     if (atomic_load_explicit(&r->nwaiters, memory_order_relaxed)) {
         pthread_mutex_lock(&r->m);
@@ -120,11 +128,19 @@ static void *consume(void *arg) {
             continue;
         }
         if (__atomic_load_n(&r->stop, __ATOMIC_ACQUIRE)) return NULL;
+        if (r->v.broken) {
+            /* A header or padding that didn't fit what the guest published: stop reading this ring. */
+            error("ring broken: a record didn't fit what was published", r->ctx_id, r->blob_id);
+            pthread_mutex_lock(&r->m);
+            while (!r->stop) pthread_cond_wait(&r->c, &r->m);
+            pthread_mutex_unlock(&r->m);
+            return NULL;
+        }
         if (now_ns() - idle < SPIN_NS) {
             __asm__ volatile("yield");
             continue;
         }
-        if (!mn_ring_try_park(&r->v)) continue;
+        if (!mn_ring_try_park(&r->v, r->tail)) continue;
         pthread_mutex_lock(&r->m);
         while (!r->wake_pending && !r->stop) pthread_cond_wait(&r->c, &r->m);
         r->wake_pending = 0;
@@ -180,12 +196,19 @@ static void add_waiter(struct ring *r, uint64_t seq, uint32_t ring_idx, uint64_t
         return mn_dxmt_fence_done(r->ctx_id, ring_idx, fence_id); /* the guest rechecks and waits again */
     }
     r->waiters[n] = (struct waiter){ seq, fence_id, ring_idx };
-    atomic_store(&r->nwaiters, n + 1); /* then done_seq: pairs with run() */
+    atomic_store(&r->nwaiters, n + 1);
+    atomic_thread_fence(memory_order_seq_cst); /* nwaiters, then done_seq: pairs with run()'s fence */
     complete_waiters(r, 0);
     pthread_mutex_unlock(&r->m);
 }
 
-static void context_create(void *ctx, uint32_t ctx_id) { (void)ctx; fprintf(stderr, "mn-executor: context %u\n", ctx_id); }
+static void context_create(void *ctx, uint32_t ctx_id) {
+    (void)ctx;
+    atomic_store(&async_failures, 0);
+    fprintf(stderr, "mn-executor: context %u\n", ctx_id);
+}
+
+uint64_t mn_executor_async_failures(void) { return atomic_load(&async_failures); }
 
 static void context_destroy(void *ctx, uint32_t ctx_id) {
     (void)ctx;
@@ -215,6 +238,11 @@ static void blob_destroyed(void *ctx, uint32_t ctx_id, uint64_t blob_id) {
             break;
         }
     pthread_mutex_unlock(&blob_lock);
+    /* Lookups fail from here on; an op that found the blob before set in_op before its lookup (under blob_lock), so
+     * waiting for every ring's in_op to clear means no handler still uses the memory libkrun unmaps next.
+     * ponytail: waits out every ring's op, not just this blob's; per-blob pins when 4b's long ops make it show */
+    for (struct ring *r = rings; r; r = r->next)
+        while (atomic_load_explicit(&r->in_op, memory_order_acquire)) sched_yield();
 }
 
 static void submit(void *ctx, uint32_t ctx_id, const void *cmd, uint32_t len) {

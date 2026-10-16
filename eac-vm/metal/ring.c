@@ -2,6 +2,7 @@
  * parked, the consumer stores parked then loads head, each with a full fence between, so a wake is never lost.
  * parked is 0 (running), 1 (parked) or 2 (parked, doorbell sent). */
 #include <stdatomic.h>
+#include <string.h>
 #include "ring.h"
 
 #define MASK (MN_RING_BYTES - 1)
@@ -44,34 +45,40 @@ void mn_ring_publish(struct mn_ring_view *v, uint64_t head, void (*wake)(void *)
 }
 
 const struct mn_rec *mn_ring_next(struct mn_ring_view *v, uint64_t *tail) {
+    if (v->broken) return NULL;
     if (*tail == v->seen) v->seen = atomic_load_explicit(&v->hdr->head, memory_order_acquire);
     while (*tail != v->seen) {
-        uint64_t off = *tail & MASK;
-        const struct mn_rec *r = (const struct mn_rec *)(v->data + off);
-        if (MN_RING_BYTES - off < sizeof(struct mn_rec) || r->op == MN_OP_WRAP) {
-            *tail += MN_RING_BYTES - off;
+        uint64_t off = *tail & MASK, room = MN_RING_BYTES - off, avail = v->seen - *tail;
+        if (avail > MN_RING_BYTES) break; /* head behind tail, or more than a ring ahead */
+        if (room >= sizeof(struct mn_rec)) memcpy(&v->cur, v->data + off, sizeof v->cur);
+        if (room < sizeof(struct mn_rec) || v->cur.op == MN_OP_WRAP) {
+            if (room > avail) break; /* padding past what was published */
+            *tail += room;
             continue;
         }
-        return r;
+        uint64_t size = rec_size(v->cur.len);
+        if (v->cur.len > MN_REC_MAX || size > room || size > avail) break;
+        v->payload = v->data + off + sizeof(struct mn_rec);
+        return &v->cur;
     }
+    if (*tail != v->seen) v->broken = 1;
     return NULL;
 }
 
-void mn_ring_done(struct mn_ring_view *v, uint64_t *tail, const struct mn_rec *r) {
-    uint64_t seq = r->seq; /* the producer may reuse the record's space once tail moves */
-    int sync = !!(r->op & MN_REC_SYNC);
-    *tail += rec_size(r->len);
+void mn_ring_done(struct mn_ring_view *v, uint64_t *tail) {
+    uint64_t seq = v->cur.seq;
+    int sync = !!(v->cur.op & MN_REC_SYNC);
+    *tail += rec_size(v->cur.len);
     if (!sync && ++v->pending < 64 && *tail != v->seen) return;
     v->pending = 0;
     atomic_store_explicit(&v->hdr->done_seq, seq, memory_order_release);
     atomic_store_explicit(&v->hdr->tail, *tail, memory_order_release);
 }
 
-int mn_ring_try_park(struct mn_ring_view *v) {
+int mn_ring_try_park(struct mn_ring_view *v, uint64_t tail) {
     atomic_store_explicit(&v->hdr->parked, 1, memory_order_relaxed);
     atomic_thread_fence(memory_order_seq_cst);
-    if (atomic_load_explicit(&v->hdr->head, memory_order_relaxed) !=
-        atomic_load_explicit(&v->hdr->tail, memory_order_relaxed)) {
+    if (atomic_load_explicit(&v->hdr->head, memory_order_relaxed) != tail) {
         atomic_store_explicit(&v->hdr->parked, 0, memory_order_relaxed);
         return 0;
     }

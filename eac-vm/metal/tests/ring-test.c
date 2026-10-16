@@ -1,7 +1,9 @@
 /* The command ring (ring.c) on the Mac, without a VM: one producer thread and one consumer thread over a ring blob.
  *   records  1M records of 0 to 4,096 payload bytes through many wraps, checked in order and byte for byte
  *   park     200 bursts with 0-3 ms gaps; the consumer parks between them and is woken through the doorbell callback;
- *            the last burst completes without any extra wake */
+ *            the last burst completes without any extra wake
+ *   corrupt  a header rewritten after its record was published, and padding past head: the consumer marks the ring
+ *            broken instead of trusting them */
 #include <assert.h>
 #include <pthread.h>
 #include <sched.h>
@@ -58,15 +60,15 @@ static void *consumer(void *parks) {
         if (r) {
             assert(r->seq == consumed + 1);
             assert(r->op == 0x100 + (uint32_t)(r->seq % 7));
-            for (uint32_t j = 0; j < r->len; j++) assert(((const uint8_t *)(r + 1))[j] == (uint8_t)(r->seq + j));
+            for (uint32_t j = 0; j < r->len; j++) assert(cv.payload[j] == (uint8_t)(r->seq + j));
             consumed = r->seq;
-            mn_ring_done(&cv, &tail, r);
+            mn_ring_done(&cv, &tail);
             idle = now_ns();
             continue;
         }
         if (__atomic_load_n(&stop, __ATOMIC_ACQUIRE) && !mn_ring_next(&cv, &tail)) return NULL;
         if (!parks || now_ns() - idle < 500000) continue;
-        if (!mn_ring_try_park(&cv)) continue;
+        if (!mn_ring_try_park(&cv, tail)) continue;
         pthread_mutex_lock(&m);
         while (!wake_pending && !__atomic_load_n(&stop, __ATOMIC_ACQUIRE)) pthread_cond_wait(&c, &m);
         wake_pending = 0;
@@ -125,11 +127,30 @@ static void park(void) {
     printf("park ok (%llu records, %d wakes)\n", (unsigned long long)seq, wakes);
 }
 
+static void corrupt(void) {
+    uint64_t head = 0, tail = 0;
+    reset();
+    struct mn_rec *r = mn_ring_reserve(&pv, &head, 64);
+    r->op = 0x101;
+    r->seq = 1;
+    mn_ring_publish(&pv, head, NULL, NULL);
+    r->len = 0x7fffffff; /* the guest owns this memory */
+    assert(!mn_ring_next(&cv, &tail) && cv.broken);
+    head = tail = 0;
+    reset();
+    r = mn_ring_reserve(&pv, &head, 0);
+    r->op = MN_OP_WRAP; /* padding that claims the whole record area, published 16 bytes long */
+    mn_ring_publish(&pv, head, NULL, NULL);
+    assert(!mn_ring_next(&cv, &tail) && cv.broken);
+    puts("corrupt ok");
+}
+
 int main(void) {
     void *blob = mmap(NULL, MN_RING_BLOB_BYTES, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
     assert(blob != MAP_FAILED);
     mn_ring_view_init(&pv, blob);
     records();
     park();
+    corrupt();
     return 0;
 }

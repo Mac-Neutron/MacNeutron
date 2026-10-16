@@ -153,7 +153,11 @@ static void wait_done(struct thread_ring *t, uint64_t seq) {
     }
 }
 
+/* Op 0 is ring padding and the top bit marks synchronous records: neither is the caller's. */
+static int bad_op(uint32_t op) { return op == MN_OP_WRAP || (op & MN_REC_SYNC); }
+
 int mn_send(uint32_t op, const void *p, uint32_t len) {
+    if (bad_op(op)) return -EINVAL;
     struct thread_ring *t = ring();
     if (!t) return -ENODEV;
     if (len > MN_REC_MAX) return -E2BIG;
@@ -162,6 +166,7 @@ int mn_send(uint32_t op, const void *p, uint32_t len) {
 }
 
 int mn_call(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap, uint32_t *reply_len) {
+    if (bad_op(op)) return -EINVAL;
     struct thread_ring *t = ring();
     if (!t) return -ENODEV;
     if (len > MN_REC_MAX) return -E2BIG;
@@ -183,5 +188,7 @@ void mn_ring_stats(uint64_t *sent, uint64_t *done) {
     *sent = tr ? tr->seq : 0;
     *done = tr ? done_seq(tr) : 0;
 }
+
+int mn_ring_fenced(void) { return tr ? !!tr->fence_idx : -1; }
 
 void mn_set_spin_us(uint32_t us) { atomic_store(&spin_us, us); }

@@ -43,10 +43,13 @@ enum {
     MN_OP_NOP = 1,
     MN_OP_BLOB_RELEASE = 2, /* u64 blob id: the thread is done with it (sent synchronously before freeing it) */
     MN_OP_TEST_ECHO = 0x100, MN_OP_TEST_SET, MN_OP_TEST_GET, MN_OP_TEST_FILL, MN_OP_TEST_SUM, /* 4a's test ops */
-    MN_OP_TEST_DELAY, /* u64 ns: the host busy-waits that long (the fenced-wait bench) */
+    MN_OP_TEST_DELAY,  /* u64 ns: the host busy-waits that long (the fenced-wait bench) */
+    MN_OP_TEST_ERRORS, /* replies u64: asynchronous records that failed on the host since this context began */
+    MN_OP_TEST_HOLD,   /* struct mn_test_hold: the host keeps writing the blob's first byte for ns */
 };
 struct mn_test_fill { uint64_t blob_id, offset, len; uint32_t byte, reserved; };
 struct mn_test_sum { uint64_t blob_id, offset, len; };
+struct mn_test_hold { uint64_t blob_id, ns; };
 
 /* Host statuses (negative errno values, the same on both sides). */
 enum { MN_E2BIG = -7, MN_EINVAL = -22, MN_ENOSYS = -38 };
