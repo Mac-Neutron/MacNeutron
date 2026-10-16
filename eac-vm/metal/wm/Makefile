@@ -6,7 +6,7 @@ HOST := $(W)/metal-host
 WINEMETAL := $(ROOT)/build/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/winemetal.so
 DXMT := $(ROOT)/build/wine-arm64-src/dxmt/src
 CFLAGS ?= -O1 -g -Wall -Wextra -std=gnu2x -fsanitize=address,undefined
-INC := -I$(DXMT)/winemetal -I.. -I.
+INC := -DDXMT_GUEST_VM -I$(DXMT)/winemetal -I.. -I.
 
 # The shipped winemetal.so beside stand-ins for the Wine libraries it links (its LC_RPATH has @loader_path/).
 $(HOST)/ntdll.so: host/stand-ins.c

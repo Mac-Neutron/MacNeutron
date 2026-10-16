@@ -112,9 +112,29 @@ STUB(0) STUB(1) STUB(2) STUB(3) STUB(4) STUB(5) STUB(6) STUB(7) STUB(8) STUB(9)
 STUB10(1) STUB10(2) STUB10(3) STUB10(4) STUB10(5) STUB10(6) STUB10(7) STUB10(8) STUB10(9) STUB10(10) STUB10(11)
 STUB10(12) STUB10(13) STUB10(14) STUB(150) STUB(151) STUB(152)
 
+/* DXMT 0071's WMTMemoryAlloc and WMTMemoryFree: memory DXMT makes Metal buffers over, from the blob allocator, so the
+ * host maps it too. A freed allocation comes back once every buffer over it is gone (galloc.h). */
+static NTSTATUS_T slot153(void *p) {
+    struct unixcall_wmtmemory *m = p;
+    struct mn_region r;
+    m->ptr.ptr = NULL;
+    if (mn_open() || mn_galloc(m->length, &r)) return MN_STATUS_NO_MEMORY;
+    m->ptr.ptr = r.ptr;
+    return 0;
+}
+
+static NTSTATUS_T slot154(void *p) {
+    struct unixcall_wmtmemory *m = p;
+    uint64_t id, blob, off;
+    if (!m->ptr.ptr) return 0;
+    if (mn_glookup(m->ptr.ptr, 1, &id, &blob, &off) || mn_gptr(id) != m->ptr.ptr) return MN_STATUS_INVALID_PARAMETER;
+    mn_gfree(id);
+    return 0;
+}
+
 typedef NTSTATUS_T (*unixlib_entry_t)(void *params);
 const unixlib_entry_t __wine_unix_call_funcs[MN_WM_SLOTS] = {
     slot0, slot1, slot2, slot3, slot4, slot5, slot6, slot7, slot8, slot9,
     SLOT10(1) SLOT10(2) SLOT10(3) SLOT10(4) SLOT10(5) SLOT10(6) SLOT10(7) SLOT10(8) SLOT10(9) SLOT10(10) SLOT10(11)
-    SLOT10(12) SLOT10(13) SLOT10(14) slot150, slot151, slot152,
+    SLOT10(12) SLOT10(13) SLOT10(14) slot150, slot151, slot152, slot153, slot154,
 };

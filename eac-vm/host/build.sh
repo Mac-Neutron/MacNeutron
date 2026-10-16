@@ -13,7 +13,7 @@ objs=
 for f in wm/calls.c wm/cmdlist.c wm/marshal.c wm/slots.c wm/host/htable.c wm/host/loader.c wm/host/invoke.m wm/host/memory.m \
   wm/host/events.m wm/host/dispatch.m; do
   o="$W/obj/$(basename "$f").o"
-  clang -O2 -std=gnu2x -Wall -DMN_WM_HOST -c -I"$M" -I"$DXMT/winemetal" -I"$DXMT/airconv" -o "$o" "$M/$f"
+  clang -O2 -std=gnu2x -Wall -DMN_WM_HOST -DDXMT_GUEST_VM -c -I"$M" -I"$DXMT/winemetal" -I"$DXMT/airconv" -o "$o" "$M/$f"
   objs="$objs $o"
 done
 # shellcheck disable=SC2086

@@ -24,7 +24,7 @@ enum {
 #define MN_REGION(blob_id, page) ((uint64_t)(blob_id) << 32 | (uint32_t)(page))
 
 /* op MN_OP_WM + MN_WM_NOTIFY_ATTACH, synchronous: blob_id is a queue for the context (listener 0) or a listener. */
-#define MN_WM_NOTIFY_ATTACH 154
+#define MN_WM_NOTIFY_ATTACH 0x801u
 struct mn_wm_notify_attach { uint64_t blob_id, listener; };
 
 _Static_assert(sizeof(struct mn_notify_rec) == 16, "mn_notify_rec");

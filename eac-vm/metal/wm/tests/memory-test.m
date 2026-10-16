@@ -7,6 +7,9 @@
  *   region-bounds         slots 45 and 145 outside the texture's level are refused; inside, the bytes round-trip
  *   heap                  a buffer placed in an emulated (Shared) heap lies at the heap's memory plus its offset, and
  *                         joins the residency set the heap was added to
+ *   wmt-memory            DXMT 0071's WMTMemoryAlloc (slot 153) gives page-aligned memory a buffer can be made
+ *                         over; WMTMemoryFree (154) while the buffer lives keeps the memory from a new allocation
+ *                         until the host says the buffer is gone; neither reaches the host
  *   sequence              the 4b-1 sequence, as far as the gate runs it */
 #import <Metal/Metal.h>
 #include <pthread.h>
@@ -206,6 +209,38 @@ static int signalled(uint64_t h, int timeout_ms) {
     return found;
 }
 
+static void wmt_memory(void) {
+    CHECK(__wine_unix_call_funcs[153] && __wine_unix_call_funcs[154]);
+    if (!__wine_unix_call_funcs[153] || !__wine_unix_call_funcs[154]) return;
+    uint64_t before = loop_ctx.failures, region, blob, off;
+    struct unixcall_wmtmemory m = {65536, {NULL}};
+    CHECK(W(153, &m) == 0 && m.ptr.ptr && ((uintptr_t)m.ptr.ptr & 16383) == 0);
+    void *p = m.ptr.ptr;
+    if (!p) return;
+    CHECK(mn_glookup(p, 65536, &region, &blob, &off) == 0 && mn_gptr(region) == p);
+    @autoreleasepool {
+        struct WMTBufferInfo info = {.length = 65536, .options = WMTResourceStorageModeShared, .memory = {p}};
+        struct unixcall_mtldevice_newbuffer b = {device, {&info}, 0};
+        CHECK(W(18, &b) == 0 && b.ret && info.memory.ptr == p && mn_gholders(region) == 1);
+        CHECK([(id<MTLBuffer>)host_obj(b.ret) contents] == p);
+        struct unixcall_wmtmemory f = {0, {p}};
+        CHECK(W(154, &f) == 0);
+        CHECK(mn_glookup(p, 1, &region, &blob, &off) == 0); /* still reserved: the buffer holds it */
+        struct unixcall_wmtmemory n = {65536, {NULL}};
+        CHECK(W(153, &n) == 0 && n.ptr.ptr && ((uint8_t *)n.ptr.ptr >= (uint8_t *)p + 65536 ||
+                                                (uint8_t *)n.ptr.ptr + 65536 <= (uint8_t *)p));
+        struct unixcall_wmtmemory inside = {0, {(uint8_t *)n.ptr.ptr + 16384}};
+        CHECK(W(154, &inside) == MN_STATUS_INVALID_PARAMETER); /* not an allocation's start */
+        struct unixcall_wmtmemory none = {0, {NULL}};
+        CHECK(W(154, &none) == 0);
+        W(154, &n);
+        release(b.ret);
+    }
+    for (int i = 0; i < 1000 && (sweep(), mn_gdrain(), mn_glookup(p, 1, &region, &blob, &off) == 0); i++) usleep(1000);
+    CHECK(mn_glookup(p, 1, &region, &blob, &off) != 0); /* back for reuse */
+    CHECK(loop_ctx.failures == before);
+}
+
 static void sequence(void) {
     struct mn_wm_env env = {W, print, signalled};
     CHECK(mn_wm_sequence(&env, SEQUENCE_STEPS) == 0);
@@ -219,7 +254,7 @@ int main(int argc, char **argv) {
     struct { const char *name; void (*fn)(void); } tests[] = {
         {"galloc", galloc},           {"buffer-outlives-free", buffer_outlives_free},
         {"update-bounds", update_bounds}, {"region-bounds", region_bounds},
-        {"heap", heap},               {"sequence", sequence},
+        {"heap", heap},               {"wmt-memory", wmt_memory}, {"sequence", sequence},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         @autoreleasepool {

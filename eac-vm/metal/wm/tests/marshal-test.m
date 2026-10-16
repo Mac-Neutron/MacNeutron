@@ -601,6 +601,7 @@ static const uint32_t catalog_sizes[MN_WM_SLOTS] = {
     16, 16, 40, 16, 24, 8, 8, 16, 16, 48, 32, 24, 40, 24, 16, 32, 16, 16, 32, 8, 8, 8, 24, 32, 24, 24, 24, 32, 24, 32,
     16, 24, 136, 136, 16, 24, 16, 32, 24, 32, 32, 24, 32, 32, 24, 24, 8, 8, 16, 24, 32, 24, 32, 32, 40, 40, 96, 40,
     40, 24, 32, 16, 24, 72,
+    16, 16, /* DXMT 0071's WMTMemoryAlloc and WMTMemoryFree */
 };
 
 static void coverage(void) {
@@ -625,11 +626,13 @@ static const unsigned sync_slots[] = {
     13, 117, 126,                                               /* blocking */
 };
 static const unsigned refused_slots[] = {47, 48, 66, 67, 70, 71, 72, 73, 93, 97, 101, 120, 121, 122, 123, 124, 83};
+static const unsigned local_slots[] = {153, 154};
 
 static void modes(void) {
-    int want[MN_WM_SLOTS] = {0}, n[3] = {0};
+    int want[MN_WM_SLOTS] = {0}, n[4] = {0};
     for (size_t i = 0; i < sizeof sync_slots / sizeof *sync_slots; i++) want[sync_slots[i]] = MN_WM_SYNC;
     for (size_t i = 0; i < sizeof refused_slots / sizeof *refused_slots; i++) want[refused_slots[i]] = MN_WM_REFUSED;
+    for (size_t i = 0; i < sizeof local_slots / sizeof *local_slots; i++) want[local_slots[i]] = MN_WM_LOCAL;
     for (unsigned s = 0; s < MN_WM_SLOTS; s++) {
         n[mn_wm_calls[s].mode]++;
         if (mn_wm_calls[s].mode != want[s]) {
@@ -637,7 +640,7 @@ static void modes(void) {
             failures++;
         }
     }
-    CHECK(n[MN_WM_SYNC] == 74 && n[MN_WM_QUEUED] == 62 && n[MN_WM_REFUSED] == 17);
+    CHECK(n[MN_WM_SYNC] == 74 && n[MN_WM_QUEUED] == 62 && n[MN_WM_REFUSED] == 17 && n[MN_WM_LOCAL] == 2);
 }
 
 int main(void) {

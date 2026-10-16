@@ -16,7 +16,7 @@ cp "$DXMT/winemetal/winemetal.h" "$DXMT/winemetal/winemetal_thunks.h" "$DXMT/win
 "$B" sync "$ROOT/eac-vm/metal" /home/bench/mn-metal
 "$B" sync "$HDR" /home/bench/mn-metal-dxmt
 mkdir -p "$OUT/wm"
-CC="sh ~/mn-sysroot/cc-x86_64.sh -O2 -g -Wall -Wextra -I . -I ../mn-metal-dxmt"
+CC="sh ~/mn-sysroot/cc-x86_64.sh -O2 -g -Wall -Wextra -DDXMT_GUEST_VM -I . -I ../mn-metal-dxmt"
 build() {  # <output under bin/> <compiler arguments...>
   out=$1; shift
   "$B" ssh "cd ~/mn-metal && $CC -o /tmp/metal-out $* && cat /tmp/metal-out" > "$OUT/$out.tmp"

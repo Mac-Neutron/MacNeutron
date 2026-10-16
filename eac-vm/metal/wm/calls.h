@@ -1,18 +1,20 @@
-/* Winemetal's 153 Unix-call slots, described for forwarding (milestone 4b-1): each slot's params struct, whether the
+/* Winemetal's 155 Unix-call slots, described for forwarding (milestone 4b-1): each slot's params struct, whether the
  * guest waits for it, and the fields the marshaller translates. Slot numbers and the facts behind each entry are the
- * call catalog's (docs/research/2026-10-15-vm-route/winemetal-calls.md). Shared by the guest and the host. */
+ * call catalog's (docs/research/2026-10-15-vm-route/winemetal-calls.md), and 153-154 DXMT 0071's, which the guest
+ * answers itself (4b-2). Shared by the guest and the host. */
 #ifndef MN_WM_CALLS_H
 #define MN_WM_CALLS_H
 #include <stdint.h>
 #include "handles.h"
 
-#define MN_WM_SLOTS 153
-#define MN_WM_STATS MN_WM_SLOTS /* op MN_OP_WM + 153: struct mn_wm_stats */
-#define MN_OP_WM 0x1000u        /* a call is op MN_OP_WM + slot */
+#define MN_WM_SLOTS 155
+#define MN_WM_STATS 0x800u /* op MN_OP_WM + 0x800: struct mn_wm_stats; the forwarder's own ops are past any slot */
+#define MN_OP_WM 0x1000u   /* a call is op MN_OP_WM + slot */
 
 /* NTSTATUS values the forwarder answers with. */
 #define MN_STATUS_UNSUCCESSFUL 0xC0000001u
 #define MN_STATUS_NOT_IMPLEMENTED 0xC0000002u
+#define MN_STATUS_NO_MEMORY 0xC0000017u
 #define MN_STATUS_INVALID_HANDLE 0xC0000008u
 #define MN_STATUS_INVALID_PARAMETER 0xC000000Du
 #define MN_STATUS_BUFFER_TOO_SMALL 0xC0000023u
@@ -44,7 +46,7 @@ struct mn_wm_field {
 struct mn_wm_nested { uint16_t nfields; const struct mn_wm_field *fields; };
 extern const struct mn_wm_nested mn_wm_nested[];
 
-enum { MN_WM_QUEUED, MN_WM_SYNC, MN_WM_REFUSED };
+enum { MN_WM_QUEUED, MN_WM_SYNC, MN_WM_REFUSED, MN_WM_LOCAL /* answered in the guest; the host refuses it */ };
 enum mn_wm_special {
     MN_SP_NONE,
     MN_SP_RETAIN,    /* 0: the tables only */
@@ -65,10 +67,10 @@ enum mn_wm_special {
 struct mn_wm_call {
     const char *name;
     uint32_t params_size;
-    uint8_t mode;    /* MN_WM_QUEUED, MN_WM_SYNC, MN_WM_REFUSED */
+    uint8_t mode;    /* MN_WM_QUEUED, MN_WM_SYNC, MN_WM_REFUSED, MN_WM_LOCAL */
     uint8_t special; /* enum mn_wm_special */
     uint16_t nfields;
-    uint32_t refuse_status; /* MN_WM_REFUSED */
+    uint32_t refuse_status; /* MN_WM_REFUSED, MN_WM_LOCAL */
     const struct mn_wm_field *fields;
 };
 extern const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS];

@@ -1,4 +1,4 @@
-/* The 153 slots (calls.h), from the call catalog. Q: queued; S: the guest waits (Global Constraints' lists). */
+/* The 155 slots (calls.h), from the call catalog. Q: queued; S: the guest waits (Global Constraints' lists). */
 #include "calls.h"
 #include <stddef.h>
 #include "airconv_thunks.h"
@@ -373,6 +373,11 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
       HIN(unixcall_mtlcommandbuffer_frame_interpolate, depth), HIN(unixcall_mtlcommandbuffer_frame_interpolate, motion),
       HIN(unixcall_mtlcommandbuffer_frame_interpolate, output), HIN(unixcall_mtlcommandbuffer_frame_interpolate, fence),
       PTR(WMF_IN, unixcall_mtlcommandbuffer_frame_interpolate, props, sizeof(struct WMTFXFrameInterpolatorProps), 0)),
+    /* DXMT 0071: memory from the guest's blob allocator (guest/winemetal.c), never sent. */
+    [153] = {.name = "WMTMemoryAlloc", .params_size = sizeof(struct unixcall_wmtmemory), .mode = MN_WM_LOCAL,
+             .refuse_status = MN_STATUS_INVALID_PARAMETER},
+    [154] = {.name = "WMTMemoryFree", .params_size = sizeof(struct unixcall_wmtmemory), .mode = MN_WM_LOCAL,
+             .refuse_status = MN_STATUS_INVALID_PARAMETER},
 };
 
 /* MTLPixelFormat's values (WMTPixelFormat mirrors them). */

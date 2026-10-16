@@ -335,7 +335,7 @@ NTSTATUS_T mn_wm_pack(unsigned slot, void *params, struct mn_wm_out *out) {
     const struct mn_wm_call *c = &mn_wm_calls[slot];
     out->len = 0, out->nouts = 0, out->nregions = 0, out->nholds = 0, out->fix = NULL;
     out->sync = c->mode == MN_WM_SYNC;
-    if (c->mode == MN_WM_REFUSED) return c->refuse_status;
+    if (c->mode == MN_WM_REFUSED || c->mode == MN_WM_LOCAL) return c->refuse_status;
     if (c->special == MN_SP_RETAIN || c->special == MN_SP_RELEASE) {
         mn_handle h;
         memcpy(&h, params, sizeof h);
@@ -648,7 +648,7 @@ int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const vo
     }
     if (slot >= MN_WM_SLOTS) return failed(c, sync, MN_STATUS_INVALID_PARAMETER);
     const struct mn_wm_call *call = &mn_wm_calls[slot];
-    if (call->mode == MN_WM_REFUSED) return failed(c, sync, call->refuse_status);
+    if (call->mode == MN_WM_REFUSED || call->mode == MN_WM_LOCAL) return failed(c, sync, call->refuse_status);
     uint32_t psz = (uint32_t)PAD8(call->params_size);
     if (len < psz) return failed(c, sync, MN_STATUS_INVALID_PARAMETER);
     if (call->special == MN_SP_RETAIN || call->special == MN_SP_RELEASE) {
