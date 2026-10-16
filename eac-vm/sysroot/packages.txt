@@ -1,0 +1,4 @@
+# x86-64 Linux sysroot for building guest code in the builder (eac-vm/sysroot/build.sh).
+glibc-devel
+kernel-headers
+gcc
