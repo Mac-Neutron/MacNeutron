@@ -34,6 +34,11 @@ timeout -s KILL "$RUN" wine 'C:\Program Files (x86)\Steam\steam.exe' 'Z:\mnt\gam
   > /home/mn/smite2-run.log 2>&1
 echo "ran $(( $(date +%s) - start )) s"
 timeout 20 wineserver -k
+# A killed game takes a while to go: wait for its processes, and a second for the host to see its GPU context end
+# (it logs the drawables presented then), or the poweroff can come first.
+i=0
+while grep -lq 'Hemingway[-.]' /proc/[0-9]*/cmdline 2>/dev/null && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
+sleep 1
 find "$LOGS" -name '*.log' -exec cat {} + 2>/dev/null | tr -d '\r' > /home/mn/smite2-game.log
 mkdir -p /mnt/share/traces/smite2
 cp /home/mn/smite2-game.log /mnt/share/traces/smite2/game.log
