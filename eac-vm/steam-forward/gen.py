@@ -9,8 +9,9 @@ every unsupported call with the reason). The rules, which the report lists:
 
   - `const char *` is a string in, unless a byte count (cb*, cub*) follows it: then a buffer in.
   - `char *`, `void *`, `const void *` and pointers to bytes are buffers when a count field follows within two
-    fields, before any other pointer (name starting cb/cch/cub, or containing size/max/len/count/bytes/num);
-    otherwise unsupported.
+    fields, before any other pointer (name starting cb/cch/cub, or containing size/max/len/count/bytes/num), or when
+    the next pointer is such a count's `uint32_t *` (in and out: ISteamInventory's property calls); otherwise
+    unsupported.
   - A pointer to any other complete type is that type, copied both ways (in only when const), or an array of it when a
     count field follows.
   - Pointers to pointers, pointees that hold pointers, and `void *_ret` are unsupported.
@@ -150,10 +151,12 @@ def main():
             stars = base.count('*')
             pointee = base.replace('*', '').strip()
             flags = 'MN_IN_ONLY' if const else '0'
-            count = None
+            count = count_ptr = None
             for j in range(i + 1, min(i + 3, len(parsed))):
                 cname, ctype = parsed[j]
                 if '*' in ctype:
+                    if ctype.replace(' ', '') == 'uint32_t*' and COUNT_NAME.search(cname):
+                        count_ptr = cname  # the count behind a pointer, which the callee rewrites
                     break  # a count after the next pointer belongs to that pointer
                 if INT.match(ctype.replace('struct ', '').strip()) and COUNT_NAME.search(cname):
                     count = cname
@@ -187,6 +190,12 @@ def main():
                                         'size_offset': f'offsetof(struct {sname}, {count})',
                                         'size_width': f'sizeof(((struct {sname} *)0)->{count})'}))
                     report.append(f'buffer {name}.{fname} <- {count}')
+                    kind = 'buffer'
+                elif count_ptr:
+                    out.append((fname, {'kind': 'MN_BUF', 'flags': 'MN_COUNT_PTR' if flags == '0' else
+                                        flags + ' | MN_COUNT_PTR', 'size': '1',
+                                        'size_offset': f'offsetof(struct {sname}, {count_ptr})', 'size_width': '4'}))
+                    report.append(f'buffer {name}.{fname} <- *{count_ptr}')
                     kind = 'buffer'
                 elif pointee in ('uint8_t', 'int8_t'):
                     out.append((fname, {'kind': 'MN_FIXED', 'flags': flags, 'size': '1'}))

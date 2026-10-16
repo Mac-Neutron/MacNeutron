@@ -16,7 +16,8 @@ enum mn_kind {
     MN_RET_BUF,      /* a returned struct u_buffer { u64 ptr, len }: the host's bytes come back as a guest copy */
 };
 enum { MN_IN_ONLY = 1,  /* const pointee: not copied back */
-       MN_INNER = 2 };  /* MN_FIXED whose pointee holds a pointer (inner_ptr) to inner_size_field bytes, copied back */
+       MN_INNER = 2,    /* MN_FIXED whose pointee holds a pointer (inner_ptr) to inner_size_field bytes, copied back */
+       MN_COUNT_PTR = 4 }; /* MN_BUF whose count is behind the pointer at size_offset (a uint32_t *, in and out) */
 
 struct mn_field {
     uint16_t offset;      /* of the pointer in the params struct */

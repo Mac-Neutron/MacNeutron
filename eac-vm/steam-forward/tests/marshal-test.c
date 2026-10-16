@@ -20,6 +20,8 @@ struct cbmsg { int32_t user, id; void *pub; int32_t cub; };
 struct cb_params { uint64_t cookie; struct cbmsg *msg; };
 struct bad_params { void **pp; };
 struct retbuf_params { uint64_t iface; struct { uint64_t ptr, len; } _ret; };
+/* ISteamInventory's GetItemDefinitionProperty: a buffer whose count is behind a pointer, in and out. */
+struct prop_params { uint64_t iface; int8_t _ret; int32_t def; const char *name; char *buf; uint32_t *size; };
 #pragma pack(pop)
 
 static const struct mn_field str_fields[] = { { offsetof(struct str_params, name), MN_STR_IN, MN_IN_ONLY } };
@@ -33,6 +35,11 @@ static const struct mn_field cb_fields[] = { { offsetof(struct cb_params, msg), 
     0, 0, 0, offsetof(struct cbmsg, pub), offsetof(struct cbmsg, cub) } };
 static const struct mn_field bad_fields[] = { { offsetof(struct bad_params, pp), MN_UNSUPPORTED } };
 static const struct mn_field retbuf_fields[] = { { offsetof(struct retbuf_params, _ret), MN_RET_BUF } };
+static const struct mn_field prop_fields[] = {
+    { offsetof(struct prop_params, name), MN_STR_IN, MN_IN_ONLY },
+    { offsetof(struct prop_params, buf), MN_BUF, MN_COUNT_PTR, 1, offsetof(struct prop_params, size), 4 },
+    { offsetof(struct prop_params, size), MN_FIXED, 0, 4 },
+};
 static const struct mn_call_desc descs[] = {
     { "str", sizeof(struct str_params), 1, str_fields },
     { "out", sizeof(struct out_params), 1, out_fields },
@@ -40,6 +47,7 @@ static const struct mn_call_desc descs[] = {
     { "cb", sizeof(struct cb_params), 1, cb_fields },
     { "bad", sizeof(struct bad_params), 1, bad_fields },
     { "retbuf", sizeof(struct retbuf_params), 1, retbuf_fields },
+    { "prop", sizeof(struct prop_params), 3, prop_fields },
 };
 #define NDESCS (sizeof descs / sizeof *descs)
 
@@ -77,6 +85,14 @@ static void call_none(void *p) { (void)p; }
 static const char persona[] = "Persona";
 static void call_retbuf(void *p) { struct retbuf_params *s = p; s->_ret.ptr = (uintptr_t)persona; s->_ret.len = sizeof persona; }
 static void call_retbuf_null(void *p) { struct retbuf_params *s = p; s->_ret.ptr = 0; s->_ret.len = 0; }
+/* As Steam does: a too-small (or NULL) buffer gets the size it needs in *size, and as much as fits. */
+static void call_prop(void *p) {
+    struct prop_params *s = p;
+    static const char value[] = "hello, inventory"; /* 17 bytes with the NUL */
+    if (s->buf) memcpy(s->buf, value, *s->size < sizeof value ? *s->size : sizeof value);
+    s->_ret = s->buf && *s->size >= sizeof value;
+    *s->size = sizeof value;
+}
 
 static int roundtrip(uint32_t index, void *params, void (*call)(void *), struct mn_reg_log *log) {
     struct mn_buf req = {0}, rep = {0};
@@ -157,6 +173,31 @@ int main(void) {
       CHECK(mn_unpack_reply(&descs[2], rep.data, rep.len, &p, &st, NULL, NULL) == MN_E_MISMATCH,
             "reply longer than the caller's buffer refused");
       mn_buf_free(&req); mn_buf_free(&rep); }
+
+    { char buf[32]; uint32_t size = sizeof buf; memset(buf, 'x', sizeof buf);
+      struct prop_params p = {0x1111, 0, 7, "name", buf, &size};
+      CHECK(roundtrip(6, &p, call_prop, NULL) == 0 && p._ret == 1 && size == 17 && !strcmp(buf, "hello, inventory") &&
+            buf[17] == 'x', "buffer counted through a pointer");
+      CHECK(p.buf == buf && p.size == &size, "its pointers kept"); }
+
+    { uint32_t size = 0; struct prop_params p = {0x1111, 0, 7, "name", NULL, &size};
+      CHECK(roundtrip(6, &p, call_prop, NULL) == 0 && p._ret == 0 && size == 17, "NULL buffer: the size it needs"); }
+
+    { /* The callee says it needs more than the buffer: only the buffer's bytes come back (ASan: no overread). */
+      char buf[16]; uint32_t size = 8; memset(buf, 'x', sizeof buf);
+      struct prop_params p = {0x1111, 0, 7, "name", buf, &size};
+      CHECK(roundtrip(6, &p, call_prop, NULL) == 0 && p._ret == 0 && size == 17 && !memcmp(buf, "hello, i", 8) &&
+            buf[8] == 'x', "a count grown past the buffer copies back the buffer alone"); }
+
+    { /* A guest whose count says more than the bytes it sent is refused before the call. */
+      char buf[8] = {0}; uint32_t size = 8; struct prop_params p = {0x1111, 0, 7, "name", buf, &size};
+      struct mn_buf req = {0};
+      CHECK(mn_pack_request(&descs[6], 6, &p, &req) == 0, "count-pointer request packed");
+      uint32_t lie = 4096; memcpy(req.data + req.len - 4, &lie, 4); /* the count field's value, last in the request */
+      uint32_t index; void *hp; struct mn_arena arena = {0};
+      CHECK(mn_unpack_request(descs, NDESCS, req.data, req.len, &index, &hp, &arena) == MN_E_FORMAT,
+            "count larger than the buffer refused");
+      mn_arena_free(&arena); mn_buf_free(&req); }
 
     { /* A request naming an index past the table, or with the wrong magic, is refused. */
       struct str_params p; p._ret = 0; p.name = "x"; struct mn_buf req = {0};
