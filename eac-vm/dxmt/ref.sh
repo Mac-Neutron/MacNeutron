@@ -27,7 +27,9 @@ while IFS='|' read -r name exe args prefixes; do
   for i in $(seq 1 "${MN_REF_RUNS:-2}"); do
     start=$(now)
     # shellcheck disable=SC2086  # the arguments, one word each
+    case $name in d3d12_dlss*) dlss=1 ;; *) dlss= ;; esac  # invocations: DLSS rows run with MACNEUTRON_DLSS=1
     env STEAM_COMPAT_DATA_PATH="$WORK/compat" SteamAppId=0 MACNEUTRON_GRAPHICS=dxmt MACNEUTRON_NO_STEAM_BRIDGE=1 \
+      MACNEUTRON_DLSS=$dlss \
       MACNEUTRON_NO_METALFX=1 DXMT_SHADER_CACHE_PATH="$WORK/cache/$name.$i" DXMT_MAX_ANISOTROPY=0 \
       "$WORK/ours/bin/macneutron" launch waitforexitandrun "$I/$exe" $args \
       < /dev/null > "$WORK/out" 2>&1 &

@@ -5,8 +5,11 @@
 # differs, and the copies already there are used if the builder is off); winebuild is the Mac's own (it only marks the
 # DLLs as builtins). Set up again in a new build folder when the options or the cross file change (.setup-inputs).
 # The guest's CPU is FEX's, so no CPU flags: the x86-64 baseline. The translator key is the product's, since the
-# host's translator does the work.
+# host's translator does the work. DXMT's NVIDIA DLLs (nvapi64, nvngx: DLSS on MetalFX with MACNEUTRON_DLSS=1) are
+# built and Authenticode-signed as the product's are (wine-arm64/build.sh): the NGX SDK loads only a signed nvngx.dll,
+# so MACNEUTRON_SIGN_IDENTITY must be set.
 set -eu
+: "${MACNEUTRON_SIGN_IDENTITY:?set MACNEUTRON_SIGN_IDENTITY (DXMT NVIDIA DLLs are signed with it)}"
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 S=$ROOT/build/wine-arm64-src
 W=$ROOT/build/eac-vm-work
@@ -29,7 +32,7 @@ rm -rf "$SDK.tmp"
 mkdir -p "$SDK/bin"
 ln -sfn "$S/wine-build/tools/winebuild/winebuild" "$SDK/bin/winebuild"
 set -- "$B" "$S/dxmt" --cross-file "$S/dxmt/build-win64.txt" --buildtype release --strip --prefix "$W/dxmt-guest" \
-  -Dguest_vm=true -Dwine_builtin_dll=true -Denable_d3d12=true -Denable_nvapi=false -Denable_nvngx=false \
+  -Dguest_vm=true -Dwine_builtin_dll=true -Denable_d3d12=true -Denable_nvapi=true -Denable_nvngx=true \
   -Dwine_install_path="$SDK" -Dtranslator_key_file="$S/dxmt-translator-key"
 inputs=$(printf '%s\n' "$@"; cat "$S/dxmt/build-win64.txt")
 if [ ! -f "$B/build.ninja" ] || [ "$(cat "$B/.setup-inputs" 2> /dev/null)" != "$inputs" ]; then
@@ -41,4 +44,12 @@ fi
 meson compile -C "$B" >> "$W/dxmt-guest.log" 2>&1 || { echo "dxmt-guest: build failed; see $W/dxmt-guest.log" >&2; exit 1; }
 rm -rf "$W/dxmt-guest"
 meson install -C "$B" >> "$W/dxmt-guest.log" 2>&1 || { echo "dxmt-guest: install failed; see $W/dxmt-guest.log" >&2; exit 1; }
+T=$ROOT/wine-arm64/tools/authenticode-sign.swift
+if [ ! -x "$W/authenticode-sign" ] || [ "$T" -nt "$W/authenticode-sign" ]; then
+  xcrun swiftc -O -o "$W/authenticode-sign" "$T" >> "$W/dxmt-guest.log" 2>&1 \
+    || { echo "dxmt-guest: building authenticode-sign failed; see $W/dxmt-guest.log" >&2; exit 1; }
+fi
+"$W/authenticode-sign" "$MACNEUTRON_SIGN_IDENTITY" "$W/dxmt-guest/x86_64-windows/nvngx.dll" \
+  "$W/dxmt-guest/x86_64-windows/nvapi64.dll" >> "$W/dxmt-guest.log" 2>&1 \
+  || { echo "dxmt-guest: signing DXMT's NVIDIA DLLs failed; see $W/dxmt-guest.log" >&2; exit 1; }
 echo "dxmt-guest: installed $W/dxmt-guest"
