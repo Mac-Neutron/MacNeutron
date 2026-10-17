@@ -13,4 +13,6 @@ fail=
 grep -q '^click ' /tmp/raw2.txt || fail="$fail click"
 grep -q '^key 65$' /tmp/raw2.txt || fail="$fail key-a"
 grep -q '^raw rel 10 5$' /tmp/raw2.txt || fail="$fail raw-rel"
+grep -q '^raw rel 470 -5$' /tmp/raw2.txt || fail="$fail raw-abs-as-delta"
+! grep -q '^raw rel 1439 539$' /tmp/raw2.txt || fail="$fail raw-abs-as-position"
 if [ -z "$fail" ]; then echo "input-wine: ok"; else echo "input-wine: FAIL$fail"; exit 1; fi

@@ -1,7 +1,9 @@
 /* mn-input: the guest's half of the game window's input (spec §5.7). Reads the host's virtio-input device ("MacNeutron
  * VM input", eac-vm/host/input.c) and replays it into the X server (Xvfb, which reads no input devices) with XTEST:
  * keys as X key codes (evdev + 8, the evdev rules' mapping), buttons as 1-3 and 8-9, the wheels as buttons 4-7, and
- * motion relative or absolute (the host's 0..32767 scaled to the root window). aarch64, libxcb only (base.erofs has no
+ * motion. An absolute position (the host's 0..32767 scaled to the root window) goes as the relative move from where the
+ * pointer is: XTEST's absolute motion gives raw input (what Wine hands a game's mouse look) the position as if it were a
+ * delta, which spun cameras at thousands of pixels a move. aarch64, libxcb only (base.erofs has no
  * libXtst).   mn-input [display]   Waits up to 60 s for the device and the display.
  * It also stands in for a window manager's focus, which Xvfb has none of: the top-level window under the pointer gets
  * the X input focus (on a click, and on motion at most every 250 ms). Wine turns raw mouse input (XInput2's, what a
@@ -116,10 +118,14 @@ int main(int argc, char **argv) {
                 if (e->code == ABS_X) ax = e->value, abs_moved = 1;
                 else if (e->code == ABS_Y) ay = e->value, abs_moved = 1;
             } else if (e->type == EV_SYN && e->code == SYN_REPORT) {
-                if (abs_moved && ax >= 0 && ay >= 0)
-                    xcb_test_fake_input(c, XCB_MOTION_NOTIFY, 0, XCB_CURRENT_TIME, root,
-                                        (int16_t)((long)ax * (s->width_in_pixels - 1) / ABS_RANGE),
-                                        (int16_t)((long)ay * (s->height_in_pixels - 1) / ABS_RANGE), 0);
+                if (abs_moved && ax >= 0 && ay >= 0) {
+                    int tx = (int)((long)ax * (s->width_in_pixels - 1) / ABS_RANGE);
+                    int ty = (int)((long)ay * (s->height_in_pixels - 1) / ABS_RANGE);
+                    xcb_query_pointer_reply_t *p = xcb_query_pointer_reply(c, xcb_query_pointer(c, root), NULL);
+                    if (p) dx += tx - p->root_x, dy += ty - p->root_y;
+                    else xcb_test_fake_input(c, XCB_MOTION_NOTIFY, 0, XCB_CURRENT_TIME, root, tx, ty, 0);
+                    free(p);
+                }
                 if (dx || dy) xcb_test_fake_input(c, XCB_MOTION_NOTIFY, 1, XCB_CURRENT_TIME, XCB_NONE, dx, dy, 0);
                 if (pressed || ((abs_moved || dx || dy) && now_ms() - focus_checked >= 250)) {
                     focus_under_pointer(c, root, &focused);

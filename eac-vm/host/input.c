@@ -124,7 +124,8 @@ static int32_t properties(void *instance, uint8_t *bits, size_t len) {
 
 /* MN_INPUT_SELFTEST=1 (eac-vm/tests/input.sh, input-wine.sh): a fixed sequence 20 s after boot, the agent's and the X
  * server's check: the pointer to the middle, key A, the left button; 2 s later (once a click's focus has reached Wine,
- * which only then asks for raw motion) a relative move of (10, 5) and one wheel notch up. */
+ * which only then asks for raw motion) a relative move of (10, 5), one wheel notch up, and the pointer to three
+ * quarters across (an absolute move a game must see as its delta, (470, -5), not as a position). */
 static void *selftest(void *arg) {
     (void)arg;
     static const struct krun_input_event first[] = {
@@ -132,6 +133,7 @@ static void *selftest(void *arg) {
         {EV_SYN, 0, 0}, {EV_KEY, 0x110, 1}, {EV_SYN, 0, 0}, {EV_KEY, 0x110, 0}, {EV_SYN, 0, 0},
     }, then[] = {
         {EV_REL, 0, 10}, {EV_REL, 1, 5}, {EV_SYN, 0, 0}, {EV_REL, 8, 1}, {EV_SYN, 0, 0},
+        {EV_ABS, 0, 24575}, {EV_ABS, 1, 16384}, {EV_SYN, 0, 0},
     };
     sleep(20);
     for (size_t i = 0; i < sizeof first / sizeof *first; i++)
