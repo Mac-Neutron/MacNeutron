@@ -6,7 +6,10 @@
  *   unrelated  a blob destroyed while another ring's op is blocked is unmapped at once, not after that op
  *   hooks      progress runs before a consumer parks; ring_end for each ring that stops, then context_end
  *   notify     an MN_CTRL_NOTIFY_WAIT fence completes once the queue's head passes arg: at once if it already has,
- *              else when mn_executor_notified says the queue moved */
+ *              else when mn_executor_notified says the queue moved
+ *   spin       MN_EXECUTOR_SPIN_US (0 here, set before the start): a consumer parks after each record when they come
+ *              0.5 ms apart; the parse keeps the default for a value outside 0-2000 */
+#include <stdlib.h>
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
@@ -95,6 +98,11 @@ static void *destroy_40(void *p) {
 
 int main(void) {
     static const struct mn_executor_hooks hooks = {on_progress, on_end, on_ring_end};
+    assert(mn_executor_spin_ns("200") == 200000 && mn_executor_spin_ns("0") == 0);
+    assert(mn_executor_spin_ns(NULL) == MN_EXECUTOR_SPIN_DEFAULT_NS);
+    assert(mn_executor_spin_ns("-5") == MN_EXECUTOR_SPIN_DEFAULT_NS && mn_executor_spin_ns("abc") == MN_EXECUTOR_SPIN_DEFAULT_NS);
+    assert(mn_executor_spin_ns("2001") == MN_EXECUTOR_SPIN_DEFAULT_NS);
+    setenv("MN_EXECUTOR_SPIN_US", "0", 1); /* read once, at the start */
     mn_executor_start(blocker, &hooks);
     ops->context_create(ops->ctx, 1);
 
@@ -144,8 +152,16 @@ int main(void) {
     assert(mn_executor_snapshot(1, m[0].ring, m + 2, 2) == 1); /* except one ring */
     puts("marks ok");
 
-    usleep(10000); /* past the 2 ms spin: both consumers park */
+    usleep(10000); /* past the spin: both consumers park */
     assert(progressed >= 2);
+    int parked = progressed;
+    for (int i = 0; i < 10; i++) {
+        send_op(&a, MN_OP_NOP + 0x400);
+        usleep(500);
+    }
+    usleep(10000);
+    printf("%s spin (%d parks for 10 records)\n", progressed - parked >= 9 ? "ok  " : "FAIL", progressed - parked);
+    assert(progressed - parked >= 9);
     /* A notify queue: head is its first word (notify.h). */
     _Atomic uint64_t *head = new_blob_sized(1, 30, 16384);
     struct mn_ctrl w = {MN_CTRL_NOTIFY_WAIT, 0, 30, 0};

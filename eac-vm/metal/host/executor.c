@@ -26,7 +26,18 @@ struct mn_dxmt_ops {
 void mn_dxmt_set_ops(const struct mn_dxmt_ops *ops);
 void mn_dxmt_fence_done(uint32_t ctx_id, uint32_t ring_idx, uint64_t fence_id);
 
-#define SPIN_NS 2000000ull /* spec §5.6: a consumer spins 2 ms after its last record, then parks */
+/* Spec §5.6: a consumer spins after its last record (MN_EXECUTOR_SPIN_DEFAULT_NS; MN_EXECUTOR_SPIN_US), then parks. */
+static uint64_t spin_ns = MN_EXECUTOR_SPIN_DEFAULT_NS;
+
+uint64_t mn_executor_spin_ns(const char *value) {
+    if (!value) return MN_EXECUTOR_SPIN_DEFAULT_NS;
+    char *end;
+    long us = strtol(value, &end, 10);
+    if (*value && !*end && us >= 0 && us <= 2000) return (uint64_t)us * 1000;
+    fprintf(stderr, "mn-executor: MN_EXECUTOR_SPIN_US=%s isn't 0 to 2000, %llu us instead\n", value,
+            MN_EXECUTOR_SPIN_DEFAULT_NS / 1000);
+    return MN_EXECUTOR_SPIN_DEFAULT_NS;
+}
 #define MAX_WAITERS 64
 
 /* A blob's memory is ours once the guest frees it (patch 0005): the table holds one reference, each hold one more,
@@ -182,7 +193,7 @@ static void *consume(void *arg) {
             pthread_mutex_unlock(&r->m);
             return NULL;
         }
-        if (now_ns() - idle < SPIN_NS) {
+        if (now_ns() - idle < spin_ns) {
             __asm__ volatile("yield");
             continue;
         }
@@ -444,6 +455,7 @@ int mn_executor_passed(uint32_t ctx_id, const struct mn_mark *marks, size_t n) {
 }
 
 void mn_executor_start(mn_op_fn h, const struct mn_executor_hooks *k) {
+    spin_ns = mn_executor_spin_ns(getenv("MN_EXECUTOR_SPIN_US"));
     static const struct mn_dxmt_ops ops = {
         .context_create = context_create, .context_destroy = context_destroy, .blob_created = blob_created,
         .blob_destroyed = blob_destroyed, .submit = submit, .fence = fence,
