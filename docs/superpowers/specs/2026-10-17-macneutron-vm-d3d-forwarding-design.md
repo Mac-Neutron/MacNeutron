@@ -59,11 +59,17 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
 - Our fork, built through DXMT's native (non-cross) meson path, which upstream keeps (`build: add native build
   targets`): `d3d12`, `dxgi`, `d3d11` and `d3d10core` as macOS dylibs, `winemetal` linked in natively
   (`src/nativemetal`), Windows types from `include/native`. arm64, with the runtime's CPU tuning (`MACNEUTRON_CPU`).
-- Native DXMT's Win32 calls are few (in `d3d12`, `dxgi` and `dxmt`: eight `CloseHandle`, one each of `CreateEventW`,
-  `SetEvent`, `WaitForSingleObject`): the ones the native build lacks get small shims in the host.
-- Built by `eac-vm/dxmt-native/build.sh` from `build/wine-arm64-src/dxmt`; shipped in MacNeutron.app's
-  `Contents/Helpers/vm/dxmt/`, installed into the VM folder with the other host tools (`VMToolsInstaller.items`).
-  The macOS runtime's PE build of DXMT is unchanged.
+- Native DXMT's Win32 calls (measured in M1, research README §17): about 50, in the shader cache, the DXIL dump, the
+  stats, the pipeline recorder and the queues' and swapchain's waits: events and semaphores, files, the clock, thread
+  names, modules, the environment. Real stand-ins in the fork (`src/util/win32_native.h`, patch 0072), not upstream's
+  warn-and-return stubs; a HANDLE says what it is, so a program's event works across binaries, and winemetal's unix
+  side sets a fence's events natively (0074).
+- D3D12's headers natively are the PE build's (llvm-mingw's, in the fork's `include/native/d3d12`, 0073), with
+  `WIDL_EXPLICIT_AGGREGATE_RETURNS` as mingw has it: what M2's dispatcher includes to call DXMT.
+- Built by `eac-vm/dxmt-native/build.sh` from `build/wine-arm64-src/dxmt` into `build/dxmt-native/install`. Shipped in
+  MacNeutron.app's `Contents/Helpers/vm/dxmt/` and installed into the VM folder with the other host tools
+  (`VMToolsInstaller.items`) from the first milestone whose VM loads it. DXMT's replay tool stays the PE build's until
+  the precache runs natively (§4.12, M3). The macOS runtime's PE build of DXMT is unchanged.
 
 ### 4.2 The generator
 

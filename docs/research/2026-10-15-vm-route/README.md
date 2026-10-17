@@ -875,3 +875,65 @@ in the lobby.
 
 Open: the 4b-1 Metal gate (`eac-vm/metal/gate.sh`) crashes `macneutron-vm` in the host's `winemetal.so` on the main
 queue (games run); with `MN_EXECUTOR_SPIN_US=0` SMITE 2 never reached the lobby and the VM didn't power off.
+
+## 17. Direct3D forwarding, M1: native DXMT (2026-10-17)
+
+Plan `docs/superpowers/plans/2026-10-17-vm-d3d-forwarding-m1-native-dxmt.md`. Our DXMT fork builds natively, as arm64
+macOS dylibs (`eac-vm/dxmt-native/build.sh`: `d3d12`, `dxgi`, `d3d11`, `d3d10core`, `winemetal` with airconv, 34 MB),
+and DXMT's headless D3D12 programs built natively against them print what they print on the macOS Wine runtime.
+
+The go/no-go, before the plan: upstream's native path (VirtualBox's, which forwards guest D3D11 to native DXMT on the
+host) built everything but our D3D12, which failed with 259 errors. With the PE build's D3D12 headers and the
+aggregate-return macro, 123 were left, all Win32 calls in diagnostics and recording code: none in a rendering path.
+
+Three fork patches:
+- **0072**, real Win32 handles natively (`src/util/win32_native.h`): events and semaphores with timed waits, files
+  (paths from native WCHAR's UTF-32 as UTF-8), the clock, thread names by id, `dlopen`, `setenv`. Upstream's stand-ins
+  were warnings that did nothing (`CloseHandle` returned FALSE, `CreateSemaphore` NULL). `eac-vm/dxmt-native/tests/
+  win32.sh`, eight cases.
+- **0073**, the native build: the PE build's D3D12 headers (`include/native/d3d12`, llvm-mingw's WIDL 11.12, ahead of
+  the older mingw-directx-headers), `WIDL_EXPLICIT_AGGREGATE_RETURNS`, the stand-ins in D3D12, constexpr enum flag
+  operators as mingw's, and the replay tool left to the PE build.
+- **0074**, found by the first native run (`d3d12_null`: "fail timeout"): winemetal's native build made a fence's
+  `SetEventOnCompletion` a no-op, so no event was ever set. Its listener now runs natively too.
+
+All three apply on the stable series (pin and 0001-0071) as well as on this tree. They touch `include/` and DXMT's
+top-level `meson.build`, which the PE translator key hashes: users' DXMT caches re-translate once, behind the precache
+toast, with the release that carries them.
+
+The gate (`eac-vm/dxmt-native/gate.sh`): the 4b-2 gate's 19 headless D3D12 rows, each run once natively with a fresh
+shader cache against two macOS runs through the runtime's launcher (`eac-vm/dxmt/ref.sh`), by `compare.py`'s rule.
+Measured lines (timings, timestamps) are left out on both sides: natively they run at another speed, and the rule
+masks a line only when the two macOS runs differ (twice they agreed to the tenth).
+
+| Program | Lines | macOS (s) | Native (s) |
+|---|---|---|---|
+| d3d12_api | 49 | 7.22 | 0.60 |
+| d3d12_bounds | 1 | 3.72 | 0.08 |
+| d3d12_cache | 1 | 3.72 | 0.09 |
+| d3d12_compress | 3 | 3.78 | 0.14 |
+| d3d12_copy | 11 | 3.74 | 0.10 |
+| d3d12_depth | 2 | 3.73 | 0.10 |
+| d3d12_dxil | 8 | 3.72 | 0.09 |
+| d3d12_dxil_exec | 13 | 3.76 | 0.10 |
+| d3d12_hazards | 59 | 4.08 | 0.42 |
+| d3d12_indirect | 23 | 3.86 | 0.23 |
+| d3d12_layered | 1 | 3.73 | 0.10 |
+| d3d12_lod | 85 | 3.76 | 0.12 |
+| d3d12_null | 18 | 3.72 | 0.03 |
+| d3d12_query | 1 | 3.71 | 0.09 |
+| d3d12_timestamp | 2 | 3.74 | 0.11 |
+| d3d12_triangle | 1 | 3.72 | 0.09 |
+| d3d12_upscale | 1 | 14.67 | 0.72 |
+| d3d12_volume | 2 | 3.73 | 0.09 |
+| d3d12_vsread | 1 | 3.73 | 0.10 |
+
+All 19 pass, 282 lines. The macOS times are mostly Wine starting each program (about 3.6 s); natively a program
+starts in milliseconds. The test programs needed one portability fix: they printed HRESULTs as `unsigned long`, 64-bit
+natively, which sign-extended a negative HRESULT (`ffffffff80070057`); they print through 32 bits now, the same digits
+on Windows.
+
+Left for later milestones: the XeSS rows (4) and DLSS rows (5) need the upscalers natively (§4.11, M3: there is no
+Wine builtin `libxess` natively, and `nvngx` is a native build of its own); `d3d11_vsia` compiles HLSL with Wine's
+`d3dcompiler`, which has no native build, and D3D11 is M4's. Native DXMT isn't in the app yet: it goes in with the
+first milestone whose VM loads it.
