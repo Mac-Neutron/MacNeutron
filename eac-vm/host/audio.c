@@ -24,7 +24,9 @@
 #include <unistd.h>
 
 /* How often a connection reports the position while it waits (Direct3D forwarding M5): ALSA reads it about once a
- * period, 10 ms or more, so every 1-2 ms woke the connection about 800 times a second for nothing (audio-test's calm). */
+ * period, so every 1-2 ms woke the connection about 800 times a second for nothing (audio-test's calm). A quarter of
+ * the guest's buffer (an MNA2 hello says it), REPORT_MS at most: Wine's default 40 ms buffer gets 10 ms, its shortest
+ * (four 5 ms periods) 5 ms, so a late position never leaves the output less than a CoreAudio cycle (about 10.7 ms). */
 #define REPORT_MS 10
 
 struct stream {
@@ -38,6 +40,7 @@ struct stream {
     _Atomic int playing, closing;
     _Atomic int refs;             /* the connection's thread and the output's */
     uint64_t turns, messages, reports; /* the connection's wake-ups, for its last line (Direct3D forwarding M5) */
+    int report_ms;
 };
 
 static void put(struct stream *s) {
@@ -171,7 +174,7 @@ static int queue(int fd, struct stream *s, uint32_t bytes, uint64_t *told) {
         uint64_t w = atomic_load_explicit(&s->w, memory_order_relaxed);
         uint64_t room = s->size - (w - atomic_load_explicit(&s->r, memory_order_acquire));
         if (!room) {
-            usleep(REPORT_MS * 1000);
+            usleep((useconds_t)s->report_ms * 1000);
             s->turns++;
             if (report(fd, s, told)) return -1;
             continue;
@@ -191,9 +194,11 @@ static void *serve(void *arg) {
     static _Atomic unsigned streams;
     int fd = (int)(intptr_t)arg;
     struct mn_audio_hello h;
+    uint32_t buffer = 0; /* frames, from an MNA2 hello */
     struct stream *s = calloc(1, sizeof *s);
     pthread_t t;
-    if (!s || read_all(fd, &h, sizeof h) || h.magic != MN_AUDIO_MAGIC || h.channels != 2 || h.rate < 8000 ||
+    if (!s || read_all(fd, &h, sizeof h) || (h.magic != MN_AUDIO_MAGIC && h.magic != MN_AUDIO_MAGIC2) ||
+        (h.magic == MN_AUDIO_MAGIC2 && read_all(fd, &buffer, sizeof buffer)) || h.channels != 2 || h.rate < 8000 ||
         h.rate > 384000 || h.format > MN_AUDIO_F32) {
         fprintf(stderr, "mn-audio: refused a stream\n");
         free(s);
@@ -201,6 +206,8 @@ static void *serve(void *arg) {
         return NULL;
     }
     s->rate = h.rate, s->channels = h.channels, s->f32 = h.format == MN_AUDIO_F32;
+    uint64_t quarter = (uint64_t)buffer * 1000 / h.rate / 4;
+    s->report_ms = !buffer || quarter >= REPORT_MS ? REPORT_MS : quarter < 2 ? 2 : (int)quarter;
     s->frame = h.channels * (s->f32 ? 4 : 2);
     for (s->size = 256 * 1024; s->size < (uint64_t)h.rate * s->frame; s->size <<= 1) {}  /* >= the guest's buffer */
     s->id = ++streams, s->refs = 2;
@@ -211,12 +218,12 @@ static void *serve(void *arg) {
         return NULL;
     }
     pthread_detach(t);
-    fprintf(stderr, "mn-audio: stream %u: %u Hz, %u channels, %s\n", s->id, h.rate, h.channels,
-            s->f32 ? "float" : "s16");
+    fprintf(stderr, "mn-audio: stream %u: %u Hz, %u channels, %s, the position every %d ms\n", s->id, h.rate,
+            h.channels, s->f32 ? "float" : "s16", s->report_ms);
     uint64_t started = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
     for (uint64_t told = 0;;) {
         struct pollfd p = {.fd = fd, .events = POLLIN};
-        int n = poll(&p, 1, REPORT_MS);
+        int n = poll(&p, 1, s->report_ms);
         s->turns++;
         if (n < 0 && errno != EINTR) break;
         if (n > 0) {

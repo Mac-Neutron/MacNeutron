@@ -10,6 +10,9 @@
 
 #define MN_AUDIO_PORT 5102
 #define MN_AUDIO_MAGIC 0x31414e4du /* "MNA1" */
+/* "MNA2": the hello is followed by a uint32_t, the guest's ALSA buffer in frames; the host sends the position every
+ * quarter of it, 2 to 10 ms (an MNA1 stream: every 10 ms). */
+#define MN_AUDIO_MAGIC2 0x32414e4du
 
 enum { MN_AUDIO_S16 = 0, MN_AUDIO_F32 = 1 };
 struct mn_audio_hello {

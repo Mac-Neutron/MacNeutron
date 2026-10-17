@@ -161,6 +161,30 @@ int main(void) {
     if (!line || turns - messages > 150) fail("calm: the connection wakes too often for nothing");
     if (moved < 48000) fail("calm: the position stopped moving");
 
+    /* A small buffer (Wine's shortest: four 5 ms periods), said in an MNA2 hello: the position goes out every quarter
+     * of it, so the guest never waits a report interval longer than its buffer can cover. The stand-in output takes
+     * frames every 5-6 ms, and a report goes out when they moved: every 5 ms the guest hears each step (about 180 a
+     * second), every 10 ms about 100. CoreAudio takes them a cycle (about 10.7 ms) at a time: there it only prints. */
+    {
+        struct sockaddr_un a = {.sun_family = AF_UNIX};
+        strcpy(a.sun_path, sock);
+        fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (fd < 0 || connect(fd, (struct sockaddr *)&a, sizeof a)) fail("connect");
+        struct mn_audio_hello h = {MN_AUDIO_MAGIC2, 48000, 2, MN_AUDIO_S16};
+        uint32_t buffer = 960; /* 20 ms */
+        if (write(fd, &h, sizeof h) != sizeof h || write(fd, &buffer, sizeof buffer) != sizeof buffer) fail("hello");
+    }
+    last = 0;
+    msg(fd, MN_AUDIO_DATA, 48000);
+    msg(fd, MN_AUDIO_START, 0);
+    if (played(fd, 4800, now() + 1) < 4800) fail("small buffer: never played");
+    int reports = 0;
+    for (t0 = now(); now() - t0 < 0.5; reports++)
+        if (played(fd, last + 1, now() + 0.1) < 0) fail("small buffer: the stream ended");
+    close(fd);
+    printf("small buffer: %d reports a second\n", reports * 2);
+    if (mode && !strcmp(mode, "none") && reports * 2 < 150) fail("small buffer: the position comes too seldom");
+
     /* Six channels: the guest's plugin never asks for them (games downmix to its two). */
     fd = stream(6), last = 0;
     if (played(fd, 1, now() + 1) != -1) fail("six channels not refused");

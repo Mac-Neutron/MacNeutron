@@ -112,8 +112,13 @@ static int connect_host(struct mn *m) {
     }
     fcntl(s, F_SETFL, fcntl(s, F_GETFL) & ~O_NONBLOCK);
     m->fd = s, m->sent = m->played = m->heard_len = 0;
-    struct mn_audio_hello h = {MN_AUDIO_MAGIC, m->io.rate, m->io.channels,
-                               m->io.format == SND_PCM_FORMAT_FLOAT_LE ? MN_AUDIO_F32 : MN_AUDIO_S16};
+    /* MNA2: with the buffer, so the host sends the position often enough for it (mn-audio.h). */
+    struct {
+        struct mn_audio_hello h;
+        uint32_t buffer;
+    } h = {{MN_AUDIO_MAGIC2, m->io.rate, m->io.channels,
+            m->io.format == SND_PCM_FORMAT_FLOAT_LE ? MN_AUDIO_F32 : MN_AUDIO_S16},
+           (uint32_t)m->io.buffer_size};
     return send_all(m, &h, sizeof h);
 }
 
