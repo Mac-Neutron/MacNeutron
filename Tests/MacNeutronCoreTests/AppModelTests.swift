@@ -441,7 +441,8 @@ private func calls(_ file: URL) -> [String] {
 /// One app start whose runtime is installed, with the app's VM tools, a manifest, and `helper` as its CLI.
 @MainActor
 private func makeSetupModel(helper: URL, vmRoot: URL, manifest: URL?, awaitSetup: Bool = true,
-                            notifications: NotificationCenter = NotificationCenter()) async throws -> AppModel {
+                            notifications: NotificationCenter = NotificationCenter(), retryInterval: TimeInterval = 0,
+                            log: URL? = nil) async throws -> AppModel {
     let (mode, _) = try makeMode()
     let model = AppModel(steam: mode.steam, layout: try makeToolLayout(), mode: mode,
                          store: GameSettingsStore(directory: try makeTempDir()),
@@ -450,8 +451,9 @@ private func makeSetupModel(helper: URL, vmRoot: URL, manifest: URL?, awaitSetup
                          identity: { _ in testIdentity }, valveClient: ValveClient(cache: try makeTempDir()),
                          vmTools: try makeVMTools(), vmRoot: vmRoot,
                          vmInstaller: { try VMToolsInstaller.install(from: $0, into: $1, runningExecutables: { [] }) },
-                         vmManifest: manifest, vmHelper: helper, vmSetupLog: try makeTempDir().appending(path: "vm-setup.log"),
-                         notifications: notifications)
+                         vmManifest: manifest, vmHelper: helper,
+                         vmSetupLog: try log ?? makeTempDir().appending(path: "vm-setup.log"),
+                         notifications: notifications, vmRetryInterval: retryInterval)
     await model.installTask?.value
     if awaitSetup { await model.vmSetupTask?.value }
     return model
@@ -470,21 +472,15 @@ private func makeManifest() throws -> URL {
     #expect(AppModel.notice(forProgressLine: "vm-setup: a note") == nil)
 }
 
-@Test func progressSplitAcrossReadsIsParsed() {
-    var buffer = Data("progress assem".utf8)
-    #expect(AppModel.takeLines(&buffer).isEmpty)
-    buffer += Data("ble 1 5\nprogress ass".utf8)
-    #expect(AppModel.takeLines(&buffer) == ["progress assemble 1 5"])
-    #expect(buffer == Data("progress ass".utf8))
-}
 
 @MainActor @Test func aNeededSetupStartsAfterTheTools() async throws {
     let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
-    let fake = try fakeHelper("[ -e '\(vmRoot.path)/macneutron-vm' ] && echo tools-first >> '\(try makeTempDir().path)/x'\n"
+    let order = try makeTempDir().appending(path: "order")
+    let fake = try fakeHelper("[ -e '\(vmRoot.path)/macneutron-vm' ] && echo tools-first >> '\(order.path)'\n"
                               + "echo 'progress download 400000000 1350000000'\necho 'progress assemble 2 5'\nexit 0")
     let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest)
     #expect(calls(fake.calls) == ["vm-setup --manifest \(manifest.path) --vm \(vmRoot.path)"])
-    #expect(FileManager.default.fileExists(atPath: vmRoot.appending(path: "macneutron-vm").path))
+    #expect(try String(contentsOf: order, encoding: .utf8) == "tools-first\n")
     #expect(model.vmNotice == "Game VM: ready")
 }
 
@@ -572,4 +568,63 @@ private func makeManifest() throws -> URL {
     await model.rebuildVM()
     #expect(model.vmNotice == "Game VM: waiting for the game to quit")
     #expect(FileManager.default.fileExists(atPath: vmRoot.appending(path: "images/manifest.sha256").path))
+}
+
+@MainActor @Test func progressSplitAcrossWritesIsOneLine() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    let log = try makeTempDir().appending(path: "vm-setup.log")
+    let fake = try fakeHelper("printf 'progress assem'\nsleep 0.2\nprintf 'ble 1 5\\n'\nexit 0")
+    _ = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest, log: log)
+    #expect(try String(contentsOf: log, encoding: .utf8).contains("progress assemble 1 5\n"))
+}
+
+@MainActor @Test func aSetupStartsWithAFreshStatus() async throws {
+    // Retry after a failure, or a first run: not the old text, and not nothing, while the first file downloads.
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    let started = try makeTempDir().appending(path: "started")
+    let fake = try fakeHelper("touch '\(started.path)'\nsleep 1\nexit 0")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest, awaitSetup: false)
+    let start = Date()
+    while !FileManager.default.fileExists(atPath: started.path), Date().timeIntervalSince(start) < 5 {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(model.vmNotice == "Game VM: starting…")
+    await model.vmSetupTask?.value
+}
+
+@MainActor @Test func aDeferralWaitsBeforeItsRetry() async throws {
+    // A game session is long: the poll (every 3 s) retries a deferred setup every 30 s, not every tick.
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    let fake = try fakeHelper("exit 75")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest, retryInterval: 30)
+    await model.pollRuntime()
+    #expect(calls(fake.calls).count == 1)
+}
+
+@MainActor @Test func onlyOneToolsInstallAtATime() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    let count = Count()
+    let model = try await makeVMModel(vmRoot: vmRoot, vmInstaller: { tools, vm in
+        count.add()
+        Thread.sleep(forTimeInterval: 0.3)
+        return try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] })
+    })
+    let before = count.value
+    async let a: Void = model.installVMTools()
+    async let b: Void = model.installVMTools()
+    _ = await (a, b)
+    #expect(count.value - before == 1)
+}
+
+@MainActor @Test func withoutTheAppsVMToolsThereIsNoVMFolder() async throws {
+    // A dev run or a test never names the real ~/Library folder.
+    let (model, _, _) = try await makeModel()
+    #expect(model.vmRoot == nil)
+}
+
+private final class Count: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    var value: Int { lock.withLock { n } }
+    func add() { lock.withLock { n += 1 } }
 }

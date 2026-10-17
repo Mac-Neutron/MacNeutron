@@ -18,7 +18,9 @@ public struct MicroVM: Sendable {
         guard verb == .run || verb == .waitforexitandrun, environment["MACNEUTRON_VM"] != "0" else { return nil }
         let folder = environment["MACNEUTRON_VM_DIR"].map { URL(filePath: $0, directoryHint: .isDirectory) } ?? root
         let vm = folder.appending(path: "macneutron-vm").path(percentEncoded: false)
-        return FileManager.default.isExecutableFile(atPath: vm) && imagesComplete(folder) ? MicroVM(root: folder) : nil
+        let installing = folder.appending(path: ".installing").path(percentEncoded: false)  // VMToolsInstaller's swap
+        return FileManager.default.isExecutableFile(atPath: vm) && imagesComplete(folder)
+            && !FileManager.default.fileExists(atPath: installing) ? MicroVM(root: folder) : nil
     }
 
     /// The setup (`macneutron vm-setup`) writes images/manifest.sha256 last, once the whole set is in place; the image

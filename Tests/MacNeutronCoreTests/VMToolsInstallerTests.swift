@@ -122,3 +122,29 @@ private func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding
     #expect(try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] }) == .installed)
     #expect(text(vm.appending(path: "run-game.sh")) == "b run-game.sh\n")
 }
+
+@Test func aToolWithABrokenSignatureIsRefused() throws {
+    // As wine.app's install checks its copy: a Mach-O whose signature doesn't verify never replaces the old tools.
+    let tools = try makeTools("a"), vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] })
+    let vmTool = tools.appending(path: "macneutron-vm")
+    try FileManager.default.removeItem(at: vmTool)
+    try FileManager.default.copyItem(at: URL(filePath: "/usr/bin/true"), to: vmTool)
+    let fd = open(vmTool.path, O_WRONLY | O_APPEND)  // change its bytes after the signature: no longer verifies
+    _ = write(fd, "x", 1)
+    close(fd)
+    #expect(throws: RuntimeInstallError.self) { try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] }) }
+    #expect(text(vm.appending(path: "macneutron-vm")) == "a macneutron-vm\n")
+    #expect(!FileManager.default.fileExists(atPath: vm.appending(path: "macneutron-vm.new").path))
+}
+
+@Test func gamesWaitWhileTheToolsSwap() throws {
+    // The swap goes item by item: until its last rename, a launch runs on macOS instead of mixed tools.
+    let tools = try makeTools("a"), vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] })
+    #expect(!FileManager.default.fileExists(atPath: vm.appending(path: ".installing").path))
+    try write("dev\n", to: vm.appending(path: "images/manifest.sha256"))
+    #expect(MicroVM.find(root: vm, environment: [:], verb: .waitforexitandrun) != nil)
+    try write("", to: vm.appending(path: ".installing"))
+    #expect(MicroVM.find(root: vm, environment: [:], verb: .waitforexitandrun) == nil)
+}

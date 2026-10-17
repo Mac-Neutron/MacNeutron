@@ -30,8 +30,10 @@ public enum VMToolsInstaller {
         let source = { (item: String) in (Self.scripts.contains(item) ? scripts ?? tools : tools).appending(path: item) }
         let stamp = vm.appending(path: "tools.identity")
         let wanted = try digest(items.map { ($0, source($0)) }) + "\n"
+        let installing = vm.appending(path: ".installing")
         if (try? String(contentsOf: stamp, encoding: .utf8)) == wanted,
            items.allSatisfy({ fm.fileExists(atPath: vm.appending(path: $0).path(percentEncoded: false)) }) {
+            try? fm.removeItem(at: installing)  // a crash between the stamp and the marker's removal
             return .unchanged
         }
         try fm.createDirectory(at: vm, withIntermediateDirectories: true)
@@ -53,11 +55,21 @@ public enum VMToolsInstaller {
                 throw RuntimeInstallError.copyFailed(copy.terminationStatus)
             }
         }
+        // As wine.app's install checks its copy: every Mach-O in the copies verifies, or nothing is swapped.
+        for item in items {
+            let status = verify(URL(filePath: path(item + ".new")))
+            guard status == 0 else {
+                for item in items { try? fm.removeItem(atPath: path(item + ".new")) }
+                throw RuntimeInstallError.signatureInvalid(status)
+            }
+        }
         // Again: the copy takes a moment, and a VM started meanwhile runs from the old tools.
         if let running = running(in: vm, runningExecutables) {
             for item in items { try? fm.removeItem(atPath: path(item + ".new")) }
             return .deferred(running)
         }
+        // Until the last rename a launch runs on macOS (MicroVM.find), not on a mix of old and new tools.
+        fm.createFile(atPath: installing.path(percentEncoded: false), contents: nil)
         for item in items {
             let (new, old) = (path(item + ".new"), path(item))
             let swapped = fm.fileExists(atPath: old) ? renamex_np(new, old, UInt32(RENAME_SWAP)) : rename(new, old)
@@ -65,6 +77,7 @@ public enum VMToolsInstaller {
             try? fm.removeItem(atPath: path(item + ".new"))  // the old item, after a swap
         }
         try wanted.write(to: stamp, atomically: true, encoding: .utf8)
+        try? fm.removeItem(at: installing)
         return .installed
     }
 
@@ -78,6 +91,29 @@ public enum VMToolsInstaller {
             return
         }
         try RuntimeInstaller.installFile(install.steamClient64, at: destination)
+    }
+
+    /// codesign --verify --strict on every Mach-O under `url` (an item's copy): 0, or the first failure's status.
+    static func verify(_ url: URL) -> Int32 {
+        let fm = FileManager.default
+        let root = url.path(percentEncoded: false)
+        let files = [root] + ((fm.enumerator(atPath: root)?.allObjects as? [String]) ?? []).map { root + "/" + $0 }
+        for file in files where isMachO(file) {
+            let check = Process()
+            check.executableURL = URL(filePath: "/usr/bin/codesign")
+            check.arguments = ["--verify", "--strict", file]
+            check.standardError = FileHandle.nullDevice
+            guard (try? check.run()) != nil else { return -1 }
+            check.waitUntilExit()
+            if check.terminationStatus != 0 { return check.terminationStatus }
+        }
+        return 0
+    }
+
+    private static func isMachO(_ path: String) -> Bool {
+        guard let handle = FileHandle(forReadingAtPath: path), let magic = try? handle.read(upToCount: 4) else { return false }
+        try? handle.close()
+        return [[0xcf, 0xfa, 0xed, 0xfe], [0xca, 0xfe, 0xba, 0xbe], [0xce, 0xfa, 0xed, 0xfe]].contains(Array(magic))
     }
 
     /// SHA-256 over every item's files: their paths, kinds and bytes (a symlink's target), so any change to any item is
