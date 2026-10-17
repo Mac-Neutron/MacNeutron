@@ -3,9 +3,9 @@
 # scene at the same settings, launched with /usr/bin/env MACNEUTRON_PERF=1 %command% (and MACNEUTRON_VM=0 for the macOS
 # run), it samples for [seconds] (default 60): the CPU of the game's processes (on macOS, its Wine processes; in the
 # VM, macneutron-vm, mn-steam-host and gvproxy), the GPU's busy share (ioreg, once a second) and the frame rate (DXMT's
-# on macOS, the VM window's in the VM); in the VM also the guest's threads (the run's traces/profile.txt) and one host
-# sample of macneutron-vm. It reads the run's folders only. Writes build/perf/<appid>-<mode>-<time>.json (and
-# .sample.txt).
+# on macOS, the VM window's in the VM); in the VM also the guest's threads (the run's traces/profile.txt), and after
+# the window one host sample of macneutron-vm. It reads the run's folders only. Writes
+# build/perf/<appid>-<mode>-<time>.json (and .sample.txt).
 #   perf-compare.sh macos|vm <appid> [seconds]
 #   perf-compare.sh compare <macos.json> <vm.json>   the three ratios against the spec's gate (§1)
 set -eu
@@ -23,8 +23,10 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/perf-compare.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 PROFILE= PID=
 if [ "$MODE" = vm ]; then
-  PID=$(pgrep -x macneutron-vm | head -n 1) || true
+  PID=$(pgrep -x macneutron-vm || true)
   [ -n "$PID" ] || { echo "perf-compare: no macneutron-vm is running" >&2; exit 1; }
+  n=$(printf '%s\n' "$PID" | /usr/bin/grep -c .)
+  [ "$n" = 1 ] || { echo "perf-compare: $n VMs are running: measure one game at a time" >&2; exit 1; }
   SHARE=${MN_SHARE:-$HOME/Library/Application Support/MacNeutron/vm/runs/$APPID}
   PROFILE=$SHARE/traces/profile.txt STATS=$SHARE/traces/frames.txt  # the host counts the frames (MN_PRESENT_STATS)
 else
@@ -39,13 +41,17 @@ start=$(date +%s)
 i=0
 while [ $i -lt "$SECS" ]; do
   ioreg -r -d 1 -w 0 -c IOAccelerator > "$T/ioreg.$i" 2> /dev/null || true
-  if [ -n "$PID" ] && [ $i -eq $((SECS / 2)) ]; then sample "$PID" 10 -file "$T/sample.txt" > /dev/null 2>&1 & fi
   sleep 1
   i=$((i + 1))
 done
-wait
 ps -A -o pid=,time=,comm= > "$T/ps.after"
 elapsed=$(( $(date +%s) - start ))
+# After the window, never in it: sample(1) suspends the process at each tick (SMITE 2's frame rate fell to 1.4 fps
+# while one ran), so only its shares are used, scaled to the window's CPU (perf.py's scale).
+if [ -n "$PID" ]; then
+  echo "perf-compare: the host sample (10 s; it stalls the game)" >&2
+  sample "$PID" 10 -file "$T/sample.txt" > /dev/null 2>&1 || true
+fi
 mkdir -p "$ROOT/build/perf"
 OUT=$ROOT/build/perf/$APPID-$MODE-$(date +%Y%m%d-%H%M%S).json
 set -- record "$OUT" --mode "$MODE" --appid "$APPID" --seconds "$elapsed" --ps-before "$T/ps.before" \

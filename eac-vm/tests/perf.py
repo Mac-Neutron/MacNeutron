@@ -118,9 +118,9 @@ def sample_split(sample):
 
 
 def scale(split, cores):
-    """A sample split as shares of the CPU ps measured for macneutron-vm over the window. sample(1) records every
-    thread at every tick, on a core or not, so a spinning thread waiting for one still looks busy: on 2026-10-17 a
-    10 s sample summed 1.03 cores while ps measured 0.47 over the same seconds."""
+    """A sample split as shares of the CPU ps measured for macneutron-vm over the window. sample(1) suspends the
+    process at each tick, so what it counts is where threads stand, not how long they ran: on 2026-10-17 a 10 s sample
+    summed 1.03 cores while ps measured 0.47 for those (stalled) seconds. perf-compare.sh takes it after the window."""
     total = sum(split.values())
     return {k: round(v * cores / total, 3) if total else 0.0 for k, v in split.items()}
 

@@ -87,6 +87,8 @@ public struct Launcher: Sendable {
         let (backend, note) = GraphicsBackend.select(requested: environment["MACNEUTRON_GRAPHICS"])
         var env = LaunchEnvironment.build(base: environment, context: context, backend: backend, logging: logging)
         // MACNEUTRON_PERF=1: DXMT's frame statistics, for eac-vm/tests/perf-compare.sh. The user's own settings win.
+        // DXMT keeps stats.txt in its DXIL dump folder, which also turns on its capture mode: every new shader, root
+        // signature and pipeline is saved there too (a little CPU, and files that build up in the folder).
         if environment["MACNEUTRON_PERF"] == "1", backend == .dxmt, env["DXMT_STATS"] == nil {
             let folder = perfFolder(appID: context.appID)
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

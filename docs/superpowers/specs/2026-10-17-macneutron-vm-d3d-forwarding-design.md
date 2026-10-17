@@ -16,7 +16,8 @@ do Wine and wineserver; on macOS they run natively and only the game is translat
 | Metal executor consumers spinning (one ring never parks: its records come less than 2 ms apart) | ~1.6 |
 | Sound (`audio.c`'s two streams, a 2 ms poll that reports every turn) | ~0.95 |
 
-The process used 1146% CPU with the GPU at about 80%; the same scene on macOS uses 400-500% with the GPU at 98%.
+The process used 1146% CPU with the GPU at about 80%; the same scene on macOS uses 400-500% with the GPU at 98%. (These
+were read while `sample` ran, which suspends the process: M0's baseline, research README §15, has the cleaner numbers.)
 
 Done when, for SMITE 2 and Palworld at the same in-game settings as on macOS (`eac-vm/tests/perf-compare.sh`):
 - The GPU is busy 95% of the time or more.
@@ -170,7 +171,8 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
 ### 5.1 The guest profiler
 
 - `MACNEUTRON_VM_PROFILE=1`: `run-game.sh` writes every guest thread's CPU share and name (`/proc/<pid>/task/*/stat`)
-  to `traces/profile.txt` every 5 s, and the host takes a `sample` of `macneutron-vm` at the same moments.
+  to `traces/profile.txt` every 5 s, and the host takes a `sample` of `macneutron-vm` after the measured window:
+  `sample` suspends the process at each tick (SMITE 2 fell to 1.4 fps while one ran, 2026-10-17).
 
 ### 5.2 The comparison
 
