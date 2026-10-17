@@ -4,7 +4,8 @@
 #   vmlinuz              Fedora's signed kernel, unmodified
 #   initramfs.img        dracut, from the same kernel's signed modules
 #   base.erofs           label mn-base: packages.txt + our FEX + rootfs/ (read-only, shared by every game)
-#   x86-64-rootfs.erofs  label mn-x86-64: Fedora's FEX x86-64 RootFS (read-only, shared)
+#   x86-64-rootfs.erofs  Fedora's FEX x86-64 RootFS, the package's default.erofs as is (read-only, shared; mounted by
+#                        its disk id, virtio-x86-64, as a Mac's setup uses it unchanged too)
 #   wine.erofs           label mn-wine: our Wine (eac-vm/wine/build.sh install), /opt/mn-wine (read-only, shared), with
 #                        our DXMT and the guest winemetal.so over Wine's own D3D (eac-vm/dxmt/stage.sh); with
 #                        DXMT_GUEST=none, Wine's own D3D (llvmpipe): software rendering, optional since 4c
@@ -96,9 +97,7 @@ sudo dracut -q -f --no-hostonly --kver "$KVER" --kmoddir "$WORK/root/lib/modules
 sudo cp "$WORK/initramfs.img" "$OUT/initramfs.img"
 
 (cd "$WORK/x86-rpm" && rpm2cpio "$CACHE"/x86/*.rpm | sudo cpio -idm --quiet ./usr/share/fex-emu/RootFS/default.erofs)
-sudo mount -o loop,ro "$WORK/x86-rpm/usr/share/fex-emu/RootFS/default.erofs" "$WORK/x86"
-sudo rm -f "$OUT/x86-64-rootfs.erofs"; sudo mkfs.erofs -L mn-x86-64 -zlz4hc "$OUT/x86-64-rootfs.erofs" "$WORK/x86" > /dev/null
-sudo umount "$WORK/x86"
+sudo rm -f "$OUT/x86-64-rootfs.erofs"; sudo cp "$WORK/x86-rpm/usr/share/fex-emu/RootFS/default.erofs" "$OUT/x86-64-rootfs.erofs"
 
 wine_image
 
