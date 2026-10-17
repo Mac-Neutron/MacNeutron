@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -61,6 +62,7 @@ static long long played(int fd, uint64_t want, double deadline) {
 }
 
 int main(void) {
+    signal(SIGPIPE, SIG_IGN); /* a stream the host ends fails its write, and the test says so */
     char path[] = "/tmp/mn-audio-test-XXXXXX";
     if (!mkdtemp(path)) fail("mkdtemp");
     static char p[128];
@@ -130,12 +132,8 @@ int main(void) {
     fd = stream(2), last = 0;
     msg(fd, MN_AUDIO_START, 0);
     t0 = now();
-    struct timeval wt = {0, 20000};
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &wt, sizeof wt);
-    while (now() - t0 < 2.5) { /* 10 ms chunks, as fast as the host takes them */
-        struct mn_audio_msg m = {MN_AUDIO_DATA, 480 * 4};
-        static char chunk[480 * 4];
-        if (write(fd, &m, sizeof m) == sizeof m) write(fd, chunk, sizeof chunk);
+    while (now() - t0 < 2.5) { /* 10 ms chunks, whole, as fast as the host takes them (it blocks the writes) */
+        msg(fd, MN_AUDIO_DATA, 480);
         uint64_t v;
         while (recv(fd, &v, sizeof v, MSG_DONTWAIT) == sizeof v) last = v;
     }
