@@ -469,14 +469,15 @@ build_app() {
   # The Metal host's winemetal.so is DXMT's: the release wine.app's, as SOURCE names it.
   cp "$OUT/wine.app/Contents/Resources/lib/wine/aarch64-unix/winemetal.so" "$VMH/metal-host/winemetal.so" \
     || die "no winemetal.so in the release wine.app"
-  mkdir -p "$A/Contents/Resources/vm" && mv "$VMH"/run-*.sh "$A/Contents/Resources/vm/"
+  mkdir -p "$A/Contents/Resources/vm" || die "can't make Contents/Resources/vm"
+  mv "$VMH"/run-*.sh "$A/Contents/Resources/vm/" || die "can't move the VM's scripts"
   F="$OUT/steam-forward"
   make -s -C "$ROOT/eac-vm/steam-forward" OUT="$F" \
     MAC_UNIXLIB="$OUT/wine.app/Contents/Resources/lib/wine/aarch64-unix/lsteamclient.so" \
-    CFLAGS="-O2 -Wall -Wextra -Wno-missing-field-initializers -std=c11 -ffile-prefix-map=$ROOT=." \
+    CFLAGS="-O2 -Wall -Wextra -Wno-missing-field-initializers -std=c11 '-ffile-prefix-map=$ROOT=.'" \
     "$F/host/mn-steam-host" > /dev/null || die "can't build mn-steam-host"
   cp "$F/host/mn-steam-host" "$F/host/ntdll.so" "$F/host/lsteamclient.so" "$VMH/steam-forward/host/"
-  cp "$ROOT/build/vm-setup-tools/mkfs.erofs" "$A/Contents/Helpers/mkfs.erofs"
+  cp "${BUILD_DIR:-$ROOT/build}/vm-setup-tools/mkfs.erofs" "$A/Contents/Helpers/mkfs.erofs" || die "no mkfs.erofs"
   AL="$A/Contents/Resources/licenses"
   cp "$ROOT/LICENSE" "$AL/LICENSE"
   cp "$ROOT/bridge/Proton-steam-LICENSE.txt" "$AL/"
@@ -498,16 +499,16 @@ EOF
   # The microVM's host tools and the setup's mkfs.erofs: their licences, libkrun's crates' among them.
   ALV="$AL/vm"
   mkdir -p "$ALV"
-  python3 "$ROOT/eac-vm/libkrun/licences.py" "$W/libkrun-src" "$ALV/libkrun" "${CARGO:-$(brew --prefix rustup)/bin/cargo}" \
+  python3 "$ROOT/eac-vm/libkrun/licences.py" "$EW/libkrun-src" "$ALV/libkrun" "${CARGO:-$(brew --prefix rustup)/bin/cargo}" \
     > /dev/null || die "can't collect libkrun's crates' licences (eac-vm/libkrun/licences.py)"
   V_SRC="${BUILD_DIR:-$ROOT/build}/vm-setup-tools-src"
-  cp "$W/libtpms-src/LICENSE" "$ALV/libtpms-LICENSE"
+  cp "$EW/libtpms-src/LICENSE" "$ALV/libtpms-LICENSE"
   cp "$(brew --prefix openssl@3)/LICENSE.txt" "$ALV/openssl-LICENSE.txt"
   cp "$V_SRC/erofs-utils/COPYING" "$ALV/erofs-utils-COPYING"
   cp -R "$V_SRC/erofs-utils/LICENSES" "$ALV/erofs-utils-LICENSES"
   cp "$V_SRC/lz4/lib/LICENSE" "$ALV/lz4-LICENSE"
   cp "$ROOT/Sources/CZstd/LICENSE" "$ALV/zstd-LICENSE"
-  cp "$W/libkrun-src/LICENSE" "$ALV/gvproxy-LICENSE"  # Apache-2.0: the same text
+  sh "$ROOT/eac-vm/net/licences.sh" "$VMH/gvproxy" "$ALV/gvproxy" > /dev/null || die "can't collect gvproxy's licences"
   cat > "$ALV/README" << 'EOF'
 The microVM games run in (Contents/Helpers/vm and Contents/Resources/vm), and the setup that builds its images on
 this Mac (Contents/Helpers/mkfs.erofs, and Contents/Helpers/macneutron's vm-setup):
@@ -518,7 +519,8 @@ this Mac (Contents/Helpers/mkfs.erofs, and Contents/Helpers/macneutron's vm-setu
 - libkrun (Apache-2.0), with MacNeutron's patches, and every crate it links: libkrun/, one folder each, listed in
   libkrun/CRATES.txt. Parts of libkrun come from crosvm (BSD-3-Clause, libkrun/THIRD-PARTY); Rust's standard library
   is linked in too (libkrun/rust-std/).
-- gvproxy, from containers/gvisor-tap-vsock (Apache-2.0, gvproxy-LICENSE).
+- gvproxy, from containers/gvisor-tap-vsock (Apache-2.0, gvproxy/LICENSE), with the Go modules it was built with
+  (gvproxy/modules/, listed in gvproxy/MODULES.txt) and Go's runtime and standard library (BSD-3-Clause, gvproxy/go/).
 - mkfs.erofs is erofs-utils (GPL-2.0-or-later: erofs-utils-COPYING, erofs-utils-LICENSES/) with lz4 compiled in
   (BSD-2-Clause, lz4-LICENSE). Their source is in the release's source archive (erofs-utils.tar, lz4.tar).
 - macneutron reads Fedora's packages with zstd's decoder (BSD-3-Clause, zstd-LICENSE).
@@ -623,16 +625,16 @@ fi
 # 2b. The VM (docs/superpowers/specs/2026-10-17-macneutron-vm-setup-design.md §4.7): its images built in the builder
 # (eac-vm/image/build.sh, which writes the recipes and overlay a Mac's setup rebuilds them from), the parts archive,
 # and the app's manifest of it, whose URL is the release's own asset.
-W="$ROOT/build/eac-vm-work"
+EW="${BUILD_DIR:-$ROOT/build}/eac-vm-work"  # the VM's work folder (r3 has its own W)
 PARTS="MacNeutron-$V-vm-parts.tar.xz"
 B="$ROOT/eac-vm/builder.sh"
-VM_SHARES="out=$W/images" sh "$B" start > /dev/null || die "the builder (eac-vm/builder.sh) doesn't start"
+VM_SHARES="out=$EW/images" sh "$B" start > /dev/null || die "the builder (eac-vm/builder.sh) doesn't start"
 # Its /mnt/out must be this tree's images (a builder started elsewhere would build into another folder).
 nonce=$(uuidgen)
-echo "$nonce" > "$W/images/.release-nonce"
+echo "$nonce" > "$EW/images/.release-nonce"
 [ "$(sh "$B" ssh 'cat /mnt/out/.release-nonce 2> /dev/null')" = "$nonce" ] \
-  || die "the builder's /mnt/out isn't $W/images: stop it (eac-vm/builder.sh stop) and run the release again"
-rm -f "$W/images/.release-nonce"
+  || die "the builder's /mnt/out isn't $EW/images: stop it (eac-vm/builder.sh stop) and run the release again"
+rm -f "$EW/images/.release-nonce"
 sh "$B" sync "$ROOT/eac-vm/image" /home/bench/mn-image > /dev/null || die "can't copy eac-vm/image into the builder"
 sh "$B" ssh 'sh ~/mn-image/build.sh > /tmp/image.log 2>&1' || die "the image build failed: the builder's /tmp/image.log"
 sh "$ROOT/eac-vm/setup/parts.sh" "$OUT/vm-parts" "$OUT/wine.app" > /dev/null || die "parts.sh failed"
@@ -643,8 +645,8 @@ check_archive_owners "$OUT/$PARTS" || exit 1
 rm -rf "$OUT/vm-parts"
 check_sparse_template "$OUT/$PARTS" || exit 1
 KVER=$(sed -n 's/^KVER=//p' "$ROOT/eac-vm/image/build.sh")
-python3 "$ROOT/eac-vm/setup/manifest.py" "$OUT/$PARTS" "$W/images/setup/packages.json" "$KVER" \
-  "$W/images/x86-64-rootfs.erofs" "https://github.com/chadouming/MacNeutron/releases/download/v$V/$PARTS" \
+python3 "$ROOT/eac-vm/setup/manifest.py" "$OUT/$PARTS" "$EW/images/setup/packages.json" "$KVER" \
+  "$EW/images/x86-64-rootfs.erofs" "https://github.com/chadouming/MacNeutron/releases/download/v$V/$PARTS" \
   > "$OUT/vm-manifest.json" || die "manifest.py failed"
 check_vm_manifest "$OUT/vm-manifest.json" "$OUT/$PARTS" || exit 1
 # Every pinned package still downloads from Fedora (its mirrors, or Koji under its source package's name): the setup

@@ -104,7 +104,7 @@ if [ "${1:-}" = --app ]; then
   done
   # The microVM's host tools and mkfs.erofs (release.sh build_app).
   for f in README libkrun/CRATES.txt libkrun/THIRD-PARTY libkrun/rust-std/COPYRIGHT.html libtpms-LICENSE \
-    openssl-LICENSE.txt erofs-utils-COPYING lz4-LICENSE zstd-LICENSE gvproxy-LICENSE; do
+    openssl-LICENSE.txt erofs-utils-COPYING lz4-LICENSE zstd-LICENSE gvproxy/LICENSE gvproxy/MODULES.txt gvproxy/go/LICENSE; do
     [ -s "$AL/vm/$f" ] || { echo "MISSING Contents/Resources/licenses/vm/$f"; abad=1; }
   done
   g -qF 'Contents/Helpers/wine.app/Contents/Resources/licenses/' "$AL/README" 2> /dev/null \

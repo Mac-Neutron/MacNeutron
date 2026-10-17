@@ -27,8 +27,11 @@ Fedora's packages, which it downloads from Fedora to the Mac (MacNeutron never s
   winemetal.so (LGPL-2.1-or-later, dxmt/), and Proton's lsteamclient (BSD-3-Clause, lsteamclient/) with MacNeutron's
   Steam forwarder (MIT, macneutron/).
 - overlay/: FEX for Linux (MIT, fex/); MacNeutron's tso-litmus and image configuration (MIT, macneutron/); and data
-  the image build generated from Fedora's packages: the user database, the library and module caches, systemd's
-  hardware database, and the CA trust bundles built from ca-certificates (Mozilla's root store, MPL-2.0).
+  the image build generated from Fedora's packages with their own tools: the user database (systemd-sysusers), the
+  library cache (glibc's ldconfig), the kernel module lists (kmod's depmod, from the kernel's modules), systemd's
+  hardware database (from systemd's hwdb files, LGPL-2.1-or-later), and the CA trust bundles (update-ca-trust, from
+  ca-certificates: Mozilla's root store, MPL-2.0). Those packages' sources are Fedora's, at the versions in
+  packages.lock.
 - share/bin: MacNeutron's guest tools (MIT, macneutron/).
 The source is in the release's source archive (MacNeutron-<version>-source.tar.gz): wine-linux.tar is this Wine
 (eac-vm/wine-patches on its BASE), dxmt.tar is DXMT, lsteamclient.tar is lsteamclient, and MacNeutron.tar holds the rest.

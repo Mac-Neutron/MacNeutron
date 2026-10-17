@@ -5,7 +5,7 @@
 # build/eac-vm-work/share/console.log. MN_RUN_TIMEOUT (seconds, default 1800) bounds a guest that never powers off.
 # MN_STATE=<file> is the run's state disk (/home: a game's prefix), made on first use as an APFS clone of the images'
 # empty template (no space until written); the images themselves are one copy for every game, read-only. Default:
-# images/state.img. MN_SHARE=<dir> is the run's own share (/mnt/share: run.sh, its results, the console), so runs with
+# state/default.img (never in images/, which a setup's image swap replaces). MN_SHARE=<dir> is the run's own share (/mnt/share: run.sh, its results, the console), so runs with
 # their own share and state go side by side; the tools a game takes from the share (bin/, valve/) come in as APFS clones
 # of the default share's. Default: share/, the tests' and gates' (their programs and traces).
 set -eu
@@ -31,7 +31,13 @@ if [ "$SHARE" != "$W/share" ]; then
 fi
 rm -f "$SHARE/run.log" "$SHARE/run.status" "$SHARE/console.log" "$SHARE/traces/ready"
 cp "$script" "$SHARE/run.sh"
-STATE=${MN_STATE:-$W/images/state.img}
+STATE=${MN_STATE:-$W/state/default.img}
+# Before 2026-10-17 the default state disk, and its TPM, lived in images/: moved once.
+if [ -z "${MN_STATE:-}" ] && [ ! -e "$STATE" ] && [ -e "$W/images/state.img" ]; then
+  mkdir -p "$W/state"
+  mv "$W/images/state.img" "$STATE"
+  if [ -e "$W/images/state.tpm" ]; then mv "$W/images/state.tpm" "${STATE%.img}.tpm"; fi
+fi
 if [ ! -e "$STATE" ]; then
   mkdir -p "$(dirname "$STATE")"
   cp -c "$W/images/state-template.img" "$STATE.tmp" && mv "$STATE.tmp" "$STATE"

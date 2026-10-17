@@ -67,7 +67,8 @@ let steamAppID = opts["--steam-appid"]
 let steamMap = opts["--steam-map"]
   ?? FileManager.default.homeDirectoryForCurrentUser.path + "/Library/Application Support/Steam/steamapps/common=/mnt/games"
 func path(_ n: String) -> String { images + "/" + n }
-let state = opts["--state"] ?? path("state.img")
+let state = opts["--state"]
+  ?? URL(fileURLWithPath: images).deletingLastPathComponent().appendingPathComponent("state/default.img").path
 let exeDir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().path
 
 for f in ["vmlinuz", "initramfs.img", "cmdline.txt", "base.erofs", "x86-64-rootfs.erofs", "wine.erofs"].map(path) + [state]

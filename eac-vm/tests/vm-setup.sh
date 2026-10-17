@@ -25,6 +25,9 @@ if [ ! -f "$G/rpms/.complete" ] || ! cmp -s "$W/images/packages.lock" "$G/rpms/.
   cp "$W/images/packages.lock" "$G/rpms/.complete"
 fi
 
+# Nothing of the builder's own goes to players: no package databases or install log, and an empty /etc/machine-id.
+/usr/bin/grep -qE '	/(usr/lib/sysimage/(rpm|libdnf5)|var/lib/dnf|var/log/dnf5\.log)' "$W/images/setup/recipe/base.tsv" \
+  && fail="$fail package-databases"
 # No machine identity of the builder's goes to players: /etc/machine-id is empty in the base tree.
 awk -F'\t' '$2 == "/etc/machine-id" && $6 != 0 { bad = 1 } END { exit bad }' "$W/images/setup/recipe/base.tsv" \
   || fail="$fail machine-id"
@@ -72,7 +75,7 @@ cat "$G/guest.txt" | /usr/bin/grep -v '^Fontconfig'
 /usr/bin/grep -qx '/dev/tpm0' "$G/guest.txt" || fail="$fail tpm"
 /usr/bin/grep -qx 'audio: ok' "$G/guest.txt" || fail="$fail audio"
 # The gate's TPM key, out of the keychain with its folder.
-id=$(cat "$VM/images/state.tpm/id" 2>/dev/null || true)
+id=$(cat "$VM/state/default.tpm/id" 2>/dev/null || true)
 [ -z "$id" ] || security delete-generic-password -s "MacNeutron vTPM" -a "$id" > /dev/null 2>&1 || true
 
 if [ -z "$fail" ]; then echo "vm-setup: ok"; else echo "vm-setup: FAIL$fail"; exit 1; fi

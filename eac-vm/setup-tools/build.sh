@@ -8,8 +8,8 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 HERE=$ROOT/eac-vm/setup-tools
-SRC=$ROOT/build/vm-setup-tools-src
-OUT=$ROOT/build/vm-setup-tools
+SRC=${BUILD_DIR:-$ROOT/build}/vm-setup-tools-src
+OUT=${BUILD_DIR:-$ROOT/build}/vm-setup-tools
 cmp -s "$HERE/PIN" "$OUT/PIN" 2>/dev/null && [ -x "$OUT/mkfs.erofs" ] && { echo "$OUT/mkfs.erofs"; exit 0; }
 mkdir -p "$SRC"
 while read -r name tag sha; do

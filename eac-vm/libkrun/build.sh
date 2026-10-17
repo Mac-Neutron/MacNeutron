@@ -21,7 +21,10 @@ for p in "$HERE"/patches/*.patch; do
   git -C "$SRC" am -q --committer-date-is-author-date "$p" || { git -C "$SRC" am --abort; echo "patch failed: $p" >&2; exit 1; }
 done
 # No build paths in the library (a release refuses them; panics name sources): Cargo's registry and this tree remapped.
-export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$HOME/.rustup=/rustup --remap-path-prefix=$SRC=/libkrun"
+# CARGO_ENCODED_RUSTFLAGS (0x1f between flags): a path with spaces stays one flag.
+CARGO_ENCODED_RUSTFLAGS=$(printf '%s\037%s\037%s' "--remap-path-prefix=$HOME/.cargo=/cargo" \
+  "--remap-path-prefix=$HOME/.rustup=/rustup" "--remap-path-prefix=$SRC=/libkrun")
+export CARGO_ENCODED_RUSTFLAGS
 (cd "$SRC" && PATH=$(dirname "$CARGO"):$PATH "$CARGO" build --release -p libkrun --no-default-features --features blk,net,ffi,gpu,input)
 mkdir -p "$OUT/include"
 cp "$SRC/target/release/libkrun.dylib" "$OUT/libkrun.1.dylib"

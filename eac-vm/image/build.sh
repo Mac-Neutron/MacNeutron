@@ -9,7 +9,6 @@
 #   wine.erofs           label mn-wine: our Wine (eac-vm/wine/build.sh install), /opt/mn-wine (read-only, shared), with
 #                        our DXMT and the guest winemetal.so over Wine's own D3D (eac-vm/dxmt/stage.sh); with
 #                        DXMT_GUEST=none, Wine's own D3D (llvmpipe): software rendering, optional since 4c
-#   state.img            label mn-state: 16 GiB sparse ext4 for /home, created only when missing
 #   state-template.img   the same, empty, never attached: each game's own state disk starts as an APFS clone of it
 #                        (run-guest.sh MN_STATE), so the images above are one copy for every game
 #   cmdline.txt, packages.lock
@@ -93,7 +92,9 @@ sudo rm -f "$WORK/root/lib/modules/$KVER/vmlinuz"  # it boots from outside the i
 # No machine identity: the builder's own would be every player's guest's (systemd makes one at each boot instead).
 sudo truncate -s 0 "$WORK/root/etc/machine-id"
 # The guest never runs rpm or dnf, and a Mac's setup (recipe.py) rebuilds the tree without their databases.
-sudo rm -rf "$WORK/root/usr/lib/sysimage/rpm" "$WORK/root/var/lib/dnf" "$WORK/root/var/cache/dnf"
+sudo rm -rf "$WORK/root/usr/lib/sysimage/rpm" "$WORK/root/usr/lib/sysimage/libdnf5" "$WORK/root/var/lib/dnf" \
+  "$WORK/root/var/cache/dnf" "$WORK/root/var/cache/libdnf5"
+sudo rm -f "$WORK/root"/var/log/dnf5.log* "$WORK/root"/var/log/hawkey.log*  # the builder's own install log
 for b in FEX FEXServer FEXBash FEXGetConfig FEXpidof; do sudo install -m755 "$FEX_BIN/$b" "$WORK/root/usr/bin/"; done
 sudo rm -f "$WORK/root/etc/resolv.conf"  # ours replaces whatever the packages left, a symlink included
 sudo cp -R "$HERE/rootfs/." "$WORK/root/"
@@ -113,9 +114,6 @@ sudo rm -f "$OUT/x86-64-rootfs.erofs"; sudo cp "$WORK/x86-rpm/usr/share/fex-emu/
 
 wine_image
 
-if [ ! -e "$OUT/state.img" ]; then
-  truncate -s 16G "$OUT/state.img"; sudo mkfs.ext4 -q -F -L mn-state "$OUT/state.img"
-fi
 state_template
 
 # rd.*: an initrd that cannot find or mount its root reboots after 30 s (ending the host) instead of waiting forever
