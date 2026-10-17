@@ -35,13 +35,15 @@ struct ImageAssembler {
         }
     }
 
-    /// One payload file to `to` (vmlinuz, FEX's default.erofs), checked against `sha256`.
-    func extract(_ rpm: URL, path: String, to: URL, sha256: String) throws {
+    /// One payload file to `to` (vmlinuz, FEX's default.erofs), checked against `sha256` when given (a checked
+    /// package already fixes its payload's bytes).
+    func extract(_ rpm: URL, path: String, to: URL, sha256: String?) throws {
         var found = false
         try RPMReader.readFiles(rpm) { _, paths, next in
             guard !found, paths.contains(path) else { return }
             found = true
-            guard try Self.copy(next, to: to) == sha256 else {
+            let hash = try Self.copy(next, to: to)
+            guard sha256 == nil || hash == sha256 else {
                 try? FileManager.default.removeItem(at: to)
                 throw VMSetupError.mismatch(file: path)
             }

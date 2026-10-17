@@ -8,6 +8,7 @@ public enum CommandLineTool {
         usage: macneutron launch <verb> <target> [args...]
                macneutron install --tool-dir <dir> --wine-app <wine.app> [--steam-exe <steam.exe>] [--force]
                macneutron passthrough <verb> <command> [args...]
+               macneutron vm-setup --manifest <vm-manifest.json> --vm <dir> [--mkfs <mkfs.erofs>] [--min-free-gb <n>]
         """
 
     public static func run(_ args: [String], environment: [String: String], executable: URL) async -> Int32 {
@@ -55,6 +56,24 @@ public enum CommandLineTool {
                 return failure(error)
             }
             return 1  // a successful exec doesn't return
+        case "vm-setup":
+            // Both required: tests and the gate set up their own folders, never the installed one.
+            var args = rest
+            guard let manifest = option("--manifest", in: &args), let vm = option("--vm", in: &args) else {
+                return usageError()
+            }
+            let mkfs = option("--mkfs", in: &args).map { URL(filePath: $0) }
+                ?? executable.deletingLastPathComponent().appending(path: "mkfs.erofs")
+            let minFree = option("--min-free-gb", in: &args).flatMap { Int($0) } ?? 6
+            guard args.isEmpty else { return usageError() }
+            setvbuf(stdout, nil, _IOLBF, 0)  // the app reads the progress lines as they come
+            do {
+                return try await VMSetup.run(manifest: URL(filePath: manifest), vm: URL(filePath: vm, directoryHint: .isDirectory),
+                                             mkfs: mkfs, minFreeGB: minFree)
+            } catch {
+                FileHandle.standardError.write(Data("\(error)\n".utf8))
+                return 1
+            }
         default:
             return usageError()
         }

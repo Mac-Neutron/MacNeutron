@@ -99,3 +99,18 @@ import Testing
     #expect(status == 0)
     #expect(try String(contentsOf: out, encoding: .utf8) == "arm64")
 }
+
+@Test func vmSetupNeedsAManifestAndAFolder() async throws {
+    // Never the real VM folder by default.
+    #expect(await CommandLineTool.run(["vm-setup", "--manifest", "/nonexistent.json"], environment: [:],
+                                      executable: URL(filePath: "/x")) == 2)
+    #expect(await CommandLineTool.run(["vm-setup", "--vm", try makeTempDir().path], environment: [:],
+                                      executable: URL(filePath: "/x")) == 2)
+    // With both, it runs: a developer's linked folder is left alone, and that's a success.
+    let link = try makeTempDir().appending(path: "vm")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: try makeTempDir())
+    let manifest = try makeTempDir().appending(path: "vm-manifest.json")
+    try write("{}", to: manifest)
+    #expect(await CommandLineTool.run(["vm-setup", "--manifest", manifest.path, "--vm", link.path], environment: [:],
+                                      executable: URL(filePath: "/x")) == 0)
+}
