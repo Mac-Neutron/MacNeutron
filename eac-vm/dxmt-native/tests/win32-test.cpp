@@ -91,8 +91,10 @@ int main() {
         bool sized = GetFileSizeEx(h, &size) && size.QuadPart == 5;
         bool read = SetFilePointer(h, 0, nullptr, FILE_BEGIN) == 0 && ReadFile(h, back, 5, &n, nullptr) && n == 5 &&
                     !memcmp(back, "hello", 5);
-        bool cut = SetFilePointer(h, 2, nullptr, FILE_BEGIN) == 2 && SetEndOfFile(h) && GetFileSizeEx(h, &size) &&
-                   size.QuadPart == 2;
+        LARGE_INTEGER two = {}, at = {};
+        two.QuadPart = 2;
+        bool cut = SetFilePointerEx(h, two, &at, FILE_BEGIN) && at.QuadPart == 2 && SetEndOfFile(h) &&
+                   GetFileSizeEx(h, &size) && size.QuadPart == 2;
         CloseHandle(h);
         HANDLE o = CreateFileW(other.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         CloseHandle(o);
@@ -114,6 +116,33 @@ int main() {
         QueryPerformanceCounter(&b);
         double took = ms_between(a, b, f);
         check("clock", f.QuadPart == 1000000000 && took >= 8 && took <= 50 && GetTickCount64() > 0);
+    }
+
+    // thread: another thread's name by its id (DXMT_STATS names every thread it saw from the one that reports), and
+    // the calling thread's through its pseudo-handle.
+    {
+        DWORD id = 0;
+        HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr), done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        std::thread t([&] {
+            pthread_setname_np("mn-named");
+            id = GetCurrentThreadId();
+            SetEvent(ready);
+            WaitForSingleObject(done, INFINITE);
+        });
+        WaitForSingleObject(ready, INFINITE);
+        LPWSTR name = nullptr, mine = nullptr;
+        HANDLE th = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, id);
+        bool other = th && SUCCEEDED(GetThreadDescription(th, &name)) && name && std::wstring(name) == L"mn-named";
+        LocalFree(name);
+        CloseHandle(th);
+        SetEvent(done);
+        t.join();
+        pthread_setname_np("mn-main");
+        bool self = SUCCEEDED(GetThreadDescription(GetCurrentThread(), &mine)) && mine && std::wstring(mine) == L"mn-main";
+        LocalFree(mine);
+        check("thread", id && other && self && !OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, 0));
+        CloseHandle(ready);
+        CloseHandle(done);
     }
 
     // module: dlopen and dlsym behind LoadLibraryA and GetProcAddress.

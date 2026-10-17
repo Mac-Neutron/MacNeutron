@@ -204,6 +204,8 @@ starts no replay; an edit to airconv, even uncommitted, gets new ones (`tests/tr
 patch's message names the arm64 failure it fixes. Folding the patches into the fork (and moving the pin) is a separate
 maintainer step.
 
+The same tree also builds natively, as macOS dylibs (`eac-vm/dxmt-native/build.sh`, Direct3D forwarding M1): `d3d12`, `dxgi`, `d3d11`, `d3d10core` and `winemetal` in `build/dxmt-native/install/lib`. Its D3D12 headers, `include/native/d3d12` in the tree (patch 0073), are copies of the pinned llvm-mingw's: after a toolchain bump in `dxmt/pins`, copy them again, or the native and PE builds see different interfaces.
+
 lsteamclient works the same way. Its tree, `build/wine-arm64-src/lsteamclient`, is a sparse, blob-filtered checkout of
 Proton's `lsteamclient/` folder at `deps.pins`' `LSTEAMCLIENT_COMMIT` (without the Steamworks SDK folders), linked
 into the Wine tree as `dlls/lsteamclient` (ignored there, so the Wine tree stays applied; Wine patch 0016 registers
