@@ -756,11 +756,17 @@ A Mac downloads about 1.27 GB.
 - gvproxy's notices ship: its own, its 17 Go modules' from its vendored source at v0.8.9, and Go 1.26.3's
   (`eac-vm/net/licences.sh`).
 
+**Rehearsed 2026-10-17:** `release.sh --rehearse 0.6.0` passes end to end (R3 against Mac Steam, the VM's parts and
+manifest with every pinned package answering, R4, the zip, R5 sources), and `eac-vm/tests/vm-setup.sh` on the images it
+built. It ran on the stable series' trees: this branch's own trees are the upstream-master experiment's (its merges are
+commits in the trees, past the pins), which check_trees refuses. Wine 0037 left the series for
+`wine-arm64/patches/wine-master` (only master's mem areas need it); every other patch applies at the pins. The stable
+trees, their build folders and wine.app wait in `build/wine-arm64-src.stable`; the experiment's are back in
+`build/wine-arm64-src`.
+
 **Open:**
-- This branch's build trees (Wine, FEX, DXMT, lsteamclient) are the upstream-master experiment's: its merges are
-  commits in the trees, past the pins, not patch series. A release, rehearsed or not, refuses them (check_trees), so a
-  release from this branch first needs its trees re-pinned and re-exported, or the stable series' trees; the
-  maintainer's call.
+- A release from this branch builds for the M5 (`MACNEUTRON_CPU=apple-m5`, the experiment's default): the launcher
+  refuses an M1-M4 Mac (Preflight). A release for every Mac needs `MACNEUTRON_CPU=generic`.
 - A release that rebuilds the images changes the parts' bytes, so every Mac downloads again; reusing an unchanged VM's
   parts is the maintainer's call.
 - The first run on a clean macOS account is the maintainer's (plan 4, task 3).
