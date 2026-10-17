@@ -17,7 +17,7 @@
 #include <vector>
 
 #define CHECK(expr) do { HRESULT hr_ = (expr); if (FAILED(hr_)) { \
-    printf("%s failed 0x%08lx\n", #expr, (unsigned long)hr_); exit(1); } } while (0)
+    printf("%s failed 0x%08lx\n", #expr, (unsigned long)(unsigned)hr_); exit(1); } } while (0)
 
 static std::vector<char> load(const std::string &path) {
     std::vector<char> data;
@@ -323,7 +323,7 @@ int main(int argc, char **argv) {
         D3D12_COMPUTE_PIPELINE_STATE_DESC d = {}; d.pRootSignature = rs; d.CS = {cs.data(), cs.size()};
         ID3D12PipelineState *pso = nullptr;
         HRESULT hr = device->CreateComputePipelineState(&d, __uuidof(ID3D12PipelineState), (void **)&pso);
-        if (FAILED(hr)) { printf("group %s fail 0x%08lx\n", name.c_str(), (unsigned long)hr); fflush(stdout); continue; }
+        if (FAILED(hr)) { printf("group %s fail 0x%08lx\n", name.c_str(), (unsigned long)(unsigned)hr); fflush(stdout); continue; }
         // Every group starts from zeroed UAVs (RWTyped, AtomicS, AtomicTex, AtomicTexF, a64 and AtomicTex64 are zeroed here
         // too; RWTex isn't read).
         list->CopyBufferRegion(out, 0, zerobuf, 0, 4096);

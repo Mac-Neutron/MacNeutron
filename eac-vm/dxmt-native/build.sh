@@ -37,5 +37,5 @@ for f in d3d12/d3d12 dxgi/dxgi d3d11/d3d11 d3d10/d3d10core nativemetal/winemetal
   codesign --force --sign - "$lib" 2> /dev/null
 done
 cp -R "$D/include/native/." "$I/include-native/"
-cp "$D/src/util/win32_native.h" "$I/include-native/"
+cp "$D/src/util/win32_native.h" "$D/src/util/win32_native_event.h" "$I/include-native/"
 echo "dxmt-native: built $(cd "$I/lib" && echo *.dylib)"

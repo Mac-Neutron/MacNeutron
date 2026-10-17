@@ -19,7 +19,7 @@
 #include <vector>
 
 #define CHECK(expr) do { HRESULT hr_ = (expr); if (FAILED(hr_)) { \
-    printf("%s failed 0x%08lx\n", #expr, (unsigned long)hr_); exit(1); } } while (0)
+    printf("%s failed 0x%08lx\n", #expr, (unsigned long)(unsigned)hr_); exit(1); } } while (0)
 
 static std::vector<char> load(const char *path) {
     std::vector<char> data;
@@ -124,7 +124,7 @@ int main(int argc, char **argv) {
     gd.SampleDesc.Count = 1;
     ID3D12PipelineState *pso = nullptr;
     HRESULT hr = device->CreateGraphicsPipelineState(&gd, __uuidof(ID3D12PipelineState), (void **)&pso);
-    if (FAILED(hr)) { printf("triangle fail 0x%08lx\n", (unsigned long)hr); return 0; }
+    if (FAILED(hr)) { printf("triangle fail 0x%08lx\n", (unsigned long)(unsigned)hr); return 0; }
 
     // Constants: scale (0.9, 0.9), offset (0.05, -0.05).
     float cb[4] = {0.9f, 0.9f, 0.05f, -0.05f};

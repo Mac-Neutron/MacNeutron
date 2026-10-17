@@ -13,7 +13,7 @@
 #include <cstring>
 
 #define CHECK(expr) do { HRESULT hr_ = (expr); if (FAILED(hr_)) { \
-    printf("%s failed 0x%08lx\n", #expr, (unsigned long)hr_); exit(1); } } while (0)
+    printf("%s failed 0x%08lx\n", #expr, (unsigned long)(unsigned)hr_); exit(1); } } while (0)
 
 static const char kSource[] = R"(
 struct VSOut { float4 pos : SV_Position; float4 a : TEXCOORD0; float4 b : TEXCOORD1; float4 c : TEXCOORD2; float4 d : TEXCOORD3; };
@@ -33,7 +33,7 @@ static ID3DBlob *Compile(const char *entry, const char *target) {
     ID3DBlob *code = nullptr, *errors = nullptr;
     HRESULT hr = D3DCompile(kSource, sizeof kSource - 1, "vsia", nullptr, nullptr, entry, target, 0, 0, &code, &errors);
     if (FAILED(hr)) {
-        printf("D3DCompile %s failed 0x%08lx %s\n", entry, (unsigned long)hr,
+        printf("D3DCompile %s failed 0x%08lx %s\n", entry, (unsigned long)(unsigned)hr,
                errors ? (const char *)errors->GetBufferPointer() : "");
         exit(1);
     }
@@ -49,7 +49,7 @@ static int CompileFile(char **argv) {
     ID3DBlob *code = nullptr, *errors = nullptr;
     HRESULT hr = D3DCompile(source, n, argv[2], nullptr, nullptr, argv[3], argv[4], 0, 0, &code, &errors);
     if (FAILED(hr)) {
-        printf("D3DCompile failed 0x%08lx %s\n", (unsigned long)hr, errors ? (const char *)errors->GetBufferPointer() : "");
+        printf("D3DCompile failed 0x%08lx %s\n", (unsigned long)(unsigned)hr, errors ? (const char *)errors->GetBufferPointer() : "");
         return 1;
     }
     f = fopen(argv[5], "wb");

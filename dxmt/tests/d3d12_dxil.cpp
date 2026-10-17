@@ -27,7 +27,7 @@ int main(int argc, char **argv) {
 
     ID3D12Device *device;
     HRESULT hr = D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), (void **)&device);
-    if (FAILED(hr)) { printf("D3D12CreateDevice hr=0x%08lx\n", (unsigned long)hr); fflush(stdout); return 1; }
+    if (FAILED(hr)) { printf("D3D12CreateDevice hr=0x%08lx\n", (unsigned long)(unsigned)hr); fflush(stdout); return 1; }
     // A root UAV at u0, which compute.hlsl writes; a table of t0 and a static point sampler at s0, so that the canary's
     // resources are all bound and only its op is refused. The triangle binds nothing.
     D3D12_ROOT_PARAMETER params[2] = {};
@@ -52,11 +52,11 @@ int main(int argc, char **argv) {
     rd.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
     ID3DBlob *blob = nullptr, *error = nullptr;
     hr = D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error);
-    if (FAILED(hr)) { printf("D3D12SerializeRootSignature hr=0x%08lx\n", (unsigned long)hr); fflush(stdout); return 1; }
+    if (FAILED(hr)) { printf("D3D12SerializeRootSignature hr=0x%08lx\n", (unsigned long)(unsigned)hr); fflush(stdout); return 1; }
     ID3D12RootSignature *root;
     hr = device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(),
                                      __uuidof(ID3D12RootSignature), (void **)&root);
-    if (FAILED(hr)) { printf("CreateRootSignature hr=0x%08lx\n", (unsigned long)hr); fflush(stdout); return 1; }
+    if (FAILED(hr)) { printf("CreateRootSignature hr=0x%08lx\n", (unsigned long)(unsigned)hr); fflush(stdout); return 1; }
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC gd = {};
     gd.pRootSignature = root;
@@ -73,17 +73,17 @@ int main(int argc, char **argv) {
     gd.SampleDesc.Count = 1;
     ID3D12PipelineState *pso = nullptr;
     hr = device->CreateGraphicsPipelineState(&gd, __uuidof(ID3D12PipelineState), (void **)&pso);
-    printf("graphics hr=0x%08lx\n", (unsigned long)hr); fflush(stdout);
+    printf("graphics hr=0x%08lx\n", (unsigned long)(unsigned)hr); fflush(stdout);
     // A sample count of 0 (SMITE 2 creates one): D3DMetal is the reference for what it gives.
     gd.SampleDesc.Count = 0;
     hr = device->CreateGraphicsPipelineState(&gd, __uuidof(ID3D12PipelineState), (void **)&pso);
-    printf("graphics-samples0 hr=0x%08lx\n", (unsigned long)hr); fflush(stdout);
+    printf("graphics-samples0 hr=0x%08lx\n", (unsigned long)(unsigned)hr); fflush(stdout);
     // Newer device interfaces (AMD's FSR 3 swapchain needs ID3D12Device8): D3DMetal is the reference.
     const IID devices[] = {__uuidof(ID3D12Device5), __uuidof(ID3D12Device6), __uuidof(ID3D12Device7), __uuidof(ID3D12Device8)};
     for (int i = 0; i < 4; i++) {
         IUnknown *newer = nullptr;
         hr = device->QueryInterface(devices[i], (void **)&newer);
-        printf("device%d hr=0x%08lx\n", i + 5, (unsigned long)hr); fflush(stdout);
+        printf("device%d hr=0x%08lx\n", i + 5, (unsigned long)(unsigned)hr); fflush(stdout);
         if (newer) newer->Release();
     }
 
@@ -91,10 +91,10 @@ int main(int argc, char **argv) {
     cd.pRootSignature = root;
     cd.CS = {cs.data(), cs.size()};
     hr = device->CreateComputePipelineState(&cd, __uuidof(ID3D12PipelineState), (void **)&pso);
-    printf("compute hr=0x%08lx\n", (unsigned long)hr); fflush(stdout);
+    printf("compute hr=0x%08lx\n", (unsigned long)(unsigned)hr); fflush(stdout);
 
     cd.CS = {canary.data(), canary.size()};
     hr = device->CreateComputePipelineState(&cd, __uuidof(ID3D12PipelineState), (void **)&pso);
-    printf("canary hr=0x%08lx\n", (unsigned long)hr); fflush(stdout);
+    printf("canary hr=0x%08lx\n", (unsigned long)(unsigned)hr); fflush(stdout);
     return 0;
 }

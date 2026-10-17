@@ -31,8 +31,8 @@ static void CachedBlob(ID3D12RootSignature *root) {
         ID3D12PipelineState *second = nullptr;
         again = gpu->device->CreateGraphicsPipelineState(&gd, __uuidof(ID3D12PipelineState), (void **)&second);
     }
-    printf("cachedblob %08lx %zu %08lx\n", (unsigned long)hr, blob ? (size_t)blob->GetBufferSize() : (size_t)0,
-           (unsigned long)again);
+    printf("cachedblob %08lx %zu %08lx\n", (unsigned long)(unsigned)hr, blob ? (size_t)blob->GetBufferSize() : (size_t)0,
+           (unsigned long)(unsigned)again);
 }
 
 static void NullDsv(ID3D12RootSignature *root) {  // a depth view with no resource: the draw must finish
@@ -71,7 +71,7 @@ static void List1() {
     CHECK(gpu->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator), (void **)&allocator));
     HRESULT reset = list ? list->Reset(allocator, nullptr) : E_FAIL;
     HRESULT close = list ? list->Close() : E_FAIL;
-    printf("list1 %08lx reset %08lx close %08lx\n", (unsigned long)hr, (unsigned long)reset, (unsigned long)close);
+    printf("list1 %08lx reset %08lx close %08lx\n", (unsigned long)(unsigned)hr, (unsigned long)reset, (unsigned long)close);
 }
 
 static void Heap1() {
@@ -79,7 +79,7 @@ static void Heap1() {
     CHECK(gpu->device->QueryInterface(__uuidof(ID3D12Device4), (void **)&d4));
     D3D12_HEAP_DESC hd = {65536, {D3D12_HEAP_TYPE_DEFAULT}, 0, D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS};
     ID3D12Heap *heap = nullptr;
-    printf("heap1 %08lx\n", (unsigned long)d4->CreateHeap1(&hd, nullptr, __uuidof(ID3D12Heap), (void **)&heap));
+    printf("heap1 %08lx\n", (unsigned long)(unsigned)d4->CreateHeap1(&hd, nullptr, __uuidof(ID3D12Heap), (void **)&heap));
 }
 
 // Map on a buffer placed in a heap the CPU can't see (CUSTOM with no CPU pages, DEFAULT) fails; in an UPLOAD one it
@@ -97,7 +97,7 @@ static void MapGuard() {
             hr = gpu->device->CreatePlacedResource(heap, 0, &bd, state, nullptr, __uuidof(ID3D12Resource), (void **)&b);
         if (SUCCEEDED(hr))
             hr = b->Map(0, nullptr, &p);
-        printf(" %s %08lx %d", name, (unsigned long)hr, p != nullptr);
+        printf(" %s %08lx %d", name, (unsigned long)(unsigned)hr, p != nullptr);
     };
     D3D12_HEAP_PROPERTIES custom = {D3D12_HEAP_TYPE_CUSTOM, D3D12_CPU_PAGE_PROPERTY_NOT_AVAILABLE, D3D12_MEMORY_POOL_L0};
     printf("map");
@@ -121,8 +121,8 @@ static void Residency() {
     HANDLE e = CreateEventA(nullptr, FALSE, FALSE, nullptr);
     fence->SetEventOnCompletion(5, e);
     WaitForSingleObject(e, 1000);
-    printf("residency evict %08lx resident %08lx priority %08lx enqueue %08lx fence %llu\n", (unsigned long)evict,
-           (unsigned long)resident, (unsigned long)prio, (unsigned long)enqueue, (unsigned long long)fence->GetCompletedValue());
+    printf("residency evict %08lx resident %08lx priority %08lx enqueue %08lx fence %llu\n", (unsigned long)(unsigned)evict,
+           (unsigned long)(unsigned)resident, (unsigned long)(unsigned)prio, (unsigned long)(unsigned)enqueue, (unsigned long long)fence->GetCompletedValue());
 }
 
 static void MultiFence() {
@@ -144,13 +144,13 @@ static void MultiFence() {
     HANDLE none = CreateEventA(nullptr, FALSE, FALSE, nullptr);
     HRESULT hr_none = d1->SetEventOnMultipleFenceCompletion(fences, values, 0, D3D12_MULTIPLE_FENCE_WAIT_FLAG_ALL, none);
     int none_set = WaitForSingleObject(none, 200) == WAIT_OBJECT_0;
-    printf("multifence any %08lx %d all %08lx %d %d wait %08lx none %08lx %d\n", (unsigned long)hr_any, any_set,
-           (unsigned long)hr_all, all_early, all_late, (unsigned long)wait, (unsigned long)hr_none, none_set);
+    printf("multifence any %08lx %d all %08lx %d %d wait %08lx none %08lx %d\n", (unsigned long)(unsigned)hr_any, any_set,
+           (unsigned long)(unsigned)hr_all, all_early, all_late, (unsigned long)wait, (unsigned long)(unsigned)hr_none, none_set);
 }
 
 template <typename T> static void Feature(int id) {
     T data = {};
-    printf("feature %d %08lx\n", id, (unsigned long)gpu->device->CheckFeatureSupport((D3D12_FEATURE)id, &data, sizeof data));
+    printf("feature %d %08lx\n", id, (unsigned long)(unsigned)gpu->device->CheckFeatureSupport((D3D12_FEATURE)id, &data, sizeof data));
 }
 struct Raw40 { UINT v[10]; };  // OPTIONS19 (48)
 struct Raw16 { UINT v[4]; };   // OPTIONS21 (53)
@@ -185,7 +185,7 @@ static void Library(ID3D12RootSignature *root) {
     CHECK(gpu->device->QueryInterface(__uuidof(ID3D12Device1), (void **)&d1));
     D3D12_GRAPHICS_PIPELINE_STATE_DESC gd;
     ID3D12PipelineState *pso = QuadPipeline(*gpu, root, vs, ps, &gd), *got = nullptr;
-    auto step = [](const char *name, HRESULT hr) { printf("library %s %08lx\n", name, (unsigned long)hr); };
+    auto step = [](const char *name, HRESULT hr) { printf("library %s %08lx\n", name, (unsigned long)(unsigned)hr); };
     ID3D12PipelineLibrary *lib = nullptr;
     step("create", d1->CreatePipelineLibrary(nullptr, 0, __uuidof(ID3D12PipelineLibrary), (void **)&lib));
     if (!lib)
@@ -194,7 +194,7 @@ static void Library(ID3D12RootSignature *root) {
     step("store", lib->StorePipeline(L"a", pso));
     step("store-again", lib->StorePipeline(L"a", pso));
     HRESULT hr = lib->LoadGraphicsPipeline(L"a", &gd, __uuidof(ID3D12PipelineState), (void **)&got);
-    printf("library load-stored %08lx same %d\n", (unsigned long)hr, got == pso);
+    printf("library load-stored %08lx same %d\n", (unsigned long)(unsigned)hr, got == pso);
     if (got) got->Release();
     D3D12_GRAPHICS_PIPELINE_STATE_DESC other = gd;
     other.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
@@ -202,11 +202,11 @@ static void Library(ID3D12RootSignature *root) {
     pso->Release();  // the library still holds the stored pipeline
     got = nullptr;
     hr = lib->LoadGraphicsPipeline(L"a", &gd, __uuidof(ID3D12PipelineState), (void **)&got);
-    printf("library load-after-release %08lx valid %d\n", (unsigned long)hr, got != nullptr);
+    printf("library load-after-release %08lx valid %d\n", (unsigned long)(unsigned)hr, got != nullptr);
     SIZE_T size = lib->GetSerializedSize();
     std::vector<char> blob(size);
     hr = lib->Serialize(blob.data(), size);
-    printf("library serialize %08lx nonzero %d\n", (unsigned long)hr, size > 0);
+    printf("library serialize %08lx nonzero %d\n", (unsigned long)(unsigned)hr, size > 0);
     ID3D12PipelineLibrary *lib2 = nullptr;
     step("from-blob", d1->CreatePipelineLibrary(blob.data(), size, __uuidof(ID3D12PipelineLibrary), (void **)&lib2));
     if (lib2)

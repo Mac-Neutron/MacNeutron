@@ -19,7 +19,7 @@
 #include <vector>
 
 #define CHECK(expr) do { HRESULT hr_ = (expr); if (FAILED(hr_)) { \
-    printf("%s failed 0x%08lx\n", #expr, (unsigned long)hr_); exit(1); } } while (0)
+    printf("%s failed 0x%08lx\n", #expr, (unsigned long)(unsigned)hr_); exit(1); } } while (0)
 
 static std::vector<char> load(const char *path) {
     std::vector<char> data;
@@ -95,7 +95,7 @@ static ID3D12PipelineState *Pipeline(ID3D12RootSignature *root, const std::vecto
     D3D12_PIPELINE_STATE_STREAM_DESC sd = {sizeof stream, &stream};
     ID3D12PipelineState *pso = nullptr;
     HRESULT hr = device->CreatePipelineState(&sd, __uuidof(ID3D12PipelineState), (void **)&pso);
-    if (FAILED(hr)) { printf("depth fail CreatePipelineState 0x%08lx\n", (unsigned long)hr); exit(0); }
+    if (FAILED(hr)) { printf("depth fail CreatePipelineState 0x%08lx\n", (unsigned long)(unsigned)hr); exit(0); }
     return pso;
 }
 

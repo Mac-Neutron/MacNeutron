@@ -25,7 +25,7 @@
 #include <initializer_list>
 
 #define CHECK(expr) do { HRESULT hr_ = (expr); if (FAILED(hr_)) { \
-    printf("%s failed 0x%08lx\n", #expr, (unsigned long)hr_); return 1; } } while (0)
+    printf("%s failed 0x%08lx\n", #expr, (unsigned long)(unsigned)hr_); return 1; } } while (0)
 
 static HWND game;
 static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l) {

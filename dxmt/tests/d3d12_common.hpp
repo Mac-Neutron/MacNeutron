@@ -10,7 +10,7 @@
 #include <vector>
 
 #define CHECK(expr) do { HRESULT hr_ = (expr); if (FAILED(hr_)) { \
-    printf("%s failed 0x%08lx\n", #expr, (unsigned long)hr_); exit(1); } } while (0)
+    printf("%s failed 0x%08lx\n", #expr, (unsigned long)(unsigned)hr_); exit(1); } } while (0)
 
 inline std::vector<char> Load(const char *path) {
     std::vector<char> data;

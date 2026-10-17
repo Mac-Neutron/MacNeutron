@@ -15,6 +15,7 @@ PROGRAMS="d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_copy d3d12_dep
   d3d12_upscale d3d12_volume d3d12_vsread"
 [ -f "$I/lib/d3d12.dylib" ] || { echo "tests: FAIL no native DXMT: run eac-vm/dxmt-native/build.sh first"; exit 1; }
 mkdir -p "$OUT"
+for p in $PROGRAMS; do rm -f "$OUT/$p"; done  # a failed build must not leave the last one in its place
 for p in $PROGRAMS; do
   clang++ -std=c++17 -O1 -w -include "$H/native-prelude.h" -I"$H/include" -I"$I/include-native/d3d12" \
     -I"$I/include-native/windows" -I"$I/include-native/directx" -I"$I/include-native" -o "$OUT/$p" "$T/$p.cpp" \

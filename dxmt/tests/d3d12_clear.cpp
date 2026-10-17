@@ -14,7 +14,7 @@
 #include <cstdlib>
 
 #define CHECK(expr) do { HRESULT hr_ = (expr); if (FAILED(hr_)) { \
-    printf("%s failed 0x%08lx\n", #expr, (unsigned long)hr_); return 1; } } while (0)
+    printf("%s failed 0x%08lx\n", #expr, (unsigned long)(unsigned)hr_); return 1; } } while (0)
 
 static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l) { return DefWindowProcA(h, m, w, l); }
 
@@ -42,7 +42,7 @@ int main(int argc, char **argv) {
     D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
     device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof options);
     printf("adapter %ls\nshader model 0x%x (hr 0x%08lx)\nresource binding tier %d\n",
-           ad.Description, (unsigned)sm.HighestShaderModel, (unsigned long)smhr, (int)options.ResourceBindingTier);
+           ad.Description, (unsigned)sm.HighestShaderModel, (unsigned long)(unsigned)smhr, (int)options.ResourceBindingTier);
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_12_0,
                                         D3D_FEATURE_LEVEL_12_1};
     D3D12_FEATURE_DATA_FEATURE_LEVELS fl = {4, levels};

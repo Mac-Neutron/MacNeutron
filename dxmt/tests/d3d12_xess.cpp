@@ -826,7 +826,7 @@ static void Unsupported() {
     static Bare bare;
     HRESULT hr = D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), (void **)&device);
     if (FAILED(hr)) {
-        printf("info no D3D12 device (0x%08lx): a bare IUnknown instead\n", (unsigned long)hr);
+        printf("info no D3D12 device (0x%08lx): a bare IUnknown instead\n", (unsigned long)(unsigned)hr);
         device = (ID3D12Device *)&bare;
     }
     xess_context_handle_t ctx = (xess_context_handle_t)1;

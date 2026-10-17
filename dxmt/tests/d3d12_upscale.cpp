@@ -172,7 +172,7 @@ static void Run(const Upscale &u) {
     }
     IMTLD3D12DeviceExt *ext = nullptr;
     HRESULT hr = g.device->QueryInterface(kDeviceExt, (void **)&ext);
-    if (FAILED(hr)) { printf("upscale %s FAIL no IMTLD3D12DeviceExt 0x%08lx\n", u.name.c_str(), (unsigned long)hr); exit(1); }
+    if (FAILED(hr)) { printf("upscale %s FAIL no IMTLD3D12DeviceExt 0x%08lx\n", u.name.c_str(), (unsigned long)(unsigned)hr); exit(1); }
     IMTLD3D12CommandListExt *list = nullptr;
     CHECK(g.list->QueryInterface(kListExt, (void **)&list));
 
@@ -190,7 +190,7 @@ static void Run(const Upscale &u) {
             refused.ColorFormat = f;
             HRESULT hr = ext->CreateTemporalScaler(&refused, &scaler);
             if (hr != E_INVALIDARG || scaler) {
-                printf("upscale bad FAIL colour %d 0x%08lx\n", (int)f, (unsigned long)hr);
+                printf("upscale bad FAIL colour %d 0x%08lx\n", (int)f, (unsigned long)(unsigned)hr);
                 exit(1);
             }
         }
@@ -294,7 +294,7 @@ static void Run(const Upscale &u) {
             HRESULT b = list->TemporalUpscale(scaler, &refused);
             HRESULT c = list->TemporalUpscale(scaler, &ud);
             if (a != E_INVALIDARG || b != E_INVALIDARG || c != S_OK) {
-                printf("upscale bad FAIL 0x%08lx 0x%08lx 0x%08lx\n", (unsigned long)a, (unsigned long)b, (unsigned long)c);
+                printf("upscale bad FAIL 0x%08lx 0x%08lx 0x%08lx\n", (unsigned long)(unsigned)a, (unsigned long)(unsigned)b, (unsigned long)(unsigned)c);
                 exit(1);
             }
         } else {
@@ -388,7 +388,7 @@ int main(int argc, char **argv) {
             Gpu g;
             IMTLD3D12DeviceExt *ext = nullptr;
             HRESULT hr = g.device->QueryInterface(kDeviceExt, (void **)&ext);
-            if (FAILED(hr)) { printf("upscale range FAIL no IMTLD3D12DeviceExt 0x%08lx\n", (unsigned long)hr); return 1; }
+            if (FAILED(hr)) { printf("upscale range FAIL no IMTLD3D12DeviceExt 0x%08lx\n", (unsigned long)(unsigned)hr); return 1; }
             float lo = 0, hi = 0;
             CHECK(ext->GetTemporalScalerScaleRange(&lo, &hi));
             printf("range %.3f %.3f\n", lo, hi);
