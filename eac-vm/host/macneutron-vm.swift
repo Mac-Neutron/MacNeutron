@@ -63,9 +63,11 @@ func made<T>(_ handle: T?, _ what: String) -> T {
 var opts: [String: String] = [:]
 // --metal-test-ops (a bare flag): the Metal transport's test ops (eac-vm/metal/gate.sh); a game's VM never has them.
 let metalTestOps = CommandLine.arguments.contains("--metal-test-ops")
-// --print-cpus (a bare flag): print the vCPUs it would boot with, then exit (eac-vm/tests/vcpus.sh).
+// --print-cpus, --print-cmdline (bare flags): print the vCPUs, or the guest kernel's command line, it would boot with,
+// then exit (eac-vm/tests/vcpus.sh, cmdline.sh).
 let printCPUs = CommandLine.arguments.contains("--print-cpus")
-let argv = CommandLine.arguments.filter { $0 != "--metal-test-ops" && $0 != "--print-cpus" }
+let printCmdline = CommandLine.arguments.contains("--print-cmdline")
+let argv = CommandLine.arguments.filter { !["--metal-test-ops", "--print-cpus", "--print-cmdline"].contains($0) }
 for i in stride(from: 1, to: argv.count - 1, by: 2) { opts[argv[i]] = argv[i + 1] }
 let cpus = Int(opts["--cpus"] ?? "") ?? environmentCPUs() ?? defaultCPUs()
 if printCPUs {
@@ -93,8 +95,28 @@ where access(f, R_OK) != 0 {
 // One VM per state disk: two writers would corrupt its ext4. The lock lives as long as this process.
 let stateLock = open(state, O_RDWR)
 if stateLock < 0 || flock(stateLock, LOCK_EX | LOCK_NB) != 0 { fail(3, "\(state) is in use") }
-let cmdline = (try? String(contentsOfFile: path("cmdline.txt"), encoding: .utf8))?
-  .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+// MN_VM_CMDLINE_EXTRA (Direct3D forwarding M5): tick and RCU parameters appended to the images' command line, for
+// measuring. Only these: the kernel takes a parameter's last value, so lockdown=, module.sig_enforce= or init= must
+// never get in. Anything else is refused whole, and said.
+let cmdlineExtra: String = {
+  guard let v = ProcessInfo.processInfo.environment["MN_VM_CMDLINE_EXTRA"], !v.isEmpty else { return "" }
+  let allowed = ["nohz_full=", "rcu_nocbs=", "nohz=", "skew_tick=", "irqaffinity="]
+  let words = v.split(separator: " ")
+  if words.allSatisfy({ w in
+    allowed.contains { w.hasPrefix($0) } && w.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "=_,-".contains($0)) }
+  }) {
+    return " " + words.joined(separator: " ")
+  }
+  FileHandle.standardError.write("macneutron-vm: MN_VM_CMDLINE_EXTRA=\(v) refused: only \(allowed.joined(separator: " "))\n"
+    .data(using: .utf8)!)
+  return ""
+}()
+let cmdline = ((try? String(contentsOfFile: path("cmdline.txt"), encoding: .utf8))?
+  .trimmingCharacters(in: .whitespacesAndNewlines) ?? "") + cmdlineExtra
+if printCmdline {
+  print(cmdline)
+  exit(0)
+}
 
 // MN_KRUN_LOG: libkrun log level, 0 (off) to 5 (trace); warnings and errors by default.
 let logLevel = UInt32(ProcessInfo.processInfo.environment["MN_KRUN_LOG"] ?? "") ?? UInt32(KRUN_LOG_LEVEL_WARN)
