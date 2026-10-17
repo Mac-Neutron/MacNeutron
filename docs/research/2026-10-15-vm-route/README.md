@@ -734,7 +734,25 @@ A Mac downloads about 1.27 GB.
   wine.app's lsteamclient.
 - The licences ship (libkrun's 92 crates among them), and erofs-utils' source goes in the source archive.
 
+**Reviews** (one per two plans) found, and the fixes passes settled:
+- Koji's path takes the source package's name (kernel-core is under `packages/kernel/`). The pinned kernel was already
+  off the mirrors, so setup failed on every real Mac until the manifest carried each package's source RPM.
+  `vm-setup --check-sources` now HEADs every pin, and the release runs it: 167/167 answer.
+- The tools stamp is a hash over every item, the store goes before the last image (the floor is 8 GB), and the
+  builder's `/etc/machine-id` no longer ships.
+- The guest Wine's source (`wine-linux`: eac-vm/wine-patches on its BASE) is in the source archive, and the parts
+  carry their licences.
+- The parts archive names no account (root owners, no Mac metadata), and the release checks the builder's `/mnt/out`
+  is this tree's.
+- One setup a folder (a lock), and the manifest's hash leaves out the parts' URL.
+
 **Open:**
-- gvproxy's statically linked Go modules' notices need its source (a download).
+- **The guest DXMT DLLs name this Mac's home folder.** The worktree's locally built llvm-mingw has its `libc++abi`
+  source paths in the static runtime; the macOS wine.app's DXMT DLLs have them too. The release now refuses parts that
+  name a build or home path, so the toolchain must build path-free before a publish.
+- The builder's stages (guest Wine, DXMT, forwarder, FEX) don't record the commit they were built from.
+- A release that rebuilds the images changes the parts' bytes, so every Mac downloads again; reusing an unchanged VM's
+  parts is the maintainer's call.
+- gvproxy's statically linked Go modules' notices, and the Go runtime's, need its source (a download).
 - A full rehearsal runs R3, which needs Steam running.
 - The first run on a clean macOS account is the maintainer's (plan 4, task 3).

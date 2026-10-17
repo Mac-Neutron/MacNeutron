@@ -125,6 +125,13 @@ check_vm_manifest() {  # check_vm_manifest <vm-manifest.json> <parts archive>
   [ "$_vm" = "$_vm_size $_vm_sha" ] || { echo "release: vm-manifest.json names parts $_vm, not the archive's $_vm_size $_vm_sha" >&2; return 1; }
 }
 
+# The VM parts name no build or home path of this Mac (as build_paths checks the app), the sparse template aside.
+check_parts_paths() {  # check_parts_paths <parts dir>
+  _pp=$(find "$1" -type f ! -name state-template.img -print0 \
+    | xargs -0 env LC_ALL=C /usr/bin/grep -laF -e "$ROOT" -e "${BUILD_DIR:-$ROOT/build}" -e "$HOME/" 2> /dev/null | head -n 5)
+  [ -z "$_pp" ] || { echo "release: the VM parts name a build or home path: $(echo "${_pp#"$1"/}" | tr '\n' ' ')" >&2; return 1; }
+}
+
 # A published archive names no account of this Mac: every entry is root's (bsdtar records the user's own otherwise).
 check_archive_owners() {  # check_archive_owners <archive>
   _ao=$(tar -tvf "$1" 2> /dev/null | awk '$3 != "root" || $4 != "root" { print $NF; exit }')
@@ -280,6 +287,11 @@ self_test() {
   COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --uid 0 --gid 0 --uname root --gname root -C "$T/parts" \
     -cJf "$T/rooted.tar.xz" .
   passes "an archive of root's entries" check_archive_owners "$T/rooted.tar.xz"
+  passes "parts naming no path of this Mac" check_parts_paths "$T/parts"
+  echo "$HOME/x" > "$T/parts/leak.dll"
+  refused "parts naming this Mac's home folder" "release: the VM parts name a build or home path: leak.dll " \
+    check_parts_paths "$T/parts"
+  rm "$T/parts/leak.dll"
   dd if=/dev/zero of="$T/parts/state-template.img" bs=1048576 count=21 2> /dev/null
   tar -C "$T/parts" -cJf "$T/dense.tar.xz" .
   refused "a state template that isn't sparse" "release: the parts' state-template.img takes 21504 KB on disk: not sparse" \
@@ -624,6 +636,7 @@ rm -f "$W/images/.release-nonce"
 sh "$B" sync "$ROOT/eac-vm/image" /home/bench/mn-image > /dev/null || die "can't copy eac-vm/image into the builder"
 sh "$B" ssh 'sh ~/mn-image/build.sh > /tmp/image.log 2>&1' || die "the image build failed: the builder's /tmp/image.log"
 sh "$ROOT/eac-vm/setup/parts.sh" "$OUT/vm-parts" "$OUT/wine.app" > /dev/null || die "parts.sh failed"
+check_parts_paths "$OUT/vm-parts" || exit 1
 COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --no-acls --no-fflags --uid 0 --gid 0 --uname root --gname root \
   -C "$OUT/vm-parts" -cJf "$OUT/$PARTS" . || die "can't archive the VM parts"
 check_archive_owners "$OUT/$PARTS" || exit 1
