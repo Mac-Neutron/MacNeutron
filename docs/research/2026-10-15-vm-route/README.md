@@ -746,13 +746,21 @@ A Mac downloads about 1.27 GB.
   is this tree's.
 - One setup a folder (a lock), and the manifest's hash leaves out the parts' URL.
 
+**Before publishing, settled 2026-10-17:**
+- llvm-mingw's C++ runtime builds with its llvm-project folder mapped away (`dxmt/llvm-mingw.sh`). libc++abi's
+  checks had named this tree in every DXMT DLL, the macOS wine.app's too. The release refuses parts or an app that
+  name a build or home path.
+- Each guest stage records what it was built from (`.mn-source`, `eac-vm/image/stamps.sh`): the guest Wine, the
+  Steam forwarder, DXMT's guest DLLs and winemetal.so, and FEX. `eac-vm/image/guest-stages.sh` rebuilds them from the
+  tree, and the release refuses a stage with no stamp or another tree's.
+- gvproxy's notices ship: its own, its 17 Go modules' from its vendored source at v0.8.9, and Go 1.26.3's
+  (`eac-vm/net/licences.sh`).
+
 **Open:**
-- **The guest DXMT DLLs name this Mac's home folder.** The worktree's locally built llvm-mingw has its `libc++abi`
-  source paths in the static runtime; the macOS wine.app's DXMT DLLs have them too. The release now refuses parts that
-  name a build or home path, so the toolchain must build path-free before a publish.
-- The builder's stages (guest Wine, DXMT, forwarder, FEX) don't record the commit they were built from.
+- This branch's build trees (Wine, FEX, DXMT, lsteamclient) are the upstream-master experiment's: its merges are
+  commits in the trees, past the pins, not patch series. A release, rehearsed or not, refuses them (check_trees), so a
+  release from this branch first needs its trees re-pinned and re-exported, or the stable series' trees; the
+  maintainer's call.
 - A release that rebuilds the images changes the parts' bytes, so every Mac downloads again; reusing an unchanged VM's
   parts is the maintainer's call.
-- gvproxy's statically linked Go modules' notices, and the Go runtime's, need its source (a download).
-- A full rehearsal runs R3, which needs Steam running.
 - The first run on a clean macOS account is the maintainer's (plan 4, task 3).

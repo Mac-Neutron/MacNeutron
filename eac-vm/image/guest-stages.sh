@@ -2,6 +2,7 @@
 # Rebuilds the guest stages image/build.sh packs into the VM (the parts' wine.tar, and FEX in base.erofs) from this
 # tree's sources, each stamped (.mn-source) with what it was built from (stamps.sh), which release.sh checks against
 # the trees its source archive carries. Needs the builder (eac-vm/builder.sh start); Wine's x86-64 build is most of it.
+# dxmt needs MACNEUTRON_SIGN_IDENTITY (eac-vm/dxmt/build.sh signs DXMT's NVIDIA DLLs with it).
 #   guest-stages.sh [wine|forwarder|dxmt|fex]...   all four, in that order, by default
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
