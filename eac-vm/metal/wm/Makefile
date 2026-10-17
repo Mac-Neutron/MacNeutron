@@ -69,4 +69,5 @@ $(OUT)/window-test: tests/window-test.m host/loader.c host/loader.h
 
 window-test: metal-host $(OUT)/window-test
 	$(OUT)/window-test $(HOST)
+	MN_SCREEN=1600x1000 $(OUT)/window-test $(HOST)
 .PHONY: window-test

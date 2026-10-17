@@ -20,12 +20,15 @@ public struct Launcher: Sendable {
     public let steam: SteamLocation
     /// Where the microVM is installed (MicroVM.swift): every game runs in it when it is.
     public let microVMRoot: URL
+    /// The Mac's display in pixels (MicroVM.mainDisplay): the guest's screen, unless a launch option sets MN_SCREEN.
+    public let display: @Sendable () -> (width: Int, height: Int)?
     let stopRequested = StopFlag()
 
     public init(layout: ToolLayout, runner: any ProcessRunner = SystemProcessRunner(), log: LauncherLog = .standard,
                 notifier: any Notifier = AppleScriptNotifier(), preflight: Preflight = Preflight(),
                 settings: GameSettingsStore = GameSettingsStore(), steam: SteamLocation = SteamLocation(),
-                microVMRoot: URL = MicroVM.standardRoot) {
+                microVMRoot: URL = MicroVM.standardRoot,
+                display: @escaping @Sendable () -> (width: Int, height: Int)? = MicroVM.mainDisplay) {
         self.layout = layout
         self.runner = runner
         self.log = log
@@ -34,6 +37,7 @@ public struct Launcher: Sendable {
         self.settings = settings
         self.steam = steam
         self.microVMRoot = microVMRoot
+        self.display = display
     }
 
     /// Returns the exit code for Steam. Never throws: every failure is logged and becomes exit 1.
@@ -154,7 +158,12 @@ public struct Launcher: Sendable {
     /// prefix is gone (run-game.sh). A VM per game, side by side: the same game twice is refused (75).
     /// ponytail: Steam's Stop ends only the launcher, and a fixed 16 GiB of RAM, until milestone 5's agent and sizing.
     private func runInMicroVM(_ vm: MicroVM, _ request: LaunchRequest, _ context: CompatContext, library: String,
-                              guest: String, _ environment: [String: String], _ gameLog: URL?, _ argv: [String]) -> Int32 {
+                              guest: String, _ launchEnvironment: [String: String], _ gameLog: URL?, _ argv: [String]) -> Int32 {
+        // The guest's screen is the Mac's display, so a game is offered its resolutions up to the display's own.
+        var environment = launchEnvironment
+        if environment["MN_SCREEN"].map(MicroVM.isScreenSize) != true {
+            environment["MN_SCREEN"] = display().map { "\($0.width)x\($0.height)" }
+        }
         do {
             let script = try vm.script(verb: request.verb, appID: context.appID, guest: guest,
                                        arguments: request.arguments, environment: environment)

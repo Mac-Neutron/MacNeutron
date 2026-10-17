@@ -1,7 +1,8 @@
 /* Milestone 4c, Task 1: the host's game window (the stand-in winemac.so, host/winemac.m), through MacNeutron's real
  * winemetal.so, its slots called directly. Usage: window-test <metal-host dir>. The main thread runs NSApp, as in
  * macneutron-vm; the cases run on a worker thread started from its run loop.
- *   view       slot 72 gives a view and a layer in the window "MacNeutron VM" (1280x720 points); a 320x180 BGRA8
+ *   view       slot 72 gives a view and a layer in the window "MacNeutron VM" (1280x720 points, or with MN_SCREEN
+ *              that screen's shape, kept when resized); a 320x180 BGRA8
  *              drawable (slots 70, 67, 66) cleared to (0, 0.3, 0), blitted into a Shared buffer and presented (47)
  *              reads (0, 77, 0)
  *   two-views  a second HWND's view goes on top; slot 73 on it leaves the first on top, its layer intact
@@ -55,15 +56,24 @@ static void view(void) {
     if (!c.ret_view || !c.ret_layer) return;
     view1 = c.ret_view, layer1 = c.ret_layer;
     __block BOOL delegate_ok = NO, title_ok = NO;
-    __block NSSize size = {0, 0};
+    __block NSSize size = {0, 0}, aspect = {0, 0};
     on_main(^{
         NSView *v = (NSView *)((CAMetalLayer *)layer1).delegate;
         delegate_ok = v == (NSView *)view1;
         title_ok = [v.window.title isEqualToString:@"MacNeutron VM"];
         content = [v.window.contentView retain];
         size = content.frame.size;
+        aspect = v.window.contentAspectRatio;
     });
-    CHECK(delegate_ok && title_ok && size.width == 1280 && size.height == 720);
+    CHECK(delegate_ok && title_ok);
+    unsigned sw = 0, sh = 0;
+    const char *screen = getenv("MN_SCREEN"); /* the Makefile's second run: the guest's screen */
+    if (screen && sscanf(screen, "%ux%u", &sw, &sh) == 2 && sw && sh) {
+        CHECK(fabs(size.width / size.height - (double)sw / sh) < 0.01);
+        CHECK(aspect.width * sh == aspect.height * sw && aspect.width > 0);
+    } else {
+        CHECK(size.width == 1280 && size.height == 720);
+    }
 
     struct WMTLayerProps props = {.device = (obj_handle_t)device, .contents_scale = 1, .drawable_width = 320,
                                   .drawable_height = 180, .opaque = 1, .framebuffer_only = 0,

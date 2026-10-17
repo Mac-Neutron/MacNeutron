@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// The microVM every game runs in (eac-vm; docs/superpowers/specs/2026-10-15-macneutron-eac-vm-route-design.md): one
@@ -50,7 +51,23 @@ public struct MicroVM: Sendable {
     static func quoted(_ word: String) -> String { "'" + word.replacingOccurrences(of: "'", with: #"'\''"#) + "'" }
 
     /// The launch options the guest reads (run-game.sh), as the launcher's own environment has them.
-    static let passed = ["MACNEUTRON_DLSS", "MACNEUTRON_XESS", "DXMT_ENABLE_NVEXT", "MACNEUTRON_LOG"]
+    static let passed = ["MACNEUTRON_DLSS", "MACNEUTRON_XESS", "DXMT_ENABLE_NVEXT", "MACNEUTRON_LOG", "MN_SCREEN"]
+
+    /// The main display's size in pixels (its current mode's, so a Retina display's backing pixels), or nil.
+    public static func mainDisplay() -> (width: Int, height: Int)? {
+        guard let mode = CGDisplayCopyDisplayMode(CGMainDisplayID()), mode.pixelWidth > 0, mode.pixelHeight > 0 else {
+            return nil
+        }
+        return (mode.pixelWidth, mode.pixelHeight)
+    }
+
+    /// "WxH", each side 1 to 16384 (Xvfb's screen; MN_SCREEN from a launch option).
+    static func isScreenSize(_ text: String) -> Bool {
+        let sides = text.split(separator: "x", omittingEmptySubsequences: false)
+        return sides.count == 2 && sides.allSatisfy { side in
+            side.allSatisfy(\.isASCII) && Int(side).map { (1...16384).contains($0) } == true
+        }
+    }
 
     /// The guest's script for one launch: its facts as shell assignments, then run-game.sh.
     func script(verb: Verb, appID: String, guest: String, arguments: [String],

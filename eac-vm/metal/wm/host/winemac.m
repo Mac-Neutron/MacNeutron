@@ -226,7 +226,17 @@ static NSWindow *the_window(void) {
         fprintf(stderr, "mn-window: MN_VM_WINDOW=%s isn't WxH, 1280x720 instead\n", size);
         w = 1280, h = 720;
     }
+    /* The guest's screen (the launcher's MN_SCREEN, the Mac's display in pixels): its shape, two thirds of the
+     * screen's room, kept when resized, so a game's frames fill the window unstretched (input maps window to screen). */
+    unsigned sw = 0, sh = 0;
+    const char *screen = getenv("MN_SCREEN");
+    BOOL shaped = screen && sscanf(screen, "%ux%u", &sw, &sh) == 2 && sw && sh && sw <= 16384 && sh <= 16384;
     [NSApplication sharedApplication];
+    if (shaped && !size) {
+        NSSize room = NSScreen.mainScreen ? NSScreen.mainScreen.visibleFrame.size : NSMakeSize(1920, 1080);
+        double k = fmin(room.width / sw, room.height / sh) * 2 / 3;
+        w = (unsigned)lround(sw * k), h = (unsigned)lround(sh * k);
+    }
     window = [[NSWindow alloc]
         initWithContentRect:NSMakeRect(0, 0, w, h)
                   styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
@@ -234,6 +244,7 @@ static NSWindow *the_window(void) {
                       defer:NO];
     window.releasedWhenClosed = NO;
     window.title = @"MacNeutron VM";
+    if (shaped) window.contentAspectRatio = NSMakeSize(sw, sh);
     window.contentView = [[[MNInputView alloc] initWithFrame:NSMakeRect(0, 0, w, h)] autorelease];
     window.contentView.wantsLayer = YES;
     window.acceptsMouseMovedEvents = YES;

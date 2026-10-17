@@ -31,7 +31,8 @@ final class Scripts: @unchecked Sendable {
     }
 }
 
-private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts: Scripts = Scripts()) throws -> VMFixture {
+private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts: Scripts = Scripts(),
+                           display: (width: Int, height: Int)? = nil) throws -> VMFixture {
     let vm = try makeVMFolder()
     let runner = FakeRunner { call in
         guard call.tool == "run-guest.sh" else { return 0 }
@@ -44,7 +45,8 @@ private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts:
                             notifier: notifier, preflight: testPreflight,
                             settings: GameSettingsStore(directory: try makeTempDir().appending(path: "games")),
                             steam: try makeSteamLocation(),
-                            microVMRoot: vmInstalled ? vm : try makeTempDir().appending(path: "no-vm"))
+                            microVMRoot: vmInstalled ? vm : try makeTempDir().appending(path: "no-vm"),
+                            display: { display })
     let env = steamEnvironment(dataPath: try makeTempDir().appending(path: "compatdata/2437170"), appID: "2437170")
     return VMFixture(launcher: launcher, runner: runner, notifier: notifier, vm: vm, env: env)
 }
@@ -161,4 +163,29 @@ private func expectRefusedUntilTheVMIsReady(_ f: VMFixture) {
     _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
     #expect(f.runner.calls.first?.tool == "run-guest.sh")
     #expect(f.runner.calls.first?.environment["MN_VM_DIR"] == other.path(percentEncoded: false))
+}
+
+@Test func theGuestsScreenIsTheMacsDisplay() throws {
+    // Its pixels: the guest's X screen and the most a game is offered; the host window takes its shape.
+    let scripts = Scripts()
+    let f = try makeVMFixture(scripts: scripts, display: (3456, 2234))
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(scripts.all.last?.contains("\nMN_SCREEN='3456x2234'\n") == true)
+    #expect(f.runner.calls.last?.environment["MN_SCREEN"] == "3456x2234")
+    // A launch option's size wins; one that isn't WxH doesn't.
+    var env = f.env
+    env["MN_SCREEN"] = "2560x1600"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    #expect(scripts.all.last?.contains("\nMN_SCREEN='2560x1600'\n") == true)
+    env["MN_SCREEN"] = "big; reboot"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    #expect(scripts.all.last?.contains("\nMN_SCREEN='3456x2234'\n") == true)
+    #expect(f.runner.calls.last?.environment["MN_SCREEN"] == "3456x2234")
+}
+
+@Test func withoutADisplayTheGuestKeepsItsOwnScreen() throws {
+    let scripts = Scripts()
+    let f = try makeVMFixture(scripts: scripts)
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(scripts.all.last?.contains("MN_SCREEN") == false)  // run-game.sh's 1920x1080
 }
