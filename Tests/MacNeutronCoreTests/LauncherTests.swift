@@ -27,7 +27,7 @@ private func makeFixture(runner: FakeRunner = winebootCreatingPrefix(), identity
                             log: LauncherLog(directory: try makeTempDir().appending(path: "Logs")),
                             notifier: notifier, preflight: Preflight(systemSupported: { true }, identity: { _ in identity }),
                             settings: GameSettingsStore(directory: try makeTempDir().appending(path: "games")),
-                            steam: steam)
+                            steam: steam, microVMRoot: try makeTempDir().appending(path: "no-vm"))
     let env = steamEnvironment(dataPath: try makeTempDir().appending(path: "compatdata/42"), appID: "42")
     return Fixture(launcher: launcher, runner: runner, notifier: notifier, env: env)
 }

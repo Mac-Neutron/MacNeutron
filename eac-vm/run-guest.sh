@@ -8,7 +8,8 @@
 # ponytail: one VM at a time (one share for run.sh); a share per run if games ever run side by side.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-W=$ROOT/build/eac-vm-work
+# MN_VM_DIR: the VM's folder when run from it (MacNeutron's launcher runs the copy host/build.sh puts there).
+W=${MN_VM_DIR:-$ROOT/build/eac-vm-work}
 SHARE=$W/share
 # One run at a time: a second run would rewrite the first's script and results before its host refused state.img.
 if [ -z "${MN_RUN_GUEST_LOCKED:-}" ]; then

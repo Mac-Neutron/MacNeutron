@@ -24,5 +24,8 @@ swiftc -O -o "$W/macneutron-vm" "$ROOT/eac-vm/host/macneutron-vm.swift" "$ROOT/e
   -import-objc-header "$ROOT/eac-vm/host/bridge.h" -Xcc -I"$W/libkrun/include" \
   "$W/libkrun/libkrun.1.dylib" -Xlinker -rpath -Xlinker @executable_path/libkrun
 make -s -C "$ROOT/eac-vm/metal/wm" metal-host
+# The VM's folder is what MacNeutron's launcher runs a game from (Sources/MacNeutronCore/MicroVM.swift).
+cp "$ROOT/eac-vm/run-guest.sh" "$W/run-guest.sh"
+cp "$ROOT/eac-vm/guest/run-game.sh" "$W/run-game.sh"
 codesign -s - -f --entitlements "$ROOT/eac-vm/host/hv.plist" "$W/macneutron-vm"
 echo "$W/macneutron-vm"

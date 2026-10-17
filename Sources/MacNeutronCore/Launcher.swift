@@ -18,11 +18,14 @@ public struct Launcher: Sendable {
     public let preflight: Preflight
     public let settings: GameSettingsStore
     public let steam: SteamLocation
+    /// Where the microVM is installed (MicroVM.swift): every game runs in it when it is.
+    public let microVMRoot: URL
     let stopRequested = StopFlag()
 
     public init(layout: ToolLayout, runner: any ProcessRunner = SystemProcessRunner(), log: LauncherLog = .standard,
                 notifier: any Notifier = AppleScriptNotifier(), preflight: Preflight = Preflight(),
-                settings: GameSettingsStore = GameSettingsStore(), steam: SteamLocation = SteamLocation()) {
+                settings: GameSettingsStore = GameSettingsStore(), steam: SteamLocation = SteamLocation(),
+                microVMRoot: URL = MicroVM.standardRoot) {
         self.layout = layout
         self.runner = runner
         self.log = log
@@ -30,6 +33,7 @@ public struct Launcher: Sendable {
         self.preflight = preflight
         self.settings = settings
         self.steam = steam
+        self.microVMRoot = microVMRoot
     }
 
     /// Returns the exit code for Steam. Never throws: every failure is logged and becomes exit 1.
@@ -62,6 +66,13 @@ public struct Launcher: Sendable {
         if request.verb == .run, PEImage.machine(of: URL(filePath: request.target)) == PEImage.i386 {
             log.append("skipped 32-bit installer \(URL(filePath: request.target).lastPathComponent)")
             return 0
+        }
+
+        if let vm = MicroVM.find(root: microVMRoot, environment: environment, verb: request.verb) {
+            if let (library, guest) = MicroVM.guestPath(request.target) {
+                return runInMicroVM(vm, request, context, library: library, guest: guest, environment, gameLog, argv)
+            }
+            log.append("note: \(request.target) is not in a Steam library: it runs on macOS")
         }
 
         let (backend, note) = GraphicsBackend.select(requested: environment["MACNEUTRON_GRAPHICS"])
@@ -126,6 +137,34 @@ public struct Launcher: Sendable {
                 + " runtime=\(ToolLayout.runtimeLabel(version: layout.runtimeVersion, identity: identity)) exit=\(status)"
             if let note { line += " note=\(note)" }
             log.append(line)
+            return status
+        } catch {
+            return fail("\(error)", argv: argv, notify: true, gameLog: gameLog)
+        }
+    }
+
+    /// The game in the microVM (MicroVM.swift): run-guest.sh boots it with the game's state disk and Steam library,
+    /// Steam forwarded to the Mac's for the game's app ID, and returns the game's status once every process in its
+    /// prefix is gone (run-game.sh). One VM at a time: run-guest.sh refuses a second (75).
+    /// ponytail: Steam's Stop ends only the launcher, and a fixed 16 GiB of RAM, until milestone 5's agent and sizing.
+    private func runInMicroVM(_ vm: MicroVM, _ request: LaunchRequest, _ context: CompatContext, library: String,
+                              guest: String, _ environment: [String: String], _ gameLog: URL?, _ argv: [String]) -> Int32 {
+        do {
+            let script = try vm.script(verb: request.verb, appID: context.appID, guest: guest,
+                                       arguments: request.arguments, environment: environment)
+            let file = FileManager.default.temporaryDirectory
+                .appending(path: "macneutron-vm-\(context.appID)-\(getpid()).sh")
+            try script.write(to: file, atomically: true, encoding: .utf8)
+            defer { try? FileManager.default.removeItem(at: file) }
+            var env = environment
+            env["MN_VM_DIR"] = vm.root.path(percentEncoded: false)
+            env["MN_STATE"] = vm.state(appID: context.appID).path(percentEncoded: false)
+            env["MN_RUN_TIMEOUT"] = env["MN_RUN_TIMEOUT"] ?? "86400"
+            let status = try runner.run(vm.runGuest, [file.path(percentEncoded: false), "--steam-appid", context.appID,
+                                                      "--ram-mib", "16384", "--steam-map", "\(library)=/mnt/games"],
+                                        environment: env, output: gameLog)
+            log.append("verb=\(request.verb.rawValue) appid=\(context.appID) backend=vm vm=\(vm.root.path(percentEncoded: false))"
+                       + " exit=\(status)")
             return status
         } catch {
             return fail("\(error)", argv: argv, notify: true, gameLog: gameLog)

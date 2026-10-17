@@ -1,0 +1,27 @@
+# A game in the guest, as MacNeutron's launcher starts it (Sources/MacNeutronCore/MicroVM.swift puts VERB, APPID,
+# GAME_DIR, EXE, the game's arguments (set --) and its launch options before this). As Proton's waitforexitandrun: the
+# prefix (/home/mn/pfx, on the game's own state disk), Steam's bridge with Valve's steamclient64.dll from the share, the
+# game through steam.exe, and every process in the prefix waited for. Exits with the game's status.
+export WINEPREFIX=/home/mn/pfx SteamAppId=$APPID SteamGameId=$APPID DISPLAY=:0 PATH=/opt/mn-wine/bin:$PATH
+export WINEDEBUG=${WINEDEBUG:--all}
+# As the launcher's LaunchEnvironment: XeSS and DLSS on MetalFX.
+[ "${MACNEUTRON_XESS:-}" = 1 ] || export WINEDLLOVERRIDES="libxess,libxess_dx11=b"
+[ "${MACNEUTRON_DLSS:-}" = 1 ] && [ -z "${DXMT_ENABLE_NVEXT:-}" ] && export DXMT_ENABLE_NVEXT=1
+Xvfb :0 -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &
+[ -x /mnt/share/bin/mn-input ] && /mnt/share/bin/mn-input :0 > /home/mn/mn-input.log 2>&1 &
+# A VM that died mid-wineboot leaves DLLs of 0 bytes, which wineboot then keeps: remove them, and it writes them again.
+find "$WINEPREFIX/drive_c/windows" -name '*.dll' -size 0 -delete 2>/dev/null
+WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1
+STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
+mkdir -p "$STEAM"
+cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
+[ -f /mnt/share/valve/steamclient64.dll ] && cp /mnt/share/valve/steamclient64.dll "$STEAM/steamclient64.dll"
+cd "$GAME_DIR" || exit 1
+if [ "$VERB" = waitforexitandrun ]; then
+  wine 'C:\Program Files (x86)\Steam\steam.exe' "$EXE" "$@"
+else
+  wine "$EXE" "$@"  # run: Steam's install scripts' redistributables
+fi
+status=$?
+wineserver -w
+exit $status
