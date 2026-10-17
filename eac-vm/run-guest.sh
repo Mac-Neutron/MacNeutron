@@ -36,6 +36,9 @@ if [ ! -e "$STATE" ]; then
   mkdir -p "$(dirname "$STATE")"
   cp -c "$W/images/state-template.img" "$STATE.tmp" && mv "$STATE.tmp" "$STATE"
 fi
+# The run's TPM 2.0 beside its state disk (a game's state/<appid>.tpm), unless MN_TPM names another folder or is empty.
+TPM=${MN_TPM-${STATE%.img}.tpm}
+[ -z "$TPM" ] || set -- --tpm "$TPM" "$@"
 host=0
 "$W/macneutron-vm" --images "$W/images" --share "$SHARE" --state "$STATE" --timeout "${MN_RUN_TIMEOUT:-1800}" "$@" \
   || host=$?
