@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import ServiceManagement
 import Testing
@@ -421,4 +422,125 @@ private func makeVMModel(vmRoot: URL, layout: ToolLayout? = nil, cdn: FakeValveC
     let model = try await makeVMModel(vmRoot: vmRoot, layout: layout, cdn: try FakeValveCDN(dir: try makeTempDir()))
     let cached = try #require(ValveClient.installed(in: model.valveClient.cache)).steamClient64
     #expect(try Data(contentsOf: vmRoot.appending(path: "share/valve/steamclient64.dll")) == Data(contentsOf: cached))
+}
+
+// MARK: The game VM's setup
+
+/// A stand-in for the app's CLI: each run appends its arguments to `calls`, then runs `body`.
+private func fakeHelper(_ body: String) throws -> (helper: URL, calls: URL, dir: URL) {
+    let dir = try makeTempDir()
+    let calls = dir.appending(path: "calls"), helper = dir.appending(path: "macneutron")
+    try write("#!/bin/sh\necho \"$*\" >> '\(calls.path)'\n\(body)\n", to: helper, executable: true)
+    return (helper, calls, dir)
+}
+
+private func calls(_ file: URL) -> [String] {
+    ((try? String(contentsOf: file, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+}
+
+/// One app start whose runtime is installed, with the app's VM tools, a manifest, and `helper` as its CLI.
+@MainActor
+private func makeSetupModel(helper: URL, vmRoot: URL, manifest: URL?, awaitSetup: Bool = true,
+                            notifications: NotificationCenter = NotificationCenter()) async throws -> AppModel {
+    let (mode, _) = try makeMode()
+    let model = AppModel(steam: mode.steam, layout: try makeToolLayout(), mode: mode,
+                         store: GameSettingsStore(directory: try makeTempDir()),
+                         loginItem: FakeLoginItem(statusAfterRegister: .enabled).item,
+                         wineAppSource: try makeToolLayout().wineApp, installer: ScriptedInstaller(.unchanged).install,
+                         identity: { _ in testIdentity }, valveClient: ValveClient(cache: try makeTempDir()),
+                         vmTools: try makeVMTools(), vmRoot: vmRoot,
+                         vmInstaller: { try VMToolsInstaller.install(from: $0, into: $1, runningExecutables: { [] }) },
+                         vmManifest: manifest, vmHelper: helper, vmSetupLog: try makeTempDir().appending(path: "vm-setup.log"),
+                         notifications: notifications)
+    await model.installTask?.value
+    if awaitSetup { await model.vmSetupTask?.value }
+    return model
+}
+
+private func makeManifest() throws -> URL {
+    let manifest = try makeTempDir().appending(path: "vm-manifest.json")
+    try write("{\"version\": 1}\n", to: manifest)
+    return manifest
+}
+
+@Test func noticeTextsAreExact() {
+    #expect(AppModel.notice(forProgressLine: "progress download 400000000 1350000000") == "Game VM: downloading (0.4 of 1.35 GB)")
+    #expect(AppModel.notice(forProgressLine: "progress assemble 2 5") == "Game VM: building its images (2 of 5)")
+    #expect(AppModel.notice(forProgressLine: "progress install 0 1") == nil)
+    #expect(AppModel.notice(forProgressLine: "vm-setup: a note") == nil)
+}
+
+@Test func progressSplitAcrossReadsIsParsed() {
+    var buffer = Data("progress assem".utf8)
+    #expect(AppModel.takeLines(&buffer).isEmpty)
+    buffer += Data("ble 1 5\nprogress ass".utf8)
+    #expect(AppModel.takeLines(&buffer) == ["progress assemble 1 5"])
+    #expect(buffer == Data("progress ass".utf8))
+}
+
+@MainActor @Test func aNeededSetupStartsAfterTheTools() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    let fake = try fakeHelper("[ -e '\(vmRoot.path)/macneutron-vm' ] && echo tools-first >> '\(try makeTempDir().path)/x'\n"
+                              + "echo 'progress download 400000000 1350000000'\necho 'progress assemble 2 5'\nexit 0")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest)
+    #expect(calls(fake.calls) == ["vm-setup --manifest \(manifest.path) --vm \(vmRoot.path)"])
+    #expect(FileManager.default.fileExists(atPath: vmRoot.appending(path: "macneutron-vm").path))
+    #expect(model.vmNotice == "Game VM: ready")
+}
+
+@MainActor @Test func aCurrentImageSetStartsNothing() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    try write(VMSetup.manifestHash(manifest)! + "\n", to: vmRoot.appending(path: "images/manifest.sha256"))
+    let fake = try fakeHelper("exit 0")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest)
+    #expect(calls(fake.calls).isEmpty)
+    #expect(model.vmNotice == nil)
+}
+
+@MainActor @Test func aDeferralIsRetriedByThePoll() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    let flag = try makeTempDir().appending(path: "ran")
+    let fake = try fakeHelper("[ -e '\(flag.path)' ] && exit 0\ntouch '\(flag.path)'\nexit 75")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest)
+    #expect(model.vmNotice == "Game VM: waiting for the game to quit")
+    await model.pollRuntime()
+    #expect(model.vmNotice == "Game VM: ready")
+    #expect(calls(fake.calls).count == 2)
+}
+
+@MainActor @Test func aFailedSetupWaitsForRetry() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    let fake = try fakeHelper("echo 'vm-setup: it needs 6 GB free' >&2\nexit 1")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest)
+    #expect(model.vmNotice == "Game VM: vm-setup: it needs 6 GB free")
+    for _ in 0..<3 { await model.pollRuntime() }
+    #expect(calls(fake.calls).count == 1)
+    await model.setUpVM()
+    #expect(calls(fake.calls).count == 2)
+}
+
+@MainActor @Test func withoutAManifestNothingStarts() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    let fake = try fakeHelper("exit 0")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: nil)
+    #expect(calls(fake.calls).isEmpty)
+    #expect(model.vmNotice == nil)
+}
+
+@MainActor @Test func quittingStopsTheSetup() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    let pidFile = try makeTempDir().appending(path: "pid")
+    let fake = try fakeHelper("echo $$ > '\(pidFile.path)'\nexec sleep 60")
+    let center = NotificationCenter()  // its own: other tests' models run alongside
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest, awaitSetup: false,
+                                         notifications: center)
+    let start = Date()
+    while !FileManager.default.fileExists(atPath: pidFile.path), Date().timeIntervalSince(start) < 5 {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    let pid = try #require(Int32(String(contentsOf: pidFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+    center.post(name: NSApplication.willTerminateNotification, object: nil)
+    await model.vmSetupTask?.value
+    #expect(Date().timeIntervalSince(start) < 10)
+    #expect(kill(pid, 0) != 0)
 }

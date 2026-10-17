@@ -71,6 +71,21 @@ final class AppModel {
     private let vmInstaller: @Sendable (URL, URL) throws -> VMToolsInstallOutcome
     /// A VM ran from the folder at the last tools install: the poll retries it.
     private(set) var vmToolsDeferred = false
+    /// MacNeutron.app's `Contents/Resources/vm-manifest.json`: the image set this app's VM needs; nil in dev runs and tests.
+    let vmManifest: URL?
+    /// The CLI whose `vm-setup` builds it (`helper` unless a test gives its own).
+    private let vmHelper: URL?
+    private let vmSetupLog: URL
+    /// The game VM's setup, as Settings and Setup show it; nil when none ran.
+    private(set) var vmNotice: String?
+    private(set) var vmSetupRunning = false
+    /// The setup started by a tools install.
+    private(set) var vmSetupTask: Task<Void, Never>?
+    /// The last setup exited 75 (a VM ran from the folder): the poll retries it.
+    private var vmSetupDeferred = false
+    /// The last setup failed: nothing retries it but Retry or Rebuild.
+    private(set) var vmSetupFailed = false
+    private var vmProcess: Process?
 
     private(set) var runtime: InstalledRuntime?
     /// Setup's runtime text while installing, deferred or failed; nil once installed.
@@ -126,7 +141,10 @@ final class AppModel {
          vmTools: URL? = AppModel.bundledVMTools, vmRoot: URL = MicroVM.standardRoot,
          vmInstaller: @escaping @Sendable (URL, URL) throws -> VMToolsInstallOutcome = {
              try VMToolsInstaller.install(from: $0, scripts: AppModel.bundledVMScripts, into: $1)
-         }) {
+         },
+         vmManifest: URL? = AppModel.bundledVMManifest, vmHelper: URL? = nil,
+         vmSetupLog: URL = LauncherLog.standard.directory.appending(path: "vm-setup.log"),
+         notifications: NotificationCenter = .default) {
         self.steam = steam
         self.layout = layout
         self.mode = mode
@@ -141,12 +159,20 @@ final class AppModel {
         self.vmTools = vmTools
         self.vmRoot = vmRoot
         self.vmInstaller = vmInstaller
+        self.vmManifest = vmManifest
+        self.vmHelper = vmHelper
+        self.vmSetupLog = vmSetupLog
         valveVersion = ValveClient.installed(in: self.valveClient.cache)?.version
         // Read now, not in the first refresh: the scene decides at launch whether to open the setup window.
         runtime = InstalledRuntime.read(layout, identity: identity)
         Task { await refresh() }
         installTask = Task { [weak self] in await self?.installRuntime() }
         startWatchingSteam()
+        // Quitting ends a setup's child: the next start resumes from its downloads.
+        notifications.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
+                                  queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.vmProcess?.terminate() }
+        }
     }
 
     var setupComplete: Bool { runtime != nil && mode.isWanted }
@@ -158,6 +184,11 @@ final class AppModel {
     }
 
     /// `Contents/Resources/vm`: the VM tools' scripts (`VMToolsInstaller.scripts`).
+    nonisolated static var bundledVMManifest: URL? {
+        let manifest = Bundle.main.bundleURL.appending(path: "Contents/Resources/vm-manifest.json")
+        return FileManager.default.fileExists(atPath: manifest.path(percentEncoded: false)) ? manifest : nil
+    }
+
     nonisolated static var bundledVMScripts: URL? {
         let scripts = Bundle.main.bundleURL.appending(path: "Contents/Resources/vm", directoryHint: .isDirectory)
         return FileManager.default.fileExists(atPath: scripts.path(percentEncoded: false)) ? scripts : nil
@@ -271,6 +302,7 @@ final class AppModel {
     /// Each poll tick: retry a deferred install; reinstall when a launch found the runtime damaged.
     func pollRuntime() async {
         if vmToolsDeferred { await installVMTools() }
+        if vmSetupDeferred, !vmSetupRunning { await setUpVM() }
         if let force = deferredForce {
             await installRuntime(force: force)
         } else if !installFailed, FileManager.default.fileExists(atPath: layout.runtimeDamagedMarker.path(percentEncoded: false)) {
@@ -318,9 +350,102 @@ final class AppModel {
         vmToolsDeferred = false
         switch result {
         case .success(.deferred): vmToolsDeferred = true
-        case .success: copyValveClientToVM()
+        case .success:
+            copyValveClientToVM()
+            if vmSetupNeeded, !vmSetupRunning { vmSetupTask = Task { [weak self] in await self?.setUpVM() } }
         case .failure(let error): errorMessage = "\(error)"
         }
+    }
+
+    // MARK: The game VM's images
+
+    /// The app ships a manifest, the folder isn't a developer's link, and its images aren't the manifest's.
+    var vmSetupNeeded: Bool {
+        guard let vmManifest, !VMToolsInstaller.isDeveloperFolder(vmRoot) else { return false }
+        let current = try? String(contentsOf: vmRoot.appending(path: "images/manifest.sha256"), encoding: .utf8)
+        return current?.trimmingCharacters(in: .whitespacesAndNewlines) != VMSetup.manifestHash(vmManifest)
+    }
+
+    /// `macneutron vm-setup` for the app's manifest (spec §4.6), its progress lines read into `vmNotice` and both its
+    /// streams appended to vm-setup.log. One at a time; a deferral (75) waits for the poll, a failure for Retry.
+    func setUpVM() async {
+        guard let vmManifest, !vmSetupRunning else { return }
+        vmSetupRunning = true
+        vmSetupDeferred = false
+        vmSetupFailed = false
+        let process = Process()
+        process.executableURL = vmHelper ?? helper
+        let folder = vmRoot.path(percentEncoded: false)
+        process.arguments = ["vm-setup", "--manifest", vmManifest.path(percentEncoded: false),
+                             "--vm", folder.hasSuffix("/") ? String(folder.dropLast()) : folder]
+        let out = Pipe(), err = Pipe()
+        process.standardOutput = out
+        process.standardError = err
+        try? FileManager.default.createDirectory(at: vmSetupLog.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: vmSetupLog.path(percentEncoded: false)) {
+            FileManager.default.createFile(atPath: vmSetupLog.path(percentEncoded: false), contents: nil)
+        }
+        let log = try? FileHandle(forWritingTo: vmSetupLog)
+        _ = try? log?.seekToEnd()
+        var status: Int32 = -1, lastError = ""
+        do {
+            try process.run()
+            vmProcess = process
+            async let errors = Task.detached { err.fileHandleForReading.readDataToEndOfFile() }.value
+            let reader = out.fileHandleForReading
+            var buffer = Data()
+            while true {
+                let chunk = await Task.detached { reader.availableData }.value
+                if chunk.isEmpty { break }
+                try? log?.write(contentsOf: chunk)
+                buffer += chunk
+                for line in Self.takeLines(&buffer) {
+                    if let notice = Self.notice(forProgressLine: line) { vmNotice = notice }
+                }
+            }
+            let stderr = await errors
+            try? log?.write(contentsOf: stderr)
+            lastError = String(decoding: stderr, as: UTF8.self).split(separator: "\n").last.map(String.init) ?? ""
+            await Task.detached { process.waitUntilExit() }.value
+            status = process.terminationStatus
+        } catch {
+            lastError = "\(error)"
+        }
+        try? log?.close()
+        vmProcess = nil
+        vmSetupRunning = false
+        switch status {
+        case 0: vmNotice = "Game VM: ready"
+        case 75:
+            vmSetupDeferred = true
+            vmNotice = "Game VM: waiting for the game to quit"
+        default:
+            vmSetupFailed = true
+            vmNotice = "Game VM: " + (lastError.isEmpty ? "the setup stopped (\(status))" : lastError)
+        }
+    }
+
+    /// "progress download <done> <total>" and "progress assemble <k> <n>" as the status line says them; nil otherwise.
+    nonisolated static func notice(forProgressLine line: String) -> String? {
+        let words = line.split(separator: " ")
+        guard words.count == 4, words[0] == "progress", let done = Double(words[2]), let total = Double(words[3]) else {
+            return nil
+        }
+        switch words[1] {
+        case "download": return String(format: "Game VM: downloading (%.1f of %.2f GB)", done / 1e9, total / 1e9)
+        case "assemble": return "Game VM: building its images (\(words[2]) of \(words[3]))"
+        default: return nil
+        }
+    }
+
+    /// The whole lines at the start of `buffer`, taken out of it; a partial last line stays.
+    nonisolated static func takeLines(_ buffer: inout Data) -> [String] {
+        var lines: [String] = []
+        while let end = buffer.firstIndex(of: UInt8(ascii: "\n")) {
+            lines.append(String(decoding: buffer[buffer.startIndex..<end], as: UTF8.self))
+            buffer = Data(buffer[buffer.index(after: end)...])
+        }
+        return lines
     }
 
     /// Valve's steamclient64.dll for the guest (the VM folder's share/valve), only where the app ships the VM.
