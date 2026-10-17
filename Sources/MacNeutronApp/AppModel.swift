@@ -425,6 +425,14 @@ final class AppModel {
         }
     }
 
+    /// Settings' Rebuild: the setup's downloads and any half-built set go, then a fresh set is built and swapped in (the
+    /// setup waits while a game runs from the old one, then removes it). Games' disks, TPMs and runs are never touched.
+    func rebuildVM() async {
+        guard vmManifest != nil, !vmSetupRunning, !VMToolsInstaller.isDeveloperFolder(vmRoot) else { return }
+        try? FileManager.default.removeItem(at: vmRoot.appending(path: "setup", directoryHint: .isDirectory))
+        await setUpVM()
+    }
+
     /// "progress download <done> <total>" and "progress assemble <k> <n>" as the status line says them; nil otherwise.
     nonisolated static func notice(forProgressLine line: String) -> String? {
         let words = line.split(separator: " ")

@@ -20,6 +20,13 @@ struct SetupView: View {
                 if model.installing { ProgressView().controlSize(.small) }
             }
 
+            if model.vmManifest != nil {
+                Step(done: !model.vmSetupRunning && !model.vmSetupNeeded, title: "Game VM",
+                     detail: model.vmNotice ?? (model.vmSetupNeeded ? "Sets itself up after the runtime." : "Ready.")) {
+                    if model.vmSetupRunning { ProgressView().controlSize(.small) }
+                }
+            }
+
             Step(done: model.mode.isWanted, title: "Steam Play",
                  detail: "Steam restarts. Your Mac games stay native and protected.") {
                 Button("Turn on and restart Steam") { Task { await model.enableSteamPlay() } }

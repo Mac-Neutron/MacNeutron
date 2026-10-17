@@ -544,3 +544,32 @@ private func makeManifest() throws -> URL {
     #expect(Date().timeIntervalSince(start) < 10)
     #expect(kill(pid, 0) != 0)
 }
+
+@MainActor @Test func rebuildKeepsTheGamesFiles() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    try write(VMSetup.manifestHash(manifest)! + "\n", to: vmRoot.appending(path: "images/manifest.sha256"))
+    let kept = ["state/1.img", "state/1.tpm/id", "runs/1/run.log"]
+    for path in kept { try write("game \(path)\n", to: vmRoot.appending(path: path)) }
+    try write("half a download\n", to: vmRoot.appending(path: "setup/cache/x"))
+    let seen = try makeTempDir().appending(path: "setup-seen")
+    let fake = try fakeHelper("[ -e '\(vmRoot.path)/setup' ] && touch '\(seen.path)'\nexit 0")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest)
+    #expect(calls(fake.calls).isEmpty)  // the images are current
+    await model.rebuildVM()
+    #expect(calls(fake.calls).count == 1)
+    #expect(!FileManager.default.fileExists(atPath: seen.path))
+    for path in kept {
+        #expect(try String(contentsOf: vmRoot.appending(path: path), encoding: .utf8) == "game \(path)\n")
+    }
+    #expect(model.vmNotice == "Game VM: ready")
+}
+
+@MainActor @Test func rebuildWhileAGameRunsWaits() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    try write(VMSetup.manifestHash(manifest)! + "\n", to: vmRoot.appending(path: "images/manifest.sha256"))
+    let fake = try fakeHelper("exit 75")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest)
+    await model.rebuildVM()
+    #expect(model.vmNotice == "Game VM: waiting for the game to quit")
+    #expect(FileManager.default.fileExists(atPath: vmRoot.appending(path: "images/manifest.sha256").path))
+}

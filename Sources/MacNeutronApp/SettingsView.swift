@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @State private var confirmingTurnOff = false
+    @State private var confirmingRebuild = false
 
     var body: some View {
         Form {
@@ -31,6 +32,18 @@ struct SettingsView: View {
                 }
             }
             if let notice = model.valveNotice { Text(notice).foregroundStyle(.secondary).textSelection(.enabled) }
+            if model.vmManifest != nil {
+                LabeledContent("Game VM") {
+                    HStack {
+                        if model.vmSetupFailed {
+                            Button("Retry") { Task { await model.setUpVM() } }
+                        }
+                        Button("Rebuild the game VM", role: .destructive) { confirmingRebuild = true }
+                            .disabled(model.vmSetupRunning)
+                    }
+                }
+                if let notice = model.vmNotice { Text(notice).foregroundStyle(.secondary).textSelection(.enabled) }
+            }
             LabeledContent("Setup") {
                 Button("Run setup again") { show("setup", with: openWindow) }
             }
@@ -44,6 +57,11 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 460)
         .disabled(model.busy != nil)
+        .confirmationDialog("Rebuild the game VM?", isPresented: $confirmingRebuild) {
+            Button("Rebuild", role: .destructive) { Task { await model.rebuildVM() } }
+        } message: {
+            Text("It downloads about 1.35 GB again. Games' saves and settings are kept.")
+        }
         .confirmationDialog("Turn off Steam Play mode?", isPresented: $confirmingTurnOff) {
             Button("Turn off and restart Steam", role: .destructive) { Task { await model.disableSteamPlay() } }
         } message: {
