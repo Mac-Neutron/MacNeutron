@@ -39,6 +39,12 @@ class Perf(unittest.TestCase):
         after = "  10   0:15.00 /x/wine.app/Contents/MacOS/wine\n  12   0:02.00 /x/wine.app/bin/wineserver\n"
         self.assertEqual(perf.cpu_delta(before, after, lambda c: "/wine.app/" in c), (12.0, 1))
 
+    def test_macos_game_processes(self):
+        # Wine names a game's process by its Windows path; wineserver and the loader run from the tool's wine.app.
+        self.assertTrue(perf.macos_game(r"S:\steamapps\common\SMITE 2\Windows\Hemingway-Win64-Shipping.exe"))
+        self.assertTrue(perf.macos_game("/x/macneutron/wine.app/Contents/Resources/bin/wineserver"))
+        self.assertFalse(perf.macos_game("/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer"))
+
     def test_gpu_busy_mean(self):
         self.assertAlmostEqual(perf.gpu_busy(['"Device Utilization %"=90', '"Device Utilization %"=100']), 95.0)
 

@@ -12,7 +12,7 @@ import sys
 from collections import defaultdict
 
 GATE_GPU, GATE_FPS, GATE_CPU = 95.0, 0.9, 1.5
-# The VM's processes; on macOS, the game's: everything run from the tool's wine.app.
+# The VM's processes; on macOS, the game's (macos_game).
 VM_PROCESSES = {"macneutron-vm", "mn-steam-host", "gvproxy"}
 # sample(1)'s innermost frames where a thread waits rather than runs (an idle workqueue thread shows start_wqthread).
 BLOCKING = ("__psynch_cvwait", "__psynch_mutexwait", "kevent", "__workq_kernreturn", "start_wqthread", "mach_msg2_trap",
@@ -38,6 +38,12 @@ def _listing(text, match):
         if len(fields) == 3 and fields[0].isdigit() and match(fields[2]):
             procs[fields[0]] = parse_time(fields[1])
     return procs
+
+
+def macos_game(comm):
+    """A process of the game on macOS: Wine names one by its Windows path; wineserver and the loader run from the
+    tool's wine.app."""
+    return "/wine.app/" in comm or re.match(r"^[A-Za-z]:\\", comm) is not None
 
 
 def cpu_delta(before, after, match):
@@ -142,7 +148,7 @@ def _read(path, offset=0):
 
 
 def record(a):
-    match = (lambda c: os.path.basename(c) in VM_PROCESSES) if a.mode == "vm" else (lambda c: "/wine.app/" in c)
+    match = (lambda c: os.path.basename(c) in VM_PROCESSES) if a.mode == "vm" else macos_game
     before, after = _read(a.ps_before)[0], _read(a.ps_after)[0]
     used, ended = cpu_delta(before, after, match)
     vm_used = cpu_delta(before, after, lambda c: os.path.basename(c) == "macneutron-vm")[0]
