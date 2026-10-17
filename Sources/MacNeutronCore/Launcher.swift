@@ -68,8 +68,13 @@ public struct Launcher: Sendable {
             return 0
         }
 
-        if let vm = MicroVM.find(root: microVMRoot, environment: environment, verb: request.verb) {
+        if MicroVM.wanted(environment: environment, verb: request.verb) {
             if let (library, guest) = MicroVM.guestPath(request.target) {
+                // In the VM or not at all: a launch before the app's setup finishes is refused, never run on macOS.
+                guard let vm = MicroVM.find(root: microVMRoot, environment: environment, verb: request.verb) else {
+                    return fail("MacNeutron's game VM isn't ready yet: open MacNeutron, and launch the game again "
+                                + "once its Settings say \"Game VM: ready\".", argv: argv, notify: true, gameLog: gameLog)
+                }
                 return runInMicroVM(vm, request, context, library: library, guest: guest, environment, gameLog, argv)
             }
             log.append("note: \(request.target) is not in a Steam library: it runs on macOS")

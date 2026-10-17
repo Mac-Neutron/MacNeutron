@@ -111,12 +111,19 @@ private let game = "/Users/someone/Library/Application Support/Steam/steamapps/c
     #expect(!g.notifier.posted.contains { $0.contains("TPM") })
 }
 
-@Test func aVMWithoutACompleteImageSetLeavesGamesOnMacOS() throws {
+/// A game in a Steam library runs in the VM or not at all: never on macOS while the setup is still going.
+private func expectRefusedUntilTheVMIsReady(_ f: VMFixture) {
+    let status = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(status != 0)
+    #expect(f.runner.calls.isEmpty)  // no guest, no host prefix, no host Wine
+    #expect(f.notifier.posted.contains { $0.contains("game VM isn't ready") })
+    #expect(f.launcherLog.contains("game VM isn't ready"))
+}
+
+@Test func aGameBeforeTheVMSetupFinishesIsRefused() throws {
     let f = try makeVMFixture()
     try FileManager.default.removeItem(at: f.vm.appending(path: "images/manifest.sha256"))
-    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
-    #expect(!f.runner.calls.contains { $0.tool == "run-guest.sh" })
-    #expect(f.runner.calls.contains { $0.tool == "wine" && $0.arguments.first == game })
+    expectRefusedUntilTheVMIsReady(f)
 }
 
 @Test func optingOutRunsOnMacOS() throws {
@@ -128,11 +135,14 @@ private let game = "/Users/someone/Library/Application Support/Steam/steamapps/c
     #expect(f.runner.calls.contains { $0.tool == "wine" && $0.arguments.first == game })
 }
 
-@Test func withoutAMicroVMGamesRunOnMacOS() throws {
-    let f = try makeVMFixture(vmInstalled: false)
-    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
-    #expect(!f.runner.calls.contains { $0.tool == "run-guest.sh" })
-    #expect(f.runner.calls.contains { $0.tool == "wine" && $0.arguments.first == game })
+@Test func aGameBeforeTheVMToolsAreInstalledIsRefused() throws {
+    expectRefusedUntilTheVMIsReady(try makeVMFixture(vmInstalled: false))
+}
+
+@Test func aGameWhileTheVMToolsSwapIsRefused() throws {
+    let f = try makeVMFixture()
+    try write("", to: f.vm.appending(path: ".installing"))
+    expectRefusedUntilTheVMIsReady(f)
 }
 
 @Test func pathQueriesAndGamesOutsideALibraryStayOnMacOS() throws {

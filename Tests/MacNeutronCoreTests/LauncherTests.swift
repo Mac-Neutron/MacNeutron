@@ -67,10 +67,12 @@ private func makeFixture(runner: FakeRunner = winebootCreatingPrefix(), identity
 @Test func aNewPrefixIsPreparedUnderAToast() throws {
     let f = try makeFixture()
     let game = "/Steam/steamapps/common/Some Game/bin/Game.exe"
-    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    var env = f.env
+    env["MACNEUTRON_VM"] = "0"  // a game in a library runs on macOS only by opting out of the VM
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
     #expect(f.notifier.toasts == ["Setting up Some Game"])
     #expect(f.notifier.toastsClosed == 1)
-    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)  // up to date: no toast
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)  // up to date: no toast
     #expect(f.notifier.toasts.count == 1)
 }
 

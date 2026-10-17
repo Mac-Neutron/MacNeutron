@@ -23,7 +23,7 @@ Done when, on a Mac without the folder:
 | How they're built | Only the packages are downloaded. Their files are streamed into images on macOS, with no builder VM and no Fedora Cloud image. |
 | The x86-64 side | FEX's whole x86-64 root (`fex-emu-rootfs-fedora`, 969 MB), used exactly as FEX ships it. |
 | Where our own parts come from | A "VM parts" archive attached to each GitHub release, its hash built into the app. |
-| When | Automatically, when MacNeutron opens and finds no current VM. Until the VM is ready, games run on macOS. |
+| When | Automatically, when MacNeutron opens and finds no current VM. Until the VM is ready, a game in a Steam library is refused, never run on macOS (maintainer, 2026-10-17). |
 
 ## 3. The VM folder and where each piece comes from
 
@@ -172,7 +172,8 @@ It prints one progress line per step (`progress <step> <done> <total>`).
 - **On start:** after the runtime install, if `vm/images/manifest.sha256` doesn't match the app's manifest (or is
   missing), start `macneutron vm-setup` in the background.
   - An older complete set keeps running games while a new one builds.
-  - With no set at all, games run on macOS.
+  - With no set at all, the launcher refuses a game in a Steam library: "MacNeutron's game VM isn't ready yet"
+    (maintainer, 2026-10-17: the VM all the time, no launch before it's ready). `MACNEUTRON_VM=0` still opts out.
 - **Status line,** beside the Valve notice:
   - "Game VM: downloading (0.4 of 1.35 GB)", "Game VM: building its images (2 of 5)", then "Game VM: ready".
   - On failure, the reason and a Retry button.

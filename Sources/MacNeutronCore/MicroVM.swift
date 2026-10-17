@@ -5,17 +5,23 @@ import Foundation
 /// game's own state disk (state/<appid>.img, run-guest.sh's APFS clone of images/state-template.img on first use), TPM
 /// (state/<appid>.tpm, sealed under a key in the login keychain) and share (runs/<appid>: the run's script, results and
 /// console), so games run side by side.
-/// MACNEUTRON_VM_DIR names the folder, else MacNeutron's own; MACNEUTRON_VM=0 runs a game on macOS as before.
+/// MACNEUTRON_VM_DIR names the folder, else MacNeutron's own; MACNEUTRON_VM=0 runs a game on macOS as before. A game in
+/// a Steam library runs in the VM or not at all: the launcher refuses it until the VM is ready.
 public struct MicroVM: Sendable {
     public let root: URL
 
     public static let standardRoot = FileManager.default.homeDirectoryForCurrentUser
         .appending(path: "Library/Application Support/MacNeutron/vm", directoryHint: .isDirectory)
 
-    /// The game's verbs only (getcompatpath and getnativepath answer about the macOS prefix), and only with
-    /// macneutron-vm and a complete image set in the folder.
+    /// The game's verbs go to the VM (getcompatpath and getnativepath answer about the macOS prefix), unless
+    /// MACNEUTRON_VM=0.
+    static func wanted(environment: [String: String], verb: Verb) -> Bool {
+        (verb == .run || verb == .waitforexitandrun) && environment["MACNEUTRON_VM"] != "0"
+    }
+
+    /// The VM, once it's ready: macneutron-vm and a complete image set in the folder, no tools swap under way.
     static func find(root: URL, environment: [String: String], verb: Verb) -> MicroVM? {
-        guard verb == .run || verb == .waitforexitandrun, environment["MACNEUTRON_VM"] != "0" else { return nil }
+        guard wanted(environment: environment, verb: verb) else { return nil }
         let folder = environment["MACNEUTRON_VM_DIR"].map { URL(filePath: $0, directoryHint: .isDirectory) } ?? root
         let vm = folder.appending(path: "macneutron-vm").path(percentEncoded: false)
         let installing = folder.appending(path: ".installing").path(percentEncoded: false)  // VMToolsInstaller's swap
