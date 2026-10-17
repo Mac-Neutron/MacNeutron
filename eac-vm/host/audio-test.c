@@ -11,6 +11,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <fcntl.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -116,6 +117,51 @@ int main(void) {
     msg(fd, MN_AUDIO_START, 0);
     if (played(fd, 76800, now() + 1) != 76800) fail("resume");
     close(fd);
+
+    /* A game writing ahead (the host's ring full, as in a match): beyond a wake-up for each message it reads, the
+     * connection wakes about once a report interval, not every millisecond, and its position still goes out. Its last
+     * line, at the close, has the rates. */
+    char log[] = "/tmp/mn-audio-calm-XXXXXX";
+    close(mkstemp(log));
+    fflush(stderr);
+    int saved = dup(2), lf = open(log, O_WRONLY | O_TRUNC);
+    dup2(lf, 2);
+    close(lf);
+    fd = stream(2), last = 0;
+    msg(fd, MN_AUDIO_START, 0);
+    t0 = now();
+    struct timeval wt = {0, 20000};
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &wt, sizeof wt);
+    while (now() - t0 < 2.5) { /* 10 ms chunks, as fast as the host takes them */
+        struct mn_audio_msg m = {MN_AUDIO_DATA, 480 * 4};
+        static char chunk[480 * 4];
+        if (write(fd, &m, sizeof m) == sizeof m) write(fd, chunk, sizeof chunk);
+        uint64_t v;
+        while (recv(fd, &v, sizeof v, MSG_DONTWAIT) == sizeof v) last = v;
+    }
+    long long moved = (long long)last;
+    close(fd);
+    usleep(200000); /* the connection's thread prints its last line */
+    fflush(stderr);
+    dup2(saved, 2);
+    close(saved);
+    char text[2048] = "";
+    FILE *f = fopen(log, "r");
+    size_t n = f ? fread(text, 1, sizeof text - 1, f) : 0;
+    text[n] = 0;
+    if (f) fclose(f);
+    unlink(log);
+    const char *line = strstr(text, " turns, ");
+    double turns = 0, messages = 0;
+    if (line) {
+        const char *t = line;
+        while (t > text && t[-1] != ' ') t--;
+        turns = atof(t);
+        messages = atof(line + strlen(" turns, "));
+    }
+    printf("calm: %.0f turns a second, %.0f of them for messages; position at %lld frames\n", turns, messages, moved);
+    if (!line || turns - messages > 150) fail("calm: the connection wakes too often for nothing");
+    if (moved < 48000) fail("calm: the position stopped moving");
 
     /* Six channels: the guest's plugin never asks for them (games downmix to its two). */
     fd = stream(6), last = 0;

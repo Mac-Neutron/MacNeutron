@@ -23,6 +23,10 @@
 #include <time.h>
 #include <unistd.h>
 
+/* How often a connection reports the position while it waits (Direct3D forwarding M5): ALSA reads it about once a
+ * period, 10 ms or more, so every 1-2 ms woke the connection about 800 times a second for nothing (audio-test's calm). */
+#define REPORT_MS 10
+
 struct stream {
     unsigned id, rate, channels, frame; /* frame: bytes a frame */
     int f32;
@@ -33,6 +37,7 @@ struct stream {
     _Atomic uint64_t dropped;     /* bytes */
     _Atomic int playing, closing;
     _Atomic int refs;             /* the connection's thread and the output's */
+    uint64_t turns, messages, reports; /* the connection's wake-ups, for its last line (Direct3D forwarding M5) */
 };
 
 static void put(struct stream *s) {
@@ -155,6 +160,7 @@ static int report(int fd, struct stream *s, uint64_t *told) {
     uint64_t played = atomic_load_explicit(&s->r, memory_order_acquire) / s->frame;
     if (played == *told) return 0;
     *told = played;
+    s->reports++;
     return send(fd, &played, sizeof played, 0) == sizeof played ? 0 : -1;
 }
 
@@ -165,7 +171,8 @@ static int queue(int fd, struct stream *s, uint32_t bytes, uint64_t *told) {
         uint64_t w = atomic_load_explicit(&s->w, memory_order_relaxed);
         uint64_t room = s->size - (w - atomic_load_explicit(&s->r, memory_order_acquire));
         if (!room) {
-            usleep(1000);
+            usleep(REPORT_MS * 1000);
+            s->turns++;
             if (report(fd, s, told)) return -1;
             continue;
         }
@@ -206,13 +213,16 @@ static void *serve(void *arg) {
     pthread_detach(t);
     fprintf(stderr, "mn-audio: stream %u: %u Hz, %u channels, %s\n", s->id, h.rate, h.channels,
             s->f32 ? "float" : "s16");
+    uint64_t started = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
     for (uint64_t told = 0;;) {
         struct pollfd p = {.fd = fd, .events = POLLIN};
-        int n = poll(&p, 1, 2);
+        int n = poll(&p, 1, REPORT_MS);
+        s->turns++;
         if (n < 0 && errno != EINTR) break;
         if (n > 0) {
             struct mn_audio_msg m;
             if (read_all(fd, &m, sizeof m)) break;
+            s->messages++;
             if (m.type == MN_AUDIO_DATA) {
                 if (queue(fd, s, m.bytes, &told)) break;
             } else if (m.type == MN_AUDIO_START || m.type == MN_AUDIO_PAUSE) {
@@ -227,8 +237,11 @@ static void *serve(void *arg) {
         if (report(fd, s, &told)) break;
     }
     uint64_t dropped = atomic_load(&s->dropped) / s->frame;
-    fprintf(stderr, "mn-audio: stream %u: %llu frames played, %llu dropped\n", s->id,
-            (unsigned long long)(atomic_load(&s->r) / s->frame - dropped), (unsigned long long)dropped);
+    double secs = (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - started) / 1e9;
+    fprintf(stderr, "mn-audio: stream %u: %llu frames played, %llu dropped; over %.0f s, %.0f turns, %.0f messages and "
+            "%.0f reports a second\n", s->id, (unsigned long long)(atomic_load(&s->r) / s->frame - dropped),
+            (unsigned long long)dropped, secs, secs > 0 ? s->turns / secs : 0, secs > 0 ? s->messages / secs : 0,
+            secs > 0 ? s->reports / secs : 0);
     atomic_store(&s->closing, 1);
     put(s);
     close(fd);
