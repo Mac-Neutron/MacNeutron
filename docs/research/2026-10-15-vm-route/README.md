@@ -688,3 +688,53 @@ EAC Linux v2's second requirement (§6). Every run has one: the device in libkru
 - Whether EAC v2 accepts a virtual TPM whose endorsement key MacNeutron certifies. There is no EK certificate yet; it
   would go in the TPM's NV at the TCG's index, signed by a MacNeutron CA, as swtpm_setup does for its TPMs.
 - Measured boot (4) needs Secure Boot firmware (3) first.
+
+## 14. The app sets up its own VM (2026-10-17)
+
+Spec `docs/superpowers/specs/2026-10-17-macneutron-vm-setup-design.md`, plans `2026-10-17-vm-setup-1..4`. A Mac with only
+MacNeutron.app gets the VM folder (`~/Library/Application Support/MacNeutron/vm`) by itself:
+- **Host tools** ride in the app: `Contents/Helpers/vm` (macneutron-vm, libkrun, the Steam forwarder's host, gvproxy,
+  the Metal host) and `Contents/Resources/vm` (the two scripts: codesign takes a script in Helpers for unsigned code).
+  `VMToolsInstaller` copies them in on each app version, never while a VM runs from the folder, never into a developer's
+  linked folder.
+- **Images are built on the Mac** by `macneutron vm-setup`, with no VM and nothing unpacked onto the case-insensitive
+  disk:
+  - Fedora's pinned packages (166 aarch64, 177 MB, plus FEX's x86-64 root, 969 MB) come from Fedora's mirrors, falling
+    back to Koji, each checked against the SHA-256 in the app's `vm-manifest.json`.
+  - Our parts (118.7 MB xz: the recipes, an overlay of what package scripts and our build wrote, `wine.tar`, the guest
+    tools) are a release asset.
+  - RPM payloads (zstd through the vendored decoder in `Sources/CZstd`, xz through Compression) fill a store by SHA-256.
+    The recipes then stream tars into a bundled `mkfs.erofs` (erofs-utils 1.9.4 with lz4, built here by plain clang),
+    and the initramfs's cpio.
+  - FEX's image is used as FEX ships it, mounted by its virtio-blk id.
+- **The recipes** (`eac-vm/image/recipe.py`, run by `build.sh` in the builder) record the builder's base tree and
+  initramfs file by file.
+  - Base: 17,882 entries, 193 from the overlay.
+  - Initramfs: 3,301 entries, 24 from the overlay, 5 device nodes.
+  - The overlay is 26.9 MB of generated files and our FEX. No Fedora binary ships.
+  - Making this true changed the build: the initramfs is now made by the pinned root's own dracut, in a chroot. Before,
+    dracut took the builder's own programs (its systemd was 259.5 against the image's 259.9). The rpm and dnf
+    databases, and kernel-core's unused `/boot` initramfs, leave the base tree.
+- **The app** runs the setup when the folder's `images/manifest.sha256` isn't its manifest's hash, and shows "Game VM:
+  downloading / building its images / ready". A game running from the folder defers the swap (exit 75), retried from
+  the poll. A failure waits for Retry. Settings' Rebuild clears the downloads and builds a fresh set.
+
+**Checked** (`eac-vm/tests/vm-setup.sh`, the gate): a folder set up from the builder's packages and the parts, served
+as `file:` URLs, took 22 s. Its base, Wine and initramfs images equal the builder's (type, path, mode, owner, size,
+link, SHA-256, capabilities), and the kernel and x86-64 root are byte for byte the same. It booted 7.2.10-200.fc44 with
+`[integrity]`, `sig_enforce` Y and `/dev/tpm0`, and played sound under FEX (2.008 s for 2 s) and Wine (1.995 s).
+A Mac downloads about 1.27 GB.
+
+**Release** (`release.sh`):
+- It builds the images in the builder, archives the parts, writes the manifest naming the release's asset URL, and
+  checks that the template stays sparse and that the manifest names the archive.
+- It signs the helpers under the hardened runtime (macneutron-vm with the hypervisor entitlement, mn-steam-host with
+  disable-library-validation).
+- No helper names a build path: libkrun remaps Cargo's paths, and the forwarder is rebuilt against the release
+  wine.app's lsteamclient.
+- The licences ship (libkrun's 92 crates among them), and erofs-utils' source goes in the source archive.
+
+**Open:**
+- gvproxy's statically linked Go modules' notices need its source (a download).
+- A full rehearsal runs R3, which needs Steam running.
+- The first run on a clean macOS account is the maintainer's (plan 4, task 3).
