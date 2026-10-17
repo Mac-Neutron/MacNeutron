@@ -501,8 +501,19 @@ the memory DXMT hands to Metal itself (`dxmt_buffer.cpp:44-46`, `d3d12_command_a
   transport and the dispatch sizes. The cause: the guest loaded the game's Intel XeSS, whose non-Intel (DP4a) path is
   this slow, where MacNeutron's launcher sets `libxess,libxess_dx11=b` for Wine's builtin, which answers with MetalFX
   through DXMT. With XeSS off, the game played at 110-135 fps in a match (the user's report). `smite2-render.sh` now
-  sets the launcher's override, and the 4b-2 gate gains check.sh's five `d3d12_xess` rows; neither has run yet (the VM
-  was in use), so XeSS on MetalFX in the guest is still unmeasured.
+  sets the launcher's override, and the 4b-2 gate gains check.sh's `d3d12_xess` rows (quality, performance, nodepth,
+  api), all the same as macOS; the cycles row is left out, its GPU memory sizes being a few MB apart (blob memory is
+  freed when the guest drains its frees). XeSS in SMITE 2 itself is the user's to check.
+- **DLSS, as the launcher offers it.** The guest's DXMT builds its nvapi64 and nvngx, Authenticode-signed as the
+  product's (the NGX SDK loads only a signed nvngx.dll). `MACNEUTRON_DLSS=1` turns DXMT's NVIDIA extension on;
+  check.sh's `d3d12_dlss` rows (vendor 10de with NVAPI, quality, performance, inverted depth, the refusals) give the
+  same lines as macOS.
+- **Mouse look had no raw input.** Capture sent relative motion, but Wine turns raw input (XInput2's raw motion, what a
+  game's mouse look reads) on only when one of its windows gets an X FocusIn. Xvfb has no window manager and its focus
+  stays PointerRoot, so it never did, whatever the X server sent (it does send raw motion for XTEST's device). `mn-input`
+  now gives the top-level window under the pointer the focus. `eac-vm/tests/input-wine.sh` checks it with a Windows
+  program that registers raw mouse input and clips the cursor, as a game in a match: the host's relative move arrives as
+  WM_INPUT.
 
 **Open.**
 - `mn-steam-host` takes the guest's interface values (`u_iface`) as host pointers unchecked: one run crashed it
