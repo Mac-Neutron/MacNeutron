@@ -64,6 +64,13 @@ final class AppModel {
     /// Valve's signed Windows client files in `layout.valveCache` (`ValveClient`).
     let valveClient: ValveClient
     private let appVersion: String
+    /// MacNeutron.app's `Contents/Helpers/vm`: the microVM's host tools (`VMToolsInstaller`); nil in dev runs and tests.
+    let vmTools: URL?
+    /// The VM folder (`MicroVM.standardRoot`).
+    let vmRoot: URL
+    private let vmInstaller: @Sendable (URL, URL) throws -> VMToolsInstallOutcome
+    /// A VM ran from the folder at the last tools install: the poll retries it.
+    private(set) var vmToolsDeferred = false
 
     private(set) var runtime: InstalledRuntime?
     /// Setup's runtime text while installing, deferred or failed; nil once installed.
@@ -115,7 +122,11 @@ final class AppModel {
              try RuntimeInstaller.install(wineApp: $0, layout: $1, launcherBinary: $2, force: $3)
          },
          identity: @escaping @Sendable (URL) -> String? = CodeIdentity.of,
-         valveClient: ValveClient? = nil, appVersion: String = AppModel.appVersion) {
+         valveClient: ValveClient? = nil, appVersion: String = AppModel.appVersion,
+         vmTools: URL? = AppModel.bundledVMTools, vmRoot: URL = MicroVM.standardRoot,
+         vmInstaller: @escaping @Sendable (URL, URL) throws -> VMToolsInstallOutcome = {
+             try VMToolsInstaller.install(from: $0, into: $1)
+         }) {
         self.steam = steam
         self.layout = layout
         self.mode = mode
@@ -127,6 +138,9 @@ final class AppModel {
         self.identity = identity
         self.valveClient = valveClient ?? ValveClient(cache: layout.valveCache)
         self.appVersion = appVersion
+        self.vmTools = vmTools
+        self.vmRoot = vmRoot
+        self.vmInstaller = vmInstaller
         valveVersion = ValveClient.installed(in: self.valveClient.cache)?.version
         // Read now, not in the first refresh: the scene decides at launch whether to open the setup window.
         runtime = InstalledRuntime.read(layout, identity: identity)
@@ -141,6 +155,11 @@ final class AppModel {
     /// `CFBundleVersion`: the automatic Valve check runs once per app version (spec D4).
     nonisolated static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "dev"
+    }
+
+    nonisolated static var bundledVMTools: URL? {
+        let tools = Bundle.main.bundleURL.appending(path: "Contents/Helpers/vm", directoryHint: .isDirectory)
+        return FileManager.default.fileExists(atPath: tools.path(percentEncoded: false)) ? tools : nil
     }
 
     nonisolated static var bundledWineApp: URL? {
@@ -234,6 +253,7 @@ final class AppModel {
         }
         generation += 1  // a refresh that read the folder mid-install would put the old runtime back
         runtime = InstalledRuntime.read(layout, identity: identity)
+        if case .success = result { await installVMTools() }
         // D2: no question asked; the files come from Valve's CDN to this Mac, as Linux Steam's legacycompat does for
         // Proton (macOS Steam has no legacycompat). Only for a runtime that can use them (Wine 0036).
         if case .success = result, layout.supportsGenuineSteamclient {
@@ -244,6 +264,7 @@ final class AppModel {
 
     /// Each poll tick: retry a deferred install; reinstall when a launch found the runtime damaged.
     func pollRuntime() async {
+        if vmToolsDeferred { await installVMTools() }
         if let force = deferredForce {
             await installRuntime(force: force)
         } else if !installFailed, FileManager.default.fileExists(atPath: layout.runtimeDamagedMarker.path(percentEncoded: false)) {
@@ -269,6 +290,7 @@ final class AppModel {
         valveUpdating = false
         valveNotice = failure.map { ($0 as? ValveClientError)?.description ?? $0.localizedDescription }
         valveVersion = ValveClient.installed(in: valveClient.cache)?.version
+        copyValveClientToVM()
     }
 
     /// Settings' Remove (spec D5): prefixes get lsteamclient from the next launch, and nothing is downloaded again until
@@ -276,6 +298,31 @@ final class AppModel {
     func removeValveClient() {
         do { try valveClient.remove() } catch { valveNotice = error.localizedDescription }
         valveVersion = ValveClient.installed(in: valveClient.cache)?.version
+        copyValveClientToVM()
+    }
+
+    // MARK: The microVM's host tools
+
+    /// From `Contents/Helpers/vm` into the VM folder after each runtime install, off the main thread; deferred while a
+    /// VM runs from the folder (the poll retries). Never into a developer's linked folder.
+    func installVMTools() async {
+        guard let tools = vmTools else { return }
+        let (install, root) = (vmInstaller, vmRoot)
+        let result = await Task.detached { Result { try install(tools, root) } }.value
+        vmToolsDeferred = false
+        switch result {
+        case .success(.deferred): vmToolsDeferred = true
+        case .success: copyValveClientToVM()
+        case .failure(let error): errorMessage = "\(error)"
+        }
+    }
+
+    /// Valve's steamclient64.dll for the guest (the VM folder's share/valve), only where the app ships the VM.
+    private func copyValveClientToVM() {
+        guard vmTools != nil else { return }
+        do {
+            try VMToolsInstaller.copyValveClient(ValveClient.installed(in: valveClient.cache), into: vmRoot)
+        } catch { errorMessage = "\(error)" }
     }
 
     // MARK: Setup

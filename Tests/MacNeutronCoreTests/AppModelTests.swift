@@ -361,3 +361,64 @@ private func makeValveModel(layout: ToolLayout, cdn: FakeValveCDN, appVersion: S
     _ = try await makeValveModel(layout: layout, cdn: cdn, appVersion: "2")
     #expect(cdn.requests == [ValveClient.manifestURL, cdn.packageURL, ValveClient.manifestURL])
 }
+
+// MARK: The microVM's host tools
+
+/// A stand-in for MacNeutron.app's Contents/Helpers/vm.
+private func makeVMTools() throws -> URL {
+    let tools = try makeTempDir().appending(path: "vm-tools", directoryHint: .isDirectory)
+    for file in ["macneutron-vm", "libkrun/libkrun.1.dylib", "steam-forward/host/mn-steam-host", "gvproxy",
+                 "metal-host/winemetal.so", "run-guest.sh", "run-game.sh"] {
+        try write("\(file)\n", to: tools.appending(path: file), executable: true)
+    }
+    return tools
+}
+
+/// One app start whose runtime is already installed, with the app's VM tools and a VM folder of the test's own.
+@MainActor
+private func makeVMModel(vmRoot: URL, layout: ToolLayout? = nil, cdn: FakeValveCDN? = nil,
+                         vmInstaller: (@Sendable (URL, URL) throws -> VMToolsInstallOutcome)? = nil) async throws -> AppModel {
+    let (mode, _) = try makeMode()
+    let layout = try layout ?? makeToolLayout()
+    let model = AppModel(steam: mode.steam, layout: layout, mode: mode, store: GameSettingsStore(directory: try makeTempDir()),
+                         loginItem: FakeLoginItem(statusAfterRegister: .enabled).item,
+                         wineAppSource: try makeToolLayout().wineApp, installer: ScriptedInstaller(.unchanged).install,
+                         identity: { _ in testIdentity },
+                         valveClient: try cdn.map { ValveClient(cache: layout.valveCache, fetch: $0.fetch) }
+                             ?? ValveClient(cache: try makeTempDir()),
+                         vmTools: try makeVMTools(), vmRoot: vmRoot,
+                         vmInstaller: vmInstaller ?? { try VMToolsInstaller.install(from: $0, into: $1, runningExecutables: { [] }) })
+    await model.installTask?.value
+    await model.valveTask?.value
+    return model
+}
+
+@MainActor @Test func theVMToolsFollowTheRuntimeInstall() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    let model = try await makeVMModel(vmRoot: vmRoot)
+    #expect(FileManager.default.fileExists(atPath: vmRoot.appending(path: "macneutron-vm").path))
+    #expect(!model.vmToolsDeferred)
+}
+
+@MainActor @Test func deferredVMToolsAreRetriedByThePoll() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    nonisolated(unsafe) var calls = 0
+    let lock = NSLock()
+    let model = try await makeVMModel(vmRoot: vmRoot, vmInstaller: { tools, vm in
+        if lock.withLock({ calls += 1; return calls == 1 }) { return .deferred(vm.appending(path: "macneutron-vm").path) }
+        return try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] })
+    })
+    #expect(model.vmToolsDeferred)
+    #expect(!FileManager.default.fileExists(atPath: vmRoot.appending(path: "macneutron-vm").path))
+    await model.pollRuntime()
+    #expect(!model.vmToolsDeferred)
+    #expect(FileManager.default.fileExists(atPath: vmRoot.appending(path: "macneutron-vm").path))
+}
+
+@MainActor @Test func valveFilesReachTheVM() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    let layout = try supportingLayout()
+    let model = try await makeVMModel(vmRoot: vmRoot, layout: layout, cdn: try FakeValveCDN(dir: try makeTempDir()))
+    let cached = try #require(ValveClient.installed(in: model.valveClient.cache)).steamClient64
+    #expect(try Data(contentsOf: vmRoot.appending(path: "share/valve/steamclient64.dll")) == Data(contentsOf: cached))
+}

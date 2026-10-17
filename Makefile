@@ -83,7 +83,8 @@ dxmt-check: build wine-arm64 dxmt-tests dxmt-tests-arm64ec presenter
 	sh dxmt/check.sh
 	MACNEUTRON_ARM64_TESTS=build/dxmt-tests-arm64ec MACNEUTRON_ARM64_LOOP=build/dxmt-tests-arm64ec/present_loop.exe DXMT_CHECK_WORK="$${TMPDIR:-/tmp}/macneutron dxmt arm64ec" sh dxmt/check.sh
 
-# A development MacNeutron.app, ad hoc signed, with the CLI, wine.app and steam.exe inside. Never open it on this Mac:
+# A development MacNeutron.app, ad hoc signed, with the CLI, wine.app, the microVM's host tools (eac-vm/host/stage.sh)
+# and steam.exe inside. Never open it on this Mac:
 # its start installs into the real tool folder. Needs the signing variables (it builds wine.app); make release
 # builds the notarized one.
 app: build bridge wine-arm64
@@ -95,6 +96,8 @@ app: build bridge wine-arm64
 	cp .build/release/macneutron $(APP)/Contents/Helpers/macneutron
 	codesign --force --sign - $(APP)/Contents/Helpers/macneutron
 	cp -c -R build/wine-arm64/wine.app $(APP)/Contents/Helpers/wine.app
+	sh eac-vm/host/stage.sh $(APP)/Contents/Helpers/vm
+	codesign --force --sign - --entitlements eac-vm/host/hv.plist $(APP)/Contents/Helpers/vm/macneutron-vm
 	cp $(BRIDGE)/arm64/steam.exe $(APP)/Contents/Resources/steam.exe
 	codesign --force --sign - $(APP)
 
