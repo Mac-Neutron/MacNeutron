@@ -2,7 +2,11 @@ import Foundation
 
 /// One entry of the tree an image is built from (eac-vm/image/recipe.py wrote it from the builder's own tree).
 struct RecipeEntry: Equatable {
-    enum Kind: Equatable { case directory, file(size: Int64, sha256: String, source: Source), symlink(String) }
+    enum Kind: Equatable {
+        case directory, file(size: Int64, sha256: String, source: Source), symlink(String)
+        /// A character or block device node (an initramfs's /dev/console: the kernel opens it before /init).
+        case device(block: Bool, major: UInt32, minor: UInt32)
+    }
     /// Where a file's bytes come from: a Fedora package's payload, or the parts' overlay.
     enum Source: Equatable { case package(String), overlay }
     let path: String
@@ -16,7 +20,8 @@ struct RecipeEntry: Equatable {
 }
 
 /// A recipe file: one entry a line, tab-separated, `type path mode uid gid size sha256 source link caps` (`-` for a
-/// field the type has no use for; a tab, newline or backslash in a path or link written `\t`, `\n`, `\\`).
+/// field the type has no use for; a tab, newline or backslash in a path or link written `\t`, `\n`, `\\`). Types: `d`,
+/// `f`, `l`, and `c` or `b` for a device, whose link field is `major:minor`.
 enum Recipe {
     static func parse(_ tsv: String) throws -> [RecipeEntry] {
         var entries: [RecipeEntry] = []
@@ -34,6 +39,10 @@ enum Recipe {
         switch f[0] {
         case "d": kind = .directory
         case "l": kind = .symlink(unescaped(f[8]))
+        case "c", "b":
+            let numbers = f[8].split(separator: ":").compactMap { UInt32($0) }
+            guard numbers.count == 2 else { return nil }
+            kind = .device(block: f[0] == "b", major: numbers[0], minor: numbers[1])
         case "f":
             guard let size = Int64(f[5]), f[6].count == 64 else { return nil }
             if f[7] == "overlay" {

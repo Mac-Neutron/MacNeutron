@@ -29,3 +29,9 @@ private let sha = String(repeating: "ab", count: 32)
         try Recipe.parse("d\t/\t755\t0\t0\t-\t-\t-\t-\t-\nf\t/x\t644\n")
     }
 }
+
+@Test func deviceNodesCarryTheirNumbers() throws {
+    let entries = try Recipe.parse("c\t/dev/console\t600\t0\t5\t-\t-\t-\t5:1\t-\n")
+    #expect(entries == [RecipeEntry(path: "/dev/console", mode: 0o600, uid: 0, gid: 5,
+                                    kind: .device(block: false, major: 5, minor: 1), capability: nil)])
+}

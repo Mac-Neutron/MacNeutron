@@ -10,7 +10,7 @@ struct TarWriter {
     /// `contents` for a file: its bytes, whose size goes in the header.
     mutating func add(_ entry: RecipeEntry, contents: URL?) throws {
         var name = entry.path == "/" ? "./" : String(entry.path.drop { $0 == "/" })
-        var type: UInt8 = UInt8(ascii: "0"), link = "", size: Int64 = 0
+        var type: UInt8 = UInt8(ascii: "0"), link = "", size: Int64 = 0, device: (UInt32, UInt32) = (0, 0)
         switch entry.kind {
         case .directory:
             type = UInt8(ascii: "5")
@@ -18,6 +18,9 @@ struct TarWriter {
         case .symlink(let target):
             type = UInt8(ascii: "2")
             link = target
+        case .device(let block, let major, let minor):
+            type = UInt8(ascii: block ? "4" : "3")
+            device = (major, minor)
         case .file:
             guard let contents else { throw CocoaError(.fileNoSuchFile) }
             size = (try FileManager.default.attributesOfItem(atPath: contents.path(percentEncoded: false))[.size]
@@ -36,7 +39,8 @@ struct TarWriter {
                              size: Int64(body.count), type: UInt8(ascii: "x"), link: ""))
             try write(padded(body))
         }
-        try write(header(name: name, mode: entry.mode, uid: entry.uid, gid: entry.gid, size: size, type: type, link: link))
+        try write(header(name: name, mode: entry.mode, uid: entry.uid, gid: entry.gid, size: size, type: type, link: link,
+                         device: device))
         if let contents, case .file = entry.kind {
             let file = try FileHandle(forReadingFrom: contents)
             defer { try? file.close() }
@@ -64,7 +68,7 @@ struct TarWriter {
     private func padded(_ data: Data) -> Data { data + Data(count: (512 - data.count % 512) % 512) }
 
     private func header(name: String, mode: UInt16, uid: UInt32, gid: UInt32, size: Int64, type: UInt8,
-                        link: String) -> Data {
+                        link: String, device: (UInt32, UInt32) = (0, 0)) -> Data {
         var h = Data(count: 512)
         func put(_ text: String, _ at: Int, _ width: Int) {
             let bytes = Array(text.utf8.prefix(width))
@@ -84,6 +88,8 @@ struct TarWriter {
         put(link, 157, 100)
         put("ustar", 257, 6)
         put("00", 263, 2)
+        octal(Int64(device.0), 329, 8)
+        octal(Int64(device.1), 337, 8)
         put("        ", 148, 8)
         let sum = h.reduce(0) { $0 + Int64($1) }
         octal(sum, 148, 7)

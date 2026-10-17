@@ -88,6 +88,9 @@ struct CPIOWriter {
             try write(name: name, mode: 0o040000 | UInt32(entry.mode), entry: entry, nlink: 2, bytes: Data())
         case .symlink(let target):
             try write(name: name, mode: 0o120000 | UInt32(entry.mode), entry: entry, nlink: 1, bytes: Data(target.utf8))
+        case .device(let block, let major, let minor):
+            try write(name: name, mode: (block ? 0o060000 : 0o020000) | UInt32(entry.mode), entry: entry, nlink: 1,
+                      bytes: Data(), rdev: (major, minor))
         case .file:
             guard let contents else { throw CocoaError(.fileNoSuchFile) }
             try write(name: name, mode: 0o100000 | UInt32(entry.mode), entry: entry, nlink: 1,
@@ -100,9 +103,10 @@ struct CPIOWriter {
         try write(name: "TRAILER!!!", mode: 0, entry: nil, nlink: 1, bytes: Data())
     }
 
-    private mutating func write(name: String, mode: UInt32, entry: RecipeEntry?, nlink: UInt32, bytes: Data) throws {
-        let fields: [UInt32] = [inode, mode, entry?.uid ?? 0, entry?.gid ?? 0, nlink, 0, UInt32(bytes.count), 0, 0, 0, 0,
-                                UInt32(name.utf8.count + 1), 0]
+    private mutating func write(name: String, mode: UInt32, entry: RecipeEntry?, nlink: UInt32, bytes: Data,
+                                rdev: (UInt32, UInt32) = (0, 0)) throws {
+        let fields: [UInt32] = [inode, mode, entry?.uid ?? 0, entry?.gid ?? 0, nlink, 0, UInt32(bytes.count), 0, 0,
+                                rdev.0, rdev.1, UInt32(name.utf8.count + 1), 0]
         var record = Data(("070701" + fields.map { String(format: "%08X", $0) }.joined()).utf8) + Data(name.utf8) + [0]
         record += Data(count: (4 - (written + record.count) % 4) % 4)
         record += bytes

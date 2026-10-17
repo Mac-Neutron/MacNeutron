@@ -48,6 +48,8 @@ wine_image() {
     sudo install -m755 "$DXMT_GUEST/x86_64-unix/winemetal.so" "$WORK/wine/lib/wine/x86_64-unix/"
   fi
   sudo rm -f "$OUT/wine.erofs"; sudo mkfs.erofs -L mn-wine -zlz4hc "$OUT/wine.erofs" "$WORK/wine" > /dev/null
+  # The same tree as a tar, for a Mac's setup to make wine.erofs from (eac-vm/setup/parts.sh).
+  sudo mkdir -p "$OUT/setup"; sudo tar --numeric-owner -C "$WORK/wine" -cf "$OUT/setup/wine.tar" .
   ls -la "$OUT/wine.erofs"
 }
 
@@ -76,8 +78,20 @@ if [ -f "$HERE/packages.lock" ] && [ -z "${UPDATE_LOCK:-}" ]; then
 fi
 cp "$WORK/packages.lock" "$OUT/packages.lock"
 
+# The initramfs from the pinned root's own dracut, modules and programs, none of the builder's (a Mac rebuilds it
+# from the same packages: recipe.py). Run before the root's other changes, which it then doesn't see.
+for m in proc sys dev; do sudo mount --bind "/$m" "$WORK/root/$m"; done
+sudo chroot "$WORK/root" dracut -q -f --no-hostonly --kver "$KVER" \
+  --add-drivers "virtio_mmio erofs overlay virtiofs" \
+  --omit "plymouth systemd-cryptsetup network nfs iscsi multipath lvm dm mdraid crypt" /tmp/mn-initramfs.img
+for m in proc sys dev; do sudo umount "$WORK/root/$m"; done
+sudo mv "$WORK/root/tmp/mn-initramfs.img" "$WORK/initramfs.img" && sudo chmod 644 "$WORK/initramfs.img"
+sudo rm -f "$WORK/root/boot/initramfs-$KVER.img"  # kernel-core's own, never booted
+
 cp "$WORK/root/lib/modules/$KVER/vmlinuz" "$OUT/vmlinuz"
 sudo rm -f "$WORK/root/lib/modules/$KVER/vmlinuz"  # it boots from outside the image
+# The guest never runs rpm or dnf, and a Mac's setup (recipe.py) rebuilds the tree without their databases.
+sudo rm -rf "$WORK/root/usr/lib/sysimage/rpm" "$WORK/root/var/lib/dnf" "$WORK/root/var/cache/dnf"
 for b in FEX FEXServer FEXBash FEXGetConfig FEXpidof; do sudo install -m755 "$FEX_BIN/$b" "$WORK/root/usr/bin/"; done
 sudo rm -f "$WORK/root/etc/resolv.conf"  # ours replaces whatever the packages left, a symlink included
 sudo cp -R "$HERE/rootfs/." "$WORK/root/"
@@ -90,11 +104,7 @@ sudo systemd-sysusers --root="$WORK/root"  # our mn user (rootfs/usr/lib/sysuser
 sudo systemd-hwdb update --root="$WORK/root"  # its scriptlet cannot write hwdb.bin inside the install root
 sudo rm -f "$OUT/base.erofs"; sudo mkfs.erofs -L mn-base -zlz4hc "$OUT/base.erofs" "$WORK/root" > /dev/null
 
-# The modules come from the pinned kernel-modules-core in the install root, not from the builder's own kernel.
-sudo dracut -q -f --no-hostonly --kver "$KVER" --kmoddir "$WORK/root/lib/modules/$KVER" \
-  --add-drivers "virtio_mmio erofs overlay virtiofs" \
-  --omit "plymouth systemd-cryptsetup network nfs iscsi multipath lvm dm mdraid crypt" "$WORK/initramfs.img"
-sudo cp "$WORK/initramfs.img" "$OUT/initramfs.img"
+sudo install -m644 "$WORK/initramfs.img" "$OUT/initramfs.img"
 
 (cd "$WORK/x86-rpm" && rpm2cpio "$CACHE"/x86/*.rpm | sudo cpio -idm --quiet ./usr/share/fex-emu/RootFS/default.erofs)
 sudo rm -f "$OUT/x86-64-rootfs.erofs"; sudo cp "$WORK/x86-rpm/usr/share/fex-emu/RootFS/default.erofs" "$OUT/x86-64-rootfs.erofs"
@@ -109,6 +119,9 @@ state_template
 # rd.*: an initrd that cannot find or mount its root reboots after 30 s (ending the host) instead of waiting forever
 # or opening a shell.
 printf '%s\n' "root=LABEL=mn-base rootfstype=erofs ro systemd.volatile=overlay lockdown=integrity sysctl.kernel.kexec_load_disabled=1 module.sig_enforce=1 rd.timeout=30 rd.shell=0 rd.emergency=reboot panic=5 console=hvc0 net.ifnames=0" > "$OUT/cmdline.txt"
+# What a Mac's setup rebuilds base.erofs and the initramfs from: recipes, the overlay and the package list.
+sudo python3 "$HERE/recipe.py" "$WORK/root" "$WORK/initramfs.img" "$KVER" "$OUT/setup" "$CACHE/base" "$CACHE/x86" \
+  | tail -3
 echo dev > "$OUT/manifest.sha256"  # a complete set (MicroVM.imagesComplete); the app's setup writes its manifest's hash
 file "$OUT/vmlinuz"
 ls -la "$OUT"

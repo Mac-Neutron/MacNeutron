@@ -67,3 +67,21 @@ private func listing(_ archive: URL) throws -> String {
     let record = Data("SCHILY.xattr.security.capability=".utf8) + Data([1, 0, 0, 2, 0, 0x20])
     #expect(bytes.range(of: record) != nil)
 }
+
+@Test func aDeviceNodeIsWrittenWithItsNumbers() throws {
+    let console = RecipeEntry(path: "/dev/console", mode: 0o600, uid: 0, gid: 5,
+                              kind: .device(block: false, major: 5, minor: 1), capability: nil)
+    let cpioFile = try makeTempDir().appending(path: "d.cpio"), tarFile = try makeTempDir().appending(path: "d.tar")
+    for file in [cpioFile, tarFile] { FileManager.default.createFile(atPath: file.path, contents: nil) }
+    var cpio = CPIOWriter(try FileHandle(forWritingTo: cpioFile))
+    try cpio.add(console, contents: nil)
+    try cpio.finish()
+    var tar = TarWriter(try FileHandle(forWritingTo: tarFile))
+    try tar.add(console, contents: nil)
+    try tar.finish()
+    for file in [cpioFile, tarFile] {
+        let text = try listing(file)
+        #expect(text.hasPrefix("crw-------"))
+        #expect(text.contains("5,1") || text.contains("5, 1"))
+    }
+}

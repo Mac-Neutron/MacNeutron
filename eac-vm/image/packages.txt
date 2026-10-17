@@ -14,3 +14,4 @@ alsa-lib
 iproute
 # Development: traces the EAC bootstrapper's Linux system calls under FEX
 strace
+dracut
