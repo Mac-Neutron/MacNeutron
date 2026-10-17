@@ -53,8 +53,8 @@ public enum VMToolsInstaller {
             return .deferred(running)
         }
         for item in items {
-            let swapped = fm.fileExists(atPath: path(item))
-                ? renamex_np(path(item + ".new"), path(item), UInt32(RENAME_SWAP)) : rename(path(item + ".new"), path(item))
+            let (new, old) = (path(item + ".new"), path(item))
+            let swapped = fm.fileExists(atPath: old) ? renamex_np(new, old, UInt32(RENAME_SWAP)) : rename(new, old)
             guard swapped == 0 else { throw RuntimeInstallError.swapFailed(errno) }
             try? fm.removeItem(atPath: path(item + ".new"))  // the old item, after a swap
         }
@@ -77,13 +77,16 @@ public enum VMToolsInstaller {
     /// The folder itself is a symlink: a developer's link to build/eac-vm-work.
     public static func isDeveloperFolder(_ vm: URL) -> Bool {
         let path = vm.path(percentEncoded: false)
-        return (try? FileManager.default.destinationOfSymbolicLink(atPath: path.hasSuffix("/") ? String(path.dropLast()) : path)) != nil
+        let link = path.hasSuffix("/") ? String(path.dropLast()) : path
+        return (try? FileManager.default.destinationOfSymbolicLink(atPath: link)) != nil
     }
 
     /// The first running executable under the folder, by its real path (the kernel reports /private/var/…) or as given.
     private static func running(in vm: URL, _ runningExecutables: () -> [String]) -> String? {
         let given = vm.standardizedFileURL.path(percentEncoded: false)
         let roots = [given, realPath(given) ?? given].map { $0.hasSuffix("/") ? $0 : $0 + "/" }
-        return runningExecutables().first { path in roots.contains { (realPath(path) ?? path).hasPrefix($0) || path.hasPrefix($0) } }
+        return runningExecutables().first { path in
+            roots.contains { (realPath(path) ?? path).hasPrefix($0) || path.hasPrefix($0) }
+        }
     }
 }
