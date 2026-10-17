@@ -16,6 +16,9 @@ WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -i >/dev/null 2>&1; rc=$?
 echo "wineboot -i: $(( $(date +%s) - start )) s"
 check wineboot "$rc" 0
 check echo "$(wine cmd /c echo hi 2>/dev/null | tr -d '\r')" hi
+echo "ntsync device: $(ls -l /dev/ntsync 2>&1)"
+# NTSync (rootfs/usr/lib/modules-load.d/mn-ntsync.conf): the server keeps Windows' sync objects in the kernel.
+check ntsync "$(ls -l "/proc/$(pgrep -x wineserver | head -n 1)/fd" 2>/dev/null | grep -c ' /dev/ntsync$')" 1
 wineserver -k; wineserver -w
 # wineserver writes the registry when it exits.
 check system.reg "$([ -s "$WINEPREFIX/system.reg" ] && echo present)" present
