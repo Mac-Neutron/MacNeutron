@@ -1,13 +1,14 @@
 /* The guest's TPM 2.0 (macneutron-vm --tpm <dir>; research README §6 and §13, EAC v2): libkrun's TpmDevice, a TIS
  * interface that Linux's built-in tpm_tis binds to, run by libtpms (eac-vm/libtpms) with its default-v1 profile.
  *
- * Its state is kept the way Parallels Desktop keeps its virtual TPM's (kb.parallels.com/en/122702): files in its folder,
- * encrypted (AES-256-GCM, each file's name authenticated with it; Parallels uses AES-128) under a key that lives in the
- * login keychain, never in the folder. The keychain item's account is the folder's random id (<dir>/id), so the key
- * follows the TPM, not the game, and a copy on the same Mac keeps working. A folder whose key isn't in this Mac's
- * keychain (copied from another Mac), or whose files don't decrypt, moves to <dir>/backup-<id>/ and the TPM starts
- * afresh, a new identity: Parallels 18's way. Any other keychain failure (locked, denied) fails the start instead of
- * losing the state. */
+ * Its state is kept the way Parallels Desktop keeps its virtual TPM's (kb.parallels.com/en/122702): files in its
+ * folder, encrypted (AES-256-GCM, each file's name authenticated with it; Parallels uses AES-128) under a key that
+ * lives in the login keychain, never in the folder. The keychain item's account is the folder's random id (<dir>/id),
+ * so the key follows the TPM, not the game, and a copy on the same Mac keeps working. A folder whose key isn't in
+ * this Mac's keychain (copied from another Mac), or whose files don't decrypt, moves to <dir>/backup-<id>/ and the TPM
+ * starts afresh, a new identity: Parallels 18's way. That is decided once, before libtpms starts. Anything else (a
+ * keychain that is locked or says no, a file that can't be read just now) fails the start instead of losing the
+ * state. */
 #include "tpm.h"
 #include <Security/Security.h>
 #include <dirent.h>
@@ -79,7 +80,8 @@ static int write_file(const char *name, const uint8_t *data, size_t n) {
     path(p, name), snprintf(tmp, sizeof tmp, "%s.tmp", p);
     int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (fd < 0) return -1;
-    int ok = write(fd, data, n) == (ssize_t)n && fsync(fd) == 0;
+    /* F_BARRIERFSYNC: the data reaches the disk before the rename does (fsync alone doesn't order them on macOS). */
+    int ok = write(fd, data, n) == (ssize_t)n && (fcntl(fd, F_BARRIERFSYNC) == 0 || fsync(fd) == 0);
     close(fd);
     if (ok && rename(tmp, p) == 0) return 0;
     unlink(tmp);
@@ -118,30 +120,6 @@ static int backup(void) {
     return rc;
 }
 
-static int open_state(const char *dir) {
-    snprintf(tpm.dir, sizeof tpm.dir, "%s", dir), tpm.id[0] = 0;
-    if (mkdir(dir, 0700) != 0 && errno != EEXIST) return -1;
-    char p[PATH_MAX];
-    path(p, "id");
-    FILE *f = fopen(p, "r");
-    if (f) {
-        int ok = fscanf(f, "%36s", tpm.id) == 1;
-        fclose(f);
-        if (ok) {
-            int k = key_get();
-            if (k <= 0) return k;
-        }
-    } else {
-        int empty = 1;
-        DIR *d = opendir(dir);
-        for (struct dirent *e; d && (e = readdir(d));)
-            if (e->d_name[0] != '.' && strncmp(e->d_name, "backup-", 7)) empty = 0;
-        if (d) closedir(d);
-        if (empty) return fresh();
-    }
-    return backup() == 0 ? fresh() : -1;
-}
-
 /* AES-256-GCM, the file's name as associated data. A file is iv (12) | ciphertext | tag (16). */
 static int gcm(int enc, const char *name, const uint8_t *in, size_t n, uint8_t *out, const uint8_t *iv, uint8_t *tag) {
     EVP_CIPHER_CTX *c = EVP_CIPHER_CTX_new();
@@ -154,27 +132,87 @@ static int gcm(int enc, const char *name, const uint8_t *in, size_t n, uint8_t *
     return ok ? 0 : -1;
 }
 
+/* A sealed file's plaintext (malloc'd). 0, 1 if there's none, 2 if it isn't this key's (or is cut short), -1 if it
+ * can't be read. */
+static int unseal(const char *name, unsigned char **data, uint32_t *length) {
+    char p[PATH_MAX];
+    path(p, name);
+    FILE *f = fopen(p, "rb");
+    if (!f) return errno == ENOENT ? 1 : -1;
+    struct stat sb;
+    uint8_t *file = NULL;
+    int rc = -1;
+    if (fstat(fileno(f), &sb) == 0 && (file = malloc(sb.st_size + 1)) &&
+        fread(file, 1, sb.st_size, f) == (size_t)sb.st_size) {
+        size_t n = sb.st_size;
+        rc = n < 28 ? 2 : (*data = malloc(n - 28 + 1)) ? 0 : -1;
+        if (rc == 0 && gcm(0, name, file + 12, n - 28, *data, file, file + n - 16) != 0)
+            free(*data), *data = NULL, rc = 2;
+        if (rc == 0) *length = (uint32_t)(n - 28);
+    }
+    fclose(f), free(file);
+    return rc;
+}
+
+/* Each of libtpms's files opens with the key: 0, or a fresh TPM if one doesn't (-1 if one can't be read). */
+static int check_files(void) {
+    DIR *d = opendir(tpm.dir);
+    if (!d) return -1;
+    int rc = 0;
+    for (struct dirent *e; rc == 0 && (e = readdir(d));) {
+        size_t n = strlen(e->d_name);
+        if (e->d_name[0] == '.' || !strcmp(e->d_name, "id") || !strncmp(e->d_name, "backup-", 7) ||
+            (n > 4 && !strcmp(e->d_name + n - 4, ".tmp")))
+            continue;
+        unsigned char *data = NULL;
+        uint32_t len;
+        rc = unseal(e->d_name, &data, &len);
+        free(data);
+        if (rc == 2) fprintf(stderr, "mn-tpm: %s doesn't open with this TPM's key\n", e->d_name);
+        if (rc == -1) fprintf(stderr, "mn-tpm: can't read %s/%s\n", tpm.dir, e->d_name);
+    }
+    closedir(d);
+    if (rc == 2) return backup() == 0 ? fresh() : -1;
+    return rc < 0 ? -1 : 0;
+}
+
+static int open_state(const char *dir) {
+    snprintf(tpm.dir, sizeof tpm.dir, "%s", dir), tpm.id[0] = 0;
+    if (mkdir(dir, 0700) != 0 && errno != EEXIST) return -1;
+    char p[PATH_MAX];
+    path(p, "id");
+    FILE *f = fopen(p, "r");
+    if (!f && errno != ENOENT) return fprintf(stderr, "mn-tpm: can't read %s\n", p), -1;
+    if (f) {
+        int ok = fscanf(f, "%36s", tpm.id) == 1;
+        fclose(f);
+        if (ok) {
+            int k = key_get();
+            if (k < 0) return -1;
+            if (k == 0) return check_files();
+        }
+    } else {
+        int empty = 1;
+        DIR *d = opendir(dir);
+        for (struct dirent *e; d && (e = readdir(d));)
+            if (e->d_name[0] != '.' && strncmp(e->d_name, "backup-", 7)) empty = 0;
+        if (d) closedir(d);
+        if (empty) return fresh();
+    }
+    return backup() == 0 ? fresh() : -1;
+}
+
 /* libtpms's storage (TPMLIB_RegisterCallbacks): "permall" is the TPM's NV, the rest its volatile state. */
 static TPM_RESULT nv_init(void) { return TPM_SUCCESS; }
 
 static TPM_RESULT nv_load(unsigned char **data, uint32_t *length, uint32_t tpm_number, const char *name) {
     (void)tpm_number;
     *data = NULL, *length = 0;
-    char p[PATH_MAX];
-    path(p, name);
-    FILE *f = fopen(p, "rb");
-    if (!f) return errno == ENOENT ? TPM_RETRY : TPM_FAIL; /* TPM_RETRY: none yet, the first start */
-    uint8_t *file = NULL;
-    long n = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
-    if (n >= 28 && fseek(f, 0, SEEK_SET) == 0 && (file = malloc(n)) && fread(file, 1, n, f) == (size_t)n &&
-        (*data = malloc(n - 28)) && gcm(0, name, file + 12, n - 28, *data, file, file + n - 16) == 0) {
-        *length = (uint32_t)(n - 28);
-        fclose(f), free(file);
-        return TPM_SUCCESS;
+    switch (unseal(name, data, length)) { /* checked before the start: a failure now is the disk's, not the key's */
+    case 0: return TPM_SUCCESS;
+    case 1: return TPM_RETRY; /* none yet: the first start */
+    default: fprintf(stderr, "mn-tpm: can't read %s now\n", name); return TPM_FAIL;
     }
-    fclose(f), free(file), free(*data), *data = NULL;
-    fprintf(stderr, "mn-tpm: %s doesn't open with this TPM's key\n", name);
-    return backup() == 0 && fresh() == 0 ? TPM_RETRY : TPM_FAIL;
 }
 
 static TPM_RESULT nv_store(const unsigned char *data, uint32_t length, uint32_t tpm_number, const char *name) {
@@ -218,6 +256,7 @@ int mn_tpm_start(const char *dir) {
         TPMLIB_SetProfile("{\"Name\":\"default-v1\"}") == TPM_SUCCESS && TPMLIB_MainInit() == TPM_SUCCESS)
         return 0;
     fprintf(stderr, "mn-tpm: libtpms didn't start\n");
+    TPMLIB_Terminate();
     return -1;
 }
 

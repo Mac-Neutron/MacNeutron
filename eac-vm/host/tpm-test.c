@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static const char *dir;
@@ -101,8 +102,22 @@ int main(void) {
     CHECK(boot(x2) == 0 && !memcmp(x1, x2, 32), "a restart changed the TPM");
     mn_tpm_stop();
 
-    /* A file that doesn't open: kept in backup-<id>/, and a new TPM. */
+    /* A file that can't be read just now (a passing I/O error): no TPM this time, and nothing moved or replaced. */
     char p[1024];
+    for (const char *name = "permall"; name; name = strcmp(name, "permall") ? NULL : "id") {
+        snprintf(p, sizeof p, "%s/%s", dir, name);
+        chmod(p, 0);
+        int started = mn_tpm_start(dir) == 0;
+        if (started) mn_tpm_stop();
+        chmod(p, 0600);
+        CHECK(!started, "the TPM started without its %s", name);
+        snprintf(bk, sizeof bk, "backup-%s", id1);
+        CHECK(!exists(bk), "an unreadable %s moved the TPM aside", name);
+        CHECK(boot(x2) == 0 && !memcmp(x1, x2, 32), "an unreadable %s changed the TPM", name);
+        mn_tpm_stop();
+    }
+
+    /* A file that doesn't open: kept in backup-<id>/, and a new TPM. */
     snprintf(p, sizeof p, "%s/permall", dir);
     FILE *f = fopen(p, "r+b");
     if (f) {  /* its last byte, the GCM tag's */

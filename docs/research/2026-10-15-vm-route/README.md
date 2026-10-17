@@ -644,7 +644,11 @@ EAC Linux v2's second requirement (§6). Every run has one: the device in libkru
     account is the folder's random id (`<dir>/id`), so the key follows the TPM, not the game.
   - A folder whose key isn't in this Mac's keychain (copied from another Mac), or whose files don't decrypt, moves to
     `<dir>/backup-<id>/`, and the TPM starts afresh with a new identity: Parallels 18's way.
-  - Any other keychain failure (locked, denied) stops the VM (exit 7) rather than lose the state.
+  - That is decided once, before libtpms starts. Anything else stops the VM (exit 7) rather than lose the state: a
+    keychain that is locked or says no, or a file that can't be read just now. The VM's timeout runs from before
+    the keychain is asked, so a keychain dialog nobody answers can't hold a run forever.
+  - Each file is written beside itself and renamed over, with `F_BARRIERFSYNC` first: on macOS a plain `fsync`
+    doesn't keep the data ahead of the rename.
   - Skipped: Parallels' key export for moving a VM by hand, and its iCloud Keychain sync (that needs the
     data-protection keychain, so an app bundle with a provisioning profile; `macneutron-vm` is a bare tool). A game's
     TPM on a new Mac is a new TPM, which is what Parallels falls back to as well.
@@ -660,12 +664,15 @@ EAC Linux v2's second requirement (§6). Every run has one: the device in libkru
   - A restart gives the same TPM: the same owner-hierarchy ECC primary key.
   - `permall` on disk is the plaintext's size plus 28 bytes and holds none of it.
   - A damaged file, and a key removed from the keychain, each give a new TPM with the old files in `backup-<id>/`.
+  - An unreadable `permall` or `id` stops the start, moves nothing, and the next start has the same TPM. Before the
+    fix, an unreadable `id` made a new TPM.
   - With saving turned off, it fails.
 - `eac-vm/tests/tpm-host.sh` (the guest's own kernel):
   - Linux registers the chip: `/dev/tpm0` and `/dev/tpmrm0`, which need its boot-time HMAC session and so a working
     primary key.
   - It reports a TPM 2.0 and reads PCR 0 through sysfs (zeros: nothing is measured yet).
-  - A second boot keeps the same id, with nothing moved aside.
+  - A second boot keeps the same id, with nothing moved aside, and so does a boot after rebuilding `macneutron-vm`
+    signed with the same identity: it read its key with no keychain dialog.
 
 **Open** (the §6 questions still stand):
 - Whether EAC v2 accepts a virtual TPM whose endorsement key MacNeutron certifies. There is no EK certificate yet; it

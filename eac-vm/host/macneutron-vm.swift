@@ -140,6 +140,14 @@ add(krun_gpu_device_without_display(8 << 30), "gpu")
 // The keyboard and mouse (spec §5.7): virtio-input, fed by the game window (metal-host's winemac.so), which the guest's
 // agent (eac-vm/guest/mn-input.c) replays into Xvfb.
 add(mn_input_device(&err), "input")
+if timeout > 0 {
+  // A guest that never powers off (an initrd that cannot find its root, a failed mount), or a keychain that waits on a
+  // dialog for the TPM's key, must not hold the host and state.img's lock forever.
+  DispatchQueue.global().asyncAfter(deadline: .now() + .seconds(timeout)) {
+    FileHandle.standardError.write("timeout: the guest still runs after \(timeout) s, see \(console)\n".data(using: .utf8)!)
+    _exit(4)
+  }
+}
 if let dir = opts["--tpm"] {
   if mn_tpm_start(dir) != 0 { fail(7, "the TPM in \(dir) did not start") }
   add(mn_tpm_device(&err), "TPM")
@@ -209,14 +217,6 @@ check(krun_vmm_builder_ram_mib(&builder, ramMiB, &err), "\(ramMiB) MiB")
 krun_vmm_builder_payload(&builder, payload)
 krun_vmm_builder_devices(&builder, devices)
 FileHandle.standardError.write("macneutron-vm: \(cpus) vCPUs, \(ramMiB) MiB\n".data(using: .utf8)!)
-if timeout > 0 {
-  // A guest that never powers off (an initrd that cannot find its root, a failed mount) must not hold the host and
-  // state.img's lock forever.
-  DispatchQueue.global().asyncAfter(deadline: .now() + .seconds(timeout)) {
-    FileHandle.standardError.write("timeout: the guest still runs after \(timeout) s, see \(console)\n".data(using: .utf8)!)
-    _exit(4)
-  }
-}
 let vmm = made(krun_vmm_builder_build(&builder, &err), "build the VM")
 // The VM runs off the main thread. The main thread runs AppKit: the game window (metal-host's stand-in winemac.so,
 // eac-vm/metal/wm/host/winemac.m) and Metal's main-thread calls share its run loop (spec §5.6). No Dock icon until the
