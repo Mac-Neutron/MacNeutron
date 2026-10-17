@@ -22,6 +22,8 @@ for f in "$G/Hemingway.exe" /mnt/share/valve/steamclient64.dll /mnt/share/bin/st
   [ -f "$f" ] || { echo "missing: $f"; exit 2; }
 done
 Xvfb :0 -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &
+# MACNEUTRON_VM_PROFILE=1 (bench-smite2.sh's header): every thread's CPU every 5 s, as run-game.sh keeps it.
+[ "${MACNEUTRON_VM_PROFILE:-}" = 1 ] && top -b -H -d 5 -w 512 > /mnt/share/traces/profile.txt 2>&1 &
 # The window's keyboard and mouse (eac-vm/guest/mn-input.c), into Xvfb.
 [ -x /mnt/share/bin/mn-input ] && /mnt/share/bin/mn-input :0 > /home/mn/mn-input.log 2>&1 &
 mkdir -p /home/mn
