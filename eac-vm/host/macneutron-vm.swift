@@ -36,6 +36,15 @@ func defaultCPUs() -> Int {
     return total + (sysctlString("hw.perflevel\(level).name") == "Efficiency" ? cores / 2 : cores)
   }
 }
+// MN_VM_CPUS (Direct3D forwarding M5): the vCPUs when --cpus doesn't say, 1 to the Mac's cores; anything else keeps
+// the default, and says so.
+func environmentCPUs() -> Int? {
+  guard let v = ProcessInfo.processInfo.environment["MN_VM_CPUS"] else { return nil }
+  if let n = Int(v), n >= 1, n <= sysctlInt("hw.physicalcpu") { return n }
+  FileHandle.standardError.write("macneutron-vm: MN_VM_CPUS=\(v) isn't a core count, \(defaultCPUs()) instead\n"
+    .data(using: .utf8)!)
+  return nil
+}
 // libkrun's v2 API: strings are (pointer, length) pairs, and a failing call leaves a KrunError in `err`.
 var err: KrunError? = nil
 func kstr(_ s: String) -> KrunStr {
@@ -54,12 +63,18 @@ func made<T>(_ handle: T?, _ what: String) -> T {
 var opts: [String: String] = [:]
 // --metal-test-ops (a bare flag): the Metal transport's test ops (eac-vm/metal/gate.sh); a game's VM never has them.
 let metalTestOps = CommandLine.arguments.contains("--metal-test-ops")
-let argv = CommandLine.arguments.filter { $0 != "--metal-test-ops" }
+// --print-cpus (a bare flag): print the vCPUs it would boot with, then exit (eac-vm/tests/vcpus.sh).
+let printCPUs = CommandLine.arguments.contains("--print-cpus")
+let argv = CommandLine.arguments.filter { $0 != "--metal-test-ops" && $0 != "--print-cpus" }
 for i in stride(from: 1, to: argv.count - 1, by: 2) { opts[argv[i]] = argv[i + 1] }
+let cpus = Int(opts["--cpus"] ?? "") ?? environmentCPUs() ?? defaultCPUs()
+if printCPUs {
+  print(cpus)
+  exit(0)
+}
 guard let images = opts["--images"], let share = opts["--share"] else {
   fail(64, "usage: macneutron-vm --images <dir> --share <dir> [--cpus N] [--ram-mib M] [--console <file>] [--timeout <s>]")
 }
-let cpus = Int(opts["--cpus"] ?? "") ?? defaultCPUs()
 let ramMiB = UInt32(opts["--ram-mib"] ?? "") ?? 8192
 let console = opts["--console"] ?? share + "/console.log"
 let timeout = Int(opts["--timeout"] ?? "") ?? 0  // seconds; 0 = run until the guest stops
