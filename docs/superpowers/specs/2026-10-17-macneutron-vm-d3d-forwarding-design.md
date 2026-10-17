@@ -182,13 +182,26 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
 
 ### 5.3 The fixes, each measured with §5.2
 
-- **vCPUs:** a setting (`MN_VM_CPUS`), its default chosen by measurement (likely the performance cores only, not 18):
-  fewer vCPUs for the same work wake each other less.
+M0 (research README §15) measured SMITE 2's VM at 11.64 cores: the guest's code 6.4, and on the host 5.2 more
+(vCPU wake-ups 2.5, executor spinning 0.7, sound 0.6, other 1.35); wineserver, in the guest, 0.67.
+
+- **vCPUs:** a setting (`MN_VM_CPUS`), its default chosen by measurement. 18 vCPUs on an M5 Pro are all 18 of its
+  cores (6 Super, 12 Performance), leaving none for the host's own threads, and fewer vCPUs for the same work wake
+  each other less.
+- **Wake-ups:** after the count, the guest kernel's command line (the signed kernel stays): for example `nohz_full=`
+  on the vCPUs the game keeps busy, so they don't take the 1000 Hz tick. Kept only where it lowers the wake-ups.
 - **Executor spin:** a consumer spins only while records keep arriving within a short window, then parks; the window
   is chosen by measuring frame rate against host CPU (a parked consumer takes about 36 us to wake).
-- **Sound:** each stream reports its position when it has moved by a period, or every 10 ms at most, not every 2 ms.
-- **What the profiler finds next:** for example wineserver, which also runs as x86-64 under FEX. It enters the M5 plan
-  when it's large enough to matter for §1, and §11 otherwise.
+- **Sound:** each stream's loop wakes for data or for a period of played frames, not every 2 ms.
+- **wineserver (maintainer, 2026-10-17):** a native arm64 wineserver in the guest, serving the x86-64 Wine processes.
+  Wine's server keeps thread contexts in a CPU-neutral form (`context_t`) but checks that a thread's native context is
+  its own machine's (`server/thread.c`, `native_machine`); a patch lets it take x86-64 as its native machine. A spike
+  first (wineboot, DXMT's programs, SMITE 2), kept if it runs them and saves CPU.
+- **The host's other 1.35 cores** (the virtio-gpu worker, vsock, virtiofs): found with the host sample, fixed where a
+  loop polls.
+- **Measuring each one:** on a repeatable scene, SMITE 2's lobby (`eac-vm/tests/smite2-render.sh` in the dev VM with
+  the profiler, with the maintainer's go-ahead: it starts the game on their Steam account); M5's gate is taken in a
+  match.
 
 ## 6. Failure handling
 
@@ -213,16 +226,18 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
 - Games: SMITE 2 and Palworld through forwarding (M3), then `perf-compare.sh` (M5).
 - The existing VM gates keep passing: `vm-setup.sh`, `turn.sh`, `modes.sh`, `tpm-host.sh`, `audio.sh`.
 
-## 8. Milestones, in order (one plan each)
+## 8. Milestones, in order (one plan each; M5 runs second)
 
 | Milestone | Delivers | Gate |
 |---|---|---|
 | M0, measure | §5.1 and §5.2 | Baseline numbers for SMITE 2 and Palworld, macOS and today's VM; DXMT's share of the guest's CPU. |
+| M5, overheads (second, after M0: maintainer, 2026-10-17) | §5.3 | SMITE 2 in a match at M0's settings (1440p, DLSS Performance): the host's overheads (wake-ups, spinning, sound, other) from 5.2 cores to 2.0 or less, wineserver from 0.67 to 0.2 or less, and the frame rate and GPU busy no lower than M0's VM run (108.6 fps, 91.6%). |
 | M1, native DXMT | §4.1 | DXMT's test programs natively on the Mac match the macOS Wine run. Go/no-go: if our D3D12 can't build natively at reasonable cost, stop and ask the maintainer before M2. |
 | M2, D3D12 and DXGI forwarding | §4.2 to §4.7, §4.9 | The loopback test; the headless D3D12 programs through forwarding match macOS. |
 | M3, games | §4.8, §4.11, §4.12 | SMITE 2 and Palworld play in the VM through forwarding, with XeSS and DLSS on MetalFX; the coverage trace shows no unforwarded call. |
 | M4, D3D10 and D3D11 | §4.10 and the D3D10/11 rules | DXMT's D3D11 and D3D10 test programs through forwarding match macOS. |
-| M5, overheads and parity | §5.3 | §1's three numbers for SMITE 2 and Palworld. |
+
+§1's three numbers, for SMITE 2 and Palworld, are the project's gate after M4.
 
 ## 9. Shipping
 
