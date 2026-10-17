@@ -12,6 +12,12 @@ Xvfb :0 -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &
 # A VM that died mid-wineboot leaves DLLs of 0 bytes, which wineboot then keeps: remove them, and it writes them again.
 find "$WINEPREFIX/drive_c/windows" -name '*.dll' -size 0 -delete 2>/dev/null
 WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1
+# Xvfb has one mode and can't change it: Wine offers games its standard modes and takes their changes itself (the
+# drawable has the game's size; the host window scales it). Read when the desktop starts: once per prefix, a restart.
+if ! grep -q '^"EmulateModeset"="Y"' "$WINEPREFIX/user.reg" 2>/dev/null; then
+  wine reg add 'HKCU\Software\Wine\X11 Driver' /v EmulateModeset /d Y /f >/dev/null 2>&1
+  wineserver -k
+fi
 STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
