@@ -2,7 +2,8 @@ import Foundation
 
 /// The microVM every game runs in (eac-vm; docs/superpowers/specs/2026-10-15-macneutron-eac-vm-route-design.md): one
 /// folder holding macneutron-vm, run-guest.sh, the guest's run-game.sh, the images every game shares (images/) and each
-/// game's own state disk (state/<appid>.img, run-guest.sh's APFS clone of images/state-template.img on first use).
+/// game's own state disk (state/<appid>.img, run-guest.sh's APFS clone of images/state-template.img on first use) and
+/// share (runs/<appid>: the run's script, results and console), so games run side by side.
 /// MACNEUTRON_VM_DIR names the folder, else MacNeutron's own; MACNEUTRON_VM=0 runs a game on macOS as before.
 public struct MicroVM: Sendable {
     public let root: URL
@@ -22,6 +23,7 @@ public struct MicroVM: Sendable {
     var runGuest: URL { root.appending(path: "run-guest.sh") }
     var gameScript: URL { root.appending(path: "run-game.sh") }
     func state(appID: String) -> URL { root.appending(path: "state/\(appID).img") }
+    func share(appID: String) -> URL { root.appending(path: "runs/\(appID)") }
 
     /// A game under a Steam library's steamapps/common: that folder (the guest's read-only /mnt/games) and the game's
     /// path in the guest. Nil for a game anywhere else.

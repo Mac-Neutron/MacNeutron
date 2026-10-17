@@ -145,7 +145,7 @@ public struct Launcher: Sendable {
 
     /// The game in the microVM (MicroVM.swift): run-guest.sh boots it with the game's state disk and Steam library,
     /// Steam forwarded to the Mac's for the game's app ID, and returns the game's status once every process in its
-    /// prefix is gone (run-game.sh). One VM at a time: run-guest.sh refuses a second (75).
+    /// prefix is gone (run-game.sh). A VM per game, side by side: the same game twice is refused (75).
     /// ponytail: Steam's Stop ends only the launcher, and a fixed 16 GiB of RAM, until milestone 5's agent and sizing.
     private func runInMicroVM(_ vm: MicroVM, _ request: LaunchRequest, _ context: CompatContext, library: String,
                               guest: String, _ environment: [String: String], _ gameLog: URL?, _ argv: [String]) -> Int32 {
@@ -153,12 +153,13 @@ public struct Launcher: Sendable {
             let script = try vm.script(verb: request.verb, appID: context.appID, guest: guest,
                                        arguments: request.arguments, environment: environment)
             let file = FileManager.default.temporaryDirectory
-                .appending(path: "macneutron-vm-\(context.appID)-\(getpid()).sh")
+                .appending(path: "macneutron-vm-\(context.appID)-\(UUID().uuidString).sh")
             try script.write(to: file, atomically: true, encoding: .utf8)
             defer { try? FileManager.default.removeItem(at: file) }
             var env = environment
             env["MN_VM_DIR"] = vm.root.path(percentEncoded: false)
             env["MN_STATE"] = vm.state(appID: context.appID).path(percentEncoded: false)
+            env["MN_SHARE"] = vm.share(appID: context.appID).path(percentEncoded: false)
             env["MN_RUN_TIMEOUT"] = env["MN_RUN_TIMEOUT"] ?? "86400"
             let status = try runner.run(vm.runGuest, [file.path(percentEncoded: false), "--steam-appid", context.appID,
                                                       "--ram-mib", "16384", "--steam-map", "\(library)=/mnt/games"],

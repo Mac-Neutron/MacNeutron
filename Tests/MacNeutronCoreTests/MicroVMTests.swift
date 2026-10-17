@@ -59,6 +59,7 @@ private let game = "/Users/someone/Library/Application Support/Steam/steamapps/c
                                                    "/Users/someone/Library/Application Support/Steam/steamapps/common=/mnt/games"])
     #expect(call.environment["MN_VM_DIR"] == f.vm.path(percentEncoded: false))
     #expect(call.environment["MN_STATE"] == f.vm.appending(path: "state/2437170.img").path(percentEncoded: false))
+    #expect(call.environment["MN_SHARE"] == f.vm.appending(path: "runs/2437170").path(percentEncoded: false))
     #expect(f.launcherLog.contains("verb=waitforexitandrun appid=2437170 backend=vm"))
     #expect(f.launcherLog.contains("exit=3"))
 }

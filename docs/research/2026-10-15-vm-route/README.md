@@ -531,6 +531,10 @@ VM's base for all of them.
   - A game's own data (its prefix, `/home`) is its state disk (`macneutron-vm --state`, `run-guest.sh MN_STATE`). It
     is made on first use as an APFS clone of the images' empty `state-template.img` (`image/build.sh`), so a new game
     costs only what it writes: 6.5 MB to start.
+  - Its run has its own share too (`run-guest.sh MN_SHARE`; the launcher's `runs/<appid>`): the script, results and
+    console, with the tools the guest takes from the share (`bin/`, `valve/`) as APFS clones of the default share's.
+    So games run side by side, a VM each; the same game twice is refused (same share, then same state disk). Checked
+    with two VMs booted together.
 - **The launcher** (`Sources/MacNeutronCore/MicroVM.swift`) sends Steam's `run` and `waitforexitandrun` to the VM when
   one is installed:
   - the VM's folder is `MACNEUTRON_VM_DIR`, else `~/Library/Application Support/MacNeutron/vm`; `MACNEUTRON_VM=0`
@@ -548,7 +552,6 @@ VM's base for all of them.
   frames presented, `backend=vm` in `launcher.log`.
 
 **Open** (milestone 5):
-- One VM at a time (one share).
 - Steam's Stop ends only the launcher; the game is quit from inside it.
 - A fixed 16 GiB of RAM.
 - 32-bit games (the guest's Wine is 64-bit only).

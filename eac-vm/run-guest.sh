@@ -4,22 +4,31 @@
 # Exits with the script's status, or the host's when the guest left none. The guest console is in
 # build/eac-vm-work/share/console.log. MN_RUN_TIMEOUT (seconds, default 1800) bounds a guest that never powers off.
 # MN_STATE=<file> is the run's state disk (/home: a game's prefix), made on first use as an APFS clone of the images'
-# empty template (no space until written); the images themselves are one copy for every game. Default: images/state.img.
-# ponytail: one VM at a time (one share for run.sh); a share per run if games ever run side by side.
+# empty template (no space until written); the images themselves are one copy for every game, read-only. Default:
+# images/state.img. MN_SHARE=<dir> is the run's own share (/mnt/share: run.sh, its results, the console), so runs with
+# their own share and state go side by side; the tools a game takes from the share (bin/, valve/) come in as APFS clones
+# of the default share's. Default: share/, the tests' and gates' (their programs and traces).
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # MN_VM_DIR: the VM's folder when run from it (MacNeutron's launcher runs the copy host/build.sh puts there).
 W=${MN_VM_DIR:-$ROOT/build/eac-vm-work}
-SHARE=$W/share
-# One run at a time: a second run would rewrite the first's script and results before its host refused state.img.
+SHARE=${MN_SHARE:-$W/share}
+# One run per share: a second would rewrite the first's script and results before its host refused the state disk.
 if [ -z "${MN_RUN_GUEST_LOCKED:-}" ]; then
-  MN_RUN_GUEST_LOCKED=1 /usr/bin/lockf -s -t 0 "$W/run-guest.lock" "$0" "$@" && exit 0
+  mkdir -p "$(dirname "$SHARE")"
+  MN_RUN_GUEST_LOCKED=1 /usr/bin/lockf -s -t 0 "$SHARE.lock" "$0" "$@" && exit 0
   rc=$?
-  [ $rc -eq 75 ] && echo "run-guest: another run is in progress" >&2
+  [ $rc -eq 75 ] && echo "run-guest: another run is in progress in $SHARE" >&2
   exit $rc
 fi
 script=$1; shift
 mkdir -p "$SHARE"
+if [ "$SHARE" != "$W/share" ]; then
+  for d in bin valve; do
+    rm -rf "${SHARE:?}/$d"
+    [ ! -d "$W/share/$d" ] || cp -cR "$W/share/$d" "$SHARE/$d"
+  done
+fi
 rm -f "$SHARE/run.log" "$SHARE/run.status" "$SHARE/console.log"
 cp "$script" "$SHARE/run.sh"
 STATE=${MN_STATE:-$W/images/state.img}
