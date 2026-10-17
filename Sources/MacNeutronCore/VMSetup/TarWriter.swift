@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// A POSIX pax tar of recipe entries, for `mkfs.erofs --tar=f`: a pax record for a path or link over 100 bytes, for
@@ -45,15 +46,26 @@ struct TarWriter {
             let file = try FileHandle(forReadingFrom: contents)
             defer { try? file.close() }
             var written: Int64 = 0
+            var hash = SHA256()
             while let chunk = try file.read(upToCount: 1 << 20), !chunk.isEmpty {
                 try write(chunk)
+                hash.update(data: chunk)
                 written += Int64(chunk.count)
             }
             try write(Data(count: Int((512 - written % 512) % 512)))
+            try Self.check(entry, hash)
         }
     }
 
     mutating func finish() throws { try write(Data(count: 1024)) }
+
+    /// A recipe file's bytes are the ones it names (a store file left by an earlier run could have changed since).
+    static func check(_ entry: RecipeEntry, _ hash: SHA256) throws {
+        guard case .file(_, let sha256, _) = entry.kind, sha256.count == 64 else { return }
+        guard hash.finalize().map({ String(format: "%02x", $0) }).joined() == sha256 else {
+            throw VMSetupError.mismatch(file: entry.path)
+        }
+    }
 
     private func write(_ data: Data) throws { try out.write(contentsOf: data) }
 

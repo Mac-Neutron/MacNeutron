@@ -81,7 +81,7 @@ private func manifest(mirrors: [URL]? = nil) throws -> VMSetupManifest {
     let cache = try makeTempDir()
     await #expect(throws: VMSetupError.download(name: "x.rpm")) {
         try await VMDownloads.fetchAll([(good, 5, sha(Data("good\n".utf8)), "good.rpm"), (bad, 5, sha(Data("bad\n".utf8)), "x.rpm")],
-                                       cache: cache, fetch: mirror.fetch, progress: { _, _ in })
+                                       cache: cache, fetch: mirror.fetch, pause: { _ in }, progress: { _, _ in })
     }
     #expect(mirror.requests.filter { $0 == bad[0] }.count == 3)
     #expect(FileManager.default.fileExists(atPath: cache.appending(path: sha(Data("good\n".utf8))).path))
@@ -91,11 +91,11 @@ private func manifest(mirrors: [URL]? = nil) throws -> VMSetupManifest {
     let cache = try makeTempDir()
     try Data("core\n".utf8).write(to: cache.appending(path: kernel.sha256))
     let mirror = FakeMirror([:])
-    nonisolated(unsafe) var reported: (Int64, Int64) = (0, 0)
+    nonisolated(unsafe) var reported: [Int64] = []
     try await VMDownloads.fetchAll([(try manifest().sources(kernel), 5, kernel.sha256, kernel.file)], cache: cache,
-                                   fetch: mirror.fetch, progress: { reported = ($0, $1) })
+                                   fetch: mirror.fetch, progress: { done, _ in reported.append(done) })
     #expect(mirror.requests.isEmpty)
-    #expect(reported == (5, 5))
+    #expect(reported == [0, 5])  // at once, so the status shows a download from the start
 }
 
 @Test func theReleaseNamesAPackageNoSourceServes() async throws {
@@ -106,4 +106,31 @@ private func manifest(mirrors: [URL]? = nil) throws -> VMSetupManifest {
         url == sources[2] ? 5 : url == fex[0] ? 7 : nil  // the FEX root answers, at the wrong size
     }
     #expect(missing == [m.fexRootfs.package.file])
+}
+
+@Test func roundsWaitLongerEachTime() async throws {
+    // A two-second network drop shouldn't use up every try: 1 s, then 4 s, between the rounds.
+    let bad = [URL(string: "https://example.invalid/x.rpm")!]
+    let mirror = FakeMirror([bad[0]: Data("evil\n".utf8)])
+    let pauses = Pauses()
+    await #expect(throws: VMSetupError.download(name: "x.rpm")) {
+        try await VMDownloads.fetch(bad, size: 5, sha256: sha(Data("good\n".utf8)), name: "x.rpm", cache: try makeTempDir(),
+                                    fetch: mirror.fetch, pause: pauses.record)
+    }
+    #expect(pauses.all == [1, 4])
+}
+
+@Test func aCancelledDownloadStops() async throws {
+    let cancelled: ValveClient.Fetch = { _ in throw CancellationError() }
+    await #expect(throws: CancellationError.self) {
+        try await VMDownloads.fetch([URL(string: "https://example.invalid/x.rpm")!], size: 5, sha256: "aa", name: "x.rpm",
+                                    cache: try makeTempDir(), fetch: cancelled, pause: { _ in })
+    }
+}
+
+private final class Pauses: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seconds: [Int] = []
+    var all: [Int] { lock.withLock { seconds } }
+    var record: @Sendable (Int) async -> Void { { s in self.lock.withLock { self.seconds.append(s) } } }
 }

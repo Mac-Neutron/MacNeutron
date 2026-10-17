@@ -111,6 +111,14 @@ private func setUp(_ f: SetupFixture, requests: Requests = Requests(), minFreeGB
     #expect(MicroVM.imagesComplete(f.vm))
 }
 
+@Test func aFailedSetupLeavesOnlyItsDownloads() async throws {
+    // A failure keeps the cache for the next try and nothing else: parts, store and a half-built set are gigabytes.
+    let f = try makeSetup()
+    try write("#!/bin/sh\nexit 1\n", to: f.mkfs, executable: true)
+    await #expect(throws: VMSetupError.tool("mkfs.erofs", 1)) { try await setUp(f) }
+    #expect(try FileManager.default.contentsOfDirectory(atPath: f.vm.appending(path: "setup").path) == ["cache"])
+}
+
 @Test func tooLittleSpaceIsRefusedBeforeAnyDownload() async throws {
     let f = try makeSetup(), requests = Requests()
     await #expect(throws: VMSetupError.self) { try await setUp(f, requests: requests, minFreeGB: 100_000) }

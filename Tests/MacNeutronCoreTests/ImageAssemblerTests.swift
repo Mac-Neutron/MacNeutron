@@ -107,3 +107,42 @@ private func makeFixture() throws -> Fixture {
     #expect(bytes.prefix(6) == Data("070701".utf8))
     #expect(bytes.range(of: Data("TRAILER!!!".utf8)) != nil)
 }
+
+@Test func aMkfsThatDiesSaysSo() throws {
+    // It exits before reading its tar: the setup names mkfs.erofs and its status, not a broken pipe.
+    let f = try makeFixture()
+    let big = Data(repeating: 1, count: 4 << 20)
+    try f.assembler.collectOverlay(f.overlay)
+    try FileManager.default.createDirectory(at: f.assembler.store, withIntermediateDirectories: true)
+    try big.write(to: f.assembler.store.appending(path: sha(big)))
+    let dying = try makeTempDir().appending(path: "mkfs.erofs")
+    try write("#!/bin/sh\nexit 3\n", to: dying, executable: true)
+    let out = try makeTempDir().appending(path: "base.erofs")
+    #expect(throws: VMSetupError.tool("mkfs.erofs", 3)) {
+        try f.assembler.erofs([dir("/"), file("/big", big, .overlay)], label: "mn-base", mkfs: dying, out: out)
+    }
+}
+
+@Test func aDamagedStoreFileIsCaught() throws {
+    // A file an earlier run left in the store, changed since: its bytes aren't the recipe's.
+    let f = try makeFixture()
+    let bytes = Data("from the overlay\n".utf8)
+    try f.assembler.collectOverlay(f.overlay)
+    try Data("changed!\n".utf8).write(to: f.assembler.store.appending(path: sha(bytes)))
+    let out = try makeTempDir().appending(path: "base.erofs")
+    #expect(throws: VMSetupError.mismatch(file: "/etc/motd")) {
+        try f.assembler.erofs([dir("/"), dir("/etc"), file("/etc/motd", bytes, .overlay)], label: "mn-base",
+                              mkfs: try fakeMkfs(), out: out)
+    }
+}
+
+@Test func theSetupsChildrenEndWithIt() async throws {
+    // vm-setup ends its tar and mkfs.erofs when it's told to stop (the app quitting), not only itself.
+    let child = Process()
+    child.executableURL = URL(filePath: "/bin/sleep")
+    child.arguments = ["60"]
+    try VMSetup.Children.run(child)
+    VMSetup.Children.terminateAll()
+    child.waitUntilExit()
+    #expect(child.terminationReason == .uncaughtSignal)
+}

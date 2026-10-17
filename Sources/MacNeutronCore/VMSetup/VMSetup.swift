@@ -7,6 +7,26 @@ import Foundation
 /// from the folder (exit 75; the next run swaps it without rebuilding). The games' own files (state/, runs/) and a
 /// developer's linked folder are never touched.
 public enum VMSetup {
+    /// The setup's own children (tar, mkfs.erofs), ended with it: the app quitting ends vm-setup with SIGTERM, and
+    /// vm-setup ends them before it exits.
+    enum Children {
+        nonisolated(unsafe) private static var running: [Process] = []
+        private static let lock = NSLock()
+
+        static func run(_ process: Process) throws {
+            try lock.withLock {
+                try process.run()
+                running.append(process)
+            }
+        }
+
+        static func finished(_ process: Process) { lock.withLock { running.removeAll { $0 === process } } }
+
+        static func terminateAll() {
+            lock.withLock { for p in running where p.isRunning { p.terminate() } }
+        }
+    }
+
     /// Which image set a manifest builds (images/manifest.sha256): the SHA-256 of its JSON with sorted keys and without
     /// the parts' URL, which names the release it's on. A release whose VM didn't change moves only that URL, and no
     /// Mac downloads its VM again.
@@ -49,6 +69,7 @@ public enum VMSetup {
         let parts = setup.appending(path: "parts", directoryHint: .isDirectory)
         try fm.createDirectory(at: setup, withIntermediateDirectories: true)
         if (try? String(contentsOf: built.appending(path: ".built-for"), encoding: .utf8)) != hash {
+          do {
             try checkSpace(vm, minFreeGB)
             let cache = setup.appending(path: "cache", directoryHint: .isDirectory)
             let packages = manifest.packages + [manifest.fexRootfs.package]
@@ -90,20 +111,26 @@ public enum VMSetup {
             }
             try (hash + "\n").write(to: built.appending(path: "manifest.sha256"), atomically: true, encoding: .utf8)
             try hash.write(to: built.appending(path: ".built-for"), atomically: true, encoding: .utf8)
+          } catch {
+            // Keep the downloads for the next try, and nothing else: parts, store and a half-built set are gigabytes.
+            for name in ["parts", "store", "images"] { try? fm.removeItem(at: setup.appending(path: name)) }
+            throw error
+          }
         }
         if let running = runningUnder(vm, runningExecutables) {
             progress("vm-setup: \(running) runs from the folder: the new images go in after it ends")
             return 75
         }
         progress("progress install 0 1")
-        let bin = parts.appending(path: "share/bin", directoryHint: .isDirectory)
-        for name in (try? fm.contentsOfDirectory(atPath: bin.path(percentEncoded: false))) ?? [] {
-            try RuntimeInstaller.installFile(bin.appending(path: name), at: vm.appending(path: "share/bin/\(name)"))
-        }
         try? fm.removeItem(at: built.appending(path: ".built-for"))
         let (new, old) = (built.path(percentEncoded: false), vm.appending(path: "images").path(percentEncoded: false))
         let swapped = fm.fileExists(atPath: old) ? renamex_np(new, old, UInt32(RENAME_SWAP)) : rename(new, old)
         guard swapped == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        // The guest's tools, once the images are in: each file replaced in one rename.
+        let bin = parts.appending(path: "share/bin", directoryHint: .isDirectory)
+        for name in (try? fm.contentsOfDirectory(atPath: bin.path(percentEncoded: false))) ?? [] {
+            try RuntimeInstaller.installFile(bin.appending(path: name), at: vm.appending(path: "share/bin/\(name)"))
+        }
         try fm.removeItem(at: setup)  // the old set, the downloads and the parts
         progress("progress install 1 1")
         return 0
@@ -144,8 +171,9 @@ public enum VMSetup {
         let p = Process()
         p.executableURL = URL(filePath: path)
         p.arguments = arguments
-        try p.run()
+        try Children.run(p)
         p.waitUntilExit()
+        Children.finished(p)
         guard p.terminationStatus == 0 else { throw VMSetupError.tool((path as NSString).lastPathComponent, p.terminationStatus) }
     }
 

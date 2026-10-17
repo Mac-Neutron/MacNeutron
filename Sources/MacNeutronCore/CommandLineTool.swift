@@ -80,6 +80,15 @@ public enum CommandLineTool {
             let minFree = option("--min-free-gb", in: &args).flatMap { Int($0) } ?? 8
             guard args.isEmpty else { return usageError() }
             setvbuf(stdout, nil, _IOLBF, 0)  // the app reads the progress lines as they come
+            // The app quitting sends SIGTERM: tar and mkfs.erofs end with this process, not after it.
+            signal(SIGTERM, SIG_IGN)
+            let stop = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+            stop.setEventHandler {
+                VMSetup.Children.terminateAll()
+                exit(143)
+            }
+            stop.resume()
+            defer { stop.cancel() }
             do {
                 return try await VMSetup.run(manifest: URL(filePath: manifest), vm: URL(filePath: vm, directoryHint: .isDirectory),
                                              mkfs: mkfs, minFreeGB: minFree)

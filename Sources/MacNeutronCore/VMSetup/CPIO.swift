@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Bytes read in order: a file's, or a payload's as it decompresses.
@@ -93,8 +94,11 @@ struct CPIOWriter {
                       bytes: Data(), rdev: (major, minor))
         case .file:
             guard let contents else { throw CocoaError(.fileNoSuchFile) }
-            try write(name: name, mode: 0o100000 | UInt32(entry.mode), entry: entry, nlink: 1,
-                      bytes: try Data(contentsOf: contents))
+            let bytes = try Data(contentsOf: contents)
+            var hash = SHA256()
+            hash.update(data: bytes)
+            try TarWriter.check(entry, hash)
+            try write(name: name, mode: 0o100000 | UInt32(entry.mode), entry: entry, nlink: 1, bytes: bytes)
         }
     }
 

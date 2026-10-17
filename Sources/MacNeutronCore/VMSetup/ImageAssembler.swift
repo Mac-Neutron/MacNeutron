@@ -54,11 +54,13 @@ struct ImageAssembler {
     /// mkfs.erofs --tar=f -L label -zlz4hc out, the recipe's tar on its stdin (it reads a tar from there when given no
     /// source). A missing file stops it, and `out` is removed.
     func erofs(_ recipe: [RecipeEntry], label: String, mkfs: URL, out: URL) throws {
-        signal(SIGPIPE, SIG_IGN)  // a mkfs.erofs that dies makes the next write fail instead of ending this process
         let input = Pipe()
+        // A mkfs.erofs that dies makes the next write fail with EPIPE instead of ending this process (this pipe only).
+        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         let tool = Self.mkfs(mkfs, label: label, out: out, source: nil)
         tool.standardInput = input
-        try tool.run()
+        try VMSetup.Children.run(tool)
+        defer { VMSetup.Children.finished(tool) }
         do {
             var tar = TarWriter(input.fileHandleForWriting)
             for entry in recipe { try tar.add(entry, contents: try contents(entry)) }
@@ -66,9 +68,12 @@ struct ImageAssembler {
             try input.fileHandleForWriting.close()
         } catch {
             try? input.fileHandleForWriting.close()
-            tool.terminate()
+            if tool.isRunning, error is VMSetupError { tool.terminate() }  // ours: stop it; a broken pipe: it stopped
             tool.waitUntilExit()
             try? FileManager.default.removeItem(at: out)
+            if !(error is VMSetupError), tool.terminationReason == .exit, tool.terminationStatus != 0 {
+                throw VMSetupError.tool("mkfs.erofs", tool.terminationStatus)
+            }
             throw error
         }
         tool.waitUntilExit()
@@ -81,8 +86,9 @@ struct ImageAssembler {
     /// The same for a ready tar file (the parts' wine.tar).
     static func erofs(tar: URL, label: String, mkfs: URL, out: URL) throws {
         let tool = Self.mkfs(mkfs, label: label, out: out, source: tar)
-        try tool.run()
+        try VMSetup.Children.run(tool)
         tool.waitUntilExit()
+        VMSetup.Children.finished(tool)
         guard tool.terminationStatus == 0 else {
             try? FileManager.default.removeItem(at: out)
             throw VMSetupError.tool("mkfs.erofs", tool.terminationStatus)
