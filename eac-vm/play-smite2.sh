@@ -11,4 +11,6 @@ pgrep -x steam_osx > /dev/null || { echo "play: Mac Steam isn't running: start i
 { echo 'SMITE2_RUN_SECONDS=86400'
   printf 'MACNEUTRON_DLSS=%s MACNEUTRON_XESS=%s\n' "${MACNEUTRON_DLSS:-}" "${MACNEUTRON_XESS:-}"
   cat "$ROOT/eac-vm/tests/smite2-render.sh"; } > "$W/play-smite2.sh"
-MN_RUN_TIMEOUT=90000 exec "$ROOT/eac-vm/run-guest.sh" "$W/play-smite2.sh" --steam-appid 2437170 --ram-mib 16384
+# SMITE 2's own state disk (its prefix), beside the images every game shares.
+MN_STATE=$W/state/2437170.img MN_RUN_TIMEOUT=90000 exec "$ROOT/eac-vm/run-guest.sh" "$W/play-smite2.sh" \
+  --steam-appid 2437170 --ram-mib 16384

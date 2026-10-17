@@ -9,6 +9,8 @@
 #                        our DXMT and the guest winemetal.so over Wine's own D3D (eac-vm/dxmt/stage.sh); with
 #                        DXMT_GUEST=none, Wine's own D3D (llvmpipe): software rendering, optional since 4c
 #   state.img            label mn-state: 16 GiB sparse ext4 for /home, created only when missing
+#   state-template.img   the same, empty, never attached: each game's own state disk starts as an APFS clone of it
+#                        (run-guest.sh MN_STATE), so the images above are one copy for every game
 #   cmdline.txt, packages.lock
 # Pinning: the first build downloads packages.txt's closure and the x86-64 RootFS into $CACHE and checks every
 # package's Fedora signature; builds install from that cache only, never from the live repositories, and fail if the
@@ -26,6 +28,12 @@ WINE_STAGE=${WINE_STAGE:-$HOME/wine-stage/opt/mn-wine}
 # has no Steam of its own, every call goes to the Mac's.
 STEAM_FORWARDER=${STEAM_FORWARDER:-$HOME/mn-steam-out/lsteamclient.so}
 DXMT_GUEST=${DXMT_GUEST:-$HOME/mn-dxmt-guest}
+# The empty state disk each game's starts from (run-guest.sh); `build.sh wine` makes it too.
+state_template() {
+  [ -e "$OUT/state-template.img" ] && return 0
+  truncate -s 16G "$OUT/state-template.img.tmp"; sudo mkfs.ext4 -q -F -L mn-state "$OUT/state-template.img.tmp"
+  mv "$OUT/state-template.img.tmp" "$OUT/state-template.img"
+}
 wine_image() {
   [ -f "$STEAM_FORWARDER" ] || { echo "no Steam forwarder at $STEAM_FORWARDER" >&2; exit 1; }
   [ "$DXMT_GUEST" = none ] || [ -f "$DXMT_GUEST/x86_64-unix/winemetal.so" ] \
@@ -43,7 +51,7 @@ wine_image() {
 }
 
 mountpoint -q "$OUT" || { sudo mkdir -p "$OUT"; sudo mount -t virtiofs out "$OUT"; }
-[ "${1:-}" = wine ] && { wine_image; exit 0; }
+[ "${1:-}" = wine ] && { wine_image; state_template; exit 0; }
 sudo rm -rf "$WORK"; sudo mkdir -p "$WORK/root" "$WORK/x86" "$WORK/x86-rpm"
 
 # The cache is for one packages.txt: a changed list refetches (otherwise an added package would silently be missing).
@@ -97,6 +105,7 @@ wine_image
 if [ ! -e "$OUT/state.img" ]; then
   truncate -s 16G "$OUT/state.img"; sudo mkfs.ext4 -q -F -L mn-state "$OUT/state.img"
 fi
+state_template
 
 # rd.*: an initrd that cannot find or mount its root reboots after 30 s (ending the host) instead of waiting forever
 # or opening a shell.

@@ -1,11 +1,12 @@
 // MacNeutronVM: boots the EAC guest (Fedora's signed kernel, our EROFS images) in a libkrun microVM, in this process.
 // The guest's virtio-gpu has the dxmt context (spec §5.6), served by the Metal transport's executor in this process.
 //   macneutron-vm --images <dir> --share <dir> [--cpus N] [--ram-mib M] [--console <file>] [--timeout <s>]
-//                 [--steam-appid <id> [--steam-map <host dir>=<guest dir>]] [--metal-test-ops]
+//                 [--steam-appid <id> [--steam-map <host dir>=<guest dir>]] [--state <file>] [--metal-test-ops]
 // --steam-appid starts mn-steam-host (steam-forward/host/ beside this binary) for the guest's Steam forwarding
 // (spec §5.9) and maps guest vsock port 5101 to it; the map defaults to the Mac Steam library's common folder as
 // /mnt/games. The map's host side is shared read-only (virtiofs tag `games`) whether or not Steam is forwarded.
-// <dir> holds eac-vm/image/build.sh's output. The share is virtiofs tag `share` (/mnt/share in the guest). The process
+// <dir> holds eac-vm/image/build.sh's output, shared read-only by every game; --state is the game's own state disk
+// (/home in the guest; default <dir>/state.img). The share is virtiofs tag `share` (/mnt/share in the guest). The process
 // exits when the guest powers off.
 import AppKit
 import Foundation
@@ -64,15 +65,16 @@ let steamAppID = opts["--steam-appid"]
 let steamMap = opts["--steam-map"]
   ?? FileManager.default.homeDirectoryForCurrentUser.path + "/Library/Application Support/Steam/steamapps/common=/mnt/games"
 func path(_ n: String) -> String { images + "/" + n }
+let state = opts["--state"] ?? path("state.img")
 let exeDir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().path
 
-for n in ["vmlinuz", "initramfs.img", "cmdline.txt", "base.erofs", "x86-64-rootfs.erofs", "wine.erofs", "state.img"]
-where access(path(n), R_OK) != 0 {
-  fail(2, "missing image: \(path(n))")
+for f in ["vmlinuz", "initramfs.img", "cmdline.txt", "base.erofs", "x86-64-rootfs.erofs", "wine.erofs"].map(path) + [state]
+where access(f, R_OK) != 0 {
+  fail(2, "missing image: \(f)")
 }
 // One VM per state disk: two writers would corrupt its ext4. The lock lives as long as this process.
-let stateLock = open(path("state.img"), O_RDWR)
-if stateLock < 0 || flock(stateLock, LOCK_EX | LOCK_NB) != 0 { fail(3, "state.img is in use") }
+let stateLock = open(state, O_RDWR)
+if stateLock < 0 || flock(stateLock, LOCK_EX | LOCK_NB) != 0 { fail(3, "\(state) is in use") }
 let cmdline = (try? String(contentsOfFile: path("cmdline.txt"), encoding: .utf8))?
   .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
@@ -82,7 +84,8 @@ check(krun_init_log(-1, logLevel, UInt32(KRUN_LOG_STYLE_AUTO), 0, &err), "log le
 let devices = krun_mmio_device_manager_new()
 func add(_ device: KrunAttachDevice?, _ what: String) { krun_mmio_device_manager_add(devices, made(device, what)) }
 func disk(_ id: String, _ name: String, readOnly: Bool) {
-  let d = made(krun_block_device_new(kstr(id), kstr(path(name)), UInt32(KRUN_DISK_FORMAT_RAW), &err), name)
+  let file = name.hasPrefix("/") ? name : path(name)
+  let d = made(krun_block_device_new(kstr(id), kstr(file), UInt32(KRUN_DISK_FORMAT_RAW), &err), name)
   krun_block_device_set_read_only(d, readOnly)
   add(d, name)
 }
@@ -104,7 +107,7 @@ add(krun_console_builder_build(consoles, &err), "console")
 disk("base", "base.erofs", readOnly: true)
 disk("x86-64", "x86-64-rootfs.erofs", readOnly: true)
 disk("wine", "wine.erofs", readOnly: true)
-disk("state", "state.img", readOnly: false)
+disk("state", state, readOnly: false)
 add(krun_fs_device_new(kstr("share"), kstr(share), &err), "share")
 // The Mac's Steam library (the map's host side), read-only as tag `games` at /mnt/games: game files stay the Mac's.
 let games = String(steamMap.prefix { $0 != "=" })
