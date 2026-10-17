@@ -1,0 +1,109 @@
+/* audio.c against a stand-in guest: a stream is paced by the output's clock, a STOP drops what's queued and counts it
+ * as played, PAUSE keeps it, and a stream it can't play is refused. Prints "audio-test: ok" or the first failure.
+ *   audio-test             on the Mac's output (silence), once CoreAudio answers
+ *   MN_AUDIO_OUTPUT=none   on the stand-in output that plays into nothing at the stream's rate
+ * eac-vm/tests/audio-host.sh builds it and runs both. */
+#include "audio.h"
+#include "../guest/mn-audio.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <time.h>
+#include <unistd.h>
+
+static const char *sock;
+
+static double now(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec + t.tv_nsec / 1e9;
+}
+
+static void fail(const char *what) {
+    printf("audio-test: FAIL %s\n", what);
+    exit(1);
+}
+
+static int stream(unsigned channels) {
+    struct sockaddr_un a = {.sun_family = AF_UNIX};
+    strcpy(a.sun_path, sock);
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0 || connect(fd, (struct sockaddr *)&a, sizeof a)) fail("connect");
+    struct mn_audio_hello h = {MN_AUDIO_MAGIC, 48000, channels, MN_AUDIO_S16};
+    if (write(fd, &h, sizeof h) != sizeof h) fail("hello");
+    return fd;
+}
+
+static void msg(int fd, uint32_t type, uint32_t frames) {
+    static char silence[48000 * 4];
+    struct mn_audio_msg m = {type, frames * 4};
+    if (write(fd, &m, sizeof m) != sizeof m) fail("message");
+    if (frames && write(fd, silence, frames * 4) != (ssize_t)frames * 4) fail("frames");
+}
+
+/* The host's count (sent only when it changes), once it reaches want or the deadline passes; -1 if the stream
+ * ended. */
+static uint64_t last;
+static long long played(int fd, uint64_t want, double deadline) {
+    struct timeval tv = {0, 50000};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    while (last < want && now() < deadline) {
+        uint64_t v;
+        ssize_t n = read(fd, &v, sizeof v);
+        if (n == 0) return -1;
+        if (n == sizeof v) last = v;
+    }
+    return (long long)last;
+}
+
+int main(void) {
+    char path[] = "/tmp/mn-audio-test-XXXXXX";
+    if (!mkdtemp(path)) fail("mkdtemp");
+    static char p[128];
+    snprintf(p, sizeof p, "%s/audio.sock", path);
+    sock = p;
+    if (mn_audio_listen(sock)) fail("listen");
+    setvbuf(stdout, NULL, _IONBF, 0);
+    usleep(200000);  /* CoreAudio's first answer, when it answers */
+
+    /* Half a second, sent at once: played as the output's clock goes, not as fast as it came. */
+    int fd = stream(2);
+    msg(fd, MN_AUDIO_DATA, 24000);
+    double t0 = now();
+    msg(fd, MN_AUDIO_START, 0);
+    long long got = played(fd, 24000, t0 + 3);
+    double took = now() - t0;
+    printf("paced: %lld frames in %.3f s\n", got, took);
+    if (got != 24000) fail("paced: not all played");
+    if (took < 0.45 || took > 1.2) fail("paced: not in real time");
+
+    /* A second queued, a tenth of it played, then STOP: the rest dropped, and counted, at once. */
+    msg(fd, MN_AUDIO_DATA, 48000);
+    msg(fd, MN_AUDIO_START, 0);
+    usleep(100000);
+    t0 = now();
+    msg(fd, MN_AUDIO_STOP, 0);
+    got = played(fd, 72000, t0 + 1);
+    took = now() - t0;
+    printf("stop: %lld frames in %.3f s\n", got, took);
+    if (got != 72000 || took > 0.3) fail("stop");
+
+    /* PAUSE keeps what's queued: nothing more is played until START. */
+    msg(fd, MN_AUDIO_DATA, 4800);
+    msg(fd, MN_AUDIO_PAUSE, 0);
+    got = played(fd, 72001, now() + 0.3);
+    printf("paused: %lld frames\n", got);
+    if (got != 72000) fail("pause");
+    msg(fd, MN_AUDIO_START, 0);
+    if (played(fd, 76800, now() + 1) != 76800) fail("resume");
+    close(fd);
+
+    /* Six channels: the guest's plugin never asks for them (games downmix to its two). */
+    fd = stream(6), last = 0;
+    if (played(fd, 1, now() + 1) != -1) fail("six channels not refused");
+    close(fd);
+    printf("audio-test: ok\n");
+    return 0;
+}

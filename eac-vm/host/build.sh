@@ -17,12 +17,13 @@ for f in wm/calls.c wm/cmdlist.c wm/marshal.c wm/slots.c wm/host/htable.c wm/hos
   objs="$objs $o"
 done
 clang -O2 -std=gnu2x -Wall -c -I"$W/libkrun/include" -o "$W/obj/input.c.o" "$ROOT/eac-vm/host/input.c"
-objs="$objs $W/obj/input.c.o"
+clang -O2 -std=gnu2x -Wall -c -o "$W/obj/audio.c.o" "$ROOT/eac-vm/host/audio.c"
+objs="$objs $W/obj/input.c.o $W/obj/audio.c.o"
 # shellcheck disable=SC2086
 swiftc -O -o "$W/macneutron-vm" "$ROOT/eac-vm/host/macneutron-vm.swift" "$ROOT/eac-vm/metal/host/executor.c" \
   "$ROOT/eac-vm/metal/host/testops.c" "$ROOT/eac-vm/metal/ring.c" $objs \
   -import-objc-header "$ROOT/eac-vm/host/bridge.h" -Xcc -I"$W/libkrun/include" \
-  "$W/libkrun/libkrun.1.dylib" -Xlinker -rpath -Xlinker @executable_path/libkrun
+  "$W/libkrun/libkrun.1.dylib" -Xlinker -rpath -Xlinker @executable_path/libkrun -framework AudioToolbox
 make -s -C "$ROOT/eac-vm/metal/wm" metal-host
 # The VM's folder is what MacNeutron's launcher runs a game from (Sources/MacNeutronCore/MicroVM.swift).
 cp "$ROOT/eac-vm/run-guest.sh" "$W/run-guest.sh"

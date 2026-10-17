@@ -560,3 +560,45 @@ VM's base for all of them.
 - 32-bit games (the guest's Wine is 64-bit only).
 - Games that write into their install folder: `/mnt/games` is read-only.
 - The VM folder isn't part of MacNeutron's install yet: the development setup links it from `build/eac-vm-work`.
+
+## 12. Sound (2026-10-16)
+
+A game's sound plays on the Mac. The route is an ALSA plugin over vsock, not the spec's virtio-snd (§5.7):
+- The image's kernel modules (`kernel-modules-core`) have no `virtio_snd.ko`; it is in `kernel-modules`, a new
+  download of about 30 MB.
+- Wine runs x86-64 under FEX, so a sound card would put ALSA's ioctls through FEX's translation. A plugin sends plain
+  socket writes.
+- libkrun has no sound device; the plugin needs only the vsock device the VM already has.
+
+The pieces:
+- **`eac-vm/guest/alsa-mn.c`**, ALSA's `mn` PCM, is the image's default device (`/etc/asound.conf`).
+  - It is x86-64, built against the FEX RootFS's libasound (`eac-vm/guest/build-audio.sh`), and sits in the share's
+    `bin/` like `mn-input`.
+  - It accepts two channels, S16 or FLOAT, at any rate. A wider device would let ALSA's plug drop channels; games mix
+    down to two themselves.
+  - Its hardware pointer is the frames the host has played, so the game is paced by the Mac's audio clock.
+  - Without the host it plays into nothing at the stream's rate, as the null device did.
+- **`eac-vm/host/audio.c`** in `macneutron-vm` serves vsock port 5102 (`eac-vm/guest/mn-audio.h`).
+  - Each stream gets its own CoreAudio output (the default device, which converts the rate).
+  - A ring of a second, or 256 KiB at least, sits between the connection and the render callback.
+  - If CoreAudio doesn't answer, a clock thread takes the frames instead. A stuck audio driver can stall every
+    client's calls, so CoreAudio is asked once, off the streams' threads.
+  - `MN_AUDIO_OUTPUT=none` keeps the Mac quiet in tests.
+
+**Checked:**
+- `eac-vm/tests/audio-host.sh` runs the player against a stand-in guest: half a second played in 0.503 s, STOP in
+  2 ms, PAUSE kept. It fails against an unpaced output ("0.008 s").
+- `eac-vm/tests/audio.sh` runs in the VM:
+
+  | Row | Played | Host count |
+  |---|---|---|
+  | ALSA, blocking writes under FEX | 2.0 s in 2.011 s | 96,000 frames |
+  | Wine's waveOut | 2.0 s in 2.016 s | 96,000 frames |
+
+  Both rows failed while the plugin didn't load: Wine's `waveOutOpen` fails, which SMITE 2 would crash on.
+
+**Open:**
+- On the development Mac, CoreAudio stopped answering every client (even `afplay`) during this work, so the real
+  output path is only proven up to "no output". It needs a run with a working audio server.
+- Microphone input: the plugin refuses capture.
+- libkrun logs `unexpected dgram pkt: 3` once a connection; the streams are unaffected.

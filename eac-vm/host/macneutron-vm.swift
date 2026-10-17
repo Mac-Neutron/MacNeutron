@@ -4,7 +4,8 @@
 //                 [--steam-appid <id> [--steam-map <host dir>=<guest dir>]] [--state <file>] [--metal-test-ops]
 // --steam-appid starts mn-steam-host (steam-forward/host/ beside this binary) for the guest's Steam forwarding
 // (spec §5.9) and maps guest vsock port 5101 to it; the map defaults to the Mac Steam library's common folder as
-// /mnt/games. The map's host side is shared read-only (virtiofs tag `games`) whether or not Steam is forwarded.
+// /mnt/games. The map's host side is shared read-only (virtiofs tag `games`) whether or not Steam is forwarded. Port
+// 5102 is the guest's sound, played through CoreAudio (audio.c; MN_AUDIO_OUTPUT=none plays it into nothing).
 // <dir> holds eac-vm/image/build.sh's output, shared read-only by every game; --state is the game's own state disk
 // (/home in the guest; default <dir>/state.img). The share is virtiofs tag `share` (/mnt/share in the guest). The process
 // exits when the guest powers off.
@@ -138,6 +139,15 @@ add(krun_gpu_device_without_display(8 << 30), "gpu")
 // The keyboard and mouse (spec §5.7): virtio-input, fed by the game window (metal-host's winemac.so), which the guest's
 // agent (eac-vm/guest/mn-input.c) replays into Xvfb.
 add(mn_input_device(&err), "input")
+// The guest reaches the host over vsock: its sound (MN_AUDIO_PORT, audio.c) and, for a game, Steam (5101).
+let vsock = made(krun_vsock_device_new(3, 0, &err), "vsock device")
+// Sound (spec §5.7): the guest's ALSA plugin (eac-vm/guest/alsa-mn.c) streams to CoreAudio here.
+let audioSock = NSTemporaryDirectory() + "mn-audio-\(getpid()).sock"
+if mn_audio_listen(audioSock) == 0 {
+  krun_vsock_device_add_unix_port(vsock, UInt32(MN_AUDIO_PORT), kstr(audioSock), false)
+} else {
+  FileHandle.standardError.write("macneutron-vm: no sound (\(String(cString: strerror(errno))))\n".data(using: .utf8)!)
+}
 // Steam forwarding: mn-steam-host serves the guest's lsteamclient calls against the Mac's Steam (spec §5.9).
 var steamHostPID: pid_t = 0
 if let appid = steamAppID {
@@ -154,10 +164,9 @@ if let appid = steamAppID {
     if waited >= 50 || !host.isRunning { fail(5, "mn-steam-host did not start") }
     usleep(100_000); waited += 1
   }
-  let vsock = made(krun_vsock_device_new(3, 0, &err), "vsock device")
   krun_vsock_device_add_unix_port(vsock, 5101, kstr(sock), false)
-  add(vsock, "vsock")
 }
+add(vsock, "vsock")
 // Network (spec §5.7): gvproxy (eac-vm/net/fetch.sh, beside this binary) answers the guest's frames with the Mac's own
 // sockets, over a unixgram socket in vfkit's framing. The guest takes gvproxy's static lease for this MAC
 // (192.168.127.2, gateway and DNS 192.168.127.1). No gvproxy, no network.
