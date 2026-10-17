@@ -770,3 +770,45 @@ trees, their build folders and wine.app wait in `build/wine-arm64-src.stable`; t
 - A release that rebuilds the images changes the parts' bytes, so every Mac downloads again; reusing an unchanged VM's
   parts is the maintainer's call.
 - The first run on a clean macOS account is the maintainer's (plan 4, task 3).
+
+## 15. Direct3D forwarding, M0: the baseline (2026-10-17)
+
+Spec `docs/superpowers/specs/2026-10-17-macneutron-vm-d3d-forwarding-design.md`, plan
+`docs/superpowers/plans/2026-10-17-vm-d3d-forwarding-m0-measure.md`. SMITE 2 in a match, 1440p, DLSS Performance (on
+MetalFX), the maintainer playing; `eac-vm/tests/perf-compare.sh`, 60 s each, launched with
+`/usr/bin/env MACNEUTRON_PERF=1 %command%` (and `MACNEUTRON_VM=0` for macOS). Palworld was skipped (maintainer).
+
+| | macOS | VM | VM / macOS | Gate |
+|---|---|---|---|---|
+| CPU (the game's Wine processes; `macneutron-vm`, `mn-steam-host`, `gvproxy`) | 4.64 cores | 10.06 cores | 2.17 | 1.5 or less: FAIL |
+| GPU busy (`ioreg`) | 97.7% | 85.8% | | 95% or more: FAIL |
+| Frame rate | 119.5 fps (the game's 120 cap) | 94.8 fps | 0.79 | 0.90 or more: FAIL |
+
+Where the VM's CPU goes, from the guest's profiler (`top -H`, % of a vCPU, mean over 5 s batches) and one host
+`sample` scaled to what `ps` measured for `macneutron-vm`:
+
+| Where | Cores |
+|---|---|
+| The game's own threads: `Background Work` 2.04, `Foreground Work` 0.81, `GameThread` 0.63 | ~3.5 |
+| wineserver (x86-64 under FEX; about 0.04 on macOS) | 0.64 |
+| Rendering: `RenderThread 0` 0.30, `RHISubmissionThread` 0.26, `RHIThread` 0.20, `RHIInterruptThread` 0.16 | 0.92 |
+| DXMT's own threads (`dxmt-cmdbuf-waiting-thread`) | 0.15 |
+| Sound in the guest (`AudioMixerRender`, `FAudio`) | 0.23 |
+| Host: guest code (`hv_trap`) | 6.12 |
+| Host: vCPU wake-ups (Hypervisor.framework's lock and interrupt bookkeeping) | 1.32 |
+| Host: executor consumers spinning | 0.95 |
+| Host: sound (`audio.c`) | 0.60 |
+| Host: other (gpu worker, vsock, virtiofs) | 1.08 |
+
+What it says:
+- DXMT's share of the guest is small: its own thread 0.15 core, and the four rendering threads where its D3D12
+  recording runs 0.92 core in all (the game's own RHI work runs there too). Moving DXMT to the host (spec §4) saves at
+  most about a core of the guest's 6.1, not enough for the 1.5x gate alone.
+- The host's own overheads are 3.9 cores (wake-ups, spinning, sound, other), and wineserver 0.64: together larger
+  than DXMT's share. They are the spec's §5.3 work (M5), and wineserver isn't in the spec yet.
+- How the numbers were taken matters: the first VM run with `DXMT_STATS=1` in the guest fell to 33 fps (DXMT_STATS
+  times every D3D12 call, a clock read is about 270 ns under FEX, and its dump folder turns on capture mode, which
+  writes each new shader and pipeline over the share). The VM's frames are now counted by `macneutron-vm` at present
+  (`MN_PRESENT_STATS`); the macOS run keeps DXMT_STATS, whose timing adds a little to its CPU.
+- `sample` counts a spinning thread busy even while it waits for a core: a same-window check gave 1.03 cores from the
+  sample against 0.47 from `ps`, so the host split is the sample's shares scaled to `ps`.
