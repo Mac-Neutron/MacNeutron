@@ -521,3 +521,36 @@ the memory DXMT hands to Metal itself (`dxmt_buffer.cpp:44-46`, `d3d12_command_a
 - A killed game that lingers in the guest holds the poweroff for minutes.
 - A swapchain's layer stays retained until its context ends (DXMT never releases it).
 - No audio, gamepads or window life yet (milestone 5).
+
+## 11. Every game in the microVM (2026-10-16)
+
+**What exists.** The maintainer asked for every game MacNeutron starts to run in the microVM, and for one copy of the
+VM's base for all of them.
+- **One base, a state disk per game.**
+  - The kernel, initramfs and the base, x86-64 RootFS and Wine EROFS images are one read-only copy every VM attaches.
+  - A game's own data (its prefix, `/home`) is its state disk (`macneutron-vm --state`, `run-guest.sh MN_STATE`). It
+    is made on first use as an APFS clone of the images' empty `state-template.img` (`image/build.sh`), so a new game
+    costs only what it writes: 6.5 MB to start.
+- **The launcher** (`Sources/MacNeutronCore/MicroVM.swift`) sends Steam's `run` and `waitforexitandrun` to the VM when
+  one is installed:
+  - the VM's folder is `MACNEUTRON_VM_DIR`, else `~/Library/Application Support/MacNeutron/vm`; `MACNEUTRON_VM=0`
+    keeps a game on macOS;
+  - the launch becomes the guest's script: VERB, APPID, GAME_DIR, EXE, the arguments quoted, and the launch options the
+    guest reads (`MACNEUTRON_DLSS`, `MACNEUTRON_XESS`, `DXMT_ENABLE_NVEXT`, `MACNEUTRON_LOG`), ahead of
+    `eac-vm/guest/run-game.sh`;
+  - the VM folder's `run-guest.sh` boots it with the game's state disk, its Steam library as `/mnt/games` and Steam
+    forwarded for its app ID, and the game's status goes back to Steam.
+- **`run-game.sh`** is Proton's waitforexitandrun in the guest: the prefix `/home/mn/pfx`, `steam.exe` with Valve's
+  DLL, the game, then `wineserver -w`.
+- **What stays on macOS:** path queries (`getcompatpath`, `getnativepath`), a game outside a Steam library, and every
+  game on a Mac without the VM.
+- **Checked end to end.** The installed launcher, called as Steam calls it, ran SMITE 2 in the VM to its lobby: 4,400
+  frames presented, `backend=vm` in `launcher.log`.
+
+**Open** (milestone 5):
+- One VM at a time (one share).
+- Steam's Stop ends only the launcher; the game is quit from inside it.
+- A fixed 16 GiB of RAM.
+- 32-bit games (the guest's Wine is 64-bit only).
+- Games that write into their install folder: `/mnt/games` is read-only.
+- The VM folder isn't part of MacNeutron's install yet: the development setup links it from `build/eac-vm-work`.
