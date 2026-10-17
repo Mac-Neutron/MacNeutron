@@ -5,9 +5,11 @@
  * on top, as Wine's (dlls/winemac.drv/cocoa_window.m).
  * Input: the content view takes the window's keyboard and mouse and posts them as evdev events to the sink
  * macneutron-vm sets (mn_window_set_input_sink, eac-vm/host/input.c, the guest's virtio-input device). Keys by macOS
- * key code; Command combinations stay the Mac's. The mouse is absolute (the Mac cursor is the game's) until Control and
- * Option are pressed together, which captures it: the cursor hides and stays put, and motion goes as relative deltas
- * (a game's mouse look). The same chord, or the window losing focus, lets it go. */
+ * key code; Command combinations stay the Mac's. The mouse is absolute (the Mac cursor is the game's) until the game
+ * takes it (its cursor hidden for mouse look: the guest's agent tells macneutron-vm, which calls
+ * mn_window_set_wanted_capture), which captures it: the cursor hides and stays put, and motion goes as relative deltas.
+ * The window losing focus lets it go, and getting it back takes it again while the game still wants it. Control and
+ * Option pressed together capture or let go by hand, until the game's next change. */
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
@@ -58,9 +60,11 @@ static void post(uint16_t type, uint16_t code, int32_t value) {
 }
 
 /* The window's content view: the game's input. Main thread only, as AppKit calls it. */
+static BOOL game_wants_capture; /* main thread: the guest's word, mn_window_set_wanted_capture */
+
 @interface MNInputView : NSView {
     uint8_t down[0x120]; /* evdev keys and buttons the guest saw pressed */
-    BOOL captured, chord;
+    BOOL captured, chord, by_hand; /* by_hand: the chord's choice stands until the game's next change */
     double wheel, hwheel; /* a trackpad's scroll, until it makes a notch */
 }
 @end
@@ -91,6 +95,13 @@ static void post(uint16_t type, uint16_t code, int32_t value) {
     for (uint16_t c = 1; c < sizeof down; c++) [self key:c down:NO];
     [self capture:NO];
 }
+- (void)gameWants:(BOOL)on {
+    by_hand = NO;
+    if (self.window.isKeyWindow) [self capture:on];
+}
+- (void)becameKey {
+    if (game_wants_capture && !by_hand) [self capture:YES];
+}
 - (void)capture:(BOOL)on {
     if (captured == on) return;
     captured = on;
@@ -119,7 +130,10 @@ static void post(uint16_t type, uint16_t code, int32_t value) {
         if (mods[i].vk == e.keyCode && mods[i].vk != 0x37 && mods[i].vk != 0x36) /* Command stays the Mac's */
             [self key:keymap[e.keyCode] down:(f & mods[i].mask) != 0];
     BOOL both = (f & NSEventModifierFlagControl) && (f & NSEventModifierFlagOption);
-    if (both && !chord) [self capture:!captured];
+    if (both && !chord) {
+        [self capture:!captured];
+        by_hand = YES;
+    }
     chord = both;
 }
 - (void)moved:(NSEvent *)e {
@@ -179,6 +193,9 @@ static void post(uint16_t type, uint16_t code, int32_t value) {
 - (void)windowDidResignKey:(NSNotification *)n {
     [(MNInputView *)((NSWindow *)n.object).contentView releaseAll];
 }
+- (void)windowDidBecomeKey:(NSNotification *)n {
+    [(MNInputView *)((NSWindow *)n.object).contentView becameKey];
+}
 @end
 
 @interface MNMetalView : NSView {
@@ -216,9 +233,9 @@ static void post(uint16_t type, uint16_t code, int32_t value) {
 }
 @end
 
-/* Main thread only. */
+static NSWindow *window; /* main thread only */
+
 static NSWindow *the_window(void) {
-    static NSWindow *window;
     if (window) return window;
     unsigned w = 1280, h = 720;
     const char *size = getenv("MN_VM_WINDOW");
@@ -256,6 +273,14 @@ static NSWindow *the_window(void) {
     [window makeKeyAndOrderFront:nil];
     [NSApp activate];
     return window;
+}
+
+/* macneutron-vm's watch on the guest's capture file (eac-vm/host/input.c): the game took the mouse, or let it go. */
+__attribute__((visibility("default"))) void mn_window_set_wanted_capture(int on) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        game_wants_capture = on != 0;
+        if (window) [(MNInputView *)window.contentView gameWants:game_wants_capture];
+    });
 }
 
 static struct macdrv_win_data *get_win_data(void *hwnd) {

@@ -140,7 +140,7 @@ if wmLoaded && metalTestOps {
 add(krun_gpu_device_without_display(8 << 30), "gpu")
 // The keyboard and mouse (spec §5.7): virtio-input, fed by the game window (metal-host's winemac.so), which the guest's
 // agent (eac-vm/guest/mn-input.c) replays into Xvfb.
-add(mn_input_device(&err), "input")
+add(mn_input_device(share, &err), "input")
 if timeout > 0 {
   // A guest that never powers off (an initrd that cannot find its root, a failed mount), or a keychain that waits on a
   // dialog for the TPM's key, must not hold the host and state.img's lock forever.

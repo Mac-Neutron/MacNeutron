@@ -4,7 +4,10 @@
  * motion. An absolute position (the host's 0..32767 scaled to the root window) goes as the relative move from where the
  * pointer is: XTEST's absolute motion gives raw input (what Wine hands a game's mouse look) the position as if it were a
  * delta, which spun cameras at thousands of pixels a move. aarch64, libxcb only (base.erofs has no
- * libXtst).   mn-input [display]   Waits up to 60 s for the device and the display.
+ * libXtst).   mn-input [display [capture-file]]   Waits up to 60 s for the device and the display.
+ * With a capture file (run-game.sh's /mnt/share/traces/capture) it tells the host when the game takes the mouse: the
+ * file is there while the displayed cursor is hidden (XFixes), as Wine hides it for a game's mouse look, and the host
+ * then captures the Mac's mouse (eac-vm/host/input.c, the game window's capture).
  * It also stands in for a window manager's focus, which Xvfb has none of: the top-level window under the pointer gets
  * the X input focus (on a click, and on motion at most every 250 ms). Wine turns raw mouse input (XInput2's, what a
  * game's mouse look reads) on only when one of its windows gets FocusIn, which the X server's default focus, PointerRoot,
@@ -12,12 +15,14 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/input.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
 #include <xcb/xcb.h>
+#include <xcb/xfixes.h>
 #include <xcb/xtest.h>
 
 #define NAME "MacNeutron VM input"
@@ -66,6 +71,26 @@ static void focus_under_pointer(xcb_connection_t *c, xcb_window_t root, xcb_wind
     free(p);
 }
 
+/* Whether the cursor on screen shows anything: Wine's hidden cursor is one with no opaque pixel. */
+static int cursor_hidden(xcb_connection_t *c) {
+    xcb_xfixes_get_cursor_image_reply_t *r = xcb_xfixes_get_cursor_image_reply(c, xcb_xfixes_get_cursor_image(c), NULL);
+    if (!r) return 0;
+    const uint32_t *px = xcb_xfixes_get_cursor_image_cursor_image(r);
+    int n = xcb_xfixes_get_cursor_image_cursor_image_length(r), hidden = 1;
+    for (int i = 0; i < n && hidden; i++) hidden = (px[i] >> 24) == 0;
+    free(r);
+    return hidden;
+}
+
+/* The capture file, there while the cursor is hidden; a change goes to the log. */
+static void tell_capture(const char *file, int hidden, int *told) {
+    if (!file || hidden == *told) return;
+    *told = hidden;
+    if (hidden) close(open(file, O_WRONLY | O_CREAT, 0644));
+    else unlink(file);
+    fprintf(stderr, "mn-input: the cursor is %s\n", hidden ? "hidden: capture" : "shown: no capture");
+}
+
 static long now_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
@@ -86,10 +111,39 @@ int main(int argc, char **argv) {
     xcb_screen_t *s = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
     xcb_window_t root = s->root;
     fprintf(stderr, "mn-input: replaying %s into a %ux%u screen\n", NAME, s->width_in_pixels, s->height_in_pixels);
+    const char *capture = argc > 2 ? argv[2] : NULL;
+    int notify = -1, told = 0;
+    if (capture) {
+        unlink(capture); /* a run that ended captured */
+        const xcb_query_extension_reply_t *x = xcb_get_extension_data(c, &xcb_xfixes_id);
+        xcb_xfixes_query_version_reply_t *v = x && x->present
+            ? xcb_xfixes_query_version_reply(c, xcb_xfixes_query_version(c, 4, 0), NULL) : NULL;
+        if (v) {
+            notify = x->first_event + XCB_XFIXES_CURSOR_NOTIFY;
+            xcb_xfixes_select_cursor_input(c, root, XCB_XFIXES_CURSOR_NOTIFY_MASK_DISPLAY_CURSOR);
+            tell_capture(capture, cursor_hidden(c), &told);
+            xcb_flush(c);
+        } else {
+            fprintf(stderr, "mn-input: no XFixes: the host captures the mouse only on Control+Option\n");
+        }
+        free(v);
+    }
     int ax = -1, ay = -1, dx = 0, dy = 0, abs_moved = 0, pressed = 0;
     xcb_window_t focused = XCB_NONE;
     long focus_checked = 0;
     for (;;) {
+        /* The X server's events first (replies read below may have queued some), then wait for either side. */
+        for (xcb_generic_event_t *xe; (xe = xcb_poll_for_event(c)); free(xe))
+            if ((xe->response_type & 0x7f) == notify) tell_capture(capture, cursor_hidden(c), &told);
+        struct pollfd w[2] = {{fd, POLLIN, 0}, {xcb_get_file_descriptor(c), POLLIN, 0}};
+        if (poll(w, 2, -1) < 0 && errno != EINTR) break;
+        if (!(w[0].revents & (POLLIN | POLLHUP | POLLERR))) {
+            if (xcb_connection_has_error(c)) {
+                fprintf(stderr, "mn-input: the X display went away\n");
+                return 1;
+            }
+            continue;
+        }
         struct input_event ev[64];
         ssize_t n = read(fd, ev, sizeof ev);
         if (n < 0 && errno == EINTR) continue;

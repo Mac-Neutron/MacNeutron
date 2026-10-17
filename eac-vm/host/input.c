@@ -122,10 +122,12 @@ static int32_t properties(void *instance, uint8_t *bits, size_t len) {
     return 0;
 }
 
-/* MN_INPUT_SELFTEST=1 (eac-vm/tests/input.sh, input-wine.sh): a fixed sequence 20 s after boot, the agent's and the X
- * server's check: the pointer to the middle, key A, the left button; 2 s later (once a click's focus has reached Wine,
- * which only then asks for raw motion) a relative move of (10, 5), one wheel notch up, and the pointer to three
- * quarters across (an absolute move a game must see as its delta, (470, -5), not as a position). */
+/* MN_INPUT_SELFTEST=1 (eac-vm/tests/input.sh, input-wine.sh, turn.sh): a fixed sequence 20 s after boot (or after
+ * MN_INPUT_SELFTEST seconds, when more than 1), the agent's and the X server's check: the pointer to the middle, key A,
+ * the left button; 2 s later (once a click's focus has reached Wine, which only then asks for raw motion) a relative
+ * move of (10, 5), one wheel notch up, and the pointer to three quarters across (an absolute move a game must see as
+ * its delta, (470, -5), not as a position); 2 s later a turn: 100 relative moves of 100 to the right, past any screen's
+ * edge, all of which mouse look must see. */
 static void *selftest(void *arg) {
     (void)arg;
     static const struct krun_input_event first[] = {
@@ -135,16 +137,38 @@ static void *selftest(void *arg) {
         {EV_REL, 0, 10}, {EV_REL, 1, 5}, {EV_SYN, 0, 0}, {EV_REL, 8, 1}, {EV_SYN, 0, 0},
         {EV_ABS, 0, 24575}, {EV_ABS, 1, 16384}, {EV_SYN, 0, 0},
     };
-    sleep(20);
+    int delay = atoi(getenv("MN_INPUT_SELFTEST"));
+    sleep(delay > 1 ? (unsigned)delay : 20);
     for (size_t i = 0; i < sizeof first / sizeof *first; i++)
         mn_input_post(first[i].type, first[i].code, (int32_t)first[i].value);
     sleep(2);
     for (size_t i = 0; i < sizeof then / sizeof *then; i++)
         mn_input_post(then[i].type, then[i].code, (int32_t)then[i].value);
+    sleep(2);
+    for (int i = 0; i < 100; i++) {
+        mn_input_post(EV_REL, 0, 100);
+        mn_input_post(EV_SYN, 0, 0);
+        usleep(10000);
+    }
     return NULL;
 }
 
-KrunInputDevice mn_input_device(KrunError *err) {
+/* The guest agent's word that the game took the mouse (mn-input's capture file, there while the game hides its
+ * cursor), every 50 ms: to the game window, which captures the Mac's mouse, and to the log. */
+static void *watch_capture(void *arg) {
+    const char *file = arg;
+    void (*set)(int) = (void (*)(int))dlsym(RTLD_DEFAULT, "mn_window_set_wanted_capture");
+    for (int was = 0;; usleep(50000)) {
+        int on = access(file, F_OK) == 0;
+        if (on == was) continue;
+        was = on;
+        fprintf(stderr, "macneutron-vm: the game %s the mouse\n", on ? "took" : "let go of");
+        if (set) set(on);
+    }
+    return NULL;
+}
+
+KrunInputDevice mn_input_device(const char *share, KrunError *err) {
     if (wake[0] < 0) {
         if (pipe(wake)) return NULL;
         fcntl(wake[0], F_SETFL, O_NONBLOCK);
@@ -158,6 +182,13 @@ KrunInputDevice mn_input_device(KrunError *err) {
     if (getenv("MN_INPUT_SELFTEST")) {
         pthread_t t;
         pthread_create(&t, NULL, selftest, NULL);
+    }
+    char *capture = NULL;
+    if (asprintf(&capture, "%s/traces/capture", share) > 0) {
+        unlink(capture); /* a run that ended captured */
+        pthread_t t;
+        pthread_create(&t, NULL, watch_capture, capture); /* the process's life: never joined or freed */
+        pthread_detach(t);
     }
     struct krun_input_config config = {
         .features = KRUN_INPUT_CONFIG_FEATURE_QUERY,

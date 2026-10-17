@@ -7,8 +7,9 @@
 
 #define MN_INPUT_ABS_MAX 32767
 
-/* The virtio-input device, wired to the game window's events. NULL with *err set if libkrun refuses it. */
-KrunInputDevice mn_input_device(KrunError *err);
+/* The virtio-input device, wired to the game window's events; the window captures the mouse while the guest's agent
+ * says the game took it (<share>/traces/capture). NULL with *err set if libkrun refuses it. */
+KrunInputDevice mn_input_device(const char *share, KrunError *err);
 /* An evdev event (type, code, value) for the guest; EV_SYN/SYN_REPORT ends each batch. Any thread. */
 void mn_input_post(uint16_t type, uint16_t code, int32_t value);
 /* libkrun's event provider: the next queued event, 1; or 0 when there is none. */

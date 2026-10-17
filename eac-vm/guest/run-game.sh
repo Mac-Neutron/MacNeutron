@@ -9,7 +9,8 @@ export WINEDEBUG=${WINEDEBUG:--all}
 [ "${MACNEUTRON_DLSS:-}" = 1 ] && [ -z "${DXMT_ENABLE_NVEXT:-}" ] && export DXMT_ENABLE_NVEXT=1
 # The X screen is the Mac's display (the launcher's MN_SCREEN): games are offered its resolution and those below.
 Xvfb :0 -screen 0 "${MN_SCREEN:-1920x1080}x24" -nolisten tcp >/dev/null 2>&1 &
-[ -x /mnt/share/bin/mn-input ] && /mnt/share/bin/mn-input :0 > /home/mn/mn-input.log 2>&1 &
+# The keyboard and mouse; traces/capture says when the game takes the mouse, which the host then captures.
+[ -x /mnt/share/bin/mn-input ] && /mnt/share/bin/mn-input :0 /mnt/share/traces/capture > /home/mn/mn-input.log 2>&1 &
 # A VM that died mid-wineboot leaves DLLs of 0 bytes, which wineboot then keeps: remove them, and it writes them again.
 find "$WINEPREFIX/drive_c/windows" -name '*.dll' -size 0 -delete 2>/dev/null
 WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1

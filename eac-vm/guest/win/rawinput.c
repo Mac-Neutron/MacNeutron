@@ -2,6 +2,7 @@
  * (what games read for mouse look) and clips the cursor to itself, as a game in a match does, then prints for 40 s the
  * raw deltas (WM_INPUT), clicks and keys it gets: what the host's MN_INPUT_SELFTEST sends, replayed by mn-input. */
 #include <stdio.h>
+#include <string.h>
 #include <windows.h>
 
 static LRESULT CALLBACK proc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
@@ -23,7 +24,12 @@ static LRESULT CALLBACK proc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
     return 0;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "mode")) { /* a game's full-screen mode below the screen's (Wine's emulated) */
+        DEVMODEW m = {.dmSize = sizeof m, .dmFields = DM_PELSWIDTH | DM_PELSHEIGHT, .dmPelsWidth = 1920,
+                      .dmPelsHeight = 1080};
+        printf("rawinput: mode %ld\n", ChangeDisplaySettingsExW(NULL, &m, NULL, CDS_FULLSCREEN, NULL));
+    }
     WNDCLASSA c = {0};
     c.lpfnWndProc = proc;
     c.lpszClassName = "rawinput";
