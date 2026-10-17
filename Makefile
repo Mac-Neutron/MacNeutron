@@ -99,6 +99,7 @@ app: build bridge wine-arm64
 	sh eac-vm/host/stage.sh $(APP)/Contents/Helpers/vm
 	mkdir -p $(APP)/Contents/Resources/vm && mv $(APP)/Contents/Helpers/vm/run-*.sh $(APP)/Contents/Resources/vm/
 	codesign --force --sign - --entitlements eac-vm/host/hv.plist $(APP)/Contents/Helpers/vm/macneutron-vm
+	codesign --force --sign - $(APP)/Contents/Helpers/vm/gvproxy  # the upstream universal binary comes unsigned
 	sh eac-vm/setup-tools/build.sh > /dev/null && cp build/vm-setup-tools/mkfs.erofs $(APP)/Contents/Helpers/mkfs.erofs
 	codesign --force --sign - $(APP)/Contents/Helpers/mkfs.erofs
 	cp $(BRIDGE)/arm64/steam.exe $(APP)/Contents/Resources/steam.exe
