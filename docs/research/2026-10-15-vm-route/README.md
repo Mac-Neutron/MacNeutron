@@ -780,33 +780,33 @@ MetalFX), the maintainer playing; `eac-vm/tests/perf-compare.sh`, 60 s each, lau
 
 | | macOS | VM | VM / macOS | Gate |
 |---|---|---|---|---|
-| CPU (the game's Wine processes; `macneutron-vm`, `mn-steam-host`, `gvproxy`) | 4.64 cores | 10.06 cores* | 2.17* | 1.5 or less: FAIL |
-| GPU busy (`ioreg`) | 97.7% | 85.8%* | | 95% or more: FAIL* |
-| Frame rate | 119.5 fps (the game's 120 cap) | 111.6 fps (93.6* over the whole window) | 0.93 | 0.90 or more: pass |
+| CPU (the game's Wine processes; `macneutron-vm`, `mn-steam-host`, `gvproxy`) | 4.64 cores | 11.64 cores | 2.51 | 1.5 or less: FAIL |
+| GPU busy (`ioreg`) | 97.7% | 91.6% | | 95% or more: FAIL |
+| Frame rate | 119.5 fps (the game's 120 cap) | 108.6 fps | 0.91 | 0.90 or more: pass |
 
-\* The VM's run was perturbed by the measurement itself: `perf-compare.sh` took its host `sample` inside the
-window, and `sample` suspends the process at each tick. The VM's own frame counter fell to 25 and 1.4 fps for the
-10 seconds it ran (14:22:47), against 103-117 fps the rest of the time; 111.6 fps is the mean of the nine 5 s windows
-it didn't touch. The VM's CPU over the window is low by those stalled seconds and its GPU share low with them: both
-want a re-measure, now that `perf-compare.sh` takes the sample after the window (`perf-compare-test.sh`). The macOS
-run ran with DXMT_STATS and its capture mode (its stats need the DXIL dump folder, which also saves every new shader,
-root signature and pipeline): a little more CPU on macOS than without them.
+The VM's numbers are its second run (14:49-14:50), with the host `sample` after the window. A first run took the
+sample inside the window: `sample` suspends the process at each tick, and the VM's own frame counter fell to 25 and
+1.4 fps for those 10 seconds, so that run's CPU, GPU and frame rate were all low. In the second run the record's
+frame rate still took in the windows the sample stalled after it (94.9 fps in its JSON); 108.6 is the mean of the ten
+5 s windows inside the measured minute (96.8-116.3), and `perf-compare.sh` now stops reading at the window's end
+(`perf-compare-test.sh`). The macOS run ran with DXMT_STATS and its capture mode (its stats need the DXIL dump folder,
+which also saves every new shader, root signature and pipeline): a little more CPU on macOS than without them.
 
 Where the VM's CPU goes, from the guest's profiler (`top -H`, % of a vCPU, mean over 5 s batches) and the host
-`sample`'s shares scaled to what `ps` measured for `macneutron-vm`:
+`sample`'s shares scaled to what `ps` measured for `macneutron-vm` (second run):
 
 | Where | Cores |
 |---|---|
-| The game's own threads: `Background Work` 2.04, `Foreground Work` 0.81, `GameThread` 0.63 | ~3.5 |
-| wineserver (x86-64 under FEX) | 0.64 |
-| Rendering: `RenderThread 0` 0.30, `RHISubmissionTh` 0.26, `RHIThread` 0.20, `RHIInterruptThr` 0.16 | 0.92 |
-| DXMT's own thread (`dxmt-cmdbuf-wai`) | 0.15 |
-| Sound in the guest (`AudioMixerRende`, `FAudio_AudioCli`) | 0.23 |
-| Host: guest code (`hv_trap`) | 6.12 |
-| Host: vCPU wake-ups (Hypervisor.framework's lock and interrupt bookkeeping) | 1.32 |
-| Host: executor consumers spinning | 0.95 |
-| Host: sound (`audio.c`) | 0.60 |
-| Host: other (gpu worker, vsock, virtiofs) | 1.08 |
+| The game's own threads: `Background Work` 2.20, `Foreground Work` 0.81, `GameThread` 0.65 | ~3.7 |
+| wineserver (x86-64 under FEX) | 0.67 |
+| Rendering: `RenderThread 0` 0.32, `RHISubmissionTh` 0.25, `RHIThread` 0.20, `RHIInterruptThr` 0.16 | 0.92 |
+| DXMT's own thread (`dxmt-cmdbuf-wai`) | 0.14 |
+| Sound in the guest (`AudioMixerRende`, `FAudio_AudioCli`) | 0.24 |
+| Host: guest code (`hv_trap`) | 6.44 |
+| Host: vCPU wake-ups (Hypervisor.framework's lock and interrupt bookkeeping) | 2.53 |
+| Host: executor consumers spinning | 0.71 |
+| Host: sound (`audio.c`) | 0.62 |
+| Host: other (gpu worker, vsock, virtiofs) | 1.35 |
 
 DXMT's share, measured natively in the macOS run's `stats.txt` (DXMT_STATS times every D3D12 call on every thread,
 the game's workers included): 0.44 cores in D3D12 calls, 0.33 without `allocator.Reset`'s fence waits.
@@ -815,10 +815,10 @@ workers about 0.01 each.
 
 What it says:
 - DXMT is about 7-10% of the macOS run's CPU natively. In the guest it runs as x86-64 under FEX, several times
-  slower, inside the rendering threads' 0.92 core and its own 0.15: moving it to the host (spec §4) returns roughly
-  that difference, on the order of a core of the guest's 6.1. Not enough for the 1.5x CPU gate alone.
-- The host's own overheads, 3.9 cores (wake-ups, spinning, sound, other), and wineserver's 0.64 are together larger
-  than DXMT's share. They are spec §5.3's work (M5); wineserver isn't in the spec yet.
+  slower, inside the rendering threads' 0.92 core and its own 0.14: moving it to the host (spec §4) returns roughly
+  that difference, on the order of a core of the guest's 6.4. Not enough for the 1.5x CPU gate alone.
+- The host's own overheads, 5.2 cores (wake-ups 2.5, spinning, sound, other), and wineserver's 0.67 are together
+  much larger than DXMT's share. They are spec §5.3's work (M5); wineserver isn't in the spec yet.
 - How the numbers are taken matters. The first VM run with `DXMT_STATS=1` in the guest fell to 33 fps (it times
   every D3D12 call, a clock read is about 270 ns under FEX, and its capture mode writes each new shader and pipeline
   over the share), so the VM's frames are counted by `macneutron-vm` at present (`MN_PRESENT_STATS`). And `sample`

@@ -54,6 +54,8 @@ class Perf(unittest.TestCase):
         self.assertAlmostEqual(perf.fps(stats, 0), 110.0)
         self.assertAlmostEqual(perf.fps(stats, stats.index("# 10:00:10")), 100.0)
         self.assertIsNone(perf.fps(stats, len(stats)))
+        # Up to the window's end: what the host sample stalled after it stays out.
+        self.assertAlmostEqual(perf.fps(stats, 0, stats.index("# 10:00:10")), 120.0)
 
     def test_threads_names_with_spaces(self):
         got = perf.threads(TOP_BATCH + TOP_BATCH.replace("90.0", "50.0"), 0)
@@ -63,6 +65,7 @@ class Perf(unittest.TestCase):
     def test_threads_past_offset(self):
         both = TOP_BATCH + TOP_BATCH.replace("90.0", "50.0")
         self.assertEqual(perf.threads(both, len(TOP_BATCH))[0], ("RHI Thread", 70.0))
+        self.assertEqual(perf.threads(both, 0, len(TOP_BATCH))[0], ("RHI Thread", 110.0))
 
     def test_sample_split(self):
         split = perf.sample_split(SAMPLE)

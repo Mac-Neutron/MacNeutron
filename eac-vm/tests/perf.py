@@ -59,18 +59,19 @@ def gpu_busy(texts):
     return sum(values) / len(values) if values else None
 
 
-def fps(stats, offset):
-    """The mean frame rate of DXMT's full windows (stats.txt's ", every 5 s" lines) past byte offset."""
+def fps(stats, offset, end=None):
+    """The mean frame rate of DXMT's full windows (stats.txt's ", every 5 s" lines) from byte offset to end."""
     rates = [float(m.group(1)) for m in re.finditer(r"^# [\d:]+ [\d.]+ s, \d+ frames \(([\d.]+) fps\), every 5 s$",
-                                                     stats[offset:], re.M)]
+                                                     stats[offset:end], re.M)]
     return sum(rates) / len(rates) if rates else None
 
 
-def threads(profile, offset):
-    """Per thread name, the mean over top's batches past byte offset of its threads' summed %CPU, highest first."""
+def threads(profile, offset, end=None):
+    """Per thread name, the mean over top's batches from byte offset to end of its threads' summed %CPU, highest
+    first."""
     sums = defaultdict(float)
     batches = 0
-    for batch in re.split(r"^(?=top - )", profile[offset:], flags=re.M):
+    for batch in re.split(r"^(?=top - )", profile[offset:end], flags=re.M):
         if not batch.startswith("top - "):
             continue
         batches += 1
@@ -153,14 +154,15 @@ def record(a):
     used, ended = cpu_delta(before, after, match)
     vm_used = cpu_delta(before, after, lambda c: os.path.basename(c) == "macneutron-vm")[0]
     raw = sample_split(_read(a.sample)[0]) if a.sample else {}
+    # Up to the window's end: the host sample, after it, stalls the game while the files go on growing.
     stats, so = _read(a.stats, a.stats_offset)
     profile, po = _read(a.profile, a.profile_offset)
-    tops = threads(profile, po)
+    tops = threads(profile, po, a.profile_end)
     out = {
         "appid": a.appid, "mode": a.mode, "seconds": a.seconds,
         "cpu_cores": round(used / a.seconds, 3), "processes_ended": ended,
         "gpu_busy": gpu_busy([_read(p)[0] for p in a.ioreg]),
-        "fps": fps(stats, so),
+        "fps": fps(stats, so, a.stats_end),
         "threads": [[n, round(c, 1)] for n, c in tops[:20]],
         # DXMT's own threads: a lower bound on its share, D3D12 recording runs on the game's threads.
         "dxmt_threads": round(sum(c for n, c in tops if n.startswith("dxmt-")), 1),
@@ -215,8 +217,10 @@ def main(argv):
     r.add_argument("--ioreg", nargs="*", default=[])
     r.add_argument("--stats")
     r.add_argument("--stats-offset", type=int, default=0)
+    r.add_argument("--stats-end", type=int)
     r.add_argument("--profile")
     r.add_argument("--profile-offset", type=int, default=0)
+    r.add_argument("--profile-end", type=int)
     r.add_argument("--sample")
     c = sub.add_parser("compare")
     c.add_argument("macos")

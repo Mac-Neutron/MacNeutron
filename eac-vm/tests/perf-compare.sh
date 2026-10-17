@@ -46,6 +46,8 @@ while [ $i -lt "$SECS" ]; do
 done
 ps -A -o pid=,time=,comm= > "$T/ps.after"
 elapsed=$(( $(date +%s) - start ))
+se=$(size "$STATS") pe=0
+[ -z "$PROFILE" ] || pe=$(size "$PROFILE")
 # After the window, never in it: sample(1) suspends the process at each tick (SMITE 2's frame rate fell to 1.4 fps
 # while one ran), so only its shares are used, scaled to the window's CPU (perf.py's scale).
 if [ -n "$PID" ]; then
@@ -55,8 +57,8 @@ fi
 mkdir -p "$ROOT/build/perf"
 OUT=$ROOT/build/perf/$APPID-$MODE-$(date +%Y%m%d-%H%M%S).json
 set -- record "$OUT" --mode "$MODE" --appid "$APPID" --seconds "$elapsed" --ps-before "$T/ps.before" \
-  --ps-after "$T/ps.after" --stats "$STATS" --stats-offset "$so" --ioreg "$T"/ioreg.*
-[ -z "$PROFILE" ] || set -- "$@" --profile "$PROFILE" --profile-offset "$po"
+  --ps-after "$T/ps.after" --stats "$STATS" --stats-offset "$so" --stats-end "$se" --ioreg "$T"/ioreg.*
+[ -z "$PROFILE" ] || set -- "$@" --profile "$PROFILE" --profile-offset "$po" --profile-end "$pe"
 [ ! -s "$T/sample.txt" ] || set -- "$@" --sample "$T/sample.txt"
 $PERF "$@"
 [ ! -s "$T/sample.txt" ] || cp "$T/sample.txt" "${OUT%.json}.sample.txt"  # the host sample, for a closer look
