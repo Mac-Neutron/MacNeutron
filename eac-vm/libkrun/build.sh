@@ -3,7 +3,8 @@
 # Output: build/eac-vm-work/libkrun/{libkrun.1.dylib,include/libkrun.h}. Source: build/eac-vm-work/libkrun-src, where
 # branch `macneutron` is reset to the pin and the patches are applied with `git am` (so new patches are made there).
 # ffi exports the v2 C API (include/libkrun.h); gpu is the virtio-gpu device on patch 0005's dxmt context; input is
-# virtio-input, fed by eac-vm/host/input.c (include/libkrun_input.h). The Makefile is skipped on purpose: on macOS it downloads a Debian sysroot for the guest init blob, which we don't use.
+# virtio-input, fed by eac-vm/host/input.c (include/libkrun_input.h); patch 0007's TpmDevice is a TPM 2.0 over TIS MMIO, its
+# commands run by eac-vm/host/tpm.c (include/libkrun_tpm.h). The Makefile is skipped on purpose: on macOS it downloads a Debian sysroot for the guest init blob, which we don't use.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 HERE=$ROOT/eac-vm/libkrun
@@ -24,5 +25,5 @@ mkdir -p "$OUT/include"
 cp "$SRC/target/release/libkrun.dylib" "$OUT/libkrun.1.dylib"
 install_name_tool -id @rpath/libkrun.1.dylib "$OUT/libkrun.1.dylib"
 codesign -s - -f "$OUT/libkrun.1.dylib"
-cp "$SRC/include/libkrun.h" "$SRC/include/libkrun_input.h" "$OUT/include/"
+cp "$SRC/include/libkrun.h" "$SRC/include/libkrun_input.h" "$SRC/include/libkrun_tpm.h" "$OUT/include/"
 echo "$OUT/libkrun.1.dylib"

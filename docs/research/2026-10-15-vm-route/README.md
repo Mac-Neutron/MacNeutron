@@ -218,7 +218,7 @@ that says it is one, never to imitate hardware.
 | # | Requirement | The guest today | What meeting it takes |
 |---|---|---|---|
 | 1 | Kernel and modules signed with a well-known key | Fedora's kernel (Authenticode signer `kernel-signer`, issued by Fedora Secure Boot CA 20200709) and in-tree modules, `module.sig_enforce=1`, no out-of-tree modules | Done for the binaries; it counts only once Secure Boot verifies the chain (3) |
-| 2 | TPM 2.0 | None: libkrun has no TPM device | A CRB TPM in our libkrun fork (Fedora's kernel has `TCG_CRB=y`), backed by a software TPM on the host (libtpms) with per-VM state. Its endorsement key is certified by MacNeutron as a virtual TPM, never as a vendor's chip |
+| 2 | TPM 2.0 | The device since 2026-10-16 (§13): libkrun patch 0007, a TIS TPM; no engine behind it yet | A TPM over TIS MMIO in our libkrun fork (CRB binds only through ACPI, which this guest boots without; Fedora's kernel has `TCG_TIS=y`), backed by a software TPM on the host (libtpms) with per-VM state. Its endorsement key is certified by MacNeutron as a virtual TPM, never as a vendor's chip |
 | 3 | Secure Boot, booting only from well-known keys | Direct kernel boot, no firmware | EDK2 (ArmVirt) with Secure Boot on, `db` holding only the Microsoft UEFI CAs and Fedora's CA, current `dbx`; Fedora's Microsoft-signed shim, then GRUB and the kernel, both Fedora-signed. libkrun main has no firmware loader, so this is a libkrun patch plus our EDK2 build (spec milestone 6) |
 | 4 | Measured boot | Nothing measured | Comes with 2 and 3: EDK2's TCG2 measures shim, shim measures GRUB, GRUB measures the kernel, initramfs and command line |
 | 5 | IOMMU on, passthrough off (non-handheld devices) | No IOMMU: libkrun's virtio devices write straight into guest memory | A virtio-iommu device in our libkrun with every virtio-mmio device behind it (Fedora's kernel has `VIRTIO_IOMMU=y`), and `iommu.passthrough=0` on the command line. Each DMA buffer then needs a map request: measure the frame loop, disk and network |
@@ -602,3 +602,36 @@ The pieces:
   output path is only proven up to "no output". It needs a run with a working audio server.
 - Microphone input: the plugin refuses capture.
 - libkrun logs `unexpected dgram pkt: 3` once a connection; the streams are unaffected.
+
+## 13. TPM 2.0, the device (2026-10-16)
+
+EAC Linux v2's second requirement (§6). The guest now has the device; the TPM engine behind it is the next step.
+
+- **libkrun patch 0007** adds `TpmDevice` (`krun_tpm_device_new`, `include/libkrun_tpm.h`).
+  - It is a TPM 2.0 behind the TCG PC Client TIS (FIFO) interface: five 4 KiB localities of MMIO.
+  - Its device-tree node is `tcg,tpm-tis-mmio`, which Fedora's built-in `tpm_tis` binds to.
+  - It offers no interrupt, so the driver polls.
+  - The host's backend, a C vtable, runs each command on a thread of its own. A slow command (an RSA key generation)
+    never stalls the vCPU that sent it; a failed one answers `TPM_RC_FAILURE`.
+  - CRB, which §6 first planned, binds only through ACPI, and this guest boots from a device tree.
+- **`macneutron-vm --tpm <dir>`** attaches it, with `eac-vm/host/tpm.c` as the engine and its state in `<dir>`. The
+  launcher doesn't pass it yet.
+
+**Checked:**
+- The device's unit tests (`cargo test -p krun-devices --lib tpm_tis`): locality grant and hand-over, a command to the
+  backend and back, Expect until the whole command is in, retry, and a failed backend. Three of them fail when Expect
+  is never set.
+- `eac-vm/tests/tpm-host.sh` runs the guest kernel's own driver against it. The guest's device tree has
+  `tpm@a00d000: tcg,tpm-tis-mmio`, and the host saw the probe's `TPM2_GetCapability` and then both self-tests. The
+  driver sends a command only after reading the last response, so the TIS exchange works both ways.
+
+**Next: the engine.** With every command failing, Linux registers no chip: its boot-time HMAC sessions
+(`CONFIG_TCG_TPM2_HMAC=y`) need a primary key. So `/dev/tpm0` waits for a real TPM.
+- **libtpms** (BSD-3-Clause, IBM's TPM 2.0 reference code), built in-process: `TPMLIB_Process` behind the vtable, its NV
+  state (`tpm2-00.permall`) in `<dir>`, one per game beside its state disk.
+- It links statically against OpenSSL's `libcrypto.a`, which Homebrew's `openssl@3` already has here.
+- libtpms itself is a download (a pinned source release): it waits for the maintainer's yes.
+
+**Open** (the §6 questions still stand):
+- Whether EAC v2 accepts a virtual TPM whose endorsement key MacNeutron certifies.
+- Measured boot (4) needs Secure Boot firmware (3) first.
