@@ -580,20 +580,28 @@ The pieces:
   - Without the host it plays into nothing at the stream's rate, as the null device did.
 - **`eac-vm/host/audio.c`** in `macneutron-vm` serves vsock port 5102 (`eac-vm/guest/mn-audio.h`).
   - Each stream gets its own CoreAudio output (the default device, which converts the rate).
-  - A ring of a second, or 256 KiB at least, sits between the connection and the render callback.
-  - If CoreAudio doesn't answer, a clock thread takes the frames instead. A stuck audio driver can stall every
-    client's calls, so CoreAudio is asked once, off the streams' threads.
-  - `MN_AUDIO_OUTPUT=none` keeps the Mac quiet in tests.
+  - A ring of a second, or 256 KiB at least, sits between the connection and the output.
+  - The connection's thread never stops reading. libkrun's vsock proxy sends with blocking calls from the one thread
+    that also serves every other vsock connection (Steam's included) and the console, and an unread UNIX socket here
+    holds only about 8 KiB.
+  - So each stream's output has its own thread. It makes the CoreAudio unit, and until there is one it takes frames at
+    the stream's rate into nothing.
+  - CoreAudio is asked off the streams' threads until it answers: a stuck audio driver can stall every client's
+    calls. A stream that began without it moves to the Mac's output once it does.
+  - STOP leaves a mark that the output drops up to; it never waits.
+  - `MN_AUDIO_OUTPUT=none` keeps the Mac quiet in tests; `=slow` makes each output take 3 s.
 
 **Checked:**
-- `eac-vm/tests/audio-host.sh` runs the player against a stand-in guest: half a second played in 0.503 s, STOP in
-  2 ms, PAUSE kept. It fails against an unpaced output ("0.008 s").
+- `eac-vm/tests/audio-host.sh` runs the player against a stand-in guest: half a second played in 0.505 s, STOP in
+  8 ms, PAUSE kept. It fails against an unpaced output ("0.008 s").
+- The same test with an output that takes 3 s to make took 256 KiB in 1 ms. Before the fix (review finding), it took
+  3.011 s, because the connection stopped reading.
 - `eac-vm/tests/audio.sh` runs in the VM:
 
   | Row | Played | Host count |
   |---|---|---|
-  | ALSA, blocking writes under FEX | 2.0 s in 2.011 s | 96,000 frames |
-  | Wine's waveOut | 2.0 s in 2.016 s | 96,000 frames |
+  | ALSA, blocking writes under FEX | 2.0 s in 2.003 s | 96,000 frames |
+  | Wine's waveOut | 2.0 s in 1.997 s | 95,936 frames, and 64 dropped at Wine's stop |
 
   Both rows failed while the plugin didn't load: Wine's `waveOutOpen` fails, which SMITE 2 would crash on.
 

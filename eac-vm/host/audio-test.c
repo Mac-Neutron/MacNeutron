@@ -2,6 +2,7 @@
  * as played, PAUSE keeps it, and a stream it can't play is refused. Prints "audio-test: ok" or the first failure.
  *   audio-test             on the Mac's output (silence), once CoreAudio answers
  *   MN_AUDIO_OUTPUT=none   on the stand-in output that plays into nothing at the stream's rate
+ *   MN_AUDIO_OUTPUT=slow   an output that takes 3 s to make, as a stuck CoreAudio: the connection must keep reading
  * eac-vm/tests/audio-host.sh builds it and runs both. */
 #include "audio.h"
 #include "../guest/mn-audio.h"
@@ -66,6 +67,22 @@ int main(void) {
     sock = p;
     if (mn_audio_listen(sock)) fail("listen");
     setvbuf(stdout, NULL, _IONBF, 0);
+    const char *mode = getenv("MN_AUDIO_OUTPUT");
+    if (mode && !strcmp(mode, "slow")) {
+        /* An output that takes 3 s to make (CoreAudio stuck) must not stop the connection reading: libkrun's vsock
+         * proxy sends to it with blocking calls, from the thread every vsock connection and the console share, and an
+         * unread UNIX socket here holds about 8 KiB. */
+        int fd = stream(2);
+        double t0 = now();
+        for (int i = 0; i < 16; i++) msg(fd, MN_AUDIO_DATA, 4096); /* 256 KiB */
+        double took = now() - t0;
+        printf("slow output: 256 KiB taken in %.3f s\n", took);
+        if (took > 1) fail("slow output: the connection stopped reading");
+        msg(fd, MN_AUDIO_START, 0);
+        if (played(fd, 65536, now() + 5) != 65536) fail("slow output: never played");
+        printf("audio-test: ok\n");
+        return 0;
+    }
     usleep(200000);  /* CoreAudio's first answer, when it answers */
 
     /* Half a second, sent at once: played as the output's clock goes, not as fast as it came. */
