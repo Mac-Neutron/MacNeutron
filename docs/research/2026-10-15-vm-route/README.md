@@ -824,3 +824,54 @@ What it says:
   over the share), so the VM's frames are counted by `macneutron-vm` at present (`MN_PRESENT_STATS`). And `sample`
   stalls what it samples: a same-window check gave 1.03 cores from the sample against 0.47 from `ps` for those
   seconds, so only its shares are used.
+
+## 16. Direct3D forwarding, M5: the VM's overheads (2026-10-17)
+
+Plan `docs/superpowers/plans/2026-10-17-vm-d3d-forwarding-m5-overheads.md`. Each change was measured on a repeatable
+scene, SMITE 2's lobby in the dev VM (`eac-vm/tests/bench-smite2.sh`: 60 s once the lobby is up, sound to nowhere,
+the guest profiler and the host's frame counter, `perf-compare.sh vm`). The lobby is capped at 60 fps, so it shows CPU
+saved at the same frame rate, not headroom. Two runs of the same setting (base-a/b) set the noise: 0.1 core, 0.1 fps.
+
+| Lobby run | CPU (cores) | wineserver | fps | Host: wake / spin / other |
+|---|---|---|---|---|
+| Before M5 (base-a, base-b) | 7.74, 7.65 | 47% | 58.1, 58.2 | 0.30 / 2.91 / 0.29 |
+| Executor spin 200 us, then park (was 2 ms) | 5.60 | 47% | 59.1 | 0.30 / 1.19 / 0.40 |
+| App Nap off, window uncovered / covered | 5.40, 5.50 | 46-47% | 58.0, 59.2 | 0.29 / 1.04-1.16 / 0.30 |
+| NTSync (two runs) | 4.00, 4.12 | 6% | 59.4, 59.5 | 0.15 / 0.95 / 0.29 |
+| NTSync, 12 vCPUs | 3.73 | 5% | 59.5 | 0.10 / 1.06 / 0.24 |
+| NTSync, 9 vCPUs | 3.47 | 5% | 59.7 | 0.08 / 0.85 / 0.27 |
+| NTSync, 6 vCPUs | 3.08 | 4% | 59.6 | 0.05 / 0.89 / 0.29 |
+| NTSync, spin 50 us | 3.72 | 7% | 59.4 | 0.15 / 0.53 / 0.29 |
+
+The changes:
+- **The executor's consumers** spin 200 us, then park until the doorbell (`MN_EXECUTOR_SPIN_US`, 0-2000).
+- **The sound server** wakes once a period (10 ms) instead of polling: about 800 wake-ups a second fell to 84
+  (`audio-test.sh`'s calm case). The lobby can't show it (sound goes nowhere); M0's match had sound at 0.62 cores.
+- **Settings for the match:** `MN_VM_CPUS` (vCPUs, 1 to the Mac's cores; every core by default) and
+  `MN_VM_CMDLINE_EXTRA` (tick and RCU parameters only: `nohz_full=`, `rcu_nocbs=`, `nohz=`, `skew_tick=`,
+  `irqaffinity=`).
+- **No App Nap.** A covered VM window let macOS nap the whole host: timers coalesced (the sound's 10 ms poll took
+  about 90 ms), and the lobby fell to 19-22 fps behind a browser window. `macneutron-vm` now holds a user-initiated,
+  latency-critical activity for its life (`appnap.sh`), which also keeps an idle Mac from sleeping under a running
+  game. Every "collapse" first seen with fewer vCPUs, a 50 us spin and a native wineserver was this: those windows
+  were covered.
+- **NTSync.** Fedora's signed `ntsync` module was in the image but never loaded (it has no devname alias), so every
+  wait, event and mutex the game made went through wineserver. `modules-load.d` loads it at boot (`wine.sh` checks
+  the server holds `/dev/ntsync`); the driver makes the device 0666. wineserver fell from 0.47 cores to 0.06 in the
+  lobby, and the guest's own time with it.
+- **A native arm64 wineserver** (a Wine patch, `WINESERVER_MACHINE=x86_64`) was tried and dropped: on the same image
+  the x86-64 server under FEX used 46% at 59 fps and the native one 42% at 50 fps, with no saving a frame. FEX wasn't
+  wineserver's cost, the sync traffic was, and NTSync removed it.
+- **The host's other work** is real work, not polling: 0.42 of its 0.53 sampled is Metal's command-buffer submission
+  (`IOGPUCommandQueueSubmitCommandBuffers`), M1-M4's to shrink; virtio-gpu's worker is about 0.1, and the one timed
+  poll left (mouse capture's 50 ms check) is under 0.01.
+
+The gate (spec §8: in a match, the host's overheads from 5.2 cores to 2.0 or less, wineserver from 0.67 to 0.2 or
+less, frame rate and GPU busy no lower than M0's 108.6 fps and 91.6%) isn't taken yet: the maintainer's VM folder
+builds its images from a release's parts, and NTSync comes with the next release. In the lobby the host's overheads
+are 1.4 cores with today's defaults (0.97 with a 50 us spin), from 3.5 before M5, and wineserver is 0.06. The match
+decides the defaults the lobby can't: 6 to 12 vCPUs and the 50 us spin, since without App Nap neither cost a frame
+in the lobby.
+
+Open: the 4b-1 Metal gate (`eac-vm/metal/gate.sh`) crashes `macneutron-vm` in the host's `winemetal.so` on the main
+queue (games run); with `MN_EXECUTOR_SPIN_US=0` SMITE 2 never reached the lobby and the VM didn't power off.
