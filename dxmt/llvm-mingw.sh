@@ -50,6 +50,14 @@ sed -i '' 's/        EXTRA_CFLAGS="\$ARM64X_FLAGS"/        EXTRA_CFLAGS="\$ARM64
 sed -i '' 's/        FLAGS="\$ARM64X_FLAGS"/        FLAGS="\$ARM64X_FLAGS -mcpu='"$CPU"'"/' build-compiler-rt.sh
 grep -q "mcpu=$CPU" build-libcxx.sh && grep -q "mcpu=$CPU" build-compiler-rt.sh \
   || die "llvm-mingw $LLVM_MINGW_TAG's runtime scripts changed: no place for -mcpu=$CPU"
+# No build path in the C++ runtime every Windows-side binary links: libc++abi's checks name their source files
+# (__FILE__), which named this tree's llvm-project folder in every DXMT DLL (a release refuses a build path).
+map="-ffile-prefix-map=$S/scripts/llvm-project=/llvm-project"
+sed -i '' 's|-DCMAKE_C_FLAGS_INIT="$CFGUARD_CFLAGS $EXTRA_CFLAGS"|-DCMAKE_C_FLAGS_INIT="$CFGUARD_CFLAGS $EXTRA_CFLAGS '"$map"'"|;
+  s|-DCMAKE_CXX_FLAGS_INIT="$CFGUARD_CFLAGS $EXTRA_CFLAGS"|-DCMAKE_CXX_FLAGS_INIT="$CFGUARD_CFLAGS $EXTRA_CFLAGS '"$map"'"|' \
+  build-libcxx.sh
+[ "$(grep -cF -- "$map" build-libcxx.sh)" = 2 ] \
+  || die "llvm-mingw $LLVM_MINGW_TAG's build-libcxx.sh changed: no place for $map"
 export TOOLCHAIN_ARCHS="i686 x86_64 aarch64 arm64ec"
 rm -rf "$T.tmp"
 # The compilers themselves: -O3 (Release), ThinLTO, for this CPU. Only LLVM's own build sees these flags; the

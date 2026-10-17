@@ -125,6 +125,13 @@ check_vm_manifest() {  # check_vm_manifest <vm-manifest.json> <parts archive>
   [ "$_vm" = "$_vm_size $_vm_sha" ] || { echo "release: vm-manifest.json names parts $_vm, not the archive's $_vm_size $_vm_sha" >&2; return 1; }
 }
 
+# A guest stage in the VM parts was built from the trees this release archives (eac-vm/image/stamps.sh).
+check_stamp() {  # check_stamp <stage> <its stamp> <the trees' stamp>
+  [ -n "$2" ] || { echo "release: the VM's $1 has no stamp: rebuild it (eac-vm/image/guest-stages.sh $1)" >&2; return 1; }
+  [ "$2" = "$3" ] || { echo "release: the VM's $1 was built from $2, not $3: rebuild it (eac-vm/image/guest-stages.sh $1)" >&2
+    return 1; }
+}
+
 # The VM parts name no build or home path of this Mac (as build_paths checks the app), the sparse template aside.
 check_parts_paths() {  # check_parts_paths <parts dir>
   _pp=$(find "$1" -type f ! -name state-template.img -print0 \
@@ -288,6 +295,12 @@ self_test() {
     -cJf "$T/rooted.tar.xz" .
   passes "an archive of root's entries" check_archive_owners "$T/rooted.tar.xz"
   passes "parts naming no path of this Mac" check_parts_paths "$T/parts"
+  passes "a stage built from these trees" check_stamp wine "wine-linux a" "wine-linux a"
+  refused "a stage built from other trees" \
+    "release: the VM's wine was built from wine-linux b, not wine-linux a: rebuild it (eac-vm/image/guest-stages.sh wine)" \
+    check_stamp wine "wine-linux b" "wine-linux a"
+  refused "a stage with no stamp" "release: the VM's fex has no stamp: rebuild it (eac-vm/image/guest-stages.sh fex)" \
+    check_stamp fex "" "fex-linux a"
   echo "$HOME/x" > "$T/parts/leak.dll"
   refused "parts naming this Mac's home folder" "release: the VM parts name a build or home path: leak.dll " \
     check_parts_paths "$T/parts"
@@ -639,6 +652,13 @@ sh "$B" sync "$ROOT/eac-vm/image" /home/bench/mn-image > /dev/null || die "can't
 sh "$B" ssh 'sh ~/mn-image/build.sh > /tmp/image.log 2>&1' || die "the image build failed: the builder's /tmp/image.log"
 sh "$ROOT/eac-vm/setup/parts.sh" "$OUT/vm-parts" "$OUT/wine.app" > /dev/null || die "parts.sh failed"
 check_parts_paths "$OUT/vm-parts" || exit 1
+# Each guest stage was built from the trees the source archive carries.
+for s in wine:.mn-source forwarder:.mn-source-forwarder dxmt:.mn-source-dxmt; do
+  found=$(tar -xOf "$OUT/vm-parts/wine.tar" "./${s#*:}" 2> /dev/null || true)
+  check_stamp "${s%%:*}" "$found" "$(sh "$ROOT/eac-vm/image/stamps.sh" "${s%%:*}")" || exit 1
+done
+fex=$(awk -F'\t' '$2 == "/usr/share/fex-emu/.mn-source" { print $7 }' "$OUT/vm-parts/recipe/base.tsv")
+check_stamp fex "$(cat "$OUT/vm-parts/overlay/$fex" 2> /dev/null)" "$(sh "$ROOT/eac-vm/image/stamps.sh" fex)" || exit 1
 COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --no-acls --no-fflags --uid 0 --gid 0 --uname root --gname root \
   -C "$OUT/vm-parts" -cJf "$OUT/$PARTS" . || die "can't archive the VM parts"
 check_archive_owners "$OUT/$PARTS" || exit 1

@@ -46,6 +46,11 @@ wine_image() {
     sudo install -m644 "$DXMT_GUEST"/x86_64-windows/*.dll "$WORK/wine/lib/wine/x86_64-windows/"
     sudo install -m755 "$DXMT_GUEST/x86_64-unix/winemetal.so" "$WORK/wine/lib/wine/x86_64-unix/"
   fi
+  # What the forwarder and DXMT were built from, beside the Wine stage's own (guest-stages.sh; release.sh checks them).
+  [ ! -f "$(dirname "$STEAM_FORWARDER")/.mn-source" ] \
+    || sudo install -m644 "$(dirname "$STEAM_FORWARDER")/.mn-source" "$WORK/wine/.mn-source-forwarder"
+  [ "$DXMT_GUEST" = none ] || [ ! -f "$DXMT_GUEST/.mn-source" ] \
+    || sudo install -m644 "$DXMT_GUEST/.mn-source" "$WORK/wine/.mn-source-dxmt"
   sudo rm -f "$OUT/wine.erofs"; sudo mkfs.erofs -L mn-wine -zlz4hc "$OUT/wine.erofs" "$WORK/wine" > /dev/null
   # The same tree as a tar, for a Mac's setup to make wine.erofs from (eac-vm/setup/parts.sh).
   sudo mkdir -p "$OUT/setup"; sudo tar --numeric-owner -C "$WORK/wine" -cf "$OUT/setup/wine.tar" .
@@ -96,6 +101,9 @@ sudo rm -rf "$WORK/root/usr/lib/sysimage/rpm" "$WORK/root/usr/lib/sysimage/libdn
   "$WORK/root/var/cache/dnf" "$WORK/root/var/cache/libdnf5"
 sudo rm -f "$WORK/root"/var/log/dnf5.log* "$WORK/root"/var/log/hawkey.log*  # the builder's own install log
 for b in FEX FEXServer FEXBash FEXGetConfig FEXpidof; do sudo install -m755 "$FEX_BIN/$b" "$WORK/root/usr/bin/"; done
+# What FEX was built from (guest-stages.sh; release.sh checks it).
+[ ! -f "$FEX_BIN/.mn-source" ] || { sudo mkdir -p "$WORK/root/usr/share/fex-emu"
+  sudo install -m644 "$FEX_BIN/.mn-source" "$WORK/root/usr/share/fex-emu/.mn-source"; }
 sudo rm -f "$WORK/root/etc/resolv.conf"  # ours replaces whatever the packages left, a symlink included
 sudo cp -R "$HERE/rootfs/." "$WORK/root/"
 sudo chown -R root:root "$WORK/root/etc/fstab" "$WORK/root/etc/asound.conf" "$WORK/root/etc/resolv.conf" "$WORK/root/usr/lib/sysusers.d/mn.conf" "$WORK/root/etc/systemd/system" "$WORK/root/usr/libexec/mn-runner" \
