@@ -1,5 +1,5 @@
-// What covers the VM's window (Direct3D forwarding M5): macOS slows a covered window's process, so a bench whose
-// window another app covered measured that, not the VM (SMITE 2's lobby at 22 fps behind a browser, 59 uncovered).
+// What covers the VM's window (Direct3D forwarding M5), for the bench's record: App Nap slowed a covered VM (SMITE 2's
+// lobby at 22 fps behind a browser, 59 uncovered) until macneutron-vm held an activity against it.
 // Prints "vm-window: uncovered", "vm-window: covered by <apps>" (normal windows in front that overlap it) or
 // "vm-window: none".
 //   swift vm-window.swift
