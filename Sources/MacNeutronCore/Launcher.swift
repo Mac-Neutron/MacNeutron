@@ -86,6 +86,13 @@ public struct Launcher: Sendable {
 
         let (backend, note) = GraphicsBackend.select(requested: environment["MACNEUTRON_GRAPHICS"])
         var env = LaunchEnvironment.build(base: environment, context: context, backend: backend, logging: logging)
+        // MACNEUTRON_PERF=1: DXMT's frame statistics, for eac-vm/tests/perf-compare.sh. The user's own settings win.
+        if environment["MACNEUTRON_PERF"] == "1", backend == .dxmt, env["DXMT_STATS"] == nil {
+            let folder = perfFolder(appID: context.appID)
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            env["DXMT_STATS"] = "1"
+            env["DXMT_DXIL_DUMP"] = env["DXMT_DXIL_DUMP"] ?? folder.path(percentEncoded: false)
+        }
         let steamBridge = usesSteamBridge(request.verb, env)
         if steamBridge { addSteamClient(to: &env) }
         // The MetalFX presenter inside wine.app reads this; only the game's verbs ask for it. With MetalFX off it still
@@ -164,6 +171,10 @@ public struct Launcher: Sendable {
         if environment["MN_SCREEN"].map(MicroVM.isScreenSize) != true {
             environment["MN_SCREEN"] = display().map { "\($0.width)x\($0.height)" }
         }
+        if environment["MACNEUTRON_PERF"] == "1" {  // the guest profiler and DXMT's frame statistics (run-game.sh)
+            environment["MACNEUTRON_VM_PROFILE"] = "1"
+            environment["DXMT_STATS"] = environment["DXMT_STATS"] ?? "1"
+        }
         do {
             let script = try vm.script(verb: request.verb, appID: context.appID, guest: guest,
                                        arguments: request.arguments, environment: environment)
@@ -203,6 +214,11 @@ public struct Launcher: Sendable {
         } catch {
             return fail("\(error)", argv: argv, notify: true, gameLog: gameLog)
         }
+    }
+
+    /// `MACNEUTRON_PERF=1`'s folder for a game's DXMT frame statistics on macOS (perf-compare.sh reads its stats.txt).
+    public func perfFolder(appID: String) -> URL {
+        log.directory.appending(path: "perf/\(appID)", directoryHint: .isDirectory)
     }
 
     /// The toast while a game's prefix is prepared.

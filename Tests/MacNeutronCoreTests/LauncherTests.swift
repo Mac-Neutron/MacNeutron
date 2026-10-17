@@ -463,3 +463,22 @@ private func i386Exe(named name: String) throws -> String {
         "Steam Cloud saves for this game differ from the ones on this Mac, so MacNeutron kept both. Details are in launcher.log.",
     ])
 }
+
+@Test func perfTurnsOnDXMTStatsOnMacOS() throws {
+    // MACNEUTRON_PERF=1 (eac-vm/tests/perf-compare.sh): DXMT's frame statistics in the game's perf folder.
+    let f = try makeFixture()
+    let game = "/Steam/steamapps/common/Some Game/bin/Game.exe"
+    var env = f.env
+    env["MACNEUTRON_VM"] = "0"
+    env["MACNEUTRON_PERF"] = "1"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    let folder = f.launcher.perfFolder(appID: "42")
+    let run = try #require(f.runner.calls.last { $0.arguments.first == game })
+    #expect(run.environment["DXMT_STATS"] == "1")
+    #expect(run.environment["DXMT_DXIL_DUMP"] == folder.path(percentEncoded: false))
+    #expect(FileManager.default.fileExists(atPath: folder.path(percentEncoded: false)))
+    // A folder the user named wins.
+    env["DXMT_DXIL_DUMP"] = "/elsewhere"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    #expect(f.runner.calls.last { $0.arguments.first == game }?.environment["DXMT_DXIL_DUMP"] == "/elsewhere")
+}

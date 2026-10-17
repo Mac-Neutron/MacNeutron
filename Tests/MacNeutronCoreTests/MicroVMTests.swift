@@ -191,3 +191,16 @@ private func expectRefusedUntilTheVMIsReady(_ f: VMFixture) {
     _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
     #expect(scripts.all.last?.contains("MN_SCREEN") == false)  // run-game.sh's 1920x1080
 }
+
+@Test func perfTurnsOnTheGuestProfiler() throws {
+    let scripts = Scripts()
+    let f = try makeVMFixture(scripts: scripts)
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(scripts.all.last?.contains("MACNEUTRON_VM_PROFILE") == false)
+    #expect(scripts.all.last?.contains("DXMT_STATS") == false)
+    var env = f.env
+    env["MACNEUTRON_PERF"] = "1"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    #expect(scripts.all.last?.contains("\nMACNEUTRON_VM_PROFILE='1'\n") == true)
+    #expect(scripts.all.last?.contains("\nDXMT_STATS='1'\n") == true)
+}
