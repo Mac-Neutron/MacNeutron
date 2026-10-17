@@ -8,12 +8,15 @@ enum VMSetupError: Error, Equatable, CustomStringConvertible {
     case truncated
     /// A compressed stream that isn't one.
     case corrupt
+    /// A recipe line (1-based) that isn't one.
+    case badRecipe(line: Int)
 
     var description: String {
         switch self {
         case .unsupported(let what): "vm-setup: \(what) isn't supported"
         case .truncated: "vm-setup: a package's payload is cut short"
         case .corrupt: "vm-setup: a package's payload doesn't decompress"
+        case .badRecipe(let line): "vm-setup: the parts' recipe is damaged at line \(line)"
         }
     }
 }

@@ -71,3 +71,43 @@ enum CPIOReader {
         _ = try source.read(exactly: (4 - size % 4) % 4)
     }
 }
+
+/// A newc cpio of recipe entries, uncompressed: the initramfs (Fedora's kernel takes one as is). Paths are written
+/// relative ("usr/bin/x", the root as "."); capabilities don't apply to an initramfs.
+struct CPIOWriter {
+    private let out: FileHandle
+    private var inode: UInt32 = 0
+    private var written = 0
+    init(_ out: FileHandle) { self.out = out }
+
+    mutating func add(_ entry: RecipeEntry, contents: URL?) throws {
+        inode += 1
+        let name = entry.path == "/" ? "." : String(entry.path.drop { $0 == "/" })
+        switch entry.kind {
+        case .directory:
+            try write(name: name, mode: 0o040000 | UInt32(entry.mode), entry: entry, nlink: 2, bytes: Data())
+        case .symlink(let target):
+            try write(name: name, mode: 0o120000 | UInt32(entry.mode), entry: entry, nlink: 1, bytes: Data(target.utf8))
+        case .file:
+            guard let contents else { throw CocoaError(.fileNoSuchFile) }
+            try write(name: name, mode: 0o100000 | UInt32(entry.mode), entry: entry, nlink: 1,
+                      bytes: try Data(contentsOf: contents))
+        }
+    }
+
+    mutating func finish() throws {
+        inode = 0
+        try write(name: "TRAILER!!!", mode: 0, entry: nil, nlink: 1, bytes: Data())
+    }
+
+    private mutating func write(name: String, mode: UInt32, entry: RecipeEntry?, nlink: UInt32, bytes: Data) throws {
+        let fields: [UInt32] = [inode, mode, entry?.uid ?? 0, entry?.gid ?? 0, nlink, 0, UInt32(bytes.count), 0, 0, 0, 0,
+                                UInt32(name.utf8.count + 1), 0]
+        var record = Data(("070701" + fields.map { String(format: "%08X", $0) }.joined()).utf8) + Data(name.utf8) + [0]
+        record += Data(count: (4 - (written + record.count) % 4) % 4)
+        record += bytes
+        record += Data(count: (4 - (written + record.count) % 4) % 4)
+        try out.write(contentsOf: record)
+        written += record.count
+    }
+}
