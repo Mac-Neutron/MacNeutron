@@ -107,6 +107,24 @@ check_up_to_date() {  # make wine-arm64 has nothing to do: the bundle staged fro
   return 1
 }
 
+# The VM's parts archive (docs/superpowers/specs/2026-10-17-macneutron-vm-setup-design.md §4.2): its empty state
+# template stays sparse through the archive (16 GiB on disk otherwise, on every player's Mac).
+check_sparse_template() {  # check_sparse_template <parts archive>
+  _st_d=$(mktemp -d "${TMPDIR:-/tmp}/release-sparse.XXXXXX")
+  tar -xJf "$1" -C "$_st_d" ./state-template.img 2> /dev/null || { rm -rf "$_st_d"; echo "release: $1 has no state-template.img" >&2; return 1; }
+  _st_k=$(du -k "$_st_d/state-template.img" | cut -f1)
+  rm -rf "$_st_d"
+  [ "$_st_k" -le 20000 ] || { echo "release: the parts' state-template.img takes $_st_k KB on disk: not sparse" >&2; return 1; }
+}
+
+# The app's vm-manifest.json names the parts archive the release uploads: its size and SHA-256.
+check_vm_manifest() {  # check_vm_manifest <vm-manifest.json> <parts archive>
+  _vm=$(python3 -c 'import json, sys; p = json.load(open(sys.argv[1]))["parts"]; print(p["size"], p["sha256"])' "$1") \
+    || { echo "release: $1 isn't a VM manifest" >&2; return 1; }
+  _vm_size=$(stat -f %z "$2") _vm_sha=$(shasum -a 256 "$2" | cut -d' ' -f1)
+  [ "$_vm" = "$_vm_size $_vm_sha" ] || { echo "release: vm-manifest.json names parts $_vm, not the archive's $_vm_size $_vm_sha" >&2; return 1; }
+}
+
 # --self-test (gate R1): each refusal on its own input in a temporary clone; never build.sh, the real trees or GitHub.
 self_test() {
   T=$(mktemp -d "${TMPDIR:-/tmp}/release-self-test.XXXXXX")
@@ -212,6 +230,23 @@ self_test() {
   refused "an unpublished DXMT commit" \
     "release: DXMT_COMMIT $(git -C "$T/dxmt" rev-parse HEAD) is not on the fork's macneutron branch" \
     check_dxmt "$T/dxmt" "$(git -C "$T/dxmt" rev-parse HEAD)"
+
+  # The VM's parts: a sparse template, and a manifest naming the archive.
+  mkdir -p "$T/parts"
+  truncate -s 1g "$T/parts/state-template.img"
+  tar -C "$T/parts" -cJf "$T/parts.tar.xz" .
+  passes "a sparse state template" check_sparse_template "$T/parts.tar.xz"
+  dd if=/dev/zero of="$T/parts/state-template.img" bs=1048576 count=21 2> /dev/null
+  tar -C "$T/parts" -cJf "$T/dense.tar.xz" .
+  refused "a state template that isn't sparse" "release: the parts' state-template.img takes 21504 KB on disk: not sparse" \
+    check_sparse_template "$T/dense.tar.xz"
+  ps=$(stat -f %z "$T/parts.tar.xz") ph=$(shasum -a 256 "$T/parts.tar.xz" | cut -d' ' -f1)
+  printf '{"parts": {"url": "x", "size": %s, "sha256": "%s"}}\n' "$ps" "$ph" > "$T/vm-manifest.json"
+  passes "a VM manifest naming the parts" check_vm_manifest "$T/vm-manifest.json" "$T/parts.tar.xz"
+  printf '{"parts": {"url": "x", "size": %s, "sha256": "%s"}}\n' "$ps" "${ph%?}0" > "$T/vm-manifest.bad.json"
+  refused "a VM manifest naming other parts" \
+    "release: vm-manifest.json names parts $ps ${ph%?}0, not the archive's $ps $ph" \
+    check_vm_manifest "$T/vm-manifest.bad.json" "$T/parts.tar.xz"
 
   # The notary profile (release mode checks it with the refusals) and stapling's retries, with a stand-in xcrun on
   # PATH that logs its arguments: the real notarytool is never run here. The stand-in sleep only logs too.
@@ -364,6 +399,7 @@ build_app() {
   done
   ditto "$OUT/wine.app" "$A/Contents/Helpers/wine.app"
   cp "$STEAM_EXE" "$A/Contents/Resources/steam.exe"
+  cp "$OUT/vm-manifest.json" "$A/Contents/Resources/vm-manifest.json"
   AL="$A/Contents/Resources/licenses"
   cp "$ROOT/LICENSE" "$AL/LICENSE"
   cp "$ROOT/bridge/Proton-steam-LICENSE.txt" "$AL/"
@@ -466,6 +502,26 @@ if [ $mode = release ]; then
   echo "PASS L6 notarized copy installs and stays accepted"
 fi
 
+# 2b. The VM (docs/superpowers/specs/2026-10-17-macneutron-vm-setup-design.md §4.7): its images built in the builder
+# (eac-vm/image/build.sh, which writes the recipes and overlay a Mac's setup rebuilds them from), the parts archive,
+# and the app's manifest of it, whose URL is the release's own asset.
+W="$ROOT/build/eac-vm-work"
+PARTS="MacNeutron-$V-vm-parts.tar.xz"
+B="$ROOT/eac-vm/builder.sh"
+sh "$B" start > /dev/null || die "the builder (eac-vm/builder.sh) doesn't start"
+sh "$B" sync "$ROOT/eac-vm/image" /home/bench/mn-image > /dev/null || die "can't copy eac-vm/image into the builder"
+sh "$B" ssh 'sh ~/mn-image/build.sh > /tmp/image.log 2>&1' || die "the image build failed: the builder's /tmp/image.log"
+sh "$ROOT/eac-vm/setup/parts.sh" "$OUT/vm-parts" > /dev/null || die "parts.sh failed"
+tar -C "$OUT/vm-parts" -cJf "$OUT/$PARTS" . || die "can't archive the VM parts"
+rm -rf "$OUT/vm-parts"
+check_sparse_template "$OUT/$PARTS" || exit 1
+KVER=$(sed -n 's/^KVER=//p' "$ROOT/eac-vm/image/build.sh")
+python3 "$ROOT/eac-vm/setup/manifest.py" "$OUT/$PARTS" "$W/images/setup/packages.json" "$KVER" \
+  "$W/images/x86-64-rootfs.erofs" "https://github.com/chadouming/MacNeutron/releases/download/v$V/$PARTS" \
+  > "$OUT/vm-manifest.json" || die "manifest.py failed"
+check_vm_manifest "$OUT/vm-manifest.json" "$OUT/$PARTS" || exit 1
+echo "PASS the VM's parts ($PARTS) and manifest"
+
 # 3-4. MacNeutron.app (R4), its notarization (R2) and its zip.
 build_app
 if [ $mode = release ]; then
@@ -488,14 +544,14 @@ printf '%s\n' "$out"
 [ "$st" = 0 ] && [ "$(printf '%s\n' "$out" | tail -n 1)" = "PASS sources" ] || die "R5: the source archive fails"
 
 # 6. Checksums and sizes; the commands that publish it, for the maintainer.
-( cd "$OUT" && shasum -a 256 "$ZIP" "$TGZ" > SHA256SUMS )
-for f in "$ZIP" "$TGZ"; do echo "$f: $(stat -f %z "$OUT/$f") bytes"; done >> "$OUT/SIZES.txt"
+( cd "$OUT" && shasum -a 256 "$ZIP" "$TGZ" "$PARTS" > SHA256SUMS )
+for f in "$ZIP" "$TGZ" "$PARTS"; do echo "$f: $(stat -f %z "$OUT/$f") bytes"; done >> "$OUT/SIZES.txt"
 cat "$OUT/SIZES.txt" "$OUT/SHA256SUMS"
 if [ $mode = release ]; then
   c=$(awk '$1 == "MacNeutron" { print $3 }' "$OUT/SOURCES.txt")
   echo "release: MacNeutron $V is ready in $OUT. To publish it:"
   echo "  git tag v$V $c"
-  echo "  gh release create v$V --target $c --title 'MacNeutron $V' '$OUT/$ZIP' '$OUT/$TGZ' '$OUT/SHA256SUMS'"
+  echo "  gh release create v$V --target $c --title 'MacNeutron $V' '$OUT/$ZIP' '$OUT/$TGZ' '$OUT/$PARTS' '$OUT/SHA256SUMS'"
 else
   echo "release: rehearsal of $V done in $OUT (not notarized: nothing to publish)"
 fi
