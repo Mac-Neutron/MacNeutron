@@ -90,6 +90,8 @@ sudo rm -f "$WORK/root/boot/initramfs-$KVER.img"  # kernel-core's own, never boo
 
 cp "$WORK/root/lib/modules/$KVER/vmlinuz" "$OUT/vmlinuz"
 sudo rm -f "$WORK/root/lib/modules/$KVER/vmlinuz"  # it boots from outside the image
+# No machine identity: the builder's own would be every player's guest's (systemd makes one at each boot instead).
+sudo truncate -s 0 "$WORK/root/etc/machine-id"
 # The guest never runs rpm or dnf, and a Mac's setup (recipe.py) rebuilds the tree without their databases.
 sudo rm -rf "$WORK/root/usr/lib/sysimage/rpm" "$WORK/root/var/lib/dnf" "$WORK/root/var/cache/dnf"
 for b in FEX FEXServer FEXBash FEXGetConfig FEXpidof; do sudo install -m755 "$FEX_BIN/$b" "$WORK/root/usr/bin/"; done

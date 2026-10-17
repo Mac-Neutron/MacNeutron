@@ -9,6 +9,9 @@ struct VMSetupManifest: Codable, Equatable {
         let file, name, version, release, arch: String
         let size: Int64
         let sha256: String
+        /// The source package it was built from (`kernel-7.2.10-200.fc44.src.rpm` for kernel-core): Koji files every
+        /// binary package under its source package's name, version and release.
+        var sourceRPM: String? = nil
     }
     struct FEXRootfs: Codable, Equatable { let package: Package; let image: String; let imageSha256: String }
     struct Koji: Codable, Equatable { let base: URL; let signedKey: String }
@@ -22,6 +25,15 @@ struct VMSetupManifest: Codable, Equatable {
     /// Tests' local copies, which replace Fedora's sources: `<mirror>/<rpm file>`.
     var mirrors: [URL]?
 
+    /// The name, version and release Koji files a package under: its source package's, from name-version-release.src.rpm
+    /// split from the right (names have dashes, versions and releases don't); its own without one.
+    static func source(_ p: Package) -> (name: String, version: String, release: String) {
+        guard let rpm = p.sourceRPM, rpm.hasSuffix(".src.rpm") else { return (p.name, p.version, p.release) }
+        let parts = rpm.dropLast(".src.rpm".count).split(separator: "-").map(String.init)
+        guard parts.count >= 3 else { return (p.name, p.version, p.release) }
+        return (parts.dropLast(2).joined(separator: "-"), parts[parts.count - 2], parts[parts.count - 1])
+    }
+
     /// Where a package is fetched from, in turn: Fedora's release tree, its updates (both on dl.fedoraproject.org,
     /// noarch packages in the aarch64 tree), then Koji's signed copy, which keeps every build after the mirrors have
     /// moved on.
@@ -30,10 +42,11 @@ struct VMSetupManifest: Codable, Equatable {
         let fedora = p.release.firstMatch(of: /fc(\d+)/).map { String($0.1) } ?? "44"
         let arch = p.arch == "noarch" ? "aarch64" : p.arch, letter = String(p.name.prefix(1)).lowercased()
         let mirror = URL(string: "https://dl.fedoraproject.org/pub/fedora/linux/")!
+        let source = Self.source(p)
         return [
             mirror.appending(path: "releases/\(fedora)/Everything/\(arch)/os/Packages/\(letter)").appending(path: p.file),
             mirror.appending(path: "updates/\(fedora)/Everything/\(arch)/Packages/\(letter)").appending(path: p.file),
-            koji.base.appending(path: p.name).appending(path: p.version).appending(path: p.release)
+            koji.base.appending(path: source.name).appending(path: source.version).appending(path: source.release)
                 .appending(path: "data/signed/\(koji.signedKey)/\(p.arch)").appending(path: p.file),
         ]
     }

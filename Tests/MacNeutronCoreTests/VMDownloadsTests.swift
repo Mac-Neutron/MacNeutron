@@ -25,7 +25,7 @@ private final class FakeMirror: @unchecked Sendable {
 
 private let kernel = VMSetupManifest.Package(file: "kernel-core-7.2.10-200.fc44.aarch64.rpm", name: "kernel-core",
                                               version: "7.2.10", release: "200.fc44", arch: "aarch64", size: 5,
-                                              sha256: sha(Data("core\n".utf8)))
+                                              sha256: sha(Data("core\n".utf8)), sourceRPM: "kernel-7.2.10-200.fc44.src.rpm")
 
 /// What eac-vm/setup/manifest.py prints, shortened.
 private let manifestJSON = """
@@ -51,7 +51,7 @@ private func manifest(mirrors: [URL]? = nil) throws -> VMSetupManifest {
     #expect(m.sources(kernel).map(\.absoluteString) == [
         "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Everything/aarch64/os/Packages/k/kernel-core-7.2.10-200.fc44.aarch64.rpm",
         "https://dl.fedoraproject.org/pub/fedora/linux/updates/44/Everything/aarch64/Packages/k/kernel-core-7.2.10-200.fc44.aarch64.rpm",
-        "https://kojipkgs.fedoraproject.org/packages/kernel-core/7.2.10/200.fc44/data/signed/6d9f90a6/aarch64/kernel-core-7.2.10-200.fc44.aarch64.rpm",
+        "https://kojipkgs.fedoraproject.org/packages/kernel/7.2.10/200.fc44/data/signed/6d9f90a6/aarch64/kernel-core-7.2.10-200.fc44.aarch64.rpm",
     ])
     // A noarch package is in the aarch64 tree on the mirrors, under noarch on Koji; "^" is escaped.
     let fex = m.sources(m.fexRootfs.package).map(\.absoluteString)
@@ -96,4 +96,14 @@ private func manifest(mirrors: [URL]? = nil) throws -> VMSetupManifest {
                                    fetch: mirror.fetch, progress: { reported = ($0, $1) })
     #expect(mirror.requests.isEmpty)
     #expect(reported == (5, 5))
+}
+
+@Test func theReleaseNamesAPackageNoSourceServes() async throws {
+    // Koji files a binary package under its source package: kernel-core is in packages/kernel/.
+    let m = try manifest(), sources = m.sources(kernel), fex = m.sources(m.fexRootfs.package)
+    let missing = await VMSetup.missingSources(VMSetupManifest(version: 1, parts: m.parts, kernel: m.kernel, packages: [kernel],
+                                                               fexRootfs: m.fexRootfs, koji: m.koji)) { url in
+        url == sources[2] ? 5 : url == fex[0] ? 7 : nil  // the FEX root answers, at the wrong size
+    }
+    #expect(missing == [m.fexRootfs.package.file])
 }

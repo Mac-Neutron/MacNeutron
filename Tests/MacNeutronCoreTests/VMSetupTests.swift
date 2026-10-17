@@ -122,6 +122,8 @@ private func setUp(_ f: SetupFixture, requests: Requests = Requests(), minFreeGB
     try write("old\n", to: f.vm.appending(path: "images/manifest.sha256"))
     let vmExecutable = f.vm.appending(path: "macneutron-vm").path
     #expect(try await setUp(f, running: { [vmExecutable] }) == 75)
+    // The store goes once the images are built: the setup's peak on disk is downloads, parts and images.
+    #expect(!FileManager.default.fileExists(atPath: f.vm.appending(path: "setup/store").path))
     #expect(try String(contentsOf: f.vm.appending(path: "images/manifest.sha256"), encoding: .utf8) == "old\n")
     let requests = Requests()
     #expect(try await setUp(f, requests: requests) == 0)

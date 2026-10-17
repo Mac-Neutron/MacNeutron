@@ -14,7 +14,7 @@ public enum VMSetup {
 
     /// 0 when the set is in place, 75 when a running VM defers the swap; throws `VMSetupError` otherwise.
     /// `progress` gets lines: `progress download <done> <total>`, `progress assemble <k> 5`, `progress install <k> 1`.
-    static func run(manifest manifestFile: URL, vm: URL, mkfs: URL, minFreeGB: Int = 6,
+    static func run(manifest manifestFile: URL, vm: URL, mkfs: URL, minFreeGB: Int = 8,
                     fetch: @escaping ValveClient.Fetch = VMDownloads.download,
                     runningExecutables: () -> [String] = RunningProcesses.executablePaths,
                     progress: (String) -> Void = { print($0) }) async throws -> Int32 {
@@ -61,6 +61,7 @@ public enum VMSetup {
             try assembler.erofs(base, label: "mn-base", mkfs: mkfs, out: built.appending(path: "base.erofs"))
             progress("progress assemble 3 5")
             try assembler.cpio(initramfs, out: built.appending(path: "initramfs.img"))
+            try? fm.removeItem(at: assembler.store)  // done with: the setup's peak on disk is downloads, parts, images
             progress("progress assemble 4 5")
             try ImageAssembler.erofs(tar: parts.appending(path: "wine.tar"), label: "mn-wine", mkfs: mkfs,
                                      out: built.appending(path: "wine.erofs"))
@@ -87,6 +88,30 @@ public enum VMSetup {
         try fm.removeItem(at: setup)  // the old set, the downloads and the parts
         progress("progress install 1 1")
         return 0
+    }
+
+    /// The packages none of whose sources answers with their size (`head`: a URL's size, nil when it doesn't answer):
+    /// the release checks every pin can still be downloaded before it ships (`vm-setup --check-sources`).
+    static func missingSources(_ manifest: VMSetupManifest, head: (URL) async -> Int64?) async -> [String] {
+        var missing: [String] = []
+        for p in manifest.packages + [manifest.fexRootfs.package] {
+            var found = false
+            for url in manifest.sources(p) where await head(url) == p.size {
+                found = true
+                break
+            }
+            if !found { missing.append(p.file) }
+        }
+        return missing
+    }
+
+    /// A HEAD request's Content-Length, when the answer is a 200.
+    static func head(_ url: URL) async -> Int64? {
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        guard let (_, response) = try? await URLSession(configuration: .ephemeral).data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+        return http.expectedContentLength
     }
 
     private static func checkSpace(_ vm: URL, _ gb: Int) throws {

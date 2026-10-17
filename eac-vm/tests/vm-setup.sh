@@ -25,6 +25,10 @@ if [ ! -f "$G/rpms/.complete" ] || ! cmp -s "$W/images/packages.lock" "$G/rpms/.
   cp "$W/images/packages.lock" "$G/rpms/.complete"
 fi
 
+# No machine identity of the builder's goes to players: /etc/machine-id is empty in the base tree.
+awk -F'\t' '$2 == "/etc/machine-id" && $6 != 0 { bad = 1 } END { exit bad }' "$W/images/setup/recipe/base.tsv" \
+  || fail="$fail machine-id"
+
 # The parts and a manifest pointing at local copies.
 sh "$ROOT/eac-vm/setup/parts.sh" "$G/parts" > /dev/null
 tar -C "$G/parts" -cJf "$G/parts.tar.xz" .

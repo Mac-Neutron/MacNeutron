@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -22,13 +23,14 @@ public enum VMToolsInstaller {
     /// `scripts`: where `Self.scripts` come from, else `tools`.
     @discardableResult
     public static func install(from tools: URL, scripts: URL? = nil, into vm: URL,
-                               runningExecutables: () -> [String] = RunningProcesses.executablePaths,
-                               identity: (URL) -> String? = CodeIdentity.of) throws -> VMToolsInstallOutcome {
+                               runningExecutables: () -> [String] = RunningProcesses.executablePaths) throws
+        -> VMToolsInstallOutcome {
         if isDeveloperFolder(vm) { return .developerFolder }
         let fm = FileManager.default
+        let source = { (item: String) in (Self.scripts.contains(item) ? scripts ?? tools : tools).appending(path: item) }
         let stamp = vm.appending(path: "tools.identity")
-        let wanted = identity(tools.appending(path: "macneutron-vm")).map { $0 + "\n" }
-        if let wanted, (try? String(contentsOf: stamp, encoding: .utf8)) == wanted,
+        let wanted = try digest(items.map { ($0, source($0)) }) + "\n"
+        if (try? String(contentsOf: stamp, encoding: .utf8)) == wanted,
            items.allSatisfy({ fm.fileExists(atPath: vm.appending(path: $0).path(percentEncoded: false)) }) {
             return .unchanged
         }
@@ -43,8 +45,7 @@ public enum VMToolsInstaller {
         for item in items {
             let copy = Process()
             copy.executableURL = URL(filePath: "/bin/cp")
-            let source = (Self.scripts.contains(item) ? scripts ?? tools : tools).appending(path: item)
-            copy.arguments = ["-c", "-R", source.path(percentEncoded: false), path(item + ".new")]
+            copy.arguments = ["-c", "-R", source(item).path(percentEncoded: false), path(item + ".new")]
             try copy.run()
             copy.waitUntilExit()
             guard copy.terminationStatus == 0 else {
@@ -63,7 +64,7 @@ public enum VMToolsInstaller {
             guard swapped == 0 else { throw RuntimeInstallError.swapFailed(errno) }
             try? fm.removeItem(atPath: path(item + ".new"))  // the old item, after a swap
         }
-        try (wanted ?? "unsigned\n").write(to: stamp, atomically: true, encoding: .utf8)
+        try wanted.write(to: stamp, atomically: true, encoding: .utf8)
         return .installed
     }
 
@@ -77,6 +78,33 @@ public enum VMToolsInstaller {
             return
         }
         try RuntimeInstaller.installFile(install.steamClient64, at: destination)
+    }
+
+    /// SHA-256 over every item's files: their paths, kinds and bytes (a symlink's target), so any change to any item is
+    /// a new set of tools (one binary's code identity misses a changed script or library).
+    static func digest(_ items: [(name: String, url: URL)]) throws -> String {
+        var hash = SHA256()
+        let fm = FileManager.default
+        func add(_ text: String) { hash.update(data: Data((text + "\0").utf8)) }
+        for (name, url) in items {
+            var paths = [""]
+            if let walker = fm.enumerator(atPath: url.path(percentEncoded: false)) {
+                paths += (walker.allObjects as? [String] ?? []).sorted()
+            }
+            for relative in paths {
+                let file = relative.isEmpty ? url : url.appending(path: relative)
+                let path = file.path(percentEncoded: false)
+                if let target = try? fm.destinationOfSymbolicLink(atPath: path) {
+                    add("l \(name)/\(relative) \(target)")
+                } else if (try? fm.attributesOfItem(atPath: path)[.type] as? FileAttributeType) == .typeDirectory {
+                    add("d \(name)/\(relative)")
+                } else {
+                    add("f \(name)/\(relative)")
+                    hash.update(data: try Data(contentsOf: file, options: .alwaysMapped))
+                }
+            }
+        }
+        return hash.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     /// The folder itself is a symlink: a developer's link to build/eac-vm-work.

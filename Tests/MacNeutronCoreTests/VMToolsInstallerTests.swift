@@ -16,55 +16,53 @@ private func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding
 
 @Test func installsEveryItemAndRecordsTheIdentity() throws {
     let tools = try makeTools("a"), vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
-    let outcome = try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] }, identity: { _ in "a" })
+    let outcome = try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] })
     #expect(outcome == .installed)
     for item in VMToolsInstaller.items { #expect(FileManager.default.fileExists(atPath: vm.appending(path: item).path)) }
     #expect(text(vm.appending(path: "libkrun/libkrun.1.dylib")) == "a libkrun/libkrun.1.dylib\n")
-    #expect(text(vm.appending(path: "tools.identity")) == "a\n")
+    #expect(text(vm.appending(path: "tools.identity"))?.count == 65)
 }
 
 @Test func aSecondInstallOfTheSameToolsIsUnchanged() throws {
     let tools = try makeTools("a"), vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
-    try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] }, identity: { _ in "a" })
+    try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] })
     let file = vm.appending(path: "macneutron-vm").path
     let before = try FileManager.default.attributesOfItem(atPath: file)[.modificationDate] as? Date
-    let outcome = try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] }, identity: { _ in "a" })
+    let outcome = try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] })
     #expect(outcome == .unchanged)
     #expect(try FileManager.default.attributesOfItem(atPath: file)[.modificationDate] as? Date == before)
 }
 
 @Test func newToolsReplaceOldOnesButNotTheGamesFiles() throws {
     let vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
-    try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [] }, identity: { _ in "a" })
+    try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [] })
     let kept = ["state/1.img", "state/1.tpm/id", "runs/1/run.log", "images/manifest.sha256"]
     for path in kept { try write("game \(path)\n", to: vm.appending(path: path)) }
-    let outcome = try VMToolsInstaller.install(from: try makeTools("b"), into: vm, runningExecutables: { [] },
-                                               identity: { _ in "b" })
+    let outcome = try VMToolsInstaller.install(from: try makeTools("b"), into: vm, runningExecutables: { [] })
     #expect(outcome == .installed)
     for path in kept { #expect(text(vm.appending(path: path)) == "game \(path)\n") }
     #expect(text(vm.appending(path: "metal-host/winemetal.so")) == "b metal-host/winemetal.so\n")
-    #expect(text(vm.appending(path: "tools.identity")) == "b\n")
+    #expect(text(vm.appending(path: "tools.identity"))?.count == 65)
 }
 
 @Test func aRunningVMDefersTheInstall() throws {
     let vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: vm, withIntermediateDirectories: true)
     let running = vm.appending(path: "macneutron-vm").path
-    let outcome = try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [running] },
-                                               identity: { _ in "a" })
+    let outcome = try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [running] })
     #expect(outcome == .deferred(running))
     #expect(!FileManager.default.fileExists(atPath: vm.appending(path: "run-guest.sh").path))
 }
 
 @Test func aVMStartedDuringTheCopyDefersTheSwap() throws {
     let vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
-    try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [] }, identity: { _ in "a" })
+    try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [] })
     let running = vm.appending(path: "macneutron-vm").path
     nonisolated(unsafe) var calls = 0
     let outcome = try VMToolsInstaller.install(from: try makeTools("b"), into: vm, runningExecutables: {
         calls += 1
         return calls == 1 ? [] : [running]
-    }, identity: { _ in "b" })
+    })
     #expect(outcome == .deferred(running))
     #expect(text(vm.appending(path: "macneutron-vm")) == "a macneutron-vm\n")
     let leftovers = try FileManager.default.contentsOfDirectory(atPath: vm.path).filter { $0.hasSuffix(".new") }
@@ -74,7 +72,7 @@ private func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding
 @Test func leftoversOfAnInterruptedInstallAreCleared() throws {
     let vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
     try write("junk\n", to: vm.appending(path: "libkrun.new/junk"))
-    try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [] }, identity: { _ in "a" })
+    try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [] })
     #expect(!FileManager.default.fileExists(atPath: vm.appending(path: "libkrun.new").path))
     #expect(text(vm.appending(path: "libkrun/libkrun.1.dylib")) == "a libkrun/libkrun.1.dylib\n")
 }
@@ -84,8 +82,7 @@ private func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding
     try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
     let vm = try makeTempDir().appending(path: "vm")
     try FileManager.default.createSymbolicLink(at: vm, withDestinationURL: target)
-    let outcome = try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [] },
-                                               identity: { _ in "a" })
+    let outcome = try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [] })
     #expect(outcome == .developerFolder)
     let valve = try makeTempDir()
     try write("valve\n", to: valve.appending(path: "steamclient64.dll"))
@@ -112,8 +109,16 @@ private func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding
         try write("script \(name)\n", to: scripts.appending(path: name), executable: true)
     }
     let vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
-    #expect(try VMToolsInstaller.install(from: tools, scripts: scripts, into: vm, runningExecutables: { [] },
-                                         identity: { _ in "a" }) == .installed)
+    #expect(try VMToolsInstaller.install(from: tools, scripts: scripts, into: vm, runningExecutables: { [] }) == .installed)
     #expect(text(vm.appending(path: "run-guest.sh")) == "script run-guest.sh\n")
     #expect(text(vm.appending(path: "macneutron-vm")) == "a macneutron-vm\n")
+}
+
+@Test func toolsChangeWhenAnyItemDoes() throws {
+    // A release that changes only a script, libkrun or gvproxy still reaches the folder.
+    let tools = try makeTools("a"), vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] })
+    try write("b run-game.sh\n", to: tools.appending(path: "run-game.sh"), executable: true)
+    #expect(try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] }) == .installed)
+    #expect(text(vm.appending(path: "run-game.sh")) == "b run-game.sh\n")
 }

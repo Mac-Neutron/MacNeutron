@@ -605,6 +605,9 @@ python3 "$ROOT/eac-vm/setup/manifest.py" "$OUT/$PARTS" "$W/images/setup/packages
   "$W/images/x86-64-rootfs.erofs" "https://github.com/chadouming/MacNeutron/releases/download/v$V/$PARTS" \
   > "$OUT/vm-manifest.json" || die "manifest.py failed"
 check_vm_manifest "$OUT/vm-manifest.json" "$OUT/$PARTS" || exit 1
+# Every pinned package still downloads from Fedora (its mirrors, or Koji under its source package's name): the setup
+# a player's Mac runs uses the same sources (VMSetupManifest.sources).
+"$CLI" vm-setup --check-sources --manifest "$OUT/vm-manifest.json" || die "a pinned package can't be downloaded (above)"
 echo "PASS the VM's parts ($PARTS) and manifest"
 
 # 3-4. MacNeutron.app (R4), its notarization (R2) and its zip.

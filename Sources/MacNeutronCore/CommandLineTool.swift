@@ -9,6 +9,7 @@ public enum CommandLineTool {
                macneutron install --tool-dir <dir> --wine-app <wine.app> [--steam-exe <steam.exe>] [--force]
                macneutron passthrough <verb> <command> [args...]
                macneutron vm-setup --manifest <vm-manifest.json> --vm <dir> [--mkfs <mkfs.erofs>] [--min-free-gb <n>]
+               macneutron vm-setup --check-sources --manifest <vm-manifest.json>
         """
 
     public static func run(_ args: [String], environment: [String: String], executable: URL) async -> Int32 {
@@ -57,14 +58,26 @@ public enum CommandLineTool {
             }
             return 1  // a successful exec doesn't return
         case "vm-setup":
-            // Both required: tests and the gate set up their own folders, never the installed one.
             var args = rest
+            if args.first == "--check-sources" {  // the release: every pinned package still downloads from somewhere
+                args.removeFirst()
+                guard let manifest = option("--manifest", in: &args), args.isEmpty else { return usageError() }
+                do {
+                    let m = try JSONDecoder().decode(VMSetupManifest.self, from: Data(contentsOf: URL(filePath: manifest)))
+                    let missing = await VMSetup.missingSources(m, head: VMSetup.head)
+                    for file in missing { FileHandle.standardError.write(Data("vm-setup: no source serves \(file)\n".utf8)) }
+                    return missing.isEmpty ? 0 : 1
+                } catch {
+                    return failure(error)
+                }
+            }
+            // Both required: tests and the gate set up their own folders, never the installed one.
             guard let manifest = option("--manifest", in: &args), let vm = option("--vm", in: &args) else {
                 return usageError()
             }
             let mkfs = option("--mkfs", in: &args).map { URL(filePath: $0) }
                 ?? executable.deletingLastPathComponent().appending(path: "mkfs.erofs")
-            let minFree = option("--min-free-gb", in: &args).flatMap { Int($0) } ?? 6
+            let minFree = option("--min-free-gb", in: &args).flatMap { Int($0) } ?? 8
             guard args.isEmpty else { return usageError() }
             setvbuf(stdout, nil, _IOLBF, 0)  // the app reads the progress lines as they come
             do {

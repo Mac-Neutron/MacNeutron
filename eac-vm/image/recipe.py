@@ -16,12 +16,12 @@ def payload_index(rpm_dirs):
             if not name.endswith(".rpm"):
                 continue
             path = os.path.join(d, name)
-            q = subprocess.run(["rpm", "-qp", "--qf", "%{NAME}\\n%{VERSION}\\n%{RELEASE}\\n%{ARCH}\\n", path],
+            q = subprocess.run(["rpm", "-qp", "--qf", "%{NAME}\\n%{VERSION}\\n%{RELEASE}\\n%{ARCH}\\n%{SOURCERPM}\\n", path],
                                capture_output=True, text=True, check=True).stdout.split("\n")
             with open(path, "rb") as f:
                 digest = hashlib.file_digest(f, "sha256").hexdigest()
             packages.append({"file": name, "name": q[0], "version": q[1], "release": q[2], "arch": q[3],
-                             "size": os.path.getsize(path), "sha256": digest})
+                             "size": os.path.getsize(path), "sha256": digest, "sourceRPM": q[4]})
             with open(path, "rb") as src:
                 archive = subprocess.Popen(["rpm2archive", "-n", "-"], stdin=src, stdout=subprocess.PIPE)
                 with tarfile.open(fileobj=archive.stdout, mode="r|") as tar:
