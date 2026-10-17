@@ -79,10 +79,10 @@ int main(int argc, char **argv) {
     hr = device->CreateGraphicsPipelineState(&gd, __uuidof(ID3D12PipelineState), (void **)&pso);
     printf("graphics-samples0 hr=0x%08lx\n", (unsigned long)hr); fflush(stdout);
     // Newer device interfaces (AMD's FSR 3 swapchain needs ID3D12Device8): D3DMetal is the reference.
-    const IID *devices[] = {&__uuidof(ID3D12Device5), &__uuidof(ID3D12Device6), &__uuidof(ID3D12Device7), &__uuidof(ID3D12Device8)};
+    const IID devices[] = {__uuidof(ID3D12Device5), __uuidof(ID3D12Device6), __uuidof(ID3D12Device7), __uuidof(ID3D12Device8)};
     for (int i = 0; i < 4; i++) {
         IUnknown *newer = nullptr;
-        hr = device->QueryInterface(*devices[i], (void **)&newer);
+        hr = device->QueryInterface(devices[i], (void **)&newer);
         printf("device%d hr=0x%08lx\n", i + 5, (unsigned long)hr); fflush(stdout);
         if (newer) newer->Release();
     }

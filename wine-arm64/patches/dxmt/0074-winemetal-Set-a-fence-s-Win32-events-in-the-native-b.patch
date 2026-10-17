@@ -1,0 +1,205 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sat, 17 Oct 2026 19:25:37 -0400
+Subject: [PATCH] winemetal: Set a fence's Win32 events in the native build.
+
+Natively, MTLSharedEvent_setWin32EventAtValue(s) and the shared event
+listener were no-ops, so an event a fence's SetEventOnCompletion names was
+never set and its waiter timed out (DXMT's d3d12_null: "fail timeout"). The
+listener now runs in both builds; natively it sets win32_native.h's event,
+whose layout and SetEvent move to win32_native_event.h so winemetal's C sees
+them too.
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ src/util/win32_native.h             | 32 ++++-----------------
+ src/util/win32_native_event.h       | 44 +++++++++++++++++++++++++++++
+ src/winemetal/unix/winemetal_unix.c | 37 ++++--------------------
+ 3 files changed, 55 insertions(+), 58 deletions(-)
+ create mode 100644 src/util/win32_native_event.h
+
+diff --git a/src/util/win32_native.h b/src/util/win32_native.h
+index bfcbe25..ac744b2 100644
+--- a/src/util/win32_native.h
++++ b/src/util/win32_native.h
+@@ -12,7 +12,8 @@
+ 
+ #include <windows.h>
+ 
+-#include <atomic>
++#include "win32_native_event.h"
++
+ #include <cerrno>
+ #include <cstdlib>
+ #include <cstring>
+@@ -78,24 +79,6 @@ typedef struct SYSTEMTIME {
+ #define DLL_THREAD_DETACH 3
+ #define VK_F9 0x78
+ 
+-enum mn_win32_kind : uint32_t {
+-  MN_WIN32_EVENT = 0x6e657665, MN_WIN32_SEMAPHORE = 0x6d657373, MN_WIN32_FILE = 0x656c6966, MN_WIN32_THREAD = 0x64726874
+-};
+-
+-struct mn_win32_handle {
+-  uint32_t kind;
+-  std::atomic<int> refs;
+-  /* events and semaphores */
+-  pthread_mutex_t m;
+-  pthread_cond_t c;
+-  LONG count, max; /* an event: 1 when set; a semaphore: its count and maximum */
+-  BOOL manual;
+-  /* files */
+-  int fd;
+-  /* threads (OpenThread): the thread's id */
+-  uint64_t tid;
+-};
+-
+ static inline DWORD &mn_win32_error() {
+   static thread_local DWORD error = ERROR_SUCCESS;
+   return error;
+@@ -164,12 +147,7 @@ static inline HANDLE CreateEventA(LPSECURITY_ATTRIBUTES sa, BOOL manual, BOOL in
+ }
+ 
+ static inline BOOL SetEvent(HANDLE h) {
+-  mn_win32_handle *o = mn_win32_get(h, MN_WIN32_EVENT);
+-  if (!o) return SetLastError(ERROR_INVALID_HANDLE), FALSE;
+-  pthread_mutex_lock(&o->m);
+-  o->count = 1;
+-  pthread_cond_broadcast(&o->c);
+-  pthread_mutex_unlock(&o->m);
++  if (!mn_win32_set_event(h)) return SetLastError(ERROR_INVALID_HANDLE), FALSE;
+   return TRUE;
+ }
+ 
+@@ -238,7 +216,7 @@ static inline BOOL CloseHandle(HANDLE h) {
+   if (!h || (o->kind != MN_WIN32_EVENT && o->kind != MN_WIN32_SEMAPHORE && o->kind != MN_WIN32_FILE &&
+              o->kind != MN_WIN32_THREAD))
+     return SetLastError(ERROR_INVALID_HANDLE), FALSE;
+-  if (o->refs.fetch_sub(1) != 1) return TRUE;
++  if (__atomic_fetch_sub(&o->refs, 1, __ATOMIC_ACQ_REL) != 1) return TRUE;
+   if (o->kind == MN_WIN32_FILE) {
+     close(o->fd);
+   } else if (o->kind != MN_WIN32_THREAD) {
+@@ -271,7 +249,7 @@ static inline BOOL DuplicateHandle(HANDLE, HANDLE source, HANDLE, LPHANDLE targe
+     if ((d->fd = dup(o->fd)) < 0) return SetLastError(mn_win32_from_errno(errno)), delete d, FALSE;
+     *target = d;
+   } else {
+-    o->refs++;
++    __atomic_fetch_add(&o->refs, 1, __ATOMIC_RELAXED);
+     *target = o;
+   }
+   if (options & DUPLICATE_CLOSE_SOURCE) CloseHandle(source);
+diff --git a/src/util/win32_native_event.h b/src/util/win32_native_event.h
+new file mode 100644
+index 0000000..2e813ea
+--- /dev/null
++++ b/src/util/win32_native_event.h
+@@ -0,0 +1,44 @@
++#pragma once
++
++/*
++ * The native build's HANDLE layout (win32_native.h) and SetEvent, in C as well as C++: winemetal's unix side, which is
++ * C, sets the events a fence's SetEventOnCompletion names. refs is a plain int under __atomic builtins so the layout
++ * is the same in both languages.
++ */
++
++#ifndef _WIN32
++
++#include <pthread.h>
++#include <stdint.h>
++
++#define MN_WIN32_EVENT 0x6e657665u
++#define MN_WIN32_SEMAPHORE 0x6d657373u
++#define MN_WIN32_FILE 0x656c6966u
++#define MN_WIN32_THREAD 0x64726874u
++
++struct mn_win32_handle {
++  uint32_t kind;
++  int refs;
++  /* events and semaphores */
++  pthread_mutex_t m;
++  pthread_cond_t c;
++  int32_t count, max; /* an event: 1 when set; a semaphore: its count and maximum */
++  int manual;
++  /* files */
++  int fd;
++  /* threads (OpenThread): the thread's id */
++  uint64_t tid;
++};
++
++/* Sets h if it is an event: 1, else 0. */
++static inline int mn_win32_set_event(void *h) {
++  struct mn_win32_handle *o = (struct mn_win32_handle *)h;
++  if (!o || h == (void *)(intptr_t)-1 || h == (void *)(intptr_t)-2 || o->kind != MN_WIN32_EVENT) return 0;
++  pthread_mutex_lock(&o->m);
++  o->count = 1;
++  pthread_cond_broadcast(&o->c);
++  pthread_mutex_unlock(&o->m);
++  return 1;
++}
++
++#endif
+diff --git a/src/winemetal/unix/winemetal_unix.c b/src/winemetal/unix/winemetal_unix.c
+index 8927ec2..fc35565 100644
+--- a/src/winemetal/unix/winemetal_unix.c
++++ b/src/winemetal/unix/winemetal_unix.c
+@@ -2574,14 +2574,18 @@ _MTLSharedEvent_signalValue(void *obj) {
+   return STATUS_SUCCESS;
+ }
+ 
+-#ifndef DXMT_NATIVE
+-
+ typedef struct {
+   _Atomic(CFRunLoopRef) runloop_ref;
+   MTLSharedEventListener *shared_listener;
+ } *shared_event_listener_t;
+ 
++#ifdef DXMT_NATIVE
++/* Natively the events are src/util's (win32_native.h), set on the same listener's run loop. */
++#include "../../util/win32_native_event.h"
++#define NtSetEvent(handle, prev_state) mn_win32_set_event(handle)
++#else
+ extern NTSTATUS NtSetEvent(void *handle, void *prev_state);
++#endif
+ 
+ static NTSTATUS
+ _MTLSharedEvent_setWin32EventAtValue(void *obj) {
+@@ -2688,35 +2692,6 @@ _SharedEventListener_destroy(void *obj) {
+   return STATUS_SUCCESS;
+ }
+ 
+-#else
+-static NTSTATUS
+-_MTLSharedEvent_setWin32EventAtValue(void *obj) {
+-  // nop
+-  return STATUS_SUCCESS;
+-}
+-
+-static NTSTATUS
+-_MTLSharedEvent_setWin32EventAtValues(void *obj) {
+-  // nop
+-  return STATUS_SUCCESS;
+-}
+-
+-static NTSTATUS
+-_SharedEventListener_start(void *obj) {
+-  return STATUS_SUCCESS;
+-}
+-
+-static NTSTATUS
+-_SharedEventListener_create(void *obj) {
+-  return STATUS_SUCCESS;
+-}
+-
+-static NTSTATUS
+-_SharedEventListener_destroy(void *obj) {
+-  return STATUS_SUCCESS;
+-}
+-
+-#endif
+ 
+ static NTSTATUS
+ _MTLDevice_newFence(void *obj) {
+-- 
+2.54.0 (Apple Git-157)
+
