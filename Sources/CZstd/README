@@ -1,0 +1,3 @@
+zstd v1.5.7 (f8745da6ff1ad1e7bab384bd1f9d742439278e99), BSD-3-Clause (LICENSE): the decompressor only, lib/common and
+lib/decompress, for the VM setup's RPM payloads (VMSetup/PayloadDecoder.swift). zstd.h and zstd_errors.h are in include/
+(the module's public headers), linked beside the sources for their "../zstd.h" includes.
