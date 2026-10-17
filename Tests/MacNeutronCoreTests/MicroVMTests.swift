@@ -8,6 +8,7 @@ private func makeVMFolder() throws -> URL {
     try write("#!/bin/sh\n", to: root.appending(path: "macneutron-vm"), executable: true)
     try write("#!/bin/sh\n", to: root.appending(path: "run-guest.sh"), executable: true)
     try write("# run-game.sh\nwine steam.exe \"$EXE\" \"$@\"\n", to: root.appending(path: "run-game.sh"))
+    try write("dev\n", to: root.appending(path: "images/manifest.sha256"))
     return root
 }
 
@@ -108,6 +109,14 @@ private let game = "/Users/someone/Library/Application Support/Steam/steamapps/c
     try write("7", to: share.appending(path: "run.status"))
     _ = g.launcher.launch(["waitforexitandrun", game], environment: g.env)
     #expect(!g.notifier.posted.contains { $0.contains("TPM") })
+}
+
+@Test func aVMWithoutACompleteImageSetLeavesGamesOnMacOS() throws {
+    let f = try makeVMFixture()
+    try FileManager.default.removeItem(at: f.vm.appending(path: "images/manifest.sha256"))
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(!f.runner.calls.contains { $0.tool == "run-guest.sh" })
+    #expect(f.runner.calls.contains { $0.tool == "wine" && $0.arguments.first == game })
 }
 
 @Test func optingOutRunsOnMacOS() throws {

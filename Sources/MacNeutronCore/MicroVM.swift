@@ -13,12 +13,18 @@ public struct MicroVM: Sendable {
         .appending(path: "Library/Application Support/MacNeutron/vm", directoryHint: .isDirectory)
 
     /// The game's verbs only (getcompatpath and getnativepath answer about the macOS prefix), and only with
-    /// macneutron-vm in the folder.
+    /// macneutron-vm and a complete image set in the folder.
     static func find(root: URL, environment: [String: String], verb: Verb) -> MicroVM? {
         guard verb == .run || verb == .waitforexitandrun, environment["MACNEUTRON_VM"] != "0" else { return nil }
         let folder = environment["MACNEUTRON_VM_DIR"].map { URL(filePath: $0, directoryHint: .isDirectory) } ?? root
         let vm = folder.appending(path: "macneutron-vm").path(percentEncoded: false)
-        return FileManager.default.isExecutableFile(atPath: vm) ? MicroVM(root: folder) : nil
+        return FileManager.default.isExecutableFile(atPath: vm) && imagesComplete(folder) ? MicroVM(root: folder) : nil
+    }
+
+    /// The setup (`macneutron vm-setup`) writes images/manifest.sha256 last, once the whole set is in place; the image
+    /// build in eac-vm writes `dev` there.
+    public static func imagesComplete(_ root: URL) -> Bool {
+        FileManager.default.fileExists(atPath: root.appending(path: "images/manifest.sha256").path(percentEncoded: false))
     }
 
     var runGuest: URL { root.appending(path: "run-guest.sh") }
