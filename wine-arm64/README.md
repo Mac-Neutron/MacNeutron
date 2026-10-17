@@ -166,6 +166,7 @@ SteamID or the persona name; run it by hand the same way. The x18 hits in Valve'
 | `pins` | Wine tag and commit, FEX commit, and the source of FEX's macOS unixlib |
 | `deps.pins` | The five tarballs (FreeType, gnutls, nettle, GMP, FFmpeg), and lsteamclient's repository and commit |
 | `patches/wine/`, `patches/fex/`, `patches/dxmt/`, `patches/lsteamclient/` | The patch series (`git format-patch` output, applied with `git am`): the source of truth |
+| `patches/wine-master/` | Wine patches only Wine master needs, outside the series (it builds wine-11.19): 0037 puts 0002's pagezero reservation in master's mem-area units. They go back into `patches/wine/` with a re-pin to master |
 | `build.sh`, `bundle.sh` | Build, then assemble and sign `wine.app`, and check the result |
 | `wine.entitlements`, `Info.plist` | The loader's entitlements and the bundle's identity |
 | `licenses/` | The bundle's `licenses/README` (component, licence, source) and `NOTICES.md` (notices found only in source headers); `bundle.sh` adds the licence texts and `SOURCE` |
