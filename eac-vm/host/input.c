@@ -122,17 +122,23 @@ static int32_t properties(void *instance, uint8_t *bits, size_t len) {
     return 0;
 }
 
-/* MN_INPUT_SELFTEST=1 (eac-vm/tests/input.sh): a fixed sequence 20 s after boot, the agent's and the X server's check:
- * the pointer to the middle, key A, the left button, a relative move of (10, 5), one wheel notch up. */
+/* MN_INPUT_SELFTEST=1 (eac-vm/tests/input.sh, input-wine.sh): a fixed sequence 20 s after boot, the agent's and the X
+ * server's check: the pointer to the middle, key A, the left button; 2 s later (once a click's focus has reached Wine,
+ * which only then asks for raw motion) a relative move of (10, 5) and one wheel notch up. */
 static void *selftest(void *arg) {
     (void)arg;
-    sleep(20);
-    static const struct krun_input_event seq[] = {
+    static const struct krun_input_event first[] = {
         {EV_ABS, 0, 16384}, {EV_ABS, 1, 16384}, {EV_SYN, 0, 0}, {EV_KEY, 30, 1}, {EV_SYN, 0, 0}, {EV_KEY, 30, 0},
-        {EV_SYN, 0, 0}, {EV_KEY, 0x110, 1}, {EV_SYN, 0, 0}, {EV_KEY, 0x110, 0}, {EV_SYN, 0, 0}, {EV_REL, 0, 10},
-        {EV_REL, 1, 5}, {EV_SYN, 0, 0}, {EV_REL, 8, 1}, {EV_SYN, 0, 0},
+        {EV_SYN, 0, 0}, {EV_KEY, 0x110, 1}, {EV_SYN, 0, 0}, {EV_KEY, 0x110, 0}, {EV_SYN, 0, 0},
+    }, then[] = {
+        {EV_REL, 0, 10}, {EV_REL, 1, 5}, {EV_SYN, 0, 0}, {EV_REL, 8, 1}, {EV_SYN, 0, 0},
     };
-    for (size_t i = 0; i < sizeof seq / sizeof *seq; i++) mn_input_post(seq[i].type, seq[i].code, (int32_t)seq[i].value);
+    sleep(20);
+    for (size_t i = 0; i < sizeof first / sizeof *first; i++)
+        mn_input_post(first[i].type, first[i].code, (int32_t)first[i].value);
+    sleep(2);
+    for (size_t i = 0; i < sizeof then / sizeof *then; i++)
+        mn_input_post(then[i].type, then[i].code, (int32_t)then[i].value);
     return NULL;
 }
 

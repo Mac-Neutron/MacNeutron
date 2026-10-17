@@ -5,7 +5,9 @@
  *              drawable (slots 70, 67, 66) cleared to (0, 0.3, 0), blitted into a Shared buffer and presented (47)
  *              reads (0, 77, 0)
  *   two-views  a second HWND's view goes on top; slot 73 on it leaves the first on top, its layer intact
- *   release    slot 73 on the last view leaves no metal view in the window */
+ *   release    slot 73 on the last view leaves no metal view in the window
+ *   capture    Control+Option captures the mouse: a move with deltas reaches the input sink as EV_REL; without the
+ *              chord, a move is EV_ABS; the chord again lets it go */
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
@@ -132,10 +134,69 @@ static void release(void) {
     CHECK(metal_views().count == 0);
 }
 
+/* The window's input sink (mn_window_set_input_sink): the last events, as macneutron-vm's input.c would get them. */
+static uint16_t ev_type[64], ev_code[64];
+static int32_t ev_value[64];
+static int nev;
+static void sink(uint16_t type, uint16_t code, int32_t value) {
+    if (nev < 64) ev_type[nev] = type, ev_code[nev] = code, ev_value[nev] = value, nev++;
+}
+static int saw(uint16_t type, uint16_t code, int32_t value, int any_value) {
+    for (int i = 0; i < nev; i++)
+        if (ev_type[i] == type && ev_code[i] == code && (any_value || ev_value[i] == value)) return 1;
+    return 0;
+}
+
+static void capture(void) {
+    void (*set_sink)(void (*)(uint16_t, uint16_t, int32_t)) = dlsym(RTLD_DEFAULT, "mn_window_set_input_sink");
+    CHECK(set_sink && content);
+    if (!set_sink || !content) return;
+    set_sink(sink);
+    NSView *v = content;
+    __block int abs_before = 0, rel_captured = 0, abs_after = 0;
+    on_main(^{
+        NSWindow *w = v.window;
+        NSEvent *(^flags)(NSEventModifierFlags, unsigned short) = ^(NSEventModifierFlags f, unsigned short key) {
+            return [NSEvent keyEventWithType:NSEventTypeFlagsChanged location:NSZeroPoint modifierFlags:f timestamp:0
+                                windowNumber:w.windowNumber context:nil characters:@"" charactersIgnoringModifiers:@""
+                                   isARepeat:NO keyCode:key];
+        };
+        NSEvent *(^move)(double, double) = ^(double dx, double dy) {
+            CGEventRef cg = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, CGPointMake(100, 100), kCGMouseButtonLeft);
+            CGEventSetIntegerValueField(cg, kCGMouseEventDeltaX, (int64_t)dx);
+            CGEventSetIntegerValueField(cg, kCGMouseEventDeltaY, (int64_t)dy);
+            NSEvent *e = [NSEvent eventWithCGEvent:cg];
+            CFRelease(cg);
+            return e;
+        };
+        nev = 0;
+        [v mouseMoved:move(3, 4)];
+        abs_before = saw(3, 0, 0, 1) && !saw(2, 0, 0, 1);
+        [v flagsChanged:flags(NSEventModifierFlagControl | 0x01, 0x3B)];
+        [v flagsChanged:flags(NSEventModifierFlagControl | NSEventModifierFlagOption | 0x21, 0x3A)];
+        nev = 0;
+        [v mouseMoved:move(7, -2)];
+        rel_captured = saw(2, 0, 7, 0) && saw(2, 1, -2, 0) && !saw(3, 0, 0, 1);
+        [v flagsChanged:flags(NSEventModifierFlagControl | 0x01, 0x3A)];
+        [v flagsChanged:flags(0, 0x3B)];
+        [v flagsChanged:flags(NSEventModifierFlagControl | 0x01, 0x3B)];
+        [v flagsChanged:flags(NSEventModifierFlagControl | NSEventModifierFlagOption | 0x21, 0x3A)];
+        [v flagsChanged:flags(NSEventModifierFlagControl | 0x01, 0x3A)];
+        [v flagsChanged:flags(0, 0x3B)];
+        nev = 0;
+        [v mouseMoved:move(1, 1)];
+        abs_after = saw(3, 0, 0, 1) && !saw(2, 0, 0, 1);
+    });
+    CHECK(abs_before);
+    CHECK(rel_captured);
+    CHECK(abs_after);
+    set_sink(NULL);
+}
+
 static void *run(void *arg) {
     (void)arg;
     struct { const char *name; void (*fn)(void); } tests[] = {
-        {"view", view}, {"two-views", two_views}, {"release", release},
+        {"view", view}, {"two-views", two_views}, {"capture", capture}, {"release", release},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         @autoreleasepool {
