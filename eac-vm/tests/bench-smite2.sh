@@ -31,8 +31,13 @@ until [ "$(awk '{ v = $7; gsub(/\(/, "", v); n = v + 0 >= 30 ? n + 1 : 0 } END {
   i=$((i + 1))
 done
 echo "bench-smite2: $LABEL, the lobby after $i s" >&2
+# A covered window's process is slowed (vm-window.swift): said before and after the window, the run stands only if
+# both say uncovered.
+window() { swift "$ROOT/eac-vm/tests/vm-window.swift" 2> /dev/null || echo "vm-window: unknown"; }
+before=$(window)
 MN_SHARE=$SHARE sh "$ROOT/eac-vm/tests/perf-compare.sh" vm 2437170 "$SECS" > "$T/perf.txt" 2>&1 \
   || { cat "$T/perf.txt" >&2; exit 1; }
+after=$(window)
 REC=$(sed -n 's/^perf-compare: wrote //p' "$T/perf.txt")
 OUT=$ROOT/build/perf/bench-$LABEL-$(date +%Y%m%d-%H%M%S).json
 mv "$REC" "$OUT"
@@ -44,4 +49,7 @@ python3 -I -c "
 import json, sys; d = json.load(open(sys.argv[1]))
 print('bench-smite2:', sys.argv[2], 'cpu', d['cpu_cores'], 'gpu', round(d['gpu_busy'] or 0, 1), 'fps', round(d['fps'] or 0, 1),
       'host', d['host'], 'wineserver', dict(d['threads']).get('wineserver'))" "$OUT" "$LABEL"
+echo "bench-smite2: window ${before#vm-window: }, then ${after#vm-window: }" >&2
+[ "$before$after" = "vm-window: uncoveredvm-window: uncovered" ] \
+  || echo "bench-smite2: the window wasn't uncovered throughout: this run doesn't count" >&2
 echo "bench-smite2: wrote $OUT" >&2

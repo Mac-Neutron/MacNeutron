@@ -263,5 +263,9 @@ Thread.detachNewThread {
   krun_vmm_run(vmm)
   exit(0)
 }
+// App Nap would slow the whole guest once the window is covered (timers coalesced: a 10 ms poll took 90), and an
+// idle Mac would sleep under a running game. The activity lasts as long as the VM.
+let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical],
+                                                     reason: "MacNeutron game VM")
 NSApplication.shared.setActivationPolicy(.accessory)
-NSApplication.shared.run()
+withExtendedLifetime(activity) { NSApplication.shared.run() }
