@@ -4,11 +4,16 @@
  * With MN_PRESENT_PROBE=1, every 60th present (the 30th, 90th, ...) first blits the drawable's texture into a Shared
  * buffer in the same command buffer; when it completes, the host logs the frame's pixels as winshot measures a window:
  * green (the green channel 60-95), white (every channel above 200), and colours at 4 bits a channel. The pixels are
- * read as stored: 8-bit BGRA or RGBA, or 10-bit RGB10A2 or BGR10A2 (SMITE 2's), of which the top 8 bits a channel. */
+ * read as stored: 8-bit BGRA or RGBA, or 10-bit RGB10A2 or BGR10A2 (SMITE 2's), of which the top 8 bits a channel.
+ * With MN_PRESENT_STATS=<file> (the launcher's MACNEUTRON_PERF, for eac-vm/tests/perf-compare.sh), the frames presented
+ * every 5 s (MN_PRESENT_STATS_PERIOD seconds) go to the file as DXMT_STATS writes them, "# HH:MM:SS 5.0 s, N frames
+ * (F fps), every 5 s": counted here, natively, where DXMT_STATS's own timing would cost the guest a clock read under
+ * FEX for every D3D12 call. */
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include "../marshal.h"
@@ -22,6 +27,36 @@ static int probing(void) {
         on = v && !strcmp(v, "1");
     });
     return on;
+}
+
+static _Atomic uint64_t window_frames;
+
+static void count_frame(void) {
+    static dispatch_once_t once;
+    static dispatch_source_t timer; /* the process's life */
+    dispatch_once(&once, ^{
+        const char *path = getenv("MN_PRESENT_STATS"), *p = getenv("MN_PRESENT_STATS_PERIOD");
+        double period = p && atof(p) > 0 ? atof(p) : 5;
+        FILE *out = path && *path ? fopen(path, "a") : NULL;
+        if (!out) return;
+        __block uint64_t last = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+        timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+        dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(period * 1e9)),
+                                  (uint64_t)(period * 1e9), (uint64_t)1e8);
+        dispatch_source_set_event_handler(timer, ^{
+            uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW), n = atomic_exchange(&window_frames, 0);
+            double s = (now - last) / 1e9;
+            last = now;
+            time_t wall = time(NULL);
+            struct tm tm;
+            localtime_r(&wall, &tm);
+            fprintf(out, "# %02d:%02d:%02d %.1f s, %llu frames (%.1f fps), every 5 s\n", tm.tm_hour, tm.tm_min,
+                    tm.tm_sec, s, (unsigned long long)n, s > 0 ? n / s : 0.0);
+            fflush(out);
+        });
+        dispatch_resume(timer);
+    });
+    atomic_fetch_add(&window_frames, 1);
 }
 
 static void probe(id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, uint64_t frame) {
@@ -83,6 +118,7 @@ NTSTATUS_T mn_wm_present_special(struct mn_wm_state *k) {
         if (probing() && frame % 60 == 30 && cb && drawable) probe(cb, drawable, frame);
         NTSTATUS_T s = mn_wm_invoke(k->slot, k->p);
         if (s) atomic_fetch_sub(&k->c->presented, 1);
+        else count_frame();
         return s;
     }
     case 71: {

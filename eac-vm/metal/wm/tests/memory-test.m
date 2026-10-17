@@ -22,6 +22,8 @@
  *                         the drawable keeping its layer; deferral across rings is handles-test's)
  *   probe                 with MN_PRESENT_PROBE=1, 60 frames give one probe line: pixels 57600 green 100
  *   probe-10bit           the same with an RGB10A2 drawable (SMITE 2's): each channel's top 8 bits are read
+ *   frames                with MN_PRESENT_STATS=<file> (and a 1 s period), presents give a window line in DXMT_STATS's
+ *                         format: "# HH:MM:SS 1.0 s, N frames (F fps), every 5 s" with N > 0
  *   props                 getProps (71) after setProps (70): the guest's device value comes back as it was, the host's
  *                         device pointer is nowhere in the reply, and the drawable size is 320x180
  *   nil-drawable          a layer with no device: nextDrawable gives handle 0 and status 0 (in a window, a 0x0
@@ -428,6 +430,34 @@ static void probe_as(enum WMTPixelFormat format) {
     release(q);
 }
 
+static char frames_file[] = "/tmp/memory-test-frames-XXXXXX";
+
+static void frames(void) {
+    struct swapchain s = make_view_as(0x1234, 320, 180, WMTPixelFormatBGRA8Unorm);
+    if (!s.layer) return;
+    obj_handle_t q = new_queue();
+    struct timespec t0, t;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    do { /* two periods of presents */
+        obj_handle_t pool = pool_push();
+        frame(q, s.layer, 1);
+        release(pool);
+        clock_gettime(CLOCK_MONOTONIC, &t);
+    } while ((t.tv_sec - t0.tv_sec) * 1000 + (t.tv_nsec - t0.tv_nsec) / 1000000 < 2200);
+    char text[4096] = "";
+    FILE *f = fopen(frames_file, "r");
+    size_t n = f ? fread(text, 1, sizeof text - 1, f) : 0;
+    text[n] = 0;
+    if (f) fclose(f);
+    unsigned long long frames = 0;
+    const char *line = strstr(text, "# ");
+    CHECK(line && sscanf(line, "# %*u:%*u:%*u %*f s, %llu frames (", &frames) == 1 && frames > 0);
+    CHECK(line && strstr(line, " fps), every 5 s\n"));
+    if (line) fprintf(stderr, "  %.*s", (int)(strchr(line, '\n') ? strchr(line, '\n') - line + 1 : 0), line);
+    release_view(s.view);
+    release(q);
+}
+
 static void probe(void) { probe_as(WMTPixelFormatBGRA8Unorm); }
 static void probe_10bit(void) { probe_as(WMTPixelFormatRGB10A2Unorm); } /* SMITE 2's swapchain */
 
@@ -523,6 +553,7 @@ static void *run(void *arg) {
         {"heap", heap},               {"wmt-memory", wmt_memory}, {"big-blob", big_blob},
         {"sequence", sequence},
         {"present", present},         {"probe", probe},           {"probe-10bit", probe_10bit},
+        {"frames", frames},
         {"props", props},
         {"nil-drawable", nil_drawable}, {"view-left", view_left}, {"hud", hud},
     };
@@ -555,6 +586,9 @@ int main(int argc, char **argv) {
         return 1;
     }
     setenv("MN_PRESENT_PROBE", "1", 1); /* before the first present: the host reads it once */
+    close(mkstemp(frames_file));
+    setenv("MN_PRESENT_STATS", frames_file, 1); /* the same */
+    setenv("MN_PRESENT_STATS_PERIOD", "1", 1);
     alarm(600);                         /* a main-thread deadlock fails the test instead of hanging it */
     [NSApplication sharedApplication];
     dispatch_async(dispatch_get_main_queue(), ^{ /* the cases start once the main thread runs the application */

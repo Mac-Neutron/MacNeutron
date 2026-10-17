@@ -171,10 +171,10 @@ public struct Launcher: Sendable {
         if environment["MN_SCREEN"].map(MicroVM.isScreenSize) != true {
             environment["MN_SCREEN"] = display().map { "\($0.width)x\($0.height)" }
         }
-        if environment["MACNEUTRON_PERF"] == "1" {  // the guest profiler and DXMT's frame statistics (run-game.sh)
-            environment["MACNEUTRON_VM_PROFILE"] = "1"
-            environment["DXMT_STATS"] = environment["DXMT_STATS"] ?? "1"
-        }
+        // MACNEUTRON_PERF=1: the guest profiler (run-game.sh); frames are counted on the host (MN_PRESENT_STATS below),
+        // where DXMT_STATS's timing would cost the guest a clock read under FEX for every D3D12 call.
+        let perf = environment["MACNEUTRON_PERF"] == "1"
+        if perf { environment["MACNEUTRON_VM_PROFILE"] = "1" }
         do {
             let script = try vm.script(verb: request.verb, appID: context.appID, guest: guest,
                                        arguments: request.arguments, environment: environment)
@@ -197,6 +197,10 @@ public struct Launcher: Sendable {
             env["MN_STATE"] = vm.state(appID: context.appID).path(percentEncoded: false)
             env["MN_SHARE"] = vm.share(appID: context.appID).path(percentEncoded: false)
             env["MN_TOAST"] = layout.launcherBinary.path(percentEncoded: false)  // eac-vm/host/tpm.c's, while macOS asks
+            if perf {
+                env["MN_PRESENT_STATS"] = vm.share(appID: context.appID).appending(path: "traces/frames.txt")
+                    .path(percentEncoded: false)
+            }
             env["MN_RUN_TIMEOUT"] = env["MN_RUN_TIMEOUT"] ?? "86400"
             let status = try runner.run(vm.runGuest, [file.path(percentEncoded: false), "--steam-appid", context.appID,
                                                       "--ram-mib", "16384", "--steam-map", "\(library)=/mnt/games"],

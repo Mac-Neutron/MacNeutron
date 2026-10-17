@@ -202,5 +202,8 @@ private func expectRefusedUntilTheVMIsReady(_ f: VMFixture) {
     env["MACNEUTRON_PERF"] = "1"
     _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
     #expect(scripts.all.last?.contains("\nMACNEUTRON_VM_PROFILE='1'\n") == true)
-    #expect(scripts.all.last?.contains("\nDXMT_STATS='1'\n") == true)
+    // Frames are counted on the host: DXMT_STATS's timing would cost the guest a clock read under FEX per D3D12 call.
+    #expect(scripts.all.last?.contains("DXMT_STATS") == false)
+    #expect(f.runner.calls.last?.environment["MN_PRESENT_STATS"]
+            == f.vm.appending(path: "runs/2437170/traces/frames.txt").path(percentEncoded: false))
 }

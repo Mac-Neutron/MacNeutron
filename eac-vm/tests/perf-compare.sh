@@ -1,10 +1,11 @@
 #!/bin/sh
 # A game on macOS against the same game in the VM (Direct3D forwarding spec §5.2): while the maintainer plays the same
 # scene at the same settings, launched with /usr/bin/env MACNEUTRON_PERF=1 %command% (and MACNEUTRON_VM=0 for the macOS
-# run), it samples for [seconds] (default 60): the CPU of the game's processes (on macOS, everything run from the
-# tool's wine.app; in the VM, macneutron-vm, mn-steam-host and gvproxy), the GPU's busy share (ioreg, once a second)
-# and DXMT's frame rate; in the VM also the guest's threads (the run's traces/profile.txt) and one host sample of
-# macneutron-vm. It reads the run's folders only. Writes build/perf/<appid>-<mode>-<time>.json (and .sample.txt).
+# run), it samples for [seconds] (default 60): the CPU of the game's processes (on macOS, its Wine processes; in the
+# VM, macneutron-vm, mn-steam-host and gvproxy), the GPU's busy share (ioreg, once a second) and the frame rate (DXMT's
+# on macOS, the VM window's in the VM); in the VM also the guest's threads (the run's traces/profile.txt) and one host
+# sample of macneutron-vm. It reads the run's folders only. Writes build/perf/<appid>-<mode>-<time>.json (and
+# .sample.txt).
 #   perf-compare.sh macos|vm <appid> [seconds]
 #   perf-compare.sh compare <macos.json> <vm.json>   the three ratios against the spec's gate (§1)
 set -eu
@@ -25,7 +26,7 @@ if [ "$MODE" = vm ]; then
   PID=$(pgrep -x macneutron-vm | head -n 1) || true
   [ -n "$PID" ] || { echo "perf-compare: no macneutron-vm is running" >&2; exit 1; }
   SHARE=${MN_SHARE:-$HOME/Library/Application Support/MacNeutron/vm/runs/$APPID}
-  PROFILE=$SHARE/traces/profile.txt STATS=$SHARE/traces/dxmt/stats.txt
+  PROFILE=$SHARE/traces/profile.txt STATS=$SHARE/traces/frames.txt  # the host counts the frames (MN_PRESENT_STATS)
 else
   STATS=$HOME/Library/Logs/MacNeutron/perf/$APPID/stats.txt
 fi
