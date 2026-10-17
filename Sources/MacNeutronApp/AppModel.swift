@@ -125,7 +125,7 @@ final class AppModel {
          valveClient: ValveClient? = nil, appVersion: String = AppModel.appVersion,
          vmTools: URL? = AppModel.bundledVMTools, vmRoot: URL = MicroVM.standardRoot,
          vmInstaller: @escaping @Sendable (URL, URL) throws -> VMToolsInstallOutcome = {
-             try VMToolsInstaller.install(from: $0, into: $1)
+             try VMToolsInstaller.install(from: $0, scripts: AppModel.bundledVMScripts, into: $1)
          }) {
         self.steam = steam
         self.layout = layout
@@ -155,6 +155,12 @@ final class AppModel {
     /// `CFBundleVersion`: the automatic Valve check runs once per app version (spec D4).
     nonisolated static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "dev"
+    }
+
+    /// `Contents/Resources/vm`: the VM tools' scripts (`VMToolsInstaller.scripts`).
+    nonisolated static var bundledVMScripts: URL? {
+        let scripts = Bundle.main.bundleURL.appending(path: "Contents/Resources/vm", directoryHint: .isDirectory)
+        return FileManager.default.fileExists(atPath: scripts.path(percentEncoded: false)) ? scripts : nil
     }
 
     nonisolated static var bundledVMTools: URL? {

@@ -97,7 +97,10 @@ app: build bridge wine-arm64
 	codesign --force --sign - $(APP)/Contents/Helpers/macneutron
 	cp -c -R build/wine-arm64/wine.app $(APP)/Contents/Helpers/wine.app
 	sh eac-vm/host/stage.sh $(APP)/Contents/Helpers/vm
+	mkdir -p $(APP)/Contents/Resources/vm && mv $(APP)/Contents/Helpers/vm/run-*.sh $(APP)/Contents/Resources/vm/
 	codesign --force --sign - --entitlements eac-vm/host/hv.plist $(APP)/Contents/Helpers/vm/macneutron-vm
+	sh eac-vm/setup-tools/build.sh > /dev/null && cp build/vm-setup-tools/mkfs.erofs $(APP)/Contents/Helpers/mkfs.erofs
+	codesign --force --sign - $(APP)/Contents/Helpers/mkfs.erofs
 	cp $(BRIDGE)/arm64/steam.exe $(APP)/Contents/Resources/steam.exe
 	codesign --force --sign - $(APP)
 

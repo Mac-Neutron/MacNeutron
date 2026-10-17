@@ -125,6 +125,24 @@ check_vm_manifest() {  # check_vm_manifest <vm-manifest.json> <parts archive>
   [ "$_vm" = "$_vm_size $_vm_sha" ] || { echo "release: vm-manifest.json names parts $_vm, not the archive's $_vm_size $_vm_sha" >&2; return 1; }
 }
 
+# The microVM's helpers in the app: every Mach-O signed with the hardened runtime (notarization refuses one without),
+# and the two entitlements they need (macneutron-vm runs a VM; mn-steam-host loads Mac Steam's library, whose signer
+# isn't ours).
+check_hardened() {  # check_hardened <dir or file>...: names the first Mach-O signed without the runtime flag
+  for _h in "$@"; do
+    find "$_h" -type f | while IFS= read -r _f; do
+      file -b "$_f" | LC_ALL=C /usr/bin/grep -q '^Mach-O' || continue
+      codesign -dvvv "$_f" 2>&1 | LC_ALL=C /usr/bin/grep -q '^CodeDirectory .*flags=.*runtime' \
+        || { echo "release: ${_f#"$1"/} isn't signed with the hardened runtime" >&2; exit 1; }
+    done || return 1
+  done
+}
+
+check_entitlement() {  # check_entitlement <binary> <entitlement>
+  codesign -d --entitlements - --xml "$1" 2> /dev/null | LC_ALL=C /usr/bin/grep -qF "<key>$2</key>" \
+    || { echo "release: $(basename "$1") isn't signed with $2" >&2; return 1; }
+}
+
 # --self-test (gate R1): each refusal on its own input in a temporary clone; never build.sh, the real trees or GitHub.
 self_test() {
   T=$(mktemp -d "${TMPDIR:-/tmp}/release-self-test.XXXXXX")
@@ -230,6 +248,20 @@ self_test() {
   refused "an unpublished DXMT commit" \
     "release: DXMT_COMMIT $(git -C "$T/dxmt" rev-parse HEAD) is not on the fork's macneutron branch" \
     check_dxmt "$T/dxmt" "$(git -C "$T/dxmt" rev-parse HEAD)"
+
+  # The VM's helpers: the hardened runtime, and the entitlements they need.
+  mkdir -p "$T/helpers"
+  cp /usr/bin/true "$T/helpers/tool"
+  codesign -f -s - "$T/helpers/tool" 2> /dev/null
+  refused "a helper without the hardened runtime" "release: tool isn't signed with the hardened runtime" \
+    check_hardened "$T/helpers"
+  codesign -f -s - -o runtime "$T/helpers/tool" 2> /dev/null
+  passes "a helper with the hardened runtime" check_hardened "$T/helpers"
+  refused "mn-steam-host without its entitlement" \
+    "release: tool isn't signed with com.apple.security.cs.disable-library-validation" \
+    check_entitlement "$T/helpers/tool" com.apple.security.cs.disable-library-validation
+  codesign -f -s - -o runtime --entitlements "$ROOT/release/entitlements/mn-steam-host.plist" "$T/helpers/tool" 2> /dev/null
+  passes "mn-steam-host with its entitlement" check_entitlement "$T/helpers/tool" com.apple.security.cs.disable-library-validation
 
   # The VM's parts: a sparse template, and a manifest naming the archive.
   mkdir -p "$T/parts"
@@ -400,6 +432,20 @@ build_app() {
   ditto "$OUT/wine.app" "$A/Contents/Helpers/wine.app"
   cp "$STEAM_EXE" "$A/Contents/Resources/steam.exe"
   cp "$OUT/vm-manifest.json" "$A/Contents/Resources/vm-manifest.json"
+  # The microVM's host tools (VMToolsInstaller installs them from Helpers/vm and Resources/vm: codesign takes a script in
+  # Contents/Helpers for unsigned code), with no build paths: the forwarder's lsteamclient.so is the release wine.app's,
+  # its mn-steam-host and ntdll.so built here with the sources' prefix mapped away. mkfs.erofs makes the VM's images on
+  # the player's Mac (macneutron vm-setup).
+  VMH="$A/Contents/Helpers/vm"
+  sh "$ROOT/eac-vm/host/stage.sh" "$VMH" > /dev/null || die "eac-vm/host/stage.sh failed"
+  mkdir -p "$A/Contents/Resources/vm" && mv "$VMH"/run-*.sh "$A/Contents/Resources/vm/"
+  F="$OUT/steam-forward"
+  make -s -C "$ROOT/eac-vm/steam-forward" OUT="$F" \
+    MAC_UNIXLIB="$OUT/wine.app/Contents/Resources/lib/wine/aarch64-unix/lsteamclient.so" \
+    CFLAGS="-O2 -Wall -Wextra -Wno-missing-field-initializers -std=c11 -ffile-prefix-map=$ROOT=." \
+    "$F/host/mn-steam-host" > /dev/null || die "can't build mn-steam-host"
+  cp "$F/host/mn-steam-host" "$F/host/ntdll.so" "$F/host/lsteamclient.so" "$VMH/steam-forward/host/"
+  cp "$ROOT/build/vm-setup-tools/mkfs.erofs" "$A/Contents/Helpers/mkfs.erofs"
   AL="$A/Contents/Resources/licenses"
   cp "$ROOT/LICENSE" "$AL/LICENSE"
   cp "$ROOT/bridge/Proton-steam-LICENSE.txt" "$AL/"
@@ -423,6 +469,17 @@ EOF
   [ -z "$out" ] || die "files naming the repository, build or home folder (the first ten): $(echo "$out" | tr '\n' ' ')"
   sign() { codesign -f -s "$MACNEUTRON_SIGN_IDENTITY" --options runtime --timestamp "$1" > /dev/null 2>&1 \
     || die "signing $1 failed"; }
+  signed_for() { codesign -f -s "$MACNEUTRON_SIGN_IDENTITY" --options runtime --timestamp --entitlements "$1" "$2" \
+    > /dev/null 2>&1 || die "signing $2 failed"; }
+  for f in "$VMH/libkrun/libkrun.1.dylib" "$VMH"/metal-host/*.so "$VMH/steam-forward/host/ntdll.so" \
+    "$VMH/steam-forward/host/lsteamclient.so" "$VMH/gvproxy" "$A/Contents/Helpers/mkfs.erofs"; do
+    sign "$f"
+  done
+  signed_for "$ROOT/release/entitlements/mn-steam-host.plist" "$VMH/steam-forward/host/mn-steam-host"
+  signed_for "$ROOT/release/entitlements/macneutron-vm.plist" "$VMH/macneutron-vm"
+  check_hardened "$VMH" "$A/Contents/Helpers/mkfs.erofs" || exit 1
+  check_entitlement "$VMH/steam-forward/host/mn-steam-host" com.apple.security.cs.disable-library-validation || exit 1
+  check_entitlement "$VMH/macneutron-vm" com.apple.security.hypervisor || exit 1
   sign "$A/Contents/Helpers/macneutron"
   sign "$A"
   out=$(codesign --verify --strict --deep "$A" 2>&1) || die "codesign --verify --strict --deep $A: $out"

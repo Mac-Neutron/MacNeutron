@@ -15,9 +15,13 @@ public enum VMToolsInstallOutcome: Equatable, Sendable {
 public enum VMToolsInstaller {
     public static let items = ["macneutron-vm", "libkrun", "steam-forward", "gvproxy", "metal-host", "run-guest.sh",
                                "run-game.sh"]
+    /// The items that are scripts: MacNeutron.app keeps them in Contents/Resources/vm (codesign takes a script in
+    /// Contents/Helpers for unsigned code, and a script's own signature doesn't survive the zip).
+    public static let scripts = ["run-guest.sh", "run-game.sh"]
 
+    /// `scripts`: where `Self.scripts` come from, else `tools`.
     @discardableResult
-    public static func install(from tools: URL, into vm: URL,
+    public static func install(from tools: URL, scripts: URL? = nil, into vm: URL,
                                runningExecutables: () -> [String] = RunningProcesses.executablePaths,
                                identity: (URL) -> String? = CodeIdentity.of) throws -> VMToolsInstallOutcome {
         if isDeveloperFolder(vm) { return .developerFolder }
@@ -39,7 +43,8 @@ public enum VMToolsInstaller {
         for item in items {
             let copy = Process()
             copy.executableURL = URL(filePath: "/bin/cp")
-            copy.arguments = ["-c", "-R", tools.appending(path: item).path(percentEncoded: false), path(item + ".new")]
+            let source = (Self.scripts.contains(item) ? scripts ?? tools : tools).appending(path: item)
+            copy.arguments = ["-c", "-R", source.path(percentEncoded: false), path(item + ".new")]
             try copy.run()
             copy.waitUntilExit()
             guard copy.terminationStatus == 0 else {

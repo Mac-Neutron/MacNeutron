@@ -103,3 +103,17 @@ private func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding
     try VMToolsInstaller.copyValveClient(nil, into: vm)
     #expect(!FileManager.default.fileExists(atPath: copied.path))
 }
+
+@Test func theScriptsComeFromTheirOwnFolder() throws {
+    // MacNeutron.app keeps them in Contents/Resources/vm: codesign takes a script in Contents/Helpers for unsigned code.
+    let tools = try makeTools("a"), scripts = try makeTempDir().appending(path: "vm-scripts", directoryHint: .isDirectory)
+    for name in ["run-guest.sh", "run-game.sh"] {
+        try FileManager.default.removeItem(at: tools.appending(path: name))
+        try write("script \(name)\n", to: scripts.appending(path: name), executable: true)
+    }
+    let vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    #expect(try VMToolsInstaller.install(from: tools, scripts: scripts, into: vm, runningExecutables: { [] },
+                                         identity: { _ in "a" }) == .installed)
+    #expect(text(vm.appending(path: "run-guest.sh")) == "script run-guest.sh\n")
+    #expect(text(vm.appending(path: "macneutron-vm")) == "a macneutron-vm\n")
+}
