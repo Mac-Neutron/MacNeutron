@@ -114,3 +114,21 @@ private func markerExists(_ layout: ToolLayout) -> Bool {
 @Test func notificationTextIsEscapedForAppleScript() {
     #expect(AppleScriptNotifier.quoted(#"Game "X" at C:\Games"#) == #""Game \"X\" at C:\\Games""#)
 }
+
+@Test func aToastsUpdatesReachItAsLines() throws {
+    // A stand-in for `macneutron toast`: what it reads on stdin, until the launcher closes it.
+    let dir = try makeTempDir(), got = dir.appending(path: "stdin.txt"), done = dir.appending(path: "done")
+    let toast = dir.appending(path: "toast")
+    try write("#!/bin/sh\ncat > '\(got.path(percentEncoded: false))'\n: > '\(done.path(percentEncoded: false))'\n",
+              to: toast, executable: true)
+    let shown = AppleScriptNotifier(toast: toast).progress(title: "T", message: "M", until: nil)
+    shown.update("25% (5 of 20)")
+    shown.update("50% (10 of 20)")
+    shown.close()
+    shown.update("late")  // after close: dropped, the launcher carries on
+    let deadline = Date(timeIntervalSinceNow: 5)
+    while !FileManager.default.fileExists(atPath: done.path(percentEncoded: false)), Date() < deadline {
+        Thread.sleep(forTimeInterval: 0.02)
+    }
+    #expect(try String(contentsOf: got, encoding: .utf8) == "25% (5 of 20)\n50% (10 of 20)\n")
+}

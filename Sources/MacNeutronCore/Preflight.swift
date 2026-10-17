@@ -101,9 +101,43 @@ public struct Preflight: Sendable {
 /// Tells the user about launch-blocking failures; Steam itself shows nothing useful.
 public protocol Notifier: Sendable {
     func post(title: String, message: String)
-    /// A toast while something long runs (a game's prefix prepared), until the returned closure runs or `until`
-    /// exists.
-    func progress(title: String, message: String, until: URL?) -> @Sendable () -> Void
+    /// A toast while something long runs (a game's prefix prepared, its shaders replayed), until it's closed or
+    /// `until` exists.
+    func progress(title: String, message: String, until: URL?) -> ToastHandle
+}
+
+/// A toast on screen: `update` replaces its message, `close` takes it away; updates after the close are dropped.
+public struct ToastHandle: Sendable {
+    public let update: @Sendable (String) -> Void
+    public let close: @Sendable () -> Void
+
+    public init(update: @escaping @Sendable (String) -> Void = { _ in }, close: @escaping @Sendable () -> Void = {}) {
+        self.update = update
+        self.close = close
+    }
+}
+
+/// The toast's stdin: a line per update until the close. The replay's poller can update as the launcher closes it.
+private final class ToastInput: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handle: FileHandle?
+
+    init(_ handle: FileHandle) {
+        _ = fcntl(handle.fileDescriptor, F_SETNOSIGPIPE, 1)  // a toast that died costs an update, not the launcher
+        self.handle = handle
+    }
+
+    func send(_ line: String) {
+        let data = Data((line.replacingOccurrences(of: "\n", with: " ") + "\n").utf8)
+        lock.withLock { try? handle?.write(contentsOf: data) }
+    }
+
+    func close() {
+        lock.withLock {
+            try? handle?.close()
+            handle = nil
+        }
+    }
 }
 
 /// Posts through `osascript`, which needs no app bundle or entitlement. Toasts are `toast`'s (the launcher binary's
@@ -113,18 +147,18 @@ public struct AppleScriptNotifier: Notifier {
 
     public init(toast: URL? = nil) { self.toast = toast }
 
-    public func progress(title: String, message: String, until: URL?) -> @Sendable () -> Void {
-        guard let toast else { return {} }
+    public func progress(title: String, message: String, until: URL?) -> ToastHandle {
+        guard let toast else { return ToastHandle() }
         let process = Process(), input = Pipe()
         process.executableURL = toast
         process.arguments = ["toast", title, message] + (until.map { [$0.path(percentEncoded: false)] } ?? [])
         process.standardInput = input
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return {} }
-        // The toast goes when its stdin closes: here, or when this process ends.
-        let end = input.fileHandleForWriting
-        return { try? end.close() }
+        guard (try? process.run()) != nil else { return ToastHandle() }
+        // Each line it reads is its new message; it goes when its stdin closes: here, or when this process ends.
+        let end = ToastInput(input.fileHandleForWriting)
+        return ToastHandle(update: end.send, close: end.close)
     }
 
     public func post(title: String, message: String) {

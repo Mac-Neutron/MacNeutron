@@ -11,9 +11,13 @@ final class RecordingNotifier: Notifier, @unchecked Sendable {
     /// Each toast's title, and the file it waits for.
     var toasts: [String] { lock.withLock { shown } }
     var toastsClosed: Int { lock.withLock { hidden } }
-    func progress(title: String, message: String, until: URL?) -> @Sendable () -> Void {
+    private var lines: [String] = []
+    /// Every toast's updated messages, in order.
+    var toastUpdates: [String] { lock.withLock { lines } }
+    func progress(title: String, message: String, until: URL?) -> ToastHandle {
         lock.withLock { shown.append(title + (until.map { " until " + $0.path(percentEncoded: false) } ?? "")) }
-        return { self.lock.withLock { self.hidden += 1 } }
+        return ToastHandle(update: { line in self.lock.withLock { self.lines.append(line) } },
+                           close: { self.lock.withLock { self.hidden += 1 } })
     }
 }
 

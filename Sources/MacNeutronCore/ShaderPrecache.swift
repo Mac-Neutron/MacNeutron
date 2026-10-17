@@ -51,7 +51,7 @@ public struct ShaderPrecache: Sendable {
 
     /// Runs `dxmt-replay.exe` on every recording in the game's environment, minus recording; one log line each.
     /// Stops before the next recording once `stopped` (Steam's Stop) says so. While a replay runs, `progress` gets
-    /// "Preparing shaders: 25% (n of total)" at each quarter, from the replayer's own progress lines.
+    /// "25% (n of total)" at each quarter, from the replayer's own progress lines.
     public func replay(layout: ToolLayout, runner: any ProcessRunner, environment: [String: String],
                        stopped: () -> Bool = { false }, progress: @escaping @Sendable (String) -> Void = { _ in },
                        pollInterval: TimeInterval = 1) -> [String] {
@@ -72,7 +72,7 @@ public struct ShaderPrecache: Sendable {
                     let reached = n * 4 / total
                     if reached > quarter && reached < 4 {
                         quarter = reached
-                        progress("Preparing shaders: \(reached * 25)% (\(n) of \(total))")
+                        progress("\(reached * 25)% (\(n) of \(total))")
                     }
                 }
             }

@@ -1,10 +1,11 @@
 import AppKit
 import SwiftUI
 
-/// `macneutron toast <title> <message> [file]`: the launcher's "please wait" while a game's prefix is prepared
-/// (AppleScriptNotifier.progress starts it), in place of Wine's old dialog. A glass panel at the top of the screen,
-/// over full-screen apps too, that takes no clicks and no focus. It goes when stdin closes (the launcher is done, or
-/// gone) or the file appears (the microVM's guest wrote it).
+/// `macneutron toast <title> <message> [file]`: the launcher's "please wait" while a game's prefix is prepared or its
+/// shaders replayed (AppleScriptNotifier.progress starts it), in place of Wine's old dialog. A glass panel at the top of
+/// the screen, over full-screen apps too, that takes no clicks and no focus. Each line on stdin is its new message
+/// (the replay's progress); it goes when stdin closes (the launcher is done, or gone) or the file appears (the
+/// microVM's guest wrote it).
 @MainActor
 enum Toast {
     private static var panel: NSPanel?
@@ -12,7 +13,8 @@ enum Toast {
     static func run(title: String, message: String, until: String?) -> Never {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        let content = NSHostingView(rootView: ToastView(title: title, message: message))
+        let text = ToastText(message: message)
+        let content = NSHostingView(rootView: ToastView(title: title, text: text))
         let size = content.fittingSize
         let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: false)
@@ -33,8 +35,13 @@ enum Toast {
         NSAccessibility.post(element: panel, notification: .announcementRequested,
                              userInfo: [.announcement: "\(title). \(message)"])
         Thread.detachNewThread {
-            var byte: UInt8 = 0
-            while read(0, &byte, 1) > 0 {}
+            var line: [UInt8] = [], byte: UInt8 = 0
+            while read(0, &byte, 1) > 0 {
+                guard byte == UInt8(ascii: "\n") else { line.append(byte); continue }
+                let message = String(decoding: line, as: UTF8.self)
+                line.removeAll()
+                DispatchQueue.main.async { MainActor.assumeIsolated { text.message = message } }
+            }
             DispatchQueue.main.async { MainActor.assumeIsolated { finish() } }
         }
         if let until {
@@ -53,9 +60,15 @@ enum Toast {
     }
 }
 
+@MainActor @Observable
+private final class ToastText {
+    var message: String
+    init(message: String) { self.message = message }
+}
+
 private struct ToastView: View {
     let title: String
-    let message: String
+    let text: ToastText
 
     var body: some View {
         HStack(spacing: 14) {
@@ -65,7 +78,7 @@ private struct ToastView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
-                Text(message)
+                Text(text.message)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

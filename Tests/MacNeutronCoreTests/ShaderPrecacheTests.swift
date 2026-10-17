@@ -130,7 +130,9 @@ private let game = ["waitforexitandrun", "/g/Game.exe"]
     let gameRun = try #require(calls.firstIndex { $0.arguments == ["/g/Game.exe"] })
     #expect(lastReplay < gameRun)
     #expect(f.stamp == f.builds + "\n")
-    #expect(f.notifier.posted == ["Preparing shaders for this game (DXMT or macOS changed)", "Shaders ready, starting the game"])
+    #expect(f.notifier.posted.isEmpty)  // the toast, not notifications
+    #expect(f.notifier.toasts.last == "Preparing the game's shaders")
+    #expect(f.notifier.toastsClosed == f.notifier.toasts.count)
     #expect(f.launcherLog.contains(
         "precache: A.exe.pipelines exit=0 replay: 2 pipelines (1 graphics, 1 compute), 2 created, 0 failed, 0 bad records, 5 ms"))
 }
@@ -211,8 +213,7 @@ private let game = ["waitforexitandrun", "/g/Game.exe"]
     }
     let lines = precache.replay(layout: layout, runner: runner, environment: [:], progress: { messages.add($0) },
                                 pollInterval: 0.05)
-    #expect(messages.all == ["Preparing shaders: 25% (5 of 20)", "Preparing shaders: 50% (10 of 20)",
-                             "Preparing shaders: 75% (15 of 20)"])
+    #expect(messages.all == ["25% (5 of 20)", "50% (10 of 20)", "75% (15 of 20)"])
     #expect(lines == ["precache: Game.exe.pipelines exit=0 replay: 20 pipelines (20 graphics, 0 compute), 20 created, 0 failed, 0 bad records, 9 ms"])
 }
 

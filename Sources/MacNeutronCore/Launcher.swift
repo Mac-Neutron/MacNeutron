@@ -93,7 +93,7 @@ public struct Launcher: Sendable {
         if let gameLog { writeHeader(to: gameLog, request: request, environment: env) }
         let notifier = notifier, setup = Self.setupToast(request.target)
         let prefix = PrefixManager(context: context, layout: layout, identity: identity, runner: runner, log: log,
-                                   onPrepare: { notifier.progress(title: setup.title, message: setup.message, until: nil) })
+                                   onPrepare: { notifier.progress(title: setup.title, message: setup.message, until: nil).close })
 
         do {
             let status: Int32
@@ -115,15 +115,14 @@ public struct Launcher: Sendable {
                 let precache = ShaderPrecache.enabled(backend: backend, environment: env)
                     ? ShaderPrecache(context: context, layout: layout) : nil
                 if let precache, precache.needsReplay {
-                    notifier.post(title: "MacNeutron", message: "Preparing shaders for this game (DXMT or macOS changed)")
+                    let toast = notifier.progress(title: "Preparing \(Self.gameName(request.target))'s shaders",
+                                                  message: "DXMT or macOS changed: they're rebuilt once, before it starts.",
+                                                  until: nil)
                     let lines = precache.replay(layout: layout, runner: runner, environment: env,
-                                                stopped: { stopRequested.isSet },
-                                                progress: { [notifier] in notifier.post(title: "MacNeutron", message: $0) })
+                                                stopped: { stopRequested.isSet }, progress: toast.update)
+                    toast.close()
                     for line in lines { log.append(line) }
-                    if !stopRequested.isSet {
-                        precache.writeStamp()
-                        notifier.post(title: "MacNeutron", message: "Shaders ready, starting the game")
-                    }
+                    if !stopRequested.isSet { precache.writeStamp() }
                 }
                 if stopRequested.isSet {
                     // Steam's Stop during the replay: start nothing; with the stamp unchanged, the next launch replays.
@@ -170,7 +169,7 @@ public struct Launcher: Sendable {
                 let ready = vm.share(appID: context.appID).appending(path: "traces/ready")
                 try? FileManager.default.removeItem(at: ready)
                 let setup = Self.setupToast(request.target)
-                shown = notifier.progress(title: setup.title, message: setup.message, until: ready)
+                shown = notifier.progress(title: setup.title, message: setup.message, until: ready).close
             }
             defer { shown() }
             var env = environment
@@ -196,12 +195,15 @@ public struct Launcher: Sendable {
         }
     }
 
-    /// The toast while a game's prefix is prepared, named after its folder in steamapps/common (Steam's name for it,
-    /// near enough).
+    /// The toast while a game's prefix is prepared.
     static func setupToast(_ target: String) -> (title: String, message: String) {
+        ("Setting up \(gameName(target))", "Preparing its Windows environment. The first launch takes a minute or two.")
+    }
+
+    /// A game's folder in steamapps/common (Steam's name for it, near enough), or "the game".
+    static func gameName(_ target: String) -> String {
         let name = target.range(of: "/steamapps/common/").flatMap { target[$0.upperBound...].split(separator: "/").first }
-        return ("Setting up \(name.map(String.init) ?? "the game")",
-                "Preparing its Windows environment. The first launch takes a minute or two.")
+        return name.map(String.init) ?? "the game"
     }
 
     /// Per-game settings from the app sit underneath; variables from Steam launch options win.
