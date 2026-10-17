@@ -20,5 +20,5 @@ fail=
 /usr/bin/grep -qx '/dev/tpm0' "$OUT" && /usr/bin/grep -qx '/dev/tpmrm0' "$OUT" || fail="$fail no-chip"
 /usr/bin/grep -qx 'version: 2' "$OUT" || fail="$fail version"
 /usr/bin/grep -qE '^pcr0: [0-9A-F]{64}$' "$OUT" || fail="$fail pcr-read"
-! /usr/bin/grep -q '^mn-tpm: ' "$OUT" || fail="$fail engine-errors"
+/usr/bin/grep '^mn-tpm: ' "$OUT" | /usr/bin/grep -qv ': a new TPM$' && fail="$fail engine-errors"
 if [ -z "$fail" ]; then echo "tpm-host: ok"; else echo "tpm-host: FAIL$fail"; exit 1; fi

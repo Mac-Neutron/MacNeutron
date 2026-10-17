@@ -96,6 +96,20 @@ private let game = "/Users/someone/Library/Application Support/Steam/steamapps/c
     #expect(f.notifier.toasts.count == 1)
 }
 
+@Test func aTPMThatDoesNotStartIsToldToThePlayer() throws {
+    // macneutron-vm's 7, with no run.status: its TPM refused to start, so the guest never ran.
+    let f = try makeVMFixture(status: 7)
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(f.notifier.posted.contains { $0.contains("TPM") })
+    // A game that itself ends with 7 leaves run.status: nothing to tell.
+    let g = try makeVMFixture(status: 7)
+    let share = g.vm.appending(path: "runs/2437170")
+    try FileManager.default.createDirectory(at: share, withIntermediateDirectories: true)
+    try write("7", to: share.appending(path: "run.status"))
+    _ = g.launcher.launch(["waitforexitandrun", game], environment: g.env)
+    #expect(!g.notifier.posted.contains { $0.contains("TPM") })
+}
+
 @Test func optingOutRunsOnMacOS() throws {
     let f = try makeVMFixture()
     var env = f.env

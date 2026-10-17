@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <uuid/uuid.h>
@@ -32,7 +33,9 @@ static struct {
     char id[37];
     uint8_t key[32];
     uint8_t locality; /* the command's, for libtpms's tpm_io_getlocality (one command at a time) */
-} tpm;
+    int lock;         /* <dir>/.lock, held while the TPM runs: one VM per TPM */
+    int told;         /* that it's a new TPM (libtpms looks for its state twice) */
+} tpm = {.lock = -1};
 
 static void path(char *out, const char *name) { snprintf(out, PATH_MAX, "%s/%s", tpm.dir, name); }
 
@@ -56,8 +59,10 @@ static int key_get(void) {
     OSStatus rc = SecItemCopyMatching(q, &v);
     CFRelease(q);
     if (rc == errSecItemNotFound) return 1;
-    int ok = rc == errSecSuccess && CFDataGetLength(v) == sizeof tpm.key;
+    long got = rc == errSecSuccess ? (long)CFDataGetLength(v) : 0;
+    int ok = got == sizeof tpm.key;
     if (ok) CFDataGetBytes(v, CFRangeMake(0, sizeof tpm.key), tpm.key);
+    else if (rc == errSecSuccess) fprintf(stderr, "mn-tpm: this TPM's key in the keychain is %ld bytes, not 32\n", got);
     else fprintf(stderr, "mn-tpm: the keychain refused the TPM's key (%d)\n", (int)rc);
     if (v) CFRelease(v);
     return ok ? 0 : -1;
@@ -97,7 +102,8 @@ static int fresh(void) {
     return write_file("id", (const uint8_t *)tpm.id, strlen(tpm.id));
 }
 
-/* Everything but earlier backups into backup-<id>/ (a new id when there's none), for a fresh TPM to start from. */
+/* Everything but earlier backups into backup-<id>/ (a new id when there's none; -2, -3... if that one is taken), for a
+ * fresh TPM to start from. */
 static int backup(void) {
     char to[PATH_MAX], from[PATH_MAX], name[64];
     if (!tpm.id[0]) {
@@ -105,7 +111,10 @@ static int backup(void) {
         uuid_generate_random(u), uuid_unparse_lower(u, tpm.id);
     }
     snprintf(name, sizeof name, "backup-%s", tpm.id), path(to, name);
-    if (mkdir(to, 0700) != 0 && errno != EEXIST) return -1;
+    for (int i = 2; mkdir(to, 0700) != 0; i++) {
+        if (errno != EEXIST || i > 99) return -1;
+        snprintf(name, sizeof name, "backup-%s-%d", tpm.id, i), path(to, name);
+    }
     DIR *d = opendir(tpm.dir);
     if (!d) return -1;
     int rc = 0;
@@ -177,9 +186,12 @@ static int check_files(void) {
 }
 
 static int open_state(const char *dir) {
-    snprintf(tpm.dir, sizeof tpm.dir, "%s", dir), tpm.id[0] = 0;
+    snprintf(tpm.dir, sizeof tpm.dir, "%s", dir), tpm.id[0] = 0, tpm.told = 0;
     if (mkdir(dir, 0700) != 0 && errno != EEXIST) return -1;
     char p[PATH_MAX];
+    path(p, ".lock");
+    if ((tpm.lock = open(p, O_RDWR | O_CREAT, 0600)) < 0 || flock(tpm.lock, LOCK_EX | LOCK_NB) != 0)
+        return fprintf(stderr, "mn-tpm: %s is in use by another VM\n", dir), -1;
     path(p, "id");
     FILE *f = fopen(p, "r");
     if (!f && errno != ENOENT) return fprintf(stderr, "mn-tpm: can't read %s\n", p), -1;
@@ -210,7 +222,9 @@ static TPM_RESULT nv_load(unsigned char **data, uint32_t *length, uint32_t tpm_n
     *data = NULL, *length = 0;
     switch (unseal(name, data, length)) { /* checked before the start: a failure now is the disk's, not the key's */
     case 0: return TPM_SUCCESS;
-    case 1: return TPM_RETRY; /* none yet: the first start */
+    case 1: /* none yet: the first start */
+        if (!strcmp(name, "permall") && !tpm.told++) fprintf(stderr, "mn-tpm: no saved state in %s: a new TPM\n", tpm.dir);
+        return TPM_RETRY;
     default: fprintf(stderr, "mn-tpm: can't read %s now\n", name); return TPM_FAIL;
     }
 }
@@ -248,27 +262,38 @@ static TPM_RESULT io_presence(TPM_BOOL *presence, uint32_t tpm_number) {
     return TPM_SUCCESS;
 }
 
+static void unlock(void) {
+    if (tpm.lock >= 0) close(tpm.lock);
+    tpm.lock = -1;
+}
+
 int mn_tpm_start(const char *dir) {
     static struct libtpms_callbacks cb = {sizeof cb, nv_init, nv_load, nv_store, nv_delete, io_init, io_locality,
                                           io_presence};
-    if (open_state(dir) != 0) return -1;
-    if (TPMLIB_ChooseTPMVersion(TPMLIB_TPM_VERSION_2) == TPM_SUCCESS && TPMLIB_RegisterCallbacks(&cb) == TPM_SUCCESS &&
-        TPMLIB_SetProfile("{\"Name\":\"default-v1\"}") == TPM_SUCCESS && TPMLIB_MainInit() == TPM_SUCCESS)
-        return 0;
-    fprintf(stderr, "mn-tpm: libtpms didn't start\n");
-    TPMLIB_Terminate();
+    if (open_state(dir) == 0) {
+        if (TPMLIB_ChooseTPMVersion(TPMLIB_TPM_VERSION_2) == TPM_SUCCESS &&
+            TPMLIB_RegisterCallbacks(&cb) == TPM_SUCCESS &&
+            TPMLIB_SetProfile("{\"Name\":\"default-v1\"}") == TPM_SUCCESS && TPMLIB_MainInit() == TPM_SUCCESS)
+            return 0;
+        fprintf(stderr, "mn-tpm: libtpms didn't start\n");
+        TPMLIB_Terminate();
+    }
+    unlock();
     return -1;
 }
 
-void mn_tpm_stop(void) { TPMLIB_Terminate(); }
+void mn_tpm_stop(void) { TPMLIB_Terminate(), unlock(); }
 
 int32_t mn_tpm_execute(void *userdata, uint8_t locality, const uint8_t *cmd, size_t len, uint8_t *resp, size_t cap) {
     static unsigned char *buf; /* libtpms's, grown as it needs */
     static uint32_t size;
+    static unsigned char command[4096]; /* libtpms decrypts a command's parameters in place: not in libkrun's buffer */
     uint32_t n = 0;
     (void)userdata;
+    if (len > sizeof command) return -1;
+    memcpy(command, cmd, len);
     tpm.locality = locality;
-    if (TPMLIB_Process(&buf, &n, &size, (unsigned char *)cmd, (uint32_t)len) != TPM_SUCCESS || n > cap) return -1;
+    if (TPMLIB_Process(&buf, &n, &size, command, (uint32_t)len) != TPM_SUCCESS || n > cap) return -1;
     memcpy(resp, buf, n);
     return (int32_t)n;
 }

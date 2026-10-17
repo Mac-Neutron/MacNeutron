@@ -1,14 +1,17 @@
 /* tpm.c's engine and state on the host, without a VM (eac-vm/tests/tpm-engine.sh): the same TPM across restarts (its
  * owner seed, seen as the same primary key), its files sealed, and a fresh TPM with the old files kept when they don't
  * open or their key isn't in the keychain. Keys go under their own keychain service, removed at the end.
+ * tests/tpm-engine.sh builds tpm.c with SecItemCopyMatching as keychain_copy below, for a keychain that says no.
  * Prints "tpm-engine: ok" or the first failure. */
 #include "tpm.h"
 #include <Security/Security.h>
+#include <fcntl.h>
 #include <libtpms/tpm_error.h>
 #include <libtpms/tpm_library.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -16,6 +19,11 @@ static const char *dir;
 static int failed;
 #define CHECK(c, ...) \
     do { if (!(c)) { printf("tpm-engine: FAIL " __VA_ARGS__), printf("\n"), failed = 1; } } while (0)
+
+static int refuse; /* the keychain says no, as a locked one or a "Deny" would */
+OSStatus keychain_copy(CFDictionaryRef query, CFTypeRef *result) {
+    return refuse ? errSecInteractionNotAllowed : SecItemCopyMatching(query, result);
+}
 
 static void clear_keys(void) {
     CFMutableDictionaryRef q = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks,
@@ -117,7 +125,32 @@ int main(void) {
         mn_tpm_stop();
     }
 
-    /* A file that doesn't open: kept in backup-<id>/, and a new TPM. */
+    /* A keychain that says no: the same. */
+    refuse = 1;
+    int started = mn_tpm_start(dir) == 0;
+    if (started) mn_tpm_stop();
+    refuse = 0;
+    CHECK(!started, "the TPM started without its key");
+    CHECK(!exists(bk), "a keychain that said no moved the TPM aside");
+    CHECK(boot(x2) == 0 && !memcmp(x1, x2, 32), "a keychain that said no changed the TPM");
+    mn_tpm_stop();
+
+    /* A TPM another VM runs: refused. */
+    snprintf(p, sizeof p, "%s/.lock", dir);
+    int held = open(p, O_RDWR | O_CREAT, 0600);
+    CHECK(held >= 0 && flock(held, LOCK_EX | LOCK_NB) == 0, "lock");
+    started = mn_tpm_start(dir) == 0;
+    if (started) mn_tpm_stop();
+    close(held);
+    CHECK(!started, "a TPM in use started again");
+
+    /* A file that doesn't open: kept in a backup folder that holds nothing yet (backup-<id>-2/: an earlier reset's
+     * backup-<id>/ stays as it was), and a new TPM. */
+    snprintf(p, sizeof p, "%s/backup-%s", dir, id1);
+    mkdir(p, 0700);
+    snprintf(p, sizeof p, "%s/backup-%s/permall", dir, id1);
+    FILE *old = fopen(p, "w");
+    if (old) fputs("an earlier reset's", old), fclose(old);
     snprintf(p, sizeof p, "%s/permall", dir);
     FILE *f = fopen(p, "r+b");
     if (f) {  /* its last byte, the GCM tag's */
@@ -126,8 +159,12 @@ int main(void) {
         fseek(f, -1, SEEK_END), fputc(c ^ 1, f), fclose(f);
     }
     CHECK(boot(x3) == 0 && memcmp(x1, x3, 32), "a damaged permall kept the TPM");
-    snprintf(bk, sizeof bk, "backup-%s/permall", id1);
+    snprintf(bk, sizeof bk, "backup-%s-2/permall", id1);
     CHECK(exists(bk), "no %s", bk);
+    snprintf(bk, sizeof bk, "backup-%s/permall", id1);
+    char *earlier = slurp(bk, &n);
+    CHECK(earlier && n == 18 && !memcmp(earlier, "an earlier reset's", 18), "the earlier backup was replaced");
+    free(earlier);
     free(id), id = slurp("id", &(size_t){0});
     if (id) snprintf(id3, sizeof id3, "%.36s", id);
     CHECK(id && strcmp(id1, id3), "the new TPM kept the old id");

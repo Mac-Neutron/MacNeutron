@@ -622,12 +622,14 @@ EAC Linux v2's second requirement (§6). Every run has one: the device in libkru
   - The host's backend, a C vtable, runs each command on a thread of its own. A slow command (an RSA key generation)
     never stalls the vCPU that sent it; a failed one answers `TPM_RC_FAILURE`.
   - CRB, which §6 first planned, binds only through ACPI, and this guest boots from a device tree.
+  - Patch 0008: a command the guest aborts finishes on its thread, and the device reports ready only once it has, so
+    one command thread runs at a time however often the guest aborts.
 - **`macneutron-vm --tpm <dir>`** attaches it, with `eac-vm/host/tpm.c` as the engine and its state in `<dir>`.
 
 **Checked:**
 - The device's unit tests (`cargo test -p krun-devices --lib tpm_tis`): locality grant and hand-over, a command to the
-  backend and back, Expect until the whole command is in, retry, and a failed backend. Three of them fail when Expect
-  is never set.
+  backend and back, Expect until the whole command is in, retry, a failed backend, and an aborted command holding the
+  device until it ends (which fails without patch 0008). Three of them fail when Expect is never set.
 - Before the engine, `eac-vm/tests/tpm-host.sh` ran the guest kernel's own driver against it. The guest's device tree had
   `tpm@a00d000: tcg,tpm-tis-mmio`, and the host saw the probe's `TPM2_GetCapability` and then both self-tests. The
   driver sends a command only after reading the last response, so the TIS exchange works both ways.
@@ -636,7 +638,8 @@ EAC Linux v2's second requirement (§6). Every run has one: the device in libkru
 - **libtpms 0.10.2** (BSD-3-Clause, IBM's TPM 2.0 reference code; `eac-vm/libtpms/PIN`), built in-process: TPM 2.0 only,
   its `default-v1` profile, statically on Homebrew's openssl@3 `libcrypto.a`. `eac-vm/libtpms/build.sh` runs clang over
   the sources its `src/Makefile.am` lists, with the defines its configure picks on OpenSSL 3, since automake and
-  libtool aren't installed here.
+  libtool aren't installed here. Its users rebuild it when `eac-vm/libtpms/PIN` no longer matches the copy beside
+  `libtpms.a`.
 - **Its state, the way Parallels Desktop keeps its virtual TPM's** ([kb.parallels.com/en/122702](https://kb.parallels.com/en/122702)):
   - libtpms's files (`permall`, its NV) are encrypted in the TPM's folder. They use AES-256-GCM with each file's name
     authenticated (Parallels uses AES-128).
@@ -649,6 +652,10 @@ EAC Linux v2's second requirement (§6). Every run has one: the device in libkru
     the keychain is asked, so a keychain dialog nobody answers can't hold a run forever.
   - Each file is written beside itself and renamed over, with `F_BARRIERFSYNC` first: on macOS a plain `fsync`
     doesn't keep the data ahead of the rename.
+  - A backup never replaces an earlier one: a second reset under the same id goes to `backup-<id>-2/`.
+  - The folder is locked (`<dir>/.lock`) while its TPM runs, so a second VM on it is refused.
+  - If the TPM refuses to start, the launcher tells the player in a notification; the reason is in the game's log.
+  - The guest's command is copied before libtpms takes it, since libtpms decrypts parameters in place.
   - Skipped: Parallels' key export for moving a VM by hand, and its iCloud Keychain sync (that needs the
     data-protection keychain, so an app bundle with a provisioning profile; `macneutron-vm` is a bare tool). A game's
     TPM on a new Mac is a new TPM, which is what Parallels falls back to as well.
@@ -666,7 +673,10 @@ EAC Linux v2's second requirement (§6). Every run has one: the device in libkru
   - A damaged file, and a key removed from the keychain, each give a new TPM with the old files in `backup-<id>/`.
   - An unreadable `permall` or `id` stops the start, moves nothing, and the next start has the same TPM. Before the
     fix, an unreadable `id` made a new TPM.
-  - With saving turned off, it fails.
+  - A keychain that says no (the test swaps in its own keychain read) and a folder another VM holds are both refused,
+    with nothing moved, and the next start has the same TPM.
+  - A second reset under the same id leaves the first one's backup as it was.
+  - With saving turned off, it fails; the lock and backup cases fail on the code before them.
 - `eac-vm/tests/tpm-host.sh` (the guest's own kernel):
   - Linux registers the chip: `/dev/tpm0` and `/dev/tpmrm0`, which need its boot-time HMAC session and so a working
     primary key.

@@ -178,6 +178,13 @@ public struct Launcher: Sendable {
                                         environment: env, output: gameLog)
             log.append("verb=\(request.verb.rawValue) appid=\(context.appID) backend=vm vm=\(vm.root.path(percentEncoded: false))"
                        + " exit=\(status)")
+            // macneutron-vm's 7: the game's TPM didn't start, so the guest never ran (run-guest.sh removed the last
+            // run.status first).
+            let ran = vm.share(appID: context.appID).appending(path: "run.status")
+            if status == 7, !FileManager.default.fileExists(atPath: ran.path(percentEncoded: false)) {
+                notifier.post(title: "MacNeutron", message: "This game's TPM didn't start: the login keychain refused its"
+                              + " key, or its files couldn't be read. The game's log has the reason.")
+            }
             return status
         } catch {
             return fail("\(error)", argv: argv, notify: true, gameLog: gameLog)

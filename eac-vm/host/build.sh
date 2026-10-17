@@ -21,7 +21,7 @@ clang -O2 -std=gnu2x -Wall -c -I"$W/libkrun/include" -o "$W/obj/input.c.o" "$ROO
 clang -O2 -std=gnu2x -Wall -c -o "$W/obj/audio.c.o" "$ROOT/eac-vm/host/audio.c"
 # The TPM's engine: libtpms (eac-vm/libtpms) on Homebrew's openssl@3, both linked in statically.
 SSL=${OPENSSL:-$(brew --prefix openssl@3)}
-[ -f "$W/libtpms/libtpms.a" ] || "$ROOT/eac-vm/libtpms/build.sh"
+cmp -s "$ROOT/eac-vm/libtpms/PIN" "$W/libtpms/PIN" || "$ROOT/eac-vm/libtpms/build.sh"
 clang -O2 -std=gnu2x -Wall -c -I"$W/libkrun/include" -I"$W/libtpms/include" -I"$SSL/include" -o "$W/obj/tpm.c.o" \
   "$ROOT/eac-vm/host/tpm.c"
 objs="$objs $W/obj/input.c.o $W/obj/audio.c.o $W/obj/tpm.c.o"
