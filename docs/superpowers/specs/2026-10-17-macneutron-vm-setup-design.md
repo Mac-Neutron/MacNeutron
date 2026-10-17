@@ -152,7 +152,7 @@ It prints one progress line per step (`progress <step> <done> <total>`).
    - The stream goes into the bundled `mkfs.erofs --tar=f -L mn-base -zlz4hc` (erofs-utils 1.9.4, GPL-2.0+, which
      builds on macOS).
    - Nothing is unpacked onto the Mac's disk, which is case-insensitive.
-5. **`initramfs.img`:** the initramfs recipe becomes a newc cpio, gzip-compressed with the system zlib.
+5. **`initramfs.img`:** the initramfs recipe becomes an uncompressed newc cpio (Fedora's kernel takes one).
 6. **`vmlinuz`** comes from kernel-core's payload, and **`x86-64-rootfs.erofs`** from fex-emu-rootfs-fedora's, each
    checked against the manifest.
    - FEX's image keeps its own label, so the guest mounts it by its virtio-blk serial instead
@@ -174,7 +174,7 @@ It prints one progress line per step (`progress <step> <done> <total>`).
   - An older complete set keeps running games while a new one builds.
   - With no set at all, games run on macOS.
 - **Status line,** beside the Valve notice:
-  - "Game VM: downloading (0.4 of 1.35 GB)", "Game VM: building its images (2 of 4)", then "Game VM: ready".
+  - "Game VM: downloading (0.4 of 1.35 GB)", "Game VM: building its images (2 of 5)", then "Game VM: ready".
   - On failure, the reason and a Retry button.
 - **Settings:** "Rebuild the game VM" deletes `vm/images` (not `state/`, `runs/` or any TPM) and runs the setup.
 - **Logs:** setup's own log goes to the launcher log folder (`vm-setup.log`).
