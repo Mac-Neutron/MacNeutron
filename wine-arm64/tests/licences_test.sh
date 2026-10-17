@@ -102,6 +102,11 @@ if [ "${1:-}" = --app ]; then
   for f in LICENSE LICENSE.TXT COPYING.MinGW-w64-runtime.txt Proton-steam-LICENSE.txt README; do
     [ -s "$AL/$f" ] || { echo "MISSING Contents/Resources/licenses/$f"; abad=1; }
   done
+  # The microVM's host tools and mkfs.erofs (release.sh build_app).
+  for f in README libkrun/CRATES.txt libtpms-LICENSE openssl-LICENSE.txt erofs-utils-COPYING lz4-LICENSE zstd-LICENSE \
+    gvproxy-LICENSE; do
+    [ -s "$AL/vm/$f" ] || { echo "MISSING Contents/Resources/licenses/vm/$f"; abad=1; }
+  done
   g -qF 'Contents/Helpers/wine.app/Contents/Resources/licenses/' "$AL/README" 2> /dev/null \
     || { echo "MISSING the README's pointer to Contents/Helpers/wine.app/Contents/Resources/licenses/"; abad=1; }
   g -qF 'Proton-steam-LICENSE.txt' "$AL/README" 2> /dev/null \

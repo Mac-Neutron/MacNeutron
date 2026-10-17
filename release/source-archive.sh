@@ -70,6 +70,14 @@ COPYFILE_DISABLE=1 tar -cf "$W/lsteamclient.tar" --no-mac-metadata --no-xattrs -
   || die "can't tar lsteamclient's worktree"
 rm "$W/lsteamclient.list"
 row lsteamclient "$LSTEAMCLIENT_COMMIT" "$a" "$n" lsteamclient.tar
+# The VM setup's mkfs.erofs (GPL-2.0-or-later, Contents/Helpers/mkfs.erofs) and the lz4 compiled into it, at
+# eac-vm/setup-tools/PIN (eac-vm/setup-tools/build.sh, in MacNeutron.tar, builds it).
+VS="${BUILD_DIR:-$ROOT/build}/vm-setup-tools-src"
+while read -r name tag sha; do
+  [ "$(git -C "$VS/$name" rev-parse HEAD 2> /dev/null)" = "$sha" ] || die "$VS/$name isn't at $sha ($tag)"
+  git -C "$VS/$name" archive --format=tar --prefix="$name/" -o "$W/$name.tar" HEAD
+  row "$name" "$sha" "$sha" 0 "$name.tar"
+done < "$ROOT/eac-vm/setup-tools/PIN"
 
 for u in "$FREETYPE_URL" "$GNUTLS_URL" "$NETTLE_URL" "$GMP_URL" "$FFMPEG_URL"; do
   cp -c "$S/${u##*/}" "$W/" || die "no ${u##*/} in $S"

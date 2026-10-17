@@ -464,6 +464,34 @@ The runtime, Contents/Helpers/wine.app (Wine, FEX, DXMT, FreeType, gnutls, nettl
 and MacNeutron's MetalFX presenter), carries every component's licence and the exact sources it is built from in
 Contents/Helpers/wine.app/Contents/Resources/licenses/ (README there first; SOURCE names each commit).
 EOF
+  # The microVM's host tools and the setup's mkfs.erofs: their licences, libkrun's crates' among them.
+  ALV="$AL/vm"
+  mkdir -p "$ALV"
+  python3 "$ROOT/eac-vm/libkrun/licences.py" "$W/libkrun-src" "$ALV/libkrun" "${CARGO:-$(brew --prefix rustup)/bin/cargo}" \
+    > /dev/null || die "can't collect libkrun's crates' licences (eac-vm/libkrun/licences.py)"
+  V_SRC="${BUILD_DIR:-$ROOT/build}/vm-setup-tools-src"
+  cp "$W/libtpms-src/LICENSE" "$ALV/libtpms-LICENSE"
+  cp "$(brew --prefix openssl@3)/LICENSE.txt" "$ALV/openssl-LICENSE.txt"
+  cp "$V_SRC/erofs-utils/COPYING" "$ALV/erofs-utils-COPYING"
+  cp -R "$V_SRC/erofs-utils/LICENSES" "$ALV/erofs-utils-LICENSES"
+  cp "$V_SRC/lz4/lib/LICENSE" "$ALV/lz4-LICENSE"
+  cp "$ROOT/Sources/CZstd/LICENSE" "$ALV/zstd-LICENSE"
+  cp "$W/libkrun-src/LICENSE" "$ALV/gvproxy-LICENSE"  # Apache-2.0: the same text
+  cat > "$ALV/README" << 'EOF'
+The microVM games run in (Contents/Helpers/vm and Contents/Resources/vm), and the setup that builds its images on
+this Mac (Contents/Helpers/mkfs.erofs, and Contents/Helpers/macneutron's vm-setup):
+- macneutron-vm, its Metal host, the Steam forwarder's host and the two scripts are MacNeutron's own (MIT, ../LICENSE).
+  macneutron-vm links libtpms (BSD-3-Clause, libtpms-LICENSE) and OpenSSL's libcrypto (Apache-2.0,
+  openssl-LICENSE.txt). The forwarder loads Proton's lsteamclient (BSD-3-Clause; wine.app's licences).
+- libkrun (Apache-2.0), with MacNeutron's patches, and every crate it links: libkrun/, one folder each, listed in
+  libkrun/CRATES.txt.
+- gvproxy, from containers/gvisor-tap-vsock (Apache-2.0, gvproxy-LICENSE).
+- mkfs.erofs is erofs-utils (GPL-2.0-or-later: erofs-utils-COPYING, erofs-utils-LICENSES/) with lz4 compiled in
+  (BSD-2-Clause, lz4-LICENSE). Their source is in the release's source archive (erofs-utils.tar, lz4.tar).
+- macneutron reads Fedora's packages with zstd's decoder (BSD-3-Clause, zstd-LICENSE).
+The VM's Fedora packages are downloaded from Fedora (its mirrors, or its build system, Koji) to this Mac by the setup;
+MacNeutron never ships them. MacNeutron's own VM parts are a separate download, built from the release's sources.
+EOF
   out=$(check_no_valve "$A" 2>&1) || die "A7: $out"
   out=$(build_paths "$A")  # no build path ships (Ruling 20)
   [ -z "$out" ] || die "files naming the repository, build or home folder (the first ten): $(echo "$out" | tr '\n' ' ')"

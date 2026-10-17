@@ -65,10 +65,14 @@ while read -r tree pinned applied n file; do
       K=$(echo "${tree%%/*}" | tr '[:lower:]' '[:upper:]')
       subs="$subs${K}_SUBMODULE_${tree##*/}=$applied
 " ;;
+    erofs-utils | lz4)  # the VM setup's mkfs.erofs and its lz4, at eac-vm/setup-tools/PIN
+      p=$(awk -v n="$tree" '$1 == n { print $3 }' "$M/eac-vm/setup-tools/PIN")
+      [ -n "$p" ] && [ "$pinned" = "$p" ] && [ "$applied" = "$p" ] \
+        || bad "$tree is $applied, not eac-vm/setup-tools/PIN's ${p:-missing}" ;;
     *) bad "an unknown tree $tree in SOURCES.txt" ;;
   esac
 done < "$D/SOURCES.txt"
-for t in MacNeutron wine fex dxmt lsteamclient; do
+for t in MacNeutron wine fex dxmt lsteamclient erofs-utils lz4; do
   awk -v t="$t" '$1 == t { f = 1 } END { exit !f }' "$D/SOURCES.txt" || bad "SOURCES.txt has no $t"
 done
 want=$(LC_ALL=C /usr/bin/grep -E '^(FEX|DXMT)_SUBMODULE_' "$SRCF" | LC_ALL=C sort)
