@@ -7,7 +7,9 @@
  *   two-views  a second HWND's view goes on top; slot 73 on it leaves the first on top, its layer intact
  *   release    slot 73 on the last view leaves no metal view in the window
  *   capture    Control+Option captures the mouse: a move with deltas reaches the input sink as EV_REL; without the
- *              chord, a move is EV_ABS; the chord again lets it go */
+ *              chord, a move is EV_ABS; the chord again lets it go
+ *   no-quit    once the window shows (a Dock icon), AppKit's quit (the Dock's Quit, logout) is refused: it would end
+ *              the process under a running VM, its state disk mid-write */
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
@@ -193,10 +195,19 @@ static void capture(void) {
     set_sink(NULL);
 }
 
+static void no_quit(void) {
+    __block NSApplicationTerminateReply r = NSTerminateNow;
+    on_main(^{
+        id<NSApplicationDelegate> d = NSApp.delegate;
+        if ([d respondsToSelector:@selector(applicationShouldTerminate:)]) r = [d applicationShouldTerminate:NSApp];
+    });
+    CHECK(r == NSTerminateCancel);
+}
+
 static void *run(void *arg) {
     (void)arg;
     struct { const char *name; void (*fn)(void); } tests[] = {
-        {"view", view}, {"two-views", two_views}, {"capture", capture}, {"release", release},
+        {"view", view}, {"two-views", two_views}, {"capture", capture}, {"no-quit", no_quit}, {"release", release},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         @autoreleasepool {

@@ -161,6 +161,18 @@ static void post(uint16_t type, uint16_t code, int32_t value) {
 }
 @end
 
+/* The Dock icon's Quit (or a logout) would end the process under a running VM, its state disk mid-write: refused.
+ * ponytail: the VM ends with its game; a quit that powers the guest off waits for milestone 5's agent channel. */
+@interface MNAppDelegate : NSObject <NSApplicationDelegate>
+@end
+@implementation MNAppDelegate
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)app {
+    (void)app;
+    fprintf(stderr, "mn-window: quit refused while the VM runs: quit the game instead\n");
+    return NSTerminateCancel;
+}
+@end
+
 @interface MNWindowDelegate : NSObject <NSWindowDelegate>
 @end
 @implementation MNWindowDelegate
@@ -228,6 +240,7 @@ static NSWindow *the_window(void) {
     window.delegate = [[MNWindowDelegate alloc] init]; /* the window's life: never released */
     [window makeFirstResponder:window.contentView];
     [window center];
+    if (!NSApp.delegate) NSApp.delegate = [[MNAppDelegate alloc] init]; /* the process's life: never released */
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     [window makeKeyAndOrderFront:nil];
     [NSApp activate];
