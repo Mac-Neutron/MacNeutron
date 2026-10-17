@@ -1,0 +1,53 @@
+"""gen.py's descriptors for the shapes that once went out as one element (host heap overflows): typed arrays whose
+count is behind a pointer, and parallel arrays sharing one later count; and single values that must stay single.
+   gen-check.py <lsteamclient dir>   Prints a line per case and exits 1 on a failure."""
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+here = os.path.dirname(os.path.abspath(__file__))
+out = tempfile.mkdtemp()
+subprocess.run([sys.executable, '-I', os.path.join(here, '..', 'gen.py'), sys.argv[1], out], check=True,
+               stdout=subprocess.DEVNULL)
+text = open(os.path.join(out, 'descriptors.c')).read()
+
+
+def field(call, name):
+    """kind, flags and the count's field name of call's pointer `name` (None for no count)."""
+    m = re.search(r'\{ offsetof\(struct ' + call + r'_params, ' + name + r'\), (MN_\w+), ([^,]+), [^,]+, '
+                  r'(?:offsetof\(struct ' + call + r'_params, (\w+)\)|0)', text)
+    return (m.group(1), m.group(2).strip(), m.group(3)) if m else None
+
+
+V = 'ISteamInventory_STEAMINVENTORY_INTERFACE_V003_'
+cases = [
+    ('GetResultItems items, count behind a pointer', V + 'GetResultItems', 'pOutItemsArray',
+     ('MN_BUF', 'MN_COUNT_PTR', 'punOutItemsArraySize')),
+    ('GetItemDefinitionIDs ids, count behind a pointer', V + 'GetItemDefinitionIDs', 'pItemDefIDs',
+     ('MN_BUF', 'MN_COUNT_PTR', 'punItemDefIDsArraySize')),
+    ('GetEligiblePromoItemDefinitionIDs ids', V + 'GetEligiblePromoItemDefinitionIDs', 'pItemDefIDs',
+     ('MN_BUF', 'MN_COUNT_PTR', 'punItemDefIDsArraySize')),
+    ('GetItemsWithPrices defs', V + 'GetItemsWithPrices', 'pArrayItemDefs', ('MN_BUF', '0', 'unArrayLength')),
+    ('GetItemsWithPrices current prices', V + 'GetItemsWithPrices', 'pCurrentPrices', ('MN_BUF', '0', 'unArrayLength')),
+    ('GetItemsWithPrices base prices', V + 'GetItemsWithPrices', 'pBasePrices', ('MN_BUF', '0', 'unArrayLength')),
+    ('GenerateItems defs', V + 'GenerateItems', 'pArrayItemDefs', ('MN_BUF', 'MN_IN_ONLY', 'unArrayLength')),
+    ('ExchangeItems generate', V + 'ExchangeItems', 'pArrayGenerate', ('MN_BUF', 'MN_IN_ONLY', 'unArrayGenerateLength')),
+    ('ExchangeItems destroy', V + 'ExchangeItems', 'pArrayDestroy', ('MN_BUF', 'MN_IN_ONLY', 'unArrayDestroyLength')),
+    ('TradeItems give', V + 'TradeItems', 'pArrayGive', ('MN_BUF', 'MN_IN_ONLY', 'nArrayGiveLength')),
+    ('TradeItems get', V + 'TradeItems', 'pArrayGet', ('MN_BUF', 'MN_IN_ONLY', 'nArrayGetLength')),
+    ('StartPurchase defs', V + 'StartPurchase', 'pArrayItemDefs', ('MN_BUF', 'MN_IN_ONLY', 'unArrayLength')),
+    ('GenerateItems result handle stays one', V + 'GenerateItems', 'pResultHandle', ('MN_FIXED', '0', None)),
+    ('ExchangeItems result handle stays one', V + 'ExchangeItems', 'pResultHandle', ('MN_FIXED', '0', None)),
+]
+failures = 0
+for what, call, name, want in cases:
+    got = field(call, name)
+    if got and got[0] == want[0] and want[1] in got[1] and got[2] == want[2]:
+        print(f'ok   {what}')
+    else:
+        print(f'FAIL {what}: {got}, want {want}')
+        failures += 1
+print('gen-check: ' + ('FAIL' if failures else 'all passed'))
+sys.exit(1 if failures else 0)

@@ -13,7 +13,10 @@ every unsupported call with the reason). The rules, which the report lists:
     the next pointer is such a count's `uint32_t *` (in and out: ISteamInventory's property calls); otherwise
     unsupported.
   - A pointer to any other complete type is that type, copied both ways (in only when const), or an array of it when a
-    count field follows.
+    count field follows, or a count behind the next pointer (`uint32_t *`, in and out: ISteamInventory's
+    GetResultItems). Parallel arrays (a name with Array or Prices: ISteamInventory's GenerateItems, ExchangeItems,
+    TradeItems, StartPurchase, GetItemsWithPrices) take the first count after the run of pointers that follows them.
+    One element where Steam writes or reads many is a host heap overflow.
   - Pointers to pointers, pointees that hold pointers, and `void *_ret` are unsupported.
   - `struct u_iface`, `struct u_buffer`, function pointers and interface objects (`w_I…`, `struct w_iface *`) are host
     or guest values carried as they are: not described.
@@ -161,6 +164,13 @@ def main():
                 if INT.match(ctype.replace('struct ', '').strip()) and COUNT_NAME.search(cname):
                     count = cname
                     break
+            if not count and not count_ptr and re.search(r'Array|Prices', fname):
+                for cname, ctype in parsed[i + 1:]:
+                    if '*' in ctype:
+                        continue  # another of the parallel arrays
+                    if INT.match(ctype.replace('struct ', '').strip()) and COUNT_NAME.search(cname):
+                        count = cname
+                    break
             access = f'((struct {sname} *)0)->{fname}'
             if stars > 1 and '(*)' not in t:
                 out.append((fname, {'kind': 'MN_UNSUPPORTED'})); reasons.append(f'{fname}: pointer to pointer')
@@ -208,6 +218,12 @@ def main():
                                     'size_offset': f'offsetof(struct {sname}, {count})',
                                     'size_width': f'sizeof(((struct {sname} *)0)->{count})'}))
                 report.append(f'array  {name}.{fname} <- {count}')
+                kind = 'array'
+            elif count_ptr and '(*)' not in t:
+                out.append((fname, {'kind': 'MN_BUF', 'flags': 'MN_COUNT_PTR' if flags == '0' else
+                                    flags + ' | MN_COUNT_PTR', 'size': f'sizeof(*{access})',
+                                    'size_offset': f'offsetof(struct {sname}, {count_ptr})', 'size_width': '4'}))
+                report.append(f'array  {name}.{fname} <- *{count_ptr}')
                 kind = 'array'
             else:
                 out.append((fname, {'kind': 'MN_FIXED', 'flags': flags, 'size': f'sizeof(*{access})'}))

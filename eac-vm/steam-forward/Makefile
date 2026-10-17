@@ -19,6 +19,11 @@ LSCFLAGS = -DWINE_UNIX_LIB -I. -I$(LSC) -I$(WINEINC) -Wno-unused-parameter -Wno-
 $(OUT)/descriptors.c: gen.py $(LSC)/unixlib_generated.h $(LSC)/unixlib.h
 	python3 -I gen.py $(LSC) $(OUT)
 
+# gen.py's arrays: none of them goes out as one element (tests/gen-check.py).
+gen-check:
+	python3 -I tests/gen-check.py $(LSC)
+.PHONY: gen-check
+
 # mn-steam-host with its ntdll.so stand-in and a copy of the Mac Unix half, together in $(OUT)/host.
 $(OUT)/host/ntdll.so: host_wine.c host_wine.h marshal.c marshal.h
 	mkdir -p $(OUT)/host

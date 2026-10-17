@@ -22,6 +22,9 @@ struct bad_params { void **pp; };
 struct retbuf_params { uint64_t iface; struct { uint64_t ptr, len; } _ret; };
 /* ISteamInventory's GetItemDefinitionProperty: a buffer whose count is behind a pointer, in and out. */
 struct prop_params { uint64_t iface; int8_t _ret; int32_t def; const char *name; char *buf; uint32_t *size; };
+/* ISteamInventory's GetResultItems: an array of 16-byte items whose count is behind a pointer. */
+struct item { uint64_t id; int32_t def; uint16_t quantity, flags; };
+struct items_params { uint64_t iface; int8_t _ret; int32_t result; struct item *items; uint32_t *count; };
 #pragma pack(pop)
 
 static const struct mn_field str_fields[] = { { offsetof(struct str_params, name), MN_STR_IN, MN_IN_ONLY } };
@@ -40,6 +43,10 @@ static const struct mn_field prop_fields[] = {
     { offsetof(struct prop_params, buf), MN_BUF, MN_COUNT_PTR, 1, offsetof(struct prop_params, size), 4 },
     { offsetof(struct prop_params, size), MN_FIXED, 0, 4 },
 };
+static const struct mn_field items_fields[] = {
+    { offsetof(struct items_params, items), MN_BUF, MN_COUNT_PTR, sizeof(struct item), offsetof(struct items_params, count), 4 },
+    { offsetof(struct items_params, count), MN_FIXED, 0, 4 },
+};
 static const struct mn_call_desc descs[] = {
     { "str", sizeof(struct str_params), 1, str_fields },
     { "out", sizeof(struct out_params), 1, out_fields },
@@ -48,6 +55,7 @@ static const struct mn_call_desc descs[] = {
     { "bad", sizeof(struct bad_params), 1, bad_fields },
     { "retbuf", sizeof(struct retbuf_params), 1, retbuf_fields },
     { "prop", sizeof(struct prop_params), 3, prop_fields },
+    { "items", sizeof(struct items_params), 2, items_fields },
 };
 #define NDESCS (sizeof descs / sizeof *descs)
 
@@ -94,6 +102,14 @@ static void call_prop(void *p) {
     *s->size = sizeof value;
 }
 
+/* As Steam does: three items, as many as fit, and the count it has. */
+static void call_items(void *p) {
+    struct items_params *s = p;
+    for (uint32_t i = 0; s->items && i < 3 && i < *s->count; i++) s->items[i] = (struct item){100 + i, 7, 1, 0};
+    s->_ret = 1;
+    *s->count = 3;
+}
+
 static int roundtrip(uint32_t index, void *params, void (*call)(void *), struct mn_reg_log *log) {
     struct mn_buf req = {0}, rep = {0};
     uint32_t status = 99;
@@ -105,7 +121,17 @@ static int roundtrip(uint32_t index, void *params, void (*call)(void *), struct 
     return r;
 }
 
+static void items_cases(void) {
+    { struct item it[4] = {{0}}; uint32_t count = 4; struct items_params p = {0x1111, 0, 5, it, &count};
+      CHECK(roundtrip(7, &p, call_items, NULL) == 0 && count == 3 && it[2].id == 102 && it[3].id == 0 && p.items == it,
+            "typed array behind a count pointer"); }
+    { struct item it[3] = {{0}}; it[2].id = 0xfeed; uint32_t count = 2; struct items_params p = {0x1111, 0, 5, it, &count};
+      CHECK(roundtrip(7, &p, call_items, NULL) == 0 && count == 3 && it[1].id == 101 && it[2].id == 0xfeed,
+            "typed array: no more items back than the guest's count"); }
+}
+
 int main(void) {
+    items_cases();
     { struct str_params p; p._ret = 0; p.name = "SteamClient017";
       CHECK(roundtrip(0, &p, call_str, NULL) == 0 && p._ret == 14, "string in"); }
 
