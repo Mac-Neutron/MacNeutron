@@ -28,13 +28,18 @@ public struct PrefixManager: Sendable {
     public let identity: String
     public let runner: any ProcessRunner
     public let log: LauncherLog
+    /// Called as a prefix starts being prepared (made, or made again for a new wine.app); what it returns, once that's
+    /// done. The launcher's shows a toast meanwhile.
+    public let onPrepare: @Sendable () -> @Sendable () -> Void
 
-    public init(context: CompatContext, layout: ToolLayout, identity: String, runner: any ProcessRunner, log: LauncherLog) {
+    public init(context: CompatContext, layout: ToolLayout, identity: String, runner: any ProcessRunner, log: LauncherLog,
+                onPrepare: @escaping @Sendable () -> @Sendable () -> Void = { {} }) {
         self.context = context
         self.layout = layout
         self.identity = identity
         self.runner = runner
         self.log = log
+        self.onPrepare = onPrepare
     }
 
     public static func stamp(identity: String, msync: Bool) -> String { "wine.app \(identity) msync=\(msync ? 1 : 0)" }
@@ -85,6 +90,8 @@ public struct PrefixManager: Sendable {
                     carryFrom = (try? String(contentsOf: context.dataPath.appending(path: Self.pendingRecord), encoding: .utf8))
                         .flatMap { $0.hasPrefix("pfx.rosetta") && !$0.contains("/") ? $0 : nil }
                 }
+                let prepared = onPrepare()
+                defer { prepared() }
                 try Self.preparingStamp.write(to: context.versionFile, atomically: true, encoding: .utf8)
                 try prepareNew(environment: environment)
                 // After prepareNew's `wineserver -w`: no server runs to rewrite user.reg.

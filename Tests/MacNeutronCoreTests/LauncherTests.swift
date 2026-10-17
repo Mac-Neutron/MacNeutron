@@ -7,6 +7,14 @@ final class RecordingNotifier: Notifier, @unchecked Sendable {
     private var messages: [String] = []
     var posted: [String] { lock.withLock { messages } }
     func post(title: String, message: String) { lock.withLock { messages.append(message) } }
+    private var shown: [String] = [], hidden = 0
+    /// Each toast's title, and the file it waits for.
+    var toasts: [String] { lock.withLock { shown } }
+    var toastsClosed: Int { lock.withLock { hidden } }
+    func progress(title: String, message: String, until: URL?) -> @Sendable () -> Void {
+        lock.withLock { shown.append(title + (until.map { " until " + $0.path(percentEncoded: false) } ?? "")) }
+        return { self.lock.withLock { self.hidden += 1 } }
+    }
 }
 
 private struct Fixture {
@@ -54,6 +62,16 @@ private func makeFixture(runner: FakeRunner = winebootCreatingPrefix(), identity
         ["wine", "/g/Game.exe", "-windowed"],
         ["wineserver", "-w"],
     ])
+}
+
+@Test func aNewPrefixIsPreparedUnderAToast() throws {
+    let f = try makeFixture()
+    let game = "/Steam/steamapps/common/Some Game/bin/Game.exe"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(f.notifier.toasts == ["Setting up Some Game"])
+    #expect(f.notifier.toastsClosed == 1)
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)  // up to date: no toast
+    #expect(f.notifier.toasts.count == 1)
 }
 
 @Test func runDoesNotWaitForWineserver() throws {

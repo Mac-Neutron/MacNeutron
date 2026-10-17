@@ -101,11 +101,31 @@ public struct Preflight: Sendable {
 /// Tells the user about launch-blocking failures; Steam itself shows nothing useful.
 public protocol Notifier: Sendable {
     func post(title: String, message: String)
+    /// A toast while something long runs (a game's prefix prepared), until the returned closure runs or `until`
+    /// exists.
+    func progress(title: String, message: String, until: URL?) -> @Sendable () -> Void
 }
 
-/// Posts through `osascript`, which needs no app bundle or entitlement.
+/// Posts through `osascript`, which needs no app bundle or entitlement. Toasts are `toast`'s (the launcher binary's
+/// `macneutron toast`, Sources/macneutron/Toast.swift); without one, none.
 public struct AppleScriptNotifier: Notifier {
-    public init() {}
+    let toast: URL?
+
+    public init(toast: URL? = nil) { self.toast = toast }
+
+    public func progress(title: String, message: String, until: URL?) -> @Sendable () -> Void {
+        guard let toast else { return {} }
+        let process = Process(), input = Pipe()
+        process.executableURL = toast
+        process.arguments = ["toast", title, message] + (until.map { [$0.path(percentEncoded: false)] } ?? [])
+        process.standardInput = input
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return {} }
+        // The toast goes when its stdin closes: here, or when this process ends.
+        let end = input.fileHandleForWriting
+        return { try? end.close() }
+    }
 
     public func post(title: String, message: String) {
         let script = "display notification \(Self.quoted(message)) with title \(Self.quoted(title))"

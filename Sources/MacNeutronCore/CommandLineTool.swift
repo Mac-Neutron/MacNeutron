@@ -15,7 +15,7 @@ public enum CommandLineTool {
         let rest = Array(args.dropFirst())
         switch command {
         case "launch":
-            let launcher = Launcher(layout: ToolLayout(executable: executable))
+            let launcher = Launcher(layout: ToolLayout(executable: executable), notifier: AppleScriptNotifier(toast: executable))
             installTerminationHandlers(launcher, environment: environment)
             return launcher.launch(rest, environment: environment)
         case "install":

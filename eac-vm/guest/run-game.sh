@@ -16,6 +16,7 @@ STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
 [ -f /mnt/share/valve/steamclient64.dll ] && cp /mnt/share/valve/steamclient64.dll "$STEAM/steamclient64.dll"
+: > /mnt/share/traces/ready  # the prefix is done: the launcher's toast goes (traces/: the share is root's)
 cd "$GAME_DIR" || exit 1
 if [ "$VERB" = waitforexitandrun ]; then
   wine 'C:\Program Files (x86)\Steam\steam.exe' "$EXE" "$@"

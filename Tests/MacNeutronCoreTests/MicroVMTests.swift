@@ -14,6 +14,7 @@ private func makeVMFolder() throws -> URL {
 private struct VMFixture {
     let launcher: Launcher
     let runner: FakeRunner
+    let notifier: RecordingNotifier
     let vm: URL
     let env: [String: String]
     var launcherLog: String { (try? String(contentsOf: launcher.log.launcherLog, encoding: .utf8)) ?? "" }
@@ -36,14 +37,15 @@ private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts:
         scripts.add(call.arguments.first)
         return status
     }
+    let notifier = RecordingNotifier()
     let launcher = Launcher(layout: try makeToolLayout(), runner: runner,
                             log: LauncherLog(directory: try makeTempDir().appending(path: "Logs")),
-                            notifier: RecordingNotifier(), preflight: testPreflight,
+                            notifier: notifier, preflight: testPreflight,
                             settings: GameSettingsStore(directory: try makeTempDir().appending(path: "games")),
                             steam: try makeSteamLocation(),
                             microVMRoot: vmInstalled ? vm : try makeTempDir().appending(path: "no-vm"))
     let env = steamEnvironment(dataPath: try makeTempDir().appending(path: "compatdata/2437170"), appID: "2437170")
-    return VMFixture(launcher: launcher, runner: runner, vm: vm, env: env)
+    return VMFixture(launcher: launcher, runner: runner, notifier: notifier, vm: vm, env: env)
 }
 
 private let game = "/Users/someone/Library/Application Support/Steam/steamapps/common/SMITE 2/Windows/Hemingway.exe"
@@ -78,6 +80,20 @@ private let game = "/Users/someone/Library/Application Support/Steam/steamapps/c
     #expect(script.contains(#"set -- '-homedir=SMITE2Alpha' 'it'\''s quoted' ''"# + "\n"))
     #expect(script.contains("MACNEUTRON_DLSS='1'\n"))
     #expect(script.hasSuffix("# run-game.sh\nwine steam.exe \"$EXE\" \"$@\"\n"))
+}
+
+@Test func aGamesFirstRunShowsAToastUntilTheGuestsPrefixIsReady() throws {
+    let f = try makeVMFixture()
+    let share = f.vm.appending(path: "runs/2437170/traces")
+    try FileManager.default.createDirectory(at: share, withIntermediateDirectories: true)
+    try write("", to: share.appending(path: "ready"))  // the last run's
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(f.notifier.toasts == ["Setting up SMITE 2 until " + share.appending(path: "ready").path(percentEncoded: false)])
+    #expect(f.notifier.toastsClosed == 1)
+    #expect(!FileManager.default.fileExists(atPath: share.appending(path: "ready").path(percentEncoded: false)))
+    try write("", to: f.vm.appending(path: "state/2437170.img"))  // run-guest.sh made it
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(f.notifier.toasts.count == 1)
 }
 
 @Test func optingOutRunsOnMacOS() throws {

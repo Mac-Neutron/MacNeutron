@@ -29,7 +29,7 @@ if [ "$SHARE" != "$W/share" ]; then
     [ ! -d "$W/share/$d" ] || cp -cR "$W/share/$d" "$SHARE/$d"
   done
 fi
-rm -f "$SHARE/run.log" "$SHARE/run.status" "$SHARE/console.log"
+rm -f "$SHARE/run.log" "$SHARE/run.status" "$SHARE/console.log" "$SHARE/traces/ready"
 cp "$script" "$SHARE/run.sh"
 STATE=${MN_STATE:-$W/images/state.img}
 if [ ! -e "$STATE" ]; then

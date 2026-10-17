@@ -546,6 +546,9 @@ VM's base for all of them.
     forwarded for its app ID, and the game's status goes back to Steam.
 - **`run-game.sh`** is Proton's waitforexitandrun in the guest: the prefix `/home/mn/pfx`, `steam.exe` with Valve's
   DLL, the game, then `wineserver -w`.
+- **A game's first run** makes its prefix in the guest, where nothing shows: the launcher shows a toast
+  (`macneutron toast`, Sources/macneutron/Toast.swift) until `run-game.sh` writes `traces/ready` in the run's share.
+  On macOS the same toast covers a prefix being prepared, and Wine's own wait window is gone (Wine patch 0039).
 - **What stays on macOS:** path queries (`getcompatpath`, `getnativepath`), a game outside a Steam library, and every
   game on a Mac without the VM.
 - **Checked end to end.** The installed launcher, called as Steam calls it, ran SMITE 2 in the VM to its lobby: 4,400

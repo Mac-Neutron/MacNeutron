@@ -86,7 +86,9 @@ public struct Launcher: Sendable {
             env["MACNEUTRON_PRESENT"] = "1"
         }
         if let gameLog { writeHeader(to: gameLog, request: request, environment: env) }
-        let prefix = PrefixManager(context: context, layout: layout, identity: identity, runner: runner, log: log)
+        let notifier = notifier, setup = Self.setupToast(request.target)
+        let prefix = PrefixManager(context: context, layout: layout, identity: identity, runner: runner, log: log,
+                                   onPrepare: { notifier.progress(title: setup.title, message: setup.message, until: nil) })
 
         do {
             let status: Int32
@@ -156,6 +158,16 @@ public struct Launcher: Sendable {
                 .appending(path: "macneutron-vm-\(context.appID)-\(UUID().uuidString).sh")
             try script.write(to: file, atomically: true, encoding: .utf8)
             defer { try? FileManager.default.removeItem(at: file) }
+            // A game's first run makes its prefix in the guest, behind no window: a toast until run-game.sh says it's
+            // ready (the last run's word removed first).
+            var shown: @Sendable () -> Void = {}
+            if !FileManager.default.fileExists(atPath: vm.state(appID: context.appID).path(percentEncoded: false)) {
+                let ready = vm.share(appID: context.appID).appending(path: "traces/ready")
+                try? FileManager.default.removeItem(at: ready)
+                let setup = Self.setupToast(request.target)
+                shown = notifier.progress(title: setup.title, message: setup.message, until: ready)
+            }
+            defer { shown() }
             var env = environment
             env["MN_VM_DIR"] = vm.root.path(percentEncoded: false)
             env["MN_STATE"] = vm.state(appID: context.appID).path(percentEncoded: false)
@@ -170,6 +182,14 @@ public struct Launcher: Sendable {
         } catch {
             return fail("\(error)", argv: argv, notify: true, gameLog: gameLog)
         }
+    }
+
+    /// The toast while a game's prefix is prepared, named after its folder in steamapps/common (Steam's name for it,
+    /// near enough).
+    static func setupToast(_ target: String) -> (title: String, message: String) {
+        let name = target.range(of: "/steamapps/common/").flatMap { target[$0.upperBound...].split(separator: "/").first }
+        return ("Setting up \(name.map(String.init) ?? "the game")",
+                "Preparing its Windows environment. The first launch takes a minute or two.")
     }
 
     /// Per-game settings from the app sit underneath; variables from Steam launch options win.
