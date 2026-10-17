@@ -137,12 +137,23 @@ private func makeFixture() throws -> Fixture {
 }
 
 @Test func theSetupsChildrenEndWithIt() async throws {
-    // vm-setup ends its tar and mkfs.erofs when it's told to stop (the app quitting), not only itself.
-    let child = Process()
-    child.executableURL = URL(filePath: "/bin/sleep")
-    child.arguments = ["60"]
-    try VMSetup.Children.run(child)
-    VMSetup.Children.terminateAll()
-    child.waitUntilExit()
-    #expect(child.terminationReason == .uncaughtSignal)
+    // vm-setup ends its tar and mkfs.erofs when it's told to stop (the app quitting), not only itself. The test ends
+    // its own group: tests run side by side, and ending every child would end their mkfs.erofs too.
+    func sleeper() -> Process {
+        let p = Process()
+        p.executableURL = URL(filePath: "/bin/sleep")
+        p.arguments = ["60"]
+        return p
+    }
+    let mine = sleeper(), other = sleeper()
+    try VMSetup.Children.run(mine, group: 99)
+    try VMSetup.Children.run(other, group: 98)
+    VMSetup.Children.terminateAll(group: 99)
+    mine.waitUntilExit()
+    #expect(mine.terminationReason == .uncaughtSignal)
+    #expect(other.isRunning)
+    VMSetup.Children.terminateAll(group: 98)
+    other.waitUntilExit()
+    VMSetup.Children.finished(mine)
+    VMSetup.Children.finished(other)
 }

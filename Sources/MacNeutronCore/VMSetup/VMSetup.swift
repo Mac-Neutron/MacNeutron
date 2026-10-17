@@ -8,22 +8,25 @@ import Foundation
 /// developer's linked folder are never touched.
 public enum VMSetup {
     /// The setup's own children (tar, mkfs.erofs), ended with it: the app quitting ends vm-setup with SIGTERM, and
-    /// vm-setup ends them before it exits.
+    /// vm-setup ends them before it exits. A group keeps a test's children apart from the ones tests beside it run.
     enum Children {
-        nonisolated(unsafe) private static var running: [Process] = []
+        nonisolated(unsafe) private static var running: [(process: Process, group: Int)] = []
         private static let lock = NSLock()
 
-        static func run(_ process: Process) throws {
+        static func run(_ process: Process, group: Int = 0) throws {
             try lock.withLock {
                 try process.run()
-                running.append(process)
+                running.append((process, group))
             }
         }
 
-        static func finished(_ process: Process) { lock.withLock { running.removeAll { $0 === process } } }
+        static func finished(_ process: Process) { lock.withLock { running.removeAll { $0.process === process } } }
 
-        static func terminateAll() {
-            lock.withLock { for p in running where p.isRunning { p.terminate() } }
+        /// Every child, or one group's.
+        static func terminateAll(group: Int? = nil) {
+            lock.withLock {
+                for c in running where c.process.isRunning && (group == nil || c.group == group) { c.process.terminate() }
+            }
         }
     }
 
