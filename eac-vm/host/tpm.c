@@ -18,13 +18,19 @@
 #include <libtpms/tpm_library.h>
 #include <limits.h>
 #include <openssl/evp.h>
+#include <pthread.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #include <uuid/uuid.h>
+
+extern char **environ;
 
 const char *mn_tpm_service = "MacNeutron vTPM";
 
@@ -52,11 +58,67 @@ static CFMutableDictionaryRef item(void) {
     return q;
 }
 
+/* macOS asks for the login password before it hands the key to a macneutron-vm the key's item doesn't trust yet (one
+ * signed otherwise: a development build, or another Mac's copy), which leaves the read waiting on the player. A read
+ * that hasn't answered in half a second gets a toast that says why (MN_TOAST: the launcher's `macneutron toast`),
+ * until it does. */
+struct waiting { pthread_mutex_t m; pthread_cond_t c; int done; };
+
+static void *say_why(void *arg) {
+    struct waiting *w = arg;
+    struct timespec until;
+    clock_gettime(CLOCK_REALTIME, &until);
+    until.tv_nsec += 500000000;
+    if (until.tv_nsec >= 1000000000) until.tv_sec++, until.tv_nsec -= 1000000000;
+    pthread_mutex_lock(&w->m);
+    while (!w->done && pthread_cond_timedwait(&w->c, &w->m, &until) == 0) {}
+    int waiting = !w->done;
+    pthread_mutex_unlock(&w->m);
+    const char *toast = getenv("MN_TOAST");
+    int in[2];
+    if (!waiting || !toast || !*toast || pipe(in)) return NULL;
+    char *argv[] = {(char *)toast, "toast", "Why macOS asks for your password",
+                    "MacNeutron keeps this game's virtual TPM, the security chip Windows and anti-cheat look for, "
+                    "locked with a key in your login keychain. Enter your password and choose Always Allow: it won't "
+                    "ask again.",
+                    NULL};
+    posix_spawn_file_actions_t fa;
+    posix_spawnattr_t at;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, in[0], 0); /* only its stdin: none of the VM's descriptors (its locks) */
+    posix_spawnattr_init(&at);
+    posix_spawnattr_setflags(&at, POSIX_SPAWN_CLOEXEC_DEFAULT);
+    pid_t pid;
+    int spawned = posix_spawn(&pid, toast, &fa, &at, argv, environ) == 0;
+    posix_spawn_file_actions_destroy(&fa);
+    posix_spawnattr_destroy(&at);
+    close(in[0]);
+    pthread_mutex_lock(&w->m);
+    while (!w->done) pthread_cond_wait(&w->c, &w->m);
+    pthread_mutex_unlock(&w->m);
+    close(in[1]); /* the toast goes */
+    if (spawned) waitpid(pid, NULL, 0);
+    return NULL;
+}
+
+static OSStatus copy_saying_why(CFDictionaryRef q, CFTypeRef *v) {
+    struct waiting w = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0};
+    pthread_t t;
+    int watching = pthread_create(&t, NULL, say_why, &w) == 0;
+    OSStatus rc = SecItemCopyMatching(q, v);
+    pthread_mutex_lock(&w.m);
+    w.done = 1;
+    pthread_cond_broadcast(&w.c);
+    pthread_mutex_unlock(&w.m);
+    if (watching) pthread_join(t, NULL);
+    return rc;
+}
+
 static int key_get(void) {
     CFMutableDictionaryRef q = item();
     CFTypeRef v = NULL;
     CFDictionarySetValue(q, kSecReturnData, kCFBooleanTrue);
-    OSStatus rc = SecItemCopyMatching(q, &v);
+    OSStatus rc = copy_saying_why(q, &v);
     CFRelease(q);
     if (rc == errSecItemNotFound) return 1;
     long got = rc == errSecSuccess ? (long)CFDataGetLength(v) : 0;

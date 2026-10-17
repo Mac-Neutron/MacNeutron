@@ -185,6 +185,7 @@ public struct Launcher: Sendable {
             env["MN_VM_DIR"] = vm.root.path(percentEncoded: false)
             env["MN_STATE"] = vm.state(appID: context.appID).path(percentEncoded: false)
             env["MN_SHARE"] = vm.share(appID: context.appID).path(percentEncoded: false)
+            env["MN_TOAST"] = layout.launcherBinary.path(percentEncoded: false)  // eac-vm/host/tpm.c's, while macOS asks
             env["MN_RUN_TIMEOUT"] = env["MN_RUN_TIMEOUT"] ?? "86400"
             let status = try runner.run(vm.runGuest, [file.path(percentEncoded: false), "--steam-appid", context.appID,
                                                       "--ram-mib", "16384", "--steam-map", "\(library)=/mnt/games"],

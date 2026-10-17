@@ -1,7 +1,8 @@
 /* tpm.c's engine and state on the host, without a VM (eac-vm/tests/tpm-engine.sh): the same TPM across restarts (its
  * owner seed, seen as the same primary key), its files sealed, and a fresh TPM with the old files kept when they don't
  * open or their key isn't in the keychain. Keys go under their own keychain service, removed at the end.
- * tests/tpm-engine.sh builds tpm.c with SecItemCopyMatching as keychain_copy below, for a keychain that says no.
+ * tests/tpm-engine.sh builds tpm.c with SecItemCopyMatching as keychain_copy below, for a keychain that says no, or
+ * waits as one does on macOS's password dialog.
  * Prints "tpm-engine: ok" or the first failure. */
 #include "tpm.h"
 #include <Security/Security.h>
@@ -21,7 +22,9 @@ static int failed;
     do { if (!(c)) { printf("tpm-engine: FAIL " __VA_ARGS__), printf("\n"), failed = 1; } } while (0)
 
 static int refuse; /* the keychain says no, as a locked one or a "Deny" would */
+static int slow;   /* the keychain waits, as while macOS asks for the password */
 OSStatus keychain_copy(CFDictionaryRef query, CFTypeRef *result) {
+    if (slow) usleep(1500000);
     return refuse ? errSecInteractionNotAllowed : SecItemCopyMatching(query, result);
 }
 
@@ -109,6 +112,37 @@ int main(void) {
     /* The same TPM after a restart. */
     CHECK(boot(x2) == 0 && !memcmp(x1, x2, 32), "a restart changed the TPM");
     mn_tpm_stop();
+
+    /* A key read that waits (macOS's password dialog): a toast says why (MN_TOAST, the launcher's `macneutron toast`)
+     * until it answers. A stand-in toast notes its arguments, and its end when its stdin closes. A quick read: none. */
+    char toast_dir[] = "/tmp/mn-tpm-toast.XXXXXX", toast[1100], said[1100], ended[1100], line[512] = "";
+    mkdtemp(toast_dir);
+    snprintf(toast, sizeof toast, "%s/toast", toast_dir);
+    snprintf(said, sizeof said, "%s/said", toast_dir);
+    snprintf(ended, sizeof ended, "%s/ended", toast_dir);
+    FILE *tf = fopen(toast, "w");
+    fprintf(tf, "#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%s'\ncat > /dev/null\n: > '%s'\n", said, ended);
+    fclose(tf);
+    chmod(toast, 0755);
+    setenv("MN_TOAST", toast, 1);
+    slow = 1;
+    CHECK(boot(x2) == 0 && !memcmp(x1, x2, 32), "a slow keychain changed the TPM");
+    slow = 0;
+    mn_tpm_stop();
+    CHECK(access(ended, F_OK) == 0, "no toast while the keychain waited, or it stayed up");
+    tf = fopen(said, "r");
+    if (tf) {
+        fgets(line, sizeof line, tf); /* "toast", its verb */
+        fgets(line, sizeof line, tf); /* the title */
+        fclose(tf);
+    }
+    CHECK(strstr(line, "password") != NULL, "the toast's title doesn't say why: %s", line);
+    unlink(said), unlink(ended);
+    CHECK(boot(x2) == 0, "a quick restart");
+    mn_tpm_stop();
+    CHECK(access(said, F_OK) != 0, "a quick keychain showed the toast");
+    unsetenv("MN_TOAST");
+    unlink(toast), rmdir(toast_dir);
 
     /* A file that can't be read just now (a passing I/O error): no TPM this time, and nothing moved or replaced. */
     char p[1024];
