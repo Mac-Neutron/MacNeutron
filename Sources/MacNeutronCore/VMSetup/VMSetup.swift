@@ -7,9 +7,20 @@ import Foundation
 /// from the folder (exit 75; the next run swaps it without rebuilding). The games' own files (state/, runs/) and a
 /// developer's linked folder are never touched.
 public enum VMSetup {
-    /// The manifest file's SHA-256: which image set it builds (images/manifest.sha256).
+    /// Which image set a manifest builds (images/manifest.sha256): the SHA-256 of its JSON with sorted keys and without
+    /// the parts' URL, which names the release it's on. A release whose VM didn't change moves only that URL, and no
+    /// Mac downloads its VM again.
     public static func manifestHash(_ manifest: URL) -> String? {
-        (try? Data(contentsOf: manifest)).map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() }
+        guard let data = try? Data(contentsOf: manifest) else { return nil }
+        var canonical = data
+        if var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if var parts = object["parts"] as? [String: Any] {
+                parts["url"] = nil
+                object["parts"] = parts
+            }
+            canonical = (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? data
+        }
+        return SHA256.hash(data: canonical).map { String(format: "%02x", $0) }.joined()
     }
 
     /// 0 when the set is in place, 75 when a running VM defers the swap; throws `VMSetupError` otherwise.
@@ -23,6 +34,14 @@ public enum VMSetup {
             return 0
         }
         guard let hash = manifestHash(manifestFile) else { throw CocoaError(.fileReadNoSuchFile) }
+        // One setup a folder: a crashed app's may still run when the relaunch starts another.
+        try FileManager.default.createDirectory(at: vm, withIntermediateDirectories: true)
+        let lock = open(vm.appending(path: "setup.lock").path(percentEncoded: false), O_RDWR | O_CREAT, 0o600)
+        defer { if lock >= 0 { close(lock) } }
+        guard lock >= 0, flock(lock, LOCK_EX | LOCK_NB) == 0 else {
+            progress("vm-setup: another setup runs in \(vm.path(percentEncoded: false)): this one waits")
+            return 75
+        }
         let manifest = try JSONDecoder().decode(VMSetupManifest.self, from: Data(contentsOf: manifestFile))
         let fm = FileManager.default
         let setup = vm.appending(path: "setup", directoryHint: .isDirectory)

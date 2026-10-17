@@ -125,6 +125,12 @@ check_vm_manifest() {  # check_vm_manifest <vm-manifest.json> <parts archive>
   [ "$_vm" = "$_vm_size $_vm_sha" ] || { echo "release: vm-manifest.json names parts $_vm, not the archive's $_vm_size $_vm_sha" >&2; return 1; }
 }
 
+# A published archive names no account of this Mac: every entry is root's (bsdtar records the user's own otherwise).
+check_archive_owners() {  # check_archive_owners <archive>
+  _ao=$(tar -tvf "$1" 2> /dev/null | awk '$3 != "root" || $4 != "root" { print $NF; exit }')
+  [ -z "$_ao" ] || { echo "release: $(basename "$1") has an entry owned by someone other than root ($_ao)" >&2; return 1; }
+}
+
 # The microVM's helpers in the app: every Mach-O signed with the hardened runtime (notarization refuses one without),
 # and the two entitlements they need (macneutron-vm runs a VM; mn-steam-host loads Mac Steam's library, whose signer
 # isn't ours).
@@ -268,6 +274,12 @@ self_test() {
   truncate -s 1g "$T/parts/state-template.img"
   tar -C "$T/parts" -cJf "$T/parts.tar.xz" .
   passes "a sparse state template" check_sparse_template "$T/parts.tar.xz"
+  refused "an archive naming this Mac's account" \
+    "release: parts.tar.xz has an entry owned by someone other than root (./)" \
+    check_archive_owners "$T/parts.tar.xz"
+  COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --uid 0 --gid 0 --uname root --gname root -C "$T/parts" \
+    -cJf "$T/rooted.tar.xz" .
+  passes "an archive of root's entries" check_archive_owners "$T/rooted.tar.xz"
   dd if=/dev/zero of="$T/parts/state-template.img" bs=1048576 count=21 2> /dev/null
   tar -C "$T/parts" -cJf "$T/dense.tar.xz" .
   refused "a state template that isn't sparse" "release: the parts' state-template.img takes 21504 KB on disk: not sparse" \
@@ -437,7 +449,14 @@ build_app() {
   # its mn-steam-host and ntdll.so built here with the sources' prefix mapped away. mkfs.erofs makes the VM's images on
   # the player's Mac (macneutron vm-setup).
   VMH="$A/Contents/Helpers/vm"
+  # Built now from this tree (each skips what is current), not whatever build/ holds.
+  sh "$ROOT/eac-vm/setup-tools/build.sh" > /dev/null || die "eac-vm/setup-tools/build.sh failed"
+  sh "$ROOT/eac-vm/libkrun/build.sh" > /dev/null 2>&1 || die "eac-vm/libkrun/build.sh failed"
+  sh "$ROOT/eac-vm/host/build.sh" > /dev/null 2>&1 || die "eac-vm/host/build.sh failed"
   sh "$ROOT/eac-vm/host/stage.sh" "$VMH" > /dev/null || die "eac-vm/host/stage.sh failed"
+  # The Metal host's winemetal.so is DXMT's: the release wine.app's, as SOURCE names it.
+  cp "$OUT/wine.app/Contents/Resources/lib/wine/aarch64-unix/winemetal.so" "$VMH/metal-host/winemetal.so" \
+    || die "no winemetal.so in the release wine.app"
   mkdir -p "$A/Contents/Resources/vm" && mv "$VMH"/run-*.sh "$A/Contents/Resources/vm/"
   F="$OUT/steam-forward"
   make -s -C "$ROOT/eac-vm/steam-forward" OUT="$F" \
@@ -480,11 +499,13 @@ EOF
   cat > "$ALV/README" << 'EOF'
 The microVM games run in (Contents/Helpers/vm and Contents/Resources/vm), and the setup that builds its images on
 this Mac (Contents/Helpers/mkfs.erofs, and Contents/Helpers/macneutron's vm-setup):
-- macneutron-vm, its Metal host, the Steam forwarder's host and the two scripts are MacNeutron's own (MIT, ../LICENSE).
+- macneutron-vm, the Steam forwarder's host and the two scripts are MacNeutron's own (MIT, ../LICENSE). The Metal
+  host's winemetal.so is DXMT's (LGPL-2.1-or-later): wine.app's licences, the source archive's dxmt.tar.
   macneutron-vm links libtpms (BSD-3-Clause, libtpms-LICENSE) and OpenSSL's libcrypto (Apache-2.0,
   openssl-LICENSE.txt). The forwarder loads Proton's lsteamclient (BSD-3-Clause; wine.app's licences).
 - libkrun (Apache-2.0), with MacNeutron's patches, and every crate it links: libkrun/, one folder each, listed in
-  libkrun/CRATES.txt.
+  libkrun/CRATES.txt. Parts of libkrun come from crosvm (BSD-3-Clause, libkrun/THIRD-PARTY); Rust's standard library
+  is linked in too (libkrun/rust-std/).
 - gvproxy, from containers/gvisor-tap-vsock (Apache-2.0, gvproxy-LICENSE).
 - mkfs.erofs is erofs-utils (GPL-2.0-or-later: erofs-utils-COPYING, erofs-utils-LICENSES/) with lz4 compiled in
   (BSD-2-Clause, lz4-LICENSE). Their source is in the release's source archive (erofs-utils.tar, lz4.tar).
@@ -593,11 +614,19 @@ fi
 W="$ROOT/build/eac-vm-work"
 PARTS="MacNeutron-$V-vm-parts.tar.xz"
 B="$ROOT/eac-vm/builder.sh"
-sh "$B" start > /dev/null || die "the builder (eac-vm/builder.sh) doesn't start"
+VM_SHARES="out=$W/images" sh "$B" start > /dev/null || die "the builder (eac-vm/builder.sh) doesn't start"
+# Its /mnt/out must be this tree's images (a builder started elsewhere would build into another folder).
+nonce=$(uuidgen)
+echo "$nonce" > "$W/images/.release-nonce"
+[ "$(sh "$B" ssh 'cat /mnt/out/.release-nonce 2> /dev/null')" = "$nonce" ] \
+  || die "the builder's /mnt/out isn't $W/images: stop it (eac-vm/builder.sh stop) and run the release again"
+rm -f "$W/images/.release-nonce"
 sh "$B" sync "$ROOT/eac-vm/image" /home/bench/mn-image > /dev/null || die "can't copy eac-vm/image into the builder"
 sh "$B" ssh 'sh ~/mn-image/build.sh > /tmp/image.log 2>&1' || die "the image build failed: the builder's /tmp/image.log"
-sh "$ROOT/eac-vm/setup/parts.sh" "$OUT/vm-parts" > /dev/null || die "parts.sh failed"
-tar -C "$OUT/vm-parts" -cJf "$OUT/$PARTS" . || die "can't archive the VM parts"
+sh "$ROOT/eac-vm/setup/parts.sh" "$OUT/vm-parts" "$OUT/wine.app" > /dev/null || die "parts.sh failed"
+COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --no-acls --no-fflags --uid 0 --gid 0 --uname root --gname root \
+  -C "$OUT/vm-parts" -cJf "$OUT/$PARTS" . || die "can't archive the VM parts"
+check_archive_owners "$OUT/$PARTS" || exit 1
 rm -rf "$OUT/vm-parts"
 check_sparse_template "$OUT/$PARTS" || exit 1
 KVER=$(sed -n 's/^KVER=//p' "$ROOT/eac-vm/image/build.sh")

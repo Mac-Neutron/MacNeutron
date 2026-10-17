@@ -31,7 +31,8 @@ awk -F'\t' '$2 == "/etc/machine-id" && $6 != 0 { bad = 1 } END { exit bad }' "$W
 
 # The parts and a manifest pointing at local copies.
 sh "$ROOT/eac-vm/setup/parts.sh" "$G/parts" > /dev/null
-tar -C "$G/parts" -cJf "$G/parts.tar.xz" .
+COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --no-acls --no-fflags --uid 0 --gid 0 --uname root --gname root \
+  -C "$G/parts" -cJf "$G/parts.tar.xz" .  # as release.sh makes it
 python3 "$ROOT/eac-vm/setup/manifest.py" "$G/parts.tar.xz" "$W/images/setup/packages.json" "$KVER" \
   "$W/images/x86-64-rootfs.erofs" "file://$G/parts.tar.xz" "file://$G/rpms/" > "$G/vm-manifest.json"
 

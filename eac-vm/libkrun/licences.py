@@ -41,12 +41,12 @@ for line in sorted(set(tree.splitlines())):
         found = [os.path.join(registry, i, f"{name}-{version}") for i in os.listdir(registry)
                  if os.path.isdir(os.path.join(registry, i, f"{name}-{version}"))]
         folder = found[0] if found else None
-    files = [f for f in sorted(os.listdir(folder)) if re.match(r"(LICEN[CS]E|COPYING|NOTICE)", f, re.I)] if folder else []
+    files = [f for f in sorted(os.listdir(folder)) if re.match(r"(LICEN[CS]E|COPYING|NOTICE|COPYRIGHT)", f, re.I)] if folder else []
     if not files and path:  # libkrun's own crates take the repository's licence
         folder, files = os.path.abspath(src), ["LICENSE"]
     if not files and root:  # a git crate in a workspace: the repository's
         folder = root
-        files = [f for f in sorted(os.listdir(root)) if re.match(r"(LICEN[CS]E|COPYING|NOTICE)", f, re.I)]
+        files = [f for f in sorted(os.listdir(root)) if re.match(r"(LICEN[CS]E|COPYING|NOTICE|COPYRIGHT)", f, re.I)]
     if not files:
         missing.append(f"{name} {version}")
     dest = os.path.join(out, f"{name}-{version}")
@@ -54,6 +54,21 @@ for line in sorted(set(tree.splitlines())):
     for f in files:
         shutil.copyfile(os.path.join(folder, f), os.path.join(dest, f))
     rows.append(f"{name} {version} {licence.strip() or '-'}")
+# libkrun's own macOS sources carry "Portions Copyright 2017 The Chromium OS Authors" under crosvm's BSD-3-Clause
+# licence, which its repository doesn't hold: the same text as vm-memory's (crosvm's) LICENSE-BSD-3-Clause.
+crosvm = [os.path.join(out, d, "LICENSE-BSD-3-Clause") for d in sorted(os.listdir(out)) if d.startswith("vm-memory-")]
+crosvm = [c for c in crosvm if os.path.exists(c)]
+if not crosvm:
+    sys.exit("licences: no vm-memory LICENSE-BSD-3-Clause for libkrun's Chromium OS notice")
+shutil.copyfile(crosvm[0], os.path.join(out, "THIRD-PARTY"))
+# Rust's standard library, linked in statically: the toolchain's own copyright and licences.
+sysroot = subprocess.run(["rustc", "--print", "sysroot"], cwd=src, env=env, capture_output=True, text=True,
+                         check=True).stdout.strip()
+doc = os.path.join(sysroot, "share", "doc", "rust")
+os.makedirs(os.path.join(out, "rust-std"))
+for f in ("COPYRIGHT.html", "COPYRIGHT-library.html"):
+    shutil.copyfile(os.path.join(doc, f), os.path.join(out, "rust-std", f))
+shutil.copytree(os.path.join(doc, "licenses"), os.path.join(out, "rust-std", "licenses"))
 with open(os.path.join(out, "CRATES.txt"), "w") as f:
     f.write("# crate version licence (each crate's files are in <crate>-<version>/)\n" + "\n".join(rows) + "\n")
 print(f"licences: {len(rows)} crates")

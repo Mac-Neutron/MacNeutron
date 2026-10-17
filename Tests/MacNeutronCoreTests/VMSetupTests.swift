@@ -140,3 +140,25 @@ private func setUp(_ f: SetupFixture, requests: Requests = Requests(), minFreeGB
     #expect(try await setUp(f) == 0)
     #expect(try FileManager.default.contentsOfDirectory(atPath: target.path).isEmpty)
 }
+
+@Test func theManifestsHashLeavesOutWhereThePartsAre() throws {
+    // A release whose VM didn't change moves only the parts' URL: the image set is the same, nothing downloads again.
+    let dir = try makeTempDir()
+    let a = dir.appending(path: "a.json"), b = dir.appending(path: "b.json"), c = dir.appending(path: "c.json")
+    try write(#"{"version": 1, "parts": {"url": "https://x/v0.6.0/p.tar.xz", "size": 3, "sha256": "aa"}, "kernel": "k"}"#, to: a)
+    try write(#"{"kernel": "k", "parts": {"sha256": "aa", "size": 3, "url": "https://x/v0.6.1/p.tar.xz"}, "version": 1}"#, to: b)
+    try write(#"{"version": 1, "parts": {"url": "https://x/v0.6.1/p.tar.xz", "size": 3, "sha256": "bb"}, "kernel": "k"}"#, to: c)
+    #expect(VMSetup.manifestHash(a) == VMSetup.manifestHash(b))
+    #expect(VMSetup.manifestHash(a) != VMSetup.manifestHash(c))
+}
+
+@Test func aSecondSetupInTheFolderWaits() async throws {
+    // A crashed app's setup still running when the relaunch starts another: one at a time, the other waits (75).
+    let f = try makeSetup(), requests = Requests()
+    try FileManager.default.createDirectory(at: f.vm, withIntermediateDirectories: true)
+    let held = open(f.vm.appending(path: "setup.lock").path, O_RDWR | O_CREAT, 0o600)
+    #expect(held >= 0 && flock(held, LOCK_EX | LOCK_NB) == 0)
+    defer { close(held) }
+    #expect(try await setUp(f, requests: requests) == 75)
+    #expect(requests.made == 0)
+}

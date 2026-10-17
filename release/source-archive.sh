@@ -70,6 +70,15 @@ COPYFILE_DISABLE=1 tar -cf "$W/lsteamclient.tar" --no-mac-metadata --no-xattrs -
   || die "can't tar lsteamclient's worktree"
 rm "$W/lsteamclient.list"
 row lsteamclient "$LSTEAMCLIENT_COMMIT" "$a" "$n" lsteamclient.tar
+# The VM's Wine (LGPL-2.1-or-later, in the VM parts' wine.tar): eac-vm/wine-patches on its BASE, clean.
+WL="${BUILD_DIR:-$ROOT/build}/eac-vm-work/wine-linux"
+wb=$(cut -d' ' -f1 "$ROOT/eac-vm/wine-patches/BASE")
+wn=$(find "$ROOT/eac-vm/wine-patches" -name '*.patch' | wc -l | tr -d ' ')
+wh=$(git -C "$WL" rev-parse HEAD 2> /dev/null) || die "no $WL"
+[ -z "$(git -C "$WL" status --porcelain)" ] || die "$WL has changes"
+case "$(git -C "$WL" rev-parse "$wh~$wn")" in "$wb"*) ;; *) die "$WL isn't eac-vm/wine-patches' BASE $wb with $wn patches" ;; esac
+git -C "$WL" archive --format=tar --prefix=wine-linux/ -o "$W/wine-linux.tar" HEAD
+row wine-linux "$wb" "$wh" "$wn" wine-linux.tar
 # The VM setup's mkfs.erofs (GPL-2.0-or-later, Contents/Helpers/mkfs.erofs) and the lz4 compiled into it, at
 # eac-vm/setup-tools/PIN (eac-vm/setup-tools/build.sh, in MacNeutron.tar, builds it).
 VS="${BUILD_DIR:-$ROOT/build}/vm-setup-tools-src"

@@ -65,6 +65,13 @@ while read -r tree pinned applied n file; do
       K=$(echo "${tree%%/*}" | tr '[:lower:]' '[:upper:]')
       subs="$subs${K}_SUBMODULE_${tree##*/}=$applied
 " ;;
+    wine-linux)  # the VM's Wine: eac-vm/wine-patches on BASE
+      b=$(cut -d' ' -f1 "$M/eac-vm/wine-patches/BASE")
+      np=$(find "$M/eac-vm/wine-patches" -name '*.patch' | wc -l | tr -d ' ')
+      case "$pinned" in "$b"*) ;; *) bad "wine-linux's base $pinned isn't eac-vm/wine-patches/BASE's $b" ;; esac
+      [ "$np" = "$n" ] || bad "wine-linux has $np archived patches, not $n"
+      c=$(git -C "${BUILD_DIR:-$ROOT/build}/eac-vm-work/wine-linux" rev-parse "$applied~$n" 2> /dev/null || true)
+      case "$c" in "$b"*) ;; *) bad "wine-linux's $applied~$n is ${c:-missing}, not BASE $b" ;; esac ;;
     erofs-utils | lz4)  # the VM setup's mkfs.erofs and its lz4, at eac-vm/setup-tools/PIN
       p=$(awk -v n="$tree" '$1 == n { print $3 }' "$M/eac-vm/setup-tools/PIN")
       [ -n "$p" ] && [ "$pinned" = "$p" ] && [ "$applied" = "$p" ] \
@@ -72,7 +79,7 @@ while read -r tree pinned applied n file; do
     *) bad "an unknown tree $tree in SOURCES.txt" ;;
   esac
 done < "$D/SOURCES.txt"
-for t in MacNeutron wine fex dxmt lsteamclient erofs-utils lz4; do
+for t in MacNeutron wine fex dxmt lsteamclient wine-linux erofs-utils lz4; do
   awk -v t="$t" '$1 == t { f = 1 } END { exit !f }' "$D/SOURCES.txt" || bad "SOURCES.txt has no $t"
 done
 want=$(LC_ALL=C /usr/bin/grep -E '^(FEX|DXMT)_SUBMODULE_' "$SRCF" | LC_ALL=C sort)
