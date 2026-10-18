@@ -145,6 +145,15 @@ class ClassifyTest(unittest.TestCase):
         self.assertIn("mn_d3d_call(", out[start:out.index("\n}", start)])
         self.assertNotIn('mn_d3d_special("ID3D12Device::GetAdapterLuid"', out)
 
+    def test_wrap_an_export(self):
+        # an export's wrap (M3): the generated proxy is mn_px_<name>, which guest/proxy.cpp's export calls
+        rules = gen.parse_rules(gen.read(RULES) + "\n::DXGIGetDebugInterface1 wrap\n", self.m)
+        calls = gen.classify(self.m, rules)
+        out, _ = gen.emit_proxies(self.m, rules, calls)
+        self.assertIn('extern "C" HRESULT WINAPI mn_px_DXGIGetDebugInterface1(', out)
+        self.assertNotIn('extern "C" HRESULT WINAPI DXGIGetDebugInterface1(', out)
+        self.assertIn('extern "C" HRESULT WINAPI CreateDXGIFactory1(', out)
+
     def test_every_method_has_a_mode(self):
         for row in gen.manifest(self.m):
             self.assertIn(self.calls[row[0]].mode, ("async", "sync", "submit", "special", "refuse"), row[1])

@@ -1252,6 +1252,8 @@ def emit_proxies(model, rules, calls):
         ret = c.ret
         if iface:
             sig = f"static {ret} STDMETHODCALLTYPE px_{mid}({', '.join(['mn_proxy *This'] + params)})"
+        elif c.name in rules.wrap:  # guest/proxy.cpp's export calls it
+            sig = f'extern "C" {ret} WINAPI mn_px_{mname}({", ".join(params) or "void"})'
         else:
             sig = f'extern "C" {ret} WINAPI {mname}({", ".join(params) or "void"})'
         body = [sig + " {", f"    // {c.name}"]

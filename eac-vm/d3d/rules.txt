@@ -270,6 +270,8 @@ IDXGISwapChain::Present wrap
 IDXGISwapChain1::Present1 wrap
 IDXGISwapChain::GetContainingOutput wrap
 IDXGIAdapter::EnumOutputs wrap
+# DXMT's NVIDIA extension (M3 Task 6): the registry keys NVIDIA's DLSS loader reads, in the guest, then forwarded.
+::DXGIGetDebugInterface1 wrap
 # DXMT's IMPLEMENT_ME (they'd abort it): answered in the guest as DXGI does (M3 Task 3, guest/proxy.cpp).
 IDXGISwapChain1::GetRestrictToOutput special
 # Frame pacing is the guest's (M3 Task 4): the latency object is a semaphore of its own.

@@ -159,6 +159,18 @@ private func expectRefusedUntilTheVMIsReady(_ f: VMFixture) {
     #expect(f.launcherLog.contains("not in a Steam library"))
 }
 
+@Test func dlssTurnsOnNativeDXMTsNvidiaExtension() throws {
+    // Forwarded, native DXMT in macneutron-vm reads its own environment: DLSS's NVIDIA extension too (M3 Task 6).
+    let f = try makeVMFixture()
+    var env = f.env
+    env["MACNEUTRON_DLSS"] = "1"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    #expect(f.runner.calls.last?.environment["DXMT_ENABLE_NVEXT"] == "1")
+    let g = try makeVMFixture()
+    _ = g.launcher.launch(["waitforexitandrun", game], environment: g.env)
+    #expect(g.runner.calls.last?.environment["DXMT_ENABLE_NVEXT"] == nil)
+}
+
 @Test func vmDirFromTheEnvironment() throws {
     let other = try makeVMFolder()
     let f = try makeVMFixture(vmInstalled: false)

@@ -199,6 +199,8 @@ public struct Launcher: Sendable {
             env["MN_STATE"] = vm.state(appID: context.appID).path(percentEncoded: false)
             env["MN_SHARE"] = vm.share(appID: context.appID).path(percentEncoded: false)
             env["MN_TOAST"] = layout.launcherBinary.path(percentEncoded: false)  // eac-vm/host/tpm.c's, while macOS asks
+            // DLSS's NVIDIA extension in native DXMT too (Direct3D forwarding: it reads macneutron-vm's environment)
+            if environment["MACNEUTRON_DLSS"] == "1", env["DXMT_ENABLE_NVEXT"] == nil { env["DXMT_ENABLE_NVEXT"] = "1" }
             if perf {
                 env["MN_PRESENT_STATS"] = vm.share(appID: context.appID).appending(path: "traces/frames.txt")
                     .path(percentEncoded: false)

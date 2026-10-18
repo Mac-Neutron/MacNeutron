@@ -31,6 +31,7 @@ struct mn_obj {
     DXGI_RGBA background = {0, 0, 0, 1};     // the swapchain's own answers (Task 3)
     UINT source_width = 0, source_height = 0;
     pacing *pace = nullptr;                  // a swapchain's frames (Task 4)
+    std::vector<std::pair<int, mn_obj *>> companions; // one an interface at another pointer, held for our life (M3)
 };
 static void end_pacing(pacing *p);
 
@@ -120,6 +121,17 @@ HRESULT STDMETHODCALLTYPE mn_px_QueryInterface(mn_proxy *This, REFIID riid, void
         *out = proxy_of(o, k);
         return S_OK;
     }
+    // A companion: an object of its own, one an interface, the same each time (COM's identity: a caller may patch it,
+    // as a test of DXMT's own does), which the object holds until its last release.
+    {
+        std::lock_guard<std::mutex> l(o->m);
+        for (auto &c : o->companions)
+            if (c.first == k) {
+                c.second->refs++;
+                *out = c.second->proxies[k];
+                return S_OK;
+            }
+    }
     mn_d3d_query_args q = {};
     q.handle = o->handle;
     std::memcpy(q.iid, &riid, sizeof q.iid);
@@ -128,8 +140,11 @@ HRESULT STDMETHODCALLTYPE mn_px_QueryInterface(mn_proxy *This, REFIID riid, void
     if (FAILED(hr) || !q.out) return FAILED(hr) ? hr : E_NOINTERFACE;
     uint64_t one[2] = {};
     one[k / 64] = 1ull << (k % 64);
-    mn_obj *c = object(q.out, k, one, nullptr); // a companion: an object of its own
+    mn_obj *c = object(q.out, k, one, nullptr);
     *out = proxy_of(c, k);
+    std::lock_guard<std::mutex> l(o->m);
+    c->refs++; // the object's hold
+    o->companions.push_back({k, c});
     return S_OK;
 }
 
@@ -147,6 +162,7 @@ ULONG STDMETHODCALLTYPE mn_px_Release(mn_proxy *This) {
     uint64_t h = o->handle;
     mn_d3d_call(MN_D3D_OP_RELEASE, &h);
     if (o->pace) end_pacing(o->pace);
+    for (auto &c : o->companions) mn_px_Release(c.second->proxies[c.first]);
     for (mn_proxy *p : o->proxies) delete p;
     delete o;
     return 0;
@@ -931,6 +947,59 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         }
     return fallback;
 }
+
+// ---- DXMT's NVIDIA extension (a wrapped export, M3 Task 6) ----
+
+// As DXMT's dxgi.cpp writes them in the guest's DXGI (InitializeVendorExtensionNV): the keys NVIDIA's DLSS loader and
+// nvapi read, there with DXMT_ENABLE_NVEXT=1 and gone without; then native DXMT is asked (its answer is the host's).
+extern "C" HRESULT WINAPI mn_px_DXGIGetDebugInterface1(UINT flags, REFIID iid, void **debug);
+static const GUID nvext_guid = {0xba0af616, 0x4a43, 0x4259, {0x81, 0x5c, 0xdb, 0x3b, 0x89, 0x82, 0x99, 0x05}};
+
+#ifndef MN_D3D_LOOPBACK
+static void nvext_registry() {
+    HKEY key1 = nullptr, key2 = nullptr, key3 = nullptr;
+    const WCHAR *name1 = L"{41FCC608-8496-4DEF-B43E-7D9BD675A6FF}", *name2 = L"FullPath";
+    WCHAR value3[] = L"C:\\Windows\\System32";
+    const char *on = getenv("DXMT_ENABLE_NVEXT");
+    if (!RegCreateKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\NVIDIA Corporation\\Global", 0, nullptr, 0, KEY_ALL_ACCESS,
+                         nullptr, &key1, nullptr) &&
+        !RegCreateKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\ControlSet001\\Services\\nvlddmkm", 0, nullptr, 0,
+                         KEY_ALL_ACCESS, nullptr, &key2, nullptr) &&
+        !RegCreateKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\NVIDIA Corporation\\Global\\NGXCore", 0, nullptr, 0,
+                         KEY_ALL_ACCESS, nullptr, &key3, nullptr)) {
+        if (!on || std::strcmp(on, "1")) {
+            RegDeleteValueW(key1, name1);
+            RegDeleteValueW(key2, name1);
+            RegDeleteValueW(key3, name2);
+        } else {
+            DWORD one = 1;
+            RegSetValueExW(key1, name1, 0, REG_DWORD, (const BYTE *)&one, sizeof one);
+            RegSetValueExW(key2, name1, 0, REG_DWORD, (const BYTE *)&one, sizeof one);
+            RegSetValueExW(key3, name2, 0, REG_SZ, (const BYTE *)value3, sizeof value3);
+        }
+    }
+    if (key1) RegCloseKey(key1);
+    if (key2) RegCloseKey(key2);
+    if (key3) RegCloseKey(key3);
+}
+#else
+static void nvext_registry() {}
+#endif
+
+static std::once_flag nvext_once;
+
+extern "C" HRESULT WINAPI DXGIGetDebugInterface1(UINT flags, REFIID iid, void **debug) {
+    if (!std::memcmp(&iid, &nvext_guid, sizeof iid)) std::call_once(nvext_once, nvext_registry);
+    return mn_px_DXGIGetDebugInterface1(flags, iid, debug);
+}
+
+#ifndef MN_D3D_LOOPBACK
+// As DXMT's dxgi.dll does at load: the keys are there before the game looks for NVIDIA's loader.
+extern "C" BOOL WINAPI DllMain(HINSTANCE, DWORD reason, void *) {
+    if (reason == DLL_PROCESS_ATTACH) std::call_once(nvext_once, nvext_registry);
+    return TRUE;
+}
+#endif
 
 #ifdef MN_D3D_LOOPBACK
 // The loopback library: the unix side is in the same library.
