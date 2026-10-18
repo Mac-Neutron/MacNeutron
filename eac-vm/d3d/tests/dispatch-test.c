@@ -3,6 +3,8 @@
  * as macneutron-vm runs them.
  *   device     D3D12CreateDevice with a guest-picked handle makes a device that answers ID3D12Device
  *   fence      ID3D12Device::CreateFence on it; ID3D12Fence::GetCompletedValue answers the initial value
+ *   identity   (after M2) ID3D12DeviceChild::GetDevice answers the device's first handle, again after its own
+ *              handle's release
  *   winemetal  a winemetal op still reaches mn_wm_dispatch
  *   invalid    an unknown id, and a record shorter than its params, answer MN_EINVAL
  *   removed    once a stub says DXGI_ERROR_DEVICE_REMOVED, the next CreateFence answers it too
@@ -13,7 +15,9 @@
  *   events     (M2 Task 8) after op 2 attaches a notify queue and a mirror, a fence's creation names its mirror slot;
  *              a queue's Signal(5) raises the slot to 5 with no record of the guest's; a CPU Signal(9) leaves 9; a raise
  *              to 3 after 5 leaves 5; SetEventOnCompletion(12, e) posts MN_NOTIFY_EVENT with e once the fence
- *              reaches 12 (whatever the guest did with e meanwhile); SetEventOnMultipleFenceCompletion's any and all
+ *              reaches 12 (whatever the guest did with e meanwhile); SetEventOnMultipleFenceCompletion's any and all;
+ *              (after M2) the context's notify queue and mirror go with its end, though an event is never set (its
+ *              fence released first, or a wait on no fences)
  *   wchar      (M2 Task 10) IDXGIAdapter1::GetDesc1 answers the guest's layout: its description UTF-16, its ids past
  *              it where the guest has them
  *   dispatch-test <metal-host> <native DXMT lib>; prints "dispatch-test: ok" or each failure. */
@@ -108,6 +112,20 @@ int main(int argc, char **argv) {
     struct value_params { uint64_t self, ret, aux[2]; } gv = {fp.fence, 0, {0}};
     CHECK(mn_d3d_calls[value].params_size == sizeof gv);
     CHECK(call(value, &gv) == 0 && gv.ret == 7);
+
+    /* identity: GetDevice answers the device's own first handle (the guest returns its proxy), twice, the handle it
+     * bound let go between */
+    unsigned getdev = id_of("ID3D12DeviceChild::GetDevice");
+    struct gd_params { uint64_t self, ret, riid, device, ifaces[5]; };
+    CHECK(mn_d3d_calls[getdev].params_size == sizeof(struct gd_params));
+    for (int i = 0; i < 2; i++) {
+        struct gd_params g = {fp.fence, 0, (uintptr_t)iid("ID3D12Device"), 0, {0}};
+        CHECK(call(getdev, &g) == 0 && (uint32_t)g.ret == 0 && g.device && g.device != device && g.ifaces[4] == device);
+        uint64_t gh = g.device;
+        uint32_t gn = 0;
+        CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_RELEASE, &gh, sizeof gh, reply, sizeof reply, &gn) == 0);
+        mn_vm_hooks.progress(1, ring_state);
+    }
 
     /* winemetal */
     struct mn_wm_stats st;
@@ -231,6 +249,20 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 500 && !got; i++)
         if (!(got = mn_notify_next(q, &r))) usleep(1000);
     CHECK(got && r.value == 0x66);
+    /* two events never set, checked at the end: one on a fence released first (Metal keeps what would set it), one
+     * that a wait on no fences leaves alone */
+    struct fence_params e3 = fp;
+    e3.fence = 0, e3.initial_value = 0;
+    CHECK(call(fence, &e3) == 0 && e3.fence);
+    struct { uint64_t self, ret, value, event, aux[2]; } pending = {e3.fence, 0, 100, 0x77, {0}};
+    CHECK(call(onc, &pending) == 0 && (uint32_t)pending.ret == 0);
+    uint64_t h3 = e3.fence;
+    CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_RELEASE, &h3, sizeof h3, reply, sizeof reply, &n) == 0);
+    mn_vm_hooks.progress(1, ring_state);
+    struct mf none = any;
+    none.count = 0, none.event = 0x88;
+    CHECK(call(multi, &none) == 0 && (uint32_t)none.ret == 0);
+    CHECK(mn_d3d_events_live() == 1);
 
     /* wchar */
     unsigned factory1 = id_of("::CreateDXGIFactory1"), enum1 = id_of("IDXGIFactory1::EnumAdapters1"),
@@ -279,6 +311,10 @@ int main(int argc, char **argv) {
     mn_d3d_stubs[victim] = keep;
     f2.fence = 0;
     CHECK(call(fence, &f2) == (int32_t)0x887A0005);
+
+    /* events' end: the context's notify queue and mirror go with it, the two events never set above too */
+    mn_vm_hooks.context_end(1);
+    CHECK(mn_d3d_events_live() == 0);
 
     if (!failed) puts("dispatch-test: ok");
     return failed;

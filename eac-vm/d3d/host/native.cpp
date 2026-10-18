@@ -2,9 +2,37 @@
 // answers.
 #include <atomic>
 #include <cstdio>
+#include <mutex>
+#include <unordered_map>
 #include "stubs.h"
 
 extern "C" void mn_d3d_native_release(void *obj) { ((IUnknown *)obj)->Release(); }
+
+// COM identity: the first handle each native object was bound to, and how many handles it has, so a method that hands
+// back an object the guest already has (GetDevice, a pipeline library's stored pipeline) answers that handle and the
+// guest its proxy. Keyed by the object alone: native DXMT shares no object between contexts (it has no singletons),
+// and a handle's release doesn't know its context; one shared anyway would answer only its first context.
+struct identity { uint32_t ctx_id; uint64_t handle; unsigned bindings; };
+static std::mutex identity_lock;
+static std::unordered_map<void *, identity> identities;
+
+extern "C" uint64_t mn_d3d_identity_of(uint32_t ctx_id, void *obj) {
+    std::lock_guard<std::mutex> l(identity_lock);
+    auto it = identities.find(obj);
+    return it != identities.end() && it->second.ctx_id == ctx_id ? it->second.handle : 0;
+}
+
+extern "C" void mn_d3d_identity_add(uint32_t ctx_id, void *obj, uint64_t handle) {
+    std::lock_guard<std::mutex> l(identity_lock);
+    identities.try_emplace(obj, identity{ctx_id, handle, 0}).first->second.bindings++;
+}
+
+// A binding's release (each holds its own reference).
+extern "C" void mn_d3d_identity_drop(void *obj) {
+    std::lock_guard<std::mutex> l(identity_lock);
+    auto it = identities.find(obj);
+    if (it != identities.end() && !--it->second.bindings) identities.erase(it);
+}
 
 extern "C" int32_t mn_d3d_native_query(void *obj, const uint8_t iid[16], void **out) {
     return ((IUnknown *)obj)->QueryInterface(*(const IID *)iid, out);

@@ -21,6 +21,7 @@ extern void *mn_d3d_exports[MN_D3D_EXPORTS];
 void mn_d3d_native_release(void *obj);
 int32_t mn_d3d_native_query(void *obj, const uint8_t iid[16], void **out);
 const void *mn_d3d_native_blob(void *obj, uint64_t *size);
+void mn_d3d_identity_add(uint32_t ctx_id, void *obj, uint64_t handle), mn_d3d_identity_drop(void *obj);
 NTSTATUS_T mn_d3d_map_stub(void *params);
 NTSTATUS_T mn_d3d_create_fence_stub(void *params), mn_d3d_fence_signal_stub(void *params),
     mn_d3d_queue_signal_stub(void *params), mn_d3d_set_event_stub(void *params),
@@ -105,46 +106,9 @@ int mn_d3d_load(const char *d) {
     return 0;
 }
 
-/* COM identity: the first handle each native object was bound to in a context, and how many handles it has, so a method
- * that hands back an object the guest already has (GetDevice, a pipeline library's stored pipeline) answers that
- * handle and the guest its proxy. ponytail: a linear list under one lock; a map when objects get many. */
-struct known { uint32_t ctx_id; void *obj; uint64_t handle; unsigned bindings; struct known *next; };
-static struct known *known;
-static pthread_mutex_t known_lock = PTHREAD_MUTEX_INITIALIZER;
-
-uint64_t mn_d3d_identity_of(uint32_t ctx_id, void *obj) {
-    uint64_t h = 0;
-    pthread_mutex_lock(&known_lock);
-    for (struct known *k = known; k && !h; k = k->next)
-        if (k->ctx_id == ctx_id && k->obj == obj) h = k->handle;
-    pthread_mutex_unlock(&known_lock);
-    return h;
-}
-
-static void identity_add(uint32_t ctx_id, void *obj, uint64_t h) {
-    pthread_mutex_lock(&known_lock);
-    struct known *k = known;
-    while (k && !(k->ctx_id == ctx_id && k->obj == obj)) k = k->next;
-    if (k) k->bindings++;
-    else if ((k = malloc(sizeof *k))) *k = (struct known){ctx_id, obj, h, 1, known}, known = k;
-    pthread_mutex_unlock(&known_lock);
-}
-
-/* A binding's release (each holds its own reference). */
-static void identity_drop(void *obj) {
-    pthread_mutex_lock(&known_lock);
-    for (struct known **kp = &known; *kp; kp = &(*kp)->next)
-        if ((*kp)->obj == obj) {
-            struct known *k = *kp;
-            if (!--k->bindings) *kp = k->next, free(k);
-            break;
-        }
-    pthread_mutex_unlock(&known_lock);
-}
-
 /* A handle's object goes: a fence forgets its mirror slot first. */
 static void release(void *obj) {
-    identity_drop(obj);
+    mn_d3d_identity_drop(obj);
     mn_d3d_fence_gone(obj);
     mn_d3d_native_release(obj);
 }
@@ -191,6 +155,8 @@ static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *
         if (hr >= 0 && mn_ht_bind(c->ht, ring, q.out, MN_HK_D3D, out, MN_OWN_PLUS1)) {
             mn_d3d_native_release(out);
             hr = MN_D3D_E_FAIL;
+        } else if (hr >= 0) {
+            mn_d3d_identity_add(c->ctx_id, out, q.out); /* its release drops a binding too */
         }
         memcpy(reply, &hr, sizeof hr);
         *n = sizeof hr;
@@ -280,7 +246,7 @@ static int32_t d3d(uint32_t ctx_id, void *ring, uint32_t id, const void *p, uint
             if (call->fields[i].kind != WMF_HANDLE_OUT) continue;
             memcpy(&h, (uint8_t *)reply + call->fields[i].offset, sizeof h);
             void *obj = h ? mn_ht_get(c->ht, h, MN_HK_D3D, &ok) : NULL;
-            if (obj) identity_add(c->ctx_id, obj, h);
+            if (obj) mn_d3d_identity_add(c->ctx_id, obj, h);
         }
     if (need && !s && cap >= sizeof need) { /* made in host memory for want of an arena: let it go, the guest adds one
                                               * and asks again */

@@ -147,6 +147,9 @@ IDXGIOutput5::DuplicateOutput1 refuse
 ID3D12Object::GetPrivateData data_size inout one
 ID3D12Object::GetPrivateData data out size=*data_size
 ID3D12Object::SetPrivateData data in size=data_size
+# SetName: SetPrivateData(WKPDID_D3DDebugObjectNameW) of the name, as D3D12's is, made in the guest (guest/proxy.cpp) so
+# GetPrivateData hands back the guest's 2-byte WCHARs, not native DXMT's 4.
+ID3D12Object::SetName special
 IDXGIObject::GetPrivateData data_size inout one
 IDXGIObject::GetPrivateData data out size=*data_size
 IDXGIObject::SetPrivateData data in size=data_size

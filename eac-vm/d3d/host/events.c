@@ -1,8 +1,10 @@
 /* Waiting (M2 Task 8): a context's Direct3D notify queue and its fences' mirror (op 2), the slots, and the relay
  * events native DXMT sets instead of the guest's (win32_native_event.h, fork 0076). A relay for a guest's event posts
  * MN_NOTIFY_EVENT with its handle, which the guest's listener sets; a relay for a fence's value raises its slot. A
- * relay fires once, on whichever thread DXMT sets it; what it uses holds a reference on the context's state, which
- * outlives the context until the last relay is gone. Slots are never reused: a late relay could raise a new fence's. */
+ * relay fires once, on whichever thread DXMT sets it, and holds a reference on the context's state until it fires or
+ * DXMT lets it go unset (fork 0080's end: a wait on no fences); the context's end disarms the rest (Metal keeps what
+ * would set one whose fence went first for good: that relay's few bytes stay). Slots are never reused: a late relay
+ * could raise a new fence's. */
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -26,17 +28,23 @@ struct events {
     _Atomic uint64_t *mirror;
     void *hold;
     uint64_t slots, next;
+    struct relay *relays; /* armed, under lock */
     struct events *next_ctx;
 };
+struct relay { struct events *e; _Atomic uint64_t *slot; uint64_t value; struct relay *next; };
 struct fence { void *obj; struct events *e; uint64_t slot; struct fence *next; };
 
 /* ponytail: linear lists under one lock; a map if fences get many */
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static struct events *all;
 static struct fence *fences;
+static atomic_int live;
+
+int mn_d3d_events_live(void) { return atomic_load(&live); }
 
 static void put(struct events *e) {
     if (atomic_fetch_sub(&e->refs, 1) != 1) return;
+    atomic_fetch_sub(&live, 1);
     mn_notifyq_put(e->q);
     mn_executor_blob_release(e->hold);
     free(e);
@@ -58,6 +66,7 @@ int mn_d3d_events_attach(struct mn_wm_ctx *c, uint64_t queue_blob, uint64_t mirr
         return -1;
     }
     atomic_init(&e->refs, 1);
+    atomic_fetch_add(&live, 1);
     e->ctx_id = c->ctx_id, e->slots = mirror_len / 8;
     pthread_mutex_lock(&lock);
     struct events *old = of(c->ctx_id);
@@ -79,6 +88,9 @@ void mn_d3d_events_end(uint32_t ctx_id) {
     while (*pp && (*pp)->ctx_id != ctx_id) pp = &(*pp)->next_ctx;
     struct events *e = *pp;
     if (e) *pp = e->next_ctx;
+    int armed = 0; /* disarmed now, each with its reference */
+    for (struct relay *r = e ? e->relays : NULL; r; r = r->next) r->e = NULL, armed++;
+    if (e) e->relays = NULL;
     for (struct fence **fp = &fences; *fp;) {
         struct fence *f = *fp;
         if (f->e != e || !e) {
@@ -90,6 +102,7 @@ void mn_d3d_events_end(uint32_t ctx_id) {
         free(f);
     }
     pthread_mutex_unlock(&lock);
+    while (armed--) put(e);
     if (e) put(e);
 }
 
@@ -154,25 +167,48 @@ void mn_d3d_fence_raise(void *obj, uint64_t v) {
     put(e);
 }
 
-struct relay { struct events *e; _Atomic uint64_t *slot; uint64_t value; };
+/* The relay's state and its reference, taken from it: NULL once it fired or was disarmed. */
+static struct events *disarm(struct relay *r) {
+    pthread_mutex_lock(&lock);
+    struct events *e = r->e;
+    if (e) {
+        struct relay **rp = &e->relays;
+        while (*rp != r) rp = &(*rp)->next;
+        *rp = r->next;
+        r->e = NULL;
+    }
+    pthread_mutex_unlock(&lock);
+    return e;
+}
 
 static void fire(void *ctx) {
     struct relay *r = ctx;
+    struct events *e = disarm(r);
+    if (!e) return;
     if (r->slot) mn_d3d_mirror_raise((uint64_t *)r->slot, r->value);
-    else mn_notifyq_post(r->e->q, MN_NOTIFY_EVENT, r->value);
-    put(r->e);
+    else mn_notifyq_post(e->q, MN_NOTIFY_EVENT, r->value);
+    put(e);
+}
+
+static void end(void *ctx) {
+    struct relay *r = ctx;
+    struct events *e = disarm(r);
+    if (e) put(e);
     free(r);
 }
 
 static void *relay(struct events *e, _Atomic uint64_t *slot, uint64_t value) {
     struct relay *r = malloc(sizeof *r);
-    void *h = r ? mn_win32_relay_event(fire, r) : NULL;
+    void *h = r ? mn_win32_relay_event(fire, end, r) : NULL;
     if (!h) {
         free(r);
         put(e);
         return NULL;
     }
-    *r = (struct relay){e, slot, value};
+    pthread_mutex_lock(&lock);
+    *r = (struct relay){e, slot, value, e->relays};
+    e->relays = r;
+    pthread_mutex_unlock(&lock);
     return h;
 }
 

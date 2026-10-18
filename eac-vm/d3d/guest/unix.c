@@ -16,7 +16,7 @@
 #ifdef MN_D3D_LOOPBACK
 #include "win32_native_event.h" /* the guest's events are the native program's */
 #else
-extern unsigned int NtSetEvent(void *handle, void *prev_state); /* Wine's ntdll.so */
+extern unsigned int NtSetEvent(void *handle, void *prev_state), NtClose(void *handle); /* Wine's ntdll.so */
 #endif
 #include "mnd3d_params.h"
 #include "../mn_d3d.h"
@@ -25,7 +25,8 @@ extern const struct mn_wm_call mn_d3d_calls[MN_D3D_CALLS];
 
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static int ready; /* 0, or the transport's -errno */
-static _Thread_local uint8_t *rec, *reply;
+static _Thread_local uint8_t *rec, *reply; /* one allocation, freed as its thread ends (thread_end) */
+static pthread_key_t thread_end;
 
 /* The arenas this process gave the host (galloc regions, for the process's life): Map's (blob, offset) is ours here. */
 struct arena { uint64_t blob, offset, len; uint8_t *ptr; };
@@ -84,11 +85,13 @@ static void *listener(void *arg) {
         struct mn_notify_rec r;
         while (mn_notify_next(q, &r)) {
             if (r.type != MN_NOTIFY_EVENT) continue;
+            /* ours (proxy.cpp's on_event), let go once set: the program may have closed its own */
 #ifdef MN_D3D_LOOPBACK
             mn_win32_set_event((void *)(uintptr_t)r.value);
-            mn_win32_unref((void *)(uintptr_t)r.value); /* the proxy's reference: the program may have closed it */
+            mn_win32_unref((void *)(uintptr_t)r.value);
 #else
-            NtSetEvent((void *)(uintptr_t)r.value, NULL); /* a closed handle: an error, nothing more */
+            NtSetEvent((void *)(uintptr_t)r.value, NULL);
+            NtClose((void *)(uintptr_t)r.value);
 #endif
         }
         mn_notify_wait(queue_blob.blob_id, atomic_load_explicit(&q->tail, memory_order_relaxed), 1000);
@@ -136,6 +139,7 @@ __attribute__((destructor)) static void trace_end(void) { trace_out(); }
 static void init(void) {
     const char *t = getenv("MACNEUTRON_VM_D3D_TRACE");
     if (t && *t == '1' && (why = calloc(MN_D3D_CALLS, 1))) counts = calloc(MN_D3D_CALLS, sizeof *counts);
+    pthread_key_create(&thread_end, free);
     mn_wm_guest_handle = proxy_handle;
     ready = mn_open();
     if (!ready) ready = mn_drained();
@@ -143,9 +147,11 @@ static void init(void) {
 }
 
 static int buffers(void) {
-    if (!rec) rec = malloc(MN_REC_MAX);
-    if (!reply) reply = malloc(MN_REPLY_BYTES);
-    return rec && reply ? 0 : -ENOMEM;
+    if (rec) return 0;
+    if (!(rec = malloc(MN_REC_MAX + MN_REPLY_BYTES))) return -ENOMEM;
+    reply = rec + MN_REC_MAX;
+    pthread_setspecific(thread_end, rec);
+    return 0;
 }
 
 static int32_t family(uint32_t id, void *params) {
@@ -210,7 +216,7 @@ int32_t mn_d3d_unix_call(void *args) {
     if (a->id >= MN_D3D_CALLS || !mn_d3d_calls[a->id].name) return MN_EINVAL;
     if (counts) atomic_fetch_add_explicit(&counts[a->id], 1, memory_order_relaxed);
     const struct mn_wm_call *c = &mn_d3d_calls[a->id];
-    for (int again = 0;; again = 1) {
+    for (int tries = 0;;) {
         struct mn_wm_out o = {.buf = rec, .cap = MN_REC_MAX};
         NTSTATUS_T s = mn_wm_pack_call(c, params, &o);
         if (s) return (int32_t)s;
@@ -228,7 +234,9 @@ int32_t mn_d3d_unix_call(void *args) {
             if (r != MN_D3D_NEED_ARENA) return r;
             uint64_t want = 0;
             if (n >= sizeof want) memcpy(&want, reply, sizeof want);
-            if (again || add_arena(want)) return E_OUTOFMEMORY_; /* the guest's memory, once */
+            /* the guest's memory, an arena a try: another thread's creation may take the one added first.
+             * ponytail: 8 tries; a reservation for the asker if creators ever starve each other */
+            if (++tries == 8 || add_arena(want)) return E_OUTOFMEMORY_;
             continue;
         }
         if (!o.sync) return 0;

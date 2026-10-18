@@ -11,8 +11,11 @@
 //   view      (the final review of M2) one thread makes a render target's view and goes idle (alive, its ring
 //             unflushed); another clears through that view and closes its list, which is then executed: the target
 //             reads back cleared (a view runs when it's made, so a later recording on any thread finds it)
+//   exits     (after M2) 512 threads, one after another, each make one call and end: the memory they took is given
+//             back (the unix side's per-thread buffers)
 // Prints "threads ..." lines.
 #include "d3d12_common.hpp"
+#include <malloc/malloc.h>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -224,6 +227,16 @@ static void View() {
     printf("threads view %d of 64 pixels wrong\n", bad);
 }
 
+static void Exits() {
+    auto used = [] { return mstats().bytes_used; };
+    std::thread([] { gpu->device->GetNodeCount(); }).join(); // what the first thread takes for good
+    size_t before = used();
+    for (int i = 0; i < 512; i++) std::thread([] { gpu->device->GetNodeCount(); }).join();
+    size_t kept = used() > before ? used() - before : 0;
+    if (kept < (16u << 20)) printf("threads exits ok\n");
+    else printf("threads exits kept %zu MiB\n", kept >> 20);
+}
+
 int main() {
     Gpu g;
     gpu = &g;
@@ -231,5 +244,6 @@ int main() {
     Order();
     Release();
     View();
+    Exits();
     return 0;
 }

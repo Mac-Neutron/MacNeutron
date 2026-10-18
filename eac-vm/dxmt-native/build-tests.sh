@@ -38,7 +38,7 @@ W=$ROOT/build/eac-vm-work/share
 MN_REF_INVOCATIONS="$OUT/check.invocations" MN_REF_OUT="$OUT/check-ref" MN_REF_RUNS=1 sh "$ROOT/eac-vm/dxmt/ref.sh" \
   > "$OUT/check-ref.txt" 2>&1 || { tail -3 "$OUT/check-ref.txt"; echo "tests: FAIL the macOS run"; exit 1; }
 rc=0
-DXMT_SHADER_CACHE_PATH=$(mktemp -d "${TMPDIR:-/tmp}/dxmt-native-check.XXXXXX") DXMT_MAX_ANISOTROPY=0 \
+DXMT_LOG_PATH=none DXMT_SHADER_CACHE_PATH=$(mktemp -d "${TMPDIR:-/tmp}/dxmt-native-check.XXXXXX") DXMT_MAX_ANISOTROPY=0 \
   "$OUT/d3d12_null" "$T/shaders/null.cs.dxil" > "$OUT/check-native.txt" 2>&1 || rc=$?
 echo "$rc" > "$OUT/check-native.status"
 python3 -I "$ROOT/eac-vm/dxmt/compare.py" d3d12_null "$OUT/check-ref/d3d12_null.1.txt" \
@@ -47,7 +47,7 @@ python3 -I "$ROOT/eac-vm/dxmt/compare.py" d3d12_null "$OUT/check-ref/d3d12_null.
 # DXMT's own files natively, from the paths it builds the Wine way (Z: and backslashes): the pipeline recording (the
 # launcher's precache) and the DXIL dump.
 X=$(mktemp -d "${TMPDIR:-/tmp}/dxmt-native-files.XXXXXX")
-DXMT_PIPELINE_RECORD="$X/record" DXMT_DXIL_DUMP="$X/dump" DXMT_SHADER_CACHE_PATH="$X/cache" \
+DXMT_LOG_PATH=none DXMT_PIPELINE_RECORD="$X/record" DXMT_DXIL_DUMP="$X/dump" DXMT_SHADER_CACHE_PATH="$X/cache" \
   "$OUT/d3d12_null" "$T/shaders/null.cs.dxil" > "$OUT/check-files.txt" 2>&1 || true
 recorded=$(find "$X/record" -type f 2> /dev/null | wc -l | tr -d ' ')
 dumped=$(find "$X/dump" -type f 2> /dev/null | wc -l | tr -d ' ')

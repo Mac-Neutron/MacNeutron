@@ -1022,7 +1022,7 @@ page the host raises, `GetCompletedValue` without a call; events set by the gues
 memory (arenas of guest-shared memory, 64 MiB at a time, from which native DXMT's CPU-visible buffers and heaps are
 carved through the memory hooks: `Map` answers the guest's own address). Fork patches: 0076 (the hooks and relay
 events natively), 0077 (CPU-visible heaps over the hooks), 0078 (DXGI's adapter description in native WCHAR; it was
-garbage natively) and 0079 (`WMTForward`). All apply on the pin.
+garbage natively), 0079 (`WMTForward`, call 155 only) and 0080 (a relay event's end). All apply on the pin.
 
 The gates (`eac-vm/d3d/gate.sh`), against one macOS run each (`compare.py` given it as both references, measured lines
 left out): the loopback (`loopback-gate.sh`: the 19 programs linked to a library that runs the guest's proxies,
@@ -1070,8 +1070,8 @@ The final review (one fresh reviewer over the whole branch) found three things t
 test that failed first:
 - The thread that sets the events the host posts was a pthread of the unix side's, so `NtSetEvent` ran on its
   creator's TEB and server pipes; when that thread had ended, the process died at its first event set
-  (`tests/eventthread.cpp` in `d3d-smoke.sh`: the set must be the event's first use, or ntsync's cached handle needs no
-  server call). It is now `mnd3d.dll`'s own Wine thread (op 6), started with the first event a fence is given.
+  (`tests/smoke.cpp`'s eventthread line in `d3d-smoke.sh`: the set must be the event's first use, or ntsync's cached
+  handle needs no server call). It is now `mnd3d.dll`'s own Wine thread (op 6), started with the first event a fence is given.
 - A CPU descriptor written on one thread was still in that thread's ring when another thread recorded with it
   (`threads.cpp`'s view case: a clear through another thread's new view cleared nothing, 64 of 64 pixels). The seven
   descriptor writes now run when they're made (a trap each; M5 measures what that costs); left open, another thread
@@ -1086,10 +1086,36 @@ boundary against its own game decides whether every record's objects get checked
 Also from M2: the VM host's native DXMT wrote an empty `_dxgi.log` into the folder `macneutron-vm` ran from; its logs
 go to the run's `traces/` now.
 
+The review's deferred minors, fixed after it (2026-10-18), each with a test that failed first where one could:
+- `SetName` is the guest's own `SetPrivateData(WKPDID_D3DDebugObjectNameW)`, so `GetPrivateData` hands back the
+  guest's 2-byte WCHARs; forwarded, it read back native DXMT's UTF-32 (`smoke.cpp`'s name line: 24 bytes for 12).
+- An event goes to the host as the listener's own duplicate, closed once set: Wine gives a closed handle's value to the
+  next event at once, and a program that closed its event after `SetEventOnCompletion` had its next one set
+  (`smoke.cpp`'s eventreuse line, forwarded; guest DXMT does the same).
+- `WMTForward` (0079) takes call 155 only; 156 indexed past the guest's table (an access violation in both modes).
+- A relay DXMT never sets no longer keeps its context's notify queue and mirror for good (`dispatch-test`): a relay
+  ends when DXMT lets it go (0080: a wait on no fences), and the context's end disarms the rest. Metal itself keeps an
+  unreached notification's block and event for good (a probe: neither the event's release nor the listener's frees
+  them), so a fence released with an event still to set leaves that relay's few bytes, Metal's, and in the guest the
+  listener's duplicate, until the process ends.
+- The unix side's per-thread buffers (320 KiB) go with their thread (`threads.cpp`'s exits case: 512 threads kept
+  160 MiB).
+- An identity hit on an object the guest knows only as another interface (a companion `QueryInterface` made) is a proxy
+  of the interface asked, not of the object's first one (`tests/identity.sh`); the host's identity list is a hash map
+  by object (native DXMT shares none between contexts), and a companion's handle counts in it.
+- `MN_D3D_NEED_ARENA` is retried up to 8 times, not once: another thread's creation can take the arena one added. No
+  test caught it: 16 threads making 48 buffers that each want an arena never lost one (a creation's Metal call takes
+  milliseconds, the window microseconds).
+- `memory.c` says what the review found (a creation's own DXMT buffers, such as a shader-visible heap's argument
+  buffer, come from the arenas too, as guest DXMT's come from guest memory), and `build-tests.sh` leaves no
+  `_dxgi.log` where it runs.
+
 Left for M3: presentation (swapchains on the VM window's layer, `Present`, the frame-latency object: the swapchain
 methods are forwarded as generated but untested, and a guest window's handle means nothing natively), XeSS and DLSS
 natively, and the games; the launcher's DXMT settings, which native DXMT reads from the VM host's environment, not the
 guest program's (NVEXT, stats, a shader cache per game: natively it defaults to one for every game), native DXMT in
 the app's VM folder, `WriteToSubresource`/`ReadFromSubresource`, and DXMT's conditional `IMPLEMENT_ME` paths, which
 still abort the VM host rather than fail the call. The guest caches no immutable answer yet (spec §4.5): M5 measures
-whether one is worth it. Left for M4: D3D11 and D3D10 (`d3d11_vsia`).
+whether one is worth it. Left for M4: D3D11 and D3D10 (`d3d11_vsia`). Until then forwarding breaks them in the same
+prefix: the stand-in `dxgi.dll` replaces DXMT's, whose adapter guest DXMT's `d3d11` needs, so
+`MACNEUTRON_VM_D3D=forward` is for D3D12 games only.

@@ -1,11 +1,12 @@
 /* Arenas (M2 Task 7): native DXMT's CPU-visible buffers in memory the guest shares, so a mapped resource is the
  * guest's own memory. The guest hands over regions (op 1); native winemetal's memory hooks (WMTSetMemoryHooks, fork
  * 0076) carve 16 KiB pieces from them, first fit, during a creation (a call with a handle out) of the context running
- * on this thread. A creation that finds no room is made in host memory (DXMT doesn't survive a failed buffer), and
- * the dispatcher lets it go and answers MN_D3D_NEED_ARENA with the bytes it wanted. Anything else (DXMT's own buffers,
- * made inside other calls) gets host memory the guest never sees. A piece
- * is the arena's again once Metal lets its buffer go, on whichever thread; an arena lives as long as its context, or
- * after it until its last piece comes back. */
+ * on this thread: every CPU-visible buffer DXMT makes in it, the object's and DXMT's own (a shader-visible descriptor
+ * heap's argument buffer), as guest DXMT's all come from guest memory. A creation that finds no room is made in host
+ * memory (DXMT doesn't survive a failed buffer), and the dispatcher lets it go and answers MN_D3D_NEED_ARENA with the
+ * bytes it wanted. Buffers made inside other calls get host memory the guest never sees. A piece is the arena's again
+ * once Metal lets its buffer go, on whichever thread; an arena lives as long as its context, or after it until its
+ * last piece comes back. */
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>

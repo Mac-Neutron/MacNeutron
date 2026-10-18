@@ -131,7 +131,8 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
   guest's own address for that memory: persistently mapped upload buffers need no copies. (M2: through memory hooks
   natively, `WMTSetMemoryHooks`, fork 0076, and CPU-visible heaps over them, 0077.)
 - When an arena is full the host asks for another in the reply of the call that needed it. (M2: the creation is
-  answered `MN_D3D_NEED_ARENA` with the bytes it wanted; the guest adds an arena and sends it again, once.)
+  answered `MN_D3D_NEED_ARENA` with the bytes it wanted; the guest adds an arena and sends it again, up to 8
+  tries: another thread's creation may take the arena first.)
 - GPU-only resources stay in the host's private Metal memory and never touch guest RAM.
 - Pointer inputs are copied per their rule (§4.2): shader bytecode, pipeline and root signature descriptions, initial
   data, subresource data. One that doesn't fit a ring record goes through a blob.

@@ -54,16 +54,17 @@ static mn_obj *object(uint64_t handle, int k, const uint64_t answers[2], const u
 void *mn_proxy_out(uint64_t handle, int iface, const IID *riid, const uint64_t ifaces[5]) {
     int k = iface >= 0 ? iface : riid ? mn_d3d_iface_of(riid) : -1;
     mn_obj *have = nullptr;
+    // The object we have, if it answers k at its own pointer (a companion QueryInterface made knows only that one).
     if (ifaces[4] && ifaces[4] != handle) {
         std::lock_guard<std::mutex> l(objs_lock);
         auto it = objs.find(ifaces[4]);
-        if (it != objs.end() && it->second->refs > 0) (have = it->second)->refs++;
+        mn_obj *o = it != objs.end() ? it->second : nullptr;
+        if (o && o->refs > 0 && (k < 0 || (has(o->answers, k) && !has(o->moved, k)))) (have = o)->refs++;
     }
-    if (have) { // the object we have: its proxy, and the host lets the new handle go
+    if (have) { // its proxy, and the host lets the new handle go
         uint64_t h = handle;
         mn_d3d_call(MN_D3D_OP_RELEASE, &h);
-        if (k < 0 || !has(have->answers, k) || has(have->moved, k)) k = have->created;
-        return proxy_of(have, k);
+        return proxy_of(have, k < 0 ? have->created : k);
     }
     mn_obj *o = object(handle, k, ifaces, ifaces + 2);
     return proxy_of(o, o->created);
@@ -171,6 +172,13 @@ static HRESULT STDMETHODCALLTYPE map(mn_proxy *This, UINT sub, const D3D12_RANGE
     return hr;
 }
 
+// SetName (a special): SetPrivateData(WKPDID_D3DDebugObjectNameW) of the name, as D3D12's is, in the guest's WCHARs.
+static const GUID debug_name = {0x4cca5fd8, 0x921f, 0x42c8, {0x85, 0x66, 0x70, 0xca, 0xf2, 0xa9, 0xb7, 0x41}};
+static HRESULT STDMETHODCALLTYPE set_name(mn_proxy *This, LPCWSTR name) {
+    UINT size = name ? (UINT)(sizeof(WCHAR) * (wcslen(name) + 1)) : 0;
+    return ((ID3D12Object *)This)->SetPrivateData(debug_name, size, name);
+}
+
 // ---- fences (rules.txt's own, Task 8) ----
 
 static void raise(std::atomic<uint64_t> *slot, uint64_t v) {
@@ -229,12 +237,22 @@ static HRESULT on_event(HANDLE event, HRESULT (*send)(void *, HANDLE), void *ctx
     HANDLE own = event ? nullptr : CreateEventA(nullptr, FALSE, FALSE, nullptr);
     HANDLE e = event ? event : own;
     if (!e) return E_OUTOFMEMORY;
+    // The listener's own, which it lets go once set: the program may close its handle first, and Wine reuses the value.
 #ifdef MN_D3D_LOOPBACK
-    mn_win32_ref(e); // the listener's, so the program may close it first (the VM's NtSetEvent just fails then)
+    mn_win32_ref(e);
+    HANDLE theirs = e;
+#else
+    HANDLE theirs = nullptr;
+    if (!DuplicateHandle(GetCurrentProcess(), e, GetCurrentProcess(), &theirs, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+        if (own) CloseHandle(own);
+        return E_INVALIDARG;
+    }
 #endif
-    HRESULT hr = send(ctx, e);
+    HRESULT hr = send(ctx, theirs);
 #ifdef MN_D3D_LOOPBACK
-    if (FAILED(hr)) mn_win32_unref(e);
+    if (FAILED(hr)) mn_win32_unref(theirs);
+#else
+    if (FAILED(hr)) CloseHandle(theirs);
 #endif
     if (own) {
         if (SUCCEEDED(hr)) WaitForSingleObject(own, INFINITE);
@@ -459,6 +477,7 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"ID3D12Fence::SetEventOnCompletion", (const void *)set_event},
         {"ID3D12Device1::SetEventOnMultipleFenceCompletion", (const void *)set_event_multiple},
         {"ID3D12Resource::Map", (const void *)map},
+        {"ID3D12Object::SetName", (const void *)set_name},
         {"ID3D10Blob::GetBufferPointer", (const void *)blob_pointer},
         {"ID3D10Blob::GetBufferSize", (const void *)blob_size},
     };

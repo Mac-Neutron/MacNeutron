@@ -176,16 +176,22 @@ int main() {
     }
 
     // relay: an event whose SetEvent calls a function (the VM host's fence completions), on the setter's thread; it
-    // can't be waited on.
+    // can't be waited on. Its last reference's drop calls its end, set or not (relay-end: a fence gone first).
     {
-        static std::atomic<int> calls{0};
+        static std::atomic<int> calls{0}, ends{0};
         static void *seen = nullptr;
-        int token = 7;
-        HANDLE r = mn_win32_relay_event([](void *ctx) { seen = ctx; calls++; }, &token);
+        static int token = 7;
+        auto end = [](void *ctx) { ends += ctx == &token; };
+        HANDLE r = mn_win32_relay_event([](void *ctx) { seen = ctx; calls++; }, end, &token);
         std::thread t([r] { SetEvent(r); });
         t.join();
         bool waited = WaitForSingleObject(r, 0) == WAIT_FAILED;
-        check("relay", r && calls == 1 && seen == &token && waited && CloseHandle(r));
+        check("relay", r && calls == 1 && seen == &token && waited && ends == 0 && CloseHandle(r) && ends == 1);
+        HANDLE unset = mn_win32_relay_event([](void *) { calls++; }, end, &token);
+        mn_win32_ref(unset); // as winemetal's listener holds it
+        bool closed = CloseHandle(unset) && ends == 1;
+        mn_win32_unref(unset);
+        check("relay-end", closed && ends == 2 && calls == 1);
     }
 
     // module: dlopen and dlsym behind LoadLibraryA and GetProcAddress.

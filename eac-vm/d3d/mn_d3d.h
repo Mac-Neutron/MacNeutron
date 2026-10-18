@@ -30,7 +30,7 @@ struct mn_d3d_notify { uint64_t queue_blob, mirror_blob, mirror_len; };
 /* Op 1: guest memory (a galloc region, held for the host) the host carves CPU-visible resources from. */
 struct mn_d3d_arena { uint64_t blob_id, offset, len; };
 /* A creation's status when no arena has room: the reply is the u64 bytes wanted; the guest adds an arena of at least
- * MN_D3D_ARENA_BYTES that size and sends the creation again, once (then E_OUTOFMEMORY). */
+ * MN_D3D_ARENA_BYTES that size and sends the creation again, up to 8 tries (then E_OUTOFMEMORY). */
 #define MN_D3D_NEED_ARENA 0x20000001
 #define MN_D3D_ARENA_BYTES (64ull << 20)
 
