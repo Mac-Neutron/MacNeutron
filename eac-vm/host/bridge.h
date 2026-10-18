@@ -10,3 +10,4 @@
 #include "../metal/host/executor.h"
 #include "../metal/wm/host/dispatch.h"
 #include "../metal/wm/host/loader.h"
+#include "../d3d/host/dispatch.h"

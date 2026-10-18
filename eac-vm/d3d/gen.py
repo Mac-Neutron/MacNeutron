@@ -8,6 +8,7 @@ interfaces (declared there in the headers' C prototype form) and the annotations
     manifest.txt   one line a forwarded method or export: "<id> <Interface>::<Method> <slot>" ("<id> ::<Export> -1"):
                    ids from 16 (0-15 are the family's own ops), declared methods only, header order, then the exports
     calls:         mnd3d_params.h (each method's params struct), calls.c (mn_d3d_calls[], by id, for the marshaller),
+                   ifaces.c (the interfaces' IIDs and families), stubs.cpp (the host's calls into native DXMT),
                    layout.cpp (the guest's struct layouts checked against the native headers'), roundtrip-cases.c
 
     gen.py --headers <include-native> --rules <rules.txt> --out <dir> manifest|calls
@@ -492,6 +493,7 @@ class CallSpec:
     params: List[ParamLayout]
     ret: str
     structs: set = field(default_factory=set)  # the structs its fields name (layout.cpp checks them)
+    method: Optional[Method] = None
 
 
 @dataclass
@@ -499,6 +501,7 @@ class Rules:
     modes: Dict[str, str] = field(default_factory=dict)
     params: Dict[tuple, List[str]] = field(default_factory=dict)  # (method, param): words
     fields: Dict[tuple, List[str]] = field(default_factory=dict)  # (struct, field): words
+    companions: List[tuple] = field(default_factory=list)  # (interface, companion): QueryInterface answers it too
 
 
 MODES = ("async", "sync", "submit", "special", "refuse")
@@ -512,6 +515,7 @@ def parse_rules(text, model):
                                                 [unit=<n>: a void array's element bytes, with count]
         struct <S>.<field> in|out [count=<field>|size=<field>|bytes=<n>|one|string]
         struct <S>.<union field> union=<discriminant field> <Member>=<value> ...  (the members with pointers)
+        companion <Interface> <Interface>       an object of the first answers the second (another C++ subobject)
     count=*<param> and size=*<param> read the length through an inout pointer argument. ::<Export> names an export
     the same way. refuse: the guest answers E_NOTIMPL (nothing, for a void method), logged."""
     rules, depth = Rules(), 0
@@ -529,6 +533,9 @@ def parse_rules(text, model):
         if line.startswith("export "):
             continue
         words = line.split()
+        if words[0] == "companion" and len(words) == 3:
+            rules.companions.append((words[1], words[2]))
+            continue
         if words[0] == "struct":
             st, _, fname = words[1].partition(".")
             if not fname:
@@ -819,7 +826,8 @@ def classify(model, rules):
         except RuleError as e:
             errors.append(f"{mname}: {e}")
             continue
-        spec = CallSpec(mid, mname, mode or default_mode(method.ret, fields), fields, params, method.ret)
+        spec = CallSpec(mid, mname, mode or default_mode(method.ret, fields), fields, params, method.ret,
+                        method=method)
         collect_structs(fields, spec.structs)
         if mode not in ("special", "refuse"):  # every struct an argument passes or points to
             spec.structs |= {resolve(model, p.type) for p in method.params if resolve(model, p.type) in model.structs}
@@ -914,6 +922,10 @@ def emit_params(calls):
                 out.append(f"    MN_D3D_ALIGNAS({p.align}) uint8_t {name}[{p.size}];")
             else:
                 out.append(f"    {p.ctype} {name};")
+        rename = {p.name: member(i, p.name) for i, p in enumerate(c.params)}
+        for f in c.fields:
+            if f.kind == "WMF_HANDLE_OUT":  # the reply's: the interfaces the object answers, and which of them it
+                out.append(f"    uint64_t {rename[f.param]}_ifaces[4];  /* answers at another pointer (bits by index) */")
         out.append("};")
     out += ["", "#endif", ""]
     return "\n".join(out)
@@ -1008,6 +1020,145 @@ def emit_roundtrip(calls):
     return "\n".join(out)
 
 
+def iid_bytes(text):
+    """A GUID's 16 bytes in memory (Data1-3 little-endian), from its text form."""
+    h = text.replace("-", "")
+    d1, d2, d3 = int(h[0:8], 16), int(h[8:12], 16), int(h[12:16], 16)
+    return list(d1.to_bytes(4, "little")) + list(d2.to_bytes(2, "little")) + list(d3.to_bytes(2, "little")) + \
+        [int(h[i:i + 2], 16) for i in range(16, 32, 2)]
+
+
+def iface_index(model):
+    names = [n for n, i in model.interfaces.items() if i.iid]
+    if len(names) > 128:
+        raise RuleError(f"{len(names)} interfaces: the answers' masks have 128 bits")
+    return {n: k for k, n in enumerate(names)}
+
+
+def families(model, rules):
+    """Each interface's family: what an object created as it may answer (its bases, the interfaces derived from it,
+    and their companions), which the host asks the object at its creation. An interface DXMT doesn't implement
+    (`<I>::* refuse`) is never asked: DXMT logs every QueryInterface it can't answer."""
+    index = iface_index(model)
+    absent = {k[:-3] for k, m in rules.modes.items() if k.endswith("::*") and m == "refuse"}
+
+    def chain(n):
+        out = []
+        while n in model.interfaces:
+            out.append(n)
+            n = model.interfaces[n].base
+        return out
+    fam = {}
+    for n in index:
+        members = set(chain(n)) | {m for m in index if n in chain(m)}
+        for a, b in rules.companions:
+            if a in members:
+                members |= set(chain(b))
+        fam[n] = sorted(index[m] for m in members if m in index and m not in absent)
+    return index, fam
+
+
+def emit_ifaces(model, rules):
+    index, fam = families(model, rules)
+    out = ["/* Generated by eac-vm/d3d/gen.py: don't edit. The interfaces by index (the answers' bits), their IIDs and",
+           " * families. */", '#include "mnd3d_params.h"', ""]
+    for n, k in index.items():
+        out.append(f"static const uint8_t fam{k}[] = {{{', '.join(str(x) for x in fam[n])}}};")
+    out.append("const struct mn_d3d_iface mn_d3d_ifaces[MN_D3D_IFACES] = {")
+    for n, k in index.items():
+        iid = ", ".join(f"0x{b:02x}" for b in iid_bytes(model.interfaces[n].iid))
+        out.append(f'    {{"{n}", {{{iid}}}, {len(fam[n])}, fam{k}}},')
+    out += ["};", ""]
+    return "\n".join(out)
+
+
+def iface_decls(model):
+    return ["", f"#define MN_D3D_IFACES {len(iface_index(model))}", f"#define MN_D3D_EXPORTS {len(model.exports)}",
+            "struct mn_d3d_iface { const char *name; uint8_t iid[16]; uint16_t nfamily; const uint8_t *family; };",
+            "extern const struct mn_d3d_iface mn_d3d_ifaces[MN_D3D_IFACES];",
+            "/* The interface an IID names, or -1. */",
+            "int mn_d3d_iface_of(const void *iid);", ""]
+
+
+HANDLE_TYPES = ("HANDLE", "HWND", "HMONITOR", "HDC", "HMODULE", "HINSTANCE")
+
+
+def stub_arg(model, i, p, c):
+    name = f"a->{member(i, p.name)}"
+    t = p.type
+    if t in REFS:
+        return f"*(const GUID *)(uintptr_t){name}"
+    out = next((f for f in c.fields if f.param == p.name and f.kind == "WMF_HANDLE_OUT"), None)
+    if out:
+        return f"any_ptr{{(uintptr_t)&{name}}}"
+    if stars(t) or t.startswith("PFN_") or resolve(model, t) in HANDLE_TYPES:
+        return f"any_ptr{{{name}}}"
+    base = resolve(model, t)
+    if base in model.enums:
+        return f"({t}){name}"
+    if param_layout(model, p).ctype == "bytes":
+        return f"val<{t}>({name})"
+    return name
+
+
+def emit_stubs(model, rules, calls):
+    index = iface_index(model)
+    exports = [e for e in model.exports]
+    out = ["// Generated by eac-vm/d3d/gen.py: don't edit. Each forwarded method and export on native DXMT: the params",
+           "// the marshaller translated (handles to native pointers, data to host copies) passed to the method of the",
+           "// declaring interface. Compiled with DXMT's own -DWIDL_EXPLICIT_AGGREGATE_RETURNS: a struct return is its",
+           "// __ret argument, as the guest's C vtables have it.",
+           '#include "stubs.h"', ""]
+    for e in exports:
+        if e.name == "DXGIDeclareAdapterRemovalSupport":  # rules.txt's: the headers don't declare it
+            out.append('extern "C" HRESULT WINAPI DXGIDeclareAdapterRemovalSupport(void);')
+    out.append("extern \"C\" const struct mn_d3d_export mn_d3d_export_names[MN_D3D_EXPORTS] = {")
+    for e in exports:
+        out.append(f'    {{"{e.dll.replace(".dll", "")}", "{e.name}"}},')
+    out += ["};", "extern \"C\" {", "void *mn_d3d_exports[MN_D3D_EXPORTS]; // mn_d3d_load's", "}", ""]
+    ids = {}
+    for mid in sorted(calls):
+        c = calls[mid]
+        if c.mode in ("special", "refuse"):
+            continue
+        iface, _, mname = c.name.partition("::")
+        args = ", ".join(stub_arg(model, i, p, c) for i, p in enumerate(c.method.params))
+        if iface:
+            call = f"((::{iface} *)(uintptr_t)a->self)->{mname}({args})"
+        else:
+            k = [e.name for e in exports].index(mname)
+            call = f"((decltype(&::{mname}))mn_d3d_exports[{k}])({args})"
+        body = [f'extern "C" NTSTATUS_T mn_d3d_stub_{mid}(void *params) {{ // {c.name}',
+                f"    auto *a = (struct mn_d3d_p_{mid} *)params;"]
+        if c.ret == "void":
+            body.append(f"    {call};")
+        else:
+            body.append(f"    auto r = {call};")
+            body.append("    static_assert(sizeof r <= 8);")
+            body.append("    std::memcpy(&a->ret, &r, sizeof r);")
+        made = [f for f in c.fields if f.kind == "WMF_HANDLE_OUT"]
+        rename = {p.name: member(i, p.name) for i, p in enumerate(c.method.params)}
+        for f in made:
+            m = rename[f.param]
+            if f.iface == "riid":
+                riid = next(c.method.params[j - 1].name for j, p in enumerate(c.method.params) if p.name == f.param)
+                which = f"mn_d3d_iface_of((const void *)(uintptr_t)a->{rename[riid]})"
+            else:
+                which = str(index.get(f.iface, -1))
+            ok = "SUCCEEDED(r) && " if c.ret == "HRESULT" else ""
+            body.append(f"    if ({ok}a->{m}) mn_d3d_answers((void *)(uintptr_t)a->{m}, {which}, a->{m}_ifaces);")
+        if c.ret == "HRESULT":
+            body.append("    mn_d3d_result(r);")
+        body += ["    return 0;", "}"]
+        out += body
+        ids[mid] = True
+    out.append("extern \"C\" NTSTATUS_T (*mn_d3d_stubs[MN_D3D_CALLS])(void *) = {")
+    for mid in range(max(calls) + 1):  # by id; NULL: none (an op of the family's own, a special, a refusal)
+        out.append(f"    mn_d3d_stub_{mid}," if mid in ids else "    nullptr,")
+    out += ["};", ""]
+    return "\n".join(out)
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--headers", required=True)
@@ -1020,8 +1171,11 @@ def main(argv):
         files = {"manifest.txt": "".join(f"{r[0]} {r[1]} {r[2]}\n" for r in manifest(model))}
         if a.what == "calls":
             calls = classify(model, parse_rules(read(a.rules), model))
-            files = {"mnd3d_params.h": emit_params(calls), "calls.c": emit_calls(calls),
-                     "layout.cpp": emit_layout(model, calls), "roundtrip-cases.c": emit_roundtrip(calls)}
+            rules = parse_rules(read(a.rules), model)
+            params = emit_params(calls).replace("\n#endif\n", "\n".join(iface_decls(model)) + "\n#endif\n")
+            files = {"mnd3d_params.h": params, "calls.c": emit_calls(calls), "ifaces.c": emit_ifaces(model, rules),
+                     "stubs.cpp": emit_stubs(model, rules, calls), "layout.cpp": emit_layout(model, calls),
+                     "roundtrip-cases.c": emit_roundtrip(calls)}
     except ValueError as e:  # RuleError too
         print(f"gen.py: {e}", file=sys.stderr)
         return 1

@@ -44,6 +44,11 @@ static struct ctx *ctx_of(uint32_t ctx_id, void *ring_state) {
     return *cached = c;
 }
 
+struct mn_wm_ctx *mn_wm_context(uint32_t ctx_id, void *ring_state) {
+    struct ctx *c = ctx_of(ctx_id, ring_state);
+    return c ? &c->wm : NULL;
+}
+
 int32_t mn_wm_dispatch(uint32_t ctx_id, void *ring_state, uint32_t op, const void *p, uint32_t len, void *reply,
                        uint32_t cap, uint32_t *reply_len) {
     if (op < MN_OP_WM || op > MN_OP_WM + MN_WM_NOTIFY_ATTACH) return MN_ENOSYS; /* the slots, stats, notify */

@@ -245,3 +245,7 @@ ID3D12CommandQueue::ExecuteCommandLists command_lists in count=command_list_coun
 ID3D12Device::MakeResident objects in count=object_count
 ID3D12Device::Evict objects in count=object_count
 ID3D12Device3::EnqueueMakeResident objects in count=num_objects
+
+# Interfaces an object answers at another pointer (DXMT's private ones, C++ subobjects of its own).
+companion ID3D12Device IMTLD3D12DeviceExt
+companion ID3D12GraphicsCommandList IMTLD3D12CommandListExt

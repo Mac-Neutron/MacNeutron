@@ -1,8 +1,9 @@
 #!/bin/sh
 # Builds build/eac-vm-work/macneutron-vm against eac-vm/libkrun's build, with the Metal transport's executor
-# (eac-vm/metal/host) and the TPM's engine (eac-vm/libtpms), signed with the hypervisor entitlement; and
-# build/eac-vm-work/metal-host, MacNeutron's winemetal.so beside stand-ins for its Wine libraries (eac-vm/metal/wm),
-# which the executor loads.
+# (eac-vm/metal/host), Direct3D forwarding's dispatcher and stubs (eac-vm/d3d, generated from native DXMT's headers)
+# and the TPM's engine (eac-vm/libtpms), signed with the hypervisor entitlement; build/eac-vm-work/metal-host,
+# MacNeutron's winemetal.so beside stand-ins for its Wine libraries (eac-vm/metal/wm), which the executor loads; and
+# build/eac-vm-work/dxmt, native DXMT (eac-vm/dxmt-native/build.sh), which the first Direct3D record loads.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=$ROOT/build/eac-vm-work
@@ -17,6 +18,27 @@ for f in wm/calls.c wm/cmdlist.c wm/marshal.c wm/slots.c wm/host/htable.c wm/hos
   clang -O2 -std=gnu2x -Wall -DMN_WM_HOST -DDXMT_GUEST_VM -c -I"$M" -I"$DXMT/winemetal" -I"$DXMT/airconv" -o "$o" "$M/$f"
   objs="$objs $o"
 done
+# Direct3D forwarding (M2): the tables and stubs from native DXMT's headers, its dispatcher, and native DXMT itself.
+G=$W/d3d-gen
+D3D=$ROOT/eac-vm/d3d
+I=$ROOT/build/dxmt-native/install/include-native
+NT=$ROOT/eac-vm/dxmt-native/tests
+[ -f "$ROOT/build/dxmt-native/install/lib/d3d12.dylib" ] || { echo "no native DXMT: run eac-vm/dxmt-native/build.sh" >&2; exit 1; }
+python3 -I "$D3D/gen.py" --headers "$I" --rules "$D3D/rules.txt" --out "$G" calls
+for f in "$D3D/host/dispatch.c" "$G/calls.c" "$G/ifaces.c"; do
+  o="$W/obj/d3d-$(basename "$f").o"
+  clang -O2 -std=gnu2x -Wall -c -I"$M" -I"$M/wm" -I"$G" -I"$DXMT/winemetal" -o "$o" "$f"
+  objs="$objs $o"
+done
+for f in "$G/stubs.cpp" "$D3D/host/native.cpp"; do
+  o="$W/obj/d3d-$(basename "$f").o"
+  clang++ -O2 -std=c++17 -Wall -Werror -DWIDL_EXPLICIT_AGGREGATE_RETURNS -include "$NT/native-prelude.h" -I"$NT/include" \
+    -I"$I/d3d12" -I"$I/windows" -I"$I/directx" -I"$I" -I"$DXMT/util" -I"$DXMT/d3d12" -I"$G" -I"$D3D/host" -c -o "$o" "$f"
+  objs="$objs $o"
+done
+rm -rf "$W/dxmt"
+mkdir -p "$W/dxmt"
+cp "$ROOT"/build/dxmt-native/install/lib/*.dylib "$W/dxmt/"
 clang -O2 -std=gnu2x -Wall -c -I"$W/libkrun/include" -o "$W/obj/input.c.o" "$ROOT/eac-vm/host/input.c"
 clang -O2 -std=gnu2x -Wall -c -o "$W/obj/audio.c.o" "$ROOT/eac-vm/host/audio.c"
 # The TPM's engine: libtpms (eac-vm/libtpms) on Homebrew's openssl@3, both linked in statically.
@@ -30,7 +52,7 @@ swiftc -O -o "$W/macneutron-vm" "$ROOT/eac-vm/host/macneutron-vm.swift" "$ROOT/e
   "$ROOT/eac-vm/metal/host/testops.c" "$ROOT/eac-vm/metal/ring.c" $objs \
   -import-objc-header "$ROOT/eac-vm/host/bridge.h" -Xcc -I"$W/libkrun/include" \
   "$W/libkrun/libkrun.1.dylib" -Xlinker -rpath -Xlinker @executable_path/libkrun -framework AudioToolbox \
-  "$W/libtpms/libtpms.a" "$SSL/lib/libcrypto.a" -framework Security
+  "$W/libtpms/libtpms.a" "$SSL/lib/libcrypto.a" -framework Security -lc++
 make -s -C "$ROOT/eac-vm/metal/wm" metal-host
 # The VM's folder is what MacNeutron's launcher runs a game from (Sources/MacNeutronCore/MicroVM.swift).
 cp "$ROOT/eac-vm/run-guest.sh" "$W/run-guest.sh"
