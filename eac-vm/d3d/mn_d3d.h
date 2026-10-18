@@ -21,6 +21,11 @@ enum {
 };
 struct mn_d3d_query { uint64_t handle; uint8_t iid[16]; uint64_t out; }; /* reply: int32 HRESULT */
 struct mn_d3d_blob { uint64_t handle, offset, len; };
+/* Op 2: the context's Direct3D notify queue (MN_NOTIFY_EVENT: a guest event to set) and its fences' mirror, one
+ * uint64_t a fence (its completed value, raised by the host: max(slot, value)); a fence's creation names its slot in
+ * aux[0], the guest's address of it in aux[1] (the unix side's). */
+struct mn_d3d_notify { uint64_t queue_blob, mirror_blob, mirror_len; };
+
 /* Op 1: guest memory (a galloc region, held for the host) the host carves CPU-visible resources from. */
 struct mn_d3d_arena { uint64_t blob_id, offset, len; };
 /* A creation's status when no arena has room: the reply is the u64 bytes wanted; the guest adds an arena of at least

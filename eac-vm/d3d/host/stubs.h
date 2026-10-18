@@ -34,4 +34,11 @@ void mn_d3d_answers(void *obj, int iface, uint64_t out[4]);
 // A method's HRESULT: device removal, and an asynchronous call's failure, for the call running (dispatch.c).
 void mn_d3d_result(HRESULT hr);
 int mn_d3d_arena_of(const void *ptr, uint64_t *blob, uint64_t *offset); // memory.c
+// events.c and dispatch.c (Task 8): the call's context, fences' mirror slots, and relays DXMT sets in place of events
+uint32_t mn_d3d_current_ctx(void);
+uint64_t mn_d3d_fence_new(uint32_t ctx_id, void *obj, uint64_t initial); // UINT64_MAX: none
+void mn_d3d_fence_raise(void *obj, uint64_t v);
+void *mn_d3d_event_relay(uint32_t ctx_id, uint64_t guest_event);
+void *mn_d3d_fence_relay(void *obj, uint64_t value);
+void mn_d3d_relay_done(void *h);
 }

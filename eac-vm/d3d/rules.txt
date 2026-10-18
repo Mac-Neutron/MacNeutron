@@ -158,7 +158,18 @@ ID3D12Resource::ReadFromSubresource special
 ID3D12Device::CheckFeatureSupport special
 ID3D12Device2::CreatePipelineState special
 ID3D12PipelineLibrary1::LoadPipeline special
-ID3D12Device1::SetEventOnMultipleFenceCompletion special
+# Fences (Task 8): a mirror slot each in guest memory (CreateFence's aux), raised by relays on the host; the guest
+# reads its completed value there, raises it on a CPU signal, and waits a NULL event out itself.
+ID3D12Device::CreateFence own
+ID3D12Fence::GetCompletedValue own
+ID3D12Fence::Signal own
+ID3D12Fence::SetEventOnCompletion own
+ID3D12CommandQueue::Signal own
+# Its fence is signalled by DXMT when the objects are resident: a relay raises the slot (host/native.cpp).
+ID3D12Device3::EnqueueMakeResident own
+ID3D12Device1::SetEventOnMultipleFenceCompletion own
+ID3D12Device1::SetEventOnMultipleFenceCompletion fences in count=fence_count
+ID3D12Device1::SetEventOnMultipleFenceCompletion values in count=fence_count
 # Their descriptions hold names: DXMT has no meta commands (a count of 0; E_INVALIDARG), answered in the guest.
 ID3D12Device5::EnumerateMetaCommands special
 ID3D12Device5::EnumerateMetaCommandParameters special

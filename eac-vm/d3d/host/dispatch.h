@@ -28,6 +28,8 @@ uint64_t mn_d3d_memory_end(void);
 int mn_d3d_arena_of(const void *ptr, uint64_t *blob, uint64_t *offset); /* 0, or -1: not in an arena */
 void mn_d3d_arenas_end(uint32_t ctx_id);
 uint64_t mn_d3d_arena_free(uint32_t ctx_id); /* free bytes in the context's arenas (tests) */
+/* events.c: a fence's mirror slot raised to v, never lowered (relays fire in any order). */
+void mn_d3d_mirror_raise(uint64_t *slot, uint64_t v);
 extern const struct mn_executor_hooks mn_vm_hooks; /* winemetal's, and the arenas' end with the context's */
 
 #endif

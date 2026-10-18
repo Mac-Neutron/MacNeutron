@@ -7,7 +7,7 @@ NT := $(ROOT)/eac-vm/dxmt-native/tests
 WM := $(ROOT)/eac-vm/metal/wm
 DXMT := $(ROOT)/build/wine-arm64-src/dxmt/src
 CFLAGS ?= -O1 -g -Wall -Wextra -std=gnu2x -fsanitize=address,undefined
-INC := -DDXMT_GUEST_VM -I$(DXMT)/winemetal -I$(DXMT)/airconv -I$(ROOT)/eac-vm/metal -I$(WM) -I$(WM)/tests -I$(GEN)
+INC := -DDXMT_GUEST_VM -I$(I) -I$(DXMT)/winemetal -I$(DXMT)/airconv -I$(ROOT)/eac-vm/metal -I$(WM) -I$(WM)/tests -I$(GEN)
 
 $(GEN)/calls.c: gen.py rules.txt
 	python3 -W error::ResourceWarning gen.py --headers $(I) --rules rules.txt --out $(GEN) calls
@@ -45,10 +45,10 @@ $(GEN)/native.o: host/native.cpp host/stubs.h $(GEN)/calls.c
 	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -fsanitize=address,undefined -c -o $@ host/native.cpp
 $(GEN)/stubs-asan.o: $(GEN)/calls.c host/stubs.h
 	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -fsanitize=address,undefined -c -o $@ $(GEN)/stubs.cpp
-$(GEN)/dispatch-test: tests/dispatch-test.c host/dispatch.c host/memory.c host/dispatch.h mn_d3d.h $(GEN)/calls.c $(GEN)/native.o \
+$(GEN)/dispatch-test: tests/dispatch-test.c host/dispatch.c host/memory.c host/events.c host/dispatch.h mn_d3d.h $(GEN)/calls.c $(GEN)/native.o \
   $(GEN)/stubs-asan.o $(LOOP_SRC) $(WM)/host/dispatch.m $(WM)/marshal.c $(WM)/marshal.h
 	$(CC) $(CFLAGS) $(INC) -I. -c -o $(GEN)/dispatch-test.o tests/dispatch-test.c
-	$(CC) $(CFLAGS) $(INC) -I. -o $@ $(GEN)/dispatch-test.o host/dispatch.c host/memory.c $(GEN)/calls.c $(GEN)/ifaces.c \
+	$(CC) $(CFLAGS) $(INC) -I. -o $@ $(GEN)/dispatch-test.o host/dispatch.c host/memory.c host/events.c $(GEN)/calls.c $(GEN)/ifaces.c \
 	  $(GEN)/native.o $(GEN)/stubs-asan.o $(LOOP_SRC) $(WM)/host/dispatch.m $(ROOT)/eac-vm/metal/host/testops.c \
 	  -framework AppKit -framework Metal -framework QuartzCore -lpthread -lc++
 

@@ -22,6 +22,13 @@ void mn_d3d_native_release(void *obj);
 int32_t mn_d3d_native_query(void *obj, const uint8_t iid[16], void **out);
 const void *mn_d3d_native_blob(void *obj, uint64_t *size);
 NTSTATUS_T mn_d3d_map_stub(void *params);
+NTSTATUS_T mn_d3d_create_fence_stub(void *params), mn_d3d_fence_signal_stub(void *params),
+    mn_d3d_queue_signal_stub(void *params), mn_d3d_set_event_stub(void *params),
+    mn_d3d_set_event_multi_stub(void *params), mn_d3d_enqueue_resident_stub(void *params);
+int mn_d3d_events_attach(struct mn_wm_ctx *c, uint64_t queue_blob, uint64_t mirror_blob, uint64_t mirror_len);
+void mn_d3d_events_end(uint32_t ctx_id);
+void mn_d3d_fence_gone(void *obj);
+static void release(void *obj);
 
 static char *dir;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
@@ -60,9 +67,23 @@ int mn_d3d_load(const char *d) {
     }
     mn_d3d_memory_hooks(hooks);
     mn_d3d_stubs[MN_D3D_ID_ID3D12Resource_Map] = mn_d3d_map_stub; /* rules.txt's own */
-    mn_wm_d3d_release = mn_d3d_native_release;
+    mn_d3d_stubs[MN_D3D_ID_ID3D12Device_CreateFence] = mn_d3d_create_fence_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D12Fence_Signal] = mn_d3d_fence_signal_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D12CommandQueue_Signal] = mn_d3d_queue_signal_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D12Fence_SetEventOnCompletion] = mn_d3d_set_event_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D12Device1_SetEventOnMultipleFenceCompletion] = mn_d3d_set_event_multi_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D12Device3_EnqueueMakeResident] = mn_d3d_enqueue_resident_stub;
+    mn_wm_d3d_release = release;
     return 0;
 }
+
+/* A handle's object goes: a fence forgets its mirror slot first. */
+static void release(void *obj) {
+    mn_d3d_fence_gone(obj);
+    mn_d3d_native_release(obj);
+}
+
+uint32_t mn_d3d_current_ctx(void) { return cur.c ? cur.c->ctx_id : 0; }
 
 /* ponytail: the first Direct3D record loads native DXMT on its vCPU (dlopen and Metal's device: tens of ms, once) */
 static void load_once(void) {
@@ -109,6 +130,14 @@ static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *
         *n = sizeof hr;
         return 0;
     }
+    case MN_D3D_OP_NOTIFY: {
+        struct mn_d3d_notify a;
+        if (len < sizeof a) return MN_EINVAL;
+        memcpy(&a, p, sizeof a);
+        if (!mn_d3d_events_attach(c, a.queue_blob, a.mirror_blob, a.mirror_len)) return 0;
+        fprintf(stderr, "mn-d3d: error: a notify queue or mirror that isn't guest memory\n");
+        return MN_EINVAL;
+    }
     case MN_D3D_OP_ARENA: {
         struct mn_d3d_arena a;
         if (len < sizeof a) return MN_EINVAL;
@@ -136,7 +165,7 @@ static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *
         return 0;
     }
     default:
-        return MN_ENOSYS; /* ops 2-3: Tasks 8, 11 */
+        return MN_ENOSYS; /* op 3: Task 11 */
     }
 }
 
@@ -199,6 +228,7 @@ static void ring_end(uint32_t ctx_id, void *ring_state) { mn_wm_hooks.ring_end(c
 static void context_end(uint32_t ctx_id) {
     mn_wm_hooks.context_end(ctx_id); /* its objects released: their pieces come back as Metal lets them go */
     mn_d3d_arenas_end(ctx_id);
+    mn_d3d_events_end(ctx_id);
 }
 const struct mn_executor_hooks mn_vm_hooks = {progress, context_end, ring_end};
 

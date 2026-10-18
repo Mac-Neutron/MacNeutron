@@ -8,8 +8,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include "marshal.h"
+#include "notify.h"
 #include "../../metal/guest/transport.h"
 #include "guest/galloc.h"
+#ifdef MN_D3D_LOOPBACK
+#include "win32_native_event.h" /* the guest's events are the native program's */
+#else
+extern unsigned int NtSetEvent(void *handle, void *prev_state); /* Wine's ntdll.so */
+#endif
 #include "mnd3d_params.h"
 #include "../mn_d3d.h"
 
@@ -62,10 +68,48 @@ static int proxy_handle(uint64_t value, mn_handle *h) {
     return 0;
 }
 
+/* The context's notify queue and its fences' mirror (op 2), and the thread that sets the events the host posts. */
+#define MIRROR_BYTES (1u << 20)
+static struct mn_blob queue_blob, mirror_blob;
+static int events_ready;
+
+static void *listener(void *arg) {
+    (void)arg;
+    struct mn_notify *q = queue_blob.ptr;
+    for (;;) {
+        struct mn_notify_rec r;
+        while (mn_notify_next(q, &r)) {
+            if (r.type != MN_NOTIFY_EVENT) continue;
+#ifdef MN_D3D_LOOPBACK
+            mn_win32_set_event((void *)(uintptr_t)r.value);
+            mn_win32_unref((void *)(uintptr_t)r.value); /* the proxy's reference: the program may have closed it */
+#else
+            NtSetEvent((void *)(uintptr_t)r.value, NULL); /* a closed handle: an error, nothing more */
+#endif
+        }
+        mn_notify_wait(queue_blob.blob_id, atomic_load_explicit(&q->tail, memory_order_relaxed), 1000);
+    }
+    return NULL;
+}
+
+static void events(void) {
+    uint32_t n = 0;
+    if (mn_blob_alloc(MN_NOTIFY_BYTES, &queue_blob) || mn_blob_alloc(MIRROR_BYTES, &mirror_blob)) return;
+    memset(queue_blob.ptr, 0, queue_blob.size);
+    memset(mirror_blob.ptr, 0, mirror_blob.size);
+    struct mn_d3d_notify a = {queue_blob.blob_id, mirror_blob.blob_id, mirror_blob.size};
+    pthread_t t;
+    if (mn_call_flush(MN_OP_D3D + MN_D3D_OP_NOTIFY, &a, sizeof a, NULL, 0, &n) || pthread_create(&t, NULL, listener, NULL))
+        return;
+    pthread_detach(t);
+    events_ready = 1;
+}
+
 static void init(void) {
     mn_wm_guest_handle = proxy_handle;
     ready = mn_open();
     if (!ready) ready = mn_drained();
+    if (!ready) events();
 }
 
 static int buffers(void) {
@@ -146,6 +190,10 @@ int32_t mn_d3d_unix_call(void *args) {
         }
         if (!o.sync) return 0;
         s = mn_wm_unpack_call(c, params, &o, reply, n);
+        if (!s && a->id == MN_D3D_ID_ID3D12Device_CreateFence) { /* the fence's mirror slot: our address of it */
+            mn_d3d_p_ID3D12Device_CreateFence *f = params;
+            f->aux[1] = events_ready && f->aux[0] < mirror_blob.size / 8 ? (uintptr_t)((uint64_t *)mirror_blob.ptr + f->aux[0]) : 0;
+        }
         if (!s && a->id == MN_D3D_ID_ID3D12Resource_Map) { /* the arena's (blob, offset): our address of it */
             uint64_t *at = (uint64_t *)(uintptr_t)((mn_d3d_p_ID3D12Resource_Map *)params)->data;
             if (at) at[0] = (uintptr_t)arena_ptr(at[0], at[1]);

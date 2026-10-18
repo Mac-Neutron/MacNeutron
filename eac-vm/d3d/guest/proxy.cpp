@@ -16,6 +16,7 @@ struct mn_obj {
     mn_proxy *proxies[MN_D3D_IFACES] = {};
     std::vector<uint8_t> blob; // an ID3D10Blob's bytes, read once
     bool blob_read = false;
+    std::atomic<uint64_t> *mirror = nullptr; // a fence's completed value, which the host raises (Task 8)
 };
 
 static const IID unknown_iid = {0x00000000, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
@@ -144,8 +145,106 @@ static HRESULT STDMETHODCALLTYPE map(mn_proxy *This, UINT sub, const D3D12_RANGE
     return hr;
 }
 
+// ---- fences (rules.txt's own, Task 8) ----
+
+static void raise(std::atomic<uint64_t> *slot, uint64_t v) {
+    uint64_t cur = slot->load();
+    while (cur < v && !slot->compare_exchange_weak(cur, v)) {}
+}
+
+static HRESULT STDMETHODCALLTYPE create_fence(mn_proxy *This, UINT64 initial, D3D12_FENCE_FLAGS flags, REFIID riid,
+                                              void **fence) {
+    mn_d3d_p_ID3D12Device_CreateFence p = {};
+    p.self = (uintptr_t)This, p.initial_value = initial, p.flags = (uint32_t)flags, p.riid = (uintptr_t)&riid;
+    p.fence = (uintptr_t)fence;
+    int32_t s = mn_d3d_call(MN_D3D_ID_ID3D12Device_CreateFence, &p);
+    HRESULT hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;
+    if (!fence) return hr;
+    *fence = SUCCEEDED(hr) && p.fence ? mn_proxy_out(p.fence, -1, &riid, p.fence_ifaces) : nullptr;
+    if (*fence && p.aux[1]) ((mn_proxy *)*fence)->obj->mirror = (std::atomic<uint64_t> *)(uintptr_t)p.aux[1];
+    return hr;
+}
+
+static UINT64 STDMETHODCALLTYPE completed_value(mn_proxy *This) {
+    if (This->obj->mirror) return This->obj->mirror->load();
+    mn_d3d_p_ID3D12Fence_GetCompletedValue p = {};
+    p.self = (uintptr_t)This;
+    return mn_d3d_call(MN_D3D_ID_ID3D12Fence_GetCompletedValue, &p) ? 0 : p.ret;
+}
+
+// A CPU signal: complete at once, here too, before the host hears of it.
+static HRESULT STDMETHODCALLTYPE fence_signal(mn_proxy *This, UINT64 value) {
+    if (This->obj->mirror) raise(This->obj->mirror, value);
+    mn_d3d_p_ID3D12Fence_Signal p = {};
+    p.self = (uintptr_t)This, p.value = value;
+    int32_t s = mn_d3d_call(MN_D3D_ID_ID3D12Fence_Signal, &p);
+    return s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;
+}
+
+// The host's relay posts the event, which the unix side's listener sets. NULL: we wait here, never the host.
+static HRESULT on_event(HANDLE event, HRESULT (*send)(void *, HANDLE), void *ctx) {
+    HANDLE own = event ? nullptr : CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    HANDLE e = event ? event : own;
+    if (!e) return E_OUTOFMEMORY;
+#ifdef MN_D3D_LOOPBACK
+    mn_win32_ref(e); // the listener's, so the program may close it first (the VM's NtSetEvent just fails then)
+#endif
+    HRESULT hr = send(ctx, e);
+#ifdef MN_D3D_LOOPBACK
+    if (FAILED(hr)) mn_win32_unref(e);
+#endif
+    if (own) {
+        if (SUCCEEDED(hr)) WaitForSingleObject(own, INFINITE);
+        CloseHandle(own);
+    }
+    return hr;
+}
+
+struct on_completion { mn_proxy *fence; UINT64 value; };
+static HRESULT send_completion(void *ctx, HANDLE e) {
+    auto *c = (on_completion *)ctx;
+    mn_d3d_p_ID3D12Fence_SetEventOnCompletion p = {};
+    p.self = (uintptr_t)c->fence, p.value = c->value, p.event = (uintptr_t)e;
+    int32_t s = mn_d3d_call(MN_D3D_ID_ID3D12Fence_SetEventOnCompletion, &p);
+    return s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;
+}
+static HRESULT STDMETHODCALLTYPE set_event(mn_proxy *This, UINT64 value, HANDLE event) {
+    if (This->obj->mirror && This->obj->mirror->load() >= value) { // already there: no round trip
+        if (event) SetEvent(event);
+        return S_OK;
+    }
+    on_completion c = {This, value};
+    return on_event(event, send_completion, &c);
+}
+
+struct on_multiple {
+    mn_proxy *device;
+    ID3D12Fence *const *fences;
+    const UINT64 *values;
+    UINT count;
+    D3D12_MULTIPLE_FENCE_WAIT_FLAGS flags;
+};
+static HRESULT send_multiple(void *ctx, HANDLE e) {
+    auto *c = (on_multiple *)ctx;
+    mn_d3d_p_ID3D12Device1_SetEventOnMultipleFenceCompletion p = {};
+    p.self = (uintptr_t)c->device, p.fences = (uintptr_t)c->fences, p.values = (uintptr_t)c->values;
+    p.fence_count = c->count, p.flags = (uint32_t)c->flags, p.event = (uintptr_t)e;
+    int32_t s = mn_d3d_call(MN_D3D_ID_ID3D12Device1_SetEventOnMultipleFenceCompletion, &p);
+    return s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;
+}
+static HRESULT STDMETHODCALLTYPE set_event_multiple(mn_proxy *This, ID3D12Fence *const *fences, const UINT64 *values,
+                                                    UINT count, D3D12_MULTIPLE_FENCE_WAIT_FLAGS flags, HANDLE event) {
+    on_multiple c = {This, fences, values, count, flags};
+    return on_event(event, send_multiple, &c);
+}
+
 const void *mn_d3d_special(const char *name, const void *fallback) {
     static const struct { const char *name; const void *fn; } code[] = {
+        {"ID3D12Device::CreateFence", (const void *)create_fence},
+        {"ID3D12Fence::GetCompletedValue", (const void *)completed_value},
+        {"ID3D12Fence::Signal", (const void *)fence_signal},
+        {"ID3D12Fence::SetEventOnCompletion", (const void *)set_event},
+        {"ID3D12Device1::SetEventOnMultipleFenceCompletion", (const void *)set_event_multiple},
         {"ID3D12Resource::Map", (const void *)map},
         {"ID3D10Blob::GetBufferPointer", (const void *)blob_pointer},
         {"ID3D10Blob::GetBufferSize", (const void *)blob_size},

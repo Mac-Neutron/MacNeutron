@@ -10,12 +10,17 @@
  *   arena      (M2 Task 7) an upload buffer larger than the arenas answers MN_D3D_NEED_ARENA with the bytes it wants;
  *              after op 1 adds one it is made; Map answers its arena's blob and an offset inside it; released, its
  *              piece is the arena's again
+ *   events     (M2 Task 8) after op 2 attaches a notify queue and a mirror, a fence's creation names its mirror slot;
+ *              a queue's Signal(5) raises the slot to 5 with no record of the guest's; a CPU Signal(9) leaves 9; a raise
+ *              to 3 after 5 leaves 5; SetEventOnCompletion(12, e) posts MN_NOTIFY_EVENT with e once the fence
+ *              reaches 12 (whatever the guest did with e meanwhile); SetEventOnMultipleFenceCompletion's any and all
  *   dispatch-test <metal-host> <native DXMT lib>; prints "dispatch-test: ok" or each failure. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include "marshal.h"
+#include "notify.h"
 #include "../../guest/transport.h"
 #include "host/dispatch.h"
 #include "host/loader.h"
@@ -93,11 +98,12 @@ int main(int argc, char **argv) {
     CHECK(!answers(dev.device_ifaces + 2, "ID3D12Device5")); /* the same pointer */
 
     /* fence */
-    struct fence_params { uint64_t self, ret, initial_value; uint32_t flags; uint64_t riid, fence, ifaces[4]; } fp = {0};
+    struct fence_params { uint64_t self, ret, initial_value; uint32_t flags; uint64_t riid, fence, ifaces[4], aux[2]; }
+        fp = {0};
     CHECK(mn_d3d_calls[fence].params_size == sizeof fp);
     fp.self = device, fp.initial_value = 7, fp.riid = (uintptr_t)iid("ID3D12Fence");
     CHECK(call(fence, &fp) == 0 && (uint32_t)fp.ret == 0 && fp.fence);
-    struct { uint64_t self, ret; } gv = {fp.fence, 0};
+    struct value_params { uint64_t self, ret, aux[2]; } gv = {fp.fence, 0, {0}};
     CHECK(mn_d3d_calls[value].params_size == sizeof gv);
     CHECK(call(value, &gv) == 0 && gv.ret == 7);
 
@@ -118,7 +124,7 @@ int main(int argc, char **argv) {
     uint64_t h = f2.fence;
     CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_RELEASE, &h, sizeof h, reply, sizeof reply, &n) == 0);
     mn_wm_hooks.progress(1, ring_state); /* the deferred release runs once the rings that used it pass: all here */
-    struct { uint64_t self, ret; } gone = {h, 0};
+    struct value_params gone = {h, 0, {0}};
     CHECK(call(value, &gone) != 0);
 
     /* arena */
@@ -150,7 +156,7 @@ int main(int argc, char **argv) {
     struct res_params try3 = rp;
     CHECK(call(committed, &try3) == 0 && (uint32_t)try3.ret == 0 && try3.resource);
     CHECK(mn_d3d_arena_free(1) <= total - (1 << 20));
-    struct { uint64_t self, ret; uint32_t sub; uint64_t range, data; } mp = {try3.resource, 0, 0, 0, 0};
+    struct { uint64_t self, ret; uint32_t sub; uint64_t range, data, aux[2]; } mp = {try3.resource, 0, 0, 0, 0, {0}};
     uint64_t at[2] = {0, ~0ull};
     mp.data = (uintptr_t)at;
     CHECK(mn_d3d_calls[map].params_size == sizeof mp);
@@ -161,6 +167,68 @@ int main(int argc, char **argv) {
     mn_wm_hooks.progress(1, ring_state);
     for (int i = 0; i < 200 && mn_d3d_arena_free(1) != total; i++) usleep(10000); /* Metal lets it go */
     CHECK(mn_d3d_arena_free(1) == total);
+
+    /* events */
+    struct mn_blob qb, mb;
+    CHECK(!mn_blob_alloc(MN_NOTIFY_BYTES, &qb) && !mn_blob_alloc(MN_PAGE, &mb));
+    memset(qb.ptr, 0, qb.size);
+    struct mn_d3d_notify na = {qb.blob_id, mb.blob_id, mb.size};
+    CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_NOTIFY, &na, sizeof na, reply, sizeof reply, &n) == 0);
+    volatile uint64_t *mirror = mb.ptr;
+    struct mn_notify *q = qb.ptr;
+    unsigned queue = id_of("ID3D12Device::CreateCommandQueue"), qsignal = id_of("ID3D12CommandQueue::Signal"),
+             fsignal = id_of("ID3D12Fence::Signal"), onc = id_of("ID3D12Fence::SetEventOnCompletion"),
+             multi = id_of("ID3D12Device1::SetEventOnMultipleFenceCompletion");
+    struct { uint32_t type, priority, flags, node; } qd = {0};
+    struct { uint64_t self, ret, desc, riid, queue, ifaces[4]; } cq = {device, 0, (uintptr_t)&qd, 0, 0, {0}};
+    cq.riid = (uintptr_t)iid("ID3D12CommandQueue");
+    CHECK(mn_d3d_calls[queue].params_size == sizeof cq && call(queue, &cq) == 0 && cq.queue);
+    struct fence_params e1 = fp, e2 = fp;
+    e1.fence = 0, e1.initial_value = 0, e2.fence = 0, e2.initial_value = 0;
+    CHECK(call(fence, &e1) == 0 && e1.fence && call(fence, &e2) == 0 && e2.fence && e1.aux[0] != e2.aux[0]);
+    volatile uint64_t *s1 = &mirror[e1.aux[0]], *s2 = &mirror[e2.aux[0]];
+    struct qsig { uint64_t self, ret, fence, value, aux[2]; } qs = {cq.queue, 0, e1.fence, 5, {0}};
+    CHECK(mn_d3d_calls[qsignal].params_size == sizeof qs && call(qsignal, &qs) == 0 && (uint32_t)qs.ret == 0);
+    for (int i = 0; i < 500 && *s1 != 5; i++) usleep(1000); /* the GPU reaches it */
+    CHECK(*s1 == 5);
+    struct { uint64_t self, ret, value, aux[2]; } fs = {e1.fence, 0, 9, {0}};
+    CHECK(mn_d3d_calls[fsignal].params_size == sizeof fs && call(fsignal, &fs) == 0 && *s1 == 9);
+    mn_d3d_mirror_raise((uint64_t *)s1, 3); /* a relay for an earlier value firing late */
+    CHECK(*s1 == 9);
+    struct { uint64_t self, ret, value, event, aux[2]; } oc = {e1.fence, 0, 12, 0x1234, {0}};
+    CHECK(mn_d3d_calls[onc].params_size == sizeof oc && call(onc, &oc) == 0 && (uint32_t)oc.ret == 0);
+    usleep(20000);
+    struct mn_notify_rec r;
+    CHECK(!mn_notify_next(q, &r)); /* not there yet */
+    struct qsig q12 = {cq.queue, 0, e1.fence, 12, {0}};
+    CHECK(call(qsignal, &q12) == 0);
+    int got = 0;
+    for (int i = 0; i < 500 && !got; i++)
+        if (!(got = mn_notify_next(q, &r))) usleep(1000);
+    CHECK(got && r.type == MN_NOTIFY_EVENT && r.value == 0x1234);
+    uint64_t fences[2] = {e1.fence, e2.fence}, values[2] = {20, 20};
+    struct mf { uint64_t self, ret, fences, values; uint32_t count, flags; uint64_t event, aux[2]; }
+        any = {device, 0, (uintptr_t)fences, (uintptr_t)values, 2, 1, 0x55, {0}}; /* D3D12_MULTIPLE_FENCE_WAIT_FLAG_ANY */
+    CHECK(mn_d3d_calls[multi].params_size == sizeof any && call(multi, &any) == 0 && (uint32_t)any.ret == 0);
+    struct qsig q20 = {cq.queue, 0, e2.fence, 20, {0}};
+    CHECK(call(qsignal, &q20) == 0);
+    got = 0;
+    for (int i = 0; i < 500 && !got; i++)
+        if (!(got = mn_notify_next(q, &r))) usleep(1000);
+    CHECK(got && r.value == 0x55);
+    values[0] = values[1] = 30;
+    struct mf all = any;
+    all.flags = 0, all.event = 0x66;
+    CHECK(call(multi, &all) == 0);
+    struct qsig q30a = {cq.queue, 0, e1.fence, 30, {0}}, q30b = {cq.queue, 0, e2.fence, 30, {0}};
+    CHECK(call(qsignal, &q30a) == 0);
+    usleep(50000);
+    CHECK(!mn_notify_next(q, &r)); /* one of the two */
+    CHECK(call(qsignal, &q30b) == 0);
+    got = 0;
+    for (int i = 0; i < 500 && !got; i++)
+        if (!(got = mn_notify_next(q, &r))) usleep(1000);
+    CHECK(got && r.value == 0x66);
 
     /* removed */
     unsigned victim = id_of("ID3D12Object::GetPrivateData");
