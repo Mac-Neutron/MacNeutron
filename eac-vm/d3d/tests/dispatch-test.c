@@ -24,6 +24,13 @@
  *              goes on, logged
  *   wchar      (M2 Task 10) IDXGIAdapter1::GetDesc1 answers the guest's layout: its description UTF-16, its ids past
  *              it where the guest has them
+ *   d3d11device   (M4 Task 5) D3D11CoreCreateDevice on a forwarded factory's adapter makes a device that answers
+ *              ID3D11Device, and IDXGIDevice and ID3D10Device1 at other pointers
+ *   d3d11identity (M4 Task 5) op 4's companion (the device's IDXGIDevice1) comes with its whole interfaces block: it
+ *              answers IDXGIDevice too, and ID3D11Device at another pointer, whose query names the device's first handle
+ *   d3d11getters  (M4 Task 5) two views PSSetShaderResources set come back from PSGetShaderResources as their handles
+ *   d3d11notimpl  (M4 Task 5) a D3D11 call that reaches DXMT's UNIMPLEMENTED (a STAGING buffer's UpdateSubresource)
+ *              fails and the host goes on
  *   dispatch-test <metal-host> <native DXMT lib>; prints "dispatch-test: ok" or each failure. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -364,6 +371,72 @@ int main(int argc, char **argv) {
     struct { uint64_t self, ret, resource, desc; uint64_t descriptor; } cr = {device, 0, bp.resource, 0, cpu};
     CHECK(mn_d3d_calls[rtv].params_size == sizeof cr && call(rtv, &cr) == 0);
     puts("dispatch-test: notimpl: went on");
+
+    /* d3d11device */
+    unsigned mkfactory = id_of("::CreateDXGIFactory1"), enumad = id_of("IDXGIFactory::EnumAdapters"),
+             core11 = id_of("::D3D11CoreCreateDevice");
+    struct { uint64_t self, ret, riid, factory, ifaces[9]; } f11 = {0, 0, (uintptr_t)iid("IDXGIFactory1"), 0, {0}};
+    CHECK(mn_d3d_calls[mkfactory].params_size == sizeof f11 && call(mkfactory, &f11) == 0 && (uint32_t)f11.ret == 0);
+    struct { uint64_t self, ret; uint32_t idx; uint64_t adapter, ifaces[9]; } ea1 = {f11.factory, 0, 0, 0, {0}};
+    CHECK(mn_d3d_calls[enumad].params_size == sizeof ea1 && call(enumad, &ea1) == 0 && (uint32_t)ea1.ret == 0);
+    uint32_t level11 = 0xb000; /* D3D_FEATURE_LEVEL_11_0 */
+    struct { uint64_t self, ret, factory, adapter; uint32_t flags; uint64_t levels; uint32_t n; uint64_t device, ifaces[9]; }
+        cd = {0, 0, f11.factory, ea1.adapter, 0, (uintptr_t)&level11, 1, 0, {0}};
+    CHECK(mn_d3d_calls[core11].params_size == sizeof cd && call(core11, &cd) == 0 && (uint32_t)cd.ret == 0 && cd.device);
+    uint64_t d11 = cd.device;
+    CHECK(answers(cd.ifaces, "ID3D11Device") && answers(cd.ifaces, "ID3D11Device5"));
+    CHECK(answers(cd.ifaces + MN_D3D_MASK_WORDS, "IDXGIDevice") && answers(cd.ifaces + MN_D3D_MASK_WORDS, "ID3D10Device1"));
+
+    /* d3d11identity: op 4 at another pointer, its reply's block, and back */
+    struct mn_d3d_query q11 = {d11, {0}, mn_gh_alloc(MN_OWN_PLUS1)};
+    memcpy(q11.iid, iid("IDXGIDevice1"), 16);
+    struct mn_d3d_query_reply qr = {0};
+    uint32_t qn = 0;
+    CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_QUERY, &q11, sizeof q11, &qr, sizeof qr, &qn) == 0);
+    CHECK(qn == sizeof qr && qr.hr == 0 && answers(qr.ifaces, "IDXGIDevice1") && answers(qr.ifaces, "IDXGIDevice"));
+    CHECK(answers(qr.ifaces, "ID3D11Device") && answers(qr.ifaces + MN_D3D_MASK_WORDS, "ID3D11Device"));
+    struct mn_d3d_query back = {q11.out, {0}, mn_gh_alloc(MN_OWN_PLUS1)};
+    memcpy(back.iid, iid("ID3D11Device"), 16);
+    struct mn_d3d_query_reply br = {0};
+    CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_QUERY, &back, sizeof back, &br, sizeof br, &qn) == 0);
+    CHECK(br.hr == 0 && br.ifaces[2 * MN_D3D_MASK_WORDS] == d11); /* the device the guest has */
+
+    /* d3d11getters */
+    unsigned imm = id_of("ID3D11Device::GetImmediateContext"), tex2d = id_of("ID3D11Device::CreateTexture2D"),
+             srv11 = id_of("ID3D11Device::CreateShaderResourceView"),
+             pset = id_of("ID3D11DeviceContext::PSSetShaderResources"),
+             pget = id_of("ID3D11DeviceContext::PSGetShaderResources");
+    struct { uint64_t self, ret, ctx, ifaces[9]; } gi = {d11, 0, 0, {0}};
+    CHECK(mn_d3d_calls[imm].params_size == sizeof gi && call(imm, &gi) == 0 && gi.ctx);
+    struct { uint32_t w, h, mips, array, format, count, quality, usage, bind, cpu, misc; } td =
+        {8, 8, 1, 1, 28 /* R8G8B8A8_UNORM */, 1, 0, 0, 8 /* D3D11_BIND_SHADER_RESOURCE */, 0, 0};
+    struct { uint64_t self, ret, desc, init, tex, ifaces[9], aux[2]; } ct = {d11, 0, (uintptr_t)&td, 0, 0, {0}, {0}};
+    CHECK(mn_d3d_calls[tex2d].params_size == sizeof ct && call(tex2d, &ct) == 0 && (uint32_t)ct.ret == 0 && ct.tex);
+    uint64_t views[2];
+    for (int i = 0; i < 2; i++) {
+        struct { uint64_t self, ret, res, desc, view, ifaces[9]; } cs = {d11, 0, ct.tex, 0, 0, {0}};
+        CHECK(mn_d3d_calls[srv11].params_size == sizeof cs && call(srv11, &cs) == 0 && (uint32_t)cs.ret == 0);
+        views[i] = cs.view;
+    }
+    struct { uint64_t self, ret; uint32_t start, n; uint64_t views; } ps = {gi.ctx, 0, 0, 2, (uintptr_t)views};
+    CHECK(mn_d3d_calls[pset].params_size == sizeof ps && call(pset, &ps) == 0);
+    uint64_t got11[2] = {0};
+    struct { uint64_t self, ret; uint32_t start, n; uint64_t views; } pg = {gi.ctx, 0, 0, 2, (uintptr_t)got11};
+    CHECK(mn_d3d_calls[pget].params_size == sizeof pg && call(pget, &pg) == 0);
+    CHECK(got11[0] == views[0] && got11[1] == views[1]);
+
+    /* d3d11notimpl: a STAGING buffer's UpdateSubresource (DXMT's UNIMPLEMENTED "update buffer: staging"): the host
+     * goes on */
+    unsigned buf11 = id_of("ID3D11Device::CreateBuffer"), upd11 = id_of("ID3D11DeviceContext::UpdateSubresource");
+    struct { uint32_t width, usage, bind, cpu, misc, stride; } bd11 = {256, 3 /* STAGING */, 0, 0x30000 /* READ|WRITE */, 0, 0};
+    struct { uint64_t self, ret, desc, init, buffer, ifaces[9], aux[2]; } cb11 = {d11, 0, (uintptr_t)&bd11, 0, 0, {0}, {0}};
+    CHECK(call(buf11, &cb11) == 0 && (uint32_t)cb11.ret == 0 && cb11.buffer);
+    uint8_t src[16] = {1};
+    struct { uint64_t self, ret, res; uint32_t sub; uint64_t box, data; uint32_t pitch, slice; uint64_t aux[2]; } up11 =
+        {gi.ctx, 0, cb11.buffer, 0, 0, (uintptr_t)src, 0, 0, {sizeof src, 0}};
+    CHECK(mn_d3d_calls[upd11].params_size == sizeof up11 && call(upd11, &up11) == 0);
+    CHECK(call(imm, &gi) == 0 && gi.ctx); /* still there */
+    puts("dispatch-test: d3d11notimpl: went on");
 
     /* removed */
     unsigned victim = id_of("ID3D12Object::GetPrivateData");

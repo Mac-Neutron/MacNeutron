@@ -12,3 +12,10 @@ EXPORTS
     CreateDXGIFactory2
     DXGIDeclareAdapterRemovalSupport
     DXGIGetDebugInterface1
+    D3D11CoreCreateDevice
+    D3D11CoreRegisterLayers
+    D3D11CreateDevice
+    D3D11CreateDeviceAndSwapChain
+    D3D11On12CreateDevice
+    D3D10CoreCreateDevice
+    D3D10CoreRegisterLayers

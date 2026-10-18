@@ -33,8 +33,10 @@ struct mn_obj {
     UINT source_width = 0, source_height = 0;
     pacing *pace = nullptr;                  // a swapchain's frames (Task 4)
     std::vector<std::pair<int, mn_obj *>> companions; // one an interface at another pointer, held for our life (M3)
+    uint64_t root = 0; // a companion's: the object it came from, whose IUnknown is its IUnknown too (COM's identity, M4)
     std::atomic<const void *> recorder{nullptr};      // a command list's: the thread that called it last (Task 10)
     mn_res res;                                       // a D3D11 or D3D10 resource's description (M4), under m
+    std::recursive_mutex mt;                          // an ID3D11Multithread's Enter and Leave (M4)
 };
 static void end_pacing(pacing *p);
 
@@ -136,7 +138,9 @@ HRESULT STDMETHODCALLTYPE mn_px_QueryInterface(mn_proxy *This, REFIID riid, void
     if (!out) return E_POINTER;
     *out = nullptr;
     mn_obj *o = This->obj;
-    int k = std::memcmp(&riid, &unknown_iid, sizeof riid) ? mn_d3d_iface_of(&riid) : o->created;
+    bool unknown = !std::memcmp(&riid, &unknown_iid, sizeof riid);
+    if (unknown && o->root && (*out = mn_proxy_known(o->root, -1))) return S_OK;
+    int k = unknown ? o->created : mn_d3d_iface_of(&riid);
     if (!has(o->answers, k)) {
         static std::atomic<int> logged;
         if (logged++ < 32) {
@@ -151,16 +155,21 @@ HRESULT STDMETHODCALLTYPE mn_px_QueryInterface(mn_proxy *This, REFIID riid, void
         *out = proxy_of(o, k);
         return S_OK;
     }
-    // A companion: an object of its own, one an interface, the same each time (COM's identity: a caller may patch it,
-    // as a test of DXMT's own does), which the object holds until its last release.
+    // A companion: an object of its own, answering its whole family (M4: D3D11's device its DXGI device, which answers
+    // IDXGIDevice1 too), the same each time (COM's identity: a caller may patch it, as a test of DXMT's own does),
+    // which the object holds until its last release.
+    mn_obj *have = nullptr;
     {
         std::lock_guard<std::mutex> l(o->m);
         for (auto &c : o->companions)
-            if (c.first == k) {
-                c.second->refs++;
-                *out = c.second->proxies[k];
-                return S_OK;
+            if (has(c.second->answers, k) && !has(c.second->moved, k)) {
+                (have = c.second)->refs++;
+                break;
             }
+    }
+    if (have) {
+        *out = proxy_of(have, k);
+        return S_OK;
     }
     mn_d3d_query_args q = {};
     q.handle = o->handle;
@@ -168,13 +177,14 @@ HRESULT STDMETHODCALLTYPE mn_px_QueryInterface(mn_proxy *This, REFIID riid, void
     int32_t s = mn_d3d_call(MN_D3D_OP_QUERY, &q);
     HRESULT hr = s ? mn_d3d_hr(s) : (HRESULT)q.hr;
     if (FAILED(hr) || !q.out) return FAILED(hr) ? hr : E_NOINTERFACE;
-    uint64_t one[2] = {};
-    one[k / 64] = 1ull << (k % 64);
-    mn_obj *c = object(q.out, k, one, nullptr);
-    *out = proxy_of(c, k);
+    auto *p = (mn_proxy *)mn_proxy_out(q.out, k, nullptr, q.ifaces);
+    *out = p;
+    if (p->obj->handle != q.out) return S_OK; // one the guest has (a companion's device): not held, or neither goes
+    // ponytail: a companion the guest got first from a getter (a new object) has no root: its IUnknown is its own
+    p->obj->root = o->root ? o->root : o->handle;
     std::lock_guard<std::mutex> l(o->m);
-    c->refs++; // the object's hold
-    o->companions.push_back({k, c});
+    p->obj->refs++; // the object's hold
+    o->companions.push_back({k, p->obj});
     return S_OK;
 }
 
@@ -670,6 +680,30 @@ static HRESULT STDMETHODCALLTYPE fullscreen(mn_proxy *This, BOOL on, IDXGIOutput
     return hr;
 }
 
+// D3D11CreateDeviceAndSwapChain (a wrap): its swapchain's window as IDXGIFactory::CreateSwapChain's.
+extern "C" HRESULT WINAPI mn_px_D3D11CreateDeviceAndSwapChain(IDXGIAdapter *, D3D_DRIVER_TYPE, HMODULE, UINT,
+                                                              const D3D_FEATURE_LEVEL *, UINT, UINT,
+                                                              const DXGI_SWAP_CHAIN_DESC *, IDXGISwapChain **,
+                                                              ID3D11Device **, D3D_FEATURE_LEVEL *,
+                                                              ID3D11DeviceContext **);
+extern "C" HRESULT WINAPI D3D11CreateDeviceAndSwapChain(IDXGIAdapter *adapter, D3D_DRIVER_TYPE type, HMODULE swrast,
+                                                        UINT flags, const D3D_FEATURE_LEVEL *levels, UINT nlevels,
+                                                        UINT sdk, const DXGI_SWAP_CHAIN_DESC *desc,
+                                                        IDXGISwapChain **swapchain, ID3D11Device **device,
+                                                        D3D_FEATURE_LEVEL *level, ID3D11DeviceContext **context) {
+    HWND hwnd = desc ? desc->OutputWindow : nullptr;
+    if (swapchain) push_window(hwnd);
+    HRESULT hr = mn_px_D3D11CreateDeviceAndSwapChain(adapter, type, swrast, flags, levels, nlevels, sdk, desc, swapchain,
+                                                     device, level, context);
+    if (SUCCEEDED(hr) && swapchain) bind_window((void **)swapchain, hwnd);
+    if (SUCCEEDED(hr) && swapchain && *swapchain) replay(((mn_proxy *)*swapchain)->obj); // created full screen
+    return hr;
+}
+
+// ID3D11Multithread's (and ID3D10Multithread's) Enter and Leave (specials): one object per DXMT device (identity).
+static void STDMETHODCALLTYPE mt_enter(mn_proxy *This) { This->obj->mt.lock(); }
+static void STDMETHODCALLTYPE mt_leave(mn_proxy *This) { This->obj->mt.unlock(); }
+
 // The frame latency object (a special): our semaphore, a waitable swapchain's (DXMT's answers none without the flag).
 static HANDLE STDMETHODCALLTYPE latency_object(mn_proxy *This) {
     pacing *p = This->obj->pace;
@@ -1144,6 +1178,8 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"IDXGISwapChain::GetContainingOutput", (const void *)containing_output, &px_containing_output},
         {"IDXGIAdapter::EnumOutputs", (const void *)enum_outputs, &px_enum_outputs},
         {"IDXGISwapChain2::GetFrameLatencyWaitableObject", (const void *)latency_object},
+        {"ID3D11Multithread::Enter", (const void *)mt_enter},
+        {"ID3D11Multithread::Leave", (const void *)mt_leave},
         {"IDXGISwapChain2::SetMaximumFrameLatency", (const void *)set_latency, &px_set_latency},
         {"IDXGISwapChain1::GetRestrictToOutput", (const void *)restrict_to_output},
         {"IDXGISwapChain1::SetBackgroundColor", (const void *)set_background},

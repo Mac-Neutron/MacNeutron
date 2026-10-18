@@ -166,6 +166,13 @@ class ClassifyTest(unittest.TestCase):
         self.assertIn("mn_d3d_record(This, ", body("ID3D12GraphicsCommandList::Close"))
         self.assertIn("mn_d3d_record(This, ", body("ID3D12GraphicsCommandList1::OMSetDepthBounds"))
         self.assertNotIn("mn_d3d_record", body("ID3D12Device::GetNodeCount"))
+        # M4: a D3D11 context's and a D3D10 device's (a deferred context recorded on one thread, the immediate one
+        # called from several), not a device child's
+        self.assertIn("mn_d3d_record(This, ", body("ID3D11DeviceContext::Draw"))
+        self.assertIn("mn_d3d_record(This, ", body("ID3D11DeviceContext1::ClearView"))
+        self.assertIn("mn_d3d_record(This, ", body("ID3D10Device::Draw"))
+        self.assertNotIn("mn_d3d_record", body("ID3D10DeviceChild::GetDevice"))
+        self.assertNotIn("mn_d3d_record", body("ID3D11Device::GetCreationFlags"))
 
     VIEWS = ("interface ITestViews : IUnknown 01234567-89ab-cdef-0123-456789abcdef\n"
              "HRESULT Get(UINT NumViews, ITestViews **views);\n"

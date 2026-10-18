@@ -1,7 +1,7 @@
 #!/bin/sh
 # Direct3D forwarding's guest DLLs (M2 Task 11): mnd3d.dll (the proxies: guest/proxies.cpp and proxy.cpp; it reaches
-# the guest winemetal.so's slot MN_WM_D3D through winemetal.dll's WMTForward, DXMT 0079) and its stand-ins d3d12.dll and
-# dxgi.dll, which forward their exports to it: plain x86-64 PE DLLs, built on the Mac with MacNeutron's llvm-mingw
+# the guest winemetal.so's slot MN_WM_D3D through winemetal.dll's WMTForward, DXMT 0079) and its stand-ins d3d12.dll,
+# dxgi.dll, d3d11.dll and d3d10core.dll (M4), which forward their exports to it: plain x86-64 PE DLLs, built on the Mac with MacNeutron's llvm-mingw
 # against the headers DXMT's PE build takes (llvm-mingw's, as the native set copies them), into
 # build/eac-vm-work/d3d-guest/x86_64-windows. Needs eac-vm/dxmt/build.sh (winemetal.dll's import library).
 set -eu
@@ -32,7 +32,7 @@ x86_64-w64-mingw32-clang -O2 -Wall -Werror -I"$G" -c -o "$O/obj/ifaces.o" "$G/if
 x86_64-w64-mingw32-clang++ -shared -static -o "$O/x86_64-windows/mnd3d.dll" "$O"/obj/*.o "$D3D/guest/mnd3d.def" "$WMLIB" \
   -lgdi32 -luser32 -Wl,--no-insert-timestamp
 echo 'int __stdcall DllMain(void *h, unsigned r, void *p) { (void)h, (void)r, (void)p; return 1; }' > "$O/obj/forward.c"
-for n in d3d12 dxgi; do
+for n in d3d12 dxgi d3d11 d3d10core; do
   x86_64-w64-mingw32-clang -shared -nostdlib -Wl,--entry,DllMain -o "$O/x86_64-windows/$n.dll" "$O/obj/forward.c" \
     "$D3D/guest/$n.def" -Wl,--no-insert-timestamp
 done

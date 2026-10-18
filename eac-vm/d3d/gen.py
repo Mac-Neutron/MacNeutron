@@ -1124,6 +1124,9 @@ def families(model, rules):
             out.append(n)
             n = model.interfaces[n].base
         return out
+    for a, b in rules.companions:
+        if a not in index or b not in index:
+            raise RuleError(f"companion {a} {b}: {a if a not in index else b} isn't an interface of the model")
     fam = {}
     for n in index:
         members = set(chain(n)) | {m for m in index if n in chain(m)}
@@ -1157,6 +1160,8 @@ def iface_decls(model):
             "/* The interface an IID names, or -1. */",
             "int mn_d3d_iface_of(const void *iid);", ""]
 
+
+RECORDERS = re.compile(r"ID3D12GraphicsCommandList|ID3D11DeviceContext|ID3D10Device1?$")
 
 HANDLE_TYPES = ("HANDLE", "HWND", "HMONITOR", "HDC", "HMODULE", "HINSTANCE")
 
@@ -1329,9 +1334,8 @@ def emit_proxies(model, rules, calls):
                 body.append(f"    std::vector<uint64_t> mn_o_{m}({rename[f.count]});")
                 body.append(f"    mn_p.{m} = (uintptr_t)mn_o_{m}.data();")
         has_ret = any(p.name == "__ret" for p in c.method.params)
-        # a command list's: in order when handed between threads (guest/proxy.cpp)
-        call = f"mn_d3d_record(This, {mid}, &mn_p)" if iface.startswith("ID3D12GraphicsCommandList") else \
-            f"mn_d3d_call({mid}, &mn_p)"
+        # a command list's, a D3D11 context's or a D3D10 device's: in order when handed between threads (guest/proxy.cpp)
+        call = f"mn_d3d_record(This, {mid}, &mn_p)" if RECORDERS.match(iface) else f"mn_d3d_call({mid}, &mn_p)"
         if (ret == "void" or (has_ret and ret != "HRESULT")) and not made:  # the status tells the caller nothing
             body.append(f"    {call};")
         else:

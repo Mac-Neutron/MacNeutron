@@ -109,8 +109,11 @@ ID3D12SDKConfiguration1::* refuse
 ID3D12DeviceFactory::* refuse
 ID3D12DeviceConfiguration::* refuse
 ID3DDestructionNotifier::* refuse
-IDXGIResource::* refuse
-IDXGIResource1::* refuse
+# A D3D11 or D3D10 resource's DXGI side (M4; D3D12's has none in DXMT): its usage and eviction priority, not its
+# handles shared across processes, which mean nothing across the VM.
+IDXGIResource::GetSharedHandle refuse
+IDXGIResource1::CreateSharedHandle refuse
+IDXGIResource1::CreateSubresourceSurface refuse
 IDXGIKeyedMutex::* refuse
 IDXGISurface::* refuse
 IDXGISurface1::* refuse
@@ -358,6 +361,12 @@ ID3D11VideoContext2::* refuse
 ::D3D11CreateDevice feature_levels in count=levels
 ::D3D11CoreCreateDevice feature_levels in count=levels
 ::D3D11CreateDeviceAndSwapChain feature_levels in count=levels
+# Its swapchain's window pushed first and bound after (guest/proxy.cpp, as IDXGIFactory::CreateSwapChain's).
+::D3D11CreateDeviceAndSwapChain wrap
+# The app's own lock between its threads, taken in the guest (a host lock is a host thread's, and a guest thread moves
+# between vCPUs): DXMT's protection inside each call stays the host's (SetMultithreadProtected is forwarded).
+ID3D11Multithread::Enter special
+ID3D11Multithread::Leave special
 # What DXMT aborts on (UNIMPLEMENTED: the tiled methods, SwapDeviceContextState, the Device3 copies) or answers
 # E_NOTIMPL itself (counters, class instances: AS_DXMT), and handles shared across processes, which mean nothing
 # across the VM.
@@ -487,6 +496,55 @@ ID3D10Texture2D::Map pMappedTex2D out bytes=16
 ID3D10Texture2D::Map own
 ID3D10Texture3D::Map pMappedTex3D out bytes=16
 ID3D10Texture3D::Map own
+# D3D11's and D3D10's objects answer each other, and DXGI's interfaces, at other pointers (DXMT's C++ subobjects):
+# the device its DXGI device, D3D10 device and multithread lock; a resource, view, state, shader or query its D3D10
+# counterpart, a resource its DXGI resource. Each way, so a companion answers its whole family too.
+companion ID3D11Device IDXGIDevice3
+companion ID3D11Device ID3D10Device1
+companion ID3D11Device ID3D11Multithread
+companion IDXGIDevice ID3D11Device5
+companion IDXGIDevice ID3D10Device1
+companion IDXGIDevice ID3D11Multithread
+companion ID3D10Device ID3D11Device5
+companion ID3D10Device IDXGIDevice3
+companion ID3D10Device ID3D11Multithread
+companion ID3D11Multithread ID3D11Device5
+companion ID3D11Multithread IDXGIDevice3
+companion ID3D11Multithread ID3D10Device1
+companion ID3D11Resource IDXGIResource1
+companion ID3D10Resource IDXGIResource1
+companion IDXGIResource ID3D11Resource
+companion IDXGIResource ID3D10Resource
+companion ID3D11Buffer ID3D10Buffer
+companion ID3D10Buffer ID3D11Buffer
+companion ID3D11Texture1D ID3D10Texture1D
+companion ID3D10Texture1D ID3D11Texture1D
+companion ID3D11Texture2D ID3D10Texture2D
+companion ID3D10Texture2D ID3D11Texture2D1
+companion ID3D11Texture3D ID3D10Texture3D
+companion ID3D10Texture3D ID3D11Texture3D1
+companion ID3D11RenderTargetView ID3D10RenderTargetView
+companion ID3D10RenderTargetView ID3D11RenderTargetView1
+companion ID3D11DepthStencilView ID3D10DepthStencilView
+companion ID3D10DepthStencilView ID3D11DepthStencilView
+companion ID3D11ShaderResourceView ID3D10ShaderResourceView1
+companion ID3D10ShaderResourceView ID3D11ShaderResourceView1
+companion ID3D11SamplerState ID3D10SamplerState
+companion ID3D10SamplerState ID3D11SamplerState
+companion ID3D11BlendState ID3D10BlendState1
+companion ID3D10BlendState ID3D11BlendState1
+companion ID3D11RasterizerState ID3D10RasterizerState
+companion ID3D10RasterizerState ID3D11RasterizerState2
+companion ID3D11DepthStencilState ID3D10DepthStencilState
+companion ID3D10DepthStencilState ID3D11DepthStencilState
+companion ID3D11VertexShader ID3D10VertexShader
+companion ID3D10VertexShader ID3D11VertexShader
+companion ID3D11GeometryShader ID3D10GeometryShader
+companion ID3D10GeometryShader ID3D11GeometryShader
+companion ID3D11PixelShader ID3D10PixelShader
+companion ID3D10PixelShader ID3D11PixelShader
+companion ID3D11Query ID3D10Query
+companion ID3D10Query ID3D11Query
 # D3D11_KEEP_* counts carry no array (guest/proxy.cpp's wrap drops them).
 ID3D11DeviceContext::OMSetRenderTargetsAndUnorderedAccessViews wrap
 # Class instances: their count after them (DXMT has none, so games pass none).
@@ -523,15 +581,15 @@ ID3D10Device::VSGetSamplers ppSamplers out count=NumSamplers
 ID3D10Device::GSGetShaderResources ppShaderResourceViews out count=NumViews
 ID3D10Device::GSGetSamplers ppSamplers out count=NumSamplers
 ID3D10Device::OMGetRenderTargets ppRenderTargetViews out count=NumViews
-ID3D10Device::OMGetRenderTargets ppDepthStencilView out count=NumViews
+ID3D10Device::OMGetRenderTargets ppDepthStencilView out one
 ID3D10Device::SOGetTargets ppSOTargets out count=NumBuffers
 ID3D10Device::GetPrivateData pDataSize inout one
 ID3D10Device::GetPrivateData pData out size=*pDataSize
 ID3D10Device::SetPrivateData pData in size=DataSize
-ID3D10Device::CreateInputLayout ppInputLayout out count=NumElements
+ID3D10Device::CreateInputLayout ppInputLayout out one
 ID3D10Device::CreateVertexShader pShaderBytecode in size=BytecodeLength
 ID3D10Device::CreateGeometryShader pShaderBytecode in size=BytecodeLength
-ID3D10Device::CreateGeometryShaderWithStreamOutput ppGeometryShader out count=NumEntries
+ID3D10Device::CreateGeometryShaderWithStreamOutput ppGeometryShader out one
 ID3D10Device::CreateGeometryShaderWithStreamOutput pShaderBytecode in size=BytecodeLength
 ID3D10Device::CreatePixelShader pShaderBytecode in size=BytecodeLength
 ID3D11DeviceChild::GetPrivateData pDataSize inout one
@@ -572,9 +630,9 @@ ID3D11DeviceContext::VSGetSamplers ppSamplers out count=NumSamplers
 ID3D11DeviceContext::GSGetShaderResources ppShaderResourceViews out count=NumViews
 ID3D11DeviceContext::GSGetSamplers ppSamplers out count=NumSamplers
 ID3D11DeviceContext::OMGetRenderTargets ppRenderTargetViews out count=NumViews
-ID3D11DeviceContext::OMGetRenderTargets ppDepthStencilView out count=NumViews
+ID3D11DeviceContext::OMGetRenderTargets ppDepthStencilView out one
 ID3D11DeviceContext::OMGetRenderTargetsAndUnorderedAccessViews ppRenderTargetViews out count=NumRTVs
-ID3D11DeviceContext::OMGetRenderTargetsAndUnorderedAccessViews ppDepthStencilView out count=NumRTVs
+ID3D11DeviceContext::OMGetRenderTargetsAndUnorderedAccessViews ppDepthStencilView out one
 ID3D11DeviceContext::OMGetRenderTargetsAndUnorderedAccessViews ppUnorderedAccessViews out count=NumUAVs
 ID3D11DeviceContext::SOGetTargets ppSOTargets out count=NumBuffers
 ID3D11DeviceContext::HSGetShaderResources ppShaderResourceViews out count=NumViews
@@ -587,10 +645,10 @@ ID3D11DeviceContext::CSGetShaderResources ppShaderResourceViews out count=NumVie
 ID3D11DeviceContext::CSGetUnorderedAccessViews ppUnorderedAccessViews out count=NumUAVs
 ID3D11DeviceContext::CSGetSamplers ppSamplers out count=NumSamplers
 ID3D11DeviceContext::CSGetConstantBuffers ppConstantBuffers out count=NumBuffers
-ID3D11Device::CreateInputLayout ppInputLayout out count=NumElements
+ID3D11Device::CreateInputLayout ppInputLayout out one
 ID3D11Device::CreateVertexShader pShaderBytecode in size=BytecodeLength
 ID3D11Device::CreateGeometryShader pShaderBytecode in size=BytecodeLength
-ID3D11Device::CreateGeometryShaderWithStreamOutput ppGeometryShader out count=NumStrides
+ID3D11Device::CreateGeometryShaderWithStreamOutput ppGeometryShader out one
 ID3D11Device::CreateGeometryShaderWithStreamOutput pShaderBytecode in size=BytecodeLength
 ID3D11Device::CreatePixelShader pShaderBytecode in size=BytecodeLength
 ID3D11Device::CreateHullShader pShaderBytecode in size=BytecodeLength

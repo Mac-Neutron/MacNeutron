@@ -190,12 +190,15 @@ static int32_t family(uint32_t id, void *params) {
         struct mn_d3d_query q = {a->handle, {0}, mn_gh_alloc(MN_OWN_PLUS1)};
         memcpy(q.iid, a->iid, sizeof q.iid);
         if (!q.out) return (int32_t)MN_STATUS_UNSUCCESSFUL;
-        int32_t hr = 0, s = mn_call_flush(MN_OP_D3D + id, &q, sizeof q, &hr, sizeof hr, &n);
-        if (s || hr < 0) {
+        struct mn_d3d_query_reply r = {0};
+        int32_t s = mn_call_flush(MN_OP_D3D + id, &q, sizeof q, &r, sizeof r, &n);
+        if (!s && n != sizeof r) s = (int32_t)MN_STATUS_UNSUCCESSFUL;
+        if (s || r.hr < 0) {
             mn_gh_drop(q.out);
             q.out = 0;
         }
-        a->out = q.out, a->hr = s ? 0 : hr;
+        a->out = q.out, a->hr = s ? 0 : r.hr;
+        memcpy(a->ifaces, r.ifaces, sizeof a->ifaces);
         return s;
     }
     case MN_D3D_OP_BLOB: {

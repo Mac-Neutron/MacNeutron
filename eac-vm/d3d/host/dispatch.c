@@ -23,6 +23,8 @@ void mn_d3d_native_release(void *obj);
 int32_t mn_d3d_native_query(void *obj, const uint8_t iid[16], void **out);
 const void *mn_d3d_native_blob(void *obj, uint64_t *size);
 void mn_d3d_identity_add(uint32_t ctx_id, void *obj, uint64_t handle), mn_d3d_identity_drop(void *obj);
+uint64_t mn_d3d_identity_of(uint32_t ctx_id, void *obj);
+void mn_d3d_answers(void *obj, int iface, uint64_t out[9]);
 NTSTATUS_T mn_d3d_map_stub(void *params);
 NTSTATUS_T mn_d3d_create_fence_stub(void *params), mn_d3d_fence_signal_stub(void *params),
     mn_d3d_queue_signal_stub(void *params), mn_d3d_set_event_stub(void *params),
@@ -245,20 +247,25 @@ static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *
     }
     case MN_D3D_OP_QUERY: {
         struct mn_d3d_query q;
-        if (len < sizeof q || !reply || cap < sizeof(int32_t)) return MN_EINVAL;
+        struct mn_d3d_query_reply r = {0};
+        if (len < sizeof q || !reply || cap < sizeof r) return MN_EINVAL;
         memcpy(&q, p, sizeof q);
         int ok;
         void *obj = mn_ht_get(c->ht, q.handle, MN_HK_D3D, &ok), *out = NULL;
         if (!ok || !obj) return (int32_t)MN_STATUS_INVALID_HANDLE;
-        int32_t hr = mn_d3d_native_query(obj, q.iid, &out);
-        if (hr >= 0 && mn_ht_bind(c->ht, ring, q.out, MN_HK_D3D, out, MN_OWN_PLUS1)) {
+        r.hr = mn_d3d_native_query(obj, q.iid, &out);
+        if (r.hr >= 0) { /* what it answers, and the handle the guest has it by, if any: before this one's */
+            mn_d3d_answers(out, mn_d3d_iface_of(q.iid), r.ifaces);
+            r.ifaces[2 * MN_D3D_MASK_WORDS] = mn_d3d_identity_of(c->ctx_id, out);
+        }
+        if (r.hr >= 0 && mn_ht_bind(c->ht, ring, q.out, MN_HK_D3D, out, MN_OWN_PLUS1)) {
             mn_d3d_native_release(out);
-            hr = MN_D3D_E_FAIL;
-        } else if (hr >= 0) {
+            r.hr = MN_D3D_E_FAIL;
+        } else if (r.hr >= 0) {
             mn_d3d_identity_add(c->ctx_id, out, q.out); /* its release drops a binding too */
         }
-        memcpy(reply, &hr, sizeof hr);
-        *n = sizeof hr;
+        memcpy(reply, &r, sizeof r);
+        *n = sizeof r;
         return 0;
     }
     case MN_D3D_OP_NOTIFY: {

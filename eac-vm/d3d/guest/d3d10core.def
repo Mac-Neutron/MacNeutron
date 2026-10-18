@@ -1,0 +1,4 @@
+LIBRARY d3d10core.dll
+EXPORTS
+    D3D10CoreCreateDevice = mnd3d.D3D10CoreCreateDevice
+    D3D10CoreRegisterLayers = mnd3d.D3D10CoreRegisterLayers

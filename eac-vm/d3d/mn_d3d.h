@@ -30,7 +30,7 @@ enum {
  * no more than one is still to be shown, so the next has a drawable free and the host's nextDrawable doesn't wait on
  * the vCPU: on op 11's event, which the host has the guest's listener set with each one shown. */
 #define MN_D3D_MIRROR_DRAWABLES 2
-struct mn_d3d_query { uint64_t handle; uint8_t iid[16]; uint64_t out; }; /* reply: int32 HRESULT */
+struct mn_d3d_query { uint64_t handle; uint8_t iid[16]; uint64_t out; }; /* reply: struct mn_d3d_query_reply */
 /* Ops 7 and 8 (M3): the guest's window and displays as Win32 has them there, pushed before the calls that read them
  * (host/window.c keeps the latest of each, by context). flags: 1 minimised, 2 foreground, 4 a window. A display's
  * modes follow it, `modes` of them, the current one first and then EnumDisplaySettings' list. */
@@ -74,12 +74,18 @@ struct mn_d3d_proxy_hdr { const void *vtbl; uint32_t magic; int32_t iface; uint6
  * params struct's <out>_ifaces[9]): answered (a bit by mn_d3d_ifaces index), answered at another pointer, then the
  * handle the host gave the object before (0: none). 256 interfaces (M4: D3D11 and D3D10 take the model past 128). */
 #define MN_D3D_MASK_WORDS 4
+/* Op 4's reply (M4): the companion's whole interfaces block, as a creation's (D3D11's, D3D10's and DXGI's objects answer
+ * each other at other pointers) */
+struct mn_d3d_query_reply { int32_t hr, pad; uint64_t ifaces[2 * MN_D3D_MASK_WORDS + 1]; };
 struct mn_d3d_args { uint32_t id, flags; uint64_t params; };
 /* A command list's method on a list another thread called last (M3 Task 10, SMITE 2's: one thread opens a list and
  * stamps its start, another records and closes it): sent with MN_REC_SUBMIT, which first runs every other ring of the
  * context, that thread's records for the list among them. */
 #define MN_D3D_ARG_HANDOFF 1u
-struct mn_d3d_query_args { uint64_t handle; uint8_t iid[16]; uint64_t out; int32_t hr, pad; };
+struct mn_d3d_query_args {
+    uint64_t handle; uint8_t iid[16]; uint64_t out; int32_t hr, pad;
+    uint64_t ifaces[2 * MN_D3D_MASK_WORDS + 1];
+};
 struct mn_d3d_blob_args { uint64_t handle, dst, cap, size; }; /* the blob's bytes into dst (at most cap), its size */
 
 #define MN_D3D_E_FAIL ((int32_t)0x80004005)

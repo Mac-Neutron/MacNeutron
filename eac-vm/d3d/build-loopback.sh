@@ -1,8 +1,8 @@
 #!/bin/sh
 # Direct3D forwarding's loopback library (M2 Task 6): build/d3d-loopback/libmnd3d-loopback.dylib, the guest's proxies,
 # marshaller and unix side over a loopback transport (tests/loopback.c) to the VM host's executor, dispatcher and stubs
-# on native DXMT, in one Mac process. It exports d3d12.def's and dxgi.def's functions: a native program linked to it
-# instead of native DXMT runs every Direct3D call through forwarding (MN_D3D_LOOPBACK: the guest's WCHAR is the native
+# on native DXMT, in one Mac process. It exports the stand-ins' functions (d3d12.def's, dxgi.def's, and M4's d3d11.def's
+# and d3d10core.def's): a native program linked to it instead of native DXMT runs every Direct3D call through forwarding (MN_D3D_LOOPBACK: the guest's WCHAR is the native
 # one). Needs eac-vm/dxmt-native/build.sh. Prints the library's path.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
