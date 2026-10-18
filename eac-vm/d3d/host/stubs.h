@@ -34,9 +34,10 @@ struct mn_d3d_export { const char *dll, *name; };
 // After a creation: which interfaces of iface's family (an mn_d3d_ifaces index; -1: none known) the object answers
 // (out[0..3]), which of them at another pointer (out[4..7]), and the handle it already has (out[8]: 0, none).
 void mn_d3d_answers(void *obj, int iface, uint64_t out[9]);
-// A getter's objects (M4), n native pointers in p, each turned into the handle the guest knows it by (0 for one it
-// doesn't, or NULL), DXMT's reference let go.
-void mn_d3d_objects_out(uint64_t *p, uint32_t n);
+// A getter's objects (M4), n native pointers DXMT wrote into objs (host memory), each the handle the guest knows it by
+// in out (0 for one it doesn't, or NULL), DXMT's reference let go. MN_D3D_MAX_OBJECTS: D3D11's widest slot range.
+#define MN_D3D_MAX_OBJECTS 128
+void mn_d3d_objects_out(void *const *objs, uint32_t n, uint64_t *out);
 uint64_t mn_d3d_identity_of(uint32_t ctx_id, void *obj); // native.cpp
 // A method's HRESULT: device removal, and an asynchronous call's failure, for the call running (dispatch.c).
 void mn_d3d_result(HRESULT hr);

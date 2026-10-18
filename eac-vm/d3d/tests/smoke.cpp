@@ -22,6 +22,9 @@
 //                the GPU takes longer over than the CPU (four 256 MiB copies each), a fence signalled before each:
 //                after each present the fence trails it by no more than the device's latency, 3, and d3d-smoke.sh
 //                checks no present held a vCPU on the host ("ok", or what broke)
+//   smoke.exe die (M4's final review) a D3D11 device, its shaders and draws that compile pipelines, and the process's
+//                end at once, releasing nothing: d3d-smoke.sh runs it three times before the rest, which the host must
+//                still be up for (its "die status" lines)
 //   wmsize       (M3's final review) a window that answers WM_SIZE with ResizeBuffers(0, 0), as DXGI's samples do:
 //                ResizeTarget(640x480) and SetFullscreenState(TRUE, then FALSE) on its own thread each return, and
 //                the buffers are then the window's size ("ok", "hang <step>": 10 s, the process ends, or the size)
@@ -357,6 +360,57 @@ static const char *d3d11_latency() {
     return bad ? bad : "ok";
 }
 
+static std::vector<char> file(const char *path) {
+    std::vector<char> v;
+    if (FILE *f = fopen(path, "rb")) {
+        char b[4096];
+        for (size_t n; (n = fread(b, 1, sizeof b, f));) v.insert(v.end(), b, b + n);
+        fclose(f);
+    }
+    return v;
+}
+
+// A child's life (smoke.exe die): a device, shaders, draws whose pipelines compile on the host, then the end at once.
+static int die() {
+    ID3D11Device *dev = nullptr;
+    ID3D11DeviceContext *ctx = nullptr;
+    D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
+    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, &level, 1, D3D11_SDK_VERSION, &dev,
+                                 nullptr, &ctx)))
+        return 2;
+    std::vector<char> vs = file("shaders/d3d11/quad.vs.dxbc");
+    ID3D11VertexShader *v = nullptr;
+    if (vs.empty() || FAILED(dev->CreateVertexShader(vs.data(), vs.size(), nullptr, &v))) return 3;
+    D3D11_TEXTURE2D_DESC td = {64, 64, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM, {1, 0}, D3D11_USAGE_DEFAULT,
+                               D3D11_BIND_RENDER_TARGET, 0, 0};
+    ID3D11Texture2D *t = nullptr;
+    ID3D11RenderTargetView *rtv = nullptr;
+    if (FAILED(dev->CreateTexture2D(&td, nullptr, &t)) || FAILED(dev->CreateRenderTargetView(t, nullptr, &rtv))) return 4;
+    D3D11_VIEWPORT vp = {0, 0, 64, 64, 0, 1};
+    ctx->OMSetRenderTargets(1, &rtv, nullptr);
+    ctx->RSSetViewports(1, &vp);
+    ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ctx->VSSetShader(v, nullptr, 0);
+    const D3D11_BLEND blends[] = {D3D11_BLEND_ONE, D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_ZERO};
+    for (const char *ps : {"shaders/d3d11/solid.ps.dxbc", "shaders/d3d11/sample.ps.dxbc", // float colours: RGBA8's
+                           "shaders/d3d11/render.ps.dxbc", "shaders/d3d11/vsia.ps.dxbc"}) {
+        std::vector<char> code = file(ps);
+        ID3D11PixelShader *p = nullptr;
+        if (code.empty() || FAILED(dev->CreatePixelShader(code.data(), code.size(), nullptr, &p))) continue;
+        ctx->PSSetShader(p, nullptr, 0);
+        for (D3D11_BLEND b : blends) { // a pipeline each: their compiles still running as the process ends
+            D3D11_BLEND_DESC bd = {};
+            bd.RenderTarget[0] = {TRUE, b, D3D11_BLEND_ZERO, D3D11_BLEND_OP_ADD, D3D11_BLEND_ONE, D3D11_BLEND_ZERO,
+                                  D3D11_BLEND_OP_ADD, D3D11_COLOR_WRITE_ENABLE_ALL};
+            ID3D11BlendState *bs = nullptr;
+            if (SUCCEEDED(dev->CreateBlendState(&bd, &bs))) ctx->OMSetBlendState(bs, nullptr, 0xffffffff);
+            ctx->Draw(3, 0);
+        }
+    }
+    ctx->Flush();
+    return 0; // the process ends now, nothing released: its pipelines still compiling
+}
+
 static void wmt_forward() {
     auto forward = (UINT32(WINAPI *)(UINT32, void *))GetProcAddress(LoadLibraryA("winemetal.dll"), "WMTForward");
     if (!forward) return (void)printf("wmtforward FAIL no WMTForward\n");
@@ -366,7 +420,8 @@ static void wmt_forward() {
     else printf("wmtforward %08x\n", s);
 }
 
-int main() {
+int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "die")) return die();
     setvbuf(stdout, nullptr, _IONBF, 0);
     HANDLE t = CreateThread(nullptr, 0, first, nullptr, 0, nullptr);
     if (!t) return printf("eventthread FAIL thread\n"), 1;

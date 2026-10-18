@@ -31,10 +31,10 @@ for f in "$D3D/host/dispatch.c" "$D3D/host/memory.c" "$D3D/host/events.c" "$D3D/
   clang -O2 -std=gnu2x -Wall -c -I"$M" -I"$M/wm" -I"$G" -I"$I" -I"$DXMT/winemetal" -o "$o" "$f"
   objs="$objs $o"
 done
-for f in "$G/stubs.cpp" "$D3D/host/native.cpp"; do
+for f in "$G/stubs.cpp" "$D3D/host/native.cpp" "$D3D/guest/formats.cpp"; do  # formats: the host checks data sizes too
   o="$W/obj/d3d-$(basename "$f").o"
   clang++ -O2 -std=c++17 -Wall -Werror -Wno-extern-c-compat -DWIDL_EXPLICIT_AGGREGATE_RETURNS -include "$NT/native-prelude.h" -I"$NT/include" \
-    -I"$I/d3d12" -I"$I/windows" -I"$I/directx" -I"$I" -I"$DXMT/util" -I"$DXMT/d3d12" -I"$DXMT/d3d11" -I"$G" -I"$D3D/host" -c -o "$o" "$f"
+    -I"$I/d3d12" -I"$I/windows" -I"$I/directx" -I"$I" -I"$DXMT/util" -I"$DXMT/d3d12" -I"$DXMT/d3d11" -I"$G" -I"$D3D/host" -I"$D3D/guest" -c -o "$o" "$f"
   objs="$objs $o"
 done
 rm -rf "$W/dxmt"

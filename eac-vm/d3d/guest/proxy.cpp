@@ -48,7 +48,6 @@ struct mn_obj {
     uint64_t root = 0; // a companion's: the object it came from, whose IUnknown is its IUnknown too (COM's identity, M4)
     std::atomic<const void *> recorder{nullptr};      // a command list's: the thread that called it last (Task 10)
     mn_res res;                                       // a D3D11 or D3D10 resource's description (M4), under m
-    std::recursive_mutex mt;                          // an ID3D11Multithread's Enter and Leave (M4)
     std::atomic<UINT> latency{0};                     // an IDXGIDevice1's SetMaximumFrameLatency (M4; 0: DXGI's 3)
     uint64_t alloc = 0;           // a D3D11 or D3D10 resource's allocation, as its creation named it (Task 7), under m
     ID3D11Fence *idle = nullptr;  // a context's own fence, which a map's wait signals and waits on (Task 7), under m
@@ -57,6 +56,7 @@ struct mn_obj {
     int8_t pieces = 0;             // 1: its maps answered here, -1: the host's (E_NOTIMPL), 0: not asked
     int8_t immediate = 0;          // a context's: 1 the immediate one, -1 deferred, 0 not asked
     mn_proxy *ext2 = nullptr;      // and its IMTLD3D11ContextExt2 (a companion it holds), if asked
+    std::vector<uint64_t> lists;   // a deferred context's dynamic resources discarded since its last list, or a list's
 };
 static void end_pacing(pacing *p);
 
@@ -817,9 +817,12 @@ extern "C" HRESULT WINAPI D3D11CreateDeviceAndSwapChain(IDXGIAdapter *adapter, D
     return hr;
 }
 
-// ID3D11Multithread's (and ID3D10Multithread's) Enter and Leave (specials): one object per DXMT device (identity).
-static void STDMETHODCALLTYPE mt_enter(mn_proxy *This) { This->obj->mt.lock(); }
-static void STDMETHODCALLTYPE mt_leave(mn_proxy *This) { This->obj->mt.unlock(); }
+// ID3D11Multithread's (and ID3D10Multithread's) Enter and Leave (specials): the device's, its context's and its D3D10
+// device's are other objects over one lock. ponytail: one lock for every device in the process (a game has one); a
+// lock per device, found from any of them, if two devices' Enter blocks ever need to overlap.
+static std::recursive_mutex multithread;
+static void STDMETHODCALLTYPE mt_enter(mn_proxy *) { multithread.lock(); }
+static void STDMETHODCALLTYPE mt_leave(mn_proxy *) { multithread.unlock(); }
 
 // The frame latency object (a special): our semaphore, a waitable swapchain's (DXMT's answers none without the flag).
 static HANDLE STDMETHODCALLTYPE latency_object(mn_proxy *This) {
@@ -1096,23 +1099,6 @@ template <class T> static int iface_of() {
     return mn_d3d_iface_of(&iid);
 }
 
-static mn_res described(const D3D11_BUFFER_DESC &d) { return mn_res_of(1, DXGI_FORMAT_UNKNOWN, d.ByteWidth, 1, 1, 1, 1); }
-static mn_res described(const D3D11_TEXTURE1D_DESC &d) { return mn_res_of(2, d.Format, d.Width, 1, 1, d.MipLevels, d.ArraySize); }
-static mn_res described(const D3D11_TEXTURE2D_DESC &d) {
-    return mn_res_of(3, d.Format, d.Width, d.Height, 1, d.MipLevels, d.ArraySize);
-}
-static mn_res described(const D3D11_TEXTURE2D_DESC1 &d) {
-    return mn_res_of(3, d.Format, d.Width, d.Height, 1, d.MipLevels, d.ArraySize);
-}
-static mn_res described(const D3D11_TEXTURE3D_DESC &d) { return mn_res_of(4, d.Format, d.Width, d.Height, d.Depth, d.MipLevels, 1); }
-static mn_res described(const D3D11_TEXTURE3D_DESC1 &d) { return mn_res_of(4, d.Format, d.Width, d.Height, d.Depth, d.MipLevels, 1); }
-static mn_res described(const D3D10_BUFFER_DESC &d) { return mn_res_of(1, DXGI_FORMAT_UNKNOWN, d.ByteWidth, 1, 1, 1, 1); }
-static mn_res described(const D3D10_TEXTURE1D_DESC &d) { return mn_res_of(2, d.Format, d.Width, 1, 1, d.MipLevels, d.ArraySize); }
-static mn_res described(const D3D10_TEXTURE2D_DESC &d) {
-    return mn_res_of(3, d.Format, d.Width, d.Height, 1, d.MipLevels, d.ArraySize);
-}
-static mn_res described(const D3D10_TEXTURE3D_DESC &d) { return mn_res_of(4, d.Format, d.Width, d.Height, d.Depth, d.MipLevels, 1); }
-
 template <class Res, class T, class Desc> static bool describe(Res *res, mn_res &r) {
     T *t = nullptr;
     if (FAILED(res->QueryInterface(__uuidof(T), (void **)&t))) return false;
@@ -1345,6 +1331,21 @@ static HRESULT get_pieces(mn_proxy *ext, ID3D11Resource *res, UINT sub, UINT cou
     return hr;
 }
 
+// The host renamed the resource itself (a command list's discard executed, a map of its own): the guest's current piece
+// is no longer the resource's, nor the rest of its allocation's pieces, which DXMT recycles (the final review).
+static void forget_current(mn_obj *o) {
+    std::lock_guard<std::mutex> l(o->m);
+    for (auto &st : o->stashes) {
+        if (!st.has_current) continue;
+        uint64_t allocation = st.current.id >> 16;
+        std::deque<mn_piece> keep;
+        for (auto &p : st.free)
+            if (p.id >> 16 != allocation) keep.push_back(p);
+        st.free.swap(keep);
+        st.has_current = false;
+    }
+}
+
 // A map answered here: true, with *hr; false, the host's to answer.
 static bool piece_map(mn_proxy *context, ID3D11Resource *res, UINT sub, D3D11_MAP type,
                       D3D11_MAPPED_SUBRESOURCE *mapped, HRESULT *hr) {
@@ -1404,6 +1405,14 @@ static HRESULT STDMETHODCALLTYPE map11(mn_proxy *This, ID3D11Resource *res, UINT
                                        D3D11_MAPPED_SUBRESOURCE *mapped) {
     HRESULT answered;
     if (piece_map(This, res, sub, type, mapped, &answered)) return answered;
+    if (res && (type == D3D11_MAP_WRITE_DISCARD || type == D3D11_MAP_WRITE_NO_OVERWRITE)) {
+        mn_obj *ro = ((mn_proxy *)res)->obj;
+        std::unique_lock<std::mutex> l(This->obj->m);
+        if (This->obj->immediate < 0 && type == D3D11_MAP_WRITE_DISCARD) // a deferred context's: its list's
+            This->obj->lists.push_back(ro->handle);
+        l.unlock();
+        if (This->obj->immediate > 0 && type == D3D11_MAP_WRITE_DISCARD) forget_current(ro); // DXMT's own rename
+    }
     mn_d3d_p_ID3D11DeviceContext_Map p = {};
     D3D11_MAPPED_SUBRESOURCE m = {};
     const bool wait = would_wait(type, flags);
@@ -1448,6 +1457,38 @@ static void STDMETHODCALLTYPE unmap11(mn_proxy *This, ID3D11Resource *res, UINT 
         return;
     }
     if (!ours) PX(unmap11, px_unmap11)(This, res, sub);
+}
+
+// FinishCommandList and ExecuteCommandList (wraps): the list carries its deferred context's discarded resources, and
+// executing it ends the guest's current piece of each.
+static const void *px_finish, *px_execute;
+static HRESULT STDMETHODCALLTYPE finish_list(mn_proxy *This, BOOL restore, ID3D11CommandList **list) {
+    HRESULT hr = PX(finish_list, px_finish)(This, restore, list);
+    std::vector<uint64_t> mapped;
+    {
+        std::lock_guard<std::mutex> l(This->obj->m);
+        mapped.swap(This->obj->lists);
+    }
+    if (SUCCEEDED(hr) && list && *list) {
+        mn_obj *lo = ((mn_proxy *)*list)->obj;
+        std::lock_guard<std::mutex> l(lo->m);
+        lo->lists = std::move(mapped);
+    }
+    return hr;
+}
+static void STDMETHODCALLTYPE execute_list(mn_proxy *This, ID3D11CommandList *list, BOOL restore) {
+    std::vector<uint64_t> mapped;
+    if (list) {
+        mn_obj *lo = ((mn_proxy *)list)->obj;
+        std::lock_guard<std::mutex> l(lo->m);
+        mapped = lo->lists;
+    }
+    for (uint64_t h : mapped) { // (objs_lock, then the object's: never taken the other way round)
+        std::lock_guard<std::mutex> l(objs_lock);
+        auto it = objs.find(h);
+        if (it != objs.end() && it->second->refs > 0) forget_current(it->second);
+    }
+    PX(execute_list, px_execute)(This, list, restore);
 }
 
 #define MN_MAP10(fn, NAME, SUB, Out, OUT, FILL)                                                                         \
@@ -1554,6 +1595,8 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"ID3D10Device::UpdateSubresource", (const void *)update10},
         {"ID3D11DeviceContext::Map", (const void *)map11},
         {"ID3D11DeviceContext::Unmap", (const void *)unmap11, &px_unmap11},
+        {"ID3D11DeviceContext::FinishCommandList", (const void *)finish_list, &px_finish},
+        {"ID3D11DeviceContext::ExecuteCommandList", (const void *)execute_list, &px_execute},
         {"ID3D10Buffer::Map", (const void *)map10_buffer},
         {"ID3D10Texture1D::Map", (const void *)map10_tex1d},
         {"ID3D10Texture2D::Map", (const void *)map10_tex2d},

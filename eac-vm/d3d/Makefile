@@ -28,7 +28,7 @@ formats-test:
 
 # The host's calls into native DXMT (generated stubs.cpp), with DXMT's own flags: they must compile warning-free.
 DXMT_CXXFLAGS := -std=c++17 -Wno-extern-c-compat -DWIDL_EXPLICIT_AGGREGATE_RETURNS -include $(NT)/native-prelude.h -I$(NT)/include \
-  -I$(I)/d3d12 -I$(I)/windows -I$(I)/directx -I$(I) -I$(DXMT)/util -I$(DXMT)/d3d12 -I$(DXMT)/d3d11 -I$(GEN) -Ihost
+  -I$(I)/d3d12 -I$(I)/windows -I$(I)/directx -I$(I) -I$(DXMT)/util -I$(DXMT)/d3d12 -I$(DXMT)/d3d11 -I$(GEN) -Ihost -Iguest
 $(GEN)/stubs.o: $(GEN)/calls.c host/stubs.h
 	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -Wno-extern-c-compat -c -o $@ $(GEN)/stubs.cpp
 stubs: $(GEN)/stubs.o
@@ -48,16 +48,18 @@ roundtrip: $(GEN)/roundtrip
 
 # The host dispatcher on native DXMT (dispatch-test.c), beside Wine's winemetal.so as macneutron-vm runs them.
 NATIVE_LIB := $(ROOT)/build/dxmt-native/install/lib
-$(GEN)/native.o: host/native.cpp host/stubs.h $(GEN)/calls.c
+$(GEN)/native.o: host/native.cpp host/stubs.h guest/formats.h $(GEN)/calls.c
 	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -Wno-extern-c-compat -fsanitize=address,undefined -c -o $@ host/native.cpp
 $(GEN)/stubs-asan.o: $(GEN)/calls.c host/stubs.h
 	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -Wno-extern-c-compat -fsanitize=address,undefined -c -o $@ $(GEN)/stubs.cpp
+$(GEN)/formats-asan.o: guest/formats.cpp guest/formats.h
+	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -Wno-extern-c-compat -fsanitize=address,undefined -c -o $@ guest/formats.cpp
 $(GEN)/dispatch-test: tests/dispatch-test.c host/dispatch.c host/memory.c host/events.c host/window.c host/dispatch.h mn_d3d.h $(GEN)/calls.c $(GEN)/native.o \
-  $(GEN)/stubs-asan.o $(LOOP_SRC) $(WM)/host/dispatch.m $(WM)/marshal.c $(WM)/marshal.h
+  $(GEN)/stubs-asan.o $(GEN)/formats-asan.o $(LOOP_SRC) $(WM)/host/dispatch.m $(WM)/marshal.c $(WM)/marshal.h
 	$(CC) $(CFLAGS) $(INC) -I. -c -o $(GEN)/dispatch-test.o tests/dispatch-test.c
 	$(CC) $(CFLAGS) $(INC) -I. -o $@ $(GEN)/dispatch-test.o host/dispatch.c host/memory.c host/events.c host/window.c \
 	  $(GEN)/calls.c $(GEN)/ifaces.c \
-	  $(GEN)/native.o $(GEN)/stubs-asan.o $(LOOP_SRC) $(WM)/host/dispatch.m $(ROOT)/eac-vm/metal/host/testops.c \
+	  $(GEN)/native.o $(GEN)/stubs-asan.o $(GEN)/formats-asan.o $(LOOP_SRC) $(WM)/host/dispatch.m $(ROOT)/eac-vm/metal/host/testops.c \
 	  -framework AppKit -framework Metal -framework QuartzCore -lpthread -lc++
 
 dispatch-test: $(GEN)/dispatch-test

@@ -29,6 +29,8 @@
  *   d3d11identity (M4 Task 5) op 4's companion (the device's IDXGIDevice1) comes with its whole interfaces block: it
  *              answers IDXGIDevice too, and ID3D11Device at another pointer, whose query names the device's first handle
  *   d3d11getters  (M4 Task 5) two views PSSetShaderResources set come back from PSGetShaderResources as their handles
+ *   d3d11short    (M4's final review) initial data or an update covering less than DXMT reads (a short region, too
+ *              few subresources, a box past the buffer) is refused before DXMT reads: no read past the guest's region
  *   d3d11maparena (M4 Task 7) a dynamic buffer's WRITE_DISCARD maps, renames included, in the guest's arenas; a rename
  *              the arenas can't hold (the creation's allocation, which it names, past their room) answers
  *              MN_D3D_NEED_ARENA before DXMT maps, then maps inside the arena op 1 adds
@@ -438,12 +440,40 @@ int main(int argc, char **argv) {
     struct { uint32_t width, usage, bind, cpu, misc, stride; } bd11 = {256, 3 /* STAGING */, 0, 0x30000 /* READ|WRITE */, 0, 0};
     struct { uint64_t self, ret, desc, init, buffer, ifaces[9], aux[2]; } cb11 = {d11, 0, (uintptr_t)&bd11, 0, 0, {0}, {0}};
     CHECK(call(buf11, &cb11) == 0 && (uint32_t)cb11.ret == 0 && cb11.buffer);
-    uint8_t src[16] = {1};
+    uint8_t src[256] = {1}; /* the whole buffer: the host lets DXMT read it (d3d11short) */
     struct { uint64_t self, ret, res; uint32_t sub; uint64_t box, data; uint32_t pitch, slice; uint64_t aux[2]; } up11 =
         {gi.ctx, 0, cb11.buffer, 0, 0, (uintptr_t)src, 0, 0, {sizeof src, 0}};
     CHECK(mn_d3d_calls[upd11].params_size == sizeof up11 && call(upd11, &up11) == 0);
     CHECK(call(imm, &gi) == 0 && gi.ctx); /* still there */
     puts("dispatch-test: d3d11notimpl: went on");
+
+    /* d3d11short (M4's final review): initial data and updates that cover less than DXMT reads are refused before
+     * it reads (a 64 KiB staging buffer from 16 bytes; a mipped texture's data for its first mip only; an update of a
+     * whole 64 KiB buffer from 16 bytes); the host never reads past the region */
+    struct { uint32_t n, pad; struct mn_d3d_sub sub; uint8_t bytes[16]; } short1 = {1, 0, {24, 0, 0, 16}, {0}};
+    struct { uint32_t width, usage, bind, cpu, misc, stride; } sb64 = {64 << 10, 3 /* STAGING */, 0, 0x20000, 0, 0};
+    struct { uint64_t self, ret, desc, init, buffer, ifaces[9], aux[2]; } cs64 =
+        {d11, 0, (uintptr_t)&sb64, (uintptr_t)&short1, 0, {0}, {sizeof short1, 0}};
+    CHECK(call(buf11, &cs64) == 0 && (int32_t)cs64.ret == (int32_t)0x80070057 /* E_INVALIDARG */ && !cs64.buffer);
+    struct { uint32_t w, h, mips, array, format, count, quality, usage, bind, cpu, misc; } tm =
+        {8, 8, 4, 1, 28, 1, 0, 0, 8, 0, 0};
+    struct { uint32_t n, pad; struct mn_d3d_sub sub; uint8_t bytes[256]; } mip0 = {1, 0, {24, 32, 0, 256}, {0}};
+    struct { uint64_t self, ret, desc, init, tex, ifaces[9], aux[2]; } ctm =
+        {d11, 0, (uintptr_t)&tm, (uintptr_t)&mip0, 0, {0}, {sizeof mip0, 0}};
+    CHECK(call(tex2d, &ctm) == 0 && (int32_t)ctm.ret == (int32_t)0x80070057 && !ctm.tex);
+    struct { uint32_t width, usage, bind, cpu, misc, stride; } db64 = {64 << 10, 0, 1, 0, 0, 0};
+    struct { uint64_t self, ret, desc, init, buffer, ifaces[9], aux[2]; } cd64 = {d11, 0, (uintptr_t)&db64, 0, 0, {0}, {0}};
+    CHECK(call(buf11, &cd64) == 0 && (uint32_t)cd64.ret == 0 && cd64.buffer);
+    uint8_t few[16] = {0};
+    struct { uint64_t self, ret, res; uint32_t sub; uint64_t box, data; uint32_t pitch, slice; uint64_t aux[2]; } u64 =
+        {gi.ctx, 0, cd64.buffer, 0, 0, (uintptr_t)few, 0, 0, {sizeof few, 0}};
+    CHECK(call(upd11, &u64) == 0);
+    struct { uint32_t left, top, front, right, bottom, back; } past = {0, 0, 0, (64 << 10) + 16, 1, 1};
+    uint8_t whole[(64 << 10) + 16];
+    struct { uint64_t self, ret, res; uint32_t sub; uint64_t box, data; uint32_t pitch, slice; uint64_t aux[2]; } u65 =
+        {gi.ctx, 0, cd64.buffer, 0, (uintptr_t)&past, (uintptr_t)whole, 0, 0, {sizeof whole, 0}};
+    CHECK(call(upd11, &u65) == 0); /* a box past the buffer: DXMT would write past its memory */
+    puts("dispatch-test: d3d11short: refused");
 
     /* d3d11maparena: a 64 KiB dynamic buffer mapped WRITE_DISCARD twice, each map's memory in a guest arena (the
      * renames DXMT makes inside Map too); one whose creation names its allocation and whose rename the arenas can't

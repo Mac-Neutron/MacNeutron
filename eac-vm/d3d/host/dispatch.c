@@ -64,6 +64,7 @@ static void release(void *obj), present(void *cmdbuf, void *drawable);
  * Present call. ponytail: two processes presenting D3D11 at once may probe and mirror each other's frames; a context
  * per native swapchain if that ever matters. */
 static _Atomic uint32_t presenter;
+static int (*d3d11_wait_idle)(void); /* DXMT 0090's MTLD3D11WaitIdle: 1 once D3D11's compiles are all done */
 static _Thread_local int hooked;
 static unsigned present_ids[2]; /* IDXGISwapChain::Present's and IDXGISwapChain1::Present1's */
 
@@ -162,6 +163,8 @@ int mn_d3d_load(const char *d) {
     for (unsigned i = MN_D3D_FIRST; i < MN_D3D_CALLS; i++)
         if (mn_d3d_calls[i].name && !strcmp(mn_d3d_calls[i].name, "IDXGISwapChain::Present")) present_ids[0] = i;
         else if (mn_d3d_calls[i].name && !strcmp(mn_d3d_calls[i].name, "IDXGISwapChain1::Present1")) present_ids[1] = i;
+    /* DXMT 0090: a guest process's end waits for D3D11's compiles before its objects go (none: an older DXMT) */
+    d3d11_wait_idle = (int (*)(void))dlsym(libs[3], "MTLD3D11WaitIdle");
     void (*wsi)(const void *) = (void (*)(const void *))dlsym(libs[2], "WMTSetWsiHooks");
     if (!wsi) {
         fprintf(stderr, "mn-d3d: error: native DXMT: %s\n", dlerror());
@@ -434,6 +437,10 @@ int32_t mn_vm_dispatch(uint32_t ctx_id, void *ring_state, uint32_t op, const voi
 static void progress(uint32_t ctx_id, void *ring_state) { mn_wm_hooks.progress(ctx_id, ring_state); }
 static void ring_end(uint32_t ctx_id, void *ring_state) { mn_wm_hooks.ring_end(ctx_id, ring_state); }
 static void context_end(uint32_t ctx_id) {
+    /* M4's final review: a process that ended mid-load leaves native DXMT compiling for it, its shaders' and pipelines'
+     * own tasks, which their release would free under the compile threads: those first */
+    if (loaded && d3d11_wait_idle && !d3d11_wait_idle())
+        fprintf(stderr, "mn-d3d: error: native DXMT's D3D11 compiles still ran 10 s after a context's end\n");
     mn_wm_hooks.context_end(ctx_id); /* its objects released: their pieces come back as Metal lets them go */
     mn_d3d_arenas_end(ctx_id);
     mn_d3d_events_end(ctx_id);

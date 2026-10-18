@@ -6,7 +6,8 @@
 # made its first Direct3D call on a thread that has ended, is set from a Wine thread of its own), "name ok" (SetName
 # reads back in the guest's WCHARs), "minimised ok" (a minimised window's present costs the host's vCPU no sleep),
 # "latency ok" (the frame latency object, and GPU-bound presents that hold no vCPU on the host: mn-d3d's "slow:" lines),
-# "d3d11latency ok" (M4: D3D11's GPU-bound presents, paced by the device's latency, likewise)
+# "d3d11latency ok" (M4: D3D11's GPU-bound presents, paced by the device's latency, likewise), and three
+# `smoke.exe die` runs first, each ending mid-load with status 0, that the host outlives (M4's final review)
 # and "wmtforward ok" (fork 0079 refuses a call past the guest's table) and "wmsize ok" (a window resizing its buffers
 # from WM_SIZE through full screen and ResizeTarget), and forwarded "swapchain ok" (DXGI's answers where DXMT has none) and "eventreuse ok" (a closed event's
 # reused handle takes no stray set; guest DXMT has that bug too). Prints macneutron-vm's peak resident size in each
@@ -18,7 +19,7 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=$ROOT/build/eac-vm-work
 SH=$W/share
-MN_DXMT_ONLY=d3d12_null sh "$ROOT/eac-vm/dxmt/share.sh" > /dev/null
+MN_DXMT_ONLY=d3d12_null sh "$ROOT/eac-vm/dxmt/share.sh" > /dev/null  # the share's shaders too (dies' D3D11 ones)
 "$(sh "$ROOT/dxmt/toolchain.sh")/x86_64-w64-mingw32-clang++" -std=c++17 -O1 -static -s -o "$SH/dxmt-tests/smoke.exe" \
   "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ld3d11 -ldxgi
 fail=
@@ -35,6 +36,10 @@ WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1
 cd \$T
 timeout -k 10 120 wine \$T/d3d12_null.exe Z:\$T/shaders/null.cs.dxil < /dev/null > \$O/d3d-smoke.raw 2>&1
 echo "status \$?" >> \$O/d3d-smoke.raw
+for i in 1 2 3; do  # processes that end mid-load (M4's final review): the host must outlive them
+  timeout -k 10 60 wine \$T/smoke.exe die < /dev/null >> \$O/d3d-smoke.raw 2>&1
+  echo "die status \$?" >> \$O/d3d-smoke.raw
+done
 timeout -k 10 60 wine \$T/smoke.exe < /dev/null >> \$O/d3d-smoke.raw 2>&1
 timeout 20 wineserver -k
 tr -d '\r' < \$O/d3d-smoke.raw > \$O/d3d-smoke-$mode.txt
@@ -58,6 +63,9 @@ EOS
   echo "d3d-smoke: $mode: ${lines:-0} null lines, $(/usr/bin/grep '^status' "$out" 2> /dev/null), macneutron-vm peak $((peak / 1024)) MiB"
   [ "${lines:-0}" -eq 18 ] || { fail="$fail $mode-lines"; tail -5 "$out" 2> /dev/null || true; }
   [ -z "$(ls -A "$C")" ] || fail="$fail $mode-cwd($(ls -A "$C" | tr '\n' ' '))"
+  dies=$(/usr/bin/grep -c '^die status 0$' "$out" 2> /dev/null || true)
+  echo "d3d-smoke: $mode: ${dies:-0} of 3 processes ended mid-load, and the host outlived them"
+  [ "${dies:-0}" -eq 3 ] || fail="$fail $mode-dies"
   checks="eventthread name minimised latency d3d11latency wmtforward wmsize"
   [ "$mode" = guest ] || checks="$checks eventreuse swapchain"
   for c in $checks; do

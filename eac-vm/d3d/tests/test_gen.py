@@ -273,6 +273,20 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(self.calls[next(i for i, c in self.calls.items() if c.name ==
                          "IDXGIAdapter3::RegisterHardwareContentProtectionTeardownStatusEvent")].mode, "refuse")
 
+    def test_objects_out_never_in_guest_memory(self):
+        # M4's final review: a getter's objects go into host memory first, converted to handles, then copied out: the
+        # guest's region is never DXMT's to write pointers into nor the host's to read pointers back from (another vCPU
+        # could rewrite them between), and a count past the cap calls nothing
+        out = gen.emit_stubs(self.m, gen.parse_rules(gen.read(RULES), self.m), self.calls)
+        mid = next(i for i, c in self.calls.items() if c.name == "ID3D11DeviceContext::PSGetShaderResources")
+        start = out.index(f"mn_d3d_stub_{mid}(")
+        body = out[start:out.index("\n}", start)]
+        self.assertIn("void *mn_o_ppShaderResourceViews[MN_D3D_MAX_OBJECTS]", body)
+        self.assertIn("PSGetShaderResources(a->StartSlot, a->NumViews, any_ptr{(uintptr_t)mn_o_ppShaderResourceViews})", body)
+        self.assertIn("mn_d3d_objects_out(mn_o_ppShaderResourceViews, a->NumViews, "
+                      "(uint64_t *)(uintptr_t)a->ppShaderResourceViews)", body)
+        self.assertIn("a->NumViews > MN_D3D_MAX_OBJECTS", body)
+
     def test_arena(self):
         # M4 Task 7: a call whose allocations come from the guest's arenas, as a creation's (a map's renames)
         rules = gen.parse_rules(gen.read(RULES), self.m)

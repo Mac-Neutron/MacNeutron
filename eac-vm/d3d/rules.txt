@@ -545,6 +545,7 @@ companion IDXGIDevice ID3D11Multithread
 companion ID3D10Device ID3D11Device5
 companion ID3D10Device IDXGIDevice3
 companion ID3D10Device ID3D11Multithread
+companion ID3D11DeviceContext ID3D11Multithread
 companion ID3D11Multithread ID3D11Device5
 companion ID3D11Multithread IDXGIDevice3
 companion ID3D11Multithread ID3D10Device1
@@ -593,6 +594,9 @@ IMTLD3D11ContextExt2::GetPieces own
 IMTLD3D11ContextExt2::GetPieces arena
 IMTLD3D11ContextExt2::UsePiece own
 ID3D11DeviceContext::Unmap wrap
+# A command list's dynamic resources (the final review): their discards in it end the guest's piece of them.
+ID3D11DeviceContext::FinishCommandList wrap
+ID3D11DeviceContext::ExecuteCommandList wrap
 # D3D11_KEEP_* counts carry no array (guest/proxy.cpp's wrap drops them).
 ID3D11DeviceContext::OMSetRenderTargetsAndUnorderedAccessViews wrap
 # Class instances: their count after them (DXMT has none, so games pass none).

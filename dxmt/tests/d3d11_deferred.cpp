@@ -5,6 +5,9 @@
 //              wrong, and the immediate context's viewport count after each (1 restored, 0 cleared)
 //     shared   two threads taking 32 turns on the immediate context under ID3D11Multithread (Enter, a WRITE_DISCARD
 //              map, a draw into the turn's texel, Leave): texels wrong
+//     mixed    one dynamic constant buffer mapped WRITE_DISCARD on the immediate context, in a command list (executed
+//              there), then on the immediate context again, 3 rounds, a draw after each: texels wrong (the list's
+//              discard is the buffer's memory after it, and the next one the immediate context's own)
 #include "d3d11_common.hpp"
 #include <condition_variable>
 #include <mutex>
@@ -60,6 +63,31 @@ int main(int argc, char **argv) {
     ctx->RSGetViewports(&cleared, back);
     std::vector<UINT> want = {7, 8, 9, 10};
     printf("deferred lists %zu %u %u\n", Wrong(As<UINT>(dev.Read(t, 0, 16, 1)), want), restored, cleared);
+
+    // The same buffer discarded on both contexts.
+    ID3D11Texture2D *mt3 = dev.Tex2D(9, 1, DXGI_FORMAT_R32_UINT, D3D11_BIND_RENDER_TARGET);
+    ID3D11RenderTargetView *mv3 = dev.RTV(mt3);
+    ID3D11Buffer *both = dev.Buffer(256, D3D11_BIND_CONSTANT_BUFFER, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
+    std::vector<UINT> mwant(9);
+    for (UINT round = 0; round < 3; round++) {
+        UINT base = round * 3;
+        for (ID3D11DeviceContext *c : {ctx, def}) {
+            c->OMSetRenderTargets(1, &mv3, nullptr);
+            c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            c->VSSetShader(quad, nullptr, 0);
+            c->PSSetShader(cbps, nullptr, 0);
+            c->PSSetConstantBuffers(0, 1, &both);
+        }
+        MapDraw(ctx, both, 100 + base, base);
+        MapDraw(def, both, 101 + base, base + 1);
+        ID3D11CommandList *list = nullptr;
+        CHECK(def->FinishCommandList(FALSE, &list));
+        ctx->ExecuteCommandList(list, TRUE);
+        list->Release();
+        MapDraw(ctx, both, 102 + base, base + 2);
+        for (UINT k = 0; k < 3; k++) mwant[base + k] = 100 + base + k;
+    }
+    printf("deferred mixed %zu\n", Wrong(As<UINT>(dev.Read(mt3, 0, 9 * 4, 1)), mwant));
 
     const UINT TURNS = 32;
     ID3D11Multithread *mt;

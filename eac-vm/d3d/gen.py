@@ -1179,6 +1179,8 @@ HANDLE_TYPES = ("HANDLE", "HWND", "HMONITOR", "HDC", "HMODULE", "HINSTANCE")
 def stub_arg(model, i, p, c):
     name = f"a->{member(i, p.name)}"
     t = p.type
+    if any(f.param == p.name and f.objects for f in c.fields):  # DXMT writes a getter's objects into host memory
+        return f"any_ptr{{(uintptr_t)mn_o_{member(i, p.name)}}}"
     if t in REFS:
         return f"*(const GUID *)(uintptr_t){name}"
     out = next((f for f in c.fields if f.param == p.name and f.kind == "WMF_HANDLE_OUT"), None)
@@ -1225,8 +1227,14 @@ def emit_stubs(model, rules, calls):
             k = [e.name for e in exports].index(mname)
             call = f"((decltype(&::{mname}))mn_d3d_exports[{k}])({args})"
         body = [f'extern "C" NTSTATUS_T mn_d3d_stub_{mid}(void *params) {{ // {c.name}',
-                f"    auto *a = (struct mn_d3d_p_{mid} *)params;",
-                "    try {"]  # natively, DXMT's IMPLEMENT_ME throws (fork 0084): the call fails, the VM host goes on
+                f"    auto *a = (struct mn_d3d_p_{mid} *)params;"]
+        rename = {p.name: member(i, p.name) for i, p in enumerate(c.method.params)}
+        for f in c.fields:  # a getter's objects, DXMT's to write here: never the guest's memory (M4's final review)
+            if f.objects:
+                m, n = rename[f.param], rename[f.count]
+                body.append(f"    if (a->{n} > MN_D3D_MAX_OBJECTS) return 0; // past any slot range: nothing")
+                body.append(f"    void *mn_o_{m}[MN_D3D_MAX_OBJECTS] = {{}};")
+        body.append("    try {")  # natively, DXMT's IMPLEMENT_ME throws (fork 0084): the call fails, the VM host goes on
         if c.ret == "void":
             body.append(f"    {call};")
         else:
@@ -1234,7 +1242,6 @@ def emit_stubs(model, rules, calls):
             body.append("    static_assert(sizeof r <= 8);")
             body.append("    std::memcpy(&a->ret, &r, sizeof r);")
         made = [f for f in c.fields if f.kind == "WMF_HANDLE_OUT"]
-        rename = {p.name: member(i, p.name) for i, p in enumerate(c.method.params)}
         for f in made:
             m = rename[f.param]
             if f.iface == "riid":
@@ -1246,7 +1253,8 @@ def emit_stubs(model, rules, calls):
             body.append(f"    if ({ok}a->{m}) mn_d3d_answers((void *)(uintptr_t)a->{m}, {which}, a->{m}_ifaces);")
         for f in c.fields:
             if f.objects:  # a getter's objects: the handles the guest knows them by, DXMT's references let go
-                body.append(f"    mn_d3d_objects_out((uint64_t *)(uintptr_t)a->{rename[f.param]}, a->{rename[f.count]});")
+                body.append(f"    mn_d3d_objects_out(mn_o_{rename[f.param]}, a->{rename[f.count]}, "
+                            f"(uint64_t *)(uintptr_t)a->{rename[f.param]});")
         if c.ret == "HRESULT":
             body.append("    mn_d3d_result(r);")
         ret = "&a->ret" if c.ret == "HRESULT" else "nullptr"

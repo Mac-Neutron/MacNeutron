@@ -7,6 +7,7 @@
 #include <vector>
 #include "stubs.h"
 #include "../mn_d3d.h"
+#include "formats.h" // guest/formats.cpp: the bytes initial data and updates must cover (M4)
 
 extern "C" void mn_d3d_native_release(void *obj) { ((IUnknown *)obj)->Release(); }
 
@@ -267,10 +268,11 @@ DESCRIPTION(mn_d3d_adapter_desc3_stub, IDXGIAdapter4, GetDesc3, DXGI_ADAPTER_DES
 DESCRIPTION(mn_d3d_output_desc_stub, IDXGIOutput, GetDesc, DXGI_OUTPUT_DESC, DeviceName, desc)
 DESCRIPTION(mn_d3d_output_desc1_stub, IDXGIOutput6, GetDesc1, DXGI_OUTPUT_DESC1, DeviceName, desc)
 
-extern "C" void mn_d3d_objects_out(uint64_t *p, uint32_t n) {
-    for (uint32_t i = 0; p && i < n; i++) {
-        auto *obj = (IUnknown *)(uintptr_t)p[i];
-        p[i] = obj ? mn_d3d_identity_of(mn_d3d_current_ctx(), obj) : 0;
+extern "C" void mn_d3d_objects_out(void *const *objs, uint32_t n, uint64_t *out) {
+    for (uint32_t i = 0; i < n && i < MN_D3D_MAX_OBJECTS; i++) {
+        auto *obj = (IUnknown *)objs[i];
+        uint64_t h = obj ? mn_d3d_identity_of(mn_d3d_current_ctx(), obj) : 0;
+        if (out) std::memcpy(&out[i], &h, sizeof h); // the guest's memory: written, never read
         if (obj) obj->Release(); // the getter's reference: the guest holds its own
     }
 }
@@ -298,35 +300,61 @@ template <class T> static int iface_of() {
     return mn_d3d_iface_of(&iid);
 }
 
-// A packed region (guest/proxy.cpp's pack: count, each subresource's mn_d3d_sub, their bytes), as DXMT takes it.
-static bool unpacked(const void *flat, uint64_t len, std::vector<D3D11_SUBRESOURCE_DATA> &out) {
+// A packed region (guest/proxy.cpp's pack: count, each subresource's mn_d3d_sub, their bytes), as DXMT takes it: one
+// subresource each of res's (DXMT reads them all), each covering what DXMT reads of it by res and its pitches, inside
+// the region (M4's final review: never the guest's own size word).
+static bool unpacked(const void *flat, uint64_t len, const mn_res &res, std::vector<D3D11_SUBRESOURCE_DATA> &out) {
     auto *b = (const uint8_t *)flat;
     uint32_t n;
     if (!b || len < 8) return false;
     std::memcpy(&n, b, 4);
-    if ((len - 8) / sizeof(mn_d3d_sub) < n) return false;
+    if (n != mn_subresources(res) || (len - 8) / sizeof(mn_d3d_sub) < n) return false;
     out.resize(n);
     for (uint32_t i = 0; i < n; i++) {
         mn_d3d_sub s;
         std::memcpy(&s, b + 8 + i * sizeof s, sizeof s);
-        if (s.offset > len || s.size > len - s.offset) return false;
+        if (s.offset > len || !mn_data_fits(res, i, nullptr, s.pitch, s.slice, len - s.offset)) return false;
         out[i] = {b + s.offset, s.pitch, s.slice};
     }
     return true;
+}
+
+// A resource's description as DXMT has it (its GetDesc), for an update's check.
+template <class Res, class T, class Desc> static bool host_described(Res *res, mn_res &r) {
+    T *t = nullptr;
+    if (FAILED(res->QueryInterface(__uuidof(T), (void **)&t)) || !t) return false;
+    Desc d = {};
+    t->GetDesc(&d);
+    t->Release();
+    r = described(d);
+    return true;
+}
+static bool host_res(ID3D11Resource *res, mn_res &r) {
+    return host_described<ID3D11Resource, ID3D11Buffer, D3D11_BUFFER_DESC>(res, r) ||
+           host_described<ID3D11Resource, ID3D11Texture1D, D3D11_TEXTURE1D_DESC>(res, r) ||
+           host_described<ID3D11Resource, ID3D11Texture2D, D3D11_TEXTURE2D_DESC>(res, r) ||
+           host_described<ID3D11Resource, ID3D11Texture3D, D3D11_TEXTURE3D_DESC>(res, r);
+}
+static bool host_res(ID3D10Resource *res, mn_res &r) {
+    return host_described<ID3D10Resource, ID3D10Buffer, D3D10_BUFFER_DESC>(res, r) ||
+           host_described<ID3D10Resource, ID3D10Texture1D, D3D10_TEXTURE1D_DESC>(res, r) ||
+           host_described<ID3D10Resource, ID3D10Texture2D, D3D10_TEXTURE2D_DESC>(res, r) ||
+           host_described<ID3D10Resource, ID3D10Texture3D, D3D10_TEXTURE3D_DESC>(res, r);
 }
 
 #define CREATE_STUB(stub, NAME, Iface, method, Desc, Data, T, DESC, INIT, OUT)                                         \
     extern "C" NTSTATUS_T stub(void *params) {                                                                         \
         auto *a = (mn_d3d_p_##NAME *)params;                                                                           \
         std::vector<D3D11_SUBRESOURCE_DATA> subs;                                                                      \
-        if (a->INIT && !unpacked((const void *)(uintptr_t)a->INIT, a->aux[0], subs)) {                                \
+        Desc d = {}; /* the host's copy: what it checks is what DXMT reads, whatever the guest's memory does */        \
+        if (a->DESC) std::memcpy(&d, (const void *)(uintptr_t)a->DESC, sizeof d);                                     \
+        if (!a->DESC || (a->INIT && !unpacked((const void *)(uintptr_t)a->INIT, a->aux[0], described(d), subs))) {    \
             RESULT(a, E_INVALIDARG);                                                                                   \
             return 0;                                                                                                  \
         }                                                                                                              \
         try {                                                                                                          \
             HRESULT r = ((Iface *)(uintptr_t)a->self)                                                                  \
-                            ->method((const Desc *)(uintptr_t)a->DESC, a->INIT ? (const Data *)subs.data() : nullptr, \
-                                     (T **)&a->OUT);                                                                   \
+                            ->method(&d, a->INIT ? (const Data *)subs.data() : nullptr, (T **)&a->OUT);                \
             if (SUCCEEDED(r) && a->OUT) mn_d3d_answers((void *)(uintptr_t)a->OUT, iface_of<T>(), a->OUT##_ifaces); \
             a->aux[1] = mn_d3d_memory_largest(); /* its allocation: what a map's rename makes (Task 7) */             \
             RESULT(a, r);                                                                                              \
@@ -359,10 +387,22 @@ CREATE_STUB(mn_d3d_create_tex3d10_stub, ID3D10Device_CreateTexture3D, ID3D10Devi
 #define UPDATE_STUB(stub, NAME, Iface, method, Res, Box, EXTRA)                                                        \
     extern "C" NTSTATUS_T stub(void *params) {                                                                         \
         auto *a = (mn_d3d_p_##NAME *)params;                                                                           \
+        auto *res = (Res *)(uintptr_t)a->pDstResource;                                                                 \
+        Box box = {}; /* the host's copy, checked against the resource as DXMT describes it */                        \
+        if (a->pDstBox) std::memcpy(&box, (const void *)(uintptr_t)a->pDstBox, sizeof box);                           \
+        static_assert(sizeof(Box) == sizeof(D3D11_BOX), "a box is six UINTs");                                        \
+        mn_res r;                                                                                                      \
+        if (!res || !a->pSrcData || !host_res(res, r) ||                                                               \
+            !mn_data_fits(r, a->DstSubresource, a->pDstBox ? (const D3D11_BOX *)&box : nullptr, a->SrcRowPitch,       \
+                          a->SrcDepthPitch, a->aux[0])) {                                                              \
+            static std::atomic<int> said;                                                                              \
+            if (!said++) fprintf(stderr, "mn-d3d: error: " #NAME ": data short of what it updates, refused\n");        \
+            return 0;                                                                                                  \
+        }                                                                                                              \
         try {                                                                                                          \
             ((Iface *)(uintptr_t)a->self)                                                                              \
-                ->method((Res *)(uintptr_t)a->pDstResource, a->DstSubresource, (const Box *)(uintptr_t)a->pDstBox,    \
-                         (const void *)(uintptr_t)a->pSrcData, a->SrcRowPitch, a->SrcDepthPitch EXTRA);               \
+                ->method(res, a->DstSubresource, a->pDstBox ? &box : nullptr, (const void *)(uintptr_t)a->pSrcData,   \
+                         a->SrcRowPitch, a->SrcDepthPitch EXTRA);                                                      \
         } catch (...) {                                                                                                \
             return mn_d3d_not_in_dxmt(MN_D3D_ID_##NAME, nullptr);                                                      \
         }                                                                                                              \

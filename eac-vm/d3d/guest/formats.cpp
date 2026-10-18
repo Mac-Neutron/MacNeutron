@@ -48,6 +48,23 @@ mn_format mn_format_of(DXGI_FORMAT f) {
     }
 }
 
+mn_res described(const D3D11_BUFFER_DESC &d) { return mn_res_of(1, DXGI_FORMAT_UNKNOWN, d.ByteWidth, 1, 1, 1, 1); }
+mn_res described(const D3D11_TEXTURE1D_DESC &d) { return mn_res_of(2, d.Format, d.Width, 1, 1, d.MipLevels, d.ArraySize); }
+mn_res described(const D3D11_TEXTURE2D_DESC &d) {
+    return mn_res_of(3, d.Format, d.Width, d.Height, 1, d.MipLevels, d.ArraySize);
+}
+mn_res described(const D3D11_TEXTURE2D_DESC1 &d) {
+    return mn_res_of(3, d.Format, d.Width, d.Height, 1, d.MipLevels, d.ArraySize);
+}
+mn_res described(const D3D11_TEXTURE3D_DESC &d) { return mn_res_of(4, d.Format, d.Width, d.Height, d.Depth, d.MipLevels, 1); }
+mn_res described(const D3D11_TEXTURE3D_DESC1 &d) { return mn_res_of(4, d.Format, d.Width, d.Height, d.Depth, d.MipLevels, 1); }
+mn_res described(const D3D10_BUFFER_DESC &d) { return mn_res_of(1, DXGI_FORMAT_UNKNOWN, d.ByteWidth, 1, 1, 1, 1); }
+mn_res described(const D3D10_TEXTURE1D_DESC &d) { return mn_res_of(2, d.Format, d.Width, 1, 1, d.MipLevels, d.ArraySize); }
+mn_res described(const D3D10_TEXTURE2D_DESC &d) {
+    return mn_res_of(3, d.Format, d.Width, d.Height, 1, d.MipLevels, d.ArraySize);
+}
+mn_res described(const D3D10_TEXTURE3D_DESC &d) { return mn_res_of(4, d.Format, d.Width, d.Height, d.Depth, d.MipLevels, 1); }
+
 mn_res mn_res_of(int dim, DXGI_FORMAT format, UINT width, UINT height, UINT depth, UINT mips, UINT array) {
     mn_res r;
     r.dim = dim, r.format = format, r.width = width, r.height = height ? height : 1, r.depth = depth ? depth : 1;
@@ -79,4 +96,18 @@ uint64_t mn_subresource_bytes(const mn_res &r, UINT sub, const D3D11_BOX *box, U
     if (!w || !h || !d || !f.bytes) return 0;
     uint64_t rows = (h + f.block_h - 1) / f.block_h, row = (w + f.block_w - 1) / f.block_w * f.bytes;
     return (d - 1) * slice + (rows - 1) * pitch + row;
+}
+
+bool mn_data_fits(const mn_res &r, UINT sub, const D3D11_BOX *box, UINT pitch, UINT slice, uint64_t len) {
+    if (!r.dim || sub >= mn_subresources(r)) return false;
+    if (box) {
+        UINT mip = r.dim == D3D11_RESOURCE_DIMENSION_BUFFER ? 0 : sub % r.mips;
+        UINT w = r.width >> mip, h = r.height >> mip, d = r.depth >> mip;
+        w = w ? w : 1, h = h ? h : 1, d = d ? d : 1;
+        if (r.dim == D3D11_RESOURCE_DIMENSION_BUFFER) h = d = 1;
+        if (box->left > box->right || box->top > box->bottom || box->front > box->back || box->right > w ||
+            box->bottom > h || box->back > d)
+            return false;
+    }
+    return mn_subresource_bytes(r, sub, box, pitch, slice) <= len;
 }

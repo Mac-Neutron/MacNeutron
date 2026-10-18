@@ -1,0 +1,178 @@
+From d8e150575224feaab825e713940894bf195a3ac5 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sun, 18 Oct 2026 19:04:33 -0400
+Subject: [PATCH] dxmt, d3d11: A VM host waits for D3D11's compiles.
+
+Every task scheduler of the process enlists itself, and
+wait_schedulers_idle() waits until none has a task queued, waiting on
+another or running (a task is counted running as it leaves the queue,
+under the queue's lock). Natively, d3d11.dylib exports
+MTLD3D11WaitIdle(), which a VM host calls when a guest process ends,
+before it releases the process's objects: a process that ended
+mid-load left pipeline compiles running whose shaders and pipelines
+that release freed under the compile threads, and the host crashed.
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ src/d3d11/d3d11.cpp     | 10 ++++++++++
+ src/dxmt/dxmt_tasks.cpp | 43 +++++++++++++++++++++++++++++++++++++++++
+ src/dxmt/dxmt_tasks.hpp | 31 +++++++++++++++++++++++++++--
+ src/dxmt/meson.build    |  1 +
+ 4 files changed, 83 insertions(+), 2 deletions(-)
+ create mode 100644 src/dxmt/dxmt_tasks.cpp
+
+diff --git a/src/d3d11/d3d11.cpp b/src/d3d11/d3d11.cpp
+index 9d1122c..75b75e7 100644
+--- a/src/d3d11/d3d11.cpp
++++ b/src/d3d11/d3d11.cpp
+@@ -24,6 +24,7 @@
+ #include "log/log.hpp"
+ #include "util_string.hpp"
+ #include "dxmt_capture.hpp"
++#include "dxmt_tasks.hpp"
+ #include <exception>
+ 
+ namespace dxmt {
+@@ -240,6 +241,15 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
+ 
+ #endif
+ 
++#ifndef _WIN32
++// MacNeutron: a VM host waits here, before a guest process's objects go, until D3D11's compiles (each device's
++// pipeline cache's tasks, which its shaders and pipelines own) are done, at most 10 s: 1 if they were.
++extern "C" int
++MTLD3D11WaitIdle(void) {
++  return dxmt::wait_schedulers_idle(10000) ? 1 : 0;
++}
++#endif
++
+ extern "C" void _massert(const char *_Message, const char *_File,
+                          unsigned _Line) {
+   dxmt::Logger::err(dxmt::str::format("Assertion failed: ", _Message,
+diff --git a/src/dxmt/dxmt_tasks.cpp b/src/dxmt/dxmt_tasks.cpp
+new file mode 100644
+index 0000000..0163705
+--- /dev/null
++++ b/src/dxmt/dxmt_tasks.cpp
+@@ -0,0 +1,43 @@
++#include "dxmt_tasks.hpp"
++#include <algorithm>
++#include <chrono>
++#include <mutex>
++#include <vector>
++
++namespace dxmt {
++
++// MacNeutron: see dxmt_tasks.hpp.
++static std::mutex schedulers_lock;
++static std::vector<task_scheduler_base *> schedulers;
++
++void
++task_scheduler_base::enlist() {
++  std::lock_guard<std::mutex> lock(schedulers_lock);
++  schedulers.push_back(this);
++}
++
++void
++task_scheduler_base::delist() {
++  std::lock_guard<std::mutex> lock(schedulers_lock);
++  schedulers.erase(std::remove(schedulers.begin(), schedulers.end(), this), schedulers.end());
++}
++
++bool
++wait_schedulers_idle(unsigned timeout_ms) {
++  auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
++  for (;;) {
++    bool all = true;
++    {
++      std::lock_guard<std::mutex> lock(schedulers_lock);
++      for (auto *s : schedulers)
++        all = all && s->idle();
++    }
++    if (all)
++      return true;
++    if (std::chrono::steady_clock::now() >= end)
++      return false;
++    Sleep(1);
++  }
++}
++
++} // namespace dxmt
+diff --git a/src/dxmt/dxmt_tasks.hpp b/src/dxmt/dxmt_tasks.hpp
+index 6762d47..bf369ba 100644
+--- a/src/dxmt/dxmt_tasks.hpp
++++ b/src/dxmt/dxmt_tasks.hpp
+@@ -14,10 +14,35 @@ template <typename Task> struct task_trait {
+   void set_done(Task task);
+ };
+ 
+-template <typename Task> class task_scheduler {
++// MacNeutron: the process's schedulers, so a VM host can wait until none holds or runs a task before it releases what
++// their tasks use (a guest process's end: its shaders and pipelines own their compile tasks).
++class task_scheduler_base {
++public:
++  virtual bool idle() = 0;
++
++protected:
++  void enlist();
++  void delist();
++  ~task_scheduler_base() = default;
++};
++// Until every scheduler of the process is idle, at most timeout_ms: whether they all were.
++bool wait_schedulers_idle(unsigned timeout_ms);
++
++template <typename Task> class task_scheduler : public task_scheduler_base {
+ public:
+   void submit(Task task);
+ 
++  bool
++  idle() override {
++    {
++      std::unique_lock<dxmt::mutex> lock(worker_mutex_);
++      if (!task_queue_.empty() || !task_continuation_queue_.empty() || running.load())
++        return false;
++    }
++    std::unique_lock<dxmt::mutex> lock(deps_mutex_);
++    return task_continuation_.empty();
++  }
++
+   task_scheduler();
+   ~task_scheduler();
+ 
+@@ -53,9 +78,11 @@ template <typename Task> task_scheduler<Task>::task_scheduler() {
+   for (unsigned i = 0; i < threads; i++) {
+     workers_.emplace_back([this]() { worker_func(); });
+   }
++  enlist();
+ }
+ 
+ template <typename Task> task_scheduler<Task>::~task_scheduler() {
++  delist();
+   destroyed.store(true);
+   worker_cond_.notify_all();
+ 
+@@ -93,8 +120,8 @@ task_scheduler<Task>::worker_func() {
+       } else {
+         break;
+       }
++      running.fetch_add(1, std::memory_order_relaxed); // under the lock: idle() never sees a task between queue and run
+     }
+-    running.fetch_add(1, std::memory_order_relaxed);
+     while (true) {
+       Task continuation = task_trait.run_task(task);
+       if (continuation == task) {
+diff --git a/src/dxmt/meson.build b/src/dxmt/meson.build
+index 0713297..b6f9e5f 100644
+--- a/src/dxmt/meson.build
++++ b/src/dxmt/meson.build
+@@ -23,6 +23,7 @@ dxmt_src = [
+   'dxmt_counter.cpp',
+   'dxmt_fence.cpp',
+   'dxmt_keyed_mutex.cpp',
++  'dxmt_tasks.cpp',
+ ]
+ 
+ dxmt_shaders = [
+-- 
+2.54.0 (Apple Git-157)
+

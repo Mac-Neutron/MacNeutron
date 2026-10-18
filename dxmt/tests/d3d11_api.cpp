@@ -9,6 +9,8 @@
 //     identity <interface>       QueryInterface from the device to it: its HRESULT, and whether its IUnknown is the
 //                                device's and querying ID3D11Device back gives the device
 //     usage                      IDXGIResource::GetUsage of a render target texture
+//     ctxmt                      ID3D11Multithread from the immediate context: its HRESULT, and whether it is the
+//                                device's object (DXMT's is another, over the same lock)
 #include "d3d11_common.hpp"
 #include <d3d10_1.h>
 #include <dxgi1_2.h>
@@ -100,6 +102,13 @@ int main(int argc, char **argv) {
         if (p) p->Release();
     }
     root->Release();
+
+    ID3D11Multithread *from_ctx = nullptr, *from_dev = nullptr;
+    hr = dev.ctx->QueryInterface(__uuidof(ID3D11Multithread), (void **)&from_ctx);
+    device->QueryInterface(__uuidof(ID3D11Multithread), (void **)&from_dev);
+    printf("api ctxmt %08lx %d\n", (unsigned long)(unsigned)hr, from_ctx && from_ctx == from_dev);
+    if (from_ctx) from_ctx->Release();
+    if (from_dev) from_dev->Release();
 
     ID3D11Texture2D *t = dev.Tex2D(16, 16, DXGI_FORMAT_R8G8B8A8_UNORM, D3D11_BIND_RENDER_TARGET);
     IDXGIResource *res = nullptr;
