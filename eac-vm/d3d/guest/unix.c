@@ -34,6 +34,7 @@ struct arena { uint64_t blob, offset, len; uint8_t *ptr; };
 static struct arena arenas[256];
 static unsigned narenas;
 static pthread_mutex_t arena_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t arena_bytes; /* their total, for the trace (M4 Task 8), under arena_lock */
 #define E_OUTOFMEMORY_ ((int32_t)0x8007000E)
 
 /* A new arena of at least want bytes: 0, or -1 (the test's MN_D3D_NO_ARENAS, no memory, or the host refused). */
@@ -49,7 +50,7 @@ static int add_arena(uint64_t want) {
     a.len = r.len;
     uint32_t n = 0;
     if (ok && (ok = !mn_call_flush(MN_OP_D3D + MN_D3D_OP_ARENA, &a, sizeof a, NULL, 0, &n)))
-        arenas[narenas++] = (struct arena){a.blob_id, a.offset, a.len, r.ptr};
+        arenas[narenas++] = (struct arena){a.blob_id, a.offset, a.len, r.ptr}, arena_bytes += a.len;
     pthread_mutex_unlock(&arena_lock);
     return ok ? 0 : -1;
 }
@@ -137,7 +138,7 @@ static void events(void) {
  * and every 5 s from the listener (M3 Task 10: a game killed at its run's end never ends; the loopback's, appended at
  * its end: MN_D3D_LOOPBACK_TRACE); a method the guest answered itself (op 3, once) is marked by why. */
 static _Atomic uint64_t *counts;
-static uint8_t *why; /* 1 refused, 2 a special without guest code */
+static uint8_t *why; /* 1 refused, 2 a special without guest code, 3 answered in the guest by design (M4 Task 8) */
 
 static void trace_out(void) {
 #ifdef MN_D3D_LOOPBACK
@@ -150,10 +151,11 @@ static void trace_out(void) {
     FILE *f = counts && path ? fopen(path, mode) : NULL;
     if (!f) return;
     fprintf(f, "# process %d\n", (int)getpid());
+    fprintf(f, "# arenas %llu\n", (unsigned long long)arena_bytes); /* the guest memory it gave the host (M4) */
     for (unsigned i = 0; i < MN_D3D_CALLS; i++)
         if (counts[i])
             fprintf(f, "%u %s %llu%s\n", i, mn_d3d_calls[i].name, (unsigned long long)counts[i],
-                    why[i] == 1 ? " refused" : why[i] == 2 ? " unhandled" : "");
+                    why[i] == 1 ? " refused" : why[i] == 2 ? " unhandled" : why[i] == 3 ? " answered" : "");
     fclose(f);
 }
 __attribute__((destructor)) static void trace_end(void) { trace_out(); }
@@ -239,7 +241,7 @@ static int32_t family(uint32_t id, void *params) {
     case MN_D3D_OP_TRACE: {
         const uint32_t *m = params;
         if (counts && m[0] < MN_D3D_CALLS) {
-            why[m[0]] = m[1] ? 1 : 2;
+            why[m[0]] = m[1] == 2 ? 3 : m[1] ? 1 : 2;
             atomic_fetch_add_explicit(&counts[m[0]], 1, memory_order_relaxed);
         }
         return 0;
@@ -298,6 +300,12 @@ int32_t mn_d3d_unix_call(void *args) {
             fence_slot(((mn_d3d_p_ID3D12Device_CreateFence *)params)->aux);
         if (!s && a->id == MN_D3D_ID_ID3D11Device5_CreateFence) /* D3D11's (M4) */
             fence_slot(((mn_d3d_p_ID3D11Device5_CreateFence *)params)->aux);
+        if (!s && a->id == MN_D3D_ID_IMTLD3D11ContextExt2_GetPieces) { /* each piece's memory: our address (M4) */
+            mn_d3d_p_IMTLD3D11ContextExt2_GetPieces *g = params;
+            struct mn_d3d_piece *p = (struct mn_d3d_piece *)(uintptr_t)g->pieces;
+            for (uint32_t i = 0; p && i < (g->count ? g->count : 1); i++)
+                if (p[i].blob || p[i].offset) map_address(&p[i].blob); /* (blob, offset): adjacent, as a map's aux */
+        }
         if (!s) /* D3D11's and D3D10's maps (M4): the arena's (blob, offset) in aux, our address of it in aux[0] */
             switch (a->id) {
             case MN_D3D_ID_ID3D11DeviceContext_Map: map_address(((mn_d3d_p_ID3D11DeviceContext_Map *)params)->aux); break;

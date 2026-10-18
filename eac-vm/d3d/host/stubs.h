@@ -10,6 +10,7 @@
 #include <d3d10_1.h>
 #include <d3d11_4.h>
 #include "d3d12_interfaces.hpp"
+#include "d3d11_interfaces.hpp"
 extern "C" {
 #include "mnd3d_params.h"
 }

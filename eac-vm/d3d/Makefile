@@ -28,7 +28,7 @@ formats-test:
 
 # The host's calls into native DXMT (generated stubs.cpp), with DXMT's own flags: they must compile warning-free.
 DXMT_CXXFLAGS := -std=c++17 -Wno-extern-c-compat -DWIDL_EXPLICIT_AGGREGATE_RETURNS -include $(NT)/native-prelude.h -I$(NT)/include \
-  -I$(I)/d3d12 -I$(I)/windows -I$(I)/directx -I$(I) -I$(DXMT)/util -I$(DXMT)/d3d12 -I$(GEN) -Ihost
+  -I$(I)/d3d12 -I$(I)/windows -I$(I)/directx -I$(I) -I$(DXMT)/util -I$(DXMT)/d3d12 -I$(DXMT)/d3d11 -I$(GEN) -Ihost
 $(GEN)/stubs.o: $(GEN)/calls.c host/stubs.h
 	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -Wno-extern-c-compat -c -o $@ $(GEN)/stubs.cpp
 stubs: $(GEN)/stubs.o

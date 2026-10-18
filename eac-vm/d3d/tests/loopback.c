@@ -60,10 +60,14 @@ static void thread_exit(void *p) {
     tr = NULL;
 }
 
+static void host_trace(void) { mn_d3d_trace_flush(CTX); }
+
 static void init(void) {
     pthread_key_create(&key, thread_exit);
     const char *dir = getenv("MN_D3D_NATIVE");
     mn_d3d_set_dir(dir && *dir ? dir : MN_D3D_NATIVE_DIR);
+    const char *trace = getenv("MN_D3D_LOOPBACK_HOST_TRACE"); /* the host's trace, written as the process ends (M4) */
+    if (trace && *trace) mn_d3d_set_trace(trace), atexit(host_trace);
     mn_executor_start(mn_vm_dispatch, &mn_vm_hooks);
     ops->context_create(ops->ctx, CTX);
 }

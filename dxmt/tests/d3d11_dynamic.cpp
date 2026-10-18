@@ -1,7 +1,8 @@
 // D3D11 dynamic resources (Direct3D forwarding M4, spec §4.10): each map's data is the one the next draw reads.
-//   d3d11_dynamic.exe <shaders>   prints "dynamic <check> <value>":
+//   d3d11_dynamic.exe <shaders> [frames]   prints "dynamic <check> <value>":
 //     discard <frame>   1,000 Map(WRITE_DISCARD) of a 256-byte constant buffer in a frame, a draw after each writing
-//                       its value into its own texel of a 1000x1 target: texels wrong (4 frames)
+//                       its value into its own texel of a 1000x1 target: texels wrong (frames of them, 4 by default:
+//                       forwarding's piece test runs 1 and 30)
 //     nooverwrite       Map(WRITE_DISCARD) then 100 Map(WRITE_NO_OVERWRITE) appending 3 points each to a dynamic
 //                       vertex buffer, a draw of each 3: lit texels of a 64x64 target (300 when right)
 //     offsets           VSSetConstantBuffers1/PSSetConstantBuffers1 into 16 slots of one buffer, a draw each: texels
@@ -14,8 +15,9 @@
 static D3D11_VIEWPORT Texel(UINT x, UINT y) { return {(float)x, (float)y, 1, 1, 0, 1}; }
 
 int main(int argc, char **argv) {
-    if (argc != 2) { printf("usage: d3d11_dynamic.exe <shaders>\n"); return 2; }
+    if (argc != 2 && argc != 3) { printf("usage: d3d11_dynamic.exe <shaders> [frames]\n"); return 2; }
     g_shaders = argv[1];
+    const UINT frames = argc == 3 ? (UINT)atoi(argv[2]) : 4;
     Dev dev(D3D_FEATURE_LEVEL_11_1);
     ID3D11Device *d = dev.device;
     ID3D11DeviceContext *ctx = dev.ctx;
@@ -32,7 +34,7 @@ int main(int argc, char **argv) {
     ctx->VSSetShader(quad, nullptr, 0);
     ctx->PSSetShader(cbps, nullptr, 0);
     ctx->PSSetConstantBuffers(0, 1, &cb);
-    for (UINT frame = 0; frame < 4; frame++) {
+    for (UINT frame = 0; frame < frames; frame++) {
         for (UINT i = 0; i < N; i++) {
             D3D11_MAPPED_SUBRESOURCE m;
             CHECK(ctx->Map(cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m));

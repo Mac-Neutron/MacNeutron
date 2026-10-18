@@ -3,6 +3,7 @@
 // is another proxy of the same object, one at another pointer (a companion) a new handle from the host (op 4).
 #include <atomic>
 #include <cstdio>
+#include <deque>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -13,6 +14,17 @@
 #endif
 
 struct pacing;
+
+// A piece of a dynamic resource's memory the host lent the guest (M4 Task 8), and a subresource's: the ones to take,
+// the current one (WRITE_NO_OVERWRITE's), the one a WRITE_DISCARD map took, made current at its Unmap.
+struct mn_piece { uint64_t id = 0; void *cpu = nullptr; UINT row_pitch = 0, depth_pitch = 0; };
+struct mn_stash {
+    std::deque<mn_piece> free;
+    mn_piece current, pending;
+    bool has_current = false, pending_on = false, mapped = false; // mapped: a NO_OVERWRITE map of ours, open
+    UINT refill = 8;
+    uint64_t refilled = ~0ull; // the frame of the last refill: two in one frame double the next
+};
 
 struct mn_obj {
     std::atomic<long> refs{1};
@@ -41,6 +53,10 @@ struct mn_obj {
     uint64_t alloc = 0;           // a D3D11 or D3D10 resource's allocation, as its creation named it (Task 7), under m
     ID3D11Fence *idle = nullptr;  // a context's own fence, which a map's wait signals and waits on (Task 7), under m
     uint64_t idle_value = 0;
+    std::vector<mn_stash> stashes; // a dynamic resource's, by subresource (Task 8), under m
+    int8_t pieces = 0;             // 1: its maps answered here, -1: the host's (E_NOTIMPL), 0: not asked
+    int8_t immediate = 0;          // a context's: 1 the immediate one, -1 deferred, 0 not asked
+    mn_proxy *ext2 = nullptr;      // and its IMTLD3D11ContextExt2 (a companion it holds), if asked
 };
 static void end_pacing(pacing *p);
 
@@ -573,7 +589,10 @@ static void end_pacing(pacing *p) {
 
 // Before a present: without the frame latency object, at most kInFlight frames in flight; and a drawable free, waited
 // for on the shown event, for 100 ms at most (a window never shown mustn't hang the game).
+static std::atomic<uint64_t> presents; // the process's frames (Task 8's stashes double within one)
+
 static void pace_before(pacing *p, UINT flags) {
+    if (!(flags & DXGI_PRESENT_TEST)) presents++;
     if (!p || (flags & DXGI_PRESENT_TEST)) return;
     uint64_t n = p->presented;
     UINT latency = p->device && p->device->latency ? p->device->latency.load() : p->latency;
@@ -1278,8 +1297,113 @@ MN_UPDATE(update1_11, ID3D11DeviceContext1_UpdateSubresource1, ID3D11Resource, D
 MN_UPDATE(update10, ID3D10Device_UpdateSubresource, ID3D10Resource, D3D10_BOX, , (void)0)
 
 // Maps: the unix side answers our address of the host's memory in aux[0] (rules.txt's own, as ID3D12Resource::Map's).
+// ---- dynamic maps answered in the guest (M4 Task 8, spec §4.10, DXMT 0089) ----
+// On the immediate context, a dynamic resource's WRITE_DISCARD map takes a piece of its memory the host lent the
+// guest (IMTLD3D11ContextExt2::GetPieces, 8 at a time, doubling to 64 while a frame empties them) and its Unmap makes
+// it the resource's (UsePiece, queued); WRITE_NO_OVERWRITE answers the current piece. Deferred contexts, other maps,
+// and resources DXMT maps itself (E_NOTIMPL) stay the host's.
+
+static bool tracing() {
+    static const bool on = [] {
+        const char *t = getenv("MACNEUTRON_VM_D3D_TRACE");
+        return t && *t == '1';
+    }();
+    return on;
+}
+
+// The context's IMTLD3D11ContextExt2 if it's the immediate one (asked once each).
+static mn_proxy *pieces_of(mn_proxy *context) {
+    mn_obj *o = context->obj;
+    {
+        std::lock_guard<std::mutex> l(o->m);
+        if (o->immediate) return o->immediate > 0 ? o->ext2 : nullptr;
+    }
+    static const int k = [] {
+        for (int i = 0; i < MN_D3D_IFACES; i++)
+            if (!std::strcmp(mn_d3d_ifaces[i].name, "IMTLD3D11ContextExt2")) return i;
+        return -1;
+    }();
+    bool imm = k >= 0 && ((ID3D11DeviceContext *)context)->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE;
+    IUnknown *ext = nullptr;
+    if (imm && SUCCEEDED(((IUnknown *)context)->QueryInterface(*(const IID *)mn_d3d_ifaces[k].iid, (void **)&ext)))
+        ext->Release(); // the context holds its companion for its life
+    std::lock_guard<std::mutex> l(o->m);
+    o->ext2 = (mn_proxy *)ext, o->immediate = imm && ext ? 1 : -1;
+    return o->immediate > 0 ? o->ext2 : nullptr;
+}
+
+// GetPieces: count pieces (0: the current one) into out; its HRESULT.
+static HRESULT get_pieces(mn_proxy *ext, ID3D11Resource *res, UINT sub, UINT count, std::vector<mn_piece> &out) {
+    std::vector<mn_d3d_piece> p(count ? count : 1);
+    mn_d3d_p_IMTLD3D11ContextExt2_GetPieces g = {};
+    g.self = (uintptr_t)ext, g.resource = (uintptr_t)res, g.subresource = sub, g.count = count;
+    g.pieces = (uintptr_t)p.data(), g.aux[0] = p.size() * sizeof(mn_d3d_piece), g.aux[1] = alloc_of(res);
+    int32_t s = mn_d3d_call(MN_D3D_ID_IMTLD3D11ContextExt2_GetPieces, &g);
+    HRESULT hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)g.ret;
+    for (const auto &q : p)
+        if (SUCCEEDED(hr) && q.blob) out.push_back({q.id, (void *)(uintptr_t)q.blob, q.row_pitch, q.depth_pitch});
+    return hr;
+}
+
+// A map answered here: true, with *hr; false, the host's to answer.
+static bool piece_map(mn_proxy *context, ID3D11Resource *res, UINT sub, D3D11_MAP type,
+                      D3D11_MAPPED_SUBRESOURCE *mapped, HRESULT *hr) {
+    if (!res || !mapped || (type != D3D11_MAP_WRITE_DISCARD && type != D3D11_MAP_WRITE_NO_OVERWRITE)) return false;
+    mn_proxy *ext = pieces_of(context);
+    mn_obj *o = ((mn_proxy *)res)->obj;
+    if (!ext || sub >= 4096) return false;
+    std::unique_lock<std::mutex> l(o->m);
+    if (o->pieces < 0) return false;
+    if (type == D3D11_MAP_WRITE_NO_OVERWRITE && o->res.dim != D3D11_RESOURCE_DIMENSION_BUFFER) return false;
+    if (o->stashes.size() <= sub) o->stashes.resize(sub + 1);
+    mn_piece p;
+    if (type == D3D11_MAP_WRITE_NO_OVERWRITE) {
+        if (!o->stashes[sub].has_current) {
+            l.unlock();
+            std::vector<mn_piece> cur;
+            HRESULT r = get_pieces(ext, res, sub, 0, cur);
+            l.lock();
+            if (r == E_NOTIMPL) o->pieces = -1;
+            if (FAILED(r) || cur.empty()) return false;
+            o->stashes[sub].current = cur[0], o->stashes[sub].has_current = true;
+        }
+        p = o->stashes[sub].current;
+        o->stashes[sub].mapped = true;
+    } else {
+        while (o->stashes[sub].free.empty()) {
+            mn_stash &st = o->stashes[sub];
+            uint64_t frame = presents.load();
+            if (st.refilled == frame && st.refill < 64) st.refill *= 2;
+            st.refilled = frame;
+            UINT n = st.refill;
+            l.unlock();
+            std::vector<mn_piece> more;
+            HRESULT r = get_pieces(ext, res, sub, n, more);
+            l.lock();
+            if (r == E_NOTIMPL) o->pieces = -1;
+            if (FAILED(r) || more.empty()) return false;
+            for (auto &m : more) o->stashes[sub].free.push_back(m);
+        }
+        mn_stash &st = o->stashes[sub];
+        p = st.free.front();
+        st.free.pop_front();
+        st.pending = p, st.pending_on = true;
+    }
+    o->pieces = 1;
+    l.unlock();
+    *mapped = {p.cpu, p.row_pitch, p.depth_pitch};
+    *hr = S_OK;
+    if (tracing()) { // for the guest's trace: answered here, by design (coverage.py)
+        uint32_t m[2] = {MN_D3D_ID_ID3D11DeviceContext_Map, 2};
+        mn_d3d_call(MN_D3D_OP_TRACE, m);
+    }
+    return true;
+}
+
 static HRESULT STDMETHODCALLTYPE map11(mn_proxy *This, ID3D11Resource *res, UINT sub, D3D11_MAP type, UINT flags,
                                        D3D11_MAPPED_SUBRESOURCE *mapped) {
+    HRESULT answered;
+    if (piece_map(This, res, sub, type, mapped, &answered)) return answered;
     mn_d3d_p_ID3D11DeviceContext_Map p = {};
     D3D11_MAPPED_SUBRESOURCE m = {};
     const bool wait = would_wait(type, flags);
@@ -1299,6 +1423,31 @@ static HRESULT STDMETHODCALLTYPE map11(mn_proxy *This, ID3D11Resource *res, UINT
     if (mapped) *mapped = SUCCEEDED(hr) ? D3D11_MAPPED_SUBRESOURCE{(void *)(uintptr_t)p.aux[0], m.RowPitch, m.DepthPitch}
                                         : D3D11_MAPPED_SUBRESOURCE{};
     return hr;
+}
+
+// Unmap (a wrap): a WRITE_DISCARD map's piece made current (UsePiece, queued in order with the context's calls); a
+// NO_OVERWRITE map of ours has nothing to unmap; others are the host's.
+static const void *px_unmap11;
+static void STDMETHODCALLTYPE unmap11(mn_proxy *This, ID3D11Resource *res, UINT sub) {
+    mn_obj *o = res ? ((mn_proxy *)res)->obj : nullptr;
+    mn_piece use;
+    bool used = false, ours = false;
+    if (o) {
+        std::lock_guard<std::mutex> l(o->m);
+        if (sub < o->stashes.size()) {
+            mn_stash &st = o->stashes[sub];
+            if (st.pending_on) use = st.pending, st.current = use, st.has_current = true, st.pending_on = false, used = true;
+            else if (st.mapped) ours = true;
+            st.mapped = false;
+        }
+    }
+    if (used) {
+        mn_d3d_p_IMTLD3D11ContextExt2_UsePiece p = {};
+        p.self = (uintptr_t)This->obj->ext2, p.resource = (uintptr_t)res, p.subresource = sub, p.piece = use.id;
+        mn_d3d_record(This, MN_D3D_ID_IMTLD3D11ContextExt2_UsePiece, &p);
+        return;
+    }
+    if (!ours) PX(unmap11, px_unmap11)(This, res, sub);
 }
 
 #define MN_MAP10(fn, NAME, SUB, Out, OUT, FILL)                                                                         \
@@ -1404,6 +1553,7 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"ID3D11DeviceContext1::UpdateSubresource1", (const void *)update1_11},
         {"ID3D10Device::UpdateSubresource", (const void *)update10},
         {"ID3D11DeviceContext::Map", (const void *)map11},
+        {"ID3D11DeviceContext::Unmap", (const void *)unmap11, &px_unmap11},
         {"ID3D10Buffer::Map", (const void *)map10_buffer},
         {"ID3D10Texture1D::Map", (const void *)map10_tex1d},
         {"ID3D10Texture2D::Map", (const void *)map10_tex2d},

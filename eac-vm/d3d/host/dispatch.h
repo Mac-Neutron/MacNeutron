@@ -29,6 +29,7 @@ void mn_d3d_memory_begin(uint32_t ctx_id, int creation);
 uint64_t mn_d3d_memory_end(void);
 /* In a call (M4 Task 7): the largest buffer its hooks made, in 16 KiB pieces; more wanted of the guest (the call
  * answers MN_D3D_NEED_ARENA); whether one of the context's arenas has a free piece of len. */
+void mn_d3d_trace_flush(uint32_t ctx_id); /* the context's counts into the trace now (the loopback's, at its end) */
 uint64_t mn_d3d_memory_largest(void);
 void mn_d3d_memory_want(uint64_t len);
 int mn_d3d_arena_fits(uint32_t ctx_id, uint64_t len);

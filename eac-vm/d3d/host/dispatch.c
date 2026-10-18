@@ -35,7 +35,7 @@ NTSTATUS_T mn_d3d_create_fence_stub(void *params), mn_d3d_fence_signal_stub(void
     mn_d3d_output_desc1_stub(void *params);
 /* native.cpp: D3D11's fences and events (M4 Task 6) */
 NTSTATUS_T mn_d3d_create_fence11_stub(void *params), mn_d3d_context_signal_stub(void *params),
-    mn_d3d_set_event11_stub(void *params), mn_d3d_flush1_stub(void *params);
+    mn_d3d_set_event11_stub(void *params), mn_d3d_flush1_stub(void *params), mn_d3d_get_pieces_stub(void *params);
 /* native.cpp: D3D11's and D3D10's data and maps (M4) */
 NTSTATUS_T mn_d3d_create_buffer11_stub(void *params);
 NTSTATUS_T mn_d3d_create_tex1d11_stub(void *params);
@@ -111,6 +111,8 @@ static void trace_out(uint32_t ctx_id) {
     }
     fclose(f);
 }
+
+void mn_d3d_trace_flush(uint32_t ctx_id) { trace_out(ctx_id); }
 
 /* Whether the guest refuses the export (rules.txt: no call reaches the host, so native DXMT needn't have it). */
 static int refused_export(const char *name) {
@@ -188,6 +190,7 @@ int mn_d3d_load(const char *d) {
     mn_d3d_stubs[MN_D3D_ID_ID3D11DeviceContext4_Signal] = mn_d3d_context_signal_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D11Fence_SetEventOnCompletion] = mn_d3d_set_event11_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D11DeviceContext3_Flush1] = mn_d3d_flush1_stub;
+    mn_d3d_stubs[MN_D3D_ID_IMTLD3D11ContextExt2_GetPieces] = mn_d3d_get_pieces_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D12Fence_Signal] = mn_d3d_fence_signal_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D12CommandQueue_Signal] = mn_d3d_queue_signal_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D12Fence_SetEventOnCompletion] = mn_d3d_set_event_stub;

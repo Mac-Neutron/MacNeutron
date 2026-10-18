@@ -226,8 +226,9 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual([f.kind for f in c.fields], ["WMF_STR_IN", "WMF_WSTR_IN"])
 
     def test_d3d11_counts(self):
-        # M4: D3D11 and D3D10 in the model (ID3D10Multithread has ID3D11Multithread's IID and vtable: one of them)
-        self.assertEqual(len(gen.iface_index(self.m)), 204)
+        # M4: D3D11 and D3D10 in the model (ID3D10Multithread has ID3D11Multithread's IID and vtable: one of them), and
+        # DXMT's IMTLD3D11ContextExt to Ext2 (Task 8's pieces)
+        self.assertEqual(len(gen.iface_index(self.m)), 207)
         self.assertNotIn("ID3D10Multithread", self.m.interfaces)
         names = {c.name for c in self.calls.values()}
         for n in ("::D3D11CreateDevice", "::D3D11CoreCreateDevice", "::D3D11CreateDeviceAndSwapChain",

@@ -452,3 +452,31 @@ MAP10_STUB(mn_d3d_map10_tex2d_stub, ID3D10Texture2D_Map, ID3D10Texture2D, D3D10_
            a->Subresource)
 MAP10_STUB(mn_d3d_map10_tex3d_stub, ID3D10Texture3D_Map, ID3D10Texture3D, D3D10_MAPPED_TEXTURE3D, pMappedTex3D, WITH_SUB,
            a->Subresource)
+
+// A dynamic resource's pieces (M4 Task 8): room in the arenas first for count of its allocation (aux[1], the
+// guest's word: conservative, a piece may be a suballocation), then each piece's memory as the arena's (blob,
+// offset); one outside them (0, 0) the guest never uses.
+extern "C" NTSTATUS_T mn_d3d_get_pieces_stub(void *params) {
+    auto *a = (mn_d3d_p_IMTLD3D11ContextExt2_GetPieces *)params;
+    uint32_t n = a->count ? a->count : 1;
+    auto *out = (mn_d3d_piece *)(uintptr_t)a->pieces;
+    if (!out || a->count > 1024 || a->aux[0] < n * sizeof *out) {
+        RESULT(a, E_INVALIDARG);
+        return 0;
+    }
+    if (a->count && !room_for(a->count * a->aux[1])) return 0;
+    std::vector<MTLD3D11Piece> p(n);
+    try {
+        HRESULT r = ((IMTLD3D11ContextExt2 *)(uintptr_t)a->self)
+                        ->GetPieces((ID3D11Resource *)(uintptr_t)a->resource, a->subresource, a->count, p.data());
+        for (uint32_t i = 0; SUCCEEDED(r) && i < n; i++) {
+            uint64_t at[2] = {0, 0};
+            if (!located(p[i].cpu, at)) at[0] = at[1] = 0;
+            out[i] = {p[i].id, at[0], at[1], p[i].row_pitch, p[i].depth_pitch};
+        }
+        RESULT(a, r);
+    } catch (...) {
+        return mn_d3d_not_in_dxmt(MN_D3D_ID_IMTLD3D11ContextExt2_GetPieces, &a->ret);
+    }
+    return 0;
+}

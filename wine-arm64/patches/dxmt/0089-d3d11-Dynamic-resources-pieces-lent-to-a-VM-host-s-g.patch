@@ -1,0 +1,304 @@
+From 09baa0845aaf4fc5b787faa15cedbf437776218c Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sun, 18 Oct 2026 15:22:54 -0400
+Subject: [PATCH] d3d11: Dynamic resources' pieces lent to a VM host's guest.
+
+IMTLD3D11ContextExt2 (a new IID, deriving IMTLD3D11ContextExt1) on the
+immediate context: GetPieces lends a dynamic buffer's or dynamic
+texture's memory in pieces (one suballocation each, the recycled
+allocations first, then new ones), and UsePiece makes one the
+resource's memory as Map(WRITE_DISCARD) renames it (with a dynamic
+texture's Unmap upload), returning the one it replaces to the
+recycling. A VM host's guest then answers WRITE_DISCARD and
+WRITE_NO_OVERWRITE maps itself. A piece's id is a counter, never an
+address, and UsePiece takes only the ids it lent or the current one.
+Deferred contexts and linear dynamic textures answer E_NOTIMPL.
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ src/d3d11/d3d11_context_imm.cpp  | 84 ++++++++++++++++++++++++++++++++
+ src/d3d11/d3d11_context_impl.cpp | 21 +++++++-
+ src/d3d11/d3d11_interfaces.hpp   | 20 ++++++++
+ src/dxmt/dxmt_dynamic.cpp        | 41 ++++++++++++++++
+ src/dxmt/dxmt_dynamic.hpp        | 13 +++++
+ 5 files changed, 177 insertions(+), 2 deletions(-)
+
+diff --git a/src/d3d11/d3d11_context_imm.cpp b/src/d3d11/d3d11_context_imm.cpp
+index 4862ce7..9435e18 100644
+--- a/src/d3d11/d3d11_context_imm.cpp
++++ b/src/d3d11/d3d11_context_imm.cpp
+@@ -312,6 +312,90 @@ public:
+     }
+   }
+ 
++  // MacNeutron (IMTLD3D11ContextExt2): pieces of a dynamic buffer's or dynamic texture's memory, lent to a VM host's
++  // guest, which answers WRITE_DISCARD and WRITE_NO_OVERWRITE maps itself. A piece is one suballocation of an
++  // allocation (its id: the allocation's, DynamicBuffer::lend's, and the suballocation); an allocation's are lent in
++  // order, and it goes back to the recycling once another becomes current.
++  static UINT64 PieceId(uint64_t allocation, uint32_t suballocation) { return allocation << 16 | suballocation; }
++
++  HRESULT GetPieces(ID3D11Resource *pResource, UINT Subresource, UINT Count, MTLD3D11Piece *pPieces) override {
++    std::lock_guard<d3d11_device_mutex> lock(mutex);
++    if (unlikely(!pResource || !pPieces))
++      return E_INVALIDARG;
++    UINT buffer_length = 0, bind_flag = 0, row_pitch = 0, depth_pitch = 0;
++    Rc<DynamicBuffer> dynamic = GetDynamicBuffer(pResource, &buffer_length, &bind_flag);
++    if (dynamic)
++      row_pitch = depth_pitch = buffer_length;
++    else if (!(dynamic = GetDynamicTexture(pResource, Subresource, &row_pitch, &depth_pitch)))
++      return E_NOTIMPL;
++    if (!Count) {
++      pPieces[0] = {PieceId(dynamic->immediatePiece(), dynamic->immediateSuballocation()),
++                    dynamic->immediateMappedMemory(), row_pitch, depth_pitch};
++      return S_OK;
++    }
++    auto coherent_seq_id = cmd_queue.CoherentSeqId();
++    for (UINT i = 0; i < Count;) {
++      auto [id, allocation] = dynamic->lend(coherent_seq_id);
++      for (uint32_t sub = 0; i < Count && sub < 0x10000 && allocation->hasSuballocatoin(sub); sub++, i++)
++        pPieces[i] = {PieceId(id, sub), allocation->mappedMemory(sub), row_pitch, depth_pitch};
++    }
++    return S_OK;
++  }
++
++  // The piece the guest wrote becomes the subresource's memory, as Map(WRITE_DISCARD) renames it (and a dynamic
++  // texture's Unmap uploads it). An id it never lent (nor the current allocation's) is ignored.
++  void UsePiece(ID3D11Resource *pResource, UINT Subresource, UINT64 Piece) override {
++    std::lock_guard<d3d11_device_mutex> lock(mutex);
++    if (unlikely(!pResource))
++      return;
++    UINT buffer_length = 0, bind_flag = 0, row_pitch = 0, depth_pitch = 0;
++    bool texture = false;
++    Rc<DynamicBuffer> dynamic = GetDynamicBuffer(pResource, &buffer_length, &bind_flag);
++    if (!dynamic) {
++      if (!(dynamic = GetDynamicTexture(pResource, Subresource, &row_pitch, &depth_pitch)))
++        return;
++      texture = true;
++    }
++    uint64_t id = Piece >> 16;
++    uint32_t sub = Piece & 0xffff;
++    if (id == dynamic->immediatePiece()) {
++      if (!dynamic->immediateName()->hasSuballocatoin(sub))
++        return;
++      dynamic->useImmediateSuballocation(sub);
++      EmitST([allocation = dynamic->immediateName(), sub](ArgumentEncodingContext &enc) mutable {
++        allocation->useSuballocation(sub);
++      });
++    } else {
++      Rc<BufferAllocation> lent = dynamic->takeLent(id);
++      if (!lent)
++        return;
++      if (!lent->hasSuballocatoin(sub))
++        sub = 0;
++      dynamic->updateImmediateName(cmd_queue.CurrentSeqId(), std::move(lent), sub, false);
++      dynamic->setImmediatePiece(id);
++      EmitST([allocation = dynamic->immediateName(), sub,
++              buffer = Rc(dynamic->buffer)](ArgumentEncodingContext &enc) mutable {
++        allocation->useSuballocation(sub);
++        auto _ = buffer->rename(forward_rc(allocation));
++      });
++    }
++    if (texture) {
++      for (auto &stage : state_.ShaderStages)
++        stage.SRVs.set_dirty();
++      BlitObject blit(device, pResource);
++      UpdateTexture(TextureUpdateCommand(blit, Subresource, nullptr), dynamic->buffer, row_pitch, depth_pitch);
++      return;
++    }
++    if (bind_flag & D3D11_BIND_VERTEX_BUFFER)
++      state_.InputAssembler.VertexBuffers.set_dirty();
++    if (bind_flag & D3D11_BIND_CONSTANT_BUFFER)
++      for (auto &stage : state_.ShaderStages)
++        stage.ConstantBuffers.set_dirty();
++    if (bind_flag & D3D11_BIND_SHADER_RESOURCE)
++      for (auto &stage : state_.ShaderStages)
++        stage.SRVs.set_dirty();
++  }
++
+   void
+   STDMETHODCALLTYPE
+   Begin(ID3D11Asynchronous *pAsync) override {
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+index f49c2bd..0ac5d52 100644
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -645,7 +645,8 @@ public:
+       return S_OK;
+     }
+ 
+-    if (riid == __uuidof(IMTLD3D11ContextExt) || riid == __uuidof(IMTLD3D11ContextExt1)) {
++    if (riid == __uuidof(IMTLD3D11ContextExt) || riid == __uuidof(IMTLD3D11ContextExt1) ||
++        riid == __uuidof(IMTLD3D11ContextExt2)) {
+       *ppvObject = ref(&ext_);
+       return S_OK;
+     }
+@@ -5154,6 +5155,13 @@ public:
+ 
+ #pragma endregion
+ 
++public:
++  // IMTLD3D11ContextExt2's (MacNeutron): the immediate context's; a deferred one has none.
++  virtual HRESULT GetPieces(ID3D11Resource *pResource, UINT Subresource, UINT Count, MTLD3D11Piece *pPieces) {
++    return E_NOTIMPL;
++  }
++  virtual void UsePiece(ID3D11Resource *pResource, UINT Subresource, UINT64 Piece) {}
++
+ protected:
+   D3D11ContextState state_;
+   D3D11UserDefinedAnnotation annotation_;
+@@ -5184,7 +5192,7 @@ public:
+ };
+ 
+ template <typename ContextInternalState>
+-class MTLD3D11ContextExt : public IMTLD3D11ContextExt1 {
++class MTLD3D11ContextExt : public IMTLD3D11ContextExt2 {
+   class CachedTemporalScaler {
+   public:
+     WMTPixelFormat color_pixel_format;
+@@ -5202,6 +5210,15 @@ class MTLD3D11ContextExt : public IMTLD3D11ContextExt1 {
+ public:
+   MTLD3D11ContextExt(MTLD3D11DeviceContextImplBase<ContextInternalState> *context) : ctx_(context){};
+ 
++  HRESULT STDMETHODCALLTYPE GetPieces(ID3D11Resource *pResource, UINT Subresource, UINT Count,
++                                      MTLD3D11Piece *pPieces) final {
++    return ctx_->GetPieces(pResource, Subresource, Count, pPieces);
++  }
++
++  void STDMETHODCALLTYPE UsePiece(ID3D11Resource *pResource, UINT Subresource, UINT64 Piece) final {
++    ctx_->UsePiece(pResource, Subresource, Piece);
++  }
++
+   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid,
+                                            void **ppvObject) final {
+     return ctx_->QueryInterface(riid, ppvObject);
+diff --git a/src/d3d11/d3d11_interfaces.hpp b/src/d3d11/d3d11_interfaces.hpp
+index ff4bb2b..79531c1 100644
+--- a/src/d3d11/d3d11_interfaces.hpp
++++ b/src/d3d11/d3d11_interfaces.hpp
+@@ -39,6 +39,26 @@ DEFINE_COM_INTERFACE("19a8e35a-38be-418f-94e3-9f7323936870", IMTLD3D11ContextExt
+   ) = 0;
+ };
+ 
++// MacNeutron: a VM host's guest answers a dynamic resource's WRITE_DISCARD and WRITE_NO_OVERWRITE maps itself, in
++// pieces of its memory the immediate context lends it. GetPieces lends count pieces of the subresource's memory not
++// in use (the recycled ones first, then new ones), each the caller's until UsePiece makes it the subresource's memory
++// (WRITE_DISCARD's rename, and a dynamic texture's Unmap upload), which returns the one it replaces to the recycling;
++// count 0 answers the current piece. E_NOTIMPL: a resource whose maps the context makes itself (not dynamic, a
++// linear dynamic texture), or a deferred context. A piece's id means nothing but to UsePiece, which takes only the
++// ids it lent out or the current one's.
++struct MTLD3D11Piece {
++  UINT64 id;
++  void *cpu;
++  UINT row_pitch;
++  UINT depth_pitch;
++};
++
++DEFINE_COM_INTERFACE("a5253c74-3ff9-497f-b184-f137c5a7b928", IMTLD3D11ContextExt2) : public IMTLD3D11ContextExt1 {
++  virtual HRESULT STDMETHODCALLTYPE GetPieces(ID3D11Resource *resource, UINT subresource, UINT count,
++                                              MTLD3D11Piece *pieces) = 0;
++  virtual void STDMETHODCALLTYPE UsePiece(ID3D11Resource *resource, UINT subresource, UINT64 piece) = 0;
++};
++
+ DEFINE_COM_INTERFACE("efc77ae6-2179-4c0a-b844-7661ca0dcde7", IMTLD3D11DeviceExt)
+     : public IUnknown {
+   virtual void STDMETHODCALLTYPE SetShaderExtensionSlot(UINT Slot) = 0;
+diff --git a/src/dxmt/dxmt_dynamic.cpp b/src/dxmt/dxmt_dynamic.cpp
+index ce7941e..318a36d 100644
+--- a/src/dxmt/dxmt_dynamic.cpp
++++ b/src/dxmt/dxmt_dynamic.cpp
+@@ -47,6 +47,7 @@ DynamicBuffer::updateImmediateName(uint64_t current_seq_id, Rc<BufferAllocation>
+   name_ = std::move(allocation);
+   name_suballocation_ = suballocation;
+   owned_by_command_list_ = owned_by_command_list;
++  name_piece_ = 0;
+ }
+ 
+ void
+@@ -62,6 +63,46 @@ DynamicBuffer::recycle(uint64_t current_seq_id, Rc<BufferAllocation> &&allocatio
+   fifo.push(QueueEntry{.allocation = std::move(allocation), .will_free_at = current_seq_id});
+ }
+ 
++std::pair<uint64_t, Rc<BufferAllocation>>
++DynamicBuffer::lend(uint64_t coherent_seq_id) {
++  Rc<BufferAllocation> ret = allocate(coherent_seq_id);
++  std::lock_guard<dxmt::mutex> lock(mutex_);
++  uint64_t id = next_piece_++;
++  lent_[id] = ret;
++  return {id, ret};
++}
++
++Rc<BufferAllocation>
++DynamicBuffer::takeLent(uint64_t id) {
++  std::lock_guard<dxmt::mutex> lock(mutex_);
++  auto it = lent_.find(id);
++  if (it == lent_.end())
++    return {};
++  Rc<BufferAllocation> ret = std::move(it->second);
++  lent_.erase(it);
++  return ret;
++}
++
++uint64_t
++DynamicBuffer::immediatePiece() {
++  std::lock_guard<dxmt::mutex> lock(mutex_);
++  if (!name_piece_)
++    name_piece_ = next_piece_++;
++  return name_piece_;
++}
++
++void
++DynamicBuffer::setImmediatePiece(uint64_t id) {
++  std::lock_guard<dxmt::mutex> lock(mutex_);
++  name_piece_ = id;
++}
++
++void
++DynamicBuffer::useImmediateSuballocation(uint32_t suballocation) {
++  std::lock_guard<dxmt::mutex> lock(mutex_);
++  name_suballocation_ = suballocation;
++}
++
+ uint32_t
+ DynamicBuffer::nextSuballocation() {
+   if (name_->hasSuballocatoin(name_suballocation_ + 1)) {
+diff --git a/src/dxmt/dxmt_dynamic.hpp b/src/dxmt/dxmt_dynamic.hpp
+index 9ee3b1d..1edafff 100644
+--- a/src/dxmt/dxmt_dynamic.hpp
++++ b/src/dxmt/dxmt_dynamic.hpp
+@@ -2,6 +2,7 @@
+ #include "dxmt_buffer.hpp"
+ #include "dxmt_texture.hpp"
+ #include <queue>
++#include <unordered_map>
+ 
+ namespace dxmt {
+ 
+@@ -15,6 +16,16 @@ public:
+   void recycle(uint64_t current_seq_id, Rc<BufferAllocation> &&allocation);
+   uint32_t nextSuballocation();
+ 
++  // MacNeutron (IMTLD3D11ContextExt2's pieces): an allocation lent out under an id of its own (never its address), as
++  // allocate() finds one, until taken back to become the immediate name (takeLent: nullptr, that id isn't lent);
++  // the immediate name's id (one given it when it has none: an allocation DXMT renamed to itself), set as it's made
++  // the immediate name from a lent one; its suballocation set.
++  std::pair<uint64_t, Rc<BufferAllocation>> lend(uint64_t coherent_seq_id);
++  Rc<BufferAllocation> takeLent(uint64_t id);
++  uint64_t immediatePiece();
++  void setImmediatePiece(uint64_t id);
++  void useImmediateSuballocation(uint32_t suballocation);
++
+   Rc<BufferAllocation>
+   immediateName() {
+     return name_;
+@@ -50,6 +61,8 @@ private:
+   Rc<BufferAllocation> name_;
+   uint32_t name_suballocation_ = 0;
+   bool owned_by_command_list_ = false;
++  std::unordered_map<uint64_t, Rc<BufferAllocation>> lent_; // they go with the buffer
++  uint64_t next_piece_ = 1, name_piece_ = 0;
+ };
+ 
+ class DynamicLinearTexture {
+-- 
+2.54.0 (Apple Git-157)
+

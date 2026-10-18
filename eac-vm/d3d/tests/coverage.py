@@ -4,9 +4,10 @@
 coverage.py <guest trace> <host trace>
     Every method the guest's programs called (the guest trace: unix.c's, a "# process" section each) has a rule that
     forwards it and reached the host (the host trace: dispatch.c's, a "# context" section each). A line is
-    "<id> <name> <calls>", and in the guest trace "<id> <name> <calls> refused|unhandled" for a method the guest
-    answered itself (rules.txt's refuse, or a special without guest code): each of those fails (but AS_DXMT's), as does a
-    forwarded method with no host count, or a guest trace with no method at all (nothing was forwarded).
+    "<id> <name> <calls>", and in the guest trace "<id> <name> <calls> refused|unhandled|answered" for a method the
+    guest answered itself (rules.txt's refuse, a special without guest code, or by design: M4's dynamic maps, which
+    need no host count): refused and unhandled fail (but AS_DXMT's), as does a forwarded method with no host count, or
+    a guest trace with no method at all (nothing was forwarded).
 coverage.py self-test
     Each rule's failure case must fail, and a covered run pass.
 Prints "coverage: ok ..." or "coverage: FAIL ...", and exits 1 on a failure.
@@ -47,7 +48,8 @@ def coverage(guest, host):
         return 'coverage: FAIL no method in the guest trace (nothing forwarded)'
     bad = [f'{name} {why}' if why else f'{name} never reached the host'
            for i, (name, n, why) in sorted(g.items())
-           if (why and not (why == 'refused' and name in AS_DXMT)) or (not why and not h.get(i, [0, 0])[1])]
+           if (why and why != 'answered' and not (why == 'refused' and name in AS_DXMT))
+           or (not why and not h.get(i, [0, 0])[1])]
     if bad:
         return f'coverage: FAIL {len(bad)} of {len(g)} methods: ' + ', '.join(bad[:5])
     return f'coverage: ok ({len(g)} methods, {sum(e[1] for e in g.values())} calls, all forwarded)'
@@ -73,6 +75,8 @@ def self_test():
         ('empty', f('g5', '# process 9\n'), f('h5', host), 'coverage: FAIL no method'),
         ('as-dxmt', f('g6', guest + '159 ID3D12Device3::OpenExistingHeapFromAddress 3 refused\n'), f('h6', host),
          'coverage: ok (3 methods, 7 calls'),
+        ('answered', f('g7', guest + '576 ID3D11DeviceContext::Map 40000 answered\n'), f('h7', host),
+         'coverage: ok (3 methods, 40004 calls'),
     ]
     failures = 0
     for name, g, h, want in cases:

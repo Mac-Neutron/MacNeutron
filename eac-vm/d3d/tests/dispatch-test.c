@@ -32,6 +32,8 @@
  *   d3d11maparena (M4 Task 7) a dynamic buffer's WRITE_DISCARD maps, renames included, in the guest's arenas; a rename
  *              the arenas can't hold (the creation's allocation, which it names, past their room) answers
  *              MN_D3D_NEED_ARENA before DXMT maps, then maps inside the arena op 1 adds
+ *   d3d11pieces   (M4 Task 8) the immediate context's IMTLD3D11ContextExt2 lends a dynamic buffer's pieces inside the
+ *              arenas; UsePiece makes one current, as GetPieces(0) says; an id never lent changes nothing
  *   d3d11events   (M4 Task 6) a D3D11 fence's mirror slot, raised by ID3D11DeviceContext4::Signal; the fence's
  *              SetEventOnCompletion(7, e) and Flush1(e) post MN_NOTIFY_EVENT with e (relays: DXMT never takes e)
  *   d3d11notimpl  (M4 Task 5) a D3D11 call that reaches DXMT's UNIMPLEMENTED (a STAGING buffer's UpdateSubresource)
@@ -477,6 +479,28 @@ int main(int argc, char **argv) {
     CHECK(call(map11, &mbig2) == 0 && (uint32_t)mbig2.ret == 0 && mbig2.aux[0] == more.blob_id);
     struct { uint64_t self, ret, res; uint32_t sub; } umb = {gi.ctx, 0, cbig.buffer, 0};
     CHECK(call(unmap11, &umb) == 0);
+
+    /* d3d11pieces: the immediate context's IMTLD3D11ContextExt2 (a companion, op 4) lends a dynamic buffer's pieces in
+     * the arenas; UsePiece makes one current (GetPieces(0) names it); an id it never lent changes nothing */
+    struct mn_d3d_query qx = {gi.ctx, {0}, mn_gh_alloc(MN_OWN_PLUS1)};
+    memcpy(qx.iid, iid("IMTLD3D11ContextExt2"), 16);
+    struct mn_d3d_query_reply qxr = {0};
+    CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_QUERY, &qx, sizeof qx, &qxr, sizeof qxr, &qn) == 0);
+    CHECK(qxr.hr == 0 && answers(qxr.ifaces, "IMTLD3D11ContextExt2"));
+    unsigned getp = id_of("IMTLD3D11ContextExt2::GetPieces"), usep = id_of("IMTLD3D11ContextExt2::UsePiece");
+    struct mn_d3d_piece pcs[2];
+    struct gp { uint64_t self, ret, res; uint32_t sub, count; uint64_t pieces, aux[2]; } g2 =
+        {qx.out, 0, cdy.buffer, 0, 2, (uintptr_t)pcs, {sizeof pcs, cdy.aux[1]}};
+    CHECK(mn_d3d_calls[getp].params_size == sizeof g2 && call(getp, &g2) == 0 && (uint32_t)g2.ret == 0);
+    CHECK(pcs[0].id != pcs[1].id && pcs[0].offset != UINT64_MAX && pcs[1].offset != UINT64_MAX);
+    CHECK((pcs[0].blob == small.blob_id || pcs[0].blob == big.blob_id || pcs[0].blob == more.blob_id));
+    struct up { uint64_t self, ret, res; uint32_t sub; uint64_t piece, aux[2]; } u1 = {qx.out, 0, cdy.buffer, 0, 0xdead0000ull, {0}};
+    CHECK(mn_d3d_calls[usep].params_size == sizeof u1 && call(usep, &u1) == 0);
+    struct mn_d3d_piece now;
+    struct gp g0 = {qx.out, 0, cdy.buffer, 0, 0, (uintptr_t)&now, {sizeof now, 0}};
+    CHECK(call(getp, &g0) == 0 && (uint32_t)g0.ret == 0 && now.id != pcs[0].id && now.id != pcs[1].id);
+    struct up u2 = {qx.out, 0, cdy.buffer, 0, pcs[1].id, {0}};
+    CHECK(call(usep, &u2) == 0 && call(getp, &g0) == 0 && now.id == pcs[1].id);
 
     /* d3d11events: a D3D11 fence's slot raised by the context's Signal, and the guest's events relayed (the fence's
      * SetEventOnCompletion, Flush1's), never DXMT's to take as its own */

@@ -15,7 +15,8 @@ enum {
     MN_D3D_OP_RELEASE = 0, /* u64 handle: the guest's last Release (deferred until the rings that used it pass) */
     MN_D3D_OP_ARENA = 1,   /* Task 7 */
     MN_D3D_OP_NOTIFY = 2,  /* Task 8 */
-    MN_D3D_OP_TRACE = 3,   /* u32 id, u32 refused: a method the guest answered itself, for its trace; never sent */
+    MN_D3D_OP_TRACE = 3,   /* u32 id, u32 why (0 unhandled, 1 refused, 2 answered by design: M4's dynamic maps): a
+                            * method the guest answered itself, for its trace; never sent */
     MN_D3D_OP_QUERY = 4,   /* struct mn_d3d_query: QueryInterface for an interface at another pointer, a new handle */
     MN_D3D_OP_BLOB = 5,    /* struct mn_d3d_blob: an ID3D10Blob's bytes; reply: u64 its size, then the bytes asked */
     MN_D3D_OP_LISTEN = 6,  /* none: the calling thread sets the events the host posts, for the process's life; never sent */
@@ -82,6 +83,9 @@ struct mn_d3d_args { uint32_t id, flags; uint64_t params; };
  * stamps its start, another records and closes it): sent with MN_REC_SUBMIT, which first runs every other ring of the
  * context, that thread's records for the list among them. */
 #define MN_D3D_ARG_HANDOFF 1u
+/* A piece of a dynamic resource's memory (IMTLD3D11ContextExt2::GetPieces's, M4 Task 8), as the host answers it: the
+ * arena's (blob, offset), which the unix side makes the guest's address in blob (0: none, not in an arena). */
+struct mn_d3d_piece { uint64_t id, blob, offset; uint32_t row_pitch, depth_pitch; };
 struct mn_d3d_query_args {
     uint64_t handle; uint8_t iid[16]; uint64_t out; int32_t hr, pad;
     uint64_t ifaces[2 * MN_D3D_MASK_WORDS + 1];

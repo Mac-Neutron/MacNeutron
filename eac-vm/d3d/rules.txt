@@ -61,6 +61,23 @@ interface IMTLD3D12CommandListExt : IUnknown 5690e8a7-51a1-4b37-8bbd-730d0fdb2ce
   HRESULT TemporalUpscale(IMTLD3D12TemporalScaler *pScaler, const MTL_TEMPORAL_UPSCALE_D3D12_DESC *pDesc);
 end
 
+# D3D11's (M4 Task 8; build/wine-arm64-src/dxmt/src/d3d11/d3d11_interfaces.hpp, DXMT 0089): a dynamic resource's
+# memory lent to the guest in pieces. Ext's and Ext1's methods (MetalFX, UAV overlap) aren't forwarded yet.
+interface IMTLD3D11ContextExt : IUnknown 43ace3ce-1956-448b-a4eb-aee68bdeb283
+  void TemporalUpscale(const void *pDesc);
+  void BeginUAVOverlap(void);
+  void EndUAVOverlap(void);
+end
+
+interface IMTLD3D11ContextExt1 : IMTLD3D11ContextExt 19a8e35a-38be-418f-94e3-9f7323936870
+  HRESULT CheckFeatureSupport(UINT Feature, void *pFeatureSupportData, UINT FeatureSupportDataSize);
+end
+
+interface IMTLD3D11ContextExt2 : IMTLD3D11ContextExt1 a5253c74-3ff9-497f-b184-f137c5a7b928
+  HRESULT GetPieces(ID3D11Resource *resource, UINT subresource, UINT count, void *pieces);
+  void UsePiece(ID3D11Resource *resource, UINT subresource, UINT64 piece);
+end
+
 # Exports the headers don't declare (dxgi.def's).
 export dxgi.dll HRESULT DXGIDeclareAdapterRemovalSupport(void);
 # M4: D3D11's and D3D10's exports, as Wine declares them (d3d11.h's prototypes name no parameters; d3d10core's and the
@@ -565,6 +582,17 @@ companion ID3D11PixelShader ID3D10PixelShader
 companion ID3D10PixelShader ID3D11PixelShader
 companion ID3D11Query ID3D10Query
 companion ID3D10Query ID3D11Query
+# A dynamic resource's maps answered in the guest (M4 Task 8): GetPieces lends it pieces of its memory (own: the
+# pieces' addresses as the arenas' (blob, offset), the guest's on the unix side; arena: new ones from the arenas, the
+# host checking first for room for count of the resource's allocation, aux[1]), UsePiece makes one current (queued).
+companion ID3D11DeviceContext IMTLD3D11ContextExt2
+IMTLD3D11ContextExt::* refuse
+IMTLD3D11ContextExt1::* refuse
+IMTLD3D11ContextExt2::GetPieces pieces out size=aux0
+IMTLD3D11ContextExt2::GetPieces own
+IMTLD3D11ContextExt2::GetPieces arena
+IMTLD3D11ContextExt2::UsePiece own
+ID3D11DeviceContext::Unmap wrap
 # D3D11_KEEP_* counts carry no array (guest/proxy.cpp's wrap drops them).
 ID3D11DeviceContext::OMSetRenderTargetsAndUnorderedAccessViews wrap
 # Class instances: their count after them (DXMT has none, so games pass none).

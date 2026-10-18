@@ -21,7 +21,7 @@ rm -rf "$O"
 mkdir -p "$O"
 CF="-O1 -g -Wall -std=gnu2x -DMN_D3D_LOOPBACK -DDXMT_GUEST_VM -I$M -I$M/wm -I$G -I$I -I$D3D -I$DXMT/winemetal -I$DXMT/airconv"
 CXF="-O1 -g -Wall -Werror -Wno-extern-c-compat -std=c++17 -DMN_D3D_LOOPBACK -DWIDL_EXPLICIT_AGGREGATE_RETURNS -include $NT/native-prelude.h
-  -I$NT/include -I$I/d3d12 -I$I/windows -I$I/directx -I$I -I$DXMT/util -I$DXMT/d3d12 -I$G -I$D3D -I$D3D/host -I$D3D/guest"
+  -I$NT/include -I$I/d3d12 -I$I/windows -I$I/directx -I$I -I$DXMT/util -I$DXMT/d3d12 -I$DXMT/d3d11 -I$G -I$D3D -I$D3D/host -I$D3D/guest"
 objs=
 compile() {  # compile <compiler and flags> <source>
   o="$O/$(echo "$2" | sed "s|^$ROOT/||; s|/|_|g").o"  # two calls.c: the path names each object
