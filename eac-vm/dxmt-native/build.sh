@@ -19,8 +19,13 @@ CPU=${MACNEUTRON_CPU:-apple-m5}
 set -- "$B" "$D" --buildtype release -Denable_d3d12=true -Denable_nvapi=false -Denable_nvngx=false \
   -Dwine_builtin_dll=false -Dnative_llvm_path="$SRC/llvm-arm64" -Dtranslator_key_file="$SRC/dxmt-translator-key"
 [ "$CPU" = generic ] || set -- "$@" -Dc_args="-mcpu=$CPU" -Dcpp_args="-mcpu=$CPU"
+# Its .metal files through wine-arm64/tools/xcrun-metal.sh, as the PE build's: the AIR modules winemetal.dylib embeds
+# name no build path (they ship in the app's VM helpers: arm64 release Ruling 20).
+mkdir -p "$OUT"
+printf "[binaries]\nxcrun = ['/bin/sh', '%s']\n" "$ROOT/wine-arm64/tools/xcrun-metal.sh" > "$OUT/xcrun.txt"
+set -- "$@" --native-file "$OUT/xcrun.txt"
 # The tree's commit too (eac-vm/dxmt/build.sh's reason: a swapped-in tree's older files leave stale objects).
-inputs=$(printf '%s\n' "$@"; git -C "$D" rev-parse HEAD)
+inputs=$(printf '%s\n' "$@"; git -C "$D" rev-parse HEAD; cat "$ROOT/wine-arm64/tools/xcrun-metal.sh")
 if [ ! -f "$B/build.ninja" ] || [ "$(cat "$B/.setup-inputs" 2> /dev/null)" != "$inputs" ]; then
   rm -rf "$B"
   mkdir -p "$OUT"

@@ -14,8 +14,9 @@ public enum VMToolsInstallOutcome: Equatable, Sendable {
 /// `RuntimeInstaller` installs wine.app: each item copied beside itself, then swapped in, never while a VM runs from the
 /// folder. The folder's games' files (state/, runs/) and its images/ aren't the tools' and are never touched.
 public enum VMToolsInstaller {
-    public static let items = ["macneutron-vm", "libkrun", "steam-forward", "gvproxy", "metal-host", "run-guest.sh",
-                               "run-game.sh"]
+    /// dxmt: native DXMT and its replayer, which macneutron-vm loads for Direct3D forwarding (eac-vm/d3d).
+    public static let items = ["macneutron-vm", "libkrun", "steam-forward", "gvproxy", "metal-host", "dxmt",
+                               "run-guest.sh", "run-game.sh"]
     /// The items that are scripts: MacNeutron.app keeps them in Contents/Resources/vm (codesign takes a script in
     /// Contents/Helpers for unsigned code, and a script's own signature doesn't survive the zip).
     public static let scripts = ["run-guest.sh", "run-game.sh"]

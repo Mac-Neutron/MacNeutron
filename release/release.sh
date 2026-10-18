@@ -477,6 +477,8 @@ build_app() {
   # Built now from this tree (each skips what is current), not whatever build/ holds.
   sh "$ROOT/eac-vm/setup-tools/build.sh" > /dev/null || die "eac-vm/setup-tools/build.sh failed"
   sh "$ROOT/eac-vm/libkrun/build.sh" > /dev/null 2>&1 || die "eac-vm/libkrun/build.sh failed"
+  # Native DXMT and its replayer, which macneutron-vm loads from dxmt/ for Direct3D forwarding (host/build.sh copies)
+  sh "$ROOT/eac-vm/dxmt-native/build.sh" > /dev/null 2>&1 || die "eac-vm/dxmt-native/build.sh failed"
   sh "$ROOT/eac-vm/host/build.sh" > /dev/null 2>&1 || die "eac-vm/host/build.sh failed"
   sh "$ROOT/eac-vm/host/stage.sh" "$VMH" > /dev/null || die "eac-vm/host/stage.sh failed"
   # The Metal host's winemetal.so is DXMT's: the release wine.app's, as SOURCE names it.
@@ -526,7 +528,8 @@ EOF
 The microVM games run in (Contents/Helpers/vm and Contents/Resources/vm), and the setup that builds its images on
 this Mac (Contents/Helpers/mkfs.erofs, and Contents/Helpers/macneutron's vm-setup):
 - macneutron-vm, the Steam forwarder's host and the two scripts are MacNeutron's own (MIT, ../LICENSE). The Metal
-  host's winemetal.so is DXMT's (LGPL-2.1-or-later): wine.app's licences, the source archive's dxmt.tar.
+  host's winemetal.so and native DXMT (dxmt/, Direct3D forwarding) are DXMT's (LGPL-2.1-or-later): wine.app's
+  licences, the source archive's dxmt.tar.
   macneutron-vm links libtpms (BSD-3-Clause, libtpms-LICENSE) and OpenSSL's libcrypto (Apache-2.0,
   openssl-LICENSE.txt). The forwarder loads Proton's lsteamclient (BSD-3-Clause; wine.app's licences).
 - libkrun (Apache-2.0), with MacNeutron's patches, and every crate it links: libkrun/, one folder each, listed in
@@ -547,7 +550,7 @@ EOF
     || die "signing $1 failed"; }
   signed_for() { codesign -f -s "$MACNEUTRON_SIGN_IDENTITY" --options runtime --timestamp --entitlements "$1" "$2" \
     > /dev/null 2>&1 || die "signing $2 failed"; }
-  for f in "$VMH/libkrun/libkrun.1.dylib" "$VMH"/metal-host/*.so "$VMH/steam-forward/host/ntdll.so" \
+  for f in "$VMH/libkrun/libkrun.1.dylib" "$VMH"/metal-host/*.so "$VMH"/dxmt/* "$VMH/steam-forward/host/ntdll.so" \
     "$VMH/steam-forward/host/lsteamclient.so" "$VMH/gvproxy" "$A/Contents/Helpers/mkfs.erofs"; do
     sign "$f"
   done

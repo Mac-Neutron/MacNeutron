@@ -6,7 +6,7 @@ import Testing
 private func makeTools(_ version: String) throws -> URL {
     let tools = try makeTempDir().appending(path: "vm-tools", directoryHint: .isDirectory)
     for file in ["macneutron-vm", "libkrun/libkrun.1.dylib", "steam-forward/host/mn-steam-host", "gvproxy",
-                 "metal-host/winemetal.so", "run-guest.sh", "run-game.sh"] {
+                 "metal-host/winemetal.so", "dxmt/d3d12.dylib", "dxmt/dxmt-replay", "run-guest.sh", "run-game.sh"] {
         try write("\(version) \(file)\n", to: tools.appending(path: file), executable: true)
     }
     return tools
@@ -21,6 +21,14 @@ private func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding
     for item in VMToolsInstaller.items { #expect(FileManager.default.fileExists(atPath: vm.appending(path: item).path)) }
     #expect(text(vm.appending(path: "libkrun/libkrun.1.dylib")) == "a libkrun/libkrun.1.dylib\n")
     #expect(text(vm.appending(path: "tools.identity"))?.count == 65)
+}
+
+@Test func nativeDXMTReachesTheVM() throws {
+    // Direct3D forwarding's native DXMT and its replayer (macneutron-vm loads them from the folder's dxmt/: M3 Task 9).
+    let tools = try makeTools("a"), vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    _ = try VMToolsInstaller.install(from: tools, into: vm, runningExecutables: { [] })
+    #expect(text(vm.appending(path: "dxmt/d3d12.dylib")) == "a dxmt/d3d12.dylib\n")
+    #expect(text(vm.appending(path: "dxmt/dxmt-replay")) == "a dxmt/dxmt-replay\n")
 }
 
 @Test func aSecondInstallOfTheSameToolsIsUnchanged() throws {
