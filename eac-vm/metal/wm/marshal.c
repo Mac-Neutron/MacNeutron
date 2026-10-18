@@ -43,10 +43,16 @@ static uint64_t wstr_len(const uint8_t *p) {
 }
 
 static uint64_t read_count(const uint8_t *base, const struct mn_wm_field *f) {
+    const uint8_t *at = base + f->count_offset;
+    if (f->flags & WMF_DEREF) { /* the host's copy of it by now: the generator orders the count's field first */
+        memcpy(&at, at, sizeof(const uint8_t *));
+        if (!at) return 0;
+    }
     switch (f->count_width) {
-    case 1: return base[f->count_offset];
-    case 4: { uint32_t v; memcpy(&v, base + f->count_offset, 4); return v; }
-    default: { uint64_t v; memcpy(&v, base + f->count_offset, 8); return v; }
+    case 1: return at[0];
+    case 2: { uint16_t v; memcpy(&v, at, 2); return v; }
+    case 4: { uint32_t v; memcpy(&v, at, 4); return v; }
+    default: { uint64_t v; memcpy(&v, at, 8); return v; }
     }
 }
 

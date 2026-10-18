@@ -1,8 +1,11 @@
-"""eac-vm/d3d/gen.py's model and manifest (Direct3D forwarding M2, Task 2), against native DXMT's own headers
+"""eac-vm/d3d/gen.py's model, manifest and rules (Direct3D forwarding M2, Tasks 2 and 3), against native DXMT's own headers
 (build/dxmt-native/install/include-native, eac-vm/dxmt-native/build.sh) and rules.txt.
     python3 -m unittest eac-vm/d3d/tests/test_gen.py"""
+import contextlib
+import io
 import os
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -82,6 +85,64 @@ class ManifestTest(unittest.TestCase):
         self.assertNotIn("ID3D12Fence::QueryInterface", names)  # IUnknown's are the guest's own
         slot = [row[2] for row in rows if row[1] == "ID3D12Fence::SetEventOnCompletion"][0]
         self.assertEqual(slot, 9)
+
+
+def spec(calls, model, name):
+    """The generated call spec for <Interface>::<Method>."""
+    ids = {row[1]: row[0] for row in gen.manifest(model)}
+    return calls[ids[name]]
+
+
+class ClassifyTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.m = model()
+        cls.calls = gen.classify(cls.m, gen.parse_rules(gen.read(RULES), cls.m))
+
+    def test_defaults(self):
+        c = spec(self.calls, self.m, "ID3D12Device::CreateCommittedResource")
+        by = {f.param: f for f in c.fields}
+        self.assertEqual((by["heap_properties"].kind, by["heap_properties"].size), ("WMF_IN", 20))
+        self.assertEqual(by["resource"].kind, "WMF_HANDLE_OUT")
+        self.assertEqual(c.mode, "sync")
+
+    def test_fixed_array_and_count(self):
+        c = spec(self.calls, self.m, "ID3D12GraphicsCommandList::ClearRenderTargetView")
+        by = {f.param: f for f in c.fields}
+        self.assertEqual((by["color"].kind, by["color"].size, by["color"].array), ("WMF_IN", 16, False))
+        self.assertEqual((by["rects"].kind, by["rects"].array, by["rects"].count), ("WMF_IN", True, "rect_count"))
+        self.assertEqual(c.mode, "async")
+
+    def test_unruled_arrays_stop(self):
+        rules = gen.parse_rules("\n".join(l for l in gen.read(RULES).splitlines()
+                                          if not l.startswith("ID3D12Device::CopyDescriptors ")), self.m)
+        with self.assertRaises(gen.RuleError) as e:
+            gen.classify(self.m, rules)
+        self.assertIn("ID3D12Device::CopyDescriptors", str(e.exception))
+
+    def test_cli_names_unruled_methods(self):
+        with tempfile.TemporaryDirectory() as d:
+            rules = os.path.join(d, "rules.txt")
+            with open(rules, "w") as f:
+                f.write("\n".join(l for l in gen.read(RULES).splitlines()
+                                   if not l.startswith("ID3D12Device::CopyDescriptors ")))
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = gen.main(["--headers", INCLUDE, "--rules", rules, "--out", d, "calls"])
+            self.assertEqual(rc, 1)
+            self.assertIn("ID3D12Device::CopyDescriptors", err.getvalue())
+            self.assertFalse(os.path.exists(os.path.join(d, "calls.c")))
+
+    def test_every_method_has_a_mode(self):
+        for row in gen.manifest(self.m):
+            self.assertIn(self.calls[row[0]].mode, ("async", "sync", "submit", "special", "refuse"), row[1])
+
+    def test_layout(self):
+        size = lambda t: gen.size_align(self.m, t)[0]
+        self.assertEqual(size("D3D12_RESOURCE_BARRIER"), 32)
+        self.assertEqual(size("D3D12_HEAP_PROPERTIES"), 20)
+        self.assertEqual(size("D3D12_RESOURCE_DESC"), 56)
+        self.assertEqual(size("DXGI_SAMPLE_DESC"), 8)
 
 
 if __name__ == "__main__":

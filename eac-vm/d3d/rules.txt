@@ -63,3 +63,185 @@ end
 
 # Exports the headers don't declare (dxgi.def's).
 export dxgi.dll HRESULT DXGIDeclareAdapterRemovalSupport(void);
+
+# ---- Annotations (gen.py's parse_rules). A pointer the defaults can't place needs one (gen.py classify_param):
+# <Interface>::<Method> <param> in|out|inout count=|size=|bytes=|one|string|wstring, and a mode where the default
+# (async for void without outputs, else sync) isn't the spec's.
+
+# Interfaces native DXMT doesn't implement (its QueryInterface answers E_NOINTERFACE, so the guest never hands one
+# out): never called.
+ID3D12ProtectedSession::* refuse
+ID3D12ProtectedResourceSession::* refuse
+ID3D12ProtectedResourceSession1::* refuse
+ID3D12GraphicsCommandList3::* refuse
+ID3D12GraphicsCommandList4::* refuse
+ID3D12GraphicsCommandList5::* refuse
+ID3D12GraphicsCommandList6::* refuse
+ID3D12GraphicsCommandList7::* refuse
+ID3D12LifetimeOwner::* refuse
+ID3D12LifetimeTracker::* refuse
+ID3D12SwapChainAssistant::* refuse
+ID3D12StateObjectProperties::* refuse
+ID3D12DeviceRemovedExtendedDataSettings::* refuse
+ID3D12DeviceRemovedExtendedDataSettings1::* refuse
+ID3D12DeviceRemovedExtendedData::* refuse
+ID3D12DeviceRemovedExtendedData1::* refuse
+ID3D12DeviceRemovedExtendedData2::* refuse
+ID3D12Resource1::* refuse
+ID3D12Resource2::* refuse
+ID3D12Heap1::* refuse
+ID3D12MetaCommand::* refuse
+ID3D12ShaderCacheSession::* refuse
+ID3D12Device9::* refuse
+ID3D12Device10::* refuse
+ID3D12VirtualizationGuestDevice::* refuse
+ID3D12Tools::* refuse
+ID3D12SDKConfiguration::* refuse
+ID3D12SDKConfiguration1::* refuse
+ID3D12DeviceFactory::* refuse
+ID3D12DeviceConfiguration::* refuse
+ID3DDestructionNotifier::* refuse
+IDXGIResource::* refuse
+IDXGIResource1::* refuse
+IDXGIKeyedMutex::* refuse
+IDXGISurface::* refuse
+IDXGISurface1::* refuse
+IDXGISurface2::* refuse
+IDXGIOutputDuplication::* refuse
+IDXGIDisplayControl::* refuse
+IDXGIDecodeSwapChain::* refuse
+IDXGIFactoryMedia::* refuse
+IDXGISwapChainMedia::* refuse
+IDXGIFactory7::* refuse
+IDXGIDebug::* refuse
+
+# DXMT's IMPLEMENT_ME methods abort the process: forwarded, they would end macneutron-vm. The guest answers them.
+ID3D12GraphicsCommandList::SOSetTargets refuse
+ID3D12GraphicsCommandList::SetPredication refuse
+ID3D12GraphicsCommandList::ExecuteBundle refuse
+ID3D12GraphicsCommandList::CopyTiles refuse
+ID3D12GraphicsCommandList1::AtomicCopyBufferUINT refuse
+ID3D12GraphicsCommandList1::AtomicCopyBufferUINT64 refuse
+ID3D12GraphicsCommandList1::SetSamplePositions refuse
+ID3D12GraphicsCommandList1::ResolveSubresourceRegion refuse
+ID3D12GraphicsCommandList1::SetViewInstanceMask refuse
+ID3D12GraphicsCommandList2::WriteBufferImmediate refuse
+ID3D12CommandQueue::UpdateTileMappings refuse
+ID3D12CommandQueue::CopyTileMappings refuse
+ID3D12Device::GetResourceTiling refuse
+# And the ones DXMT answers E_NOTIMPL itself, whose arguments would need rules for nothing.
+ID3D12Device::CreateSharedHandle refuse
+ID3D12Device3::OpenExistingHeapFromAddress refuse
+ID3D12Device5::CreateStateObject refuse
+ID3D12Device7::AddToStateObject refuse
+# DXGI's device interfaces are D3D11's (M4).
+IDXGIDevice::CreateSurface refuse
+IDXGIDevice::QueryResourceResidency refuse
+IDXGIDevice2::OfferResources refuse
+IDXGIDevice2::ReclaimResources refuse
+IDXGIDevice4::OfferResources1 refuse
+IDXGIDevice4::ReclaimResources1 refuse
+IDXGIOutput5::DuplicateOutput1 refuse
+
+# Specials (hand-written in eac-vm/d3d: Tasks 6 to 10).
+ID3D12Object::GetPrivateData data_size inout one
+ID3D12Object::GetPrivateData data out size=*data_size
+ID3D12Object::SetPrivateData data in size=data_size
+IDXGIObject::GetPrivateData data_size inout one
+IDXGIObject::GetPrivateData data out size=*data_size
+IDXGIObject::SetPrivateData data in size=data_size
+ID3D12Resource::Map special
+ID3D12Resource::Unmap special
+ID3D12Resource::WriteToSubresource special
+ID3D12Resource::ReadFromSubresource special
+ID3D12Device::CheckFeatureSupport special
+ID3D12Device2::CreatePipelineState special
+ID3D12PipelineLibrary1::LoadPipeline special
+ID3D12Device1::SetEventOnMultipleFenceCompletion special
+# Their descriptions hold names: DXMT has no meta commands (a count of 0; E_INVALIDARG), answered in the guest.
+ID3D12Device5::EnumerateMetaCommands special
+ID3D12Device5::EnumerateMetaCommandParameters special
+ID3D12GraphicsCommandList::OMSetRenderTargets special
+ID3D12RootSignatureDeserializer::* special
+ID3D12VersionedRootSignatureDeserializer::* special
+ID3D10Blob::* special
+IDXGIOutput::GetDesc special
+IDXGIOutput6::GetDesc1 special
+IDXGIAdapter::GetDesc special
+IDXGIAdapter1::GetDesc1 special
+IDXGIAdapter2::GetDesc2 special
+IDXGIAdapter4::GetDesc3 special
+
+# Arrays and sized data.
+ID3D12GraphicsCommandList::RSSetViewports viewports in count=viewport_count
+ID3D12GraphicsCommandList::RSSetScissorRects rects in count=rect_count
+ID3D12GraphicsCommandList::ResourceBarrier barriers in count=barrier_count
+ID3D12GraphicsCommandList::SetComputeRoot32BitConstants data in count=constant_count unit=4
+ID3D12GraphicsCommandList::SetGraphicsRoot32BitConstants data in count=constant_count unit=4
+ID3D12GraphicsCommandList::IASetVertexBuffers views in count=view_count
+ID3D12GraphicsCommandList::ClearDepthStencilView rects in count=rect_count
+ID3D12GraphicsCommandList::ClearRenderTargetView rects in count=rect_count
+ID3D12GraphicsCommandList::ClearUnorderedAccessViewUint rects in count=rect_count
+ID3D12GraphicsCommandList::ClearUnorderedAccessViewFloat rects in count=rect_count
+ID3D12GraphicsCommandList::SetMarker data in size=size
+ID3D12GraphicsCommandList::BeginEvent data in size=size
+ID3D12CommandQueue::SetMarker data in size=size
+ID3D12CommandQueue::BeginEvent data in size=size
+ID3D12Device::CreateRootSignature bytecode in size=bytecode_length
+ID3D12Device::CopyDescriptors dst_descriptor_range_offsets in count=dst_descriptor_range_count
+ID3D12Device::CopyDescriptors dst_descriptor_range_sizes in count=dst_descriptor_range_count
+ID3D12Device::CopyDescriptors src_descriptor_range_offsets in count=src_descriptor_range_count
+ID3D12Device::CopyDescriptors src_descriptor_range_sizes in count=src_descriptor_range_count
+ID3D12Device::GetResourceAllocationInfo resource_descs in count=reource_desc_count
+ID3D12Device::GetCopyableFootprints desc in one
+ID3D12Device::GetCopyableFootprints layouts out count=sub_resource_count
+ID3D12Device::GetCopyableFootprints row_count out count=sub_resource_count
+ID3D12Device::GetCopyableFootprints row_size out count=sub_resource_count
+ID3D12Device::GetCopyableFootprints total_bytes out one
+ID3D12Device1::CreatePipelineLibrary blob in size=blob_size
+ID3D12Device1::SetResidencyPriority objects in count=object_count
+ID3D12Device1::SetResidencyPriority priorities in count=object_count
+ID3D12Device4::GetResourceAllocationInfo1 resource_descs in count=resource_descs_count
+ID3D12Device4::GetResourceAllocationInfo1 resource_allocation_info1 out count=resource_descs_count
+ID3D12Device5::CreateMetaCommand creation_parameters_data in size=creation_parameters_data_size_in_bytes
+ID3D12Device8::GetResourceAllocationInfo2 resource_descs in count=resource_descs_count
+ID3D12Device8::GetResourceAllocationInfo2 resource_allocation_info1 out count=resource_descs_count
+ID3D12Device8::GetCopyableFootprints1 resource_desc in one
+ID3D12Device8::GetCopyableFootprints1 layouts out count=subresources_count
+ID3D12Device8::GetCopyableFootprints1 rows_count out count=subresources_count
+ID3D12Device8::GetCopyableFootprints1 row_size_in_bytes out count=subresources_count
+ID3D12Device8::GetCopyableFootprints1 total_bytes out one
+ID3D12PipelineLibrary::Serialize data out size=data_size_in_bytes
+IDXGISwapChain3::ResizeBuffers1 node_mask in count=buffer_count
+IDXGISwapChain3::ResizeBuffers1 present_queue in count=buffer_count
+IDXGISwapChain4::SetHDRMetaData metadata in size=size
+IDXGIFactory5::CheckFeatureSupport support_data inout size=support_data_size
+::D3D12CreateRootSignatureDeserializer data in size=data_size
+::D3D12CreateVersionedRootSignatureDeserializer data in size=data_size
+
+# Structs with pointers.
+struct D3D12_RESOURCE_BARRIER.UNIONNAME union=Type Transition=0 Aliasing=1 UAV=2
+struct D3D12_DISCARD_REGION.pRects in count=NumRects
+struct D3D12_SHADER_BYTECODE.pShaderBytecode in size=BytecodeLength
+struct D3D12_STREAM_OUTPUT_DESC.pSODeclaration in count=NumEntries
+struct D3D12_STREAM_OUTPUT_DESC.pBufferStrides in count=NumStrides
+struct D3D12_INPUT_LAYOUT_DESC.pInputElementDescs in count=NumElements
+struct D3D12_CACHED_PIPELINE_STATE.pCachedBlob in size=CachedBlobSizeInBytes
+struct D3D12_COMMAND_SIGNATURE_DESC.pArgumentDescs in count=NumArgumentDescs
+struct D3D12_ROOT_SIGNATURE_DESC.pParameters in count=NumParameters
+struct D3D12_ROOT_SIGNATURE_DESC.pStaticSamplers in count=NumStaticSamplers
+struct D3D12_ROOT_SIGNATURE_DESC1.pParameters in count=NumParameters
+struct D3D12_ROOT_SIGNATURE_DESC1.pStaticSamplers in count=NumStaticSamplers
+struct D3D12_ROOT_DESCRIPTOR_TABLE.pDescriptorRanges in count=NumDescriptorRanges
+struct D3D12_ROOT_DESCRIPTOR_TABLE1.pDescriptorRanges in count=NumDescriptorRanges
+struct D3D12_ROOT_PARAMETER.UNIONNAME union=ParameterType DescriptorTable=0
+struct D3D12_ROOT_PARAMETER1.UNIONNAME union=ParameterType DescriptorTable=0
+struct D3D12_VERSIONED_ROOT_SIGNATURE_DESC.UNIONNAME union=Version Desc_1_0=1 Desc_1_1=2
+struct DXGI_PRESENT_PARAMETERS.pDirtyRects in count=DirtyRectsCount
+struct DXGI_PRESENT_PARAMETERS.pScrollRect in one
+struct DXGI_PRESENT_PARAMETERS.pScrollOffset in one
+ID3D12GraphicsCommandList::SetDescriptorHeaps heaps in count=heap_count
+ID3D12CommandQueue::ExecuteCommandLists command_lists in count=command_list_count
+ID3D12Device::MakeResident objects in count=object_count
+ID3D12Device::Evict objects in count=object_count
+ID3D12Device3::EnqueueMakeResident objects in count=num_objects

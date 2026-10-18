@@ -41,6 +41,7 @@ enum mn_wm_field_kind {
 #define MN_WM_GUEST_WCHAR 2
 #endif
 #define WMF_ARRAY 1
+#define WMF_DEREF 2 /* with WMF_ARRAY: count_offset holds a pointer to the count (NULL: none) */
 
 struct mn_wm_field {
     uint16_t offset;
@@ -60,7 +61,8 @@ struct mn_wm_union { uint16_t nvalues; const uint32_t *values; const uint8_t *ne
 struct mn_wm_tables { const struct mn_wm_nested *nested; const struct mn_wm_union *unions; };
 extern const struct mn_wm_nested mn_wm_nested[];
 
-enum { MN_WM_QUEUED, MN_WM_SYNC, MN_WM_REFUSED, MN_WM_LOCAL /* answered in the guest; the host refuses it */ };
+enum { MN_WM_QUEUED, MN_WM_SYNC, MN_WM_REFUSED, MN_WM_LOCAL /* answered in the guest; the host refuses it */,
+       MN_WM_SUBMIT /* Direct3D's queue operations: queued, then every ring of the context run (MN_REC_SUBMIT) */ };
 enum mn_wm_special {
     MN_SP_NONE,
     MN_SP_RETAIN,    /* 0: the tables only */
@@ -79,6 +81,7 @@ enum mn_wm_special {
     MN_SP_PRESENT,   /* 47, 48: drawables presented, counted, and the frame probe (milestone 4c, host/present.m) */
     MN_SP_LAYER,     /* 71: the layer's device isn't the host's pointer in the reply, but the guest's own value */
     MN_SP_VIEW,      /* 73: a view's release, the handle's own */
+    MN_SP_D3D,       /* a Direct3D method eac-vm/d3d's own code packs and runs (rules.txt's specials) */
 };
 
 struct mn_wm_call {

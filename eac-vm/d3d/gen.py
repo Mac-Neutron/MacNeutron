@@ -7,8 +7,10 @@ interfaces (declared there in the headers' C prototype form) and the annotations
 --out:
     manifest.txt   one line a forwarded method or export: "<id> <Interface>::<Method> <slot>" ("<id> ::<Export> -1"):
                    ids from 16 (0-15 are the family's own ops), declared methods only, header order, then the exports
+    calls:         mnd3d_params.h (each method's params struct), calls.c (mn_d3d_calls[], by id, for the marshaller),
+                   layout.cpp (the guest's struct layouts checked against the native headers'), roundtrip-cases.c
 
-    gen.py --headers <include-native> --rules <rules.txt> --out <dir> manifest
+    gen.py --headers <include-native> --rules <rules.txt> --out <dir> manifest|calls
 """
 import argparse
 import os
@@ -20,8 +22,9 @@ from typing import Dict, List, Optional
 FIRST_ID = 16
 IUNKNOWN_METHODS = 3
 # The headers the model reads, in order (paths under include-native): their interfaces are numbered in this order.
-HEADERS = ["d3d12/d3d12.h", "directx/d3dcommon.h", "directx/dxgi.h", "directx/dxgi1_2.h", "directx/dxgi1_3.h",
-           "directx/dxgi1_4.h", "directx/dxgi1_5.h", "directx/dxgi1_6.h", "directx/dxgidebug.h"]
+HEADERS = ["directx/dxgiformat.h", "directx/dxgicommon.h", "directx/dxgitype.h", "d3d12/d3d12.h",
+           "directx/d3dcommon.h", "directx/dxgi.h", "directx/dxgi1_2.h", "directx/dxgi1_3.h", "directx/dxgi1_4.h",
+           "directx/dxgi1_5.h", "directx/dxgi1_6.h", "directx/dxgidebug.h"]
 # The exports games call: d3d12.def's and dxgi.def's (DXMT's own lists).
 EXPORTS = {"d3d12.dll": ["D3D12CreateDevice", "D3D12GetDebugInterface", "D3D12CreateRootSignatureDeserializer",
                          "D3D12CreateVersionedRootSignatureDeserializer", "D3D12SerializeRootSignature",
@@ -34,6 +37,7 @@ EXPORTS = {"d3d12.dll": ["D3D12CreateDevice", "D3D12GetDebugInterface", "D3D12Cr
 class Param:
     type: str
     name: str
+    array: Optional[str] = None  # a fixed array's length ("const FLOAT color[4]": type 'const FLOAT *', "4")
 
 
 @dataclass
@@ -83,6 +87,7 @@ class Model:
     enums: Dict[str, Dict[str, str]] = field(default_factory=dict)
     typedefs: Dict[str, str] = field(default_factory=dict)
     exports: List[Export] = field(default_factory=list)
+    constants: Dict[str, int] = field(default_factory=dict)  # #define <NAME> <number>
 
 
 def strip_comments(text):
@@ -125,7 +130,9 @@ def parse_param(text):
     typ, name, arr = m.group(1), m.group(2), m.group(3)
     if not typ.strip():  # an unnamed parameter: the whole text is the type
         return Param(norm_type(text), "")
-    return Param(norm_type(typ) + (" *" if arr else ""), name)
+    if arr:
+        return Param(norm_type(norm_type(typ) + " *"), name, arr.strip("[] ") or None)
+    return Param(norm_type(typ), name)
 
 
 def parse_params(text):
@@ -208,18 +215,22 @@ def parse_types(text, model):
         if m.group(2).endswith("Vtbl"):  # the interfaces' (parse_header)
             continue
         close = find_braced(text, m.end() - 1)
-        model.structs.setdefault(m.group(2), parse_struct_body(text[m.end():close], m.group(1) == "union",
-                                                                m.group(2)))
-    for m in re.finditer(r"typedef\s+enum\s+(\w+)\s*\{(.*?)\}\s*\1\s*;", text, re.S):
+        st = parse_struct_body(text[m.end():close], m.group(1) == "union", m.group(2))
+        model.structs.setdefault(m.group(2), st)
+        alias = re.match(r"\s*(\w+)\s*;", text[close + 1:])  # "typedef struct TAG { } NAME;": NAME as well
+        if alias:
+            model.structs.setdefault(alias.group(1), st)
+    for m in re.finditer(r"typedef\s+enum\s+(\w+)\s*\{(.*?)\}\s*(\w+)\s*;", text, re.S):
         values = {}
         for item in split_top(m.group(2)):
             k, _, v = item.partition("=")
             if k.strip():
                 values[k.strip()] = v.strip()
         model.enums.setdefault(m.group(1), values)
+        model.enums.setdefault(m.group(3), values)
     for m in re.finditer(r"typedef\s+([\w\s\*]+?)\s+(\w+)\s*;", text):
         t = norm_type(m.group(1))
-        if not t.startswith(("struct ", "union ", "enum ")) and m.group(2) not in model.typedefs:
+        if not t.startswith(("struct ", "union ", "enum ", "interface ")) and m.group(2) not in model.typedefs:
             model.typedefs[m.group(2)] = t
 
 
@@ -230,6 +241,8 @@ def read(path):
 
 def parse_header(path, header, model):
     text = strip_comments(read(path))
+    for m in re.finditer(r"^#define\s+(\w+)\s+\(?\s*(\d+)\s*\)?\s*$", text, re.M):
+        model.constants.setdefault(m.group(1), int(m.group(2)))
     iids = {m.group(1): guid_text(m.groups()[1:]) for m in GUID.finditer(text)}
     bases = {m.group(2): (m.group(3), m.group(1).lower()) for m in MIDL.finditer(text)}
     for m in VTBL.finditer(text):
@@ -301,22 +314,721 @@ def manifest(model):
     return rows
 
 
+# ---- rules and classification (Task 3) ----
+
+class RuleError(ValueError):
+    pass
+
+
+# The guest's ABI, x86-64 Windows: the host's (arm64 macOS) for every type here but WCHAR, 2 bytes in the guest.
+SCALARS = {}
+for _n in ("BYTE", "UINT8", "INT8", "CHAR", "char", "BOOLEAN", "UCHAR", "unsigned char"):
+    SCALARS[_n] = (1, 1, "uint8_t")
+for _n in ("WORD", "UINT16", "INT16", "SHORT", "USHORT", "WCHAR"):
+    SCALARS[_n] = (2, 2, "uint16_t")
+for _n in ("UINT", "UINT32", "ULONG", "DWORD", "unsigned int"):
+    SCALARS[_n] = (4, 4, "uint32_t")
+for _n in ("INT", "INT32", "LONG", "BOOL", "HRESULT", "int"):
+    SCALARS[_n] = (4, 4, "int32_t")
+for _n in ("FLOAT", "float"):
+    SCALARS[_n] = (4, 4, "float")
+for _n in ("UINT64", "ULONGLONG", "SIZE_T", "UINT_PTR", "ULONG_PTR", "HANDLE", "HWND", "HMONITOR", "HDC", "HMODULE",
+           "HINSTANCE"):
+    SCALARS[_n] = (8, 8, "uint64_t")
+for _n in ("INT64", "LONGLONG", "INT_PTR", "LONG_PTR"):
+    SCALARS[_n] = (8, 8, "int64_t")
+SCALARS["double"] = (8, 8, "double")
+# windows_base.h's structs (not a header the model reads).
+WELL_KNOWN = {"GUID": (16, 4), "IID": (16, 4), "LUID": (8, 4), "RECT": (16, 4), "POINT": (8, 4), "SIZE": (8, 4),
+              "LARGE_INTEGER": (8, 8), "PALETTEENTRY": (4, 1)}
+REFS = ("REFIID", "REFGUID", "REFCLSID")
+LOCAL_INTERFACES = ("IUnknown",)
+
+
+def resolve(model, t):
+    """A type's base name, const and pointers dropped, typedefs followed."""
+    base = t.replace("const ", "").replace("*", "").strip()
+    seen = set()
+    while base in model.typedefs and base not in seen:
+        seen.add(base)
+        nxt = model.typedefs[base].replace("const ", "").replace("*", "").strip()
+        if nxt == base or "*" in model.typedefs[base]:
+            break
+        base = nxt
+    return base
+
+
+def stars(t):
+    return t.count("*")
+
+
+def is_interface(model, base):
+    return base in model.interfaces or base in LOCAL_INTERFACES
+
+
+def eval_dim(model, text):
+    total = 1
+    for d in text.split("*"):
+        d = d.strip()
+        if re.match(r"^\d+$", d):
+            total *= int(d)
+        elif d in model.constants:
+            total *= model.constants[d]
+        else:
+            raise RuleError(f"an array length that isn't a number: {d}")
+    return total
+
+
+def struct_layout(model, st):
+    """(size, align, {field name: (offset, field)}) of a struct or union; inline members' fields are their own."""
+    off, align, fields = 0, 1, {}
+    unit = None  # a bitfield run: (offset, size, bits used)
+    for f in st.fields:
+        if f.bits is not None:
+            sz, al = size_align(model, f.type)
+            if unit and unit[1] == sz and unit[2] + f.bits <= sz * 8 and not st.union:
+                unit = (unit[0], sz, unit[2] + f.bits)
+                fields[f.name] = (unit[0], f)
+                continue
+            o = (off + al - 1) // al * al if not st.union else 0
+            unit = (o, sz, f.bits)
+            fields[f.name] = (o, f)
+            off = max(off, o + sz) if not st.union else max(off, sz)
+            align = max(align, al)
+            continue
+        unit = None
+        if f.inline is not None:
+            sz, al, _ = struct_layout(model, f.inline)
+        else:
+            sz, al = size_align(model, f.type)
+        if f.array:
+            sz *= eval_dim(model, f.array)
+        if st.union:
+            fields[f.name] = (0, f)
+            off = max(off, sz)
+        else:
+            o = (off + al - 1) // al * al
+            fields[f.name] = (o, f)
+            off = o + sz
+        align = max(align, al)
+    size = (off + align - 1) // align * align
+    return size, align, fields
+
+
+def size_align(model, t):
+    if stars(t):
+        return 8, 8
+    base = resolve(model, t)
+    if base in SCALARS:
+        return SCALARS[base][:2]
+    if base in model.enums:
+        return 4, 4
+    if base in WELL_KNOWN:
+        return WELL_KNOWN[base]
+    if base in model.structs:
+        size, align, _ = struct_layout(model, model.structs[base])
+        return size, align
+    raise RuleError(f"a type the model doesn't know: {base}")
+
+
+def has_wchar(model, t, seen=None):
+    """True if a type is or holds a WCHAR (2 bytes in the guest, 4 natively): such structs are specials."""
+    seen = seen or set()
+    if stars(t):
+        return False
+    base = resolve(model, t)
+    if base == "WCHAR":
+        return True
+    st = model.structs.get(base)
+    if not st or base in seen:
+        return False
+    seen.add(base)
+    return any(has_wchar(model, f.type, seen) if f.inline is None else
+               any(has_wchar(model, g.type, seen) for g in f.inline.fields) for f in st.fields)
+
+
+@dataclass
+class FieldSpec:
+    kind: str  # WMF_*
+    param: str  # the params struct's member (a method's argument), or a struct's field path
+    offset: Optional[int] = None  # within a struct (nested lists); None: the params struct's member
+    size: int = 0
+    array: bool = False
+    count: Optional[str] = None  # the count's member (params) or field path (struct)
+    count_offset: Optional[int] = None
+    count_width: int = 0
+    deref: bool = False  # the count is read through a pointer (count=*<param>): an inout argument before this one
+    nested: Optional["NestedSpec"] = None
+    union: Optional["UnionSpec"] = None
+    iface: Optional[str] = None  # a handle's interface ("riid": the call's REFIID names it)
+
+
+@dataclass
+class NestedSpec:
+    name: str  # the element's type
+    fields: List[FieldSpec]
+
+
+@dataclass
+class UnionSpec:
+    name: str
+    variants: List[tuple]  # [(value, NestedSpec or None)]
+
+
+@dataclass
+class ParamLayout:
+    name: str
+    ctype: str  # the params struct member's C type ("uint8_t name[56]" members: ctype "bytes", size, align)
+    size: int
+    align: int
+
+
+@dataclass
+class CallSpec:
+    id: int
+    name: str  # "<Interface>::<Method>" or "::<Export>"
+    mode: str  # async, sync, submit, special, refuse
+    fields: List[FieldSpec]
+    params: List[ParamLayout]
+    ret: str
+    structs: set = field(default_factory=set)  # the structs its fields name (layout.cpp checks them)
+
+
+@dataclass
+class Rules:
+    modes: Dict[str, str] = field(default_factory=dict)
+    params: Dict[tuple, List[str]] = field(default_factory=dict)  # (method, param): words
+    fields: Dict[tuple, List[str]] = field(default_factory=dict)  # (struct, field): words
+
+
+MODES = ("async", "sync", "submit", "special", "refuse")
+
+
+def parse_rules(text, model):
+    """rules.txt's annotation lines (the declarations are parse_rules_declarations'):
+        <Interface>::<Method> async|sync|submit|special|refuse
+        <Interface>::* refuse                   every method the interface declares (one DXMT doesn't implement)
+        <Interface>::<Method> <param> in|out|inout [count=<param>|size=<param>|bytes=<n>|one|string|wstring]
+                                                [unit=<n>: a void array's element bytes, with count]
+        struct <S>.<field> in|out [count=<field>|size=<field>|bytes=<n>|one|string]
+        struct <S>.<union field> union=<discriminant field> <Member>=<value> ...  (the members with pointers)
+    count=*<param> and size=*<param> read the length through an inout pointer argument. ::<Export> names an export
+    the same way. refuse: the guest answers E_NOTIMPL (nothing, for a void method), logged."""
+    rules, depth = Rules(), 0
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith(("interface ",)) or (line.startswith("struct ") and "{" in line):
+            depth += 1
+            continue
+        if depth:
+            if line in ("end", "};") or line.startswith("}"):
+                depth -= 1
+            continue
+        if line.startswith("export "):
+            continue
+        words = line.split()
+        if words[0] == "struct":
+            st, _, fname = words[1].partition(".")
+            if not fname:
+                raise RuleError(f"rules.txt: {line!r}: struct rules name a field")
+            rules.fields[(st, fname)] = words[2:]
+        elif "::" in words[0]:
+            if len(words) == 2 and words[1] in MODES:
+                rules.modes[words[0]] = words[1]
+            elif len(words) >= 3:
+                rules.params[(words[0], words[1])] = words[2:]
+            else:
+                raise RuleError(f"rules.txt: can't read {line!r}")
+        else:
+            raise RuleError(f"rules.txt: can't read {line!r}")
+    return rules
+
+
+def length_spec(words):
+    """(direction, form, value) from a rule's words: form one of one, count, size, bytes, string, wstring."""
+    if not words or words[0] not in ("in", "out", "inout"):
+        raise RuleError(f"a rule wants in, out or inout first: {' '.join(words)}")
+    form, value, unit = "one", None, 1
+    for w in words[1:]:
+        k, _, v = w.partition("=")
+        if k in ("count", "size", "bytes"):
+            form, value = k, v
+        elif k == "unit":
+            unit = int(v, 0)
+        elif k in ("one", "string", "wstring"):
+            form = k
+        else:
+            raise RuleError(f"a rule word the generator doesn't know: {w}")
+    return words[0], form, value, unit
+
+
+KIND = {"in": "WMF_IN", "out": "WMF_OUT", "inout": "WMF_INOUT"}
+
+
+def nested_for(model, rules, base, where, seen=()):
+    """The fields inside a struct a pointer leads to, as a nested list (offsets within it), or None when the bytes
+    alone are enough. Interface pointers are handles; any other pointer needs a struct rule; a WCHAR is a special."""
+    st = model.structs.get(base)
+    if st is None:
+        return None
+    if base in seen:
+        raise RuleError(f"{where}: {base} contains itself")
+    if has_wchar(model, base):
+        raise RuleError(f"{where}: {base} holds WCHAR (its guest and native sizes differ): a special")
+    out = []
+    _, _, layout = struct_layout(model, st)
+    for fname, (off, f) in layout.items():
+        rule = rules.fields.get((base, fname))
+        if f.inline is not None and f.inline.union:
+            spec = union_for(model, rules, base, fname, f, off, where, seen + (base,))
+            if spec:
+                out.append(FieldSpec("WMF_UNION", fname, off, union=spec[0], count_offset=spec[1], count_width=spec[2]))
+            continue
+        if f.inline is not None:  # a struct in place: its fields at their offsets
+            out += shifted(nested_for_struct(model, rules, f.inline, base, where, seen + (base,)), off)
+            continue
+        if f.array and not stars(f.type):
+            elem = resolve(model, f.type)
+            if elem in model.structs and nested_for(model, rules, elem, where, seen + (base,)):
+                raise RuleError(f"{where}: {base}.{fname} is an array of structs with pointers")
+            continue
+        if not stars(f.type):
+            elem = resolve(model, f.type)
+            inner = nested_for(model, rules, elem, where, seen + (base,)) if elem in model.structs else None
+            out += shifted(inner.fields if inner else [], off)
+            continue
+        g = pointer_field(model, rules, f.type, fname, off, rule, where + f" {base}.{fname}", seen + (base,))
+        if g.count:  # a count is a field of the same struct
+            if g.count not in layout or g.deref:
+                raise RuleError(f"{where}: {base}.{g.param}'s count {g.count} isn't a field of {base}")
+            g.count_offset = layout[g.count][0]
+            g.count_width = size_align(model, layout[g.count][1].type)[0]
+        out.append(g)
+    return NestedSpec(base, out) if out else None
+
+
+def shifted(fields, off):
+    """A struct-in-place's fields, at its offset in the outer struct (their counts and discriminants too)."""
+    for g in fields:
+        g.offset += off
+        if g.count_offset is not None:
+            g.count_offset += off
+    return fields
+
+
+def nested_for_struct(model, rules, st, owner, where, seen):
+    tmp_name = f"{owner}.inline"
+    model.structs[tmp_name] = st
+    try:
+        spec = nested_for(model, rules, tmp_name, where, seen)
+    finally:
+        del model.structs[tmp_name]
+    return spec.fields if spec else []
+
+
+def union_for(model, rules, owner, fname, f, off, where, seen):
+    """A union with pointers in some variant: its rule names the discriminant and each member's value."""
+    variants = []
+    for g in f.inline.fields:
+        inner = nested_for(model, rules, resolve(model, g.type), where, seen) if g.inline is None else None
+        variants.append((g.name, inner))
+    if not any(v for _, v in variants):
+        return None
+    words = rules.fields.get((owner, fname))
+    if not words or not words[0].startswith("union="):
+        raise RuleError(f"{where}: {owner}.{fname} is a union with pointers: it needs a union= rule")
+    disc = words[0].split("=", 1)[1]
+    values = dict(w.split("=", 1) for w in words[1:])
+    _, _, layout = struct_layout(model, model.structs[owner])
+    if disc not in layout:
+        raise RuleError(f"{where}: {owner} has no field {disc}")
+    dsize, _ = size_align(model, layout[disc][1].type)
+    spec = UnionSpec(f"{owner}.{fname}", [])
+    for name, inner in variants:
+        if inner and name not in values:
+            raise RuleError(f"{where}: {owner}.{fname}'s rule gives no value for {name}, which has pointers")
+        for v in values.get(name, "").split(","):
+            if v and inner:
+                spec.variants.append((int(v, 0), inner))
+    return spec, layout[disc][0], dsize
+
+
+def pointer_field(model, rules, t, name, offset, rule, where, seen=()):
+    """One pointer: a struct's field (offset set) or a call's argument (offset None)."""
+    elem_t = t[: t.rindex("*")].strip()
+    base = resolve(model, elem_t)
+    if rule:
+        direction, form, value, unit = length_spec(rule)
+        if form == "string":
+            return FieldSpec("WMF_STR_IN", name, offset)
+        if form == "wstring":
+            return FieldSpec("WMF_WSTR_IN", name, offset)
+        if stars(elem_t) == 1 and is_interface(model, base):  # an array of interface pointers: a handle each
+            esize, nested = 8, NestedSpec("handle", [FieldSpec("WMF_HANDLE_IN", "", 0, iface=base)])
+        elif base == "void" or form in ("size", "bytes"):
+            esize, nested = unit if form == "count" else 1, None
+        else:
+            esize, nested = size_align(model, elem_t)[0], nested_for(model, rules, base, where, seen)
+        fs = FieldSpec(KIND[direction], name, offset, esize, nested=nested)
+        if form in ("count", "size"):
+            fs.array, fs.count, fs.deref = True, value.lstrip("*"), value.startswith("*")
+        elif form == "bytes":
+            fs.size = int(value, 0)
+        return fs
+    if is_interface(model, base) and stars(t) == 1:
+        return FieldSpec("WMF_HANDLE_IN", name, offset, iface=base)
+    if stars(t) == 1 and t.startswith("const ") and base in ("char", "CHAR"):
+        return FieldSpec("WMF_STR_IN", name, offset)
+    if stars(t) == 1 and t.startswith("const ") and base == "WCHAR":
+        return FieldSpec("WMF_WSTR_IN", name, offset)
+    raise RuleError(f"{where}: the pointer {t} {name} needs a rule")
+
+
+def count_like(method):
+    return any(re.search(r"(count|^num|Num|_num|^n[A-Z])", p.name) and not stars(p.type) for p in method.params)
+
+
+def classify_param(model, rules, mname, method, i, p):
+    t, where = p.type, f"{mname} {p.name}"
+    rule = rules.params.get((mname, p.name))
+    base = resolve(model, t)
+    if t in REFS:
+        return FieldSpec("WMF_IN", p.name, size=16)
+    if not stars(t):
+        if base in model.structs and nested_for(model, rules, base, where):
+            raise RuleError(f"{where}: {t} by value holds pointers")
+        if has_wchar(model, t):
+            raise RuleError(f"{where}: {t} by value holds WCHAR")
+        return None
+    if rule:
+        return pointer_field(model, rules, t, p.name, None, rule, where)
+    elem_t = t[: t.rindex("*")].strip()
+    if is_interface(model, base):
+        if stars(t) == 1:
+            return FieldSpec("WMF_HANDLE_IN", p.name, iface=base)
+        if stars(t) == 2 and " const" in t:  # T *const *: an array of them in
+            raise RuleError(f"{where}: {t} is an array: it needs a count rule")
+        if stars(t) == 2:
+            return FieldSpec("WMF_HANDLE_OUT", p.name, iface=base)
+    if t == "void **" and i and method.params[i - 1].type in REFS:
+        return FieldSpec("WMF_HANDLE_OUT", p.name, iface="riid")
+    if stars(t) > 1:
+        raise RuleError(f"{where}: {t} needs a rule")
+    const = t.startswith("const ")
+    if p.array:
+        esize = size_align(model, elem_t)[0]
+        return FieldSpec("WMF_IN" if const else "WMF_OUT", p.name, size=esize * eval_dim(model, p.array),
+                         nested=nested_for(model, rules, base, where))
+    if p.name == "__ret":
+        return FieldSpec("WMF_OUT", p.name, size=size_align(model, elem_t)[0], nested=nested_for(model, rules, base,
+                                                                                                 where))
+    if base == "WCHAR" and const:
+        return FieldSpec("WMF_WSTR_IN", p.name)
+    if base in ("char", "CHAR") and const:
+        return FieldSpec("WMF_STR_IN", p.name)
+    if base == "void" or count_like(method) or (const and base not in model.structs):
+        raise RuleError(f"{where}: the pointer {t} needs a rule (it may be an array, or its size another argument)")
+    if has_wchar(model, base):
+        raise RuleError(f"{where}: {base} holds WCHAR: a special")
+    return FieldSpec("WMF_IN" if const else "WMF_OUT", p.name, size=size_align(model, elem_t)[0],
+                     nested=nested_for(model, rules, base, where))
+
+
+def param_layout(model, p):
+    t = p.type
+    if stars(t) or t in REFS or t.startswith("PFN_"):  # function pointers: the guest's, opaque
+        return ParamLayout(p.name, "uint64_t", 8, 8)
+    base = resolve(model, t)
+    if base in SCALARS:
+        size, align, ctype = SCALARS[base]
+        return ParamLayout(p.name, ctype, size, align)
+    if base in model.enums:
+        return ParamLayout(p.name, "uint32_t", 4, 4)
+    size, align = size_align(model, t)
+    return ParamLayout(p.name, "bytes", size, align)
+
+
+def default_mode(ret, fields):
+    outs = any(f.kind in ("WMF_OUT", "WMF_INOUT", "WMF_HANDLE_OUT") for f in fields)
+    if outs or ret not in ("void", "HRESULT"):
+        return "sync"
+    return "async" if ret == "void" else "sync"
+
+
+def collect_structs(fields, out):
+    for f in fields:
+        if f.nested:
+            out.add(f.nested.name)
+            collect_structs(f.nested.fields, out)
+        if f.union:
+            for _, v in f.union.variants:
+                if v:
+                    out.add(v.name)
+                    collect_structs(v.fields, out)
+
+
+def classify(model, rules):
+    """{id: CallSpec} for every method and export the manifest numbers; a RuleError lists every one that needs a
+    rule."""
+    calls, errors = {}, []
+    methods = {}
+    for name, iface in model.interfaces.items():
+        for slot in range(base_count(model, name), len(iface.methods)):
+            methods[f"{name}::{iface.methods[slot].name}"] = iface.methods[slot]
+    for e in model.exports:
+        methods[f"::{e.name}"] = Method(e.name, e.ret, e.params)
+    for mid, mname, _ in manifest(model):
+        method = methods[mname]
+        mode = rules.modes.get(mname) or rules.modes.get(mname.split("::")[0] + "::*")
+        fields = []
+        # widl's aggregate returns hand back their __ret argument: those are values, not pointers.
+        if mode not in ("special", "refuse") and stars(method.ret) and not any(p.name == "__ret" for p in method.params):
+            errors.append(f"{mname}: it returns a pointer ({method.ret}): special or refuse")
+            continue
+        if mode not in ("special", "refuse"):
+            try:
+                for i, p in enumerate(method.params):
+                    f = classify_param(model, rules, mname, method, i, p)
+                    if f:
+                        fields.append(f)
+                byname = {p.name: p for p in method.params}
+                for f in fields:
+                    if f.kind == "WMF_OUT" and f.nested:  # the host would write its own pointers into them
+                        raise RuleError(f"{mname} {f.param}: data out holds pointers or handles: a special")
+                    if f.count:
+                        if f.count not in byname:
+                            raise RuleError(f"{mname} {f.param}: no argument {f.count}")
+                        target = byname[f.count]
+                        if f.deref:
+                            if not stars(target.type) or not any(g.param == f.count and g.kind == "WMF_INOUT"
+                                                                 for g in fields):
+                                raise RuleError(f"{mname} {f.param}: count=*{f.count} wants an inout pointer")
+                            f.count_width = size_align(model, target.type[: target.type.rindex("*")])[0]
+                        else:
+                            f.count_width = param_layout(model, target).size
+                # A count read through a pointer is the host's copy by the time its array is read: its field first.
+                firsts = {f.count for f in fields if f.deref}
+                fields.sort(key=lambda f: f.param not in firsts)
+            except RuleError as e:
+                errors.append(str(e))
+                continue
+        try:
+            params = [param_layout(model, p) for p in method.params]
+        except RuleError as e:
+            errors.append(f"{mname}: {e}")
+            continue
+        spec = CallSpec(mid, mname, mode or default_mode(method.ret, fields), fields, params, method.ret)
+        collect_structs(fields, spec.structs)
+        if mode not in ("special", "refuse"):  # every struct an argument passes or points to
+            spec.structs |= {resolve(model, p.type) for p in method.params if resolve(model, p.type) in model.structs}
+        calls[mid] = spec
+    if errors:
+        raise RuleError(f"{len(errors)} methods need rules:\n  " + "\n  ".join(errors))
+    ifaces = {n.split("::")[0] for n in methods}
+    for name in list(rules.modes) + [k[0] for k in rules.params]:
+        if name.endswith("::*") and name[:-3] in ifaces:
+            continue
+        if name not in methods:
+            raise RuleError(f"rules.txt names a method the headers don't have: {name}")
+    return calls
+
+
+# ---- the call tables (Task 3): calls.c, mnd3d_params.h, layout.cpp, roundtrip-cases.c ----
+
+C_KEYWORDS = {"self", "ret", "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else",
+              "enum", "extern", "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict",
+              "return", "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned",
+              "void", "volatile", "while", "class", "new", "delete", "this", "template", "private", "public",
+              "operator", "friend", "virtual", "namespace", "bool", "true", "false"}
+MODE = {"async": "MN_WM_QUEUED", "sync": "MN_WM_SYNC", "submit": "MN_WM_SUBMIT", "special": "MN_WM_SYNC",
+        "refuse": "MN_WM_LOCAL"}
+E_NOTIMPL = 0x80004001
+
+
+def member(i, name):
+    """A params struct member's name: the argument's, unless C or the struct's own (self, ret) take it."""
+    if not name:
+        return f"a{i}"
+    return name + "_" if name in C_KEYWORDS else name
+
+
+class Tables:
+    """The nested lists and unions every call shares (1-based indexes, as calls.h's), deduplicated."""
+
+    def __init__(self):
+        self.nested, self.unions, self.keys = [], [], {}
+
+    def nest(self, spec):
+        rows = [self.row(f, None) for f in spec.fields]
+        key = ("n", tuple(rows))
+        if key not in self.keys:
+            self.nested.append((spec.name, rows))
+            self.keys[key] = len(self.nested)
+        return self.keys[key]
+
+    def union(self, spec):
+        variants = [(v, self.nest(n)) for v, n in spec.variants]
+        key = ("u", tuple(variants))
+        if key not in self.keys:
+            self.unions.append((spec.name, variants))
+            self.keys[key] = len(self.unions)
+        return self.keys[key]
+
+    def row(self, f, params):
+        """One struct mn_wm_field initializer. params: the call's params struct (a top-level field), or None."""
+        off = f"offsetof(struct {params}, {f.param})" if params else str(f.offset)
+        hkind = "MN_HK_D3D" if f.kind in ("WMF_HANDLE_IN", "WMF_HANDLE_OUT") else "0"
+        flags = " | ".join(x for x, on in (("WMF_ARRAY", f.array), ("WMF_DEREF", f.deref)) if on) or "0"
+        if f.count:
+            coff = f"offsetof(struct {params}, {f.count})" if params else str(f.count_offset)
+        else:
+            coff = str(f.count_offset or 0)
+        nested = 0
+        if f.union:
+            nested = self.union(f.union)
+        elif f.nested:
+            nested = self.nest(f.nested)
+        if nested > 255:
+            raise RuleError("more than 255 nested lists or unions: calls.h's nested index is 8 bits")
+        return (f"{{{off}, {f.kind}, {hkind}, 0, {flags}, {f.size}, {coff}, {f.count_width}, {nested}}}")
+
+
+def emit_params(calls):
+    out = ["/* Generated by eac-vm/d3d/gen.py from the native headers and rules.txt: don't edit. Each forwarded",
+           " * method's params, in wire types (pointers and handles 64-bit, structs by value as their guest bytes):",
+           " * the same layout for the guest's x86-64 code and the host's arm64. */",
+           "#ifndef MN_D3D_PARAMS_H", "#define MN_D3D_PARAMS_H", "#include <stdint.h>",
+           "#ifdef __cplusplus", "#define MN_D3D_ALIGNAS(n) alignas(n)", "#else",
+           "#define MN_D3D_ALIGNAS(n) _Alignas(n)", "#endif", "",
+           f"#define MN_D3D_FIRST {FIRST_ID}", f"#define MN_D3D_CALLS {max(calls) + 1}", ""]
+    for mid in sorted(calls):
+        c = calls[mid]
+        out.append(f"struct mn_d3d_p_{mid} {{ /* {c.name} */")
+        out.append("    uint64_t self;")
+        out.append("    uint64_t ret;")
+        for i, p in enumerate(c.params):
+            name = member(i, p.name)
+            if p.ctype == "bytes":
+                out.append(f"    MN_D3D_ALIGNAS({p.align}) uint8_t {name}[{p.size}];")
+            else:
+                out.append(f"    {p.ctype} {name};")
+        out.append("};")
+    out += ["", "#endif", ""]
+    return "\n".join(out)
+
+
+def emit_calls(calls):
+    t = Tables()
+    per_call = {}
+    for mid in sorted(calls):
+        c = calls[mid]
+        rename = {p.name: member(i, p.name) for i, p in enumerate(c.params)}
+        rows = []
+        if not c.name.startswith("::"):  # the object called: a handle like any other
+            rows.append(t.row(FieldSpec("WMF_HANDLE_IN", "self"), f"mn_d3d_p_{mid}"))
+        for f in c.fields:
+            g = FieldSpec(**{**f.__dict__, "param": rename[f.param], "count": rename.get(f.count, f.count)})
+            rows.append(t.row(g, f"mn_d3d_p_{mid}"))
+        per_call[mid] = rows
+    out = ["/* Generated by eac-vm/d3d/gen.py from the native headers and rules.txt: don't edit. The forwarded",
+           " * methods and exports, by id (manifest.txt), for eac-vm/metal/wm's marshaller. */",
+           "#include <stddef.h>", '#include "calls.h"', '#include "mnd3d_params.h"', ""]
+    for i, (name, rows) in enumerate(t.nested, 1):
+        out.append(f"static const struct mn_wm_field n{i}[] = {{ /* {name} */")
+        out += [f"    {r}," for r in rows]
+        out.append("};")
+    out.append("static const struct mn_wm_nested nested[] = {")
+    out += [f"    {{{len(rows)}, n{i}}}," for i, (_, rows) in enumerate(t.nested, 1)]
+    out.append("};")
+    for i, (name, variants) in enumerate(t.unions, 1):
+        out.append(f"static const uint32_t u{i}_values[] = {{{', '.join(str(v) for v, _ in variants)}}}; /* {name} */")
+        out.append(f"static const uint8_t u{i}_nested[] = {{{', '.join(str(n) for _, n in variants)}}};")
+    out.append("static const struct mn_wm_union unions[] = {")
+    out += [f"    {{{len(v)}, u{i}_values, u{i}_nested}}," for i, (_, v) in enumerate(t.unions, 1)]
+    if not t.unions:
+        out.append("    {0, NULL, NULL},")
+    out.append("};")
+    out.append("static const struct mn_wm_tables tables = {nested, unions};")
+    for mid in sorted(calls):
+        if per_call[mid]:
+            out.append(f"static const struct mn_wm_field f{mid}[] = {{")
+            out += [f"    {r}," for r in per_call[mid]]
+            out.append("};")
+    out.append("const struct mn_wm_call mn_d3d_calls[MN_D3D_CALLS] = {")
+    for mid in sorted(calls):
+        c = calls[mid]
+        status = f"0x{E_NOTIMPL:08x}u" if c.mode == "refuse" and c.ret == "HRESULT" else "0"
+        sp = "MN_SP_D3D" if c.mode == "special" else "MN_SP_NONE"
+        fields = f"f{mid}" if per_call[mid] else "NULL"
+        out.append(f'    [{mid}] = {{"{c.name}", sizeof(struct mn_d3d_p_{mid}), {MODE[c.mode]}, {sp}, '
+                   f"{len(per_call[mid])}, {status}, {fields}, &tables}},")
+    out += ["};", ""]
+    return "\n".join(out)
+
+
+def struct_access(fname, f):
+    """The C++ member name offsetof takes for a field: an anonymous union's or struct's first member."""
+    if f.inline is not None and f.name in ("UNIONNAME", "DUMMYUNIONNAME", "DUMMYSTRUCTNAME", "STRUCTNAME"):
+        return f.inline.fields[0].name
+    return fname
+
+
+def emit_layout(model, calls):
+    """layout.cpp: compiled with the native headers, it checks the guest layout the generator computed (x86-64
+    Windows) against the host's own, for every struct a call's data holds."""
+    names = set()
+    for c in calls.values():
+        names |= c.structs
+    out = ["// Generated by eac-vm/d3d/gen.py: don't edit. The guest's struct layouts (x86-64 Windows, as gen.py computes",
+           "// them) against the host's (the native headers): data crosses the boundary as bytes.",
+           "#include <cstddef>", "#include <d3d12.h>", "#include <dxgi1_6.h>", ""]
+    for n in sorted(names):
+        if n not in model.structs or "." in n or n.startswith("MTL_"):
+            continue
+        size, _, layout = struct_layout(model, model.structs[n])
+        out.append(f'static_assert(sizeof({n}) == {size}, "{n}");')
+        for fname, (off, f) in layout.items():
+            if f.bits is not None:
+                continue
+            out.append(f'static_assert(offsetof({n}, {struct_access(fname, f)}) == {off}, "{n}.{fname}");')
+    out += ["int main() { return 0; }", ""]
+    return "\n".join(out)
+
+
+def emit_roundtrip(calls):
+    ids = [mid for mid in sorted(calls) if calls[mid].mode in ("async", "sync", "submit")]
+    out = ["/* Generated by eac-vm/d3d/gen.py: don't edit. The calls eac-vm/d3d/tests/roundtrip.c packs and unpacks. */",
+           '#include "mnd3d_params.h"', f"const unsigned mn_d3d_roundtrip_count = {len(ids)};",
+           "const unsigned mn_d3d_roundtrip_ids[] = {"]
+    for i in range(0, len(ids), 16):
+        out.append("    " + ", ".join(str(x) for x in ids[i:i + 16]) + ",")
+    out += ["};", ""]
+    return "\n".join(out)
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--headers", required=True)
     ap.add_argument("--rules", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("what", choices=["manifest"])
+    ap.add_argument("what", choices=["manifest", "calls"])
     a = ap.parse_args(argv)
     try:
         model = load(a.headers, a.rules)
-    except ValueError as e:
+        files = {"manifest.txt": "".join(f"{r[0]} {r[1]} {r[2]}\n" for r in manifest(model))}
+        if a.what == "calls":
+            calls = classify(model, parse_rules(read(a.rules), model))
+            files = {"mnd3d_params.h": emit_params(calls), "calls.c": emit_calls(calls),
+                     "layout.cpp": emit_layout(model, calls), "roundtrip-cases.c": emit_roundtrip(calls)}
+    except ValueError as e:  # RuleError too
         print(f"gen.py: {e}", file=sys.stderr)
         return 1
     os.makedirs(a.out, exist_ok=True)
-    with open(os.path.join(a.out, "manifest.txt"), "w") as f:
-        for row in manifest(model):
-            f.write(f"{row[0]} {row[1]} {row[2]}\n")
+    for name, text in files.items():
+        with open(os.path.join(a.out, name), "w") as f:
+            f.write(text)
     return 0
 
 
