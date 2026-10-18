@@ -1,13 +1,13 @@
 #!/bin/sh
-# The M1 gate (Direct3D forwarding spec §8): DXMT's headless D3D12 programs, built natively against native DXMT
+# The M1 gate (Direct3D forwarding spec §8): DXMT's headless D3D12 programs (and M4's D3D11 ones), built natively against native DXMT
 # (build.sh, build-tests.sh), print what they print on the macOS Wine runtime, by the 4b-2 gate's rule (compare.py).
 # MN_GATE_PROGRAMS, MN_GATE_RUNS and MN_GATE_NAME: another build of the programs (M2's loopback, loopback-gate.sh).
 # MN_DXMT_ONLY: those rows only.
 # The macOS side is the 4b-2 gate's own reference (share.sh and ref.sh: one run each, through the runtime's launcher;
 # the maintainer's rule, 2026-10-17); the native side runs each program once as the guest gate does, with the share's timeout, a fresh shader cache and
-# ref.sh's DXMT settings, from the tests folder's paths (@S, @T). The XeSS and DLSS rows are M3's, d3d11_vsia M4's.
+# ref.sh's DXMT settings, from the tests folder's paths (@S, @T). The XeSS and DLSS rows are M3's.
 # Writes build/dxmt-native/runs/<name>.txt, .status and .time. Prints a line a program and its run times, then
-# "dxmt-native gate: all 19 programs passed" or "dxmt-native gate: FAIL"; exits 1 on a failure.
+# "dxmt-native gate: all <n> programs passed" or "dxmt-native gate: FAIL"; exits 1 on a failure.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 D=$ROOT/eac-vm/dxmt
@@ -18,7 +18,8 @@ NAME=${MN_GATE_NAME:-dxmt-native gate}
 REF=$ROOT/build/eac-vm-work/share/dxmt-ref
 ROWS=${MN_DXMT_ONLY:-"d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_copy d3d12_depth d3d12_dxil
   d3d12_dxil_exec d3d12_hazards d3d12_indirect d3d12_layered d3d12_lod d3d12_null d3d12_query d3d12_timestamp
-  d3d12_triangle d3d12_upscale d3d12_volume d3d12_vsread"}
+  d3d12_triangle d3d12_upscale d3d12_volume d3d12_vsread d3d11_api d3d11_compute d3d11_dynamic d3d11_render
+  d3d11_transfer d3d11_vsia"}
 WANT=$(echo $ROWS | wc -w | tr -d ' ')
 now() { perl -MTime::HiRes=time -e 'printf "%.2f\n", time'; }
 fail=0
