@@ -10,13 +10,14 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 I=$ROOT/build/dxmt-native/install
 OUT=${MN_D3D_PROGRAMS_OUT:-$ROOT/build/dxmt-native/tests}
-LINK="$I/lib/d3d12.dylib $I/lib/dxgi.dylib $I/lib/d3d11.dylib -Wl,-rpath,$I/lib"
+LINK="$I/lib/d3d12.dylib $I/lib/dxgi.dylib $I/lib/d3d11.dylib $I/lib/d3d10core.dylib -Wl,-rpath,$I/lib"
 [ -z "${MN_D3D_PROGRAMS_LIB:-}" ] || LINK="$MN_D3D_PROGRAMS_LIB -Wl,-rpath,$(dirname "$MN_D3D_PROGRAMS_LIB")"
 T=$ROOT/dxmt/tests
 H=$ROOT/eac-vm/dxmt-native/tests
 PROGRAMS="d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_copy d3d12_depth d3d12_dxil d3d12_dxil_exec
   d3d12_hazards d3d12_indirect d3d12_layered d3d12_lod d3d12_null d3d12_query d3d12_timestamp d3d12_triangle
-  d3d12_upscale d3d12_volume d3d12_vsread d3d11_api d3d11_compute d3d11_dynamic d3d11_render d3d11_transfer d3d11_vsia"
+  d3d12_upscale d3d12_volume d3d12_vsread d3d11_api d3d11_compute d3d11_deferred d3d11_dynamic d3d11_getters
+  d3d11_pipeline d3d11_query d3d11_render d3d11_transfer d3d11_vsia d3d10_core"
 [ -f "$I/lib/d3d12.dylib" ] || { echo "tests: FAIL no native DXMT: run eac-vm/dxmt-native/build.sh first"; exit 1; }
 mkdir -p "$OUT"
 for p in $PROGRAMS; do rm -f "$OUT/$p"; done  # a failed build must not leave the last one in its place

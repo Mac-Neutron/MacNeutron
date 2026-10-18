@@ -5,7 +5,8 @@
 # MN_DXMT_ONLY: those rows only.
 # The macOS side is the 4b-2 gate's own reference (share.sh and ref.sh: one run each, through the runtime's launcher;
 # the maintainer's rule, 2026-10-17); the native side runs each program once as the guest gate does, with the share's timeout, a fresh shader cache and
-# ref.sh's DXMT settings, from the tests folder's paths (@S, @T). The XeSS and DLSS rows are M3's.
+# ref.sh's DXMT settings, from the tests folder's paths (@S, @T). The XeSS and DLSS rows are M3's; d3d10_wine is Wine's
+# d3d10.dll, which has no native build.
 # Writes build/dxmt-native/runs/<name>.txt, .status and .time. Prints a line a program and its run times, then
 # "dxmt-native gate: all <n> programs passed" or "dxmt-native gate: FAIL"; exits 1 on a failure.
 set -u
@@ -18,8 +19,8 @@ NAME=${MN_GATE_NAME:-dxmt-native gate}
 REF=$ROOT/build/eac-vm-work/share/dxmt-ref
 ROWS=${MN_DXMT_ONLY:-"d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_copy d3d12_depth d3d12_dxil
   d3d12_dxil_exec d3d12_hazards d3d12_indirect d3d12_layered d3d12_lod d3d12_null d3d12_query d3d12_timestamp
-  d3d12_triangle d3d12_upscale d3d12_volume d3d12_vsread d3d11_api d3d11_compute d3d11_dynamic d3d11_render
-  d3d11_transfer d3d11_vsia"}
+  d3d12_triangle d3d12_upscale d3d12_volume d3d12_vsread d3d11_api d3d11_compute d3d11_deferred d3d11_dynamic
+  d3d11_getters d3d11_pipeline d3d11_query d3d11_render d3d11_transfer d3d11_vsia d3d10_core"}
 WANT=$(echo $ROWS | wc -w | tr -d ' ')
 now() { perl -MTime::HiRes=time -e 'printf "%.2f\n", time'; }
 fail=0

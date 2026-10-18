@@ -74,6 +74,24 @@ float4 main(float4 pos : SV_Position) : SV_Target { InterlockedAdd(u[0], 1); ret
     {"cbbig.ps", "ps_4_0", "cbuffer c : register(b0) { uint4 v[4096]; };\n"
                            "uint main() : SV_Target { return v[0].x ^ (v[4095].x << 16); }"},
     {"point.vs", "vs_4_0", "float4 main(float2 p : POSITION) : SV_Position { return float4(p, 0, 1); }"},
+    // d3d11_pipeline: a vertex shader whose outputs stream out (as DXMT does it), and hull and domain shaders for a
+    // triangle patch.
+    {"so.vs", "vs_4_0", R"(
+struct V { float4 pos : SV_Position; float value : VALUE; };
+V main(float2 p : POSITION, uint id : SV_VertexID) { V o; o.pos = float4(p, 0, 1); o.value = id; return o; })"},
+    {"patch.vs", "vs_5_0", "struct V { float4 pos : POSITION; }; V main(float2 p : POSITION) { V o; o.pos = float4(p, 0, 1); return o; }"},
+    {"patch.hs", "hs_5_0", R"(
+struct V { float4 pos : POSITION; };
+struct C { float edges[3] : SV_TessFactor; float inside : SV_InsideTessFactor; };
+C constants(InputPatch<V, 3> p) { C c; c.edges[0] = c.edges[1] = c.edges[2] = 4; c.inside = 4; return c; }
+[domain("tri")] [partitioning("integer")] [outputtopology("triangle_cw")] [outputcontrolpoints(3)]
+[patchconstantfunc("constants")] V main(InputPatch<V, 3> p, uint i : SV_OutputControlPointID) { return p[i]; })"},
+    {"patch.ds", "ds_5_0", R"(
+struct V { float4 pos : POSITION; };
+struct C { float edges[3] : SV_TessFactor; float inside : SV_InsideTessFactor; };
+[domain("tri")] float4 main(C c, float3 uvw : SV_DomainLocation, const OutputPatch<V, 3> p) : SV_Position {
+    return p[0].pos * uvw.x + p[1].pos * uvw.y + p[2].pos * uvw.z;
+})"},
 };
 
 int main(int argc, char **argv) {
