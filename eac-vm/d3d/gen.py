@@ -96,10 +96,16 @@ def strip_comments(text):
     return re.sub(r"//[^\n]*", " ", text)
 
 
+# String typedefs (D3D11's ClassLinkage, counters, annotations): their pointers, so the defaults read them as strings.
+STRING_TYPEDEFS = {"LPCSTR": "const char *", "LPCWSTR": "const WCHAR *", "LPSTR": "char *", "LPWSTR": "WCHAR *"}
+
+
 def norm_type(t):
-    """'const  D3D12_RANGE*' -> 'const D3D12_RANGE *', 'void **' -> 'void **'."""
+    """'const  D3D12_RANGE*' -> 'const D3D12_RANGE *', 'void **' -> 'void **', 'LPCSTR' -> 'const char *'."""
     stars = t.count("*")
     base = re.sub(r"\s+", " ", t.replace("*", " ")).strip()
+    if base in STRING_TYPEDEFS:
+        base, stars = STRING_TYPEDEFS[base][:-2], stars + 1
     return base + (" " + "*" * stars if stars else "")
 
 
@@ -463,6 +469,7 @@ class FieldSpec:
     nested: Optional["NestedSpec"] = None
     union: Optional["UnionSpec"] = None
     iface: Optional[str] = None  # a handle's interface ("riid": the call's REFIID names it)
+    objects: Optional[str] = None  # an array of objects out (a getter's): their interface, 8 bytes each on the wire
 
 
 @dataclass
@@ -691,6 +698,13 @@ def pointer_field(model, rules, t, name, offset, rule, where, seen=()):
                 raise RuleError(f"{where}: wstruct is for a struct out with WCHAR arrays")
             size = f"({size_align(model, elem_t)[0]} + (MN_WM_GUEST_WCHAR - 2) * {wchars})"
             return FieldSpec("WMF_OUT", name, offset, size)
+        if stars(elem_t) == 1 and is_interface(model, base) and direction == "out" and offset is None:
+            # objects out (M4: D3D11's getters): each the first handle the host gave it, which the guest knows
+            if form == "one":
+                return FieldSpec("WMF_HANDLE_OUT", name, offset, iface=base)
+            if form != "count" or value.startswith("*"):
+                raise RuleError(f"{where}: objects out want count=<argument>")
+            return FieldSpec("WMF_OUT", name, offset, 8, array=True, count=value, objects=base)
         if stars(elem_t) == 1 and is_interface(model, base):  # an array of interface pointers: a handle each
             esize, nested = 8, NestedSpec("handle", [FieldSpec("WMF_HANDLE_IN", "", 0, iface=base)])
         elif base == "void" or form in ("size", "bytes"):
@@ -739,6 +753,8 @@ def classify_param(model, rules, mname, method, i, p):
             return FieldSpec("WMF_HANDLE_IN", p.name, iface=base)
         if stars(t) == 2 and " const" in t:  # T *const *: an array of them in
             raise RuleError(f"{where}: {t} is an array: it needs a count rule")
+        if stars(t) == 2 and count_like(method):  # a getter's array of objects out, maybe (D3D11's)
+            raise RuleError(f"{where}: {t} may be an array of objects out: it needs a rule (out count=<n>, or out one)")
         if stars(t) == 2:
             return FieldSpec("WMF_HANDLE_OUT", p.name, iface=base)
     if t == "void **" and i and method.params[i - 1].type in REFS:
@@ -951,8 +967,8 @@ def emit_params(calls, own=()):
             if f.one_if:  # the array's own length: the method's count, or one (the proxy's)
                 out.append(f"    uint32_t {rename[f.param]}_n;")
             if f.kind == "WMF_HANDLE_OUT":  # the reply's: the interfaces the object answers, and which of them it
-                out.append(f"    uint64_t {rename[f.param]}_ifaces[5];  /* answers at another pointer (bits by index), and the"
-                           " handle the host gave this object before (0: none) */")
+                out.append(f"    uint64_t {rename[f.param]}_ifaces[9];  /* the interfaces it answers (words 0-3, bits by"
+                           " index), those at another pointer (4-7), and the handle the host gave it before (8; 0: none) */")
         if c.name in own:
             out.append("    uint64_t aux[2]; /* own code's (rules.txt's own: a fence's mirror slot, ...) */")
         out.append("};")
@@ -1063,8 +1079,8 @@ def iid_bytes(text):
 
 def iface_index(model):
     names = [n for n, i in model.interfaces.items() if i.iid]
-    if len(names) > 128:
-        raise RuleError(f"{len(names)} interfaces: the answers' masks have 128 bits")
+    if len(names) > 256:
+        raise RuleError(f"{len(names)} interfaces: the answers' masks have 256 bits (MN_D3D_MASK_WORDS)")
     return {n: k for k, n in enumerate(names)}
 
 
@@ -1183,6 +1199,9 @@ def emit_stubs(model, rules, calls):
                 which = str(index.get(f.iface, -1))
             ok = "SUCCEEDED(r) && " if c.ret == "HRESULT" else ""
             body.append(f"    if ({ok}a->{m}) mn_d3d_answers((void *)(uintptr_t)a->{m}, {which}, a->{m}_ifaces);")
+        for f in c.fields:
+            if f.objects:  # a getter's objects: the handles the guest knows them by, DXMT's references let go
+                body.append(f"    mn_d3d_objects_out((uint64_t *)(uintptr_t)a->{rename[f.param]}, a->{rename[f.count]});")
         if c.ret == "HRESULT":
             body.append("    mn_d3d_result(r);")
         ret = "&a->ret" if c.ret == "HRESULT" else "nullptr"
@@ -1277,6 +1296,10 @@ def emit_proxies(model, rules, calls):
             if f.one_if:
                 m = rename[f.param]
                 body.append(f"    mn_p.{m}_n = {rename[f.one_if]} ? 1 : (uint32_t){rename[f.count]};")
+            if f.objects:  # a getter's objects come back as the handles the guest knows them by
+                m = rename[f.param]
+                body.append(f"    std::vector<uint64_t> mn_o_{m}({rename[f.count]});")
+                body.append(f"    mn_p.{m} = (uintptr_t)mn_o_{m}.data();")
         has_ret = any(p.name == "__ret" for p in c.method.params)
         # a command list's: in order when handed between threads (guest/proxy.cpp)
         call = f"mn_d3d_record(This, {mid}, &mn_p)" if iface.startswith("ID3D12GraphicsCommandList") else \
@@ -1297,6 +1320,12 @@ def emit_proxies(model, rules, calls):
             ok = "SUCCEEDED(mn_hr) && " if ret == "HRESULT" else "!mn_s && "
             body.append(f"    if ({m}) *(void **){m} = {ok}mn_p.{m} ? mn_proxy_out(mn_p.{m}, {which}, {rp}, "
                         f"mn_p.{m}_ifaces) : nullptr;")
+        for f in c.fields:
+            if f.objects:
+                m = rename[f.param]
+                body.append(f"    if ({m})")
+                body.append(f"        for (size_t mn_i = 0; mn_i < mn_o_{m}.size(); mn_i++)")
+                body.append(f"            {m}[mn_i] = ({f.objects} *)mn_proxy_known(mn_o_{m}[mn_i], {index.get(f.objects, -1)});")
         if ret == "HRESULT":
             body.append("    return mn_hr;")
         elif any(p.name == "__ret" for p in c.method.params):  # the caller's own struct, not the host's pointer

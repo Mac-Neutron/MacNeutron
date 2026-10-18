@@ -5,6 +5,7 @@
 #include <mutex>
 #include <unordered_map>
 #include "stubs.h"
+#include "../mn_d3d.h"
 
 extern "C" void mn_d3d_native_release(void *obj) { ((IUnknown *)obj)->Release(); }
 
@@ -218,9 +219,17 @@ DESCRIPTION(mn_d3d_adapter_desc3_stub, IDXGIAdapter4, GetDesc3, DXGI_ADAPTER_DES
 DESCRIPTION(mn_d3d_output_desc_stub, IDXGIOutput, GetDesc, DXGI_OUTPUT_DESC, DeviceName, desc)
 DESCRIPTION(mn_d3d_output_desc1_stub, IDXGIOutput6, GetDesc1, DXGI_OUTPUT_DESC1, DeviceName, desc)
 
-extern "C" void mn_d3d_answers(void *obj, int iface, uint64_t out[5]) {
-    std::memset(out, 0, 5 * sizeof *out);
-    out[4] = mn_d3d_identity_of(mn_d3d_current_ctx(), obj); // an object the guest has: its proxy, not a new one
+extern "C" void mn_d3d_objects_out(uint64_t *p, uint32_t n) {
+    for (uint32_t i = 0; p && i < n; i++) {
+        auto *obj = (IUnknown *)(uintptr_t)p[i];
+        p[i] = obj ? mn_d3d_identity_of(mn_d3d_current_ctx(), obj) : 0;
+        if (obj) obj->Release(); // the getter's reference: the guest holds its own
+    }
+}
+
+extern "C" void mn_d3d_answers(void *obj, int iface, uint64_t out[9]) {
+    std::memset(out, 0, 9 * sizeof *out);
+    out[2 * MN_D3D_MASK_WORDS] = mn_d3d_identity_of(mn_d3d_current_ctx(), obj); // the guest's: its proxy, not a new one
     if (iface < 0) return;
     const mn_d3d_iface &f = mn_d3d_ifaces[iface];
     for (unsigned i = 0; i < f.nfamily; i++) {
@@ -228,7 +237,7 @@ extern "C" void mn_d3d_answers(void *obj, int iface, uint64_t out[5]) {
         void *q = nullptr;
         if (FAILED(((IUnknown *)obj)->QueryInterface(*(const IID *)mn_d3d_ifaces[k].iid, &q)) || !q) continue;
         out[k / 64] |= 1ull << (k % 64);
-        if (q != obj) out[2 + k / 64] |= 1ull << (k % 64);
+        if (q != obj) out[MN_D3D_MASK_WORDS + k / 64] |= 1ull << (k % 64);
         ((IUnknown *)q)->Release();
     }
 }

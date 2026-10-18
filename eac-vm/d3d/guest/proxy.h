@@ -3,6 +3,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
+#include <vector>
 #include <windows.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
@@ -32,7 +33,10 @@ int32_t mn_d3d_record(mn_proxy *This, uint32_t id, void *params);
 HRESULT mn_d3d_hr(int32_t status);
 // A created object: its proxy for iface (an index; -1: riid's), answering what ifaces says (the reply's masks); one
 // the guest already has (ifaces[4], the host's first handle for it): that object's proxy, the new handle let go.
-void *mn_proxy_out(uint64_t handle, int iface, const IID *riid, const uint64_t ifaces[5]);
+void *mn_proxy_out(uint64_t handle, int iface, const IID *riid, const uint64_t ifaces[9]);
+// A getter's object (M4): the proxy of the object the guest has by that first handle, as iface when it answers it,
+// referenced; nullptr for 0 or an object the guest doesn't have.
+void *mn_proxy_known(uint64_t handle, int iface);
 // A special's guest code (proxy.cpp) for a vtable slot, or fallback (which says it has none).
 const void *mn_d3d_special(const char *name, const void *fallback);
 // A refused method or a special without guest code: said once each.

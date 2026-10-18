@@ -17,7 +17,7 @@ struct mn_obj {
     std::atomic<long> refs{1};
     uint64_t handle = 0;
     int created = 0; // the interface it was made as: its IUnknown
-    uint64_t answers[2] = {}, moved[2] = {};
+    uint64_t answers[MN_D3D_MASK_WORDS] = {}, moved[MN_D3D_MASK_WORDS] = {};
     std::mutex m;
     mn_proxy *proxies[MN_D3D_IFACES] = {};
     std::vector<uint8_t> blob; // an ID3D10Blob's bytes, read once
@@ -65,7 +65,7 @@ static mn_proxy *proxy_of(mn_obj *o, int k) {
 }
 
 // A new object for handle, made as k (-1: unknown, its first answer), answering answers (moved: at another pointer).
-static mn_obj *object(uint64_t handle, int k, const uint64_t answers[2], const uint64_t moved[2]) {
+static mn_obj *object(uint64_t handle, int k, const uint64_t *answers, const uint64_t *moved) {
     auto *o = new mn_obj;
     o->handle = handle;
     if (answers) std::memcpy(o->answers, answers, sizeof o->answers);
@@ -81,13 +81,16 @@ static mn_obj *object(uint64_t handle, int k, const uint64_t answers[2], const u
     return o;
 }
 
-void *mn_proxy_out(uint64_t handle, int iface, const IID *riid, const uint64_t ifaces[5]) {
+static_assert(2 * MN_D3D_MASK_WORDS + 1 == 9, "the params' <out>_ifaces[9]");
+
+void *mn_proxy_out(uint64_t handle, int iface, const IID *riid, const uint64_t ifaces[9]) {
     int k = iface >= 0 ? iface : riid ? mn_d3d_iface_of(riid) : -1;
     mn_obj *have = nullptr;
     // The object we have, if it answers k at its own pointer (a companion QueryInterface made knows only that one).
-    if (ifaces[4] && ifaces[4] != handle) {
+    const uint64_t first = ifaces[2 * MN_D3D_MASK_WORDS];
+    if (first && first != handle) {
         std::lock_guard<std::mutex> l(objs_lock);
-        auto it = objs.find(ifaces[4]);
+        auto it = objs.find(first);
         mn_obj *o = it != objs.end() ? it->second : nullptr;
         if (o && o->refs > 0 && (k < 0 || (has(o->answers, k) && !has(o->moved, k)))) (have = o)->refs++;
     }
@@ -96,8 +99,18 @@ void *mn_proxy_out(uint64_t handle, int iface, const IID *riid, const uint64_t i
         mn_d3d_call(MN_D3D_OP_RELEASE, &h);
         return proxy_of(have, k < 0 ? have->created : k);
     }
-    mn_obj *o = object(handle, k, ifaces, ifaces + 2);
+    mn_obj *o = object(handle, k, ifaces, ifaces + MN_D3D_MASK_WORDS);
     return proxy_of(o, o->created);
+}
+
+void *mn_proxy_known(uint64_t handle, int iface) {
+    mn_obj *have = nullptr;
+    if (handle) {
+        std::lock_guard<std::mutex> l(objs_lock);
+        auto it = objs.find(handle);
+        if (it != objs.end() && it->second->refs > 0) (have = it->second)->refs++;
+    }
+    return have ? proxy_of(have, iface >= 0 && has(have->answers, iface) ? iface : have->created) : nullptr;
 }
 
 HRESULT mn_d3d_hr(int32_t status) {

@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
              value = id_of("ID3D12Fence::GetCompletedValue");
 
     /* device: the export's params, as mnd3d_params.h has them (their sizes checked against the table's) */
-    struct { uint64_t self, ret, adapter; uint32_t level; uint64_t riid, device, device_ifaces[5]; } dev = {0};
+    struct { uint64_t self, ret, adapter; uint32_t level; uint64_t riid, device, device_ifaces[9]; } dev = {0};
     dev.level = 0xb000; /* D3D_FEATURE_LEVEL_11_0 */
     dev.riid = (uintptr_t)iid("ID3D12Device");
     CHECK(mn_d3d_calls[create].params_size == sizeof dev);
@@ -104,11 +104,11 @@ int main(int argc, char **argv) {
     CHECK((uint32_t)dev.ret == 0);
     uint64_t device = dev.device;
     CHECK(device && answers(dev.device_ifaces, "ID3D12Device") && answers(dev.device_ifaces, "ID3D12Device8"));
-    CHECK(answers(dev.device_ifaces, "IMTLD3D12DeviceExt") && answers(dev.device_ifaces + 2, "IMTLD3D12DeviceExt"));
-    CHECK(!answers(dev.device_ifaces + 2, "ID3D12Device5")); /* the same pointer */
+    CHECK(answers(dev.device_ifaces, "IMTLD3D12DeviceExt") && answers(dev.device_ifaces + MN_D3D_MASK_WORDS, "IMTLD3D12DeviceExt"));
+    CHECK(!answers(dev.device_ifaces + MN_D3D_MASK_WORDS, "ID3D12Device5")); /* the same pointer */
 
     /* fence */
-    struct fence_params { uint64_t self, ret, initial_value; uint32_t flags; uint64_t riid, fence, ifaces[5], aux[2]; }
+    struct fence_params { uint64_t self, ret, initial_value; uint32_t flags; uint64_t riid, fence, ifaces[9], aux[2]; }
         fp = {0};
     CHECK(mn_d3d_calls[fence].params_size == sizeof fp);
     fp.self = device, fp.initial_value = 7, fp.riid = (uintptr_t)iid("ID3D12Fence");
@@ -120,11 +120,11 @@ int main(int argc, char **argv) {
     /* identity: GetDevice answers the device's own first handle (the guest returns its proxy), twice, the handle it
      * bound let go between */
     unsigned getdev = id_of("ID3D12DeviceChild::GetDevice");
-    struct gd_params { uint64_t self, ret, riid, device, ifaces[5]; };
+    struct gd_params { uint64_t self, ret, riid, device, ifaces[9]; };
     CHECK(mn_d3d_calls[getdev].params_size == sizeof(struct gd_params));
     for (int i = 0; i < 2; i++) {
         struct gd_params g = {fp.fence, 0, (uintptr_t)iid("ID3D12Device"), 0, {0}};
-        CHECK(call(getdev, &g) == 0 && (uint32_t)g.ret == 0 && g.device && g.device != device && g.ifaces[4] == device);
+        CHECK(call(getdev, &g) == 0 && (uint32_t)g.ret == 0 && g.device && g.device != device && g.ifaces[8] == device);
         uint64_t gh = g.device;
         uint32_t gn = 0;
         CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_RELEASE, &gh, sizeof gh, reply, sizeof reply, &gn) == 0);
@@ -157,7 +157,7 @@ int main(int argc, char **argv) {
     struct { uint32_t dimension; uint64_t alignment, width; uint32_t height; uint16_t depth, mips; uint32_t format;
              uint32_t count, quality, layout, flags; } buf = {1, 0, 1 << 20, 1, 1, 1, 0, 1, 0, 1, 0};
     struct res_params { uint64_t self, ret, heap_properties; uint32_t heap_flags; uint64_t desc; uint32_t state;
-                        uint64_t clear, riid, resource, ifaces[5]; } rp = {0};
+                        uint64_t clear, riid, resource, ifaces[9]; } rp = {0};
     CHECK(mn_d3d_calls[committed].params_size == sizeof rp && sizeof buf == 56 && sizeof upload == 20);
     rp.self = device, rp.heap_properties = (uintptr_t)&upload, rp.desc = (uintptr_t)&buf;
     rp.state = 0xac3; /* D3D12_RESOURCE_STATE_GENERIC_READ */
@@ -204,7 +204,7 @@ int main(int argc, char **argv) {
              fsignal = id_of("ID3D12Fence::Signal"), onc = id_of("ID3D12Fence::SetEventOnCompletion"),
              multi = id_of("ID3D12Device1::SetEventOnMultipleFenceCompletion");
     struct { uint32_t type, priority, flags, node; } qd = {0};
-    struct { uint64_t self, ret, desc, riid, queue, ifaces[5]; } cq = {device, 0, (uintptr_t)&qd, 0, 0, {0}};
+    struct { uint64_t self, ret, desc, riid, queue, ifaces[9]; } cq = {device, 0, (uintptr_t)&qd, 0, 0, {0}};
     cq.riid = (uintptr_t)iid("ID3D12CommandQueue");
     CHECK(mn_d3d_calls[queue].params_size == sizeof cq && call(queue, &cq) == 0 && cq.queue);
     struct fence_params e1 = fp, e2 = fp;
@@ -271,9 +271,9 @@ int main(int argc, char **argv) {
     /* wchar */
     unsigned factory1 = id_of("::CreateDXGIFactory1"), enum1 = id_of("IDXGIFactory1::EnumAdapters1"),
              desc1 = id_of("IDXGIAdapter1::GetDesc1");
-    struct { uint64_t self, ret, riid, factory, ifaces[5]; } cf = {0, 0, (uintptr_t)iid("IDXGIFactory1"), 0, {0}};
+    struct { uint64_t self, ret, riid, factory, ifaces[9]; } cf = {0, 0, (uintptr_t)iid("IDXGIFactory1"), 0, {0}};
     CHECK(mn_d3d_calls[factory1].params_size == sizeof cf && call(factory1, &cf) == 0 && cf.factory);
-    struct { uint64_t self, ret; uint32_t index; uint64_t adapter, ifaces[5]; } ea = {cf.factory, 0, 0, 0, {0}};
+    struct { uint64_t self, ret; uint32_t index; uint64_t adapter, ifaces[9]; } ea = {cf.factory, 0, 0, 0, {0}};
     CHECK(mn_d3d_calls[enum1].params_size == sizeof ea && call(enum1, &ea) == 0 && ea.adapter);
     uint8_t guest[312]; /* DXGI_ADAPTER_DESC1 with a 2-byte WCHAR: Description[128], then VendorId at 256 */
     memset(guest, 0xee, sizeof guest);
@@ -321,7 +321,7 @@ int main(int argc, char **argv) {
     CHECK(mn_d3d_window_of(2, 0x1234, &got2) && got2.width == 640 && got2.height == 480);
     unsigned outputs = id_of("IDXGIAdapter::EnumOutputs"), odesc = id_of("IDXGIOutput::GetDesc"),
              omodes = id_of("IDXGIOutput::GetDisplayModeList");
-    struct { uint64_t self, ret; uint32_t index; uint64_t output, ifaces[5]; } eo = {ea.adapter, 0, 0, 0, {0}};
+    struct { uint64_t self, ret; uint32_t index; uint64_t output, ifaces[9]; } eo = {ea.adapter, 0, 0, 0, {0}};
     CHECK(mn_d3d_calls[outputs].params_size == sizeof eo && call(outputs, &eo) == 0 && (uint32_t)eo.ret == 0 &&
           eo.output);
     uint8_t od[96]; /* DXGI_OUTPUT_DESC with a 2-byte WCHAR: DeviceName[32], DesktopCoordinates at 64 */
@@ -351,7 +351,7 @@ int main(int argc, char **argv) {
     unsigned heapc = id_of("ID3D12Device::CreateDescriptorHeap"), rtv = id_of("ID3D12Device::CreateRenderTargetView"),
              start = id_of("ID3D12DescriptorHeap::GetCPUDescriptorHandleForHeapStart");
     struct { uint32_t type, count, flags, node; } hd = {2 /* D3D12_DESCRIPTOR_HEAP_TYPE_RTV */, 1, 0, 0};
-    struct { uint64_t self, ret, desc, riid, heap, ifaces[5]; } ch = {device, 0, (uintptr_t)&hd, 0, 0, {0}};
+    struct { uint64_t self, ret, desc, riid, heap, ifaces[9]; } ch = {device, 0, (uintptr_t)&hd, 0, 0, {0}};
     ch.riid = (uintptr_t)iid("ID3D12DescriptorHeap");
     CHECK(mn_d3d_calls[heapc].params_size == sizeof ch && call(heapc, &ch) == 0 && (uint32_t)ch.ret == 0 && ch.heap);
     uint64_t cpu = 0; /* the struct the guest's caller returns, at __ret */

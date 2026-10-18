@@ -67,6 +67,10 @@ struct mn_d3d_arena { uint64_t blob_id, offset, len; };
 struct mn_d3d_proxy_hdr { const void *vtbl; uint32_t magic; int32_t iface; uint64_t handle; };
 #define MN_D3D_PROXY_MAGIC 0x4433444eu /* "ND3D" */
 /* The unix side's call (guest/unix.c): id, and the params (a method's struct, or a family op's below). */
+/* A creation's reply names the interfaces its object answers in a block of 2 * MN_D3D_MASK_WORDS + 1 words (each
+ * params struct's <out>_ifaces[9]): answered (a bit by mn_d3d_ifaces index), answered at another pointer, then the
+ * handle the host gave the object before (0: none). 256 interfaces (M4: D3D11 and D3D10 take the model past 128). */
+#define MN_D3D_MASK_WORDS 4
 struct mn_d3d_args { uint32_t id, flags; uint64_t params; };
 /* A command list's method on a list another thread called last (M3 Task 10, SMITE 2's: one thread opens a list and
  * stamps its start, another records and closes it): sent with MN_REC_SUBMIT, which first runs every other ring of the

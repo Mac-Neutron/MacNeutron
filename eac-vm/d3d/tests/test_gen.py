@@ -167,6 +167,57 @@ class ClassifyTest(unittest.TestCase):
         self.assertIn("mn_d3d_record(This, ", body("ID3D12GraphicsCommandList1::OMSetDepthBounds"))
         self.assertNotIn("mn_d3d_record", body("ID3D12Device::GetNodeCount"))
 
+    VIEWS = ("interface ITestViews : IUnknown 01234567-89ab-cdef-0123-456789abcdef\n"
+             "HRESULT Get(UINT NumViews, ITestViews **views);\n"
+             "HRESULT Name(LPCSTR name, LPCWSTR wide);\n"
+             "end\n")
+
+    def views(self, rule=True):
+        m = model()
+        gen.parse_rules_declarations(self.VIEWS, m)
+        text = gen.read(RULES) + ("\nITestViews::Get views out count=NumViews\n" if rule else "")
+        rules = gen.parse_rules(text, m)
+        return m, rules
+
+    def test_masks(self):
+        # M4: D3D11 and D3D10 take the model past 128 interfaces: the answers' masks hold 256, the reply's block is
+        # 9 words (answers 0-3, moved 4-7, the first handle 8)
+        m = gen.Model()
+        for i in range(256):
+            m.interfaces[f"I{i}"] = gen.Interface(f"I{i}", f"{i:08x}-0000-0000-0000-000000000000", "IUnknown", [], "t")
+        self.assertEqual(len(gen.iface_index(m)), 256)
+        m.interfaces["I256"] = gen.Interface("I256", "00000100-0000-0000-0000-000000000001", "IUnknown", [], "t")
+        with self.assertRaises(gen.RuleError):
+            gen.iface_index(m)
+        self.assertIn("_ifaces[9]", gen.emit_params(self.calls))
+
+    def test_objects_out(self):
+        # a getter's array of objects out (M4): 8 bytes an element on the wire, the objects' first handles; the
+        # proxy makes each the guest's proxy again, the stub turns each native pointer into its handle
+        m, rules = self.views()
+        calls = gen.classify(m, rules)
+        mid = next(i for i, c in calls.items() if c.name == "ITestViews::Get")
+        f = next(f for f in calls[mid].fields if f.param == "views")
+        self.assertEqual((f.kind, f.size, f.array, f.count, f.objects), ("WMF_OUT", 8, True, "NumViews", "ITestViews"))
+        out, _ = gen.emit_proxies(m, rules, calls)
+        start = out.index(f"px_{mid}(")
+        self.assertIn("mn_proxy_known(", out[start:out.index("\n}", start)])
+        stubs = gen.emit_stubs(m, rules, calls)
+        start = stubs.index(f"mn_d3d_stub_{mid}(")
+        self.assertIn("mn_d3d_objects_out(", stubs[start:stubs.index("\n}", start)])
+
+    def test_objects_out_needs_a_rule(self):
+        m, rules = self.views(rule=False)
+        with self.assertRaises(gen.RuleError) as e:
+            gen.classify(m, rules)
+        self.assertIn("ITestViews::Get views", str(e.exception))
+
+    def test_string_typedefs(self):
+        m, rules = self.views()
+        calls = gen.classify(m, rules)
+        c = next(c for c in calls.values() if c.name == "ITestViews::Name")
+        self.assertEqual([f.kind for f in c.fields], ["WMF_STR_IN", "WMF_WSTR_IN"])
+
     def test_every_method_has_a_mode(self):
         for row in gen.manifest(self.m):
             self.assertIn(self.calls[row[0]].mode, ("async", "sync", "submit", "special", "refuse"), row[1])
