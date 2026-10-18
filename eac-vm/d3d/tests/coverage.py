@@ -5,8 +5,8 @@ coverage.py <guest trace> <host trace>
     Every method the guest's programs called (the guest trace: unix.c's, a "# process" section each) has a rule that
     forwards it and reached the host (the host trace: dispatch.c's, a "# context" section each). A line is
     "<id> <name> <calls>", and in the guest trace "<id> <name> <calls> refused|unhandled" for a method the guest
-    answered itself (rules.txt's refuse, or a special without guest code): each of those fails, as does a forwarded
-    method with no host count, or a guest trace with no method at all (nothing was forwarded).
+    answered itself (rules.txt's refuse, or a special without guest code): each of those fails (but AS_DXMT's), as does a
+    forwarded method with no host count, or a guest trace with no method at all (nothing was forwarded).
 coverage.py self-test
     Each rule's failure case must fail, and a covered run pass.
 Prints "coverage: ok ..." or "coverage: FAIL ...", and exits 1 on a failure.
@@ -14,6 +14,12 @@ Prints "coverage: ok ..." or "coverage: FAIL ...", and exits 1 on a failure.
 import os
 import sys
 import tempfile
+
+
+# Refused in the guest with the E_NOTIMPL native DXMT answers itself (rules.txt: "the ones DXMT answers E_NOTIMPL
+# itself"): the program gets what forwarding would give it (SMITE 2 calls OpenExistingHeapFromAddress, M3 Task 10).
+AS_DXMT = {'ID3D12Device::CreateSharedHandle', 'ID3D12Device3::OpenExistingHeapFromAddress',
+           'ID3D12Device5::CreateStateObject', 'ID3D12Device7::AddToStateObject'}
 
 
 def read(path):
@@ -40,7 +46,8 @@ def coverage(guest, host):
     if not g:
         return 'coverage: FAIL no method in the guest trace (nothing forwarded)'
     bad = [f'{name} {why}' if why else f'{name} never reached the host'
-           for i, (name, n, why) in sorted(g.items()) if why or not h.get(i, [0, 0])[1]]
+           for i, (name, n, why) in sorted(g.items())
+           if (why and not (why == 'refused' and name in AS_DXMT)) or (not why and not h.get(i, [0, 0])[1])]
     if bad:
         return f'coverage: FAIL {len(bad)} of {len(g)} methods: ' + ', '.join(bad[:5])
     return f'coverage: ok ({len(g)} methods, {sum(e[1] for e in g.values())} calls, all forwarded)'
@@ -64,6 +71,8 @@ def self_test():
          'coverage: FAIL 1 of 2 methods: ID3D12Device::CreateFence never reached'),
         ('no-host-trace', f('g4', guest), os.path.join(d, 'none'), 'coverage: FAIL 2 of 2'),
         ('empty', f('g5', '# process 9\n'), f('h5', host), 'coverage: FAIL no method'),
+        ('as-dxmt', f('g6', guest + '159 ID3D12Device3::OpenExistingHeapFromAddress 3 refused\n'), f('h6', host),
+         'coverage: ok (3 methods, 7 calls'),
     ]
     failures = 0
     for name, g, h, want in cases:

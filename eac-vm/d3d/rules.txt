@@ -129,7 +129,7 @@ ID3D12GraphicsCommandList2::WriteBufferImmediate refuse
 ID3D12CommandQueue::UpdateTileMappings refuse
 ID3D12CommandQueue::CopyTileMappings refuse
 ID3D12Device::GetResourceTiling refuse
-# And the ones DXMT answers E_NOTIMPL itself, whose arguments would need rules for nothing.
+# And the ones DXMT answers E_NOTIMPL itself, whose arguments would need rules for nothing (tests/coverage.py's AS_DXMT).
 ID3D12Device::CreateSharedHandle refuse
 ID3D12Device3::OpenExistingHeapFromAddress refuse
 ID3D12Device5::CreateStateObject refuse
