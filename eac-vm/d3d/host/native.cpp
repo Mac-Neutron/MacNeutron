@@ -10,9 +10,14 @@ extern "C" int32_t mn_d3d_native_query(void *obj, const uint8_t iid[16], void **
     return ((IUnknown *)obj)->QueryInterface(*(const IID *)iid, out);
 }
 
+// An ID3D10Blob's bytes and size, or NULL: obj isn't one.
 extern "C" const void *mn_d3d_native_blob(void *obj, uint64_t *size) {
-    *size = ((ID3D10Blob *)obj)->GetBufferSize();
-    return ((ID3D10Blob *)obj)->GetBufferPointer();
+    ID3D10Blob *blob = nullptr;
+    if (FAILED(((IUnknown *)obj)->QueryInterface(__uuidof(ID3D10Blob), (void **)&blob))) return nullptr;
+    *size = blob->GetBufferSize();
+    const void *bytes = blob->GetBufferPointer();
+    blob->Release(); // the handle holds it
+    return bytes;
 }
 
 // Map (rules.txt's own): the arena's (blob, offset) where the host's pointer is, for the guest's own address of it.
@@ -125,9 +130,9 @@ extern "C" NTSTATUS_T mn_d3d_check_feature_stub(void *params) {
     auto *a = (mn_d3d_p_ID3D12Device_CheckFeatureSupport *)params;
     auto *data = (uint8_t *)(uintptr_t)a->feature_data;
     UINT size = a->feature_data_size;
-    if (a->feature == D3D12_FEATURE_FEATURE_LEVELS && data && a->aux[0] == sizeof(D3D12_FEATURE_DATA_FEATURE_LEVELS)) {
-        auto *levels = (D3D12_FEATURE_DATA_FEATURE_LEVELS *)data; // its levels follow it (the guest's)
-        if (size < sizeof *levels + 4ull * levels->NumFeatureLevels) {
+    if (a->feature == D3D12_FEATURE_FEATURE_LEVELS) { // its levels follow it, or its pointer is the guest's: refused
+        auto *levels = (D3D12_FEATURE_DATA_FEATURE_LEVELS *)data;
+        if (!data || a->aux[0] != sizeof *levels || size < sizeof *levels + 4ull * levels->NumFeatureLevels) {
             RESULT(a, E_INVALIDARG);
             return 0;
         }

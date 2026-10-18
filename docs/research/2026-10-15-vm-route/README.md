@@ -1004,16 +1004,16 @@ another thread's recorded lists are there. The default stays guest DXMT (`run-ga
 The generator (`eac-vm/d3d/gen.py`) reads widl's C headers from native DXMT's include set (`d3d12.h`, `dxgi.h` to
 `dxgi1_6.h`, `d3dcommon.h`, `dxgidebug.h`), not the IDL the spec named: the headers are what both builds compile
 against, with the guest's layouts checked against them (`make layout`). D3D12 and DXGI are 112 interfaces and 393
-methods with 12 exports: 405 numbered calls. 202 are classified by the defaults alone (an interface pointer is a handle,
+methods with 12 exports: 405 numbered calls. 195 are classified by the defaults alone (an interface pointer is a handle,
 `REFIID` then `void **` a created object, `const T *` one input, a non-const pointer an output, an output or a
-non-HRESULT return makes the call synchronous). `rules.txt` (238 rules) adds a rule to 85: counts, sizes, unions, wide
-strings, the three queue operations' submit mode, 15 calls with code of our own (fences, `Map`, `CheckFeatureSupport`,
-DXGI's descriptions in the guest's 2-byte WCHAR) and 9 special rules, 11 calls with guest code by hand
-(`CreatePipelineState` and `LoadPipeline` read the stream into the description forms; the blob and the root signature
-deserializers are answered in the guest; `WriteToSubresource` and `ReadFromSubresource` have none yet). 137 are refused
-in the guest (E_NOTIMPL): 118 of 47 interfaces DXMT doesn't implement, and 19 that DXMT aborts on (`IMPLEMENT_ME`:
-`SetPredication`, `ExecuteBundle`, tiled resources) or leaves out. Calls end up 66 asynchronous, 188 synchronous, 3
-submit, 11 special and 137 refused.
+non-HRESULT return makes the call synchronous). `rules.txt` (245 rules) adds a rule to 92: counts, sizes, unions, wide
+strings, the three queue operations' submit mode, the seven CPU descriptor writes made synchronous (below), 15 calls
+with code of our own (fences, `Map`, `CheckFeatureSupport`, DXGI's descriptions in the guest's 2-byte WCHAR) and 9
+special rules, 11 calls with guest code by hand (`CreatePipelineState` and `LoadPipeline` read the stream into the
+description forms; the blob and the root signature deserializers are answered in the guest; `WriteToSubresource` and
+`ReadFromSubresource` have none yet). 137 are refused in the guest (E_NOTIMPL): 118 of 47 interfaces DXMT doesn't
+implement, and 19 that DXMT aborts on (`IMPLEMENT_ME`: `SetPredication`, `ExecuteBundle`, tiled resources) or leaves
+out. Calls end up 59 asynchronous, 195 synchronous, 3 submit, 11 special and 137 refused.
 
 What the guest keeps: `AddRef`/`Release` (the last release reaches the host after every ring that used the object),
 `QueryInterface` (from the interfaces the host reported at creation; the first handle the host bound an object to
@@ -1065,6 +1065,23 @@ the program reads all three of `nvngx`'s refusals as successes, though `nvngx` l
 (today's build, loaded as the builtin). The first of them returns before any Direct3D call, so the guest loses
 `nvngx`'s return value on the way back (FEX or the call path): open, and a game could take a refused DLSS feature as
 made. The 4b-2 gate runs its references once now, as the others do.
+
+The final review (one fresh reviewer over the whole branch) found three things the gates didn't, each now pinned by a
+test that failed first:
+- The thread that sets the events the host posts was a pthread of the unix side's, so `NtSetEvent` ran on its
+  creator's TEB and server pipes; when that thread had ended, the process died at its first event set
+  (`tests/eventthread.cpp` in `d3d-smoke.sh`: the set must be the event's first use, or ntsync's cached handle needs no
+  server call). It is now `mnd3d.dll`'s own Wine thread (op 6), started with the first event a fence is given.
+- A CPU descriptor written on one thread was still in that thread's ring when another thread recorded with it
+  (`threads.cpp`'s view case: a clear through another thread's new view cleared nothing, 64 of 64 pixels). The seven
+  descriptor writes now run when they're made (a trap each; M5 measures what that costs); left open, another thread
+  overwriting a descriptor after a recording read it and before that recorder's ring ran.
+- Two host calls trusted guest pointers: `CheckFeatureSupport`'s levels when the guest hadn't put them after the
+  struct (DXMT read the guest's address: `dispatch-test`, SIGSEGV), and the blob op on an object that isn't a blob.
+Not fixed, for the maintainer: the host runs a record on whatever object its handles name, as native DXMT trusts its
+caller, so a guest that names a fence where a device belongs, or forges a descriptor handle (DXMT's carry host
+pointers, passed through as the spec says), can crash or corrupt `macneutron-vm`. Whether the VM must be a security
+boundary against its own game decides whether every record's objects get checked against what they answer.
 
 Also from M2: the VM host's native DXMT wrote an empty `_dxgi.log` into the folder `macneutron-vm` ran from; its logs
 go to the run's `traces/` now.

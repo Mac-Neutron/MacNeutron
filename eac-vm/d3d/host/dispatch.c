@@ -222,6 +222,10 @@ static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *
         if (!ok || !obj) return (int32_t)MN_STATUS_INVALID_HANDLE;
         uint64_t size;
         const uint8_t *bytes = mn_d3d_native_blob(obj, &size);
+        if (!bytes) {
+            fprintf(stderr, "mn-d3d: error: a blob's bytes asked of an object that isn't one\n");
+            return (int32_t)MN_STATUS_INVALID_HANDLE;
+        }
         uint64_t take = b.offset < size ? size - b.offset : 0;
         if (take > b.len) take = b.len;
         if (take > cap - 8) take = cap - 8;
@@ -231,7 +235,7 @@ static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *
         return 0;
     }
     default:
-        return MN_ENOSYS; /* op 3: Task 11 */
+        return MN_ENOSYS; /* op 3: the guest's own (its trace), never sent */
     }
 }
 

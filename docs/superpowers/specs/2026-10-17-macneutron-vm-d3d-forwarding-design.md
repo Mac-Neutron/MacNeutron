@@ -114,7 +114,8 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
   caching.)
 - Asynchronous, batched on the calling thread's ring: every command-list recording call (draws, dispatches, barriers,
   copies, root arguments, render targets), descriptor writes (`Create*View`, `CreateSampler`, `CopyDescriptors*`),
-  `ExecuteCommandLists`, `Signal`, `Present`.
+  `ExecuteCommandLists`, `Signal`, `Present`. (M2: the view and sampler creations run when they're made, so another
+  thread's recording finds them; the copies stay asynchronous.)
 - Synchronous: creations a game checks for failure (resources, heaps, pipelines, root signatures, command signatures,
   query heaps, swapchains), `Map`, and every method with output data.
 - A call on one thread that uses an object created on another waits for that creation (the winemetal forwarding's

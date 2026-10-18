@@ -18,6 +18,7 @@ enum {
     MN_D3D_OP_TRACE = 3,   /* u32 id, u32 refused: a method the guest answered itself, for its trace; never sent */
     MN_D3D_OP_QUERY = 4,   /* struct mn_d3d_query: QueryInterface for an interface at another pointer, a new handle */
     MN_D3D_OP_BLOB = 5,    /* struct mn_d3d_blob: an ID3D10Blob's bytes; reply: u64 its size, then the bytes asked */
+    MN_D3D_OP_LISTEN = 6,  /* none: the calling thread sets the events the host posts, for the process's life; never sent */
 };
 struct mn_d3d_query { uint64_t handle; uint8_t iid[16]; uint64_t out; }; /* reply: int32 HRESULT */
 struct mn_d3d_blob { uint64_t handle, offset, len; };

@@ -207,8 +207,25 @@ static HRESULT STDMETHODCALLTYPE fence_signal(mn_proxy *This, UINT64 value) {
     return s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;
 }
 
+#ifndef MN_D3D_LOOPBACK
+// The thread that sets the events the host posts (op 6): a Wine thread of its own, started with the first event a fence
+// is given.
+static DWORD WINAPI listener_main(void *) {
+    mn_d3d_call(MN_D3D_OP_LISTEN, nullptr);
+    return 0;
+}
+static BOOL CALLBACK start_listener(INIT_ONCE *, void *, void **) {
+    if (HANDLE t = CreateThread(nullptr, 0, listener_main, nullptr, 0, nullptr)) CloseHandle(t);
+    return TRUE;
+}
+#endif
+
 // The host's relay posts the event, which the unix side's listener sets. NULL: we wait here, never the host.
 static HRESULT on_event(HANDLE event, HRESULT (*send)(void *, HANDLE), void *ctx) {
+#ifndef MN_D3D_LOOPBACK
+    static INIT_ONCE listening = INIT_ONCE_STATIC_INIT;
+    InitOnceExecuteOnce(&listening, start_listener, nullptr, nullptr);
+#endif
     HANDLE own = event ? nullptr : CreateEventA(nullptr, FALSE, FALSE, nullptr);
     HANDLE e = event ? event : own;
     if (!e) return E_OUTOFMEMORY;

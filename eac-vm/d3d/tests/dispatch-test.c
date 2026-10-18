@@ -252,6 +252,20 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 128 && u[i] && u[i] < 0x80; i++) ascii[i] = (char)u[i];
     CHECK(!strncmp(ascii, "Apple ", 6) && vendor == 0x106b);
 
+    /* levels: CheckFeatureSupport(FEATURE_LEVELS) whose levels the guest didn't put after it (aux[0] 0) answers
+     * E_INVALIDARG; its pointer, the guest's, is never read */
+    unsigned check = id_of("ID3D12Device::CheckFeatureSupport");
+    struct { uint32_t count, pad; uint64_t requested; uint32_t max, pad2; } lv = {1, 0, 0x414141414000ull, 0, 0};
+    mn_d3d_p_ID3D12Device_CheckFeatureSupport cs = {0};
+    cs.self = device, cs.feature = 2 /* D3D12_FEATURE_FEATURE_LEVELS */, cs.feature_data = (uintptr_t)&lv;
+    cs.feature_data_size = sizeof lv;
+    CHECK(sizeof lv == 24 && call(check, &cs) == 0 && (uint32_t)cs.ret == 0x80070057u);
+
+    /* blob: op 5 on an object that isn't an ID3D10Blob is refused */
+    struct mn_d3d_blob nb = {device, 0, 64};
+    CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_BLOB, &nb, sizeof nb, reply, sizeof reply, &n) ==
+          (int32_t)MN_STATUS_INVALID_HANDLE);
+
     /* removed */
     unsigned victim = id_of("ID3D12Object::GetPrivateData");
     NTSTATUS_T (*keep)(void *) = mn_d3d_stubs[victim];

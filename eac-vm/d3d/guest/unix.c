@@ -70,7 +70,9 @@ static int proxy_handle(uint64_t value, mn_handle *h) {
     return 0;
 }
 
-/* The context's notify queue and its fences' mirror (op 2), and the thread that sets the events the host posts. */
+/* The context's notify queue and its fences' mirror (op 2), and the thread that sets the events the host posts: in the
+ * VM mnd3d.dll's own Wine thread (op 6), as NtSetEvent needs its caller's TEB and server pipes (a pthread of ours would
+ * run on its creator's, which may be gone); in the loopback a thread of ours. */
 #define MIRROR_BYTES (1u << 20)
 static struct mn_blob queue_blob, mirror_blob;
 static int events_ready;
@@ -100,10 +102,12 @@ static void events(void) {
     memset(queue_blob.ptr, 0, queue_blob.size);
     memset(mirror_blob.ptr, 0, mirror_blob.size);
     struct mn_d3d_notify a = {queue_blob.blob_id, mirror_blob.blob_id, mirror_blob.size};
+    if (mn_call_flush(MN_OP_D3D + MN_D3D_OP_NOTIFY, &a, sizeof a, NULL, 0, &n)) return;
+#ifdef MN_D3D_LOOPBACK
     pthread_t t;
-    if (mn_call_flush(MN_OP_D3D + MN_D3D_OP_NOTIFY, &a, sizeof a, NULL, 0, &n) || pthread_create(&t, NULL, listener, NULL))
-        return;
+    if (pthread_create(&t, NULL, listener, NULL)) return;
     pthread_detach(t);
+#endif
     events_ready = 1;
 }
 
@@ -179,6 +183,10 @@ static int32_t family(uint32_t id, void *params) {
             if (n == 8 || at >= a->cap) return 0;
         }
     }
+    case MN_D3D_OP_LISTEN:
+        if (!events_ready) return MN_EINVAL;
+        listener(NULL);
+        return 0;
     case MN_D3D_OP_TRACE: {
         const uint32_t *m = params;
         if (counts && m[0] < MN_D3D_CALLS) {

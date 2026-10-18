@@ -8,6 +8,9 @@
 //   release   one thread records copies from a buffer and, before closing, lets another thread release that buffer's
 //             last reference (and make a call that reaches the host): the copies still run on a live buffer, and
 //             the list is closed and never executed (its buffer is gone)
+//   view      (the final review of M2) one thread makes a render target's view and goes idle (alive, its ring
+//             unflushed); another clears through that view and closes its list, which is then executed: the target
+//             reads back cleared (a view runs when it's made, so a later recording on any thread finds it)
 // Prints "threads ..." lines.
 #include "d3d12_common.hpp"
 #include <condition_variable>
@@ -160,11 +163,73 @@ static void Release() {
     printf("threads release closed\n");
 }
 
+static void View() {
+    D3D12_RESOURCE_DESC d = {};
+    d.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D, d.Width = 8, d.Height = 8, d.DepthOrArraySize = 1, d.MipLevels = 1;
+    d.Format = DXGI_FORMAT_R8G8B8A8_UNORM, d.SampleDesc.Count = 1, d.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    ID3D12Resource *target = gpu->Texture(d, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    D3D12_DESCRIPTOR_HEAP_DESC hd = {D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1};
+    ID3D12DescriptorHeap *heap;
+    CHECK(gpu->device->CreateDescriptorHeap(&hd, __uuidof(ID3D12DescriptorHeap), (void **)&heap));
+    D3D12_CPU_DESCRIPTOR_HANDLE h = heap->GetCPUDescriptorHandleForHeapStart();
+    Recorder clear;
+    std::mutex m;
+    std::condition_variable cv;
+    int stage = 0;
+    std::thread maker([&] {
+        gpu->device->CreateRenderTargetView(target, nullptr, h);
+        std::unique_lock<std::mutex> l(m);
+        stage = 1;
+        cv.notify_all();
+        cv.wait(l, [&] { return stage == 2; }); // idle until the other is done: its exit would flush its ring
+    });
+    std::thread user([&] {
+        {
+            std::unique_lock<std::mutex> l(m);
+            cv.wait(l, [&] { return stage == 1; });
+        }
+        const float red[4] = {1, 0, 0, 1};
+        clear.list->ClearRenderTargetView(h, red, 0, nullptr);
+        CHECK(clear.list->Close());
+        ID3D12CommandList *lists[] = {clear.list};
+        gpu->queue->ExecuteCommandLists(1, lists);
+        CHECK(gpu->queue->Signal(gpu->fence, ++gpu->value));
+        HANDLE done = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+        CHECK(gpu->fence->SetEventOnCompletion(gpu->value, done));
+        WaitForSingleObject(done, 10000);
+        CloseHandle(done);
+        std::unique_lock<std::mutex> l(m);
+        stage = 2;
+        cv.notify_all();
+    });
+    user.join();
+    maker.join();
+    const UINT pitch = 256; // D3D12_TEXTURE_DATA_PITCH_ALIGNMENT
+    ID3D12Resource *rb = gpu->Buffer(D3D12_HEAP_TYPE_READBACK, pitch * 8, D3D12_RESOURCE_STATE_COPY_DEST);
+    gpu->Barrier(target, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    D3D12_TEXTURE_COPY_LOCATION to = {}, from = {};
+    to.pResource = rb, to.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    to.PlacedFootprint.Footprint = {DXGI_FORMAT_R8G8B8A8_UNORM, 8, 8, 1, pitch};
+    from.pResource = target, from.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    gpu->list->CopyTextureRegion(&to, 0, 0, 0, &from, nullptr);
+    gpu->Submit();
+    uint8_t *v;
+    CHECK(rb->Map(0, nullptr, (void **)&v));
+    int bad = 0;
+    for (UINT y = 0; y < 8; y++)
+        for (UINT x = 0; x < 8; x++) {
+            const uint8_t *px = v + y * pitch + x * 4;
+            bad += px[0] != 255 || px[1] != 0 || px[2] != 0 || px[3] != 255;
+        }
+    printf("threads view %d of 64 pixels wrong\n", bad);
+}
+
 int main() {
     Gpu g;
     gpu = &g;
     Record();
     Order();
     Release();
+    View();
     return 0;
 }
