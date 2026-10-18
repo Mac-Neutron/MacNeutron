@@ -33,7 +33,7 @@ for f in "$D3D/host/dispatch.c" "$D3D/host/memory.c" "$D3D/host/events.c" "$D3D/
 done
 for f in "$G/stubs.cpp" "$D3D/host/native.cpp"; do
   o="$W/obj/d3d-$(basename "$f").o"
-  clang++ -O2 -std=c++17 -Wall -Werror -DWIDL_EXPLICIT_AGGREGATE_RETURNS -include "$NT/native-prelude.h" -I"$NT/include" \
+  clang++ -O2 -std=c++17 -Wall -Werror -Wno-extern-c-compat -DWIDL_EXPLICIT_AGGREGATE_RETURNS -include "$NT/native-prelude.h" -I"$NT/include" \
     -I"$I/d3d12" -I"$I/windows" -I"$I/directx" -I"$I" -I"$DXMT/util" -I"$DXMT/d3d12" -I"$G" -I"$D3D/host" -c -o "$o" "$f"
   objs="$objs $o"
 done

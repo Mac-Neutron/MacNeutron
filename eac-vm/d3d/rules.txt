@@ -63,6 +63,14 @@ end
 
 # Exports the headers don't declare (dxgi.def's).
 export dxgi.dll HRESULT DXGIDeclareAdapterRemovalSupport(void);
+# M4: D3D11's and D3D10's exports, as Wine declares them (d3d11.h's prototypes name no parameters; d3d10core's and the
+# Core and On12 ones are in no header).
+export d3d11.dll HRESULT D3D11CoreCreateDevice(IDXGIFactory *factory, IDXGIAdapter *adapter, UINT flags, const D3D_FEATURE_LEVEL *feature_levels, UINT levels, ID3D11Device **device);
+export d3d11.dll HRESULT D3D11CoreRegisterLayers(const void *layers, DWORD layer_count);
+export d3d11.dll HRESULT D3D11CreateDevice(IDXGIAdapter *adapter, D3D_DRIVER_TYPE driver_type, HMODULE swrast, UINT flags, const D3D_FEATURE_LEVEL *feature_levels, UINT levels, UINT sdk_version, ID3D11Device **device_out, D3D_FEATURE_LEVEL *obtained_feature_level, ID3D11DeviceContext **immediate_context);
+export d3d11.dll HRESULT D3D11On12CreateDevice(IUnknown *device, UINT flags, const D3D_FEATURE_LEVEL *feature_levels, UINT feature_level_count, IUnknown *const *queues, UINT queue_count, UINT node_mask, ID3D11Device **d3d11_device, ID3D11DeviceContext **d3d11_immediate_context, D3D_FEATURE_LEVEL *obtained_feature_level);
+export d3d10core.dll HRESULT D3D10CoreCreateDevice(IDXGIFactory *factory, IDXGIAdapter *adapter, UINT flags, D3D_FEATURE_LEVEL feature_level, ID3D10Device **device);
+export d3d10core.dll HRESULT D3D10CoreRegisterLayers(void);
 
 # ---- Annotations (gen.py's parse_rules). A pointer the defaults can't place needs one (gen.py classify_param):
 # <Interface>::<Method> <param> in|out|inout count=|size=|bytes=|one|string|wstring, and a mode where the default
@@ -326,3 +334,280 @@ ID3D12Device3::EnqueueMakeResident objects in count=num_objects
 # Interfaces an object answers at another pointer (DXMT's private ones, C++ subobjects of its own).
 companion ID3D12Device IMTLD3D12DeviceExt
 companion ID3D12GraphicsCommandList IMTLD3D12CommandListExt
+
+# ---- M4: D3D11 and D3D10 ----
+# Video and content protection: none in DXMT (spec §11).
+ID3D11AuthenticatedChannel::* refuse
+ID3D11CryptoSession::* refuse
+ID3D11VideoDecoder::* refuse
+ID3D11VideoProcessorEnumerator::* refuse
+ID3D11VideoProcessor::* refuse
+ID3D11VideoDecoderOutputView::* refuse
+ID3D11VideoProcessorInputView::* refuse
+ID3D11VideoProcessorOutputView::* refuse
+ID3D11VideoDevice::* refuse
+ID3D11VideoContext::* refuse
+ID3D11VideoContext1::* refuse
+ID3D11VideoDevice1::* refuse
+ID3D11VideoProcessorEnumerator1::* refuse
+ID3D11VideoContext2::* refuse
+# Exports: D3D11On12 is none of DXMT's (E_NOTIMPL, AS_DXMT); the layer registrations are no one's.
+::D3D11On12CreateDevice refuse
+::D3D11CoreRegisterLayers refuse
+::D3D10CoreRegisterLayers refuse
+::D3D11CreateDevice feature_levels in count=levels
+::D3D11CoreCreateDevice feature_levels in count=levels
+::D3D11CreateDeviceAndSwapChain feature_levels in count=levels
+# What DXMT aborts on (UNIMPLEMENTED: the tiled methods, SwapDeviceContextState, the Device3 copies) or answers
+# E_NOTIMPL itself (counters, class instances: AS_DXMT), and handles shared across processes, which mean nothing
+# across the VM.
+ID3D11DeviceContext2::UpdateTileMappings refuse
+ID3D11DeviceContext2::CopyTileMappings refuse
+ID3D11DeviceContext2::CopyTiles refuse
+ID3D11DeviceContext2::UpdateTiles refuse
+ID3D11DeviceContext2::ResizeTilePool refuse
+ID3D11DeviceContext2::TiledResourceBarrier refuse
+ID3D11Device2::GetResourceTiling refuse
+ID3D11Device1::CreateDeviceContextState refuse
+ID3D11DeviceContext1::SwapDeviceContextState refuse
+ID3D11Device3::WriteToSubresource refuse
+ID3D11Device3::ReadFromSubresource refuse
+ID3D11Device::CreateCounter refuse
+ID3D11Device::CheckCounter refuse
+ID3D10Device::CreateCounter refuse
+ID3D10Device::CheckCounter refuse
+ID3D11ClassLinkage::CreateClassInstance refuse
+ID3D11ClassLinkage::GetClassInstance refuse
+ID3D11Device::OpenSharedResource refuse
+ID3D11Device1::OpenSharedResource1 refuse
+ID3D11Device1::OpenSharedResourceByName refuse
+ID3D11Device5::OpenSharedFence refuse
+ID3D11Fence::CreateSharedHandle refuse
+ID3D10Device::OpenSharedResource refuse
+# Arrays by their counts.
+ID3D11DeviceContext::RSSetViewports pViewports in count=NumViewports
+ID3D11DeviceContext::RSSetScissorRects pRects in count=NumRects
+ID3D11DeviceContext::RSGetViewports pNumViewports inout one
+ID3D11DeviceContext::RSGetViewports pViewports out count=*pNumViewports
+ID3D11DeviceContext::RSGetScissorRects pNumRects inout one
+ID3D11DeviceContext::RSGetScissorRects pRects out count=*pNumRects
+ID3D10Device::RSSetViewports pViewports in count=NumViewports
+ID3D10Device::RSSetScissorRects pRects in count=NumRects
+ID3D10Device::RSGetViewports NumViewports inout one
+ID3D10Device::RSGetViewports pViewports out count=*NumViewports
+ID3D10Device::RSGetScissorRects NumRects inout one
+ID3D10Device::RSGetScissorRects pRects out count=*NumRects
+ID3D11DeviceContext::IASetVertexBuffers pStrides in count=NumBuffers
+ID3D11DeviceContext::IASetVertexBuffers pOffsets in count=NumBuffers
+ID3D11DeviceContext::IAGetVertexBuffers pStrides out count=NumBuffers
+ID3D11DeviceContext::IAGetVertexBuffers pOffsets out count=NumBuffers
+ID3D10Device::IASetVertexBuffers pStrides in count=NumBuffers
+ID3D10Device::IASetVertexBuffers pOffsets in count=NumBuffers
+ID3D10Device::IAGetVertexBuffers pStrides out count=NumBuffers
+ID3D10Device::IAGetVertexBuffers pOffsets out count=NumBuffers
+ID3D11DeviceContext::SOSetTargets pOffsets in count=NumBuffers
+ID3D10Device::SOSetTargets pOffsets in count=NumBuffers
+ID3D10Device::SOGetTargets pOffsets out count=NumBuffers
+ID3D11DeviceContext::CSSetUnorderedAccessViews pUAVInitialCounts in count=NumUAVs
+ID3D11DeviceContext::OMSetRenderTargetsAndUnorderedAccessViews pUAVInitialCounts in count=NumUAVs
+ID3D11DeviceContext1::ClearView pRect in count=NumRects
+ID3D11DeviceContext1::DiscardView1 pRects in count=NumRects
+ID3D11Device2::CheckMultisampleQualityLevels1 quality_level_count out one
+ID3D11DeviceContext1::VSSetConstantBuffers1 pFirstConstant in count=NumBuffers
+ID3D11DeviceContext1::VSSetConstantBuffers1 pNumConstants in count=NumBuffers
+ID3D11DeviceContext1::VSGetConstantBuffers1 pFirstConstant out count=NumBuffers
+ID3D11DeviceContext1::VSGetConstantBuffers1 pNumConstants out count=NumBuffers
+ID3D11DeviceContext1::HSSetConstantBuffers1 pFirstConstant in count=NumBuffers
+ID3D11DeviceContext1::HSSetConstantBuffers1 pNumConstants in count=NumBuffers
+ID3D11DeviceContext1::HSGetConstantBuffers1 pFirstConstant out count=NumBuffers
+ID3D11DeviceContext1::HSGetConstantBuffers1 pNumConstants out count=NumBuffers
+ID3D11DeviceContext1::DSSetConstantBuffers1 pFirstConstant in count=NumBuffers
+ID3D11DeviceContext1::DSSetConstantBuffers1 pNumConstants in count=NumBuffers
+ID3D11DeviceContext1::DSGetConstantBuffers1 pFirstConstant out count=NumBuffers
+ID3D11DeviceContext1::DSGetConstantBuffers1 pNumConstants out count=NumBuffers
+ID3D11DeviceContext1::GSSetConstantBuffers1 pFirstConstant in count=NumBuffers
+ID3D11DeviceContext1::GSSetConstantBuffers1 pNumConstants in count=NumBuffers
+ID3D11DeviceContext1::GSGetConstantBuffers1 pFirstConstant out count=NumBuffers
+ID3D11DeviceContext1::GSGetConstantBuffers1 pNumConstants out count=NumBuffers
+ID3D11DeviceContext1::PSSetConstantBuffers1 pFirstConstant in count=NumBuffers
+ID3D11DeviceContext1::PSSetConstantBuffers1 pNumConstants in count=NumBuffers
+ID3D11DeviceContext1::PSGetConstantBuffers1 pFirstConstant out count=NumBuffers
+ID3D11DeviceContext1::PSGetConstantBuffers1 pNumConstants out count=NumBuffers
+ID3D11DeviceContext1::CSSetConstantBuffers1 pFirstConstant in count=NumBuffers
+ID3D11DeviceContext1::CSSetConstantBuffers1 pNumConstants in count=NumBuffers
+ID3D11DeviceContext1::CSGetConstantBuffers1 pFirstConstant out count=NumBuffers
+ID3D11DeviceContext1::CSGetConstantBuffers1 pNumConstants out count=NumBuffers
+ID3D11DeviceContext::GetData pData out size=DataSize
+ID3D10Asynchronous::GetData pData out size=DataSize
+ID3D11Device::CheckFeatureSupport pFeatureSupportData inout size=FeatureSupportDataSize
+ID3D11Device::CreateInputLayout pInputElementDescs in count=NumElements
+ID3D11Device::CreateInputLayout pShaderBytecodeWithInputSignature in size=BytecodeLength
+ID3D10Device::CreateInputLayout pInputElementDescs in count=NumElements
+ID3D10Device::CreateInputLayout pShaderBytecodeWithInputSignature in size=BytecodeLength
+ID3D11Device::CreateGeometryShaderWithStreamOutput pSODeclaration in count=NumEntries
+ID3D11Device::CreateGeometryShaderWithStreamOutput pBufferStrides in count=NumStrides
+ID3D10Device::CreateGeometryShaderWithStreamOutput pSODeclaration in count=NumEntries
+# Initial data and updates (own: guest/proxy.cpp packs each subresource's bytes, sized from the resource's
+# description, into one region of aux[0] bytes; host/native.cpp gives DXMT the subresource array over it).
+ID3D11Device::CreateBuffer pInitialData in size=aux0
+ID3D11Device::CreateBuffer own
+ID3D11Device::CreateTexture1D pInitialData in size=aux0
+ID3D11Device::CreateTexture1D own
+ID3D11Device::CreateTexture2D pInitialData in size=aux0
+ID3D11Device::CreateTexture2D own
+ID3D11Device::CreateTexture3D pInitialData in size=aux0
+ID3D11Device::CreateTexture3D own
+ID3D11Device3::CreateTexture2D1 initial_data in size=aux0
+ID3D11Device3::CreateTexture2D1 own
+ID3D11Device3::CreateTexture3D1 initial_data in size=aux0
+ID3D11Device3::CreateTexture3D1 own
+ID3D10Device::CreateBuffer pInitialData in size=aux0
+ID3D10Device::CreateBuffer own
+ID3D10Device::CreateTexture1D pInitialData in size=aux0
+ID3D10Device::CreateTexture1D own
+ID3D10Device::CreateTexture2D pInitialData in size=aux0
+ID3D10Device::CreateTexture2D own
+ID3D10Device::CreateTexture3D pInitialData in size=aux0
+ID3D10Device::CreateTexture3D own
+ID3D11DeviceContext::UpdateSubresource pSrcData in size=aux0
+ID3D11DeviceContext::UpdateSubresource own
+ID3D11DeviceContext1::UpdateSubresource1 pSrcData in size=aux0
+ID3D11DeviceContext1::UpdateSubresource1 own
+ID3D10Device::UpdateSubresource pSrcData in size=aux0
+ID3D10Device::UpdateSubresource own
+# Maps (own): the host answers the arena's (blob, offset) of DXMT's memory in aux, which the unix side makes the
+# guest's address (as ID3D12Resource::Map); the pitches come back in the mapped struct's bytes.
+ID3D11DeviceContext::Map pMappedResource out bytes=16
+ID3D11DeviceContext::Map own
+ID3D10Buffer::Map ppData out bytes=8
+ID3D10Buffer::Map own
+ID3D10Texture1D::Map ppData out bytes=8
+ID3D10Texture1D::Map own
+ID3D10Texture2D::Map pMappedTex2D out bytes=16
+ID3D10Texture2D::Map own
+ID3D10Texture3D::Map pMappedTex3D out bytes=16
+ID3D10Texture3D::Map own
+# D3D11_KEEP_* counts carry no array (guest/proxy.cpp's wrap drops them).
+ID3D11DeviceContext::OMSetRenderTargetsAndUnorderedAccessViews wrap
+# Class instances: their count after them (DXMT has none, so games pass none).
+ID3D11DeviceContext::VSSetShader ppClassInstances in count=NumClassInstances
+ID3D11DeviceContext::HSSetShader ppClassInstances in count=NumClassInstances
+ID3D11DeviceContext::DSSetShader ppClassInstances in count=NumClassInstances
+ID3D11DeviceContext::GSSetShader ppClassInstances in count=NumClassInstances
+ID3D11DeviceContext::PSSetShader ppClassInstances in count=NumClassInstances
+ID3D11DeviceContext::CSSetShader ppClassInstances in count=NumClassInstances
+# The mechanical ones: object arrays by the count before them, private data, shader bytecode.
+ID3D10DeviceChild::GetPrivateData pDataSize inout one
+ID3D10DeviceChild::GetPrivateData pData out size=*pDataSize
+ID3D10DeviceChild::SetPrivateData pData in size=DataSize
+ID3D10Device::VSSetConstantBuffers ppConstantBuffers in count=NumBuffers
+ID3D10Device::PSSetShaderResources ppShaderResourceViews in count=NumViews
+ID3D10Device::PSSetSamplers ppSamplers in count=NumSamplers
+ID3D10Device::PSSetConstantBuffers ppConstantBuffers in count=NumBuffers
+ID3D10Device::IASetVertexBuffers ppVertexBuffers in count=NumBuffers
+ID3D10Device::GSSetConstantBuffers ppConstantBuffers in count=NumBuffers
+ID3D10Device::VSSetShaderResources ppShaderResourceViews in count=NumViews
+ID3D10Device::VSSetSamplers ppSamplers in count=NumSamplers
+ID3D10Device::GSSetShaderResources ppShaderResourceViews in count=NumViews
+ID3D10Device::GSSetSamplers ppSamplers in count=NumSamplers
+ID3D10Device::OMSetRenderTargets ppRenderTargetViews in count=NumViews
+ID3D10Device::SOSetTargets ppSOTargets in count=NumBuffers
+ID3D10Device::VSGetConstantBuffers ppConstantBuffers out count=NumBuffers
+ID3D10Device::PSGetShaderResources ppShaderResourceViews out count=NumViews
+ID3D10Device::PSGetSamplers ppSamplers out count=NumSamplers
+ID3D10Device::PSGetConstantBuffers ppConstantBuffers out count=NumBuffers
+ID3D10Device::IAGetVertexBuffers ppVertexBuffers out count=NumBuffers
+ID3D10Device::GSGetConstantBuffers ppConstantBuffers out count=NumBuffers
+ID3D10Device::VSGetShaderResources ppShaderResourceViews out count=NumViews
+ID3D10Device::VSGetSamplers ppSamplers out count=NumSamplers
+ID3D10Device::GSGetShaderResources ppShaderResourceViews out count=NumViews
+ID3D10Device::GSGetSamplers ppSamplers out count=NumSamplers
+ID3D10Device::OMGetRenderTargets ppRenderTargetViews out count=NumViews
+ID3D10Device::OMGetRenderTargets ppDepthStencilView out count=NumViews
+ID3D10Device::SOGetTargets ppSOTargets out count=NumBuffers
+ID3D10Device::GetPrivateData pDataSize inout one
+ID3D10Device::GetPrivateData pData out size=*pDataSize
+ID3D10Device::SetPrivateData pData in size=DataSize
+ID3D10Device::CreateInputLayout ppInputLayout out count=NumElements
+ID3D10Device::CreateVertexShader pShaderBytecode in size=BytecodeLength
+ID3D10Device::CreateGeometryShader pShaderBytecode in size=BytecodeLength
+ID3D10Device::CreateGeometryShaderWithStreamOutput ppGeometryShader out count=NumEntries
+ID3D10Device::CreateGeometryShaderWithStreamOutput pShaderBytecode in size=BytecodeLength
+ID3D10Device::CreatePixelShader pShaderBytecode in size=BytecodeLength
+ID3D11DeviceChild::GetPrivateData pDataSize inout one
+ID3D11DeviceChild::GetPrivateData pData out size=*pDataSize
+ID3D11DeviceChild::SetPrivateData pData in size=DataSize
+ID3D11DeviceContext::VSSetConstantBuffers ppConstantBuffers in count=NumBuffers
+ID3D11DeviceContext::PSSetShaderResources ppShaderResourceViews in count=NumViews
+ID3D11DeviceContext::PSSetSamplers ppSamplers in count=NumSamplers
+ID3D11DeviceContext::PSSetConstantBuffers ppConstantBuffers in count=NumBuffers
+ID3D11DeviceContext::IASetVertexBuffers ppVertexBuffers in count=NumBuffers
+ID3D11DeviceContext::GSSetConstantBuffers ppConstantBuffers in count=NumBuffers
+ID3D11DeviceContext::VSSetShaderResources ppShaderResourceViews in count=NumViews
+ID3D11DeviceContext::VSSetSamplers ppSamplers in count=NumSamplers
+ID3D11DeviceContext::GSSetShaderResources ppShaderResourceViews in count=NumViews
+ID3D11DeviceContext::GSSetSamplers ppSamplers in count=NumSamplers
+ID3D11DeviceContext::OMSetRenderTargets ppRenderTargetViews in count=NumViews
+ID3D11DeviceContext::OMSetRenderTargetsAndUnorderedAccessViews ppRenderTargetViews in count=NumRTVs
+ID3D11DeviceContext::OMSetRenderTargetsAndUnorderedAccessViews ppUnorderedAccessViews in count=NumUAVs
+ID3D11DeviceContext::SOSetTargets ppSOTargets in count=NumBuffers
+ID3D11DeviceContext::HSSetShaderResources ppShaderResourceViews in count=NumViews
+ID3D11DeviceContext::HSSetSamplers ppSamplers in count=NumSamplers
+ID3D11DeviceContext::HSSetConstantBuffers ppConstantBuffers in count=NumBuffers
+ID3D11DeviceContext::DSSetShaderResources ppShaderResourceViews in count=NumViews
+ID3D11DeviceContext::DSSetSamplers ppSamplers in count=NumSamplers
+ID3D11DeviceContext::DSSetConstantBuffers ppConstantBuffers in count=NumBuffers
+ID3D11DeviceContext::CSSetShaderResources ppShaderResourceViews in count=NumViews
+ID3D11DeviceContext::CSSetUnorderedAccessViews ppUnorderedAccessViews in count=NumUAVs
+ID3D11DeviceContext::CSSetSamplers ppSamplers in count=NumSamplers
+ID3D11DeviceContext::CSSetConstantBuffers ppConstantBuffers in count=NumBuffers
+ID3D11DeviceContext::VSGetConstantBuffers ppConstantBuffers out count=NumBuffers
+ID3D11DeviceContext::PSGetShaderResources ppShaderResourceViews out count=NumViews
+ID3D11DeviceContext::PSGetSamplers ppSamplers out count=NumSamplers
+ID3D11DeviceContext::PSGetConstantBuffers ppConstantBuffers out count=NumBuffers
+ID3D11DeviceContext::IAGetVertexBuffers ppVertexBuffers out count=NumBuffers
+ID3D11DeviceContext::GSGetConstantBuffers ppConstantBuffers out count=NumBuffers
+ID3D11DeviceContext::VSGetShaderResources ppShaderResourceViews out count=NumViews
+ID3D11DeviceContext::VSGetSamplers ppSamplers out count=NumSamplers
+ID3D11DeviceContext::GSGetShaderResources ppShaderResourceViews out count=NumViews
+ID3D11DeviceContext::GSGetSamplers ppSamplers out count=NumSamplers
+ID3D11DeviceContext::OMGetRenderTargets ppRenderTargetViews out count=NumViews
+ID3D11DeviceContext::OMGetRenderTargets ppDepthStencilView out count=NumViews
+ID3D11DeviceContext::OMGetRenderTargetsAndUnorderedAccessViews ppRenderTargetViews out count=NumRTVs
+ID3D11DeviceContext::OMGetRenderTargetsAndUnorderedAccessViews ppDepthStencilView out count=NumRTVs
+ID3D11DeviceContext::OMGetRenderTargetsAndUnorderedAccessViews ppUnorderedAccessViews out count=NumUAVs
+ID3D11DeviceContext::SOGetTargets ppSOTargets out count=NumBuffers
+ID3D11DeviceContext::HSGetShaderResources ppShaderResourceViews out count=NumViews
+ID3D11DeviceContext::HSGetSamplers ppSamplers out count=NumSamplers
+ID3D11DeviceContext::HSGetConstantBuffers ppConstantBuffers out count=NumBuffers
+ID3D11DeviceContext::DSGetShaderResources ppShaderResourceViews out count=NumViews
+ID3D11DeviceContext::DSGetSamplers ppSamplers out count=NumSamplers
+ID3D11DeviceContext::DSGetConstantBuffers ppConstantBuffers out count=NumBuffers
+ID3D11DeviceContext::CSGetShaderResources ppShaderResourceViews out count=NumViews
+ID3D11DeviceContext::CSGetUnorderedAccessViews ppUnorderedAccessViews out count=NumUAVs
+ID3D11DeviceContext::CSGetSamplers ppSamplers out count=NumSamplers
+ID3D11DeviceContext::CSGetConstantBuffers ppConstantBuffers out count=NumBuffers
+ID3D11Device::CreateInputLayout ppInputLayout out count=NumElements
+ID3D11Device::CreateVertexShader pShaderBytecode in size=BytecodeLength
+ID3D11Device::CreateGeometryShader pShaderBytecode in size=BytecodeLength
+ID3D11Device::CreateGeometryShaderWithStreamOutput ppGeometryShader out count=NumStrides
+ID3D11Device::CreateGeometryShaderWithStreamOutput pShaderBytecode in size=BytecodeLength
+ID3D11Device::CreatePixelShader pShaderBytecode in size=BytecodeLength
+ID3D11Device::CreateHullShader pShaderBytecode in size=BytecodeLength
+ID3D11Device::CreateDomainShader pShaderBytecode in size=BytecodeLength
+ID3D11Device::CreateComputeShader pShaderBytecode in size=BytecodeLength
+ID3D11Device::GetPrivateData pDataSize inout one
+ID3D11Device::GetPrivateData pData out size=*pDataSize
+ID3D11Device::SetPrivateData pData in size=DataSize
+ID3D11DeviceContext1::VSSetConstantBuffers1 ppConstantBuffers in count=NumBuffers
+ID3D11DeviceContext1::HSSetConstantBuffers1 ppConstantBuffers in count=NumBuffers
+ID3D11DeviceContext1::DSSetConstantBuffers1 ppConstantBuffers in count=NumBuffers
+ID3D11DeviceContext1::GSSetConstantBuffers1 ppConstantBuffers in count=NumBuffers
+ID3D11DeviceContext1::PSSetConstantBuffers1 ppConstantBuffers in count=NumBuffers
+ID3D11DeviceContext1::CSSetConstantBuffers1 ppConstantBuffers in count=NumBuffers
+ID3D11DeviceContext1::VSGetConstantBuffers1 ppConstantBuffers out count=NumBuffers
+ID3D11DeviceContext1::HSGetConstantBuffers1 ppConstantBuffers out count=NumBuffers
+ID3D11DeviceContext1::DSGetConstantBuffers1 ppConstantBuffers out count=NumBuffers
+ID3D11DeviceContext1::GSGetConstantBuffers1 ppConstantBuffers out count=NumBuffers
+ID3D11DeviceContext1::PSGetConstantBuffers1 ppConstantBuffers out count=NumBuffers
+ID3D11DeviceContext1::CSGetConstantBuffers1 ppConstantBuffers out count=NumBuffers

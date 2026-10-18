@@ -35,6 +35,9 @@ struct mn_d3d_query { uint64_t handle; uint8_t iid[16]; uint64_t out; }; /* repl
  * (host/window.c keeps the latest of each, by context). flags: 1 minimised, 2 foreground, 4 a window. A display's
  * modes follow it, `modes` of them, the current one first and then EnumDisplaySettings' list. */
 struct mn_d3d_window { uint64_t hwnd, monitor; uint32_t width, height, flags, pad; }; /* flags 8: the process in front */
+/* D3D11's and D3D10's initial data and updates (M4 Task 4, rules.txt's own): uint32_t count, pad, then count of these,
+ * then the bytes each names (offset from the region's start). */
+struct mn_d3d_sub { uint32_t offset, pitch, slice, size; };
 /* Op 9 (M3 Task 3): a change to a window or a mode that native DXMT made and the guest makes with its own window
  * system (fork 0083's WMTWsiAction, kind its MN_D3D_ACTION_*); taken during the context's own calls, in order. */
 enum {

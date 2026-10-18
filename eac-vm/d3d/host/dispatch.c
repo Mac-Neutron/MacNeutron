@@ -31,6 +31,25 @@ NTSTATUS_T mn_d3d_create_fence_stub(void *params), mn_d3d_fence_signal_stub(void
     mn_d3d_adapter_desc1_stub(void *params), mn_d3d_adapter_desc2_stub(void *params),
     mn_d3d_adapter_desc3_stub(void *params), mn_d3d_output_desc_stub(void *params),
     mn_d3d_output_desc1_stub(void *params);
+/* native.cpp: D3D11's and D3D10's data and maps (M4) */
+NTSTATUS_T mn_d3d_create_buffer11_stub(void *params);
+NTSTATUS_T mn_d3d_create_tex1d11_stub(void *params);
+NTSTATUS_T mn_d3d_create_tex2d11_stub(void *params);
+NTSTATUS_T mn_d3d_create_tex3d11_stub(void *params);
+NTSTATUS_T mn_d3d_create_tex2d1_11_stub(void *params);
+NTSTATUS_T mn_d3d_create_tex3d1_11_stub(void *params);
+NTSTATUS_T mn_d3d_create_buffer10_stub(void *params);
+NTSTATUS_T mn_d3d_create_tex1d10_stub(void *params);
+NTSTATUS_T mn_d3d_create_tex2d10_stub(void *params);
+NTSTATUS_T mn_d3d_create_tex3d10_stub(void *params);
+NTSTATUS_T mn_d3d_update11_stub(void *params);
+NTSTATUS_T mn_d3d_update1_11_stub(void *params);
+NTSTATUS_T mn_d3d_update10_stub(void *params);
+NTSTATUS_T mn_d3d_map11_stub(void *params);
+NTSTATUS_T mn_d3d_map10_buffer_stub(void *params);
+NTSTATUS_T mn_d3d_map10_tex1d_stub(void *params);
+NTSTATUS_T mn_d3d_map10_tex2d_stub(void *params);
+NTSTATUS_T mn_d3d_map10_tex3d_stub(void *params);
 int mn_d3d_events_attach(struct mn_wm_ctx *c, uint64_t queue_blob, uint64_t mirror_blob, uint64_t mirror_len);
 void mn_d3d_events_end(uint32_t ctx_id);
 void mn_d3d_fence_gone(void *obj);
@@ -83,11 +102,20 @@ static void trace_out(uint32_t ctx_id) {
     fclose(f);
 }
 
+/* Whether the guest refuses the export (rules.txt: no call reaches the host, so native DXMT needn't have it). */
+static int refused_export(const char *name) {
+    for (unsigned i = 0; i < MN_D3D_CALLS; i++)
+        if (mn_d3d_calls[i].name && mn_d3d_calls[i].name[0] == ':' && !strcmp(mn_d3d_calls[i].name + 2, name))
+            return mn_d3d_calls[i].mode == MN_WM_LOCAL || mn_d3d_calls[i].mode == MN_WM_REFUSED; /* refused: answered in the guest */
+    return 0;
+}
+
 int mn_d3d_load(const char *d) {
-    static const char *const names[3] = {"d3d12", "dxgi", "winemetal"};
-    void *libs[3];
+    /* M4: D3D11 and D3D10 too (d3d10core links d3d11: after it); winemetal's hooks are libs[2]'s */
+    static const char *const names[5] = {"d3d12", "dxgi", "winemetal", "d3d11", "d3d10core"};
+    void *libs[5];
     char path[4096];
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 5; i++) {
         snprintf(path, sizeof path, "%s/%s.dylib", d, names[i]);
         if (!(libs[i] = dlopen(path, RTLD_NOW | RTLD_LOCAL))) {
             fprintf(stderr, "mn-d3d: error: native DXMT: %s\n", dlerror());
@@ -95,8 +123,10 @@ int mn_d3d_load(const char *d) {
         }
     }
     for (int k = 0; k < MN_D3D_EXPORTS; k++) {
-        void *lib = libs[strcmp(mn_d3d_export_names[k].dll, "d3d12") ? 1 : 0];
-        if (!(mn_d3d_exports[k] = dlsym(lib, mn_d3d_export_names[k].name))) {
+        void *lib = libs[1];
+        for (int i = 0; i < 5; i++)
+            if (!strcmp(mn_d3d_export_names[k].dll, names[i])) lib = libs[i];
+        if (!(mn_d3d_exports[k] = dlsym(lib, mn_d3d_export_names[k].name)) && !refused_export(mn_d3d_export_names[k].name)) {
             fprintf(stderr, "mn-d3d: error: native DXMT: %s\n", dlerror());
             return -1;
         }
@@ -122,6 +152,24 @@ int mn_d3d_load(const char *d) {
     }
     mn_d3d_wsi_hooks(wsi); /* window.c: native DXMT's window system, from the guest's ops 7 and 8 */
     mn_d3d_stubs[MN_D3D_ID_ID3D12Resource_Map] = mn_d3d_map_stub; /* rules.txt's own */
+    mn_d3d_stubs[MN_D3D_ID_ID3D11Device_CreateBuffer] = mn_d3d_create_buffer11_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D11Device_CreateTexture1D] = mn_d3d_create_tex1d11_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D11Device_CreateTexture2D] = mn_d3d_create_tex2d11_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D11Device_CreateTexture3D] = mn_d3d_create_tex3d11_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D11Device3_CreateTexture2D1] = mn_d3d_create_tex2d1_11_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D11Device3_CreateTexture3D1] = mn_d3d_create_tex3d1_11_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D10Device_CreateBuffer] = mn_d3d_create_buffer10_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D10Device_CreateTexture1D] = mn_d3d_create_tex1d10_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D10Device_CreateTexture2D] = mn_d3d_create_tex2d10_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D10Device_CreateTexture3D] = mn_d3d_create_tex3d10_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D11DeviceContext_UpdateSubresource] = mn_d3d_update11_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D11DeviceContext1_UpdateSubresource1] = mn_d3d_update1_11_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D10Device_UpdateSubresource] = mn_d3d_update10_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D11DeviceContext_Map] = mn_d3d_map11_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D10Buffer_Map] = mn_d3d_map10_buffer_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D10Texture1D_Map] = mn_d3d_map10_tex1d_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D10Texture2D_Map] = mn_d3d_map10_tex2d_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D10Texture3D_Map] = mn_d3d_map10_tex3d_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D12Device_CreateFence] = mn_d3d_create_fence_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D12Fence_Signal] = mn_d3d_fence_signal_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D12CommandQueue_Signal] = mn_d3d_queue_signal_stub;

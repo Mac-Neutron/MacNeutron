@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 #include "stubs.h"
 #include "../mn_d3d.h"
 
@@ -241,3 +242,154 @@ extern "C" void mn_d3d_answers(void *obj, int iface, uint64_t out[9]) {
         ((IUnknown *)q)->Release();
     }
 }
+
+// ---- D3D11's and D3D10's data and maps (own, M4 Task 4) ----
+
+// An interface's mn_d3d_ifaces index (natively __uuidof is a temporary).
+template <class T> static int iface_of() {
+    static const GUID iid = __uuidof(T);
+    return mn_d3d_iface_of(&iid);
+}
+
+// A packed region (guest/proxy.cpp's pack: count, each subresource's mn_d3d_sub, their bytes), as DXMT takes it.
+static bool unpacked(const void *flat, uint64_t len, std::vector<D3D11_SUBRESOURCE_DATA> &out) {
+    auto *b = (const uint8_t *)flat;
+    uint32_t n;
+    if (!b || len < 8) return false;
+    std::memcpy(&n, b, 4);
+    if ((len - 8) / sizeof(mn_d3d_sub) < n) return false;
+    out.resize(n);
+    for (uint32_t i = 0; i < n; i++) {
+        mn_d3d_sub s;
+        std::memcpy(&s, b + 8 + i * sizeof s, sizeof s);
+        if (s.offset > len || s.size > len - s.offset) return false;
+        out[i] = {b + s.offset, s.pitch, s.slice};
+    }
+    return true;
+}
+
+#define CREATE_STUB(stub, NAME, Iface, method, Desc, Data, T, DESC, INIT, OUT)                                         \
+    extern "C" NTSTATUS_T stub(void *params) {                                                                         \
+        auto *a = (mn_d3d_p_##NAME *)params;                                                                           \
+        std::vector<D3D11_SUBRESOURCE_DATA> subs;                                                                      \
+        if (a->INIT && !unpacked((const void *)(uintptr_t)a->INIT, a->aux[0], subs)) {                                \
+            RESULT(a, E_INVALIDARG);                                                                                   \
+            return 0;                                                                                                  \
+        }                                                                                                              \
+        try {                                                                                                          \
+            HRESULT r = ((Iface *)(uintptr_t)a->self)                                                                  \
+                            ->method((const Desc *)(uintptr_t)a->DESC, a->INIT ? (const Data *)subs.data() : nullptr, \
+                                     (T **)&a->OUT);                                                                   \
+            if (SUCCEEDED(r) && a->OUT) mn_d3d_answers((void *)(uintptr_t)a->OUT, iface_of<T>(), a->OUT##_ifaces); \
+            RESULT(a, r);                                                                                              \
+        } catch (...) {                                                                                                \
+            return mn_d3d_not_in_dxmt(MN_D3D_ID_##NAME, &a->ret);                                                      \
+        }                                                                                                              \
+        return 0;                                                                                                      \
+    }
+CREATE_STUB(mn_d3d_create_buffer11_stub, ID3D11Device_CreateBuffer, ID3D11Device, CreateBuffer, D3D11_BUFFER_DESC,
+            D3D11_SUBRESOURCE_DATA, ID3D11Buffer, pDesc, pInitialData, ppBuffer)
+CREATE_STUB(mn_d3d_create_tex1d11_stub, ID3D11Device_CreateTexture1D, ID3D11Device, CreateTexture1D,
+            D3D11_TEXTURE1D_DESC, D3D11_SUBRESOURCE_DATA, ID3D11Texture1D, pDesc, pInitialData, ppTexture1D)
+CREATE_STUB(mn_d3d_create_tex2d11_stub, ID3D11Device_CreateTexture2D, ID3D11Device, CreateTexture2D,
+            D3D11_TEXTURE2D_DESC, D3D11_SUBRESOURCE_DATA, ID3D11Texture2D, pDesc, pInitialData, ppTexture2D)
+CREATE_STUB(mn_d3d_create_tex3d11_stub, ID3D11Device_CreateTexture3D, ID3D11Device, CreateTexture3D,
+            D3D11_TEXTURE3D_DESC, D3D11_SUBRESOURCE_DATA, ID3D11Texture3D, pDesc, pInitialData, ppTexture3D)
+CREATE_STUB(mn_d3d_create_tex2d1_11_stub, ID3D11Device3_CreateTexture2D1, ID3D11Device3, CreateTexture2D1,
+            D3D11_TEXTURE2D_DESC1, D3D11_SUBRESOURCE_DATA, ID3D11Texture2D1, desc, initial_data, texture)
+CREATE_STUB(mn_d3d_create_tex3d1_11_stub, ID3D11Device3_CreateTexture3D1, ID3D11Device3, CreateTexture3D1,
+            D3D11_TEXTURE3D_DESC1, D3D11_SUBRESOURCE_DATA, ID3D11Texture3D1, desc, initial_data, texture)
+CREATE_STUB(mn_d3d_create_buffer10_stub, ID3D10Device_CreateBuffer, ID3D10Device, CreateBuffer, D3D10_BUFFER_DESC,
+            D3D10_SUBRESOURCE_DATA, ID3D10Buffer, pDesc, pInitialData, ppBuffer)
+CREATE_STUB(mn_d3d_create_tex1d10_stub, ID3D10Device_CreateTexture1D, ID3D10Device, CreateTexture1D,
+            D3D10_TEXTURE1D_DESC, D3D10_SUBRESOURCE_DATA, ID3D10Texture1D, pDesc, pInitialData, ppTexture1D)
+CREATE_STUB(mn_d3d_create_tex2d10_stub, ID3D10Device_CreateTexture2D, ID3D10Device, CreateTexture2D,
+            D3D10_TEXTURE2D_DESC, D3D10_SUBRESOURCE_DATA, ID3D10Texture2D, pDesc, pInitialData, ppTexture2D)
+CREATE_STUB(mn_d3d_create_tex3d10_stub, ID3D10Device_CreateTexture3D, ID3D10Device, CreateTexture3D,
+            D3D10_TEXTURE3D_DESC, D3D10_SUBRESOURCE_DATA, ID3D10Texture3D, pDesc, pInitialData, ppTexture3D)
+
+#define UPDATE_STUB(stub, NAME, Iface, method, Res, Box, EXTRA)                                                        \
+    extern "C" NTSTATUS_T stub(void *params) {                                                                         \
+        auto *a = (mn_d3d_p_##NAME *)params;                                                                           \
+        try {                                                                                                          \
+            ((Iface *)(uintptr_t)a->self)                                                                              \
+                ->method((Res *)(uintptr_t)a->pDstResource, a->DstSubresource, (const Box *)(uintptr_t)a->pDstBox,    \
+                         (const void *)(uintptr_t)a->pSrcData, a->SrcRowPitch, a->SrcDepthPitch EXTRA);               \
+        } catch (...) {                                                                                                \
+            return mn_d3d_not_in_dxmt(MN_D3D_ID_##NAME, nullptr);                                                      \
+        }                                                                                                              \
+        return 0;                                                                                                      \
+    }
+#define MN_COMMA ,
+UPDATE_STUB(mn_d3d_update11_stub, ID3D11DeviceContext_UpdateSubresource, ID3D11DeviceContext, UpdateSubresource,
+            ID3D11Resource, D3D11_BOX, )
+UPDATE_STUB(mn_d3d_update1_11_stub, ID3D11DeviceContext1_UpdateSubresource1, ID3D11DeviceContext1, UpdateSubresource1,
+            ID3D11Resource, D3D11_BOX, MN_COMMA a->CopyFlags)
+UPDATE_STUB(mn_d3d_update10_stub, ID3D10Device_UpdateSubresource, ID3D10Device, UpdateSubresource, ID3D10Resource,
+            D3D10_BOX, )
+
+// A map's memory as the arena's (blob, offset) in aux (the loopback's guest shares the host's memory: the pointer, and
+// UINT64_MAX); false outside every arena.
+static bool located(void *ptr, uint64_t aux[2]) {
+    if (!mn_d3d_arena_of(ptr, &aux[0], &aux[1])) return true;
+#ifdef MN_D3D_LOOPBACK
+    aux[0] = (uintptr_t)ptr, aux[1] = UINT64_MAX;
+    return true;
+#else
+    static std::atomic<int> said;
+    if (!said++) fprintf(stderr, "mn-d3d: error: a D3D11 or D3D10 map: memory outside the arenas\n");
+    return false;
+#endif
+}
+
+extern "C" NTSTATUS_T mn_d3d_map11_stub(void *params) {
+    auto *a = (mn_d3d_p_ID3D11DeviceContext_Map *)params;
+    auto *ctx = (ID3D11DeviceContext *)(uintptr_t)a->self;
+    auto *res = (ID3D11Resource *)(uintptr_t)a->pResource;
+    D3D11_MAPPED_SUBRESOURCE m = {};
+    try {
+        HRESULT r = ctx->Map(res, a->Subresource, (D3D11_MAP)a->MapType, a->MapFlags, a->pMappedResource ? &m : nullptr);
+        if (SUCCEEDED(r) && a->pMappedResource) {
+            if (!located(m.pData, a->aux)) {
+                ctx->Unmap(res, a->Subresource);
+                r = E_FAIL;
+            } else {
+                std::memcpy((void *)(uintptr_t)a->pMappedResource, &m, sizeof m); // the pitches (pData: aux's)
+            }
+        }
+        RESULT(a, r);
+    } catch (...) {
+        return mn_d3d_not_in_dxmt(MN_D3D_ID_ID3D11DeviceContext_Map, &a->ret);
+    }
+    return 0;
+}
+
+#define MAP10_STUB(stub, NAME, Iface, Out, OUT, SUB, UNMAP)                                                            \
+    extern "C" NTSTATUS_T stub(void *params) {                                                                         \
+        auto *a = (mn_d3d_p_##NAME *)params;                                                                           \
+        auto *self = (Iface *)(uintptr_t)a->self;                                                                      \
+        Out m = {};                                                                                                    \
+        try {                                                                                                          \
+            HRESULT r = self->Map(SUB(D3D10_MAP)a->MapType, a->MapFlags, a->OUT ? &m : nullptr);                      \
+            if (SUCCEEDED(r) && a->OUT) {                                                                              \
+                if (!located(*(void **)&m, a->aux)) {                                                                  \
+                    self->Unmap(UNMAP);                                                                                \
+                    r = E_FAIL;                                                                                        \
+                } else {                                                                                               \
+                    std::memcpy((void *)(uintptr_t)a->OUT, &m, sizeof m);                                              \
+                }                                                                                                      \
+            }                                                                                                          \
+            RESULT(a, r);                                                                                              \
+        } catch (...) {                                                                                                \
+            return mn_d3d_not_in_dxmt(MN_D3D_ID_##NAME, &a->ret);                                                      \
+        }                                                                                                              \
+        return 0;                                                                                                      \
+    }
+#define NO_SUB
+#define WITH_SUB a->Subresource,
+MAP10_STUB(mn_d3d_map10_buffer_stub, ID3D10Buffer_Map, ID3D10Buffer, void *, ppData, NO_SUB, )
+MAP10_STUB(mn_d3d_map10_tex1d_stub, ID3D10Texture1D_Map, ID3D10Texture1D, void *, ppData, WITH_SUB, a->Subresource)
+MAP10_STUB(mn_d3d_map10_tex2d_stub, ID3D10Texture2D_Map, ID3D10Texture2D, D3D10_MAPPED_TEXTURE2D, pMappedTex2D, WITH_SUB,
+           a->Subresource)
+MAP10_STUB(mn_d3d_map10_tex3d_stub, ID3D10Texture3D_Map, ID3D10Texture3D, D3D10_MAPPED_TEXTURE3D, pMappedTex3D, WITH_SUB,
+           a->Subresource)

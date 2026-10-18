@@ -246,6 +246,11 @@ static int32_t family(uint32_t id, void *params) {
     }
 }
 
+/* A D3D11 or D3D10 map's (blob, offset), our address (aux[1] UINT64_MAX: the loopback's pointer, already ours). */
+static void map_address(uint64_t aux[2]) {
+    if (aux[1] != UINT64_MAX && (aux[0] || aux[1])) aux[0] = (uintptr_t)arena_ptr(aux[0], aux[1]);
+}
+
 int32_t mn_d3d_unix_call(void *args) {
     const struct mn_d3d_args *a = args;
     pthread_once(&once, init);
@@ -285,6 +290,14 @@ int32_t mn_d3d_unix_call(void *args) {
             mn_d3d_p_ID3D12Device_CreateFence *f = params;
             f->aux[1] = events_ready && f->aux[0] < mirror_blob.size / 8 ? (uintptr_t)((uint64_t *)mirror_blob.ptr + f->aux[0]) : 0;
         }
+        if (!s) /* D3D11's and D3D10's maps (M4): the arena's (blob, offset) in aux, our address of it in aux[0] */
+            switch (a->id) {
+            case MN_D3D_ID_ID3D11DeviceContext_Map: map_address(((mn_d3d_p_ID3D11DeviceContext_Map *)params)->aux); break;
+            case MN_D3D_ID_ID3D10Buffer_Map: map_address(((mn_d3d_p_ID3D10Buffer_Map *)params)->aux); break;
+            case MN_D3D_ID_ID3D10Texture1D_Map: map_address(((mn_d3d_p_ID3D10Texture1D_Map *)params)->aux); break;
+            case MN_D3D_ID_ID3D10Texture2D_Map: map_address(((mn_d3d_p_ID3D10Texture2D_Map *)params)->aux); break;
+            case MN_D3D_ID_ID3D10Texture3D_Map: map_address(((mn_d3d_p_ID3D10Texture3D_Map *)params)->aux); break;
+            }
         if (!s && a->id == MN_D3D_ID_ID3D12Resource_Map) { /* the arena's (blob, offset): our address of it */
             uint64_t *at = (uint64_t *)(uintptr_t)((mn_d3d_p_ID3D12Resource_Map *)params)->data;
             if (at) at[0] = (uintptr_t)arena_ptr(at[0], at[1]);

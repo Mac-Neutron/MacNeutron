@@ -25,13 +25,20 @@ IUNKNOWN_METHODS = 3
 # The headers the model reads, in order (paths under include-native): their interfaces are numbered in this order.
 HEADERS = ["directx/dxgiformat.h", "directx/dxgicommon.h", "directx/dxgitype.h", "d3d12/d3d12.h",
            "directx/d3dcommon.h", "directx/dxgi.h", "directx/dxgi1_2.h", "directx/dxgi1_3.h", "directx/dxgi1_4.h",
-           "directx/dxgi1_5.h", "directx/dxgi1_6.h", "directx/dxgidebug.h"]
+           "directx/dxgi1_5.h", "directx/dxgi1_6.h", "directx/dxgidebug.h",
+           # M4: D3D11 and D3D10, after the others so that D3D12's and DXGI's interfaces keep their numbers
+           "directx/d3d10.h", "directx/d3d10_1.h", "directx/d3d11.h", "directx/d3d11_1.h", "directx/d3d11_2.h",
+           "directx/d3d11_3.h", "directx/d3d11_4.h"]
 # The exports games call: d3d12.def's and dxgi.def's (DXMT's own lists).
 EXPORTS = {"d3d12.dll": ["D3D12CreateDevice", "D3D12GetDebugInterface", "D3D12CreateRootSignatureDeserializer",
                          "D3D12CreateVersionedRootSignatureDeserializer", "D3D12SerializeRootSignature",
                          "D3D12SerializeVersionedRootSignature", "D3D12GetInterface"],
            "dxgi.dll": ["CreateDXGIFactory", "CreateDXGIFactory1", "CreateDXGIFactory2",
-                        "DXGIDeclareAdapterRemovalSupport", "DXGIGetDebugInterface1"]}
+                        "DXGIDeclareAdapterRemovalSupport", "DXGIGetDebugInterface1"],
+           # M4: d3d11.def's and d3d10core.def's (DXMT's, with Wine's D3D11CoreRegisterLayers)
+           "d3d11.dll": ["D3D11CoreCreateDevice", "D3D11CoreRegisterLayers", "D3D11CreateDevice",
+                         "D3D11CreateDeviceAndSwapChain", "D3D11On12CreateDevice"],
+           "d3d10core.dll": ["D3D10CoreCreateDevice", "D3D10CoreRegisterLayers"]}
 
 
 @dataclass
@@ -79,6 +86,7 @@ class Export:
     dll: str
     ret: str
     params: List[Param]
+    declared: bool = False  # rules.txt's (no header declares it, or not with its parameters' names)
 
 
 @dataclass
@@ -260,8 +268,11 @@ def parse_header(path, header, model):
     wanted = {n: dll for dll, names in EXPORTS.items() for n in names}
     for m in EXPORT.finditer(re.sub(r"^\s*#.*$", " ", text, flags=re.M)):  # not a preceding #endif
         if m.group(2) in wanted and m.group(2) not in [e.name for e in model.exports]:
-            model.exports.append(Export(m.group(2), wanted[m.group(2)], norm_type(m.group(1)),
-                                        parse_params(m.group(3))))
+            try:
+                params = parse_params(m.group(3))
+            except ValueError:  # d3d11.h's prototypes name no parameters: rules.txt declares those exports
+                continue
+            model.exports.append(Export(m.group(2), wanted[m.group(2)], norm_type(m.group(1)), params))
 
 
 def parse_rules_declarations(text, model):
@@ -279,7 +290,7 @@ def parse_rules_declarations(text, model):
         model.interfaces[name] = Interface(name, m.group(3).lower(), base, inherited(model, base) + own, "rules.txt")
     for m in re.finditer(r"\bexport\s+(\S+)\s+([\w\s\*]+?)\s+(\w+)\s*\(([^;]*)\)\s*;", text, re.S):
         if m.group(3) not in [e.name for e in model.exports]:
-            model.exports.append(Export(m.group(3), m.group(1), norm_type(m.group(2)), parse_params(m.group(4))))
+            model.exports.append(Export(m.group(3), m.group(1), norm_type(m.group(2)), parse_params(m.group(4)), True))
 
 
 def inherited(model, base):
@@ -290,10 +301,22 @@ def inherited(model, base):
     return list(model.interfaces[base].methods)
 
 
+# Interfaces another one's IID and vtable stand for (QueryInterface finds that one): D3D10's multithread interface is
+# D3D11's (d3d10.h and d3d11_4.h, the same IID and methods).
+SAME_AS = {"ID3D10Multithread": "ID3D11Multithread"}
+
+
 def load(include_dir, rules_path):
     model = Model()
     for h in HEADERS:
         parse_header(os.path.join(include_dir, h), os.path.basename(h), model)
+    for name, same in SAME_AS.items():
+        if name in model.interfaces and model.interfaces[name].iid == model.interfaces[same].iid:
+            del model.interfaces[name]
+    iids = {}
+    for n, i in model.interfaces.items():
+        if i.iid and iids.setdefault(i.iid, n) != n:
+            raise ValueError(f"{n} has {iids[i.iid]}'s IID: SAME_AS it?")
     parse_rules_declarations(read(rules_path), model)
     missing = [n for names in EXPORTS.values() for n in names if n not in [e.name for e in model.exports]]
     if missing:
@@ -842,6 +865,9 @@ def classify(model, rules):
                 for f in fields:
                     if f.kind == "WMF_OUT" and f.nested:  # the host would write its own pointers into them
                         raise RuleError(f"{mname} {f.param}: data out holds pointers or handles: a special")
+                    if f.count in ("aux0", "aux1") and mname in rules.own and not f.deref:
+                        f.count, f.count_width = f"aux[{f.count[3]}]", 8  # the own code's size (M4: packed data)
+                        continue
                     if f.count:
                         if f.count not in byname:
                             raise RuleError(f"{mname} {f.param}: no argument {f.count}")
@@ -1042,7 +1068,8 @@ def emit_layout(model, calls):
         names |= c.structs
     out = ["// Generated by eac-vm/d3d/gen.py: don't edit. The guest's struct layouts (x86-64 Windows, as gen.py computes",
            "// them) against the host's (the native headers): data crosses the boundary as bytes.",
-           "#include <cstddef>", "#include <d3d12.h>", "#include <dxgi1_6.h>", ""]
+           "#include <cstddef>", "#include <d3d12.h>", "#include <dxgi1_6.h>", "#include <d3d10_1.h>",
+           "#include <d3d11_4.h>", ""]
     for n in sorted(names):
         if n not in model.structs or "." in n or n.startswith("MTL_"):
             continue
@@ -1161,8 +1188,9 @@ def emit_stubs(model, rules, calls):
            "// __ret argument, as the guest's C vtables have it.",
            '#include "stubs.h"', ""]
     for e in exports:
-        if e.name == "DXGIDeclareAdapterRemovalSupport":  # rules.txt's: the headers don't declare it
-            out.append('extern "C" HRESULT WINAPI DXGIDeclareAdapterRemovalSupport(void);')
+        if e.declared:  # rules.txt's prototype: a header declares it without its parameters' names, or not at all
+            params = ", ".join(f"{p.type} {p.name}" for p in e.params) or "void"
+            out.append(f'extern "C" {e.ret} WINAPI {e.name}({params});')
     out.append("extern \"C\" const struct mn_d3d_export mn_d3d_export_names[MN_D3D_EXPORTS] = {")
     for e in exports:
         out.append(f'    {{"{e.dll.replace(".dll", "")}", "{e.name}"}},')

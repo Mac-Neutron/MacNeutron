@@ -19,11 +19,18 @@ layout: $(GEN)/calls.c
 	@echo "layout: ok"
 .PHONY: layout
 
+# The bytes initial data and updates carry (M4 Task 4: guest/formats.cpp), natively.
+formats-test:
+	clang++ -std=c++17 -O1 -g -Wall -Werror -Wno-extern-c-compat -fsanitize=address,undefined -include $(NT)/native-prelude.h \
+	  -I$(NT)/include -I$(I)/d3d12 -I$(I)/windows -I$(I)/directx -I$(I) -o $(GEN)/formats-test tests/formats-test.cpp guest/formats.cpp
+	$(GEN)/formats-test
+.PHONY: formats-test
+
 # The host's calls into native DXMT (generated stubs.cpp), with DXMT's own flags: they must compile warning-free.
-DXMT_CXXFLAGS := -std=c++17 -DWIDL_EXPLICIT_AGGREGATE_RETURNS -include $(NT)/native-prelude.h -I$(NT)/include \
+DXMT_CXXFLAGS := -std=c++17 -Wno-extern-c-compat -DWIDL_EXPLICIT_AGGREGATE_RETURNS -include $(NT)/native-prelude.h -I$(NT)/include \
   -I$(I)/d3d12 -I$(I)/windows -I$(I)/directx -I$(I) -I$(DXMT)/util -I$(DXMT)/d3d12 -I$(GEN) -Ihost
 $(GEN)/stubs.o: $(GEN)/calls.c host/stubs.h
-	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -c -o $@ $(GEN)/stubs.cpp
+	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -Wno-extern-c-compat -c -o $@ $(GEN)/stubs.cpp
 stubs: $(GEN)/stubs.o
 	@echo "stubs: ok"
 .PHONY: stubs
@@ -42,9 +49,9 @@ roundtrip: $(GEN)/roundtrip
 # The host dispatcher on native DXMT (dispatch-test.c), beside Wine's winemetal.so as macneutron-vm runs them.
 NATIVE_LIB := $(ROOT)/build/dxmt-native/install/lib
 $(GEN)/native.o: host/native.cpp host/stubs.h $(GEN)/calls.c
-	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -fsanitize=address,undefined -c -o $@ host/native.cpp
+	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -Wno-extern-c-compat -fsanitize=address,undefined -c -o $@ host/native.cpp
 $(GEN)/stubs-asan.o: $(GEN)/calls.c host/stubs.h
-	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -fsanitize=address,undefined -c -o $@ $(GEN)/stubs.cpp
+	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -Wno-extern-c-compat -fsanitize=address,undefined -c -o $@ $(GEN)/stubs.cpp
 $(GEN)/dispatch-test: tests/dispatch-test.c host/dispatch.c host/memory.c host/events.c host/window.c host/dispatch.h mn_d3d.h $(GEN)/calls.c $(GEN)/native.o \
   $(GEN)/stubs-asan.o $(LOOP_SRC) $(WM)/host/dispatch.m $(WM)/marshal.c $(WM)/marshal.h
 	$(CC) $(CFLAGS) $(INC) -I. -c -o $(GEN)/dispatch-test.o tests/dispatch-test.c

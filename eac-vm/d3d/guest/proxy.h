@@ -7,6 +7,8 @@
 #include <windows.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
+#include <d3d10_1.h>
+#include <d3d11_4.h>
 #include <dxgidebug.h>
 #include "d3d12_interfaces.hpp"
 extern "C" {

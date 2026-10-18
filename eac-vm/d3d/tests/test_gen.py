@@ -218,6 +218,35 @@ class ClassifyTest(unittest.TestCase):
         c = next(c for c in calls.values() if c.name == "ITestViews::Name")
         self.assertEqual([f.kind for f in c.fields], ["WMF_STR_IN", "WMF_WSTR_IN"])
 
+    def test_d3d11_counts(self):
+        # M4: D3D11 and D3D10 in the model (ID3D10Multithread has ID3D11Multithread's IID and vtable: one of them)
+        self.assertEqual(len(gen.iface_index(self.m)), 204)
+        self.assertNotIn("ID3D10Multithread", self.m.interfaces)
+        names = {c.name for c in self.calls.values()}
+        for n in ("::D3D11CreateDevice", "::D3D11CoreCreateDevice", "::D3D11CreateDeviceAndSwapChain",
+                  "::D3D10CoreCreateDevice"):
+            self.assertIn(n, names)
+        self.assertEqual(sum(1 for n in names if n.startswith(("ID3D11", "ID3D10", "::D3D1"))), 522)
+
+    def test_d3d11_getters_are_arrays(self):
+        c = spec(self.calls, self.m, "ID3D11DeviceContext::PSGetShaderResources")
+        f = next(f for f in c.fields if f.param == "ppShaderResourceViews")
+        self.assertEqual((f.objects, f.count), ("ID3D11ShaderResourceView", "NumViews"))
+        c = spec(self.calls, self.m, "ID3D10Device::OMGetRenderTargets")
+        self.assertEqual(next(f for f in c.fields if f.param == "ppRenderTargetViews").objects, "ID3D10RenderTargetView")
+
+    def test_d3d11_own(self):
+        # initial data and updates: one region the own code sizes, aux[0] bytes
+        for name, param in (("ID3D11Device::CreateTexture2D", "pInitialData"),
+                            ("ID3D11DeviceContext::UpdateSubresource", "pSrcData"),
+                            ("ID3D10Device::CreateBuffer", "pInitialData")):
+            c = spec(self.calls, self.m, name)
+            f = next(f for f in c.fields if f.param == param)
+            self.assertEqual((f.kind, f.count, f.count_width), ("WMF_IN", "aux[0]", 8), name)
+        rules = gen.parse_rules(gen.read(RULES), self.m)
+        for name in ("ID3D11Device::CreateBuffer", "ID3D11DeviceContext::Map", "ID3D10Texture2D::Map"):
+            self.assertIn(name, rules.own)
+
     def test_every_method_has_a_mode(self):
         for row in gen.manifest(self.m):
             self.assertIn(self.calls[row[0]].mode, ("async", "sync", "submit", "special", "refuse"), row[1])

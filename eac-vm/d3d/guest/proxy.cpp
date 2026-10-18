@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <vector>
 #include "proxy.h"
+#include "formats.h"
 #ifndef MN_D3D_LOOPBACK
 #include "wsi_window.hpp" // DXMT's own Win32 window code, built in (build-guest.sh): the window's changes, made here
 #endif
@@ -33,6 +34,7 @@ struct mn_obj {
     pacing *pace = nullptr;                  // a swapchain's frames (Task 4)
     std::vector<std::pair<int, mn_obj *>> companions; // one an interface at another pointer, held for our life (M3)
     std::atomic<const void *> recorder{nullptr};      // a command list's: the thread that called it last (Task 10)
+    mn_res res;                                       // a D3D11 or D3D10 resource's description (M4), under m
 };
 static void end_pacing(pacing *p);
 
@@ -927,6 +929,193 @@ static HRESULT STDMETHODCALLTYPE check_feature(mn_proxy *This, D3D12_FEATURE fea
     return hr;
 }
 
+// ---- D3D11's and D3D10's data and maps (own, M4 Task 4) ----
+
+// An interface's mn_d3d_ifaces index (natively __uuidof is a temporary).
+template <class T> static int iface_of() {
+    static const GUID iid = __uuidof(T);
+    return mn_d3d_iface_of(&iid);
+}
+
+static mn_res described(const D3D11_BUFFER_DESC &d) { return mn_res_of(1, DXGI_FORMAT_UNKNOWN, d.ByteWidth, 1, 1, 1, 1); }
+static mn_res described(const D3D11_TEXTURE1D_DESC &d) { return mn_res_of(2, d.Format, d.Width, 1, 1, d.MipLevels, d.ArraySize); }
+static mn_res described(const D3D11_TEXTURE2D_DESC &d) {
+    return mn_res_of(3, d.Format, d.Width, d.Height, 1, d.MipLevels, d.ArraySize);
+}
+static mn_res described(const D3D11_TEXTURE2D_DESC1 &d) {
+    return mn_res_of(3, d.Format, d.Width, d.Height, 1, d.MipLevels, d.ArraySize);
+}
+static mn_res described(const D3D11_TEXTURE3D_DESC &d) { return mn_res_of(4, d.Format, d.Width, d.Height, d.Depth, d.MipLevels, 1); }
+static mn_res described(const D3D11_TEXTURE3D_DESC1 &d) { return mn_res_of(4, d.Format, d.Width, d.Height, d.Depth, d.MipLevels, 1); }
+static mn_res described(const D3D10_BUFFER_DESC &d) { return mn_res_of(1, DXGI_FORMAT_UNKNOWN, d.ByteWidth, 1, 1, 1, 1); }
+static mn_res described(const D3D10_TEXTURE1D_DESC &d) { return mn_res_of(2, d.Format, d.Width, 1, 1, d.MipLevels, d.ArraySize); }
+static mn_res described(const D3D10_TEXTURE2D_DESC &d) {
+    return mn_res_of(3, d.Format, d.Width, d.Height, 1, d.MipLevels, d.ArraySize);
+}
+static mn_res described(const D3D10_TEXTURE3D_DESC &d) { return mn_res_of(4, d.Format, d.Width, d.Height, d.Depth, d.MipLevels, 1); }
+
+template <class Res, class T, class Desc> static bool describe(Res *res, mn_res &r) {
+    T *t = nullptr;
+    if (FAILED(res->QueryInterface(__uuidof(T), (void **)&t))) return false;
+    Desc d = {};
+    t->GetDesc(&d);
+    t->Release();
+    r = described(d);
+    return true;
+}
+
+// The description a resource the guest didn't create (a back buffer, another API's view of one) has: asked once.
+static mn_res resource_of(IUnknown *resource) {
+    mn_obj *o = ((mn_proxy *)resource)->obj;
+    {
+        std::lock_guard<std::mutex> l(o->m);
+        if (o->res.dim) return o->res;
+    }
+    mn_res r;
+    ID3D11Resource *r11 = nullptr;
+    ID3D10Resource *r10 = nullptr;
+    if (SUCCEEDED(resource->QueryInterface(__uuidof(ID3D11Resource), (void **)&r11))) {
+        describe<ID3D11Resource, ID3D11Buffer, D3D11_BUFFER_DESC>(r11, r) ||
+            describe<ID3D11Resource, ID3D11Texture1D, D3D11_TEXTURE1D_DESC>(r11, r) ||
+            describe<ID3D11Resource, ID3D11Texture2D, D3D11_TEXTURE2D_DESC>(r11, r) ||
+            describe<ID3D11Resource, ID3D11Texture3D, D3D11_TEXTURE3D_DESC>(r11, r);
+        r11->Release();
+    } else if (SUCCEEDED(resource->QueryInterface(__uuidof(ID3D10Resource), (void **)&r10))) {
+        describe<ID3D10Resource, ID3D10Buffer, D3D10_BUFFER_DESC>(r10, r) ||
+            describe<ID3D10Resource, ID3D10Texture1D, D3D10_TEXTURE1D_DESC>(r10, r) ||
+            describe<ID3D10Resource, ID3D10Texture2D, D3D10_TEXTURE2D_DESC>(r10, r) ||
+            describe<ID3D10Resource, ID3D10Texture3D, D3D10_TEXTURE3D_DESC>(r10, r);
+        r10->Release();
+    }
+    std::lock_guard<std::mutex> l(o->m);
+    return o->res = r;
+}
+
+// A resource's initial data, each subresource sized from its description, packed (mn_d3d.h's struct mn_d3d_sub).
+static std::vector<uint8_t> pack(const mn_res &r, const D3D11_SUBRESOURCE_DATA *init) {
+    const uint32_t n = mn_subresources(r);
+    std::vector<mn_d3d_sub> subs(n);
+    uint64_t at = 8 + n * sizeof(mn_d3d_sub);
+    for (uint32_t i = 0; i < n; i++) {
+        uint64_t size = init[i].pSysMem ? mn_subresource_bytes(r, i, nullptr, init[i].SysMemPitch, init[i].SysMemSlicePitch) : 0;
+        subs[i] = {(uint32_t)at, init[i].SysMemPitch, init[i].SysMemSlicePitch, (uint32_t)size};
+        at += (size + 15) & ~15ull;
+    }
+    std::vector<uint8_t> flat(at);
+    std::memcpy(flat.data(), &n, 4);
+    std::memcpy(flat.data() + 8, subs.data(), n * sizeof(mn_d3d_sub));
+    for (uint32_t i = 0; i < n; i++)
+        if (subs[i].size) std::memcpy(flat.data() + subs[i].offset, init[i].pSysMem, subs[i].size);
+    return flat;
+}
+
+static void set_res(mn_obj *o, const mn_res &r) {
+    std::lock_guard<std::mutex> l(o->m);
+    o->res = r;
+}
+
+#define MN_CREATE(fn, NAME, Desc, Data, T, DESC, INIT, OUT)                                                            \
+    static HRESULT STDMETHODCALLTYPE fn(mn_proxy *This, const Desc *desc, const Data *init, T **out) {                \
+        mn_res r = desc ? described(*desc) : mn_res{};                                                                 \
+        std::vector<uint8_t> flat;                                                                                     \
+        if (desc && init) flat = pack(r, (const D3D11_SUBRESOURCE_DATA *)init);                                        \
+        mn_d3d_p_##NAME p = {};                                                                                        \
+        p.self = (uintptr_t)This, p.DESC = (uintptr_t)desc, p.OUT = (uintptr_t)out;                                   \
+        p.INIT = flat.empty() ? 0 : (uintptr_t)flat.data(), p.aux[0] = flat.size();                                  \
+        int32_t s = mn_d3d_call(MN_D3D_ID_##NAME, &p);                                                                 \
+        HRESULT hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;                                                      \
+        if (out) {                                                                                                     \
+            *out = SUCCEEDED(hr) && p.OUT                                                                              \
+                       ? (T *)mn_proxy_out(p.OUT, iface_of<T>(), nullptr, p.OUT##_ifaces)              \
+                       : nullptr;                                                                                      \
+            if (*out) set_res(((mn_proxy *)*out)->obj, r);                                                             \
+        }                                                                                                              \
+        return hr;                                                                                                     \
+    }
+MN_CREATE(create_buffer11, ID3D11Device_CreateBuffer, D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA, ID3D11Buffer, pDesc,
+          pInitialData, ppBuffer)
+MN_CREATE(create_tex1d11, ID3D11Device_CreateTexture1D, D3D11_TEXTURE1D_DESC, D3D11_SUBRESOURCE_DATA, ID3D11Texture1D,
+          pDesc, pInitialData, ppTexture1D)
+MN_CREATE(create_tex2d11, ID3D11Device_CreateTexture2D, D3D11_TEXTURE2D_DESC, D3D11_SUBRESOURCE_DATA, ID3D11Texture2D,
+          pDesc, pInitialData, ppTexture2D)
+MN_CREATE(create_tex3d11, ID3D11Device_CreateTexture3D, D3D11_TEXTURE3D_DESC, D3D11_SUBRESOURCE_DATA, ID3D11Texture3D,
+          pDesc, pInitialData, ppTexture3D)
+MN_CREATE(create_tex2d1_11, ID3D11Device3_CreateTexture2D1, D3D11_TEXTURE2D_DESC1, D3D11_SUBRESOURCE_DATA,
+          ID3D11Texture2D1, desc, initial_data, texture)
+MN_CREATE(create_tex3d1_11, ID3D11Device3_CreateTexture3D1, D3D11_TEXTURE3D_DESC1, D3D11_SUBRESOURCE_DATA,
+          ID3D11Texture3D1, desc, initial_data, texture)
+MN_CREATE(create_buffer10, ID3D10Device_CreateBuffer, D3D10_BUFFER_DESC, D3D10_SUBRESOURCE_DATA, ID3D10Buffer, pDesc,
+          pInitialData, ppBuffer)
+MN_CREATE(create_tex1d10, ID3D10Device_CreateTexture1D, D3D10_TEXTURE1D_DESC, D3D10_SUBRESOURCE_DATA, ID3D10Texture1D,
+          pDesc, pInitialData, ppTexture1D)
+MN_CREATE(create_tex2d10, ID3D10Device_CreateTexture2D, D3D10_TEXTURE2D_DESC, D3D10_SUBRESOURCE_DATA, ID3D10Texture2D,
+          pDesc, pInitialData, ppTexture2D)
+MN_CREATE(create_tex3d10, ID3D10Device_CreateTexture3D, D3D10_TEXTURE3D_DESC, D3D10_SUBRESOURCE_DATA, ID3D10Texture3D,
+          pDesc, pInitialData, ppTexture3D)
+
+#define MN_COMMA ,
+// UpdateSubresource: its data sized from the destination's description and the box.
+#define MN_UPDATE(fn, NAME, Res, Box, EXTRA, SET)                                                                       \
+    static void STDMETHODCALLTYPE fn(mn_proxy *This, Res *dst, UINT sub, const Box *box, const void *data, UINT pitch, \
+                                     UINT slice EXTRA) {                                                               \
+        mn_d3d_p_##NAME p = {};                                                                                        \
+        p.self = (uintptr_t)This, p.pDstResource = (uintptr_t)dst, p.DstSubresource = sub, p.pDstBox = (uintptr_t)box; \
+        p.pSrcData = (uintptr_t)data, p.SrcRowPitch = pitch, p.SrcDepthPitch = slice;                                 \
+        SET;                                                                                                           \
+        p.aux[0] = data && dst ? mn_subresource_bytes(resource_of(dst), sub, (const D3D11_BOX *)box, pitch, slice) : 0; \
+        mn_d3d_record(This, MN_D3D_ID_##NAME, &p);                                                                     \
+    }
+MN_UPDATE(update11, ID3D11DeviceContext_UpdateSubresource, ID3D11Resource, D3D11_BOX, , (void)0)
+MN_UPDATE(update1_11, ID3D11DeviceContext1_UpdateSubresource1, ID3D11Resource, D3D11_BOX, MN_COMMA UINT flags,
+          p.CopyFlags = flags)
+MN_UPDATE(update10, ID3D10Device_UpdateSubresource, ID3D10Resource, D3D10_BOX, , (void)0)
+
+// Maps: the unix side answers our address of the host's memory in aux[0] (rules.txt's own, as ID3D12Resource::Map's).
+static HRESULT STDMETHODCALLTYPE map11(mn_proxy *This, ID3D11Resource *res, UINT sub, D3D11_MAP type, UINT flags,
+                                       D3D11_MAPPED_SUBRESOURCE *mapped) {
+    mn_d3d_p_ID3D11DeviceContext_Map p = {};
+    D3D11_MAPPED_SUBRESOURCE m = {};
+    p.self = (uintptr_t)This, p.pResource = (uintptr_t)res, p.Subresource = sub, p.MapType = (uint32_t)type;
+    p.MapFlags = flags, p.pMappedResource = mapped ? (uintptr_t)&m : 0;
+    int32_t s = mn_d3d_record(This, MN_D3D_ID_ID3D11DeviceContext_Map, &p);
+    HRESULT hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;
+    if (SUCCEEDED(hr) && mapped && !p.aux[0]) hr = E_FAIL; // not in an arena of ours: the host said so too
+    if (mapped) *mapped = SUCCEEDED(hr) ? D3D11_MAPPED_SUBRESOURCE{(void *)(uintptr_t)p.aux[0], m.RowPitch, m.DepthPitch}
+                                        : D3D11_MAPPED_SUBRESOURCE{};
+    return hr;
+}
+
+#define MN_MAP10(fn, NAME, SUB, Out, OUT, FILL)                                                                         \
+    static HRESULT STDMETHODCALLTYPE fn(mn_proxy *This SUB, D3D10_MAP type, UINT flags, Out *out) {                    \
+        using mn_out = Out;                                                                                            \
+        mn_d3d_p_##NAME p = {};                                                                                        \
+        mn_out m = {};                                                                                                 \
+        p.self = (uintptr_t)This, p.MapType = (uint32_t)type, p.MapFlags = flags, p.OUT = out ? (uintptr_t)&m : 0;    \
+        FILL;                                                                                                          \
+        int32_t s = mn_d3d_call(MN_D3D_ID_##NAME, &p);                                                                 \
+        HRESULT hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;                                                      \
+        if (SUCCEEDED(hr) && out && !p.aux[0]) hr = E_FAIL;                                                            \
+        if (out) {                                                                                                     \
+            *out = SUCCEEDED(hr) ? m : mn_out{};                                                                       \
+            *(void **)out = SUCCEEDED(hr) ? (void *)(uintptr_t)p.aux[0] : nullptr; /* its pData, first */            \
+        }                                                                                                              \
+        return hr;                                                                                                     \
+    }
+MN_MAP10(map10_buffer, ID3D10Buffer_Map, , void *, ppData, (void)0)
+MN_MAP10(map10_tex1d, ID3D10Texture1D_Map, MN_COMMA UINT sub, void *, ppData, p.Subresource = sub)
+MN_MAP10(map10_tex2d, ID3D10Texture2D_Map, MN_COMMA UINT sub, D3D10_MAPPED_TEXTURE2D, pMappedTex2D, p.Subresource = sub)
+MN_MAP10(map10_tex3d, ID3D10Texture3D_Map, MN_COMMA UINT sub, D3D10_MAPPED_TEXTURE3D, pMappedTex3D, p.Subresource = sub)
+
+// D3D11_KEEP_* counts carry no array (a wrap): the generated proxy would read that many.
+static const void *px_om_uav;
+static void STDMETHODCALLTYPE om_uav(mn_proxy *This, UINT nrtv, ID3D11RenderTargetView *const *rtvs,
+                                     ID3D11DepthStencilView *dsv, UINT start, UINT nuav,
+                                     ID3D11UnorderedAccessView *const *uavs, const UINT *counts) {
+    if (nrtv == D3D11_KEEP_RENDER_TARGETS_AND_DEPTH_STENCIL) rtvs = nullptr;
+    if (nuav == D3D11_KEEP_UNORDERED_ACCESS_VIEWS) uavs = nullptr, counts = nullptr;
+    PX(om_uav, px_om_uav)(This, nrtv, rtvs, dsv, start, nuav, uavs, counts);
+}
+
 // DXMT has no meta commands: it answers so, and so do we (their descriptions hold names the wire doesn't carry).
 static HRESULT STDMETHODCALLTYPE meta_commands(mn_proxy *, UINT *count, D3D12_META_COMMAND_DESC *) {
     if (!count) return E_INVALIDARG;
@@ -966,6 +1155,25 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"ID3D12Device5::EnumerateMetaCommands", (const void *)meta_commands},
         {"ID3D12Device5::EnumerateMetaCommandParameters", (const void *)meta_command_parameters},
         {"ID3D12Device::CheckFeatureSupport", (const void *)check_feature},
+        {"ID3D11Device::CreateBuffer", (const void *)create_buffer11},
+        {"ID3D11Device::CreateTexture1D", (const void *)create_tex1d11},
+        {"ID3D11Device::CreateTexture2D", (const void *)create_tex2d11},
+        {"ID3D11Device::CreateTexture3D", (const void *)create_tex3d11},
+        {"ID3D11Device3::CreateTexture2D1", (const void *)create_tex2d1_11},
+        {"ID3D11Device3::CreateTexture3D1", (const void *)create_tex3d1_11},
+        {"ID3D10Device::CreateBuffer", (const void *)create_buffer10},
+        {"ID3D10Device::CreateTexture1D", (const void *)create_tex1d10},
+        {"ID3D10Device::CreateTexture2D", (const void *)create_tex2d10},
+        {"ID3D10Device::CreateTexture3D", (const void *)create_tex3d10},
+        {"ID3D11DeviceContext::UpdateSubresource", (const void *)update11},
+        {"ID3D11DeviceContext1::UpdateSubresource1", (const void *)update1_11},
+        {"ID3D10Device::UpdateSubresource", (const void *)update10},
+        {"ID3D11DeviceContext::Map", (const void *)map11},
+        {"ID3D10Buffer::Map", (const void *)map10_buffer},
+        {"ID3D10Texture1D::Map", (const void *)map10_tex1d},
+        {"ID3D10Texture2D::Map", (const void *)map10_tex2d},
+        {"ID3D10Texture3D::Map", (const void *)map10_tex3d},
+        {"ID3D11DeviceContext::OMSetRenderTargetsAndUnorderedAccessViews", (const void *)om_uav, &px_om_uav},
         {"ID3D12Device2::CreatePipelineState", (const void *)create_pipeline_state},
         {"ID3D12PipelineLibrary1::LoadPipeline", (const void *)load_pipeline},
         {"ID3D12Device::CreateFence", (const void *)create_fence},

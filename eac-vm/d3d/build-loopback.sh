@@ -20,7 +20,7 @@ python3 -I "$D3D/gen.py" --headers "$I" --rules "$D3D/rules.txt" --out "$G" call
 rm -rf "$O"
 mkdir -p "$O"
 CF="-O1 -g -Wall -std=gnu2x -DMN_D3D_LOOPBACK -DDXMT_GUEST_VM -I$M -I$M/wm -I$G -I$I -I$D3D -I$DXMT/winemetal -I$DXMT/airconv"
-CXF="-O1 -g -Wall -Werror -std=c++17 -DMN_D3D_LOOPBACK -DWIDL_EXPLICIT_AGGREGATE_RETURNS -include $NT/native-prelude.h
+CXF="-O1 -g -Wall -Werror -Wno-extern-c-compat -std=c++17 -DMN_D3D_LOOPBACK -DWIDL_EXPLICIT_AGGREGATE_RETURNS -include $NT/native-prelude.h
   -I$NT/include -I$I/d3d12 -I$I/windows -I$I/directx -I$I -I$DXMT/util -I$DXMT/d3d12 -I$G -I$D3D -I$D3D/host -I$D3D/guest"
 objs=
 compile() {  # compile <compiler and flags> <source>
@@ -41,7 +41,7 @@ for f in "$G/calls.c" "$G/ifaces.c" "$D3D/host/dispatch.c" "$D3D/host/memory.c" 
   compile "clang $CF" "$f"
 done
 compile "clang $CF -DMN_D3D_NATIVE_DIR=\"$LIB\"" "$D3D/tests/loopback.c"
-for f in "$G/stubs.cpp" "$G/proxies.cpp" "$D3D/host/native.cpp" "$D3D/guest/proxy.cpp"; do compile "clang++ $CXF" "$f"; done
+for f in "$G/stubs.cpp" "$G/proxies.cpp" "$D3D/host/native.cpp" "$D3D/guest/proxy.cpp" "$D3D/guest/formats.cpp"; do compile "clang++ $CXF" "$f"; done
 # shellcheck disable=SC2086  # the objects, one word each
 clang++ -dynamiclib -install_name @rpath/libmnd3d-loopback.dylib -o "$OUT/libmnd3d-loopback.dylib" $objs \
   -framework AppKit -framework Metal -framework QuartzCore -framework Foundation -lpthread
