@@ -17,15 +17,18 @@ struct WMTWsiHooks {
     int (*window)(uint64_t hwnd, struct WMTWsiWindow *out);
     int (*display)(uint32_t index, struct WMTWsiDisplay *out);
     int (*mode)(uint64_t monitor, uint32_t index, struct WMTWsiMode *out);
+    void (*action)(const struct mn_d3d_action *action); /* fork 0083's WMTWsiAction: the same layout */
 };
 
 struct win { uint32_t ctx_id; struct mn_d3d_window w; uint64_t seq; struct win *next; };
 struct displays { uint32_t ctx_id, len; uint64_t seq; uint8_t *p; struct displays *next; };
+struct actions { uint32_t ctx_id, n, cap; struct mn_d3d_action *v; struct actions *next; };
 
 /* ponytail: linear lists under one lock; a game has a window or two and a display or two */
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static struct win *wins;
 static struct displays *disps;
+static struct actions *acts;
 static uint64_t seq;
 
 int mn_d3d_window_set(uint32_t ctx_id, const struct mn_d3d_window *w) {
@@ -38,11 +41,12 @@ int mn_d3d_window_set(uint32_t ctx_id, const struct mn_d3d_window *w) {
     return k ? 0 : -1;
 }
 
-/* ctx_id 0: the latest in any context. Under lock. */
+/* ctx_id 0: the latest in any context; hwnd 0: the context's latest window. Under lock. */
 static struct win *find(uint32_t ctx_id, uint64_t hwnd) {
     struct win *best = NULL;
     for (struct win *k = wins; k; k = k->next)
-        if (k->w.hwnd == hwnd && (k->ctx_id == ctx_id || (!ctx_id && (!best || k->seq > best->seq)))) best = k;
+        if ((!hwnd || k->w.hwnd == hwnd) && (!ctx_id || k->ctx_id == ctx_id) && (!best || k->seq > best->seq))
+            best = k;
     return best;
 }
 
@@ -85,8 +89,43 @@ int mn_d3d_displays_set(uint32_t ctx_id, const void *p, uint32_t len) {
     return k ? 0 : -1;
 }
 
+/* Op 9: the context's actions into out (at most cap bytes, whole ones), then forgotten: the bytes. */
+uint32_t mn_d3d_actions_take(uint32_t ctx_id, void *out, uint32_t cap) {
+    uint32_t n = 0;
+    pthread_mutex_lock(&lock);
+    for (struct actions *k = acts; k; k = k->next)
+        if (k->ctx_id == ctx_id) {
+            n = k->n < cap / sizeof *k->v ? k->n : cap / (uint32_t)sizeof *k->v;
+            memcpy(out, k->v, n * sizeof *k->v);
+            k->n = 0;
+        }
+    pthread_mutex_unlock(&lock);
+    return n * (uint32_t)sizeof(struct mn_d3d_action);
+}
+
+/* An action native DXMT took during one of a context's calls; one off a call (a release) has nobody to make it. */
+static void hook_action(const struct mn_d3d_action *a) {
+    uint32_t ctx_id = mn_d3d_current_ctx();
+    if (!ctx_id) return;
+    pthread_mutex_lock(&lock);
+    struct actions *k = acts;
+    while (k && k->ctx_id != ctx_id) k = k->next;
+    if (!k && (k = calloc(1, sizeof *k))) k->ctx_id = ctx_id, k->next = acts, acts = k;
+    if (k && k->n == k->cap) {
+        struct mn_d3d_action *v = realloc(k->v, (k->cap * 2 + 8) * sizeof *v);
+        if (v) k->v = v, k->cap = k->cap * 2 + 8;
+    }
+    if (k && k->n < k->cap) k->v[k->n++] = *a;
+    pthread_mutex_unlock(&lock);
+}
+
 void mn_d3d_windows_end(uint32_t ctx_id) {
     pthread_mutex_lock(&lock);
+    for (struct actions **kp = &acts; *kp;) {
+        struct actions *k = *kp;
+        if (k->ctx_id == ctx_id) *kp = k->next, free(k->v), free(k);
+        else kp = &k->next;
+    }
     for (struct win **kp = &wins; *kp;) {
         struct win *k = *kp;
         if (k->ctx_id == ctx_id) *kp = k->next, free(k);
@@ -157,6 +196,6 @@ static int hook_mode(uint64_t monitor, uint32_t index, struct WMTWsiMode *out) {
 }
 
 void mn_d3d_wsi_hooks(void (*set)(const void *hooks)) {
-    static const struct WMTWsiHooks hooks = {hook_window, hook_display, hook_mode};
+    static const struct WMTWsiHooks hooks = {hook_window, hook_display, hook_mode, hook_action};
     set(&hooks);
 }

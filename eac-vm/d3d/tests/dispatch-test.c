@@ -20,6 +20,8 @@
  *              fence released first, or a wait on no fences)
  *   window     (M3 Task 2) op 7's window and op 8's displays: the window by context; IDXGIAdapter::EnumOutputs, the
  *              output's DesktopCoordinates and its two modes as op 8 had them
+ *   notimpl    (M3 Task 3) a call that reaches DXMT's IMPLEMENT_ME (a buffer's render target view) fails and the host
+ *              goes on, logged
  *   wchar      (M2 Task 10) IDXGIAdapter1::GetDesc1 answers the guest's layout: its description UTF-16, its ids past
  *              it where the guest has them
  *   dispatch-test <metal-host> <native DXMT lib>; prints "dispatch-test: ok" or each failure. */
@@ -334,6 +336,25 @@ int main(int argc, char **argv) {
         {eo.output, 0, 28 /* DXGI_FORMAT_R8G8B8A8_UNORM */, 0, (uintptr_t)&count, 0};
     CHECK(mn_d3d_calls[omodes].params_size == sizeof dm && call(omodes, &dm) == 0 && (uint32_t)dm.ret == 0);
     CHECK(count == 2);
+
+    /* notimpl: a call DXMT has no code for (a render target view of a buffer: its IMPLEMENT_ME) fails, logged; the
+     * host goes on */
+    unsigned heapc = id_of("ID3D12Device::CreateDescriptorHeap"), rtv = id_of("ID3D12Device::CreateRenderTargetView"),
+             start = id_of("ID3D12DescriptorHeap::GetCPUDescriptorHandleForHeapStart");
+    struct { uint32_t type, count, flags, node; } hd = {2 /* D3D12_DESCRIPTOR_HEAP_TYPE_RTV */, 1, 0, 0};
+    struct { uint64_t self, ret, desc, riid, heap, ifaces[5]; } ch = {device, 0, (uintptr_t)&hd, 0, 0, {0}};
+    ch.riid = (uintptr_t)iid("ID3D12DescriptorHeap");
+    CHECK(mn_d3d_calls[heapc].params_size == sizeof ch && call(heapc, &ch) == 0 && (uint32_t)ch.ret == 0 && ch.heap);
+    uint64_t cpu = 0; /* the struct the guest's caller returns, at __ret */
+    struct { uint64_t self, ret, h; } hs = {ch.heap, 0, (uintptr_t)&cpu};
+    CHECK(mn_d3d_calls[start].params_size == sizeof hs && call(start, &hs) == 0 && cpu);
+    struct { uint32_t type, cpu_page, pool, creation_node, visible_node; } gpu_heap = {1}; /* D3D12_HEAP_TYPE_DEFAULT */
+    struct res_params bp = rp;
+    bp.heap_properties = (uintptr_t)&gpu_heap, bp.state = 0, bp.resource = 0;
+    CHECK(call(committed, &bp) == 0 && (uint32_t)bp.ret == 0 && bp.resource);
+    struct { uint64_t self, ret, resource, desc; uint64_t descriptor; } cr = {device, 0, bp.resource, 0, cpu};
+    CHECK(mn_d3d_calls[rtv].params_size == sizeof cr && call(rtv, &cr) == 0);
+    puts("dispatch-test: notimpl: went on");
 
     /* removed */
     unsigned victim = id_of("ID3D12Object::GetPrivateData");

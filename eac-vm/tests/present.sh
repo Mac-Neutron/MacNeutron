@@ -12,6 +12,7 @@ Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
 # DLLs): remove them, and it writes them again.
 find "$WINEPREFIX/drive_c/windows" -name '*.dll' -size 0 -delete 2>/dev/null
 WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1
+wine reg add 'HKCU\Software\Wine\X11 Driver' /v EmulateModeset /d Y /f >/dev/null 2>&1  # as run-game.sh's
 . /opt/mn-wine/lib/wine/mn-d3d/prefix.sh  # MACNEUTRON_VM_D3D=forward (present-gate.sh forward): the stand-ins
 cd "$T"
 start=$(date +%s%N)

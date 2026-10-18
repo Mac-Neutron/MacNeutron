@@ -5,8 +5,9 @@
 # guest trace; and eac-vm/d3d/tests/smoke.cpp's lines: in both modes "eventthread ok" (a fence's event, whose process
 # made its first Direct3D call on a thread that has ended, is set from a Wine thread of its own), "name ok" (SetName
 # reads back in the guest's WCHARs), "minimised ok" (a minimised window's present costs the host's vCPU no sleep) and
-# "wmtforward ok" (fork 0079 refuses a call past the guest's table), and forwarded "eventreuse ok" (a closed event's
-# reused handle takes no stray set; guest DXMT has that bug too). Prints macneutron-vm's peak resident size in each
+# "wmtforward ok" (fork 0079 refuses a call past the guest's table), and forwarded "swapchain ok" (DXGI's answers
+# where DXMT has none) and "eventreuse ok" (a closed event's reused handle takes no stray set; guest DXMT has that bug
+# too). Prints macneutron-vm's peak resident size in each
 # (forwarding loads native DXMT, a second LLVM beside the Wine build's), and that nothing lands in the folder the VM
 # host ran from (native DXMT's logs go to the run's traces). Needs the images (guest-stages.sh dxmt d3d, image/build.sh
 # wine) and the share's dxmt-tests (eac-vm/dxmt/share.sh). Prints "d3d-smoke: ok" or "d3d-smoke: FAIL <what>".
@@ -52,7 +53,7 @@ EOS
   [ "${lines:-0}" -eq 18 ] || { fail="$fail $mode-lines"; tail -5 "$out" 2> /dev/null || true; }
   [ -z "$(ls -A "$C")" ] || fail="$fail $mode-cwd($(ls -A "$C" | tr '\n' ' '))"
   checks="eventthread name minimised wmtforward"
-  [ "$mode" = guest ] || checks="$checks eventreuse"
+  [ "$mode" = guest ] || checks="$checks eventreuse swapchain"
   for c in $checks; do
     got=$(/usr/bin/grep "^$c " "$out" 2> /dev/null || true)
     echo "d3d-smoke: $mode: ${got:-no $c line}"

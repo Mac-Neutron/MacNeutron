@@ -21,12 +21,25 @@ enum {
     MN_D3D_OP_LISTEN = 6,  /* none: the calling thread sets the events the host posts, for the process's life; never sent */
     MN_D3D_OP_WINDOW = 7,  /* struct mn_d3d_window: a window's state, which native DXMT's window system answers (M3) */
     MN_D3D_OP_DISPLAYS = 8, /* u32 count, then each struct mn_d3d_display and its modes (M3); guest args: below */
+    MN_D3D_OP_ACTIONS = 9, /* none; reply: the window actions native DXMT took since the last (struct mn_d3d_action) */
 };
 struct mn_d3d_query { uint64_t handle; uint8_t iid[16]; uint64_t out; }; /* reply: int32 HRESULT */
 /* Ops 7 and 8 (M3): the guest's window and displays as Win32 has them there, pushed before the calls that read them
  * (host/window.c keeps the latest of each, by context). flags: 1 minimised, 2 foreground, 4 a window. A display's
  * modes follow it, `modes` of them, the current one first and then EnumDisplaySettings' list. */
-struct mn_d3d_window { uint64_t hwnd, monitor; uint32_t width, height, flags, pad; };
+struct mn_d3d_window { uint64_t hwnd, monitor; uint32_t width, height, flags, pad; }; /* flags 8: the process in front */
+/* Op 9 (M3 Task 3): a change to a window or a mode that native DXMT made and the guest makes with its own window
+ * system (fork 0083's WMTWsiAction, kind its MN_D3D_ACTION_*); taken during the context's own calls, in order. */
+enum {
+    MN_D3D_ACTION_SAVE = 1, MN_D3D_ACTION_SET_MODE, MN_D3D_ACTION_ENTER, MN_D3D_ACTION_LEAVE, MN_D3D_ACTION_RESTORE_MODE,
+    MN_D3D_ACTION_RESIZE, MN_D3D_ACTION_UPDATE_FULLSCREEN, MN_D3D_ACTION_MINIMIZE,
+};
+struct mn_d3d_action {
+    uint32_t kind, arg;
+    uint64_t hwnd, monitor;
+    uint32_t width, height, refresh_num, refresh_den, bits_per_pixel, interlaced;
+};
+struct mn_d3d_actions_args { uint64_t data; uint32_t cap, len; }; /* op 9 from the proxies: into data, len bytes */
 struct mn_d3d_display { uint64_t monitor; int32_t left, top, right, bottom; uint16_t name[32]; uint32_t modes, pad; };
 struct mn_d3d_mode { uint32_t width, height, refresh_num, refresh_den; };
 struct mn_d3d_displays_args { uint64_t data; uint32_t len, pad; }; /* op 8 from the proxies: the record's bytes */

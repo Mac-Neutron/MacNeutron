@@ -85,6 +85,21 @@ case $shot in
     else no "winshot: MacNeutron VM: $(printf '%s\n' "$shot" | tail -n 1)"; fi ;;
 esac
 
+# d3d12_fullscreen, forwarded (M3 Task 3): leaving full screen as guest DXMT leaves it, its window changes made in the
+# guest; guest mode's run is the reference (the Mac's display modes aren't the guest's).
+if [ "$MODE" = forward ]; then
+  for m in guest forward; do
+    guest d3d12_fullscreen d3d12_fullscreen.exe d3d12 "$m"
+    cp "$G/d3d12_fullscreen.txt" "$W/present-fullscreen-$m.txt" 2> /dev/null || : > "$W/present-fullscreen-$m.txt"
+  done
+  for r in fg-leave popup-leave bg-leave; do
+    a=$(/usr/bin/grep "^$r " "$W/present-fullscreen-guest.txt") b=$(/usr/bin/grep "^$r " "$W/present-fullscreen-forward.txt")
+    if [ -n "$a" ] && [ "$a" = "$b" ]; then ok "d3d12_fullscreen: [$b] as in guest mode"
+    else no "d3d12_fullscreen: forwarded [$b], guest mode [$a]"; fi
+  done
+  python3 -I "$D/compare.py" host "$W/present-d3d12_fullscreen.txt" || fail=1
+fi
+
 # present_loop, the D3D11 game loop.
 guest present_loop present_loop.exe "1280 720 0 0 600 0" guest
 H=$W/present-present_loop.txt C=$G/present_loop.txt R=$REF/present_loop.1.txt

@@ -195,6 +195,13 @@ static int32_t family(uint32_t id, void *params) {
         const struct mn_d3d_displays_args *d = params;
         return mn_queue(MN_OP_D3D + id, (const void *)(uintptr_t)d->data, d->len);
     }
+    case MN_D3D_OP_ACTIONS: { /* after the call that took them: this thread's ring ran it already */
+        struct mn_d3d_actions_args *a = params;
+        uint32_t got = 0;
+        int32_t s = mn_call_flush(MN_OP_D3D + id, NULL, 0, (void *)(uintptr_t)a->data, a->cap, &got);
+        a->len = s ? 0 : got;
+        return s;
+    }
     case MN_D3D_OP_LISTEN:
         if (!events_ready) return MN_EINVAL;
         listener(NULL);

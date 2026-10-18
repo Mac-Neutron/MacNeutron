@@ -39,6 +39,7 @@ int mn_d3d_window_of(uint32_t ctx_id, uint64_t hwnd, struct mn_d3d_window *out);
 int mn_d3d_window_set(uint32_t ctx_id, const struct mn_d3d_window *w);
 int mn_d3d_displays_set(uint32_t ctx_id, const void *p, uint32_t len); /* 0, or -1: malformed */
 void mn_d3d_windows_end(uint32_t ctx_id);
+uint32_t mn_d3d_actions_take(uint32_t ctx_id, void *out, uint32_t cap); /* op 9's reply: bytes */
 void mn_d3d_wsi_hooks(void (*set)(const void *hooks)); /* native winemetal's WMTSetWsiHooks: ours */
 extern const struct mn_executor_hooks mn_vm_hooks; /* winemetal's, and the arenas' end with the context's */
 

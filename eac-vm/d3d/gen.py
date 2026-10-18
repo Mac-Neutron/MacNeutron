@@ -1163,7 +1163,8 @@ def emit_stubs(model, rules, calls):
             k = [e.name for e in exports].index(mname)
             call = f"((decltype(&::{mname}))mn_d3d_exports[{k}])({args})"
         body = [f'extern "C" NTSTATUS_T mn_d3d_stub_{mid}(void *params) {{ // {c.name}',
-                f"    auto *a = (struct mn_d3d_p_{mid} *)params;"]
+                f"    auto *a = (struct mn_d3d_p_{mid} *)params;",
+                "    try {"]  # natively, DXMT's IMPLEMENT_ME throws (fork 0084): the call fails, the VM host goes on
         if c.ret == "void":
             body.append(f"    {call};")
         else:
@@ -1183,7 +1184,8 @@ def emit_stubs(model, rules, calls):
             body.append(f"    if ({ok}a->{m}) mn_d3d_answers((void *)(uintptr_t)a->{m}, {which}, a->{m}_ifaces);")
         if c.ret == "HRESULT":
             body.append("    mn_d3d_result(r);")
-        body += ["    return 0;", "}"]
+        ret = "&a->ret" if c.ret == "HRESULT" else "nullptr"
+        body += [f"    }} catch (...) {{ return mn_d3d_not_in_dxmt({mid}, {ret}); }}", "    return 0;", "}"]
         out += body
         ids[mid] = True
     out.append("extern \"C\" NTSTATUS_T (*mn_d3d_stubs[MN_D3D_CALLS])(void *) = {")

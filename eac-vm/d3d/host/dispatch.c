@@ -148,6 +148,14 @@ void mn_d3d_result(int32_t hr) {
     }
 }
 
+NTSTATUS_T mn_d3d_not_in_dxmt(uint32_t id, uint64_t *ret) {
+    static _Atomic uint64_t told[(MN_D3D_CALLS + 63) / 64];
+    if (!(atomic_fetch_or(&told[id / 64], 1ull << (id % 64)) & (1ull << (id % 64))))
+        fprintf(stderr, "mn-d3d: error: %s: not in DXMT\n", mn_d3d_calls[id].name);
+    if (ret) *ret = (uint32_t)MN_D3D_E_NOTIMPL;
+    return 0;
+}
+
 /* The family's own ops (mn_d3d.h). */
 static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *p, uint32_t len, void *reply,
                       uint32_t cap, uint32_t *n) {
@@ -222,6 +230,10 @@ static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *
         memcpy(&w, p, sizeof w);
         return mn_d3d_window_set(c->ctx_id, &w) ? MN_D3D_E_FAIL : 0;
     }
+    case MN_D3D_OP_ACTIONS:
+        if (!reply) return MN_EINVAL;
+        *n = mn_d3d_actions_take(c->ctx_id, reply, cap);
+        return 0;
     case MN_D3D_OP_DISPLAYS:
         if (!mn_d3d_displays_set(c->ctx_id, p, len)) return 0;
         fprintf(stderr, "mn-d3d: error: displays that don't fit their record (%u bytes)\n", len);

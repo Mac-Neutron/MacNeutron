@@ -7,6 +7,9 @@
 #include <unordered_map>
 #include <vector>
 #include "proxy.h"
+#ifndef MN_D3D_LOOPBACK
+#include "wsi_window.hpp" // DXMT's own Win32 window code, built in (build-guest.sh): the window's changes, made here
+#endif
 
 struct mn_obj {
     std::atomic<long> refs{1};
@@ -20,6 +23,11 @@ struct mn_obj {
     std::atomic<uint64_t> *mirror = nullptr; // a fence's completed value, which the host raises (Task 8)
     HWND window = nullptr;                   // a swapchain's (M3 Task 2), and its state as last pushed
     mn_d3d_window pushed = {};
+#ifndef MN_D3D_LOOPBACK
+    dxmt::wsi::DXMTWindowState saved;        // as guest DXMT's swapchain keeps it (Task 3)
+#endif
+    DXGI_RGBA background = {0, 0, 0, 1};     // the swapchain's own answers (Task 3)
+    UINT source_width = 0, source_height = 0;
 };
 
 // The objects by handle, for identity (mn_proxy_out); an object leaves at its last Release, under the same lock.
@@ -311,7 +319,10 @@ static mn_d3d_window window_state(HWND hwnd) {
     if (IsWindow(hwnd)) w.flags |= 4;
     if (GetClientRect(hwnd, &r)) w.width = (uint32_t)(r.right - r.left), w.height = (uint32_t)(r.bottom - r.top);
     if (IsIconic(hwnd)) w.flags |= 1;
-    if (GetForegroundWindow() == hwnd) w.flags |= 2;
+    HWND front = GetForegroundWindow();
+    DWORD pid = 0;
+    if (front == hwnd) w.flags |= 2;
+    if (front && GetWindowThreadProcessId(front, &pid) && pid == GetCurrentProcessId()) w.flags |= 8;
     w.monitor = (uintptr_t)MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
     return w;
 }
@@ -357,9 +368,37 @@ static bool push_window(HWND hwnd, mn_obj *o = nullptr, bool changed = false) {
     mn_d3d_call(MN_D3D_OP_WINDOW, &w);
     return w.flags & 1;
 }
+// The window changes native DXMT made during the call just forwarded (op 9), made here with DXMT's own Win32 window
+// code as guest DXMT makes them, in order; then the window and displays as they are now.
+static void replay(mn_obj *o) {
+    mn_d3d_action v[32];
+    mn_d3d_actions_args a = {(uintptr_t)v, sizeof v, 0};
+    if (mn_d3d_call(MN_D3D_OP_ACTIONS, &a) || !a.len) return;
+    namespace wsi = dxmt::wsi;
+    for (uint32_t i = 0; i < a.len / sizeof *v; i++) {
+        const mn_d3d_action &x = v[i];
+        HWND w = (HWND)(uintptr_t)x.hwnd;
+        HMONITOR m = (HMONITOR)(uintptr_t)x.monitor;
+        wsi::WsiMode mode = {x.width, x.height, {x.refresh_num, x.refresh_den}, x.bits_per_pixel, x.interlaced != 0};
+        std::lock_guard<std::mutex> l(o->m);
+        switch (x.kind) {
+        case MN_D3D_ACTION_SAVE: wsi::saveWindowState(w, &o->saved); break;
+        case MN_D3D_ACTION_SET_MODE: wsi::setWindowMode(m, w, mode); break;
+        case MN_D3D_ACTION_ENTER: wsi::enterFullscreenMode(m, w, &o->saved, x.arg != 0); break;
+        case MN_D3D_ACTION_LEAVE: wsi::leaveFullscreenMode(w, &o->saved, x.arg != 0); break;
+        case MN_D3D_ACTION_RESTORE_MODE: wsi::restoreDisplayMode(m); break;
+        case MN_D3D_ACTION_RESIZE: wsi::resizeWindow(w, &o->saved, x.width, x.height); break;
+        case MN_D3D_ACTION_UPDATE_FULLSCREEN: wsi::updateFullscreenWindow(m, w, x.arg != 0); break;
+        case MN_D3D_ACTION_MINIMIZE: wsi::minimizeWindow(w); break;
+        }
+    }
+    push_displays();
+    push_window(o->window, o);
+}
 #else
 static void push_displays() {}
 static bool push_window(HWND, mn_obj * = nullptr, bool = false) { return false; } // the loopback's have no windows
+static void replay(mn_obj *) {}
 #endif
 
 // Each wrap's generated proxy (mn_d3d_special keeps it).
@@ -380,6 +419,7 @@ static HRESULT STDMETHODCALLTYPE create_swapchain(mn_proxy *This, IUnknown *devi
     push_window(hwnd);
     HRESULT hr = PX(create_swapchain, px_create_swapchain)(This, device, desc, out);
     if (SUCCEEDED(hr)) bind_window((void **)out, hwnd);
+    if (SUCCEEDED(hr) && out && *out) replay(((mn_proxy *)*out)->obj); // created full screen
     return hr;
 }
 
@@ -390,31 +430,98 @@ static HRESULT STDMETHODCALLTYPE create_for_hwnd(mn_proxy *This, IUnknown *devic
     push_window(hwnd);
     HRESULT hr = PX(create_for_hwnd, px_create_for_hwnd)(This, device, hwnd, desc, fullscreen, restrict_to, out);
     if (SUCCEEDED(hr)) bind_window((void **)out, hwnd);
+    if (SUCCEEDED(hr) && out && *out) replay(((mn_proxy *)*out)->obj);
     return hr;
+}
+
+// Resizing the buffers resets the source size (DXGI's).
+static void resized(mn_obj *o) {
+    std::lock_guard<std::mutex> l(o->m);
+    o->source_width = o->source_height = 0;
 }
 
 static HRESULT STDMETHODCALLTYPE resize(mn_proxy *This, UINT count, UINT width, UINT height, DXGI_FORMAT format,
                                         UINT flags) {
     push_window(This->obj->window, This->obj);
-    return PX(resize, px_resize)(This, count, width, height, format, flags);
+    HRESULT hr = PX(resize, px_resize)(This, count, width, height, format, flags);
+    if (SUCCEEDED(hr)) resized(This->obj);
+    return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE resize1(mn_proxy *This, UINT count, UINT width, UINT height, DXGI_FORMAT format,
                                          UINT flags, const UINT *node_mask, IUnknown *const *queues) {
     push_window(This->obj->window, This->obj);
-    return PX(resize1, px_resize1)(This, count, width, height, format, flags, node_mask, queues);
+    HRESULT hr = PX(resize1, px_resize1)(This, count, width, height, format, flags, node_mask, queues);
+    if (SUCCEEDED(hr)) resized(This->obj);
+    return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE resize_target(mn_proxy *This, const DXGI_MODE_DESC *mode) {
     push_displays();
     push_window(This->obj->window, This->obj);
-    return PX(resize_target, px_resize_target)(This, mode);
+    HRESULT hr = PX(resize_target, px_resize_target)(This, mode);
+    replay(This->obj);
+    return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE fullscreen(mn_proxy *This, BOOL on, IDXGIOutput *target) {
     push_displays();
     push_window(This->obj->window, This->obj);
-    return PX(fullscreen, px_fullscreen)(This, on, target);
+    HRESULT hr = PX(fullscreen, px_fullscreen)(This, on, target);
+    replay(This->obj);
+    return hr;
+}
+
+// ---- a swapchain's own answers (specials, M3 Task 3): DXMT has none (IMPLEMENT_ME); DXGI's are these ----
+
+static HRESULT STDMETHODCALLTYPE restrict_to_output(mn_proxy *, IDXGIOutput **out) {
+    if (!out) return E_INVALIDARG;
+    *out = nullptr; // a swapchain restricted to none
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE set_background(mn_proxy *This, const DXGI_RGBA *color) {
+    if (!color) return E_INVALIDARG;
+    std::lock_guard<std::mutex> l(This->obj->m);
+    This->obj->background = *color;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE get_background(mn_proxy *This, DXGI_RGBA *color) {
+    if (!color) return E_INVALIDARG;
+    std::lock_guard<std::mutex> l(This->obj->m);
+    *color = This->obj->background;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE set_rotation(mn_proxy *, DXGI_MODE_ROTATION rotation) {
+    return rotation == DXGI_MODE_ROTATION_IDENTITY ? S_OK : DXGI_ERROR_INVALID_CALL;
+}
+
+static HRESULT STDMETHODCALLTYPE get_rotation(mn_proxy *, DXGI_MODE_ROTATION *rotation) {
+    if (!rotation) return E_INVALIDARG;
+    *rotation = DXGI_MODE_ROTATION_IDENTITY;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE set_source_size(mn_proxy *This, UINT width, UINT height) {
+    DXGI_SWAP_CHAIN_DESC1 d = {};
+    if (FAILED(((IDXGISwapChain1 *)This)->GetDesc1(&d))) return E_FAIL;
+    if (!width || !height || width > d.Width || height > d.Height) return E_INVALIDARG;
+    std::lock_guard<std::mutex> l(This->obj->m);
+    This->obj->source_width = width, This->obj->source_height = height;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE get_source_size(mn_proxy *This, UINT *width, UINT *height) {
+    if (!width || !height) return E_INVALIDARG;
+    {
+        std::lock_guard<std::mutex> l(This->obj->m);
+        *width = This->obj->source_width, *height = This->obj->source_height;
+    }
+    DXGI_SWAP_CHAIN_DESC1 d = {};
+    if (!*width && SUCCEEDED(((IDXGISwapChain1 *)This)->GetDesc1(&d))) *width = d.Width, *height = d.Height;
+    return S_OK;
 }
 
 // A minimised window's present is skipped by DXMT, which then sleeps a 60 Hz frame (natively, with the guest's window
@@ -625,6 +732,13 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"IDXGISwapChain1::Present1", (const void *)present1, &px_present1},
         {"IDXGISwapChain::GetContainingOutput", (const void *)containing_output, &px_containing_output},
         {"IDXGIAdapter::EnumOutputs", (const void *)enum_outputs, &px_enum_outputs},
+        {"IDXGISwapChain1::GetRestrictToOutput", (const void *)restrict_to_output},
+        {"IDXGISwapChain1::SetBackgroundColor", (const void *)set_background},
+        {"IDXGISwapChain1::GetBackgroundColor", (const void *)get_background},
+        {"IDXGISwapChain1::SetRotation", (const void *)set_rotation},
+        {"IDXGISwapChain1::GetRotation", (const void *)get_rotation},
+        {"IDXGISwapChain2::SetSourceSize", (const void *)set_source_size},
+        {"IDXGISwapChain2::GetSourceSize", (const void *)get_source_size},
         {"ID3D12Device5::EnumerateMetaCommands", (const void *)meta_commands},
         {"ID3D12Device5::EnumerateMetaCommandParameters", (const void *)meta_command_parameters},
         {"ID3D12Device::CheckFeatureSupport", (const void *)check_feature},

@@ -34,6 +34,9 @@ void mn_d3d_answers(void *obj, int iface, uint64_t out[5]);
 uint64_t mn_d3d_identity_of(uint32_t ctx_id, void *obj); // native.cpp
 // A method's HRESULT: device removal, and an asynchronous call's failure, for the call running (dispatch.c).
 void mn_d3d_result(HRESULT hr);
+// A call whose DXMT path threw (natively, IMPLEMENT_ME: fork 0084): logged once a method, E_NOTIMPL into ret if it has
+// one (dispatch.c): the method's own result, 0.
+NTSTATUS_T mn_d3d_not_in_dxmt(uint32_t id, uint64_t *ret);
 int mn_d3d_arena_of(const void *ptr, uint64_t *blob, uint64_t *offset); // memory.c
 // events.c and dispatch.c (Task 8): the call's context, fences' mirror slots, and relays DXMT sets in place of events
 uint32_t mn_d3d_current_ctx(void);

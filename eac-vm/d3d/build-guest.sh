@@ -19,11 +19,18 @@ python3 -I "$D3D/gen.py" --headers "$I" --rules "$D3D/rules.txt" --out "$G" call
 rm -rf "$O"; mkdir -p "$O/obj" "$O/x86_64-windows"
 CXF="-std=c++17 -O2 -Wall -Werror -DWIDL_EXPLICIT_AGGREGATE_RETURNS -I$I/d3d12 -I$DXMT/d3d12 -I$DXMT/util -I$G -I$D3D
   -I$D3D/guest"
+# DXMT's own Win32 window code (M3 Task 3: the window changes native DXMT asks for, made in the guest), copied beside
+# guest/dxmt-shim's stand-ins for its logger and string helpers, which its quoted includes then find first.
+mkdir -p "$O/wsi"
+cp "$DXMT/util/wsi_window_win32.cpp" "$DXMT/util/wsi_monitor_win32.cpp" "$O/wsi/"
+cp -R "$D3D/guest/dxmt-shim/." "$O/wsi/"
 # shellcheck disable=SC2086  # the flags, one word each
-for f in "$G/proxies.cpp" "$D3D/guest/proxy.cpp"; do x86_64-w64-mingw32-clang++ $CXF -c -o "$O/obj/$(basename "$f").o" "$f"; done
+for f in "$G/proxies.cpp" "$D3D/guest/proxy.cpp" "$O/wsi/wsi_window_win32.cpp" "$O/wsi/wsi_monitor_win32.cpp"; do
+  x86_64-w64-mingw32-clang++ $CXF -I"$O/wsi" -c -o "$O/obj/$(basename "$f").o" "$f"
+done
 x86_64-w64-mingw32-clang -O2 -Wall -Werror -I"$G" -c -o "$O/obj/ifaces.o" "$G/ifaces.c"
 x86_64-w64-mingw32-clang++ -shared -static -o "$O/x86_64-windows/mnd3d.dll" "$O"/obj/*.o "$D3D/guest/mnd3d.def" "$WMLIB" \
-  -Wl,--no-insert-timestamp
+  -lgdi32 -luser32 -Wl,--no-insert-timestamp
 echo 'int __stdcall DllMain(void *h, unsigned r, void *p) { (void)h, (void)r, (void)p; return 1; }' > "$O/obj/forward.c"
 for n in d3d12 dxgi; do
   x86_64-w64-mingw32-clang -shared -nostdlib -Wl,--entry,DllMain -o "$O/x86_64-windows/$n.dll" "$O/obj/forward.c" \

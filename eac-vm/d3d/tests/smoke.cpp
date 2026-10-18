@@ -11,6 +11,9 @@
 //                DXMT skips the frame and sleeps a 60 Hz frame), and it and a call right after take under 28 ms: one
 //                sleep, the guest's, not a second on the host's vCPU ("ok", "untested": not minimised, or what it
 //                answered and how long)
+//   swapchain    (M3 Task 3) forwarded only (guest DXMT aborts on them): the seven methods DXMT has no code for, as
+//                DXGI answers them: no output restricted to, the background colour kept, identity rotation only, a
+//                source size no larger than the buffers ("ok", or the first wrong one)
 //   wmtforward   (after M2) winemetal's WMTForward (fork 0079) refuses a call past the guest's table, 156
 //                ("ok": STATUS_INVALID_PARAMETER, or what it answered); last, as a wrong one may end the process
 // A failed step prints "<line> FAIL <step>".
@@ -90,10 +93,13 @@ static double ms_since(LARGE_INTEGER a) {
     return (double)(b.QuadPart - a.QuadPart) * 1000.0 / (double)f.QuadPart;
 }
 
-static void minimised(ID3D12CommandQueue *queue) {
-    WNDCLASSA wc = {};
-    wc.lpfnWndProc = window_proc, wc.hInstance = GetModuleHandleA(nullptr), wc.lpszClassName = "mn-smoke";
-    RegisterClassA(&wc);
+// A 320x240 flip-model swapchain on a new Wine window: the swapchain, or nullptr.
+static IDXGISwapChain1 *swapchain(ID3D12CommandQueue *queue, HWND *window) {
+    static WNDCLASSA wc = {};
+    if (!wc.lpszClassName) {
+        wc.lpfnWndProc = window_proc, wc.hInstance = GetModuleHandleA(nullptr), wc.lpszClassName = "mn-smoke";
+        RegisterClassA(&wc);
+    }
     HWND w = CreateWindowA("mn-smoke", "smoke", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 320, 240, nullptr, nullptr,
                            wc.hInstance, nullptr);
     IDXGIFactory2 *f = nullptr;
@@ -102,9 +108,45 @@ static void minimised(ID3D12CommandQueue *queue) {
     d.Width = 320, d.Height = 240, d.Format = DXGI_FORMAT_R8G8B8A8_UNORM, d.SampleDesc.Count = 1;
     d.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT, d.BufferCount = 2, d.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     pump();
-    if (!w || FAILED(CreateDXGIFactory2(0, __uuidof(IDXGIFactory2), (void **)&f)) ||
-        FAILED(f->CreateSwapChainForHwnd(queue, w, &d, nullptr, nullptr, &sc)) || FAILED(sc->Present(0, 0)))
-        return (void)printf("minimised FAIL swapchain\n");
+    if (w && SUCCEEDED(CreateDXGIFactory2(0, __uuidof(IDXGIFactory2), (void **)&f)))
+        f->CreateSwapChainForHwnd(queue, w, &d, nullptr, nullptr, &sc);
+    if (f) f->Release();
+    *window = w;
+    return sc;
+}
+
+static const char *own_answers(ID3D12CommandQueue *queue) {
+    HWND w;
+    IDXGISwapChain1 *sc = swapchain(queue, &w);
+    IDXGISwapChain2 *sc2 = nullptr;
+    if (!sc || FAILED(sc->QueryInterface(__uuidof(IDXGISwapChain2), (void **)&sc2))) return "FAIL swapchain";
+    IDXGIOutput *o = (IDXGIOutput *)1;
+    DXGI_RGBA c = {}, set = {1, 0.5f, 0.25f, 1};
+    DXGI_MODE_ROTATION r = DXGI_MODE_ROTATION_UNSPECIFIED;
+    UINT sw = 0, sh = 0;
+    const char *bad = nullptr;
+    if (sc->GetRestrictToOutput(&o) != S_OK || o) bad = "GetRestrictToOutput";
+    else if (sc->GetBackgroundColor(&c) != S_OK || c.r || c.g || c.b || c.a != 1) bad = "GetBackgroundColor";
+    else if (sc->SetBackgroundColor(&set) != S_OK || sc->GetBackgroundColor(&c) != S_OK || c.g != 0.5f)
+        bad = "SetBackgroundColor";
+    else if (sc->SetRotation(DXGI_MODE_ROTATION_IDENTITY) != S_OK ||
+             sc->SetRotation(DXGI_MODE_ROTATION_ROTATE90) != DXGI_ERROR_INVALID_CALL)
+        bad = "SetRotation";
+    else if (sc->GetRotation(&r) != S_OK || r != DXGI_MODE_ROTATION_IDENTITY) bad = "GetRotation";
+    else if (sc2->GetSourceSize(&sw, &sh) != S_OK || sw != 320 || sh != 240) bad = "GetSourceSize";
+    else if (sc2->SetSourceSize(160, 120) != S_OK || sc2->GetSourceSize(&sw, &sh) != S_OK || sw != 160 || sh != 120)
+        bad = "SetSourceSize";
+    else if (sc2->SetSourceSize(640, 480) != E_INVALIDARG) bad = "SetSourceSize past the buffers";
+    sc2->Release();
+    sc->Release();
+    DestroyWindow(w);
+    return bad ? bad : "ok";
+}
+
+static void minimised(ID3D12CommandQueue *queue) {
+    HWND w;
+    IDXGISwapChain1 *sc = swapchain(queue, &w);
+    if (!sc || FAILED(sc->Present(0, 0))) return (void)printf("minimised FAIL swapchain\n");
     ShowWindow(w, SW_MINIMIZE);
     pump();
     if (!IsIconic(w)) return (void)printf("minimised untested\n");
@@ -117,7 +159,6 @@ static void minimised(ID3D12CommandQueue *queue) {
     if (hr == S_OK && ms < 28) printf("minimised ok\n");
     else printf("minimised %08lx %.1f ms\n", (unsigned long)hr, ms);
     sc->Release();
-    f->Release();
     DestroyWindow(w);
 }
 
@@ -146,6 +187,9 @@ int main() {
     printf("eventreuse %s\n", event_reuse(device, queue));
     name(queue);
     minimised(queue);
+    const char *mode = getenv("MACNEUTRON_VM_D3D");
+    if (mode && !strcmp(mode, "forward")) printf("swapchain %s\n", own_answers(queue));
+    else printf("swapchain untested: guest DXMT aborts on these\n");
     queue->Release();
     device->Release();
     wmt_forward();
