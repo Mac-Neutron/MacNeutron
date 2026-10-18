@@ -16,6 +16,8 @@ void mn_d3d_set_dir(const char *dir);
 /* dlopens native DXMT and resolves its exports, once: 0, or -1 logged as "mn-d3d: error: native DXMT: <dlerror>"
  * (every Direct3D record then answers E_FAIL). */
 int mn_d3d_load(const char *dir);
+/* MACNEUTRON_VM_D3D_TRACE=1 (macneutron-vm): each method's records, appended to path as each context ends. */
+void mn_d3d_set_trace(const char *path);
 /* A stub's HRESULT (stubs.cpp): removes the context's device on DXGI_ERROR_DEVICE_REMOVED, _HUNG or _RESET, and logs
  * an asynchronous call's failure. */
 void mn_d3d_result(int32_t hr);

@@ -1,0 +1,49 @@
+From a2be1faf5d139af8a9446f1e79c1dd6c8167f736 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sat, 17 Oct 2026 23:56:43 -0400
+Subject: [PATCH] winemetal: WMTForward, for a guest DLL without a unix lib.
+
+In the guest_vm build, WMTForward makes a call of the guest winemetal.so
+past winemetal's own (155 and up: the VM's Direct3D forwarding), for
+mnd3d.dll, a plain PE DLL that has no unix lib of its own. Below 155 it
+answers STATUS_INVALID_PARAMETER.
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ src/winemetal/winemetal.h        | 3 +++
+ src/winemetal/winemetal_thunks.c | 7 +++++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/src/winemetal/winemetal.h b/src/winemetal/winemetal.h
+index 15cb873..0bb27ea 100644
+--- a/src/winemetal/winemetal.h
++++ b/src/winemetal/winemetal.h
+@@ -2245,6 +2245,9 @@ WINEMETAL_API void MTLTexture_getBytes(
+  * made over it is gone. */
+ WINEMETAL_API void *WMTMemoryAlloc(uint64_t length);
+ WINEMETAL_API void WMTMemoryFree(void *ptr);
++/* A call of the guest winemetal.so's past winemetal's own (155: Direct3D forwarding's), for a DLL with no unix lib of
++ * its own (the VM's mnd3d.dll): its NTSTATUS. STATUS_INVALID_PARAMETER for one of winemetal's. */
++WINEMETAL_API uint32_t WMTForward(uint32_t call, void *params);
+ #endif
+ 
+ #ifdef DXMT_NATIVE
+diff --git a/src/winemetal/winemetal_thunks.c b/src/winemetal/winemetal_thunks.c
+index 6a0cf6f..0e39a56 100644
+--- a/src/winemetal/winemetal_thunks.c
++++ b/src/winemetal/winemetal_thunks.c
+@@ -1442,4 +1442,11 @@ WMTMemoryFree(void *ptr) {
+   WMT_MEMPTR_SET(params.ptr, ptr);
+   UNIX_CALL(154, &params);
+ }
++
++WINEMETAL_API uint32_t
++WMTForward(uint32_t call, void *params) {
++  if (call < 155)
++    return 0xC000000D; /* STATUS_INVALID_PARAMETER: winemetal's own calls aren't forwarded */
++  return WINE_UNIX_CALL(call, params);
++}
+ #endif
+-- 
+2.54.0 (Apple Git-157)
+

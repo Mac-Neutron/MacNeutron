@@ -28,6 +28,9 @@ WINE_STAGE=${WINE_STAGE:-$HOME/wine-stage/opt/mn-wine}
 # has no Steam of its own, every call goes to the Mac's.
 STEAM_FORWARDER=${STEAM_FORWARDER:-$HOME/mn-steam-out/lsteamclient.so}
 DXMT_GUEST=${DXMT_GUEST:-$HOME/mn-dxmt-guest}
+# Direct3D forwarding's guest DLLs and prefix.sh (guest-stages.sh d3d), in /opt/mn-wine/lib/wine/mn-d3d: off unless a
+# run asks (MACNEUTRON_VM_D3D=forward); D3D_GUEST=none leaves them out.
+D3D_GUEST=${D3D_GUEST:-$HOME/mn-d3d-guest}
 # The empty state disk each game's starts from (run-guest.sh); `build.sh wine` makes it too.
 state_template() {
   [ -e "$OUT/state-template.img" ] && return 0
@@ -45,6 +48,12 @@ wine_image() {
   if [ "$DXMT_GUEST" != none ]; then
     sudo install -m644 "$DXMT_GUEST"/x86_64-windows/*.dll "$WORK/wine/lib/wine/x86_64-windows/"
     sudo install -m755 "$DXMT_GUEST/x86_64-unix/winemetal.so" "$WORK/wine/lib/wine/x86_64-unix/"
+  fi
+  if [ "$D3D_GUEST" != none ] && [ -f "$D3D_GUEST/x86_64-windows/mnd3d.dll" ]; then
+    sudo mkdir -p "$WORK/wine/lib/wine/mn-d3d/x86_64-windows"
+    sudo install -m644 "$D3D_GUEST"/x86_64-windows/*.dll "$WORK/wine/lib/wine/mn-d3d/x86_64-windows/"
+    sudo install -m644 "$D3D_GUEST/prefix.sh" "$WORK/wine/lib/wine/mn-d3d/"
+    [ ! -f "$D3D_GUEST/.mn-source" ] || sudo install -m644 "$D3D_GUEST/.mn-source" "$WORK/wine/.mn-source-d3d"
   fi
   # What the forwarder and DXMT were built from, beside the Wine stage's own (guest-stages.sh; release.sh checks them).
   [ ! -f "$(dirname "$STEAM_FORWARDER")/.mn-source" ] \

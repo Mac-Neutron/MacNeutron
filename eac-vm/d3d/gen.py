@@ -1269,7 +1269,8 @@ def emit_proxies(model, rules, calls):
             if f.one_if:
                 m = rename[f.param]
                 body.append(f"    mn_p.{m}_n = {rename[f.one_if]} ? 1 : (uint32_t){rename[f.count]};")
-        if ret == "void" and not made:  # nothing to tell the caller: an asynchronous call's failure is the host's to log
+        has_ret = any(p.name == "__ret" for p in c.method.params)
+        if (ret == "void" or (has_ret and ret != "HRESULT")) and not made:  # the status tells the caller nothing
             body.append(f"    mn_d3d_call({mid}, &mn_p);")
         else:
             body.append(f"    int32_t mn_s = mn_d3d_call({mid}, &mn_p);")
@@ -1287,6 +1288,8 @@ def emit_proxies(model, rules, calls):
                         f"mn_p.{m}_ifaces) : nullptr;")
         if ret == "HRESULT":
             body.append("    return mn_hr;")
+        elif any(p.name == "__ret" for p in c.method.params):  # the caller's own struct, not the host's pointer
+            body.append(f"    return {member(next(i for i, p in enumerate(c.method.params) if p.name == '__ret'), '__ret')};")
         elif ret != "void":
             body += [f"    {ret} mn_r{{}};", "    if (!mn_s) std::memcpy(&mn_r, &mn_p.ret, sizeof mn_r);",
                      "    return mn_r;"]

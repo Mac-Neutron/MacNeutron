@@ -449,10 +449,18 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
 }
 
 #ifdef MN_D3D_LOOPBACK
-// The loopback library: the unix side is in the same library (in mnd3d.dll it is winemetal's WMTForward).
+// The loopback library: the unix side is in the same library.
 extern "C" int32_t mn_d3d_unix_call(void *args);
 extern "C" int32_t mn_d3d_call(uint32_t id, void *params) {
     mn_d3d_args a = {id, 0, (uintptr_t)params};
     return mn_d3d_unix_call(&a);
+}
+#else
+// mnd3d.dll: the guest winemetal.so's slot MN_WM_D3D, through winemetal.dll (DXMT 0079), a plain DLL having no unix
+// lib of its own.
+extern "C" __declspec(dllimport) uint32_t WMTForward(uint32_t call, void *params);
+extern "C" int32_t mn_d3d_call(uint32_t id, void *params) {
+    mn_d3d_args a = {id, 0, (uintptr_t)params};
+    return (int32_t)WMTForward(155 /* MN_WM_D3D */, &a);
 }
 #endif

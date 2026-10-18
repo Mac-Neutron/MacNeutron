@@ -132,9 +132,17 @@ static NTSTATUS_T slot154(void *p) {
     return 0;
 }
 
+/* Direct3D forwarding (M2): mnd3d.dll's calls, through winemetal.dll's WMTForward (DXMT 0079); eac-vm/d3d/guest/unix.c
+ * has them (a build without it, the tests', refuses). */
+__attribute__((weak)) int32_t mn_d3d_unix_call(void *args) {
+    (void)args;
+    return (int32_t)MN_STATUS_NOT_IMPLEMENTED;
+}
+static NTSTATUS_T d3d(void *args) { return (NTSTATUS_T)mn_d3d_unix_call(args); }
+
 typedef NTSTATUS_T (*unixlib_entry_t)(void *params);
-const unixlib_entry_t __wine_unix_call_funcs[MN_WM_SLOTS] = {
+const unixlib_entry_t __wine_unix_call_funcs[MN_WM_D3D + 1] = {
     slot0, slot1, slot2, slot3, slot4, slot5, slot6, slot7, slot8, slot9,
     SLOT10(1) SLOT10(2) SLOT10(3) SLOT10(4) SLOT10(5) SLOT10(6) SLOT10(7) SLOT10(8) SLOT10(9) SLOT10(10) SLOT10(11)
-    SLOT10(12) SLOT10(13) SLOT10(14) slot150, slot151, slot152, slot153, slot154,
+    SLOT10(12) SLOT10(13) SLOT10(14) slot150, slot151, slot152, slot153, slot154, d3d,
 };

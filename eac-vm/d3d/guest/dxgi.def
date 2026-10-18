@@ -1,0 +1,7 @@
+LIBRARY dxgi.dll
+EXPORTS
+    CreateDXGIFactory = mnd3d.CreateDXGIFactory @9
+    CreateDXGIFactory1 = mnd3d.CreateDXGIFactory1 @10
+    CreateDXGIFactory2 = mnd3d.CreateDXGIFactory2 @11
+    DXGIDeclareAdapterRemovalSupport = mnd3d.DXGIDeclareAdapterRemovalSupport @16
+    DXGIGetDebugInterface1 = mnd3d.DXGIGetDebugInterface1 @17

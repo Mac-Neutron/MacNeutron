@@ -8,6 +8,7 @@
 #include "handles.h"
 
 #define MN_WM_SLOTS 155
+#define MN_WM_D3D MN_WM_SLOTS /* the guest winemetal.so's next: Direct3D forwarding's (eac-vm/d3d/guest/unix.c) */
 #define MN_WM_STATS 0x800u /* op MN_OP_WM + 0x800: struct mn_wm_stats; the forwarder's own ops are past any slot */
 #define MN_OP_WM 0x1000u   /* a call is op MN_OP_WM + slot */
 

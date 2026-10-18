@@ -15,8 +15,14 @@ cp "$DXMT/winemetal/winemetal.h" "$DXMT/winemetal/winemetal_thunks.h" "$DXMT/win
   "$DXMT/airconv/airconv_public.h" "$HDR/"
 "$B" sync "$ROOT/eac-vm/metal" /home/bench/mn-metal
 "$B" sync "$HDR" /home/bench/mn-metal-dxmt
+# Direct3D forwarding's unix side (M2), slot MN_WM_D3D of winemetal.so, and its generated tables (eac-vm/d3d/gen.py).
+G=$ROOT/build/eac-vm-work/d3d-gen
+python3 -I "$ROOT/eac-vm/d3d/gen.py" --headers "$ROOT/build/dxmt-native/install/include-native" \
+  --rules "$ROOT/eac-vm/d3d/rules.txt" --out "$G" calls
+"$B" sync "$ROOT/eac-vm/d3d" /home/bench/mn-d3d
+"$B" sync "$G" /home/bench/mn-d3d-gen
 mkdir -p "$OUT/wm"
-CC="sh ~/mn-sysroot/cc-x86_64.sh -O2 -g -Wall -Wextra -DDXMT_GUEST_VM -I . -I ../mn-metal-dxmt"
+CC="sh ~/mn-sysroot/cc-x86_64.sh -O2 -g -Wall -Wextra -DDXMT_GUEST_VM -I . -I ../mn-metal-dxmt -I wm -I ../mn-d3d-gen"
 build() {  # <output under bin/> <compiler arguments...>
   out=$1; shift
   "$B" ssh "cd ~/mn-metal && $CC -o /tmp/metal-out $* && cat /tmp/metal-out" > "$OUT/$out.tmp"
@@ -25,7 +31,8 @@ build() {  # <output under bin/> <compiler arguments...>
 build metal-probe -std=gnu11 tests/probe.c -lpthread
 build metal-transport-test -std=gnu11 tests/transport-test.c guest/transport.c ring.c -lpthread
 WM="wm/calls.c wm/cmdlist.c wm/marshal.c wm/slots.c wm/guest/ghandles.c wm/guest/galloc.c guest/transport.c ring.c"
-build wm/winemetal.so -std=gnu2x -DMN_WM_GUEST -fPIC -shared wm/guest/winemetal.c $WM $WINEBUILD/dlls/ntdll/ntdll.so \
+D3D="../mn-d3d/guest/unix.c ../mn-d3d-gen/calls.c ../mn-d3d-gen/ifaces.c"
+build wm/winemetal.so -std=gnu2x -DMN_WM_GUEST -fPIC -shared wm/guest/winemetal.c $WM $D3D $WINEBUILD/dlls/ntdll/ntdll.so \
   -lpthread
 build wm/ntdll.so -std=gnu2x -fPIC -shared -Wl,-soname,ntdll.so wm/guest/stub-ntdll.c -lpthread
 build metal-wm-test -std=gnu2x wm/tests/guest-test.c wm/tests/sequence.c wm/tests/galloc-cases.c -ldl -lpthread

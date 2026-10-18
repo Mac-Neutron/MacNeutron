@@ -1,0 +1,14 @@
+LIBRARY mnd3d.dll
+EXPORTS
+    D3D12CreateDevice
+    D3D12GetDebugInterface
+    D3D12CreateRootSignatureDeserializer
+    D3D12CreateVersionedRootSignatureDeserializer
+    D3D12SerializeRootSignature
+    D3D12SerializeVersionedRootSignature
+    D3D12GetInterface
+    CreateDXGIFactory
+    CreateDXGIFactory1
+    CreateDXGIFactory2
+    DXGIDeclareAdapterRemovalSupport
+    DXGIGetDebugInterface1

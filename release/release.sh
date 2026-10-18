@@ -657,6 +657,9 @@ for s in wine:.mn-source forwarder:.mn-source-forwarder dxmt:.mn-source-dxmt; do
   found=$(tar -xOf "$OUT/vm-parts/wine.tar" "./${s#*:}" 2> /dev/null || true)
   check_stamp "${s%%:*}" "$found" "$(sh "$ROOT/eac-vm/image/stamps.sh" "${s%%:*}")" || exit 1
 done
+# Direct3D forwarding's DLLs (off by default until it ships): checked when the image has them.
+found=$(tar -xOf "$OUT/vm-parts/wine.tar" ./.mn-source-d3d 2> /dev/null || true)
+[ -z "$found" ] || check_stamp d3d "$found" "$(sh "$ROOT/eac-vm/image/stamps.sh" d3d)" || exit 1
 fex=$(awk -F'\t' '$2 == "/usr/share/fex-emu/.mn-source" { print $7 }' "$OUT/vm-parts/recipe/base.tsv")
 check_stamp fex "$(cat "$OUT/vm-parts/overlay/$fex" 2> /dev/null)" "$(sh "$ROOT/eac-vm/image/stamps.sh" fex)" || exit 1
 COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --no-acls --no-fflags --uid 0 --gid 0 --uname root --gname root \

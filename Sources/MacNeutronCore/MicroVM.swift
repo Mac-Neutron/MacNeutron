@@ -52,7 +52,7 @@ public struct MicroVM: Sendable {
 
     /// The launch options the guest reads (run-game.sh), as the launcher's own environment has them.
     static let passed = ["MACNEUTRON_DLSS", "MACNEUTRON_XESS", "DXMT_ENABLE_NVEXT", "MACNEUTRON_LOG", "MN_SCREEN",
-                         "MACNEUTRON_VM_PROFILE", "DXMT_STATS"]
+                         "MACNEUTRON_VM_PROFILE", "DXMT_STATS", "MACNEUTRON_VM_D3D", "MACNEUTRON_VM_D3D_TRACE"]
 
     /// The main display's size in pixels (its current mode's, so a Retina display's backing pixels), or nil.
     public static func mainDisplay() -> (width: Int, height: Int)? {

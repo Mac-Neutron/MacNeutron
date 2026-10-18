@@ -3,7 +3,7 @@
 # repository's folders it builds from, each +dirty when it has uncommitted changes. guest-stages.sh writes it into the
 # stage (.mn-source), image/build.sh carries it into the VM parts, and release.sh checks it against the trees it
 # archives.
-#   stamps.sh wine|forwarder|dxmt|fex
+#   stamps.sh wine|forwarder|dxmt|d3d|fex
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
@@ -14,7 +14,8 @@ here() { printf '%s%s' "$(git -C "$ROOT" rev-parse "HEAD:$1")" "$(dirty "$ROOT" 
 case ${1:-} in
   wine) echo "wine-linux $(rev "$W/wine-linux") lsteamclient $(rev "$S/lsteamclient") build $(here eac-vm/wine)" ;;
   forwarder) echo "steam-forward $(here eac-vm/steam-forward) lsteamclient $(rev "$S/lsteamclient")" ;;
-  dxmt) echo "dxmt $(rev "$S/dxmt") build $(here eac-vm/dxmt) metal $(here eac-vm/metal)" ;;
+  dxmt) echo "dxmt $(rev "$S/dxmt") build $(here eac-vm/dxmt) metal $(here eac-vm/metal) d3d $(here eac-vm/d3d)" ;;
+  d3d) echo "d3d $(here eac-vm/d3d) dxmt $(rev "$S/dxmt")" ;;
   fex) echo "fex-linux $(rev "$W/fex-linux")" ;;
-  *) echo "usage: stamps.sh wine|forwarder|dxmt|fex" >&2; exit 2 ;;
+  *) echo "usage: stamps.sh wine|forwarder|dxmt|d3d|fex" >&2; exit 2 ;;
 esac

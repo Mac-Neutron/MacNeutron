@@ -34,7 +34,8 @@ void mn_d3d_events_end(uint32_t ctx_id);
 void mn_d3d_fence_gone(void *obj);
 static void release(void *obj);
 
-static char *dir;
+static char *dir, *trace;
+static _Atomic uint64_t counts[MN_D3D_CALLS]; /* with a trace: each method's records, all contexts' */
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static int loaded;
 static _Thread_local struct { struct mn_wm_ctx *c; const struct mn_wm_call *call; int sync; } cur;
@@ -43,6 +44,22 @@ static _Atomic uint64_t said[(MN_D3D_CALLS + 63) / 64]; /* the methods without h
 void mn_d3d_set_dir(const char *d) {
     free(dir);
     dir = d ? strdup(d) : NULL;
+}
+
+void mn_d3d_set_trace(const char *path) {
+    free(trace);
+    trace = path ? strdup(path) : NULL;
+}
+
+static void trace_out(uint32_t ctx_id) {
+    FILE *f = trace ? fopen(trace, "a") : NULL;
+    if (!f) return;
+    fprintf(f, "# context %u\n", ctx_id);
+    for (unsigned i = 0; i < MN_D3D_CALLS; i++) {
+        uint64_t n = atomic_exchange(&counts[i], 0);
+        if (n) fprintf(f, "%u %s %llu\n", i, mn_d3d_calls[i].name, (unsigned long long)n);
+    }
+    fclose(f);
 }
 
 int mn_d3d_load(const char *d) {
@@ -228,6 +245,7 @@ static int32_t d3d(uint32_t ctx_id, void *ring, uint32_t id, const void *p, uint
         return MN_EINVAL;
     }
     const struct mn_wm_call *call = &mn_d3d_calls[id];
+    if (trace) atomic_fetch_add_explicit(&counts[id], 1, memory_order_relaxed);
     if (len < call->params_size) {
         fprintf(stderr, "mn-d3d: error: %s: a record of %u bytes, its params %u\n", call->name, len,
                 call->params_size);
@@ -287,6 +305,7 @@ static void context_end(uint32_t ctx_id) {
     mn_wm_hooks.context_end(ctx_id); /* its objects released: their pieces come back as Metal lets them go */
     mn_d3d_arenas_end(ctx_id);
     mn_d3d_events_end(ctx_id);
+    trace_out(ctx_id);
 }
 const struct mn_executor_hooks mn_vm_hooks = {progress, context_end, ring_end};
 

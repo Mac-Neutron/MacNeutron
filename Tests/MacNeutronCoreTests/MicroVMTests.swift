@@ -76,6 +76,7 @@ private let game = "/Users/someone/Library/Application Support/Steam/steamapps/c
     let f = try makeVMFixture(scripts: scripts)
     var env = f.env
     env["MACNEUTRON_DLSS"] = "1"
+    env["MACNEUTRON_VM_D3D"] = "forward"
     _ = f.launcher.launch(["waitforexitandrun", game, "-homedir=SMITE2Alpha", "it's quoted", ""], environment: env)
     let script = try #require(scripts.all.first)
     #expect(!FileManager.default.fileExists(atPath: try #require(f.runner.calls.first?.arguments.first)))
@@ -84,6 +85,7 @@ private let game = "/Users/someone/Library/Application Support/Steam/steamapps/c
     #expect(script.contains(#"EXE='Z:\mnt\games\SMITE 2\Windows\Hemingway.exe'"# + "\n"))
     #expect(script.contains(#"set -- '-homedir=SMITE2Alpha' 'it'\''s quoted' ''"# + "\n"))
     #expect(script.contains("MACNEUTRON_DLSS='1'\n"))
+    #expect(script.contains("MACNEUTRON_VM_D3D='forward'\n"))
     #expect(script.hasSuffix("# run-game.sh\nwine steam.exe \"$EXE\" \"$@\"\n"))
 }
 

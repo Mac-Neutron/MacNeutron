@@ -2,15 +2,15 @@
 # Rebuilds the guest stages image/build.sh packs into the VM (the parts' wine.tar, and FEX in base.erofs) from this
 # tree's sources, each stamped (.mn-source) with what it was built from (stamps.sh), which release.sh checks against
 # the trees its source archive carries. Needs the builder (eac-vm/builder.sh start); Wine's x86-64 build is most of it.
-# dxmt needs MACNEUTRON_SIGN_IDENTITY (eac-vm/dxmt/build.sh signs DXMT's NVIDIA DLLs with it).
-#   guest-stages.sh [wine|forwarder|dxmt|fex]...   all four, in that order, by default
+# dxmt needs MACNEUTRON_SIGN_IDENTITY (eac-vm/dxmt/build.sh signs DXMT's NVIDIA DLLs with it); d3d needs dxmt's build.
+#   guest-stages.sh [wine|forwarder|dxmt|d3d|fex]...   all five, in that order, by default
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 S=${BUILD_DIR:-$ROOT/build}/wine-arm64-src
 B="sh $ROOT/eac-vm/builder.sh"
 stamp() { sh "$ROOT/eac-vm/image/stamps.sh" "$1"; }
-for stage in ${*:-wine forwarder dxmt fex}; do
+for stage in ${*:-wine forwarder dxmt d3d fex}; do
   echo "guest-stages: $stage" >&2
   case $stage in
     wine)  # eac-vm/wine/build.sh in the builder, from eac-vm/wine/sync.sh's copies
@@ -31,10 +31,17 @@ for stage in ${*:-wine forwarder dxmt fex}; do
       sh "$ROOT/eac-vm/metal/build-guest.sh" > /dev/null
       stamp dxmt > "$W/dxmt-guest/.mn-source"
       sh "$ROOT/eac-vm/dxmt/stage.sh" > /dev/null ;;
+    d3d)  # Direct3D forwarding's guest DLLs (eac-vm/d3d/build-guest.sh, on the Mac) and prefix.sh, staged in the builder
+      sh "$ROOT/eac-vm/d3d/build-guest.sh" > /dev/null
+      rm -rf "$W/d3d-guest-stage"; mkdir -p "$W/d3d-guest-stage"
+      cp -R "$W/d3d-guest/x86_64-windows" "$W/d3d-guest-stage/"
+      cp "$ROOT/eac-vm/d3d/guest/prefix.sh" "$W/d3d-guest-stage/"
+      stamp d3d > "$W/d3d-guest-stage/.mn-source"
+      $B sync "$W/d3d-guest-stage" /home/bench/mn-d3d-guest > /dev/null ;;
     fex)  # eac-vm/image/build-fex.sh in the builder, from fex-linux
       $B sync "$W/fex-linux" /home/bench/fex-linux > /dev/null
       $B sync "$ROOT/eac-vm/image" /home/bench/mn-image > /dev/null
       $B ssh "set -e; sh mn-image/build-fex.sh > /dev/null; echo '$(stamp fex)' > fex-linux/build/Bin/.mn-source" ;;
-    *) echo "usage: guest-stages.sh [wine|forwarder|dxmt|fex]..." >&2; exit 2 ;;
+    *) echo "usage: guest-stages.sh [wine|forwarder|dxmt|d3d|fex]..." >&2; exit 2 ;;
   esac
 done

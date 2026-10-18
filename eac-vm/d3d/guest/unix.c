@@ -5,11 +5,13 @@
  * runs every other ring of the context (MN_REC_SUBMIT). */
 #include <errno.h>
 #include <pthread.h>
+#include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include "marshal.h"
 #include "notify.h"
-#include "../../metal/guest/transport.h"
+#include "guest/transport.h"
 #include "guest/galloc.h"
 #ifdef MN_D3D_LOOPBACK
 #include "win32_native_event.h" /* the guest's events are the native program's */
@@ -105,7 +107,22 @@ static void events(void) {
     events_ready = 1;
 }
 
+/* MACNEUTRON_VM_D3D_TRACE=1: each method's calls, written to the share's traces/d3d-guest.txt as the process ends. */
+static _Atomic uint64_t *counts;
+
+static void trace_out(void) {
+    FILE *f = counts ? fopen("/mnt/share/traces/d3d-guest.txt", "a") : NULL;
+    if (!f) return;
+    fprintf(f, "# process %d\n", (int)getpid());
+    for (unsigned i = 0; i < MN_D3D_CALLS; i++)
+        if (counts[i]) fprintf(f, "%u %s %llu\n", i, mn_d3d_calls[i].name, (unsigned long long)counts[i]);
+    fclose(f);
+}
+__attribute__((destructor)) static void trace_end(void) { trace_out(); }
+
 static void init(void) {
+    const char *t = getenv("MACNEUTRON_VM_D3D_TRACE");
+    if (t && *t == '1') counts = calloc(MN_D3D_CALLS, sizeof *counts);
     mn_wm_guest_handle = proxy_handle;
     ready = mn_open();
     if (!ready) ready = mn_drained();
@@ -166,6 +183,7 @@ int32_t mn_d3d_unix_call(void *args) {
     void *params = (void *)(uintptr_t)a->params;
     if (a->id < MN_D3D_FIRST) return family(a->id, params);
     if (a->id >= MN_D3D_CALLS || !mn_d3d_calls[a->id].name) return MN_EINVAL;
+    if (counts) atomic_fetch_add_explicit(&counts[a->id], 1, memory_order_relaxed);
     const struct mn_wm_call *c = &mn_d3d_calls[a->id];
     for (int again = 0;; again = 1) {
         struct mn_wm_out o = {.buf = rec, .cap = MN_REC_MAX};

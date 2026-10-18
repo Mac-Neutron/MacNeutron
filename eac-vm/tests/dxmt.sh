@@ -10,6 +10,8 @@ TO=$(cat "$T/timeout")
 rm -rf "$O" /home/mn/dxmt-cache; mkdir -p "$O"
 Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
 WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1
+# MACNEUTRON_VM_D3D=forward (M2's gate): the programs' Direct3D through mnd3d.dll to the host's native DXMT.
+[ -f /opt/mn-wine/lib/wine/mn-d3d/prefix.sh ] && . /opt/mn-wine/lib/wine/mn-d3d/prefix.sh
 cd "$T"
 grep -v '^#' "$T/invocations" | while IFS='|' read -r name exe args prefixes; do
   args=$(printf '%s' "$args" | sed "s|@S|Z:$T/shaders|g; s|@T|Z:$T|g; s|@X|Z:$T|g")
