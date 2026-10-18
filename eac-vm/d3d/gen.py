@@ -252,7 +252,7 @@ def parse_header(path, header, model):
         model.interfaces[name] = Interface(name, iids.get(name, iid), base, parse_vmethods(m.group(2), name), header)
     parse_types(text, model)
     wanted = {n: dll for dll, names in EXPORTS.items() for n in names}
-    for m in EXPORT.finditer(text):
+    for m in EXPORT.finditer(re.sub(r"^\s*#.*$", " ", text, flags=re.M)):  # not a preceding #endif
         if m.group(2) in wanted and m.group(2) not in [e.name for e in model.exports]:
             model.exports.append(Export(m.group(2), wanted[m.group(2)], norm_type(m.group(1)),
                                         parse_params(m.group(3))))
@@ -459,6 +459,7 @@ class FieldSpec:
     count_offset: Optional[int] = None
     count_width: int = 0
     deref: bool = False  # the count is read through a pointer (count=*<param>): an inout argument before this one
+    one_if: Optional[str] = None  # the array is one element when this argument is nonzero (its own length member)
     nested: Optional["NestedSpec"] = None
     union: Optional["UnionSpec"] = None
     iface: Optional[str] = None  # a handle's interface ("riid": the call's REFIID names it)
@@ -513,6 +514,7 @@ def parse_rules(text, model):
         <Interface>::* refuse                   every method the interface declares (one DXMT doesn't implement)
         <Interface>::<Method> <param> in|out|inout [count=<param>|size=<param>|bytes=<n>|one|string|wstring]
                                                 [unit=<n>: a void array's element bytes, with count]
+                                                [one_if=<param>: one element when that argument is nonzero]
         struct <S>.<field> in|out [count=<field>|size=<field>|bytes=<n>|one|string]
         struct <S>.<union field> union=<discriminant field> <Member>=<value> ...  (the members with pointers)
         companion <Interface> <Interface>       an object of the first answers the second (another C++ subobject)
@@ -557,18 +559,20 @@ def length_spec(words):
     """(direction, form, value) from a rule's words: form one of one, count, size, bytes, string, wstring."""
     if not words or words[0] not in ("in", "out", "inout"):
         raise RuleError(f"a rule wants in, out or inout first: {' '.join(words)}")
-    form, value, unit = "one", None, 1
+    form, value, unit, one_if = "one", None, 1, None
     for w in words[1:]:
         k, _, v = w.partition("=")
         if k in ("count", "size", "bytes"):
             form, value = k, v
         elif k == "unit":
             unit = int(v, 0)
+        elif k == "one_if":
+            one_if = v
         elif k in ("one", "string", "wstring"):
             form = k
         else:
             raise RuleError(f"a rule word the generator doesn't know: {w}")
-    return words[0], form, value, unit
+    return words[0], form, value, unit, one_if
 
 
 KIND = {"in": "WMF_IN", "out": "WMF_OUT", "inout": "WMF_INOUT"}
@@ -667,7 +671,7 @@ def pointer_field(model, rules, t, name, offset, rule, where, seen=()):
     elem_t = t[: t.rindex("*")].strip()
     base = resolve(model, elem_t)
     if rule:
-        direction, form, value, unit = length_spec(rule)
+        direction, form, value, unit, one_if = length_spec(rule)
         if form == "string":
             return FieldSpec("WMF_STR_IN", name, offset)
         if form == "wstring":
@@ -681,6 +685,9 @@ def pointer_field(model, rules, t, name, offset, rule, where, seen=()):
         fs = FieldSpec(KIND[direction], name, offset, esize, nested=nested)
         if form in ("count", "size"):
             fs.array, fs.count, fs.deref = True, value.lstrip("*"), value.startswith("*")
+            if one_if and offset is not None:
+                raise RuleError(f"{where}: one_if is for a method's argument")
+            fs.one_if = one_if
         elif form == "bytes":
             fs.size = int(value, 0)
         return fs
@@ -808,6 +815,8 @@ def classify(model, rules):
                         if f.count not in byname:
                             raise RuleError(f"{mname} {f.param}: no argument {f.count}")
                         target = byname[f.count]
+                        if f.one_if and f.one_if not in byname:
+                            raise RuleError(f"{mname} {f.param}: no argument {f.one_if}")
                         if f.deref:
                             if not stars(target.type) or not any(g.param == f.count and g.kind == "WMF_INOUT"
                                                                  for g in fields):
@@ -924,6 +933,8 @@ def emit_params(calls):
                 out.append(f"    {p.ctype} {name};")
         rename = {p.name: member(i, p.name) for i, p in enumerate(c.params)}
         for f in c.fields:
+            if f.one_if:  # the array's own length: the method's count, or one (the proxy's)
+                out.append(f"    uint32_t {rename[f.param]}_n;")
             if f.kind == "WMF_HANDLE_OUT":  # the reply's: the interfaces the object answers, and which of them it
                 out.append(f"    uint64_t {rename[f.param]}_ifaces[4];  /* answers at another pointer (bits by index) */")
         out.append("};")
@@ -942,6 +953,8 @@ def emit_calls(calls):
             rows.append(t.row(FieldSpec("WMF_HANDLE_IN", "self"), f"mn_d3d_p_{mid}"))
         for f in c.fields:
             g = FieldSpec(**{**f.__dict__, "param": rename[f.param], "count": rename.get(f.count, f.count)})
+            if f.one_if:
+                g.count, g.count_width = rename[f.param] + "_n", 4
             rows.append(t.row(g, f"mn_d3d_p_{mid}"))
         per_call[mid] = rows
     out = ["/* Generated by eac-vm/d3d/gen.py from the native headers and rules.txt: don't edit. The forwarded",
@@ -1061,14 +1074,15 @@ def families(model, rules):
 def emit_ifaces(model, rules):
     index, fam = families(model, rules)
     out = ["/* Generated by eac-vm/d3d/gen.py: don't edit. The interfaces by index (the answers' bits), their IIDs and",
-           " * families. */", '#include "mnd3d_params.h"', ""]
+           " * families. */", "#include <string.h>", '#include "mnd3d_params.h"', ""]
     for n, k in index.items():
         out.append(f"static const uint8_t fam{k}[] = {{{', '.join(str(x) for x in fam[n])}}};")
     out.append("const struct mn_d3d_iface mn_d3d_ifaces[MN_D3D_IFACES] = {")
     for n, k in index.items():
         iid = ", ".join(f"0x{b:02x}" for b in iid_bytes(model.interfaces[n].iid))
         out.append(f'    {{"{n}", {{{iid}}}, {len(fam[n])}, fam{k}}},')
-    out += ["};", ""]
+    out += ["};", "", "int mn_d3d_iface_of(const void *iid) {", "    for (int i = 0; i < MN_D3D_IFACES; i++)",
+            "        if (!memcmp(mn_d3d_ifaces[i].iid, iid, 16)) return i;", "    return -1;", "}", ""]
     return "\n".join(out)
 
 
@@ -1159,6 +1173,129 @@ def emit_stubs(model, rules, calls):
     return "\n".join(out)
 
 
+def declaring(model, iface):
+    """The interface that declares each slot of iface's vtable (IUnknown's three: None)."""
+    chain = []
+    n = iface
+    while n in model.interfaces:
+        chain.insert(0, n)
+        n = model.interfaces[n].base
+    out = [None] * IUNKNOWN_METHODS
+    for y in chain:
+        out += [y] * (len(model.interfaces[y].methods) - len(out))
+    return out
+
+
+def proxy_decl(model, c):
+    """A proxy function's parameters (the C vtable's, This aside), named as the params struct's members."""
+    out = []
+    for i, p in enumerate(c.method.params):
+        t = p.type
+        name = member(i, p.name)
+        out.append(f"{t} {name}" if not t.endswith("*") else f"{t}{name}")
+    return out
+
+
+def proxy_fill(model, c):
+    lines = []
+    for i, p in enumerate(c.method.params):
+        m = member(i, p.name)
+        t = p.type
+        base = resolve(model, t)
+        if t in REFS:
+            lines.append(f"    mn_p.{m} = (uintptr_t)&{m};")
+        elif stars(t) or t.startswith("PFN_") or base in HANDLE_TYPES:
+            lines.append(f"    mn_p.{m} = (uintptr_t){m};")
+        elif param_layout(model, p).ctype == "bytes":
+            lines.append(f"    std::memcpy(mn_p.{m}, &{m}, sizeof mn_p.{m});")
+        elif base in model.enums:
+            lines.append(f"    mn_p.{m} = (uint32_t){m};")
+        else:
+            lines.append(f"    mn_p.{m} = {m};")
+    return lines
+
+
+def emit_proxies(model, rules, calls):
+    """The guest's proxies (proxies.cpp): a function per forwarded method and export, filling its params and calling
+    mn_d3d_call; the vtables, by interface index, built at load (a special's slot is guest code, mn_d3d_special)."""
+    index = iface_index(model)
+    by_name = {c.name: mid for mid, c in calls.items()}
+    out = ["// Generated by eac-vm/d3d/gen.py: don't edit. The guest's proxies: each forwarded method fills its params",
+           "// (mnd3d_params.h) and calls mn_d3d_call; a refused one answers E_NOTIMPL; the vtables by interface index.",
+           '#include "proxy.h"', ""]
+    for mid in sorted(calls):
+        c = calls[mid]
+        iface, _, mname = c.name.partition("::")
+        params = proxy_decl(model, c)
+        ret = c.ret
+        if iface:
+            sig = f"static {ret} STDMETHODCALLTYPE px_{mid}({', '.join(['mn_proxy *This'] + params)})"
+        else:
+            sig = f'extern "C" {ret} WINAPI {mname}({", ".join(params) or "void"})'
+        body = [sig + " {", f"    // {c.name}"]
+        if c.mode == "refuse" or c.mode == "special":
+            body.append(f'    mn_d3d_unhandled({mid}, "{c.name}", {"1" if c.mode == "refuse" else "0"});')
+            if ret == "HRESULT":
+                body.append("    return E_NOTIMPL;")
+            elif ret != "void":
+                body.append(f"    return ({ret})0;")
+            body.append("}")
+            out += body
+            continue
+        body.append(f"    struct mn_d3d_p_{mid} mn_p = {{}};")
+        if iface:
+            body.append("    mn_p.self = (uintptr_t)This;")
+        body += proxy_fill(model, c)
+        made = [f for f in c.fields if f.kind == "WMF_HANDLE_OUT"]
+        rename = {p.name: member(i, p.name) for i, p in enumerate(c.method.params)}
+        for f in c.fields:
+            if f.one_if:
+                m = rename[f.param]
+                body.append(f"    mn_p.{m}_n = {rename[f.one_if]} ? 1 : (uint32_t){rename[f.count]};")
+        if ret == "void" and not made:  # nothing to tell the caller: an asynchronous call's failure is the host's to log
+            body.append(f"    mn_d3d_call({mid}, &mn_p);")
+        else:
+            body.append(f"    int32_t mn_s = mn_d3d_call({mid}, &mn_p);")
+        if ret == "HRESULT":
+            body.append("    HRESULT mn_hr = mn_s ? mn_d3d_hr(mn_s) : (HRESULT)(uint32_t)mn_p.ret;")
+        for f in made:
+            m = rename[f.param]
+            if f.iface == "riid":
+                riid = next(c.method.params[j - 1] for j, p in enumerate(c.method.params) if p.name == f.param)
+                which, rp = "-1", f"&{rename[riid.name]}"
+            else:
+                which, rp = str(index.get(f.iface, -1)), "nullptr"
+            ok = "SUCCEEDED(mn_hr) && " if ret == "HRESULT" else "!mn_s && "
+            body.append(f"    if ({m}) *(void **){m} = {ok}mn_p.{m} ? mn_proxy_out(mn_p.{m}, {which}, {rp}, "
+                        f"mn_p.{m}_ifaces) : nullptr;")
+        if ret == "HRESULT":
+            body.append("    return mn_hr;")
+        elif ret != "void":
+            body += [f"    {ret} mn_r{{}};", "    if (!mn_s) std::memcpy(&mn_r, &mn_p.ret, sizeof mn_r);",
+                     "    return mn_r;"]
+        body.append("}")
+        out += body
+    # vtables
+    out.append("")
+    out.append("const void *mn_d3d_vtables[MN_D3D_IFACES][MN_D3D_MAX_SLOTS];")
+    out.append("static void build(void) {")
+    for n, k in index.items():
+        decl = declaring(model, n)
+        for slot, y in enumerate(decl):
+            if y is None:
+                fn = ["(const void *)mn_px_QueryInterface", "(const void *)mn_px_AddRef",
+                      "(const void *)mn_px_Release"][slot]
+            else:
+                mid = by_name[f"{y}::{model.interfaces[n].methods[slot].name}"]
+                fn = f"(const void *)px_{mid}"
+                if calls[mid].mode == "special":  # guest code (proxy.cpp), else px_'s E_NOTIMPL
+                    fn = f'mn_d3d_special("{calls[mid].name}", {fn})'
+            out.append(f"    mn_d3d_vtables[{k}][{slot}] = {fn};")
+    out += ["}", "static int built = (build(), 1);", ""]
+    maxslots = max(len(model.interfaces[n].methods) for n in index)
+    return "\n".join(out), maxslots
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--headers", required=True)
@@ -1172,10 +1309,15 @@ def main(argv):
         if a.what == "calls":
             calls = classify(model, parse_rules(read(a.rules), model))
             rules = parse_rules(read(a.rules), model)
-            params = emit_params(calls).replace("\n#endif\n", "\n".join(iface_decls(model)) + "\n#endif\n")
+            params = emit_params(calls)
+            tail = "\n".join(iface_decls(model))
+            proxies, maxslots = emit_proxies(model, rules, calls)
+            tail += f"\n#define MN_D3D_MAX_SLOTS {maxslots}\n"
+            head, _, end = params.rpartition("\n#endif\n")  # the header's own guard, its last
+            params = head + "\n" + tail + "\n#endif\n" + end
             files = {"mnd3d_params.h": params, "calls.c": emit_calls(calls), "ifaces.c": emit_ifaces(model, rules),
-                     "stubs.cpp": emit_stubs(model, rules, calls), "layout.cpp": emit_layout(model, calls),
-                     "roundtrip-cases.c": emit_roundtrip(calls)}
+                     "stubs.cpp": emit_stubs(model, rules, calls), "proxies.cpp": proxies,
+                     "layout.cpp": emit_layout(model, calls), "roundtrip-cases.c": emit_roundtrip(calls)}
     except ValueError as e:  # RuleError too
         print(f"gen.py: {e}", file=sys.stderr)
         return 1

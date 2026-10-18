@@ -8,10 +8,9 @@ extern "C" int32_t mn_d3d_native_query(void *obj, const uint8_t iid[16], void **
     return ((IUnknown *)obj)->QueryInterface(*(const IID *)iid, out);
 }
 
-extern "C" int mn_d3d_iface_of(const void *iid) {
-    for (int i = 0; i < MN_D3D_IFACES; i++)
-        if (!std::memcmp(mn_d3d_ifaces[i].iid, iid, 16)) return i;
-    return -1;
+extern "C" const void *mn_d3d_native_blob(void *obj, uint64_t *size) {
+    *size = ((ID3D10Blob *)obj)->GetBufferSize();
+    return ((ID3D10Blob *)obj)->GetBufferPointer();
 }
 
 extern "C" void mn_d3d_answers(void *obj, int iface, uint64_t out[4]) {

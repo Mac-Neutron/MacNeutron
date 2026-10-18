@@ -16,7 +16,7 @@
 #include "host/dispatch.h"
 #include "host/loader.h"
 #include "mnd3d_params.h"
-#include "d3d.h"
+#include "mn_d3d.h"
 #include "../host/dispatch.h"
 
 extern const struct mn_wm_call mn_d3d_calls[MN_D3D_CALLS];

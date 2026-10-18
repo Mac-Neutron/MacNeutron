@@ -1,6 +1,8 @@
 #!/bin/sh
 # The M1 gate (Direct3D forwarding spec §8): DXMT's headless D3D12 programs, built natively against native DXMT
 # (build.sh, build-tests.sh), print what they print on the macOS Wine runtime, by the 4b-2 gate's rule (compare.py).
+# MN_GATE_PROGRAMS, MN_GATE_RUNS and MN_GATE_NAME: another build of the programs (M2's loopback, loopback-gate.sh).
+# MN_DXMT_ONLY: those rows only.
 # The macOS side is the 4b-2 gate's own reference (share.sh and ref.sh: one run each, through the runtime's launcher;
 # the maintainer's rule, 2026-10-17); the native side runs each program once as the guest gate does, with the share's timeout, a fresh shader cache and
 # ref.sh's DXMT settings, from the tests folder's paths (@S, @T). The XeSS and DLSS rows are M3's, d3d11_vsia M4's.
@@ -10,12 +12,14 @@ set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 D=$ROOT/eac-vm/dxmt
 T=$ROOT/dxmt/tests
-P=$ROOT/build/dxmt-native/tests
-R=$ROOT/build/dxmt-native/runs
+P=${MN_GATE_PROGRAMS:-$ROOT/build/dxmt-native/tests}
+R=${MN_GATE_RUNS:-$ROOT/build/dxmt-native/runs}
+NAME=${MN_GATE_NAME:-dxmt-native gate}
 REF=$ROOT/build/eac-vm-work/share/dxmt-ref
-ROWS="d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_copy d3d12_depth d3d12_dxil d3d12_dxil_exec d3d12_hazards
-  d3d12_indirect d3d12_layered d3d12_lod d3d12_null d3d12_query d3d12_timestamp d3d12_triangle d3d12_upscale
-  d3d12_volume d3d12_vsread"
+ROWS=${MN_DXMT_ONLY:-"d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_copy d3d12_depth d3d12_dxil
+  d3d12_dxil_exec d3d12_hazards d3d12_indirect d3d12_layered d3d12_lod d3d12_null d3d12_query d3d12_timestamp
+  d3d12_triangle d3d12_upscale d3d12_volume d3d12_vsread"}
+WANT=$(echo $ROWS | wc -w | tr -d ' ')
 now() { perl -MTime::HiRes=time -e 'printf "%.2f\n", time'; }
 # Measurements, not behaviour, left out of the comparison: natively they run at another speed, and the 4b-2 rule masks
 # a line only when the two macOS runs happen to differ (d3d12_cache's timing and d3d12_compress's uav-clear once agreed
@@ -27,10 +31,11 @@ behaviour() {  # behaviour <run> <copy>: the run without its measurements, with 
 }
 fail=0
 python3 -I "$D/compare.py" self-test || fail=1
-for p in $ROWS; do [ -x "$P/$p" ] || { echo "dxmt-native gate: no $P/$p: run build-tests.sh first"; exit 1; }; done
+for p in $ROWS; do [ -x "$P/$p" ] || { echo "$NAME: no $P/$p: run build-tests.sh first"; exit 1; }; done
 # shellcheck disable=SC2086  # the names, one word each
 MN_DXMT_ONLY=$(echo $ROWS) sh "$D/share.sh" || exit 1
-MN_REF_RUNS=1 sh "$D/ref.sh" > "$ROOT/build/dxmt-native/ref.txt" 2>&1 || { tail "$ROOT/build/dxmt-native/ref.txt"; exit 1; }
+mkdir -p "$R"
+MN_REF_RUNS=1 sh "$D/ref.sh" > "$R.ref.txt" 2>&1 || { tail "$R.ref.txt"; exit 1; }
 TO=$(cat "$ROOT/build/eac-vm-work/share/dxmt-tests/timeout")
 rm -rf "$R"; mkdir -p "$R/cache" "$R/compared"
 n=0
@@ -55,6 +60,6 @@ while IFS='|' read -r name exe args prefixes; do
   python3 -I "$D/compare.py" "$name" "$C.1.txt" "$C.1.txt" "$C.native.txt" $prefixes || fail=1  # one reference run
   echo "     time: macOS $(cat "$REF/$name.1.time") s, native $(cat "$R/$name.time") s"
 done < "$ROOT/build/eac-vm-work/share/dxmt-tests/invocations"
-[ "$n" -eq 19 ] || { echo "dxmt-native gate: $n programs ran, not 19"; fail=1; }
-[ $fail -eq 0 ] && echo "dxmt-native gate: all $n programs passed" || echo "dxmt-native gate: FAIL"
+[ "$n" -eq "$WANT" ] || { echo "$NAME: $n programs ran, not $WANT"; fail=1; }
+[ $fail -eq 0 ] && echo "$NAME: all $n programs passed" || echo "$NAME: FAIL"
 exit $fail

@@ -6,8 +6,8 @@
  * of the marshaller's (MN_STATUS_*: a handle that didn't translate, a reply that didn't fit); or an HRESULT when the
  * host refused the call before running it: DXGI_ERROR_DEVICE_REMOVED once the context's device is removed, E_FAIL
  * without native DXMT, E_NOTIMPL for a method the host has no code for. */
-#ifndef MN_D3D_H
-#define MN_D3D_H
+#ifndef MN_D3D_MN_D3D_H
+#define MN_D3D_MN_D3D_H
 #include <stdint.h>
 
 #define MN_OP_D3D 0x10000u
@@ -17,8 +17,18 @@ enum {
     MN_D3D_OP_NOTIFY = 2,  /* Task 8 */
     MN_D3D_OP_TRACE = 3,   /* Task 11 */
     MN_D3D_OP_QUERY = 4,   /* struct mn_d3d_query: QueryInterface for an interface at another pointer, a new handle */
+    MN_D3D_OP_BLOB = 5,    /* struct mn_d3d_blob: an ID3D10Blob's bytes; reply: u64 its size, then the bytes asked */
 };
 struct mn_d3d_query { uint64_t handle; uint8_t iid[16]; uint64_t out; }; /* reply: int32 HRESULT */
+struct mn_d3d_blob { uint64_t handle, offset, len; };
+
+/* A guest proxy's start (guest/proxy.h): the marshaller's hook reads the handle there. */
+struct mn_d3d_proxy_hdr { const void *vtbl; uint32_t magic; int32_t iface; uint64_t handle; };
+#define MN_D3D_PROXY_MAGIC 0x4433444eu /* "ND3D" */
+/* The unix side's call (guest/unix.c): id, and the params (a method's struct, or a family op's below). */
+struct mn_d3d_args { uint32_t id, pad; uint64_t params; };
+struct mn_d3d_query_args { uint64_t handle; uint8_t iid[16]; uint64_t out; int32_t hr, pad; };
+struct mn_d3d_blob_args { uint64_t handle, dst, cap, size; }; /* the blob's bytes into dst (at most cap), its size */
 
 #define MN_D3D_E_FAIL ((int32_t)0x80004005)
 #define MN_D3D_E_NOTIMPL ((int32_t)0x80004001)

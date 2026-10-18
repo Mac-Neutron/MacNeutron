@@ -150,8 +150,8 @@ ID3D12Object::SetPrivateData data in size=data_size
 IDXGIObject::GetPrivateData data_size inout one
 IDXGIObject::GetPrivateData data out size=*data_size
 IDXGIObject::SetPrivateData data in size=data_size
-ID3D12Resource::Map special
-ID3D12Resource::Unmap special
+# Map: the host's pointer, until Task 7's arenas (one process, the loopback, can read it).
+ID3D12Resource::Map data out bytes=8
 ID3D12Resource::WriteToSubresource special
 ID3D12Resource::ReadFromSubresource special
 ID3D12Device::CheckFeatureSupport special
@@ -161,7 +161,6 @@ ID3D12Device1::SetEventOnMultipleFenceCompletion special
 # Their descriptions hold names: DXMT has no meta commands (a count of 0; E_INVALIDARG), answered in the guest.
 ID3D12Device5::EnumerateMetaCommands special
 ID3D12Device5::EnumerateMetaCommandParameters special
-ID3D12GraphicsCommandList::OMSetRenderTargets special
 ID3D12RootSignatureDeserializer::* special
 ID3D12VersionedRootSignatureDeserializer::* special
 ID3D10Blob::* special
@@ -174,6 +173,9 @@ IDXGIAdapter4::GetDesc3 special
 
 # Arrays and sized data.
 ID3D12GraphicsCommandList::RSSetViewports viewports in count=viewport_count
+# One handle when single_descriptor_handle: DXMT steps through the heap from it.
+ID3D12GraphicsCommandList::OMSetRenderTargets render_target_descriptors in count=render_target_descriptor_count one_if=single_descriptor_handle
+ID3D12GraphicsCommandList::OMSetRenderTargets depth_stencil_descriptor in one
 ID3D12GraphicsCommandList::RSSetScissorRects rects in count=rect_count
 ID3D12GraphicsCommandList::ResourceBarrier barriers in count=barrier_count
 ID3D12GraphicsCommandList::SetComputeRoot32BitConstants data in count=constant_count unit=4

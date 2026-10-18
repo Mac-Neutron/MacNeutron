@@ -45,7 +45,7 @@ $(GEN)/native.o: host/native.cpp host/stubs.h $(GEN)/calls.c
 	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -fsanitize=address,undefined -c -o $@ host/native.cpp
 $(GEN)/stubs-asan.o: $(GEN)/calls.c host/stubs.h
 	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -fsanitize=address,undefined -c -o $@ $(GEN)/stubs.cpp
-$(GEN)/dispatch-test: tests/dispatch-test.c host/dispatch.c host/dispatch.h d3d.h $(GEN)/calls.c $(GEN)/native.o \
+$(GEN)/dispatch-test: tests/dispatch-test.c host/dispatch.c host/dispatch.h mn_d3d.h $(GEN)/calls.c $(GEN)/native.o \
   $(GEN)/stubs-asan.o $(LOOP_SRC) $(WM)/host/dispatch.m $(WM)/marshal.c $(WM)/marshal.h
 	$(CC) $(CFLAGS) $(INC) -I. -c -o $(GEN)/dispatch-test.o tests/dispatch-test.c
 	$(CC) $(CFLAGS) $(INC) -I. -o $@ $(GEN)/dispatch-test.o host/dispatch.c $(GEN)/calls.c $(GEN)/ifaces.c \

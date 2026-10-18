@@ -42,6 +42,9 @@ struct mn_wm_out {
 NTSTATUS_T mn_wm_pack(unsigned slot, void *params, struct mn_wm_out *out);
 /* The same for a call another table describes (Direct3D forwarding's): no winemetal specials. */
 NTSTATUS_T mn_wm_pack_call(const struct mn_wm_call *c, void *params, struct mn_wm_out *out);
+/* Direct3D forwarding's: a handle field of a table's call holds a guest proxy's address, which this turns into its
+ * handle in the record's copy (the caller's memory is left alone): 0, or -1 for something not a proxy. NULL: none. */
+extern int (*mn_wm_guest_handle)(uint64_t value, mn_handle *h);
 NTSTATUS_T mn_wm_unpack_call(const struct mn_wm_call *c, void *params, const struct mn_wm_out *out, const void *reply,
                              uint32_t len);
 /* A synchronous call's reply: its outputs into params and the memory it points to; nil handles' indexes freed. */

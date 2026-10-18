@@ -1,6 +1,6 @@
 /* Direct3D forwarding's host side (M2 Task 5): the executor's handler for macneutron-vm. Records from MN_OP_D3D go to
  * native DXMT through the generated stubs (stubs.cpp), loaded on the first one; the rest to winemetal's dispatcher.
- * Statuses: eac-vm/d3d/d3d.h. */
+ * Statuses: eac-vm/d3d/mn_d3d.h. */
 #ifndef MN_D3D_DISPATCH_H
 #define MN_D3D_DISPATCH_H
 #include <stdint.h>

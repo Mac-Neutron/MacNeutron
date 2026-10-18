@@ -4,10 +4,14 @@
 # prints what a fresh macOS run of it prints (eac-vm/dxmt/ref.sh through the runtime's launcher, compare.py's rule).
 # Needs build.sh, and for the check what ref.sh needs (make dxmt-tests, .build/release/macneutron,
 # build/wine-arm64/wine.app). Prints "tests: ok" or "tests: FAIL <what>".
+# MN_D3D_PROGRAMS_LIB: link the programs to that library instead of native DXMT (Direct3D forwarding's loopback, M2),
+# into MN_D3D_PROGRAMS_OUT, with no check (the loopback's gate compares them).
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 I=$ROOT/build/dxmt-native/install
-OUT=$ROOT/build/dxmt-native/tests
+OUT=${MN_D3D_PROGRAMS_OUT:-$ROOT/build/dxmt-native/tests}
+LINK="$I/lib/d3d12.dylib $I/lib/dxgi.dylib -Wl,-rpath,$I/lib"
+[ -z "${MN_D3D_PROGRAMS_LIB:-}" ] || LINK="$MN_D3D_PROGRAMS_LIB -Wl,-rpath,$(dirname "$MN_D3D_PROGRAMS_LIB")"
 T=$ROOT/dxmt/tests
 H=$ROOT/eac-vm/dxmt-native/tests
 PROGRAMS="d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_copy d3d12_depth d3d12_dxil d3d12_dxil_exec
@@ -17,14 +21,16 @@ PROGRAMS="d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_copy d3d12_dep
 mkdir -p "$OUT"
 for p in $PROGRAMS; do rm -f "$OUT/$p"; done  # a failed build must not leave the last one in its place
 for p in $PROGRAMS; do
+  # shellcheck disable=SC2086  # the link's words
   clang++ -std=c++17 -O1 -w -include "$H/native-prelude.h" -I"$H/include" -I"$I/include-native/d3d12" \
     -I"$I/include-native/windows" -I"$I/include-native/directx" -I"$I/include-native" -o "$OUT/$p" "$T/$p.cpp" \
-    "$I/lib/d3d12.dylib" "$I/lib/dxgi.dylib" -Wl,-rpath,"$I/lib" > "$OUT/$p.build.txt" 2>&1 &
+    $LINK > "$OUT/$p.build.txt" 2>&1 &
 done
 wait
 fail=
 for p in $PROGRAMS; do [ -x "$OUT/$p" ] || fail="$fail $p"; done
 [ -z "$fail" ] || { for p in $fail; do head -5 "$OUT/$p.build.txt"; done; echo "tests: FAIL builds:$fail"; exit 1; }
+[ -z "${MN_D3D_PROGRAMS_LIB:-}" ] || { echo "tests: ok (built against $MN_D3D_PROGRAMS_LIB)"; exit 0; }
 # The check: d3d12_null, natively and in a fresh macOS run (one row of the gate's invocations).
 W=$ROOT/build/eac-vm-work/share
 [ -f "$W/dxmt-tests/timeout" ] || sh "$ROOT/eac-vm/dxmt/share.sh"

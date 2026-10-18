@@ -9,7 +9,7 @@
 #include "marshal.h"
 #include "host/dispatch.h"
 #include "mnd3d_params.h"
-#include "../d3d.h"
+#include "../mn_d3d.h"
 #include "dispatch.h"
 
 extern const struct mn_wm_call mn_d3d_calls[MN_D3D_CALLS];
@@ -20,6 +20,7 @@ extern void *mn_d3d_exports[MN_D3D_EXPORTS];
 /* native.cpp */
 void mn_d3d_native_release(void *obj);
 int32_t mn_d3d_native_query(void *obj, const uint8_t iid[16], void **out);
+const void *mn_d3d_native_blob(void *obj, uint64_t *size);
 
 static char *dir;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
@@ -71,7 +72,7 @@ void mn_d3d_result(int32_t hr) {
     }
 }
 
-/* The family's own ops (d3d.h). */
+/* The family's own ops (mn_d3d.h). */
 static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *p, uint32_t len, void *reply,
                       uint32_t cap, uint32_t *n) {
     switch (id) {
@@ -97,6 +98,23 @@ static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *
         }
         memcpy(reply, &hr, sizeof hr);
         *n = sizeof hr;
+        return 0;
+    }
+    case MN_D3D_OP_BLOB: {
+        struct mn_d3d_blob b;
+        if (len < sizeof b || !reply || cap < 8) return MN_EINVAL;
+        memcpy(&b, p, sizeof b);
+        int ok;
+        void *obj = mn_ht_get(c->ht, b.handle, MN_HK_D3D, &ok);
+        if (!ok || !obj) return (int32_t)MN_STATUS_INVALID_HANDLE;
+        uint64_t size;
+        const uint8_t *bytes = mn_d3d_native_blob(obj, &size);
+        uint64_t take = b.offset < size ? size - b.offset : 0;
+        if (take > b.len) take = b.len;
+        if (take > cap - 8) take = cap - 8;
+        memcpy(reply, &size, 8);
+        if (take) memcpy((uint8_t *)reply + 8, bytes + b.offset, take);
+        *n = (uint32_t)(8 + take);
         return 0;
     }
     default:
