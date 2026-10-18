@@ -131,7 +131,7 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
   operations, `ExecuteCommandLists`, `Signal` and `Wait`, are sent with every other ring of the process run first.
   M4: a D3D11 context's and a D3D10 device's methods, as a command list's, go as a submit when another thread called
   that object last; `ID3D11Multithread`'s `Enter` and `Leave` are a lock in the guest. A context's end releases what
-  the guest kept newest first: native DXMT's D3D11 children use their device's pools without holding it.)
+  the guest kept newest first, after native DXMT's D3D11 compiles are done (fork 0090).)
 
 ### 4.6 Memory
 
