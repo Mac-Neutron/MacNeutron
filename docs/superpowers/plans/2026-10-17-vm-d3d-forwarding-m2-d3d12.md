@@ -72,7 +72,7 @@ DXMT (M1), POSIX sh.
   entry (`dlls/ntdll/unix/loader.c`, `set_dll_path`), so builtin stand-ins couldn't sit beside guest DXMT's. The three
   are plain PE DLLs in `/opt/mn-wine/lib/wine/mn-d3d/`, which `run-game.sh` links into the prefix's `system32`; the
   mode is `WINEDLLOVERRIDES` alone (`d3d12,dxgi=n` forwards, `=b` is today's path). A plain DLL has no unix lib of its
-  own: `mnd3d.dll` calls the builtin `winemetal.dll`'s new `WMTForward` (fork 0076, the `guest_vm` build only), which
+  own: `mnd3d.dll` calls the builtin `winemetal.dll`'s new `WMTForward` (fork 0077, the `guest_vm` build only), which
   reaches slot `MN_WM_D3D` (155) of our guest `winemetal.so`: one transport and one context a process.
 - **Op numbers:** `MN_OP_D3D = 0x10000`; a method's record is `MN_OP_D3D + id`. Ids 0 to 15 are the family's own
   (0 release, 1 add arena, 2 attach the notify queue, 3 the trace's counts); methods start at 16, numbered by the
@@ -80,9 +80,9 @@ DXMT (M1), POSIX sh.
 - **Two ring-state halves:** the executor's 64 bytes of `state` a ring: `[0..3]` winemetal's (today), `[4..7]` the
   D3D dispatcher's.
 - **Native DXMT loads lazily**, on the first `MN_OP_D3D` record, from `dxmt/` beside `macneutron-vm`: a run on today's
-  path never loads it. Its Objective-C classes are renamed in the native build (fork 0075): native and Wine
+  path never loads it. Its Objective-C classes are renamed in the native build (fork 0076): native and Wine
   `winemetal` both define `CacheReader` and `CacheWriter`.
-- **Fence completions on the host** go through a relay event (fork 0075: a `win32_native_event.h` kind whose
+- **Fence completions on the host** go through a relay event (fork 0076: a `win32_native_event.h` kind whose
   `SetEvent` calls a function): `SetEventOnCompletion` with the guest's event posts `MN_NOTIFY_EVENT` to the context's
   notify queue, as winemetal's listener does; each `Signal` registers one that writes the fence's mirror slot.
 - **The DXGI swapchain and its frame-latency object are M3's** (§4.8 presentation): M2's DXGI is the factory, adapters
@@ -108,7 +108,7 @@ DXMT (M1), POSIX sh.
 
 ---
 
-### Task 1: Native DXMT for hosting (fork 0075)
+### Task 1: Native DXMT for hosting (fork 0076)
 
 **Files:**
 - Modify (fork): `src/util/win32_native_event.h` (a relay kind), `src/dxmt/dxmt_buffer.cpp` (CPU-placed buffers from
@@ -132,7 +132,7 @@ DXMT (M1), POSIX sh.
   -DCacheWriter=DXMTNativeCacheWriter` in `nativemetal`'s `c_args`.
 - [ ] **Step 4: Run** `win32.sh`, the hook test, `tests/build.sh` and `eac-vm/dxmt-native/gate.sh`. Expected:
   `win32: ok`, `hook: ok`, `build: ok`, 19 of 19; `nm` of `winemetal.dylib` has no `_OBJC_CLASS_$_CacheReader`.
-- [ ] **Step 5: Commit** in the fork, export 0075 (applies on the stable series), commit here.
+- [ ] **Step 5: Commit** in the fork, export 0076 (applies on the stable series), commit here.
 
 ### Task 2: The generator's model and manifest
 
@@ -361,7 +361,7 @@ DXMT (M1), POSIX sh.
 - Create: `eac-vm/d3d/guest/mnd3d.def`, `d3d12.def`, `dxgi.def` (the two forward their exports to `mnd3d.dll`),
   `eac-vm/d3d/build-guest.sh` (plain PE DLLs on the Mac with llvm-mingw, importing `winemetal.dll` from the guest
   Wine SDK as `eac-vm/dxmt/build.sh` does; the guest `winemetal.so` gains `unix.c` in `eac-vm/metal/build-guest.sh`)
-- Modify (fork 0076, `guest_vm` only): `src/winemetal/winemetal_thunks.c`, `winemetal.def` (`NTSTATUS WINAPI
+- Modify (fork 0077, `guest_vm` only): `src/winemetal/winemetal_thunks.c`, `winemetal.def` (`NTSTATUS WINAPI
   WMTForward(UINT32 call, void *params)`: `UNIX_CALL(call, params)` for `call >= 155`, `STATUS_INVALID_PARAMETER`
   below)
 - Modify: `eac-vm/image/build.sh` (`/opt/mn-wine/lib/wine/mn-d3d/x86_64-windows/`), `eac-vm/image/guest-stages.sh`
