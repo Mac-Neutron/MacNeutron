@@ -1,7 +1,8 @@
 // The D3D11 and D3D10 test programs' shaders (Direct3D forwarding M4), compiled with D3DCompile where one exists (the
 // macOS runtime's Wine, through eac-vm/dxmt/ref.sh): `dxbc.exe <folder>` writes <name>.dxbc for each into the shaders
-// folder (dxmt/tests/shaders, the invocations' @S), committed, so the programs load bytecode and compile nothing when
-// they run (native builds have no d3dcompiler). Prints "dxbc <name> <bytes>" each, or the compiler's errors.
+// folder (dxmt/tests/shaders/d3d11, the invocations' @S/d3d11; apart from the DXIL, whose count dxmt/check.sh checks),
+// committed, so the programs load bytecode and compile nothing when they run (native builds have no d3dcompiler).
+// Prints "dxbc <name> <bytes>" each, or the compiler's errors.
 #include <windows.h>
 #include <d3dcompiler.h>
 #include <cstdio>

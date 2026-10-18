@@ -60,9 +60,11 @@ void mn_d3d_events_end(uint32_t ctx_id);
 void mn_d3d_fence_gone(void *obj);
 static void release(void *obj), present(void *cmdbuf, void *drawable);
 /* D3D11's present (M4 Task 6) happens on DXMT's encoder thread after the Present call returned (D3D12's inside it):
- * the context of the latest Present call. ponytail: two processes presenting D3D11 at once may count each other's
- * frames; a context per native swapchain if that ever matters. */
+ * counted at its call (hooked: no present hook ran inside it), and probed and mirrored for the context of the latest
+ * Present call. ponytail: two processes presenting D3D11 at once may probe and mirror each other's frames; a context
+ * per native swapchain if that ever matters. */
 static _Atomic uint32_t presenter;
+static _Thread_local int hooked;
 static unsigned present_ids[2]; /* IDXGISwapChain::Present's and IDXGISwapChain1::Present1's */
 
 static char *dir, *trace;
@@ -221,8 +223,8 @@ uint32_t mn_d3d_current_ctx(void) { return cur.c ? cur.c->ctx_id : 0; }
 static void shown(void *ctx) { mn_d3d_drawable((uint32_t)(uintptr_t)ctx, 1); }
 static void present(void *cmdbuf, void *drawable) {
     uint32_t ctx_id = cur.c ? cur.c->ctx_id : atomic_load(&presenter);
-    if (cur.c) mn_wm_present_native(cur.c, cmdbuf, drawable);
-    else mn_wm_present_native_of(ctx_id, cmdbuf, drawable);
+    if (cur.c) mn_wm_present_native(cur.c, cmdbuf, drawable), hooked = 1;
+    else mn_wm_present_probe_of(ctx_id, cmdbuf, drawable);
     if (!ctx_id || !drawable) return;
     mn_d3d_drawable(ctx_id, 0);
     mn_wm_on_shown(drawable, shown, (void *)(uintptr_t)ctx_id);
@@ -386,7 +388,8 @@ static int32_t d3d(uint32_t ctx_id, void *ring, uint32_t id, const void *p, uint
     for (unsigned i = 0; i < call->nfields && !creation; i++) creation = call->fields[i].kind == WMF_HANDLE_OUT;
     __typeof__(cur) outer = cur; /* a stub doesn't call back into the dispatcher, but keep it right if one did */
     cur.c = c, cur.call = call, cur.sync = reply != NULL;
-    if (id == present_ids[0] || id == present_ids[1]) atomic_store(&presenter, c->ctx_id);
+    const int presenting = id == present_ids[0] || id == present_ids[1];
+    if (presenting) atomic_store(&presenter, c->ctx_id), hooked = 0;
     mn_d3d_memory_begin(c->ctx_id, creation && reply);
     uint64_t t0 = now_us();
     int32_t s = mn_wm_host_call_table(c, ring, call, stub, p, len, reply, cap, n);
@@ -396,6 +399,7 @@ static int32_t d3d(uint32_t ctx_id, void *ring, uint32_t id, const void *p, uint
         while (us > top && !atomic_compare_exchange_weak(&slowest_us[id], &top, us)) {}
     }
     uint64_t need = mn_d3d_memory_end();
+    if (presenting && !s && !hooked) mn_wm_present_count(c); /* D3D11's: its present comes on DXMT's thread */
     cur = outer;
     if (!s && !need && reply && creation)
         for (unsigned i = 0; i < call->nfields; i++) { /* the handles it bound, for identity */

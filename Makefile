@@ -51,7 +51,7 @@ presenter-check: build wine-arm64 presenter
 	sh presenter/check.sh
 
 # D3D12, D3D11 and D3D10 test programs for our DXMT, built in parallel (one compiler per core), and dxbc.exe, which
-# compiles the D3D11 and D3D10 ones' shaders into dxmt/tests/shaders (run on the macOS runtime: dxmt/tests/dxbc.cpp).
+# compiles the D3D11 and D3D10 ones' shaders into dxmt/tests/shaders/d3d11 (run on the macOS runtime: dxmt/tests/dxbc.cpp).
 DXMT_TESTS = $(patsubst dxmt/tests/%.cpp,build/dxmt-tests/%.exe,$(wildcard dxmt/tests/d3d1[012]_*.cpp)) \
 	build/dxmt-tests/dxbc.exe
 dxmt-tests:

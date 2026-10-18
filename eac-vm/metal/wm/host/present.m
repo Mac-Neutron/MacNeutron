@@ -116,6 +116,18 @@ void mn_wm_present_native(struct mn_wm_ctx *c, void *cmdbuf, void *drawable) {
     count_frame();
 }
 
+/* D3D11's (M4): its present happens on DXMT's encoder thread after the Present call, which counted it
+ * (mn_wm_present_count): probed there as the context's latest frame. */
+void mn_wm_present_count(struct mn_wm_ctx *c) {
+    atomic_fetch_add(&c->presented, 1);
+    count_frame();
+}
+void mn_wm_present_probe(struct mn_wm_ctx *c, void *cmdbuf, void *drawable) {
+    uint64_t frame = c ? atomic_load(&c->presented) : 0;
+    if (probing() && frame % 60 == 30 && cmdbuf && drawable)
+        probe((id<MTLCommandBuffer>)cmdbuf, (id<CAMetalDrawable>)drawable, frame);
+}
+
 /* fn(ctx) once the display shows drawable (or drops it): Metal's presented handler. */
 void mn_wm_on_shown(void *drawable, void (*fn)(void *ctx), void *ctx) {
     [(id<MTLDrawable>)drawable addPresentedHandler:^(id<MTLDrawable> d) {

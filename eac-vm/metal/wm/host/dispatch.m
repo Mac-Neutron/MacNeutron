@@ -63,11 +63,11 @@ int32_t mn_wm_dispatch_test(uint32_t ctx_id, void *ring_state, uint32_t op, cons
                           : mn_testops(ctx_id, ring_state, op, p, len, reply, cap, reply_len);
 }
 
-void mn_wm_present_native_of(uint32_t ctx_id, void *cmdbuf, void *drawable) {
+void mn_wm_present_probe_of(uint32_t ctx_id, void *cmdbuf, void *drawable) {
     pthread_mutex_lock(&ctx_lock);
     struct ctx *c = ctxs;
     while (c && c->wm.ctx_id != ctx_id) c = c->next;
-    mn_wm_present_native(c ? &c->wm : NULL, cmdbuf, drawable);
+    mn_wm_present_probe(c ? &c->wm : NULL, cmdbuf, drawable);
     pthread_mutex_unlock(&ctx_lock);
 }
 

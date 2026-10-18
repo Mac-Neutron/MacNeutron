@@ -14,7 +14,7 @@ T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 run() { # run <frames> <name>
   MACNEUTRON_VM_D3D_TRACE=1 MN_D3D_LOOPBACK_TRACE=$T/$2.guest MN_D3D_LOOPBACK_HOST_TRACE=$T/$2.host DXMT_LOG_PATH=none \
-    DXMT_SHADER_CACHE_PATH=$T/cache "$P" "$ROOT/dxmt/tests/shaders" "$1" > "$T/$2.out" 2>&1 \
+    DXMT_SHADER_CACHE_PATH=$T/cache "$P" "$ROOT/dxmt/tests/shaders/d3d11" "$1" > "$T/$2.out" 2>&1 \
     || { tail -3 "$T/$2.out"; echo "pieces: FAIL d3d11_dynamic $1 exited"; exit 1; }
 }
 maps() { awk '$2 == "ID3D11DeviceContext::Map" {n += $3} END {print n + 0}' "$1"; }

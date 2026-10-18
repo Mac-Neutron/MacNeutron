@@ -9,18 +9,18 @@
 # freed when the guest drains its frees); its own limits pass on both sides. A line of output is compared when it starts with one
 # of the program's prefixes (its own printf lines; Wine's, DXMT's and the launcher's never count). The d3d11 and d3d10 rows
 # (Direct3D forwarding M4) take their shaders as DXBC from @S, which dxbc.exe compiled on the macOS runtime.
-d3d10_core|d3d10_core.exe|@S|d3d10
-d3d10_wine|d3d10_wine.exe|@S|wine
-d3d11_api|d3d11_api.exe|@S|api
-d3d11_compute|d3d11_compute.exe|@S|compute
-d3d11_deferred|d3d11_deferred.exe|@S|deferred
-d3d11_dynamic|d3d11_dynamic.exe|@S|dynamic
-d3d11_getters|d3d11_getters.exe|@S|getters
-d3d11_pipeline|d3d11_pipeline.exe|@S|pipeline
-d3d11_query|d3d11_query.exe|@S|query
-d3d11_render|d3d11_render.exe|@S|render
-d3d11_transfer|d3d11_transfer.exe|@S|transfer
-d3d11_vsia|d3d11_vsia.exe|@S|d3d11
+d3d10_core|d3d10_core.exe|@S/d3d11|d3d10
+d3d10_wine|d3d10_wine.exe|@S/d3d11|wine
+d3d11_api|d3d11_api.exe|@S/d3d11|api
+d3d11_compute|d3d11_compute.exe|@S/d3d11|compute
+d3d11_deferred|d3d11_deferred.exe|@S/d3d11|deferred
+d3d11_dynamic|d3d11_dynamic.exe|@S/d3d11|dynamic
+d3d11_getters|d3d11_getters.exe|@S/d3d11|getters
+d3d11_pipeline|d3d11_pipeline.exe|@S/d3d11|pipeline
+d3d11_query|d3d11_query.exe|@S/d3d11|query
+d3d11_render|d3d11_render.exe|@S/d3d11|render
+d3d11_transfer|d3d11_transfer.exe|@S/d3d11|transfer
+d3d11_vsia|d3d11_vsia.exe|@S/d3d11|d3d11
 d3d12_api|d3d12_api.exe|@S/depth.vs.dxil @S/depth.ps.dxil|library residency nulldsv multifence markers list1 heap1 feature caps cachedblob map
 d3d12_bounds|d3d12_bounds.exe|@S/bounds.cs.dxil|bounds
 d3d12_cache|d3d12_cache.exe|@S/cache.vs.dxil @S/cache.ps.dxil @S/cache.cs.dxil a|cache timing

@@ -899,8 +899,8 @@ expect "a vertex shader reads typed, structured, 3D and cube resources as on D3D
 # without a null check: the runtime binds a zeroed buffer). Slot 0 bound to (1, 2, 3, 4).
 run ours vsia-ours dxmt "$TESTS/d3d12_vsread.exe" "Z:$S/vsread.vsia.dxil" "Z:$S/vsread.ps.dxil" ia
 run ref vsia-ref d3dmetal "$TESTS/d3d12_vsread.exe" "Z:$S/vsread.vsia.dxil" "Z:$S/vsread.ps.dxil" ia
-run ours vsia11-ours dxmt "$TESTS/d3d11_vsia.exe"
-run ref vsia11-ref d3dmetal "$TESTS/d3d11_vsia.exe"
+run ours vsia11-ours dxmt "$TESTS/d3d11_vsia.exe" "Z:$S/d3d11"
+run ref vsia11-ref d3dmetal "$TESTS/d3d11_vsia.exe" "Z:$S/d3d11"
 ia="1,2,3,4 0,0,0,1 0,0,0,0 0,0,0,1"
 expect "unbound vertex buffer slots read zeros, widened by their format" "$(grep '^vsread ia' "$WORK/vsia-ours.txt" || echo none)" "vsread ia $ia"
 expect "and on D3DMetal" "$(grep '^vsread ia' "$WORK/vsia-ref.txt" || echo 'D3DMetal printed nothing')" "vsread ia $ia"
