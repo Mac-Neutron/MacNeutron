@@ -40,6 +40,10 @@ struct mn_wm_out {
 /* Builds slot's record from params, picking the handles it returns and writing them into params at once. 0, or an
  * NTSTATUS to return without sending: a refused slot, a dead handle, or a record past cap. */
 NTSTATUS_T mn_wm_pack(unsigned slot, void *params, struct mn_wm_out *out);
+/* The same for a call another table describes (Direct3D forwarding's): no winemetal specials. */
+NTSTATUS_T mn_wm_pack_call(const struct mn_wm_call *c, void *params, struct mn_wm_out *out);
+NTSTATUS_T mn_wm_unpack_call(const struct mn_wm_call *c, void *params, const struct mn_wm_out *out, const void *reply,
+                             uint32_t len);
 /* A synchronous call's reply: its outputs into params and the memory it points to; nil handles' indexes freed. */
 NTSTATUS_T mn_wm_unpack(unsigned slot, void *params, const struct mn_wm_out *out, const void *reply, uint32_t len);
 /* The call failed: frees the handles mn_wm_pack picked, and, if it never reached the host, its holds (else the host
@@ -77,6 +81,12 @@ struct mn_wm_ctx {
 };
 int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const void *rec, uint32_t len, void *reply,
                         uint32_t cap, uint32_t *reply_len);
+/* A call another table describes (Direct3D forwarding's), its params translated and handed to invoke. */
+int32_t mn_wm_host_call_table(struct mn_wm_ctx *c, void *ring, const struct mn_wm_call *call,
+                              NTSTATUS_T (*invoke)(void *params), const void *rec, uint32_t len, void *reply,
+                              uint32_t cap, uint32_t *reply_len);
+/* invoke.m: how an MN_HK_D3D object is released (the Direct3D dispatcher sets it). */
+extern void (*mn_wm_d3d_release)(void *obj);
 /* Frees the marshaller's memory in a ring_state (the ring is gone). */
 void mn_wm_ring_end(void *ring);
 

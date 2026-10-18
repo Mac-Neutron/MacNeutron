@@ -57,6 +57,16 @@ $(OUT)/memory-test: tests/memory-test.m $(LOOP_SRC) calls.h marshal.h handles.h 
 	$(CC) $(CFLAGS) $(INC) -I$(DXMT)/airconv -o $@ tests/memory-test.m $(LOOP_SRC) \
 	  -framework AppKit -framework Metal -framework QuartzCore -lpthread
 
+# The field kinds Direct3D forwarding adds (M2 Task 3), on memory-test's loopback.
+$(OUT)/kinds-test: tests/kinds-test.c $(LOOP_SRC) calls.h marshal.h handles.h notify.h ../proto.h
+	mkdir -p $(OUT)
+	$(CC) $(CFLAGS) $(INC) -I$(DXMT)/airconv -o $@ tests/kinds-test.c $(LOOP_SRC) \
+	  -framework AppKit -framework Metal -framework QuartzCore -lpthread
+
+kinds-test: metal-host $(OUT)/kinds-test
+	$(OUT)/kinds-test
+.PHONY: kinds-test
+
 memory-test: metal-host $(OUT)/memory-test
 	$(OUT)/memory-test $(HOST)
 .PHONY: memory-test

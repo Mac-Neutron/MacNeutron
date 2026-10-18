@@ -14,6 +14,8 @@ NTSTATUS_T mn_wm_invoke(unsigned slot, void *params) {
     }
 }
 
+void (*mn_wm_d3d_release)(void *obj);
+
 void mn_wm_release_object(enum mn_hkind kind, void *obj) {
     switch (kind) {
     case MN_HK_OBJC:
@@ -34,6 +36,9 @@ void mn_wm_release_object(enum mn_hkind kind, void *obj) {
     case MN_HK_SM50_BITCODE:
     case MN_HK_SM50_ERROR: /* slots.c */
         mn_wm_sm50_release(kind, obj);
+        return;
+    case MN_HK_D3D: /* a native DXMT object: the Direct3D dispatcher's Release */
+        if (mn_wm_d3d_release) mn_wm_d3d_release(obj);
         return;
     default:
         fprintf(stderr, "mn-winemetal: no release for a kind-%d object\n", kind);

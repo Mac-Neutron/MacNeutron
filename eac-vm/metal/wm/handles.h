@@ -22,6 +22,7 @@ enum mn_hkind {
     MN_HK_POOL, /* an NSAutoreleasePool: only its own ring may release it, and nothing else takes it */
     MN_HK_ANY_OBJC, /* lookups only: an Objective-C object or an emulated heap (residency sets, heap slots) */
     MN_HK_VIEW,     /* a metal view (slot 72): its release is winemetal's slot 73, which takes it off the window */
+    MN_HK_D3D,      /* a native DXMT COM object (Direct3D forwarding): its release is its own Release */
 };
 enum mn_own { MN_OWN_PLUS1, MN_OWN_AUTORELEASED, MN_OWN_BORROWED };
 

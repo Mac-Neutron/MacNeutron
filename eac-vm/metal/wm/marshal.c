@@ -19,13 +19,27 @@
 #endif
 
 #define PAD8(n) (((n) + 7u) & ~(uint64_t)7)
+#define NO_SLOT UINT32_MAX /* a call from another table (Direct3D forwarding's): no winemetal special */
 #define MAX_DEPTH 4
 #define STORAGE(options) ((uint64_t)(options) & 0xf0) /* MTLStorageMode << 4 */
 #define STORAGE_PRIVATE 32u
 #define STORAGE_MEMORYLESS 48u
 
 static int is_ptr(uint8_t kind) {
-    return kind == WMF_IN || kind == WMF_OUT || kind == WMF_INOUT || kind == WMF_STR_IN || kind == WMF_BLOB_PTR;
+    return kind == WMF_IN || kind == WMF_OUT || kind == WMF_INOUT || kind == WMF_STR_IN || kind == WMF_BLOB_PTR ||
+           kind == WMF_WSTR_IN;
+}
+
+static int is_string(uint8_t kind) { return kind == WMF_STR_IN || kind == WMF_WSTR_IN; }
+
+/* A guest wide string's bytes, its terminating unit included. */
+static uint64_t wstr_len(const uint8_t *p) {
+    uint64_t n = 0;
+    for (;; n += MN_WM_GUEST_WCHAR) {
+        uint32_t u = 0;
+        memcpy(&u, p + n, MN_WM_GUEST_WCHAR);
+        if (!u) return n + MN_WM_GUEST_WCHAR;
+    }
 }
 
 static uint64_t read_count(const uint8_t *base, const struct mn_wm_field *f) {
@@ -39,13 +53,26 @@ static uint64_t read_count(const uint8_t *base, const struct mn_wm_field *f) {
 /* The bytes a pointer field covers in base (a struct of this field's), or UINT64_MAX if it overflows. */
 static uint64_t region_len(const uint8_t *base, const struct mn_wm_field *f, const void *ptr) {
     if (f->kind == WMF_STR_IN) return strlen(ptr) + 1;
+    if (f->kind == WMF_WSTR_IN) return wstr_len(ptr);
     if (!(f->flags & WMF_ARRAY)) return f->size;
     uint64_t n = read_count(base, f);
     return f->size && n > UINT32_MAX / f->size ? UINT64_MAX : n * f->size;
 }
 
-static const struct mn_wm_nested *nested_of(const struct mn_wm_field *f) {
-    return f->nested ? &mn_wm_nested[f->nested - 1] : NULL;
+static const struct mn_wm_nested *nested_of(const struct mn_wm_tables *t, const struct mn_wm_field *f) {
+    if (!f->nested || f->kind == WMF_UNION) return NULL;
+    return t ? &t->nested[f->nested - 1] : &mn_wm_nested[f->nested - 1];
+}
+
+/* A WMF_UNION's fields for the value its discriminant has in base, or NULL (a value without fields, or unknown). */
+static const struct mn_wm_nested *variant_of(const struct mn_wm_tables *t, const struct mn_wm_field *f,
+                                             const uint8_t *base) {
+    if (!t || !t->unions || !f->nested) return NULL;
+    const struct mn_wm_union *u = &t->unions[f->nested - 1];
+    uint64_t d = read_count(base, f);
+    for (unsigned i = 0; i < u->nvalues; i++)
+        if (u->values[i] == d) return u->nested[i] ? &t->nested[u->nested[i] - 1] : NULL;
+    return NULL;
 }
 
 /* The specials each side has code for so far (Tasks 6-8 add the rest). */
@@ -219,11 +246,17 @@ static NTSTATUS_T emit_hold(struct mn_wm_out *o, uint64_t len, uint64_t blob, ui
     return 0;
 }
 
-static NTSTATUS_T pack_fields(struct mn_wm_out *o, const struct mn_wm_field *fields, unsigned n, const uint8_t *base,
-                              int depth) {
+static NTSTATUS_T pack_fields(struct mn_wm_out *o, const struct mn_wm_tables *t, const struct mn_wm_field *fields,
+                              unsigned n, const uint8_t *base, int depth) {
     if (depth > MAX_DEPTH) return MN_STATUS_INVALID_PARAMETER;
     for (unsigned i = 0; i < n; i++) {
         const struct mn_wm_field *f = &fields[i];
+        if (f->kind == WMF_UNION) {
+            const struct mn_wm_nested *v = variant_of(t, f, base);
+            NTSTATUS_T s = v ? pack_fields(o, t, v->fields, v->nfields, base + f->offset, depth + 1) : 0;
+            if (s) return s;
+            continue;
+        }
         if (!is_ptr(f->kind)) continue;
         const uint8_t *ptr;
         memcpy(&ptr, base + f->offset, sizeof ptr);
@@ -238,10 +271,10 @@ static NTSTATUS_T pack_fields(struct mn_wm_out *o, const struct mn_wm_field *fie
             continue;
         }
         if ((s = mn_wm_emit_data(o, ptr, len, f->kind))) return s;
-        const struct mn_wm_nested *nest = ptr ? nested_of(f) : NULL;
+        const struct mn_wm_nested *nest = ptr ? nested_of(t, f) : NULL;
         uint64_t elem = f->flags & WMF_ARRAY ? f->size : len;
         for (uint64_t e = 0; nest && elem && e < len / elem; e++)
-            if ((s = pack_fields(o, nest->fields, nest->nfields, ptr + e * elem, depth + 1))) return s;
+            if ((s = pack_fields(o, t, nest->fields, nest->nfields, ptr + e * elem, depth + 1))) return s;
     }
     return 0;
 }
@@ -339,9 +372,18 @@ void mn_wm_unwind(const struct mn_wm_out *out, int reached_host) {
     mn_wm_scratch_done();
 }
 
+static NTSTATUS_T pack(const struct mn_wm_call *c, unsigned slot, void *params, struct mn_wm_out *out);
+
 NTSTATUS_T mn_wm_pack(unsigned slot, void *params, struct mn_wm_out *out) {
     if (slot >= MN_WM_SLOTS) return MN_STATUS_INVALID_PARAMETER;
-    const struct mn_wm_call *c = &mn_wm_calls[slot];
+    return pack(&mn_wm_calls[slot], slot, params, out);
+}
+
+NTSTATUS_T mn_wm_pack_call(const struct mn_wm_call *c, void *params, struct mn_wm_out *out) {
+    return pack(c, NO_SLOT, params, out);
+}
+
+static NTSTATUS_T pack(const struct mn_wm_call *c, unsigned slot, void *params, struct mn_wm_out *out) {
     out->len = 0, out->nouts = 0, out->nregions = 0, out->nholds = 0, out->fix = NULL;
     out->sync = c->mode == MN_WM_SYNC;
     if (c->mode == MN_WM_REFUSED || c->mode == MN_WM_LOCAL) return c->refuse_status;
@@ -366,8 +408,8 @@ NTSTATUS_T mn_wm_pack(unsigned slot, void *params, struct mn_wm_out *out) {
         memcpy((uint8_t *)params + f->offset, &h, sizeof h);
     }
     NTSTATUS_T s = emit(out, params, c->params_size);
-    if (!s) s = guest_special(slot, params, out);
-    if (!s) s = pack_fields(out, c->fields, c->nfields, params, 0);
+    if (!s && slot != NO_SLOT) s = guest_special(slot, params, out);
+    if (!s) s = pack_fields(out, c->tables, c->fields, c->nfields, params, 0);
     if (s) mn_wm_unwind(out, 0);
     return s;
 }
@@ -376,6 +418,11 @@ NTSTATUS_T mn_wm_unpack(unsigned slot, void *params, const struct mn_wm_out *out
     const struct mn_wm_call *c = &mn_wm_calls[slot];
     if (c->special == MN_SP_SM50) return mn_wm_sm50_unpack(slot, params, out, reply, len);
     if (c->special == MN_SP_ENUMERATE) return mn_wm_enumerate_unpack(params, out, reply, len);
+    return mn_wm_unpack_call(c, params, out, reply, len);
+}
+
+NTSTATUS_T mn_wm_unpack_call(const struct mn_wm_call *c, void *params, const struct mn_wm_out *out, const void *reply,
+                             uint32_t len) {
     const uint8_t *r = reply;
     uint64_t pos = PAD8(c->params_size);
     if (len < pos) {
@@ -499,7 +546,7 @@ static NTSTATUS_T take_data(struct mn_wm_state *k, const struct mn_wm_field *f, 
     memcpy(&h, k->rec + k->pos, sizeof h);
     k->pos += sizeof h;
     if (h.how == MN_RH_NONE) return 0;
-    if ((want != UINT64_MAX && h.len != want) || (kind == WMF_STR_IN && !h.len)) return MN_STATUS_INVALID_PARAMETER;
+    if ((want != UINT64_MAX && h.len != want) || (is_string(kind) && !h.len)) return MN_STATUS_INVALID_PARAMETER;
     const uint8_t *src = NULL;
     uint8_t *scratch = NULL;
     if (h.how == MN_RH_INLINE) {
@@ -527,6 +574,25 @@ static NTSTATUS_T take_data(struct mn_wm_state *k, const struct mn_wm_field *f, 
         else memset(dst, 0, h.len);
     }
     if (kind == WMF_STR_IN && dst[h.len - 1]) return MN_STATUS_INVALID_PARAMETER;
+    if (kind == WMF_WSTR_IN) { /* the guest's units, NUL-terminated, as the host's wchar_t */
+        uint32_t units = h.len / MN_WM_GUEST_WCHAR, last = 0;
+        if (h.len % MN_WM_GUEST_WCHAR) return MN_STATUS_INVALID_PARAMETER;
+        memcpy(&last, dst + h.len - MN_WM_GUEST_WCHAR, MN_WM_GUEST_WCHAR);
+        if (last) return MN_STATUS_INVALID_PARAMETER;
+        uint32_t *w = arena_alloc(k->arena, units * sizeof *w);
+        if (!w) return MN_STATUS_UNSUCCESSFUL;
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < units; i++) {
+            uint32_t c = 0, d = 0;
+            memcpy(&c, dst + i * MN_WM_GUEST_WCHAR, MN_WM_GUEST_WCHAR);
+            if (MN_WM_GUEST_WCHAR == 2 && c >= 0xd800 && c < 0xdc00 && i + 1 < units) {
+                memcpy(&d, dst + (i + 1) * MN_WM_GUEST_WCHAR, 2);
+                if (d >= 0xdc00 && d < 0xe000) c = 0x10000 + ((c - 0xd800) << 10) + (d - 0xdc00), i++;
+            }
+            w[n++] = c;
+        }
+        dst = (uint8_t *)w;
+    }
     if (kind == WMF_OUT || kind == WMF_INOUT) {
         if (k->nregions == MN_WM_MAX_REGIONS) return MN_STATUS_INVALID_PARAMETER;
         k->regions[k->nregions++] = (struct mn_wm_hregion){dst, src, scratch, h.len, kind, (uint8_t)h.how, f};
@@ -578,9 +644,15 @@ static NTSTATUS_T take_blob(struct mn_wm_state *k, uint64_t want, struct mn_wm_h
 static NTSTATUS_T unpack_fields(struct mn_wm_state *k, const struct mn_wm_field *fields, unsigned n, uint8_t *base,
                                 int depth) {
     if (depth > MAX_DEPTH) return MN_STATUS_INVALID_PARAMETER;
+    const struct mn_wm_tables *t = k->call->tables;
     for (unsigned i = 0; i < n; i++) {
         const struct mn_wm_field *f = &fields[i];
         NTSTATUS_T s;
+        if (f->kind == WMF_UNION) {
+            const struct mn_wm_nested *v = variant_of(t, f, base);
+            if (v && (s = unpack_fields(k, v->fields, v->nfields, base + f->offset, depth + 1))) return s;
+            continue;
+        }
         if (f->kind == WMF_HANDLE_IN) {
             mn_handle h;
             memcpy(&h, base + f->offset, sizeof h);
@@ -601,11 +673,11 @@ static NTSTATUS_T unpack_fields(struct mn_wm_state *k, const struct mn_wm_field 
         if (!is_ptr(f->kind)) continue;
         uint8_t *host;
         uint32_t len;
-        uint64_t want = f->kind == WMF_STR_IN ? UINT64_MAX : region_len(base, f, NULL);
-        int copy = f->nested || f->kind == WMF_STR_IN || !(f->flags & WMF_ARRAY);
+        uint64_t want = is_string(f->kind) ? UINT64_MAX : region_len(base, f, NULL);
+        int copy = f->nested || is_string(f->kind) || !(f->flags & WMF_ARRAY);
         if ((s = take_data(k, f, f->kind, want, copy, &host, &len))) return s;
         memcpy(base + f->offset, &host, sizeof host);
-        const struct mn_wm_nested *nest = host ? nested_of(f) : NULL;
+        const struct mn_wm_nested *nest = host ? nested_of(t, f) : NULL;
         uint64_t elem = f->flags & WMF_ARRAY ? f->size : len;
         for (uint64_t e = 0; nest && elem && e < len / elem; e++)
             if ((s = unpack_fields(k, nest->fields, nest->nfields, host + e * elem, depth + 1))) return s;
@@ -613,17 +685,25 @@ static NTSTATUS_T unpack_fields(struct mn_wm_state *k, const struct mn_wm_field 
     return 0;
 }
 
+/* One element's handle and pointer fields back to the guest's values (a union's: its variant's). */
+static void restore_fields(const struct mn_wm_tables *t, const struct mn_wm_nested *nest, uint8_t *dst,
+                           const uint8_t *guest, int depth) {
+    for (unsigned i = 0; nest && depth <= MAX_DEPTH && i < nest->nfields; i++) {
+        const struct mn_wm_field *g = &nest->fields[i];
+        if (g->kind == WMF_UNION)
+            restore_fields(t, variant_of(t, g, guest), dst + g->offset, guest + g->offset, depth + 1);
+        else if (g->kind == WMF_HANDLE_IN || is_ptr(g->kind))
+            memcpy(dst + g->offset, guest + g->offset, 8);
+    }
+}
+
 /* A region the host wrote, with the guest's own values back in its handle and pointer fields. */
-static void restore(uint8_t *dst, const uint8_t *guest, const struct mn_wm_field *f, uint32_t len) {
-    const struct mn_wm_nested *nest = f ? nested_of(f) : NULL;
+static void restore(const struct mn_wm_tables *t, uint8_t *dst, const uint8_t *guest, const struct mn_wm_field *f,
+                    uint32_t len) {
+    const struct mn_wm_nested *nest = f ? nested_of(t, f) : NULL;
     uint32_t elem = f && f->flags & WMF_ARRAY ? f->size : len;
     if (!guest || !nest || !elem) return;
-    for (uint64_t e = 0; e < len / elem; e++)
-        for (unsigned i = 0; i < nest->nfields; i++) {
-            const struct mn_wm_field *g = &nest->fields[i];
-            if (g->kind == WMF_HANDLE_IN || is_ptr(g->kind))
-                memcpy(dst + e * elem + g->offset, guest + e * elem + g->offset, 8);
-        }
+    for (uint64_t e = 0; e < len / elem; e++) restore_fields(t, nest, dst + e * elem, guest + e * elem, 0);
 }
 
 static int32_t failed(struct mn_wm_ctx *c, int sync, uint32_t status) {
@@ -656,6 +736,10 @@ static NTSTATUS_T take_prefix(struct mn_wm_state *k) {
     default: return 0;
     }
 }
+
+static int32_t host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const struct mn_wm_call *call,
+                         NTSTATUS_T (*invoke)(void *params), const void *rec, uint32_t len, void *reply, uint32_t cap,
+                         uint32_t *reply_len);
 
 int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const void *rec, uint32_t len, void *reply,
                         uint32_t cap, uint32_t *reply_len) {
@@ -690,6 +774,26 @@ int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const vo
         if (!sync) bind_nil(c, ring, call, rec);
         return failed(c, sync, MN_STATUS_NOT_IMPLEMENTED); /* Tasks 6-8 */
     }
+    return host_call(c, ring, slot, call, NULL, rec, len, reply, cap, reply_len);
+}
+
+int32_t mn_wm_host_call_table(struct mn_wm_ctx *c, void *ring, const struct mn_wm_call *call,
+                              NTSTATUS_T (*invoke)(void *params), const void *rec, uint32_t len, void *reply,
+                              uint32_t cap, uint32_t *reply_len) {
+    int sync = reply != NULL;
+    *reply_len = 0;
+    if (call->mode == MN_WM_REFUSED || call->mode == MN_WM_LOCAL) return failed(c, sync, call->refuse_status);
+    if (len < (uint32_t)PAD8(call->params_size)) return failed(c, sync, MN_STATUS_INVALID_PARAMETER);
+    return host_call(c, ring, NO_SLOT, call, invoke, rec, len, reply, cap, reply_len);
+}
+
+/* A call whose record checked out so far: its params translated, run (invoke, a winemetal slot, or its special), its
+ * handles bound, and a synchronous call's reply written. */
+static int32_t host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const struct mn_wm_call *call,
+                         NTSTATUS_T (*invoke)(void *params), const void *rec, uint32_t len, void *reply, uint32_t cap,
+                         uint32_t *reply_len) {
+    int sync = reply != NULL;
+    uint32_t psz = (uint32_t)PAD8(call->params_size);
     struct arena *a = arena_of(ring);
     if (a) arena_reset(a);
     struct mn_wm_state *k = a ? arena_alloc(a, sizeof *k) : NULL;
@@ -713,7 +817,7 @@ int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const vo
     if (!s) s = unpack_fields(k, call->fields, call->nfields, p, 0);
     if (!s) s = k->status;
     if (!s && sync && psz + k->out_bytes > cap) s = MN_STATUS_BUFFER_TOO_SMALL;
-    if (!s) s = call->special == MN_SP_NONE ? mn_wm_invoke(slot, p) : mn_wm_special(k);
+    if (!s) s = invoke ? invoke(p) : call->special == MN_SP_NONE ? mn_wm_invoke(slot, p) : mn_wm_special(k);
     for (unsigned i = 0; i < k->nholds; i++) /* blob memory nothing took: its region is the guest's again */
         if (!k->holds[i].taken) mn_wm_drop_hold(c, &k->holds[i]);
     if (s) {
@@ -758,7 +862,7 @@ int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const vo
     uint32_t pos = psz;
     for (unsigned i = 0; i < k->nregions; i++) {
         struct mn_wm_hregion *g = &k->regions[i];
-        restore(g->host, g->guest, g->f, g->len);
+        restore(call->tables, g->host, g->guest, g->f, g->len);
         struct mn_wm_rhdr h = {g->len, g->how};
         memcpy(r + pos, &h, sizeof h);
         pos += sizeof h;

@@ -29,7 +29,17 @@ enum mn_wm_field_kind {
     WMF_STR_IN,        /* a pointer to a NUL-terminated string */
     WMF_VALUE_HANDLE,  /* typed obj_handle_t, but a value: passed through */
     WMF_BLOB_PTR,      /* a pointer into blob memory both sides map (count bytes): the host maps it, never copies */
+    WMF_WSTR_IN,       /* Direct3D forwarding: a NUL-terminated wide string, the guest's units (MN_WM_GUEST_WCHAR
+                        * bytes: UTF-16) arriving as the host's wchar_t (UTF-32) */
+    WMF_UNION,         /* Direct3D forwarding: a union in place, its discriminant at count_offset (count_width bytes);
+                        * nested is 1 + an index into its tables' unions: each value's own field list */
 };
+/* A guest's WCHAR: Windows' 16-bit unit, or the host's own wchar_t in the loopback build (one process). */
+#ifdef MN_D3D_LOOPBACK
+#define MN_WM_GUEST_WCHAR 4
+#else
+#define MN_WM_GUEST_WCHAR 2
+#endif
 #define WMF_ARRAY 1
 
 struct mn_wm_field {
@@ -44,6 +54,10 @@ struct mn_wm_field {
     uint8_t nested;        /* 1 + an index into mn_wm_nested: fields inside each element; 0 for none */
 };
 struct mn_wm_nested { uint16_t nfields; const struct mn_wm_field *fields; };
+/* A WMF_UNION's variants: for each discriminant value, 1 + an index into its tables' nested lists (0: no fields). */
+struct mn_wm_union { uint16_t nvalues; const uint32_t *values; const uint8_t *nested; };
+/* A call family's nested lists and unions (the generator's for Direct3D); NULL in a call: winemetal's. */
+struct mn_wm_tables { const struct mn_wm_nested *nested; const struct mn_wm_union *unions; };
 extern const struct mn_wm_nested mn_wm_nested[];
 
 enum { MN_WM_QUEUED, MN_WM_SYNC, MN_WM_REFUSED, MN_WM_LOCAL /* answered in the guest; the host refuses it */ };
@@ -75,6 +89,7 @@ struct mn_wm_call {
     uint16_t nfields;
     uint32_t refuse_status; /* MN_WM_REFUSED, MN_WM_LOCAL */
     const struct mn_wm_field *fields;
+    const struct mn_wm_tables *tables; /* NULL: winemetal's (mn_wm_nested, no unions) */
 };
 extern const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS];
 
