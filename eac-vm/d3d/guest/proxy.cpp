@@ -38,6 +38,9 @@ struct mn_obj {
     mn_res res;                                       // a D3D11 or D3D10 resource's description (M4), under m
     std::recursive_mutex mt;                          // an ID3D11Multithread's Enter and Leave (M4)
     std::atomic<UINT> latency{0};                     // an IDXGIDevice1's SetMaximumFrameLatency (M4; 0: DXGI's 3)
+    uint64_t alloc = 0;           // a D3D11 or D3D10 resource's allocation, as its creation named it (Task 7), under m
+    ID3D11Fence *idle = nullptr;  // a context's own fence, which a map's wait signals and waits on (Task 7), under m
+    uint64_t idle_value = 0;
 };
 static void end_pacing(pacing *p);
 
@@ -204,6 +207,7 @@ ULONG STDMETHODCALLTYPE mn_px_Release(mn_proxy *This) {
     mn_d3d_call(MN_D3D_OP_RELEASE, &h);
     if (o->pace) end_pacing(o->pace);
     for (auto &c : o->companions) mn_px_Release(c.second->proxies[c.first]);
+    if (o->idle) o->idle->Release();
     for (mn_proxy *p : o->proxies) delete p;
     delete o;
     return 0;
@@ -1145,10 +1149,77 @@ static std::vector<uint8_t> pack(const mn_res &r, const D3D11_SUBRESOURCE_DATA *
     return flat;
 }
 
-static void set_res(mn_obj *o, const mn_res &r) {
+static void set_res(mn_obj *o, const mn_res &r, uint64_t alloc) {
     std::lock_guard<std::mutex> l(o->m);
-    o->res = r;
+    o->res = r, o->alloc = alloc;
 }
+
+// The allocation a map's rename makes (Task 7): the resource's creation named it, or its root's (a D3D10 view of a
+// D3D11 resource); 0: unknown, the host doesn't check for room first.
+static uint64_t alloc_of(IUnknown *resource) {
+    mn_obj *o = resource ? ((mn_proxy *)resource)->obj : nullptr;
+    if (!o) return 0;
+    uint64_t root;
+    {
+        std::lock_guard<std::mutex> l(o->m);
+        if (o->alloc || !o->root) return o->alloc;
+        root = o->root;
+    }
+    std::lock_guard<std::mutex> l(objs_lock);
+    auto it = objs.find(root);
+    return it != objs.end() ? it->second->alloc : 0; // ponytail: read without its lock: set once, at its creation
+}
+
+// A map that would wait (READ, WRITE, READ_WRITE without DO_NOT_WAIT) goes with DO_NOT_WAIT; while the host answers
+// DXGI_ERROR_WAS_STILL_DRAWING, the context signals a fence of its own (DXMT's Signal flushes, which its
+// DO_NOT_WAIT map doesn't) and the guest waits for it, then asks again: no map waits on the host's vCPU.
+static bool would_wait(UINT type, UINT flags) {
+    return !(flags & D3D11_MAP_FLAG_DO_NOT_WAIT) && type >= D3D11_MAP_READ && type <= D3D11_MAP_READ_WRITE;
+}
+static void wait_idle(mn_proxy *context) {
+    mn_obj *o = context->obj;
+    int k4 = iface_of<ID3D11DeviceContext4>();
+    if (!has(o->answers, k4) || has(o->moved, k4)) return Sleep(1);
+    ID3D11Fence *fence;
+    uint64_t v;
+    {
+        std::lock_guard<std::mutex> l(o->m);
+        fence = o->idle;
+        v = ++o->idle_value;
+    }
+    if (!fence) {
+        ID3D11Device *dev = nullptr;
+        ID3D11Device5 *d5 = nullptr;
+        ((ID3D11DeviceContext *)context)->GetDevice(&dev);
+        if (dev && SUCCEEDED(dev->QueryInterface(__uuidof(ID3D11Device5), (void **)&d5))) {
+            d5->CreateFence(0, D3D11_FENCE_FLAG_NONE, __uuidof(ID3D11Fence), (void **)&fence);
+            d5->Release();
+        }
+        if (dev) dev->Release();
+        if (!fence) return Sleep(1);
+        std::lock_guard<std::mutex> l(o->m);
+        if (o->idle) fence->Release(), fence = o->idle; // another thread's, first
+        else o->idle = fence;
+    }
+    ((ID3D11DeviceContext4 *)proxy_of(o, k4))->Signal(fence, v);
+    wait_fence(fence, v);
+}
+// A D3D10 resource's device's immediate context (the D3D11 one), for wait_idle; nullptr: none.
+static ID3D11DeviceContext *context_of(IUnknown *resource10) {
+    ID3D10DeviceChild *child = nullptr;
+    ID3D10Device *d10 = nullptr;
+    ID3D11Device *d11 = nullptr;
+    ID3D11DeviceContext *ctx = nullptr;
+    if (SUCCEEDED(resource10->QueryInterface(__uuidof(ID3D10DeviceChild), (void **)&child))) {
+        child->GetDevice(&d10);
+        child->Release();
+    }
+    if (d10 && SUCCEEDED(d10->QueryInterface(__uuidof(ID3D11Device), (void **)&d11))) d11->GetImmediateContext(&ctx);
+    if (d11) d11->Release();
+    if (d10) d10->Release();
+    return ctx;
+}
+static const int kMapTries = 64; // then the host waits: DXMT's view of the GPU may lag the fence's
 
 #define MN_CREATE(fn, NAME, Desc, Data, T, DESC, INIT, OUT)                                                            \
     static HRESULT STDMETHODCALLTYPE fn(mn_proxy *This, const Desc *desc, const Data *init, T **out) {                \
@@ -1164,7 +1235,7 @@ static void set_res(mn_obj *o, const mn_res &r) {
             *out = SUCCEEDED(hr) && p.OUT                                                                              \
                        ? (T *)mn_proxy_out(p.OUT, iface_of<T>(), nullptr, p.OUT##_ifaces)              \
                        : nullptr;                                                                                      \
-            if (*out) set_res(((mn_proxy *)*out)->obj, r);                                                             \
+            if (*out) set_res(((mn_proxy *)*out)->obj, r, p.aux[1]);                                                   \
         }                                                                                                              \
         return hr;                                                                                                     \
     }
@@ -1211,10 +1282,19 @@ static HRESULT STDMETHODCALLTYPE map11(mn_proxy *This, ID3D11Resource *res, UINT
                                        D3D11_MAPPED_SUBRESOURCE *mapped) {
     mn_d3d_p_ID3D11DeviceContext_Map p = {};
     D3D11_MAPPED_SUBRESOURCE m = {};
-    p.self = (uintptr_t)This, p.pResource = (uintptr_t)res, p.Subresource = sub, p.MapType = (uint32_t)type;
-    p.MapFlags = flags, p.pMappedResource = mapped ? (uintptr_t)&m : 0;
-    int32_t s = mn_d3d_record(This, MN_D3D_ID_ID3D11DeviceContext_Map, &p);
-    HRESULT hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;
+    const bool wait = would_wait(type, flags);
+    const uint64_t alloc = alloc_of(res);
+    HRESULT hr;
+    for (int tries = 0;; tries++) {
+        p = {};
+        p.self = (uintptr_t)This, p.pResource = (uintptr_t)res, p.Subresource = sub, p.MapType = (uint32_t)type;
+        p.MapFlags = wait && tries < kMapTries ? flags | D3D11_MAP_FLAG_DO_NOT_WAIT : flags;
+        p.pMappedResource = mapped ? (uintptr_t)&m : 0, p.aux[0] = alloc;
+        int32_t s = mn_d3d_record(This, MN_D3D_ID_ID3D11DeviceContext_Map, &p);
+        hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;
+        if (!wait || tries == kMapTries || hr != DXGI_ERROR_WAS_STILL_DRAWING) break;
+        wait_idle(This);
+    }
     if (SUCCEEDED(hr) && mapped && !p.aux[0]) hr = E_FAIL; // not in an arena of ours: the host said so too
     if (mapped) *mapped = SUCCEEDED(hr) ? D3D11_MAPPED_SUBRESOURCE{(void *)(uintptr_t)p.aux[0], m.RowPitch, m.DepthPitch}
                                         : D3D11_MAPPED_SUBRESOURCE{};
@@ -1226,10 +1306,22 @@ static HRESULT STDMETHODCALLTYPE map11(mn_proxy *This, ID3D11Resource *res, UINT
         using mn_out = Out;                                                                                            \
         mn_d3d_p_##NAME p = {};                                                                                        \
         mn_out m = {};                                                                                                 \
-        p.self = (uintptr_t)This, p.MapType = (uint32_t)type, p.MapFlags = flags, p.OUT = out ? (uintptr_t)&m : 0;    \
-        FILL;                                                                                                          \
-        int32_t s = mn_d3d_call(MN_D3D_ID_##NAME, &p);                                                                 \
-        HRESULT hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;                                                      \
+        const bool wait = would_wait(type, flags);                                                                     \
+        const uint64_t alloc = alloc_of((IUnknown *)This);                                                             \
+        HRESULT hr;                                                                                                    \
+        for (int tries = 0;; tries++) {                                                                                \
+            p = {};                                                                                                    \
+            p.self = (uintptr_t)This, p.MapType = (uint32_t)type, p.OUT = out ? (uintptr_t)&m : 0, p.aux[0] = alloc;  \
+            p.MapFlags = wait && tries < kMapTries ? flags | D3D10_MAP_FLAG_DO_NOT_WAIT : flags;                       \
+            FILL;                                                                                                      \
+            int32_t s = mn_d3d_call(MN_D3D_ID_##NAME, &p);                                                             \
+            hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;                                                          \
+            if (!wait || tries == kMapTries || hr != DXGI_ERROR_WAS_STILL_DRAWING) break;                              \
+            if (ID3D11DeviceContext *ctx = context_of((IUnknown *)This)) {                                             \
+                wait_idle((mn_proxy *)ctx);                                                                            \
+                ctx->Release();                                                                                        \
+            }                                                                                                          \
+        }                                                                                                              \
         if (SUCCEEDED(hr) && out && !p.aux[0]) hr = E_FAIL;                                                            \
         if (out) {                                                                                                     \
             *out = SUCCEEDED(hr) ? m : mn_out{};                                                                       \

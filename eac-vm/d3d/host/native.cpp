@@ -328,6 +328,7 @@ static bool unpacked(const void *flat, uint64_t len, std::vector<D3D11_SUBRESOUR
                             ->method((const Desc *)(uintptr_t)a->DESC, a->INIT ? (const Data *)subs.data() : nullptr, \
                                      (T **)&a->OUT);                                                                   \
             if (SUCCEEDED(r) && a->OUT) mn_d3d_answers((void *)(uintptr_t)a->OUT, iface_of<T>(), a->OUT##_ifaces); \
+            a->aux[1] = mn_d3d_memory_largest(); /* its allocation: what a map's rename makes (Task 7) */             \
             RESULT(a, r);                                                                                              \
         } catch (...) {                                                                                                \
             return mn_d3d_not_in_dxmt(MN_D3D_ID_##NAME, &a->ret);                                                      \
@@ -375,6 +376,15 @@ UPDATE_STUB(mn_d3d_update1_11_stub, ID3D11DeviceContext1_UpdateSubresource1, ID3
 UPDATE_STUB(mn_d3d_update10_stub, ID3D10Device_UpdateSubresource, ID3D10Device, UpdateSubresource, ID3D10Resource,
             D3D10_BOX, )
 
+// Before a map (M4 Task 7): room in the arenas for a rename of the resource's allocation (alloc: its creation's,
+// the guest's word; 0: unknown), or false, more wanted of the guest (the map answers MN_D3D_NEED_ARENA, and DXMT
+// hasn't renamed: a map that renamed into host memory can't be taken back).
+static bool room_for(uint64_t alloc) {
+    if (!alloc || mn_d3d_arena_fits(mn_d3d_current_ctx(), alloc)) return true;
+    mn_d3d_memory_want(alloc);
+    return false;
+}
+
 // A map's memory as the arena's (blob, offset) in aux (the loopback's guest shares the host's memory: the pointer, and
 // UINT64_MAX); false outside every arena.
 static bool located(void *ptr, uint64_t aux[2]) {
@@ -394,6 +404,7 @@ extern "C" NTSTATUS_T mn_d3d_map11_stub(void *params) {
     auto *ctx = (ID3D11DeviceContext *)(uintptr_t)a->self;
     auto *res = (ID3D11Resource *)(uintptr_t)a->pResource;
     D3D11_MAPPED_SUBRESOURCE m = {};
+    if (!room_for(a->aux[0])) return 0;
     try {
         HRESULT r = ctx->Map(res, a->Subresource, (D3D11_MAP)a->MapType, a->MapFlags, a->pMappedResource ? &m : nullptr);
         if (SUCCEEDED(r) && a->pMappedResource) {
@@ -416,6 +427,7 @@ extern "C" NTSTATUS_T mn_d3d_map11_stub(void *params) {
         auto *a = (mn_d3d_p_##NAME *)params;                                                                           \
         auto *self = (Iface *)(uintptr_t)a->self;                                                                      \
         Out m = {};                                                                                                    \
+        if (!room_for(a->aux[0])) return 0;                                                                            \
         try {                                                                                                          \
             HRESULT r = self->Map(SUB(D3D10_MAP)a->MapType, a->MapFlags, a->OUT ? &m : nullptr);                      \
             if (SUCCEEDED(r) && a->OUT) {                                                                              \

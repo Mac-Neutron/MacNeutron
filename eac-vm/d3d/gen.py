@@ -525,6 +525,7 @@ class CallSpec:
     ret: str
     structs: set = field(default_factory=set)  # the structs its fields name (layout.cpp checks them)
     method: Optional[Method] = None
+    arena: bool = False  # rules.txt's arena: its allocations from the guest's arenas, as a creation's (M4 Task 7)
 
 
 @dataclass
@@ -535,6 +536,7 @@ class Rules:
     companions: List[tuple] = field(default_factory=list)  # (interface, companion): QueryInterface answers it too
     own: set = field(default_factory=set)  # generated tables, with guest and host code of our own (MN_D3D_ID_*)
     wrap: set = field(default_factory=set)  # guest code of our own (proxy.cpp) first, then the generated proxy (M3)
+    arena: set = field(default_factory=set)  # calls whose allocations the guest's arenas serve (M4 Task 7)
 
 
 MODES = ("async", "sync", "submit", "special", "refuse")
@@ -552,6 +554,8 @@ def parse_rules(text, model):
         companion <Interface> <Interface>       an object of the first answers the second (another C++ subobject)
         <Interface>::<Method> own                the generated params and tables, but guest and host code of our own
                                                 (proxy.cpp's mn_d3d_special, the dispatcher's own stubs)
+        <Interface>::<Method> arena              DXMT's buffers made in it come from the guest's arenas, as in a
+                                                creation (a map's renames: mn_d3d_arena_call)
     count=*<param> and size=*<param> read the length through an inout pointer argument. ::<Export> names an export
     the same way. refuse: the guest answers E_NOTIMPL (nothing, for a void method), logged."""
     rules, depth = Rules(), 0
@@ -582,6 +586,8 @@ def parse_rules(text, model):
                 rules.own.add(words[0])
             elif len(words) == 2 and words[1] == "wrap":
                 rules.wrap.add(words[0])
+            elif len(words) == 2 and words[1] == "arena":
+                rules.arena.add(words[0])
             elif len(words) == 2 and words[1] in MODES:
                 rules.modes[words[0]] = words[1]
             elif len(words) >= 3:
@@ -893,7 +899,7 @@ def classify(model, rules):
             errors.append(f"{mname}: {e}")
             continue
         spec = CallSpec(mid, mname, mode or default_mode(method.ret, fields), fields, params, method.ret,
-                        method=method)
+                        method=method, arena=mname in rules.arena)
         collect_structs(fields, spec.structs)
         if mode not in ("special", "refuse"):  # every struct an argument passes or points to
             spec.structs |= {resolve(model, p.type) for p in method.params if resolve(model, p.type) in model.structs}
@@ -901,7 +907,7 @@ def classify(model, rules):
     if errors:
         raise RuleError(f"{len(errors)} methods need rules:\n  " + "\n  ".join(errors))
     ifaces = {n.split("::")[0] for n in methods}
-    for name in list(rules.modes) + [k[0] for k in rules.params] + sorted(rules.own | rules.wrap):
+    for name in list(rules.modes) + [k[0] for k in rules.params] + sorted(rules.own | rules.wrap | rules.arena):
         if name.endswith("::*") and name[:-3] in ifaces:
             continue
         if name not in methods:
@@ -1049,6 +1055,8 @@ def emit_calls(calls):
         fields = f"f{mid}" if per_call[mid] else "NULL"
         out.append(f'    [{mid}] = {{"{c.name}", sizeof(struct mn_d3d_p_{mid}), {MODE[c.mode]}, {sp}, '
                    f"{len(per_call[mid])}, {status}, {fields}, &tables}},")
+    out += ["};", "const uint8_t mn_d3d_arena_call[MN_D3D_CALLS] = {"]
+    out += [f"    [{mid}] = 1," for mid in sorted(calls) if calls[mid].arena] or ["    0,"]
     out += ["};", ""]
     return "\n".join(out)
 
@@ -1157,6 +1165,8 @@ def iface_decls(model):
             "/* base: the interface it derives from, or -1 (IUnknown, or a base that isn't forwarded) */",
             "struct mn_d3d_iface { const char *name; uint8_t iid[16]; uint16_t nfamily; const uint8_t *family; int16_t base; };",
             "extern const struct mn_d3d_iface mn_d3d_ifaces[MN_D3D_IFACES];",
+            "/* 1: the call's buffers come from the guest's arenas (rules.txt's arena) */",
+            "extern const uint8_t mn_d3d_arena_call[MN_D3D_CALLS];",
             "/* The interface an IID names, or -1. */",
             "int mn_d3d_iface_of(const void *iid);", ""]
 

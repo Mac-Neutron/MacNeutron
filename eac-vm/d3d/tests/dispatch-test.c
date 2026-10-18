@@ -29,6 +29,9 @@
  *   d3d11identity (M4 Task 5) op 4's companion (the device's IDXGIDevice1) comes with its whole interfaces block: it
  *              answers IDXGIDevice too, and ID3D11Device at another pointer, whose query names the device's first handle
  *   d3d11getters  (M4 Task 5) two views PSSetShaderResources set come back from PSGetShaderResources as their handles
+ *   d3d11maparena (M4 Task 7) a dynamic buffer's WRITE_DISCARD maps, renames included, in the guest's arenas; a rename
+ *              the arenas can't hold (the creation's allocation, which it names, past their room) answers
+ *              MN_D3D_NEED_ARENA before DXMT maps, then maps inside the arena op 1 adds
  *   d3d11events   (M4 Task 6) a D3D11 fence's mirror slot, raised by ID3D11DeviceContext4::Signal; the fence's
  *              SetEventOnCompletion(7, e) and Flush1(e) post MN_NOTIFY_EVENT with e (relays: DXMT never takes e)
  *   d3d11notimpl  (M4 Task 5) a D3D11 call that reaches DXMT's UNIMPLEMENTED (a STAGING buffer's UpdateSubresource)
@@ -439,6 +442,41 @@ int main(int argc, char **argv) {
     CHECK(mn_d3d_calls[upd11].params_size == sizeof up11 && call(upd11, &up11) == 0);
     CHECK(call(imm, &gi) == 0 && gi.ctx); /* still there */
     puts("dispatch-test: d3d11notimpl: went on");
+
+    /* d3d11maparena: a 64 KiB dynamic buffer mapped WRITE_DISCARD twice, each map's memory in a guest arena (the
+     * renames DXMT makes inside Map too); one whose creation names its allocation and whose rename the arenas can't
+     * hold answers MN_D3D_NEED_ARENA before DXMT maps it, and maps inside the arena op 1 then adds */
+    unsigned unmap11 = id_of("ID3D11DeviceContext::Unmap"), map11 = id_of("ID3D11DeviceContext::Map");
+    struct { uint32_t width, usage, bind, cpu, misc, stride; } dd11 = {64 << 10, 2 /* DYNAMIC */, 1, 0x10000, 0, 0};
+    struct { uint64_t self, ret, desc, init, buffer, ifaces[9], aux[2]; } cdy = {d11, 0, (uintptr_t)&dd11, 0, 0, {0}, {0}};
+    CHECK(call(buf11, &cdy) == 0 && (uint32_t)cdy.ret == 0 && cdy.buffer && cdy.aux[1] >= (64 << 10));
+    struct map11_params { uint64_t self, ret, res; uint32_t sub, type, flags; uint64_t mapped, aux[2]; };
+    struct { uint64_t self, ret, res; uint32_t sub; } um = {gi.ctx, 0, cdy.buffer, 0};
+    for (int i = 0; i < 2; i++) {
+        uint8_t m11[16];
+        struct map11_params md = {gi.ctx, 0, cdy.buffer, 0, 4 /* WRITE_DISCARD */, 0, (uintptr_t)m11, {cdy.aux[1], 0}};
+        CHECK(call(map11, &md) == 0 && (uint32_t)md.ret == 0);
+        CHECK((md.aux[0] == small.blob_id || md.aux[0] == big.blob_id) && md.aux[1] != UINT64_MAX);
+        CHECK(call(unmap11, &um) == 0);
+    }
+    uint64_t room = mn_d3d_arena_free(1) / 5 * 3 / 16384 * 16384; /* its creation fits, a second one doesn't */
+    struct { uint32_t width, usage, bind, cpu, misc, stride; } db11 = {(uint32_t)room, 2, 1, 0x10000, 0, 0};
+    struct { uint64_t self, ret, desc, init, buffer, ifaces[9], aux[2]; } cbig = {d11, 0, (uintptr_t)&db11, 0, 0, {0}, {0}};
+    CHECK(call(buf11, &cbig) == 0 && (uint32_t)cbig.ret == 0 && cbig.buffer && cbig.aux[1] >= room);
+    uint64_t before = mn_d3d_arena_free(1);
+    uint8_t mb11[16];
+    struct map11_params mbig = {gi.ctx, 0, cbig.buffer, 0, 4, 0, (uintptr_t)mb11, {cbig.aux[1], 0}};
+    struct map11_params mbig2 = mbig;
+    CHECK(call(map11, &mbig) == MN_D3D_NEED_ARENA && mn_d3d_arena_free(1) == before);
+    memcpy(&wanted, reply, sizeof wanted);
+    CHECK(wanted >= room);
+    struct mn_blob more;
+    CHECK(!mn_blob_alloc(wanted, &more));
+    add = (struct mn_d3d_arena){more.blob_id, 0, more.size};
+    CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_ARENA, &add, sizeof add, reply, sizeof reply, &n) == 0);
+    CHECK(call(map11, &mbig2) == 0 && (uint32_t)mbig2.ret == 0 && mbig2.aux[0] == more.blob_id);
+    struct { uint64_t self, ret, res; uint32_t sub; } umb = {gi.ctx, 0, cbig.buffer, 0};
+    CHECK(call(unmap11, &umb) == 0);
 
     /* d3d11events: a D3D11 fence's slot raised by the context's Signal, and the guest's events relayed (the fence's
      * SetEventOnCompletion, Flush1's), never DXMT's to take as its own */

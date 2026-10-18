@@ -36,7 +36,7 @@ struct own { uint8_t *ptr; uint64_t len; struct own *next; }; /* host memory han
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static struct arena *arenas;
 static struct own *owns;
-static _Thread_local struct { uint32_t ctx_id; int creation; uint64_t need; } call;
+static _Thread_local struct { uint32_t ctx_id; int creation; uint64_t need, largest; } call;
 
 int mn_d3d_arena_add(uint32_t ctx_id, uint64_t blob, uint64_t offset, uint64_t len) {
     if (!len || offset % PIECE || len % PIECE) return -1;
@@ -119,6 +119,7 @@ static void *hook_alloc(uint64_t length, void *ctx) {
     (void)ctx;
     uint64_t len = (length + PIECE - 1) / PIECE * PIECE;
     if (!len) len = PIECE;
+    if (len > call.largest) call.largest = len;
     uint8_t *p = NULL;
     if (call.creation) {
         pthread_mutex_lock(&lock);
@@ -176,7 +177,23 @@ void mn_d3d_memory_hooks(void (*set)(void *(*alloc)(uint64_t, void *), void (*fr
     set(hook_alloc, hook_free, NULL);
 }
 
-void mn_d3d_memory_begin(uint32_t ctx_id, int creation) { call.ctx_id = ctx_id, call.creation = creation, call.need = 0; }
+void mn_d3d_memory_begin(uint32_t ctx_id, int creation) {
+    call.ctx_id = ctx_id, call.creation = creation, call.need = 0, call.largest = 0;
+}
+
+uint64_t mn_d3d_memory_largest(void) { return call.largest; }
+
+void mn_d3d_memory_want(uint64_t len) { call.need += (len + PIECE - 1) / PIECE * PIECE; }
+
+int mn_d3d_arena_fits(uint32_t ctx_id, uint64_t len) {
+    len = (len + PIECE - 1) / PIECE * PIECE;
+    int fits = 0;
+    pthread_mutex_lock(&lock);
+    for (struct arena *a = arenas; a && !fits; a = a->next)
+        for (unsigned i = 0; a->ctx_id == ctx_id && !a->dead && i < a->nfree && !fits; i++) fits = a->free[i].len >= len;
+    pthread_mutex_unlock(&lock);
+    return fits;
+}
 
 uint64_t mn_d3d_memory_end(void) {
     uint64_t need = call.need;

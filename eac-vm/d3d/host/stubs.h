@@ -43,6 +43,9 @@ void mn_d3d_result(HRESULT hr);
 // one (dispatch.c): the method's own result, 0.
 NTSTATUS_T mn_d3d_not_in_dxmt(uint32_t id, uint64_t *ret);
 int mn_d3d_arena_of(const void *ptr, uint64_t *blob, uint64_t *offset); // memory.c
+uint64_t mn_d3d_memory_largest(void);
+void mn_d3d_memory_want(uint64_t len);
+int mn_d3d_arena_fits(uint32_t ctx_id, uint64_t len);
 // events.c and dispatch.c (Task 8): the call's context, fences' mirror slots, and relays DXMT sets in place of events
 uint32_t mn_d3d_current_ctx(void);
 uint64_t mn_d3d_fence_new(uint32_t ctx_id, void *obj, uint64_t initial); // UINT64_MAX: none

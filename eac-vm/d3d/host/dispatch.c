@@ -379,7 +379,7 @@ static int32_t d3d(uint32_t ctx_id, void *ring, uint32_t id, const void *p, uint
             fprintf(stderr, "mn-d3d: error: %s has no host code\n", call->name);
         return MN_D3D_E_NOTIMPL;
     }
-    int creation = 0;
+    int creation = mn_d3d_arena_call[id]; /* a map's renames too (M4 Task 7) */
     for (unsigned i = 0; i < call->nfields && !creation; i++) creation = call->fields[i].kind == WMF_HANDLE_OUT;
     __typeof__(cur) outer = cur; /* a stub doesn't call back into the dispatcher, but keep it right if one did */
     cur.c = c, cur.call = call, cur.sync = reply != NULL;

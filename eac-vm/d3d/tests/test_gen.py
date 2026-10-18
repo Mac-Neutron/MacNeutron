@@ -272,6 +272,17 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(self.calls[next(i for i, c in self.calls.items() if c.name ==
                          "IDXGIAdapter3::RegisterHardwareContentProtectionTeardownStatusEvent")].mode, "refuse")
 
+    def test_arena(self):
+        # M4 Task 7: a call whose allocations come from the guest's arenas, as a creation's (a map's renames)
+        rules = gen.parse_rules(gen.read(RULES), self.m)
+        calls = gen.classify(self.m, rules)
+        mid = next(i for i, c in calls.items() if c.name == "ID3D11DeviceContext::Map")
+        self.assertTrue(calls[mid].arena)
+        self.assertIn(f"[{mid}] = 1,", gen.emit_calls(calls))
+        self.assertFalse(next(c for c in calls.values() if c.name == "ID3D11DeviceContext::Draw").arena)
+        with self.assertRaises(gen.RuleError):
+            gen.classify(self.m, gen.parse_rules("ID3D11DeviceContext::Nope arena\n", self.m))
+
     def test_every_method_has_a_mode(self):
         for row in gen.manifest(self.m):
             self.assertIn(self.calls[row[0]].mode, ("async", "sync", "submit", "special", "refuse"), row[1])

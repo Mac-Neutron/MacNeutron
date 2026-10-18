@@ -508,6 +508,14 @@ ID3D10Texture2D::Map pMappedTex2D out bytes=16
 ID3D10Texture2D::Map own
 ID3D10Texture3D::Map pMappedTex3D out bytes=16
 ID3D10Texture3D::Map own
+# A map's renames (a dynamic resource's new memory, a staging one's) in the guest's arenas, as a creation's buffers
+# (M4 Task 7): the host checks first that they hold the resource's allocation, which its creation named, and asks
+# for an arena otherwise; a map that would wait goes with DO_NOT_WAIT and the guest waits on a fence of its own.
+ID3D11DeviceContext::Map arena
+ID3D10Buffer::Map arena
+ID3D10Texture1D::Map arena
+ID3D10Texture2D::Map arena
+ID3D10Texture3D::Map arena
 # D3D11's and D3D10's objects answer each other, and DXGI's interfaces, at other pointers (DXMT's C++ subobjects):
 # the device its DXGI device, D3D10 device and multithread lock; a resource, view, state, shader or query its D3D10
 # counterpart, a resource its DXGI resource. Each way, so a companion answers its whole family too.

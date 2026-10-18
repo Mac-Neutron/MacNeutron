@@ -27,6 +27,11 @@ int mn_d3d_arena_add(uint32_t ctx_id, uint64_t blob, uint64_t offset, uint64_t l
 void mn_d3d_memory_hooks(void (*set)(void *(*alloc)(uint64_t, void *), void (*free)(void *, void *), void *ctx));
 void mn_d3d_memory_begin(uint32_t ctx_id, int creation);
 uint64_t mn_d3d_memory_end(void);
+/* In a call (M4 Task 7): the largest buffer its hooks made, in 16 KiB pieces; more wanted of the guest (the call
+ * answers MN_D3D_NEED_ARENA); whether one of the context's arenas has a free piece of len. */
+uint64_t mn_d3d_memory_largest(void);
+void mn_d3d_memory_want(uint64_t len);
+int mn_d3d_arena_fits(uint32_t ctx_id, uint64_t len);
 int mn_d3d_arena_of(const void *ptr, uint64_t *blob, uint64_t *offset); /* 0, or -1: not in an arena */
 void mn_d3d_arenas_end(uint32_t ctx_id);
 uint64_t mn_d3d_arena_free(uint32_t ctx_id); /* free bytes in the context's arenas (tests) */
