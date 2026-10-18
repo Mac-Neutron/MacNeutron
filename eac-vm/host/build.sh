@@ -25,7 +25,7 @@ I=$ROOT/build/dxmt-native/install/include-native
 NT=$ROOT/eac-vm/dxmt-native/tests
 [ -f "$ROOT/build/dxmt-native/install/lib/d3d12.dylib" ] || { echo "no native DXMT: run eac-vm/dxmt-native/build.sh" >&2; exit 1; }
 python3 -I "$D3D/gen.py" --headers "$I" --rules "$D3D/rules.txt" --out "$G" calls
-for f in "$D3D/host/dispatch.c" "$G/calls.c" "$G/ifaces.c"; do
+for f in "$D3D/host/dispatch.c" "$D3D/host/memory.c" "$G/calls.c" "$G/ifaces.c"; do
   o="$W/obj/d3d-$(basename "$f").o"
   clang -O2 -std=gnu2x -Wall -c -I"$M" -I"$M/wm" -I"$G" -I"$DXMT/winemetal" -o "$o" "$f"
   objs="$objs $o"

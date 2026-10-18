@@ -33,4 +33,5 @@ struct mn_d3d_export { const char *dll, *name; };
 void mn_d3d_answers(void *obj, int iface, uint64_t out[4]);
 // A method's HRESULT: device removal, and an asynchronous call's failure, for the call running (dispatch.c).
 void mn_d3d_result(HRESULT hr);
+int mn_d3d_arena_of(const void *ptr, uint64_t *blob, uint64_t *offset); // memory.c
 }

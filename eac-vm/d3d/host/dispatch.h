@@ -19,5 +19,15 @@ int mn_d3d_load(const char *dir);
 /* A stub's HRESULT (stubs.cpp): removes the context's device on DXGI_ERROR_DEVICE_REMOVED, _HUNG or _RESET, and logs
  * an asynchronous call's failure. */
 void mn_d3d_result(int32_t hr);
+/* memory.c: the arenas (op 1) native DXMT's CPU-visible buffers come from during a creation; begin and end bracket a
+ * call (end: the bytes a creation wanted and found no room for, else 0). */
+int mn_d3d_arena_add(uint32_t ctx_id, uint64_t blob, uint64_t offset, uint64_t len);
+void mn_d3d_memory_hooks(void (*set)(void *(*alloc)(uint64_t, void *), void (*free)(void *, void *), void *ctx));
+void mn_d3d_memory_begin(uint32_t ctx_id, int creation);
+uint64_t mn_d3d_memory_end(void);
+int mn_d3d_arena_of(const void *ptr, uint64_t *blob, uint64_t *offset); /* 0, or -1: not in an arena */
+void mn_d3d_arenas_end(uint32_t ctx_id);
+uint64_t mn_d3d_arena_free(uint32_t ctx_id); /* free bytes in the context's arenas (tests) */
+extern const struct mn_executor_hooks mn_vm_hooks; /* winemetal's, and the arenas' end with the context's */
 
 #endif

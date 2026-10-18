@@ -64,7 +64,7 @@ static void init(void) {
     pthread_key_create(&key, thread_exit);
     const char *dir = getenv("MN_D3D_NATIVE");
     mn_d3d_set_dir(dir && *dir ? dir : MN_D3D_NATIVE_DIR);
-    mn_executor_start(mn_vm_dispatch, &mn_wm_hooks);
+    mn_executor_start(mn_vm_dispatch, &mn_vm_hooks);
     ops->context_create(ops->ctx, CTX);
 }
 

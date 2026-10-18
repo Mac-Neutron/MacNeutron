@@ -36,7 +36,7 @@ done
 for f in wm/host/invoke.m wm/host/memory.m wm/host/events.m wm/host/present.m wm/host/dispatch.m; do
   compile "clang $CF" "$M/$f"
 done
-for f in "$G/calls.c" "$G/ifaces.c" "$D3D/host/dispatch.c" "$D3D/guest/unix.c"; do compile "clang $CF" "$f"; done
+for f in "$G/calls.c" "$G/ifaces.c" "$D3D/host/dispatch.c" "$D3D/host/memory.c" "$D3D/guest/unix.c"; do compile "clang $CF" "$f"; done
 compile "clang $CF -DMN_D3D_NATIVE_DIR=\"$LIB\"" "$D3D/tests/loopback.c"
 for f in "$G/stubs.cpp" "$G/proxies.cpp" "$D3D/host/native.cpp" "$D3D/guest/proxy.cpp"; do compile "clang++ $CXF" "$f"; done
 # shellcheck disable=SC2086  # the objects, one word each

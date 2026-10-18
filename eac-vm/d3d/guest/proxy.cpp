@@ -131,8 +131,22 @@ static SIZE_T STDMETHODCALLTYPE blob_size(mn_proxy *This) {
     return This->obj->blob.size();
 }
 
+// Map (rules.txt's own): the unix side answers our address of the host's memory (in an arena) in the first word.
+static HRESULT STDMETHODCALLTYPE map(mn_proxy *This, UINT sub, const D3D12_RANGE *read_range, void **data) {
+    mn_d3d_p_ID3D12Resource_Map p = {};
+    uint64_t at[2] = {};
+    p.self = (uintptr_t)This, p.sub_resource = sub, p.read_range = (uintptr_t)read_range;
+    p.data = data ? (uintptr_t)at : 0;
+    int32_t s = mn_d3d_call(MN_D3D_ID_ID3D12Resource_Map, &p);
+    HRESULT hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;
+    if (SUCCEEDED(hr) && data && !at[0]) hr = E_FAIL; /* not in an arena of ours: the host said so too */
+    if (data) *data = SUCCEEDED(hr) ? (void *)(uintptr_t)at[0] : nullptr;
+    return hr;
+}
+
 const void *mn_d3d_special(const char *name, const void *fallback) {
     static const struct { const char *name; const void *fn; } code[] = {
+        {"ID3D12Resource::Map", (const void *)map},
         {"ID3D10Blob::GetBufferPointer", (const void *)blob_pointer},
         {"ID3D10Blob::GetBufferSize", (const void *)blob_size},
     };

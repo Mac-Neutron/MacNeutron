@@ -9,6 +9,7 @@
 #include <string.h>
 #include "marshal.h"
 #include "../../metal/guest/transport.h"
+#include "guest/galloc.h"
 #include "mnd3d_params.h"
 #include "../mn_d3d.h"
 
@@ -17,6 +18,41 @@ extern const struct mn_wm_call mn_d3d_calls[MN_D3D_CALLS];
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static int ready; /* 0, or the transport's -errno */
 static _Thread_local uint8_t *rec, *reply;
+
+/* The arenas this process gave the host (galloc regions, for the process's life): Map's (blob, offset) is ours here. */
+struct arena { uint64_t blob, offset, len; uint8_t *ptr; };
+static struct arena arenas[256];
+static unsigned narenas;
+static pthread_mutex_t arena_lock = PTHREAD_MUTEX_INITIALIZER;
+#define E_OUTOFMEMORY_ ((int32_t)0x8007000E)
+
+/* A new arena of at least want bytes: 0, or -1 (the test's MN_D3D_NO_ARENAS, no memory, or the host refused). */
+static int add_arena(uint64_t want) {
+    const char *no = getenv("MN_D3D_NO_ARENAS");
+    if (no && *no == '1') return -1;
+    struct mn_region r;
+    uint64_t len = want > MN_D3D_ARENA_BYTES ? want : MN_D3D_ARENA_BYTES, id;
+    struct mn_d3d_arena a;
+    pthread_mutex_lock(&arena_lock);
+    int ok = narenas < sizeof arenas / sizeof *arenas && !mn_galloc(len, &r) &&
+             !mn_glookup(r.ptr, r.len, &id, &a.blob_id, &a.offset);
+    a.len = r.len;
+    uint32_t n = 0;
+    if (ok && (ok = !mn_call_flush(MN_OP_D3D + MN_D3D_OP_ARENA, &a, sizeof a, NULL, 0, &n)))
+        arenas[narenas++] = (struct arena){a.blob_id, a.offset, a.len, r.ptr};
+    pthread_mutex_unlock(&arena_lock);
+    return ok ? 0 : -1;
+}
+
+static void *arena_ptr(uint64_t blob, uint64_t offset) {
+    void *p = NULL;
+    pthread_mutex_lock(&arena_lock);
+    for (unsigned i = 0; i < narenas && !p; i++)
+        if (arenas[i].blob == blob && offset >= arenas[i].offset && offset < arenas[i].offset + arenas[i].len)
+            p = arenas[i].ptr + (offset - arenas[i].offset);
+    pthread_mutex_unlock(&arena_lock);
+    return p;
+}
 
 static int proxy_handle(uint64_t value, mn_handle *h) {
     const struct mn_d3d_proxy_hdr *p = (const void *)(uintptr_t)value;
@@ -87,22 +123,33 @@ int32_t mn_d3d_unix_call(void *args) {
     if (a->id < MN_D3D_FIRST) return family(a->id, params);
     if (a->id >= MN_D3D_CALLS || !mn_d3d_calls[a->id].name) return MN_EINVAL;
     const struct mn_wm_call *c = &mn_d3d_calls[a->id];
-    struct mn_wm_out o = {.buf = rec, .cap = MN_REC_MAX};
-    NTSTATUS_T s = mn_wm_pack_call(c, params, &o);
-    if (s) return (int32_t)s;
-    int submit = c->mode == MN_WM_SUBMIT;
-    if (!o.sync && !submit) {
-        int r = mn_queue(MN_OP_D3D + a->id, rec, o.len);
-        if (r) mn_wm_unwind(&o, 0);
-        return r;
+    for (int again = 0;; again = 1) {
+        struct mn_wm_out o = {.buf = rec, .cap = MN_REC_MAX};
+        NTSTATUS_T s = mn_wm_pack_call(c, params, &o);
+        if (s) return (int32_t)s;
+        int submit = c->mode == MN_WM_SUBMIT;
+        if (!o.sync && !submit) {
+            int r = mn_queue(MN_OP_D3D + a->id, rec, o.len);
+            if (r) mn_wm_unwind(&o, 0);
+            return r;
+        }
+        uint32_t n = 0;
+        int32_t r = mn_call_flush((MN_OP_D3D + a->id) | (submit ? MN_REC_SUBMIT : 0), rec, o.len, reply,
+                                  MN_REPLY_BYTES, &n);
+        if (r) {
+            mn_wm_unwind(&o, r != -EIO && r != -ENODEV); /* a status from the host: it had the record */
+            if (r != MN_D3D_NEED_ARENA) return r;
+            uint64_t want = 0;
+            if (n >= sizeof want) memcpy(&want, reply, sizeof want);
+            if (again || add_arena(want)) return E_OUTOFMEMORY_; /* the guest's memory, once */
+            continue;
+        }
+        if (!o.sync) return 0;
+        s = mn_wm_unpack_call(c, params, &o, reply, n);
+        if (!s && a->id == MN_D3D_ID_ID3D12Resource_Map) { /* the arena's (blob, offset): our address of it */
+            uint64_t *at = (uint64_t *)(uintptr_t)((mn_d3d_p_ID3D12Resource_Map *)params)->data;
+            if (at) at[0] = (uintptr_t)arena_ptr(at[0], at[1]);
+        }
+        return (int32_t)s;
     }
-    uint32_t n = 0;
-    int32_t r = mn_call_flush((MN_OP_D3D + a->id) | (submit ? MN_REC_SUBMIT : 0), rec, o.len, reply, MN_REPLY_BYTES,
-                              &n);
-    if (r) {
-        mn_wm_unwind(&o, r != -EIO && r != -ENODEV); /* a status from the host: it had the record */
-        return r;
-    }
-    if (!o.sync) return 0;
-    return (int32_t)mn_wm_unpack_call(c, params, &o, reply, n);
 }

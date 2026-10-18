@@ -503,6 +503,7 @@ class Rules:
     params: Dict[tuple, List[str]] = field(default_factory=dict)  # (method, param): words
     fields: Dict[tuple, List[str]] = field(default_factory=dict)  # (struct, field): words
     companions: List[tuple] = field(default_factory=list)  # (interface, companion): QueryInterface answers it too
+    own: set = field(default_factory=set)  # generated tables, with guest and host code of our own (MN_D3D_ID_*)
 
 
 MODES = ("async", "sync", "submit", "special", "refuse")
@@ -518,6 +519,8 @@ def parse_rules(text, model):
         struct <S>.<field> in|out [count=<field>|size=<field>|bytes=<n>|one|string]
         struct <S>.<union field> union=<discriminant field> <Member>=<value> ...  (the members with pointers)
         companion <Interface> <Interface>       an object of the first answers the second (another C++ subobject)
+        <Interface>::<Method> own                the generated params and tables, but guest and host code of our own
+                                                (proxy.cpp's mn_d3d_special, the dispatcher's own stubs)
     count=*<param> and size=*<param> read the length through an inout pointer argument. ::<Export> names an export
     the same way. refuse: the guest answers E_NOTIMPL (nothing, for a void method), logged."""
     rules, depth = Rules(), 0
@@ -544,7 +547,9 @@ def parse_rules(text, model):
                 raise RuleError(f"rules.txt: {line!r}: struct rules name a field")
             rules.fields[(st, fname)] = words[2:]
         elif "::" in words[0]:
-            if len(words) == 2 and words[1] in MODES:
+            if len(words) == 2 and words[1] == "own":
+                rules.own.add(words[0])
+            elif len(words) == 2 and words[1] in MODES:
                 rules.modes[words[0]] = words[1]
             elif len(words) >= 3:
                 rules.params[(words[0], words[1])] = words[2:]
@@ -844,7 +849,7 @@ def classify(model, rules):
     if errors:
         raise RuleError(f"{len(errors)} methods need rules:\n  " + "\n  ".join(errors))
     ifaces = {n.split("::")[0] for n in methods}
-    for name in list(rules.modes) + [k[0] for k in rules.params]:
+    for name in list(rules.modes) + [k[0] for k in rules.params] + sorted(rules.own):
         if name.endswith("::*") and name[:-3] in ifaces:
             continue
         if name not in methods:
@@ -1288,7 +1293,7 @@ def emit_proxies(model, rules, calls):
             else:
                 mid = by_name[f"{y}::{model.interfaces[n].methods[slot].name}"]
                 fn = f"(const void *)px_{mid}"
-                if calls[mid].mode == "special":  # guest code (proxy.cpp), else px_'s E_NOTIMPL
+                if calls[mid].mode == "special" or calls[mid].name in rules.own:  # proxy.cpp's code
                     fn = f'mn_d3d_special("{calls[mid].name}", {fn})'
             out.append(f"    mn_d3d_vtables[{k}][{slot}] = {fn};")
     out += ["}", "static int built = (build(), 1);", ""]
@@ -1313,6 +1318,10 @@ def main(argv):
             tail = "\n".join(iface_decls(model))
             proxies, maxslots = emit_proxies(model, rules, calls)
             tail += f"\n#define MN_D3D_MAX_SLOTS {maxslots}\n"
+            for mid in sorted(calls):  # the methods with code of our own, by name
+                if calls[mid].name in rules.own:
+                    c_name = calls[mid].name.replace("::", "_")
+                    tail += f"#define MN_D3D_ID_{c_name} {mid}\ntypedef struct mn_d3d_p_{mid} mn_d3d_p_{c_name};\n"
             head, _, end = params.rpartition("\n#endif\n")  # the header's own guard, its last
             params = head + "\n" + tail + "\n#endif\n" + end
             files = {"mnd3d_params.h": params, "calls.c": emit_calls(calls), "ifaces.c": emit_ifaces(model, rules),

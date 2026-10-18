@@ -167,10 +167,11 @@ if !wmLoaded {
 }
 // Direct3D forwarding (M2): native DXMT beside macneutron-vm, loaded by the first Direct3D record (eac-vm/d3d).
 mn_d3d_set_dir(URL(fileURLWithPath: metalHost).deletingLastPathComponent().appendingPathComponent("dxmt").path)
+var vmHooks = mn_vm_hooks
 if wmLoaded && metalTestOps {
-  mn_executor_start(mn_vm_dispatch_test, &wmHooks)
+  mn_executor_start(mn_vm_dispatch_test, &vmHooks)
 } else if wmLoaded {
-  mn_executor_start(mn_vm_dispatch, &wmHooks)
+  mn_executor_start(mn_vm_dispatch, &vmHooks)
 } else if metalTestOps {
   mn_executor_start(mn_testops, nil)
 } else {

@@ -21,6 +21,12 @@ enum {
 };
 struct mn_d3d_query { uint64_t handle; uint8_t iid[16]; uint64_t out; }; /* reply: int32 HRESULT */
 struct mn_d3d_blob { uint64_t handle, offset, len; };
+/* Op 1: guest memory (a galloc region, held for the host) the host carves CPU-visible resources from. */
+struct mn_d3d_arena { uint64_t blob_id, offset, len; };
+/* A creation's status when no arena has room: the reply is the u64 bytes wanted; the guest adds an arena of at least
+ * MN_D3D_ARENA_BYTES that size and sends the creation again, once (then E_OUTOFMEMORY). */
+#define MN_D3D_NEED_ARENA 0x20000001
+#define MN_D3D_ARENA_BYTES (64ull << 20)
 
 /* A guest proxy's start (guest/proxy.h): the marshaller's hook reads the handle there. */
 struct mn_d3d_proxy_hdr { const void *vtbl; uint32_t magic; int32_t iface; uint64_t handle; };

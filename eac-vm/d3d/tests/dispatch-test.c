@@ -7,10 +7,14 @@
  *   invalid    an unknown id, and a record shorter than its params, answer MN_EINVAL
  *   removed    once a stub says DXGI_ERROR_DEVICE_REMOVED, the next CreateFence answers it too
  *   release    the family's op 0 lets a handle go: a later call on it is refused
+ *   arena      (M2 Task 7) an upload buffer larger than the arenas answers MN_D3D_NEED_ARENA with the bytes it wants;
+ *              after op 1 adds one it is made; Map answers its arena's blob and an offset inside it; released, its
+ *              piece is the arena's again
  *   dispatch-test <metal-host> <native DXMT lib>; prints "dispatch-test: ok" or each failure. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "marshal.h"
 #include "../../guest/transport.h"
 #include "host/dispatch.h"
@@ -116,6 +120,47 @@ int main(int argc, char **argv) {
     mn_wm_hooks.progress(1, ring_state); /* the deferred release runs once the rings that used it pass: all here */
     struct { uint64_t self, ret; } gone = {h, 0};
     CHECK(call(value, &gone) != 0);
+
+    /* arena */
+    unsigned committed = id_of("ID3D12Device::CreateCommittedResource"), map = id_of("ID3D12Resource::Map");
+    struct { uint32_t type, cpu_page, pool, creation_node, visible_node; } upload = {2}; /* D3D12_HEAP_TYPE_UPLOAD */
+    struct { uint32_t dimension; uint64_t alignment, width; uint32_t height; uint16_t depth, mips; uint32_t format;
+             uint32_t count, quality, layout, flags; } buf = {1, 0, 1 << 20, 1, 1, 1, 0, 1, 0, 1, 0};
+    struct res_params { uint64_t self, ret, heap_properties; uint32_t heap_flags; uint64_t desc; uint32_t state;
+                        uint64_t clear, riid, resource, ifaces[4]; } rp = {0};
+    CHECK(mn_d3d_calls[committed].params_size == sizeof rp && sizeof buf == 56 && sizeof upload == 20);
+    rp.self = device, rp.heap_properties = (uintptr_t)&upload, rp.desc = (uintptr_t)&buf;
+    rp.state = 0xac3; /* D3D12_RESOURCE_STATE_GENERIC_READ */
+    rp.riid = (uintptr_t)iid("ID3D12Resource");
+    struct res_params try1 = rp;
+    CHECK(call(committed, &try1) == MN_D3D_NEED_ARENA);
+    uint64_t wanted;
+    memcpy(&wanted, reply, sizeof wanted);
+    CHECK(wanted >= (1 << 20));
+    struct mn_blob small, big;
+    CHECK(!mn_blob_alloc(512 << 10, &small) && !mn_blob_alloc(4 << 20, &big));
+    struct mn_d3d_arena add = {small.blob_id, 0, small.size};
+    CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_ARENA, &add, sizeof add, reply, sizeof reply, &n) == 0);
+    struct res_params try2 = rp;
+    CHECK(call(committed, &try2) == MN_D3D_NEED_ARENA); /* still too small */
+    add = (struct mn_d3d_arena){big.blob_id, 0, big.size};
+    CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_ARENA, &add, sizeof add, reply, sizeof reply, &n) == 0);
+    uint64_t total = small.size + big.size;
+    CHECK(mn_d3d_arena_free(1) == total);
+    struct res_params try3 = rp;
+    CHECK(call(committed, &try3) == 0 && (uint32_t)try3.ret == 0 && try3.resource);
+    CHECK(mn_d3d_arena_free(1) <= total - (1 << 20));
+    struct { uint64_t self, ret; uint32_t sub; uint64_t range, data; } mp = {try3.resource, 0, 0, 0, 0};
+    uint64_t at[2] = {0, ~0ull};
+    mp.data = (uintptr_t)at;
+    CHECK(mn_d3d_calls[map].params_size == sizeof mp);
+    CHECK(call(map, &mp) == 0 && (uint32_t)mp.ret == 0);
+    CHECK(at[0] == big.blob_id && at[1] + (1 << 20) <= big.size);
+    uint64_t rh = try3.resource;
+    CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_RELEASE, &rh, sizeof rh, reply, sizeof reply, &n) == 0);
+    mn_wm_hooks.progress(1, ring_state);
+    for (int i = 0; i < 200 && mn_d3d_arena_free(1) != total; i++) usleep(10000); /* Metal lets it go */
+    CHECK(mn_d3d_arena_free(1) == total);
 
     /* removed */
     unsigned victim = id_of("ID3D12Object::GetPrivateData");

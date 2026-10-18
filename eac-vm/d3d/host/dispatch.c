@@ -21,6 +21,7 @@ extern void *mn_d3d_exports[MN_D3D_EXPORTS];
 void mn_d3d_native_release(void *obj);
 int32_t mn_d3d_native_query(void *obj, const uint8_t iid[16], void **out);
 const void *mn_d3d_native_blob(void *obj, uint64_t *size);
+NTSTATUS_T mn_d3d_map_stub(void *params);
 
 static char *dir;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
@@ -34,10 +35,10 @@ void mn_d3d_set_dir(const char *d) {
 }
 
 int mn_d3d_load(const char *d) {
-    static const char *const names[2] = {"d3d12", "dxgi"};
-    void *libs[2];
+    static const char *const names[3] = {"d3d12", "dxgi", "winemetal"};
+    void *libs[3];
     char path[4096];
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 3; i++) {
         snprintf(path, sizeof path, "%s/%s.dylib", d, names[i]);
         if (!(libs[i] = dlopen(path, RTLD_NOW | RTLD_LOCAL))) {
             fprintf(stderr, "mn-d3d: error: native DXMT: %s\n", dlerror());
@@ -51,6 +52,14 @@ int mn_d3d_load(const char *d) {
             return -1;
         }
     }
+    void (*hooks)(void *(*)(uint64_t, void *), void (*)(void *, void *), void *) =
+        (void (*)(void *(*)(uint64_t, void *), void (*)(void *, void *), void *))dlsym(libs[2], "WMTSetMemoryHooks");
+    if (!hooks) {
+        fprintf(stderr, "mn-d3d: error: native DXMT: %s\n", dlerror());
+        return -1;
+    }
+    mn_d3d_memory_hooks(hooks);
+    mn_d3d_stubs[MN_D3D_ID_ID3D12Resource_Map] = mn_d3d_map_stub; /* rules.txt's own */
     mn_wm_d3d_release = mn_d3d_native_release;
     return 0;
 }
@@ -100,6 +109,15 @@ static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *
         *n = sizeof hr;
         return 0;
     }
+    case MN_D3D_OP_ARENA: {
+        struct mn_d3d_arena a;
+        if (len < sizeof a) return MN_EINVAL;
+        memcpy(&a, p, sizeof a);
+        if (!mn_d3d_arena_add(c->ctx_id, a.blob_id, a.offset, a.len)) return 0;
+        fprintf(stderr, "mn-d3d: error: an arena that isn't guest memory (%llu, %llu, %llu)\n",
+                (unsigned long long)a.blob_id, (unsigned long long)a.offset, (unsigned long long)a.len);
+        return MN_EINVAL;
+    }
     case MN_D3D_OP_BLOB: {
         struct mn_d3d_blob b;
         if (len < sizeof b || !reply || cap < 8) return MN_EINVAL;
@@ -118,7 +136,7 @@ static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *
         return 0;
     }
     default:
-        return MN_ENOSYS; /* ops 1-3: Tasks 7, 8, 11 */
+        return MN_ENOSYS; /* ops 2-3: Tasks 8, 11 */
     }
 }
 
@@ -147,10 +165,26 @@ static int32_t d3d(uint32_t ctx_id, void *ring, uint32_t id, const void *p, uint
             fprintf(stderr, "mn-d3d: error: %s has no host code\n", call->name);
         return MN_D3D_E_NOTIMPL;
     }
+    int creation = 0;
+    for (unsigned i = 0; i < call->nfields && !creation; i++) creation = call->fields[i].kind == WMF_HANDLE_OUT;
     __typeof__(cur) outer = cur; /* a stub doesn't call back into the dispatcher, but keep it right if one did */
     cur.c = c, cur.call = call, cur.sync = reply != NULL;
+    mn_d3d_memory_begin(c->ctx_id, creation && reply);
     int32_t s = mn_wm_host_call_table(c, ring, call, stub, p, len, reply, cap, n);
+    uint64_t need = mn_d3d_memory_end();
     cur = outer;
+    if (need && !s && cap >= sizeof need) { /* made in host memory for want of an arena: let it go, the guest adds one
+                                              * and asks again */
+        for (unsigned i = 0; i < call->nfields; i++) {
+            mn_handle h;
+            if (call->fields[i].kind != WMF_HANDLE_OUT) continue;
+            memcpy(&h, (uint8_t *)reply + call->fields[i].offset, sizeof h);
+            if (h) mn_ht_release(c->ht, ring, h);
+        }
+        memcpy(reply, &need, sizeof need);
+        *n = sizeof need;
+        return MN_D3D_NEED_ARENA;
+    }
     return s;
 }
 
@@ -159,6 +193,14 @@ int32_t mn_vm_dispatch(uint32_t ctx_id, void *ring_state, uint32_t op, const voi
     if (op < MN_OP_D3D) return mn_wm_dispatch(ctx_id, ring_state, op, p, len, reply, cap, reply_len);
     return d3d(ctx_id, ring_state, op - MN_OP_D3D, p, len, reply, cap, reply_len);
 }
+
+static void progress(uint32_t ctx_id, void *ring_state) { mn_wm_hooks.progress(ctx_id, ring_state); }
+static void ring_end(uint32_t ctx_id, void *ring_state) { mn_wm_hooks.ring_end(ctx_id, ring_state); }
+static void context_end(uint32_t ctx_id) {
+    mn_wm_hooks.context_end(ctx_id); /* its objects released: their pieces come back as Metal lets them go */
+    mn_d3d_arenas_end(ctx_id);
+}
+const struct mn_executor_hooks mn_vm_hooks = {progress, context_end, ring_end};
 
 int32_t mn_vm_dispatch_test(uint32_t ctx_id, void *ring_state, uint32_t op, const void *p, uint32_t len, void *reply,
                             uint32_t cap, uint32_t *reply_len) {

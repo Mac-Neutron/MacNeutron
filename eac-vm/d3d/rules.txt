@@ -150,8 +150,9 @@ ID3D12Object::SetPrivateData data in size=data_size
 IDXGIObject::GetPrivateData data_size inout one
 IDXGIObject::GetPrivateData data out size=*data_size
 IDXGIObject::SetPrivateData data in size=data_size
-# Map: the host's pointer, until Task 7's arenas (one process, the loopback, can read it).
-ID3D12Resource::Map data out bytes=8
+# Map: the arena's (blob, offset) the host's pointer is at (host/native.cpp); the guest answers its own address of it.
+ID3D12Resource::Map data out bytes=16
+ID3D12Resource::Map own
 ID3D12Resource::WriteToSubresource special
 ID3D12Resource::ReadFromSubresource special
 ID3D12Device::CheckFeatureSupport special
