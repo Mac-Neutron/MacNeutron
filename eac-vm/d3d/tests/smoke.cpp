@@ -14,6 +14,10 @@
 //   swapchain    (M3 Task 3) forwarded only (guest DXMT aborts on them): the seven methods DXMT has no code for, as
 //                DXGI answers them: no output restricted to, the background colour kept, identity rotation only, a
 //                source size no larger than the buffers ("ok", or the first wrong one)
+//   latency      (M3 Task 4) a waitable swapchain's frame latency object starts at its maximum latency and is then
+//                signalled once a presented frame; a swapchain without one presents 60 frames the GPU takes longer
+//                over than the CPU (four 256 MiB copies each), which d3d-smoke.sh checks held no vCPU on the host
+//                ("ok", or what broke)
 //   wmtforward   (after M2) winemetal's WMTForward (fork 0079) refuses a call past the guest's table, 156
 //                ("ok": STATUS_INVALID_PARAMETER, or what it answered); last, as a wrong one may end the process
 // A failed step prints "<line> FAIL <step>".
@@ -21,7 +25,9 @@
 #include <d3d12.h>
 #include <dxgi1_4.h>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <vector>
 
 static DWORD WINAPI first(void *) {
     IDXGIFactory1 *f = nullptr;
@@ -94,7 +100,7 @@ static double ms_since(LARGE_INTEGER a) {
 }
 
 // A 320x240 flip-model swapchain on a new Wine window: the swapchain, or nullptr.
-static IDXGISwapChain1 *swapchain(ID3D12CommandQueue *queue, HWND *window) {
+static IDXGISwapChain1 *swapchain(ID3D12CommandQueue *queue, HWND *window, UINT flags = 0) {
     static WNDCLASSA wc = {};
     if (!wc.lpszClassName) {
         wc.lpfnWndProc = window_proc, wc.hInstance = GetModuleHandleA(nullptr), wc.lpszClassName = "mn-smoke";
@@ -107,6 +113,7 @@ static IDXGISwapChain1 *swapchain(ID3D12CommandQueue *queue, HWND *window) {
     DXGI_SWAP_CHAIN_DESC1 d = {};
     d.Width = 320, d.Height = 240, d.Format = DXGI_FORMAT_R8G8B8A8_UNORM, d.SampleDesc.Count = 1;
     d.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT, d.BufferCount = 2, d.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    d.Flags = flags;
     pump();
     if (w && SUCCEEDED(CreateDXGIFactory2(0, __uuidof(IDXGIFactory2), (void **)&f)))
         f->CreateSwapChainForHwnd(queue, w, &d, nullptr, nullptr, &sc);
@@ -162,6 +169,74 @@ static void minimised(ID3D12CommandQueue *queue) {
     DestroyWindow(w);
 }
 
+static ID3D12Resource *gpu_buffer(ID3D12Device *device, UINT64 size) {
+    D3D12_HEAP_PROPERTIES hp = {D3D12_HEAP_TYPE_DEFAULT};
+    D3D12_RESOURCE_DESC d = {};
+    d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER, d.Width = size, d.Height = 1, d.DepthOrArraySize = 1;
+    d.MipLevels = 1;
+    d.SampleDesc.Count = 1, d.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    ID3D12Resource *r = nullptr;
+    device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &d, D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                    __uuidof(ID3D12Resource), (void **)&r);
+    return r;
+}
+
+static const char *latency(ID3D12Device *device, ID3D12CommandQueue *queue) {
+    HWND w;
+    IDXGISwapChain1 *sc = swapchain(queue, &w, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
+    IDXGISwapChain2 *sc2 = nullptr;
+    if (!sc || FAILED(sc->QueryInterface(__uuidof(IDXGISwapChain2), (void **)&sc2))) return "FAIL swapchain";
+    HANDLE object = sc2->GetFrameLatencyWaitableObject();
+    UINT most = 0;
+    sc2->GetMaximumFrameLatency(&most);
+    const char *bad = nullptr;
+    if (!object || !most) bad = "no object";
+    for (UINT i = 0; !bad && i < most; i++)
+        if (WaitForSingleObject(object, 0) != WAIT_OBJECT_0) bad = "the object's first count";
+    if (!bad && WaitForSingleObject(object, 0) != WAIT_TIMEOUT) bad = "the object past its count";
+    for (int k = 0; !bad && k < 10; k++)
+        if (FAILED(sc->Present(0, 0)) || WaitForSingleObject(object, 2000) != WAIT_OBJECT_0) bad = "a frame's signal";
+    if (object) CloseHandle(object);
+    sc2->Release();
+    sc->Release();
+    DestroyWindow(w);
+    if (bad) return bad;
+    // Without the object: frames the GPU is behind on (its copies), presented as fast as the CPU can.
+    sc = swapchain(queue, &w);
+    ID3D12Resource *a = gpu_buffer(device, 256u << 20), *b = gpu_buffer(device, 256u << 20);
+    ID3D12CommandAllocator *alloc = nullptr;
+    ID3D12GraphicsCommandList *list = nullptr;
+    if (!sc || !a || !b ||
+        FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator),
+                                              (void **)&alloc)) ||
+        FAILED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, nullptr,
+                                         __uuidof(ID3D12GraphicsCommandList), (void **)&list)))
+        return "FAIL the GPU's frames";
+    list->Close();
+    std::vector<ID3D12CommandAllocator *> allocs; // one a frame: a list's memory is the GPU's until its frame is done
+    for (int k = 0; !bad && k < 60; k++) {
+        ID3D12CommandAllocator *fa = nullptr;
+        device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator), (void **)&fa);
+        allocs.push_back(fa);
+        list->Reset(fa, nullptr);
+        for (int i = 0; i < 4; i++) list->CopyBufferRegion(i % 2 ? a : b, 0, i % 2 ? b : a, 0, 256u << 20);
+        list->Close();
+        ID3D12CommandList *lists[] = {list};
+        queue->ExecuteCommandLists(1, lists);
+        if (FAILED(sc->Present(0, 0))) bad = "a GPU-bound frame's present";
+    }
+    ID3D12Fence *done = new_fence(device);
+    HANDLE e = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    if (done && SUCCEEDED(queue->Signal(done, 1)) && SUCCEEDED(done->SetEventOnCompletion(1, e)))
+        WaitForSingleObject(e, 30000);
+    CloseHandle(e);
+    if (done) done->Release();
+    for (auto *x : allocs) x->Release();
+    list->Release(), alloc->Release(), a->Release(), b->Release(), sc->Release();
+    DestroyWindow(w);
+    return bad ? bad : "ok";
+}
+
 static void wmt_forward() {
     auto forward = (UINT32(WINAPI *)(UINT32, void *))GetProcAddress(LoadLibraryA("winemetal.dll"), "WMTForward");
     if (!forward) return (void)printf("wmtforward FAIL no WMTForward\n");
@@ -187,6 +262,7 @@ int main() {
     printf("eventreuse %s\n", event_reuse(device, queue));
     name(queue);
     minimised(queue);
+    printf("latency %s\n", latency(device, queue));
     const char *mode = getenv("MACNEUTRON_VM_D3D");
     if (mode && !strcmp(mode, "forward")) printf("swapchain %s\n", own_answers(queue));
     else printf("swapchain untested: guest DXMT aborts on these\n");

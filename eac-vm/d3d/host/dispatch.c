@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "marshal.h"
 #include "host/dispatch.h"
 #include "mnd3d_params.h"
@@ -37,6 +38,10 @@ static void release(void *obj), present(void *cmdbuf, void *drawable);
 
 static char *dir, *trace;
 static _Atomic uint64_t counts[MN_D3D_CALLS]; /* with a trace: each method's records, all contexts' */
+/* Calls that held their vCPU longer than SLOW_US (M3 Task 4): how many, and the longest, by method, all contexts'; said
+ * as each context ends. A wait for the GPU or a drawable belongs in the guest. */
+#define SLOW_US 4000
+static _Atomic uint64_t slow[MN_D3D_CALLS], slowest_us[MN_D3D_CALLS];
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static int loaded;
 static _Thread_local struct { struct mn_wm_ctx *c; const struct mn_wm_call *call; int sync; } cur;
@@ -50,6 +55,21 @@ void mn_d3d_set_dir(const char *d) {
 void mn_d3d_set_trace(const char *path) {
     free(trace);
     trace = path ? strdup(path) : NULL;
+}
+
+static void slow_out(void) {
+    for (unsigned i = 0; i < MN_D3D_CALLS; i++) {
+        uint64_t n = atomic_exchange(&slow[i], 0), us = atomic_exchange(&slowest_us[i], 0);
+        if (n)
+            fprintf(stderr, "mn-d3d: slow: %s: %llu calls over %d ms, the longest %.1f ms\n", mn_d3d_calls[i].name,
+                    (unsigned long long)n, SLOW_US / 1000, us / 1000.0);
+    }
+}
+
+static uint64_t now_us(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000000 + (uint64_t)t.tv_nsec / 1000;
 }
 
 static void trace_out(uint32_t ctx_id) {
@@ -128,8 +148,15 @@ static void release(void *obj) {
 
 uint32_t mn_d3d_current_ctx(void) { return cur.c ? cur.c->ctx_id : 0; }
 
-/* Native DXMT's presents (fork 0081's hook), counted and probed as guest DXMT's are (present.m). */
-static void present(void *cmdbuf, void *drawable) { mn_wm_present_native(cur.c, cmdbuf, drawable); }
+/* Native DXMT's presents (fork 0081's hook), counted and probed as guest DXMT's are (present.m), and the drawables
+ * presented and shown counted for the guest's pacing (events.c's mirror slots 0 and 1). */
+static void shown(void *ctx) { mn_d3d_drawable((uint32_t)(uintptr_t)ctx, 1); }
+static void present(void *cmdbuf, void *drawable) {
+    mn_wm_present_native(cur.c, cmdbuf, drawable);
+    if (!cur.c || !drawable) return;
+    mn_d3d_drawable(cur.c->ctx_id, 0);
+    mn_wm_on_shown(drawable, shown, (void *)(uintptr_t)cur.c->ctx_id);
+}
 
 /* ponytail: the first Direct3D record loads native DXMT on its vCPU (dlopen and Metal's device: tens of ms, once) */
 static void load_once(void) {
@@ -230,6 +257,12 @@ static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *
         memcpy(&w, p, sizeof w);
         return mn_d3d_window_set(c->ctx_id, &w) ? MN_D3D_E_FAIL : 0;
     }
+    case MN_D3D_OP_SHOWN: {
+        uint64_t ev;
+        if (len < sizeof ev) return MN_EINVAL;
+        memcpy(&ev, p, sizeof ev);
+        return mn_d3d_shown_event(c->ctx_id, ev) ? MN_EINVAL : 0;
+    }
     case MN_D3D_OP_ACTIONS:
         if (!reply) return MN_EINVAL;
         *n = mn_d3d_actions_take(c->ctx_id, reply, cap);
@@ -274,7 +307,13 @@ static int32_t d3d(uint32_t ctx_id, void *ring, uint32_t id, const void *p, uint
     __typeof__(cur) outer = cur; /* a stub doesn't call back into the dispatcher, but keep it right if one did */
     cur.c = c, cur.call = call, cur.sync = reply != NULL;
     mn_d3d_memory_begin(c->ctx_id, creation && reply);
+    uint64_t t0 = now_us();
     int32_t s = mn_wm_host_call_table(c, ring, call, stub, p, len, reply, cap, n);
+    uint64_t us = now_us() - t0, top = atomic_load(&slowest_us[id]);
+    if (us > SLOW_US) {
+        atomic_fetch_add(&slow[id], 1);
+        while (us > top && !atomic_compare_exchange_weak(&slowest_us[id], &top, us)) {}
+    }
     uint64_t need = mn_d3d_memory_end();
     cur = outer;
     if (!s && !need && reply && creation)
@@ -314,6 +353,7 @@ static void context_end(uint32_t ctx_id) {
     mn_d3d_arenas_end(ctx_id);
     mn_d3d_events_end(ctx_id);
     mn_d3d_windows_end(ctx_id);
+    slow_out();
     trace_out(ctx_id);
 }
 const struct mn_executor_hooks mn_vm_hooks = {progress, context_end, ring_end};

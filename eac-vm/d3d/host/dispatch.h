@@ -32,6 +32,8 @@ void mn_d3d_arenas_end(uint32_t ctx_id);
 uint64_t mn_d3d_arena_free(uint32_t ctx_id); /* free bytes in the context's arenas (tests) */
 /* events.c: a fence's mirror slot raised to v, never lowered (relays fire in any order). */
 void mn_d3d_mirror_raise(uint64_t *slot, uint64_t v);
+void mn_d3d_drawable(uint32_t ctx_id, int shown); /* the context's drawables presented (0) and shown (1) */
+int mn_d3d_shown_event(uint32_t ctx_id, uint64_t guest_event); /* op 11: 0, or -1 without a notify queue */
 int mn_d3d_events_live(void); /* the contexts' notify queues and mirrors still held (tests) */
 /* window.c (M3): the context's latest op 7 for hwnd into out (struct mn_d3d_window): 1, or 0 if it pushed none */
 struct mn_d3d_window;

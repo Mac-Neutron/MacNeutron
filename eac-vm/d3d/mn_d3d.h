@@ -22,7 +22,14 @@ enum {
     MN_D3D_OP_WINDOW = 7,  /* struct mn_d3d_window: a window's state, which native DXMT's window system answers (M3) */
     MN_D3D_OP_DISPLAYS = 8, /* u32 count, then each struct mn_d3d_display and its modes (M3); guest args: below */
     MN_D3D_OP_ACTIONS = 9, /* none; reply: the window actions native DXMT took since the last (struct mn_d3d_action) */
+    MN_D3D_OP_DRAWABLES = 10, /* u64 out: the guest's address of the mirror's drawable counts (below); never sent */
+    MN_D3D_OP_SHOWN = 11,  /* u64 a guest event, the process's: set (MN_NOTIFY_SET) each time a drawable is shown */
 };
+/* The fences' mirror (op 2) starts with the context's drawables (M3 Task 4): slot 0 those native DXMT presented, slot
+ * 1 those the display showed (Metal's presented handler); the fences' slots follow. A present waits in the guest until
+ * no more than one is still to be shown, so the next has a drawable free and the host's nextDrawable doesn't wait on
+ * the vCPU: on op 11's event, which the host has the guest's listener set with each one shown. */
+#define MN_D3D_MIRROR_DRAWABLES 2
 struct mn_d3d_query { uint64_t handle; uint8_t iid[16]; uint64_t out; }; /* reply: int32 HRESULT */
 /* Ops 7 and 8 (M3): the guest's window and displays as Win32 has them there, pushed before the calls that read them
  * (host/window.c keeps the latest of each, by context). flags: 1 minimised, 2 foreground, 4 a window. A display's

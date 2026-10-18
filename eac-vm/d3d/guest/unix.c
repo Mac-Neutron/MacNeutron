@@ -84,6 +84,14 @@ static void *listener(void *arg) {
     for (;;) {
         struct mn_notify_rec r;
         while (mn_notify_next(q, &r)) {
+            if (r.type == MN_NOTIFY_SET) { /* the proxies' own, which they keep */
+#ifdef MN_D3D_LOOPBACK
+                mn_win32_set_event((void *)(uintptr_t)r.value);
+#else
+                NtSetEvent((void *)(uintptr_t)r.value, NULL);
+#endif
+                continue;
+            }
             if (r.type != MN_NOTIFY_EVENT) continue;
             /* ours (proxy.cpp's on_event), let go once set: the program may have closed its own */
 #ifdef MN_D3D_LOOPBACK
@@ -202,6 +210,11 @@ static int32_t family(uint32_t id, void *params) {
         a->len = s ? 0 : got;
         return s;
     }
+    case MN_D3D_OP_SHOWN:
+        return mn_call_flush(MN_OP_D3D + id, params, sizeof(uint64_t), NULL, 0, &n);
+    case MN_D3D_OP_DRAWABLES: /* the mirror's first slots: our address of them, or 0 without the mirror */
+        *(uint64_t *)params = events_ready ? (uintptr_t)mirror_blob.ptr : 0;
+        return 0;
     case MN_D3D_OP_LISTEN:
         if (!events_ready) return MN_EINVAL;
         listener(NULL);

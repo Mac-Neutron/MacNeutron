@@ -11,6 +11,8 @@
 #include "wsi_window.hpp" // DXMT's own Win32 window code, built in (build-guest.sh): the window's changes, made here
 #endif
 
+struct pacing;
+
 struct mn_obj {
     std::atomic<long> refs{1};
     uint64_t handle = 0;
@@ -28,7 +30,9 @@ struct mn_obj {
 #endif
     DXGI_RGBA background = {0, 0, 0, 1};     // the swapchain's own answers (Task 3)
     UINT source_width = 0, source_height = 0;
+    pacing *pace = nullptr;                  // a swapchain's frames (Task 4)
 };
+static void end_pacing(pacing *p);
 
 // The objects by handle, for identity (mn_proxy_out); an object leaves at its last Release, under the same lock.
 static std::mutex objs_lock;
@@ -142,6 +146,7 @@ ULONG STDMETHODCALLTYPE mn_px_Release(mn_proxy *This) {
     if (n) return (ULONG)n;
     uint64_t h = o->handle;
     mn_d3d_call(MN_D3D_OP_RELEASE, &h);
+    if (o->pace) end_pacing(o->pace);
     for (mn_proxy *p : o->proxies) delete p;
     delete o;
     return 0;
@@ -238,12 +243,17 @@ static BOOL CALLBACK start_listener(INIT_ONCE *, void *, void **) {
 }
 #endif
 
-// The host's relay posts the event, which the unix side's listener sets. NULL: we wait here, never the host.
-static HRESULT on_event(HANDLE event, HRESULT (*send)(void *, HANDLE), void *ctx) {
+// The listener, started once (the loopback's unix side starts its own).
+static void listen() {
 #ifndef MN_D3D_LOOPBACK
     static INIT_ONCE listening = INIT_ONCE_STATIC_INIT;
     InitOnceExecuteOnce(&listening, start_listener, nullptr, nullptr);
 #endif
+}
+
+// The host's relay posts the event, which the unix side's listener sets. NULL: we wait here, never the host.
+static HRESULT on_event(HANDLE event, HRESULT (*send)(void *, HANDLE), void *ctx) {
+    listen();
     HANDLE own = event ? nullptr : CreateEventA(nullptr, FALSE, FALSE, nullptr);
     HANDLE e = event ? event : own;
     if (!e) return E_OUTOFMEMORY;
@@ -307,6 +317,132 @@ static HRESULT STDMETHODCALLTYPE set_event_multiple(mn_proxy *This, ID3D12Fence 
                                                     UINT count, D3D12_MULTIPLE_FENCE_WAIT_FLAGS flags, HANDLE event) {
     on_multiple c = {This, fences, values, count, flags};
     return on_event(event, send_multiple, &c);
+}
+
+// ---- frame pacing (M3 Task 4): in the guest, so no present waits on the host's vCPU for the GPU or a drawable ----
+// A swapchain's queue signals a fence of ours after each present. A swapchain without the frame latency object waits
+// on it before presenting, to keep at most kInFlight frames in flight (DXGI's default latency); a waitable one's object
+// is our semaphore, which a thread of ours releases once for each frame the fence passes. Every present also waits
+// until the display has shown all but one of the drawables presented (the mirror's first slots, mn_d3d.h), so the
+// host's nextDrawable finds one free.
+static const UINT kInFlight = 3;
+
+struct pacing {
+    ID3D12CommandQueue *queue = nullptr; // the swapchain's, held
+    ID3D12Fence *fence = nullptr;        // ours
+    std::atomic<uint64_t> presented{0};
+    UINT latency = kInFlight;            // a waitable swapchain's: DXMT's own, as GetMaximumFrameLatency answers
+    HANDLE waitable = nullptr;           // the frame latency object (its first count: latency)
+    HANDLE thread = nullptr, wake = nullptr;
+    std::atomic<bool> stop{false};
+    std::mutex m;
+    std::atomic<uint64_t> *drawables = nullptr; // the context's presented and shown, raised by the host
+};
+
+static void listen();
+
+// Set by the host's listener each time a drawable is shown (op 11): the process's one, for its life.
+static HANDLE shown_event() {
+    static HANDLE e = [] {
+        listen();
+        HANDLE h = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+        uint64_t v = (uintptr_t)h;
+        if (h && mn_d3d_call(MN_D3D_OP_SHOWN, &v)) CloseHandle(h), h = nullptr;
+        return h;
+    }();
+    return e;
+}
+
+// Until fence passes v (a guest wait: the host is never asked to wait).
+static void wait_fence(ID3D12Fence *fence, uint64_t v, HANDLE e = nullptr) {
+    if (!v || fence->GetCompletedValue() >= v) return;
+    static thread_local HANDLE own = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    HANDLE w = e ? e : own;
+    if (SUCCEEDED(fence->SetEventOnCompletion(v, w))) WaitForSingleObject(w, INFINITE);
+}
+
+#ifndef MN_D3D_LOOPBACK
+static DWORD WINAPI pacer(void *arg) {
+    auto *p = (pacing *)arg;
+    for (uint64_t released = 0; !p->stop;) {
+        if (released + 1 > p->presented) {
+            WaitForSingleObject(p->wake, INFINITE); // a present, or the end
+            continue;
+        }
+        if (p->fence->GetCompletedValue() < released + 1) {
+            wait_fence(p->fence, released + 1, p->wake);
+            continue;
+        }
+        ReleaseSemaphore(p->waitable, 1, nullptr);
+        released++;
+    }
+    return 0;
+}
+#endif
+
+// After a swapchain's creation on device (its queue): nullptr when device isn't a D3D12 queue.
+static pacing *start_pacing(IUnknown *device, IUnknown *swapchain, UINT flags) {
+    ID3D12CommandQueue *queue = nullptr;
+    ID3D12Device *dev = nullptr;
+    if (!device || FAILED(device->QueryInterface(__uuidof(ID3D12CommandQueue), (void **)&queue))) return nullptr;
+    auto *p = new pacing;
+    p->queue = queue;
+    uint64_t at = 0;
+    if (!mn_d3d_call(MN_D3D_OP_DRAWABLES, &at)) p->drawables = (std::atomic<uint64_t> *)(uintptr_t)at;
+    if (SUCCEEDED(queue->GetDevice(__uuidof(ID3D12Device), (void **)&dev))) {
+        dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void **)&p->fence);
+        dev->Release();
+    }
+    if (!p->fence) return end_pacing(p), nullptr;
+#ifndef MN_D3D_LOOPBACK // the loopback's programs make no swapchains
+    if (flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT) {
+        IDXGISwapChain2 *sc2 = nullptr;
+        if (SUCCEEDED(swapchain->QueryInterface(__uuidof(IDXGISwapChain2), (void **)&sc2))) {
+            sc2->GetMaximumFrameLatency(&p->latency);
+            sc2->Release();
+        }
+        p->waitable = CreateSemaphoreA(nullptr, (LONG)p->latency, DXGI_MAX_SWAP_CHAIN_BUFFERS, nullptr);
+        p->wake = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+        p->thread = p->waitable && p->wake ? CreateThread(nullptr, 0, pacer, p, 0, nullptr) : nullptr;
+    }
+#else
+    (void)swapchain, (void)flags;
+#endif
+    return p;
+}
+
+static void end_pacing(pacing *p) {
+    if (p->thread) {
+        p->stop = true;
+        SetEvent(p->wake);
+        WaitForSingleObject(p->thread, INFINITE);
+        CloseHandle(p->thread);
+    }
+    if (p->wake) CloseHandle(p->wake);
+    if (p->waitable) CloseHandle(p->waitable);
+    if (p->fence) p->fence->Release();
+    if (p->queue) p->queue->Release();
+    delete p;
+}
+
+// Before a present: without the frame latency object, at most kInFlight frames in flight; and a drawable free, waited
+// for on the shown event, for 100 ms at most (a window never shown mustn't hang the game).
+static void pace_before(pacing *p, UINT flags) {
+    if (!p || (flags & DXGI_PRESENT_TEST)) return;
+    uint64_t n = p->presented;
+    if (!p->waitable) wait_fence(p->fence, n + 1 > p->latency ? n + 1 - p->latency : 0);
+    HANDLE shown = p->drawables ? shown_event() : nullptr;
+    for (int i = 0; shown && i < 10 && p->drawables[0].load() > p->drawables[1].load() + 1; i++)
+        WaitForSingleObject(shown, 10);
+}
+
+// After it: the frame's fence value, on the swapchain's queue after the present.
+static void pace_after(pacing *p, HRESULT hr, UINT flags) {
+    if (!p || FAILED(hr) || (flags & DXGI_PRESENT_TEST)) return;
+    std::lock_guard<std::mutex> l(p->m);
+    p->queue->Signal(p->fence, p->presented + 1);
+    p->presented++;
+    if (p->wake) SetEvent(p->wake);
 }
 
 // ---- the window and displays (wraps, M3 Task 2): native DXMT's window system answers from what the guest pushes ----
@@ -419,6 +555,8 @@ static HRESULT STDMETHODCALLTYPE create_swapchain(mn_proxy *This, IUnknown *devi
     push_window(hwnd);
     HRESULT hr = PX(create_swapchain, px_create_swapchain)(This, device, desc, out);
     if (SUCCEEDED(hr)) bind_window((void **)out, hwnd);
+    if (SUCCEEDED(hr) && out && *out)
+        ((mn_proxy *)*out)->obj->pace = start_pacing(device, *out, desc ? desc->Flags : 0);
     if (SUCCEEDED(hr) && out && *out) replay(((mn_proxy *)*out)->obj); // created full screen
     return hr;
 }
@@ -430,6 +568,8 @@ static HRESULT STDMETHODCALLTYPE create_for_hwnd(mn_proxy *This, IUnknown *devic
     push_window(hwnd);
     HRESULT hr = PX(create_for_hwnd, px_create_for_hwnd)(This, device, hwnd, desc, fullscreen, restrict_to, out);
     if (SUCCEEDED(hr)) bind_window((void **)out, hwnd);
+    if (SUCCEEDED(hr) && out && *out)
+        ((mn_proxy *)*out)->obj->pace = start_pacing(device, *out, desc ? desc->Flags : 0);
     if (SUCCEEDED(hr) && out && *out) replay(((mn_proxy *)*out)->obj);
     return hr;
 }
@@ -440,8 +580,14 @@ static void resized(mn_obj *o) {
     o->source_width = o->source_height = 0;
 }
 
+// The buffers are free only once the frames that use them are done: waited for here, not on the host.
+static void drain(pacing *p) {
+    if (p) wait_fence(p->fence, p->presented);
+}
+
 static HRESULT STDMETHODCALLTYPE resize(mn_proxy *This, UINT count, UINT width, UINT height, DXGI_FORMAT format,
                                         UINT flags) {
+    drain(This->obj->pace);
     push_window(This->obj->window, This->obj);
     HRESULT hr = PX(resize, px_resize)(This, count, width, height, format, flags);
     if (SUCCEEDED(hr)) resized(This->obj);
@@ -450,6 +596,7 @@ static HRESULT STDMETHODCALLTYPE resize(mn_proxy *This, UINT count, UINT width, 
 
 static HRESULT STDMETHODCALLTYPE resize1(mn_proxy *This, UINT count, UINT width, UINT height, DXGI_FORMAT format,
                                          UINT flags, const UINT *node_mask, IUnknown *const *queues) {
+    drain(This->obj->pace);
     push_window(This->obj->window, This->obj);
     HRESULT hr = PX(resize1, px_resize1)(This, count, width, height, format, flags, node_mask, queues);
     if (SUCCEEDED(hr)) resized(This->obj);
@@ -469,6 +616,28 @@ static HRESULT STDMETHODCALLTYPE fullscreen(mn_proxy *This, BOOL on, IDXGIOutput
     push_window(This->obj->window, This->obj);
     HRESULT hr = PX(fullscreen, px_fullscreen)(This, on, target);
     replay(This->obj);
+    return hr;
+}
+
+// The frame latency object (a special): our semaphore, a waitable swapchain's (DXMT's answers none without the flag).
+static HANDLE STDMETHODCALLTYPE latency_object(mn_proxy *This) {
+    pacing *p = This->obj->pace;
+    HANDLE h = nullptr;
+    if (p && p->waitable)
+        DuplicateHandle(GetCurrentProcess(), p->waitable, GetCurrentProcess(), &h, 0, FALSE, DUPLICATE_SAME_ACCESS);
+    return h;
+}
+
+static const void *px_set_latency;
+// A waitable swapchain's raised latency frees as many more frames at once, as DXMT's semaphore does.
+static HRESULT STDMETHODCALLTYPE set_latency(mn_proxy *This, UINT latency) {
+    HRESULT hr = PX(set_latency, px_set_latency)(This, latency);
+    pacing *p = This->obj->pace;
+    if (SUCCEEDED(hr) && p && p->waitable) {
+        std::lock_guard<std::mutex> l(p->m);
+        if (latency > p->latency) ReleaseSemaphore(p->waitable, (LONG)(latency - p->latency), nullptr);
+        p->latency = latency;
+    }
     return hr;
 }
 
@@ -528,14 +697,18 @@ static HRESULT STDMETHODCALLTYPE get_source_size(mn_proxy *This, UINT *width, UI
 // system hooked, it doesn't): the sleep is here, never on the host's vCPU thread.
 static HRESULT STDMETHODCALLTYPE present(mn_proxy *This, UINT sync, UINT flags) {
     bool minimised = push_window(This->obj->window, This->obj, true);
+    pace_before(This->obj->pace, flags);
     HRESULT hr = PX(present, px_present)(This, sync, flags);
+    pace_after(This->obj->pace, hr, flags);
     if (minimised && !(flags & DXGI_PRESENT_TEST)) Sleep(16);
     return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE present1(mn_proxy *This, UINT sync, UINT flags, const DXGI_PRESENT_PARAMETERS *p) {
     bool minimised = push_window(This->obj->window, This->obj, true);
+    pace_before(This->obj->pace, flags);
     HRESULT hr = PX(present1, px_present1)(This, sync, flags, p);
+    pace_after(This->obj->pace, hr, flags);
     if (minimised && !(flags & DXGI_PRESENT_TEST)) Sleep(16);
     return hr;
 }
@@ -732,6 +905,8 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"IDXGISwapChain1::Present1", (const void *)present1, &px_present1},
         {"IDXGISwapChain::GetContainingOutput", (const void *)containing_output, &px_containing_output},
         {"IDXGIAdapter::EnumOutputs", (const void *)enum_outputs, &px_enum_outputs},
+        {"IDXGISwapChain2::GetFrameLatencyWaitableObject", (const void *)latency_object},
+        {"IDXGISwapChain2::SetMaximumFrameLatency", (const void *)set_latency, &px_set_latency},
         {"IDXGISwapChain1::GetRestrictToOutput", (const void *)restrict_to_output},
         {"IDXGISwapChain1::SetBackgroundColor", (const void *)set_background},
         {"IDXGISwapChain1::GetBackgroundColor", (const void *)get_background},

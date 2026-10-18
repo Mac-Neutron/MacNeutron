@@ -20,6 +20,7 @@ enum {
     MN_NOTIFY_REGION_FREE = 1, /* value: the region (blob_id << 32 | first page) one holder no longer uses */
     MN_NOTIFY_EVENT,           /* value: a Win32 event handle to set (Task 7) */
     MN_NOTIFY_STOP,            /* the listener is gone (Task 7) */
+    MN_NOTIFY_SET,             /* value: a Win32 event handle to set, the guest's to keep (Direct3D forwarding, M3) */
 };
 #define MN_REGION(blob_id, page) ((uint64_t)(blob_id) << 32 | (uint32_t)(page))
 

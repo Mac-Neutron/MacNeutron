@@ -116,6 +116,14 @@ void mn_wm_present_native(struct mn_wm_ctx *c, void *cmdbuf, void *drawable) {
     count_frame();
 }
 
+/* fn(ctx) once the display shows drawable (or drops it): Metal's presented handler. */
+void mn_wm_on_shown(void *drawable, void (*fn)(void *ctx), void *ctx) {
+    [(id<MTLDrawable>)drawable addPresentedHandler:^(id<MTLDrawable> d) {
+        (void)d;
+        fn(ctx);
+    }];
+}
+
 NTSTATUS_T mn_wm_present_special(struct mn_wm_state *k) {
     switch (k->slot) {
     case 47:

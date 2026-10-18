@@ -14,6 +14,7 @@
 #include "notify.h"
 #include "../../metal/host/executor.h"
 #include "win32_native_event.h"
+#include "../mn_d3d.h"
 #include "dispatch.h"
 
 struct mn_notifyq;
@@ -26,6 +27,7 @@ struct events {
     uint32_t ctx_id;
     struct mn_notifyq *q;
     _Atomic uint64_t *mirror;
+    _Atomic uint64_t shown_event; /* op 11's guest event, set at each drawable shown; 0: none */
     void *hold;
     uint64_t slots, next;
     struct relay *relays; /* armed, under lock */
@@ -68,6 +70,7 @@ int mn_d3d_events_attach(struct mn_wm_ctx *c, uint64_t queue_blob, uint64_t mirr
     atomic_init(&e->refs, 1);
     atomic_fetch_add(&live, 1);
     e->ctx_id = c->ctx_id, e->slots = mirror_len / 8;
+    e->next = MN_D3D_MIRROR_DRAWABLES; /* slots 0 and 1: the drawables presented and shown (mn_d3d_drawable) */
     pthread_mutex_lock(&lock);
     struct events *old = of(c->ctx_id);
     if (old) { /* again (a fork's child has its own context): the new one */
@@ -88,6 +91,9 @@ void mn_d3d_events_end(uint32_t ctx_id) {
     while (*pp && (*pp)->ctx_id != ctx_id) pp = &(*pp)->next_ctx;
     struct events *e = *pp;
     if (e) *pp = e->next_ctx;
+    if (e && e->slots >= MN_D3D_MIRROR_DRAWABLES && atomic_load(&e->mirror[0]))
+        fprintf(stderr, "mn-d3d: context %u: %llu drawables presented, %llu shown\n", ctx_id,
+                (unsigned long long)atomic_load(&e->mirror[0]), (unsigned long long)atomic_load(&e->mirror[1]));
     int armed = 0; /* disarmed now, each with its reference */
     for (struct relay *r = e ? e->relays : NULL; r; r = r->next) r->e = NULL, armed++;
     if (e) e->relays = NULL;
@@ -104,6 +110,24 @@ void mn_d3d_events_end(uint32_t ctx_id) {
     pthread_mutex_unlock(&lock);
     while (armed--) put(e);
     if (e) put(e);
+}
+
+/* A drawable native DXMT presented (shown 0) or the display showed (1), counted in the context's mirror. */
+void mn_d3d_drawable(uint32_t ctx_id, int shown) {
+    pthread_mutex_lock(&lock);
+    struct events *e = of(ctx_id);
+    if (e && e->slots >= MN_D3D_MIRROR_DRAWABLES) atomic_fetch_add(&e->mirror[shown ? 1 : 0], 1);
+    uint64_t ev = e && shown ? atomic_load(&e->shown_event) : 0;
+    if (ev) mn_notifyq_post(e->q, MN_NOTIFY_SET, ev);
+    pthread_mutex_unlock(&lock);
+}
+
+int mn_d3d_shown_event(uint32_t ctx_id, uint64_t guest_event) {
+    pthread_mutex_lock(&lock);
+    struct events *e = of(ctx_id);
+    if (e) atomic_store(&e->shown_event, guest_event);
+    pthread_mutex_unlock(&lock);
+    return e ? 0 : -1;
 }
 
 void mn_d3d_mirror_raise(uint64_t *slot, uint64_t v) {

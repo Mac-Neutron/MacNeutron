@@ -4,8 +4,9 @@
 # (MACNEUTRON_VM_D3D_TRACE=1) showing D3D12CreateDevice; MACNEUTRON_VM_D3D=guest the same lines on guest DXMT, with no
 # guest trace; and eac-vm/d3d/tests/smoke.cpp's lines: in both modes "eventthread ok" (a fence's event, whose process
 # made its first Direct3D call on a thread that has ended, is set from a Wine thread of its own), "name ok" (SetName
-# reads back in the guest's WCHARs), "minimised ok" (a minimised window's present costs the host's vCPU no sleep) and
-# "wmtforward ok" (fork 0079 refuses a call past the guest's table), and forwarded "swapchain ok" (DXGI's answers
+# reads back in the guest's WCHARs), "minimised ok" (a minimised window's present costs the host's vCPU no sleep),
+# "latency ok" (the frame latency object, and GPU-bound presents that hold no vCPU on the host: mn-d3d's "slow:" lines)
+# and "wmtforward ok" (fork 0079 refuses a call past the guest's table), and forwarded "swapchain ok" (DXGI's answers
 # where DXMT has none) and "eventreuse ok" (a closed event's reused handle takes no stray set; guest DXMT has that bug
 # too). Prints macneutron-vm's peak resident size in each
 # (forwarding loads native DXMT, a second LLVM beside the Wine build's), and that nothing lands in the folder the VM
@@ -52,7 +53,7 @@ EOS
   echo "d3d-smoke: $mode: ${lines:-0} null lines, $(/usr/bin/grep '^status' "$out" 2> /dev/null), macneutron-vm peak $((peak / 1024)) MiB"
   [ "${lines:-0}" -eq 18 ] || { fail="$fail $mode-lines"; tail -5 "$out" 2> /dev/null || true; }
   [ -z "$(ls -A "$C")" ] || fail="$fail $mode-cwd($(ls -A "$C" | tr '\n' ' '))"
-  checks="eventthread name minimised wmtforward"
+  checks="eventthread name minimised latency wmtforward"
   [ "$mode" = guest ] || checks="$checks eventreuse swapchain"
   for c in $checks; do
     got=$(/usr/bin/grep "^$c " "$out" 2> /dev/null || true)
@@ -60,6 +61,9 @@ EOS
     [ "$got" = "$c ok" ] || fail="$fail $mode-$c"
   done
   if [ "$mode" = forward ]; then
+    # Pacing is the guest's: no present held its vCPU waiting for a drawable or the GPU (latency's frames)
+    held=$(/usr/bin/grep -h 'mn-d3d: slow: IDXGISwapChain[0-9]*::Present' "$W/d3d-smoke-$mode.log" 2> /dev/null || true)
+    [ -z "$held" ] || { echo "d3d-smoke: $mode: $held"; fail="$fail present-held-a-vcpu"; }
     /usr/bin/grep -q '::D3D12CreateDevice' "$SH/traces/d3d-guest.txt" 2> /dev/null || fail="$fail no-guest-trace"
     /usr/bin/grep -q '::D3D12CreateDevice' "$SH/traces/d3d-host.txt" 2> /dev/null || fail="$fail no-host-trace"
   else
