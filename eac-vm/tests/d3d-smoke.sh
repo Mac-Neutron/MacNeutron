@@ -5,7 +5,8 @@
 # guest trace; and eac-vm/d3d/tests/smoke.cpp's lines: in both modes "eventthread ok" (a fence's event, whose process
 # made its first Direct3D call on a thread that has ended, is set from a Wine thread of its own), "name ok" (SetName
 # reads back in the guest's WCHARs), "minimised ok" (a minimised window's present costs the host's vCPU no sleep),
-# "latency ok" (the frame latency object, and GPU-bound presents that hold no vCPU on the host: mn-d3d's "slow:" lines)
+# "latency ok" (the frame latency object, and GPU-bound presents that hold no vCPU on the host: mn-d3d's "slow:" lines),
+# "d3d11latency ok" (M4: D3D11's GPU-bound presents, paced by the device's latency, likewise)
 # and "wmtforward ok" (fork 0079 refuses a call past the guest's table) and "wmsize ok" (a window resizing its buffers
 # from WM_SIZE through full screen and ResizeTarget), and forwarded "swapchain ok" (DXGI's answers where DXMT has none) and "eventreuse ok" (a closed event's
 # reused handle takes no stray set; guest DXMT has that bug too). Prints macneutron-vm's peak resident size in each
@@ -19,7 +20,7 @@ W=$ROOT/build/eac-vm-work
 SH=$W/share
 MN_DXMT_ONLY=d3d12_null sh "$ROOT/eac-vm/dxmt/share.sh" > /dev/null
 "$(sh "$ROOT/dxmt/toolchain.sh")/x86_64-w64-mingw32-clang++" -std=c++17 -O1 -static -s -o "$SH/dxmt-tests/smoke.exe" \
-  "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ldxgi
+  "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ld3d11 -ldxgi
 fail=
 for mode in forward guest; do
   G=$W/d3d-smoke-$mode.sh
@@ -57,7 +58,7 @@ EOS
   echo "d3d-smoke: $mode: ${lines:-0} null lines, $(/usr/bin/grep '^status' "$out" 2> /dev/null), macneutron-vm peak $((peak / 1024)) MiB"
   [ "${lines:-0}" -eq 18 ] || { fail="$fail $mode-lines"; tail -5 "$out" 2> /dev/null || true; }
   [ -z "$(ls -A "$C")" ] || fail="$fail $mode-cwd($(ls -A "$C" | tr '\n' ' '))"
-  checks="eventthread name minimised latency wmtforward wmsize"
+  checks="eventthread name minimised latency d3d11latency wmtforward wmsize"
   [ "$mode" = guest ] || checks="$checks eventreuse swapchain"
   for c in $checks; do
     got=$(/usr/bin/grep "^$c " "$out" 2> /dev/null || true)
@@ -68,10 +69,10 @@ EOS
     # Pacing is the guest's: no present held its vCPU waiting for a drawable or the GPU (latency's frames)
     ls "$ST"/shaders_*.db > /dev/null 2>&1 || fail="$fail no-native-shader-cache"
     [ -s "$ST/pipelines/game.pipelines" ] || fail="$fail no-native-recording"
-    # (a swapchain's first drawable may cost a few ms once: up to one over 4 ms a swapchain, smoke.cpp's four, none
+    # (a swapchain's first drawable may cost a few ms once: up to one over 4 ms a swapchain, smoke.cpp's five, none
     # over 10)
     held=$(/usr/bin/grep -h 'mn-d3d: slow: IDXGISwapChain[0-9]*::Present' "$W/d3d-smoke-$mode.log" 2> /dev/null || true)
-    echo "$held" | awk 'NF > 5 && ($4 > 4 || $(NF - 1) > 10) {bad = 1} END {exit !bad}' \
+    echo "$held" | awk 'NF > 5 && ($4 > 5 || $(NF - 1) > 10) {bad = 1} END {exit !bad}' \
       && { echo "d3d-smoke: $mode: $held"; fail="$fail present-held-a-vcpu"; }
     cat "$SH"/traces/d3d-guest.*.txt 2> /dev/null | /usr/bin/grep -q '::D3D12CreateDevice' || fail="$fail no-guest-trace"
     /usr/bin/grep -q '::D3D12CreateDevice' "$SH/traces/d3d-host.txt" 2> /dev/null || fail="$fail no-host-trace"

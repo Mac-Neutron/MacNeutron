@@ -33,6 +33,9 @@ NTSTATUS_T mn_d3d_create_fence_stub(void *params), mn_d3d_fence_signal_stub(void
     mn_d3d_adapter_desc1_stub(void *params), mn_d3d_adapter_desc2_stub(void *params),
     mn_d3d_adapter_desc3_stub(void *params), mn_d3d_output_desc_stub(void *params),
     mn_d3d_output_desc1_stub(void *params);
+/* native.cpp: D3D11's fences and events (M4 Task 6) */
+NTSTATUS_T mn_d3d_create_fence11_stub(void *params), mn_d3d_context_signal_stub(void *params),
+    mn_d3d_set_event11_stub(void *params), mn_d3d_flush1_stub(void *params);
 /* native.cpp: D3D11's and D3D10's data and maps (M4) */
 NTSTATUS_T mn_d3d_create_buffer11_stub(void *params);
 NTSTATUS_T mn_d3d_create_tex1d11_stub(void *params);
@@ -56,6 +59,11 @@ int mn_d3d_events_attach(struct mn_wm_ctx *c, uint64_t queue_blob, uint64_t mirr
 void mn_d3d_events_end(uint32_t ctx_id);
 void mn_d3d_fence_gone(void *obj);
 static void release(void *obj), present(void *cmdbuf, void *drawable);
+/* D3D11's present (M4 Task 6) happens on DXMT's encoder thread after the Present call returned (D3D12's inside it):
+ * the context of the latest Present call. ponytail: two processes presenting D3D11 at once may count each other's
+ * frames; a context per native swapchain if that ever matters. */
+static _Atomic uint32_t presenter;
+static unsigned present_ids[2]; /* IDXGISwapChain::Present's and IDXGISwapChain1::Present1's */
 
 static char *dir, *trace;
 static _Atomic uint64_t counts[MN_D3D_CALLS]; /* with a trace: each method's records, all contexts' */
@@ -147,6 +155,9 @@ int mn_d3d_load(const char *d) {
         return -1;
     }
     present_hook(present);
+    for (unsigned i = MN_D3D_FIRST; i < MN_D3D_CALLS; i++)
+        if (mn_d3d_calls[i].name && !strcmp(mn_d3d_calls[i].name, "IDXGISwapChain::Present")) present_ids[0] = i;
+        else if (mn_d3d_calls[i].name && !strcmp(mn_d3d_calls[i].name, "IDXGISwapChain1::Present1")) present_ids[1] = i;
     void (*wsi)(const void *) = (void (*)(const void *))dlsym(libs[2], "WMTSetWsiHooks");
     if (!wsi) {
         fprintf(stderr, "mn-d3d: error: native DXMT: %s\n", dlerror());
@@ -173,6 +184,10 @@ int mn_d3d_load(const char *d) {
     mn_d3d_stubs[MN_D3D_ID_ID3D10Texture2D_Map] = mn_d3d_map10_tex2d_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D10Texture3D_Map] = mn_d3d_map10_tex3d_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D12Device_CreateFence] = mn_d3d_create_fence_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D11Device5_CreateFence] = mn_d3d_create_fence11_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D11DeviceContext4_Signal] = mn_d3d_context_signal_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D11Fence_SetEventOnCompletion] = mn_d3d_set_event11_stub;
+    mn_d3d_stubs[MN_D3D_ID_ID3D11DeviceContext3_Flush1] = mn_d3d_flush1_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D12Fence_Signal] = mn_d3d_fence_signal_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D12CommandQueue_Signal] = mn_d3d_queue_signal_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D12Fence_SetEventOnCompletion] = mn_d3d_set_event_stub;
@@ -202,10 +217,12 @@ uint32_t mn_d3d_current_ctx(void) { return cur.c ? cur.c->ctx_id : 0; }
  * presented and shown counted for the guest's pacing (events.c's mirror slots 0 and 1). */
 static void shown(void *ctx) { mn_d3d_drawable((uint32_t)(uintptr_t)ctx, 1); }
 static void present(void *cmdbuf, void *drawable) {
-    mn_wm_present_native(cur.c, cmdbuf, drawable);
-    if (!cur.c || !drawable) return;
-    mn_d3d_drawable(cur.c->ctx_id, 0);
-    mn_wm_on_shown(drawable, shown, (void *)(uintptr_t)cur.c->ctx_id);
+    uint32_t ctx_id = cur.c ? cur.c->ctx_id : atomic_load(&presenter);
+    if (cur.c) mn_wm_present_native(cur.c, cmdbuf, drawable);
+    else mn_wm_present_native_of(ctx_id, cmdbuf, drawable);
+    if (!ctx_id || !drawable) return;
+    mn_d3d_drawable(ctx_id, 0);
+    mn_wm_on_shown(drawable, shown, (void *)(uintptr_t)ctx_id);
 }
 
 /* ponytail: the first Direct3D record loads native DXMT on its vCPU (dlopen and Metal's device: tens of ms, once) */
@@ -366,6 +383,7 @@ static int32_t d3d(uint32_t ctx_id, void *ring, uint32_t id, const void *p, uint
     for (unsigned i = 0; i < call->nfields && !creation; i++) creation = call->fields[i].kind == WMF_HANDLE_OUT;
     __typeof__(cur) outer = cur; /* a stub doesn't call back into the dispatcher, but keep it right if one did */
     cur.c = c, cur.call = call, cur.sync = reply != NULL;
+    if (id == present_ids[0] || id == present_ids[1]) atomic_store(&presenter, c->ctx_id);
     mn_d3d_memory_begin(c->ctx_id, creation && reply);
     uint64_t t0 = now_us();
     int32_t s = mn_wm_host_call_table(c, ring, call, stub, p, len, reply, cap, n);

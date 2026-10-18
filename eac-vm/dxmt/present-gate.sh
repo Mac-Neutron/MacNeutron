@@ -9,8 +9,8 @@
 # play), SMITE 2 (eac-vm/tests/smite2-render.sh) as Steam runs it, through the Mac's Steam (never started or quit here):
 # it skips, by name, without MN_GATE_GAMES=1, when Mac Steam isn't running, SMITE 2 isn't installed or Steam didn't
 # initialise in the guest.
-#   present-gate.sh [forward]   forward: Direct3D forwarding (MACNEUTRON_VM_D3D=forward) for the D3D12 rows and
-#                               SMITE 2; present_loop is D3D11, M4's, and stays on guest DXMT
+#   present-gate.sh [forward]   forward: Direct3D forwarding (MACNEUTRON_VM_D3D=forward) for every row (present_loop,
+#                               D3D11, since M4) and SMITE 2
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 MODE=${1:-guest}
@@ -100,8 +100,9 @@ if [ "$MODE" = forward ]; then
   python3 -I "$D/compare.py" host "$W/present-d3d12_fullscreen.txt" || fail=1
 fi
 
-# present_loop, the D3D11 game loop.
-guest present_loop present_loop.exe "1280 720 0 0 600 0" guest
+# present_loop, the D3D11 game loop (forwarded since M4 Task 6: paced in the guest, so no present holds its vCPU on the
+# host past a swapchain's first drawable, as d3d-smoke.sh's rule).
+guest present_loop present_loop.exe "1280 720 0 0 600 0"
 H=$W/present-present_loop.txt C=$G/present_loop.txt R=$REF/present_loop.1.txt
 if /usr/bin/grep -q 'avg frame' "$C" 2> /dev/null; then ok "present_loop: $(/usr/bin/grep 'avg frame' "$C")"
 else no "present_loop: no 'avg frame' line, status $(cat "$G/present_loop.status" 2> /dev/null), see $H"; fi
@@ -109,6 +110,11 @@ g=$(probes "$H" | awk '{print $7}' | median) w=$(probes "$H" | awk '{print $9}' 
 if [ "$g" -ge 56 ] && [ "$w" -ge 12 ]; then ok "present_loop: median probe green $g (56), white $w (12)"
 else no "present_loop: median probe green $g (56), white $w (12)"; fi
 counted present_loop "$H"
+if [ "$MODE" = forward ]; then
+  held=$(/usr/bin/grep -h 'mn-d3d: slow: IDXGISwapChain[0-9]*::Present' "$H" 2> /dev/null || true)
+  if echo "$held" | awk 'NF > 5 && ($4 > 1 || $(NF - 1) > 10) {bad = 1} END {exit !bad}'; then no "present_loop: $held"
+  else ok "present_loop: no present held its vCPU on the host"; fi
+fi
 python3 -I "$D/compare.py" host "$H" || fail=1
 echo "     time: macOS $(frame_time "$R") ms, guest $(frame_time "$C") ms a frame"
 

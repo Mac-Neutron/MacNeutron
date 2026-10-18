@@ -154,6 +154,8 @@ void mn_wm_ctx_end(struct mn_wm_ctx *c);
  * (a view's release is its handle's). */
 NTSTATUS_T mn_wm_present_special(struct mn_wm_state *k);
 void mn_wm_present_native(struct mn_wm_ctx *c, void *cmdbuf, void *drawable); /* native DXMT's presents */
+/* The same for a context by its id, which may have ended (host/dispatch.m: under the contexts' lock) */
+void mn_wm_present_native_of(uint32_t ctx_id, void *cmdbuf, void *drawable);
 void mn_wm_on_shown(void *drawable, void (*fn)(void *ctx), void *ctx); /* present.m: once the display shows it */
 
 /* events.m: slots 104, 108-110 and 146; and the table's release of a listener. */

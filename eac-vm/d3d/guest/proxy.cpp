@@ -37,6 +37,7 @@ struct mn_obj {
     std::atomic<const void *> recorder{nullptr};      // a command list's: the thread that called it last (Task 10)
     mn_res res;                                       // a D3D11 or D3D10 resource's description (M4), under m
     std::recursive_mutex mt;                          // an ID3D11Multithread's Enter and Leave (M4)
+    std::atomic<UINT> latency{0};                     // an IDXGIDevice1's SetMaximumFrameLatency (M4; 0: DXGI's 3)
 };
 static void end_pacing(pacing *p);
 
@@ -370,9 +371,62 @@ static HRESULT STDMETHODCALLTYPE set_event_multiple(mn_proxy *This, ID3D12Fence 
     return on_event(event, send_multiple, &c);
 }
 
+// D3D11's (M4 Task 6), as D3D12's: the fence's slot, its value read there, its events relayed; Flush1's event too.
+static HRESULT STDMETHODCALLTYPE create_fence11(mn_proxy *This, UINT64 initial, D3D11_FENCE_FLAG flags, REFIID riid,
+                                                void **fence) {
+    mn_d3d_p_ID3D11Device5_CreateFence p = {};
+    p.self = (uintptr_t)This, p.initial_value = initial, p.flags = (uint32_t)flags, p.iid = (uintptr_t)&riid;
+    p.fence = (uintptr_t)fence;
+    int32_t s = mn_d3d_call(MN_D3D_ID_ID3D11Device5_CreateFence, &p);
+    HRESULT hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;
+    if (!fence) return hr;
+    *fence = SUCCEEDED(hr) && p.fence ? mn_proxy_out(p.fence, -1, &riid, p.fence_ifaces) : nullptr;
+    if (*fence && p.aux[1]) ((mn_proxy *)*fence)->obj->mirror = (std::atomic<uint64_t> *)(uintptr_t)p.aux[1];
+    return hr;
+}
+
+static UINT64 STDMETHODCALLTYPE completed_value11(mn_proxy *This) {
+    if (This->obj->mirror) return This->obj->mirror->load();
+    mn_d3d_p_ID3D11Fence_GetCompletedValue p = {};
+    p.self = (uintptr_t)This;
+    return mn_d3d_call(MN_D3D_ID_ID3D11Fence_GetCompletedValue, &p) ? 0 : p.ret;
+}
+
+static HRESULT send_completion11(void *ctx, HANDLE e) {
+    auto *c = (on_completion *)ctx;
+    mn_d3d_p_ID3D11Fence_SetEventOnCompletion p = {};
+    p.self = (uintptr_t)c->fence, p.value = c->value, p.event = (uintptr_t)e;
+    int32_t s = mn_d3d_call(MN_D3D_ID_ID3D11Fence_SetEventOnCompletion, &p);
+    return s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;
+}
+// (NULL, which D3D11 doesn't allow, is waited out here as D3D12's is: never DXMT's to take)
+static HRESULT STDMETHODCALLTYPE set_event11(mn_proxy *This, UINT64 value, HANDLE event) {
+    if (This->obj->mirror && This->obj->mirror->load() >= value) {
+        if (event) SetEvent(event);
+        return S_OK;
+    }
+    on_completion c = {This, value};
+    return on_event(event, send_completion11, &c);
+}
+
+struct on_flush { mn_proxy *context; D3D11_CONTEXT_TYPE type; };
+static HRESULT send_flush(void *ctx, HANDLE e) {
+    auto *c = (on_flush *)ctx;
+    mn_d3d_p_ID3D11DeviceContext3_Flush1 p = {};
+    p.self = (uintptr_t)c->context, p.type = (uint32_t)c->type, p.event = (uintptr_t)e;
+    int32_t s = mn_d3d_record(c->context, MN_D3D_ID_ID3D11DeviceContext3_Flush1, &p);
+    return s ? mn_d3d_hr(s) : S_OK;
+}
+static void STDMETHODCALLTYPE flush1(mn_proxy *This, D3D11_CONTEXT_TYPE type, HANDLE event) {
+    on_flush c = {This, type};
+    if (event) on_event(event, send_flush, &c);
+    else send_flush(&c, nullptr);
+}
+
 // ---- frame pacing (M3 Task 4): in the guest, so no present waits on the host's vCPU for the GPU or a drawable ----
-// A swapchain's queue signals a fence of ours after each present. A swapchain without the frame latency object waits
-// on it before presenting, to keep at most kInFlight frames in flight (DXGI's default latency); a waitable one's object
+// A swapchain's queue (M4: or a D3D11 device's immediate context) signals a fence of ours after each present. A swapchain without the frame latency object waits
+// on it before presenting, to keep at most kInFlight frames in flight (DXGI's default latency; a D3D11 device's own,
+// SetMaximumFrameLatency's); a waitable one's object
 // is our semaphore, which a thread of ours releases once for each frame the fence passes. Every present also waits
 // until the display has shown all but one of the drawables presented (the mirror's first slots, mn_d3d.h), so the
 // host's nextDrawable finds one free.
@@ -381,6 +435,10 @@ static const UINT kInFlight = 3;
 struct pacing {
     ID3D12CommandQueue *queue = nullptr; // the swapchain's, held
     ID3D12Fence *fence = nullptr;        // ours
+    ID3D11DeviceContext4 *context = nullptr; // or a D3D11 device's immediate one, held (M4)
+    ID3D11Fence *fence11 = nullptr;          // and ours on it
+    mn_obj *device = nullptr;                // its IDXGIDevice1's object: SetMaximumFrameLatency's (held, by dxgi)
+    IDXGIDevice1 *dxgi = nullptr;
     std::atomic<uint64_t> presented{0};
     UINT latency = kInFlight;            // a waitable swapchain's: DXMT's own, as GetMaximumFrameLatency answers
     HANDLE waitable = nullptr;           // the frame latency object (its first count: latency)
@@ -404,15 +462,27 @@ static HANDLE shown_event() {
     return e;
 }
 
-// Until fence passes v (a guest wait: the host is never asked to wait).
-static void wait_fence(ID3D12Fence *fence, uint64_t v, HANDLE e = nullptr) {
+// Until fence passes v (a guest wait: the host is never asked to wait). D3D12's fence or D3D11's.
+template <class F> static void wait_fence(F *fence, uint64_t v, HANDLE e = nullptr) {
     if (!v || fence->GetCompletedValue() >= v) return;
     static thread_local HANDLE own = CreateEventA(nullptr, FALSE, FALSE, nullptr);
     HANDLE w = e ? e : own;
     if (SUCCEEDED(fence->SetEventOnCompletion(v, w))) WaitForSingleObject(w, INFINITE);
 }
 
+// A wait for the pacing fence, and a frame's signal after its present: D3D12's queue or D3D11's context.
+static void wait_frame(pacing *p, uint64_t v, HANDLE e = nullptr) {
+    if (p->fence) wait_fence(p->fence, v, e);
+    else wait_fence(p->fence11, v, e);
+}
+static void signal(pacing *p, uint64_t v) {
+    if (p->queue) p->queue->Signal(p->fence, v);
+    else p->context->Signal(p->fence11, v);
+}
+
 #ifndef MN_D3D_LOOPBACK
+static uint64_t completed(pacing *p) { return p->fence ? p->fence->GetCompletedValue() : p->fence11->GetCompletedValue(); }
+
 static DWORD WINAPI pacer(void *arg) {
     auto *p = (pacing *)arg;
     for (uint64_t released = 0; !p->stop;) {
@@ -420,8 +490,8 @@ static DWORD WINAPI pacer(void *arg) {
             WaitForSingleObject(p->wake, INFINITE); // a present, or the end
             continue;
         }
-        if (p->fence->GetCompletedValue() < released + 1) {
-            wait_fence(p->fence, released + 1, p->wake);
+        if (completed(p) < released + 1) {
+            wait_frame(p, released + 1, p->wake);
             continue;
         }
         ReleaseSemaphore(p->waitable, 1, nullptr);
@@ -431,20 +501,38 @@ static DWORD WINAPI pacer(void *arg) {
 }
 #endif
 
-// After a swapchain's creation on device (its queue): nullptr when device isn't a D3D12 queue.
+// D3D11's: the device's immediate context, a fence on it, and its IDXGIDevice1 (the device's latency); false when
+// device isn't a D3D11 device that has fences (ID3D11Device5).
+static bool d3d11_pacing(pacing *p, IUnknown *device) {
+    ID3D11Device5 *d5 = nullptr;
+    ID3D11DeviceContext *imm = nullptr;
+    if (FAILED(device->QueryInterface(__uuidof(ID3D11Device5), (void **)&d5))) return false;
+    d5->GetImmediateContext(&imm);
+    if (imm) imm->QueryInterface(__uuidof(ID3D11DeviceContext4), (void **)&p->context), imm->Release();
+    d5->CreateFence(0, D3D11_FENCE_FLAG_NONE, __uuidof(ID3D11Fence), (void **)&p->fence11);
+    if (SUCCEEDED(d5->QueryInterface(__uuidof(IDXGIDevice1), (void **)&p->dxgi))) p->device = ((mn_proxy *)p->dxgi)->obj;
+    d5->Release();
+    return p->context && p->fence11;
+}
+
+// After a swapchain's creation on device (a D3D12 queue, or M4's D3D11 device): nullptr when it's neither.
 static pacing *start_pacing(IUnknown *device, IUnknown *swapchain, UINT flags) {
     ID3D12CommandQueue *queue = nullptr;
     ID3D12Device *dev = nullptr;
-    if (!device || FAILED(device->QueryInterface(__uuidof(ID3D12CommandQueue), (void **)&queue))) return nullptr;
+    if (!device) return nullptr;
     auto *p = new pacing;
-    p->queue = queue;
+    if (SUCCEEDED(device->QueryInterface(__uuidof(ID3D12CommandQueue), (void **)&queue))) {
+        p->queue = queue;
+        if (SUCCEEDED(queue->GetDevice(__uuidof(ID3D12Device), (void **)&dev))) {
+            dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void **)&p->fence);
+            dev->Release();
+        }
+        if (!p->fence) return end_pacing(p), nullptr;
+    } else if (!d3d11_pacing(p, device)) {
+        return end_pacing(p), nullptr;
+    }
     uint64_t at = 0;
     if (!mn_d3d_call(MN_D3D_OP_DRAWABLES, &at)) p->drawables = (std::atomic<uint64_t> *)(uintptr_t)at;
-    if (SUCCEEDED(queue->GetDevice(__uuidof(ID3D12Device), (void **)&dev))) {
-        dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void **)&p->fence);
-        dev->Release();
-    }
-    if (!p->fence) return end_pacing(p), nullptr;
 #ifndef MN_D3D_LOOPBACK // the loopback's programs make no swapchains
     if (flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT) {
         IDXGISwapChain2 *sc2 = nullptr;
@@ -473,6 +561,9 @@ static void end_pacing(pacing *p) {
     if (p->waitable) CloseHandle(p->waitable);
     if (p->fence) p->fence->Release();
     if (p->queue) p->queue->Release();
+    if (p->fence11) p->fence11->Release();
+    if (p->context) p->context->Release();
+    if (p->dxgi) p->dxgi->Release();
     delete p;
 }
 
@@ -481,7 +572,8 @@ static void end_pacing(pacing *p) {
 static void pace_before(pacing *p, UINT flags) {
     if (!p || (flags & DXGI_PRESENT_TEST)) return;
     uint64_t n = p->presented;
-    if (!p->waitable) wait_fence(p->fence, n + 1 > p->latency ? n + 1 - p->latency : 0);
+    UINT latency = p->device && p->device->latency ? p->device->latency.load() : p->latency;
+    if (!p->waitable) wait_frame(p, n + 1 > latency ? n + 1 - latency : 0);
     HANDLE shown = p->drawables ? shown_event() : nullptr;
     for (int i = 0; shown && i < 10 && p->drawables[0].load() > p->drawables[1].load() + 1; i++)
         WaitForSingleObject(shown, 10);
@@ -491,7 +583,7 @@ static void pace_before(pacing *p, UINT flags) {
 static void pace_after(pacing *p, HRESULT hr, UINT flags) {
     if (!p || FAILED(hr) || (flags & DXGI_PRESENT_TEST)) return;
     std::lock_guard<std::mutex> l(p->m);
-    p->queue->Signal(p->fence, p->presented + 1);
+    signal(p, p->presented + 1);
     p->presented++;
     if (p->wake) SetEvent(p->wake);
 }
@@ -643,7 +735,7 @@ static void resized(mn_obj *o) {
 
 // The buffers are free only once the frames that use them are done: waited for here, not on the host.
 static void drain(pacing *p) {
-    if (p) wait_fence(p->fence, p->presented);
+    if (p) wait_frame(p, p->presented);
 }
 
 static HRESULT STDMETHODCALLTYPE resize(mn_proxy *This, UINT count, UINT width, UINT height, DXGI_FORMAT format,
@@ -696,6 +788,8 @@ extern "C" HRESULT WINAPI D3D11CreateDeviceAndSwapChain(IDXGIAdapter *adapter, D
     HRESULT hr = mn_px_D3D11CreateDeviceAndSwapChain(adapter, type, swrast, flags, levels, nlevels, sdk, desc, swapchain,
                                                      device, level, context);
     if (SUCCEEDED(hr) && swapchain) bind_window((void **)swapchain, hwnd);
+    if (SUCCEEDED(hr) && swapchain && *swapchain && device && *device)
+        ((mn_proxy *)*swapchain)->obj->pace = start_pacing(*device, *swapchain, desc ? desc->Flags : 0);
     if (SUCCEEDED(hr) && swapchain && *swapchain) replay(((mn_proxy *)*swapchain)->obj); // created full screen
     return hr;
 }
@@ -723,6 +817,14 @@ static HRESULT STDMETHODCALLTYPE set_latency(mn_proxy *This, UINT latency) {
         if (latency > p->latency) ReleaseSemaphore(p->waitable, (LONG)(latency - p->latency), nullptr);
         p->latency = latency;
     }
+    return hr;
+}
+
+static const void *px_device_latency;
+// A D3D11 device's frame latency (a wrap, M4 Task 6): its swapchains' pacing keeps it (0: DXGI's default).
+static HRESULT STDMETHODCALLTYPE device_latency(mn_proxy *This, UINT latency) {
+    HRESULT hr = PX(device_latency, px_device_latency)(This, latency);
+    if (SUCCEEDED(hr)) This->obj->latency = latency;
     return hr;
 }
 
@@ -1178,6 +1280,11 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"IDXGISwapChain::GetContainingOutput", (const void *)containing_output, &px_containing_output},
         {"IDXGIAdapter::EnumOutputs", (const void *)enum_outputs, &px_enum_outputs},
         {"IDXGISwapChain2::GetFrameLatencyWaitableObject", (const void *)latency_object},
+        {"IDXGIDevice1::SetMaximumFrameLatency", (const void *)device_latency, &px_device_latency},
+        {"ID3D11Device5::CreateFence", (const void *)create_fence11},
+        {"ID3D11Fence::GetCompletedValue", (const void *)completed_value11},
+        {"ID3D11Fence::SetEventOnCompletion", (const void *)set_event11},
+        {"ID3D11DeviceContext3::Flush1", (const void *)flush1},
         {"ID3D11Multithread::Enter", (const void *)mt_enter},
         {"ID3D11Multithread::Leave", (const void *)mt_leave},
         {"IDXGISwapChain2::SetMaximumFrameLatency", (const void *)set_latency, &px_set_latency},

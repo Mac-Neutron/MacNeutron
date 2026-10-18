@@ -112,6 +112,8 @@ ID3DDestructionNotifier::* refuse
 # A D3D11 or D3D10 resource's DXGI side (M4; D3D12's has none in DXMT): its usage and eviction priority, not its
 # handles shared across processes, which mean nothing across the VM.
 IDXGIResource::GetSharedHandle refuse
+# DXMT's TODO (an assert): content protection.
+IDXGIAdapter3::RegisterHardwareContentProtectionTeardownStatusEvent refuse
 IDXGIResource1::CreateSharedHandle refuse
 IDXGIResource1::CreateSubresourceSurface refuse
 IDXGIKeyedMutex::* refuse
@@ -367,6 +369,16 @@ ID3D11VideoContext2::* refuse
 # between vCPUs): DXMT's protection inside each call stays the host's (SetMultithreadProtected is forwarded).
 ID3D11Multithread::Enter special
 ID3D11Multithread::Leave special
+# Fences and pacing (M4 Task 6), as D3D12's: a fence's mirror slot in CreateFence's aux, raised by relays on the host;
+# the guest reads its completed value there and waits out a NULL event itself. A guest's event is a relay natively
+# (a generated stub passes no HANDLE: gen.py), Flush1's too.
+ID3D11Device5::CreateFence own
+ID3D11Fence::GetCompletedValue own
+ID3D11Fence::SetEventOnCompletion own
+ID3D11DeviceContext4::Signal own
+ID3D11DeviceContext3::Flush1 own
+# A device's frame latency, which the guest's pacing keeps (native DXMT's present doesn't wait: fork 0088).
+IDXGIDevice1::SetMaximumFrameLatency wrap
 # What DXMT aborts on (UNIMPLEMENTED: the tiled methods, SwapDeviceContextState, the Device3 copies) or answers
 # E_NOTIMPL itself (counters, class instances: AS_DXMT), and handles shared across processes, which mean nothing
 # across the VM.

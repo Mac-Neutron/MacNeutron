@@ -249,6 +249,11 @@ static int32_t family(uint32_t id, void *params) {
     }
 }
 
+/* A fence's mirror slot (aux[0]), our address of it in aux[1] (0: none). */
+static void fence_slot(uint64_t aux[2]) {
+    aux[1] = events_ready && aux[0] < mirror_blob.size / 8 ? (uintptr_t)((uint64_t *)mirror_blob.ptr + aux[0]) : 0;
+}
+
 /* A D3D11 or D3D10 map's (blob, offset), our address (aux[1] UINT64_MAX: the loopback's pointer, already ours). */
 static void map_address(uint64_t aux[2]) {
     if (aux[1] != UINT64_MAX && (aux[0] || aux[1])) aux[0] = (uintptr_t)arena_ptr(aux[0], aux[1]);
@@ -289,10 +294,10 @@ int32_t mn_d3d_unix_call(void *args) {
         }
         if (!o.sync) return 0;
         s = mn_wm_unpack_call(c, params, &o, reply, n);
-        if (!s && a->id == MN_D3D_ID_ID3D12Device_CreateFence) { /* the fence's mirror slot: our address of it */
-            mn_d3d_p_ID3D12Device_CreateFence *f = params;
-            f->aux[1] = events_ready && f->aux[0] < mirror_blob.size / 8 ? (uintptr_t)((uint64_t *)mirror_blob.ptr + f->aux[0]) : 0;
-        }
+        if (!s && a->id == MN_D3D_ID_ID3D12Device_CreateFence) /* the fence's mirror slot: our address of it */
+            fence_slot(((mn_d3d_p_ID3D12Device_CreateFence *)params)->aux);
+        if (!s && a->id == MN_D3D_ID_ID3D11Device5_CreateFence) /* D3D11's (M4) */
+            fence_slot(((mn_d3d_p_ID3D11Device5_CreateFence *)params)->aux);
         if (!s) /* D3D11's and D3D10's maps (M4): the arena's (blob, offset) in aux, our address of it in aux[0] */
             switch (a->id) {
             case MN_D3D_ID_ID3D11DeviceContext_Map: map_address(((mn_d3d_p_ID3D11DeviceContext_Map *)params)->aux); break;

@@ -102,8 +102,8 @@ extern "C" NTSTATUS_T mn_d3d_fence_signal_stub(void *params) {
     return 0;
 }
 
-// A relay raises the slot when fence gets to value, by whatever DXMT does to it.
-static void raise_later(ID3D12Fence *fence, uint64_t value) {
+// A relay raises the slot when fence gets to value, by whatever DXMT does to it (D3D12's fence or D3D11's).
+template <class F> static void raise_later(F *fence, uint64_t value) {
     if (void *relay = fence ? mn_d3d_fence_relay(fence, value) : nullptr) {
         fence->SetEventOnCompletion(value, relay);
         mn_d3d_relay_done(relay);
@@ -151,6 +151,53 @@ extern "C" NTSTATUS_T mn_d3d_set_event_multi_stub(void *params) {
                       : E_INVALIDARG;
     if (relay) mn_d3d_relay_done(relay);
     RESULT(a, r);
+    return 0;
+}
+
+// D3D11's (M4 Task 6), as D3D12's: a fence and its slot, the context's GPU signal, the guest's events as relays.
+extern "C" NTSTATUS_T mn_d3d_create_fence11_stub(void *params) {
+    auto *a = (mn_d3d_p_ID3D11Device5_CreateFence *)params;
+    auto *riid = (const IID *)(uintptr_t)a->iid;
+    HRESULT r = ((ID3D11Device5 *)(uintptr_t)a->self)
+                    ->CreateFence(a->initial_value, (D3D11_FENCE_FLAG)a->flags, *riid, (void **)&a->fence);
+    a->aux[0] = UINT64_MAX;
+    if (SUCCEEDED(r) && a->fence) {
+        mn_d3d_answers((void *)(uintptr_t)a->fence, mn_d3d_iface_of(riid), a->fence_ifaces);
+        a->aux[0] = mn_d3d_fence_new(mn_d3d_current_ctx(), (void *)(uintptr_t)a->fence, a->initial_value);
+    }
+    RESULT(a, r);
+    return 0;
+}
+
+extern "C" NTSTATUS_T mn_d3d_context_signal_stub(void *params) {
+    auto *a = (mn_d3d_p_ID3D11DeviceContext4_Signal *)params;
+    auto *fence = (ID3D11Fence *)(uintptr_t)a->fence;
+    HRESULT r = ((ID3D11DeviceContext4 *)(uintptr_t)a->self)->Signal(fence, a->value);
+    if (SUCCEEDED(r)) raise_later(fence, a->value);
+    RESULT(a, r);
+    return 0;
+}
+
+extern "C" NTSTATUS_T mn_d3d_set_event11_stub(void *params) {
+    auto *a = (mn_d3d_p_ID3D11Fence_SetEventOnCompletion *)params;
+    void *relay = a->event ? mn_d3d_event_relay(mn_d3d_current_ctx(), a->event) : nullptr;
+    HRESULT r = relay ? ((ID3D11Fence *)(uintptr_t)a->self)->SetEventOnCompletion(a->value, relay) : E_INVALIDARG;
+    if (relay) mn_d3d_relay_done(relay);
+    RESULT(a, r);
+    return 0;
+}
+
+// Flush1's event, set once the flushed work is done: a relay (none without one).
+extern "C" NTSTATUS_T mn_d3d_flush1_stub(void *params) {
+    auto *a = (mn_d3d_p_ID3D11DeviceContext3_Flush1 *)params;
+    void *relay = a->event ? mn_d3d_event_relay(mn_d3d_current_ctx(), a->event) : nullptr;
+    try {
+        ((ID3D11DeviceContext3 *)(uintptr_t)a->self)->Flush1((D3D11_CONTEXT_TYPE)a->type, relay);
+    } catch (...) {
+        if (relay) mn_d3d_relay_done(relay);
+        return mn_d3d_not_in_dxmt(MN_D3D_ID_ID3D11DeviceContext3_Flush1, nullptr);
+    }
+    if (relay) mn_d3d_relay_done(relay);
     return 0;
 }
 

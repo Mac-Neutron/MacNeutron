@@ -29,6 +29,8 @@
  *   d3d11identity (M4 Task 5) op 4's companion (the device's IDXGIDevice1) comes with its whole interfaces block: it
  *              answers IDXGIDevice too, and ID3D11Device at another pointer, whose query names the device's first handle
  *   d3d11getters  (M4 Task 5) two views PSSetShaderResources set come back from PSGetShaderResources as their handles
+ *   d3d11events   (M4 Task 6) a D3D11 fence's mirror slot, raised by ID3D11DeviceContext4::Signal; the fence's
+ *              SetEventOnCompletion(7, e) and Flush1(e) post MN_NOTIFY_EVENT with e (relays: DXMT never takes e)
  *   d3d11notimpl  (M4 Task 5) a D3D11 call that reaches DXMT's UNIMPLEMENTED (a STAGING buffer's UpdateSubresource)
  *              fails and the host goes on
  *   dispatch-test <metal-host> <native DXMT lib>; prints "dispatch-test: ok" or each failure. */
@@ -437,6 +439,32 @@ int main(int argc, char **argv) {
     CHECK(mn_d3d_calls[upd11].params_size == sizeof up11 && call(upd11, &up11) == 0);
     CHECK(call(imm, &gi) == 0 && gi.ctx); /* still there */
     puts("dispatch-test: d3d11notimpl: went on");
+
+    /* d3d11events: a D3D11 fence's slot raised by the context's Signal, and the guest's events relayed (the fence's
+     * SetEventOnCompletion, Flush1's), never DXMT's to take as its own */
+    unsigned fence11 = id_of("ID3D11Device5::CreateFence"), sig11 = id_of("ID3D11DeviceContext4::Signal"),
+             onc11 = id_of("ID3D11Fence::SetEventOnCompletion"), flush1 = id_of("ID3D11DeviceContext3::Flush1");
+    struct { uint64_t self, ret, initial; uint32_t flags; uint64_t iid, fence, ifaces[9], aux[2]; } f11e =
+        {d11, 0, 0, 0, (uintptr_t)iid("ID3D11Fence"), 0, {0}, {0}};
+    CHECK(mn_d3d_calls[fence11].params_size == sizeof f11e && call(fence11, &f11e) == 0 && (uint32_t)f11e.ret == 0);
+    CHECK(f11e.fence && f11e.aux[0] != UINT64_MAX);
+    volatile uint64_t *s11 = &mirror[f11e.aux[0]];
+    struct { uint64_t self, ret, value, event, aux[2]; } oc11 = {f11e.fence, 0, 7, 0x2345, {0}};
+    CHECK(mn_d3d_calls[onc11].params_size == sizeof oc11 && call(onc11, &oc11) == 0 && (uint32_t)oc11.ret == 0);
+    struct { uint64_t self, ret, fence, value, aux[2]; } sg11 = {gi.ctx, 0, f11e.fence, 7, {0}};
+    CHECK(mn_d3d_calls[sig11].params_size == sizeof sg11 && call(sig11, &sg11) == 0 && (uint32_t)sg11.ret == 0);
+    for (int i = 0; i < 500 && *s11 != 7; i++) usleep(1000);
+    CHECK(*s11 == 7);
+    got = 0;
+    for (int i = 0; i < 500 && !got; i++)
+        if (!(got = mn_notify_next(q, &r))) usleep(1000);
+    CHECK(got && r.type == MN_NOTIFY_EVENT && r.value == 0x2345);
+    struct { uint64_t self, ret; uint32_t type; uint64_t event, aux[2]; } fl1 = {gi.ctx, 0, 0 /* ALL */, 0x3456, {0}};
+    CHECK(mn_d3d_calls[flush1].params_size == sizeof fl1 && call(flush1, &fl1) == 0);
+    got = 0;
+    for (int i = 0; i < 500 && !got; i++)
+        if (!(got = mn_notify_next(q, &r))) usleep(1000);
+    CHECK(got && r.type == MN_NOTIFY_EVENT && r.value == 0x3456);
 
     /* removed */
     unsigned victim = id_of("ID3D12Object::GetPrivateData");

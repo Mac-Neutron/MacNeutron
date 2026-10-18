@@ -254,6 +254,24 @@ class ClassifyTest(unittest.TestCase):
         for name in ("ID3D11Device::CreateBuffer", "ID3D11DeviceContext::Map", "ID3D10Texture2D::Map"):
             self.assertIn(name, rules.own)
 
+    def test_guest_handles_stay_in_the_guest(self):
+        # M4 Task 6: a guest's HANDLE means nothing natively (native DXMT would take it for its own event: the host's
+        # crash, seen with ID3D11Fence::SetEventOnCompletion): a generated stub passes none; own code relays events
+        rules = gen.parse_rules(gen.read(RULES), self.m)
+        out = gen.emit_stubs(self.m, rules, self.calls)
+        def body(name):
+            mid = next(i for i, c in self.calls.items() if c.name == name)
+            start = out.index(f"mn_d3d_stub_{mid}(")
+            return out[start:out.index("\n}", start)]
+        self.assertIn("RegisterOcclusionStatusEvent(nullptr, ", body("IDXGIFactory2::RegisterOcclusionStatusEvent"))
+        self.assertIn("EnqueueSetEvent(nullptr)", body("IDXGIDevice2::EnqueueSetEvent"))
+        self.assertIn("any_ptr{a->window}", body("IDXGIFactory::MakeWindowAssociation"))  # a window is the host's id
+        for name in ("ID3D11Fence::SetEventOnCompletion", "ID3D11DeviceContext3::Flush1",
+                     "ID3D12Fence::SetEventOnCompletion"):
+            self.assertIn(name, rules.own)
+        self.assertEqual(self.calls[next(i for i, c in self.calls.items() if c.name ==
+                         "IDXGIAdapter3::RegisterHardwareContentProtectionTeardownStatusEvent")].mode, "refuse")
+
     def test_every_method_has_a_mode(self):
         for row in gen.manifest(self.m):
             self.assertIn(self.calls[row[0]].mode, ("async", "sync", "submit", "special", "refuse"), row[1])

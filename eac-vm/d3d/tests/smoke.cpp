@@ -18,6 +18,10 @@
 //                signalled once a presented frame; a swapchain without one presents 60 frames the GPU takes longer
 //                over than the CPU (four 256 MiB copies each), which d3d-smoke.sh checks held no vCPU on the host
 //                ("ok", or what broke)
+//   d3d11latency (M4 Task 6) a D3D11CreateDeviceAndSwapChain swapchain (no frame latency object) presents 60 frames
+//                the GPU takes longer over than the CPU (four 256 MiB copies each), a fence signalled before each:
+//                after each present the fence trails it by no more than the device's latency, 3, and d3d-smoke.sh
+//                checks no present held a vCPU on the host ("ok", or what broke)
 //   wmsize       (M3's final review) a window that answers WM_SIZE with ResizeBuffers(0, 0), as DXGI's samples do:
 //                ResizeTarget(640x480) and SetFullscreenState(TRUE, then FALSE) on its own thread each return, and
 //                the buffers are then the window's size ("ok", "hang <step>": 10 s, the process ends, or the size)
@@ -26,6 +30,7 @@
 // A failed step prints "<line> FAIL <step>".
 #include <windows.h>
 #include <d3d12.h>
+#include <d3d11_4.h>
 #include <dxgi1_4.h>
 #include <cstdio>
 #include <cstdlib>
@@ -102,15 +107,20 @@ static double ms_since(LARGE_INTEGER a) {
     return (double)(b.QuadPart - a.QuadPart) * 1000.0 / (double)f.QuadPart;
 }
 
-// A 320x240 flip-model swapchain on a new Wine window: the swapchain, or nullptr.
-static IDXGISwapChain1 *swapchain(ID3D12CommandQueue *queue, HWND *window, UINT flags = 0) {
+// A new 320x240 Wine window.
+static HWND new_window() {
     static WNDCLASSA wc = {};
     if (!wc.lpszClassName) {
         wc.lpfnWndProc = window_proc, wc.hInstance = GetModuleHandleA(nullptr), wc.lpszClassName = "mn-smoke";
         RegisterClassA(&wc);
     }
-    HWND w = CreateWindowA("mn-smoke", "smoke", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 320, 240, nullptr, nullptr,
-                           wc.hInstance, nullptr);
+    return CreateWindowA("mn-smoke", "smoke", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 320, 240, nullptr, nullptr,
+                         wc.hInstance, nullptr);
+}
+
+// A 320x240 flip-model swapchain on a new Wine window: the swapchain, or nullptr.
+static IDXGISwapChain1 *swapchain(ID3D12CommandQueue *queue, HWND *window, UINT flags = 0) {
+    HWND w = new_window();
     IDXGIFactory2 *f = nullptr;
     IDXGISwapChain1 *sc = nullptr;
     DXGI_SWAP_CHAIN_DESC1 d = {};
@@ -302,6 +312,51 @@ static const char *latency(ID3D12Device *device, ID3D12CommandQueue *queue) {
     return bad ? bad : "ok";
 }
 
+static const char *d3d11_latency() {
+    HWND w = new_window();
+    pump();
+    DXGI_SWAP_CHAIN_DESC d = {};
+    d.BufferDesc.Width = 320, d.BufferDesc.Height = 240, d.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    d.SampleDesc.Count = 1, d.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT, d.BufferCount = 2, d.OutputWindow = w;
+    d.Windowed = TRUE, d.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
+    IDXGISwapChain *sc = nullptr;
+    ID3D11Device *dev = nullptr;
+    ID3D11DeviceContext *ctx = nullptr;
+    if (!w || FAILED(D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, &level, 1,
+                                                   D3D11_SDK_VERSION, &d, &sc, &dev, nullptr, &ctx)))
+        return "FAIL device";
+    ID3D11Device5 *d5 = nullptr;
+    ID3D11DeviceContext4 *c4 = nullptr;
+    ID3D11Fence *fence = nullptr;
+    ID3D11Buffer *a = nullptr, *b = nullptr;
+    D3D11_BUFFER_DESC bd = {256u << 20, D3D11_USAGE_DEFAULT, D3D11_BIND_VERTEX_BUFFER, 0, 0, 0};
+    const char *bad = nullptr;
+    if (FAILED(dev->QueryInterface(__uuidof(ID3D11Device5), (void **)&d5)) ||
+        FAILED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext4), (void **)&c4)) ||
+        FAILED(d5->CreateFence(0, D3D11_FENCE_FLAG_NONE, __uuidof(ID3D11Fence), (void **)&fence)) ||
+        FAILED(dev->CreateBuffer(&bd, nullptr, &a)) || FAILED(dev->CreateBuffer(&bd, nullptr, &b)))
+        bad = "FAIL objects";
+    static char trail[64];
+    for (UINT64 k = 1; !bad && k <= 60; k++) {
+        for (int i = 0; i < 4; i++) ctx->CopyResource(i % 2 ? a : b, i % 2 ? b : a);
+        c4->Signal(fence, k);
+        if (FAILED(sc->Present(0, 0))) bad = "a GPU-bound frame's present";
+        UINT64 done = fence->GetCompletedValue();
+        if (!bad && done + 3 < k)
+            snprintf(trail, sizeof trail, "frame %llu: the fence at %llu", (unsigned long long)k,
+                     (unsigned long long)done), bad = trail;
+    }
+    HANDLE e = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    if (fence && SUCCEEDED(fence->SetEventOnCompletion(60, e))) WaitForSingleObject(e, 30000);
+    CloseHandle(e);
+    for (IUnknown *x : {(IUnknown *)a, (IUnknown *)b, (IUnknown *)fence, (IUnknown *)c4, (IUnknown *)d5})
+        if (x) x->Release();
+    ctx->Release(), sc->Release(), dev->Release();
+    DestroyWindow(w);
+    return bad ? bad : "ok";
+}
+
 static void wmt_forward() {
     auto forward = (UINT32(WINAPI *)(UINT32, void *))GetProcAddress(LoadLibraryA("winemetal.dll"), "WMTForward");
     if (!forward) return (void)printf("wmtforward FAIL no WMTForward\n");
@@ -328,6 +383,7 @@ int main() {
     name(queue);
     minimised(queue);
     printf("latency %s\n", latency(device, queue));
+    printf("d3d11latency %s\n", d3d11_latency());
     const char *mode = getenv("MACNEUTRON_VM_D3D");
     bool forward = mode && !strcmp(mode, "forward");
     if (forward) printf("swapchain %s\n", own_answers(queue));

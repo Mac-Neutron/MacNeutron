@@ -1174,6 +1174,8 @@ def stub_arg(model, i, p, c):
     out = next((f for f in c.fields if f.param == p.name and f.kind == "WMF_HANDLE_OUT"), None)
     if out:
         return f"any_ptr{{(uintptr_t)&{name}}}"
+    if not stars(t) and resolve(model, t) == "HANDLE":  # a guest's handle (an event, mostly) means nothing natively:
+        return "nullptr"                                # none (own code relays an event: host/native.cpp)
     if stars(t) or t.startswith("PFN_") or resolve(model, t) in HANDLE_TYPES:
         return f"any_ptr{{{name}}}"
     base = resolve(model, t)
