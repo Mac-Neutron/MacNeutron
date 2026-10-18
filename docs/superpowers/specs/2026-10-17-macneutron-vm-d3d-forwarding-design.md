@@ -142,16 +142,20 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
 
 - Each fence's completed value is mirrored by the host into a shared page; `GetCompletedValue` reads it in the guest.
 - `SetEventOnCompletion` signals the guest's Win32 event through the winemetal forwarding's shared-event path.
-- DXGI's frame-latency waitable object is mirrored the same way. (M3's, with the swapchain.)
+- DXGI's frame-latency waitable object is mirrored the same way. (M3: a guest semaphore a pacer thread releases as
+  each present's fence completes; without it, at most 3 frames in flight; presents also wait for the display, on the
+  host's drawables shown, so none holds a vCPU.)
 
 ### 4.8 Presentation
 
 - A swapchain is created from the game's window in the guest and bound, on the host, to the VM window's Metal layer
-  (one window per VM, as now). (M3's: M2 forwards the swapchain methods as generated and no gate program calls them; a
-  guest window's handle means nothing to native DXMT until M3 binds it.)
+  (one window per VM, as now). (M3: native DXMT asks about windows and displays through window-system hooks the guest
+  feeds before the calls that read them; full screen is native DXMT's logic, its window actions replayed in the guest
+  with DXMT's own Win32 window code.)
 - `ResizeBuffers` is forwarded. Full-screen modes stay emulated in the guest (Wine's EmulateModeset): the host presents
   at the buffer's size and the window scales it.
-- `Present` is asynchronous; the game paces itself on the mirrored frame-latency object.
+- `Present` is asynchronous; the game paces itself on the mirrored frame-latency object. (M3: `Present` stays
+  synchronous, so its HRESULT is native DXMT's; the guest's pacing keeps it short.)
 
 ### 4.9 Threads
 
@@ -170,21 +174,24 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
 ### 4.11 Upscalers
 
 - `nvngx` and `nvapi` (DLSS on MetalFX) and our `libxess` stand-in (XeSS on MetalFX, Wine patch 0022) reach DXMT
-  through its private interfaces. Their entry points are forwarded the same way, to their native host builds.
+  through its private interfaces. Their entry points are forwarded the same way, to their native host builds. (M3:
+  `libxess` and `nvngx` stay guest DLLs and their private-interface calls are what's forwarded; DXMT's NVIDIA extension
+  is native DXMT's, from `DXMT_ENABLE_NVEXT=1` in `macneutron-vm`'s environment.)
 
 ### 4.12 Shaders and precache
 
 - DXIL to Metal (airconv) runs natively on the host.
 - DXMT's shader cache and its pipeline recordings live in the game's VM state folder (`state/<appid>.dxmt/`).
 - The launcher's precache replays a game's recordings natively before it starts, as it does on macOS, behind the same
-  toast.
+  toast. (M3: `MN_D3D_STATE=<vm>/state/<appid>.dxmt`; a native `dxmt-replay` replays them before the VM boots.)
 
 ### 4.13 Settings and selection
 
 - The game's `DXMT_*` settings (launch options, per-game settings) reach native DXMT through `macneutron-vm`'s
   environment: a VM runs one game.
 - `run-game.sh` points Wine at the stand-ins by default and at the guest DXMT DLLs with `MACNEUTRON_VM_D3D=guest`,
-  today's path, which stays for any game the forwarding breaks.
+  today's path, which stays for any game the forwarding breaks. (M3: the default stays `guest` until §9;
+  `MACNEUTRON_VM_D3D=forward` opts in, and the launcher's `MACNEUTRON_DLSS=1` sets native DXMT's NVIDIA extension.)
 
 ## 5. VM overheads and measurement
 
@@ -254,7 +261,7 @@ M0 (research README §15) measured SMITE 2's VM at 11.64 cores: the guest's code
 | M5, overheads (second, after M0: maintainer, 2026-10-17) | §5.3 | SMITE 2 in a match at M0's settings (1440p, DLSS Performance): the host's overheads (wake-ups, spinning, sound, other) from 5.2 cores to 2.0 or less, wineserver from 0.67 to 0.2 or less, and the frame rate and GPU busy no lower than M0's VM run (108.6 fps, 91.6%). |
 | M1, native DXMT | §4.1 | DXMT's test programs natively on the Mac match the macOS Wine run. Go/no-go: if our D3D12 can't build natively at reasonable cost, stop and ask the maintainer before M2. |
 | M2, D3D12 and DXGI forwarding (done 2026-10-18, research README §19) | §4.2 to §4.7, §4.9 | The loopback test; the headless D3D12 programs through forwarding match macOS. |
-| M3, games | §4.8, §4.11, §4.12 | SMITE 2 and Palworld play in the VM through forwarding, with XeSS and DLSS on MetalFX; the coverage trace shows no unforwarded call. |
+| M3, games (SMITE 2 done 2026-10-18, research README §20; Palworld waits for the maintainer) | §4.8, §4.11, §4.12 | SMITE 2 and Palworld play in the VM through forwarding, with XeSS and DLSS on MetalFX; the coverage trace shows no unforwarded call. |
 | M4, D3D10 and D3D11 | §4.10 and the D3D10/11 rules | DXMT's D3D11 and D3D10 test programs through forwarding match macOS. |
 
 §1's three numbers, for SMITE 2 and Palworld, are the project's gate after M4.

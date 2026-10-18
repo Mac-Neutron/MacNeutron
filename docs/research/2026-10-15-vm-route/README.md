@@ -1119,3 +1119,125 @@ still abort the VM host rather than fail the call. The guest caches no immutable
 whether one is worth it. Left for M4: D3D11 and D3D10 (`d3d11_vsia`). Until then forwarding breaks them in the same
 prefix: the stand-in `dxgi.dll` replaces DXMT's, whose adapter guest DXMT's `d3d11` needs, so
 `MACNEUTRON_VM_D3D=forward` is for D3D12 games only.
+
+## 20. Direct3D forwarding, M3: games (2026-10-18)
+
+Plan `docs/superpowers/plans/2026-10-18-vm-d3d-forwarding-m3-games.md`. M2's forwarding (§19) gains what a game needs
+on top of the headless programs: presentation, pacing, the upscalers, and the shader cache and precache. With
+`MACNEUTRON_VM_D3D=forward` SMITE 2 plays a match in the VM on native DXMT, with XeSS and with DLSS on MetalFX, every
+method it calls forwarded. Palworld hasn't run yet (the maintainer's go-ahead), so M3's gate is open for it.
+
+What M3 built:
+- Presentation (spec §4.8). A swapchain is made from the game's window in the guest and presents into the VM window's
+  layer on the host. Native DXMT asks about windows and displays through window-system hooks (fork 0082): the guest
+  pushes a window's state before the calls that read it (op 7) and the displays and their modes (op 8). Full screen
+  is native DXMT's own logic; the window actions it takes (save, enter, leave, minimise) come back in the reply and
+  are replayed in the guest with DXMT's own Win32 window code (fork 0083, op 9), so the guest's emulated mode switch
+  is Wine's EmulateModeset, as in guest mode. A present hook (0081) counts the drawables presented and shown.
+- Pacing in the guest (§4.7). Each swapchain has a fence signalled after each `Present`. Without the frame-latency
+  object, at most 3 frames are in flight (DXGI's default); with it, the object is a guest semaphore that a pacer
+  thread releases. Presents also pace on the display: the host mirrors the drawables presented and shown (Metal's
+  presented handler) and the guest waits, on a shown event (op 11), until at most one is unshown. No present holds a
+  vCPU: the host's `mn-d3d: slow:` lines (calls over 4 ms on a vCPU, by method, at a context's end) are the smoke's
+  check. `Present` stays synchronous, so its HRESULT is native DXMT's.
+- DXMT's `IMPLEMENT_ME` throws natively (0084), and each host stub catches it: the call fails, logged, and the VM host
+  goes on (it used to abort it).
+- The upscalers (§4.11). XeSS (Wine's builtin `libxess`) and DLSS (guest DXMT's `nvngx`) reach native DXMT's MetalFX
+  through its private interfaces, forwarded like the rest. DXMT's NVIDIA extension is on natively from
+  `DXMT_ENABLE_NVEXT=1` at `dxgi.dylib`'s load (0085), set in `macneutron-vm`'s environment by the launcher's
+  `MACNEUTRON_DLSS=1` (process-wide on the VM host: a VM runs one game); the guest writes the registry keys NVIDIA's
+  loader reads. A companion interface is cached once per object, as COM identity needs.
+- Shaders and precache (§4.12). Native DXMT's shader cache and pipeline recordings live in the game's VM state folder
+  (`MN_D3D_STATE=<vm>/state/<appid>.dxmt`), and a native `dxmt-replay` (0086) replays the recordings before the VM
+  boots, as the macOS precache does. The release ships native DXMT beside `macneutron-vm` (`dxmt/`, signed).
+- The generator gained `wrap` (guest code first, then the generated proxy), for methods whose guest side must push
+  state first; it covers exports too. DXMT builds are keyed on their tree's commit, after a stale guest `nvngx` object
+  read refusals as successes.
+
+Fork patches 0079 (amended) and 0080 to 0086; the series applies on the pin.
+
+SMITE 2's first forwarded runs found four faults the gate programs didn't; each now has a test that failed first:
+- `GetDisplayModeList` took the generator's defaults (the count out only, the list one struct), and DXMT answered
+  `DXGI_ERROR_MORE_DATA`, fatal to the game. Rules now marshal the count in and out and the list as long as it
+  (`dispatch-test`).
+- The VM host crashed in DXMT's `EndQuery`: one thread opens a command list and stamps its start with a timestamp,
+  another records the rest and closes it, and the close ran before the first thread's queued records. A command
+  list's method on a list another thread called last is now sent as a submit (flushed with `MN_REC_SUBMIT`: the
+  other rings run first). `threads.cpp`'s handoff case crashed the loopback with SMITE 2's stack.
+- The game died in its god-select lobby: Unreal calls `IDXGIAdapter3::QueryVideoMemoryInfo` (slot 14) through the
+  `IDXGIAdapter` that `EnumAdapters` gives it. DXGI's and DXMT's adapters have one vtable for every version; our
+  proxy's stopped at slot 9. A proxy now has the vtable of the most derived interface its object answers at its own
+  pointer (`identity.sh`). FEX with multiblock (its default) reported the fault inside `EnumAdapters`' proxy;
+  `FEX_MULTIBLOCK=0` reported the jump to 0 exactly, and the game's code at the return address showed the call. When
+  a fault under FEX doesn't fit its registers, that is the setting to try first.
+- The game calls `OpenExistingHeapFromAddress`, which the guest refuses with the `E_NOTIMPL` native DXMT answers
+  itself (Unreal's GPU breadcrumbs go without). `coverage.py` takes the four refusals that give DXMT's own answer as
+  forwarded.
+
+The gate's programs. The 28 D3D12 rows of the 4b-2 gate (the 19, 4 XeSS, 5 DLSS), each against one macOS run by
+`compare.py`'s rule: guest mode (`eac-vm/dxmt/gate.sh`, its 29 rows with `d3d11_vsia`) and forwarded
+(`eac-vm/d3d/gate.sh`, the loopback first). All pass both ways, with no host error; coverage over the forwarded
+traces: 96 methods, every one forwarded. Seconds, one run each:
+
+| Program | macOS (forwarded's ref) | VM, forwarded | macOS (guest's ref) | VM, guest DXMT |
+|---|---|---|---|---|
+| d3d12_api | 7.17 | 0.66 | 4.16 | 1.53 |
+| d3d12_bounds | 3.72 | 1.05 | 3.73 | 1.08 |
+| d3d12_cache | 3.72 | 1.05 | 3.72 | 1.08 |
+| d3d12_compress | 3.77 | 1.09 | 3.76 | 1.12 |
+| d3d12_copy | 3.71 | 1.05 | 3.70 | 1.08 |
+| d3d12_depth | 3.71 | 1.05 | 3.74 | 1.08 |
+| d3d12_dxil | 3.71 | 1.05 | 3.73 | 1.08 |
+| d3d12_dxil_exec | 3.73 | 1.07 | 3.76 | 1.11 |
+| d3d12_hazards | 4.07 | 1.42 | 4.09 | 1.47 |
+| d3d12_indirect | 3.86 | 1.19 | 3.86 | 1.24 |
+| d3d12_layered | 3.72 | 1.04 | 3.95 | 1.08 |
+| d3d12_lod | 3.74 | 1.11 | 3.75 | 1.11 |
+| d3d12_null | 3.71 | 1.04 | 3.72 | 1.09 |
+| d3d12_query | 3.73 | 1.04 | 3.71 | 1.07 |
+| d3d12_timestamp | 3.73 | 1.06 | 3.75 | 1.10 |
+| d3d12_triangle | 3.72 | 1.05 | 3.73 | 1.10 |
+| d3d12_upscale | 14.80 | 8.48 | 15.43 | 8.51 |
+| d3d12_volume | 3.71 | 1.04 | 3.74 | 1.09 |
+| d3d12_vsread | 3.72 | 1.03 | 3.73 | 1.08 |
+| d3d12_xess_quality | 18.47 | 8.29 | 15.78 | 8.01 |
+| d3d12_xess_performance | 11.50 | 6.12 | 11.78 | 6.10 |
+| d3d12_xess_nodepth | 34.26 | 16.87 | 35.20 | 16.97 |
+| d3d12_xess_api | 3.85 | 1.13 | 3.89 | 1.15 |
+| d3d12_dlss_vendor | 3.71 | 0.15 | 3.72 | 1.06 |
+| d3d12_dlss_quality | 14.50 | 8.31 | 15.94 | 8.42 |
+| d3d12_dlss_performance | 11.28 | 6.60 | 18.55 | 6.25 |
+| d3d12_dlss_inverted | 12.73 | 7.34 | 22.76 | 7.07 |
+| d3d12_dlss_refuse | 3.79 | 1.12 | 4.30 | 1.13 |
+
+As in §19 these time Wine and the GPU, not the CPU (a row's first program finds wineboot's wineserver: `d3d12_api`
+and `d3d12_dlss_vendor`, the DLSS rows' own boot). The 4c gate's rows forwarded (`present-gate.sh forward`): every
+`d3d12_clear` and `present_loop` check passes, with frames of 8.34 ms against macOS's 7.78 and 7.44-7.51 ms against
+7.26-8.30; `d3d12_fullscreen`'s three leave cases match guest mode. Task 4 measured `d3d12_clear` at 9.30 ms a frame
+forwarded against 8.40 in guest mode: with Metal's three drawables only one frame can wait for the display without a
+host wait (the upgrade: DXMT's presenter fetching its next drawable on a thread of its own).
+
+The games, recorded and not graded (M5's). SMITE 2 through `present-gate.sh forward` with `MN_GATE_GAMES=1` (Mac
+Steam, a practice match the maintainer played, 1920x1080, the game's settings):
+
+| Run | Frames presented | Frame rate | VM host CPU | Upscaler on the host | Coverage |
+|---|---|---|---|---|---|
+| Forwarded, XeSS | 13,610 | about 78 fps | 3.6-4.4 cores (`ps`, in the match) | 13,289 `TemporalUpscale` | 117 methods, all forwarded |
+| Forwarded, DLSS (`MN_GATE_DLSS=1`) | 7,114 | about 63 fps | (not sampled in the match) | 4 scalers, 6,680 `TemporalUpscale` (`nvngx`) | 118 methods, all forwarded |
+| M0, guest DXMT (§15: 1440p, DLSS Performance) | | 108.6 fps | 11.64 cores (with `mn-steam-host` and `gvproxy`) | | |
+| M0, macOS (§15) | | 119.5 fps (the cap) | 4.64 cores | | |
+
+Forwarded, the VM host uses about the cores macOS does, a third of guest mode's, but the frame rate is lower: the
+settings differ from M0's, and where the frames go is M5's question. Two leads from the runs: every call with an
+answer is a vCPU exit (`QueryVideoMemoryInfo` alone about 900 a second), and pipeline creations still compile on vCPU
+threads (721 graphics pipelines over 4 ms in one run, the longest 120 ms). The 7 `GetResourceAllocationInfo failed`
+lines in SMITE 2's log are DXMT's: the macOS run logs the same 7.
+
+Open:
+- Palworld (M3's gate), with the maintainer.
+- In a forwarded process a D3D11 program gets the forwarded DXGI, whose adapter guest DXMT's `d3d11` refuses ("Not a
+  DXMT adapter"): Unreal's crash reporter showed a black window. M4 forwards D3D11.
+- One DLSS run aborted at startup in Streamline's signature check (Wine's `wintrust` failed its delayed import of
+  `imagehlp`); the next passed in full. Seen once, cause open.
+- A SMITE 2 run whose game crashed still waits out its 180 s (Unreal's crash reporter holds the launcher), and a game
+  that dies before Steam initialises makes the row skip, not fail.
