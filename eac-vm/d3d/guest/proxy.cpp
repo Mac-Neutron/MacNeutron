@@ -44,9 +44,23 @@ static const IID unknown_iid = {0x00000000, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0
 
 static bool has(const uint64_t mask[2], int k) { return k >= 0 && (mask[k / 64] >> (k % 64) & 1); }
 
+// The vtable a proxy of k has (M3 Task 10, SMITE 2's): the most derived interface whose bases include k that the object
+// answers at its own pointer. DXGI's and D3D12's objects have one vtable for all their versions, and programs count on
+// it: Unreal calls IDXGIAdapter3::QueryVideoMemoryInfo through the IDXGIAdapter that EnumAdapters gives it.
+static int widest(const mn_obj *o, int k) {
+    int best = k, depth = 0;
+    for (int j = 0; j < MN_D3D_IFACES; j++) {
+        if (!has(o->answers, j) || has(o->moved, j)) continue;
+        int d = 0, b = j;
+        for (; b >= 0 && b != k; d++) b = mn_d3d_ifaces[b].base;
+        if (b == k && d > depth) best = j, depth = d;
+    }
+    return best;
+}
+
 static mn_proxy *proxy_of(mn_obj *o, int k) {
     std::lock_guard<std::mutex> l(o->m);
-    if (!o->proxies[k]) o->proxies[k] = new mn_proxy{mn_d3d_vtables[k], MN_D3D_PROXY_MAGIC, k, o->handle, o};
+    if (!o->proxies[k]) o->proxies[k] = new mn_proxy{mn_d3d_vtables[widest(o, k)], MN_D3D_PROXY_MAGIC, k, o->handle, o};
     return o->proxies[k];
 }
 

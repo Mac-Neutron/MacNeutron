@@ -121,11 +121,13 @@ elif [ ! -f "$HOME/Library/Application Support/Steam/steamapps/common/SMITE 2/Wi
 else
   rm -rf "$W/share/traces/smite2"  # a run that never got there leaves no log to blame
   rm -f "$W"/share/traces/d3d-guest.*.txt "$W/share/traces/d3d-host.txt"
-  # The guest runs its script with a fresh environment: the mode, the trace and DLSS go in it (forwarded, DLSS's NVIDIA
-  # extension in native DXMT too, in macneutron-vm's environment). The upscaler is the game's own setting.
-  { printf 'export MACNEUTRON_VM_D3D=%s MACNEUTRON_VM_D3D_TRACE=1 MACNEUTRON_DLSS=1\n' "$MODE"
+  # The guest runs its script with a fresh environment: the mode and the trace go in it. MN_GATE_DLSS=1: DLSS's too
+  # (MACNEUTRON_DLSS=1; forwarded, DXMT's NVIDIA extension is native DXMT's, in macneutron-vm's environment). The
+  # upscaler is the game's own setting.
+  dlss=; [ "${MN_GATE_DLSS:-}" = 1 ] && dlss=1
+  { printf 'export MACNEUTRON_VM_D3D=%s MACNEUTRON_VM_D3D_TRACE=1%s\n' "$MODE" "${dlss:+ MACNEUTRON_DLSS=1}"
     cat "$ROOT/eac-vm/tests/smite2-render.sh"; } > "$W/present-smite2.sh"
-  DXMT_ENABLE_NVEXT=1 MACNEUTRON_VM_D3D_TRACE=1 MN_PRESENT_PROBE=1 MN_RUN_TIMEOUT=900 "$ROOT/eac-vm/run-guest.sh" \
+  DXMT_ENABLE_NVEXT=$dlss MACNEUTRON_VM_D3D_TRACE=1 MN_PRESENT_PROBE=1 MN_RUN_TIMEOUT=900 "$ROOT/eac-vm/run-guest.sh" \
     "$W/present-smite2.sh" --steam-appid 2437170 --ram-mib 16384 2>&1 \
     | perl -ne 'BEGIN { $| = 1; $t = time } print time - $t, " ", $_' > "$L"
   if ! /usr/bin/grep -q '^[0-9]* steam: initialised$' "$L"; then echo "skip: Steam didn't initialise in the guest"

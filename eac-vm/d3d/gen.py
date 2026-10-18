@@ -1100,7 +1100,7 @@ def emit_ifaces(model, rules):
     out.append("const struct mn_d3d_iface mn_d3d_ifaces[MN_D3D_IFACES] = {")
     for n, k in index.items():
         iid = ", ".join(f"0x{b:02x}" for b in iid_bytes(model.interfaces[n].iid))
-        out.append(f'    {{"{n}", {{{iid}}}, {len(fam[n])}, fam{k}}},')
+        out.append(f'    {{"{n}", {{{iid}}}, {len(fam[n])}, fam{k}, {index.get(model.interfaces[n].base, -1)}}},')
     out += ["};", "", "int mn_d3d_iface_of(const void *iid) {", "    for (int i = 0; i < MN_D3D_IFACES; i++)",
             "        if (!memcmp(mn_d3d_ifaces[i].iid, iid, 16)) return i;", "    return -1;", "}", ""]
     return "\n".join(out)
@@ -1108,7 +1108,8 @@ def emit_ifaces(model, rules):
 
 def iface_decls(model):
     return ["", f"#define MN_D3D_IFACES {len(iface_index(model))}", f"#define MN_D3D_EXPORTS {len(model.exports)}",
-            "struct mn_d3d_iface { const char *name; uint8_t iid[16]; uint16_t nfamily; const uint8_t *family; };",
+            "/* base: the interface it derives from, or -1 (IUnknown, or a base that isn't forwarded) */",
+            "struct mn_d3d_iface { const char *name; uint8_t iid[16]; uint16_t nfamily; const uint8_t *family; int16_t base; };",
             "extern const struct mn_d3d_iface mn_d3d_ifaces[MN_D3D_IFACES];",
             "/* The interface an IID names, or -1. */",
             "int mn_d3d_iface_of(const void *iid);", ""]
