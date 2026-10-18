@@ -22,7 +22,7 @@ sh "$ROOT/eac-vm/d3d/loopback-gate.sh" || fail=1
 # builtin libxess and DLSS through guest DXMT's nvngx, both on native DXMT's MetalFX through the private interfaces
 # forwarded. Their macOS references beside the 19's (ref.sh starts its folder afresh). MN_D3D_UPSCALERS="": none.
 UPSCALERS=${MN_D3D_UPSCALERS-"d3d12_xess_quality d3d12_xess_performance d3d12_xess_nodepth d3d12_xess_api
-  d3d12_dlss_vendor d3d12_dlss_quality d3d12_dlss_performance d3d12_dlss_inverted"}
+  d3d12_dlss_vendor d3d12_dlss_quality d3d12_dlss_performance d3d12_dlss_inverted d3d12_dlss_refuse"}
 rows=$(cut -d'|' -f1 "$SH/dxmt-tests/invocations" | tr '\n' ' ')
 if [ -n "$UPSCALERS" ]; then
   MN_DXMT_ONLY=$(echo $UPSCALERS) sh "$D/share.sh" > /dev/null || fail=1

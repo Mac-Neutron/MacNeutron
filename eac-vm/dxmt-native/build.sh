@@ -19,7 +19,8 @@ CPU=${MACNEUTRON_CPU:-apple-m5}
 set -- "$B" "$D" --buildtype release -Denable_d3d12=true -Denable_nvapi=false -Denable_nvngx=false \
   -Dwine_builtin_dll=false -Dnative_llvm_path="$SRC/llvm-arm64" -Dtranslator_key_file="$SRC/dxmt-translator-key"
 [ "$CPU" = generic ] || set -- "$@" -Dc_args="-mcpu=$CPU" -Dcpp_args="-mcpu=$CPU"
-inputs=$(printf '%s\n' "$@")
+# The tree's commit too (eac-vm/dxmt/build.sh's reason: a swapped-in tree's older files leave stale objects).
+inputs=$(printf '%s\n' "$@"; git -C "$D" rev-parse HEAD)
 if [ ! -f "$B/build.ninja" ] || [ "$(cat "$B/.setup-inputs" 2> /dev/null)" != "$inputs" ]; then
   rm -rf "$B"
   mkdir -p "$OUT"

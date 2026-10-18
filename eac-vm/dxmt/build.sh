@@ -34,7 +34,10 @@ ln -sfn "$S/wine-build/tools/winebuild/winebuild" "$SDK/bin/winebuild"
 set -- "$B" "$S/dxmt" --cross-file "$S/dxmt/build-win64.txt" --buildtype release --strip --prefix "$W/dxmt-guest" \
   -Dguest_vm=true -Dwine_builtin_dll=true -Denable_d3d12=true -Denable_nvapi=true -Denable_nvngx=true \
   -Dwine_install_path="$SDK" -Dtranslator_key_file="$S/dxmt-translator-key"
-inputs=$(printf '%s\n' "$@"; cat "$S/dxmt/build-win64.txt")
+# The tree's commit too: a tree put in place with older files than the build's objects (the upstream-master swap)
+# leaves ninja nothing newer to rebuild, so stale objects stayed (M3 Task 7: nvngx's old error values). ponytail: a full
+# build after every fork commit; the tree's base commit instead if that ever costs too much.
+inputs=$(printf '%s\n' "$@"; cat "$S/dxmt/build-win64.txt"; git -C "$S/dxmt" rev-parse HEAD)
 if [ ! -f "$B/build.ninja" ] || [ "$(cat "$B/.setup-inputs" 2> /dev/null)" != "$inputs" ]; then
   rm -rf "$B"
   meson setup "$@" > "$W/dxmt-guest.log" 2>&1 \
