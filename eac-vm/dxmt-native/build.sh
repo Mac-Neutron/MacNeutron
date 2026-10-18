@@ -26,8 +26,9 @@ if [ ! -f "$B/build.ninja" ] || [ "$(cat "$B/.setup-inputs" 2> /dev/null)" != "$
   meson setup "$@" > "$OUT/setup.log" 2>&1 || { rm -rf "$B"; die "configuring failed; see $OUT/setup.log"; }
   printf '%s\n' "$inputs" > "$B/.setup-inputs"
 fi
+rm -rf "$I"  # first: a failed build leaves no dylibs from the last one
 meson compile -C "$B" > "$OUT/build.log" 2>&1 || die "building failed; see $OUT/build.log"
-rm -rf "$I" && mkdir -p "$I/lib" "$I/include-native"
+mkdir -p "$I/lib" "$I/include-native"
 # One folder: each finds the others beside it (the build's rpaths name its own folders), signed again ad hoc as
 # arm64 needs after install_name_tool.
 for f in d3d12/d3d12 dxgi/dxgi d3d11/d3d11 d3d10/d3d10core nativemetal/winemetal; do

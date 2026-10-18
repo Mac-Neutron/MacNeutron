@@ -1,0 +1,191 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sat, 17 Oct 2026 20:09:40 -0400
+Subject: [PATCH] util: Native Wine paths, and events held until their fence
+ sets them.
+
+DXMT builds its DXIL dump's and pipeline recording's paths the Wine way, "Z:"
+and backslashes; natively they named nothing, so nothing was dumped or
+recorded (no precache). win32_native.h's paths drop Wine's root drive and
+take slashes.
+
+An event a fence's SetEventOnCompletion names was freed if the program
+closed it first, and the listener then set freed memory. Natively the
+listener holds a reference from registration to the set, as the Windows
+kernel does; handles are calloc'd so C (winemetal) releases them too.
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ src/util/win32_native.h             | 26 +++++++++---------------
+ src/util/win32_native_event.h       | 31 +++++++++++++++++++++++++++++
+ src/winemetal/unix/winemetal_unix.c | 11 +++++++++-
+ 3 files changed, 50 insertions(+), 18 deletions(-)
+
+diff --git a/src/util/win32_native.h b/src/util/win32_native.h
+index ac744b2..553fc02 100644
+--- a/src/util/win32_native.h
++++ b/src/util/win32_native.h
+@@ -105,7 +105,7 @@ static inline mn_win32_handle *mn_win32_get(HANDLE h, uint32_t kind) {
+ }
+ 
+ static inline mn_win32_handle *mn_win32_new(uint32_t kind) {
+-  mn_win32_handle *o = new mn_win32_handle();
++  mn_win32_handle *o = (mn_win32_handle *)calloc(1, sizeof *o); /* calloc: freed in C too (win32_native_event.h) */
+   o->kind = kind;
+   o->refs = 1;
+   o->fd = -1;
+@@ -116,12 +116,16 @@ static inline mn_win32_handle *mn_win32_new(uint32_t kind) {
+   return o;
+ }
+ 
+-/* Native paths: the wide string (UTF-32) as UTF-8. */
++/* Native paths: the wide string (UTF-32) as UTF-8. DXMT builds Wine's paths, "Z:" (Wine's drive for the root) and
++ * backslashes: natively the same path is the POSIX one. */
+ static inline std::string mn_win32_utf8(LPCWSTR s) {
+   std::string out;
++  if (s && (s[0] == L'Z' || s[0] == L'z') && s[1] == L':' && (s[2] == L'/' || s[2] == L'\\')) s += 2;
+   for (; s && *s; s++) {
+     uint32_t c = (uint32_t)*s;
+-    if (c < 0x80) {
++    if (c == L'\\') {
++      out += '/';
++    } else if (c < 0x80) {
+       out += (char)c;
+     } else if (c < 0x800) {
+       out += (char)(0xc0 | c >> 6), out += (char)(0x80 | (c & 0x3f));
+@@ -212,19 +216,7 @@ static inline DWORD WaitForSingleObject(HANDLE h, DWORD ms) {
+ 
+ static inline BOOL CloseHandle(HANDLE h) {
+   if (h == (HANDLE)(intptr_t)-1 || h == (HANDLE)(intptr_t)-2) return TRUE; /* the pseudo-handles */
+-  mn_win32_handle *o = (mn_win32_handle *)h;
+-  if (!h || (o->kind != MN_WIN32_EVENT && o->kind != MN_WIN32_SEMAPHORE && o->kind != MN_WIN32_FILE &&
+-             o->kind != MN_WIN32_THREAD))
+-    return SetLastError(ERROR_INVALID_HANDLE), FALSE;
+-  if (__atomic_fetch_sub(&o->refs, 1, __ATOMIC_ACQ_REL) != 1) return TRUE;
+-  if (o->kind == MN_WIN32_FILE) {
+-    close(o->fd);
+-  } else if (o->kind != MN_WIN32_THREAD) {
+-    pthread_mutex_destroy(&o->m);
+-    pthread_cond_destroy(&o->c);
+-  }
+-  o->kind = 0;
+-  delete o;
++  if (!mn_win32_unref(h)) return SetLastError(ERROR_INVALID_HANDLE), FALSE;
+   return TRUE;
+ }
+ 
+@@ -246,7 +238,7 @@ static inline BOOL DuplicateHandle(HANDLE, HANDLE source, HANDLE, LPHANDLE targe
+     return SetLastError(ERROR_INVALID_HANDLE), FALSE;
+   if (o->kind == MN_WIN32_FILE) {
+     mn_win32_handle *d = mn_win32_new(MN_WIN32_FILE);
+-    if ((d->fd = dup(o->fd)) < 0) return SetLastError(mn_win32_from_errno(errno)), delete d, FALSE;
++    if ((d->fd = dup(o->fd)) < 0) return SetLastError(mn_win32_from_errno(errno)), free(d), FALSE;
+     *target = d;
+   } else {
+     __atomic_fetch_add(&o->refs, 1, __ATOMIC_RELAXED);
+diff --git a/src/util/win32_native_event.h b/src/util/win32_native_event.h
+index 2e813ea..42c2041 100644
+--- a/src/util/win32_native_event.h
++++ b/src/util/win32_native_event.h
+@@ -10,6 +10,8 @@
+ 
+ #include <pthread.h>
+ #include <stdint.h>
++#include <stdlib.h>
++#include <unistd.h>
+ 
+ #define MN_WIN32_EVENT 0x6e657665u
+ #define MN_WIN32_SEMAPHORE 0x6d657373u
+@@ -30,6 +32,35 @@ struct mn_win32_handle {
+   uint64_t tid;
+ };
+ 
++static inline int mn_win32_is_handle(void *h) {
++  struct mn_win32_handle *o = (struct mn_win32_handle *)h;
++  return o && h != (void *)(intptr_t)-1 && h != (void *)(intptr_t)-2 &&
++         (o->kind == MN_WIN32_EVENT || o->kind == MN_WIN32_SEMAPHORE || o->kind == MN_WIN32_FILE ||
++          o->kind == MN_WIN32_THREAD);
++}
++
++/* Another reference to h: a fence's listener holds the event it will set, as the Windows kernel does, so the program
++ * may close it first. */
++static inline void mn_win32_ref(void *h) {
++  if (mn_win32_is_handle(h)) __atomic_fetch_add(&((struct mn_win32_handle *)h)->refs, 1, __ATOMIC_RELAXED);
++}
++
++/* Drops a reference (CloseHandle is one); the last frees the object. 1 if h was a handle, else 0. */
++static inline int mn_win32_unref(void *h) {
++  struct mn_win32_handle *o = (struct mn_win32_handle *)h;
++  if (!mn_win32_is_handle(h)) return 0;
++  if (__atomic_fetch_sub(&o->refs, 1, __ATOMIC_ACQ_REL) != 1) return 1;
++  if (o->kind == MN_WIN32_FILE) {
++    close(o->fd);
++  } else if (o->kind != MN_WIN32_THREAD) {
++    pthread_mutex_destroy(&o->m);
++    pthread_cond_destroy(&o->c);
++  }
++  o->kind = 0;
++  free(o);
++  return 1;
++}
++
+ /* Sets h if it is an event: 1, else 0. */
+ static inline int mn_win32_set_event(void *h) {
+   struct mn_win32_handle *o = (struct mn_win32_handle *)h;
+diff --git a/src/winemetal/unix/winemetal_unix.c b/src/winemetal/unix/winemetal_unix.c
+index fc35565..bf53120 100644
+--- a/src/winemetal/unix/winemetal_unix.c
++++ b/src/winemetal/unix/winemetal_unix.c
+@@ -2580,11 +2580,16 @@ typedef struct {
+ } *shared_event_listener_t;
+ 
+ #ifdef DXMT_NATIVE
+-/* Natively the events are src/util's (win32_native.h), set on the same listener's run loop. */
++/* Natively the events are src/util's (win32_native.h), set on the same listener's run loop, and held from the
++ * registration to the set, as the Windows kernel holds them: the program may close one before its fence fires. */
+ #include "../../util/win32_native_event.h"
+ #define NtSetEvent(handle, prev_state) mn_win32_set_event(handle)
++#define EVENT_HOLD(handle) mn_win32_ref(handle)
++#define EVENT_DROP(handle) mn_win32_unref(handle)
+ #else
+ extern NTSTATUS NtSetEvent(void *handle, void *prev_state);
++#define EVENT_HOLD(handle) ((void)0)
++#define EVENT_DROP(handle) ((void)0)
+ #endif
+ 
+ static NTSTATUS
+@@ -2592,6 +2597,7 @@ _MTLSharedEvent_setWin32EventAtValue(void *obj) {
+   struct unixcall_mtlsharedevent_setevent *params = obj;
+   void *nt_event_handle = (shared_event_listener_t)params->event_handle;
+   shared_event_listener_t q = (shared_event_listener_t)params->shared_event_listener;
++  EVENT_HOLD(nt_event_handle);
+   [(id<MTLSharedEvent>)params->shared_event
+       notifyListener:q->shared_listener
+              atValue:params->value
+@@ -2606,6 +2612,7 @@ _MTLSharedEvent_setWin32EventAtValue(void *obj) {
+                  }
+                  CFRunLoopPerformBlock(q->runloop_ref, kCFRunLoopCommonModes, ^{
+                    NtSetEvent(nt_event_handle, NULL);
++                   EVENT_DROP(nt_event_handle);
+                  });
+                  CFRunLoopWakeUp(q->runloop_ref);
+                }];
+@@ -2626,6 +2633,7 @@ _MTLSharedEvent_setWin32EventAtValues(void *obj) {
+   } *c = malloc(sizeof(*c));
+   atomic_init(&c->needed, params->needed);
+   atomic_init(&c->refs, params->count);
++  EVENT_HOLD(nt_event_handle);
+   for (uint32_t i = 0; i < params->count; i++) {
+     [(id<MTLSharedEvent>)events[i]
+         notifyListener:q->shared_listener
+@@ -2641,6 +2649,7 @@ _MTLSharedEvent_setWin32EventAtValues(void *obj) {
+                    if (atomic_fetch_sub(&c->needed, 1) == 1) {
+                      CFRunLoopPerformBlock(q->runloop_ref, kCFRunLoopCommonModes, ^{
+                        NtSetEvent(nt_event_handle, NULL);
++                       EVENT_DROP(nt_event_handle);
+                      });
+                      CFRunLoopWakeUp(q->runloop_ref);
+                    }
+-- 
+2.54.0 (Apple Git-157)
+

@@ -145,6 +145,35 @@ int main() {
         CloseHandle(done);
     }
 
+    // winpath: DXMT builds its dump and recording paths the Windows way, a drive and backslashes ("Z:" + a native
+    // folder, then "\\name"): natively they are the same POSIX path.
+    {
+        char tmpl[] = "/tmp/win32-winpath-XXXXXX";
+        std::string base = mkdtemp(tmpl) ? tmpl : "";
+        std::wstring w = L"Z:" + std::wstring(base.begin(), base.end());
+        bool made = CreateDirectoryW((w + L"\\sub").c_str(), nullptr);
+        HANDLE h = CreateFileW((w + L"\\sub\\f.bin").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                               FILE_ATTRIBUTE_NORMAL, nullptr);
+        bool opened = h != INVALID_HANDLE_VALUE;
+        CloseHandle(h);
+        bool there = access((base + "/sub/f.bin").c_str(), F_OK) == 0;
+        check("winpath", made && opened && there);
+        unlink((base + "/sub/f.bin").c_str());
+        rmdir((base + "/sub").c_str());
+        rmdir(base.c_str());
+    }
+
+    // closed: an event a fence holds (the listener's reference) and the program closes before the fence fires is
+    // still the event when it is set, then freed (ASan: no use after free).
+    {
+        HANDLE e = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        mn_win32_ref(e);
+        bool closed = CloseHandle(e);
+        bool set = mn_win32_set_event(e) == 1;
+        mn_win32_unref(e);
+        check("closed", closed && set);
+    }
+
     // module: dlopen and dlsym behind LoadLibraryA and GetProcAddress.
     {
         HMODULE m = LoadLibraryA("/usr/lib/libSystem.B.dylib");

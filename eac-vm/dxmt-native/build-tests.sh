@@ -35,9 +35,18 @@ rc=0
 DXMT_SHADER_CACHE_PATH=$(mktemp -d "${TMPDIR:-/tmp}/dxmt-native-check.XXXXXX") DXMT_MAX_ANISOTROPY=0 \
   "$OUT/d3d12_null" "$T/shaders/null.cs.dxil" > "$OUT/check-native.txt" 2>&1 || rc=$?
 echo "$rc" > "$OUT/check-native.status"
-if python3 -I "$ROOT/eac-vm/dxmt/compare.py" d3d12_null "$OUT/check-ref/d3d12_null.1.txt" \
-     "$OUT/check-ref/d3d12_null.1.txt" "$OUT/check-native.txt" null > "$OUT/check.txt" 2>&1; then
-  echo "tests: ok"
-else
-  cat "$OUT/check.txt"; echo "tests: FAIL d3d12_null differs"; exit 1
-fi
+python3 -I "$ROOT/eac-vm/dxmt/compare.py" d3d12_null "$OUT/check-ref/d3d12_null.1.txt" \
+  "$OUT/check-ref/d3d12_null.1.txt" "$OUT/check-native.txt" null > "$OUT/check.txt" 2>&1 \
+  || { cat "$OUT/check.txt"; echo "tests: FAIL d3d12_null differs"; exit 1; }
+# DXMT's own files natively, from the paths it builds the Wine way (Z: and backslashes): the pipeline recording (the
+# launcher's precache) and the DXIL dump.
+X=$(mktemp -d "${TMPDIR:-/tmp}/dxmt-native-files.XXXXXX")
+DXMT_PIPELINE_RECORD="$X/record" DXMT_DXIL_DUMP="$X/dump" DXMT_SHADER_CACHE_PATH="$X/cache" \
+  "$OUT/d3d12_null" "$T/shaders/null.cs.dxil" > "$OUT/check-files.txt" 2>&1 || true
+recorded=$(find "$X/record" -type f 2> /dev/null | wc -l | tr -d ' ')
+dumped=$(find "$X/dump" -type f 2> /dev/null | wc -l | tr -d ' ')
+rm -rf "$X"
+[ "$recorded" -gt 0 ] && [ "$dumped" -gt 0 ] \
+  || { echo "tests: FAIL DXMT's files: $recorded recorded, $dumped dumped"; exit 1; }
+echo "tests: ok"
+

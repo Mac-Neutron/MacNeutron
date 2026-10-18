@@ -4,8 +4,8 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 L=$ROOT/build/dxmt-native/install/lib
-sh "$ROOT/eac-vm/dxmt-native/build.sh" || true
 fail=
+sh "$ROOT/eac-vm/dxmt-native/build.sh" || fail=" build.sh"
 for e in "d3d12 _D3D12CreateDevice _D3D12GetDebugInterface _D3D12SerializeVersionedRootSignature" \
          "dxgi _CreateDXGIFactory2" "d3d11 _D3D11CreateDevice" "d3d10core _D3D10CoreCreateDevice" "winemetal"; do
   set -- $e

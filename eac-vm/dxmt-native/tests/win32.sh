@@ -7,7 +7,7 @@ D=$ROOT/build/wine-arm64-src/dxmt
 OUT=$ROOT/build/dxmt-native/tests
 mkdir -p "$OUT"
 H=$ROOT/eac-vm/dxmt-native/tests
-clang++ -std=c++20 -Wall -Wextra -Wno-unused-parameter -I"$D/include/native/windows" -I"$D/src/util" \
+clang++ -std=c++20 -Wall -Wextra -Wno-unused-parameter -fsanitize=address,undefined -I"$D/include/native/windows" -I"$D/src/util" \
   -o "$OUT/win32-test" "$H/win32-test.cpp" "$H/win32-other.cpp"
 "$OUT/win32-test" > "$OUT/win32-test.txt" 2>&1 || true
 cat "$OUT/win32-test.txt"
