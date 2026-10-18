@@ -3,7 +3,8 @@
 # (prefix.sh: mnd3d.dll and its stand-ins, native) must print its 18 "null" lines with the guest's and the host's traces
 # (MACNEUTRON_VM_D3D_TRACE=1) showing D3D12CreateDevice; MACNEUTRON_VM_D3D=guest the same lines on guest DXMT, with no
 # guest trace. Prints macneutron-vm's peak resident size in each (forwarding loads native DXMT, a second LLVM beside
-# the Wine build's). Needs the images (guest-stages.sh dxmt d3d, image/build.sh wine) and the share's dxmt-tests
+# the Wine build's), and that nothing lands in the folder the VM host ran from (native DXMT's logs go to the run's
+# traces). Needs the images (guest-stages.sh dxmt d3d, image/build.sh wine) and the share's dxmt-tests
 # (eac-vm/dxmt/share.sh). Prints "d3d-smoke: ok" or "d3d-smoke: FAIL <what>".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -28,7 +29,8 @@ timeout 20 wineserver -k
 tr -d '\r' < \$O/d3d-smoke.raw > \$O/d3d-smoke-$mode.txt
 EOS
   rm -f "$SH/traces/d3d-guest.txt" "$SH/traces/d3d-host.txt" "$SH/traces/d3d-smoke-$mode.txt"
-  MACNEUTRON_VM_D3D_TRACE=1 MN_RUN_TIMEOUT=400 sh "$ROOT/eac-vm/run-guest.sh" "$G" > "$W/d3d-smoke-$mode.log" 2>&1 &
+  C=$W/d3d-smoke-cwd; rm -rf "$C"; mkdir -p "$C"
+  (cd "$C" && MACNEUTRON_VM_D3D_TRACE=1 MN_RUN_TIMEOUT=400 sh "$ROOT/eac-vm/run-guest.sh" "$G") > "$W/d3d-smoke-$mode.log" 2>&1 &
   run=$!
   peak=0
   while kill -0 "$run" 2> /dev/null; do  # the VM host's resident size, its largest
@@ -41,6 +43,7 @@ EOS
   lines=$(/usr/bin/grep -c '^null ' "$out" 2> /dev/null || true)
   echo "d3d-smoke: $mode: ${lines:-0} null lines, $(/usr/bin/grep '^status' "$out" 2> /dev/null), macneutron-vm peak $((peak / 1024)) MiB"
   [ "${lines:-0}" -eq 18 ] || { fail="$fail $mode-lines"; tail -5 "$out" 2> /dev/null || true; }
+  [ -z "$(ls -A "$C")" ] || fail="$fail $mode-cwd($(ls -A "$C" | tr '\n' ' '))"
   if [ "$mode" = forward ]; then
     /usr/bin/grep -q '::D3D12CreateDevice' "$SH/traces/d3d-guest.txt" 2> /dev/null || fail="$fail no-guest-trace"
     /usr/bin/grep -q '::D3D12CreateDevice' "$SH/traces/d3d-host.txt" 2> /dev/null || fail="$fail no-host-trace"

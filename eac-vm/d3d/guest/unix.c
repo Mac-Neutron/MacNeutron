@@ -107,22 +107,31 @@ static void events(void) {
     events_ready = 1;
 }
 
-/* MACNEUTRON_VM_D3D_TRACE=1: each method's calls, written to the share's traces/d3d-guest.txt as the process ends. */
+/* MACNEUTRON_VM_D3D_TRACE=1: each method's calls, written to the share's traces/d3d-guest.txt as the process ends
+ * (the loopback's: MN_D3D_LOOPBACK_TRACE); a method the guest answered itself (op 3, once) is marked by why. */
 static _Atomic uint64_t *counts;
+static uint8_t *why; /* 1 refused, 2 a special without guest code */
 
 static void trace_out(void) {
-    FILE *f = counts ? fopen("/mnt/share/traces/d3d-guest.txt", "a") : NULL;
+#ifdef MN_D3D_LOOPBACK
+    const char *path = getenv("MN_D3D_LOOPBACK_TRACE");
+#else
+    const char *path = "/mnt/share/traces/d3d-guest.txt";
+#endif
+    FILE *f = counts && path ? fopen(path, "a") : NULL;
     if (!f) return;
     fprintf(f, "# process %d\n", (int)getpid());
     for (unsigned i = 0; i < MN_D3D_CALLS; i++)
-        if (counts[i]) fprintf(f, "%u %s %llu\n", i, mn_d3d_calls[i].name, (unsigned long long)counts[i]);
+        if (counts[i])
+            fprintf(f, "%u %s %llu%s\n", i, mn_d3d_calls[i].name, (unsigned long long)counts[i],
+                    why[i] == 1 ? " refused" : why[i] == 2 ? " unhandled" : "");
     fclose(f);
 }
 __attribute__((destructor)) static void trace_end(void) { trace_out(); }
 
 static void init(void) {
     const char *t = getenv("MACNEUTRON_VM_D3D_TRACE");
-    if (t && *t == '1') counts = calloc(MN_D3D_CALLS, sizeof *counts);
+    if (t && *t == '1' && (why = calloc(MN_D3D_CALLS, 1))) counts = calloc(MN_D3D_CALLS, sizeof *counts);
     mn_wm_guest_handle = proxy_handle;
     ready = mn_open();
     if (!ready) ready = mn_drained();
@@ -169,6 +178,14 @@ static int32_t family(uint32_t id, void *params) {
             at += n - 8;
             if (n == 8 || at >= a->cap) return 0;
         }
+    }
+    case MN_D3D_OP_TRACE: {
+        const uint32_t *m = params;
+        if (counts && m[0] < MN_D3D_CALLS) {
+            why[m[0]] = m[1] ? 1 : 2;
+            atomic_fetch_add_explicit(&counts[m[0]], 1, memory_order_relaxed);
+        }
+        return 0;
     }
     default:
         return MN_EINVAL;

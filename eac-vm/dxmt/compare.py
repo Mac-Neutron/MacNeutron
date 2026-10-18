@@ -6,10 +6,11 @@ compare.py <name> <macOS run 1> <macOS run 2> <guest run> <prefix>...
     a position where they agree is required, one where they differ (a timing, a counter) is masked. The guest must give
     that many lines and equal the macOS runs at every required position. No required line is a failure. Each run's
     exit status (<file>.status beside it, if there) must be the same; "timeout" is a timeout. A guest line from the
-    guest winemetal.so ("mn-winemetal: ...", a refused call) is a failure.
+    guest winemetal.so ("mn-winemetal: ...", a refused call) is a failure. Given one macOS run as both (the run-once
+    rule), nothing is masked, so a measurement (MEASURED: a time, a rate, a counter that varies) isn't compared.
 compare.py host <host output>
-    The VM host's own error lines fail the gate: the executor's (each failed queued call is one) and the host
-    winemetal forwarder's. The presentation counts and probes ("mn-present: ...", milestone 4c) aren't errors.
+    The VM host's own error lines fail the gate: the executor's (each failed queued call is one), the host
+    winemetal forwarder's and the Direct3D dispatcher's (M2). The presentation counts and probes ("mn-present: ...", milestone 4c) aren't errors.
 compare.py self-test
     Each rule's failure case must fail, and an agreeing run pass.
 Prints "ok ..." or "FAIL ...", and exits 1 on a failure.
@@ -17,6 +18,10 @@ Prints "ok ..." or "FAIL ...", and exits 1 on a failure.
 import os
 import sys
 import tempfile
+
+# Lines that are measurements, not behaviour: on another path they run at another speed, and two macOS runs mask them
+# only when they happen to differ (d3d12_cache's timing and d3d12_compress's uav-clear once agreed to the tenth).
+MEASURED = ('timing ', 'compress clear ', 'compress uav-clear ', 'ts-many values ', 'timestamp values ')
 
 
 def lines(path, prefixes):
@@ -45,6 +50,8 @@ def compare(name, ref1, ref2, guest, prefixes):
     if refused:
         return f'FAIL {name}: {refused[0]}'
     r1, r2, g = lines(ref1, prefixes), lines(ref2, prefixes), lines(guest, prefixes)
+    if ref1 == ref2:
+        r1, r2, g = ([l for l in x if not l.startswith(MEASURED)] for x in (r1, r2, g))
     if len(r1) != len(r2):
         return f'FAIL {name}: the macOS runs differ in their lines ({len(r1)}, {len(r2)})'
     required = [i for i in range(len(r1)) if r1[i] == r2[i]]
@@ -60,7 +67,7 @@ def compare(name, ref1, ref2, guest, prefixes):
 
 def host(path):
     with open(path, errors='replace') as f:
-        bad = [l.rstrip('\n') for l in f if l.startswith(('mn-executor: error', 'mn-winemetal:'))]
+        bad = [l.rstrip('\n') for l in f if l.startswith(('mn-executor: error', 'mn-winemetal:', 'mn-d3d: error'))]
     return f'FAIL host: {len(bad)} error lines, first [{bad[0]}]' if bad else 'ok   host: no error lines'
 
 
@@ -86,23 +93,26 @@ def self_test():
         ('exit-status', f('e1', ref), f('e2', ref), f('eg', ref, '137'), 'FAIL'),
         ('refused', f('u1', ref), f('u2', ref), f('ug', ref + 'mn-winemetal: X (slot 47) is refused: 0xc0000002\n'), 'FAIL'),
         ('no-status', f('n1', ref, None), f('n2', ref, None), f('ng', ref, None), 'ok'),
+        ('one-run', f('o1', ref), None, f('og', ref.replace('3.5', '9')), 'ok'),
+        ('one-run-changed', f('p1', ref), None, f('pg', ref.replace('ok 2', 'ok 3')), 'FAIL'),
     ]
     failures = 0
     for name, r1, r2, g, want in cases:
-        got = compare(name, r1, r2, g, ['copy', 'timing'])
+        got = compare(name, r1, r2 or r1, g, ['copy', 'timing'])
         if not got.startswith(want):
             print(f'FAIL self-test {name}: {got}')
             failures += 1
     for name, text, want in [('host-clean', 'mn-executor: context 1\nmn-executor: context 1 gone\n', 'ok'),
                              ('host-error', 'mn-executor: context 1\nmn-executor: error: asynchronous op failed (4114, 3221225485)\n', 'FAIL'),
                              ('host-winemetal', 'mn-winemetal: slot 18 raised NSInvalidArgumentException\n', 'FAIL'),
+                             ('host-d3d', 'mn-d3d: error: ID3D12Device::CreateFence: a record of 8 bytes, its params 48\n', 'FAIL'),
                              ('host-present', 'mn-present: probe 30 pixels 921600 green 98 white 0 colors 2\n'
                               'mn-present: context 1: 600 drawables presented\n', 'ok')]:
         got = host(f(name, text, None))
         if not got.startswith(want):
             print(f'FAIL self-test {name}: {got}')
             failures += 1
-    print('self-test: ' + ('FAIL' if failures else f'ok ({len(cases) + 4} cases)'))
+    print('self-test: ' + ('FAIL' if failures else f'ok ({len(cases) + 5} cases)'))
     return failures == 0
 
 

@@ -21,14 +21,6 @@ ROWS=${MN_DXMT_ONLY:-"d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_co
   d3d12_triangle d3d12_upscale d3d12_volume d3d12_vsread"}
 WANT=$(echo $ROWS | wc -w | tr -d ' ')
 now() { perl -MTime::HiRes=time -e 'printf "%.2f\n", time'; }
-# Measurements, not behaviour, left out of the comparison: natively they run at another speed, and the 4b-2 rule masks
-# a line only when the two macOS runs happen to differ (d3d12_cache's timing and d3d12_compress's uav-clear once agreed
-# to the tenth).
-MEASURED='^(timing |compress clear |compress uav-clear |ts-many values |timestamp values )'
-behaviour() {  # behaviour <run> <copy>: the run without its measurements, with its status
-  /usr/bin/grep -Ev "$MEASURED" "$1.txt" > "$2.txt" || true
-  if [ -f "$1.status" ]; then cp "$1.status" "$2.status"; fi
-}
 fail=0
 python3 -I "$D/compare.py" self-test || fail=1
 for p in $ROWS; do [ -x "$P/$p" ] || { echo "$NAME: no $P/$p: run build-tests.sh first"; exit 1; }; done
@@ -37,7 +29,7 @@ MN_DXMT_ONLY=$(echo $ROWS) sh "$D/share.sh" || exit 1
 mkdir -p "$R"
 MN_REF_RUNS=1 sh "$D/ref.sh" > "$R.ref.txt" 2>&1 || { tail "$R.ref.txt"; exit 1; }
 TO=$(cat "$ROOT/build/eac-vm-work/share/dxmt-tests/timeout")
-rm -rf "$R"; mkdir -p "$R/cache" "$R/compared"
+rm -rf "$R"; mkdir -p "$R/cache"
 n=0
 while IFS='|' read -r name exe args prefixes; do
   n=$((n + 1))
@@ -54,10 +46,8 @@ while IFS='|' read -r name exe args prefixes; do
   if [ -f "$R/$name.timed-out" ]; then echo timeout; else echo "$rc"; fi > "$R/$name.status"
   rm -f "$R/$name.timed-out"
   echo "$start $(now)" | awk '{printf "%.2f\n", $2 - $1}' > "$R/$name.time"
-  C=$R/compared/$name
-  behaviour "$REF/$name.1" "$C.1"; behaviour "$R/$name" "$C.native"
-  # shellcheck disable=SC2086  # the prefixes, one word each
-  python3 -I "$D/compare.py" "$name" "$C.1.txt" "$C.1.txt" "$C.native.txt" $prefixes || fail=1  # one reference run
+  # shellcheck disable=SC2086  # the prefixes, one word each; one reference run: its measurements aren't compared
+  python3 -I "$D/compare.py" "$name" "$REF/$name.1.txt" "$REF/$name.1.txt" "$R/$name.txt" $prefixes || fail=1
   echo "     time: macOS $(cat "$REF/$name.1.time") s, native $(cat "$R/$name.time") s"
 done < "$ROOT/build/eac-vm-work/share/dxmt-tests/invocations"
 [ "$n" -eq "$WANT" ] || { echo "$NAME: $n programs ran, not $WANT"; fail=1; }

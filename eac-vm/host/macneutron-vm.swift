@@ -167,8 +167,10 @@ if !wmLoaded {
 }
 // Direct3D forwarding (M2): native DXMT beside macneutron-vm, loaded by the first Direct3D record (eac-vm/d3d).
 mn_d3d_set_dir(URL(fileURLWithPath: metalHost).deletingLastPathComponent().appendingPathComponent("dxmt").path)
+// Its logs in the run's traces, not the folder macneutron-vm runs from (natively DXMT's program name is empty: _dxgi.log).
+try? FileManager.default.createDirectory(atPath: share + "/traces", withIntermediateDirectories: true)
+setenv("DXMT_LOG_PATH", share + "/traces", 0)
 if ProcessInfo.processInfo.environment["MACNEUTRON_VM_D3D_TRACE"] == "1" {
-  try? FileManager.default.createDirectory(atPath: share + "/traces", withIntermediateDirectories: true)
   mn_d3d_set_trace(share + "/traces/d3d-host.txt")
 }
 var vmHooks = mn_vm_hooks

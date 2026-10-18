@@ -82,6 +82,8 @@ void mn_d3d_unhandled(uint32_t id, const char *name, int refused) {
     uint64_t bit = 1ull << (id % 64);
     if (said[id / 64].fetch_or(bit) & bit) return;
     fprintf(stderr, refused ? "mn-d3d: %s is refused\n" : "mn-d3d: %s has no guest code\n", name);
+    uint32_t m[2] = {id, (uint32_t)refused};
+    mn_d3d_call(MN_D3D_OP_TRACE, m); // for the guest's trace (coverage.py), if on
 }
 
 HRESULT STDMETHODCALLTYPE mn_px_QueryInterface(mn_proxy *This, REFIID riid, void **out) {

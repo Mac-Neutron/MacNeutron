@@ -15,7 +15,7 @@ enum {
     MN_D3D_OP_RELEASE = 0, /* u64 handle: the guest's last Release (deferred until the rings that used it pass) */
     MN_D3D_OP_ARENA = 1,   /* Task 7 */
     MN_D3D_OP_NOTIFY = 2,  /* Task 8 */
-    MN_D3D_OP_TRACE = 3,   /* Task 11 */
+    MN_D3D_OP_TRACE = 3,   /* u32 id, u32 refused: a method the guest answered itself, for its trace; never sent */
     MN_D3D_OP_QUERY = 4,   /* struct mn_d3d_query: QueryInterface for an interface at another pointer, a new handle */
     MN_D3D_OP_BLOB = 5,    /* struct mn_d3d_blob: an ID3D10Blob's bytes; reply: u64 its size, then the bytes asked */
 };
