@@ -937,3 +937,40 @@ Left for later milestones: the XeSS rows (4) and DLSS rows (5) need the upscaler
 Wine builtin `libxess` natively, and `nvngx` is a native build of its own); `d3d11_vsia` compiles HLSL with Wine's
 `d3dcompiler`, which has no native build, and D3D11 is M4's. Native DXMT isn't in the app yet: it goes in with the
 first milestone whose VM loads it.
+
+## 18. A trap per call instead of a ring (spike, 2026-10-17)
+
+The question: could a forwarded call skip the ring's cross-thread handoff (consumer threads that spin, doorbells, fence
+waits) and run on the vCPU that made it? A guest access to a page the host leaves unmapped exits to that vCPU's own
+host thread, which could execute the call and resume the guest. A throwaway libkrun build left one virtio-gpu blob of a
+marked size unmapped (`GpuRemoveMapping` instead of `GpuAddMapping`) and answered the GPU window's exits on the vCPU
+thread: a write counted, a read answered the count. No guest kernel change: the stock virtio-gpu driver maps the blob
+into the program. `trapbench` (x86-64 under FEX, as a game's code runs, and arm64 natively) against today's ring
+(`metal-transport-test bench`), one VM boot:
+
+| Path | Cost |
+|---|---|
+| Trap: a store (a flush's doorbell) | 0.98 µs (natively 0.95-1.07) |
+| Trap: a load (a call with an 8-byte answer) | 0.98 µs |
+| Trap: store then load (doorbell and answer) | 2.0 µs |
+| Ring: an asynchronous record | 11 ns |
+| Ring: a synchronous call, the host's consumer spinning | 0.32 µs |
+| Ring: a synchronous call on the fence (consumer not spinning) | 26.5 µs |
+| Ring: a call that wakes a parked consumer | 48 µs |
+
+Every trap arrived (400,000 of 400,000): FEX's stores carry a valid syndrome. FEX adds nothing to an exit.
+
+Exits from several threads at once don't scale: 1.0, 1.3, 1.7, 4.5 and 8.2 µs an exit a thread with 1, 2, 4, 8 and 16
+threads, about 2 million exits a second for the VM. Not the trap's code: answered lock-free before libkrun's bus, the
+same. A host `sample` of 8 writers puts the waits in Hypervisor.framework's virtual GIC: every vCPU entry and exit syncs
+its list registers under one VM-wide lock (`Gic::apply_list_registers`, `Gic::compute_list_registers`), and its MMIO
+data-abort path takes it too (`Gic::write_memory`). That lock is taken by every exit the VM makes, timer interrupts and
+idle wake-ups included: M0's "vCPU wake-ups" (Hypervisor.framework's lock and interrupt bookkeeping) are its other face.
+
+What it says for forwarding: a synchronous call by trap costs about 1 µs with no host thread spinning, against 0.32 µs
+with one spinning (a core while it spins) or 26-48 µs without. Asynchronous calls would still collect in memory at the
+ring's cost; one exit flushes them. At tens of thousands of flushes a second (a game's submissions, presents and
+synchronous calls) the exits cost a few percent of a core, against the 0.5-1 core the consumers spin and the wake-ups
+they cause. The costs: the game's thread waits while the host encodes (native DXMT runs on the game's thread too), a
+long host call (a pipeline's compile) stalls that vCPU, and every extra exit takes the GIC's lock. The spike's libkrun
+was put back (`eac-vm/libkrun/build.sh`); nothing of it is kept.
