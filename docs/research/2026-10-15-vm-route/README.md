@@ -1228,10 +1228,22 @@ Steam, a practice match the maintainer played, 1920x1080, the game's settings):
 | M0, macOS (§15) | | 119.5 fps (the cap) | 4.64 cores | | |
 
 Forwarded, the VM host uses about the cores macOS does, a third of guest mode's, but the frame rate is lower: the
-settings differ from M0's, and where the frames go is M5's question. Two leads from the runs: every call with an
-answer is a vCPU exit (`QueryVideoMemoryInfo` alone about 900 a second), and pipeline creations still compile on vCPU
-threads (721 graphics pipelines over 4 ms in one run, the longest 120 ms). The 7 `GetResourceAllocationInfo failed`
+settings differ from M0's, and where the frames go is M5's question. Leads from the runs, largest first: the CPU
+descriptor writes, about 765 a frame in the DLSS run (`CopyDescriptors` 3.93 million, `CopyDescriptorsSimple` 0.79
+million, `CreateShaderResourceView` 0.67 million over 7,114 frames), each a submit (an exit that takes the one submit
+lock and runs every ring, §19); every other call with an answer is an exit too (`QueryVideoMemoryInfo` about 32 a
+frame, `GetBuffer`, `GetCurrentBackBufferIndex` and `GetFullscreenState` each frame); and pipeline creations still
+compile on vCPU threads (721 graphics pipelines over 4 ms in one run, the longest 120 ms). The 7 `GetResourceAllocationInfo failed`
 lines in SMITE 2's log are DXMT's: the macOS run logs the same 7.
+
+The final review (one fresh reviewer over the branch) found two things the runs didn't, each now pinned by a test that
+failed first:
+- The guest's replay of native DXMT's window actions held the swapchain's lock across DXMT's Win32 window calls, which
+  send `WM_SIZE` to the game's window procedure at once: a game that answers `WM_SIZE` with `ResizeBuffers(0, 0)`, as
+  DXGI's samples do, hung in `ResizeTarget` and `SetFullscreenState` (`smoke.cpp`'s wmsize line, forwarded; guest DXMT
+  drops its own lock there, and passed). The calls now run on a copy of the saved window state, without the lock.
+- A record naming no object (`self` 0) ran its stub on NULL and could take the VM host down (`dispatch-test`); the
+  dispatcher refuses it with `STATUS_INVALID_HANDLE`.
 
 Open:
 - Palworld (M3's gate), with the maintainer.
@@ -1239,5 +1251,7 @@ Open:
   DXMT adapter"): Unreal's crash reporter showed a black window. M4 forwards D3D11.
 - One DLSS run aborted at startup in Streamline's signature check (Wine's `wintrust` failed its delayed import of
   `imagehlp`); the next passed in full. Seen once, cause open.
+- The VM's display (Xvfb) reports no refresh rate, so neither native nor guest DXMT paces sync interval 1: vsync is
+  off in the VM in both modes.
 - A SMITE 2 run whose game crashed still waits out its 180 s (Unreal's crash reporter holds the launcher), and a game
   that dies before Steam initialises makes the row skip, not fail.

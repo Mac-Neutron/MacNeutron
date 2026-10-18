@@ -18,6 +18,9 @@
 //                signalled once a presented frame; a swapchain without one presents 60 frames the GPU takes longer
 //                over than the CPU (four 256 MiB copies each), which d3d-smoke.sh checks held no vCPU on the host
 //                ("ok", or what broke)
+//   wmsize       (M3's final review) a window that answers WM_SIZE with ResizeBuffers(0, 0), as DXGI's samples do:
+//                ResizeTarget(640x480) and SetFullscreenState(TRUE, then FALSE) on its own thread each return, and
+//                the buffers are then the window's size ("ok", "hang <step>": 10 s, the process ends, or the size)
 //   wmtforward   (after M2) winemetal's WMTForward (fork 0079) refuses a call past the guest's table, 156
 //                ("ok": STATUS_INVALID_PARAMETER, or what it answered); last, as a wrong one may end the process
 // A failed step prints "<line> FAIL <step>".
@@ -120,6 +123,68 @@ static IDXGISwapChain1 *swapchain(ID3D12CommandQueue *queue, HWND *window, UINT 
     if (f) f->Release();
     *window = w;
     return sc;
+}
+
+// A step that may hang: the watchdog ends the process after 10 s, saying where.
+static const char *volatile step;
+static HANDLE step_done;
+static DWORD WINAPI watchdog(void *line) {
+    for (const char *last = nullptr;;) {
+        if (WaitForSingleObject(step_done, 10000) == WAIT_OBJECT_0) {
+            if (!step) return 0;
+            last = step;
+            continue;
+        }
+        if (step && step == last) {
+            printf("%s hang %s\n", (const char *)line, step);
+            ExitProcess(3);
+        }
+        last = step;
+    }
+}
+static void watch(const char *line) {
+    step_done = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    CloseHandle(CreateThread(nullptr, 0, watchdog, (void *)line, 0, nullptr));
+}
+static void at(const char *s) { step = s, SetEvent(step_done); }
+
+static IDXGISwapChain1 *sizing; // the WM_SIZE answer's swapchain
+static LRESULT CALLBACK size_proc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
+    if (m == WM_SIZE && sizing) sizing->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
+    return DefWindowProcA(w, m, wp, lp);
+}
+
+static void wmsize(ID3D12CommandQueue *queue) {
+    HWND w;
+    IDXGISwapChain1 *sc = swapchain(queue, &w);
+    if (!sc) return (void)printf("wmsize FAIL swapchain\n");
+    SetWindowLongPtrA(w, GWLP_WNDPROC, (LONG_PTR)size_proc);
+    sizing = sc;
+    watch("wmsize");
+    DXGI_MODE_DESC mode = {};
+    mode.Width = 640, mode.Height = 480, mode.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    at("ResizeTarget");
+    HRESULT hr = sc->ResizeTarget(&mode);
+    pump();
+    at("SetFullscreenState TRUE");
+    sc->SetFullscreenState(TRUE, nullptr);
+    pump();
+    at("SetFullscreenState FALSE");
+    sc->SetFullscreenState(FALSE, nullptr);
+    pump();
+    at("ResizeTarget again");
+    sc->ResizeTarget(&mode);
+    pump();
+    at(nullptr);
+    sizing = nullptr;
+    DXGI_SWAP_CHAIN_DESC1 d = {};
+    RECT r = {};
+    sc->GetDesc1(&d);
+    GetClientRect(w, &r);
+    if (SUCCEEDED(hr) && d.Width == (UINT)r.right && d.Height == (UINT)r.bottom) printf("wmsize ok\n");
+    else printf("wmsize %08lx buffers %ux%u, window %ldx%ld\n", (unsigned long)hr, d.Width, d.Height, r.right, r.bottom);
+    sc->Release();
+    DestroyWindow(w);
 }
 
 static const char *own_answers(ID3D12CommandQueue *queue) {
@@ -264,8 +329,10 @@ int main() {
     minimised(queue);
     printf("latency %s\n", latency(device, queue));
     const char *mode = getenv("MACNEUTRON_VM_D3D");
-    if (mode && !strcmp(mode, "forward")) printf("swapchain %s\n", own_answers(queue));
+    bool forward = mode && !strcmp(mode, "forward");
+    if (forward) printf("swapchain %s\n", own_answers(queue));
     else printf("swapchain untested: guest DXMT aborts on these\n");
+    wmsize(queue);
     queue->Release();
     device->Release();
     wmt_forward();

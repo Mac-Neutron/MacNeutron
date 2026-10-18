@@ -6,9 +6,9 @@
 # made its first Direct3D call on a thread that has ended, is set from a Wine thread of its own), "name ok" (SetName
 # reads back in the guest's WCHARs), "minimised ok" (a minimised window's present costs the host's vCPU no sleep),
 # "latency ok" (the frame latency object, and GPU-bound presents that hold no vCPU on the host: mn-d3d's "slow:" lines)
-# and "wmtforward ok" (fork 0079 refuses a call past the guest's table), and forwarded "swapchain ok" (DXGI's answers
-# where DXMT has none) and "eventreuse ok" (a closed event's reused handle takes no stray set; guest DXMT has that bug
-# too). Prints macneutron-vm's peak resident size in each
+# and "wmtforward ok" (fork 0079 refuses a call past the guest's table) and "wmsize ok" (a window resizing its buffers
+# from WM_SIZE through full screen and ResizeTarget), and forwarded "swapchain ok" (DXGI's answers where DXMT has none) and "eventreuse ok" (a closed event's
+# reused handle takes no stray set; guest DXMT has that bug too). Prints macneutron-vm's peak resident size in each
 # (forwarding loads native DXMT, a second LLVM beside the Wine build's), and that nothing lands in the folder the VM
 # host ran from (native DXMT's logs go to the run's traces), and forwarded, native DXMT's shader cache and recorded
 # pipelines in MN_D3D_STATE's folder (a game's VM state). Needs the images (guest-stages.sh dxmt d3d, image/build.sh
@@ -57,7 +57,7 @@ EOS
   echo "d3d-smoke: $mode: ${lines:-0} null lines, $(/usr/bin/grep '^status' "$out" 2> /dev/null), macneutron-vm peak $((peak / 1024)) MiB"
   [ "${lines:-0}" -eq 18 ] || { fail="$fail $mode-lines"; tail -5 "$out" 2> /dev/null || true; }
   [ -z "$(ls -A "$C")" ] || fail="$fail $mode-cwd($(ls -A "$C" | tr '\n' ' '))"
-  checks="eventthread name minimised latency wmtforward"
+  checks="eventthread name minimised latency wmtforward wmsize"
   [ "$mode" = guest ] || checks="$checks eventreuse swapchain"
   for c in $checks; do
     got=$(/usr/bin/grep "^$c " "$out" 2> /dev/null || true)

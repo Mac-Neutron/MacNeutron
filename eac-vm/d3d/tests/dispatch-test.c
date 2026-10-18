@@ -342,6 +342,9 @@ int main(int argc, char **argv) {
     dm.desc = (uintptr_t)modes;
     CHECK(sizeof modes == 56 && call(omodes, &dm) == 0 && (uint32_t)dm.ret == 0 && count == 2);
     CHECK(modes[0].width == 1280 && modes[0].height == 720 && modes[1].width == 1920 && modes[1].height == 1080);
+    /* a method on no object (self 0; M3's final review): refused, and the host goes on (its stub ran on NULL) */
+    struct { uint64_t self, ret, desc, aux[2]; } nod = {0, 0, (uintptr_t)od, {0}};
+    CHECK(call(odesc, &nod) == (int32_t)MN_STATUS_INVALID_HANDLE);
 
     /* notimpl: a call DXMT has no code for (a render target view of a buffer: its IMPLEMENT_ME) fails, logged; the
      * host goes on */

@@ -537,22 +537,32 @@ static void replay(mn_obj *o) {
     mn_d3d_actions_args a = {(uintptr_t)v, sizeof v, 0};
     if (mn_d3d_call(MN_D3D_OP_ACTIONS, &a) || !a.len) return;
     namespace wsi = dxmt::wsi;
+    // The window calls send WM_SIZE and the like to the game's window procedure at once, which may call back into this
+    // swapchain (ResizeBuffers on WM_SIZE): made without its lock, as guest DXMT drops its own around them.
+    dxmt::wsi::DXMTWindowState saved;
+    {
+        std::lock_guard<std::mutex> l(o->m);
+        saved = o->saved;
+    }
     for (uint32_t i = 0; i < a.len / sizeof *v; i++) {
         const mn_d3d_action &x = v[i];
         HWND w = (HWND)(uintptr_t)x.hwnd;
         HMONITOR m = (HMONITOR)(uintptr_t)x.monitor;
         wsi::WsiMode mode = {x.width, x.height, {x.refresh_num, x.refresh_den}, x.bits_per_pixel, x.interlaced != 0};
-        std::lock_guard<std::mutex> l(o->m);
         switch (x.kind) {
-        case MN_D3D_ACTION_SAVE: wsi::saveWindowState(w, &o->saved); break;
+        case MN_D3D_ACTION_SAVE: wsi::saveWindowState(w, &saved); break;
         case MN_D3D_ACTION_SET_MODE: wsi::setWindowMode(m, w, mode); break;
-        case MN_D3D_ACTION_ENTER: wsi::enterFullscreenMode(m, w, &o->saved, x.arg != 0); break;
-        case MN_D3D_ACTION_LEAVE: wsi::leaveFullscreenMode(w, &o->saved, x.arg != 0); break;
+        case MN_D3D_ACTION_ENTER: wsi::enterFullscreenMode(m, w, &saved, x.arg != 0); break;
+        case MN_D3D_ACTION_LEAVE: wsi::leaveFullscreenMode(w, &saved, x.arg != 0); break;
         case MN_D3D_ACTION_RESTORE_MODE: wsi::restoreDisplayMode(m); break;
-        case MN_D3D_ACTION_RESIZE: wsi::resizeWindow(w, &o->saved, x.width, x.height); break;
+        case MN_D3D_ACTION_RESIZE: wsi::resizeWindow(w, &saved, x.width, x.height); break;
         case MN_D3D_ACTION_UPDATE_FULLSCREEN: wsi::updateFullscreenWindow(m, w, x.arg != 0); break;
         case MN_D3D_ACTION_MINIMIZE: wsi::minimizeWindow(w); break;
         }
+    }
+    {
+        std::lock_guard<std::mutex> l(o->m);
+        o->saved = saved;
     }
     push_displays();
     push_window(o->window, o);

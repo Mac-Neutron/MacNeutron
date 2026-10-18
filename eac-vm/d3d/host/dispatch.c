@@ -296,6 +296,11 @@ static int32_t d3d(uint32_t ctx_id, void *ring, uint32_t id, const void *p, uint
     if (!loaded) return MN_D3D_E_FAIL;
     uint32_t removed = atomic_load(&c->d3d_removed);
     if (removed) return MN_D3D_DEVICE_REMOVED;
+    if (call->name[0] != ':' && call->nfields && call->fields[0].kind == WMF_HANDLE_IN) { /* a method: its object */
+        mn_handle self;
+        memcpy(&self, (const uint8_t *)p + call->fields[0].offset, sizeof self);
+        if (!self) return (int32_t)MN_STATUS_INVALID_HANDLE; /* its stub would call it on NULL (M3's final review) */
+    }
     NTSTATUS_T (*stub)(void *) = mn_d3d_stubs[id];
     if (!stub) {
         if (!(atomic_fetch_or(&said[id / 64], 1ull << (id % 64)) & (1ull << (id % 64))))
