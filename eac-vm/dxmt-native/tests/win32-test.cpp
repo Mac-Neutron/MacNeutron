@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <string>
+#include <atomic>
 #include <thread>
 #include <unistd.h>
 
@@ -172,6 +173,19 @@ int main() {
         bool set = mn_win32_set_event(e) == 1;
         mn_win32_unref(e);
         check("closed", closed && set);
+    }
+
+    // relay: an event whose SetEvent calls a function (the VM host's fence completions), on the setter's thread; it
+    // can't be waited on.
+    {
+        static std::atomic<int> calls{0};
+        static void *seen = nullptr;
+        int token = 7;
+        HANDLE r = mn_win32_relay_event([](void *ctx) { seen = ctx; calls++; }, &token);
+        std::thread t([r] { SetEvent(r); });
+        t.join();
+        bool waited = WaitForSingleObject(r, 0) == WAIT_FAILED;
+        check("relay", r && calls == 1 && seen == &token && waited && CloseHandle(r));
     }
 
     // module: dlopen and dlsym behind LoadLibraryA and GetProcAddress.

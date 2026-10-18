@@ -1,0 +1,188 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sat, 17 Oct 2026 21:38:30 -0400
+Subject: [PATCH] winemetal: Hooks for a VM host, natively: guest memory, relay
+ events.
+
+For MacNeutron's microVM host, which runs native DXMT on the guest's behalf:
+- WMTSetMemoryHooks: a CPU-visible buffer that brings no memory of its own
+  takes the hooks' pages (newBufferWithBytesNoCopy), freed when Metal lets
+  the buffer go, so a game's mappable resources live in memory the guest
+  shares. Unset, Metal's memory as before.
+- mn_win32_relay_event: an event whose SetEvent calls a function, so the
+  host learns a fence's completion from DXMT's own listener.
+- The cache's Objective-C classes are renamed natively: the Wine build's
+  winemetal.so defines the same ones, and both load in the host.
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ src/nativemetal/meson.build         |  4 ++-
+ src/util/win32_native_event.h       | 26 ++++++++++++++---
+ src/winemetal/unix/winemetal_unix.c | 44 +++++++++++++++++++++++++++++
+ src/winemetal/winemetal.h           |  9 ++++++
+ 4 files changed, 78 insertions(+), 5 deletions(-)
+
+diff --git a/src/nativemetal/meson.build b/src/nativemetal/meson.build
+index 2c037f8..a221ca0 100644
+--- a/src/nativemetal/meson.build
++++ b/src/nativemetal/meson.build
+@@ -17,7 +17,9 @@ winemetal_dll = shared_library('winemetal', winemetal_src,
+   name_prefix         : '',
+   dependencies        : [ airconv_dep_darwin ],
+   include_directories : [ dxmt_include_path, include_directories('.') ],
+-  c_args              : ['-ObjC', '-DDXMT_NATIVE=1'],
++  # The Wine build's winemetal.so defines the same classes: both load in the VM host (macneutron-vm).
++  c_args              : ['-ObjC', '-DDXMT_NATIVE=1', '-DCacheReader=DXMTNativeCacheReader',
++                         '-DCacheWriter=DXMTNativeCacheWriter'],
+   link_args           : winemetal_ld_args,
+   build_rpath         : '@loader_path/:@loader_path/../../',
+ )
+diff --git a/src/util/win32_native_event.h b/src/util/win32_native_event.h
+index 42c2041..6709b07 100644
+--- a/src/util/win32_native_event.h
++++ b/src/util/win32_native_event.h
+@@ -17,6 +17,7 @@
+ #define MN_WIN32_SEMAPHORE 0x6d657373u
+ #define MN_WIN32_FILE 0x656c6966u
+ #define MN_WIN32_THREAD 0x64726874u
++#define MN_WIN32_RELAY 0x79616c72u
+ 
+ struct mn_win32_handle {
+   uint32_t kind;
+@@ -30,13 +31,16 @@ struct mn_win32_handle {
+   int fd;
+   /* threads (OpenThread): the thread's id */
+   uint64_t tid;
++  /* relays: what SetEvent calls instead of waking waiters */
++  void (*relay)(void *ctx);
++  void *relay_ctx;
+ };
+ 
+ static inline int mn_win32_is_handle(void *h) {
+   struct mn_win32_handle *o = (struct mn_win32_handle *)h;
+   return o && h != (void *)(intptr_t)-1 && h != (void *)(intptr_t)-2 &&
+          (o->kind == MN_WIN32_EVENT || o->kind == MN_WIN32_SEMAPHORE || o->kind == MN_WIN32_FILE ||
+-          o->kind == MN_WIN32_THREAD);
++          o->kind == MN_WIN32_THREAD || o->kind == MN_WIN32_RELAY);
+ }
+ 
+ /* Another reference to h: a fence's listener holds the event it will set, as the Windows kernel does, so the program
+@@ -52,7 +56,7 @@ static inline int mn_win32_unref(void *h) {
+   if (__atomic_fetch_sub(&o->refs, 1, __ATOMIC_ACQ_REL) != 1) return 1;
+   if (o->kind == MN_WIN32_FILE) {
+     close(o->fd);
+-  } else if (o->kind != MN_WIN32_THREAD) {
++  } else if (o->kind != MN_WIN32_THREAD && o->kind != MN_WIN32_RELAY) {
+     pthread_mutex_destroy(&o->m);
+     pthread_cond_destroy(&o->c);
+   }
+@@ -61,10 +65,24 @@ static inline int mn_win32_unref(void *h) {
+   return 1;
+ }
+ 
+-/* Sets h if it is an event: 1, else 0. */
++/* An event whose SetEvent calls fn(ctx) on the setter's thread instead of waking waiters (it can't be waited on): how
++ * a host that holds DXMT learns a fence's completion. CloseHandle frees it. */
++static inline void *mn_win32_relay_event(void (*fn)(void *ctx), void *ctx) {
++  struct mn_win32_handle *o = (struct mn_win32_handle *)calloc(1, sizeof *o);
++  if (!o) return 0;
++  o->kind = MN_WIN32_RELAY, o->refs = 1, o->fd = -1, o->relay = fn, o->relay_ctx = ctx;
++  return o;
++}
++
++/* Sets h if it is an event, or calls a relay's function: 1, else 0. */
+ static inline int mn_win32_set_event(void *h) {
+   struct mn_win32_handle *o = (struct mn_win32_handle *)h;
+-  if (!o || h == (void *)(intptr_t)-1 || h == (void *)(intptr_t)-2 || o->kind != MN_WIN32_EVENT) return 0;
++  if (!o || h == (void *)(intptr_t)-1 || h == (void *)(intptr_t)-2) return 0;
++  if (o->kind == MN_WIN32_RELAY) {
++    o->relay(o->relay_ctx);
++    return 1;
++  }
++  if (o->kind != MN_WIN32_EVENT) return 0;
+   pthread_mutex_lock(&o->m);
+   o->count = 1;
+   pthread_cond_broadcast(&o->c);
+diff --git a/src/winemetal/unix/winemetal_unix.c b/src/winemetal/unix/winemetal_unix.c
+index bf53120..19e8a2e 100644
+--- a/src/winemetal/unix/winemetal_unix.c
++++ b/src/winemetal/unix/winemetal_unix.c
+@@ -152,12 +152,56 @@ _MTLCommandBuffer_encodeSignalEvent(void *obj) {
+   return STATUS_SUCCESS;
+ }
+ 
++#ifdef DXMT_NATIVE
++static void *(*memory_alloc)(uint64_t length, void *ctx);
++static void (*memory_free)(void *ptr, void *ctx);
++static void *memory_ctx;
++
++__attribute__((visibility("default"))) void
++WMTSetMemoryHooks(void *(*alloc)(uint64_t length, void *ctx), void (*free)(void *ptr, void *ctx), void *ctx) {
++  memory_alloc = alloc, memory_free = free, memory_ctx = ctx;
++}
++
++/* A CPU-visible buffer over the hooks' memory (whole pages, as newBufferWithBytesNoCopy takes them); nil if they gave
++ * none. */
++static id<MTLBuffer>
++hooked_buffer(id<MTLDevice> device, struct WMTBufferInfo *info) {
++  uint64_t page = 16384, length = (info->length + page - 1) / page * page;
++  void *ptr = memory_alloc(length, memory_ctx);
++  if (!ptr)
++    return nil;
++  void (*release)(void *, void *) = memory_free;
++  void *ctx = memory_ctx;
++  id<MTLBuffer> buffer = [device newBufferWithBytesNoCopy:ptr
++                                                   length:length
++                                                  options:(enum MTLResourceOptions)info->options
++                                              deallocator:^(void *p, NSUInteger n) {
++                                                (void)n;
++                                                release(p, ctx);
++                                              }];
++  if (!buffer)
++    release(ptr, ctx);
++  else
++    info->memory.ptr = ptr;
++  return buffer;
++}
++#endif
++
+ static NTSTATUS
+ _MTLDevice_newBuffer(void *obj) {
+   struct unixcall_mtldevice_newbuffer *params = obj;
+   id<MTLDevice> device = (id<MTLDevice>)params->device;
+   struct WMTBufferInfo *info = params->info.ptr;
+   id<MTLBuffer> buffer;
++#ifdef DXMT_NATIVE
++  enum MTLStorageMode storage = (enum MTLStorageMode)((info->options >> MTLResourceStorageModeShift) & 0xf);
++  if (!info->memory.ptr && memory_alloc && storage != MTLStorageModePrivate && storage != MTLStorageModeMemoryless) {
++    buffer = hooked_buffer(device, info);
++    params->ret = (obj_handle_t)buffer;
++    info->gpu_address = buffer ? [buffer gpuAddress] : 0;
++    return STATUS_SUCCESS;
++  }
++#endif
+   if (info->memory.ptr) {
+     buffer = [device newBufferWithBytesNoCopy:info->memory.ptr
+                                        length:info->length
+diff --git a/src/winemetal/winemetal.h b/src/winemetal/winemetal.h
+index 4cf6195..8d09fd1 100644
+--- a/src/winemetal/winemetal.h
++++ b/src/winemetal/winemetal.h
+@@ -2247,4 +2247,13 @@ WINEMETAL_API void *WMTMemoryAlloc(uint64_t length);
+ WINEMETAL_API void WMTMemoryFree(void *ptr);
+ #endif
+ 
++#ifdef DXMT_NATIVE
++/* MacNeutron, the native build: where a CPU-visible buffer's memory comes from when it brings none of its own. With
++ * hooks set (the VM host, before any device), alloc gives whole 16 KiB pages, page-aligned, in memory a VM's guest
++ * shares; free runs once Metal lets the buffer go. NULL from alloc fails the buffer, as running out of memory does.
++ * Unset, Metal's own memory. */
++WINEMETAL_API void WMTSetMemoryHooks(void *(*alloc)(uint64_t length, void *ctx), void (*free)(void *ptr, void *ctx),
++                                     void *ctx);
++#endif
++
+ #endif
+\ No newline at end of file
+-- 
+2.54.0 (Apple Git-157)
+
