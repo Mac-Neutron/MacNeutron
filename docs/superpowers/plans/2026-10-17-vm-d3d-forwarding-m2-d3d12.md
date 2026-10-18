@@ -3,15 +3,18 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A guest program's D3D12 and DXGI calls run on native DXMT inside `macneutron-vm`: generated guest proxies
-and host stubs over today's winemetal transport, with shared memory, mirrored fences and per-thread rings; the 19
-headless D3D12 programs print through forwarding what they print on the macOS runtime.
+and host stubs over today's winemetal records, flushed by one trap that the calling vCPU's own host thread answers,
+with shared memory and mirrored fences; the 19 headless D3D12 programs print through forwarding what they print on the
+macOS runtime.
 
 **Architecture:** `eac-vm/d3d/gen.py` reads the widl-generated headers native DXMT compiles against and
 `eac-vm/d3d/rules.txt`, and writes call tables in the winemetal marshaller's own form (`struct mn_wm_call`), guest
 proxies and host stubs. The guest side is a plain PE `mnd3d.dll` (proxies; `d3d12.dll` and `dxgi.dll` forward their
 exports to it), linked into the prefix's `system32` and chosen by `WINEDLLOVERRIDES`, reaching the transport through
-the builtin `winemetal.dll` (a new export) and our guest `winemetal.so`; the host side is a dispatcher in
-`macneutron-vm` that loads native DXMT on the first forwarded call. A loopback build links the same
+the builtin `winemetal.dll` (a new export) and our guest `winemetal.so`. Calls queue in the thread's ring with no
+consumer thread; a flush is one store to a page the host leaves unmapped, which exits to that vCPU's host thread, and
+there the dispatcher in `macneutron-vm` runs the batch on native DXMT (loaded on the first forwarded call) before the
+guest resumes. A loopback build links the same
 proxies, marshaller and stubs into one Mac library, which M1's native test harness runs first.
 
 **Tech Stack:** Python 3 (the generator, its tests), C (guest runtime, unix lib, marshaller), C++20 (host stubs, against
@@ -34,8 +37,16 @@ DXMT (M1), POSIX sh.
 - Asynchronous, batched on the calling thread's ring: every command-list recording call, descriptor writes
   (`Create*View`, `CreateSampler`, `CopyDescriptors*`), `ExecuteCommandLists`, `Signal`, `Present`. Synchronous:
   creations a game checks for failure, `Map`, and every method with output data.
-- A call on one thread that uses an object created on another waits for that creation; `ExecuteCommandLists` waits,
-  on the host, until the lists it names are fully recorded on their own rings.
+- A call on one thread that uses an object created on another waits for that creation; a queue operation
+  (`ExecuteCommandLists`, `Signal`, `Wait`, `Present`) first runs every ring of the context up to what it has
+  published, so whatever any thread published before it runs before it (the lists it names are recorded by then).
+- Transport (maintainer, 2026-10-17; research README §18): batched traps on Hypervisor.framework's vGIC. A D3D ring has
+  no consumer thread: a flush (a synchronous call, a queue operation, a full ring) is one 8-byte store of the ring's
+  blob id to the context's trap page, and the vCPU's host thread runs the ring's records before the store returns. A
+  host call never waits for the GPU on a vCPU: waits happen in the guest.
+- The VM keeps every core and its RAM (maintainer): no vCPU or memory limits.
+- Benches and reference runs run once (maintainer): `MN_REF_RUNS=1`, `compare.py` given the one run as both references
+  (measured lines left out, as M1's gate does).
 - Mappable memory lives in guest-shared arenas; `Map` returns the guest's own address; GPU-only resources never touch
   guest RAM; descriptor handles, GPU virtual addresses and fence values pass through as opaque values.
 - Failures (§6): a method without a rule stops the build; an interface the host object doesn't have is
@@ -77,6 +88,12 @@ DXMT (M1), POSIX sh.
 - **Op numbers:** `MN_OP_D3D = 0x10000`; a method's record is `MN_OP_D3D + id`. Ids 0 to 15 are the family's own
   (0 release, 1 add arena, 2 attach the notify queue, 3 the trace's counts); methods start at 16, numbered by the
   manifest in header order, declared methods only (an inherited method has its declaring interface's id).
+- **Traps, not consumers (Task 4):** a trap blob is a dxmt-context blob whose id has bit 63 set
+  (`MN_TRAP_BLOB_ID`); libkrun (patch 0009) leaves it unmapped, keeps its guest range, and answers a store there on the
+  vCPU's thread by calling `macneutron-vm`'s handler with the context and the stored value, before its MMIO bus and
+  with no lock (the spike's lock-free path). Rings stay the record format (`ring.c`): the guest still publishes `head`,
+  and a ring attached in drained mode is run by whoever drains it, under its own lock. A trap costs about 1 µs (§18);
+  a frame's flushes, not its calls, are what exit.
 - **Two ring-state halves:** the executor's 64 bytes of `state` a ring: `[0..3]` winemetal's (today), `[4..7]` the
   D3D dispatcher's.
 - **Native DXMT loads lazily**, on the first `MN_OP_D3D` record, from `dxmt/` beside `macneutron-vm`: a run on today's
@@ -95,16 +112,16 @@ DXMT (M1), POSIX sh.
 ## Review Focus
 
 - `WCHAR` across the boundary: `SetName(L"...")` with non-ASCII text, and DXGI adapter descriptions (`Description[128]`)
-  read back: UTF-16 in the guest, UTF-32 natively. Pinned in Task 3's round-trip cases and Task 9's adapter-description
+  read back: UTF-16 in the guest, UTF-32 natively. Pinned in Task 3's round-trip cases and Task 10's adapter-description
   row in `wire-test`.
 - An event the guest closes before its fence completes: the relay posts the guest's handle value, and the guest's
-  `NtSetEvent` on a closed handle fails harmlessly. Pinned in Task 7's loopback case.
+  `NtSetEvent` on a closed handle fails harmlessly. Pinned in Task 8's loopback case.
 - The last `Release` on one thread while another thread's ring still records with the object: deferred until that ring
-  passes it. Pinned in Task 8's `threads` program.
+  passes it. Pinned in Task 9's `threads` program.
 - An arena that is full when a mappable resource is created: the host answers "another arena" and the guest retries
-  once; an arena that can't be had is `E_OUTOFMEMORY`. Pinned in Task 6's loopback cases.
+  once; an arena that can't be had is `E_OUTOFMEMORY`. Pinned in Task 7's loopback cases.
 - A record larger than the ring takes (shader bytecode or a root signature over `MN_WM_SCRATCH_IN`, 128 KiB): through
-  the thread's scratch blob. Pinned in Task 9's `wire-test` case with 1 MiB of bytecode.
+  the thread's scratch blob. Pinned in Task 10's `wire-test` case with 1 MiB of bytecode.
 
 ---
 
@@ -200,7 +217,49 @@ DXMT (M1), POSIX sh.
   round-trip test. Expected: all pass; `memory-test` and `marshal-test`'s winemetal cases still pass.
 - [ ] **Step 5: Commit.**
 
-### Task 4: The host dispatcher
+### Task 4: The trap transport
+
+**Files:**
+- Create (libkrun patch 0009): `src/devices/src/virtio/gpu/trap.rs` (the trap ranges and the handler),
+  `include/libkrun_trap.h` (`int32_t krun_set_trap_handler(void (*fn)(uint32_t ctx_id, uint64_t value, void *opaque),
+  void *opaque)`)
+- Modify (libkrun 0009): `src/devices/src/virtio/gpu/virtio_gpu.rs` (a trap blob's map registers its range instead of
+  mapping it, its unmap drops it), `src/libkrun/src/vmm/macos/vstate.rs` (an `MmioWrite` in a trap range calls the
+  handler first), `eac-vm/libkrun/build.sh` (copies `libkrun_trap.h`)
+- Modify: `eac-vm/metal/proto.h` (`MN_TRAP_BLOB_ID (1ull << 63)`, `MN_REC_SUBMIT 0x40000000`, `RING_ATTACH`'s `arg`
+  1: drained), `eac-vm/metal/host/executor.c`, `executor.h`, `eac-vm/metal/guest/transport.c`, `transport.h`,
+  `eac-vm/host/macneutron-vm.swift` (registers `mn_executor_trap`)
+- Test: `eac-vm/metal/tests/executor-test.c` (`drain` cases), `eac-vm/metal/tests/transport-test.c` (`trap`,
+  `trap-cross`, `trap-bench` in the VM)
+
+**Interfaces:**
+- Produces, host: a ring attached drained gets no consumer thread. `void mn_executor_trap(uint32_t ctx_id, uint64_t
+  ring_blob, void *opaque)` (the libkrun handler): runs that ring's published records on the calling thread, under
+  the ring's lock, and publishes `done_seq` and `tail` as a consumer does; a record whose op has `MN_REC_SUBMIT` first
+  runs every other drained ring of the context up to its published `head`, each under its lock. A trap for no ring
+  logs `mn-executor: error: trap for no ring` and returns.
+- Produces, guest: `int mn_trap_open(void)` (allocates and maps the context's trap blob, once a process),
+  `void mn_flush(void)` (one 8-byte store of the thread's ring blob id: `*(volatile uint64_t *)trap = blob_id`),
+  `int mn_call_flush(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap, uint32_t *reply_len)` (a
+  synchronous record, then `mn_flush`: its reply is in the ring when the store returns, no wait). `mn_send` queues
+  without exiting, and flushes when the ring is full. `mn_ring_attach_drained` for the thread's ring.
+
+- [ ] **Step 1: Write the failing tests:** `executor-test` `drain`: a drained ring's records run only on
+  `mn_executor_trap`, in order, on the caller's thread; a `MN_REC_SUBMIT` record on ring B runs ring A's 100
+  published records first (`MN_OP_TEST_SUM` totals in A's then B's order); two threads trapping two rings at once
+  both finish. `transport-test` in the VM (host with `--metal-test-ops`): `trap`: 10,000 queued records and one
+  synchronous call by `mn_call_flush` answer in order with the reply present; `trap-cross`: thread A queues 100 records
+  and doesn't flush, thread B's `MN_REC_SUBMIT` call sees them run; `trap-bench`: a synchronous call by trap, printed
+  beside the ring's numbers, at most 3 µs.
+- [ ] **Step 2: Run them.** Expected: fail (no drained mode, no trap).
+- [ ] **Step 3: Implement** libkrun 0009 (commit in `build/eac-vm-work/libkrun-src`, `git format-patch` into
+  `eac-vm/libkrun/patches/0009-*.patch`, `eac-vm/libkrun/build.sh` applies it), the executor's drained mode and the
+  guest's trap.
+- [ ] **Step 4: Run** `executor-test`, `eac-vm/metal/gate.sh` (today's rings unchanged) and the new VM cases.
+  Expected: pass; `trap-bench` about 1-2 µs.
+- [ ] **Step 5: Commit.**
+
+### Task 5: The host dispatcher
 
 **Files:**
 - Create: `eac-vm/d3d/host/dispatch.cpp`, `eac-vm/d3d/host/dispatch.h`
@@ -210,7 +269,8 @@ DXMT (M1), POSIX sh.
 - Test: `eac-vm/d3d/tests/dispatch-test.cpp`
 
 **Interfaces:**
-- Consumes: Task 3's tables and `mn_wm_host_call_table`.
+- Consumes: Task 3's tables and `mn_wm_host_call_table`; Task 4's drained rings (the dispatcher runs on vCPU
+  threads, from `mn_executor_trap`).
 - Produces: `int mn_vm_dispatch(uint32_t ctx_id, uint64_t *ring_state, uint32_t op, const void *in, uint32_t len,
   void *reply, uint32_t cap, uint32_t *n)` (the executor's `mn_op_fn`): `op >= MN_OP_D3D` to the D3D family, else
   `mn_wm_dispatch`. Generated `<dir>/stubs.cpp`: `NTSTATUS mn_d3d_stub_<id>(void *params)` each, calling the native
@@ -218,7 +278,7 @@ DXMT (M1), POSIX sh.
   with it). The handle table's objects are `MN_HK_D3D`, released with the interface's `Release`. A creation's reply
   carries the IIDs the native object answers among its family (the requested interface's derivation chain and the
   rules' companions). `int mn_d3d_load(const char *dir)`: `dlopen`s `d3d12.dylib` and `dxgi.dylib`, sets the
-  memory hooks (Task 6), once; its failure is logged `mn-d3d: error: native DXMT: <dlerror>` and every D3D record
+  memory hooks (Task 7), once; its failure is logged `mn-d3d: error: native DXMT: <dlerror>` and every D3D record
   answers `E_FAIL`. Async failures log `mn-d3d: error: <Interface>::<Method> 0x<hr>`. Device removal (§6): once a
   stub returns `DXGI_ERROR_DEVICE_REMOVED`, `_HUNG` or `_RESET`, the context is removed and every later D3D record
   answers `DXGI_ERROR_DEVICE_REMOVED`, logged once with the first method that said so.
@@ -234,18 +294,20 @@ DXMT (M1), POSIX sh.
   `memory-test`. Expected: pass; a VM run on today's path logs nothing from `mn-d3d`.
 - [ ] **Step 5: Commit.**
 
-### Task 5: The guest runtime and the loopback
+### Task 6: The guest runtime and the loopback
 
 **Files:**
 - Create: `eac-vm/d3d/guest/proxy.c`, `proxy.h` (proxy objects, `QueryInterface`, reference counts, caches, local
   `ID3DBlob`, the trace), `eac-vm/d3d/guest/unix.c` (the unix side, compiled into the guest `winemetal.so` as slot
-  `MN_WM_D3D`: `mn_wm_pack_call`, the transport, `mn_wm_unpack_call`, the notify listener), `eac-vm/d3d/tests/loopback.c` (transport stand-ins, after
-  `eac-vm/metal/wm/tests/loopback.c`), `eac-vm/d3d/build-loopback.sh`, `eac-vm/d3d/loopback-gate.sh`
+  `MN_WM_D3D`: `mn_wm_pack_call`, then `mn_send` for an asynchronous method or `mn_call_flush` for a synchronous one
+  or a queue operation (`MN_REC_SUBMIT`), `mn_wm_unpack_call`, the notify listener), `eac-vm/d3d/tests/loopback.c` (transport stand-ins, after
+  `eac-vm/metal/wm/tests/loopback.c`: `mn_send` queues in-process, `mn_flush` runs the queue at once, a submit runs
+  every thread's queue first: the trap's semantics in one process), `eac-vm/d3d/build-loopback.sh`, `eac-vm/d3d/loopback-gate.sh`
 - Generated: `<dir>/proxies.c` (vtables and methods for each interface, filling the params struct and calling
   `mn_d3d_call(id, params)`)
 
 **Interfaces:**
-- Consumes: Tasks 3 and 4.
+- Consumes: Tasks 3 to 5.
 - Produces: `HRESULT mn_d3d_call(uint32_t id, void *params)` (PE side: `WMTForward(MN_WM_D3D, &args)`) and
   `NTSTATUS mn_d3d_unix_call(void *args)` (unix side, `__wine_unix_call_funcs[MN_WM_D3D]` of the guest
   `winemetal.so`; `MN_WM_SLOTS` becomes 156). `build/d3d-loopback/libmnd3d-loopback.dylib` exporting
@@ -258,11 +320,11 @@ DXMT (M1), POSIX sh.
   library).
 - [ ] **Step 2: Implement** the runtime and the loopback build.
 - [ ] **Step 3: Run** `MN_DXMT_ONLY=d3d12_null sh eac-vm/d3d/loopback-gate.sh`. Expected: `d3d12_null` passes (its
-  readback through `Map` uses Task 6's arenas only from the next task: until then the host maps CPU-placed memory in
+  readback through `Map` uses Task 7's arenas only from the next task: until then the host maps CPU-placed memory in
   host memory, which in one process the guest side can read).
 - [ ] **Step 4: Commit.**
 
-### Task 6: Memory
+### Task 7: Memory
 
 **Files:**
 - Create: `eac-vm/d3d/host/memory.cpp` (arenas: the hooks, host pointer to `(blob, offset)`)
@@ -282,10 +344,10 @@ DXMT (M1), POSIX sh.
   its piece. Loopback: `d3d12_copy` and `d3d12_api` (its `map` line).
 - [ ] **Step 2: Run them.** Expected: fail.
 - [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run them**, then the whole loopback gate. Expected: pass; the rows Task 7 to 9 own may still fail.
+- [ ] **Step 4: Run them**, then the whole loopback gate. Expected: pass; the rows Task 9 to 10 own may still fail.
 - [ ] **Step 5: Commit.**
 
-### Task 7: Waiting
+### Task 8: Waiting
 
 **Files:**
 - Create: `eac-vm/d3d/host/events.cpp` (the mirror page, relay events, notify posts)
@@ -300,7 +362,8 @@ DXMT (M1), POSIX sh.
   its slot named in the fence's creation reply). `GetCompletedValue` reads the slot in the guest. Every write to a slot
   is `max(slot, value)` (relays fire in any order), and the proxy's `ID3D12Fence::Signal(v)`, a CPU signal that
   D3D12 completes at once, raises the guest's slot to `v` before it sends the record. A `NULL` event in
-  `SetEventOnCompletion` is a synchronous wait on the host.
+  `SetEventOnCompletion` waits in the guest: the proxy makes an event, registers it as a game's, and waits on it (a
+  host call never blocks its vCPU on the GPU).
 
 - [ ] **Step 1: Write the failing tests:** `dispatch-test` `events`: a `Signal(5)` on a queue raises the fence's mirror
   slot to 5 without a record; a CPU `ID3D12Fence::Signal(9)` reads back 9 from `GetCompletedValue` at once; a relay
@@ -313,18 +376,16 @@ DXMT (M1), POSIX sh.
 - [ ] **Step 4: Run them.** Expected: pass.
 - [ ] **Step 5: Commit.**
 
-### Task 8: Threads
+### Task 9: Threads
 
 **Files:**
-- Modify: `eac-vm/d3d/guest/proxy.c` (a command list's `Close` records its ring and sequence), `eac-vm/d3d/host/
-  dispatch.cpp` (`ExecuteCommandLists` waits for them), `eac-vm/metal/host/executor.c` (`mn_executor_wait_seq`)
+- Modify: `eac-vm/d3d/rules.txt` (the queue operations are `submit`: `MN_REC_SUBMIT`), `eac-vm/d3d/guest/proxy.c`
 - Create: `eac-vm/d3d/tests/threads.cpp` (a native program for the loopback: two threads record, a third executes;
   a last `Release` on one thread while another records with the object)
 
 **Interfaces:**
-- Produces: `int mn_executor_wait_seq(uint32_t ctx_id, uint64_t ring_blob, uint64_t seq, unsigned timeout_ms)`: 0 once
-  that ring's `done_seq` reaches `seq`, -1 on the timeout (5000 ms, `MN_H_WAIT_MS`'s). `ExecuteCommandLists`' record
-  carries `(ring_blob, close_seq)` a list.
+- Consumes: Task 4's `MN_REC_SUBMIT`: a queue operation runs every ring's published records first, so a list another
+  thread recorded and closed has run its recording by then, with no marks to wait on.
 
 - [ ] **Step 1: Write the failing test** `threads.cpp` (its lines printed as `threads ...`, compared with the native
   run of the same program, M1's way). Expected: FAIL (a list executed before its recording finished, or a crash).
@@ -332,7 +393,7 @@ DXMT (M1), POSIX sh.
 - [ ] **Step 3: Run** it and the loopback gate. Expected: pass.
 - [ ] **Step 4: Commit.**
 
-### Task 9: The remaining methods
+### Task 10: The remaining methods
 
 **Files:**
 - Modify: `eac-vm/d3d/rules.txt`, `eac-vm/d3d/host/specials.cpp` (new), `eac-vm/d3d/guest/proxy.c`
@@ -355,7 +416,7 @@ DXMT (M1), POSIX sh.
 - [ ] **Step 4: Run** `wire-test` and `loopback-gate.sh`. Expected: pass, `d3d-loopback gate: all 19 programs passed`.
 - [ ] **Step 5: Commit.**
 
-### Task 10: The guest stand-ins
+### Task 11: The guest stand-ins
 
 **Files:**
 - Create: `eac-vm/d3d/guest/mnd3d.def`, `d3d12.def`, `dxgi.def` (the two forward their exports to `mnd3d.dll`),
@@ -385,16 +446,17 @@ DXMT (M1), POSIX sh.
   before.
 - [ ] **Step 4: Commit.**
 
-### Task 11: The gate
+### Task 12: The gate
 
 **Files:**
 - Create: `eac-vm/d3d/gate.sh`, `eac-vm/d3d/tests/coverage.py`
 - Modify: `eac-vm/dxmt/compare.py` (`host` fails on `mn-d3d: error`)
 
 **Interfaces:**
-- Consumes: the 4b-2 gate (`share.sh`, `ref.sh`, `tests/dxmt.sh`, `compare.py`); M1's 19 rows; Task 10's trace.
+- Consumes: the 4b-2 gate (`share.sh`, `ref.sh`, `tests/dxmt.sh`, `compare.py`); M1's 19 rows; Task 11's trace.
 
-- [ ] **Step 1: Write `gate.sh`:** the loopback gate, then the 19 rows in the VM through forwarding
+- [ ] **Step 1: Write `gate.sh`:** the macOS references once (`MN_REF_RUNS=1`), the loopback gate, then the 19 rows
+  in the VM through forwarding
   (`MACNEUTRON_VM_D3D=forward`, the trace on) against the macOS references, `compare.py host` on the VM's output,
   and `coverage.py`: every method id in the guest trace has a rule and a host count. Native DXMT's shader cache is
   one per VM run (`DXMT_SHADER_CACHE_PATH` in the VM's environment): a row whose lines need a cold cache runs in a VM
@@ -404,12 +466,12 @@ DXMT (M1), POSIX sh.
   `vm-setup.sh`, `turn.sh`, `modes.sh`, `tpm-host.sh`, `audio-host.sh`, and the 4b-2 gate on today's path.
 - [ ] **Step 3: Commit.**
 
-### Task 12: Record
+### Task 13: Record
 
 **Files:**
-- Modify: `docs/research/2026-10-15-vm-route/README.md` (§18 "Direct3D forwarding, M2: D3D12 and DXGI"), the spec
+- Modify: `docs/research/2026-10-15-vm-route/README.md` (§19 "Direct3D forwarding, M2: D3D12 and DXGI"), the spec
   where M2 settled what it left open (the generator's input, the op family, the swapchain to M3)
 
-- [ ] **Step 1: Write §18:** the generator's numbers (interfaces, methods, rules written and inferred, specials), the
+- [ ] **Step 1: Write §19:** the generator's numbers (interfaces, methods, rules written and inferred, specials), the
   loopback and VM gates' rows with run times, the 4b-2 gate's guest times beside them, what's left for M3 and M4.
 - [ ] **Step 2: Privacy scan, commit.**
