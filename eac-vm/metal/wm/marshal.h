@@ -153,6 +153,7 @@ void mn_wm_ctx_end(struct mn_wm_ctx *c);
 /* present.m: slots 47 and 48 (the count, and the probe with MN_PRESENT_PROBE=1), 71 (the reply's device is 0) and 73
  * (a view's release is its handle's). */
 NTSTATUS_T mn_wm_present_special(struct mn_wm_state *k);
+void mn_wm_present_native(struct mn_wm_ctx *c, void *cmdbuf, void *drawable); /* native DXMT's presents */
 
 /* events.m: slots 104, 108-110 and 146; and the table's release of a listener. */
 NTSTATUS_T mn_wm_listener_special(struct mn_wm_state *k);

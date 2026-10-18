@@ -5,10 +5,15 @@
 # dxmt-tests and the presenter, eac-vm/host/build.sh, and the guest image (eac-vm/metal/build-guest.sh,
 # eac-vm/dxmt/stage.sh, image/build.sh wine in the builder). Prints a line a row, and both sides' frame times
 # (recorded, not graded). Exits 1 on any FAIL.
-# Last, SMITE 2 (eac-vm/tests/smite2-render.sh) as Steam runs it, through the Mac's Steam (never started or quit here):
-# it skips, by name, when Mac Steam isn't running, SMITE 2 isn't installed or Steam didn't initialise in the guest.
+# Last, with MN_GATE_GAMES=1 (the maintainer's go-ahead: it starts the game on their Steam account, and never while they
+# play), SMITE 2 (eac-vm/tests/smite2-render.sh) as Steam runs it, through the Mac's Steam (never started or quit here):
+# it skips, by name, without MN_GATE_GAMES=1, when Mac Steam isn't running, SMITE 2 isn't installed or Steam didn't
+# initialise in the guest.
+#   present-gate.sh [forward]   forward: Direct3D forwarding (MACNEUTRON_VM_D3D=forward) for the D3D12 rows and
+#                               SMITE 2; present_loop is D3D11, M4's, and stays on guest DXMT
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+MODE=${1:-guest}
 W=$ROOT/build/eac-vm-work
 D=$ROOT/eac-vm/dxmt
 REF=$W/share/present-ref G=$W/share/traces/present INV=$W/present-invocations
@@ -20,7 +25,8 @@ no() { echo "FAIL $*"; fail=1; }
 # guest <name> <exe> <arguments>: one VM boot with the probe on, the program alone in it; the host's output (and the
 # guest's, after it) in build/eac-vm-work/present-<name>.txt.
 guest() {
-  { printf 'set -- %s %s %s\n' "$1" "$2" "$3"; cat "$ROOT/eac-vm/tests/present.sh"; } > "$W/present-run.sh"
+  { printf 'export MACNEUTRON_VM_D3D=%s\nset -- %s %s %s\n' "${4:-$MODE}" "$1" "$2" "$3"
+    cat "$ROOT/eac-vm/tests/present.sh"; } > "$W/present-run.sh"
   MN_PRESENT_PROBE=1 MN_RUN_TIMEOUT=600 "$ROOT/eac-vm/run-guest.sh" "$W/present-run.sh" > "$W/present-$1.txt" 2>&1
 }
 presented() { # (a line may start with smite2's time stamp)
@@ -80,7 +86,7 @@ case $shot in
 esac
 
 # present_loop, the D3D11 game loop.
-guest present_loop present_loop.exe "1280 720 0 0 600 0"
+guest present_loop present_loop.exe "1280 720 0 0 600 0" guest
 H=$W/present-present_loop.txt C=$G/present_loop.txt R=$REF/present_loop.1.txt
 if /usr/bin/grep -q 'avg frame' "$C" 2> /dev/null; then ok "present_loop: $(/usr/bin/grep 'avg frame' "$C")"
 else no "present_loop: no 'avg frame' line, status $(cat "$G/present_loop.status" 2> /dev/null), see $H"; fi
@@ -93,12 +99,13 @@ echo "     time: macOS $(frame_time "$R") ms, guest $(frame_time "$C") ms a fram
 
 # SMITE 2: 180 s in the guest; its host output, each line after the seconds since the boot began, is kept.
 L=$W/smite2-render.txt
-if ! pgrep -x steam_osx > /dev/null; then echo "skip: Mac Steam isn't running"
+if [ "${MN_GATE_GAMES:-0}" != 1 ]; then echo "skip: SMITE 2 without MN_GATE_GAMES=1 (the maintainer's go-ahead)"
+elif ! pgrep -x steam_osx > /dev/null; then echo "skip: Mac Steam isn't running"
 elif [ ! -f "$HOME/Library/Application Support/Steam/steamapps/common/SMITE 2/Windows/Hemingway.exe" ]; then
   echo "skip: SMITE 2 isn't installed"
 else
   rm -rf "$W/share/traces/smite2"  # a run that never got there leaves no log to blame
-  MN_PRESENT_PROBE=1 MN_RUN_TIMEOUT=900 "$ROOT/eac-vm/run-guest.sh" "$ROOT/eac-vm/tests/smite2-render.sh" \
+  MACNEUTRON_VM_D3D=$MODE MN_PRESENT_PROBE=1 MN_RUN_TIMEOUT=900 "$ROOT/eac-vm/run-guest.sh" "$ROOT/eac-vm/tests/smite2-render.sh" \
     --steam-appid 2437170 --ram-mib 16384 2>&1 | perl -ne 'BEGIN { $| = 1; $t = time } print time - $t, " ", $_' > "$L"
   if ! /usr/bin/grep -q '^[0-9]* steam: initialised$' "$L"; then echo "skip: Steam didn't initialise in the guest"
   else

@@ -33,7 +33,7 @@ NTSTATUS_T mn_d3d_create_fence_stub(void *params), mn_d3d_fence_signal_stub(void
 int mn_d3d_events_attach(struct mn_wm_ctx *c, uint64_t queue_blob, uint64_t mirror_blob, uint64_t mirror_len);
 void mn_d3d_events_end(uint32_t ctx_id);
 void mn_d3d_fence_gone(void *obj);
-static void release(void *obj);
+static void release(void *obj), present(void *cmdbuf, void *drawable);
 
 static char *dir, *trace;
 static _Atomic uint64_t counts[MN_D3D_CALLS]; /* with a trace: each method's records, all contexts' */
@@ -88,6 +88,13 @@ int mn_d3d_load(const char *d) {
         return -1;
     }
     mn_d3d_memory_hooks(hooks);
+    void (*present_hook)(void (*)(void *, void *)) =
+        (void (*)(void (*)(void *, void *)))dlsym(libs[2], "WMTSetPresentHook");
+    if (!present_hook) {
+        fprintf(stderr, "mn-d3d: error: native DXMT: %s\n", dlerror());
+        return -1;
+    }
+    present_hook(present);
     mn_d3d_stubs[MN_D3D_ID_ID3D12Resource_Map] = mn_d3d_map_stub; /* rules.txt's own */
     mn_d3d_stubs[MN_D3D_ID_ID3D12Device_CreateFence] = mn_d3d_create_fence_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D12Fence_Signal] = mn_d3d_fence_signal_stub;
@@ -114,6 +121,9 @@ static void release(void *obj) {
 }
 
 uint32_t mn_d3d_current_ctx(void) { return cur.c ? cur.c->ctx_id : 0; }
+
+/* Native DXMT's presents (fork 0081's hook), counted and probed as guest DXMT's are (present.m). */
+static void present(void *cmdbuf, void *drawable) { mn_wm_present_native(cur.c, cmdbuf, drawable); }
 
 /* ponytail: the first Direct3D record loads native DXMT on its vCPU (dlopen and Metal's device: tens of ms, once) */
 static void load_once(void) {

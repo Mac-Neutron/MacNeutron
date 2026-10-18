@@ -1,6 +1,6 @@
 /* The host's side of presentation (milestone 4c): slots 47 and 48 count the drawables a context presents (dispatch.m
- * logs the count at its end); 71's reply carries no host device pointer; 73 is a view's release (the table's, which
- * calls winemetal's slot 73: invoke.m).
+ * logs the count at its end), as mn_wm_present_native does native DXMT's (Direct3D forwarding); 71's reply carries no
+ * host device pointer; 73 is a view's release (the table's, which calls winemetal's slot 73: invoke.m).
  * With MN_PRESENT_PROBE=1, every 60th present (the 30th, 90th, ...) first blits the drawable's texture into a Shared
  * buffer in the same command buffer; when it completes, the host logs the frame's pixels as winshot measures a window:
  * green (the green channel 60-95), white (every channel above 200), and colours at 4 bits a channel. The pixels are
@@ -104,6 +104,16 @@ static void probe(id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, uint64_
             [buf release];
         }];
     }
+}
+
+/* A native present (Direct3D forwarding: native DXMT's present hook, fork 0081), as slots 47 and 48 take one: counted
+ * to c, the context whose call it ran in, or to none off a call (DXMT's own threads: probed and in the stats only). */
+void mn_wm_present_native(struct mn_wm_ctx *c, void *cmdbuf, void *drawable) {
+    static _Atomic uint64_t uncounted;
+    uint64_t frame = atomic_fetch_add(c ? &c->presented : &uncounted, 1) + 1;
+    if (probing() && frame % 60 == 30 && cmdbuf && drawable)
+        probe((id<MTLCommandBuffer>)cmdbuf, (id<CAMetalDrawable>)drawable, frame);
+    count_frame();
 }
 
 NTSTATUS_T mn_wm_present_special(struct mn_wm_state *k) {
