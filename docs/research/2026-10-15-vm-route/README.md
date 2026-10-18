@@ -974,3 +974,17 @@ synchronous calls) the exits cost a few percent of a core, against the 0.5-1 cor
 they cause. The costs: the game's thread waits while the host encodes (native DXMT runs on the game's thread too), a
 long host call (a pipeline's compile) stalls that vCPU, and every extra exit takes the GIC's lock. The spike's libkrun
 was put back (`eac-vm/libkrun/build.sh`); nothing of it is kept.
+
+The other controller (same day): libkrun keeps its own userspace GICv3 and uses Hypervisor.framework's only when
+`hv_gic_create` exists (`vmm/builder.rs`). A throwaway switch skipped Apple's:
+
+| | Apple's vGIC | libkrun's GIC |
+|---|---|---|
+| A trap, 1 thread / 8 / 16 | 1.0 / 4.4 / 8.8 µs | 0.89 / 2.2 / 5.5 µs |
+| Ring: waking a parked consumer | 44 µs | 29 µs |
+| SMITE 2's lobby (two runs each) | 4.23, 4.14 cores; 59.3, 59.6 fps | 3.78, 4.27 cores; 58.9, 58.9 fps |
+
+Without Apple's lock exits scale about twice as far and a wake is a third quicker, but the guest's interrupts become
+exits libkrun emulates (the lobby's wake share 0.19-0.20 against 0.14-0.15), and the lobby, with few exits, can't tell
+the two apart: its two userspace runs differ by more than the controllers do. A match, with M0's 2.5 cores of wake-ups,
+is where the choice would show. The switch was removed with the rest of the spike.
