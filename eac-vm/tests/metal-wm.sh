@@ -24,6 +24,6 @@ for c in galloc refused fork; do
 done
 # Each refused slot logs once, though called twice.
 n=$(grep -c "is refused" /tmp/wm-refused.err)
-[ "$n" -eq 17 ] || { echo "FAIL $n refusal lines, want 17"; fail=1; }
+[ "$n" -eq 6 ] || { echo "FAIL $n refusal lines, want 6"; fail=1; }
 [ $fail -eq 0 ] && echo "metal-wm: ok"
 exit $fail

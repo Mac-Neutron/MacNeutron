@@ -39,6 +39,12 @@ void *mn_executor_blob(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint6
 void *mn_executor_blob_hold(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len, void **hold);
 void mn_executor_blob_release(void *hold);
 
+/* libkrun's trap handler (patch 0009, krun_set_trap_handler): the guest stored ring_blob in the context's trap blob.
+ * Runs that drained ring's published records on the calling thread (a vCPU's), under the ring's lock, publishing
+ * done_seq and tail as a consumer does. A record with MN_REC_SUBMIT first runs every other drained ring of the context
+ * up to its published head. */
+void mn_executor_trap(uint32_t ctx_id, uint64_t ring_blob, void *opaque);
+
 /* A notify queue in one of the context's blobs moved: completes the MN_CTRL_NOTIFY_WAITs it satisfies. */
 void mn_executor_notified(uint32_t ctx_id, uint64_t blob_id);
 

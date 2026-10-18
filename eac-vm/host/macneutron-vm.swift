@@ -174,6 +174,8 @@ if wmLoaded && metalTestOps {
 } else {
   mn_executor_start(nil, nil)
 }
+// Drained rings (Direct3D forwarding): a guest flush, a store to its process's trap blob, runs the ring on that vCPU.
+krun_set_trap_handler(mn_executor_trap, nil)
 add(krun_gpu_device_without_display(8 << 30), "gpu")
 // The keyboard and mouse (spec §5.7): virtio-input, fed by the game window (metal-host's winemac.so), which the guest's
 // agent (eac-vm/guest/mn-input.c) replays into Xvfb.

@@ -1,6 +1,7 @@
 /* Milestone 4a Task 3 test in the guest: the Metal transport (guest/transport.c) against the executor's test ops.
  *   metal-transport-test order | blob | free-in-flight | cross-free | gap [bursts] | threads <n> | invalid | errors | lost-wake |
  *                        ring-cap | exit-drain | bench      (the host started with --metal-test-ops)
+ *   metal-transport-test trap | trap-cross | trap-bench       (drained rings, M2: the host with --metal-test-ops)
  *   metal-transport-test no-test-ops                          (the host started without it)
  * Every case but errors also requires that no asynchronous record failed on the host (MN_OP_TEST_ERRORS).
  * A case prints "<case> ok" (bench prints its numbers first), or "FAIL <case>: <why>" and exits 1. */
@@ -335,6 +336,65 @@ static void bench(void) {
     puts("bench ok");
 }
 
+/* Drained rings: 10,000 queued records, then a call by flush answers after them, its reply present at once. */
+static void trap_order(void) {
+    if (mn_drained()) failf("trap", "mn_drained", 0, 0);
+    for (uint64_t i = 1; i <= 10000; i++)
+        if (mn_queue(MN_OP_TEST_SET, &i, sizeof i)) failf("trap", "queue", (long long)i, 0);
+    uint64_t got = 0, sent, done;
+    uint32_t n = 0;
+    int r = mn_call_flush(MN_OP_TEST_GET, NULL, 0, &got, sizeof got, &n);
+    mn_ring_stats(&sent, &done);
+    if (r || n != sizeof got || got != 10000 || done != sent) failf("trap", "GET after 10,000 SETs", (long long)got, r);
+    puts("trap ok");
+}
+
+/* Thread A queues 100 fills of a shared blob and doesn't flush; thread B's queue operation sees them run first. */
+static struct mn_blob cross_blob;
+static atomic_int cross_state; /* 1: A queued; 2: B checked */
+static void *cross_a(void *arg) {
+    (void)arg;
+    for (uint32_t i = 0; i < 100; i++) {
+        struct mn_test_fill f = { cross_blob.blob_id, i, 1, i + 1, 0 };
+        if (mn_queue(MN_OP_TEST_FILL, &f, sizeof f)) failf("trap-cross", "queue", i, 0);
+    }
+    cross_state = 1;
+    while (cross_state != 2) usleep(1000); /* the thread's exit would flush its ring */
+    return NULL;
+}
+static void trap_cross(void) {
+    if (mn_drained() || mn_blob_alloc(MN_PAGE, &cross_blob)) failf("trap-cross", "setup", 0, 0);
+    memset(cross_blob.ptr, 0, MN_PAGE);
+    pthread_t a;
+    pthread_create(&a, NULL, cross_a, NULL);
+    while (cross_state != 1) usleep(1000);
+    struct mn_test_sum s = { cross_blob.blob_id, 0, 100 };
+    uint64_t sum = 0;
+    uint32_t n = 0;
+    if (((uint8_t *)cross_blob.ptr)[0]) failf("trap-cross", "ran before any flush", 0, 0);
+    int r = mn_call_flush(MN_OP_TEST_SUM | MN_REC_SUBMIT, &s, sizeof s, &sum, sizeof sum, &n);
+    cross_state = 2;
+    pthread_join(a, NULL);
+    if (r || sum != 5050) failf("trap-cross", "the submit's sum of A's fills", (long long)sum, 5050);
+    if (mn_blob_free(&cross_blob)) failf("trap-cross", "free", 0, 0);
+    puts("trap-cross ok");
+}
+
+/* A synchronous call by trap (one store, the host runs it on the vCPU's thread), once over 100,000 calls. */
+static void trap_bench(void) {
+    if (mn_drained()) failf("trap-bench", "mn_drained", 0, 0);
+    uint32_t n;
+    mn_call_flush(MN_OP_NOP, NULL, 0, NULL, 0, &n);
+    double t0 = now_us();
+    for (int i = 0; i < 100000; i++) mn_call_flush(MN_OP_NOP, NULL, 0, NULL, 0, &n);
+    printf("trap sync ns %.0f\n", (now_us() - t0) * 1000 / 100000);
+    t0 = now_us();
+    for (int i = 0; i < 1000000; i++) mn_queue(MN_OP_NOP, NULL, 0);
+    mn_call_flush(MN_OP_NOP, NULL, 0, NULL, 0, &n);
+    printf("trap async ns/cmd %.1f\n", (now_us() - t0) * 1000 / 1e6);
+    puts("trap-bench ok");
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) return fprintf(stderr, "usage: %s <case> (see the top of transport-test.c)\n", argv[0]), 2;
     if (mn_open()) return printf("FAIL %s: mn_open\n", argv[1]), 1;
@@ -351,6 +411,9 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "exit-drain")) exit_drain();
     else if (!strcmp(argv[1], "no-test-ops")) return no_test_ops(), 0;
     else if (!strcmp(argv[1], "bench")) bench();
+    else if (!strcmp(argv[1], "trap")) trap_order();
+    else if (!strcmp(argv[1], "trap-cross")) trap_cross();
+    else if (!strcmp(argv[1], "trap-bench")) trap_bench();
     else return fprintf(stderr, "unknown case %s\n", argv[1]), 2;
     uint64_t count = host_errors();
     if (count) return printf("FAIL %s: %lld asynchronous records failed on the host\n", argv[1], (long long)count), 1;

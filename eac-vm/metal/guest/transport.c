@@ -16,10 +16,12 @@
 #include "transport.h"
 #include "../ring.h"
 
-struct thread_ring { struct mn_blob blob; struct mn_ring_view v; uint64_t head, seq; int fence_idx; };
+struct thread_ring { struct mn_blob blob; struct mn_ring_view v; uint64_t head, seq; int fence_idx, drained; };
 
 static int fd = -1;
 static atomic_uint_fast64_t next_blob_id = 1;
+static struct mn_blob trap_blob;   /* drained mode's trap: its pages are never mapped on the host */
+static volatile uint64_t *trap;
 static atomic_uint spin_us = 50;
 static pthread_mutex_t idx_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t idx_used = 1; /* bit i: fence ring index i is leased; 0 carries control messages */
@@ -53,12 +55,18 @@ static void blob_close(struct mn_blob *b) {
 
 static void wait_done(struct thread_ring *t, uint64_t seq);
 static uint64_t put(struct thread_ring *t, uint32_t op, const void *p, uint32_t len);
+static void flush(struct thread_ring *t) {
+    atomic_thread_fence(memory_order_release); /* the published head before the store that exits */
+    *trap = t->blob.blob_id;
+}
 
 static void thread_exit(void *p) {
     struct thread_ring *t = p;
     /* Drain here, in this thread: a DETACH with records queued would drain them on the host's gpu worker, stalling
      * every other thread's control messages meanwhile. */
-    wait_done(t, put(t, MN_OP_NOP | MN_REC_SYNC, NULL, 0));
+    uint64_t seq = put(t, MN_OP_NOP | MN_REC_SYNC, NULL, 0);
+    if (t->drained) flush(t);
+    else wait_done(t, seq);
     ctrl(MN_CTRL_RING_DETACH, t->blob.blob_id, 0, 0, NULL); /* the host stops its consumer before the close */
     blob_close(&t->blob);
     pthread_mutex_lock(&idx_lock);
@@ -96,11 +104,11 @@ int mn_open(void) {
     return r;
 }
 
-int mn_blob_alloc(uint64_t size, struct mn_blob *b) {
+static int blob_alloc(uint64_t size, uint64_t blob_id, struct mn_blob *b) {
     size = (size + MN_PAGE - 1) / MN_PAGE * MN_PAGE;
     struct drm_virtgpu_resource_create_blob cb = {
         .blob_mem = VIRTGPU_BLOB_MEM_HOST3D, .blob_flags = VIRTGPU_BLOB_FLAG_USE_MAPPABLE, .size = size,
-        .blob_id = atomic_fetch_add(&next_blob_id, 1),
+        .blob_id = blob_id,
     };
     if (ioctl(fd, DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB, &cb)) return -errno;
     struct drm_virtgpu_map m = { .handle = cb.bo_handle };
@@ -117,6 +125,19 @@ int mn_blob_alloc(uint64_t size, struct mn_blob *b) {
     return 0;
 }
 
+int mn_blob_alloc(uint64_t size, struct mn_blob *b) { return blob_alloc(size, atomic_fetch_add(&next_blob_id, 1), b); }
+
+int mn_drained(void) {
+    pthread_mutex_lock(&open_lock);
+    int r = trap ? 0 : open_locked();
+    if (!r && !trap) {
+        r = blob_alloc(MN_PAGE, MN_TRAP_BLOB_ID | atomic_fetch_add(&next_blob_id, 1), &trap_blob);
+        if (!r) trap = trap_blob.ptr;
+    }
+    pthread_mutex_unlock(&open_lock);
+    return r;
+}
+
 static struct thread_ring *ring(void) {
     if (tr) return tr;
     struct thread_ring *t = calloc(1, sizeof *t);
@@ -128,7 +149,8 @@ static struct thread_ring *ring(void) {
     pthread_mutex_unlock(&idx_lock);
     /* Fenced on ring index 0, which no wait uses: the host has attached (or refused) the ring once it signals. */
     int ffd = -1, attached = 0;
-    if (!ctrl(MN_CTRL_RING_ATTACH, t->blob.blob_id, 0, 0, &ffd)) {
+    t->drained = trap != NULL;
+    if (!ctrl(MN_CTRL_RING_ATTACH, t->blob.blob_id, (uint64_t)t->drained, 0, &ffd)) {
         struct pollfd pf = { .fd = ffd, .events = POLLIN };
         poll(&pf, 1, 5000);
         close(ffd);
@@ -150,7 +172,10 @@ static void wake(void *ctx) { ctrl(MN_CTRL_WAKE, ((struct thread_ring *)ctx)->bl
 
 static uint64_t put(struct thread_ring *t, uint32_t op, const void *p, uint32_t len) {
     struct mn_rec *r;
-    while (!(r = mn_ring_reserve(&t->v, &t->head, len))) sched_yield(); /* full: the consumer is draining it */
+    while (!(r = mn_ring_reserve(&t->v, &t->head, len))) { /* full */
+        if (t->drained) flush(t); /* nothing else runs it */
+        else sched_yield();       /* the consumer is draining it */
+    }
     r->op = op;
     r->seq = ++t->seq;
     if (len) memcpy(r + 1, p, len);
@@ -184,6 +209,7 @@ void mn_forget(void) {
     fd = -1;
     if (tr) pthread_setspecific(ring_key, NULL); /* the parent's ring is not ours to detach */
     tr = NULL;
+    trap = NULL; /* the parent context's: a child that wants drained rings asks again */
     idx_used = 1;
     pthread_mutex_init(&idx_lock, NULL);
     pthread_mutex_init(&open_lock, NULL);
@@ -203,22 +229,47 @@ int mn_notify_wait(uint64_t blob_id, uint64_t seen, int timeout_ms) {
     return 0;
 }
 
-/* Op 0 is ring padding and the top bit marks synchronous records: neither is the caller's. */
-static int bad_op(uint32_t op) { return op == MN_OP_WRAP || (op & MN_REC_SYNC); }
+/* Op 0 is ring padding and the top bits mark synchronous records and queue operations: not the caller's (but
+ * mn_call_flush's queue operations). */
+static int bad_op(uint32_t op) { return op == MN_OP_WRAP || (op & (MN_REC_SYNC | MN_REC_SUBMIT)); }
 
-int mn_send(uint32_t op, const void *p, uint32_t len) {
+static int queue(uint32_t op, const void *p, uint32_t len, int flush_now) {
     if (bad_op(op)) return -EINVAL;
     struct thread_ring *t = ring();
     if (!t) return -ENODEV;
     if (len > MN_REC_MAX) return -E2BIG;
     put(t, op, p, len);
+    if (t->drained && flush_now) flush(t);
     return 0;
+}
+
+int mn_send(uint32_t op, const void *p, uint32_t len) { return queue(op, p, len, 1); }
+int mn_queue(uint32_t op, const void *p, uint32_t len) { return queue(op, p, len, 0); }
+
+void mn_flush(void) {
+    if (tr && tr->drained) flush(tr);
+}
+
+int mn_call_flush(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap, uint32_t *reply_len) {
+    if (bad_op(op & ~MN_REC_SUBMIT)) return -EINVAL;
+    struct thread_ring *t = ring();
+    if (!t) return -ENODEV;
+    if (!t->drained) return mn_call(op & ~MN_REC_SUBMIT, p, len, reply, cap, reply_len);
+    if (len > MN_REC_MAX) return -E2BIG;
+    uint64_t seq = put(t, op | MN_REC_SYNC, p, len);
+    flush(t);
+    if (done_seq(t) < seq) return -EIO; /* the host stopped this ring, or found it broken */
+    uint32_t n = t->v.hdr->reply_len;
+    if (reply && n) memcpy(reply, t->v.reply, n < cap ? n : cap);
+    if (reply_len) *reply_len = n;
+    return t->v.hdr->reply_status;
 }
 
 int mn_call(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap, uint32_t *reply_len) {
     if (bad_op(op)) return -EINVAL;
     struct thread_ring *t = ring();
     if (!t) return -ENODEV;
+    if (t->drained) return mn_call_flush(op, p, len, reply, cap, reply_len);
     if (len > MN_REC_MAX) return -E2BIG;
     wait_done(t, put(t, op | MN_REC_SYNC, p, len));
     uint32_t n = t->v.hdr->reply_len;

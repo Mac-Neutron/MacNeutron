@@ -1,6 +1,11 @@
 /* The executor (see executor.h). libkrun's gpu worker thread delivers control messages, fences and blob events, one at
  * a time; only it changes the ring list, under rings_lock for the consumers' snapshots. A fence follows the message it belongs to at once, so an MN_CTRL_WAIT
- * is paired with the next fence; any other fence completes immediately. */
+ * is paired with the next fence; any other fence completes immediately.
+ *
+ * A drained ring (Direct3D forwarding) has no consumer: the vCPU that traps runs it (mn_executor_trap), under the
+ * ring's drain lock. A queue operation (MN_REC_SUBMIT) also runs the context's other drained rings, under submit_lock,
+ * taken before any drain lock: no thread waits for submit_lock while it holds a drain lock (it lets its own go and
+ * takes both again), so the submit holder can always take the others'. */
 #include <inttypes.h>
 #include <pthread.h>
 #include <sched.h>
@@ -51,6 +56,11 @@ static pthread_mutex_t blob_lock = PTHREAD_MUTEX_INITIALIZER;
 struct waiter { uint64_t seq, fence_id; uint32_t ring_idx; };
 struct ring {
     uint32_t ctx_id;
+    int drained, stopped;    /* stopped: under drain, once the ring is unlinked (its blob may go next) */
+    pthread_mutex_t drain;   /* a drained ring's: whoever runs its records holds it */
+    _Atomic(void *) holder;  /* the thread holding drain */
+    atomic_int refs;         /* the ring list's, and each drainer's that found it there */
+    int broken_said;
     uint64_t blob_id, tail;
     struct mn_ring_view v;
     pthread_t thread;
@@ -143,7 +153,7 @@ static void complete_waiters(struct ring *r, int all) {
 }
 
 static void run(struct ring *r, const struct mn_rec *rec) {
-    uint32_t op = rec->op & ~MN_REC_SYNC, n = 0;
+    uint32_t op = rec->op & ~(MN_REC_SYNC | MN_REC_SUBMIT), n = 0;
     int sync = !!(rec->op & MN_REC_SYNC);
     int32_t status = 0;
     if (op != MN_OP_NOP && op != MN_OP_BLOB_RELEASE) {
@@ -221,9 +231,17 @@ static struct ring *find(uint32_t ctx_id, uint64_t blob_id) {
     return NULL;
 }
 
+static void unref(struct ring *r) {
+    if (atomic_fetch_sub(&r->refs, 1) != 1) return;
+    pthread_mutex_destroy(&r->m);
+    pthread_cond_destroy(&r->c);
+    pthread_mutex_destroy(&r->drain);
+    free(r);
+}
+
 /* Attaches a ring and tells the guest through its header (reply_len = MN_ATTACHED), which it reads once the attach's
  * fence completes; a refused attach leaves the header alone. */
-static void attach(uint32_t ctx_id, uint64_t blob_id) {
+static void attach(uint32_t ctx_id, uint64_t blob_id, int drained) {
     void *p = mn_executor_blob(ctx_id, blob_id, 0, MN_RING_BLOB_BYTES);
     if (!p || find(ctx_id, blob_id)) { error("attach: not a free ring blob", ctx_id, blob_id); return; }
     unsigned count = 0;
@@ -233,13 +251,14 @@ static void attach(uint32_t ctx_id, uint64_t blob_id) {
     if (!r) { error("attach: no memory", ctx_id, blob_id); return; }
     r->ctx_id = ctx_id;
     r->blob_id = blob_id;
+    r->drained = drained;
+    atomic_init(&r->refs, 1);
     mn_ring_view_init(&r->v, p);
     pthread_mutex_init(&r->m, NULL);
     pthread_cond_init(&r->c, NULL);
-    if (pthread_create(&r->thread, NULL, consume, r)) {
-        pthread_mutex_destroy(&r->m);
-        pthread_cond_destroy(&r->c);
-        free(r);
+    pthread_mutex_init(&r->drain, NULL);
+    if (!drained && pthread_create(&r->thread, NULL, consume, r)) {
+        unref(r);
         error("attach: no consumer thread", ctx_id, blob_id);
         return;
     }
@@ -257,19 +276,110 @@ static void stop(struct ring *r) {
     while (*pp != r) pp = &(*pp)->next;
     *pp = r->next;
     pthread_mutex_unlock(&rings_lock);
-    pthread_mutex_lock(&r->m);
-    atomic_store(&r->stop, 1);
-    pthread_cond_signal(&r->c);
-    pthread_mutex_unlock(&r->m);
-    pthread_join(r->thread, NULL);
+    if (r->drained) { /* a drain in progress finishes; a later one finds it stopped */
+        pthread_mutex_lock(&r->drain);
+        r->stopped = 1;
+        pthread_mutex_unlock(&r->drain);
+    } else {
+        pthread_mutex_lock(&r->m);
+        atomic_store(&r->stop, 1);
+        pthread_cond_signal(&r->c);
+        pthread_mutex_unlock(&r->m);
+        pthread_join(r->thread, NULL);
+    }
     pthread_mutex_lock(&r->m);
     complete_waiters(r, 1);
     pthread_mutex_unlock(&r->m);
-    pthread_mutex_destroy(&r->m);
-    pthread_cond_destroy(&r->c);
     if (wait_ring == r) wait_ring = NULL;
     if (hooks.ring_end) hooks.ring_end(r->ctx_id, r->state);
-    free(r);
+    unref(r);
+}
+
+/* ---- drained rings ---- */
+
+/* ponytail: one submit lock for every context; a context's own if two processes' queue operations ever contend */
+static pthread_mutex_t submit_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Thread_local int holds_submit;
+
+static void take(struct ring *r) {
+    pthread_mutex_lock(&r->drain);
+    atomic_store(&r->holder, (void *)pthread_self());
+}
+static void let_go(struct ring *r) {
+    atomic_store(&r->holder, NULL);
+    pthread_mutex_unlock(&r->drain);
+}
+
+static void drain(struct ring *r);
+
+/* r's queue operation: every other drained ring of the context runs what it has published (one this thread already
+ * runs is past it: it is where this thread came from). Under submit_lock. */
+static void drain_others(struct ring *r) {
+    size_t n = 0, cap = 0;
+    struct ring **list = NULL;
+    pthread_mutex_lock(&rings_lock);
+    for (struct ring *q = rings; q; q = q->next) cap += q->ctx_id == r->ctx_id && q->drained && q != r;
+    if (cap && (list = malloc(cap * sizeof *list)))
+        for (struct ring *q = rings; q && n < cap; q = q->next)
+            if (q->ctx_id == r->ctx_id && q->drained && q != r) atomic_fetch_add(&q->refs, 1), list[n++] = q;
+    pthread_mutex_unlock(&rings_lock);
+    if (cap && !list) error("submit: no memory to run the other rings", r->ctx_id, cap);
+    for (size_t i = 0; i < n; i++) {
+        struct ring *q = list[i];
+        if (atomic_load(&q->holder) != (void *)pthread_self()) {
+            take(q);
+            if (!q->stopped) drain(q);
+            let_go(q);
+        }
+        unref(q);
+    }
+    free(list);
+}
+
+/* Runs r's published records on this thread; r->drain held (let go and taken again around waiting for submit_lock). */
+static void drain(struct ring *r) {
+    int took = 0;
+    while (!r->stopped) {
+        const struct mn_rec *rec = mn_ring_next(&r->v, &r->tail);
+        if (!rec) break;
+        if ((rec->op & MN_REC_SUBMIT) && !holds_submit) {
+            if (pthread_mutex_trylock(&submit_lock)) {
+                let_go(r); /* the holder may run this record meanwhile: read again at tail */
+                pthread_mutex_lock(&submit_lock);
+                take(r);
+            }
+            holds_submit = took = 1;
+            continue;
+        }
+        if (rec->op & MN_REC_SUBMIT) drain_others(r);
+        run(r, rec);
+    }
+    if (took) {
+        holds_submit = 0;
+        pthread_mutex_unlock(&submit_lock);
+    }
+    if (r->v.broken && !r->broken_said) {
+        r->broken_said = 1;
+        error("ring broken: a record didn't fit what was published", r->ctx_id, r->blob_id);
+    }
+    if (hooks.progress && !r->stopped) hooks.progress(r->ctx_id, r->state);
+}
+
+void mn_executor_trap(uint32_t ctx_id, uint64_t ring_blob, void *opaque) {
+    (void)opaque;
+    pthread_mutex_lock(&rings_lock);
+    struct ring *r = find(ctx_id, ring_blob);
+    if (r && r->drained) atomic_fetch_add(&r->refs, 1);
+    else r = NULL;
+    pthread_mutex_unlock(&rings_lock);
+    if (!r) {
+        error("trap for no ring", ctx_id, ring_blob);
+        return;
+    }
+    take(r);
+    drain(r);
+    let_go(r);
+    unref(r);
 }
 
 static void add_waiter(struct ring *r, uint64_t seq, uint32_t ring_idx, uint64_t fence_id) {
@@ -388,7 +498,7 @@ static void submit(void *ctx, uint32_t ctx_id, const void *cmd, uint32_t len) {
     struct ring *r = c.type == MN_CTRL_RING_ATTACH || c.type == MN_CTRL_PEEK ? NULL : find(ctx_id, c.ring_blob);
     switch (c.type) {
     case MN_CTRL_RING_ATTACH:
-        attach(ctx_id, c.ring_blob);
+        attach(ctx_id, c.ring_blob, c.arg == 1);
         return;
     case MN_CTRL_RING_DETACH:
         if (r) stop(r);

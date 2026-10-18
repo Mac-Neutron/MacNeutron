@@ -31,10 +31,18 @@ struct mn_ring {
 /* A record: then len payload bytes, padded to 8. Records are numbered from 1 per ring. */
 struct mn_rec { uint32_t op, len; uint64_t seq; };
 #define MN_REC_SYNC 0x80000000u /* in op: the guest waits for this record's reply */
+/* In op: a queue operation (Direct3D forwarding): on a drained ring, every other drained ring of the context first
+ * runs what it has published. */
+#define MN_REC_SUBMIT 0x40000000u
+/* A trap blob (Direct3D forwarding M2): its id has this bit. libkrun (patch 0009) leaves its guest range unmapped, and
+ * an 8-byte store of a ring blob's id there runs that drained ring on the storing vCPU's thread before the store
+ * returns (mn_executor_trap). */
+#define MN_TRAP_BLOB_ID (1ull << 63)
 
 struct mn_ctrl { uint32_t type, reserved; uint64_t ring_blob, arg; };
 enum {
-    MN_CTRL_RING_ATTACH = 1, /* ring_blob is now a thread's ring: the host sets reply_len to MN_ATTACHED */
+    MN_CTRL_RING_ATTACH = 1, /* ring_blob is now a thread's ring: the host sets reply_len to MN_ATTACHED. arg 1:
+                              * drained, no consumer: its records run when the guest traps (MN_TRAP_BLOB_ID) */
     MN_CTRL_RING_DETACH,     /* and no longer: the host stops its consumer before the next control message */
     MN_CTRL_WAKE,            /* the ring's consumer is parked and has work */
     MN_CTRL_WAIT,            /* this message's fence completes once the ring's done_seq >= arg; wakes the ring */

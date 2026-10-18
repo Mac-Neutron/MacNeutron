@@ -14,6 +14,19 @@ int mn_send(uint32_t op, const void *p, uint32_t len); /* asynchronous, on this 
 /* Synchronous: returns the host's status (negative: an error), with up to cap reply bytes in reply. */
 int mn_call(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap, uint32_t *reply_len);
 
+/* Drained rings (Direct3D forwarding M2): from now on this process's rings have no host consumer; a flush, one 8-byte
+ * store of the ring's blob id to the context's trap blob, runs the ring on the storing vCPU's host thread before the
+ * store returns. Call before the first ring exists (rings attached earlier keep their consumers). 0 or -errno. */
+int mn_drained(void);
+/* Asynchronous, without a flush (drained: the ring is flushed when it fills, or by the next flush). Without drained
+ * rings, mn_send. In drained mode mn_send flushes each record: winemetal's records have no later flush to wait for. */
+int mn_queue(uint32_t op, const void *p, uint32_t len);
+void mn_flush(void); /* drained: runs this thread's ring now */
+/* Synchronous by a flush: the reply is there when the store returns, no wait. op may carry MN_REC_SUBMIT (a queue
+ * operation: every other drained ring of the context first runs what it has published). -EIO if the host didn't run
+ * it (the ring stopped or broke). Without drained rings, mn_call. */
+int mn_call_flush(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap, uint32_t *reply_len);
+
 /* Sleeps until the notify queue in blob blob_id has a head past seen (MN_CTRL_NOTIFY_WAIT on this thread's fence
  * index), or timeout_ms passes; without a fence index, a short sleep. The caller rechecks the queue. */
 int mn_notify_wait(uint64_t blob_id, uint64_t seen, int timeout_ms);
