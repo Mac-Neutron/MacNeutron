@@ -24,6 +24,7 @@ struct hentry {
     uint32_t refs;          /* the guest's references */
     uint8_t own, busy;      /* busy: bound, or its release is in its second phase */
     void *ring;             /* a pool's ring */
+    uint64_t seq;           /* when it was bound, the table's count (M4: a context's end releases newest first) */
 };
 
 struct deferred {
@@ -48,20 +49,26 @@ struct mn_ht {
     size_t live;
     struct ringpools *rp;
     size_t nrp, caprp;
+    uint64_t seq;
 };
 
 /* Releases collected under the lock, run after it (a dealloc may do anything). */
-struct pending { enum mn_hkind kind; void *obj; };
+struct pending { enum mn_hkind kind; void *obj; uint64_t seq; };
 struct pendings { struct pending *v; size_t n, cap; };
 
-static void pend(struct pendings *p, enum mn_hkind kind, void *obj) {
+static void pend_at(struct pendings *p, enum mn_hkind kind, void *obj, uint64_t seq) {
     if (!obj) return; /* a queued creation that failed */
     if (p->n == p->cap) {
         struct pending *v = realloc(p->v, (p->cap ? p->cap * 2 : 16) * sizeof *v);
         if (!v) return; /* ponytail: leaks the object rather than failing a release */
         p->v = v, p->cap = p->cap ? p->cap * 2 : 16;
     }
-    p->v[p->n++] = (struct pending){kind, obj};
+    p->v[p->n++] = (struct pending){kind, obj, seq};
+}
+static void pend(struct pendings *p, enum mn_hkind kind, void *obj) { pend_at(p, kind, obj, 0); }
+static int newer_first(const void *a, const void *b) {
+    uint64_t x = ((const struct pending *)a)->seq, y = ((const struct pending *)b)->seq;
+    return x < y ? 1 : x > y ? -1 : 0;
 }
 
 static void run_pending(struct mn_ht *t, struct pendings *p) {
@@ -182,6 +189,7 @@ int mn_ht_bind(struct mn_ht *t, void *ring, mn_handle h, enum mn_hkind kind, voi
     e->own = (uint8_t)own;
     e->busy = 1;
     e->ring = ring;
+    e->seq = ++t->seq;
     atomic_store_explicit(&e->state, STATE(g, kind, BOUND), memory_order_release);
     t->live++;
     if (own == MN_OWN_AUTORELEASED) {
@@ -349,7 +357,8 @@ void mn_ht_free(struct mn_ht *t) {
         if (!chunk) continue;
         for (uint32_t i = 0; i < CHUNK; i++)
             /* A pool died with its ring's thread, which drained it. */
-            if (chunk[i].busy && S_KIND(chunk[i].state) != MN_HK_POOL) pend(&run, S_KIND(chunk[i].state), chunk[i].obj);
+            if (chunk[i].busy && S_KIND(chunk[i].state) != MN_HK_POOL)
+                pend_at(&run, S_KIND(chunk[i].state), chunk[i].obj, chunk[i].seq);
         free(chunk);
     }
     for (size_t i = 0; i < t->nrp; i++) {
@@ -357,6 +366,9 @@ void mn_ht_free(struct mn_ht *t) {
         free(t->rp[i].stack);
     }
     free(t->rp);
+    /* Newest first, by when each was bound, as a program tears down (M4: native DXMT's D3D11 children use their
+     * device's pools without holding it, so the device, made first, goes last). */
+    if (run.n) qsort(run.v, run.n, sizeof *run.v, newer_first);
     run_pending(t, &run);
     pthread_mutex_destroy(&t->lock);
     pthread_cond_destroy(&t->cond);

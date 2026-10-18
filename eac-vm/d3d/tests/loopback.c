@@ -61,6 +61,9 @@ static void thread_exit(void *p) {
 }
 
 static void host_trace(void) { mn_d3d_trace_flush(CTX); }
+/* MN_D3D_LOOPBACK_END=1: the context ends with the process, as a guest process's does in the VM (every handle the
+ * guest never let go released then, in the host's order). */
+static void context_end(void) { ops->context_destroy(ops->ctx, CTX); }
 
 static void init(void) {
     pthread_key_create(&key, thread_exit);
@@ -70,6 +73,8 @@ static void init(void) {
     if (trace && *trace) mn_d3d_set_trace(trace), atexit(host_trace);
     mn_executor_start(mn_vm_dispatch, &mn_vm_hooks);
     ops->context_create(ops->ctx, CTX);
+    const char *end = getenv("MN_D3D_LOOPBACK_END");
+    if (end && *end == '1') atexit(context_end);
 }
 
 int mn_open(void) {

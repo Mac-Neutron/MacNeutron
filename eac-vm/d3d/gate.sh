@@ -1,7 +1,8 @@
 #!/bin/sh
-# The M2 gate (Direct3D forwarding spec §8), and M3's upscaler rows: M1's 19 headless D3D12 programs, and the 4b-2
-# gate's XeSS and DLSS rows in the VM, print what they print on the macOS Wine runtime through forwarding, first in one
-# Mac process (loopback-gate.sh, which takes the macOS references: one run each), then in the VM (tests/dxmt.sh with MACNEUTRON_VM_D3D=forward: mnd3d.dll to the host's native DXMT), by
+# The M2 gate (Direct3D forwarding spec §8), M3's upscaler rows and M4's D3D11 and D3D10 rows: M1's 19 headless D3D12
+# programs and M4's 11 D3D11 and D3D10 ones, the 4b-2 gate's XeSS and DLSS rows and d3d10_wine (Wine's d3d10.dll) in
+# the VM, print what they print on the macOS Wine runtime through forwarding, first in one Mac process (loopback-gate.sh,
+# which takes the macOS references: one run each; the VM's own rows after it), then in the VM (tests/dxmt.sh with MACNEUTRON_VM_D3D=forward: mnd3d.dll to the host's native DXMT), by
 # compare.py's rule against the same references, with no VM host error (compare.py host) and every method the guest
 # called forwarded (coverage.py over MACNEUTRON_VM_D3D_TRACE=1's two traces). Native DXMT's settings are the VM host's
 # environment, so one for the whole run: ref.sh's, and a fresh shader cache (no row's lines need a cold one: d3d12_cache
@@ -23,8 +24,10 @@ sh "$ROOT/eac-vm/d3d/loopback-gate.sh" || fail=1
 # forwarded. Their macOS references beside the 19's (ref.sh starts its folder afresh). MN_D3D_UPSCALERS="": none.
 UPSCALERS=${MN_D3D_UPSCALERS-"d3d12_xess_quality d3d12_xess_performance d3d12_xess_nodepth d3d12_xess_api
   d3d12_dlss_vendor d3d12_dlss_quality d3d12_dlss_performance d3d12_dlss_inverted d3d12_dlss_refuse"}
+# d3d10_wine (M4) is the VM's alone too: Wine's d3d10.dll, in the guest, on the forwarded d3d10core. MN_D3D_WINE="": none.
+UPSCALERS="$UPSCALERS ${MN_D3D_WINE-d3d10_wine}"
 rows=$(cut -d'|' -f1 "$SH/dxmt-tests/invocations" | tr '\n' ' ')
-if [ -n "$UPSCALERS" ]; then
+if [ -n "$(echo $UPSCALERS)" ]; then
   MN_DXMT_ONLY=$(echo $UPSCALERS) sh "$D/share.sh" > /dev/null || fail=1
   MN_REF_RUNS=1 MN_REF_OUT=$W/d3d-gate-ref sh "$D/ref.sh" > "$W/d3d-gate-ref.txt" 2>&1 \
     || { tail -3 "$W/d3d-gate-ref.txt"; fail=1; }

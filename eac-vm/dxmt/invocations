@@ -8,7 +8,7 @@
 # Not d3d12_xess's cycles case: its line holds GPU memory sizes, a few MB apart in the guest (its buffers are blob memory,
 # freed when the guest drains its frees); its own limits pass on both sides. A line of output is compared when it starts with one
 # of the program's prefixes (its own printf lines; Wine's, DXMT's and the launcher's never count). The d3d11 and d3d10 rows
-(Direct3D forwarding M4) take their shaders as DXBC from @S, which dxbc.exe compiled on the macOS runtime.
+# (Direct3D forwarding M4) take their shaders as DXBC from @S, which dxbc.exe compiled on the macOS runtime.
 d3d10_core|d3d10_core.exe|@S|d3d10
 d3d10_wine|d3d10_wine.exe|@S|wine
 d3d11_api|d3d11_api.exe|@S|api

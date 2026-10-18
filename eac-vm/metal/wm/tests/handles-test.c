@@ -366,13 +366,33 @@ static void free_all(void) {
     CHECK(released[60] == 1 && released[61] == 1 && released[62] == 1);
 }
 
+/* M4 Task 9: a context's end releases what's left newest first, as a program tears down (a device made first goes last:
+ * native DXMT's D3D11 children use their device's pools without holding it), by when each was bound, not its index
+ * (a freed index is the guest's again). */
+static int order[8], norder;
+static void on_release_order(enum mn_hkind kind, void *o) {
+    (void)kind;
+    if (norder < 8) order[norder++] = (int)((int *)o - objs);
+}
+static void free_newest_first(void) {
+    memset(&rings, 0, sizeof rings);
+    rings.n = 2;
+    norder = 0;
+    struct mn_ht *t = mn_ht_new(&fake_rings, on_release_order);
+    mn_ht_bind(t, ring(0), H(1, 7), MN_HK_OBJC, obj(3), MN_OWN_PLUS1); /* the device */
+    mn_ht_bind(t, ring(0), H(1, 4), MN_HK_OBJC, obj(4), MN_OWN_PLUS1); /* its children: a lower index, after it */
+    mn_ht_bind(t, ring(0), H(1, 5000), MN_HK_OBJC, obj(5), MN_OWN_PLUS1); /* in the second chunk */
+    mn_ht_free(t);
+    CHECK(norder == 3 && order[0] == 5 && order[1] == 4 && order[2] == 3);
+}
+
 int main(void) {
     struct { const char *name; void (*fn)(void); } tests[] = {
         {"bind-get", bind_get}, {"stale", stale}, {"unbound", unbound}, {"out-of-range", out_of_range},
         {"kind-mismatch", kind_mismatch}, {"refs", refs}, {"pool", pool}, {"nested-pools", nested_pools},
         {"borrowed", borrowed}, {"cross-ring-use", cross_ring_use}, {"cross-ring-release", cross_ring_release},
         {"reuse-fifo", reuse_fifo}, {"threads", threads}, {"ring-end", ring_end}, {"sweep-phase2", sweep_phase2},
-        {"free-all", free_all},
+        {"free-all", free_all}, {"free-newest-first", free_newest_first},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         int before = failures;
