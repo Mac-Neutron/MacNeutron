@@ -15,6 +15,5 @@ ROWS=${MN_DXMT_ONLY:-"d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_co
   d3d11_pipeline d3d11_query d3d11_render d3d11_transfer d3d11_vsia d3d10_core"}
 ROWS=$(echo $ROWS)
 MN_D3D_PROGRAMS=$ROWS MN_D3D_PROGRAMS_LIB=$LIB MN_D3D_PROGRAMS_OUT=$OUT/tests sh "$ROOT/eac-vm/dxmt-native/build-tests.sh"
-# Each program's context ends with it, every handle it kept released then, as a guest process's does in the VM (M4).
-MN_D3D_LOOPBACK_END=1 MN_DXMT_ONLY=$ROWS MN_GATE_PROGRAMS=$OUT/tests MN_GATE_RUNS=$OUT/runs MN_GATE_NAME="d3d-loopback gate" \
+MN_DXMT_ONLY=$ROWS MN_GATE_PROGRAMS=$OUT/tests MN_GATE_RUNS=$OUT/runs MN_GATE_NAME="d3d-loopback gate" \
   sh "$ROOT/eac-vm/dxmt-native/gate.sh"
