@@ -26,6 +26,8 @@ extern const void *mn_d3d_vtables[MN_D3D_IFACES][MN_D3D_MAX_SLOTS];
 
 // The unix side's call (unix.c: mn_d3d_unix_call; in mnd3d.dll through winemetal's WMTForward): 0, or a status.
 extern "C" int32_t mn_d3d_call(uint32_t id, void *params);
+// A command list's method, through mn_d3d_call: on a list another thread called last, MN_D3D_ARG_HANDOFF.
+int32_t mn_d3d_record(mn_proxy *This, uint32_t id, void *params);
 // A call's status as the method's HRESULT (mn_d3d.h's contract).
 HRESULT mn_d3d_hr(int32_t status);
 // A created object: its proxy for iface (an index; -1: riid's), answering what ifaces says (the reply's masks); one

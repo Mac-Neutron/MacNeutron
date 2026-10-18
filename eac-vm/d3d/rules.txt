@@ -270,6 +270,12 @@ IDXGISwapChain::Present wrap
 IDXGISwapChain1::Present1 wrap
 IDXGISwapChain::GetContainingOutput wrap
 IDXGIAdapter::EnumOutputs wrap
+# A display's modes: the count in and out, the list as long as the count given (M3 Task 10: Unreal asks for the count,
+# then the list; one struct by default, and the count out only, which DXMT answered DXGI_ERROR_MORE_DATA).
+IDXGIOutput::GetDisplayModeList mode_count inout one
+IDXGIOutput::GetDisplayModeList desc out count=*mode_count
+IDXGIOutput1::GetDisplayModeList1 num_modes inout one
+IDXGIOutput1::GetDisplayModeList1 desc out count=*num_modes
 # DXMT's NVIDIA extension (M3 Task 6): the registry keys NVIDIA's DLSS loader reads, in the guest, then forwarded.
 ::DXGIGetDebugInterface1 wrap
 # DXMT's IMPLEMENT_ME (they'd abort it): answered in the guest as DXGI does (M3 Task 3, guest/proxy.cpp).

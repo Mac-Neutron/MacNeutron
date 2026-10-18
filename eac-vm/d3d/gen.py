@@ -1277,10 +1277,13 @@ def emit_proxies(model, rules, calls):
                 m = rename[f.param]
                 body.append(f"    mn_p.{m}_n = {rename[f.one_if]} ? 1 : (uint32_t){rename[f.count]};")
         has_ret = any(p.name == "__ret" for p in c.method.params)
+        # a command list's: in order when handed between threads (guest/proxy.cpp)
+        call = f"mn_d3d_record(This, {mid}, &mn_p)" if iface.startswith("ID3D12GraphicsCommandList") else \
+            f"mn_d3d_call({mid}, &mn_p)"
         if (ret == "void" or (has_ret and ret != "HRESULT")) and not made:  # the status tells the caller nothing
-            body.append(f"    mn_d3d_call({mid}, &mn_p);")
+            body.append(f"    {call};")
         else:
-            body.append(f"    int32_t mn_s = mn_d3d_call({mid}, &mn_p);")
+            body.append(f"    int32_t mn_s = {call};")
         if ret == "HRESULT":
             body.append("    HRESULT mn_hr = mn_s ? mn_d3d_hr(mn_s) : (HRESULT)(uint32_t)mn_p.ret;")
         for f in made:

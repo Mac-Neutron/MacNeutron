@@ -31,6 +31,8 @@ mkdir -p /home/mn
 # DLLs): remove them, and it writes them again.
 find "$WINEPREFIX/drive_c/windows" -name '*.dll' -size 0 -delete 2>/dev/null
 WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1
+# MACNEUTRON_VM_D3D=forward (present-gate.sh forward): the game's Direct3D through mnd3d.dll to the host's native DXMT.
+. /opt/mn-wine/lib/wine/mn-d3d/prefix.sh
 STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"

@@ -38,7 +38,7 @@ timeout -k 10 60 wine \$T/smoke.exe < /dev/null >> \$O/d3d-smoke.raw 2>&1
 timeout 20 wineserver -k
 tr -d '\r' < \$O/d3d-smoke.raw > \$O/d3d-smoke-$mode.txt
 EOS
-  rm -f "$SH/traces/d3d-guest.txt" "$SH/traces/d3d-host.txt" "$SH/traces/d3d-smoke-$mode.txt"
+  rm -f "$SH"/traces/d3d-guest.*.txt "$SH/traces/d3d-host.txt" "$SH/traces/d3d-smoke-$mode.txt"
   C=$W/d3d-smoke-cwd; rm -rf "$C"; mkdir -p "$C"
   # The game's native DXMT state (M3 Task 8): its shader cache and recorded pipelines, forwarded
   ST=$W/d3d-smoke-state; rm -rf "$ST"
@@ -73,10 +73,10 @@ EOS
     held=$(/usr/bin/grep -h 'mn-d3d: slow: IDXGISwapChain[0-9]*::Present' "$W/d3d-smoke-$mode.log" 2> /dev/null || true)
     echo "$held" | awk 'NF > 5 && ($4 > 4 || $(NF - 1) > 10) {bad = 1} END {exit !bad}' \
       && { echo "d3d-smoke: $mode: $held"; fail="$fail present-held-a-vcpu"; }
-    /usr/bin/grep -q '::D3D12CreateDevice' "$SH/traces/d3d-guest.txt" 2> /dev/null || fail="$fail no-guest-trace"
+    cat "$SH"/traces/d3d-guest.*.txt 2> /dev/null | /usr/bin/grep -q '::D3D12CreateDevice' || fail="$fail no-guest-trace"
     /usr/bin/grep -q '::D3D12CreateDevice' "$SH/traces/d3d-host.txt" 2> /dev/null || fail="$fail no-host-trace"
   else
-    [ ! -s "$SH/traces/d3d-guest.txt" ] || fail="$fail guest-mode-forwarded"
+    [ -z "$(cat "$SH"/traces/d3d-guest.*.txt 2> /dev/null)" ] || fail="$fail guest-mode-forwarded"
   fi
 done
 if [ -z "$fail" ]; then echo "d3d-smoke: ok"; else echo "d3d-smoke: FAIL$fail"; exit 1; fi

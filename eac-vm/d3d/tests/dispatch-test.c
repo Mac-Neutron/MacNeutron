@@ -336,6 +336,12 @@ int main(int argc, char **argv) {
         {eo.output, 0, 28 /* DXGI_FORMAT_R8G8B8A8_UNORM */, 0, (uintptr_t)&count, 0};
     CHECK(mn_d3d_calls[omodes].params_size == sizeof dm && call(omodes, &dm) == 0 && (uint32_t)dm.ret == 0);
     CHECK(count == 2);
+    /* then the list, as Unreal asks for it (M3 Task 10: SMITE 2 stopped at DXGI_ERROR_MORE_DATA): both modes, sorted */
+    struct { uint32_t width, height, num, den, format, scanline, scaling; } modes[2];
+    memset(modes, 0, sizeof modes);
+    dm.desc = (uintptr_t)modes;
+    CHECK(sizeof modes == 56 && call(omodes, &dm) == 0 && (uint32_t)dm.ret == 0 && count == 2);
+    CHECK(modes[0].width == 1280 && modes[0].height == 720 && modes[1].width == 1920 && modes[1].height == 1080);
 
     /* notimpl: a call DXMT has no code for (a render target view of a buffer: its IMPLEMENT_ME) fails, logged; the
      * host goes on */

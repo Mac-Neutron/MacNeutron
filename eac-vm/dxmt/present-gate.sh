@@ -120,8 +120,14 @@ elif [ ! -f "$HOME/Library/Application Support/Steam/steamapps/common/SMITE 2/Wi
   echo "skip: SMITE 2 isn't installed"
 else
   rm -rf "$W/share/traces/smite2"  # a run that never got there leaves no log to blame
-  MACNEUTRON_VM_D3D=$MODE MN_PRESENT_PROBE=1 MN_RUN_TIMEOUT=900 "$ROOT/eac-vm/run-guest.sh" "$ROOT/eac-vm/tests/smite2-render.sh" \
-    --steam-appid 2437170 --ram-mib 16384 2>&1 | perl -ne 'BEGIN { $| = 1; $t = time } print time - $t, " ", $_' > "$L"
+  rm -f "$W"/share/traces/d3d-guest.*.txt "$W/share/traces/d3d-host.txt"
+  # The guest runs its script with a fresh environment: the mode, the trace and DLSS go in it (forwarded, DLSS's NVIDIA
+  # extension in native DXMT too, in macneutron-vm's environment). The upscaler is the game's own setting.
+  { printf 'export MACNEUTRON_VM_D3D=%s MACNEUTRON_VM_D3D_TRACE=1 MACNEUTRON_DLSS=1\n' "$MODE"
+    cat "$ROOT/eac-vm/tests/smite2-render.sh"; } > "$W/present-smite2.sh"
+  DXMT_ENABLE_NVEXT=1 MACNEUTRON_VM_D3D_TRACE=1 MN_PRESENT_PROBE=1 MN_RUN_TIMEOUT=900 "$ROOT/eac-vm/run-guest.sh" \
+    "$W/present-smite2.sh" --steam-appid 2437170 --ram-mib 16384 2>&1 \
+    | perl -ne 'BEGIN { $| = 1; $t = time } print time - $t, " ", $_' > "$L"
   if ! /usr/bin/grep -q '^[0-9]* steam: initialised$' "$L"; then echo "skip: Steam didn't initialise in the guest"
   else
     counted smite2 "$L"
@@ -138,6 +144,14 @@ EOF
     sed 's/^[0-9]* //' "$L" > "$L.host"
     python3 -I "$D/compare.py" host "$L.host" || fail=1
     rm -f "$L.host"
+    if [ "$MODE" = forward ]; then  # every call forwarded, and an upscaler's through DXMT's private interface
+      cat "$W"/share/traces/d3d-guest.*.txt > "$W/smite2-d3d-guest.txt" 2> /dev/null  # each process's
+      python3 -I "$ROOT/eac-vm/d3d/tests/coverage.py" "$W/smite2-d3d-guest.txt" "$W/share/traces/d3d-host.txt" \
+        || fail=1
+      if /usr/bin/grep -q 'TemporalUpscale' "$W/share/traces/d3d-host.txt" 2> /dev/null; then
+        ok "smite2: its upscaler through forwarding ($(/usr/bin/grep -h 'TemporalUpscale' "$W/share/traces/d3d-host.txt" | head -1))"
+      else no "smite2: no TemporalUpscale reached the host (its upscaler off, or not forwarded)"; fi
+    fi
   fi
 fi
 

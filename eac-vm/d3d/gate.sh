@@ -38,7 +38,7 @@ others="$rows $(echo $UPSCALERS | tr ' ' '\n' | /usr/bin/grep -v '^d3d12_dlss' |
   > "$W/d3d-gate-guest.sh"
 OUT=$W/d3d-gate-out
 rm -rf "$OUT" "$W/d3d-gate-cache"; mkdir -p "$OUT"  # a run that never happened leaves nothing to compare
-rm -f "$SH/traces/d3d-guest.txt" "$SH/traces/d3d-host.txt" "$W/d3d-gate-run.txt"
+rm -f "$SH"/traces/d3d-guest.*.txt "$SH/traces/d3d-host.txt" "$W/d3d-gate-run.txt"
 boot() { # boot <rows> <DXMT_ENABLE_NVEXT>: one VM boot of those rows, their outputs into $OUT
   [ -n "$(echo $1)" ] || return 0
   MN_DXMT_ONLY=$(echo $1) sh "$D/share.sh" > /dev/null || { fail=1; return; }
@@ -59,6 +59,7 @@ while IFS='|' read -r name exe args prefixes; do
   echo "     time: macOS $(cat "$REF/$name.1.time") s, VM $(cat "$OUT/$name.time") s"
 done < "$SH/dxmt-tests/invocations"
 python3 -I "$D/compare.py" host "$W/d3d-gate-run.txt" || fail=1
-python3 -I "$ROOT/eac-vm/d3d/tests/coverage.py" "$SH/traces/d3d-guest.txt" "$SH/traces/d3d-host.txt" || fail=1
+cat "$SH"/traces/d3d-guest.*.txt > "$W/d3d-guest.txt" 2> /dev/null  # each process's
+python3 -I "$ROOT/eac-vm/d3d/tests/coverage.py" "$W/d3d-guest.txt" "$SH/traces/d3d-host.txt" || fail=1
 [ $fail -eq 0 ] && echo "d3d gate: all $n programs passed" || echo "d3d gate: FAIL"
 exit $fail

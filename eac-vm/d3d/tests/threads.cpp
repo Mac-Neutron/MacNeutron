@@ -14,6 +14,9 @@
 //   overwrite (M3 Task 5) one thread clears through RTV descriptor h and goes idle (alive, its ring unflushed);
 //             another then writes a second target's view into h; the first closes its list, which is executed: the
 //             first target reads back cleared and the second not (a recording reads a descriptor when it's made)
+//   handoff   (M3 Task 10, SMITE 2's) one thread records 256 small copies and a timestamp into a list and goes idle
+//             (alive, its ring unflushed); another closes the list, which is then executed: the buffer reads back the
+//             copies (a list's close runs every thread's published records first: the recording thread's are before it)
 //   exits     (after M2) 512 threads, one after another, each make one call and end: the memory they took is given
 //             back (the unix side's per-thread buffers)
 // Prints "threads ..." lines.
@@ -294,6 +297,52 @@ static void Overwrite() {
     printf("threads overwrite %d of 128 pixels wrong\n", bad);
 }
 
+static void Handoff() {
+    const UINT64 size = 4096;
+    ID3D12Resource *out = gpu->Buffer(D3D12_HEAP_TYPE_DEFAULT, size, D3D12_RESOURCE_STATE_COPY_DEST);
+    std::vector<uint8_t> data(size);
+    for (UINT64 i = 0; i < size; i++) data[i] = (uint8_t)(i * 5 + 3);
+    ID3D12Resource *up = Upload(data);
+    D3D12_QUERY_HEAP_DESC qd = {D3D12_QUERY_HEAP_TYPE_TIMESTAMP, 1, 0};
+    ID3D12QueryHeap *stamps;
+    CHECK(gpu->device->CreateQueryHeap(&qd, __uuidof(ID3D12QueryHeap), (void **)&stamps));
+    Recorder r;
+    std::mutex m;
+    std::condition_variable cv;
+    int stage = 0;
+    std::thread recorder([&] {
+        for (UINT64 i = 0; i < 256; i++) r.list->CopyBufferRegion(out, i * 16, up, i * 16, 16);
+        r.list->EndQuery(stamps, D3D12_QUERY_TYPE_TIMESTAMP, 0);
+        std::unique_lock<std::mutex> l(m);
+        stage = 1;
+        cv.notify_all();
+        cv.wait(l, [&] { return stage == 2; }); // idle until the list is closed: its exit would flush its ring
+    });
+    std::thread closer([&] {
+        {
+            std::unique_lock<std::mutex> l(m);
+            cv.wait(l, [&] { return stage == 1; });
+        }
+        CHECK(r.list->Close());
+        std::unique_lock<std::mutex> l(m);
+        stage = 2;
+        cv.notify_all();
+    });
+    closer.join();
+    recorder.join();
+    ID3D12CommandList *lists[] = {r.list};
+    gpu->queue->ExecuteCommandLists(1, lists);
+    ID3D12Resource *rb = gpu->Buffer(D3D12_HEAP_TYPE_READBACK, size, D3D12_RESOURCE_STATE_COPY_DEST);
+    gpu->Barrier(out, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    gpu->list->CopyBufferRegion(rb, 0, out, 0, size);
+    gpu->Submit();
+    uint8_t *v;
+    CHECK(rb->Map(0, nullptr, (void **)&v));
+    int bad = 0;
+    for (UINT64 i = 0; i < size; i++) bad += v[i] != data[i];
+    printf("threads handoff %d of %llu bytes wrong\n", bad, (unsigned long long)size);
+}
+
 static void Exits() {
     auto used = [] { return mstats().bytes_used; };
     std::thread([] { gpu->device->GetNodeCount(); }).join(); // what the first thread takes for good
@@ -312,6 +361,7 @@ int main() {
     Release();
     View();
     Overwrite();
+    Handoff();
     Exits();
     return 0;
 }

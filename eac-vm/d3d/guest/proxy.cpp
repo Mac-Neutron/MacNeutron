@@ -32,6 +32,7 @@ struct mn_obj {
     UINT source_width = 0, source_height = 0;
     pacing *pace = nullptr;                  // a swapchain's frames (Task 4)
     std::vector<std::pair<int, mn_obj *>> companions; // one an interface at another pointer, held for our life (M3)
+    std::atomic<const void *> recorder{nullptr};      // a command list's: the thread that called it last (Task 10)
 };
 static void end_pacing(pacing *p);
 
@@ -1004,16 +1005,23 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE, DWORD reason, void *) {
 #ifdef MN_D3D_LOOPBACK
 // The loopback library: the unix side is in the same library.
 extern "C" int32_t mn_d3d_unix_call(void *args);
-extern "C" int32_t mn_d3d_call(uint32_t id, void *params) {
-    mn_d3d_args a = {id, 0, (uintptr_t)params};
+static int32_t call(uint32_t id, uint32_t flags, void *params) {
+    mn_d3d_args a = {id, flags, (uintptr_t)params};
     return mn_d3d_unix_call(&a);
 }
 #else
 // mnd3d.dll: the guest winemetal.so's slot MN_WM_D3D, through winemetal.dll (DXMT 0079), a plain DLL having no unix
 // lib of its own.
 extern "C" __declspec(dllimport) uint32_t WMTForward(uint32_t call, void *params);
-extern "C" int32_t mn_d3d_call(uint32_t id, void *params) {
-    mn_d3d_args a = {id, 0, (uintptr_t)params};
+static int32_t call(uint32_t id, uint32_t flags, void *params) {
+    mn_d3d_args a = {id, flags, (uintptr_t)params};
     return (int32_t)WMTForward(155 /* MN_WM_D3D */, &a);
 }
 #endif
+extern "C" int32_t mn_d3d_call(uint32_t id, void *params) { return call(id, 0, params); }
+
+int32_t mn_d3d_record(mn_proxy *This, uint32_t id, void *params) {
+    static thread_local char me; // the calling thread, by an address of its own
+    bool handoff = This->obj->recorder.exchange(&me, std::memory_order_relaxed) != &me;
+    return call(id, handoff ? MN_D3D_ARG_HANDOFF : 0, params);
+}

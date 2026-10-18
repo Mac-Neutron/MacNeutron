@@ -154,6 +154,19 @@ class ClassifyTest(unittest.TestCase):
         self.assertNotIn('extern "C" HRESULT WINAPI DXGIGetDebugInterface1(', out)
         self.assertIn('extern "C" HRESULT WINAPI CreateDXGIFactory1(', out)
 
+    def test_a_list_records(self):
+        # a command list's method (M3 Task 10, SMITE 2's) goes through mn_d3d_record, which keeps a list handed between
+        # threads in order; another interface's through mn_d3d_call
+        out, _ = gen.emit_proxies(self.m, gen.parse_rules(gen.read(RULES), self.m), self.calls)
+        def body(name):
+            mid = next(i for i, c in self.calls.items() if c.name == name)
+            start = out.index(f"px_{mid}(")
+            return out[start:out.index("\n}", start)]
+        self.assertIn("mn_d3d_record(This, ", body("ID3D12GraphicsCommandList::EndQuery"))
+        self.assertIn("mn_d3d_record(This, ", body("ID3D12GraphicsCommandList::Close"))
+        self.assertIn("mn_d3d_record(This, ", body("ID3D12GraphicsCommandList1::OMSetDepthBounds"))
+        self.assertNotIn("mn_d3d_record", body("ID3D12Device::GetNodeCount"))
+
     def test_every_method_has_a_mode(self):
         for row in gen.manifest(self.m):
             self.assertIn(self.calls[row[0]].mode, ("async", "sync", "submit", "special", "refuse"), row[1])

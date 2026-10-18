@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "marshal.h"
 #include "notify.h"
 #include "guest/transport.h"
@@ -78,10 +79,20 @@ static int proxy_handle(uint64_t value, mn_handle *h) {
 static struct mn_blob queue_blob, mirror_blob;
 static int events_ready;
 
+static void trace_out(void);
+
 static void *listener(void *arg) {
     (void)arg;
     struct mn_notify *q = queue_blob.ptr;
+#ifndef MN_D3D_LOOPBACK
+    struct timespec last = {0};
+#endif
     for (;;) {
+#ifndef MN_D3D_LOOPBACK
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if (now.tv_sec - last.tv_sec >= 5) last = now, trace_out(); /* a killed process's trace, at most 5 s old */
+#endif
         struct mn_notify_rec r;
         while (mn_notify_next(q, &r)) {
             if (r.type == MN_NOTIFY_SET) { /* the proxies' own, which they keep */
@@ -122,18 +133,21 @@ static void events(void) {
     events_ready = 1;
 }
 
-/* MACNEUTRON_VM_D3D_TRACE=1: each method's calls, written to the share's traces/d3d-guest.txt as the process ends
- * (the loopback's: MN_D3D_LOOPBACK_TRACE); a method the guest answered itself (op 3, once) is marked by why. */
+/* MACNEUTRON_VM_D3D_TRACE=1: each method's calls, written to the share's traces/d3d-guest.<pid>.txt as the process ends
+ * and every 5 s from the listener (M3 Task 10: a game killed at its run's end never ends; the loopback's, appended at
+ * its end: MN_D3D_LOOPBACK_TRACE); a method the guest answered itself (op 3, once) is marked by why. */
 static _Atomic uint64_t *counts;
 static uint8_t *why; /* 1 refused, 2 a special without guest code */
 
 static void trace_out(void) {
 #ifdef MN_D3D_LOOPBACK
-    const char *path = getenv("MN_D3D_LOOPBACK_TRACE");
+    const char *path = getenv("MN_D3D_LOOPBACK_TRACE"), *mode = "a";
 #else
-    const char *path = "/mnt/share/traces/d3d-guest.txt";
+    char path[64];
+    const char *mode = "w"; /* the process's own, rewritten */
+    snprintf(path, sizeof path, "/mnt/share/traces/d3d-guest.%d.txt", (int)getpid());
 #endif
-    FILE *f = counts && path ? fopen(path, "a") : NULL;
+    FILE *f = counts && path ? fopen(path, mode) : NULL;
     if (!f) return;
     fprintf(f, "# process %d\n", (int)getpid());
     for (unsigned i = 0; i < MN_D3D_CALLS; i++)
@@ -246,7 +260,7 @@ int32_t mn_d3d_unix_call(void *args) {
         struct mn_wm_out o = {.buf = rec, .cap = MN_REC_MAX};
         NTSTATUS_T s = mn_wm_pack_call(c, params, &o);
         if (s) return (int32_t)s;
-        int submit = c->mode == MN_WM_SUBMIT;
+        int submit = c->mode == MN_WM_SUBMIT || (a->flags & MN_D3D_ARG_HANDOFF);
         if (!o.sync && !submit) {
             int r = mn_queue(MN_OP_D3D + a->id, rec, o.len);
             if (r) mn_wm_unwind(&o, 0);
