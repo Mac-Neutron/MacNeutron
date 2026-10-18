@@ -1255,3 +1255,109 @@ Open:
   off in the VM in both modes.
 - A SMITE 2 run whose game crashed still waits out its 180 s (Unreal's crash reporter holds the launcher), and a game
   that dies before Steam initialises makes the row skip, not fail.
+
+## 21. Direct3D forwarding, M4: D3D11 and D3D10 (2026-10-18)
+
+Plan `docs/superpowers/plans/2026-10-18-vm-d3d-forwarding-m4-d3d11.md`. M2's and M3's forwarding (§19, §20) gains
+D3D11 and D3D10: with `MACNEUTRON_VM_D3D=forward`, a process's `d3d11.dll` and `d3d10core.dll` are stand-ins too, so its
+D3D11 is native DXMT's on the host, as its DXGI and D3D12 are, and the stand-in DXGI no longer breaks a forwarded
+process's D3D11 (§20's "Not a DXMT adapter"). Wine's `d3d10.dll` (effects, state blocks) stays the guest's, on the
+forwarded `d3d10core`. DXMT's D3D11 and D3D10 test programs through forwarding match macOS.
+
+What M4 built:
+- The model (spec §4.2): `d3d10.h`, `d3d10_1.h` and `d3d11.h` to `d3d11_4.h` after D3D12's and DXGI's headers, and
+  DXMT's `IMTLD3D11ContextExt` to `Ext2` declared in `rules.txt`: 207 interfaces (the answers' masks grew to 256 bits)
+  and 928 calls, 528 of them D3D11's and D3D10's. `ID3D10Multithread` is `ID3D11Multithread` (one IID and vtable).
+  The video and content-protection interfaces, the tiled-resource methods and shared handles are refused.
+- Objects at other pointers. D3D11's device answers its DXGI device, D3D10 device and multithread lock, a resource its
+  D3D10 counterpart and DXGI resource, a view, state, shader or query its D3D10 one, each at another C++ subobject:
+  `companion` rules each way. A companion's `QueryInterface` (op 4) now answers its whole interfaces block, as a
+  creation does, so a companion answers its own family and an object the guest already has comes back as its proxy;
+  a companion's `IUnknown` is its root's. Getters (`PSGetShaderResources` and the rest) return objects as the handles
+  the guest knows them by.
+- Data. D3D11 passes no sizes for initial data and `UpdateSubresource`: the guest packs each subresource's bytes into
+  one region (`guest/formats.cpp`: blocks, pitches, boxes, from the resource's description), and the host rebuilds
+  the subresource array.
+- Threads. A D3D11 context's and a D3D10 device's methods, as a command list's (§20), go as a submit when another
+  thread called that object last; `ID3D11Multithread::Enter` and `Leave` are a lock in the guest (a host lock would be
+  a vCPU thread's).
+- Fences and pacing (spec §4.7). D3D11's fences are D3D12's design: a mirror slot, its value read in the guest, its
+  events relays. A D3D11 swapchain (`CreateSwapChain` or `D3D11CreateDeviceAndSwapChain`, now a wrap) is paced in the
+  guest on its device's immediate context, at its device's latency (`IDXGIDevice1::SetMaximumFrameLatency`, a wrap;
+  DXGI's 3); fork 0088 makes native DXMT's D3D11 present not wait with a VM host's hooks. D3D11 presents on DXMT's
+  encoder thread after its `Present` call: the host counts the frame at the call and probes it there.
+- Maps, in two layers (spec §4.10). Every map's memory, a rename included, comes from the guest's arenas (a new rule
+  word, `arena`): a resource's creation names its allocation, and the host first checks that an arena has a piece
+  that size, asking for one otherwise, since a rename into host memory can't be taken back. A map that would wait
+  goes with `DO_NOT_WAIT`, and while the host answers still drawing the context signals a fence of its own (DXMT's
+  `Signal` flushes; its `DO_NOT_WAIT` map doesn't, a DXMT finding of Task 1) and the guest waits for it. On top, fork
+  0089's `IMTLD3D11ContextExt2` lends the immediate context's dynamic resources' memory to the guest in pieces (one
+  suballocation each, 8 at a time, doubling to 64 while a frame empties them): `WRITE_DISCARD` and
+  `WRITE_NO_OVERWRITE` are answered in the guest, and `Unmap` makes the piece current with a queued `UsePiece`.
+  `d3d11_dynamic` with 30 frames of 1,000 discards maps 40,181 times in the guest and 81 on the host (the loopback,
+  `tests/pieces.sh`); in the VM, 14,128 maps and 104 on the host. Deferred contexts, linear dynamic textures and
+  readbacks map on the host.
+- DXMT's `UNIMPLEMENTED` throws natively (fork 0087), as `IMPLEMENT_ME` does (0084): the call fails and the VM host
+  goes on.
+
+Fork patches 0087 to 0089; the series applies on the pin, and the macOS runtime's build (`wine-arm64/build.sh`) and
+`dxmt/check.sh` take them (one check failed in one of its two runs, D3D12's `atomic64typed` on macOS, which M4
+doesn't touch).
+
+Faults the gate found that the plan's tests didn't; each now has a test that failed first:
+- The generator passed a guest's event `HANDLE` to native DXMT, which took it for its own: `ID3D11Fence::
+  SetEventOnCompletion` crashed the VM host (the loopback shares an address space, so it passed there). A generated
+  stub now passes no guest `HANDLE` (own code relays events: the fence's, `Flush1`'s); the content-protection event,
+  a DXMT assert, is refused (`test_gen`, `dispatch-test`).
+- The derived rules gave single objects out a count (`CreateInputLayout`, the depth-stencil view getters): the guest
+  would have written that many pointers into one.
+- At a context's end the handle table released what the guest kept in index order, the device first, and a UAV's
+  counter then used the device's freed pool: the VM host crashed (`Counter::decRef`) or its heap broke and a later
+  free failed. Native DXMT's D3D11 children use their device's pools without holding it; the table now releases a
+  context's last objects newest first (`handles-test`; the four rows that crashed in one boot pass).
+- `IDXGIResource` was refused whole (D3D12's resources have none in DXMT); D3D11's have one (`d3d11_api`).
+
+DXMT's own limits the programs met: no geometry-shader stream output nor `DrawAuto`, its emulated vertex stream
+output wrote nothing, its translator refuses Wine's compiled hull shader, Wine's compiler has no
+`AppendStructuredBuffer`, and its `DO_NOT_WAIT` map never flushes, so a game polling one without a `Flush` hangs in
+every mode. `d3d11_pipeline` checks those stages' creations only.
+
+The gate's rows (D3D11 and D3D10), each against one macOS run by `compare.py`'s rule: natively
+(`eac-vm/dxmt-native/gate.sh`), through the loopback (`eac-vm/d3d/loopback-gate.sh`), in guest mode
+(`eac-vm/dxmt/gate.sh`) and forwarded in the VM (`eac-vm/d3d/gate.sh`). All pass every way; the forwarded run's 40 rows
+(the 28 D3D12 ones too) show no host error, and coverage over its traces is 255 methods, every one forwarded or
+answered in the guest by design (the dynamic maps). Seconds, one run each (macOS: the run each side compared with):
+
+| Program | macOS | native | loopback | VM, guest DXMT | VM, forwarded |
+|---|---|---|---|---|---|
+| d3d10_core | 6.80 | 0.05 | 0.23 | 0.19 | 0.73 |
+| d3d10_wine | 5.74 / 8.80 | | | 1.67 | 1.66 |
+| d3d11_api | 3.72 | 0.05 | 0.10 | 1.09 | 1.05 |
+| d3d11_compute | 3.73 | 0.05 | 0.12 | 1.07 | 1.06 |
+| d3d11_deferred | 3.73 | 0.05 | 0.11 | 1.08 | 1.05 |
+| d3d11_dynamic | 3.87 | 0.17 | 0.23 | 1.34 | 1.23 |
+| d3d11_getters | 3.72 | 0.04 | 0.09 | 1.06 | 1.04 |
+| d3d11_pipeline | 3.72 | 0.04 | 0.09 | 1.07 | 1.07 |
+| d3d11_query | 3.71 | 0.05 | 0.11 | 1.07 | 1.04 |
+| d3d11_render | 3.74 | 0.05 | 0.11 | 1.08 | 1.06 |
+| d3d11_transfer | 3.73 | 0.07 | 0.12 | 1.09 | 1.07 |
+| d3d11_vsia | 5.67 | 0.04 | 0.10 | 1.66 | 1.67 |
+
+As in §19 the VM's times are Wine's start, not D3D's (a row's first program pays wineboot's wineserver: `d3d10_core`,
+and `d3d10_wine` in its own boot). `present-gate.sh forward` now runs `present_loop`, the 4c gate's D3D11 game loop,
+forwarded: 600 drawables counted, probed as in guest mode, 8.30 ms a frame against macOS's 8.29, and no present
+holding its vCPU on the host (d3d-smoke.sh's rule). The smoke's new `d3d11latency` line (60 GPU-bound D3D11
+presents, the fence never more than 3 behind) passes in both modes. The smoke's slow-present rule passed in Tasks 6
+and 8 but failed in every run while the Mac sat on its lock screen (an hour idle, the aerial wallpaper decoding video:
+68-69 presents over 4 ms, about one swapchain's 60 GPU-bound frames, the longest 9-14 ms), with a host without M4's
+last host change too, while its other checks passed: to run again with the maintainer at the Mac.
+
+Open:
+- A D3D11 game through forwarding (none ran in M4), and D3D11's MetalFX: `IMTLD3D11ContextExt`'s and `Ext1`'s own
+  methods (`TemporalUpscale`, DXMT's `nvngx` for D3D11 DLSS) aren't forwarded yet.
+- A guest process that died while native DXMT compiled a shader once crashed the VM host in the compile task (Task 7,
+  before the release order changed); not seen since.
+- The present counts for D3D11 go to the context of the latest `Present` call: two processes presenting D3D11 at once
+  would mix their probes and drawables.
+- The arenas' room check asks for a whole allocation a piece (a suballocated piece needs far less): `d3d11_dynamic`'s
+  arenas reach 640 MiB, all of it its one-frame stress section's.

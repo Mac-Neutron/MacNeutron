@@ -76,7 +76,10 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
 - `eac-vm/d3d/gen.py` reads the C headers widl made from Wine's IDL (`d3d12.idl`, `dxgi.idl` to `dxgi1_6.idl`,
   `d3d11.idl` to `d3d11_4.idl`, `d3d10.idl`, `d3d10_1.idl`: 199 interfaces, 899 methods), from native DXMT's include
   set, the headers both builds compile against, and `eac-vm/d3d/rules.txt`, the hand-written annotations. (M2: the
-  headers rather than the IDL; D3D12 and DXGI are 112 interfaces and 405 calls, research README §19.)
+  headers rather than the IDL; D3D12 and DXGI are 112 interfaces and 405 calls, research README §19. M4: with D3D11,
+  D3D10 and DXMT's private interfaces, 207 interfaces and 928 calls, 528 of them D3D11's and D3D10's; new rule words
+  `arena` (a call's buffers from the guest's arenas) and `own`'s sizes from its aux words, companions declared each
+  way, and a generated stub never hands native DXMT a guest's `HANDLE`, research README §21.)
 - A rule per method: each pointer argument's direction (in, out, in-out) and length (a count argument, a struct's
   size field, a NUL-terminated string, a fixed size), and whether the call is asynchronous (§4.5).
 - It writes the guest proxies, the host stubs and a manifest that numbers every method. A method without a rule stops
@@ -95,6 +98,8 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
   (`eac-vm/d3d/mn_d3d.h`). The doorbells became a trap: a flush stores to a trap blob and the host runs the ring on
   that vCPU's thread, research README §18.)
 - They go into `wine.erofs` beside the guest DXMT DLLs, and `run-game.sh` chooses which set a game loads (§4.13).
+  (M4: `d3d11.dll` and `d3d10core.dll` forward to `mnd3d.dll` too, taken as native with the other two, so a forwarded
+  process's D3D11 is the host's as its DXGI is; Wine's `d3d10.dll` stays the guest's, on that `d3d10core`.)
 
 ### 4.4 The host dispatcher
 
@@ -107,7 +112,10 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
 - Handles are the guest's choice; a creation record carries the new one. `AddRef` and `Release` count in the guest;
   only the last `Release` reaches the host, deferred until every ring that used the object is past it (the winemetal
   forwarding's rule for its own objects).
-- `QueryInterface` is answered in the guest from the interfaces the host object reported.
+- `QueryInterface` is answered in the guest from the interfaces the host object reported. (M4: D3D11's, D3D10's and
+  DXGI's interfaces of one object answer at other pointers; such a companion comes with its whole interfaces block
+  (op 4's reply), an object the guest already has comes back as its proxy, and a companion's `IUnknown` is its
+  root's.)
 - Immutable answers are cached in the guest after their first call: `GetDesc` and its siblings,
   `GetGPUVirtualAddress`, `GetCPUDescriptorHandleForHeapStart`, `GetGPUDescriptorHandleForHeapStart`,
   `GetDescriptorHandleIncrementSize`, `CheckFeatureSupport`. (Not in M2: each is a call; M5 measures which are worth
@@ -120,7 +128,10 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
   query heaps, swapchains), `Map`, and every method with output data.
 - A call on one thread that uses an object created on another waits for that creation (the winemetal forwarding's
   cross-ring rule). (M2: creations are synchronous, so an object exists before its handle is returned; the queue
-  operations, `ExecuteCommandLists`, `Signal` and `Wait`, are sent with every other ring of the process run first.)
+  operations, `ExecuteCommandLists`, `Signal` and `Wait`, are sent with every other ring of the process run first.
+  M4: a D3D11 context's and a D3D10 device's methods, as a command list's, go as a submit when another thread called
+  that object last; `ID3D11Multithread`'s `Enter` and `Leave` are a lock in the guest. A context's end releases what
+  the guest kept newest first: native DXMT's D3D11 children use their device's pools without holding it.)
 
 ### 4.6 Memory
 
@@ -129,7 +140,9 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
   winemetal forwarding's galloc regions, mapped in the game's process), and native DXMT carves its CPU-visible
   allocations from them through the allocation hook DXMT patch 0071 added (`WMTMemoryAlloc`). `Map` returns the
   guest's own address for that memory: persistently mapped upload buffers need no copies. (M2: through memory hooks
-  natively, `WMTSetMemoryHooks`, fork 0076, and CPU-visible heaps over them, 0077.)
+  natively, `WMTSetMemoryHooks`, fork 0076, and CPU-visible heaps over them, 0077. M4: a D3D11 or D3D10 map's renames
+  too, the rule word `arena`; the host checks first that an arena holds the resource's allocation, which its creation
+  named, since a rename into host memory can't be taken back.)
 - When an arena is full the host asks for another in the reply of the call that needed it. (M2: the creation is
   answered `MN_D3D_NEED_ARENA` with the bytes it wanted; the guest adds an arena and sends it again, up to 8
   tries: another thread's creation may take the arena first.)
@@ -144,7 +157,9 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
 - `SetEventOnCompletion` signals the guest's Win32 event through the winemetal forwarding's shared-event path.
 - DXGI's frame-latency waitable object is mirrored the same way. (M3: a guest semaphore a pacer thread releases as
   each present's fence completes; without it, at most 3 frames in flight; presents also wait for the display, on the
-  host's drawables shown, so none holds a vCPU.)
+  host's drawables shown, so none holds a vCPU. M4: D3D11's fences as D3D12's, their events relays; a D3D11
+  swapchain paces on its device's immediate context and the device's latency, `SetMaximumFrameLatency`'s; native
+  DXMT's D3D11 present doesn't wait with a VM host's hooks, fork 0088.)
 
 ### 4.8 Presentation
 
@@ -162,14 +177,19 @@ Today's path, DXMT in the guest over winemetal's 153 calls (parent spec §5.6), 
 - Each guest thread that calls Direct3D gets its own ring; the host runs each ring on its own consumer, so a thread's
   recording stays in order. (M2: no consumer threads; a ring runs on the vCPU thread that flushed it, in order.)
 - `ExecuteCommandLists` waits, on the host, until the lists it names are fully recorded on their own rings. D3D11
-  deferred contexts and `ExecuteCommandList` work the same way.
+  deferred contexts and `ExecuteCommandList` work the same way. (M4: `FinishCommandList` is synchronous, so a list is
+  recorded before its handle returns.)
 
 ### 4.10 D3D11 maps
 
 - `Map` with `D3D11_MAP_WRITE_DISCARD` or `D3D11_MAP_WRITE_NO_OVERWRITE` is answered in the guest, from a pool of
   replacement memory per resource that the host hands out ahead of time; `Unmap` is asynchronous and says which piece
   is now current. D3D11 games map dynamic buffers hundreds of times a frame.
-- Other maps (reads, staging) are synchronous.
+- Other maps (reads, staging) are synchronous. (M4: as written, on fork 0089's `IMTLD3D11ContextExt2`: the immediate
+  context lends a dynamic resource's pieces (a suballocation each, 8 at a time, doubling to 64 while a frame empties
+  them) and `UsePiece` at `Unmap` makes one current, queued. A map that would wait goes with `DO_NOT_WAIT`, and the
+  guest waits on a fence of its own. Deferred contexts and linear dynamic textures map on the host. Research README
+  §21.)
 
 ### 4.11 Upscalers
 
@@ -262,7 +282,7 @@ M0 (research README §15) measured SMITE 2's VM at 11.64 cores: the guest's code
 | M1, native DXMT | §4.1 | DXMT's test programs natively on the Mac match the macOS Wine run. Go/no-go: if our D3D12 can't build natively at reasonable cost, stop and ask the maintainer before M2. |
 | M2, D3D12 and DXGI forwarding (done 2026-10-18, research README §19) | §4.2 to §4.7, §4.9 | The loopback test; the headless D3D12 programs through forwarding match macOS. |
 | M3, games (SMITE 2 done 2026-10-18, research README §20; Palworld waits for the maintainer) | §4.8, §4.11, §4.12 | SMITE 2 and Palworld play in the VM through forwarding, with XeSS and DLSS on MetalFX; the coverage trace shows no unforwarded call. |
-| M4, D3D10 and D3D11 | §4.10 and the D3D10/11 rules | DXMT's D3D11 and D3D10 test programs through forwarding match macOS. |
+| M4, D3D10 and D3D11 (done 2026-10-18, research README §21) | §4.10 and the D3D10/11 rules | DXMT's D3D11 and D3D10 test programs through forwarding match macOS. |
 
 §1's three numbers, for SMITE 2 and Palworld, are the project's gate after M4.
 
