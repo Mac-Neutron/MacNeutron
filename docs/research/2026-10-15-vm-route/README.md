@@ -988,3 +988,91 @@ Without Apple's lock exits scale about twice as far and a wake is a third quicke
 exits libkrun emulates (the lobby's wake share 0.19-0.20 against 0.14-0.15), and the lobby, with few exits, can't tell
 the two apart: its two userspace runs differ by more than the controllers do. A match, with M0's 2.5 cores of wake-ups,
 is where the choice would show. The switch was removed with the rest of the spike.
+
+## 19. Direct3D forwarding, M2: D3D12 and DXGI (2026-10-18)
+
+Plan `docs/superpowers/plans/2026-10-17-vm-d3d-forwarding-m2-d3d12.md`. With `MACNEUTRON_VM_D3D=forward`, a guest
+program's D3D12 and DXGI run in native DXMT on the Mac (§17) instead of the guest's x86-64 DXMT under FEX. The guest's
+`d3d12.dll` and `dxgi.dll` are stand-ins whose exports forward to `mnd3d.dll` (a plain x86-64 PE): proxies for the
+host's objects that pack each call with generated tables and hand it to the guest `winemetal.so` through winemetal's
+`WMTForward` (its slot 155). The unix side queues the record on the thread's ring, or for a call with an answer stores
+to a trap blob: libkrun runs the VM host's executor on that vCPU's own thread (§18's batched traps, libkrun 0009), which
+runs the thread's records through the dispatcher into native DXMT and resumes the guest with the answer. A queue
+operation (`ExecuteCommandLists`, a queue's `Signal` and `Wait`) first runs every other ring of the process, so
+another thread's recorded lists are there. The default stays guest DXMT (`run-game.sh`, `prefix.sh`).
+
+The generator (`eac-vm/d3d/gen.py`) reads widl's C headers from native DXMT's include set (`d3d12.h`, `dxgi.h` to
+`dxgi1_6.h`, `d3dcommon.h`, `dxgidebug.h`), not the IDL the spec named: the headers are what both builds compile
+against, with the guest's layouts checked against them (`make layout`). D3D12 and DXGI are 112 interfaces and 393
+methods with 12 exports: 405 numbered calls. 202 are classified by the defaults alone (an interface pointer is a handle,
+`REFIID` then `void **` a created object, `const T *` one input, a non-const pointer an output, an output or a
+non-HRESULT return makes the call synchronous). `rules.txt` (238 rules) adds a rule to 85: counts, sizes, unions, wide
+strings, the three queue operations' submit mode, 15 calls with code of our own (fences, `Map`, `CheckFeatureSupport`,
+DXGI's descriptions in the guest's 2-byte WCHAR) and 9 special rules, 11 calls with guest code by hand
+(`CreatePipelineState` and `LoadPipeline` read the stream into the description forms; the blob and the root signature
+deserializers are answered in the guest; `WriteToSubresource` and `ReadFromSubresource` have none yet). 137 are refused
+in the guest (E_NOTIMPL): 118 of 47 interfaces DXMT doesn't implement, and 19 that DXMT aborts on (`IMPLEMENT_ME`:
+`SetPredication`, `ExecuteBundle`, tiled resources) or leaves out. Calls end up 66 asynchronous, 188 synchronous, 3
+submit, 11 special and 137 refused.
+
+What the guest keeps: `AddRef`/`Release` (the last release reaches the host after every ring that used the object),
+`QueryInterface` (from the interfaces the host reported at creation; the first handle the host bound an object to
+makes the guest return the live proxy, so a pipeline library's loaded pipeline is the stored object), fences (a mirror
+page the host raises, `GetCompletedValue` without a call; events set by the guest when the host posts them) and mapped
+memory (arenas of guest-shared memory, 64 MiB at a time, from which native DXMT's CPU-visible buffers and heaps are
+carved through the memory hooks: `Map` answers the guest's own address). Fork patches: 0076 (the hooks and relay
+events natively), 0077 (CPU-visible heaps over the hooks), 0078 (DXGI's adapter description in native WCHAR; it was
+garbage natively) and 0079 (`WMTForward`). All apply on the pin.
+
+The gates (`eac-vm/d3d/gate.sh`), against one macOS run each (`compare.py` given it as both references, measured lines
+left out): the loopback (`loopback-gate.sh`: the 19 programs linked to a library that runs the guest's proxies,
+marshaller, rings and the host's dispatcher in one Mac process), then the VM (`tests/dxmt.sh` with forwarding on, one
+boot). `coverage.py` over the two traces (`MACNEUTRON_VM_D3D_TRACE=1`): 89 methods called about 38,400 times, every
+one forwarded and reaching the host. The guest-DXMT column is the 4b-2 gate's (`eac-vm/dxmt/gate.sh`, the same day).
+
+| Program | Lines | macOS (s) | Loopback (s) | VM, forwarded (s) | VM, guest DXMT (s) |
+|---|---|---|---|---|---|
+| d3d12_api | 49 | 7.18 | 0.65 | 0.66 | 1.50 |
+| d3d12_bounds | 1 | 3.71 | 0.10 | 1.01 | 1.05 |
+| d3d12_cache | 1 | 3.72 | 0.10 | 1.00 | 1.05 |
+| d3d12_compress | 3 | 3.74 | 0.14 | 1.03 | 1.09 |
+| d3d12_copy | 11 | 3.71 | 0.10 | 0.99 | 1.04 |
+| d3d12_depth | 2 | 3.70 | 0.10 | 0.99 | 1.07 |
+| d3d12_dxil | 8 | 3.70 | 0.10 | 0.98 | 1.05 |
+| d3d12_dxil_exec | 13 | 3.73 | 0.11 | 1.02 | 1.08 |
+| d3d12_hazards | 59 | 4.07 | 0.44 | 1.41 | 1.46 |
+| d3d12_indirect | 23 | 3.84 | 0.23 | 1.13 | 1.20 |
+| d3d12_layered | 1 | 3.71 | 0.10 | 1.01 | 1.05 |
+| d3d12_lod | 85 | 3.74 | 0.12 | 1.02 | 1.08 |
+| d3d12_null | 18 | 3.70 | 0.10 | 1.00 | 1.04 |
+| d3d12_query | 1 | 3.70 | 0.10 | 0.99 | 1.05 |
+| d3d12_timestamp | 2 | 3.72 | 0.11 | 1.01 | 1.08 |
+| d3d12_triangle | 1 | 3.70 | 0.10 | 0.99 | 1.05 |
+| d3d12_upscale | 1 | 14.74 | 0.75 | 8.13 | 8.09 |
+| d3d12_volume | 2 | 3.70 | 0.10 | 0.99 | 1.04 |
+| d3d12_vsread | 1 | 3.71 | 0.10 | 0.98 | 1.06 |
+
+All 19 pass both ways, 282 lines, with no host error. These programs time Wine and the GPU, not the CPU: in the VM
+most of a program's second is a fresh wineserver (`dxmt.sh` stops it after each program; the first program finds
+wineboot's: `d3d12_api` here, 0.66 s, `d3d11_vsia` in the 4b-2 gate, 0.29 s), and forwarded and guest DXMT are within
+0.1 s of each other. The CPU question is M5's, in a game. The VM host peaks at 4.5 GB with forwarding and without
+(`d3d-smoke.sh`, `d3d12_null`).
+
+The VM's other gates still pass (`vm-setup.sh`, `turn.sh`, `modes.sh`, `tpm-host.sh`) but two things fail, neither
+from M2's code: `audio-host.sh`'s small-buffer case (136-142 position reports a second against its bar of 150, with
+`audio.c` unchanged since it measured 170, the Mac under load), and one 4b-2 row, `d3d12_dlss_refuse`: in the guest
+the program reads all three of `nvngx`'s refusals as successes, though `nvngx` logs them and returns the right codes
+(today's build, loaded as the builtin). The first of them returns before any Direct3D call, so the guest loses
+`nvngx`'s return value on the way back (FEX or the call path): open, and a game could take a refused DLSS feature as
+made. The 4b-2 gate runs its references once now, as the others do.
+
+Also from M2: the VM host's native DXMT wrote an empty `_dxgi.log` into the folder `macneutron-vm` ran from; its logs
+go to the run's `traces/` now.
+
+Left for M3: presentation (swapchains on the VM window's layer, `Present`, the frame-latency object: the swapchain
+methods are forwarded as generated but untested, and a guest window's handle means nothing natively), XeSS and DLSS
+natively, and the games; the launcher's DXMT settings, which native DXMT reads from the VM host's environment, not the
+guest program's (NVEXT, stats, a shader cache per game: natively it defaults to one for every game), native DXMT in
+the app's VM folder, `WriteToSubresource`/`ReadFromSubresource`, and DXMT's conditional `IMPLEMENT_ME` paths, which
+still abort the VM host rather than fail the call. The guest caches no immutable answer yet (spec §4.5): M5 measures
+whether one is worth it. Left for M4: D3D11 and D3D10 (`d3d11_vsia`).
