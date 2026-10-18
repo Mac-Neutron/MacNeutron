@@ -51,8 +51,16 @@ DXMT_LOG_PATH=none DXMT_PIPELINE_RECORD="$X/record" DXMT_DXIL_DUMP="$X/dump" DXM
   "$OUT/d3d12_null" "$T/shaders/null.cs.dxil" > "$OUT/check-files.txt" 2>&1 || true
 recorded=$(find "$X/record" -type f 2> /dev/null | wc -l | tr -d ' ')
 dumped=$(find "$X/dump" -type f 2> /dev/null | wc -l | tr -d ' ')
+# The VM's precache (M3 Task 8): the recording is game.pipelines (the native program has no name: fork 0086), and the
+# native replayer rebuilds it into a fresh shader cache, which then holds rows.
+DXMT_LOG_PATH=none DXMT_SHADER_CACHE_PATH="$X/fresh/" "$I/lib/dxmt-replay" "$X/record/game.pipelines" \
+  > "$OUT/check-replay.txt" 2>&1 || true
+db=$(ls "$X"/fresh/shaders_*.db 2> /dev/null | head -1)
+table=$([ -n "$db" ] && sqlite3 "$db" "select name from sqlite_master where type = 'table' limit 1")
+rows=$([ -n "$table" ] && sqlite3 "$db" "select count(*) from \"$table\"" || echo 0)
 rm -rf "$X"
 [ "$recorded" -gt 0 ] && [ "$dumped" -gt 0 ] \
   || { echo "tests: FAIL DXMT's files: $recorded recorded, $dumped dumped"; exit 1; }
+[ "${rows:-0}" -gt 0 ] || { tail -3 "$OUT/check-replay.txt"; echo "tests: FAIL the native replay: ${rows:-0} cache rows"; exit 1; }
 echo "tests: ok"
 

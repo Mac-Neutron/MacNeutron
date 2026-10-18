@@ -40,6 +40,10 @@ public struct MicroVM: Sendable {
     var gameScript: URL { root.appending(path: "run-game.sh") }
     func state(appID: String) -> URL { root.appending(path: "state/\(appID).img") }
     func share(appID: String) -> URL { root.appending(path: "runs/\(appID)") }
+    /// Native DXMT's own for the game, forwarded (MACNEUTRON_VM_D3D=forward): its shader cache and recorded pipelines.
+    func dxmtState(appID: String) -> URL { root.appending(path: "state/\(appID).dxmt") }
+    /// The native replayer of recorded pipelines (eac-vm/dxmt-native/build.sh), beside native DXMT.
+    var dxmtReplay: URL { root.appending(path: "dxmt/dxmt-replay") }
 
     /// A game under a Steam library's steamapps/common: that folder (the guest's read-only /mnt/games) and the game's
     /// path in the guest. Nil for a game anywhere else.

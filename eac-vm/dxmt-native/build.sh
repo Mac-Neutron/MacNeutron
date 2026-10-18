@@ -38,6 +38,9 @@ for f in d3d12/d3d12 dxgi/dxgi d3d11/d3d11 d3d10/d3d10core nativemetal/winemetal
   install_name_tool -add_rpath @loader_path "$lib" 2> /dev/null
   codesign --force --sign - "$lib" 2> /dev/null
 done
+# The native replayer of a game's recorded pipelines (fork 0086), beside the dylibs: it loads d3d12.dylib from its own
+# folder (the VM's dxmt/ too).
+cp "$B/src/replay/dxmt-replay" "$I/lib/" && codesign -s - -f "$I/lib/dxmt-replay" 2> /dev/null
 cp -R "$D/include/native/." "$I/include-native/"
 cp "$D/src/util/win32_native.h" "$D/src/util/win32_native_event.h" "$I/include-native/"
 echo "dxmt-native: built $(cd "$I/lib" && echo *.dylib)"

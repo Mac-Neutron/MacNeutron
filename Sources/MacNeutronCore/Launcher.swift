@@ -201,6 +201,29 @@ public struct Launcher: Sendable {
             env["MN_TOAST"] = layout.launcherBinary.path(percentEncoded: false)  // eac-vm/host/tpm.c's, while macOS asks
             // DLSS's NVIDIA extension in native DXMT too (Direct3D forwarding: it reads macneutron-vm's environment)
             if environment["MACNEUTRON_DLSS"] == "1", env["DXMT_ENABLE_NVEXT"] == nil { env["DXMT_ENABLE_NVEXT"] = "1" }
+            // Forwarded, native DXMT's shader cache and recordings are the game's, in its VM state folder (macneutron-vm
+            // points DXMT at them); after a translator or macOS update its recordings replay natively before the boot.
+            var precache: ShaderPrecache?
+            if environment["MACNEUTRON_VM_D3D"] == "forward" {
+                let state = vm.dxmtState(appID: context.appID)
+                env["MN_D3D_STATE"] = state.path(percentEncoded: false)
+                if ShaderPrecache.enabled(backend: .dxmt, environment: environment) {
+                    precache = ShaderPrecache(folder: state.appending(path: "pipelines"),
+                                              builds: "\(layout.dxmtTranslator ?? "none") \(ShaderPrecache.macOSBuild())")
+                }
+                if let precache, precache.needsReplay {
+                    let toast = notifier.progress(title: "Preparing \(Self.gameName(request.target))'s shaders",
+                                                  message: "DXMT or macOS changed: they're rebuilt once, before it starts.",
+                                                  until: nil)
+                    let lines = precache.replayNative(tool: vm.dxmtReplay, cache: state, runner: runner, environment: env,
+                                                      stopped: { stopRequested.isSet }, progress: toast.update)
+                    toast.close()
+                    for line in lines { log.append(line) }
+                    if stopRequested.isSet { return 128 + SIGTERM } // Steam's Stop: no boot; the next launch replays
+                    precache.writeStamp()
+                }
+            }
+            defer { precache?.writeStampIfMissing() }
             if perf {
                 env["MN_PRESENT_STATS"] = vm.share(appID: context.appID).appending(path: "traces/frames.txt")
                     .path(percentEncoded: false)

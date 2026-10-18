@@ -159,6 +159,41 @@ private func expectRefusedUntilTheVMIsReady(_ f: VMFixture) {
     #expect(f.launcherLog.contains("not in a Steam library"))
 }
 
+@Test func forwardingKeepsNativeDXMTsStateWithTheGame() throws {
+    // Forwarded, native DXMT runs in macneutron-vm: its shader cache and recordings in the game's VM state folder, and
+    // the game's launch options in its environment (M3 Task 8).
+    let f = try makeVMFixture()
+    var env = f.env
+    env["MACNEUTRON_VM_D3D"] = "forward"
+    env["DXMT_D3D12_SM6"] = "0"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    let call = try #require(f.runner.calls.last)
+    #expect(call.environment["MN_D3D_STATE"] == f.vm.appending(path: "state/2437170.dxmt").path(percentEncoded: false))
+    #expect(call.environment["DXMT_D3D12_SM6"] == "0")
+    let g = try makeVMFixture()
+    _ = g.launcher.launch(["waitforexitandrun", game], environment: g.env)
+    #expect(g.runner.calls.last?.environment["MN_D3D_STATE"] == nil)
+}
+
+@Test func theVMsPrecacheReplaysNativelyBeforeTheBoot() throws {
+    let f = try makeVMFixture()
+    let pipelines = f.vm.appending(path: "state/2437170.dxmt/pipelines")
+    try write("recorded\n", to: pipelines.appending(path: "game.pipelines"))
+    try write("an older build\n", to: pipelines.appending(path: "replayed"))
+    var env = f.env
+    env["MACNEUTRON_VM_D3D"] = "forward"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    #expect(f.runner.calls.map(\.tool) == ["dxmt-replay", "run-guest.sh"])
+    let replay = try #require(f.runner.calls.first)
+    #expect(replay.arguments == [pipelines.appending(path: "game.pipelines").path(percentEncoded: false)])
+    #expect(replay.environment["DXMT_SHADER_CACHE_PATH"]
+            == f.vm.appending(path: "state/2437170.dxmt").path(percentEncoded: false) + "/")
+    #expect(replay.environment["DXMT_PIPELINE_RECORD"] == nil)
+    let stamp = try String(contentsOf: pipelines.appending(path: "replayed"), encoding: .utf8)
+    #expect(stamp != "an older build\n")
+    #expect(f.notifier.toasts.contains { $0.contains("shaders") })
+}
+
 @Test func dlssTurnsOnNativeDXMTsNvidiaExtension() throws {
     // Forwarded, native DXMT in macneutron-vm reads its own environment: DLSS's NVIDIA extension too (M3 Task 6).
     let f = try makeVMFixture()

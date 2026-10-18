@@ -14,6 +14,12 @@ public struct ShaderPrecache: Sendable {
         builds = "\(layout.dxmtTranslator ?? "none") \(osBuild)"
     }
 
+    /// Recordings in folder, compiled for builds (the VM's: native DXMT's, in the game's VM state folder).
+    public init(folder: URL, builds: String) {
+        self.folder = folder
+        self.builds = builds
+    }
+
     public static func folder(for context: CompatContext) -> URL { context.dataPath.appending(path: "dxmt-pipelines") }
 
     /// Recording and replay are DXMT's; `MACNEUTRON_PRECACHE=0` turns both off.
@@ -55,6 +61,28 @@ public struct ShaderPrecache: Sendable {
     public func replay(layout: ToolLayout, runner: any ProcessRunner, environment: [String: String],
                        stopped: () -> Bool = { false }, progress: @escaping @Sendable (String) -> Void = { _ in },
                        pollInterval: TimeInterval = 1) -> [String] {
+        each(environment: environment, stopped: stopped, progress: progress, pollInterval: pollInterval) { recording, env, output in
+            (try? runner.run(layout.wine, [layout.dxmtReplay.path(percentEncoded: false),
+                                           "Z:" + recording.path(percentEncoded: false)],
+                             environment: env, output: output)) ?? -1
+        }
+    }
+
+    /// The same natively (Direct3D forwarding: native DXMT in the VM host): the native `tool` on each recording, into the
+    /// shader cache at `cache` (DXMT_SHADER_CACHE_PATH, as macneutron-vm gives native DXMT), before the VM boots.
+    public func replayNative(tool: URL, cache: URL, runner: any ProcessRunner, environment: [String: String],
+                             stopped: () -> Bool = { false }, progress: @escaping @Sendable (String) -> Void = { _ in },
+                             pollInterval: TimeInterval = 1) -> [String] {
+        var env = environment
+        env["DXMT_SHADER_CACHE_PATH"] = cache.path(percentEncoded: false) + "/"
+        return each(environment: env, stopped: stopped, progress: progress, pollInterval: pollInterval) {
+            recording, env, output in
+            (try? runner.run(tool, [recording.path(percentEncoded: false)], environment: env, output: output)) ?? -1
+        }
+    }
+
+    private func each(environment: [String: String], stopped: () -> Bool, progress: @escaping @Sendable (String) -> Void,
+                      pollInterval: TimeInterval, run: (URL, [String: String], URL) -> Int32) -> [String] {
         var env = environment
         env.removeValue(forKey: "DXMT_PIPELINE_RECORD")
         let output = folder.appending(path: "replay.log")
@@ -78,9 +106,7 @@ public struct ShaderPrecache: Sendable {
             }
             poller.start()
             defer { done.set() }
-            let status = (try? runner.run(layout.wine, [layout.dxmtReplay.path(percentEncoded: false),
-                                                        "Z:" + recording.path(percentEncoded: false)],
-                                          environment: env, output: output)) ?? -1
+            let status = run(recording, env, output)
             let text = (try? String(contentsOf: output, encoding: .utf8)) ?? ""
             let result = text.split(whereSeparator: \.isNewline).last { $0.hasPrefix("replay: ") }
             lines.append("precache: \(recording.lastPathComponent) exit=\(status) \(result.map(String.init) ?? "no result")")
