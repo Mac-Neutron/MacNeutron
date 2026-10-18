@@ -1,0 +1,65 @@
+# The Direct3D forwarding generator's rules (eac-vm/d3d/gen.py; spec §4.2, M2 plan Tasks 2 and 3).
+#
+# Declarations first: DXMT's private interfaces (build/wine-arm64-src/dxmt/src/d3d12/d3d12_interfaces.hpp) in the
+# headers' C prototype form, and the structs they take. The IIDs and method orders never change in DXMT (a new method
+# is a new interface), so these follow it by hand.
+
+struct MTL_TEMPORAL_SCALER_D3D12_DESC {
+  UINT InputWidth;
+  UINT InputHeight;
+  UINT OutputWidth;
+  UINT OutputHeight;
+  DXGI_FORMAT ColorFormat;
+  DXGI_FORMAT DepthFormat;
+  DXGI_FORMAT MotionFormat;
+  DXGI_FORMAT OutputFormat;
+  DXGI_FORMAT ReactiveMaskFormat;
+  BOOL AutoExposure;
+  BOOL OutputResolutionMotionVectors;
+  BOOL JitteredMotionVectors;
+  FLOAT InputContentMinScale;
+  FLOAT InputContentMaxScale;
+};
+
+struct MTL_TEMPORAL_UPSCALE_D3D12_DESC {
+  ID3D12Resource *Color;
+  ID3D12Resource *Depth;
+  ID3D12Resource *MotionVector;
+  ID3D12Resource *Exposure;
+  ID3D12Resource *ReactiveMask;
+  ID3D12Resource *Output;
+  UINT InputContentWidth;
+  UINT InputContentHeight;
+  UINT ColorOffsetX;
+  UINT ColorOffsetY;
+  UINT DepthOffsetX;
+  UINT DepthOffsetY;
+  UINT MotionOffsetX;
+  UINT MotionOffsetY;
+  UINT ReactiveOffsetX;
+  UINT ReactiveOffsetY;
+  UINT OutputOffsetX;
+  UINT OutputOffsetY;
+  FLOAT JitterOffsetX;
+  FLOAT JitterOffsetY;
+  FLOAT MotionVectorScaleX;
+  FLOAT MotionVectorScaleY;
+  FLOAT PreExposure;
+  BOOL Reset;
+  BOOL DepthReversed;
+};
+
+interface IMTLD3D12TemporalScaler : IUnknown 5b27acde-a0d8-4677-93c4-eedd17a0ab14
+end
+
+interface IMTLD3D12DeviceExt : IUnknown a8c64ba7-6d54-4833-8cc6-2605c5b454be
+  HRESULT GetTemporalScalerScaleRange(FLOAT *pMin, FLOAT *pMax);
+  HRESULT CreateTemporalScaler(const MTL_TEMPORAL_SCALER_D3D12_DESC *pDesc, IMTLD3D12TemporalScaler **ppScaler);
+end
+
+interface IMTLD3D12CommandListExt : IUnknown 5690e8a7-51a1-4b37-8bbd-730d0fdb2cec
+  HRESULT TemporalUpscale(IMTLD3D12TemporalScaler *pScaler, const MTL_TEMPORAL_UPSCALE_D3D12_DESC *pDesc);
+end
+
+# Exports the headers don't declare (dxgi.def's).
+export dxgi.dll HRESULT DXGIDeclareAdapterRemovalSupport(void);
