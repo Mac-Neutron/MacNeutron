@@ -155,7 +155,10 @@ ID3D12Resource::Map data out bytes=16
 ID3D12Resource::Map own
 ID3D12Resource::WriteToSubresource special
 ID3D12Resource::ReadFromSubresource special
-ID3D12Device::CheckFeatureSupport special
+# Its data in and out as bytes; D3D12_FEATURE_FEATURE_LEVELS's requested levels (a pointer, the one DXMT follows) travel
+# after the struct, its size in aux[0] (guest/proxy.cpp, host/native.cpp).
+ID3D12Device::CheckFeatureSupport own
+ID3D12Device::CheckFeatureSupport feature_data inout size=feature_data_size
 ID3D12Device2::CreatePipelineState special
 ID3D12PipelineLibrary1::LoadPipeline special
 # Queue operations (Task 9): queued, then flushed with MN_REC_SUBMIT, which first runs every other ring of the context
@@ -182,12 +185,19 @@ ID3D12Device5::EnumerateMetaCommandParameters special
 ID3D12RootSignatureDeserializer::* special
 ID3D12VersionedRootSignatureDeserializer::* special
 ID3D10Blob::* special
-IDXGIOutput::GetDesc special
-IDXGIOutput6::GetDesc1 special
-IDXGIAdapter::GetDesc special
-IDXGIAdapter1::GetDesc1 special
-IDXGIAdapter2::GetDesc2 special
-IDXGIAdapter4::GetDesc3 special
+# DXGI's descriptions: a WCHAR array first, 2 bytes in the guest and 4 natively; the host converts (host/native.cpp).
+IDXGIOutput::GetDesc own
+IDXGIOutput::GetDesc desc out wstruct
+IDXGIOutput6::GetDesc1 own
+IDXGIOutput6::GetDesc1 desc out wstruct
+IDXGIAdapter::GetDesc own
+IDXGIAdapter::GetDesc desc out wstruct
+IDXGIAdapter1::GetDesc1 own
+IDXGIAdapter1::GetDesc1 pDesc out wstruct
+IDXGIAdapter2::GetDesc2 own
+IDXGIAdapter2::GetDesc2 pDesc out wstruct
+IDXGIAdapter4::GetDesc3 own
+IDXGIAdapter4::GetDesc3 desc out wstruct
 
 # Arrays and sized data.
 ID3D12GraphicsCommandList::RSSetViewports viewports in count=viewport_count

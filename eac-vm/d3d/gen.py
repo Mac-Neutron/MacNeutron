@@ -573,7 +573,7 @@ def length_spec(words):
             unit = int(v, 0)
         elif k == "one_if":
             one_if = v
-        elif k in ("one", "string", "wstring"):
+        elif k in ("one", "string", "wstring", "wstruct"):
             form = k
         else:
             raise RuleError(f"a rule word the generator doesn't know: {w}")
@@ -681,6 +681,13 @@ def pointer_field(model, rules, t, name, offset, rule, where, seen=()):
             return FieldSpec("WMF_STR_IN", name, offset)
         if form == "wstring":
             return FieldSpec("WMF_WSTR_IN", name, offset)
+        if form == "wstruct":  # a struct whose WCHAR arrays the host converts (own code): the guest's size
+            st = model.structs.get(base)
+            wchars = sum(eval_dim(model, f.array) for f in (st.fields if st else []) if f.array and resolve(model, f.type) == "WCHAR")
+            if not st or direction != "out" or not wchars:
+                raise RuleError(f"{where}: wstruct is for a struct out with WCHAR arrays")
+            size = f"({size_align(model, elem_t)[0]} + (MN_WM_GUEST_WCHAR - 2) * {wchars})"
+            return FieldSpec("WMF_OUT", name, offset, size)
         if stars(elem_t) == 1 and is_interface(model, base):  # an array of interface pointers: a handle each
             esize, nested = 8, NestedSpec("handle", [FieldSpec("WMF_HANDLE_IN", "", 0, iface=base)])
         elif base == "void" or form in ("size", "bytes"):
@@ -941,7 +948,8 @@ def emit_params(calls, own=()):
             if f.one_if:  # the array's own length: the method's count, or one (the proxy's)
                 out.append(f"    uint32_t {rename[f.param]}_n;")
             if f.kind == "WMF_HANDLE_OUT":  # the reply's: the interfaces the object answers, and which of them it
-                out.append(f"    uint64_t {rename[f.param]}_ifaces[4];  /* answers at another pointer (bits by index) */")
+                out.append(f"    uint64_t {rename[f.param]}_ifaces[5];  /* answers at another pointer (bits by index), and the"
+                           " handle the host gave this object before (0: none) */")
         if c.name in own:
             out.append("    uint64_t aux[2]; /* own code's (rules.txt's own: a fence's mirror slot, ...) */")
         out.append("};")
@@ -1020,6 +1028,8 @@ def emit_layout(model, calls):
         if n not in model.structs or "." in n or n.startswith("MTL_"):
             continue
         size, _, layout = struct_layout(model, model.structs[n])
+        if has_wchar(model, n):  # a guest WCHAR is 2 bytes, the host's 4: the host converts (rules.txt's wstruct)
+            continue
         out.append(f'static_assert(sizeof({n}) == {size}, "{n}");')
         for fname, (off, f) in layout.items():
             if f.bits is not None:

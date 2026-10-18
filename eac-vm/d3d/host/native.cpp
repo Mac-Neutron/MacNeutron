@@ -119,8 +119,75 @@ extern "C" NTSTATUS_T mn_d3d_set_event_multi_stub(void *params) {
     return 0;
 }
 
-extern "C" void mn_d3d_answers(void *obj, int iface, uint64_t out[4]) {
-    std::memset(out, 0, 4 * sizeof *out);
+// ---- CheckFeatureSupport (own, Task 10) ----
+
+extern "C" NTSTATUS_T mn_d3d_check_feature_stub(void *params) {
+    auto *a = (mn_d3d_p_ID3D12Device_CheckFeatureSupport *)params;
+    auto *data = (uint8_t *)(uintptr_t)a->feature_data;
+    UINT size = a->feature_data_size;
+    if (a->feature == D3D12_FEATURE_FEATURE_LEVELS && data && a->aux[0] == sizeof(D3D12_FEATURE_DATA_FEATURE_LEVELS)) {
+        auto *levels = (D3D12_FEATURE_DATA_FEATURE_LEVELS *)data; // its levels follow it (the guest's)
+        if (size < sizeof *levels + 4ull * levels->NumFeatureLevels) {
+            RESULT(a, E_INVALIDARG);
+            return 0;
+        }
+        levels->pFeatureLevelsRequested = (const D3D_FEATURE_LEVEL *)(data + sizeof *levels);
+        size = sizeof *levels;
+    }
+    HRESULT r = ((ID3D12Device *)(uintptr_t)a->self)->CheckFeatureSupport((D3D12_FEATURE)a->feature, data, size);
+    RESULT(a, r);
+    return 0;
+}
+
+// ---- DXGI's descriptions (own, Task 10): the WCHAR array first, the rest laid out as the guest's past it ----
+
+#ifdef MN_D3D_LOOPBACK
+static const size_t guest_wchar = 4; // the loopback's guest is native code
+#else
+static const size_t guest_wchar = 2;
+#endif
+
+template <class D> static void to_guest(const D &n, const WCHAR *w, size_t wchars, void *out) {
+    auto *g = (uint8_t *)out;
+    if (guest_wchar == sizeof(WCHAR)) {
+        std::memcpy(g, &n, sizeof n);
+        return;
+    }
+    auto *u = (uint16_t *)g; // UTF-16, NUL-terminated within the array
+    size_t k = 0;
+    for (size_t i = 0; i < wchars && w[i]; i++) {
+        uint32_t c = (uint32_t)w[i];
+        if (c >= 0x10000 && k + 2 < wchars) {
+            c -= 0x10000;
+            u[k++] = (uint16_t)(0xd800 + (c >> 10)), u[k++] = (uint16_t)(0xdc00 + (c & 0x3ff));
+        } else if (c < 0x10000 && k + 1 < wchars) {
+            u[k++] = (uint16_t)c;
+        }
+    }
+    std::memset(u + k, 0, (wchars - k) * 2);
+    std::memcpy(g + 2 * wchars, (const uint8_t *)&n + sizeof(WCHAR) * wchars, sizeof n - sizeof(WCHAR) * wchars);
+}
+
+#define DESCRIPTION(stub, iface, method, type, field, param)                                                          \
+    extern "C" NTSTATUS_T stub(void *params) {                                                                         \
+        auto *a = (mn_d3d_p_##iface##_##method *)params;                                                              \
+        static_assert(offsetof(type, field) == 0, #type);                                                              \
+        type n = {};                                                                                                   \
+        HRESULT r = ((iface *)(uintptr_t)a->self)->method(a->param ? &n : nullptr);                                     \
+        if (SUCCEEDED(r) && a->param) to_guest(n, n.field, sizeof n.field / sizeof *n.field, (void *)(uintptr_t)a->param); \
+        RESULT(a, r);                                                                                                  \
+        return 0;                                                                                                      \
+    }
+DESCRIPTION(mn_d3d_adapter_desc_stub, IDXGIAdapter, GetDesc, DXGI_ADAPTER_DESC, Description, desc)
+DESCRIPTION(mn_d3d_adapter_desc1_stub, IDXGIAdapter1, GetDesc1, DXGI_ADAPTER_DESC1, Description, pDesc)
+DESCRIPTION(mn_d3d_adapter_desc2_stub, IDXGIAdapter2, GetDesc2, DXGI_ADAPTER_DESC2, Description, pDesc)
+DESCRIPTION(mn_d3d_adapter_desc3_stub, IDXGIAdapter4, GetDesc3, DXGI_ADAPTER_DESC3, Description, desc)
+DESCRIPTION(mn_d3d_output_desc_stub, IDXGIOutput, GetDesc, DXGI_OUTPUT_DESC, DeviceName, desc)
+DESCRIPTION(mn_d3d_output_desc1_stub, IDXGIOutput6, GetDesc1, DXGI_OUTPUT_DESC1, DeviceName, desc)
+
+extern "C" void mn_d3d_answers(void *obj, int iface, uint64_t out[5]) {
+    std::memset(out, 0, 5 * sizeof *out);
+    out[4] = mn_d3d_identity_of(mn_d3d_current_ctx(), obj); // an object the guest has: its proxy, not a new one
     if (iface < 0) return;
     const mn_d3d_iface &f = mn_d3d_ifaces[iface];
     for (unsigned i = 0; i < f.nfamily; i++) {

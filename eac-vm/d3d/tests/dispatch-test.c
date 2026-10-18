@@ -14,6 +14,8 @@
  *              a queue's Signal(5) raises the slot to 5 with no record of the guest's; a CPU Signal(9) leaves 9; a raise
  *              to 3 after 5 leaves 5; SetEventOnCompletion(12, e) posts MN_NOTIFY_EVENT with e once the fence
  *              reaches 12 (whatever the guest did with e meanwhile); SetEventOnMultipleFenceCompletion's any and all
+ *   wchar      (M2 Task 10) IDXGIAdapter1::GetDesc1 answers the guest's layout: its description UTF-16, its ids past
+ *              it where the guest has them
  *   dispatch-test <metal-host> <native DXMT lib>; prints "dispatch-test: ok" or each failure. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -86,7 +88,7 @@ int main(int argc, char **argv) {
              value = id_of("ID3D12Fence::GetCompletedValue");
 
     /* device: the export's params, as mnd3d_params.h has them (their sizes checked against the table's) */
-    struct { uint64_t self, ret, adapter; uint32_t level; uint64_t riid, device, device_ifaces[4]; } dev = {0};
+    struct { uint64_t self, ret, adapter; uint32_t level; uint64_t riid, device, device_ifaces[5]; } dev = {0};
     dev.level = 0xb000; /* D3D_FEATURE_LEVEL_11_0 */
     dev.riid = (uintptr_t)iid("ID3D12Device");
     CHECK(mn_d3d_calls[create].params_size == sizeof dev);
@@ -98,7 +100,7 @@ int main(int argc, char **argv) {
     CHECK(!answers(dev.device_ifaces + 2, "ID3D12Device5")); /* the same pointer */
 
     /* fence */
-    struct fence_params { uint64_t self, ret, initial_value; uint32_t flags; uint64_t riid, fence, ifaces[4], aux[2]; }
+    struct fence_params { uint64_t self, ret, initial_value; uint32_t flags; uint64_t riid, fence, ifaces[5], aux[2]; }
         fp = {0};
     CHECK(mn_d3d_calls[fence].params_size == sizeof fp);
     fp.self = device, fp.initial_value = 7, fp.riid = (uintptr_t)iid("ID3D12Fence");
@@ -133,7 +135,7 @@ int main(int argc, char **argv) {
     struct { uint32_t dimension; uint64_t alignment, width; uint32_t height; uint16_t depth, mips; uint32_t format;
              uint32_t count, quality, layout, flags; } buf = {1, 0, 1 << 20, 1, 1, 1, 0, 1, 0, 1, 0};
     struct res_params { uint64_t self, ret, heap_properties; uint32_t heap_flags; uint64_t desc; uint32_t state;
-                        uint64_t clear, riid, resource, ifaces[4]; } rp = {0};
+                        uint64_t clear, riid, resource, ifaces[5]; } rp = {0};
     CHECK(mn_d3d_calls[committed].params_size == sizeof rp && sizeof buf == 56 && sizeof upload == 20);
     rp.self = device, rp.heap_properties = (uintptr_t)&upload, rp.desc = (uintptr_t)&buf;
     rp.state = 0xac3; /* D3D12_RESOURCE_STATE_GENERIC_READ */
@@ -180,7 +182,7 @@ int main(int argc, char **argv) {
              fsignal = id_of("ID3D12Fence::Signal"), onc = id_of("ID3D12Fence::SetEventOnCompletion"),
              multi = id_of("ID3D12Device1::SetEventOnMultipleFenceCompletion");
     struct { uint32_t type, priority, flags, node; } qd = {0};
-    struct { uint64_t self, ret, desc, riid, queue, ifaces[4]; } cq = {device, 0, (uintptr_t)&qd, 0, 0, {0}};
+    struct { uint64_t self, ret, desc, riid, queue, ifaces[5]; } cq = {device, 0, (uintptr_t)&qd, 0, 0, {0}};
     cq.riid = (uintptr_t)iid("ID3D12CommandQueue");
     CHECK(mn_d3d_calls[queue].params_size == sizeof cq && call(queue, &cq) == 0 && cq.queue);
     struct fence_params e1 = fp, e2 = fp;
@@ -229,6 +231,26 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 500 && !got; i++)
         if (!(got = mn_notify_next(q, &r))) usleep(1000);
     CHECK(got && r.value == 0x66);
+
+    /* wchar */
+    unsigned factory1 = id_of("::CreateDXGIFactory1"), enum1 = id_of("IDXGIFactory1::EnumAdapters1"),
+             desc1 = id_of("IDXGIAdapter1::GetDesc1");
+    struct { uint64_t self, ret, riid, factory, ifaces[5]; } cf = {0, 0, (uintptr_t)iid("IDXGIFactory1"), 0, {0}};
+    CHECK(mn_d3d_calls[factory1].params_size == sizeof cf && call(factory1, &cf) == 0 && cf.factory);
+    struct { uint64_t self, ret; uint32_t index; uint64_t adapter, ifaces[5]; } ea = {cf.factory, 0, 0, 0, {0}};
+    CHECK(mn_d3d_calls[enum1].params_size == sizeof ea && call(enum1, &ea) == 0 && ea.adapter);
+    uint8_t guest[312]; /* DXGI_ADAPTER_DESC1 with a 2-byte WCHAR: Description[128], then VendorId at 256 */
+    memset(guest, 0xee, sizeof guest);
+    struct { uint64_t self, ret, desc, aux[2]; } gd = {ea.adapter, 0, (uintptr_t)guest, {0}};
+    CHECK(mn_d3d_calls[desc1].params_size == sizeof gd && mn_d3d_calls[desc1].fields[1].size == sizeof guest);
+    CHECK(call(desc1, &gd) == 0 && (uint32_t)gd.ret == 0);
+    uint16_t u[128];
+    uint32_t vendor;
+    memcpy(u, guest, sizeof u);
+    memcpy(&vendor, guest + 256, sizeof vendor);
+    char ascii[129] = {0};
+    for (int i = 0; i < 128 && u[i] && u[i] < 0x80; i++) ascii[i] = (char)u[i];
+    CHECK(!strncmp(ascii, "Apple ", 6) && vendor == 0x106b);
 
     /* removed */
     unsigned victim = id_of("ID3D12Object::GetPrivateData");

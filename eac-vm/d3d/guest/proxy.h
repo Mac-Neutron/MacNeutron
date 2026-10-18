@@ -28,8 +28,9 @@ extern const void *mn_d3d_vtables[MN_D3D_IFACES][MN_D3D_MAX_SLOTS];
 extern "C" int32_t mn_d3d_call(uint32_t id, void *params);
 // A call's status as the method's HRESULT (mn_d3d.h's contract).
 HRESULT mn_d3d_hr(int32_t status);
-// A created object: its proxy for iface (an index; -1: riid's), answering what ifaces says (the reply's masks).
-void *mn_proxy_out(uint64_t handle, int iface, const IID *riid, const uint64_t ifaces[4]);
+// A created object: its proxy for iface (an index; -1: riid's), answering what ifaces says (the reply's masks); one
+// the guest already has (ifaces[4], the host's first handle for it): that object's proxy, the new handle let go.
+void *mn_proxy_out(uint64_t handle, int iface, const IID *riid, const uint64_t ifaces[5]);
 // A special's guest code (proxy.cpp) for a vtable slot, or fallback (which says it has none).
 const void *mn_d3d_special(const char *name, const void *fallback);
 // A refused method or a special without guest code: said once each.

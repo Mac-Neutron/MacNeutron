@@ -29,8 +29,9 @@ template <class T> static inline std::remove_const_t<T> val(const uint8_t *bytes
 extern "C" {
 struct mn_d3d_export { const char *dll, *name; };
 // After a creation: which interfaces of iface's family (an mn_d3d_ifaces index; -1: none known) the object answers
-// (out[0..1]), and which of them at another pointer (out[2..3]).
-void mn_d3d_answers(void *obj, int iface, uint64_t out[4]);
+// (out[0..1]), which of them at another pointer (out[2..3]), and the handle it already has (out[4]: 0, none).
+void mn_d3d_answers(void *obj, int iface, uint64_t out[5]);
+uint64_t mn_d3d_identity_of(uint32_t ctx_id, void *obj); // dispatch.c
 // A method's HRESULT: device removal, and an asynchronous call's failure, for the call running (dispatch.c).
 void mn_d3d_result(HRESULT hr);
 int mn_d3d_arena_of(const void *ptr, uint64_t *blob, uint64_t *offset); // memory.c
