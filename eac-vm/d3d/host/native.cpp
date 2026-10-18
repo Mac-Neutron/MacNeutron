@@ -95,7 +95,7 @@ extern "C" NTSTATUS_T mn_d3d_fence_signal_stub(void *params) {
     auto *a = (mn_d3d_p_ID3D12Fence_Signal *)params;
     auto *fence = (ID3D12Fence *)(uintptr_t)a->self;
     HRESULT r = fence->Signal(a->value);
-    if (SUCCEEDED(r)) mn_d3d_fence_raise(fence, fence->GetCompletedValue());
+    if (SUCCEEDED(r)) mn_d3d_fence_set(fence, fence->GetCompletedValue()); // lower too, as the CPU's signal can
     RESULT(a, r);
     return 0;
 }

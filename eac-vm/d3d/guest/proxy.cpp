@@ -196,11 +196,6 @@ static HRESULT STDMETHODCALLTYPE set_name(mn_proxy *This, LPCWSTR name) {
 
 // ---- fences (rules.txt's own, Task 8) ----
 
-static void raise(std::atomic<uint64_t> *slot, uint64_t v) {
-    uint64_t cur = slot->load();
-    while (cur < v && !slot->compare_exchange_weak(cur, v)) {}
-}
-
 static HRESULT STDMETHODCALLTYPE create_fence(mn_proxy *This, UINT64 initial, D3D12_FENCE_FLAGS flags, REFIID riid,
                                               void **fence) {
     mn_d3d_p_ID3D12Device_CreateFence p = {};
@@ -221,9 +216,9 @@ static UINT64 STDMETHODCALLTYPE completed_value(mn_proxy *This) {
     return mn_d3d_call(MN_D3D_ID_ID3D12Fence_GetCompletedValue, &p) ? 0 : p.ret;
 }
 
-// A CPU signal: complete at once, here too, before the host hears of it.
+// A CPU signal: complete at once, here too, before the host hears of it; it sets the value, lower too (M3 Task 5).
 static HRESULT STDMETHODCALLTYPE fence_signal(mn_proxy *This, UINT64 value) {
-    if (This->obj->mirror) raise(This->obj->mirror, value);
+    if (This->obj->mirror) This->obj->mirror->store(value);
     mn_d3d_p_ID3D12Fence_Signal p = {};
     p.self = (uintptr_t)This, p.value = value;
     int32_t s = mn_d3d_call(MN_D3D_ID_ID3D12Fence_Signal, &p);

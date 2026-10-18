@@ -191,6 +191,17 @@ void mn_d3d_fence_raise(void *obj, uint64_t v) {
     put(e);
 }
 
+/* A CPU signal's value: set, lower or higher (relays only raise). */
+void mn_d3d_fence_set(void *obj, uint64_t v) {
+    struct events *e = NULL;
+    pthread_mutex_lock(&lock);
+    _Atomic uint64_t *s = slot_of(obj, &e);
+    pthread_mutex_unlock(&lock);
+    if (!s) return;
+    atomic_store(s, v);
+    put(e);
+}
+
 /* The relay's state and its reference, taken from it: NULL once it fired or was disarmed. */
 static struct events *disarm(struct relay *r) {
     pthread_mutex_lock(&lock);

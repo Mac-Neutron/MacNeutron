@@ -169,18 +169,19 @@ ID3D12PipelineLibrary1::LoadPipeline special
 ID3D12CommandQueue::ExecuteCommandLists submit
 ID3D12CommandQueue::Signal submit
 ID3D12CommandQueue::Wait submit
-# CPU descriptor writes (M2's final review): run when they're made, a flush each, so a recording on another thread that
-# reads the descriptor then (ClearRenderTargetView, OMSetRenderTargets, CopyDescriptors' sources) finds it. Copies stay
-# queued: their sources are views made this way, their destinations shader-visible heaps read when the lists run, after
-# every ring (the queue operations). Left open: another thread overwriting a descriptor after a recording read it but
-# before that recorder's ring ran.
-ID3D12Device::CreateConstantBufferView sync
-ID3D12Device::CreateShaderResourceView sync
-ID3D12Device::CreateUnorderedAccessView sync
-ID3D12Device::CreateRenderTargetView sync
-ID3D12Device::CreateDepthStencilView sync
-ID3D12Device::CreateSampler sync
-ID3D12Device8::CreateSamplerFeedbackUnorderedAccessView sync
+# CPU descriptor writes (M2's final review; M3 Task 5): each runs every ring of the context first, then itself, as a
+# queue operation does: a recording on another thread read the descriptor when it was made (ClearRenderTargetView,
+# OMSetRenderTargets, a copy's sources), so its ring runs before the descriptor changes, and a recording after the write
+# finds the new one. CopyDescriptors* write descriptors too.
+ID3D12Device::CreateConstantBufferView submit
+ID3D12Device::CreateShaderResourceView submit
+ID3D12Device::CreateUnorderedAccessView submit
+ID3D12Device::CreateRenderTargetView submit
+ID3D12Device::CreateDepthStencilView submit
+ID3D12Device::CreateSampler submit
+ID3D12Device8::CreateSamplerFeedbackUnorderedAccessView submit
+ID3D12Device::CopyDescriptors submit
+ID3D12Device::CopyDescriptorsSimple submit
 
 # Fences (Task 8): a mirror slot each in guest memory (CreateFence's aux), raised by relays on the host; the guest
 # reads its completed value there, raises it on a CPU signal, and waits a NULL event out itself.

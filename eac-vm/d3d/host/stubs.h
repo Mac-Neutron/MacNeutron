@@ -42,6 +42,7 @@ int mn_d3d_arena_of(const void *ptr, uint64_t *blob, uint64_t *offset); // memor
 uint32_t mn_d3d_current_ctx(void);
 uint64_t mn_d3d_fence_new(uint32_t ctx_id, void *obj, uint64_t initial); // UINT64_MAX: none
 void mn_d3d_fence_raise(void *obj, uint64_t v);
+void mn_d3d_fence_set(void *obj, uint64_t v); // the slot to v, lower or higher (a CPU signal's)
 void *mn_d3d_event_relay(uint32_t ctx_id, uint64_t guest_event);
 void *mn_d3d_fence_relay(void *obj, uint64_t value);
 void mn_d3d_relay_done(void *h);

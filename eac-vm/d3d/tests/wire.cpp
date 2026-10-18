@@ -4,6 +4,7 @@
 //   input     a graphics pipeline with 32 input elements, each a semantic name: its HRESULT
 //   name      SetName with non-ASCII text, read back by GetPrivateData(WKPDID_D3DDebugObjectNameW)
 //   adapter   IDXGIAdapter1::GetDesc1's description and ids
+//   lower     (M3 Task 5) a fence's CPU Signal(9), then Signal(3): its completed value, 3 (a CPU signal sets it, lower too)
 // Prints "wire ..." lines.
 #include "d3d12_common.hpp"
 #include <dxgi1_6.h>
@@ -58,6 +59,12 @@ int main(int argc, char **argv) {
     HRESULT got = gpu.queue->GetPrivateData(name_guid, &size, back);
     printf("wire name %08lx %08lx %u %s\n", (unsigned long)(unsigned)hr, (unsigned long)(unsigned)got, size,
            utf8(back, size / sizeof *back).c_str());
+
+    ID3D12Fence *lower = nullptr;
+    CHECK(gpu.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void **)&lower));
+    CHECK(lower->Signal(9));
+    CHECK(lower->Signal(3));
+    printf("wire lower %llu\n", (unsigned long long)lower->GetCompletedValue());
 
     IDXGIFactory1 *factory = nullptr;
     IDXGIAdapter1 *adapter = nullptr;
