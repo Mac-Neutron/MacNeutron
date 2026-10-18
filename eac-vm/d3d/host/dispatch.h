@@ -33,6 +33,13 @@ uint64_t mn_d3d_arena_free(uint32_t ctx_id); /* free bytes in the context's aren
 /* events.c: a fence's mirror slot raised to v, never lowered (relays fire in any order). */
 void mn_d3d_mirror_raise(uint64_t *slot, uint64_t v);
 int mn_d3d_events_live(void); /* the contexts' notify queues and mirrors still held (tests) */
+/* window.c (M3): the context's latest op 7 for hwnd into out (struct mn_d3d_window): 1, or 0 if it pushed none */
+struct mn_d3d_window;
+int mn_d3d_window_of(uint32_t ctx_id, uint64_t hwnd, struct mn_d3d_window *out);
+int mn_d3d_window_set(uint32_t ctx_id, const struct mn_d3d_window *w);
+int mn_d3d_displays_set(uint32_t ctx_id, const void *p, uint32_t len); /* 0, or -1: malformed */
+void mn_d3d_windows_end(uint32_t ctx_id);
+void mn_d3d_wsi_hooks(void (*set)(const void *hooks)); /* native winemetal's WMTSetWsiHooks: ours */
 extern const struct mn_executor_hooks mn_vm_hooks; /* winemetal's, and the arenas' end with the context's */
 
 #endif

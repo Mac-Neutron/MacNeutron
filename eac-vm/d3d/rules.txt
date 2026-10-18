@@ -257,6 +257,18 @@ ID3D12Device8::GetCopyableFootprints1 rows_count out count=subresources_count
 ID3D12Device8::GetCopyableFootprints1 row_size_in_bytes out count=subresources_count
 ID3D12Device8::GetCopyableFootprints1 total_bytes out one
 ID3D12PipelineLibrary::Serialize data out size=data_size_in_bytes
+# The window and displays native DXMT's window system answers (M3 Task 2): these push the guest's (ops 7 and 8,
+# guest/proxy.cpp), then forward as generated.
+IDXGIFactory::CreateSwapChain wrap
+IDXGIFactory2::CreateSwapChainForHwnd wrap
+IDXGISwapChain::ResizeBuffers wrap
+IDXGISwapChain3::ResizeBuffers1 wrap
+IDXGISwapChain::ResizeTarget wrap
+IDXGISwapChain::SetFullscreenState wrap
+IDXGISwapChain::Present wrap
+IDXGISwapChain1::Present1 wrap
+IDXGISwapChain::GetContainingOutput wrap
+IDXGIAdapter::EnumOutputs wrap
 IDXGISwapChain3::ResizeBuffers1 node_mask in count=buffer_count
 IDXGISwapChain3::ResizeBuffers1 present_queue in count=buffer_count
 IDXGISwapChain4::SetHDRMetaData metadata in size=size

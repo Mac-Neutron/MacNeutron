@@ -504,6 +504,7 @@ class Rules:
     fields: Dict[tuple, List[str]] = field(default_factory=dict)  # (struct, field): words
     companions: List[tuple] = field(default_factory=list)  # (interface, companion): QueryInterface answers it too
     own: set = field(default_factory=set)  # generated tables, with guest and host code of our own (MN_D3D_ID_*)
+    wrap: set = field(default_factory=set)  # guest code of our own (proxy.cpp) first, then the generated proxy (M3)
 
 
 MODES = ("async", "sync", "submit", "special", "refuse")
@@ -549,6 +550,8 @@ def parse_rules(text, model):
         elif "::" in words[0]:
             if len(words) == 2 and words[1] == "own":
                 rules.own.add(words[0])
+            elif len(words) == 2 and words[1] == "wrap":
+                rules.wrap.add(words[0])
             elif len(words) == 2 and words[1] in MODES:
                 rules.modes[words[0]] = words[1]
             elif len(words) >= 3:
@@ -856,7 +859,7 @@ def classify(model, rules):
     if errors:
         raise RuleError(f"{len(errors)} methods need rules:\n  " + "\n  ".join(errors))
     ifaces = {n.split("::")[0] for n in methods}
-    for name in list(rules.modes) + [k[0] for k in rules.params] + sorted(rules.own):
+    for name in list(rules.modes) + [k[0] for k in rules.params] + sorted(rules.own | rules.wrap):
         if name.endswith("::*") and name[:-3] in ifaces:
             continue
         if name not in methods:
@@ -1308,7 +1311,7 @@ def emit_proxies(model, rules, calls):
             else:
                 mid = by_name[f"{y}::{model.interfaces[n].methods[slot].name}"]
                 fn = f"(const void *)px_{mid}"
-                if calls[mid].mode == "special" or calls[mid].name in rules.own:  # proxy.cpp's code
+                if calls[mid].mode == "special" or calls[mid].name in rules.own | rules.wrap:  # proxy.cpp's code
                     fn = f'mn_d3d_special("{calls[mid].name}", {fn})'
             out.append(f"    mn_d3d_vtables[{k}][{slot}] = {fn};")
     out += ["}", "static int built = (build(), 1);", ""]

@@ -4,11 +4,12 @@
 # (MACNEUTRON_VM_D3D_TRACE=1) showing D3D12CreateDevice; MACNEUTRON_VM_D3D=guest the same lines on guest DXMT, with no
 # guest trace; and eac-vm/d3d/tests/smoke.cpp's lines: in both modes "eventthread ok" (a fence's event, whose process
 # made its first Direct3D call on a thread that has ended, is set from a Wine thread of its own), "name ok" (SetName
-# reads back in the guest's WCHARs) and "wmtforward ok" (fork 0079 refuses a call past the guest's table), and forwarded
-# "eventreuse ok" (a closed event's reused handle takes no stray set; guest DXMT has that bug too). Prints
-# macneutron-vm's peak resident size in each (forwarding loads native DXMT, a second LLVM beside the Wine build's), and
-# that nothing lands in the folder the VM host ran from (native DXMT's logs go to the run's traces). Needs the images (guest-stages.sh dxmt d3d, image/build.sh wine) and the share's dxmt-tests
-# (eac-vm/dxmt/share.sh). Prints "d3d-smoke: ok" or "d3d-smoke: FAIL <what>".
+# reads back in the guest's WCHARs), "minimised ok" (a minimised window's present costs the host's vCPU no sleep) and
+# "wmtforward ok" (fork 0079 refuses a call past the guest's table), and forwarded "eventreuse ok" (a closed event's
+# reused handle takes no stray set; guest DXMT has that bug too). Prints macneutron-vm's peak resident size in each
+# (forwarding loads native DXMT, a second LLVM beside the Wine build's), and that nothing lands in the folder the VM
+# host ran from (native DXMT's logs go to the run's traces). Needs the images (guest-stages.sh dxmt d3d, image/build.sh
+# wine) and the share's dxmt-tests (eac-vm/dxmt/share.sh). Prints "d3d-smoke: ok" or "d3d-smoke: FAIL <what>".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=$ROOT/build/eac-vm-work
@@ -50,7 +51,7 @@ EOS
   echo "d3d-smoke: $mode: ${lines:-0} null lines, $(/usr/bin/grep '^status' "$out" 2> /dev/null), macneutron-vm peak $((peak / 1024)) MiB"
   [ "${lines:-0}" -eq 18 ] || { fail="$fail $mode-lines"; tail -5 "$out" 2> /dev/null || true; }
   [ -z "$(ls -A "$C")" ] || fail="$fail $mode-cwd($(ls -A "$C" | tr '\n' ' '))"
-  checks="eventthread name wmtforward"
+  checks="eventthread name minimised wmtforward"
   [ "$mode" = guest ] || checks="$checks eventreuse"
   for c in $checks; do
     got=$(/usr/bin/grep "^$c " "$out" 2> /dev/null || true)

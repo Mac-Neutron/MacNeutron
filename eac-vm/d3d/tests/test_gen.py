@@ -133,6 +133,18 @@ class ClassifyTest(unittest.TestCase):
             self.assertIn("ID3D12Device::CopyDescriptors", err.getvalue())
             self.assertFalse(os.path.exists(os.path.join(d, "calls.c")))
 
+    def test_wrap(self):
+        # wrap (M3): guest code runs first and then the generated proxy, which forwards as the rules say
+        rules = gen.parse_rules(gen.read(RULES) + "\nID3D12Device::GetNodeCount wrap\n", self.m)
+        calls = gen.classify(self.m, rules)
+        out, _ = gen.emit_proxies(self.m, rules, calls)
+        wid = next(i for i, c in calls.items() if c.name == "ID3D12Device::GetNodeCount")
+        self.assertEqual(calls[wid].mode, "sync")
+        self.assertIn(f'mn_d3d_special("ID3D12Device::GetNodeCount", (const void *)px_{wid})', out)
+        start = out.index(f"px_{wid}(")
+        self.assertIn("mn_d3d_call(", out[start:out.index("\n}", start)])
+        self.assertNotIn('mn_d3d_special("ID3D12Device::GetAdapterLuid"', out)
+
     def test_every_method_has_a_mode(self):
         for row in gen.manifest(self.m):
             self.assertIn(self.calls[row[0]].mode, ("async", "sync", "submit", "special", "refuse"), row[1])

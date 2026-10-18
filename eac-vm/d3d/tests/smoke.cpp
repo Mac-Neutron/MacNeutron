@@ -7,6 +7,10 @@
 //                value wasn't reused)
 //   name         (after M2) SetName read back by GetPrivateData(WKPDID_D3DDebugObjectNameW): the bytes given, 2-byte
 //                WCHARs ("ok", or the size read back)
+//   minimised    (M3 Task 2) a swapchain on a Wine window, the window minimised: Present answers S_OK (flip model:
+//                DXMT skips the frame and sleeps a 60 Hz frame), and it and a call right after take under 28 ms: one
+//                sleep, the guest's, not a second on the host's vCPU ("ok", "untested": not minimised, or what it
+//                answered and how long)
 //   wmtforward   (after M2) winemetal's WMTForward (fork 0079) refuses a call past the guest's table, 156
 //                ("ok": STATUS_INVALID_PARAMETER, or what it answered); last, as a wrong one may end the process
 // A failed step prints "<line> FAIL <step>".
@@ -72,6 +76,51 @@ static void name(ID3D12CommandQueue *queue) {
     else printf("name %u\n", size);
 }
 
+static LRESULT CALLBACK window_proc(HWND w, UINT m, WPARAM wp, LPARAM lp) { return DefWindowProcA(w, m, wp, lp); }
+
+static void pump() {
+    MSG m;
+    while (PeekMessageA(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageA(&m);
+}
+
+static double ms_since(LARGE_INTEGER a) {
+    LARGE_INTEGER b, f;
+    QueryPerformanceCounter(&b);
+    QueryPerformanceFrequency(&f);
+    return (double)(b.QuadPart - a.QuadPart) * 1000.0 / (double)f.QuadPart;
+}
+
+static void minimised(ID3D12CommandQueue *queue) {
+    WNDCLASSA wc = {};
+    wc.lpfnWndProc = window_proc, wc.hInstance = GetModuleHandleA(nullptr), wc.lpszClassName = "mn-smoke";
+    RegisterClassA(&wc);
+    HWND w = CreateWindowA("mn-smoke", "smoke", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 320, 240, nullptr, nullptr,
+                           wc.hInstance, nullptr);
+    IDXGIFactory2 *f = nullptr;
+    IDXGISwapChain1 *sc = nullptr;
+    DXGI_SWAP_CHAIN_DESC1 d = {};
+    d.Width = 320, d.Height = 240, d.Format = DXGI_FORMAT_R8G8B8A8_UNORM, d.SampleDesc.Count = 1;
+    d.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT, d.BufferCount = 2, d.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    pump();
+    if (!w || FAILED(CreateDXGIFactory2(0, __uuidof(IDXGIFactory2), (void **)&f)) ||
+        FAILED(f->CreateSwapChainForHwnd(queue, w, &d, nullptr, nullptr, &sc)) || FAILED(sc->Present(0, 0)))
+        return (void)printf("minimised FAIL swapchain\n");
+    ShowWindow(w, SW_MINIMIZE);
+    pump();
+    if (!IsIconic(w)) return (void)printf("minimised untested\n");
+    LARGE_INTEGER a;
+    QueryPerformanceCounter(&a);
+    HRESULT hr = sc->Present(0, 0);
+    DXGI_SWAP_CHAIN_DESC1 got = {};
+    sc->GetDesc1(&got); // synchronous: whatever the host does for the present before it, it does first
+    double ms = ms_since(a);
+    if (hr == S_OK && ms < 28) printf("minimised ok\n");
+    else printf("minimised %08lx %.1f ms\n", (unsigned long)hr, ms);
+    sc->Release();
+    f->Release();
+    DestroyWindow(w);
+}
+
 static void wmt_forward() {
     auto forward = (UINT32(WINAPI *)(UINT32, void *))GetProcAddress(LoadLibraryA("winemetal.dll"), "WMTForward");
     if (!forward) return (void)printf("wmtforward FAIL no WMTForward\n");
@@ -96,6 +145,7 @@ int main() {
     printf("eventthread %s\n", event_thread(device, queue));
     printf("eventreuse %s\n", event_reuse(device, queue));
     name(queue);
+    minimised(queue);
     queue->Release();
     device->Release();
     wmt_forward();

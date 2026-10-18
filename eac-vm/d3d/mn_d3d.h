@@ -19,8 +19,17 @@ enum {
     MN_D3D_OP_QUERY = 4,   /* struct mn_d3d_query: QueryInterface for an interface at another pointer, a new handle */
     MN_D3D_OP_BLOB = 5,    /* struct mn_d3d_blob: an ID3D10Blob's bytes; reply: u64 its size, then the bytes asked */
     MN_D3D_OP_LISTEN = 6,  /* none: the calling thread sets the events the host posts, for the process's life; never sent */
+    MN_D3D_OP_WINDOW = 7,  /* struct mn_d3d_window: a window's state, which native DXMT's window system answers (M3) */
+    MN_D3D_OP_DISPLAYS = 8, /* u32 count, then each struct mn_d3d_display and its modes (M3); guest args: below */
 };
 struct mn_d3d_query { uint64_t handle; uint8_t iid[16]; uint64_t out; }; /* reply: int32 HRESULT */
+/* Ops 7 and 8 (M3): the guest's window and displays as Win32 has them there, pushed before the calls that read them
+ * (host/window.c keeps the latest of each, by context). flags: 1 minimised, 2 foreground, 4 a window. A display's
+ * modes follow it, `modes` of them, the current one first and then EnumDisplaySettings' list. */
+struct mn_d3d_window { uint64_t hwnd, monitor; uint32_t width, height, flags, pad; };
+struct mn_d3d_display { uint64_t monitor; int32_t left, top, right, bottom; uint16_t name[32]; uint32_t modes, pad; };
+struct mn_d3d_mode { uint32_t width, height, refresh_num, refresh_den; };
+struct mn_d3d_displays_args { uint64_t data; uint32_t len, pad; }; /* op 8 from the proxies: the record's bytes */
 struct mn_d3d_blob { uint64_t handle, offset, len; };
 /* Op 2: the context's Direct3D notify queue (MN_NOTIFY_EVENT: a guest event to set) and its fences' mirror, one
  * uint64_t a fence (its completed value, raised by the host: max(slot, value)); a fence's creation names its slot in

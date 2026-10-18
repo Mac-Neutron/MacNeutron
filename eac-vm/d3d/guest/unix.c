@@ -189,6 +189,12 @@ static int32_t family(uint32_t id, void *params) {
             if (n == 8 || at >= a->cap) return 0;
         }
     }
+    case MN_D3D_OP_WINDOW: /* queued: the call that reads it comes after it on this thread's ring */
+        return mn_queue(MN_OP_D3D + id, params, sizeof(struct mn_d3d_window));
+    case MN_D3D_OP_DISPLAYS: {
+        const struct mn_d3d_displays_args *d = params;
+        return mn_queue(MN_OP_D3D + id, (const void *)(uintptr_t)d->data, d->len);
+    }
     case MN_D3D_OP_LISTEN:
         if (!events_ready) return MN_EINVAL;
         listener(NULL);

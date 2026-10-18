@@ -95,6 +95,12 @@ int mn_d3d_load(const char *d) {
         return -1;
     }
     present_hook(present);
+    void (*wsi)(const void *) = (void (*)(const void *))dlsym(libs[2], "WMTSetWsiHooks");
+    if (!wsi) {
+        fprintf(stderr, "mn-d3d: error: native DXMT: %s\n", dlerror());
+        return -1;
+    }
+    mn_d3d_wsi_hooks(wsi); /* window.c: native DXMT's window system, from the guest's ops 7 and 8 */
     mn_d3d_stubs[MN_D3D_ID_ID3D12Resource_Map] = mn_d3d_map_stub; /* rules.txt's own */
     mn_d3d_stubs[MN_D3D_ID_ID3D12Device_CreateFence] = mn_d3d_create_fence_stub;
     mn_d3d_stubs[MN_D3D_ID_ID3D12Fence_Signal] = mn_d3d_fence_signal_stub;
@@ -210,8 +216,18 @@ static int32_t family(struct mn_wm_ctx *c, void *ring, uint32_t id, const void *
         *n = (uint32_t)(8 + take);
         return 0;
     }
+    case MN_D3D_OP_WINDOW: {
+        struct mn_d3d_window w;
+        if (len < sizeof w) return MN_EINVAL;
+        memcpy(&w, p, sizeof w);
+        return mn_d3d_window_set(c->ctx_id, &w) ? MN_D3D_E_FAIL : 0;
+    }
+    case MN_D3D_OP_DISPLAYS:
+        if (!mn_d3d_displays_set(c->ctx_id, p, len)) return 0;
+        fprintf(stderr, "mn-d3d: error: displays that don't fit their record (%u bytes)\n", len);
+        return MN_EINVAL;
     default:
-        return MN_ENOSYS; /* op 3: the guest's own (its trace), never sent */
+        return MN_ENOSYS; /* ops 3 and 6: the guest's own, never sent */
     }
 }
 
@@ -285,6 +301,7 @@ static void context_end(uint32_t ctx_id) {
     mn_wm_hooks.context_end(ctx_id); /* its objects released: their pieces come back as Metal lets them go */
     mn_d3d_arenas_end(ctx_id);
     mn_d3d_events_end(ctx_id);
+    mn_d3d_windows_end(ctx_id);
     trace_out(ctx_id);
 }
 const struct mn_executor_hooks mn_vm_hooks = {progress, context_end, ring_end};

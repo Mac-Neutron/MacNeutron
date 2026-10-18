@@ -18,6 +18,8 @@
  *              reaches 12 (whatever the guest did with e meanwhile); SetEventOnMultipleFenceCompletion's any and all;
  *              (after M2) the context's notify queue and mirror go with its end, though an event is never set (its
  *              fence released first, or a wait on no fences)
+ *   window     (M3 Task 2) op 7's window and op 8's displays: the window by context; IDXGIAdapter::EnumOutputs, the
+ *              output's DesktopCoordinates and its two modes as op 8 had them
  *   wchar      (M2 Task 10) IDXGIAdapter1::GetDesc1 answers the guest's layout: its description UTF-16, its ids past
  *              it where the guest has them
  *   dispatch-test <metal-host> <native DXMT lib>; prints "dispatch-test: ok" or each failure. */
@@ -297,6 +299,41 @@ int main(int argc, char **argv) {
     struct mn_d3d_blob nb = {device, 0, 64};
     CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_BLOB, &nb, sizeof nb, reply, sizeof reply, &n) ==
           (int32_t)MN_STATUS_INVALID_HANDLE);
+
+    /* window: op 7 and op 8 are what native DXMT's window system answers; context 2's window is its own */
+    struct mn_d3d_window win = {0x1234, 0x10001, 800, 600, 4, 0};
+    CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_WINDOW, &win, sizeof win, NULL, 0, &n) == 0);
+    struct {
+        uint32_t count, pad;
+        struct mn_d3d_display d;
+        struct mn_d3d_mode modes[3];
+    } disp = {1, 0, {0x10001, 0, 0, 1920, 1080, {0}, 3, 0}, {{1920, 1080, 60, 1}, {1920, 1080, 60, 1}, {1280, 720, 60, 1}}};
+    const char *dev_name = "\\.\DISPLAY1";
+    for (int i = 0; dev_name[i]; i++) disp.d.name[i] = (uint16_t)dev_name[i];
+    CHECK(mn_vm_dispatch(1, ring_state, MN_OP_D3D + MN_D3D_OP_DISPLAYS, &disp, sizeof disp, NULL, 0, &n) == 0);
+    uint64_t ring2[8] = {0};
+    struct mn_d3d_window win2 = {0x1234, 0x10001, 640, 480, 4, 0};
+    CHECK(mn_vm_dispatch(2, ring2, MN_OP_D3D + MN_D3D_OP_WINDOW, &win2, sizeof win2, NULL, 0, &n) == 0);
+    struct mn_d3d_window got1 = {0}, got2 = {0};
+    CHECK(mn_d3d_window_of(1, 0x1234, &got1) && got1.width == 800 && got1.height == 600);
+    CHECK(mn_d3d_window_of(2, 0x1234, &got2) && got2.width == 640 && got2.height == 480);
+    unsigned outputs = id_of("IDXGIAdapter::EnumOutputs"), odesc = id_of("IDXGIOutput::GetDesc"),
+             omodes = id_of("IDXGIOutput::GetDisplayModeList");
+    struct { uint64_t self, ret; uint32_t index; uint64_t output, ifaces[5]; } eo = {ea.adapter, 0, 0, 0, {0}};
+    CHECK(mn_d3d_calls[outputs].params_size == sizeof eo && call(outputs, &eo) == 0 && (uint32_t)eo.ret == 0 &&
+          eo.output);
+    uint8_t od[96]; /* DXGI_OUTPUT_DESC with a 2-byte WCHAR: DeviceName[32], DesktopCoordinates at 64 */
+    memset(od, 0xee, sizeof od);
+    struct { uint64_t self, ret, desc, aux[2]; } gdo = {eo.output, 0, (uintptr_t)od, {0}};
+    CHECK(mn_d3d_calls[odesc].params_size == sizeof gdo && call(odesc, &gdo) == 0 && (uint32_t)gdo.ret == 0);
+    int32_t rect[4];
+    memcpy(rect, od + 64, sizeof rect);
+    CHECK(rect[0] == 0 && rect[1] == 0 && rect[2] == 1920 && rect[3] == 1080);
+    uint32_t count = 0;
+    struct { uint64_t self, ret; uint32_t format, flags; uint64_t count, desc; } dm =
+        {eo.output, 0, 28 /* DXGI_FORMAT_R8G8B8A8_UNORM */, 0, (uintptr_t)&count, 0};
+    CHECK(mn_d3d_calls[omodes].params_size == sizeof dm && call(omodes, &dm) == 0 && (uint32_t)dm.ret == 0);
+    CHECK(count == 2);
 
     /* removed */
     unsigned victim = id_of("ID3D12Object::GetPrivateData");
