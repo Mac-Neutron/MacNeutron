@@ -8,9 +8,10 @@ headless D3D12 programs print through forwarding what they print on the macOS ru
 
 **Architecture:** `eac-vm/d3d/gen.py` reads the widl-generated headers native DXMT compiles against and
 `eac-vm/d3d/rules.txt`, and writes call tables in the winemetal marshaller's own form (`struct mn_wm_call`), guest
-proxies and host stubs. The guest side is a PE `mnd3d.dll` (proxies; `d3d12.dll` and `dxgi.dll` forward their exports
-to it) over a unix lib `mnd3d.so` (the marshaller and transport, as the guest `winemetal.so`); the host side is a
-dispatcher in `macneutron-vm` that loads native DXMT on the first forwarded call. A loopback build links the same
+proxies and host stubs. The guest side is a plain PE `mnd3d.dll` (proxies; `d3d12.dll` and `dxgi.dll` forward their
+exports to it), linked into the prefix's `system32` and chosen by `WINEDLLOVERRIDES`, reaching the transport through
+the builtin `winemetal.dll` (a new export) and our guest `winemetal.so`; the host side is a dispatcher in
+`macneutron-vm` that loads native DXMT on the first forwarded call. A loopback build links the same
 proxies, marshaller and stubs into one Mac library, which M1's native test harness runs first.
 
 **Tech Stack:** Python 3 (the generator, its tests), C (guest runtime, unix lib, marshaller), C++20 (host stubs, against
@@ -65,8 +66,14 @@ DXMT (M1), POSIX sh.
   discriminant and one nested field list per value). Structs with `WCHAR` arrays (DXGI's adapter and output
   descriptions) are specials.
 - **One guest module:** the proxies are in `mnd3d.dll`, and `d3d12.dll` and `dxgi.dll` forward their exports to it
-  (the spec's two stand-ins, as forwarders): Wine gives each builtin module its own unix lib and transport, and a
-  D3D12 device made on a DXGI adapter, or a DXGI object asked of a D3D12 one, must be the same module's proxies.
+  (the spec's two stand-ins, as forwarders): a D3D12 device made on a DXGI adapter, or a DXGI object asked of a D3D12
+  one, must be the same module's proxies.
+- **Native DLLs in the prefix, as Proton places DXVK:** Wine searches its own lib folder before any `WINEDLLPATH`
+  entry (`dlls/ntdll/unix/loader.c`, `set_dll_path`), so builtin stand-ins couldn't sit beside guest DXMT's. The three
+  are plain PE DLLs in `/opt/mn-wine/lib/wine/mn-d3d/`, which `run-game.sh` links into the prefix's `system32`; the
+  mode is `WINEDLLOVERRIDES` alone (`d3d12,dxgi=n` forwards, `=b` is today's path). A plain DLL has no unix lib of its
+  own: `mnd3d.dll` calls the builtin `winemetal.dll`'s new `WMTForward` (fork 0076, the `guest_vm` build only), which
+  reaches slot `MN_WM_D3D` (155) of our guest `winemetal.so`: one transport and one context a process.
 - **Op numbers:** `MN_OP_D3D = 0x10000`; a method's record is `MN_OP_D3D + id`. Ids 0 to 15 are the family's own
   (0 release, 1 add arena, 2 attach the notify queue, 3 the trace's counts); methods start at 16, numbered by the
   manifest in header order, declared methods only (an inherited method has its declaring interface's id).
@@ -143,7 +150,9 @@ DXMT (M1), POSIX sh.
 - [ ] **Step 1: Write the failing tests** (`python3 -m unittest eac-vm/d3d/tests/test_gen.py`): the headers give 62
   D3D12 interfaces and 44 DXGI ones; `ID3D12Fence`'s methods are IUnknown's 3, ID3D12Object's 4, `GetDevice`,
   `GetCompletedValue`, `SetEventOnCompletion`, `Signal` in that order; `ID3D12Device5`'s base is `ID3D12Device4`;
-  `D3D12_RESOURCE_BARRIER` has a union; the IID of `ID3D12Device` is `189819f1-1db6-4b57-be54-1821339b85f7`;
+  `D3D12_RESOURCE_BARRIER` has a union; `ID3D12Resource::GetDesc` takes the explicit aggregate-return form
+  (`D3D12_RESOURCE_DESC *__ret`, widl's `WIDL_EXPLICIT_AGGREGATE_RETURNS` block: the PE ABI and native DXMT's, M1);
+  the IID of `ID3D12Device` is `189819f1-1db6-4b57-be54-1821339b85f7`;
   `rules.txt`'s `IMTLD3D12DeviceExt` has `GetTemporalScalerScaleRange` and `CreateTemporalScaler`; ids are stable
   (manifest of the same input twice is identical) and start at 16.
 - [ ] **Step 2: Run them.** Expected: fail (no `gen.py`).
@@ -165,7 +174,9 @@ DXMT (M1), POSIX sh.
 - Produces: `mn_wm_pack_call(const struct mn_wm_call *, void *params, struct mn_wm_out *)`,
   `mn_wm_unpack_call(...)` (as `mn_wm_unpack` with the slot replaced by the call) and `mn_wm_host_call_table`
   (today's `mn_wm_host_call` parameters, the slot replaced by `const struct mn_wm_call *call` and an
-  `NTSTATUS_T (*invoke)(void *params)`): today's slot forms become wrappers over these. Field kinds `WMF_WSTR_IN` (NUL-terminated UTF-16 in, a native `wchar_t`
+  `NTSTATUS_T (*invoke)(void *params)`): today's slot forms become wrappers over these. `MN_WM_MAX_REGIONS` goes
+  from 64 to 256: a graphics pipeline's description is five bytecodes, a cached blob, stream output and up to 32 input
+  elements each with a semantic name. Field kinds `WMF_WSTR_IN` (NUL-terminated UTF-16 in, a native `wchar_t`
   string on the host) and `WMF_UNION` (`count_offset` is the discriminant's offset; `nested` indexes a
   `struct mn_wm_union { uint16_t nvalues; const uint32_t *values; const uint8_t *nested; }` in `mn_wm_unions[]`).
   `gen.py ... calls` writes `<dir>/calls.c` (`const struct mn_wm_call mn_d3d_calls[]`, indexed by id, and the params
@@ -227,16 +238,17 @@ DXMT (M1), POSIX sh.
 
 **Files:**
 - Create: `eac-vm/d3d/guest/proxy.c`, `proxy.h` (proxy objects, `QueryInterface`, reference counts, caches, local
-  `ID3DBlob`, the trace), `eac-vm/d3d/guest/unix.c` (the unix side: the transport, `mn_wm_pack_call`,
-  `mn_wm_unpack_call`, the notify listener), `eac-vm/d3d/tests/loopback.c` (transport stand-ins, after
+  `ID3DBlob`, the trace), `eac-vm/d3d/guest/unix.c` (the unix side, compiled into the guest `winemetal.so` as slot
+  `MN_WM_D3D`: `mn_wm_pack_call`, the transport, `mn_wm_unpack_call`, the notify listener), `eac-vm/d3d/tests/loopback.c` (transport stand-ins, after
   `eac-vm/metal/wm/tests/loopback.c`), `eac-vm/d3d/build-loopback.sh`, `eac-vm/d3d/loopback-gate.sh`
 - Generated: `<dir>/proxies.c` (vtables and methods for each interface, filling the params struct and calling
   `mn_d3d_call(id, params)`)
 
 **Interfaces:**
 - Consumes: Tasks 3 and 4.
-- Produces: `HRESULT mn_d3d_call(uint32_t id, void *params)` (PE side; the unix call `MN_D3D_UNIX_CALL`) and
-  `NTSTATUS mn_d3d_unix_call(void *args)` (unix side). `build/d3d-loopback/libmnd3d-loopback.dylib` exporting
+- Produces: `HRESULT mn_d3d_call(uint32_t id, void *params)` (PE side: `WMTForward(MN_WM_D3D, &args)`) and
+  `NTSTATUS mn_d3d_unix_call(void *args)` (unix side, `__wine_unix_call_funcs[MN_WM_D3D]` of the guest
+  `winemetal.so`; `MN_WM_SLOTS` becomes 156). `build/d3d-loopback/libmnd3d-loopback.dylib` exporting
   `D3D12CreateDevice`, `D3D12SerializeRootSignature`, `D3D12SerializeVersionedRootSignature`, `CreateDXGIFactory`,
   `CreateDXGIFactory1`, `CreateDXGIFactory2` and the other `d3d12.def` and `dxgi.def` exports. `loopback-gate.sh`:
   M1's `gate.sh` with the programs linked to the loopback library (`build-tests.sh` gains `MN_D3D_PROGRAMS_LIB`), its
@@ -285,11 +297,14 @@ DXMT (M1), POSIX sh.
 - Consumes: Task 1's `mn_win32_relay_event`; winemetal's notify queue (`wm/notify.h`, `mn_notifyq_post`, exported
   from `memory.m` if it is static).
 - Produces: op `MN_OP_D3D + 2` (attach the context's notify queue blob, and the mirror blob: one `uint64_t` a fence,
-  its slot named in the fence's creation reply). `GetCompletedValue` reads the slot in the guest. A `NULL` event in
+  its slot named in the fence's creation reply). `GetCompletedValue` reads the slot in the guest. Every write to a slot
+  is `max(slot, value)` (relays fire in any order), and the proxy's `ID3D12Fence::Signal(v)`, a CPU signal that
+  D3D12 completes at once, raises the guest's slot to `v` before it sends the record. A `NULL` event in
   `SetEventOnCompletion` is a synchronous wait on the host.
 
 - [ ] **Step 1: Write the failing tests:** `dispatch-test` `events`: a `Signal(5)` on a queue raises the fence's mirror
-  slot to 5 without a record; `SetEventOnCompletion(7, e)` posts `MN_NOTIFY_EVENT` with `e`'s value once the fence
+  slot to 5 without a record; a CPU `ID3D12Fence::Signal(9)` reads back 9 from `GetCompletedValue` at once; a relay
+  for 3 that fires after one for 5 leaves 5; `SetEventOnCompletion(7, e)` posts `MN_NOTIFY_EVENT` with `e`'s value once the fence
   reaches 7; an event closed by the guest before then is still posted, and the guest's set fails without harm;
   `SetEventOnMultipleFenceCompletion` with all and any. Loopback: `d3d12_api`'s `multifence`, `d3d12_hazards`,
   `d3d12_query`, `d3d12_timestamp`.
@@ -332,7 +347,7 @@ DXMT (M1), POSIX sh.
   DXMT's private interfaces.
 
 - [ ] **Step 1: Write the failing tests:** `wire-test`: 1 MiB of bytecode through `CreateComputePipelineState`
-  answers what natively it does; a `SetName` with non-ASCII text reads back through `GetPrivateData
+  answers what natively it does; a graphics pipeline with 32 input elements is created as natively; a `SetName` with non-ASCII text reads back through `GetPrivateData
   (WKPDID_D3DDebugObjectNameW)`; `IDXGIAdapter1::GetDesc1`'s `Description` equals the native one. The loopback gate,
   all 19.
 - [ ] **Step 2: Run them.** Expected: fail where the specials are missing.
@@ -344,13 +359,16 @@ DXMT (M1), POSIX sh.
 
 **Files:**
 - Create: `eac-vm/d3d/guest/mnd3d.def`, `d3d12.def`, `dxgi.def` (the two forward their exports to `mnd3d.dll`),
-  `eac-vm/d3d/build-guest.sh` (PE on the Mac with llvm-mingw against the guest Wine SDK, as `eac-vm/dxmt/build.sh`;
-  the unix lib in the builder, as `eac-vm/metal/build-guest.sh`)
-- Modify: `eac-vm/image/build.sh` (`/opt/mn-wine/lib/wine/mn-d3d/{x86_64-windows,x86_64-unix}`),
-  `eac-vm/image/guest-stages.sh` (a `d3d` stage), `eac-vm/image/stamps.sh`, `eac-vm/guest/run-game.sh` and
-  `eac-vm/tests/dxmt.sh` (forwarding: `WINEDLLPATH` names `mn-d3d` and `WINEDLLOVERRIDES` takes `d3d12,dxgi=b`;
-  `MACNEUTRON_VM_D3D=guest` today's DLLs), `Sources/MacNeutronCore/MicroVM.swift` (`passed` gains
-  `MACNEUTRON_VM_D3D`, `MACNEUTRON_VM_D3D_TRACE`)
+  `eac-vm/d3d/build-guest.sh` (plain PE DLLs on the Mac with llvm-mingw, importing `winemetal.dll` from the guest
+  Wine SDK as `eac-vm/dxmt/build.sh` does; the guest `winemetal.so` gains `unix.c` in `eac-vm/metal/build-guest.sh`)
+- Modify (fork 0076, `guest_vm` only): `src/winemetal/winemetal_thunks.c`, `winemetal.def` (`NTSTATUS WINAPI
+  WMTForward(UINT32 call, void *params)`: `UNIX_CALL(call, params)` for `call >= 155`, `STATUS_INVALID_PARAMETER`
+  below)
+- Modify: `eac-vm/image/build.sh` (`/opt/mn-wine/lib/wine/mn-d3d/x86_64-windows/`), `eac-vm/image/guest-stages.sh`
+  (the `d3d` stage), `eac-vm/image/stamps.sh`, `eac-vm/guest/run-game.sh` and `eac-vm/tests/dxmt.sh` (the three DLLs
+  linked into the prefix's `system32`; `WINEDLLOVERRIDES` takes `d3d12,dxgi=n` with `MACNEUTRON_VM_D3D=forward`,
+  `=b` otherwise), `Sources/MacNeutronCore/MicroVM.swift` (`passed` gains `MACNEUTRON_VM_D3D`,
+  `MACNEUTRON_VM_D3D_TRACE`)
 - Test: `eac-vm/tests/d3d-smoke.sh` (new)
 
 **Interfaces:**
@@ -360,7 +378,8 @@ DXMT (M1), POSIX sh.
 
 - [ ] **Step 1: Write the failing test** `d3d-smoke.sh`: in the VM, `d3d12_null` with `MACNEUTRON_VM_D3D=forward`
   prints its `null` lines, the trace shows `D3D12CreateDevice` reached the host, and with `MACNEUTRON_VM_D3D=guest`
-  the same program runs on guest DXMT (the trace absent). Expected: FAIL.
+  the same program runs on guest DXMT (the trace absent). It prints `macneutron-vm`'s resident size in both runs:
+  forwarding loads a second LLVM (native `winemetal.dylib`) beside the Wine build's. Expected: FAIL.
 - [ ] **Step 2: Implement**, rebuild the stages and the images.
 - [ ] **Step 3: Run** `d3d-smoke.sh`, `eac-vm/tests/wine.sh`, `vm-setup.sh`. Expected: `d3d-smoke: ok`; the rest as
   before.
