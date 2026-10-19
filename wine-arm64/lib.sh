@@ -108,7 +108,8 @@ p_flag() {  # p_flag <component>: true when the p profile builds <component> wit
 
 # PGO under the p profile (spec 2026-10-19-macneutron-performance-build §7): MACNEUTRON_PGO=generate builds
 # instrumented binaries (they write LLVM_PROFILE_FILE's profiles); unset, a component uses pgo/<profile>.profdata when it
-# exists. Profiles by toolchain: host (Apple clang), libkrun (rustc), guest (the builder's clang).
+# exists. Profiles by toolchain: host (Apple clang), guest (the builder's clang); libkrun has none (its instrumented
+# build crashed in zstd's C code under rustc's profile runtime).
 pgo_mode() {  # pgo_mode <profile>: generate, use or none
   [ "${MACNEUTRON_PROFILE:-std}" = p ] || { echo none; return; }
   case ${MACNEUTRON_PGO:-} in
