@@ -25,8 +25,17 @@ done
 # CARGO_ENCODED_RUSTFLAGS (0x1f between flags): a path with spaces stays one flag.
 CARGO_ENCODED_RUSTFLAGS=$(printf '%s\037%s\037%s' "--remap-path-prefix=$HOME/.cargo=/cargo" \
   "--remap-path-prefix=$HOME/.rustup=/rustup" "--remap-path-prefix=$SRC=/libkrun")
+# The p profile (spec 2026-10-19-macneutron-performance-build §4, §5): log calls below errors compiled out, and with
+# "krun" in its flags ThinLTO (the crate's own release profile is full LTO), one codegen unit, and the M5.
+. "$ROOT/wine-arm64/lib.sh"
+FEATURES=blk,net,ffi,gpu,input
+[ "${MACNEUTRON_PROFILE:-std}" != p ] || FEATURES="$FEATURES,log/release_max_level_error"
+if p_flag krun; then
+  export CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+  CARGO_ENCODED_RUSTFLAGS=$(printf '%s\037%s' "$CARGO_ENCODED_RUSTFLAGS" -Ctarget-cpu=apple-m5)
+fi
 export CARGO_ENCODED_RUSTFLAGS
-(cd "$SRC" && PATH=$(dirname "$CARGO"):$PATH "$CARGO" build --release -p libkrun --no-default-features --features blk,net,ffi,gpu,input)
+(cd "$SRC" && PATH=$(dirname "$CARGO"):$PATH "$CARGO" build --release -p libkrun --no-default-features --features "$FEATURES")
 mkdir -p "$OUT/include"
 cp "$SRC/target/release/libkrun.dylib" "$OUT/libkrun.1.dylib"
 install_name_tool -id @rpath/libkrun.1.dylib "$OUT/libkrun.1.dylib"

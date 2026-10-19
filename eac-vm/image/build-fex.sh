@@ -4,9 +4,17 @@
 # installs it: FEX reads its global config from <prefix>/share/fex-emu.
 set -eu
 SRC=${1:-$HOME/fex-linux}
+# The p profile with "fex" in its flags (spec 2026-10-19-macneutron-performance-build §5): the features the guest's
+# vCPU reports (/proc/cpuinfo, 2026-10-19), without SME.
+set --
+case " ${MACNEUTRON_P_FLAGS-} " in
+  *" fex "*) [ "${MACNEUTRON_PROFILE:-std}" != p ] \
+    || set -- -DCMAKE_C_FLAGS="-march=armv8.6-a+fp16+fp16fml+sha3+crypto" \
+               -DCMAKE_CXX_FLAGS="-march=armv8.6-a+fp16+fp16fml+sha3+crypto" ;;
+esac
 cmake -S "$SRC" -B "$SRC/build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DBUILD_TESTING=OFF -DBUILD_THUNKS=OFF -DBUILD_FEXCONFIG=OFF \
-  -DENABLE_LTO=ON -DENABLE_ASSERTIONS=OFF -DTUNE_CPU=none -DCMAKE_CXX_SCAN_FOR_MODULES=OFF > "$SRC/build-cmake.log"
+  -DENABLE_LTO=ON -DENABLE_ASSERTIONS=OFF -DTUNE_CPU=none -DCMAKE_CXX_SCAN_FOR_MODULES=OFF "$@" > "$SRC/build-cmake.log"
 nice cmake --build "$SRC/build" -j"$(nproc)" > "$SRC/build.log"
 "$SRC/build/Bin/FEXGetConfig" --help > /dev/null 2>&1 || true
 echo "$SRC/build/Bin"
