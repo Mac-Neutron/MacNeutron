@@ -210,6 +210,8 @@ public struct Launcher: Sendable {
                               guest: String, _ launchEnvironment: [String: String], _ gameLog: URL?, _ argv: [String]) -> Int32 {
         // The guest's screen is the Mac's display, so a game is offered its resolutions up to the display's own.
         var environment = launchEnvironment
+        // Direct3D forwarding by default (M5 passed, 2026-10-19): native DXMT on the Mac draws; =guest keeps DXMT in the guest.
+        if environment["MACNEUTRON_VM_D3D"] == nil { environment["MACNEUTRON_VM_D3D"] = "forward" }
         if environment["MN_SCREEN"].map(MicroVM.isScreenSize) != true {
             environment["MN_SCREEN"] = display().map { "\($0.width)x\($0.height)" }
         }

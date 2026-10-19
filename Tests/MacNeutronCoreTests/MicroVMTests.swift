@@ -170,9 +170,26 @@ private func expectRefusedUntilTheVMIsReady(_ f: VMFixture) {
     let call = try #require(f.runner.calls.last)
     #expect(call.environment["MN_D3D_STATE"] == f.vm.appending(path: "state/2437170.dxmt").path(percentEncoded: false))
     #expect(call.environment["DXMT_D3D12_SM6"] == "0")
-    let g = try makeVMFixture()
-    _ = g.launcher.launch(["waitforexitandrun", game], environment: g.env)
-    #expect(g.runner.calls.last?.environment["MN_D3D_STATE"] == nil)
+    var guest = f.env
+    guest["MACNEUTRON_VM_D3D"] = "guest"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: guest)
+    #expect(f.runner.calls.last?.environment["MN_D3D_STATE"] == nil)
+}
+
+// Forwarding is the VM's default since M5 passed (2026-10-19, the D3D forwarding spec §8): native DXMT on the Mac draws
+// for every game; MACNEUTRON_VM_D3D=guest keeps DXMT in the guest.
+@Test func vmGamesForwardDirect3DByDefault() throws {
+    let scripts = Scripts()
+    let f = try makeVMFixture(scripts: scripts)
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(scripts.all.last?.contains("\nMACNEUTRON_VM_D3D='forward'\n") == true)
+    #expect(f.runner.calls.last?.environment["MACNEUTRON_VM_D3D"] == "forward")
+    #expect(f.runner.calls.last?.environment["MN_D3D_STATE"] != nil)
+    var env = f.env
+    env["MACNEUTRON_VM_D3D"] = "guest"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    #expect(scripts.all.last?.contains("\nMACNEUTRON_VM_D3D='guest'\n") == true)
+    #expect(f.runner.calls.last?.environment["MN_D3D_STATE"] == nil)
 }
 
 @Test func theVMsPrecacheReplaysNativelyBeforeTheBoot() throws {
