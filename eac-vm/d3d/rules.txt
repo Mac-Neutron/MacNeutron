@@ -301,6 +301,8 @@ ID3D12PipelineLibrary::Serialize data out size=data_size_in_bytes
 # The window and displays native DXMT's window system answers (M3 Task 2): these push the guest's (ops 7 and 8,
 # guest/proxy.cpp), then forward as generated.
 IDXGIFactory::CreateSwapChain wrap
+# Not const in the headers, but the swapchain's description (2026-10-19, Palworld's: as an out, the host made it from zeros)
+IDXGIFactory::CreateSwapChain desc in one
 IDXGIFactory2::CreateSwapChainForHwnd wrap
 IDXGISwapChain::ResizeBuffers wrap
 IDXGISwapChain3::ResizeBuffers1 wrap

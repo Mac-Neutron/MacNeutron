@@ -113,6 +113,13 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual((by["rects"].kind, by["rects"].array, by["rects"].count), ("WMF_IN", True, "rect_count"))
         self.assertEqual(c.mode, "async")
 
+    def test_swapchain_desc_in(self):
+        # Not const in the headers, but the swapchain's description (2026-10-19: as an out, the host made Palworld's from
+        # zeros: no window, DXGI_ERROR_INVALID_CALL)
+        c = spec(self.calls, self.m, "IDXGIFactory::CreateSwapChain")
+        by = {f.param: f for f in c.fields}
+        self.assertEqual((by["desc"].kind, by["desc"].size), ("WMF_IN", 72))
+
     def test_unruled_arrays_stop(self):
         rules = gen.parse_rules("\n".join(l for l in gen.read(RULES).splitlines()
                                           if not l.startswith("ID3D12Device::CopyDescriptors ")), self.m)
