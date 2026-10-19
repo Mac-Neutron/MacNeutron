@@ -10,6 +10,8 @@ W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 S=${BUILD_DIR:-$ROOT/build}/wine-arm64-src
 B="sh $ROOT/eac-vm/builder.sh"
 stamp() { sh "$ROOT/eac-vm/image/stamps.sh" "$1"; }
+# The x86-64 sysroot's compiler wrapper, into this BUILDER_HOME too (the p profile's starts empty).
+$B sync "$ROOT/eac-vm/sysroot" mn-sysroot > /dev/null
 for stage in ${*:-wine forwarder dxmt d3d fex}; do
   echo "guest-stages: $stage" >&2
   case $stage in

@@ -57,6 +57,10 @@ stop)
 ssh)
   shift
   pre="export HOME=$BUILDER_HOME; mkdir -p \"\$HOME\" && cd \"\$HOME\" || exit 1;"
+  # Another home still needs the login home's tool settings: FEX finds its x86-64 RootFS through ~/.fex-emu (without
+  # it no x86-64 program runs, and Wine's configure decides it is cross-compiling).
+  [ "$BUILDER_HOME" = /home/bench ] \
+    || pre="$pre for d in .fex-emu .config .local; do [ -e \"\$HOME/\$d\" ] || ln -s /home/bench/\$d \"\$HOME/\$d\"; done;"
   [ -z "${MACNEUTRON_PROFILE:-}" ] \
     || pre="$pre export MACNEUTRON_PROFILE=$MACNEUTRON_PROFILE MACNEUTRON_P_FLAGS='${MACNEUTRON_P_FLAGS-$P_FLAGS_DEFAULT}';"
   sshx "$pre" "$@" ;;
