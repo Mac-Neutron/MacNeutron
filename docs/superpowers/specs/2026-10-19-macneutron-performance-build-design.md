@@ -198,6 +198,21 @@ gates and release half a day.
 
 ## 10. Results
 
-| Run | Build | SMITE 2 fps | macneutron-vm CPU | Kept |
+SMITE 2's lobby is capped near 60 fps, so CPU (macneutron-vm's cores, the guest's vCPUs included) decides there.
+Single runs vary by up to about 10% (the same build, run twice, gave guest times 2.405 and 2.659).
+
+| Run | Build | fps | CPU (cores) | Kept |
 |---|---|---|---|---|
-| (filled in as the benches run) | | | | |
+| smite2-std | 0.7.1 | 59.7 | 3.577 | baseline |
+| smite2-p | §4 + §5 (all rows) | 59.9 | 3.196 | yes (−10.7%) |
+| kernel: mitigations=off / init_on_alloc=0 / transparent_hugepage=always / nowatchdog audit=0 / preempt=voluntary | p + one | 59.3-59.8 | 3.248 / 3.363 / 3.397 / 3.394 / 3.444 | no |
+| FEX: X87ReducedPrecision / SMCChecks=mman / MaxInst=10000 | p + one | 59.7-59.8 | 3.217 / 3.471 / 3.249 | no |
+| FEX: TSOEnabled=0 | p + env | 59.6 | 3.017 | no: HostTSO (fex patch 0028) already does it; noise |
+| services masked + TSOEnabled=0 | p image | 59.9 | 3.296 | no |
+| PGO host + guest | p + profiles | 59.6 | 3.259 (host threads 0.402 vs 0.274) | no |
+| PGO guest only | p + guest profile | 59.8 | 3.431 | no |
+| palworld-p (TSOEnabled=0 env, = p) | p | 119.9 | 1.487 | |
+| palworld-p-pgo | p + profiles | 120.0 | 1.423 | no (SMITE 2 slower) |
+
+Final, both builds warm: SMITE 2 0.7.1 3.484 cores at 58.3 fps, 0.7.1p 3.274 at 59.6 fps (−6.0%); Palworld 0.7.1 1.534
+at 120.0 fps, 0.7.1p 1.403 at 119.5 fps (−8.5%). With the first SMITE 2 pair (−10.7%), every pair favours the p build.
