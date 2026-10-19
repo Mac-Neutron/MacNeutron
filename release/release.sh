@@ -19,8 +19,8 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/wine-arm64/lib.sh"
 . "$ROOT/release/lib.sh"  # after wine-arm64/lib.sh: its die says release:
-usage="release: usage: make release VERSION=X.Y.Z (or release.sh X.Y.Z | --rehearse X.Y.Z | --check-version X.Y.Z |\
- --self-test)"
+usage="release: usage: make release VERSION=X.Y.Z [PROFILE=p] (or release.sh [--profile p] X.Y.Z | --rehearse X.Y.Z |\
+ --check-version X.Y.Z | --self-test)"
 
 # The refusals (§6.3 step 1). Each takes its inputs as arguments, says what is wrong on stderr and returns 1.
 check_version() {  # check_version <repo> <version>: MAJOR.MINOR.PATCH without leading zeros, not yet a tag
@@ -31,6 +31,14 @@ check_version() {  # check_version <repo> <version>: MAJOR.MINOR.PATCH without l
   [ -z "$f" ] || { echo "release: VERSION $2 is not MAJOR.MINOR.PATCH" >&2; return 1; }
   if git -C "$1" rev-parse -q --verify "refs/tags/v$2" > /dev/null; then
     echo "release: v$2 is already a tag" >&2
+    return 1
+  fi
+}
+check_version_p() {  # check_version_p <repo> <X.Y.Z>: the p build of a release that is a tag, its p tag not yet made
+  git -C "$1" rev-parse -q --verify "refs/tags/v$2" > /dev/null \
+    || { echo "release: v$2 isn't a tag (a p release builds an existing release's version)" >&2; return 1; }
+  if git -C "$1" rev-parse -q --verify "refs/tags/v$2p" > /dev/null; then
+    echo "release: v$2p is already a tag" >&2
     return 1
   fi
 }
@@ -195,6 +203,12 @@ self_test() {
     refused "a version with a leading zero ($v)" "release: VERSION $v is not MAJOR.MINOR.PATCH" check_version "$T/repo" $v
   done
   passes "a version with zeros (0.10.0)" check_version "$T/repo" 0.10.0
+  # A p release: the version of a release that is a tag, its p tag not yet made.
+  refused "a p release of a version that isn't a tag" \
+    "release: v0.0.9 isn't a tag (a p release builds an existing release's version)" check_version_p "$T/repo" 0.0.9
+  passes "a p release of a tagged version" check_version_p "$T/repo" 0.0.0
+  git -C "$T/repo" tag v0.0.0p
+  refused "a p release that is already a tag" "release: v0.0.0p is already a tag" check_version_p "$T/repo" 0.0.0
   # exits <case> <status> <output> <release.sh args...>: release.sh says exactly <output> and exits <status>
   exits() {
     c=$1 w="$2:$3"; shift 3
@@ -209,6 +223,9 @@ self_test() {
     # shellcheck disable=SC2086  # a is the argument list
     exits "the arguments [$a] are refused" 2 "$usage" $a
   done
+  exits "--profile with an unknown profile" 2 "$usage" --profile q 0.0.1
+  exits "--profile p --check-version refuses an untagged version alone" 2 \
+    "release: v99.0.0 isn't a tag (a p release builds an existing release's version)" --profile p --check-version 99.0.0
 
   # README strings left from the Rosetta era.
   passes "READMEs without the Rosetta-era strings" check_readmes "$T/repo"
@@ -587,6 +604,11 @@ check_zip() {
 }
 
 # The entry points: --self-test, --check-version, or a version (released or rehearsed). Any other arguments: usage.
+PROFILE=std
+if [ "${1:-}" = --profile ]; then
+  [ "${2:-}" = p ] || { echo "$usage" >&2; exit 2; }
+  PROFILE=p; shift 2
+fi
 case "$#:${1:-}" in
   1:--self-test) self_test; exit ;;
   2:--check-version) V=$2 mode=check ;;
@@ -596,7 +618,14 @@ case "$#:${1:-}" in
   *) V= ;;
 esac
 [ -n "$V" ] || { echo "$usage" >&2; exit 2; }
-check_version "$ROOT" "$V" || exit 2
+if [ $PROFILE = p ]; then
+  # The p build (spec 2026-10-19-macneutron-performance-build): X.Y.Zp from build/p and the builder's p home.
+  check_version_p "$ROOT" "$V" || exit 2
+  V=${V}p
+  export MACNEUTRON_PROFILE=p BUILD_DIR="$ROOT/build/p" BUILDER_HOME=/home/bench/p
+else
+  check_version "$ROOT" "$V" || exit 2
+fi
 [ $mode != check ] || exit 0
 
 # 1. Refusals: every failing one is named before stopping. Then make wine-arm64 must have nothing left to do.
@@ -709,7 +738,8 @@ if [ $mode = release ]; then
   c=$(awk '$1 == "MacNeutron" { print $3 }' "$OUT/SOURCES.txt")
   echo "release: MacNeutron $V is ready in $OUT. To publish it:"
   echo "  git tag v$V $c"
-  echo "  gh release create v$V --target $c --title 'MacNeutron $V' '$OUT/$ZIP' '$OUT/$TGZ' '$OUT/$PARTS' '$OUT/SHA256SUMS'"
+  latest=; [ $PROFILE = std ] || latest=" --latest=false"  # the normal release stays GitHub's Latest
+  echo "  gh release create v$V --target $c$latest --title 'MacNeutron $V' '$OUT/$ZIP' '$OUT/$TGZ' '$OUT/$PARTS' '$OUT/SHA256SUMS'"
 else
   echo "release: rehearsal of $V done in $OUT (not notarized: nothing to publish)"
 fi

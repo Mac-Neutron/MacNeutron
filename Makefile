@@ -109,11 +109,15 @@ app: build bridge wine-arm64
 	codesign --force --sign - $(APP)
 
 # The release: notarized MacNeutron.app, its zip and the source archive (spec §6.3). VERSION=x.y.z; needs the
-# signing and notary variables and the network. A bad VERSION stops it before anything is built.
+# signing and notary variables and the network. A bad VERSION stops it before anything is built. PROFILE=p makes the
+# performance build X.Y.Zp of the tagged X.Y.Z, in build/p (spec 2026-10-19-macneutron-performance-build).
+PROFILE_ARGS = $(if $(PROFILE),--profile $(PROFILE))
 release:
-	@sh release/release.sh --check-version "$(VERSION)"
-	$(MAKE) build bridge wine-arm64
-	sh release/release.sh "$(VERSION)"
+	@sh release/release.sh $(PROFILE_ARGS) --check-version "$(VERSION)"
+	$(if $(PROFILE),sh release/p-seed.sh)
+	$(MAKE) build bridge
+	$(if $(PROFILE),MACNEUTRON_PROFILE=$(PROFILE) BUILD_DIR=$(CURDIR)/build/$(PROFILE)) $(MAKE) wine-arm64
+	sh release/release.sh $(PROFILE_ARGS) "$(VERSION)"
 
 # Native arm64 Wine 11.20 with our patches, FEX for x64 code and our DXMT for ARM64X
 # (docs/superpowers/specs/2026-10-02-macneutron-native-arm64-design.md §5, §6; 2026-10-03-macneutron-arm64-dxmt-design.md).
