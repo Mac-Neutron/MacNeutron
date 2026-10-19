@@ -23,7 +23,8 @@
  *   probe                 with MN_PRESENT_PROBE=1, 60 frames give one probe line: pixels 57600 green 100
  *   probe-10bit           the same with an RGB10A2 drawable (SMITE 2's): each channel's top 8 bits are read
  *   frames                with MN_PRESENT_STATS=<file> (and a 1 s period), presents give a window line in DXMT_STATS's
- *                         format: "# HH:MM:SS 1.0 s, N frames (F fps), every 5 s" with N > 0
+ *                         format: "# HH:MM:SS 1.0 s, N frames (F fps), every 1 s" with N > 0 (the last line written
+ *                         during the case)
  *   props                 getProps (71) after setProps (70): the guest's device value comes back as it was, the host's
  *                         device pointer is nowhere in the reply, and the drawable size is 320x180
  *   nil-drawable          a layer with no device: nextDrawable gives handle 0 and status 0 (in a window, a 0x0
@@ -38,6 +39,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 #include "../guest/galloc.h"
@@ -436,6 +438,8 @@ static void frames(void) {
     struct swapchain s = make_view_as(0x1234, 320, 180, WMTPixelFormatBGRA8Unorm);
     if (!s.layer) return;
     obj_handle_t q = new_queue();
+    struct stat sb;
+    long from = stat(frames_file, &sb) == 0 ? (long)sb.st_size : 0; /* earlier cases' presents wrote lines already */
     struct timespec t0, t;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     do { /* two periods of presents */
@@ -446,13 +450,13 @@ static void frames(void) {
     } while ((t.tv_sec - t0.tv_sec) * 1000 + (t.tv_nsec - t0.tv_nsec) / 1000000 < 2200);
     char text[4096] = "";
     FILE *f = fopen(frames_file, "r");
-    size_t n = f ? fread(text, 1, sizeof text - 1, f) : 0;
+    size_t n = f && fseek(f, from, SEEK_SET) == 0 ? fread(text, 1, sizeof text - 1, f) : 0;
     text[n] = 0;
     if (f) fclose(f);
     unsigned long long frames = 0;
-    const char *line = strstr(text, "# ");
+    const char *line = strrchr(text, '#'); /* the last window line, from this case's presents */
     CHECK(line && sscanf(line, "# %*u:%*u:%*u %*f s, %llu frames (", &frames) == 1 && frames > 0);
-    CHECK(line && strstr(line, " fps), every 5 s\n"));
+    CHECK(line && strstr(line, " fps), every 1 s\n"));
     if (line) fprintf(stderr, "  %.*s", (int)(strchr(line, '\n') ? strchr(line, '\n') - line + 1 : 0), line);
     release_view(s.view);
     release(q);
@@ -575,6 +579,7 @@ static void *run(void *arg) {
     struct mn_wm_stats st;
     mn_wm_stats(&st);
     CHECK(st.failures == loop_ctx.failures);
+    unlink(frames_file);
     printf("memory-test: %s\n", failures ? "FAIL" : "all passed");
     fflush(stdout);
     exit(failures != 0);

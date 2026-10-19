@@ -6,11 +6,13 @@
  * green (the green channel 60-95), white (every channel above 200), and colours at 4 bits a channel. The pixels are
  * read as stored: 8-bit BGRA or RGBA, or 10-bit RGB10A2 or BGR10A2 (SMITE 2's), of which the top 8 bits a channel.
  * With MN_PRESENT_STATS=<file> (the launcher's MACNEUTRON_PERF, for eac-vm/tests/perf-compare.sh), the frames presented
- * every 5 s (MN_PRESENT_STATS_PERIOD seconds) go to the file as DXMT_STATS writes them, "# HH:MM:SS 5.0 s, N frames
- * (F fps), every 5 s": counted here, natively, where DXMT_STATS's own timing would cost the guest a clock read under
- * FEX for every D3D12 call. */
+ * every 5 s (MN_PRESENT_STATS_PERIOD seconds) go to the file (truncated at the first present) as DXMT_STATS writes
+ * them, "# HH:MM:SS 5.0 s, N frames (F fps), every 5 s" (the period named): counted here, natively, where
+ * DXMT_STATS's own timing would cost the guest a clock read under FEX for every D3D12 call. A file that won't open
+ * is said on stderr. */
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
+#include <errno.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <time.h>
@@ -37,8 +39,11 @@ static void count_frame(void) {
     dispatch_once(&once, ^{
         const char *path = getenv("MN_PRESENT_STATS"), *p = getenv("MN_PRESENT_STATS_PERIOD");
         double period = p && atof(p) > 0 ? atof(p) : 5;
-        FILE *out = path && *path ? fopen(path, "a") : NULL;
-        if (!out) return;
+        FILE *out = path && *path ? fopen(path, "w") : NULL; /* a run's own: the last one's windows are gone */
+        if (!out) {
+            if (path && *path) fprintf(stderr, "mn-present: MN_PRESENT_STATS=%s: %s\n", path, strerror(errno));
+            return;
+        }
         __block uint64_t last = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
         timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
         dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(period * 1e9)),
@@ -50,8 +55,8 @@ static void count_frame(void) {
             time_t wall = time(NULL);
             struct tm tm;
             localtime_r(&wall, &tm);
-            fprintf(out, "# %02d:%02d:%02d %.1f s, %llu frames (%.1f fps), every 5 s\n", tm.tm_hour, tm.tm_min,
-                    tm.tm_sec, s, (unsigned long long)n, s > 0 ? n / s : 0.0);
+            fprintf(out, "# %02d:%02d:%02d %.1f s, %llu frames (%.1f fps), every %g s\n", tm.tm_hour, tm.tm_min,
+                    tm.tm_sec, s, (unsigned long long)n, s > 0 ? n / s : 0.0, period);
             fflush(out);
         });
         dispatch_resume(timer);
