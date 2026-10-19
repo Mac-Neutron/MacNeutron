@@ -1374,3 +1374,85 @@ Open:
   would mix their probes and drawables.
 - The arenas' room check asks for a whole allocation a piece (a suballocated piece needs far less): `d3d11_dynamic`'s
   arenas reach 640 MiB, all of it its one-frame stress section's.
+
+## 22. The frame rate, M5 revisited, the deferred findings and the upstream merges (2026-10-18)
+
+The maintainer played SMITE 2 forwarded (MacNeutron-next.app, the dev VM folder) and found the frame rate low, with the
+game's frame cap off. Every number here is `bench-smite2.sh` (SMITE 2's lobby in the dev VM, DLSS, 2 minutes a run
+since this day: the measured minute plus one) unless it says otherwise; one run each.
+
+**Where the forwarded frame went.** The first lobby run, forwarded: 74.1 fps, GPU 82.9% busy, 4.52 cores. A host
+`sample` put 1.7 cores of the vCPUs' exit time in waits on the executor's locks (the global `submit_lock` and other
+rings' drain locks: `eac-vm/metal/host/executor.c`) against 0.47 cores of Direct3D work. The submits were mostly D3D12
+descriptor writes: every `Create*View`, `CreateSampler` and `CopyDescriptors*` was one (M2's final review, M3 Task 5),
+about 765 a frame in M3's DLSS run, each running every other thread's published records first.
+
+- **Descriptor writes** (d1d786a). DXMT reads a shader-visible heap's slots only on the GPU: descriptor tables keep
+  handles, and `ExecuteCommandLists`, itself a submit, runs every ring first (a research pass over
+  `d3d12_descriptor_heap.cpp`, `d3d12_command_list.cpp`). A write into a shader-visible heap needs no submit; one into a
+  CPU-only, RTV or DSV heap does (clears, a render pass's first draw and copies read those when their records run), as
+  does a copy from a shader-visible heap. The guest classifies a write by its destination: each heap's CPU handles,
+  from its start and description, asked once at `GetCPUDescriptorHandleForHeapStart`. `MN_D3D_DESCRIPTORS` picks the
+  fast way: `sync` (the default: a call, which can't reorder two threads' writes to one slot) or `async` (queued).
+  Lock waits fell to 0.74 cores; the lobby to 77.3 fps queued and 77.1-78.3 as calls. `descriptors.sh` pins the
+  split: of its 226 writes, 84 submits through the loopback (229 before).
+- **Idle rings** (257e0fd): a queue operation no longer takes a ring whose every published record has run. Within
+  noise (76.7 fps).
+- **The present's time** (d34499a, with `MACNEUTRON_VM_D3D_TRACE=1`): about 2.2 ms a frame waiting for the display,
+  0.1 ms in the host's `Present`. Without the display wait (an experiment, removed) the lobby ran 76.4 fps: it is
+  three drawables' back-pressure, not the limit.
+- **Guest mode in the same lobby**: 78.2 fps, against forwarded 78.0 (an earlier 88.6 didn't repeat). A Metal System
+  Trace (`MN_BENCH_GPU_TRACE`, read by `dxmt/tools/gpu-trace.py`) gave 10.9 ms of GPU work a frame in guest mode and
+  11.1 forwarded, the GPU 87-90% busy, its idle time 0.92 ms between encoders, 0.43 between command buffers and 0.16
+  waiting for the CPU a frame. Forwarding no longer holds the lobby: its GPU work does.
+- **Practice, at the maintainer's settings** (2560x1440, DLSS, uncapped; `MACNEUTRON_PERF=1`, the maintainer
+  playing): macOS 114.6 fps, forwarded 113.5 (99%), both just under the display's 120 Hz.
+
+**The GPU's work** (practice, 6.1 ms a frame, 1080p output, 960x540 internal): vertex 2.6 ms, fragment 1.7, compute
+2.0. The base pass is one merged Metal pass (DXMT_STATS's pass numbers shift between frames: summing by label spread it
+over six, read one frame's encoder sequence instead): vertex 1.91 ms, fragment 0.33. MetalFX (DLSS) 0.6 ms. Ruled out:
+- **Vertex fetch**: a Metal micro-benchmark (4M vertices, a UE static-mesh layout, the vertex stage only) runs Metal's
+  own fetch (`stage_in`, a vertex descriptor) in 0.55 ms and DXMT's pulling (`pull_vertex_input`'s table, address
+  arithmetic, loads and decodes) in 0.55 ms.
+- **Concurrent dispatch**: D3D12 compute encoders are serial (`computeCommandEncoder(false)`; D3D11's are concurrent).
+  An experiment dispatching concurrently, with a memory barrier wherever a barrier call fell between two dispatches,
+  passed the native gate and left the lobby at 11.35 ms of GPU a frame either way; reverted.
+Still open from the GPU efficiency spec's D3DMetal comparison (2026-10-02): compute 1.4-3x slower per dispatch, the
+base pass's vertex +0.4 ms.
+
+**M5 revisited** (spec §8's gate; clean build b4906d7, the lobby). Forwarded: 4.41 cores, the host's overheads (wake-ups
+0.66, spinning 0.00, sound 0.00, other 0.43, of which Metal's command-buffer submits 0.44) 1.10 cores against the gate's
+2.0, wineserver 0.11 against 0.2, 76.3 fps. Guest mode: 5.37 cores, overheads 1.61 (the executor's consumers spin 1.10),
+wineserver 0.10, 76.9 fps. Forwarding makes the same frames for about a core less. The gate's own run is a match at
+M0's settings (1440p, DLSS Performance): the maintainer's practice run above passes its frame rate (113.5 against
+108.6); its CPU numbers are the maintainer's next run. The trace's exits a frame showed what M2's final review
+deferred to M5, immutable answers asked each frame: the guest now keeps them (`answers.sh`: 412 exits to 15) —
+`GetDeviceRemovedReason` (DXMT's is S_OK; the host's once the forwarding answers a call DXGI_ERROR_DEVICE_REMOVED),
+a queue's `GetTimestampFrequency`, a resource's `GetDesc`, the adapter's `QueryVideoMemoryInfo` for 100 ms (forgotten at
+`SetVideoMemoryReservation`).
+
+**The deferred findings** of M0-M5, M1-M4 and the VM setup's plans: about 70, each checked against the code first.
+Most were fixed by later work; the rest are fixed (each behaviour change with a test that failed first: the D3D10 map
+and `Enter` cases in `threads11.cpp`, `formats-test`, `dispatch-test`'s overflow, `MicroVMTests`' native translator key,
+AppModelTests' real VM folder, `perf_test.py`, `executor-test`'s spin) or ruled with their cost. Found on the way: five
+AppModel tests had failed since M3 Task 9 (the tests' fake VM tools had no `dxmt/`). Fork patches 0091 (the pieces'
+interface native only) and 0092 (the native stand-ins' timed waits on the uptime clock; exclusive moves on exFAT and
+SMB). Waiting for the maintainer: the App Nap activity keeps a hung VM's Mac awake (deliberate under a game), and a
+milliseconds-wide `share/bin` window after an image swap.
+
+**Upstream, merged into the experiment's trees** (fetched 2026-10-18 22:55): Wine master at its 11.20 release (139
+commits; `ea288a70`, built as `wine-11.19-383-gea288a70`), DXMT upstream main (one commit, an nvngx fix; `1343d34`)
+and FEX main (11 commits, rpmalloc's submodule moved with them; `b65d59e`). Proton's `proton_11.0` (lsteamclient) and
+libkrun's main had nothing new (libkrun's main is still the pin). One conflict, Wine's `dlls/ntdll/unix/virtual.c`:
+upstream merged its reserved-areas and free-ranges arrays (`1cae1f53`) and added a top-down area (`686ccbff`); the
+merge keeps our soft-pagezero reservation (in mem areas since `0b13586e`) beside upstream's new area, and drops the
+`virtual_ranges` debug channel nothing uses now. On the merged trees: the Swift suite (422), `make dxmt-check` (both
+lanes), `make smoke`, `make bridge-check`, the unit tests, the loopback gate (30), the native gate (30), `vm-setup`,
+`turn`, `modes`, `tpm-host`, `audio-host`, the guest-mode DXMT gate (40), the forwarded D3D gate (40) and the present
+gate all pass. `d3d-smoke.sh` passes every check but its slow-present rule, 68 presents over 4 ms (the longest 8.9),
+the same count as in M4 Task 9 and again while the Mac sat idle past midnight; it waits for a run with the maintainer at
+the Mac. SMITE 2's lobby: forwarded 76.5 fps at 4.27 cores (overheads 1.08, wineserver 0.10), guest mode 78.7 at 5.06.
+
+`bridge/check.sh` now runs with `MACNEUTRON_VM=0`: since every game runs in the microVM, its launcher rows had run their
+app-0 game in the VM folder MicroVM finds, the user's own by default (its state and share were made there tonight, then
+removed).
