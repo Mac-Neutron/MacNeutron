@@ -2,7 +2,9 @@
 # host keeps the Mac quiet): ALSA's default device (the mn plugin, eac-vm/guest/alsa-mn.c) under FEX with blocking
 # writes (alsa-play), then a Windows program's (waveout.exe: winmm, mmdevapi, winealsa). Each plays two seconds and
 # must take about that: paced by the host, neither run ahead (nothing pacing it) nor stalled. Programs from
-# eac-vm/guest/build-audio.sh. Prints "audio: ok" or "audio: FAIL <rows>".
+# eac-vm/guest/build-audio.sh. Prints "audio: ok" or "audio: FAIL <rows>". The plugin paces by its own clock when no
+# host takes the stream, so the host's "mn-audio: stream N: ... frames played" lines (two streams, none refused) say
+# it was served: tests/vm-setup.sh checks them.
 export PATH=/opt/mn-wine/bin:$PATH WINEDEBUG=-all DISPLAY=:0 WINEPREFIX=/home/mn/dxmt
 B=/mnt/share/bin
 Xvfb :0 -screen 0 1280x720x24 -nolisten tcp >/dev/null 2>&1 &

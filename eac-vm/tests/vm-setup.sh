@@ -74,6 +74,10 @@ cat "$G/guest.txt" | /usr/bin/grep -v '^Fontconfig'
 /usr/bin/grep -qx 'Y' "$G/guest.txt" || fail="$fail sig_enforce"
 /usr/bin/grep -qx '/dev/tpm0' "$G/guest.txt" || fail="$fail tpm"
 /usr/bin/grep -qx 'audio: ok' "$G/guest.txt" || fail="$fail audio"
+# With no host to take it the plugin paces by its own clock, so "audio: ok" alone passes: the host's lines must show
+# both programs' streams served (a stream refused, or none connected, leaves no "frames played").
+[ "$(/usr/bin/grep -Ec '^mn-audio: stream [0-9]+: [1-9][0-9]* frames played' "$G/guest.txt")" -ge 2 ] \
+  && ! /usr/bin/grep -q '^mn-audio: refused a stream' "$G/guest.txt" || fail="$fail audio-host"
 # The gate's TPM key, out of the keychain with its folder.
 id=$(cat "$VM/state/default.tpm/id" 2>/dev/null || true)
 [ -z "$id" ] || security delete-generic-password -s "MacNeutron vTPM" -a "$id" > /dev/null 2>&1 || true
