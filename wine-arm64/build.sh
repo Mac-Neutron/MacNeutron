@@ -456,11 +456,13 @@ else mv "$SRC/dxmt-xcrun.txt.new" "$SRC/dxmt-xcrun.txt"; fi
 # ARM64EC alone, not ARM64X (DXMT's own cross file's -marm64x is replaced): x64 games run them through FEX, and
 # -marm64x and -flto don't go together ("unsupported option '-marm64x'"). A native arm64 process that loads them
 # gets Wine's builtins instead (the launcher's n,b order).
+# The p profile's DXMT_PERF_BUILD (fork patch 0093) joins both lists.
+P_DEF=; [ "${MACNEUTRON_PROFILE:-std}" != p ] || P_DEF=-DDXMT_PERF_BUILD
 {
-  pe_args=$(printf "'%s', " $PE_MARCH $EC_LTO); pe_args=${pe_args%, }  # each word its own argument
+  pe_args=$(printf "'%s', " $PE_MARCH $EC_LTO $P_DEF); pe_args=${pe_args%, }  # each word its own argument
   printf "[built-in options]\nc_args = [%s]\ncpp_args = [%s]\n" "$pe_args" "$pe_args"
   printf "c_link_args = [%s]\ncpp_link_args = [%s]\n" "${EC_LTO:+'$EC_LTO'}" "${EC_LTO:+'$EC_LTO'}"
-  native=$(printf ", '%s'" $UNIX_CPU $UNIX_LTO); native=${native#, }
+  native=$(printf ", '%s'" $UNIX_CPU $UNIX_LTO $P_DEF); native=${native#, }
   [ -z "$native" ] || printf "build.c_args = [%s]\nbuild.cpp_args = [%s]\n" "$native" "$native"
   [ -z "$UNIX_LTO" ] || printf "build.c_link_args = ['%s']\nbuild.cpp_link_args = ['%s']\n" "$UNIX_LTO" "$UNIX_LTO"
 } > "$SRC/dxmt-cpu.txt.new"
@@ -477,9 +479,6 @@ set -- "$SRC/dxmt-build" "$D" --cross-file "$D/build-arm64ec.txt" --cross-file "
   -Denable_nvapi=true -Denable_nvngx=true \
   -Dnative_llvm_path="$SRC/llvm-arm64" -Dwine_build_path="$SRC/wine-build" \
   -Dtranslator_key_file="$SRC/dxmt-translator-key"
-# The p profile: logging below warnings, stats and capture compiled out (fork patch perf_build). No LTO: -marm64x
-# refuses it (above).
-[ "${MACNEUTRON_PROFILE:-std}" != p ] || set -- "$@" -Dperf_build=true
 inputs=$(printf '%s\n' "$@"; cat "$D/build-arm64ec.txt" "$SRC/dxmt-xcrun.txt" "$SRC/dxmt-cpu.txt" \
   "$ROOT/wine-arm64/tools/xcrun-metal.sh")
 if [ ! -f "$SRC/dxmt-build/build.ninja" ] || [ "$(cat "$SRC/dxmt-build/.setup-inputs" 2> /dev/null)" != "$inputs" ]; then

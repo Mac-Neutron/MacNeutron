@@ -21,13 +21,14 @@ set -- "$B" "$D" --buildtype release -Denable_d3d12=true -Denable_nvapi=false -D
   -Dwine_builtin_dll=false -Dnative_llvm_path="$SRC/llvm-arm64" -Dtranslator_key_file="$SRC/dxmt-translator-key"
 # The p profile's PGO (host.profdata, Apple clang's): instrumented with MACNEUTRON_PGO=generate, else that profile.
 CARGS=; [ "$CPU" = generic ] || CARGS="-mcpu=$CPU"
+[ "${MACNEUTRON_PROFILE:-std}" != p ] || CARGS="$CARGS${CARGS:+ }-DDXMT_PERF_BUILD"
 PGO=$(pgo_cflags host)
 CARGS="$CARGS${CARGS:+${PGO:+ }}$PGO"
 [ -z "$CARGS" ] || set -- "$@" -Dc_args="$CARGS" -Dcpp_args="$CARGS"
 [ "$(pgo_mode host)" != generate ] || set -- "$@" -Dc_link_args=-fprofile-generate -Dcpp_link_args=-fprofile-generate
 # The p profile (spec 2026-10-19-macneutron-performance-build §4, §5): logging below warnings and the D3D12 stats and
-# capture code compiled out (fork patch perf_build), and with "dxmt" in its flags, ThinLTO.
-[ "${MACNEUTRON_PROFILE:-std}" != p ] || set -- "$@" -Dperf_build=true
+# capture code compiled out (fork patch 0093's DXMT_PERF_BUILD, a compiler flag: the meson files key the shader
+# translator, which must stay the normal build's), and with "dxmt" in its flags, ThinLTO.
 ! p_flag dxmt || set -- "$@" -Db_lto=true -Db_lto_mode=thin
 # Its .metal files through wine-arm64/tools/xcrun-metal.sh, as the PE build's: the AIR modules winemetal.dylib embeds
 # name no build path (they ship in the app's VM helpers: arm64 release Ruling 20).

@@ -34,9 +34,10 @@ ln -sfn "$S/wine-build/tools/winebuild/winebuild" "$SDK/bin/winebuild"
 set -- "$B" "$S/dxmt" --cross-file "$S/dxmt/build-win64.txt" --buildtype release --strip --prefix "$W/dxmt-guest" \
   -Dguest_vm=true -Dwine_builtin_dll=true -Denable_d3d12=true -Denable_nvapi=true -Denable_nvngx=true \
   -Dwine_install_path="$SDK" -Dtranslator_key_file="$S/dxmt-translator-key"
-# The p profile: logging below warnings, stats and capture compiled out; ThinLTO with "dxmt" in its flags.
+# The p profile: logging below warnings, stats and capture compiled out (DXMT_PERF_BUILD; its cross file sets no
+# c_args to replace); ThinLTO with "dxmt" in its flags.
 . "$ROOT/wine-arm64/lib.sh"
-[ "${MACNEUTRON_PROFILE:-std}" != p ] || set -- "$@" -Dperf_build=true
+[ "${MACNEUTRON_PROFILE:-std}" != p ] || set -- "$@" -Dc_args=-DDXMT_PERF_BUILD -Dcpp_args=-DDXMT_PERF_BUILD
 ! p_flag dxmt || set -- "$@" -Db_lto=true -Db_lto_mode=thin
 # The tree's commit too: a tree put in place with older files than the build's objects (the upstream-master swap)
 # leaves ninja nothing newer to rebuild, so stale objects stayed (M3 Task 7: nvngx's old error values). ponytail: a full
