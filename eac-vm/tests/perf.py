@@ -59,19 +59,20 @@ def gpu_busy(texts):
     return sum(values) / len(values) if values else None
 
 
-def fps(stats, offset, end=None):
-    """The mean frame rate of DXMT's full windows (stats.txt's ", every 5 s" lines) from byte offset to end."""
-    rates = [float(m.group(1)) for m in re.finditer(r"^# [\d:]+ [\d.]+ s, \d+ frames \(([\d.]+) fps\), every 5 s$",
-                                                     stats[offset:end], re.M)]
-    return sum(rates) / len(rates) if rates else None
+def fps(stats):
+    """The frame rate of DXMT's (and present.m's) full windows ("# time S s, N frames (F fps), every P s" lines): all
+    their frames over all their seconds, so a short window counts for its length."""
+    windows = [(float(m.group(1)), int(m.group(2))) for m in re.finditer(
+        r"^# [\d:]+ ([\d.]+) s, (\d+) frames \([\d.]+ fps\), every [\d.]+ s$", stats, re.M)]
+    seconds = sum(s for s, _ in windows)
+    return sum(n for _, n in windows) / seconds if seconds else None
 
 
-def threads(profile, offset, end=None):
-    """Per thread name, the mean over top's batches from byte offset to end of its threads' summed %CPU, highest
-    first."""
+def threads(profile):
+    """Per thread name, the mean over top's batches of its threads' summed %CPU, highest first."""
     sums = defaultdict(float)
     batches = 0
-    for batch in re.split(r"^(?=top - )", profile[offset:end], flags=re.M):
+    for batch in re.split(r"^(?=top - )", profile, flags=re.M):
         if not batch.startswith("top - "):
             continue
         batches += 1
@@ -140,29 +141,28 @@ def _kind(thread, leaf, names):
     return "other"
 
 
-def _read(path, offset=0):
+def _read(path, start=0, end=None):
+    """The text of the file's bytes from start to end (sizes from stat, so bytes), "" if there is none."""
     if not path or not os.path.exists(path):
-        return "", 0
-    with open(path, errors="replace") as f:
-        text = f.read()
-    return text, min(offset, len(text))
+        return ""
+    with open(path, "rb") as f:
+        return f.read()[start:end].decode(errors="replace")
 
 
 def record(a):
     match = (lambda c: os.path.basename(c) in VM_PROCESSES) if a.mode == "vm" else macos_game
-    before, after = _read(a.ps_before)[0], _read(a.ps_after)[0]
+    before, after = _read(a.ps_before), _read(a.ps_after)
     used, ended = cpu_delta(before, after, match)
     vm_used = cpu_delta(before, after, lambda c: os.path.basename(c) == "macneutron-vm")[0]
-    raw = sample_split(_read(a.sample)[0]) if a.sample else {}
+    raw = sample_split(_read(a.sample)) if a.sample else {}
     # Up to the window's end: the host sample, after it, stalls the game while the files go on growing.
-    stats, so = _read(a.stats, a.stats_offset)
-    profile, po = _read(a.profile, a.profile_offset)
-    tops = threads(profile, po, a.profile_end)
+    stats = _read(a.stats, a.stats_offset, a.stats_end)
+    tops = threads(_read(a.profile, a.profile_offset, a.profile_end))
     out = {
         "appid": a.appid, "mode": a.mode, "seconds": a.seconds,
         "cpu_cores": round(used / a.seconds, 3), "processes_ended": ended,
-        "gpu_busy": gpu_busy([_read(p)[0] for p in a.ioreg]),
-        "fps": fps(stats, so, a.stats_end),
+        "gpu_busy": gpu_busy([_read(p) for p in a.ioreg]),
+        "fps": fps(stats),
         "threads": [[n, round(c, 1)] for n, c in tops[:20]],
         # DXMT's own threads: a lower bound on its share, D3D12 recording runs on the game's threads.
         "dxmt_threads": round(sum(c for n, c in tops if n.startswith("dxmt-")), 1),
@@ -181,6 +181,9 @@ def compare(a):
     with open(a.vm) as f:
         vm = json.load(f)
     ok = True
+    for name, d in (("macOS", mac), ("VM", vm)):
+        if d.get("processes_ended"):
+            print(f"{d['processes_ended']} {name} processes ended mid-window: their last stretch isn't in its CPU")
 
     def row(what, value, good):
         nonlocal ok

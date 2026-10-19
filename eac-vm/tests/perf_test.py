@@ -1,6 +1,11 @@
 """perf.py's parsers (eac-vm/tests/perf-compare.sh): python3 -I eac-vm/tests/perf_test.py"""
+import argparse
+import contextlib
+import io
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -51,21 +56,64 @@ class Perf(unittest.TestCase):
     def test_fps_skips_exit(self):
         stats = ("# 10:00:05 5.0 s, 600 frames (120.0 fps), every 5 s\n  x\n"
                  "# 10:00:10 5.0 s, 500 frames (100.0 fps), every 5 s\n# 10:00:12 2.0 s, 10 frames (5.0 fps), exit\n")
-        self.assertAlmostEqual(perf.fps(stats, 0), 110.0)
-        self.assertAlmostEqual(perf.fps(stats, stats.index("# 10:00:10")), 100.0)
-        self.assertIsNone(perf.fps(stats, len(stats)))
-        # Up to the window's end: what the host sample stalled after it stays out.
-        self.assertAlmostEqual(perf.fps(stats, 0, stats.index("# 10:00:10")), 120.0)
+        self.assertAlmostEqual(perf.fps(stats), 110.0)
+        self.assertAlmostEqual(perf.fps(stats[stats.index("# 10:00:10"):]), 100.0)
+        self.assertIsNone(perf.fps(""))
+
+    def test_fps_weighs_windows_by_length(self):
+        # A short window counts for its length: 10 frames in 1 s and 600 in 5 s are 610 frames in 6 s, not the mean
+        # of 10 and 120 fps. present.m names its own period ("every 1 s").
+        stats = ("# 10:00:01 1.0 s, 10 frames (10.0 fps), every 1 s\n"
+                 "# 10:00:06 5.0 s, 600 frames (120.0 fps), every 5 s\n")
+        self.assertAlmostEqual(perf.fps(stats), 610 / 6)
+
+    def test_fps_ignores_lines_that_are_not_windows(self):
+        self.assertIsNone(perf.fps("# 10:00:05 0.0 s, 0 frames (0.0 fps), every 5 s\n# nonsense\n"))
+
+    def test_read_slices_bytes_not_characters(self):
+        # The offsets are file sizes in bytes: a multi-byte character before them must not shift the slice.
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "f")
+            with open(path, "wb") as f:
+                f.write("caf\u00e9\n".encode() + b"# window\nlater\n")
+            start = len("caf\u00e9\n".encode())
+            self.assertEqual(perf._read(path, start, start + len("# window\n")), "# window\n")
+            self.assertEqual(perf._read(path, start), "# window\nlater\n")
+            self.assertEqual(perf._read(os.path.join(d, "none")), "")
 
     def test_threads_names_with_spaces(self):
-        got = perf.threads(TOP_BATCH + TOP_BATCH.replace("90.0", "50.0"), 0)
+        got = perf.threads(TOP_BATCH + TOP_BATCH.replace("90.0", "50.0"))
         self.assertEqual(got[0], ("RHI Thread", 90.0))
         self.assertEqual(got[1], ("dxmt-encode-thr", 40.0))
+        self.assertEqual(perf.threads("no batch here"), [])
 
-    def test_threads_past_offset(self):
-        both = TOP_BATCH + TOP_BATCH.replace("90.0", "50.0")
-        self.assertEqual(perf.threads(both, len(TOP_BATCH))[0], ("RHI Thread", 70.0))
-        self.assertEqual(perf.threads(both, 0, len(TOP_BATCH))[0], ("RHI Thread", 110.0))
+    def test_compare_says_how_many_processes_ended(self):
+        mac = {"cpu_cores": 4.0, "fps": 100.0, "processes_ended": 2}
+        vm = {"cpu_cores": 5.0, "fps": 100.0, "gpu_busy": 97.0, "processes_ended": 0}
+        out, _ = self._compare(mac, vm)
+        self.assertIn("2 macOS processes ended mid-window", out)
+        self.assertNotIn("VM processes ended", out)
+
+    def test_compare_fails_the_gate(self):
+        good = {"cpu_cores": 4.0, "fps": 100.0, "gpu_busy": 97.0}
+        for what, vm in [("gpu", dict(good, gpu_busy=90.0)), ("fps", dict(good, fps=80.0)),
+                         ("cpu", dict(good, cpu_cores=7.0)), ("no fps", dict(good, fps=None))]:
+            out, status = self._compare(good, vm)
+            self.assertEqual(status, 1, what)
+            self.assertIn("FAIL", out, what)
+        self.assertEqual(self._compare(good, good)[1], 0)
+
+    def _compare(self, mac, vm):
+        with tempfile.TemporaryDirectory() as d:
+            paths = []
+            for name, data in (("mac", mac), ("vm", vm)):
+                paths.append(os.path.join(d, name + ".json"))
+                with open(paths[-1], "w") as f:
+                    json.dump(data, f)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = perf.compare(argparse.Namespace(macos=paths[0], vm=paths[1]))
+        return out.getvalue(), code
 
     def test_sample_split(self):
         split = perf.sample_split(SAMPLE)

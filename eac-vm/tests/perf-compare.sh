@@ -10,15 +10,16 @@
 #   perf-compare.sh compare <macos.json> <vm.json>   the three ratios against the spec's gate (§1)
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-PERF="python3 -I $ROOT/eac-vm/tests/perf.py"
+perf() { python3 -I "$ROOT/eac-vm/tests/perf.py" "$@"; }
 usage() { echo "usage: perf-compare.sh macos|vm <appid> [seconds] | compare <macos.json> <vm.json>" >&2; exit 2; }
 case ${1:-} in
-  compare) [ $# -eq 3 ] || usage; exec $PERF compare "$2" "$3" ;;
+  compare) [ $# -eq 3 ] || usage; perf compare "$2" "$3"; exit ;;
   macos | vm) [ $# -ge 2 ] || usage ;;
   *) usage ;;
 esac
 MODE=$1 APPID=$2 SECS=${3:-60}
 case $APPID$SECS in *[!0-9]*) usage ;; esac
+[ "$SECS" -gt 0 ] || usage  # the CPU is per second of the window
 T=$(mktemp -d "${TMPDIR:-/tmp}/perf-compare.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 PROFILE= PID=
@@ -60,6 +61,6 @@ set -- record "$OUT" --mode "$MODE" --appid "$APPID" --seconds "$elapsed" --ps-b
   --ps-after "$T/ps.after" --stats "$STATS" --stats-offset "$so" --stats-end "$se" --ioreg "$T"/ioreg.*
 [ -z "$PROFILE" ] || set -- "$@" --profile "$PROFILE" --profile-offset "$po" --profile-end "$pe"
 [ ! -s "$T/sample.txt" ] || set -- "$@" --sample "$T/sample.txt"
-$PERF "$@"
+perf "$@"
 [ ! -s "$T/sample.txt" ] || cp "$T/sample.txt" "${OUT%.json}.sample.txt"  # the host sample, for a closer look
 echo "perf-compare: wrote $OUT" >&2
