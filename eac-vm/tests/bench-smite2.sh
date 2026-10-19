@@ -11,7 +11,13 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=${BUILD_DIR:-$ROOT/build}/eac-vm-work SHARE=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share
-LABEL=${1:?usage: bench-smite2.sh <label> [seconds]} SECS=${2:-60}
+LABEL=${1:?usage: [BENCH_GAME=smite2|palworld] bench-smite2.sh <label> [seconds]} SECS=${2:-60}
+# BENCH_GAME=palworld: Palworld's title screen instead (palworld-render.sh), for the performance build's second game.
+case ${BENCH_GAME:-smite2} in
+  smite2) APPID=2437170 GUEST=smite2-render.sh RUNVAR=SMITE2_RUN_SECONDS ;;
+  palworld) APPID=1623730 GUEST=palworld-render.sh RUNVAR=PALWORLD_RUN_SECONDS ;;
+  *) echo "bench-smite2: BENCH_GAME is smite2 or palworld" >&2; exit 2 ;;
+esac
 pgrep -x steam_osx > /dev/null || { echo "bench-smite2: Mac Steam isn't running" >&2; exit 1; }
 ! pgrep -x macneutron-vm > /dev/null || { echo "bench-smite2: a VM is running (a game being played?)" >&2; exit 1; }
 T=$(mktemp -d "${TMPDIR:-/tmp}/bench-smite2.XXXXXX")
@@ -37,13 +43,13 @@ rm -f "$SHARE/traces/frames.txt" "$SHARE/traces/profile.txt"
 mkdir -p "$SHARE/traces"
 # The game runs 60 s past the measured window (the lobby comes up in about 25 s): 2 minutes a run (maintainer,
 # 2026-10-18; it was 5).
-{ echo "SMITE2_RUN_SECONDS=$((SECS + 60)) MACNEUTRON_VM_PROFILE=1"
-  echo "export MACNEUTRON_VM_D3D=${MACNEUTRON_VM_D3D:-guest}${MACNEUTRON_DLSS:+ MACNEUTRON_DLSS=$MACNEUTRON_DLSS}${MN_D3D_DESCRIPTORS:+ MN_D3D_DESCRIPTORS=$MN_D3D_DESCRIPTORS}${MACNEUTRON_VM_D3D_TRACE:+ MACNEUTRON_VM_D3D_TRACE=1}"; cat "$ROOT/eac-vm/tests/smite2-render.sh"; } \
+{ echo "$RUNVAR=$((SECS + 60)) MACNEUTRON_VM_PROFILE=1"
+  echo "export MACNEUTRON_VM_D3D=${MACNEUTRON_VM_D3D:-guest}${MACNEUTRON_DLSS:+ MACNEUTRON_DLSS=$MACNEUTRON_DLSS}${MN_D3D_DESCRIPTORS:+ MN_D3D_DESCRIPTORS=$MN_D3D_DESCRIPTORS}${MACNEUTRON_VM_D3D_TRACE:+ MACNEUTRON_VM_D3D_TRACE=1}"; cat "$ROOT/eac-vm/tests/$GUEST"; } \
   > "$T/guest.sh"
 # Forwarded, native DXMT's shader cache is the game's, as the launcher's (Launcher.swift).
-[ "${MACNEUTRON_VM_D3D:-}" != forward ] || export MN_D3D_STATE=$W/state/2437170.dxmt
+[ "${MACNEUTRON_VM_D3D:-}" != forward ] || export MN_D3D_STATE=$W/state/$APPID.dxmt
 DXMT_ENABLE_NVEXT=${MACNEUTRON_DLSS:-} MN_PRESENT_STATS=$SHARE/traces/frames.txt MN_AUDIO_OUTPUT=none MN_RUN_TIMEOUT=900 \
-  sh "$ROOT/eac-vm/run-guest.sh" "$T/guest.sh" --steam-appid 2437170 --ram-mib 16384 > "$T/vm.txt" 2>&1 &
+  sh "$ROOT/eac-vm/run-guest.sh" "$T/guest.sh" --steam-appid $APPID --ram-mib 16384 > "$T/vm.txt" 2>&1 &
 vm=$!
 # The lobby: two windows in a row of 30 fps or more.
 i=0
@@ -58,7 +64,7 @@ echo "bench-smite2: $LABEL, the lobby after $i s" >&2
 # What covered the VM's window, before and after (vm-window.swift): App Nap slowed a covered VM until c8d02f5.
 window() { swift "$ROOT/eac-vm/tests/vm-window.swift" 2> /dev/null || echo "vm-window: unknown"; }
 before=$(window)
-MN_SHARE=$SHARE sh "$ROOT/eac-vm/tests/perf-compare.sh" vm 2437170 "$SECS" > "$T/perf.txt" 2>&1 \
+MN_SHARE=$SHARE sh "$ROOT/eac-vm/tests/perf-compare.sh" vm $APPID "$SECS" > "$T/perf.txt" 2>&1 \
   || { cat "$T/perf.txt" >&2; exit 1; }
 after=$(window)
 # MN_BENCH_GPU_TRACE=<seconds>: a Metal System Trace of the whole Mac after the window (dxmt/tools/gpu-trace.py: the
