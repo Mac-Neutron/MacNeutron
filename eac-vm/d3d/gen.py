@@ -1293,11 +1293,14 @@ def proxy_decl(model, c):
 
 def proxy_fill(model, c):
     lines = []
+    objects = {f.param for f in c.fields if f.kind == "WMF_HANDLE_IN" and f.offset is None}
     for i, p in enumerate(c.method.params):
         m = member(i, p.name)
         t = p.type
         base = resolve(model, t)
-        if t in REFS:
+        if p.name in objects:  # ours, or the one another layer's wrapper of ours wraps (guest/proxy.cpp's mn_in)
+            lines.append(f"    mn_p.{m} = mn_in({m});")
+        elif t in REFS:
             lines.append(f"    mn_p.{m} = (uintptr_t)&{m};")
         elif stars(t) or t.startswith("PFN_") or base in HANDLE_TYPES:
             lines.append(f"    mn_p.{m} = (uintptr_t){m};")

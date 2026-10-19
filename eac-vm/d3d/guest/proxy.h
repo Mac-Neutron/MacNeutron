@@ -36,6 +36,10 @@ int32_t mn_d3d_record(mn_proxy *This, uint32_t id, void *params);
 int32_t mn_d3d_call_with(uint32_t id, uint32_t flags, void *params);
 // A call's status as the method's HRESULT (mn_d3d.h's contract).
 HRESULT mn_d3d_hr(int32_t status);
+// An object argument as the marshaller takes it: our proxy, or the proxy another layer's wrapper of it gives for our
+// own interface (2026-10-19: NVIDIA Streamline's wrappers pass the queries they don't know on to what they wrap);
+// anything else as it is, which the marshaller refuses.
+uintptr_t mn_in(const void *object);
 // A created object: its proxy for iface (an index; -1: riid's), answering what ifaces says (the reply's masks); one
 // the guest already has (ifaces[4], the host's first handle for it): that object's proxy, the new handle let go.
 void *mn_proxy_out(uint64_t handle, int iface, const IID *riid, const uint64_t ifaces[9]);

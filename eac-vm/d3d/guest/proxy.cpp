@@ -74,6 +74,8 @@ static std::mutex objs_lock;
 static std::unordered_map<uint64_t, mn_obj *> objs;
 
 static const IID unknown_iid = {0x00000000, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
+// Our own, which a proxy answers with itself: mn_in's way through a wrapper.
+static const IID proxy_iid = {0x28fe10af, 0xdb41, 0x4740, {0x8b, 0x45, 0xb8, 0xff, 0x72, 0x4d, 0xe2, 0x12}};
 
 static bool has(const uint64_t mask[2], int k) { return k >= 0 && (mask[k / 64] >> (k % 64) & 1); }
 
@@ -159,6 +161,15 @@ HRESULT mn_d3d_hr(int32_t status) {
     return E_FAIL;                               // MN_E*, or the transport's -errno
 }
 
+uintptr_t mn_in(const void *object) {
+    auto *h = (const mn_d3d_proxy_hdr *)object;
+    IUnknown *ours = nullptr;
+    if (!h || h->magic == MN_D3D_PROXY_MAGIC) return (uintptr_t)object;
+    if (FAILED(((IUnknown *)object)->QueryInterface(proxy_iid, (void **)&ours)) || !ours) return (uintptr_t)object;
+    ours->Release(); // the wrapper holds it
+    return (uintptr_t)ours;
+}
+
 static std::atomic<uint64_t> said[(MN_D3D_CALLS + 63) / 64];
 
 void mn_d3d_unhandled(uint32_t id, const char *name, int refused) {
@@ -173,6 +184,7 @@ HRESULT STDMETHODCALLTYPE mn_px_QueryInterface(mn_proxy *This, REFIID riid, void
     if (!out) return E_POINTER;
     *out = nullptr;
     mn_obj *o = This->obj;
+    if (!std::memcmp(&riid, &proxy_iid, sizeof riid)) return o->refs++, *out = This, S_OK; // mn_in's
     bool unknown = !std::memcmp(&riid, &unknown_iid, sizeof riid);
     if (unknown && o->root && (*out = mn_proxy_known(o->root, -1))) return S_OK;
     int k = unknown ? o->created : mn_d3d_iface_of(&riid);
@@ -762,6 +774,7 @@ static void bind_window(void **out, HWND hwnd) {
 
 static HRESULT STDMETHODCALLTYPE create_swapchain(mn_proxy *This, IUnknown *device, DXGI_SWAP_CHAIN_DESC *desc,
                                                   IDXGISwapChain **out) {
+    device = (IUnknown *)mn_in(device); // Streamline's queue: its pacing on ours
     HWND hwnd = desc ? desc->OutputWindow : nullptr;
     push_window(hwnd);
     HRESULT hr = PX(create_swapchain, px_create_swapchain)(This, device, desc, out);
@@ -776,6 +789,7 @@ static HRESULT STDMETHODCALLTYPE create_for_hwnd(mn_proxy *This, IUnknown *devic
                                                  const DXGI_SWAP_CHAIN_DESC1 *desc,
                                                  const DXGI_SWAP_CHAIN_FULLSCREEN_DESC *fullscreen,
                                                  IDXGIOutput *restrict_to, IDXGISwapChain1 **out) {
+    device = (IUnknown *)mn_in(device);
     push_window(hwnd);
     HRESULT hr = PX(create_for_hwnd, px_create_for_hwnd)(This, device, hwnd, desc, fullscreen, restrict_to, out);
     if (SUCCEEDED(hr)) bind_window((void **)out, hwnd);

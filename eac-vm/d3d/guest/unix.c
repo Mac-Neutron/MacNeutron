@@ -65,10 +65,13 @@ static void *arena_ptr(uint64_t blob, uint64_t offset) {
     return p;
 }
 
+static __thread int foreign; /* the call being packed has an object that isn't a proxy (said once a method) */
+static _Atomic uint64_t foreign_said[(MN_D3D_CALLS + 63) / 64];
+
 static int proxy_handle(uint64_t value, mn_handle *h) {
     const struct mn_d3d_proxy_hdr *p = (const void *)(uintptr_t)value;
     if (!p) return *h = 0, 0;
-    if (p->magic != MN_D3D_PROXY_MAGIC) return -1;
+    if (p->magic != MN_D3D_PROXY_MAGIC) return foreign = 1, -1;
     *h = p->handle;
     return 0;
 }
@@ -283,6 +286,9 @@ int32_t mn_d3d_unix_call(void *args) {
     for (int tries = 0;;) {
         struct mn_wm_out o = {.buf = rec, .cap = MN_REC_MAX};
         NTSTATUS_T s = mn_wm_pack_call(c, params, &o);
+        if (foreign && !(atomic_fetch_or(&foreign_said[a->id / 64], 1ull << (a->id % 64)) & 1ull << (a->id % 64)))
+            fprintf(stderr, "mn-d3d: %s: an object argument isn't a forwarded one\n", c->name);
+        foreign = 0;
         if (s) return (int32_t)s;
         int submit = c->mode == MN_WM_SUBMIT || (a->flags & MN_D3D_ARG_HANDOFF);
         if (!o.sync && !submit && !(a->flags & MN_D3D_ARG_SYNC)) {
