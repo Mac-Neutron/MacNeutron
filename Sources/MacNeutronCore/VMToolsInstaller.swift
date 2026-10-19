@@ -15,11 +15,12 @@ public enum VMToolsInstallOutcome: Equatable, Sendable {
 /// folder. The folder's games' files (state/, runs/) and its images/ aren't the tools' and are never touched.
 public enum VMToolsInstaller {
     /// dxmt: native DXMT and its replayer, which macneutron-vm loads for Direct3D forwarding (eac-vm/d3d).
+    /// dxmt-translator: native DXMT's translator key (MicroVM's `dxmtTranslator`).
     public static let items = ["macneutron-vm", "libkrun", "steam-forward", "gvproxy", "metal-host", "dxmt",
-                               "run-guest.sh", "run-game.sh"]
-    /// The items that are scripts: MacNeutron.app keeps them in Contents/Resources/vm (codesign takes a script in
-    /// Contents/Helpers for unsigned code, and a script's own signature doesn't survive the zip).
-    public static let scripts = ["run-guest.sh", "run-game.sh"]
+                               "run-guest.sh", "run-game.sh", "dxmt-translator"]
+    /// The items that aren't code: MacNeutron.app keeps them in Contents/Resources/vm (codesign takes a script or a data
+    /// file in Contents/Helpers for unsigned code, and a script's own signature doesn't survive the zip).
+    public static let scripts = ["run-guest.sh", "run-game.sh", "dxmt-translator"]
 
     /// `scripts`: where `Self.scripts` come from, else `tools`.
     @discardableResult

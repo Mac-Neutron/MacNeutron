@@ -6,7 +6,7 @@ import Testing
 private func makeTools(_ version: String) throws -> URL {
     let tools = try makeTempDir().appending(path: "vm-tools", directoryHint: .isDirectory)
     for file in ["macneutron-vm", "libkrun/libkrun.1.dylib", "steam-forward/host/mn-steam-host", "gvproxy",
-                 "metal-host/winemetal.so", "dxmt/d3d12.dylib", "dxmt/dxmt-replay", "run-guest.sh", "run-game.sh"] {
+                 "metal-host/winemetal.so", "dxmt/d3d12.dylib", "dxmt/dxmt-replay", "run-guest.sh", "run-game.sh", "dxmt-translator"] {
         try write("\(version) \(file)\n", to: tools.appending(path: file), executable: true)
     }
     return tools
@@ -110,9 +110,10 @@ private func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding
 }
 
 @Test func theScriptsComeFromTheirOwnFolder() throws {
-    // MacNeutron.app keeps them in Contents/Resources/vm: codesign takes a script in Contents/Helpers for unsigned code.
+    // MacNeutron.app keeps them in Contents/Resources/vm: codesign takes a script or a data file (the translator key)
+    // in Contents/Helpers for unsigned code.
     let tools = try makeTools("a"), scripts = try makeTempDir().appending(path: "vm-scripts", directoryHint: .isDirectory)
-    for name in ["run-guest.sh", "run-game.sh"] {
+    for name in VMToolsInstaller.scripts {
         try FileManager.default.removeItem(at: tools.appending(path: name))
         try write("script \(name)\n", to: scripts.appending(path: name), executable: true)
     }

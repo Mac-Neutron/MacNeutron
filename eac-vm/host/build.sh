@@ -39,8 +39,10 @@ for f in "$G/stubs.cpp" "$D3D/host/native.cpp" "$D3D/guest/formats.cpp"; do  # f
 done
 rm -rf "$W/dxmt"
 mkdir -p "$W/dxmt"
-cp "$ROOT"/build/dxmt-native/install/lib/*.dylib "$ROOT/build/dxmt-native/install/lib/dxmt-replay" \
-  "$ROOT/build/dxmt-native/install/lib/translator" "$W/dxmt/"
+cp "$ROOT"/build/dxmt-native/install/lib/*.dylib "$ROOT/build/dxmt-native/install/lib/dxmt-replay" "$W/dxmt/"
+# Native DXMT's translator key, which the launcher stamps the VM's recordings with (MicroVM.swift): not code, so beside
+# dxmt/ (MacNeutron.app keeps it in Contents/Resources/vm with the scripts).
+cp "$ROOT/build/dxmt-native/install/lib/translator" "$W/dxmt-translator"
 clang -O2 -std=gnu2x -Wall -c -I"$W/libkrun/include" -o "$W/obj/input.c.o" "$ROOT/eac-vm/host/input.c"
 clang -O2 -std=gnu2x -Wall -c -o "$W/obj/audio.c.o" "$ROOT/eac-vm/host/audio.c"
 # The TPM's engine: libtpms (eac-vm/libtpms) on Homebrew's openssl@3, both linked in statically.

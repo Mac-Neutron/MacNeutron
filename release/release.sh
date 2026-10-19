@@ -485,7 +485,7 @@ build_app() {
   cp "$OUT/wine.app/Contents/Resources/lib/wine/aarch64-unix/winemetal.so" "$VMH/metal-host/winemetal.so" \
     || die "no winemetal.so in the release wine.app"
   mkdir -p "$A/Contents/Resources/vm" || die "can't make Contents/Resources/vm"
-  mv "$VMH"/run-*.sh "$A/Contents/Resources/vm/" || die "can't move the VM's scripts"
+  mv "$VMH"/run-*.sh "$VMH/dxmt-translator" "$A/Contents/Resources/vm/" || die "can't move the VM's scripts"
   F="$OUT/steam-forward"
   make -s -C "$ROOT/eac-vm/steam-forward" OUT="$F" \
     MAC_UNIXLIB="$OUT/wine.app/Contents/Resources/lib/wine/aarch64-unix/lsteamclient.so" \

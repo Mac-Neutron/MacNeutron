@@ -195,10 +195,10 @@ private func expectRefusedUntilTheVMIsReady(_ f: VMFixture) {
 }
 
 @Test func theVMsPrecacheIsStampedWithNativeDXMTsKey() throws {
-    // The VM's recordings are native DXMT's: its translator key (dxmt/translator beside it in the VM folder), not the
+    // The VM's recordings are native DXMT's: its translator key (dxmt-translator in the VM folder), not the
     // macOS runtime's, which a dev VM folder needn't match (M3's deferred minors).
     let f = try makeVMFixture()
-    try write("native-key\n", to: f.vm.appending(path: "dxmt/translator"))
+    try write("native-key\n", to: f.vm.appending(path: "dxmt-translator"))
     let pipelines = f.vm.appending(path: "state/2437170.dxmt/pipelines")
     try write("recorded\n", to: pipelines.appending(path: "game.pipelines"))
     try write("an older build\n", to: pipelines.appending(path: "replayed"))
