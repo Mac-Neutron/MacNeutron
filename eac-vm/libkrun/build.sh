@@ -34,6 +34,13 @@ if p_flag krun; then
   export CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
   CARGO_ENCODED_RUSTFLAGS=$(printf '%s\037%s' "$CARGO_ENCODED_RUSTFLAGS" -Ctarget-cpu=apple-m5)
 fi
+# And its PGO (libkrun.profdata, rustc's own LLVM): instrumented (the profile goes where LLVM_PROFILE_FILE says), or
+# built with the profile, a stale one's mismatches tolerated.
+case $(pgo_mode libkrun) in
+  generate) CARGO_ENCODED_RUSTFLAGS=$(printf '%s\037%s' "$CARGO_ENCODED_RUSTFLAGS" -Cprofile-generate=/tmp/mn-krun-pgo) ;;
+  use) CARGO_ENCODED_RUSTFLAGS=$(printf '%s\037%s\037%s' "$CARGO_ENCODED_RUSTFLAGS" "-Cprofile-use=$ROOT/pgo/libkrun.profdata" \
+         -Cllvm-args=-pgo-warn-mismatch=false) ;;
+esac
 export CARGO_ENCODED_RUSTFLAGS
 (cd "$SRC" && PATH=$(dirname "$CARGO"):$PATH "$CARGO" build --release -p libkrun --no-default-features --features "$FEATURES")
 mkdir -p "$OUT/include"

@@ -34,10 +34,19 @@ wine)
   set --
   if [ "${MACNEUTRON_PROFILE:-std}" = p ]; then
     case " ${MACNEUTRON_P_FLAGS-} " in
-      *" wine "*) F="-O3 -march=x86-64-v2 -DWINE_NO_TRACE_MSGS"; set -- CFLAGS="$F -flto=thin" LDFLAGS=-flto=thin ;;
-      *) F="-O2 -DWINE_NO_TRACE_MSGS"; set -- CFLAGS="$F" ;;
+      *" wine "*) F="-O3 -march=x86-64-v2 -DWINE_NO_TRACE_MSGS" LTO=-flto=thin ;;
+      *) F="-O2 -DWINE_NO_TRACE_MSGS" LTO= ;;
     esac
-    set -- "$@" x86_64_CFLAGS="$F"
+    # The Unix side's PGO (guest.profdata, with guest FEX's; builder.sh's MACNEUTRON_PGO_GUEST). Not the PE side:
+    # its DLLs have no C runtime to link LLVM's profile runtime into.
+    case ${MACNEUTRON_PGO_GUEST:-none} in
+      generate) U="-fprofile-generate -mllvm -runtime-counter-relocation" PL=-fprofile-generate ;;
+      use) U="-fprofile-use=$HOME/pgo/guest.profdata -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled" PL= ;;
+      *) U= PL= ;;
+    esac
+    L="$LTO${LTO:+${PL:+ }}$PL"
+    set -- CFLAGS="$F${LTO:+ $LTO}${U:+ $U}" x86_64_CFLAGS="$F"
+    [ -z "$L" ] || set -- "$@" LDFLAGS="$L"
   fi
   mkdir -p "$BUILD" && cd "$BUILD"
   "$SRC/configure" --host=x86_64-linux-gnu --with-wine-tools="$TOOLS" --prefix=/opt/mn-wine --disable-tests \
@@ -52,9 +61,10 @@ wine)
   # The preloaders without LTO: linked static at a fixed high address, their link-time code took R_X86_64_32
   # relocations lld can't place. Wine's rule puts CFLAGS last, so they're made first, with the flags minus -flto;
   # make then finds them up to date. They run once per process, before exec.
-  case $* in *-flto=thin*)
-    rm -f loader/preloader.o loader/preloader_mac.o loader64/preloader.o
-    make -j"$JOBS" loader/preloader.o loader/preloader_mac.o loader64/preloader.o CFLAGS="$F" > make.log 2>&1 \
+  # Likewise without the profile runtime, which a static, libc-less preloader can't link: built whole, first.
+  case $* in *-flto=thin* | *-fprofile-generate*)
+    rm -f loader/preloader.o loader/preloader_mac.o loader64/preloader.o loader/wine-preloader loader64/wine64-preloader
+    make -j"$JOBS" loader/wine-preloader loader64/wine64-preloader CFLAGS="$F" LDFLAGS= > make.log 2>&1 \
       || { grep -E "error|Error" make.log | head -20; exit 1; } ;;
   esac
   make -j"$JOBS" >> make.log 2>&1 || { grep -E "error|Error" make.log | head -20; exit 1; }

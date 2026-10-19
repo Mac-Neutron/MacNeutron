@@ -106,6 +106,26 @@ p_flag() {  # p_flag <component>: true when the p profile builds <component> wit
   return 1
 }
 
+# PGO under the p profile (spec 2026-10-19-macneutron-performance-build §7): MACNEUTRON_PGO=generate builds
+# instrumented binaries (they write LLVM_PROFILE_FILE's profiles); unset, a component uses pgo/<profile>.profdata when it
+# exists. Profiles by toolchain: host (Apple clang), libkrun (rustc), guest (the builder's clang).
+pgo_mode() {  # pgo_mode <profile>: generate, use or none
+  [ "${MACNEUTRON_PROFILE:-std}" = p ] || { echo none; return; }
+  case ${MACNEUTRON_PGO:-} in
+    generate) echo generate ;;
+    none) echo none ;;
+    *) if [ -f "$ROOT/pgo/$1.profdata" ]; then echo use; else echo none; fi ;;
+  esac
+}
+# The compiler flags for pgo_mode's answer: clang's, for Apple's or the builder's (continuous mode on Linux needs the
+# counters relocated at run time).
+pgo_cflags() {  # pgo_cflags <profile> [linux]
+  case $(pgo_mode "$1") in
+    generate) printf '%s' "-fprofile-generate${2:+ -mllvm -runtime-counter-relocation}" ;;
+    use) printf '%s' "-fprofile-use=$ROOT/pgo/$1.profdata -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled" ;;
+  esac
+}
+
 deps_pins() { LC_ALL=C /usr/bin/grep -E '^(FREETYPE|GNUTLS|NETTLE|GMP|FFMPEG)_' "$ROOT/wine-arm64/deps.pins"; }
 
 # A release ships no build path (arm64 release Ruling 20): the files under <dir> that contain, as bytes, the repository's

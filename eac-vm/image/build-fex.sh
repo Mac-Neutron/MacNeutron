@@ -7,11 +7,18 @@ SRC=${1:-$HOME/fex-linux}
 # The p profile with "fex" in its flags (spec 2026-10-19-macneutron-performance-build §5): the features the guest's
 # vCPU reports (/proc/cpuinfo, 2026-10-19), without SME.
 set --
+F=
 case " ${MACNEUTRON_P_FLAGS-} " in
-  *" fex "*) [ "${MACNEUTRON_PROFILE:-std}" != p ] \
-    || set -- -DCMAKE_C_FLAGS="-march=armv8.6-a+fp16+fp16fml+sha3+crypto" \
-               -DCMAKE_CXX_FLAGS="-march=armv8.6-a+fp16+fp16fml+sha3+crypto" ;;
+  *" fex "*) [ "${MACNEUTRON_PROFILE:-std}" != p ] || F="-march=armv8.6-a+fp16+fp16fml+sha3+crypto" ;;
 esac
+# And its PGO (guest.profdata, with the guest Wine's; builder.sh's MACNEUTRON_PGO_GUEST): continuous mode needs the
+# counters relocated at run time on Linux.
+case ${MACNEUTRON_PGO_GUEST:-none} in
+  generate) F="$F -fprofile-generate -mllvm -runtime-counter-relocation"
+            set -- -DCMAKE_EXE_LINKER_FLAGS=-fprofile-generate -DCMAKE_SHARED_LINKER_FLAGS=-fprofile-generate ;;
+  use) F="$F -fprofile-use=$HOME/pgo/guest.profdata -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled" ;;
+esac
+[ -z "$F" ] || set -- "$@" -DCMAKE_C_FLAGS="$F" -DCMAKE_CXX_FLAGS="$F"
 cmake -S "$SRC" -B "$SRC/build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DBUILD_TESTING=OFF -DBUILD_THUNKS=OFF -DBUILD_FEXCONFIG=OFF \
   -DENABLE_LTO=ON -DENABLE_ASSERTIONS=OFF -DTUNE_CPU=none -DCMAKE_CXX_SCAN_FOR_MODULES=OFF "$@" > "$SRC/build-cmake.log"

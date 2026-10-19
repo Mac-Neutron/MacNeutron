@@ -7,9 +7,17 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
+# Sources go to the compilers relative to the repository: a PGO profile names a file's static functions by the path
+# it was compiled from, and a profile must name no home folder (and match between its two builds).
+cd "$ROOT"
+rel() { printf '%s' "${1#"$ROOT"/}"; }
 # The p profile with "host" in its flags (spec 2026-10-19-macneutron-performance-build §5): -O3 for the M5, ThinLTO.
 . "$ROOT/wine-arm64/lib.sh"
 if p_flag host; then HOPT="-O3 -mcpu=apple-m5 -flto=thin"; else HOPT=-O2; fi
+# And its PGO (host.profdata, with native DXMT's): instrumented, or built with the profile.
+PGO=$(pgo_cflags host)
+HOPT="$HOPT${PGO:+ $PGO}"
+SWIFT_PGO=; [ "$(pgo_mode host)" != generate ] || SWIFT_PGO=-profile-generate  # links the profile runtime
 # The winemetal handler's C and Objective-C, compiled with clang: swiftc takes the objects.
 DXMT=${BUILD_DIR:-$ROOT/build}/wine-arm64-src/dxmt/src
 M=$ROOT/eac-vm/metal
@@ -18,7 +26,7 @@ objs=
 for f in wm/calls.c wm/cmdlist.c wm/marshal.c wm/slots.c wm/host/htable.c wm/host/loader.c wm/host/invoke.m wm/host/memory.m \
   wm/host/events.m wm/host/present.m wm/host/dispatch.m; do
   o="$W/obj/$(basename "$f").o"
-  clang $HOPT -std=gnu2x -Wall -DMN_WM_HOST -DDXMT_GUEST_VM -c -I"$M" -I"$DXMT/winemetal" -I"$DXMT/airconv" -o "$o" "$M/$f"
+  clang $HOPT -std=gnu2x -Wall -DMN_WM_HOST -DDXMT_GUEST_VM -c -I"$M" -I"$DXMT/winemetal" -I"$DXMT/airconv" -o "$o" "$(rel "$M/$f")"
   objs="$objs $o"
 done
 # Direct3D forwarding (M2): the tables and stubs from native DXMT's headers, its dispatcher, and native DXMT itself.
@@ -31,31 +39,31 @@ python3 -I "$D3D/gen.py" --headers "$I" --rules "$D3D/rules.txt" --out "$G" call
 for f in "$D3D/host/dispatch.c" "$D3D/host/memory.c" "$D3D/host/events.c" "$D3D/host/window.c" "$G/calls.c" \
   "$G/ifaces.c"; do
   o="$W/obj/d3d-$(basename "$f").o"
-  clang $HOPT -std=gnu2x -Wall -c -I"$M" -I"$M/wm" -I"$G" -I"$I" -I"$DXMT/winemetal" -o "$o" "$f"
+  clang $HOPT -std=gnu2x -Wall -c -I"$M" -I"$M/wm" -I"$G" -I"$I" -I"$DXMT/winemetal" -o "$o" "$(rel "$f")"
   objs="$objs $o"
 done
 for f in "$G/stubs.cpp" "$D3D/host/native.cpp" "$D3D/guest/formats.cpp"; do  # formats: the host checks data sizes too
   o="$W/obj/d3d-$(basename "$f").o"
   clang++ $HOPT -std=c++17 -Wall -Werror -Wno-extern-c-compat -DWIDL_EXPLICIT_AGGREGATE_RETURNS -include "$NT/native-prelude.h" -I"$NT/include" \
-    -I"$I/d3d12" -I"$I/windows" -I"$I/directx" -I"$I" -I"$DXMT/util" -I"$DXMT/d3d12" -I"$DXMT/d3d11" -I"$G" -I"$D3D/host" -I"$D3D/guest" -c -o "$o" "$f"
+    -I"$I/d3d12" -I"$I/windows" -I"$I/directx" -I"$I" -I"$DXMT/util" -I"$DXMT/d3d12" -I"$DXMT/d3d11" -I"$G" -I"$D3D/host" -I"$D3D/guest" -c -o "$o" "$(rel "$f")"
   objs="$objs $o"
 done
 rm -rf "$W/dxmt"
 mkdir -p "$W/dxmt"
-cp "$ROOT"/build/dxmt-native/install/lib/*.dylib "${BUILD_DIR:-$ROOT/build}/dxmt-native/install/lib/dxmt-replay" "$W/dxmt/"
+cp "${BUILD_DIR:-$ROOT/build}"/dxmt-native/install/lib/*.dylib "${BUILD_DIR:-$ROOT/build}/dxmt-native/install/lib/dxmt-replay" "$W/dxmt/"
 # Native DXMT's translator key, which the launcher stamps the VM's recordings with (MicroVM.swift): not code, so beside
 # dxmt/ (MacNeutron.app keeps it in Contents/Resources/vm with the scripts).
 cp "${BUILD_DIR:-$ROOT/build}/dxmt-native/install/lib/translator" "$W/dxmt-translator"
-clang $HOPT -std=gnu2x -Wall -c -I"$W/libkrun/include" -o "$W/obj/input.c.o" "$ROOT/eac-vm/host/input.c"
-clang $HOPT -std=gnu2x -Wall -c -o "$W/obj/audio.c.o" "$ROOT/eac-vm/host/audio.c"
+clang $HOPT -std=gnu2x -Wall -c -I"$W/libkrun/include" -o "$W/obj/input.c.o" eac-vm/host/input.c
+clang $HOPT -std=gnu2x -Wall -c -o "$W/obj/audio.c.o" eac-vm/host/audio.c
 # The TPM's engine: libtpms (eac-vm/libtpms) on Homebrew's openssl@3, both linked in statically.
 SSL=${OPENSSL:-$(brew --prefix openssl@3)}
 cmp -s "$ROOT/eac-vm/libtpms/PIN" "$W/libtpms/PIN" || "$ROOT/eac-vm/libtpms/build.sh"
 clang $HOPT -std=gnu2x -Wall -c -I"$W/libkrun/include" -I"$W/libtpms/include" -I"$SSL/include" -o "$W/obj/tpm.c.o" \
-  "$ROOT/eac-vm/host/tpm.c"
+  eac-vm/host/tpm.c
 objs="$objs $W/obj/input.c.o $W/obj/audio.c.o $W/obj/tpm.c.o"
 # The executor's C goes through swiftc, which takes no clang optimisation flags: under the p flags, clang compiles it.
-csrc="$ROOT/eac-vm/metal/host/executor.c $ROOT/eac-vm/metal/host/testops.c $ROOT/eac-vm/metal/ring.c"
+csrc="eac-vm/metal/host/executor.c eac-vm/metal/host/testops.c eac-vm/metal/ring.c"
 if p_flag host; then
   for f in $csrc; do
     clang $HOPT -std=gnu2x -Wall -c -I"$W/libkrun/include" -o "$W/obj/$(basename "$f").o" "$f"
@@ -64,7 +72,7 @@ if p_flag host; then
   csrc=
 fi
 # shellcheck disable=SC2086
-swiftc -O -o "$W/macneutron-vm" "$ROOT/eac-vm/host/macneutron-vm.swift" $csrc $objs \
+swiftc -O $SWIFT_PGO -o "$W/macneutron-vm" eac-vm/host/macneutron-vm.swift $csrc $objs \
   -import-objc-header "$ROOT/eac-vm/host/bridge.h" -Xcc -I"$W/libkrun/include" \
   "$W/libkrun/libkrun.1.dylib" -Xlinker -rpath -Xlinker @executable_path/libkrun -framework AudioToolbox \
   "$W/libtpms/libtpms.a" "$SSL/lib/libcrypto.a" -framework Security -lc++

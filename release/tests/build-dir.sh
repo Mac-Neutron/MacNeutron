@@ -7,8 +7,10 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 # The builder VM (eacvm, its key in eacbench, its host vmhost) is one machine for both profiles; p-seed.sh reads build/.
 shared='bridge|release|perf|presenter|dxmt-tests|wine-arm64-tests|p|eac-vm-work/eacvm|eac-vm-work/eacbench|eac-vm-work/vmhost'
-bad=$( { /usr/bin/grep -rnE '\$ROOT/build' eac-vm dxmt wine-arm64 release --include='*.sh' --exclude-dir=tests --exclude=p-seed.sh || true; } |
-  /usr/bin/grep -vE '\$\{BUILD_DIR:-\$ROOT/build\}' | /usr/bin/grep -vE "\\\$ROOT/build/($shared)([/\"' ]|\$)" || true)
+# Each line with its BUILD_DIR forms taken out first, so a second, bare one beside them still shows ("$ROOT"/build too).
+bad=$( { /usr/bin/grep -rnE '\$ROOT"?/build' eac-vm dxmt wine-arm64 release --include='*.sh' --exclude-dir=tests --exclude=p-seed.sh || true; } |
+  sed -E 's/\$\{BUILD_DIR:-\$ROOT\/build\}//g' | /usr/bin/grep -E '\$ROOT"?/build' |
+  /usr/bin/grep -vE "\\\$ROOT\"?/build/($shared)([/\"' *]|\$)" || true)
 # Makefiles likewise: a build/ path only through BUILD_DIR.
 mk=$( { /usr/bin/grep -rnE '(\.\./|ROOT\)/)build/' eac-vm --include=Makefile || true; } | /usr/bin/grep -v 'BUILD_DIR' || true)
 bad="$bad${mk:+

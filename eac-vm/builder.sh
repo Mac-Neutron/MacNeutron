@@ -62,7 +62,7 @@ ssh)
   [ "$BUILDER_HOME" = /home/bench ] \
     || pre="$pre for d in .fex-emu .config .local; do [ -e \"\$HOME/\$d\" ] || ln -s /home/bench/\$d \"\$HOME/\$d\"; done;"
   [ -z "${MACNEUTRON_PROFILE:-}" ] \
-    || pre="$pre export MACNEUTRON_PROFILE=$MACNEUTRON_PROFILE MACNEUTRON_P_FLAGS='${MACNEUTRON_P_FLAGS-$P_FLAGS_DEFAULT}';"
+    || pre="$pre export MACNEUTRON_PROFILE=$MACNEUTRON_PROFILE MACNEUTRON_P_FLAGS='${MACNEUTRON_P_FLAGS-$P_FLAGS_DEFAULT}' MACNEUTRON_PGO_GUEST=$(pgo_mode guest);"
   sshx "$pre" "$@" ;;
 sync)
   case $3 in /*) dest=$3 ;; *) dest=$BUILDER_HOME/$3 ;; esac

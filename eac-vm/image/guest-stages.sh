@@ -12,6 +12,8 @@ B="sh $ROOT/eac-vm/builder.sh"
 stamp() { sh "$ROOT/eac-vm/image/stamps.sh" "$1"; }
 # The x86-64 sysroot's compiler wrapper, into this BUILDER_HOME too (the p profile's starts empty).
 $B sync "$ROOT/eac-vm/sysroot" mn-sysroot > /dev/null
+# The guest's PGO profile (pgo/guest.profdata), which builder-side builds use under the p profile.
+[ ! -f "$ROOT/pgo/guest.profdata" ] || $B sync "$ROOT/pgo" pgo > /dev/null
 for stage in ${*:-wine forwarder dxmt d3d fex}; do
   echo "guest-stages: $stage" >&2
   case $stage in
