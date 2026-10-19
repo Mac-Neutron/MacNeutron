@@ -9,6 +9,30 @@ final class StopFlag: @unchecked Sendable {
     func set() { lock.withLock { stopped = true } }
 }
 
+/// The microVM launch in progress, which Steam's Stop ends (Launcher.stopVM): its run-guest.sh's process group once
+/// it runs (lockf, the guest's script, macneutron-vm; its helpers end with it).
+final class VMRun: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = false, stopped = false, group: pid_t = 0
+    var running: Bool { lock.withLock { group > 0 } }
+    func begin() { lock.withLock { active = true } }
+    func end() { lock.withLock { active = false; group = 0 } }
+    /// run-guest.sh runs: a stop that came first ends it now.
+    func started(_ pid: pid_t) {
+        if lock.withLock({ group = pid; return stopped }) { kill(-pid, SIGTERM) }
+    }
+    /// Ends the VM now, or as it starts. False when no microVM launch is in progress.
+    func stop() -> Bool {
+        let g: pid_t? = lock.withLock { () -> pid_t? in
+            guard active else { return nil }
+            stopped = true
+            return group
+        }
+        if let g, g > 0 { kill(-g, SIGTERM) }
+        return g != nil
+    }
+}
+
 /// Implements the `proton` verbs Steam calls on a compatibility tool.
 public struct Launcher: Sendable {
     public let layout: ToolLayout
@@ -23,6 +47,7 @@ public struct Launcher: Sendable {
     /// The Mac's display in pixels (MicroVM.mainDisplay): the guest's screen, unless a launch option sets MN_SCREEN.
     public let display: @Sendable () -> (width: Int, height: Int)?
     let stopRequested = StopFlag()
+    let vmRun = VMRun()
 
     public init(layout: ToolLayout, runner: any ProcessRunner = SystemProcessRunner(), log: LauncherLog = .standard,
                 notifier: any Notifier = AppleScriptNotifier(), preflight: Preflight = Preflight(),
@@ -192,6 +217,8 @@ public struct Launcher: Sendable {
         // where DXMT_STATS's timing would cost the guest a clock read under FEX for every D3D12 call.
         let perf = environment["MACNEUTRON_PERF"] == "1"
         if perf { environment["MACNEUTRON_VM_PROFILE"] = "1" }
+        vmRun.begin()
+        defer { vmRun.end() }
         do {
             let script = try vm.script(verb: request.verb, appID: context.appID, guest: guest,
                                        arguments: request.arguments, environment: environment)
@@ -247,7 +274,7 @@ public struct Launcher: Sendable {
             env["MN_RUN_TIMEOUT"] = env["MN_RUN_TIMEOUT"] ?? "86400"
             let status = try runner.run(vm.runGuest, [file.path(percentEncoded: false), "--steam-appid", context.appID,
                                                       "--ram-mib", "16384", "--steam-map", "\(library)=/mnt/games"],
-                                        environment: env, output: gameLog)
+                                        environment: env, output: gameLog, started: vmRun.started)
             log.append("verb=\(request.verb.rawValue) appid=\(context.appID) backend=vm vm=\(vm.root.path(percentEncoded: false))"
                        + " exit=\(status)")
             // macneutron-vm's 7: the game's TPM didn't start, so the guest never ran (run-guest.sh removed the last
@@ -288,12 +315,22 @@ public struct Launcher: Sendable {
     /// launch built (the server only talks to a client in its own msync mode).
     public func terminate(environment: [String: String]) {
         stopRequested.set()
+        _ = vmRun.stop()  // not left running after the launcher
         guard let context = try? CompatContext(environment: environment) else { return }
         let merged = (try? withSettings(environment, appID: context.appID)) ?? environment
         let env = LaunchEnvironment.build(base: merged, context: context,
                                           backend: GraphicsBackend.select(requested: merged["MACNEUTRON_GRAPHICS"]).backend,
                                           logging: false)
         _ = try? runner.run(layout.wineserver, ["-k"], environment: env, output: nil)
+    }
+
+    /// Steam's Stop on macOS: it asks the processes it tracks to quit, as apps (the launcher is one while it runs:
+    /// macneutron's main.swift). A microVM launch ends its VM and returns; one on macOS is left to the game, whose
+    /// Wine is an app Steam asks too. True for a microVM launch.
+    public func stopVM() -> Bool {
+        guard vmRun.stop() else { return false }
+        stopRequested.set()  // before the boot: a shader replay stops, and nothing boots
+        return true
     }
 
     private func runGame(_ request: LaunchRequest, _ env: [String: String], _ gameLog: URL?,

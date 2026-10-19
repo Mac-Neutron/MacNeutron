@@ -271,3 +271,43 @@ private func expectRefusedUntilTheVMIsReady(_ f: VMFixture) {
     #expect(f.runner.calls.last?.environment["MN_PRESENT_STATS"]
             == f.vm.appending(path: "runs/2437170/traces/frames.txt").path(percentEncoded: false))
 }
+
+/// run-guest.sh as a real process group, a shell and its child (as lockf, the guest's script and macneutron-vm are).
+private struct GroupRunner: ProcessRunner {
+    func run(_ executable: URL, _ arguments: [String], environment: [String: String], output: URL?) throws -> Int32 {
+        try run(executable, arguments, environment: environment, output: output, started: { _ in })
+    }
+    func run(_ executable: URL, _ arguments: [String], environment: [String: String], output: URL?,
+             started: @Sendable (pid_t) -> Void) throws -> Int32 {
+        guard executable.lastPathComponent == "run-guest.sh" else { return 0 }
+        return try SystemProcessRunner().run(URL(filePath: "/bin/sh"), ["-c", "sleep 60 & wait"], environment: [:],
+                                             output: nil, started: started)
+    }
+}
+
+final class Status: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Int32?
+    var status: Int32? { lock.withLock { value } }
+    func set(_ v: Int32) { lock.withLock { value = v } }
+}
+
+// Steam's Stop on macOS asks the processes it tracks to quit, the launcher among them (main.swift): a VM launch's
+// VM ends, the whole run-guest.sh group, and the launch returns.
+@Test func steamsStopEndsTheVM() throws {
+    let launcher = Launcher(layout: try makeToolLayout(), runner: GroupRunner(),
+                            log: LauncherLog(directory: try makeTempDir().appending(path: "Logs")),
+                            notifier: RecordingNotifier(), preflight: testPreflight,
+                            settings: GameSettingsStore(directory: try makeTempDir().appending(path: "games")),
+                            steam: try makeSteamLocation(), microVMRoot: try makeVMFolder(), display: { nil })
+    let env = steamEnvironment(dataPath: try makeTempDir().appending(path: "compatdata/2437170"), appID: "2437170")
+    #expect(!launcher.stopVM())  // nothing running yet
+    let result = Status()
+    Thread.detachNewThread { result.set(launcher.launch(["waitforexitandrun", game], environment: env)) }
+    let start = Date()
+    while !launcher.vmRun.running, Date().timeIntervalSince(start) < 10 { Thread.sleep(forTimeInterval: 0.05) }
+    #expect(launcher.vmRun.running)
+    #expect(launcher.stopVM())
+    while result.status == nil, Date().timeIntervalSince(start) < 20 { Thread.sleep(forTimeInterval: 0.05) }
+    #expect(result.status == 128 + SIGTERM)
+}

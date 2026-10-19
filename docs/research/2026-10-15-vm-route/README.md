@@ -555,7 +555,10 @@ VM's base for all of them.
   frames presented, `backend=vm` in `launcher.log`.
 
 **Open** (milestone 5):
-- Steam's Stop ends only the launcher; the game is quit from inside it.
+- ~~Steam's Stop ends only the launcher; the game is quit from inside it.~~ Fixed 2026-10-19: Steam's Stop on macOS
+  asks the processes it tracks to quit as apps (`NSRunningApplication`'s `terminate`), which never reached the
+  command-line launcher nor `mn-steam-host`; the launcher now waits as an accessory app and a quit request, or a
+  SIGTERM, ends run-guest.sh's process group (`Sources/macneutron/StopRequests.swift`, `Launcher.stopVM`).
 - A fixed 16 GiB of RAM.
 - 32-bit games (the guest's Wine is 64-bit only).
 - Games that write into their install folder: `/mnt/games` is read-only.

@@ -19,6 +19,7 @@ public enum CommandLineTool {
         case "launch":
             let launcher = Launcher(layout: ToolLayout(executable: executable), notifier: AppleScriptNotifier(toast: executable))
             installTerminationHandlers(launcher, environment: environment)
+            launching = launcher
             return launcher.launch(rest, environment: environment)
         case "install":
             var args = rest
@@ -173,6 +174,11 @@ public enum CommandLineTool {
 
     // ponytail: global signal sources for the process's single launch; never mutated after setup.
     nonisolated(unsafe) private static var signalSources: [any DispatchSourceSignal] = []
+    // ponytail: the process's single launch, set before it starts; read by Steam's quit request (main.swift)
+    nonisolated(unsafe) private static var launching: Launcher?
+
+    /// Steam's Stop, a quit request to the launcher (macneutron's StopRequests): a microVM launch ends its VM.
+    public static func quitRequested() { _ = launching?.stopVM() }
 
     /// Steam's Stop button (SIGTERM) and Ctrl-C kill the game's Wine processes, then exit.
     static func installTerminationHandlers(_ launcher: Launcher, environment: [String: String]) {
