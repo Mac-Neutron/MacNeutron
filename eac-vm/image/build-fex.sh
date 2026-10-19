@@ -16,7 +16,7 @@ esac
 case ${MACNEUTRON_PGO_GUEST:-none} in
   generate) F="$F -fprofile-generate -mllvm -disable-vp=true -mllvm -runtime-counter-relocation"
             set -- -DCMAKE_EXE_LINKER_FLAGS=-fprofile-generate -DCMAKE_SHARED_LINKER_FLAGS=-fprofile-generate ;;
-  use) F="$F -fprofile-use=$HOME/pgo/guest.profdata -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled" ;;
+  use) F="$F -fprofile-use=$HOME/pgo/guest.profdata -mllvm -disable-vp=true -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled" ;;
 esac
 [ -z "$F" ] || set -- "$@" -DCMAKE_C_FLAGS="$F" -DCMAKE_CXX_FLAGS="$F"
 cmake -S "$SRC" -B "$SRC/build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \

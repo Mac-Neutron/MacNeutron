@@ -120,11 +120,12 @@ pgo_mode() {  # pgo_mode <profile>: generate, use or none
 }
 # The compiler flags for pgo_mode's answer: clang's, for Apple's or the builder's. Continuous mode (%c, which a killed
 # process's profile survives) has no value profiling: its records are allocated at run time, outside the mapped file,
-# and the instrumented code crashed in __llvm_profile_instrument_target. On Linux it needs the counters relocated.
+# and the instrumented code crashed in __llvm_profile_instrument_target; the profile-using build matches it (a profile
+# with no value sites against code that expects them is an error under -Werror). On Linux it needs the counters relocated.
 pgo_cflags() {  # pgo_cflags <profile> [linux]
   case $(pgo_mode "$1") in
     generate) printf '%s' "-fprofile-generate -mllvm -disable-vp=true${2:+ -mllvm -runtime-counter-relocation}" ;;
-    use) printf '%s' "-fprofile-use=$ROOT/pgo/$1.profdata -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled" ;;
+    use) printf '%s' "-fprofile-use=$ROOT/pgo/$1.profdata -mllvm -disable-vp=true -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled" ;;
   esac
 }
 

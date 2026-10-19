@@ -41,7 +41,7 @@ wine)
     # its DLLs have no C runtime to link LLVM's profile runtime into.
     case ${MACNEUTRON_PGO_GUEST:-none} in
       generate) U="-fprofile-generate -mllvm -disable-vp=true -mllvm -runtime-counter-relocation" PL=-fprofile-generate ;;
-      use) U="-fprofile-use=$HOME/pgo/guest.profdata -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled" PL= ;;
+      use) U="-fprofile-use=$HOME/pgo/guest.profdata -mllvm -disable-vp=true -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled" PL= ;;
       *) U= PL= ;;
     esac
     L="$LTO${LTO:+${PL:+ }}$PL"
