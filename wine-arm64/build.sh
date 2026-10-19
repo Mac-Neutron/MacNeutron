@@ -357,19 +357,20 @@ fi
 #    both are recorded in wine-build/.configure-inputs.
 #    Both compilers (Apple clang for the unix side, llvm-mingw for the PE side) map $SRC/ away, so __FILE__ and the
 #    debug info name wine/dlls/..., not the build folder (arm64 release Ruling 20); otherwise -g -O3 (Wine's default
-#    is -O2), with MACNEUTRON_CPU's flags.
+#    is -O2), with MACNEUTRON_CPU's flags. The p profile: no -g, and every TRACE compiled out (WINE_NO_TRACE_MSGS).
 #    $PE_MARCH goes to the aarch64 and arm64ec PE compilers only, as their own CFLAGS (configure copies them to
 #    CXXFLAGS), not in CROSSCFLAGS: arm64ec brings in an x86_64 extra arch, for ARM64EC modules' x64 sources, and
 #    CROSSCFLAGS reaches its compiler too.
+if [ "${MACNEUTRON_PROFILE:-std}" = p ]; then WFLAGS="-O3 -DWINE_NO_TRACE_MSGS"; else WFLAGS="-g -O3"; fi
 set -- --enable-archs=arm64ec,aarch64 --with-mingw=llvm-mingw --disable-tests --without-x --without-wayland \
   --without-oss --without-alsa --without-pulse --without-sane --without-usb --without-v4l2 --without-pcap \
   --without-capi --without-opencl --without-cups --with-freetype --with-gnutls --with-ffmpeg --without-gstreamer \
   CC=/usr/bin/clang CXX=/usr/bin/clang++ \
   PKG_CONFIG_LIBDIR="$DEPS/lib/pkgconfig" FREETYPE_CFLAGS="-I$DEPS/include/freetype2" \
   FREETYPE_LIBS="-L$DEPS/lib -lfreetype -Wl,-rpath,$DEPS/lib" GNUTLS_CFLAGS="-I$DEPS/include" \
-  GNUTLS_LIBS="-L$DEPS/lib -lgnutls" CFLAGS="-g -O3 -ffile-prefix-map=$SRC/= $UNIX_CPU" \
-  CROSSCFLAGS="-g -O3 -ffile-prefix-map=$SRC/=" aarch64_CFLAGS="-g -O3 -ffile-prefix-map=$SRC/= $PE_MARCH" \
-  arm64ec_CFLAGS="-g -O3 -ffile-prefix-map=$SRC/= $PE_MARCH"
+  GNUTLS_LIBS="-L$DEPS/lib -lgnutls" CFLAGS="$WFLAGS -ffile-prefix-map=$SRC/= $UNIX_CPU" \
+  CROSSCFLAGS="$WFLAGS -ffile-prefix-map=$SRC/=" aarch64_CFLAGS="$WFLAGS -ffile-prefix-map=$SRC/= $PE_MARCH" \
+  arm64ec_CFLAGS="$WFLAGS -ffile-prefix-map=$SRC/= $PE_MARCH"
 inputs=$(printf '%s\n' "$@" "$TOOLCHAIN_BIN"; cat "$DEPS/.complete")
 if [ -f "$SRC/wine-build/Makefile" ] && [ "$(cat "$SRC/wine-build/.configure-inputs" 2> /dev/null)" = "$inputs" ]; then
   echo "wine-arm64: Wine's configure is up to date" >&2
@@ -476,6 +477,9 @@ set -- "$SRC/dxmt-build" "$D" --cross-file "$D/build-arm64ec.txt" --cross-file "
   -Denable_nvapi=true -Denable_nvngx=true \
   -Dnative_llvm_path="$SRC/llvm-arm64" -Dwine_build_path="$SRC/wine-build" \
   -Dtranslator_key_file="$SRC/dxmt-translator-key"
+# The p profile: logging below warnings, stats and capture compiled out (fork patch perf_build). No LTO: -marm64x
+# refuses it (above).
+[ "${MACNEUTRON_PROFILE:-std}" != p ] || set -- "$@" -Dperf_build=true
 inputs=$(printf '%s\n' "$@"; cat "$D/build-arm64ec.txt" "$SRC/dxmt-xcrun.txt" "$SRC/dxmt-cpu.txt" \
   "$ROOT/wine-arm64/tools/xcrun-metal.sh")
 if [ ! -f "$SRC/dxmt-build/build.ninja" ] || [ "$(cat "$SRC/dxmt-build/.setup-inputs" 2> /dev/null)" != "$inputs" ]; then

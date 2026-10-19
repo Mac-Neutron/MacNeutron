@@ -16,6 +16,7 @@ BUILDER_KEY=${BUILDER_KEY:-$ROOT/build/eac-vm-work/eacbench/key}
 BUILDER_MAC=${BUILDER_MAC:-52:54:00:ea:c0:02}
 VMHOST=$ROOT/build/eac-vm-work/vmhost
 BUILDER_HOME=${BUILDER_HOME:-/home/bench}
+. "$ROOT/wine-arm64/lib.sh"  # P_FLAGS_DEFAULT: the p profile's flags reach builder-side builds resolved
 SRC=$ROOT/eac-vm/host/vmhost.swift
 
 ip() {  # the lease macOS's DHCP server gave our MAC (written without leading zeros)
@@ -56,7 +57,8 @@ stop)
 ssh)
   shift
   pre="export HOME=$BUILDER_HOME; mkdir -p \"\$HOME\" && cd \"\$HOME\" || exit 1;"
-  [ -z "${MACNEUTRON_PROFILE:-}" ] || pre="$pre export MACNEUTRON_PROFILE=$MACNEUTRON_PROFILE;"
+  [ -z "${MACNEUTRON_PROFILE:-}" ] \
+    || pre="$pre export MACNEUTRON_PROFILE=$MACNEUTRON_PROFILE MACNEUTRON_P_FLAGS='${MACNEUTRON_P_FLAGS-$P_FLAGS_DEFAULT}';"
   sshx "$pre" "$@" ;;
 sync)
   case $3 in /*) dest=$3 ;; *) dest=$BUILDER_HOME/$3 ;; esac

@@ -171,6 +171,22 @@ check_entitlement() {  # check_entitlement <binary> <entitlement>
     || { echo "release: $(basename "$1") isn't signed with $2" >&2; return 1; }
 }
 
+check_no_traces() {  # check_no_traces <file> <string>: a p build's binary without a string only a trace prints
+  if LC_ALL=C /usr/bin/grep -qaF "$2" "$1"; then
+    echo "release: $(basename "$1") still has the trace '$2' (a p build compiles traces out)" >&2
+    return 1
+  fi
+}
+check_no_debug_info() {  # check_no_debug_info <dir or file>...: no dSYM, and no Mach-O, ELF or PE with debug sections
+  d=$(find "$@" -name '*.dSYM' -print -prune | head -n 1)
+  [ -z "$d" ] || { echo "release: $d is debug information" >&2; return 1; }
+  # objdump -h lists a file's sections (__debug_* in Mach-O's __DWARF, .debug_* in ELF and PE); other files it refuses.
+  d=$(find "$@" -type f -size +0 | while IFS= read -r f; do
+    if objdump -h "$f" 2> /dev/null | LC_ALL=C /usr/bin/grep -qE '[ _.]debug_(info|line|abbrev)'; then echo "$f"; break; fi
+  done)
+  [ -z "$d" ] || { echo "release: $d has debug information" >&2; return 1; }
+}
+
 # --self-test (gate R1): each refusal on its own input in a temporary clone; never build.sh, the real trees or GitHub.
 self_test() {
   T=$(mktemp -d "${TMPDIR:-/tmp}/release-self-test.XXXXXX")
@@ -224,6 +240,19 @@ self_test() {
     exits "the arguments [$a] are refused" 2 "$usage" $a
   done
   exits "--profile with an unknown profile" 2 "$usage" --profile q 0.0.1
+  # The p build: traces compiled out, no debug information.
+  printf 'x %s y' "$WINE_TRACE_PROBE" > "$T/traced.so"
+  refused "a p binary with a trace string" "release: traced.so still has the trace '$WINE_TRACE_PROBE' (a p build compiles traces out)" \
+    check_no_traces "$T/traced.so" "$WINE_TRACE_PROBE"
+  printf 'x y' > "$T/untraced.so"
+  passes "a p binary without trace strings" check_no_traces "$T/untraced.so" "$WINE_TRACE_PROBE"
+  mkdir -p "$T/dbg" "$T/nodbg"
+  echo 'int f(void) { return 1; }' > "$T/f.c"
+  cc -g -c -o "$T/dbg/f.o" "$T/f.c" && cc -c -o "$T/nodbg/f.o" "$T/f.c"
+  refused "a p build with debug information" "release: $T/dbg/f.o has debug information" check_no_debug_info "$T/dbg"
+  passes "a p build without debug information" check_no_debug_info "$T/nodbg"
+  mkdir -p "$T/nodbg/x.dSYM"
+  refused "a p build with a dSYM" "release: $T/nodbg/x.dSYM is debug information" check_no_debug_info "$T/nodbg"
   exits "--profile p --check-version refuses an untagged version alone" 2 \
     "release: v99.0.0 isn't a tag (a p release builds an existing release's version)" --profile p --check-version 99.0.0
 
@@ -716,6 +745,16 @@ echo "PASS the VM's parts ($PARTS) and manifest"
 
 # 3-4. MacNeutron.app (R4), its notarization (R2) and its zip.
 build_app
+if [ $PROFILE = p ]; then  # the p build (spec 2026-10-19-macneutron-performance-build §8), before notarization
+  rm -rf "$OUT/p-check"; mkdir -p "$OUT/p-check"
+  tar -xf "$OUT/vm-parts/wine.tar" -C "$OUT/p-check" || die "can't unpack the parts' wine.tar"
+  check_no_traces "$OUT/wine.app/Contents/Resources/lib/wine/aarch64-unix/ntdll.so" "$WINE_TRACE_PROBE" || exit 1
+  check_no_traces "$OUT/p-check/lib/wine/x86_64-unix/ntdll.so" "$WINE_TRACE_PROBE" || exit 1
+  check_no_traces "$A/Contents/Helpers/vm/dxmt/d3d12.dylib" "$DXMT_DEBUG_PROBE" || exit 1
+  check_no_debug_info "$A" "$OUT/p-check" || exit 1
+  rm -rf "$OUT/p-check"
+  echo "PASS the p build: traces compiled out, no debug information"
+fi
 if [ $mode = release ]; then
   notarize_and_staple "$A" "$OUT/notary-app"
   accepted "$A" || die "R2: Gatekeeper rejects $A: $(spctl -a -vvv -t exec "$A" 2>&1 | head -n 2 | tr '\n' ' ')"

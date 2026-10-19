@@ -2,6 +2,12 @@
 set -eu
 die() { echo "release: $*" >&2; exit 1; }
 
+# The p build's compile-out probes (spec 2026-10-19-macneutron-performance-build §8): a format string only a TRACE in
+# Wine's dlls/ntdll/unix/virtual.c uses (in both ntdll.so builds today, gone from a p build's).
+WINE_TRACE_PROBE='Found free area is already mapped, start %p.'
+# A string only a DEBUG in DXMT's d3d12_device.cpp logs (in native d3d12.dylib today, gone from a p build's).
+DXMT_DEBUG_PROBE='GetResourceAllocationInfo: invalid texture descriptor'
+
 # syspolicy_check <mode> <bundle>, its report in <work-dir>/syspolicy-<mode>.txt. Fails on any finding that isn't a
 # warning, or on a failure with no findings (a tool error). Warnings are counted, not fatal: wine.app keeps its
 # Mach-Os under Resources/ (Wine's layout), which the check flags as warnings; Apple's verdict decides.

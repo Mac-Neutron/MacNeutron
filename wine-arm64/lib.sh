@@ -97,6 +97,15 @@ write_source() {  # write_source <out> <mac>
 
 # The FreeType, gnutls, nettle, GMP and FFmpeg tarballs' pins (<NAME>_URL, <NAME>_SHA256): build.sh's deps input and
 # SOURCE's.
+# The p profile (spec 2026-10-19-macneutron-performance-build §5): the components built with its optimisation flags,
+# all by default; MACNEUTRON_P_FLAGS names fewer for the benches (empty: none). Compile-outs apply to every p build.
+P_FLAGS_DEFAULT="wine fex host krun dxmt"
+p_flag() {  # p_flag <component>: true when the p profile builds <component> with its optimisation flags
+  [ "${MACNEUTRON_PROFILE:-std}" = p ] || return 1
+  case " ${MACNEUTRON_P_FLAGS-$P_FLAGS_DEFAULT} " in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
 deps_pins() { LC_ALL=C /usr/bin/grep -E '^(FREETYPE|GNUTLS|NETTLE|GMP|FFMPEG)_' "$ROOT/wine-arm64/deps.pins"; }
 
 # A release ships no build path (arm64 release Ruling 20): the files under <dir> that contain, as bytes, the repository's
