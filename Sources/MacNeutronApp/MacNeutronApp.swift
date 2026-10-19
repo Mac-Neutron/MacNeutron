@@ -4,7 +4,7 @@ import SwiftUI
 
 @main
 struct MacNeutronApp: App {
-    @State private var model = AppModel()
+    @State private var model = AppModel(vmRoot: AppModel.bundledVMTools != nil ? MicroVM.standardRoot : nil)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {

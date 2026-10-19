@@ -66,8 +66,8 @@ final class AppModel {
     private let appVersion: String
     /// MacNeutron.app's `Contents/Helpers/vm`: the microVM's host tools (`VMToolsInstaller`); nil in dev runs and tests.
     let vmTools: URL?
-    /// The VM folder (`MicroVM.standardRoot`), only where the app ships the VM's tools: a dev run or a test never names
-    /// the real one unless it says so.
+    /// The VM folder: nil unless the caller names it (the app passes `MicroVM.standardRoot` where it ships the VM's
+    /// tools), so a test never reaches the real one.
     let vmRoot: URL?
     private let vmInstaller: @Sendable (URL, URL) throws -> VMToolsInstallOutcome
     /// A VM ran from the folder at the last tools install: the poll retries it.
@@ -161,7 +161,7 @@ final class AppModel {
         self.valveClient = valveClient ?? ValveClient(cache: layout.valveCache)
         self.appVersion = appVersion
         self.vmTools = vmTools
-        self.vmRoot = vmRoot ?? (vmTools != nil ? MicroVM.standardRoot : nil)
+        self.vmRoot = vmRoot
         self.vmRetryInterval = vmRetryInterval
         self.vmInstaller = vmInstaller
         self.vmManifest = vmManifest

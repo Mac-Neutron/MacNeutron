@@ -394,6 +394,18 @@ private func makeVMModel(vmRoot: URL, layout: ToolLayout? = nil, cdn: FakeValveC
     return model
 }
 
+@MainActor @Test func theVMFolderIsNeverTheRealOneUnlessNamed() async throws {
+    // Deferred, so that nothing is written even where this fails.
+    let (mode, _) = try makeMode()
+    let model = AppModel(steam: mode.steam, layout: try makeToolLayout(), mode: mode, store: GameSettingsStore(directory: try makeTempDir()),
+                         loginItem: FakeLoginItem(statusAfterRegister: .enabled).item,
+                         wineAppSource: try makeToolLayout().wineApp, installer: ScriptedInstaller(.unchanged).install,
+                         identity: { _ in testIdentity }, valveClient: ValveClient(cache: try makeTempDir()),
+                         vmTools: try makeVMTools(), vmInstaller: { _, vm in .deferred(vm.path) })
+    await model.installTask?.value
+    #expect(model.vmRoot == nil)
+}
+
 @MainActor @Test func theVMToolsFollowTheRuntimeInstall() async throws {
     let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
     let model = try await makeVMModel(vmRoot: vmRoot)
