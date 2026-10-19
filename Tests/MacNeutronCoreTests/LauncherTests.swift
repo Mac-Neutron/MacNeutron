@@ -483,6 +483,20 @@ private func i386Exe(named name: String) throws -> String {
     #expect(f.runner.calls.last { $0.arguments.first == game }?.environment["DXMT_DXIL_DUMP"] == "/elsewhere")
 }
 
+@Test func aPerformanceRuntimeIgnoresPerf() throws {
+    // X.Y.Zp has no DXMT stats or capture to turn on (compiled out): MACNEUTRON_PERF=1 asks nothing of it.
+    let f = try makeFixture()
+    try setRuntimeVersion("0.7.1p", of: f.launcher.layout)
+    let game = "/Steam/steamapps/common/Some Game/bin/Game.exe"
+    var env = f.env
+    env["MACNEUTRON_VM"] = "0"
+    env["MACNEUTRON_PERF"] = "1"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    let run = try #require(f.runner.calls.last { $0.arguments.first == game })
+    #expect(run.environment["DXMT_STATS"] == nil)
+    #expect(run.environment["DXMT_DXIL_DUMP"] == nil)
+}
+
 @Test func perfClearsTheLastRunsFiles() throws {
     // Left on, MACNEUTRON_PERF=1 would pile up stats.txt and the dump (every shader and pipeline) run after run.
     let f = try makeFixture()

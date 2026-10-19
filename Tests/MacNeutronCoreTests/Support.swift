@@ -90,6 +90,13 @@ func makeToolLayout() throws -> ToolLayout {
     return layout
 }
 
+/// The runtime's version as wine.app's Info.plist gives it: "0.7.1p" makes a performance build (X.Y.Zp).
+func setRuntimeVersion(_ version: String, of layout: ToolLayout) throws {
+    let plist = ["CFBundleExecutable": "wine", "CFBundleShortVersionString": version]
+    try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        .write(to: layout.wineApp.appending(path: "Contents/Info.plist"))
+}
+
 /// What launcher, prefix and precache tests use: no codesign, a fixed identity.
 let testIdentity = "0123456789abcdef0123456789abcdef01234567"
 let testPreflight = Preflight(systemSupported: { true }, identity: { _ in testIdentity })

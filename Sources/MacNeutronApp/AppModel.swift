@@ -394,23 +394,31 @@ final class AppModel {
         process.standardError = err
         // Set before it runs: the end of a process that exits at once isn't missed.
         let exited = AsyncStream<Void> { done in process.terminationHandler = { _ in done.finish() } }
-        try? FileManager.default.createDirectory(at: vmSetupLog.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if !FileManager.default.fileExists(atPath: vmSetupLog.path(percentEncoded: false)) {
-            FileManager.default.createFile(atPath: vmSetupLog.path(percentEncoded: false), contents: nil)
+        // A performance build (X.Y.Zp) keeps the setup's output for a failure only.
+        let quiet = ToolLayout.isPerformanceBuild(version: appVersion)
+        var held = Data()
+        func openLog() -> FileHandle? {
+            try? FileManager.default.createDirectory(at: vmSetupLog.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if !FileManager.default.fileExists(atPath: vmSetupLog.path(percentEncoded: false)) {
+                FileManager.default.createFile(atPath: vmSetupLog.path(percentEncoded: false), contents: nil)
+            }
+            let log = try? FileHandle(forWritingTo: vmSetupLog)
+            _ = try? log?.seekToEnd()
+            return log
         }
-        let log = try? FileHandle(forWritingTo: vmSetupLog)
-        _ = try? log?.seekToEnd()
+        let log = quiet ? nil : openLog()
+        func record(_ data: Data) { if quiet { held.append(data) } else { try? log?.write(contentsOf: data) } }
         var status: Int32 = -1, lastError = ""
         do {
             try process.run()
             vmProcess = process
             async let errors = Self.readAll(err.fileHandleForReading)
             for try await line in out.fileHandleForReading.bytes.lines {  // whole lines, however they're written
-                try? log?.write(contentsOf: Data((line + "\n").utf8))
+                record(Data((line + "\n").utf8))
                 if let notice = Self.notice(forProgressLine: line) { vmNotice = notice }
             }
             let stderr = await errors
-            try? log?.write(contentsOf: stderr)
+            record(stderr)
             lastError = String(decoding: stderr, as: UTF8.self).split(separator: "\n").last.map(String.init) ?? ""
             for await _ in exited {}
             status = process.terminationStatus
@@ -418,6 +426,10 @@ final class AppModel {
             lastError = "\(error)"
         }
         try? log?.close()
+        if quiet, status != 0, status != 75, let failed = openLog() {
+            try? failed.write(contentsOf: held)
+            try? failed.close()
+        }
         vmProcess = nil
         vmSetupRunning = false
         switch status {

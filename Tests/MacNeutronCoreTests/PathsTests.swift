@@ -75,3 +75,8 @@ import Testing
     #expect(ToolLayout.runtimeLabel(version: "test", identity: testIdentity) == "test (0123456789ab)")
     #expect(ToolLayout.runtimeLabel(version: nil, identity: nil) == "unknown (unsigned)")
 }
+
+@Test func aPerformanceRuntimeIsLabelled() {
+    #expect(ToolLayout.runtimeLabel(version: "0.7.1p", identity: "0123456789abcdef") == "0.7.1p (performance build) (0123456789ab)")
+    #expect(ToolLayout.runtimeLabel(version: "0.7.1", identity: "0123456789abcdef") == "0.7.1 (0123456789ab)")
+}

@@ -55,3 +55,15 @@ import Testing
     let lines = try String(contentsOf: log.launcherLog, encoding: .utf8).split(separator: "\n")
     #expect(lines.count == 400)
 }
+
+@Test func aQuietLogWritesOnlySummaries() throws {
+    // A performance build (X.Y.Zp) launched without MACNEUTRON_LOG: one line a launch, its summary.
+    let log = LauncherLog(directory: try makeTempDir().appending(path: "Logs"))
+    log.setQuiet(true)
+    log.append("note: Steam client folder /x")
+    #expect(!FileManager.default.fileExists(atPath: log.launcherLog.path(percentEncoded: false)))
+    log.summary("verb=run appid=1 exit=0")
+    let lines = try String(contentsOf: log.launcherLog, encoding: .utf8).split(separator: "\n")
+    #expect(lines.count == 1)
+    #expect(lines[0].hasSuffix(" verb=run appid=1 exit=0"))
+}

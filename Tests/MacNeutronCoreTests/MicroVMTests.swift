@@ -32,15 +32,17 @@ final class Scripts: @unchecked Sendable {
 }
 
 private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts: Scripts = Scripts(),
-                           display: (width: Int, height: Int)? = nil) throws -> VMFixture {
+                           display: (width: Int, height: Int)? = nil, version: String? = nil) throws -> VMFixture {
     let vm = try makeVMFolder()
+    let layout = try makeToolLayout()
+    if let version { try setRuntimeVersion(version, of: layout) }
     let runner = FakeRunner { call in
         guard call.tool == "run-guest.sh" else { return 0 }
         scripts.add(call.arguments.first)
         return status
     }
     let notifier = RecordingNotifier()
-    let launcher = Launcher(layout: try makeToolLayout(), runner: runner,
+    let launcher = Launcher(layout: layout, runner: runner,
                             log: LauncherLog(directory: try makeTempDir().appending(path: "Logs")),
                             notifier: notifier, preflight: testPreflight,
                             settings: GameSettingsStore(directory: try makeTempDir().appending(path: "games")),
@@ -327,4 +329,52 @@ final class Status: @unchecked Sendable {
     #expect(launcher.stopVM())
     while result.status == nil, Date().timeIntervalSince(start) < 20 { Thread.sleep(forTimeInterval: 0.05) }
     #expect(result.status == 128 + SIGTERM)
+}
+
+@Test func aPerformanceRuntimeLaunchesQuietly() throws {
+    // X.Y.Zp without MACNEUTRON_LOG: no guest console, DXMT logs nothing, one launcher line, no game log.
+    let f = try makeVMFixture(version: "0.7.1p")
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    let call = try #require(f.runner.calls.first { $0.tool == "run-guest.sh" })
+    #expect(call.arguments.suffix(2) == ["--console", "/dev/null"])
+    #expect(call.environment["DXMT_LOG_LEVEL"] == "none")
+    let lines = f.launcherLog.split(separator: "\n")
+    #expect(lines.count == 1)
+    #expect(lines.first?.contains(" verb=waitforexitandrun appid=2437170 backend=vm") == true)
+    #expect(!FileManager.default.fileExists(atPath: f.launcher.log.directory.appending(path: "steam-2437170.log").path(percentEncoded: false)))
+}
+
+@Test func aPerformanceRuntimeLogsWhenAsked() throws {
+    let f = try makeVMFixture(version: "0.7.1p")
+    var env = f.env
+    env["MACNEUTRON_LOG"] = "1"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    let call = try #require(f.runner.calls.first { $0.tool == "run-guest.sh" })
+    #expect(!call.arguments.contains("--console"))
+    #expect(call.environment["DXMT_LOG_LEVEL"] == nil)
+    #expect(call.output == f.launcher.log.directory.appending(path: "steam-2437170.log"))  // the VM's output is the game log
+}
+
+@Test func aPerformanceScriptNamesItsProfile() throws {
+    // The guest's run-game.sh keeps quiet for a p runtime; DXMT_STATS and the guest profiler aren't passed.
+    let scripts = Scripts()
+    let f = try makeVMFixture(scripts: scripts, version: "0.7.1p")
+    var env = f.env
+    env["DXMT_STATS"] = "1"
+    env["MACNEUTRON_PERF"] = "1"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    let script = try #require(scripts.all.first)
+    #expect(script.contains("MACNEUTRON_PROFILE='p'\n"))
+    #expect(script.contains("DXMT_LOG_LEVEL='none'\n"))
+    #expect(!script.contains("DXMT_STATS="))
+    #expect(!script.contains("MACNEUTRON_VM_PROFILE="))
+}
+
+@Test func aNormalRuntimeKeepsItsConsole() throws {
+    let scripts = Scripts()
+    let f = try makeVMFixture(scripts: scripts)
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    let call = try #require(f.runner.calls.first { $0.tool == "run-guest.sh" })
+    #expect(!call.arguments.contains("--console"))
+    #expect(!(scripts.all.first ?? "").contains("MACNEUTRON_PROFILE="))
 }

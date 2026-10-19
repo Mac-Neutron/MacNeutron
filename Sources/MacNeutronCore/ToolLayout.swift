@@ -77,9 +77,16 @@ public struct ToolLayout: Equatable, Sendable {
     /// `wine.app`'s CDHash, or nil when it is missing or unsigned.
     public var identity: String? { CodeIdentity.of(wineApp) }
 
-    /// `<version> (<identity, 12 hex digits>)`, for launcher.log and the menu.
+    /// A performance build's runtime (X.Y.Zp, spec 2026-10-19-macneutron-performance-build): traces compiled out, and
+    /// quiet unless MACNEUTRON_LOG is set.
+    public var isPerformanceBuild: Bool { Self.isPerformanceBuild(version: runtimeVersion) }
+    public static func isPerformanceBuild(version: String?) -> Bool { version?.hasSuffix("p") == true }
+
+    /// `<version> (<identity, 12 hex digits>)`, for launcher.log and the menu; `<version> (performance build) (...)` for
+    /// X.Y.Zp.
     public static func runtimeLabel(version: String?, identity: String?) -> String {
-        "\(version ?? "unknown") (\(identity.map { String($0.prefix(12)) } ?? "unsigned"))"
+        let build = isPerformanceBuild(version: version) ? " (performance build)" : ""
+        return "\(version ?? "unknown")\(build) (\(identity.map { String($0.prefix(12)) } ?? "unsigned"))"
     }
 
     /// What the Rosetta-era runtime left in the tool folder; the install removes them.

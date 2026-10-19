@@ -454,14 +454,14 @@ private func calls(_ file: URL) -> [String] {
 @MainActor
 private func makeSetupModel(helper: URL, vmRoot: URL, manifest: URL?, awaitSetup: Bool = true,
                             notifications: NotificationCenter = NotificationCenter(), retryInterval: TimeInterval = 0,
-                            log: URL? = nil) async throws -> AppModel {
+                            log: URL? = nil, appVersion: String = "1.0") async throws -> AppModel {
     let (mode, _) = try makeMode()
     let model = AppModel(steam: mode.steam, layout: try makeToolLayout(), mode: mode,
                          store: GameSettingsStore(directory: try makeTempDir()),
                          loginItem: FakeLoginItem(statusAfterRegister: .enabled).item,
                          wineAppSource: try makeToolLayout().wineApp, installer: ScriptedInstaller(.unchanged).install,
                          identity: { _ in testIdentity }, valveClient: ValveClient(cache: try makeTempDir()),
-                         vmTools: try makeVMTools(), vmRoot: vmRoot,
+                         appVersion: appVersion, vmTools: try makeVMTools(), vmRoot: vmRoot,
                          vmInstaller: { try VMToolsInstaller.install(from: $0, into: $1, runningExecutables: { [] }) },
                          vmManifest: manifest, vmHelper: helper,
                          vmSetupLog: try log ?? makeTempDir().appending(path: "vm-setup.log"),
@@ -639,4 +639,17 @@ private final class Count: @unchecked Sendable {
     private var n = 0
     var value: Int { lock.withLock { n } }
     func add() { lock.withLock { n += 1 } }
+}
+
+@MainActor @Test func aPerformanceBuildKeepsTheSetupLogForFailures() async throws {
+    // X.Y.Zp: vm-setup.log is written only when a setup fails (not 0, not 75).
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    let log = try makeTempDir().appending(path: "vm-setup.log")
+    let ok = try fakeHelper("echo 'progress assemble 1 5'\nexit 0")
+    _ = try await makeSetupModel(helper: ok.helper, vmRoot: vmRoot, manifest: manifest, log: log, appVersion: "0.7.1p")
+    #expect(!FileManager.default.fileExists(atPath: log.path(percentEncoded: false)))
+    let other = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    let bad = try fakeHelper("echo 'progress assemble 1 5'\necho 'no disk space' >&2\nexit 1")
+    _ = try await makeSetupModel(helper: bad.helper, vmRoot: other, manifest: manifest, log: log, appVersion: "0.7.1p")
+    #expect(try String(contentsOf: log, encoding: .utf8).contains("no disk space"))
 }

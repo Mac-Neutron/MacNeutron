@@ -84,6 +84,8 @@ public struct Launcher: Sendable {
             environment = GameSettings().environment.merging(environment) { _, launchOption in launchOption }
         }
         let logging = environment["MACNEUTRON_LOG"] == "1" || environment["MACNEUTRON_LOG"] == "2"
+        // A performance build (X.Y.Zp) keeps one launcher.log line a launch unless MACNEUTRON_LOG asks for more.
+        log.setQuiet(layout.isPerformanceBuild && !logging)
         let gameLog = logging ? log.gameLog(appID: context.appID) : nil
         let identity: String
         do {
@@ -116,7 +118,8 @@ public struct Launcher: Sendable {
         // signature and pipeline is saved there too (a little CPU, and files that build up in the folder): the
         // folder is emptied at each launch, unless the user named another. When their settings or the backend keep
         // stats.txt out of the folder, the log says so (the record's fps would come out empty).
-        if environment["MACNEUTRON_PERF"] == "1" {
+        // A performance build has no DXMT stats or capture to turn on (compiled out).
+        if environment["MACNEUTRON_PERF"] == "1", !layout.isPerformanceBuild {
             var why: String?
             if backend != .dxmt {
                 why = "needs the DXMT backend"
@@ -195,7 +198,7 @@ public struct Launcher: Sendable {
             var line = "verb=\(request.verb.rawValue) appid=\(context.appID) backend=\(backend.rawValue)"
                 + " runtime=\(ToolLayout.runtimeLabel(version: layout.runtimeVersion, identity: identity)) exit=\(status)"
             if let note { line += " note=\(note)" }
-            log.append(line)
+            log.summary(line)
             return status
         } catch {
             return fail("\(error)", argv: argv, notify: true, gameLog: gameLog)
@@ -218,12 +221,16 @@ public struct Launcher: Sendable {
         // MACNEUTRON_PERF=1: the guest profiler (run-game.sh); frames are counted on the host (MN_PRESENT_STATS below),
         // where DXMT_STATS's timing would cost the guest a clock read under FEX for every D3D12 call.
         let perf = environment["MACNEUTRON_PERF"] == "1"
-        if perf { environment["MACNEUTRON_VM_PROFILE"] = "1" }
+        if perf, !layout.isPerformanceBuild { environment["MACNEUTRON_VM_PROFILE"] = "1" }
+        // A performance build without MACNEUTRON_LOG: no guest console, and DXMT (native and the guest's) logs nothing.
+        let quiet = layout.isPerformanceBuild && gameLog == nil
+        if quiet, environment["DXMT_LOG_LEVEL"] == nil { environment["DXMT_LOG_LEVEL"] = "none" }
         vmRun.begin()
         defer { vmRun.end() }
         do {
             let script = try vm.script(verb: request.verb, appID: context.appID, guest: guest,
-                                       arguments: request.arguments, environment: environment)
+                                       arguments: request.arguments, environment: environment,
+                                       performance: layout.isPerformanceBuild)
             let file = FileManager.default.temporaryDirectory
                 .appending(path: "macneutron-vm-\(context.appID)-\(UUID().uuidString).sh")
             try script.write(to: file, atomically: true, encoding: .utf8)
@@ -275,9 +282,10 @@ public struct Launcher: Sendable {
             }
             env["MN_RUN_TIMEOUT"] = env["MN_RUN_TIMEOUT"] ?? "86400"
             let status = try runner.run(vm.runGuest, [file.path(percentEncoded: false), "--steam-appid", context.appID,
-                                                      "--ram-mib", "16384", "--steam-map", "\(library)=/mnt/games"],
+                                                      "--ram-mib", "16384", "--steam-map", "\(library)=/mnt/games"]
+                                                     + (quiet ? ["--console", "/dev/null"] : []),
                                         environment: env, output: gameLog, started: vmRun.started)
-            log.append("verb=\(request.verb.rawValue) appid=\(context.appID) backend=vm vm=\(vm.root.path(percentEncoded: false))"
+            log.summary("verb=\(request.verb.rawValue) appid=\(context.appID) backend=vm vm=\(vm.root.path(percentEncoded: false))"
                        + " exit=\(status)")
             // macneutron-vm's 7: the game's TPM didn't start, so the guest never ran (run-guest.sh removed the last
             // run.status first).
@@ -409,7 +417,7 @@ public struct Launcher: Sendable {
     }
 
     private func fail(_ message: String, argv: [String], notify: Bool, gameLog: URL? = nil) -> Int32 {
-        log.append("error: \(message) argv=\(argv)")
+        log.summary("error: \(message) argv=\(argv)")
         if let gameLog { append("macneutron: \(message)\n", to: gameLog) }
         FileHandle.standardError.write(Data("macneutron: \(message)\n".utf8))
         if notify { notifier.post(title: "MacNeutron", message: message) }

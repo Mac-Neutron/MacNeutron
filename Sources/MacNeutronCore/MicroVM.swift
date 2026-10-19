@@ -61,7 +61,9 @@ public struct MicroVM: Sendable {
 
     /// The launch options the guest reads (run-game.sh), as the launcher's own environment has them.
     static let passed = ["MACNEUTRON_DLSS", "MACNEUTRON_XESS", "DXMT_ENABLE_NVEXT", "MACNEUTRON_LOG", "MN_SCREEN",
-                         "MACNEUTRON_VM_PROFILE", "DXMT_STATS", "MACNEUTRON_VM_D3D", "MACNEUTRON_VM_D3D_TRACE"]
+                         "MACNEUTRON_VM_PROFILE", "DXMT_STATS", "MACNEUTRON_VM_D3D", "MACNEUTRON_VM_D3D_TRACE", "DXMT_LOG_LEVEL"]
+    /// What a performance build's guest doesn't get: its stats and profiler are compiled out or off.
+    static let notPassedToPerformance: Set = ["MACNEUTRON_VM_PROFILE", "DXMT_STATS"]
 
     /// The main display's size in pixels (its current mode's, so a Retina display's backing pixels), or nil.
     public static func mainDisplay() -> (width: Int, height: Int)? {
@@ -79,15 +81,19 @@ public struct MicroVM: Sendable {
         }
     }
 
-    /// The guest's script for one launch: its facts as shell assignments, then run-game.sh.
+    /// The guest's script for one launch: its facts as shell assignments, then run-game.sh. A performance build's
+    /// (X.Y.Zp) says MACNEUTRON_PROFILE=p, which keeps run-game.sh quiet unless MACNEUTRON_LOG is set.
     func script(verb: Verb, appID: String, guest: String, arguments: [String],
-                environment: [String: String]) throws -> String {
+                environment: [String: String], performance: Bool = false) throws -> String {
         let folder = (guest as NSString).deletingLastPathComponent
         var lines = ["VERB=\(Self.quoted(verb.rawValue))", "APPID=\(Self.quoted(appID))",
                      "GAME_DIR=\(Self.quoted(folder))",
                      "EXE=\(Self.quoted("Z:" + guest.replacingOccurrences(of: "/", with: "\\")))",
                      (["set --"] + arguments.map(Self.quoted)).joined(separator: " ")]
-        for key in Self.passed { if let value = environment[key] { lines.append("\(key)=\(Self.quoted(value))") } }
+        if performance { lines.append("MACNEUTRON_PROFILE=\(Self.quoted("p"))") }
+        for key in Self.passed where !(performance && Self.notPassedToPerformance.contains(key)) {
+            if let value = environment[key] { lines.append("\(key)=\(Self.quoted(value))") }
+        }
         return lines.joined(separator: "\n") + "\n" + (try String(contentsOf: gameScript, encoding: .utf8))
     }
 }

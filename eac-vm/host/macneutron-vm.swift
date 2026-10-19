@@ -169,7 +169,8 @@ if !wmLoaded {
 mn_d3d_set_dir(URL(fileURLWithPath: metalHost).deletingLastPathComponent().appendingPathComponent("dxmt").path)
 // Its logs in the run's traces, not the folder macneutron-vm runs from (natively DXMT's program name is empty: _dxgi.log).
 try? FileManager.default.createDirectory(atPath: share + "/traces", withIntermediateDirectories: true)
-setenv("DXMT_LOG_PATH", share + "/traces", 0)
+// DXMT_LOG_LEVEL=none (a performance build without MACNEUTRON_LOG, the launcher's): no log path, so no log files.
+if ProcessInfo.processInfo.environment["DXMT_LOG_LEVEL"] != "none" { setenv("DXMT_LOG_PATH", share + "/traces", 0) }
 // MN_D3D_STATE (the launcher's, forwarded: M3 Task 8): native DXMT's shader cache and pipeline recordings in the game's
 // VM state folder, unless the game's launch options say otherwise; MACNEUTRON_PRECACHE=0 records nothing.
 if let state = ProcessInfo.processInfo.environment["MN_D3D_STATE"] {

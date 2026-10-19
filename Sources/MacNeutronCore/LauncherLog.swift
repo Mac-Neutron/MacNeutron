@@ -5,6 +5,7 @@ public struct LauncherLog: Sendable {
     public static let rotateBytes = 1_048_576
     public static let gameLogRotateBytes = 50 * 1_048_576
     public let directory: URL
+    private let quiet = QuietFlag()
 
     public init(directory: URL) { self.directory = directory }
 
@@ -33,11 +34,21 @@ public struct LauncherLog: Sendable {
         return log
     }
 
+    /// A performance build (X.Y.Zp) launched without MACNEUTRON_LOG keeps one line a launch: its summary.
+    public func setQuiet(_ on: Bool) { quiet.set(on) }
+
+    /// The launch's summary (or its error): written even when quiet.
+    public func summary(_ line: String) { writeLine(line) }
+
     /// Appends a timestamped line, rotating to `launcher.log.1` past `rotateBytes`.
     /// Never throws: a logging problem must not stop a game from launching.
     /// Launches overlap (Steam's setup run and the game), so rotation and the write happen under a lock beside the log,
     /// and the line goes out in one O_APPEND write.
     public func append(_ line: String) {
+        if !quiet.isOn { writeLine(line) }
+    }
+
+    private func writeLine(_ line: String) {
         let fm = FileManager.default
         try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
         let path = launcherLog.path(percentEncoded: false)
@@ -54,4 +65,12 @@ public struct LauncherLog: Sendable {
             data.withUnsafeBytes { _ = write(fd, $0.baseAddress, $0.count) }
         }
     }
+}
+
+/// LauncherLog's quiet switch, shared by its copies (a Launcher's log is a let; the switch follows each launch).
+final class QuietFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var on = false
+    var isOn: Bool { lock.withLock { on } }
+    func set(_ value: Bool) { lock.withLock { on = value } }
 }
