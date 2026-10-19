@@ -15,8 +15,9 @@ plus db0153de (ARM64 string routines in msvcrt). The x86-64 build has none of th
 wineserver uses its plain server-side sync. 97cb9aea (makedep) only matters with a hybrid arch.
 
 **Active, and the same as on macOS.** e3aaf5fd (win32u text metrics with no font), 8699ded1 (the Windows 2003 SP1+
-critical-section LockCount encoding) 26130284 (no wineboot wait window while a prefix is updated) and 42321e57 (WINEDEBUG read before
-init_startup_info drops argv[0]: a child crashed without a trace's lazy read) are platform-neutral fixes. 3b389503 builds lsteamclient; the guest replaces its Unix half with the forwarder
+critical-section LockCount encoding), 26130284 (no wineboot wait window while a prefix is updated) and 42321e57
+(WINEDEBUG read before init_startup_info drops argv[0]: a child crashed without a trace's lazy read) are
+platform-neutral fixes. 3b389503 builds lsteamclient; the guest replaces its Unix half with the forwarder
 (`eac-vm/steam-forward`, plan 3b Task 5). d8b1c118 (a genuine steamclient64.dll's exports jump to lsteamclient.dll) is
 what SteamStub games need here too.
 
