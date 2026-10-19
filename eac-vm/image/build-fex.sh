@@ -14,7 +14,7 @@ esac
 # And its PGO (guest.profdata, with the guest Wine's; builder.sh's MACNEUTRON_PGO_GUEST): continuous mode needs the
 # counters relocated at run time on Linux.
 case ${MACNEUTRON_PGO_GUEST:-none} in
-  generate) F="$F -fprofile-generate -mllvm -runtime-counter-relocation"
+  generate) F="$F -fprofile-generate -mllvm -disable-vp=true -mllvm -runtime-counter-relocation"
             set -- -DCMAKE_EXE_LINKER_FLAGS=-fprofile-generate -DCMAKE_SHARED_LINKER_FLAGS=-fprofile-generate ;;
   use) F="$F -fprofile-use=$HOME/pgo/guest.profdata -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled" ;;
 esac

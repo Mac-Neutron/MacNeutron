@@ -40,7 +40,7 @@ wine)
     # The Unix side's PGO (guest.profdata, with guest FEX's; builder.sh's MACNEUTRON_PGO_GUEST). Not the PE side:
     # its DLLs have no C runtime to link LLVM's profile runtime into.
     case ${MACNEUTRON_PGO_GUEST:-none} in
-      generate) U="-fprofile-generate -mllvm -runtime-counter-relocation" PL=-fprofile-generate ;;
+      generate) U="-fprofile-generate -mllvm -disable-vp=true -mllvm -runtime-counter-relocation" PL=-fprofile-generate ;;
       use) U="-fprofile-use=$HOME/pgo/guest.profdata -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled" PL= ;;
       *) U= PL= ;;
     esac
