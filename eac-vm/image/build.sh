@@ -117,6 +117,9 @@ for b in FEX FEXServer FEXBash FEXGetConfig FEXpidof; do sudo install -m755 "$FE
   sudo install -m644 "$FEX_BIN/.mn-source" "$WORK/root/usr/share/fex-emu/.mn-source"; }
 sudo rm -f "$WORK/root/etc/resolv.conf"  # ours replaces whatever the packages left, a symlink included
 sudo cp -R "$HERE/rootfs/." "$WORK/root/"
+# The p profile masks what a VM running one game doesn't need, timers and pollers above all (rootfs-p: links to
+# /dev/null; spec 2026-10-19-macneutron-performance-build §6).
+[ "${MACNEUTRON_PROFILE:-std}" != p ] || sudo cp -R "$HERE/rootfs-p/." "$WORK/root/"
 sudo chown -R root:root "$WORK/root/etc/fstab" "$WORK/root/etc/asound.conf" "$WORK/root/etc/resolv.conf" "$WORK/root/usr/lib/sysusers.d/mn.conf" "$WORK/root/etc/systemd/system" "$WORK/root/usr/libexec/mn-runner" \
   "$WORK/root/usr/libexec/mn-tso-check" "$WORK/root/usr/share/fex-emu/Config.json"
 sudo mkdir -p "$WORK/root/usr/share/fex-emu/RootFS/fedora" "$WORK/root/mnt/share" "$WORK/root/mnt/games" "$WORK/root/opt/mn-wine"
