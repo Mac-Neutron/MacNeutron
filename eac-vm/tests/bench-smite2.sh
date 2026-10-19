@@ -44,11 +44,11 @@ before=$(window)
 MN_SHARE=$SHARE sh "$ROOT/eac-vm/tests/perf-compare.sh" vm 2437170 "$SECS" > "$T/perf.txt" 2>&1 \
   || { cat "$T/perf.txt" >&2; exit 1; }
 after=$(window)
-# MN_BENCH_GPU_TRACE=<seconds>: a Metal System Trace of the whole Mac after the window (gpu-trace.py: the VM's GPU
-# time a frame, the GPU's performance states).
+# MN_BENCH_GPU_TRACE=<seconds>: a Metal System Trace of the whole Mac after the window (dxmt/tools/gpu-trace.py: the
+# game's GPU time and idle time a frame, by channel and by where it falls; the trace is kept).
 if [ -n "${MN_BENCH_GPU_TRACE:-}" ]; then
   xcrun xctrace record --template 'Metal System Trace' --all-processes --time-limit "${MN_BENCH_GPU_TRACE}s" \
-    --output "$T/gpu.trace" > /dev/null 2>&1 && python3 -I "$ROOT/eac-vm/tests/gpu-trace.py" "$T/gpu.trace" > "$T/gpu.txt" 2>&1
+    --output "$T/gpu.trace" > /dev/null 2>&1 && python3 -I "$ROOT/dxmt/tools/gpu-trace.py" "$T/gpu.trace" > "$T/gpu.txt" 2>&1
 fi
 REC=$(sed -n 's/^perf-compare: wrote //p' "$T/perf.txt")
 OUT=$ROOT/build/perf/bench-$LABEL-$(date +%Y%m%d-%H%M%S).json
