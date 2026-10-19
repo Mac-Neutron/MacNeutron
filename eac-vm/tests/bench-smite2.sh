@@ -15,7 +15,18 @@ LABEL=${1:?usage: bench-smite2.sh <label> [seconds]} SECS=${2:-60}
 pgrep -x steam_osx > /dev/null || { echo "bench-smite2: Mac Steam isn't running" >&2; exit 1; }
 ! pgrep -x macneutron-vm > /dev/null || { echo "bench-smite2: a VM is running (a game being played?)" >&2; exit 1; }
 T=$(mktemp -d "${TMPDIR:-/tmp}/bench-smite2.XXXXXX")
-trap 'rm -rf "$T"' EXIT
+# An early exit (no lobby, perf-compare failed, ^C) ends the VM it started, not only the folder: the game would run on
+# the maintainer's account for up to 900 s and block the next run. Only run-guest.sh's own macneutron-vm (its child).
+vm=
+cleanup() {
+  if [ -n "$vm" ] && kill -0 "$vm" 2> /dev/null; then
+    for p in $(pgrep -x -P "$vm" macneutron-vm || true); do kill "$p" 2> /dev/null || true; done
+    kill "$vm" 2> /dev/null || true
+  fi
+  rm -rf "$T"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
 rm -f "$SHARE/traces/frames.txt" "$SHARE/traces/profile.txt"
 mkdir -p "$SHARE/traces"
 # The game runs 60 s past the measured window (the lobby comes up in about 25 s): 2 minutes a run (maintainer,
