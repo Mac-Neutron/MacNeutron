@@ -1171,7 +1171,7 @@ def iface_decls(model):
             "int mn_d3d_iface_of(const void *iid);", ""]
 
 
-RECORDERS = re.compile(r"ID3D12GraphicsCommandList|ID3D11DeviceContext|ID3D10Device1?$")
+RECORDERS = re.compile(r"ID3D12GraphicsCommandList|ID3D11DeviceContext|ID3D10Device1?$|IMTLD3D12CommandListExt")
 
 HANDLE_TYPES = ("HANDLE", "HWND", "HMONITOR", "HDC", "HMODULE", "HINSTANCE")
 

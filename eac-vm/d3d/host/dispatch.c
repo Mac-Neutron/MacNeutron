@@ -98,11 +98,7 @@ static void slow_out(void) {
     }
 }
 
-static uint64_t now_us(void) {
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (uint64_t)t.tv_sec * 1000000 + (uint64_t)t.tv_nsec / 1000;
-}
+static uint64_t now_us(void) { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1000; } /* twice a call: the cheap one */
 
 static void trace_out(uint32_t ctx_id) {
     FILE *f = trace ? fopen(trace, "a") : NULL;

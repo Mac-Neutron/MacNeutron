@@ -215,6 +215,13 @@ ID3D12Device8::CreateSamplerFeedbackUnorderedAccessView submit
 ID3D12Device::CopyDescriptors wrap
 ID3D12Device::CopyDescriptorsSimple wrap
 ID3D12DescriptorHeap::GetCPUDescriptorHandleForHeapStart wrap
+# Answers kept in the guest (M5 revisited: guest/proxy.cpp): the removed reason until the forwarding's removed device,
+# a queue's timestamp frequency, a resource's description, an adapter's video memory for 100 ms.
+ID3D12Device::GetDeviceRemovedReason wrap
+ID3D12CommandQueue::GetTimestampFrequency wrap
+ID3D12Resource::GetDesc wrap
+IDXGIAdapter3::QueryVideoMemoryInfo wrap
+IDXGIAdapter3::SetVideoMemoryReservation wrap
 
 # Fences (Task 8): a mirror slot each in guest memory (CreateFence's aux), raised by relays on the host; the guest
 # reads its completed value there, raises it on a CPU signal, and waits a NULL event out itself.

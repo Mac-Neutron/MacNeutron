@@ -141,7 +141,14 @@ static _Atomic uint64_t *counts;
 static _Atomic uint64_t exits, submits; /* the calls that trapped: the others, and those that ran every ring first */
 static uint8_t *why; /* 1 refused, 2 a special without guest code, 3 answered in the guest by design (M4 Task 8) */
 
+static pthread_mutex_t trace_lock = PTHREAD_MUTEX_INITIALIZER; /* the listener's every 5 s and the exit's (M3's minors) */
+static void trace_out_locked(void);
 static void trace_out(void) {
+    pthread_mutex_lock(&trace_lock);
+    trace_out_locked();
+    pthread_mutex_unlock(&trace_lock);
+}
+static void trace_out_locked(void) {
 #ifdef MN_D3D_LOOPBACK
     const char *path = getenv("MN_D3D_LOOPBACK_TRACE"), *mode = "a";
 #else
@@ -228,7 +235,7 @@ static int32_t family(uint32_t id, void *params) {
         struct mn_d3d_actions_args *a = params;
         uint32_t got = 0;
         int32_t s = mn_call_flush(MN_OP_D3D + id, NULL, 0, (void *)(uintptr_t)a->data, a->cap, &got);
-        a->len = s ? 0 : got;
+        a->len = s ? 0 : got < a->cap ? got : a->cap; /* what was copied: the host's reply may be longer (M3's minors) */
         return s;
     }
     case MN_D3D_OP_SHOWN:

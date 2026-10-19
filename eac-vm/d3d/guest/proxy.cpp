@@ -56,6 +56,13 @@ struct mn_obj {
     int8_t pieces = 0;             // 1: its maps answered here, -1: the host's (E_NOTIMPL), 0: not asked
     int8_t immediate = 0;          // a context's: 1 the immediate one, -1 deferred, 0 not asked
     uint64_t heap_start = 0;       // a descriptor heap's CPU start, once asked (its writes' classes: heap_start())
+    // Answers kept (M5 revisited): a queue's timestamp frequency, a resource's description, an adapter's video memory
+    // by segment group and when it was asked (us); under m
+    uint64_t frequency = 0;
+    D3D12_RESOURCE_DESC desc12 = {};
+    bool desc12_known = false;
+    DXGI_QUERY_VIDEO_MEMORY_INFO memory[2] = {};
+    uint64_t memory_at[2] = {};
     std::atomic<int8_t> covered{0}; // its calls under DXMT's device mutex (excluded()): 1 yes, -1 no, 0 not asked
     mn_proxy *ext2 = nullptr;      // and its IMTLD3D11ContextExt2 (a companion it holds), if asked
     std::vector<uint64_t> lists;   // a deferred context's dynamic resources discarded since its last list, or a list's
@@ -1549,6 +1556,74 @@ static void STDMETHODCALLTYPE execute_list(mn_proxy *This, ID3D11CommandList *li
     PX(execute_list, px_execute)(This, list, restore);
 }
 
+// ---- answers kept in the guest (M5 revisited, 2026-10-18) ----
+// SMITE 2 asked these 10 to 66 times a frame, each a trap: DXMT's GetDeviceRemovedReason is S_OK until the forwarding
+// itself answers a call DXGI_ERROR_DEVICE_REMOVED (host/dispatch.c's removed device), after which it's the host's;
+// a queue's timestamp frequency and a resource's description never change; an adapter's video memory is kept 100 ms
+// (its budget is fixed, its usage Metal's allocated size: ponytail, a streaming pool sees it 100 ms late at most) and
+// forgotten at a reservation.
+static std::atomic<bool> device_removed{false};
+
+static const void *px_removed_reason;
+static HRESULT STDMETHODCALLTYPE removed_reason(mn_proxy *This) {
+    return device_removed.load(std::memory_order_relaxed) ? PX(removed_reason, px_removed_reason)(This) : S_OK;
+}
+
+static const void *px_frequency;
+static HRESULT STDMETHODCALLTYPE frequency(mn_proxy *This, UINT64 *out) {
+    mn_obj *o = This->obj;
+    {
+        std::lock_guard<std::mutex> l(o->m);
+        if (o->frequency && out) return *out = o->frequency, S_OK;
+    }
+    HRESULT hr = PX(frequency, px_frequency)(This, out);
+    if (SUCCEEDED(hr) && out) {
+        std::lock_guard<std::mutex> l(o->m);
+        o->frequency = *out;
+    }
+    return hr;
+}
+
+static const void *px_resource_desc;
+static D3D12_RESOURCE_DESC *STDMETHODCALLTYPE resource_desc(mn_proxy *This, D3D12_RESOURCE_DESC *ret) {
+    mn_obj *o = This->obj;
+    {
+        std::lock_guard<std::mutex> l(o->m);
+        if (o->desc12_known) return *ret = o->desc12, ret;
+    }
+    PX(resource_desc, px_resource_desc)(This, ret);
+    std::lock_guard<std::mutex> l(o->m);
+    o->desc12 = *ret, o->desc12_known = true;
+    return ret;
+}
+
+static const void *px_video_memory;
+static HRESULT STDMETHODCALLTYPE video_memory(mn_proxy *This, UINT node, DXGI_MEMORY_SEGMENT_GROUP group,
+                                              DXGI_QUERY_VIDEO_MEMORY_INFO *out) {
+    mn_obj *o = This->obj;
+    const bool kept = !node && out && (group == DXGI_MEMORY_SEGMENT_GROUP_LOCAL || group == DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL);
+    const uint64_t now = kept ? now_us() : 0;
+    if (kept) {
+        std::lock_guard<std::mutex> l(o->m);
+        if (o->memory_at[group] && now - o->memory_at[group] < 100000) return *out = o->memory[group], S_OK;
+    }
+    HRESULT hr = PX(video_memory, px_video_memory)(This, node, group, out);
+    if (kept && SUCCEEDED(hr)) {
+        std::lock_guard<std::mutex> l(o->m);
+        o->memory[group] = *out, o->memory_at[group] = now;
+    }
+    return hr;
+}
+
+static const void *px_reservation;
+static HRESULT STDMETHODCALLTYPE reservation(mn_proxy *This, UINT node, DXGI_MEMORY_SEGMENT_GROUP group, UINT64 bytes) {
+    {
+        std::lock_guard<std::mutex> l(This->obj->m);
+        This->obj->memory_at[0] = This->obj->memory_at[1] = 0; // its CurrentReservation changes
+    }
+    return PX(reservation, px_reservation)(This, node, group, bytes);
+}
+
 // ---- descriptor writes (the frame rate, 2026-10-18) ----
 // DXMT reads a shader-visible heap's slots only on the GPU (tables keep handles; ExecuteCommandLists, a submit, runs
 // every ring first), so a write into one needs no submit: a call (MN_D3D_DESCRIPTORS=sync, the default: it measured
@@ -1752,6 +1827,11 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"ID3D11Fence::SetEventOnCompletion", (const void *)set_event11},
         {"ID3D11DeviceContext3::Flush1", (const void *)flush1},
         {"ID3D12DescriptorHeap::GetCPUDescriptorHandleForHeapStart", (const void *)heap_start, &px_heap_start},
+        {"ID3D12Device::GetDeviceRemovedReason", (const void *)removed_reason, &px_removed_reason},
+        {"ID3D12CommandQueue::GetTimestampFrequency", (const void *)frequency, &px_frequency},
+        {"ID3D12Resource::GetDesc", (const void *)resource_desc, &px_resource_desc},
+        {"IDXGIAdapter3::QueryVideoMemoryInfo", (const void *)video_memory, &px_video_memory},
+        {"IDXGIAdapter3::SetVideoMemoryReservation", (const void *)reservation, &px_reservation},
         {"ID3D12Device::CreateConstantBufferView", (const void *)create_cbv},
         {"ID3D12Device::CreateShaderResourceView", (const void *)create_srv},
         {"ID3D12Device::CreateUnorderedAccessView", (const void *)create_uav},
@@ -1869,7 +1949,7 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE, DWORD reason, void *) {
 #ifdef MN_D3D_LOOPBACK
 // The loopback library: the unix side is in the same library.
 extern "C" int32_t mn_d3d_unix_call(void *args);
-static int32_t call(uint32_t id, uint32_t flags, void *params) {
+static int32_t call_raw(uint32_t id, uint32_t flags, void *params) {
     mn_d3d_args a = {id, flags, (uintptr_t)params};
     return mn_d3d_unix_call(&a);
 }
@@ -1877,11 +1957,18 @@ static int32_t call(uint32_t id, uint32_t flags, void *params) {
 // mnd3d.dll: the guest winemetal.so's slot MN_WM_D3D, through winemetal.dll (DXMT 0079), a plain DLL having no unix
 // lib of its own.
 extern "C" __declspec(dllimport) uint32_t WMTForward(uint32_t call, void *params);
-static int32_t call(uint32_t id, uint32_t flags, void *params) {
+static int32_t call_raw(uint32_t id, uint32_t flags, void *params) {
     mn_d3d_args a = {id, flags, (uintptr_t)params};
     return (int32_t)WMTForward(155 /* MN_WM_D3D */, &a);
 }
 #endif
+// The forwarding's removed device (host/dispatch.c answers every call DXGI_ERROR_DEVICE_REMOVED once DXMT lost it):
+// GetDeviceRemovedReason is the host's from then on.
+static int32_t call(uint32_t id, uint32_t flags, void *params) {
+    int32_t s = call_raw(id, flags, params);
+    if (s == (int32_t)DXGI_ERROR_DEVICE_REMOVED) device_removed.store(true, std::memory_order_relaxed);
+    return s;
+}
 extern "C" int32_t mn_d3d_call(uint32_t id, void *params) { return call(id, 0, params); }
 int32_t mn_d3d_call_with(uint32_t id, uint32_t flags, void *params) { return call(id, flags, params); }
 
@@ -1889,6 +1976,13 @@ int32_t mn_d3d_record(mn_proxy *This, uint32_t id, void *params) {
     static thread_local char me; // the calling thread, by an address of its own
     std::unique_lock<std::recursive_mutex> l(multithread, std::defer_lock);
     if (entered.load(std::memory_order_acquire) && excluded(This)) l.lock(); // another thread's Enter block, to Leave
-    bool handoff = This->obj->recorder.exchange(&me, std::memory_order_relaxed) != &me;
+    // A companion records on its object's recorder (a list's upscaler: IMTLD3D12CommandListExt, M3's deferred minors).
+    mn_obj *rec = This->obj;
+    if (rec->root) {
+        std::lock_guard<std::mutex> g(objs_lock);
+        auto it = objs.find(rec->root);
+        if (it != objs.end()) rec = it->second;
+    }
+    bool handoff = rec->recorder.exchange(&me, std::memory_order_relaxed) != &me;
     return call(id, handoff ? MN_D3D_ARG_HANDOFF : 0, params);
 }
