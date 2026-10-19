@@ -16,11 +16,17 @@ pgrep -x steam_osx > /dev/null || { echo "bench-smite2: Mac Steam isn't running"
 ! pgrep -x macneutron-vm > /dev/null || { echo "bench-smite2: a VM is running (a game being played?)" >&2; exit 1; }
 T=$(mktemp -d "${TMPDIR:-/tmp}/bench-smite2.XXXXXX")
 # An early exit (no lobby, perf-compare failed, ^C) ends the VM it started, not only the folder: the game would run on
-# the maintainer's account for up to 900 s and block the next run. Only run-guest.sh's own macneutron-vm (its child).
+# the maintainer's account for up to 900 s and block the next run. Only run-guest.sh's own macneutron-vm: below it,
+# under lockf and the script's second shell, so found by its parents.
 vm=
 cleanup() {
   if [ -n "$vm" ] && kill -0 "$vm" 2> /dev/null; then
-    for p in $(pgrep -x -P "$vm" macneutron-vm || true); do kill "$p" 2> /dev/null || true; done
+    for p in $(pgrep -x macneutron-vm || true); do
+      a=$p
+      while a=$(ps -o ppid= -p "$a" | tr -d ' ') && [ -n "$a" ] && [ "$a" -gt 1 ]; do
+        [ "$a" != "$vm" ] || { kill "$p" 2> /dev/null || true; break; }
+      done
+    done
     kill "$vm" 2> /dev/null || true
   fi
   rm -rf "$T"
