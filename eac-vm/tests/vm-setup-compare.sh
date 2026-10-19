@@ -10,7 +10,7 @@ listing() {
   find . -type f -exec sha256sum {} + | sort -k2
   getcap -r . 2>/dev/null | sort
 }
-O=/mnt/out
+O=${O:-/mnt/out}  # tests/vm-setup.sh's: the p profile's images are /mnt/out-p
 T=$(mktemp -d)
 trap 'umount -q $T/*-mac $T/*-builder 2>/dev/null || true; rm -rf "$T"' EXIT
 compare() {  # compare <image> <builder tree> <mac tree>

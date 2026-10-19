@@ -10,6 +10,8 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 G=${BUILD_DIR:-$ROOT/build}/vm-setup-gate
 B="sh $ROOT/eac-vm/builder.sh"
+# The builder's share of this profile's images (image/build.sh's: the p profile's is outp at /mnt/out-p).
+case ${MACNEUTRON_PROFILE:-std} in std) O=/mnt/out ;; *) O=/mnt/out-$MACNEUTRON_PROFILE ;; esac
 KVER=7.2.10-200.fc44.aarch64
 fail=
 
@@ -20,7 +22,7 @@ mkdir -p "$G"
 # The builder's pinned packages, as a Mac's mirror would serve them.
 if [ ! -f "$G/rpms/.complete" ] || ! cmp -s "$W/images/packages.lock" "$G/rpms/.complete"; then
   rm -rf "$G/rpms" "$W/images/gate-rpms"
-  $B ssh 'mkdir -p /mnt/out/gate-rpms && cp /var/cache/mn-image-rpms/base/*.rpm /var/cache/mn-image-rpms/x86/*.rpm /mnt/out/gate-rpms/'
+  $B ssh "mkdir -p $O/gate-rpms && cp /var/cache/mn-image-rpms/base/*.rpm /var/cache/mn-image-rpms/x86/*.rpm $O/gate-rpms/"
   mv "$W/images/gate-rpms" "$G/rpms"
   cp "$W/images/packages.lock" "$G/rpms/.complete"
 fi
@@ -54,7 +56,7 @@ rm -rf "$W/images/gate" && mkdir -p "$W/images/gate"
 cp -c "$VM/images/base.erofs" "$VM/images/wine.erofs" "$VM/images/initramfs.img" "$W/images/gate/"
 for f in vmlinuz x86-64-rootfs.erofs; do cmp -s "$VM/images/$f" "$W/images/$f" || fail="$fail $f"; done
 $B ssh 'cat > /tmp/vm-setup-compare.sh' < "$ROOT/eac-vm/tests/vm-setup-compare.sh"
-$B ssh 'sudo bash /tmp/vm-setup-compare.sh' > "$G/compare.txt" 2>&1 || true
+$B ssh "sudo O=$O bash /tmp/vm-setup-compare.sh" > "$G/compare.txt" 2>&1 || true
 cat "$G/compare.txt"
 for img in base.erofs wine.erofs initramfs.img; do
   /usr/bin/grep -qx "vm-setup: $img: same" "$G/compare.txt" || fail="$fail $img"
