@@ -13,6 +13,8 @@ for f in "$G/Palworld.exe" /mnt/share/valve/steamclient64.dll /mnt/share/bin/ste
 done
 Xvfb :0 -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &
 [ "${MACNEUTRON_VM_PROFILE:-}" = 1 ] && top -b -H -d 5 -w 512 > /mnt/share/traces/profile.txt 2>&1 &
+# The window's keyboard and mouse (eac-vm/guest/mn-input.c), into Xvfb, as smite2-render.sh: without it clicks go nowhere.
+[ -x /mnt/share/bin/mn-input ] && /mnt/share/bin/mn-input :0 > /home/mn/mn-input.log 2>&1 &
 mkdir -p /home/mn
 find "$WINEPREFIX/drive_c/windows" -name '*.dll' -size 0 -delete 2>/dev/null
 WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1
