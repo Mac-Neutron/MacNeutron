@@ -187,6 +187,17 @@ check_no_debug_info() {  # check_no_debug_info <dir or file>...: no dSYM, and no
   [ -z "$d" ] || { echo "release: $d has debug information" >&2; return 1; }
 }
 
+check_pgo() {  # check_pgo <pgo dir>: the p build's PGO profiles, if any, name no home or build folder (privacy: they
+  # name static functions by the path they were compiled from)
+  for f in "$1"/*.profdata; do
+    [ -f "$f" ] || continue
+    if LC_ALL=C /usr/bin/grep -qaF -e "$HOME/" -e "$ROOT/" "$f"; then
+      echo "release: pgo/$(basename "$f") names a home or build folder" >&2
+      return 1
+    fi
+  done
+}
+
 # --self-test (gate R1): each refusal on its own input in a temporary clone; never build.sh, the real trees or GitHub.
 self_test() {
   T=$(mktemp -d "${TMPDIR:-/tmp}/release-self-test.XXXXXX")
@@ -253,6 +264,14 @@ self_test() {
   passes "a p build without debug information" check_no_debug_info "$T/nodbg"
   mkdir -p "$T/nodbg/x.dSYM"
   refused "a p build with a dSYM" "release: $T/nodbg/x.dSYM is debug information" check_no_debug_info "$T/nodbg"
+  # The p build's PGO profiles, when there are any: none naming a home or build folder.
+  mkdir -p "$T/pgo-none" "$T/pgo-ok" "$T/pgo-home"
+  passes "a p build without PGO profiles" check_pgo "$T/pgo-none"
+  printf 'x' > "$T/pgo-ok/host.profdata"; printf 'x' > "$T/pgo-ok/guest.profdata"
+  passes "a p build's PGO profiles" check_pgo "$T/pgo-ok"
+  cp "$T/pgo-ok/guest.profdata" "$T/pgo-home/"; printf 'x %s/src/f.c;f' "$HOME" > "$T/pgo-home/host.profdata"
+  refused "a PGO profile naming this Mac's home folder" "release: pgo/host.profdata names a home or build folder" \
+    check_pgo "$T/pgo-home"
   exits "--profile p --check-version refuses an untagged version alone" 2 \
     "release: v99.0.0 isn't a tag (a p release builds an existing release's version)" --profile p --check-version 99.0.0
 
@@ -652,6 +671,7 @@ if [ $PROFILE = p ]; then
   check_version_p "$ROOT" "$V" || exit 2
   V=${V}p
   export MACNEUTRON_PROFILE=p BUILD_DIR="$ROOT/build/p" BUILDER_HOME=/home/bench/p
+  [ $mode = check ] || check_pgo "$ROOT/pgo" || exit 1
 else
   check_version "$ROOT" "$V" || exit 2
 fi
