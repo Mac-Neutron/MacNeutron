@@ -599,15 +599,35 @@ static void end_pacing(pacing *p) {
 // for on the shown event, for 100 ms at most (a window never shown mustn't hang the game).
 static std::atomic<uint64_t> presents; // the process's frames (Task 8's stashes double within one)
 
+// With MACNEUTRON_VM_D3D_TRACE=1, where a present's time goes, on stderr every 300 presents (the frame rate,
+// 2026-10-18): pushing the window, waiting for a frame in flight, for the display, in the host's Present, and after.
+static bool tracing();
+static std::atomic<uint64_t> spent[5], timed;
+static uint64_t now_us() {
+    LARGE_INTEGER t, f;
+    QueryPerformanceCounter(&t), QueryPerformanceFrequency(&f);
+    return (uint64_t)(t.QuadPart * 1000000.0 / f.QuadPart);
+}
+static void spend(int k, uint64_t since) { spent[k] += now_us() - since; }
+static void timed_present() {
+    if (++timed % 300) return;
+    uint64_t v[5];
+    for (int k = 0; k < 5; k++) v[k] = spent[k].exchange(0);
+    fprintf(stderr, "mn-d3d: presents: push %.2f, frames %.2f, display %.2f, present %.2f, after %.2f ms a present\n",
+            v[0] / 300e3, v[1] / 300e3, v[2] / 300e3, v[3] / 300e3, v[4] / 300e3);
+}
+
 static void pace_before(pacing *p, UINT flags) {
     if (!(flags & DXGI_PRESENT_TEST)) presents++;
     if (!p || (flags & DXGI_PRESENT_TEST)) return;
-    uint64_t n = p->presented;
+    uint64_t n = p->presented, t = tracing() ? now_us() : 0;
     UINT latency = p->device && p->device->latency ? p->device->latency.load() : p->latency;
     if (!p->waitable) wait_frame(p, n + 1 > latency ? n + 1 - latency : 0);
+    if (t) spend(1, t), t = now_us();
     HANDLE shown = p->drawables ? shown_event() : nullptr;
     for (int i = 0; shown && i < 10 && p->drawables[0].load() > p->drawables[1].load() + 1; i++)
         WaitForSingleObject(shown, 10);
+    if (t) spend(2, t);
 }
 
 // After it: the frame's fence value, on the swapchain's queue after the present.
@@ -937,19 +957,29 @@ static HRESULT STDMETHODCALLTYPE get_source_size(mn_proxy *This, UINT *width, UI
 // A minimised window's present is skipped by DXMT, which then sleeps a 60 Hz frame (natively, with the guest's window
 // system hooked, it doesn't): the sleep is here, never on the host's vCPU thread.
 static HRESULT STDMETHODCALLTYPE present(mn_proxy *This, UINT sync, UINT flags) {
+    uint64_t t = tracing() ? now_us() : 0;
     bool minimised = push_window(This->obj->window, This->obj, true);
+    if (t) spend(0, t);
     pace_before(This->obj->pace, flags);
+    if (t) t = now_us();
     HRESULT hr = PX(present, px_present)(This, sync, flags);
+    if (t) spend(3, t), t = now_us();
     pace_after(This->obj->pace, hr, flags);
+    if (t) spend(4, t), timed_present();
     if (minimised && !(flags & DXGI_PRESENT_TEST)) Sleep(16);
     return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE present1(mn_proxy *This, UINT sync, UINT flags, const DXGI_PRESENT_PARAMETERS *p) {
+    uint64_t t = tracing() ? now_us() : 0;
     bool minimised = push_window(This->obj->window, This->obj, true);
+    if (t) spend(0, t);
     pace_before(This->obj->pace, flags);
+    if (t) t = now_us();
     HRESULT hr = PX(present1, px_present1)(This, sync, flags, p);
+    if (t) spend(3, t), t = now_us();
     pace_after(This->obj->pace, hr, flags);
+    if (t) spend(4, t), timed_present();
     if (minimised && !(flags & DXGI_PRESENT_TEST)) Sleep(16);
     return hr;
 }
