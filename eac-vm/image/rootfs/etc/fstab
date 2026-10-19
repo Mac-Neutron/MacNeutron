@@ -1,5 +1,5 @@
 /dev/disk/by-id/virtio-x86-64 /usr/share/fex-emu/RootFS/fedora erofs ro,nofail 0 0
 LABEL=mn-wine   /opt/mn-wine                     erofs    ro,nofail       0 0
-LABEL=mn-state  /home                            ext4     defaults,nofail 0 2
+LABEL=mn-state  /home                            ext4     defaults,discard,nofail 0 2
 share           /mnt/share                       virtiofs defaults,nofail 0 0
 games           /mnt/games                       virtiofs ro,nofail       0 0
