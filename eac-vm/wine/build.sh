@@ -49,7 +49,15 @@ wine)
     PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib64/pkgconfig:$SYSROOT/usr/share/pkgconfig" PKG_CONFIG_SYSROOT_DIR="$SYSROOT" \
     "$@" > configure.log 2>&1 || { tail -20 configure.log; exit 1; }
   grep -E "^configure: (WARNING|error)|could not find|won't be supported" configure.log || true
-  make -j"$JOBS" > make.log 2>&1 || { grep -E "error|Error" make.log | head -20; exit 1; }
+  # The preloaders without LTO: linked static at a fixed high address, their link-time code took R_X86_64_32
+  # relocations lld can't place. Wine's rule puts CFLAGS last, so they're made first, with the flags minus -flto;
+  # make then finds them up to date. They run once per process, before exec.
+  case $* in *-flto=thin*)
+    rm -f loader/preloader.o loader/preloader_mac.o loader64/preloader.o
+    make -j"$JOBS" loader/preloader.o loader/preloader_mac.o loader64/preloader.o CFLAGS="$F" > make.log 2>&1 \
+      || { grep -E "error|Error" make.log | head -20; exit 1; } ;;
+  esac
+  make -j"$JOBS" >> make.log 2>&1 || { grep -E "error|Error" make.log | head -20; exit 1; }
   echo "built in $BUILD" ;;
 resume)
   cd "$BUILD"
