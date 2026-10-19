@@ -1456,3 +1456,10 @@ the Mac. SMITE 2's lobby: forwarded 76.5 fps at 4.27 cores (overheads 1.08, wine
 `bridge/check.sh` now runs with `MACNEUTRON_VM=0`: since every game runs in the microVM, its launcher rows had run their
 app-0 game in the VM folder MicroVM finds, the user's own by default (its state and share were made there tonight, then
 removed).
+
+**The maintainer's run on the merged build** (2026-10-19, MacNeutron-next.app, SMITE 2 practice at 2560x1440, DLSS,
+uncapped, the maintainer playing; `perf-compare.sh`, 60 s each): macOS 125.1 fps, 4.33 cores, GPU 100% busy; forwarded
+124.0 fps, 6.12 cores (the guest 4.36), GPU 99.7% busy. The project's gate (§1) passes: frame rate 0.99 of macOS, CPU
+1.41 times. M5's: the host's overheads 1.76 cores (wake-ups 0.85, spinning 0.00, sound 0.15, other 0.76) against 2.0,
+wineserver 0.09 against 0.2, 124.0 fps against 108.6 and GPU 99.7% against 91.6%. At 124 frames a second the overheads
+are higher than in the lobby's 76 (1.10).
