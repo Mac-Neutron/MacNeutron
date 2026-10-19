@@ -482,3 +482,47 @@ private func i386Exe(named name: String) throws -> String {
     _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
     #expect(f.runner.calls.last { $0.arguments.first == game }?.environment["DXMT_DXIL_DUMP"] == "/elsewhere")
 }
+
+@Test func perfClearsTheLastRunsFiles() throws {
+    // Left on, MACNEUTRON_PERF=1 would pile up stats.txt and the dump (every shader and pipeline) run after run.
+    let f = try makeFixture()
+    let game = "/Steam/steamapps/common/Some Game/bin/Game.exe"
+    let folder = f.launcher.perfFolder(appID: "42")
+    try write("# old window", to: folder.appending(path: "stats.txt"))
+    var env = f.env
+    env["MACNEUTRON_VM"] = "0"
+    env["MACNEUTRON_PERF"] = "1"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    #expect(FileManager.default.fileExists(atPath: folder.path(percentEncoded: false)))
+    #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "stats.txt").path(percentEncoded: false)))
+    // A folder the user named is theirs: left alone.
+    let theirs = folder.deletingLastPathComponent().appending(path: "theirs")
+    try write("kept", to: theirs.appending(path: "stats.txt"))
+    env["DXMT_DXIL_DUMP"] = theirs.path(percentEncoded: false)
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    #expect(FileManager.default.fileExists(atPath: theirs.appending(path: "stats.txt").path(percentEncoded: false)))
+}
+
+@Test func perfSaysWhyThereWillBeNoFrameStatistics() throws {
+    // perf-compare.sh reads the perf folder's stats.txt: when the user's own settings or the backend keep DXMT from
+    // writing it, the launcher log says so, since the record's fps comes out empty.
+    let game = "/Steam/steamapps/common/Some Game/bin/Game.exe"
+    for (setting, value, said) in [("MACNEUTRON_GRAPHICS", "wined3d", "needs the DXMT backend"),
+                                   ("DXMT_STATS", "0", "DXMT_STATS is set"),
+                                   ("DXMT_DXIL_DUMP", "/elsewhere", "DXMT_DXIL_DUMP is set")] {
+        let f = try makeFixture()
+        var env = f.env
+        env["MACNEUTRON_VM"] = "0"
+        env["MACNEUTRON_PERF"] = "1"
+        env[setting] = value
+        _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+        #expect(f.launcherLog.contains("MACNEUTRON_PERF=1: no frame statistics in the perf folder: \(said)"), "\(setting)")
+    }
+    // Nothing in the way: no note.
+    let f = try makeFixture()
+    var env = f.env
+    env["MACNEUTRON_VM"] = "0"
+    env["MACNEUTRON_PERF"] = "1"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    #expect(!f.launcherLog.contains("MACNEUTRON_PERF=1"))
+}

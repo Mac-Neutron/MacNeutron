@@ -88,12 +88,27 @@ public struct Launcher: Sendable {
         var env = LaunchEnvironment.build(base: environment, context: context, backend: backend, logging: logging)
         // MACNEUTRON_PERF=1: DXMT's frame statistics, for eac-vm/tests/perf-compare.sh. The user's own settings win.
         // DXMT keeps stats.txt in its DXIL dump folder, which also turns on its capture mode: every new shader, root
-        // signature and pipeline is saved there too (a little CPU, and files that build up in the folder).
-        if environment["MACNEUTRON_PERF"] == "1", backend == .dxmt, env["DXMT_STATS"] == nil {
-            let folder = perfFolder(appID: context.appID)
-            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            env["DXMT_STATS"] = "1"
-            env["DXMT_DXIL_DUMP"] = env["DXMT_DXIL_DUMP"] ?? folder.path(percentEncoded: false)
+        // signature and pipeline is saved there too (a little CPU, and files that build up in the folder): the
+        // folder is emptied at each launch, unless the user named another. When their settings or the backend keep
+        // stats.txt out of the folder, the log says so (the record's fps would come out empty).
+        if environment["MACNEUTRON_PERF"] == "1" {
+            var why: String?
+            if backend != .dxmt {
+                why = "needs the DXMT backend"
+            } else if env["DXMT_STATS"] != nil {
+                why = "DXMT_STATS is set"
+            } else {
+                let folder = perfFolder(appID: context.appID)
+                if env["DXMT_DXIL_DUMP"] == nil {
+                    try? FileManager.default.removeItem(at: folder)
+                } else {
+                    why = "DXMT_DXIL_DUMP is set"
+                }
+                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                env["DXMT_STATS"] = "1"
+                env["DXMT_DXIL_DUMP"] = env["DXMT_DXIL_DUMP"] ?? folder.path(percentEncoded: false)
+            }
+            if let why { log.append("note: MACNEUTRON_PERF=1: no frame statistics in the perf folder: \(why)") }
         }
         let steamBridge = usesSteamBridge(request.verb, env)
         if steamBridge { addSteamClient(to: &env) }
