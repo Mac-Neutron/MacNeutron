@@ -55,6 +55,7 @@ struct mn_obj {
     std::vector<mn_stash> stashes; // a dynamic resource's, by subresource (Task 8), under m
     int8_t pieces = 0;             // 1: its maps answered here, -1: the host's (E_NOTIMPL), 0: not asked
     int8_t immediate = 0;          // a context's: 1 the immediate one, -1 deferred, 0 not asked
+    std::atomic<int8_t> covered{0}; // its calls under DXMT's device mutex (excluded()): 1 yes, -1 no, 0 not asked
     mn_proxy *ext2 = nullptr;      // and its IMTLD3D11ContextExt2 (a companion it holds), if asked
     std::vector<uint64_t> lists;   // a deferred context's dynamic resources discarded since its last list, or a list's
 };
@@ -67,6 +68,12 @@ static std::unordered_map<uint64_t, mn_obj *> objs;
 static const IID unknown_iid = {0x00000000, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
 
 static bool has(const uint64_t mask[2], int k) { return k >= 0 && (mask[k / 64] >> (k % 64) & 1); }
+
+// An interface's mn_d3d_ifaces index (natively __uuidof is a temporary).
+template <class T> static int iface_of() {
+    static const GUID iid = __uuidof(T);
+    return mn_d3d_iface_of(&iid);
+}
 
 // The vtable a proxy of k has (M3 Task 10, SMITE 2's): the most derived interface whose bases include k that the object
 // answers at its own pointer. DXGI's and D3D12's objects have one vtable for all their versions, and programs count on
@@ -820,9 +827,29 @@ extern "C" HRESULT WINAPI D3D11CreateDeviceAndSwapChain(IDXGIAdapter *adapter, D
 // ID3D11Multithread's (and ID3D10Multithread's) Enter and Leave (specials): the device's, its context's and its D3D10
 // device's are other objects over one lock. ponytail: one lock for every device in the process (a game has one); a
 // lock per device, found from any of them, if two devices' Enter blocks ever need to overlap.
+// While a thread is inside, other threads' immediate-context and D3D10 device calls wait for it, as DXMT's device
+// mutex makes them natively (mn_d3d_record). ponytail: a call already past its check when Enter returns isn't waited
+// for (its records still come first: the block's first call is a handoff); an in-flight count if one ever matters.
 static std::recursive_mutex multithread;
-static void STDMETHODCALLTYPE mt_enter(mn_proxy *) { multithread.lock(); }
-static void STDMETHODCALLTYPE mt_leave(mn_proxy *) { multithread.unlock(); }
+static std::atomic<int> entered{0};
+static void STDMETHODCALLTYPE mt_enter(mn_proxy *) { multithread.lock(), entered++; }
+static void STDMETHODCALLTYPE mt_leave(mn_proxy *) { entered--, multithread.unlock(); }
+// A D3D10 device or a D3D11 immediate context: the calls DXMT's device mutex covers (a deferred context's and a D3D12
+// list's aren't). Asked once each (GetType, whose own call passes).
+static bool excluded(mn_proxy *p) {
+    mn_obj *o = p->obj;
+    if (int8_t c = o->covered.load(std::memory_order_relaxed)) return c > 0;
+    static thread_local bool asking;
+    if (asking) return false;
+    bool yes = has(o->answers, iface_of<ID3D10Device>());
+    if (!yes && has(o->answers, iface_of<ID3D11DeviceContext>())) {
+        asking = true;
+        yes = ((ID3D11DeviceContext *)p)->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE;
+        asking = false;
+    }
+    o->covered.store(yes ? 1 : -1, std::memory_order_relaxed);
+    return yes;
+}
 
 // The frame latency object (a special): our semaphore, a waitable swapchain's (DXMT's answers none without the flag).
 static HANDLE STDMETHODCALLTYPE latency_object(mn_proxy *This) {
@@ -1093,12 +1120,6 @@ static HRESULT STDMETHODCALLTYPE check_feature(mn_proxy *This, D3D12_FEATURE fea
 
 // ---- D3D11's and D3D10's data and maps (own, M4 Task 4) ----
 
-// An interface's mn_d3d_ifaces index (natively __uuidof is a temporary).
-template <class T> static int iface_of() {
-    static const GUID iid = __uuidof(T);
-    return mn_d3d_iface_of(&iid);
-}
-
 template <class Res, class T, class Desc> static bool describe(Res *res, mn_res &r) {
     T *t = nullptr;
     if (FAILED(res->QueryInterface(__uuidof(T), (void **)&t))) return false;
@@ -1229,6 +1250,10 @@ static const int kMapTries = 64; // then the host waits: DXMT's view of the GPU 
 #define MN_CREATE(fn, NAME, Desc, Data, T, DESC, INIT, OUT)                                                            \
     static HRESULT STDMETHODCALLTYPE fn(mn_proxy *This, const Desc *desc, const Data *init, T **out) {                \
         mn_res r = desc ? described(*desc) : mn_res{};                                                                 \
+        if (desc && init && !mn_described_ok(r)) { /* D3D11's answer; its initial data isn't read */                  \
+            if (out) *out = nullptr;                                                                                   \
+            return E_INVALIDARG;                                                                                       \
+        }                                                                                                              \
         std::vector<uint8_t> flat;                                                                                     \
         if (desc && init) flat = pack(r, (const D3D11_SUBRESOURCE_DATA *)init);                                        \
         mn_d3d_p_##NAME p = {};                                                                                        \
@@ -1364,7 +1389,7 @@ static bool piece_map(mn_proxy *context, ID3D11Resource *res, UINT sub, D3D11_MA
             std::vector<mn_piece> cur;
             HRESULT r = get_pieces(ext, res, sub, 0, cur);
             l.lock();
-            if (r == E_NOTIMPL) o->pieces = -1;
+            if (r == E_NOTIMPL || (SUCCEEDED(r) && cur.empty())) o->pieces = -1; // none in our arenas: the host's
             if (FAILED(r) || cur.empty()) return false;
             o->stashes[sub].current = cur[0], o->stashes[sub].has_current = true;
         }
@@ -1381,7 +1406,9 @@ static bool piece_map(mn_proxy *context, ID3D11Resource *res, UINT sub, D3D11_MA
             std::vector<mn_piece> more;
             HRESULT r = get_pieces(ext, res, sub, n, more);
             l.lock();
-            if (r == E_NOTIMPL) o->pieces = -1;
+            // None in our arenas (the recycled pieces of allocations made outside them): the host's maps from now on,
+            // so DXMT lends no more that stay lent (bounded by this one refill until the resource goes).
+            if (r == E_NOTIMPL || (SUCCEEDED(r) && more.empty())) o->pieces = -1;
             if (FAILED(r) || more.empty()) return false;
             for (auto &m : more) o->stashes[sub].free.push_back(m);
         }
@@ -1491,6 +1518,9 @@ static void STDMETHODCALLTYPE execute_list(mn_proxy *This, ID3D11CommandList *li
     PX(execute_list, px_execute)(This, list, restore);
 }
 
+// A D3D10 resource's map (D3D10's maps are its resources'): after every thread's published records, as a context's map
+// after another thread's calls (M4's deferred findings). ponytail: every one; the device's recorder (mn_d3d_record) if
+// a D3D10 game's maps ever cost a frame.
 #define MN_MAP10(fn, NAME, SUB, Out, OUT, FILL)                                                                         \
     static HRESULT STDMETHODCALLTYPE fn(mn_proxy *This SUB, D3D10_MAP type, UINT flags, Out *out) {                    \
         using mn_out = Out;                                                                                            \
@@ -1504,7 +1534,7 @@ static void STDMETHODCALLTYPE execute_list(mn_proxy *This, ID3D11CommandList *li
             p.self = (uintptr_t)This, p.MapType = (uint32_t)type, p.OUT = out ? (uintptr_t)&m : 0, p.aux[0] = alloc;  \
             p.MapFlags = wait && tries < kMapTries ? flags | D3D10_MAP_FLAG_DO_NOT_WAIT : flags;                       \
             FILL;                                                                                                      \
-            int32_t s = mn_d3d_call(MN_D3D_ID_##NAME, &p);                                                             \
+            int32_t s = mn_d3d_call_with(MN_D3D_ID_##NAME, MN_D3D_ARG_HANDOFF, &p);                                    \
             hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;                                                          \
             if (!wait || tries == kMapTries || hr != DXGI_ERROR_WAS_STILL_DRAWING) break;                              \
             if (ID3D11DeviceContext *ctx = context_of((IUnknown *)This)) {                                             \
@@ -1692,9 +1722,12 @@ static int32_t call(uint32_t id, uint32_t flags, void *params) {
 }
 #endif
 extern "C" int32_t mn_d3d_call(uint32_t id, void *params) { return call(id, 0, params); }
+int32_t mn_d3d_call_with(uint32_t id, uint32_t flags, void *params) { return call(id, flags, params); }
 
 int32_t mn_d3d_record(mn_proxy *This, uint32_t id, void *params) {
     static thread_local char me; // the calling thread, by an address of its own
+    std::unique_lock<std::recursive_mutex> l(multithread, std::defer_lock);
+    if (entered.load(std::memory_order_acquire) && excluded(This)) l.lock(); // another thread's Enter block, to Leave
     bool handoff = This->obj->recorder.exchange(&me, std::memory_order_relaxed) != &me;
     return call(id, handoff ? MN_D3D_ARG_HANDOFF : 0, params);
 }

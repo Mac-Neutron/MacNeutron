@@ -16,7 +16,7 @@ build() {  # build <name> <link...>
     -I"$I/include-native/windows" -I"$I/include-native/directx" -I"$I/include-native" -I"$ROOT/dxmt/tests" \
     -o "$OUT/$name" "$ROOT/eac-vm/d3d/tests/$P.cpp" "$@"
 }
-build native "$I/lib/d3d12.dylib" "$I/lib/dxgi.dylib" -Wl,-rpath,"$I/lib"
+build native "$I/lib/d3d12.dylib" "$I/lib/dxgi.dylib" "$I/lib/d3d11.dylib" "$I/lib/d3d10core.dylib" -Wl,-rpath,"$I/lib"
 build loopback "$LIB" -Wl,-rpath,"$(dirname "$LIB")"
 for way in native loopback; do
   DXMT_LOG_PATH=none "$OUT/$way" "$@" > "$OUT/$way.txt" 2>&1 || { tail -3 "$OUT/$way.txt"; echo "$P: FAIL $way run"; exit 1; }

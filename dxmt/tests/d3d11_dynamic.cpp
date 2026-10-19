@@ -1,5 +1,6 @@
 // D3D11 dynamic resources (Direct3D forwarding M4, spec §4.10): each map's data is the one the next draw reads.
-//   d3d11_dynamic.exe <shaders> [frames]   prints "dynamic <check> <value>":
+//   d3d11_dynamic.exe <shaders> [frames [discard]]   prints "dynamic <check> <value>" (discard: the discard frames
+//                                                    only, for the arenas the frames alone leave):
 //     discard <frame>   1,000 Map(WRITE_DISCARD) of a 256-byte constant buffer in a frame, a draw after each writing
 //                       its value into its own texel of a 1000x1 target: texels wrong (frames of them, 4 by default:
 //                       forwarding's piece test runs 1 and 30)
@@ -15,9 +16,10 @@
 static D3D11_VIEWPORT Texel(UINT x, UINT y) { return {(float)x, (float)y, 1, 1, 0, 1}; }
 
 int main(int argc, char **argv) {
-    if (argc != 2 && argc != 3) { printf("usage: d3d11_dynamic.exe <shaders> [frames]\n"); return 2; }
+    if (argc < 2 || argc > 4) { printf("usage: d3d11_dynamic.exe <shaders> [frames [discard]]\n"); return 2; }
     g_shaders = argv[1];
-    const UINT frames = argc == 3 ? (UINT)atoi(argv[2]) : 4;
+    const UINT frames = argc >= 3 ? (UINT)atoi(argv[2]) : 4;
+    const bool discard_only = argc == 4 && !strcmp(argv[3], "discard");
     Dev dev(D3D_FEATURE_LEVEL_11_1);
     ID3D11Device *d = dev.device;
     ID3D11DeviceContext *ctx = dev.ctx;
@@ -48,6 +50,7 @@ int main(int argc, char **argv) {
         for (UINT i = 0; i < N; i++) want[i] = frame * N + i + 1;
         printf("dynamic discard %u %zu\n", frame, Wrong(got, want));
     }
+    if (discard_only) return 0;
 
     // Points appended with WRITE_NO_OVERWRITE after one WRITE_DISCARD.
     std::vector<char> vs_code;

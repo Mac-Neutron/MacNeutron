@@ -31,6 +31,9 @@ extern const void *mn_d3d_vtables[MN_D3D_IFACES][MN_D3D_MAX_SLOTS];
 extern "C" int32_t mn_d3d_call(uint32_t id, void *params);
 // A command list's method, through mn_d3d_call: on a list another thread called last, MN_D3D_ARG_HANDOFF.
 int32_t mn_d3d_record(mn_proxy *This, uint32_t id, void *params);
+// mn_d3d_call with mn_d3d.h's MN_D3D_ARG_* flags: a D3D10 resource's map after every thread's published records (it has
+// no context), a descriptor write's chosen way.
+int32_t mn_d3d_call_with(uint32_t id, uint32_t flags, void *params);
 // A call's status as the method's HRESULT (mn_d3d.h's contract).
 HRESULT mn_d3d_hr(int32_t status);
 // A created object: its proxy for iface (an index; -1: riid's), answering what ifaces says (the reply's masks); one

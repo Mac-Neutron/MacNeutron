@@ -2,6 +2,7 @@
 #include "formats.h"
 
 mn_format mn_format_of(DXGI_FORMAT f) {
+    if (f == (DXGI_FORMAT)191) return {1, 1, 2}; // DXGI_FORMAT_A4B4G4R4_UNORM, newer than the headers
     switch (f) {
     case DXGI_FORMAT_R32G32B32A32_TYPELESS: case DXGI_FORMAT_R32G32B32A32_FLOAT: case DXGI_FORMAT_R32G32B32A32_UINT:
     case DXGI_FORMAT_R32G32B32A32_SINT:
@@ -64,6 +65,14 @@ mn_res described(const D3D10_TEXTURE2D_DESC &d) {
     return mn_res_of(3, d.Format, d.Width, d.Height, 1, d.MipLevels, d.ArraySize);
 }
 mn_res described(const D3D10_TEXTURE3D_DESC &d) { return mn_res_of(4, d.Format, d.Width, d.Height, d.Depth, d.MipLevels, 1); }
+
+bool mn_described_ok(const mn_res &r) {
+    if (r.dim == D3D11_RESOURCE_DIMENSION_BUFFER) return true;
+    UINT longest = r.width > r.height ? r.width : r.height, chain = 0;
+    if (r.dim == D3D11_RESOURCE_DIMENSION_TEXTURE3D && r.depth > longest) longest = r.depth;
+    for (; longest; longest >>= 1) chain++;
+    return r.mips <= chain && r.array <= D3D11_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION;
+}
 
 mn_res mn_res_of(int dim, DXGI_FORMAT format, UINT width, UINT height, UINT depth, UINT mips, UINT array) {
     mn_res r;

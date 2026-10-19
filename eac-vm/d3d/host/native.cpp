@@ -504,6 +504,10 @@ extern "C" NTSTATUS_T mn_d3d_get_pieces_stub(void *params) {
         RESULT(a, E_INVALIDARG);
         return 0;
     }
+    if (a->count && a->aux[1] > UINT64_MAX / a->count) { // no arena that big: the guest's word, overflowing
+        RESULT(a, E_OUTOFMEMORY);
+        return 0;
+    }
     if (a->count && !room_for(a->count * a->aux[1])) return 0;
     std::vector<MTLD3D11Piece> p(n);
     try {

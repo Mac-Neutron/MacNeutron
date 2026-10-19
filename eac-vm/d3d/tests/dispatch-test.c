@@ -531,6 +531,9 @@ int main(int argc, char **argv) {
     CHECK(call(getp, &g0) == 0 && (uint32_t)g0.ret == 0 && now.id != pcs[0].id && now.id != pcs[1].id);
     struct up u2 = {qx.out, 0, cdy.buffer, 0, pcs[1].id, {0}};
     CHECK(call(usep, &u2) == 0 && call(getp, &g0) == 0 && now.id == pcs[1].id);
+    /* the room check's count x allocation overflowing (M4's deferred findings): no pieces, E_OUTOFMEMORY */
+    struct gp gov = {qx.out, 0, cdy.buffer, 0, 2, (uintptr_t)pcs, {sizeof pcs, 1ull << 63}};
+    CHECK(call(getp, &gov) == 0 && (uint32_t)gov.ret == 0x8007000Eu);
 
     /* d3d11events: a D3D11 fence's slot raised by the context's Signal, and the guest's events relayed (the fence's
      * SetEventOnCompletion, Flush1's), never DXMT's to take as its own */

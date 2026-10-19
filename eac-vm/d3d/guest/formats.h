@@ -30,6 +30,9 @@ mn_res described(const D3D10_BUFFER_DESC &d);
 mn_res described(const D3D10_TEXTURE1D_DESC &d);
 mn_res described(const D3D10_TEXTURE2D_DESC &d);
 mn_res described(const D3D10_TEXTURE3D_DESC &d);
+// A description D3D11 takes (M4's deferred findings): a mip chain no longer than its size allows and an array of at
+// most 2048; the guest reads a creation's initial data only for one.
+bool mn_described_ok(const mn_res &r);
 // Its subresources: mips, times the array (not a 3D texture's).
 UINT mn_subresources(const mn_res &r);
 // The bytes of subresource sub's data laid out with pitch and slice (box: within it, or the whole subresource):

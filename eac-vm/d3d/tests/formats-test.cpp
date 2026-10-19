@@ -31,6 +31,16 @@ int main() {
     const D3D11_BOX bbox = {100, 0, 0, 300, 1, 1};
     WANT(mn_subresource_bytes(buf, 0, nullptr, 0, 0), 512);
     WANT(mn_subresource_bytes(buf, 0, &bbox, 0, 0), 200);
+    // M4's deferred findings: A4B4G4R4 (newer than these headers) is 2 bytes a texel, and a description D3D11 refuses
+    // (a mip chain longer than its size allows, an array over 2048) isn't one whose initial data is read
+    WANT(mn_format_of((DXGI_FORMAT)191).bytes, 2);
+    WANT(mn_described_ok(mn_res_of(D3D11_RESOURCE_DIMENSION_TEXTURE2D, DXGI_FORMAT_R8_UNORM, 256, 256, 1, 9, 1)), 1);
+    WANT(mn_described_ok(mn_res_of(D3D11_RESOURCE_DIMENSION_TEXTURE2D, DXGI_FORMAT_R8_UNORM, 256, 256, 1, 10, 1)), 0);
+    WANT(mn_described_ok(mn_res_of(D3D11_RESOURCE_DIMENSION_TEXTURE2D, DXGI_FORMAT_R8_UNORM, 16, 16, 1, 0xffffffffu, 1)), 0);
+    WANT(mn_described_ok(mn_res_of(D3D11_RESOURCE_DIMENSION_TEXTURE1D, DXGI_FORMAT_R8_UNORM, 64, 1, 1, 1, 2048)), 1);
+    WANT(mn_described_ok(mn_res_of(D3D11_RESOURCE_DIMENSION_TEXTURE1D, DXGI_FORMAT_R8_UNORM, 64, 1, 1, 1, 2049)), 0);
+    WANT(mn_described_ok(mn_res_of(D3D11_RESOURCE_DIMENSION_TEXTURE3D, DXGI_FORMAT_R8_UNORM, 8, 8, 64, 7, 1)), 1);
+    WANT(mn_described_ok(buf), 1);
     if (!failed) printf("formats: ok\n");
     return failed;
 }
