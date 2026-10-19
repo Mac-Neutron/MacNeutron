@@ -1,11 +1,11 @@
 # Direct3D forwarding's generated tables and their tests (M2); outputs go to build/eac-vm-work/d3d-gen.
 ROOT := $(abspath ../..)
-W := $(ROOT)/build/eac-vm-work
+W := $(or $(BUILD_DIR),$(ROOT)/build)/eac-vm-work
 GEN := $(W)/d3d-gen
-I := $(ROOT)/build/dxmt-native/install/include-native
+I := $(or $(BUILD_DIR),$(ROOT)/build)/dxmt-native/install/include-native
 NT := $(ROOT)/eac-vm/dxmt-native/tests
 WM := $(ROOT)/eac-vm/metal/wm
-DXMT := $(ROOT)/build/wine-arm64-src/dxmt/src
+DXMT := $(or $(BUILD_DIR),$(ROOT)/build)/wine-arm64-src/dxmt/src
 CFLAGS ?= -O1 -g -Wall -Wextra -std=gnu2x -fsanitize=address,undefined
 INC := -DDXMT_GUEST_VM -I$(I) -I$(DXMT)/winemetal -I$(DXMT)/airconv -I$(ROOT)/eac-vm/metal -I$(WM) -I$(WM)/tests -I$(GEN)
 
@@ -47,7 +47,7 @@ roundtrip: $(GEN)/roundtrip
 .PHONY: roundtrip
 
 # The host dispatcher on native DXMT (dispatch-test.c), beside Wine's winemetal.so as macneutron-vm runs them.
-NATIVE_LIB := $(ROOT)/build/dxmt-native/install/lib
+NATIVE_LIB := $(or $(BUILD_DIR),$(ROOT)/build)/dxmt-native/install/lib
 $(GEN)/native.o: host/native.cpp host/stubs.h guest/formats.h $(GEN)/calls.c
 	clang++ $(DXMT_CXXFLAGS) -O1 -g -Wall -Werror -Wno-extern-c-compat -fsanitize=address,undefined -c -o $@ host/native.cpp
 $(GEN)/stubs-asan.o: $(GEN)/calls.c host/stubs.h

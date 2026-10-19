@@ -1,10 +1,10 @@
 # Mac-side parts and tests of winemetal forwarding (milestone 4b-1); outputs go to build/eac-vm-work.
 ROOT := $(abspath ../../..)
-W := $(ROOT)/build/eac-vm-work
+W := $(or $(BUILD_DIR),$(ROOT)/build)/eac-vm-work
 OUT ?= $(W)/metal
 HOST := $(W)/metal-host
-WINEMETAL := $(ROOT)/build/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/winemetal.so
-DXMT := $(ROOT)/build/wine-arm64-src/dxmt/src
+WINEMETAL := $(or $(BUILD_DIR),$(ROOT)/build)/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/winemetal.so
+DXMT := $(or $(BUILD_DIR),$(ROOT)/build)/wine-arm64-src/dxmt/src
 CFLAGS ?= -O1 -g -Wall -Wextra -std=gnu2x -fsanitize=address,undefined
 INC := -DDXMT_GUEST_VM -I$(DXMT)/winemetal -I.. -I.
 

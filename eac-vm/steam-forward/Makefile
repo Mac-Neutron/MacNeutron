@@ -1,5 +1,5 @@
 # Host-side (macOS) builds of the Steam forwarding pieces; outputs go to build/eac-vm-work/steam-forward.
-OUT ?= ../../build/eac-vm-work/steam-forward
+OUT ?= $(or $(BUILD_DIR),../../build)/eac-vm-work/steam-forward
 CFLAGS ?= -O2 -g -Wall -Wextra -Wno-missing-field-initializers -std=c11
 
 $(OUT)/marshal-test: tests/marshal-test.c marshal.c marshal.h wire.h
@@ -11,9 +11,9 @@ marshal-test: $(OUT)/marshal-test
 .PHONY: marshal-test
 
 # lsteamclient (the tree the Mac bridge is built from), Wine's headers, the Mac Unix half.
-LSC ?= ../../build/wine-arm64-src/lsteamclient/lsteamclient
-WINEINC ?= ../../build/wine-arm64-src/wine/include
-MAC_UNIXLIB ?= ../../build/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/lsteamclient.so
+LSC ?= $(or $(BUILD_DIR),../../build)/wine-arm64-src/lsteamclient/lsteamclient
+WINEINC ?= $(or $(BUILD_DIR),../../build)/wine-arm64-src/wine/include
+MAC_UNIXLIB ?= $(or $(BUILD_DIR),../../build)/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/lsteamclient.so
 LSCFLAGS = -DWINE_UNIX_LIB -I. -I$(LSC) -I$(WINEINC) -Wno-unused-parameter -Wno-sign-compare -Wno-pragma-pack -Wno-macro-redefined
 
 $(OUT)/descriptors.c: gen.py $(LSC)/unixlib_generated.h $(LSC)/unixlib.h

@@ -136,8 +136,11 @@ wine_image
 state_template
 
 # rd.*: an initrd that cannot find or mount its root reboots after 30 s (ending the host) instead of waiting forever
-# or opening a shell.
-printf '%s\n' "root=LABEL=mn-base rootfstype=erofs ro systemd.volatile=overlay lockdown=integrity sysctl.kernel.kexec_load_disabled=1 module.sig_enforce=1 rd.timeout=30 rd.shell=0 rd.emergency=reboot panic=5 console=hvc0 net.ifnames=0" > "$OUT/cmdline.txt"
+# or opening a shell. The p profile's kernel is quiet (spec 2026-10-19-macneutron-performance-build §4), with the
+# measured runtime settings kept in MN_P_CMDLINE (§6).
+P_ARGS=
+[ "${MACNEUTRON_PROFILE:-std}" != p ] || P_ARGS=" quiet loglevel=0${MN_P_CMDLINE:+ $MN_P_CMDLINE}"
+printf '%s\n' "root=LABEL=mn-base rootfstype=erofs ro systemd.volatile=overlay lockdown=integrity sysctl.kernel.kexec_load_disabled=1 module.sig_enforce=1 rd.timeout=30 rd.shell=0 rd.emergency=reboot panic=5 console=hvc0 net.ifnames=0$P_ARGS" > "$OUT/cmdline.txt"
 # What a Mac's setup rebuilds base.erofs and the initramfs from: recipes, the overlay and the package list.
 sudo python3 "$HERE/recipe.py" "$WORK/root" "$WORK/initramfs.img" "$KVER" "$OUT/setup" "$CACHE/base" "$CACHE/x86" \
   | tail -3
