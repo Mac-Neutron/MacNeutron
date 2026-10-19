@@ -7,8 +7,9 @@
  *   hooks      progress runs before a consumer parks; ring_end for each ring that stops, then context_end
  *   notify     an MN_CTRL_NOTIFY_WAIT fence completes once the queue's head passes arg: at once if it already has,
  *              else when mn_executor_notified says the queue moved
- *   spin       MN_EXECUTOR_SPIN_US (0 here, set before the start): a consumer parks after each record when they come
- *              0.5 ms apart; the parse keeps the default for a value outside 0-2000
+ *   spin       MN_EXECUTOR_SPIN_US (2000 here, set before the start): a consumer spins across records 0.5 ms apart
+ *              (a few parks for 10 of them; the default 200 us would park after each); the parse keeps the default for
+ *              a value outside 0-2000
  *   drain      a ring attached drained (arg 1) has no consumer: its records run only in mn_executor_trap, in order,
  *              on the caller's thread; an MN_REC_SUBMIT record on ring B first runs ring A's 100 published records;
  *              two threads trapping two rings at once both finish, and so do two that submit at once, many times;
@@ -191,7 +192,7 @@ int main(void) {
     assert(mn_executor_spin_ns(NULL) == MN_EXECUTOR_SPIN_DEFAULT_NS);
     assert(mn_executor_spin_ns("-5") == MN_EXECUTOR_SPIN_DEFAULT_NS && mn_executor_spin_ns("abc") == MN_EXECUTOR_SPIN_DEFAULT_NS);
     assert(mn_executor_spin_ns("2001") == MN_EXECUTOR_SPIN_DEFAULT_NS);
-    setenv("MN_EXECUTOR_SPIN_US", "0", 1); /* read once, at the start */
+    setenv("MN_EXECUTOR_SPIN_US", "2000", 1); /* read once, at the start */
     mn_executor_start(blocker, &hooks);
     ops->context_create(ops->ctx, 1);
 
@@ -241,16 +242,18 @@ int main(void) {
     assert(mn_executor_snapshot(1, m[0].ring, m + 2, 2) == 1); /* except one ring */
     puts("marks ok");
 
-    usleep(10000); /* past the spin: both consumers park */
+    usleep(20000); /* past the spin: both consumers park */
     assert(progressed >= 2);
     int parked = progressed;
     for (int i = 0; i < 10; i++) {
         send_op(&a, MN_OP_NOP + 0x400);
         usleep(500);
     }
-    usleep(10000);
-    printf("%s spin (%d parks for 10 records)\n", progressed - parked >= 9 ? "ok  " : "FAIL", progressed - parked);
-    assert(progressed - parked >= 9);
+    usleep(20000);
+    /* Gaps of 0.5 ms are inside 2 ms: the consumer parks once at most (a slow sleep may add one or two), where a
+     * spin of 200 us or 0 would park after each record. */
+    printf("%s spin (%d parks for 10 records)\n", progressed - parked <= 3 ? "ok  " : "FAIL", progressed - parked);
+    assert(progressed - parked <= 3);
     /* A notify queue: head is its first word (notify.h). */
     _Atomic uint64_t *head = new_blob_sized(1, 30, 16384);
     struct mn_ctrl w = {MN_CTRL_NOTIFY_WAIT, 0, 30, 0};

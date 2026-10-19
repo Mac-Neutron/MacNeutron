@@ -23,8 +23,9 @@ struct mn_executor_hooks {
 void mn_executor_start(mn_op_fn handler, const struct mn_executor_hooks *hooks);
 /* How long a consumer spins after its last record before it parks, from MN_EXECUTOR_SPIN_US (0 to 2000 us; read
  * once, by mn_executor_start), in ns: the default for a missing value, and for a bad one, said on stderr. 200 us
- * (Direct3D forwarding M5, SMITE 2's lobby): 2 ms spun 2.9 cores for 58 fps, 200 us 1.2 cores for 59; 50 us fell to
- * 24 fps, every park making the next record a doorbell (a guest syscall under FEX and a VM exit). */
+ * (Direct3D forwarding M5, SMITE 2's lobby): 2 ms spun 2.9 cores for 58 fps, 200 us 1.2 cores for 59. Every park
+ * makes the next record a doorbell (a guest syscall under FEX and a VM exit), but 50 us's fall to 24 fps was App Nap's
+ * (a covered window): with that fixed, 50 us ran 59.4 fps; the match decides. */
 #define MN_EXECUTOR_SPIN_DEFAULT_NS 200000ull
 uint64_t mn_executor_spin_ns(const char *value);
 /* Every attached ring of the context but except (a ring_state), with its published position: up to cap marks. */
