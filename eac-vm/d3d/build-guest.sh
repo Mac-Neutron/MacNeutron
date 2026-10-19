@@ -29,11 +29,12 @@ for f in "$G/proxies.cpp" "$D3D/guest/proxy.cpp" "$D3D/guest/formats.cpp" "$O/ws
   x86_64-w64-mingw32-clang++ $CXF -I"$O/wsi" -c -o "$O/obj/$(basename "$f").o" "$f"
 done
 x86_64-w64-mingw32-clang -O2 -Wall -Werror -I"$G" -c -o "$O/obj/ifaces.o" "$G/ifaces.c"
-x86_64-w64-mingw32-clang++ -shared -static -o "$O/x86_64-windows/mnd3d.dll" "$O"/obj/*.o "$D3D/guest/mnd3d.def" "$WMLIB" \
+# Stripped: the static CRT's and libc++'s debug info names this Mac's llvm-mingw build folder (release.sh refuses it)
+x86_64-w64-mingw32-clang++ -shared -static -s -o "$O/x86_64-windows/mnd3d.dll" "$O"/obj/*.o "$D3D/guest/mnd3d.def" "$WMLIB" \
   -lgdi32 -luser32 -Wl,--no-insert-timestamp
 echo 'int __stdcall DllMain(void *h, unsigned r, void *p) { (void)h, (void)r, (void)p; return 1; }' > "$O/obj/forward.c"
 for n in d3d12 dxgi d3d11 d3d10core; do
-  x86_64-w64-mingw32-clang -shared -nostdlib -Wl,--entry,DllMain -o "$O/x86_64-windows/$n.dll" "$O/obj/forward.c" \
+  x86_64-w64-mingw32-clang -shared -nostdlib -s -Wl,--entry,DllMain -o "$O/x86_64-windows/$n.dll" "$O/obj/forward.c" \
     "$D3D/guest/$n.def" -Wl,--no-insert-timestamp
 done
 echo "d3d-guest: $O/x86_64-windows"
