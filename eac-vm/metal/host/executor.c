@@ -312,18 +312,23 @@ static void let_go(struct ring *r) {
 
 static void drain(struct ring *r);
 
+/* Every record q's guest published has run (finished only moves once a record's handler is done; read before the head,
+ * so a record published meanwhile is after the caller's): nothing of q's to run before a queue operation. */
+static int idle(struct ring *q) {
+    uint64_t done = atomic_load_explicit(&q->finished, memory_order_acquire);
+    return done == atomic_load_explicit(&q->v.hdr->head, memory_order_acquire);
+}
+
 /* r's queue operation: every other drained ring of the context runs what it has published (one this thread already
- * runs is past it: it is where this thread came from). Under submit_lock. */
+ * runs is past it: it is where this thread came from); an idle one isn't taken (the frame rate, 2026-10-18: a game's
+ * dozens of rings, most of them idle). Under submit_lock. */
 static void drain_others(struct ring *r) {
-    size_t n = 0, cap = 0;
-    struct ring **list = NULL;
+    size_t n = 0;
+    struct ring *list[MN_MAX_RINGS]; /* a context's at most (attach refuses more) */
     pthread_mutex_lock(&rings_lock);
-    for (struct ring *q = rings; q; q = q->next) cap += q->ctx_id == r->ctx_id && q->drained && q != r;
-    if (cap && (list = malloc(cap * sizeof *list)))
-        for (struct ring *q = rings; q && n < cap; q = q->next)
-            if (q->ctx_id == r->ctx_id && q->drained && q != r) atomic_fetch_add(&q->refs, 1), list[n++] = q;
+    for (struct ring *q = rings; q && n < sizeof list / sizeof *list; q = q->next)
+        if (q->ctx_id == r->ctx_id && q->drained && q != r && !idle(q)) atomic_fetch_add(&q->refs, 1), list[n++] = q;
     pthread_mutex_unlock(&rings_lock);
-    if (cap && !list) error("submit: no memory to run the other rings", r->ctx_id, cap);
     for (size_t i = 0; i < n; i++) {
         struct ring *q = list[i];
         if (atomic_load(&q->holder) != (void *)pthread_self()) {
@@ -333,7 +338,6 @@ static void drain_others(struct ring *r) {
         }
         unref(q);
     }
-    free(list);
 }
 
 /* Runs r's published records on this thread; r->drain held (let go and taken again around waiting for submit_lock). */
