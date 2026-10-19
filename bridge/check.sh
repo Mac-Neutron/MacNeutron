@@ -10,6 +10,9 @@
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="${BRIDGE_CHECK_WORK:-${TMPDIR:-/tmp}/macneutron bridge ü}"   # a space and a non-ASCII letter on purpose
+# The bridge on macOS: a game in a library would go to the microVM since every game runs there, the real VM folder's
+# (its state and share made for this check's app 0, 2026-10-18).
+export MACNEUTRON_VM=0
 B="$ROOT/build/bridge/arm64"
 mkdir -p "$WORK"
 COMPAT=  # set in tool-folder mode only: the launcher rows run then
