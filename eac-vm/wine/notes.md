@@ -1,25 +1,26 @@
 # Our Wine on x86-64 Linux: what each macOS patch does
 
-The guest Wine is the same tree as the macOS one: upstream master plus our series (`build/wine-arm64-src/wine`,
-branch `macneutron`, 39 commits over upstream 081042ed) plus `eac-vm/wine-patches` (Proton 11's EAC changes). Built
+The guest Wine is the same tree as the macOS one: Wine 11.20 plus our series (`build/wine-arm64-src/wine`,
+branch `macneutron`, 39 commits over wine-11.20, 7298a818) plus `eac-vm/wine-patches` (Proton 11's EAC changes). Built
 with `--enable-archs=x86_64` for `x86_64-linux-gnu`, so every patch falls in one of four groups.
 
-**Compiled out (`__APPLE__` or `__aarch64__`/ARM64EC only).** The loader and memory work: 45939b0d (loader link
-flags), 9783750b and 0b13586e (soft pagezero), 9886dc49 and 6681fcf9 (4K-page re-exec), 3651bf99, 2cf7ed38, 8c0fd465,
-dd92a4b4 (x18 toggle), 3eb3adfd (exec environment), caf58f51 and 9e810bb2 (W^X), 431240b9 (entitlement check),
-522a308b (CPU ID registers), 01be28e7 (host regions), and the ARM64EC ones a50c494e, fc928e82, 0771adf1, 0c40afba,
-plus 887f9c1d (ARM64 string routines in msvcrt). The x86-64 build has none of this code.
+**Compiled out (`__APPLE__` or `__aarch64__`/ARM64EC only).** The loader and memory work: e7ca11cc (loader link
+flags), 6bb72271 and 89c9b11d (soft pagezero), bb246c0a and 03d212ac (4K-page re-exec), 31044c7c, 9c1fe0af, 819956c4,
+108a073d (x18 toggle), 94a3d0e9 (exec environment), 48ad4b70 and 304cbd26 (W^X), 8c88c517 (entitlement check),
+a9c3932a (CPU ID registers), 60235a9b (host regions), and the ARM64EC ones 16f72e0b, 7a678afd, 00ae4b5e, ad576f74,
+plus db0153de (ARM64 string routines in msvcrt). The x86-64 build has none of this code.
 
-**Not built on Linux.** winemac.drv's 40991c02, 38640fe7 and b378b8e7: configure builds winex11.drv instead. msync
-(d56578ae, 9df2c3e8, 2c061864): `server/msync.c` is `#ifdef __APPLE__` with stubs otherwise, so the guest
-wineserver uses its plain server-side sync. e52cc81e (makedep) only matters with a hybrid arch.
+**Not built on Linux.** winemac.drv's e92bd64d, 5dc7fa99 and 432cf73c: configure builds winex11.drv instead. msync
+(769575fb, 40421051, 875c4db7): `server/msync.c` is `#ifdef __APPLE__` with stubs otherwise, so the guest
+wineserver uses its plain server-side sync. 97cb9aea (makedep) only matters with a hybrid arch.
 
-**Active, and the same as on macOS.** 9cc4d506 (win32u text metrics with no font) and 79874a0c (the Windows 2003
-SP1+ critical-section LockCount encoding) are platform-neutral fixes. 4bdae53e builds lsteamclient; the guest replaces
-its Unix half with the forwarder (`eac-vm/steam-forward`, plan 3b Task 5). a30386ff (a genuine steamclient64.dll's
-exports jump to lsteamclient.dll) is what SteamStub games need here too.
+**Active, and the same as on macOS.** e3aaf5fd (win32u text metrics with no font), 8699ded1 (the Windows 2003 SP1+
+critical-section LockCount encoding) and 26130284 (no wineboot wait window while a prefix is updated) are
+platform-neutral fixes. 3b389503 builds lsteamclient; the guest replaces its Unix half with the forwarder
+(`eac-vm/steam-forward`, plan 3b Task 5). d8b1c118 (a genuine steamclient64.dll's exports jump to lsteamclient.dll) is
+what SteamStub games need here too.
 
-**Active but inert.** libxess (14fd47ce through c35ad85e) builds, but it drives MetalFX through DXMT's
+**Active but inert.** libxess (23235145 through c56b03e2) builds, but it drives MetalFX through DXMT's
 `IMTLD3D12*` interfaces; on a D3D12 device that isn't DXMT's the query fails and XeSS reports an error, which games
 treat as XeSS unavailable.
 
