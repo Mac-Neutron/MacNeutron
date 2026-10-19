@@ -49,6 +49,7 @@ done
 # The native replayer of a game's recorded pipelines (fork 0086), beside the dylibs: it loads d3d12.dylib from its own
 # folder (the VM's dxmt/ too).
 cp "$B/src/replay/dxmt-replay" "$I/lib/" && codesign -s - -f "$I/lib/dxmt-replay" 2> /dev/null
+cp "$SRC/dxmt-translator-key" "$I/lib/translator" # the key the launcher stamps the VM's recordings with (MicroVM.swift)
 cp -R "$D/include/native/." "$I/include-native/"
 cp "$D/src/util/win32_native.h" "$D/src/util/win32_native_event.h" "$I/include-native/"
 echo "dxmt-native: built $(cd "$I/lib" && echo *.dylib)"

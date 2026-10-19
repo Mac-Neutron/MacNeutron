@@ -14,4 +14,4 @@ cp "$W/steam-forward/host/mn-steam-host" "$W/steam-forward/host/lsteamclient.so"
   "$D/steam-forward/host/"
 cp -L "$W/gvproxy" "$D/gvproxy"
 cp "$W"/metal-host/*.so "$D/metal-host/"
-cp "$W"/dxmt/*.dylib "$W/dxmt/dxmt-replay" "$D/dxmt/"  # native DXMT (Direct3D forwarding), host/build.sh's copy
+cp "$W"/dxmt/*.dylib "$W/dxmt/dxmt-replay" "$W/dxmt/translator" "$D/dxmt/"  # native DXMT (forwarding): host/build.sh's

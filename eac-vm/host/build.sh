@@ -39,7 +39,8 @@ for f in "$G/stubs.cpp" "$D3D/host/native.cpp" "$D3D/guest/formats.cpp"; do  # f
 done
 rm -rf "$W/dxmt"
 mkdir -p "$W/dxmt"
-cp "$ROOT"/build/dxmt-native/install/lib/*.dylib "$ROOT/build/dxmt-native/install/lib/dxmt-replay" "$W/dxmt/"
+cp "$ROOT"/build/dxmt-native/install/lib/*.dylib "$ROOT/build/dxmt-native/install/lib/dxmt-replay" \
+  "$ROOT/build/dxmt-native/install/lib/translator" "$W/dxmt/"
 clang -O2 -std=gnu2x -Wall -c -I"$W/libkrun/include" -o "$W/obj/input.c.o" "$ROOT/eac-vm/host/input.c"
 clang -O2 -std=gnu2x -Wall -c -o "$W/obj/audio.c.o" "$ROOT/eac-vm/host/audio.c"
 # The TPM's engine: libtpms (eac-vm/libtpms) on Homebrew's openssl@3, both linked in statically.

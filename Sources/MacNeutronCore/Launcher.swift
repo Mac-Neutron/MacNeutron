@@ -224,7 +224,8 @@ public struct Launcher: Sendable {
                 env["MN_D3D_STATE"] = state.path(percentEncoded: false)
                 if ShaderPrecache.enabled(backend: .dxmt, environment: environment) {
                     precache = ShaderPrecache(folder: state.appending(path: "pipelines"),
-                                              builds: "\(layout.dxmtTranslator ?? "none") \(ShaderPrecache.macOSBuild())")
+                                              builds: "\(vm.dxmtTranslator ?? layout.dxmtTranslator ?? "none") "
+                                                  + ShaderPrecache.macOSBuild())
                 }
                 if let precache, precache.needsReplay {
                     let toast = notifier.progress(title: "Preparing \(Self.gameName(request.target))'s shaders",

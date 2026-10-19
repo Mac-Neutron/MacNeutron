@@ -44,6 +44,11 @@ public struct MicroVM: Sendable {
     func dxmtState(appID: String) -> URL { root.appending(path: "state/\(appID).dxmt") }
     /// The native replayer of recorded pipelines (eac-vm/dxmt-native/build.sh), beside native DXMT.
     var dxmtReplay: URL { root.appending(path: "dxmt/dxmt-replay") }
+    /// Native DXMT's translator key (`dxmt/translator`, eac-vm/dxmt-native/build.sh's), which keys its recordings.
+    var dxmtTranslator: String? {
+        (try? String(contentsOf: root.appending(path: "dxmt/translator"), encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     /// A game under a Steam library's steamapps/common: that folder (the guest's read-only /mnt/games) and the game's
     /// path in the guest. Nil for a game anywhere else.

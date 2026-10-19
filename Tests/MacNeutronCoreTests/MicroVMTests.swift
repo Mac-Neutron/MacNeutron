@@ -194,6 +194,21 @@ private func expectRefusedUntilTheVMIsReady(_ f: VMFixture) {
     #expect(f.notifier.toasts.contains { $0.contains("shaders") })
 }
 
+@Test func theVMsPrecacheIsStampedWithNativeDXMTsKey() throws {
+    // The VM's recordings are native DXMT's: its translator key (dxmt/translator beside it in the VM folder), not the
+    // macOS runtime's, which a dev VM folder needn't match (M3's deferred minors).
+    let f = try makeVMFixture()
+    try write("native-key\n", to: f.vm.appending(path: "dxmt/translator"))
+    let pipelines = f.vm.appending(path: "state/2437170.dxmt/pipelines")
+    try write("recorded\n", to: pipelines.appending(path: "game.pipelines"))
+    try write("an older build\n", to: pipelines.appending(path: "replayed"))
+    var env = f.env
+    env["MACNEUTRON_VM_D3D"] = "forward"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    let stamp = try String(contentsOf: pipelines.appending(path: "replayed"), encoding: .utf8)
+    #expect(stamp.hasPrefix("native-key "))
+}
+
 @Test func dlssTurnsOnNativeDXMTsNvidiaExtension() throws {
     // Forwarded, native DXMT in macneutron-vm reads its own environment: DLSS's NVIDIA extension too (M3 Task 6).
     let f = try makeVMFixture()
