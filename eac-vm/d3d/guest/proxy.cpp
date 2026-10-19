@@ -55,6 +55,7 @@ struct mn_obj {
     std::vector<mn_stash> stashes; // a dynamic resource's, by subresource (Task 8), under m
     int8_t pieces = 0;             // 1: its maps answered here, -1: the host's (E_NOTIMPL), 0: not asked
     int8_t immediate = 0;          // a context's: 1 the immediate one, -1 deferred, 0 not asked
+    uint64_t heap_start = 0;       // a descriptor heap's CPU start, once asked (its writes' classes: heap_start())
     std::atomic<int8_t> covered{0}; // its calls under DXMT's device mutex (excluded()): 1 yes, -1 no, 0 not asked
     mn_proxy *ext2 = nullptr;      // and its IMTLD3D11ContextExt2 (a companion it holds), if asked
     std::vector<uint64_t> lists;   // a deferred context's dynamic resources discarded since its last list, or a list's
@@ -1518,6 +1519,129 @@ static void STDMETHODCALLTYPE execute_list(mn_proxy *This, ID3D11CommandList *li
     PX(execute_list, px_execute)(This, list, restore);
 }
 
+// ---- descriptor writes (the frame rate, 2026-10-18) ----
+// DXMT reads a shader-visible heap's slots only on the GPU (tables keep handles; ExecuteCommandLists, a submit, runs
+// every ring first), so a write into one needs no submit: a call (MN_D3D_DESCRIPTORS=sync, the default: it measured
+// as fast as queued in SMITE 2's lobby, 78.3 fps against 77.3, and two threads' writes to one slot can't swap) or
+// queued (async). A CPU-only heap's (and RTV and DSV heaps', always submits: rules.txt) are read when a recording runs (clears,
+// render passes, copies' sources), so writes into them stay submits, as does a copy from a shader-visible heap. Each
+// heap's CPU handles, from its start and description (asked once, at GetCPUDescriptorHandleForHeapStart), classify a
+// write's destination; one in no heap we know is a submit.
+struct heap_span { uint64_t start, end; uint32_t inc; bool visible; };
+static heap_span spans[4096]; // ponytail: append-only; past 4096 heaps a new one's writes are submits
+static std::atomic<uint32_t> nspans{0};
+static std::mutex spans_lock;
+static std::atomic<uint32_t> incs[4]; // each heap type's increment, from its heaps
+
+static uint32_t fast_flags() {
+    static const uint32_t f = [] {
+        const char *v = getenv("MN_D3D_DESCRIPTORS");
+        return v && !std::strcmp(v, "async") ? 0u : v && !std::strcmp(v, "submit") ? MN_D3D_ARG_HANDOFF : MN_D3D_ARG_SYNC;
+    }();
+    return f;
+}
+// The span of count descriptors from h, newest heap first: nullptr if they aren't all in one we know.
+static const heap_span *span_of(uint64_t h, uint64_t count, uint32_t type) {
+    uint32_t inc = type < 4 ? incs[type].load(std::memory_order_relaxed) : 0;
+    if (!inc || !count) return nullptr;
+    for (uint32_t i = nspans.load(std::memory_order_acquire); i--;)
+        if (h >= spans[i].start && h < spans[i].end)
+            return h + (count - 1) * inc < spans[i].end ? &spans[i] : nullptr;
+    return nullptr;
+}
+// A write into count descriptors from h: its flags.
+static uint32_t write_flags(uint64_t h, uint64_t count, uint32_t type) {
+    const heap_span *s = span_of(h, count, type);
+    return s && s->visible ? fast_flags() : MN_D3D_ARG_HANDOFF;
+}
+
+static const void *px_heap_start;
+static D3D12_CPU_DESCRIPTOR_HANDLE *STDMETHODCALLTYPE heap_start(mn_proxy *This, D3D12_CPU_DESCRIPTOR_HANDLE *ret) {
+    mn_obj *o = This->obj;
+    {
+        std::lock_guard<std::mutex> l(o->m);
+        if (o->heap_start) {
+            ret->ptr = (SIZE_T)o->heap_start;
+            return ret;
+        }
+    }
+    PX(heap_start, px_heap_start)(This, ret);
+    D3D12_DESCRIPTOR_HEAP_DESC d = ((ID3D12DescriptorHeap *)This)->GetDesc();
+    ID3D12Device *dev = nullptr;
+    uint32_t inc = 0;
+    if (d.Type < 4 && SUCCEEDED(((ID3D12DescriptorHeap *)This)->GetDevice(__uuidof(ID3D12Device), (void **)&dev))) {
+        if (!(inc = incs[d.Type].load())) incs[d.Type] = inc = dev->GetDescriptorHandleIncrementSize(d.Type);
+        dev->Release();
+    }
+    if (ret->ptr && inc) {
+        std::lock_guard<std::mutex> l(spans_lock);
+        uint32_t n = nspans.load();
+        if (n < 4096) {
+            spans[n] = {ret->ptr, ret->ptr + (uint64_t)d.NumDescriptors * inc, inc,
+                        !!(d.Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE)};
+            nspans.store(n + 1, std::memory_order_release);
+        }
+    }
+    std::lock_guard<std::mutex> l(o->m);
+    o->heap_start = ret->ptr; // a heap's start never changes: asked once
+    return ret;
+}
+
+#define MN_VIEW(fn, NAME, ARGS, FILL, TYPE)                                                                            \
+    static void STDMETHODCALLTYPE fn(mn_proxy *This ARGS, D3D12_CPU_DESCRIPTOR_HANDLE descriptor) {                    \
+        mn_d3d_p_##NAME p = {};                                                                                        \
+        p.self = (uintptr_t)This;                                                                                      \
+        FILL;                                                                                                          \
+        std::memcpy(p.descriptor, &descriptor, sizeof p.descriptor);                                                   \
+        mn_d3d_call_with(MN_D3D_ID_##NAME, write_flags(descriptor.ptr, 1, TYPE), &p);                                  \
+    }
+MN_VIEW(create_cbv, ID3D12Device_CreateConstantBufferView, MN_COMMA const D3D12_CONSTANT_BUFFER_VIEW_DESC *desc,
+        p.desc = (uintptr_t)desc, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+MN_VIEW(create_srv, ID3D12Device_CreateShaderResourceView,
+        MN_COMMA ID3D12Resource *res MN_COMMA const D3D12_SHADER_RESOURCE_VIEW_DESC *desc,
+        (p.resource = (uintptr_t)res, p.desc = (uintptr_t)desc), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+MN_VIEW(create_uav, ID3D12Device_CreateUnorderedAccessView,
+        MN_COMMA ID3D12Resource *res MN_COMMA ID3D12Resource *counter MN_COMMA const D3D12_UNORDERED_ACCESS_VIEW_DESC *desc,
+        (p.resource = (uintptr_t)res, p.counter_resource = (uintptr_t)counter, p.desc = (uintptr_t)desc),
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+MN_VIEW(create_sampler, ID3D12Device_CreateSampler, MN_COMMA const D3D12_SAMPLER_DESC *desc, p.desc = (uintptr_t)desc,
+        D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)
+
+// A copy: every destination range in shader-visible heaps and every source in CPU-only ones (a source in a
+// shader-visible heap may be a queued write's) goes the fast way.
+static void STDMETHODCALLTYPE copy_descriptors(mn_proxy *This, UINT ndst, const D3D12_CPU_DESCRIPTOR_HANDLE *dst,
+                                               const UINT *dst_sizes, UINT nsrc, const D3D12_CPU_DESCRIPTOR_HANDLE *src,
+                                               const UINT *src_sizes, D3D12_DESCRIPTOR_HEAP_TYPE type) {
+    uint32_t flags = fast_flags();
+    for (UINT i = 0; i < ndst && flags != MN_D3D_ARG_HANDOFF; i++) {
+        const heap_span *s = dst && dst_sizes ? span_of(dst[i].ptr, dst_sizes[i], type) : nullptr;
+        if (!s || !s->visible) flags = MN_D3D_ARG_HANDOFF;
+    }
+    for (UINT i = 0; i < nsrc && flags != MN_D3D_ARG_HANDOFF; i++) {
+        const heap_span *s = src ? span_of(src[i].ptr, src_sizes ? src_sizes[i] : 1, type) : nullptr;
+        if (!s || s->visible) flags = MN_D3D_ARG_HANDOFF;
+    }
+    mn_d3d_p_ID3D12Device_CopyDescriptors p = {};
+    p.self = (uintptr_t)This;
+    p.dst_descriptor_range_count = ndst, p.dst_descriptor_range_offsets = (uintptr_t)dst;
+    p.dst_descriptor_range_sizes = (uintptr_t)dst_sizes;
+    p.src_descriptor_range_count = nsrc, p.src_descriptor_range_offsets = (uintptr_t)src;
+    p.src_descriptor_range_sizes = (uintptr_t)src_sizes;
+    p.descriptor_heap_type = (uint32_t)type;
+    mn_d3d_call_with(MN_D3D_ID_ID3D12Device_CopyDescriptors, flags, &p);
+}
+static void STDMETHODCALLTYPE copy_descriptors_simple(mn_proxy *This, UINT count, D3D12_CPU_DESCRIPTOR_HANDLE dst,
+                                                      D3D12_CPU_DESCRIPTOR_HANDLE src, D3D12_DESCRIPTOR_HEAP_TYPE type) {
+    const heap_span *d = span_of(dst.ptr, count, type), *s = span_of(src.ptr, count, type);
+    mn_d3d_p_ID3D12Device_CopyDescriptorsSimple p = {};
+    p.self = (uintptr_t)This, p.descriptor_count = count;
+    std::memcpy(p.dst_descriptor_range_offset, &dst, sizeof p.dst_descriptor_range_offset);
+    std::memcpy(p.src_descriptor_range_offset, &src, sizeof p.src_descriptor_range_offset);
+    p.descriptor_heap_type = (uint32_t)type;
+    mn_d3d_call_with(MN_D3D_ID_ID3D12Device_CopyDescriptorsSimple,
+                     d && d->visible && s && !s->visible ? fast_flags() : MN_D3D_ARG_HANDOFF, &p);
+}
+
 // A D3D10 resource's map (D3D10's maps are its resources'): after every thread's published records, as a context's map
 // after another thread's calls (M4's deferred findings). ponytail: every one; the device's recorder (mn_d3d_record) if
 // a D3D10 game's maps ever cost a frame.
@@ -1597,6 +1721,13 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"ID3D11Fence::GetCompletedValue", (const void *)completed_value11},
         {"ID3D11Fence::SetEventOnCompletion", (const void *)set_event11},
         {"ID3D11DeviceContext3::Flush1", (const void *)flush1},
+        {"ID3D12DescriptorHeap::GetCPUDescriptorHandleForHeapStart", (const void *)heap_start, &px_heap_start},
+        {"ID3D12Device::CreateConstantBufferView", (const void *)create_cbv},
+        {"ID3D12Device::CreateShaderResourceView", (const void *)create_srv},
+        {"ID3D12Device::CreateUnorderedAccessView", (const void *)create_uav},
+        {"ID3D12Device::CreateSampler", (const void *)create_sampler},
+        {"ID3D12Device::CopyDescriptors", (const void *)copy_descriptors},
+        {"ID3D12Device::CopyDescriptorsSimple", (const void *)copy_descriptors_simple},
         {"ID3D11Multithread::Enter", (const void *)mt_enter},
         {"ID3D11Multithread::Leave", (const void *)mt_leave},
         {"IDXGISwapChain2::SetMaximumFrameLatency", (const void *)set_latency, &px_set_latency},

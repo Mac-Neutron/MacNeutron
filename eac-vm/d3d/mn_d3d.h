@@ -83,6 +83,9 @@ struct mn_d3d_args { uint32_t id, flags; uint64_t params; };
  * stamps its start, another records and closes it): sent with MN_REC_SUBMIT, which first runs every other ring of the
  * context, that thread's records for the list among them. */
 #define MN_D3D_ARG_HANDOFF 1u
+/* A void method sent as a call (flushed, waited for) rather than queued: a descriptor write's MN_D3D_DESCRIPTORS=sync
+ * (guest/proxy.cpp). */
+#define MN_D3D_ARG_SYNC 2u
 /* A piece of a dynamic resource's memory (IMTLD3D11ContextExt2::GetPieces's, M4 Task 8), as the host answers it: the
  * arena's (blob, offset), which the unix side makes the guest's address in blob (0: none, not in an arena). */
 struct mn_d3d_piece { uint64_t id, blob, offset; uint32_t row_pitch, depth_pitch; };

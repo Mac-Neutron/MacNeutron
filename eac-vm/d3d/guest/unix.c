@@ -138,6 +138,7 @@ static void events(void) {
  * and every 5 s from the listener (M3 Task 10: a game killed at its run's end never ends; the loopback's, appended at
  * its end: MN_D3D_LOOPBACK_TRACE); a method the guest answered itself (op 3, once) is marked by why. */
 static _Atomic uint64_t *counts;
+static _Atomic uint64_t exits, submits; /* the calls that trapped: the others, and those that ran every ring first */
 static uint8_t *why; /* 1 refused, 2 a special without guest code, 3 answered in the guest by design (M4 Task 8) */
 
 static void trace_out(void) {
@@ -152,6 +153,7 @@ static void trace_out(void) {
     if (!f) return;
     fprintf(f, "# process %d\n", (int)getpid());
     fprintf(f, "# arenas %llu\n", (unsigned long long)arena_bytes); /* the guest memory it gave the host (M4) */
+    fprintf(f, "# exits %llu\n# submits %llu\n", (unsigned long long)exits, (unsigned long long)submits);
     for (unsigned i = 0; i < MN_D3D_CALLS; i++)
         if (counts[i])
             fprintf(f, "%u %s %llu%s\n", i, mn_d3d_calls[i].name, (unsigned long long)counts[i],
@@ -276,12 +278,13 @@ int32_t mn_d3d_unix_call(void *args) {
         NTSTATUS_T s = mn_wm_pack_call(c, params, &o);
         if (s) return (int32_t)s;
         int submit = c->mode == MN_WM_SUBMIT || (a->flags & MN_D3D_ARG_HANDOFF);
-        if (!o.sync && !submit) {
+        if (!o.sync && !submit && !(a->flags & MN_D3D_ARG_SYNC)) {
             int r = mn_queue(MN_OP_D3D + a->id, rec, o.len);
             if (r) mn_wm_unwind(&o, 0);
             return r;
         }
         uint32_t n = 0;
+        if (counts) atomic_fetch_add_explicit(submit ? &submits : &exits, 1, memory_order_relaxed);
         int32_t r = mn_call_flush((MN_OP_D3D + a->id) | (submit ? MN_REC_SUBMIT : 0), rec, o.len, reply,
                                   MN_REPLY_BYTES, &n);
         if (r) {

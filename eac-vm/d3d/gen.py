@@ -1426,8 +1426,8 @@ def main(argv):
             tail = "\n".join(iface_decls(model))
             proxies, maxslots = emit_proxies(model, rules, calls)
             tail += f"\n#define MN_D3D_MAX_SLOTS {maxslots}\n"
-            for mid in sorted(calls):  # the methods with code of our own, by name
-                if calls[mid].name in rules.own:
+            for mid in sorted(calls):  # the methods with code of our own (a wrap's may fill the params itself), by name
+                if calls[mid].name in rules.own | rules.wrap:
                     c_name = calls[mid].name.replace("::", "_")
                     tail += f"#define MN_D3D_ID_{c_name} {mid}\ntypedef struct mn_d3d_p_{mid} mn_d3d_p_{c_name};\n"
             head, _, end = params.rpartition("\n#endif\n")  # the header's own guard, its last
