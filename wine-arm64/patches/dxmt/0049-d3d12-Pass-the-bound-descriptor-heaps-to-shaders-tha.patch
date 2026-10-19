@@ -28,7 +28,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  3 files changed, 43 insertions(+), 9 deletions(-)
 
 diff --git a/src/d3d12/d3d12_command_list.cpp b/src/d3d12/d3d12_command_list.cpp
-index 7318a8e..18278f6 100644
+index 273eb19..c6efc20 100644
 --- a/src/d3d12/d3d12_command_list.cpp
 +++ b/src/d3d12/d3d12_command_list.cpp
 @@ -202,11 +202,15 @@ class MTLD3D12GraphicsCommandListImpl

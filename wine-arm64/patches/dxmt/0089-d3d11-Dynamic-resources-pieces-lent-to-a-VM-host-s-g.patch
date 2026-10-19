@@ -1,4 +1,4 @@
-From 09baa0845aaf4fc5b787faa15cedbf437776218c Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sun, 18 Oct 2026 15:22:54 -0400
 Subject: [PATCH] d3d11: Dynamic resources' pieces lent to a VM host's guest.

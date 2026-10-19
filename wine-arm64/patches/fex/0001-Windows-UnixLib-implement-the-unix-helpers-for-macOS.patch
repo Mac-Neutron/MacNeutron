@@ -24,7 +24,7 @@ Source: https://github.com/dappermint/FEX.git commit 4efc3abc8aca8a0d3a8aca1f153
  1 file changed, 63 insertions(+), 9 deletions(-)
 
 diff --git a/Source/Windows/UnixLib/FEXUnixLib.cpp b/Source/Windows/UnixLib/FEXUnixLib.cpp
-index 692e459..bd82e6c 100644
+index 8adef59..5f4a4b2 100644
 --- a/Source/Windows/UnixLib/FEXUnixLib.cpp
 +++ b/Source/Windows/UnixLib/FEXUnixLib.cpp
 @@ -4,7 +4,9 @@
@@ -166,7 +166,7 @@ index 692e459..bd82e6c 100644
 +#endif
  }
  
- extern "C" const unixlib_entry_t __wine_unix_call_funcs[] = {
+ static NTSTATUS FEXUnixLib_MapFileHandler(void* _Args) {
 -- 
 2.54.0 (Apple Git-157)
 

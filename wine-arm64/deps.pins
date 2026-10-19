@@ -20,4 +20,4 @@ FFMPEG_SHA256=7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3
 # checkout without the Steamworks SDK folders, with wine-arm64/patches/lsteamclient on top. Its series is these
 # LSTEAMCLIENT_ lines and those patches: a tarball pin never re-fetches it.
 LSTEAMCLIENT_REPO=https://github.com/ValveSoftware/Proton.git
-LSTEAMCLIENT_COMMIT=db9e6ffbf24a95b104fb699dd62532c70a2f9a51
+LSTEAMCLIENT_COMMIT=bc896217ffcd67f892f952b010f898fe7bd0f0a1

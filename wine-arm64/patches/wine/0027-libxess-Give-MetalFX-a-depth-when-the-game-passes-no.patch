@@ -21,7 +21,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 86 insertions(+), 13 deletions(-)
 
 diff --git a/dlls/libxess/Makefile.in b/dlls/libxess/Makefile.in
-index 7c354ad..e36bcd0 100644
+index 7c354ada..e36bcd05 100644
 --- a/dlls/libxess/Makefile.in
 +++ b/dlls/libxess/Makefile.in
 @@ -2,6 +2,7 @@ MODULE = libxess.dll
@@ -33,7 +33,7 @@ index 7c354ad..e36bcd0 100644
  SOURCES = \
  	d3d12.c \
 diff --git a/dlls/libxess/d3d12.c b/dlls/libxess/d3d12.c
-index 3c5d3de..45314fb 100644
+index 3c5d3de9..45314fbb 100644
 --- a/dlls/libxess/d3d12.c
 +++ b/dlls/libxess/d3d12.c
 @@ -67,6 +67,8 @@ struct xess_d3d12

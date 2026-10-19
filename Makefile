@@ -115,7 +115,7 @@ release:
 	$(MAKE) build bridge wine-arm64
 	sh release/release.sh "$(VERSION)"
 
-# Native arm64 Wine 11.19 with our patches, FEX for x64 code and our DXMT for ARM64X
+# Native arm64 Wine 11.20 with our patches, FEX for x64 code and our DXMT for ARM64X
 # (docs/superpowers/specs/2026-10-02-macneutron-native-arm64-design.md §5, §6; 2026-10-03-macneutron-arm64-dxmt-design.md).
 # First run: shallow clones of Wine, FEX and DXMT, an arm64 LLVM build and some compiling; see wine-arm64/build.sh.
 wine-arm64:

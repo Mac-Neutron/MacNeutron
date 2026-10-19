@@ -39,10 +39,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 16 insertions(+), 7 deletions(-)
 
 diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
-index 785796d..f0de3c1 100644
+index b08f431c..d16e201d 100644
 --- a/dlls/ntdll/unix/signal_arm64.c
 +++ b/dlls/ntdll/unix/signal_arm64.c
-@@ -933,19 +933,23 @@ __ASM_GLOBAL_FUNC( call_user_mode_callback,
+@@ -938,19 +938,23 @@ __ASM_GLOBAL_FUNC( call_user_mode_callback,
                     "mov x19, x4\n\t"              /* teb */
                     "mov x20, x0\n\t"              /* user_sp */
                     "mov x21, x3\n\t"              /* func */
@@ -73,7 +73,7 @@ index 785796d..f0de3c1 100644
  
  
  /***********************************************************************
-@@ -1676,6 +1680,11 @@ void signal_init_process( TEB *teb )
+@@ -1681,6 +1685,11 @@ void signal_init_process( TEB *teb )
          const char *selftest = getenv( "WINE_X18_SELFTEST" );
          x18_selftest = selftest && !strcmp( selftest, "double_on" );  /* before SIGTRAP is handled */
      }

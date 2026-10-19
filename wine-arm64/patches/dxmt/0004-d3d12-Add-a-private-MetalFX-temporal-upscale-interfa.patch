@@ -52,10 +52,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 src/d3d12/d3d12_interfaces.hpp
 
 diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
-index 959763d..b439391 100644
+index f95f739..f49c2bd 100644
 --- a/src/d3d11/d3d11_context_impl.cpp
 +++ b/src/d3d11/d3d11_context_impl.cpp
-@@ -5255,7 +5255,7 @@ public:
+@@ -5280,7 +5280,7 @@ public:
        scaler_entry.output_pixel_format = output->pixelFormat();
        scaler_entry.depth_pixel_format = depth->pixelFormat();
        scaler_entry.motion_vector_pixel_format = motion_vector_format;
@@ -115,7 +115,7 @@ index 12c2ee3..3baea93 100644
 +
  }; // namespace dxmt
 diff --git a/src/d3d12/d3d12_command_list.cpp b/src/d3d12/d3d12_command_list.cpp
-index 3cd6de7..95ec534 100644
+index e834e5e..06f5d43 100644
 --- a/src/d3d12/d3d12_command_list.cpp
 +++ b/src/d3d12/d3d12_command_list.cpp
 @@ -165,7 +165,8 @@ WriteEnds(D3D12_RESOURCE_STATES state) {
@@ -348,7 +348,7 @@ index 68f7370..274dcc9 100644
          if (dumping)
            DumpPass(cmdbuf, current);
 diff --git a/src/d3d12/d3d12_device.cpp b/src/d3d12/d3d12_device.cpp
-index 9a1580c..a652c94 100644
+index 8a51b5d..d400b1c 100644
 --- a/src/d3d12/d3d12_device.cpp
 +++ b/src/d3d12/d3d12_device.cpp
 @@ -260,7 +260,60 @@ stream_start += align(sizeof(*subobject), sizeof(void *));

@@ -47,10 +47,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  8 files changed, 132 insertions(+), 33 deletions(-)
 
 diff --git a/src/airconv/dxbc_converter.cpp b/src/airconv/dxbc_converter.cpp
-index 0073a7e..5bd7fd0 100644
+index 2006515..b190feb 100644
 --- a/src/airconv/dxbc_converter.cpp
 +++ b/src/airconv/dxbc_converter.cpp
-@@ -1369,6 +1369,18 @@ AIRCONV_API void SM50Destroy(sm50_shader_t pShader) {
+@@ -1366,6 +1366,18 @@ AIRCONV_API void SM50Destroy(sm50_shader_t pShader) {
    delete (dxmt::dxbc::SM50ShaderInternal *)pShader;
  }
  
@@ -69,7 +69,7 @@ index 0073a7e..5bd7fd0 100644
  AIRCONV_API int SM50Compile(
    sm50_shader_t pShader, SM50_SHADER_COMPILATION_ARGUMENT_DATA *pArgs,
    const char *FunctionName, sm50_bitcode_t *ppBitcode, sm50_error_t *ppError
-@@ -1415,10 +1427,9 @@ AIRCONV_API int SM50Compile(
+@@ -1412,10 +1424,9 @@ AIRCONV_API int SM50Compile(
      return 1;
    }
  
@@ -83,7 +83,7 @@ index 0073a7e..5bd7fd0 100644
  
    runOptimizationPasses(*pModule);
  
-@@ -1647,10 +1658,13 @@ AIRCONV_API int SM50CompileGeometryPipelineVertex(
+@@ -1644,10 +1655,13 @@ AIRCONV_API int SM50CompileGeometryPipelineVertex(
      return 1;
    }
  
@@ -101,7 +101,7 @@ index 0073a7e..5bd7fd0 100644
  
    runOptimizationPasses(*pModule);
  
-@@ -1722,10 +1736,11 @@ AIRCONV_API int SM50CompileGeometryPipelineGeometry(
+@@ -1719,10 +1733,11 @@ AIRCONV_API int SM50CompileGeometryPipelineGeometry(
      return 1;
    }
  

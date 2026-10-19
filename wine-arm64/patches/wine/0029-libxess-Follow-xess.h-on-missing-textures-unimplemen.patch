@@ -24,7 +24,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 41 insertions(+), 18 deletions(-)
 
 diff --git a/dlls/libxess/d3d12.c b/dlls/libxess/d3d12.c
-index a21938b..56231e3 100644
+index a21938bf..56231e38 100644
 --- a/dlls/libxess/d3d12.c
 +++ b/dlls/libxess/d3d12.c
 @@ -113,12 +113,14 @@ static void once(LONG *flag, char *msg, const char *format, ...)
@@ -130,7 +130,7 @@ index a21938b..56231e3 100644
  {
      struct xess_d3d12 *ctx;
 diff --git a/dlls/libxess/libxess.spec b/dlls/libxess/libxess.spec
-index 328dc66..a840c9c 100644
+index 328dc664..a840c9cc 100644
 --- a/dlls/libxess/libxess.spec
 +++ b/dlls/libxess/libxess.spec
 @@ -32,32 +32,32 @@

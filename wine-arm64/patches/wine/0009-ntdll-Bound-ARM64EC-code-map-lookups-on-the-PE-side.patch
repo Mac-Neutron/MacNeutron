@@ -31,7 +31,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 4 insertions(+)
 
 diff --git a/dlls/ntdll/signal_arm64ec.c b/dlls/ntdll/signal_arm64ec.c
-index 1a8174e..923ba88 100644
+index 1a8174e7..923ba889 100644
 --- a/dlls/ntdll/signal_arm64ec.c
 +++ b/dlls/ntdll/signal_arm64ec.c
 @@ -1394,6 +1394,8 @@ BOOLEAN WINAPI RtlIsEcCode( ULONG_PTR ptr )

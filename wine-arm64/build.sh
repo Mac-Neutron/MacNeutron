@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds MacNeutron's arm64 Wine (11.19 + wine-arm64/patches/wine) into build/wine-arm64-src/wine-build, against
+# Builds MacNeutron's arm64 Wine (11.20 + wine-arm64/patches/wine) into build/wine-arm64-src/wine-build, against
 # FreeType, gnutls and FFmpeg built from wine-arm64/deps.pins' tarballs into deps, FEX (+ wine-arm64/patches/fex) into
 # fex-ec and fex-unixlib, DXMT (dxmt/pins' commit + wine-arm64/patches/dxmt) for ARM64X into dxmt-install, and Proton's
 # lsteamclient (deps.pins' commit + wine-arm64/patches/lsteamclient) as one of Wine's DLLs, then stages the signed

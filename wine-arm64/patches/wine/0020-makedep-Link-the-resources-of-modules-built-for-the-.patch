@@ -28,7 +28,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 6 insertions(+), 3 deletions(-)
 
 diff --git a/tools/makedep.c b/tools/makedep.c
-index 04baabe..6b25132 100644
+index c955265b..cc98e7b4 100644
 --- a/tools/makedep.c
 +++ b/tools/makedep.c
 @@ -3930,7 +3930,7 @@ static void output_module( struct makefile *make, unsigned int arch )

@@ -1466,3 +1466,17 @@ uncapped, the maintainer playing; `perf-compare.sh`, 60 s each): macOS 125.1 fps
 1.41 times. M5's: the host's overheads 1.76 cores (wake-ups 0.85, spinning 0.00, sound 0.15, other 0.76) against 2.0,
 wineserver 0.09 against 0.2, 124.0 fps against 108.6 and GPU 99.7% against 91.6%. At 124 frames a second the overheads
 are higher than in the lobby's 76 (1.10).
+
+**0.7.0's trees** (2026-10-19). The pins moved to the experiment's upstream merges, its merges now patch series: Wine
+11.20 (`wine-11.20`, 7298a818; 0037 back in the series, `patches/wine-master` gone), FEX main 741e146, Proton's
+`proton_11.0` bc896217 for lsteamclient, and DXMT 5ecab2f on the fork's `macneutron` branch, a merge of upstream's
+50102f9 into the 0.6.0 pin (a3d9005's check placed in the fork's restructured graphics pipeline), under the same 92
+patches. Each series, applied on its pin, gives the experiment tree's own root tree (the same tree hash: wine 5eace0a8,
+fex 01c95217, dxmt 9ae804fb, lsteamclient 95dd5e5e), so the gates above ran on 0.7.0's sources; the conflicts were
+resolved as the experiment's merges had (Wine 0002's pagezero block in master's mem areas, 0012's debug channels, 0015's
+protocol version; FEX 0005's allocator hooks). Direct3D forwarding is the VM's default (`MACNEUTRON_VM_D3D=guest` keeps
+DXMT in the guest). `d3d-smoke.sh`'s slow-present rule still fails: 69, 2 and 6 forwarded presents over 4 ms in three
+runs on 2026-10-19 (the longest 11.5-14.3 ms), with the maintainer at the Mac, so not the idle display. They are
+GPU-bound frames (`latency`'s and `d3d11latency`'s): the host's `Present` sometimes waits up to a frame for its
+drawable although the guest's pacing left one free. Games don't show it (SMITE 2 forwarded at 99% of macOS); 0.7.0
+ships it as a known issue, and the fix (stricter pacing in the guest) needs a new frame-rate run.

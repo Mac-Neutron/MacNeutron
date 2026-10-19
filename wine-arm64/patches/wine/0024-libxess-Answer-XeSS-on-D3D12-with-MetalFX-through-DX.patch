@@ -62,7 +62,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 dlls/libxess/xess.h
 
 diff --git a/dlls/libxess/Makefile.in b/dlls/libxess/Makefile.in
-index 88420c9..7c354ad 100644
+index 88420c9e..7c354ada 100644
 --- a/dlls/libxess/Makefile.in
 +++ b/dlls/libxess/Makefile.in
 @@ -1,7 +1,8 @@
@@ -77,7 +77,7 @@ index 88420c9..7c354ad 100644
  	main.c
 diff --git a/dlls/libxess/d3d12.c b/dlls/libxess/d3d12.c
 new file mode 100644
-index 0000000..5cd4f64
+index 00000000..5cd4f641
 --- /dev/null
 +++ b/dlls/libxess/d3d12.c
 @@ -0,0 +1,600 @@
@@ -683,7 +683,7 @@ index 0000000..5cd4f64
 +}
 diff --git a/dlls/libxess/dxmt_d3d12_ext.h b/dlls/libxess/dxmt_d3d12_ext.h
 new file mode 100644
-index 0000000..7948ee7
+index 00000000..7948ee77
 --- /dev/null
 +++ b/dlls/libxess/dxmt_d3d12_ext.h
 @@ -0,0 +1,90 @@
@@ -778,7 +778,7 @@ index 0000000..7948ee7
 +
 +#endif /* __WINE_DLLS_LIBXESS_DXMT_D3D12_EXT_H */
 diff --git a/dlls/libxess/libxess.spec b/dlls/libxess/libxess.spec
-index c9e22eb..328dc66 100644
+index c9e22eb5..328dc664 100644
 --- a/dlls/libxess/libxess.spec
 +++ b/dlls/libxess/libxess.spec
 @@ -1,5 +1,5 @@
@@ -842,7 +842,7 @@ index c9e22eb..328dc66 100644
  @ cdecl xessTrinityCreateContext() xess_unsupported
  @ cdecl xessTrinityGetRequiredDeviceExtensions() xess_unsupported
 diff --git a/dlls/libxess/main.c b/dlls/libxess/main.c
-index 380229c..1d2446a 100644
+index 380229c2..1d2446a9 100644
 --- a/dlls/libxess/main.c
 +++ b/dlls/libxess/main.c
 @@ -20,7 +20,8 @@
@@ -857,7 +857,7 @@ index 380229c..1d2446a 100644
  #include <stdint.h>
 diff --git a/dlls/libxess/xess.h b/dlls/libxess/xess.h
 new file mode 100644
-index 0000000..c50111c
+index 00000000..c50111c0
 --- /dev/null
 +++ b/dlls/libxess/xess.h
 @@ -0,0 +1,161 @@

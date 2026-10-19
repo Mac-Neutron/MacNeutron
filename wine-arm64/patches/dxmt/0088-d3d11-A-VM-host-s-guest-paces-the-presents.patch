@@ -1,4 +1,4 @@
-From 6a0f322a9ad87644cdffbea37c9822e38c9bbbb1 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sun, 18 Oct 2026 14:41:05 -0400
 Subject: [PATCH] d3d11: A VM host's guest paces the presents.

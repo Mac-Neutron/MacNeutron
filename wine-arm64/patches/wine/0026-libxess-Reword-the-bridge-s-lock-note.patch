@@ -15,7 +15,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 5 insertions(+), 5 deletions(-)
 
 diff --git a/dlls/libxess/d3d12.c b/dlls/libxess/d3d12.c
-index cec20ee..3c5d3de 100644
+index cec20eec..3c5d3de9 100644
 --- a/dlls/libxess/d3d12.c
 +++ b/dlls/libxess/d3d12.c
 @@ -76,11 +76,11 @@ static SRWLOCK contexts_lock = SRWLOCK_INIT;

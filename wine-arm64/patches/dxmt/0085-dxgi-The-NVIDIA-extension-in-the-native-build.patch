@@ -1,4 +1,4 @@
-From 2e616a35c1b18f625e826a17bb802d341defe07c Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sun, 18 Oct 2026 09:08:08 -0400
 Subject: [PATCH] dxgi: The NVIDIA extension in the native build.

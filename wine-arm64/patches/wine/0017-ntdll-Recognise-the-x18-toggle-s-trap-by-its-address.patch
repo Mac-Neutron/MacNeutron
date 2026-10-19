@@ -18,7 +18,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 8 insertions(+), 5 deletions(-)
 
 diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
-index 3f1d2b3..4122550 100644
+index ce05b134..bf6924d4 100644
 --- a/dlls/ntdll/unix/signal_arm64.c
 +++ b/dlls/ntdll/unix/signal_arm64.c
 @@ -58,7 +58,6 @@
@@ -29,7 +29,7 @@ index 3f1d2b3..4122550 100644
  # include <os/arch/arm64.h>
  #endif
  #include "wine/debug.h"
-@@ -1553,16 +1552,17 @@ static void usr2_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -1558,16 +1557,17 @@ static void usr2_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
  /**********************************************************************
   *           x18_toggle_trap
   *
@@ -51,7 +51,7 @@ index 3f1d2b3..4122550 100644
  }
  
  
-@@ -1664,6 +1664,9 @@ void signal_init_process( TEB *teb )
+@@ -1669,6 +1669,9 @@ void signal_init_process( TEB *teb )
      sig_act.sa_mask = server_block_set;
      sig_act.sa_flags = SA_SIGINFO | SA_RESTART | SA_ONSTACK;
  

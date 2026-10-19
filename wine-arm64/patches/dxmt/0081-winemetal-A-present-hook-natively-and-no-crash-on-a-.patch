@@ -1,4 +1,4 @@
-From 21d52071725de21ff8186747ba83df646f02b8f5 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sun, 18 Oct 2026 07:53:37 -0400
 Subject: [PATCH] winemetal: A present hook natively, and no crash on a window

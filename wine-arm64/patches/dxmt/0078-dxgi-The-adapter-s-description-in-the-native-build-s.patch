@@ -1,4 +1,4 @@
-From 2e9c75667320c3299779487be2cc8c795349c239 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sat, 17 Oct 2026 23:49:08 -0400
 Subject: [PATCH] dxgi: The adapter's description in the native build's WCHAR.

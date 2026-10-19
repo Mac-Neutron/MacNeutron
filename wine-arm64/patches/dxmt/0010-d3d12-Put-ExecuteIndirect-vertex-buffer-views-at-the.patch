@@ -48,7 +48,7 @@ index 32acdb4..6d1e530 100644
  
  class MTLD3D12CommandAllocatorImpl : public MTLD3D12Pageable<MTLD3D12CommandAllocator> {
 diff --git a/src/d3d12/d3d12_command_list.cpp b/src/d3d12/d3d12_command_list.cpp
-index 96793e5..6471730 100644
+index 1a32403..0a0a7da 100644
 --- a/src/d3d12/d3d12_command_list.cpp
 +++ b/src/d3d12/d3d12_command_list.cpp
 @@ -2017,6 +2017,7 @@ public:

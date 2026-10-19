@@ -1,4 +1,4 @@
-From feab55f433d4236b2a714ce7b0012aa476e63bdf Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sat, 17 Oct 2026 23:19:08 -0400
 Subject: [PATCH] d3d12: CPU-visible heaps over the memory hooks, natively.

@@ -31,10 +31,10 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
  1 file changed, 31 insertions(+)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 31351f8..c043ec4 100644
+index 994a8dee..448156e1 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -1975,6 +1975,18 @@ static inline int mprotect_exec( void *base, size_t size, int unix_prot )
+@@ -1603,6 +1603,18 @@ static inline int mprotect_exec( void *base, size_t size, int unix_prot )
          if (!(unix_prot & PROT_WRITE)) return -1;
      }
  
@@ -53,7 +53,7 @@ index 31351f8..c043ec4 100644
      return mprotect( base, size, unix_prot );
  }
  
-@@ -4760,7 +4772,26 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
+@@ -4336,7 +4348,26 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
              if ((vprot & VPROT_WRITEWATCH) || is_write_watch_range( page, 1 ))
                  ret = STATUS_SUCCESS;
          }

@@ -1,4 +1,4 @@
-From 336b38a527768b0df3427c049c0eb70b8df3bd83 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sun, 18 Oct 2026 08:20:41 -0400
 Subject: [PATCH] d3d12: IMPLEMENT_ME throws in the native build.

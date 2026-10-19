@@ -5,7 +5,7 @@ fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1: $2"; else echo "FAIL $1: got '$2', want '$3'"; fail=1; fi; }
 export PATH=/opt/mn-wine/bin:$PATH WINEDEBUG=-all DISPLAY=:0 WINEPREFIX=/home/mn/wine-gate
 check wine-image "$(findmnt -n -o FSTYPE /opt/mn-wine)" erofs
-check version "$(wine --version 2>&1)" wine-11.19
+check version "$(wine --version 2>&1)" wine-11.20
 # Our tree, not upstream's: Proton's EAC runtime path is in our ntdll.
 check eac-patches "$(grep -c PROTON_EAC_RUNTIME /opt/mn-wine/lib/wine/x86_64-unix/ntdll.so)" 1
 Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &

@@ -1,13 +1,14 @@
 # MacNeutron's native arm64 stack inputs (native arm64 spec §5.1, §6.1), sourced by wine-arm64/build.sh.
-# Wine 11.19: WINE_COMMIT is what tag WINE_TAG points at (the clone is checked against it); the patches in
+# Wine 11.20: WINE_COMMIT is what tag WINE_TAG points at (the clone is checked against it); the patches in
 # wine-arm64/patches/wine apply on top. llvm-mingw is not pinned here: dxmt/pins owns it, via dxmt/toolchain.sh.
 WINE_REPO=https://gitlab.winehq.org/wine/wine.git
-WINE_TAG=wine-11.19
-WINE_COMMIT=455e3509b98a6919fd4ad1def4803e08c41c03b2
+WINE_TAG=wine-11.20
+WINE_COMMIT=7298a818b79446bae153b8d5aa27235ab3703bf9
 # FEX, which runs x86_64 code on the arm64 Wine: this one commit (main has moved past it) and its submodules; the
 # patches in wine-arm64/patches/fex apply on top.
 FEX_REPO=https://github.com/FEX-Emu/FEX.git
-FEX_COMMIT=4ed80fd07176dce976a7351f559d59a47b68cbae
-# Where patches/fex's macOS unixlib helpers come from (one commit on top of FEX_COMMIT); the build doesn't fetch it.
+FEX_COMMIT=741e146fdf5a89517e1a67e3c899907cfba6131a
+# Where patches/fex's macOS unixlib helpers come from (one commit on top of FEX 4ed80fd, the 0.6.0 pin); the build
+# doesn't fetch it.
 FEX_MACOS_REPO=https://github.com/dappermint/FEX.git
 FEX_MACOS_COMMIT=4efc3abc8aca8a0d3a8aca1f153ef6c4299f4426

@@ -21,7 +21,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 28 insertions(+), 38 deletions(-)
 
 diff --git a/dlls/libxess/d3d12.c b/dlls/libxess/d3d12.c
-index 45314fb..a21938b 100644
+index 45314fbb..a21938bf 100644
 --- a/dlls/libxess/d3d12.c
 +++ b/dlls/libxess/d3d12.c
 @@ -126,6 +126,7 @@ static void release_scaler(struct xess_d3d12 *ctx)

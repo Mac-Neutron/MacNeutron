@@ -25,7 +25,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 307 insertions(+), 45 deletions(-)
 
 diff --git a/dlls/ntdll/sync.c b/dlls/ntdll/sync.c
-index ca6dd4a..2b49968 100644
+index 8bd5a29d..021b5428 100644
 --- a/dlls/ntdll/sync.c
 +++ b/dlls/ntdll/sync.c
 @@ -345,43 +345,129 @@ NTSTATUS WINAPI RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit )
@@ -238,7 +238,7 @@ index ca6dd4a..2b49968 100644
  }
  
 diff --git a/dlls/ntdll/tests/rtl.c b/dlls/ntdll/tests/rtl.c
-index c9f5303..3946eb4 100644
+index c9f53033..3946eb48 100644
 --- a/dlls/ntdll/tests/rtl.c
 +++ b/dlls/ntdll/tests/rtl.c
 @@ -3076,7 +3076,6 @@ static void test_RtlLeaveCriticalSection(void)

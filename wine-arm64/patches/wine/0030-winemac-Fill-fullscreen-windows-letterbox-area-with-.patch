@@ -27,7 +27,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 20 insertions(+), 6 deletions(-)
 
 diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
-index 3cad3e1..af73f2f 100644
+index b883740f..4aec4dbc 100644
 --- a/dlls/winemac.drv/cocoa_window.m
 +++ b/dlls/winemac.drv/cocoa_window.m
 @@ -409,6 +409,10 @@ - (void) updateLayer
@@ -85,7 +85,7 @@ index 3cad3e1..af73f2f 100644
  
          CGMutablePathRef path = CGPathCreateMutable();
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index bdcfb57..debbe98 100644
+index 97124882..829edac8 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
 @@ -1781,7 +1781,11 @@ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT

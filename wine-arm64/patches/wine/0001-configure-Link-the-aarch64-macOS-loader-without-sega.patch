@@ -12,10 +12,10 @@ Keep the default 4GB __PAGEZERO; an entitled loader releases it at runtime.
  2 files changed, 9 insertions(+)
 
 diff --git a/configure b/configure
-index e73491f..5cf0500 100755
+index e2065aef..6b9a7809 100755
 --- a/configure
 +++ b/configure
-@@ -12384,6 +12384,10 @@ else case e in #(
+@@ -12444,6 +12444,10 @@ else case e in #(
  esac
  fi
          ;;
@@ -27,10 +27,10 @@ index e73491f..5cf0500 100755
      esac
  
 diff --git a/configure.ac b/configure.ac
-index 0332740..dd8c72f 100644
+index f1fccbd2..0a888ce1 100644
 --- a/configure.ac
 +++ b/configure.ac
-@@ -991,6 +991,11 @@ case $host_os in
+@@ -998,6 +998,11 @@ case $host_os in
              WINELOADER_LDFLAGS="$WINELOADER_LDFLAGS -Wl,-no_pie,-image_base,0x200000000,-no_huge,-no_fixup_chains,-segalign,0x1000,-segaddr,WINE_RESERVE,0x1000"],
             [wine_use_preloader=yes])
          ;;

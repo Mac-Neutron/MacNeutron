@@ -12,10 +12,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 7 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 4682eacd..75e00452 100644
+index a52430c5..cca94798 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -3600,7 +3600,13 @@ void virtual_init(void)
+@@ -3366,7 +3366,13 @@ void virtual_init(void)
                               (vm_region_info_t)&info, &count, &obj ))
          {
              TRACE( "lowest region %#llx-%#llx prot %d/%d\n", addr, addr + size, info.protection, info.max_protection );

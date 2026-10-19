@@ -57,10 +57,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 dlls/libxess_dx11/libxess_dx11.spec
 
 diff --git a/configure b/configure
-index 4e02d1f..f2ef79b 100755
+index 57047e7f..d6c83b35 100755
 --- a/configure
 +++ b/configure
-@@ -1241,6 +1241,8 @@ enable_ksuser
+@@ -1253,6 +1253,8 @@ enable_ksuser
  enable_ktmw32
  enable_l3codeca_acm
  enable_l3codecx_ax
@@ -69,7 +69,7 @@ index 4e02d1f..f2ef79b 100755
  enable_loadperf
  enable_localspl
  enable_localui
-@@ -22403,6 +22405,8 @@ wine_fn_config_makefile dlls/ksuser enable_ksuser
+@@ -22254,6 +22256,8 @@ wine_fn_config_makefile dlls/ksuser enable_ksuser
  wine_fn_config_makefile dlls/ktmw32 enable_ktmw32
  wine_fn_config_makefile dlls/l3codeca.acm enable_l3codeca_acm
  wine_fn_config_makefile dlls/l3codecx.ax enable_l3codecx_ax
@@ -79,10 +79,10 @@ index 4e02d1f..f2ef79b 100755
  wine_fn_config_makefile dlls/localspl enable_localspl
  wine_fn_config_makefile dlls/localspl/tests enable_tests
 diff --git a/configure.ac b/configure.ac
-index 4cacd56..d887a29 100644
+index 948c772e..7748dc69 100644
 --- a/configure.ac
 +++ b/configure.ac
-@@ -2865,6 +2865,8 @@ WINE_CONFIG_MAKEFILE(dlls/ksuser)
+@@ -2785,6 +2785,8 @@ WINE_CONFIG_MAKEFILE(dlls/ksuser)
  WINE_CONFIG_MAKEFILE(dlls/ktmw32)
  WINE_CONFIG_MAKEFILE(dlls/l3codeca.acm)
  WINE_CONFIG_MAKEFILE(dlls/l3codecx.ax)
@@ -93,7 +93,7 @@ index 4cacd56..d887a29 100644
  WINE_CONFIG_MAKEFILE(dlls/localspl/tests)
 diff --git a/dlls/libxess/Makefile.in b/dlls/libxess/Makefile.in
 new file mode 100644
-index 0000000..88420c9
+index 00000000..88420c9e
 --- /dev/null
 +++ b/dlls/libxess/Makefile.in
 @@ -0,0 +1,7 @@
@@ -106,7 +106,7 @@ index 0000000..88420c9
 +	main.c
 diff --git a/dlls/libxess/libxess.spec b/dlls/libxess/libxess.spec
 new file mode 100644
-index 0000000..c9e22eb
+index 00000000..c9e22eb5
 --- /dev/null
 +++ b/dlls/libxess/libxess.spec
 @@ -0,0 +1,74 @@
@@ -186,7 +186,7 @@ index 0000000..c9e22eb
 +@ cdecl xessVKInit() xess_invalid_context
 diff --git a/dlls/libxess/main.c b/dlls/libxess/main.c
 new file mode 100644
-index 0000000..380229c
+index 00000000..380229c2
 --- /dev/null
 +++ b/dlls/libxess/main.c
 @@ -0,0 +1,92 @@
@@ -284,7 +284,7 @@ index 0000000..380229c
 +}
 diff --git a/dlls/libxess_dx11/Makefile.in b/dlls/libxess_dx11/Makefile.in
 new file mode 100644
-index 0000000..ca233d5
+index 00000000..ca233d56
 --- /dev/null
 +++ b/dlls/libxess_dx11/Makefile.in
 @@ -0,0 +1,8 @@
@@ -298,7 +298,7 @@ index 0000000..ca233d5
 +	main.c
 diff --git a/dlls/libxess_dx11/libxess_dx11.spec b/dlls/libxess_dx11/libxess_dx11.spec
 new file mode 100644
-index 0000000..0ff8baa
+index 00000000..0ff8baaf
 --- /dev/null
 +++ b/dlls/libxess_dx11/libxess_dx11.spec
 @@ -0,0 +1,53 @@

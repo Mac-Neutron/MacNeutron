@@ -9,22 +9,23 @@ becomes one hard page plus a prot 0/0 reservation that MAP_FIXED may replace.
 Register it as a reserved area, like the x86_64 zerofill reserve, so
 map_fixed_area can place KUSER_SHARED_DATA at 0x7ffe0000.
 ---
- dlls/ntdll/unix/virtual.c | 20 ++++++++++++++++++++
- 1 file changed, 20 insertions(+)
+ dlls/ntdll/unix/virtual.c | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 64eed72..31351f8 100644
+index 9d3a0f22..994a8dee 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -3693,6 +3693,26 @@ void virtual_init(void)
-     TRACE( "host page size: %uk\n", (UINT)host_page_size / 1024 );
- #endif
+@@ -3279,6 +3279,27 @@ void virtual_init(void)
+         reserve_area( (void *)0x7f000000, (void *)0x7fff0000 );
+     }
  
 +#if defined(__APPLE__) && defined(__aarch64__)
 +    {
 +        /* With com.apple.developer.cross-architecture-support the 4GB hard pagezero becomes one
 +         * hard page plus a soft prot 0/0 reservation that MAP_FIXED may replace: treat it like
-+         * the x86_64 zerofill reserve, so nothing else lands in the low 4GB. */
++         * the x86_64 zerofill reserve, so nothing else lands in the low 4GB (a mem area, since Wine's mem_areas
++         * replaced the reserved list). */
 +        mach_vm_address_t addr = 0;
 +        mach_vm_size_t size;
 +        vm_region_basic_info_data_64_t info;
@@ -35,14 +36,14 @@ index 64eed72..31351f8 100644
 +                             (vm_region_info_t)&info, &count, &obj ))
 +        {
 +            TRACE( "lowest region %#llx-%#llx prot %d/%d\n", addr, addr + size, info.protection, info.max_protection );
-+            if (addr && addr < 0x100000000 && !info.max_protection) mmap_add_reserved_area( (void *)addr, size );
++            if (addr && addr < 0x100000000 && !info.max_protection) set_mem_area_state( (void *)addr, size, AREA_RESERVED );
 +        }
 +    }
 +#endif
 +
- #ifdef _WIN64
-     host_addr_space_limit = get_host_addr_space_limit();
-     TRACE( "host addr space limit: %p\n", host_addr_space_limit );
+     if (is_win64) /* top-down area */
+     {
+         void *start = (void *)0x7ff000000000;
 -- 
 2.54.0 (Apple Git-157)
 

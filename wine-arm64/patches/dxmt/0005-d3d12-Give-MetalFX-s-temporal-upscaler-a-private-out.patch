@@ -18,7 +18,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 7 insertions(+), 6 deletions(-)
 
 diff --git a/src/d3d12/d3d12_command_list.cpp b/src/d3d12/d3d12_command_list.cpp
-index 95ec534..b3e4167 100644
+index 06f5d43..6d86041 100644
 --- a/src/d3d12/d3d12_command_list.cpp
 +++ b/src/d3d12/d3d12_command_list.cpp
 @@ -2067,7 +2067,8 @@ public:
@@ -42,7 +42,7 @@ index 95ec534..b3e4167 100644
        props.output_offset_x = props.output_offset_y = 0;
        target = output_scratch.ptr();
 diff --git a/src/d3d12/d3d12_device.cpp b/src/d3d12/d3d12_device.cpp
-index a652c94..f38893e 100644
+index d400b1c..e2df3e5 100644
 --- a/src/d3d12/d3d12_device.cpp
 +++ b/src/d3d12/d3d12_device.cpp
 @@ -287,8 +287,8 @@ public:

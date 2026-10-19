@@ -16,7 +16,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 12 insertions(+), 3 deletions(-)
 
 diff --git a/dlls/libxess/d3d12.c b/dlls/libxess/d3d12.c
-index 5cd4f64..cec20ee 100644
+index 5cd4f641..cec20eec 100644
 --- a/dlls/libxess/d3d12.c
 +++ b/dlls/libxess/d3d12.c
 @@ -75,7 +75,12 @@ struct xess_d3d12

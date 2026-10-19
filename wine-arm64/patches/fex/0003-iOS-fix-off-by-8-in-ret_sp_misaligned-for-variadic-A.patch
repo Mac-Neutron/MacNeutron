@@ -86,7 +86,7 @@ index 01e5bb2..4c8ae32 100644
  }
  
 diff --git a/Source/Windows/ARM64EC/Module.S b/Source/Windows/ARM64EC/Module.S
-index 4c18172..0db0aeb 100644
+index ce36c1d..c3b3c11 100644
 --- a/Source/Windows/ARM64EC/Module.S
 +++ b/Source/Windows/ARM64EC/Module.S
 @@ -92,6 +92,19 @@ ret_sp_misaligned:

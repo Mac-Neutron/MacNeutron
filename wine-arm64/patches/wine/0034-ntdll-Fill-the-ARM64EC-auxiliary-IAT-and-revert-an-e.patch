@@ -52,7 +52,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  3 files changed, 318 insertions(+), 2 deletions(-)
 
 diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
-index b0b2392..a993008 100644
+index 8e8a6936..f529f73e 100644
 --- a/dlls/ntdll/loader.c
 +++ b/dlls/ntdll/loader.c
 @@ -1519,6 +1519,9 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
@@ -76,7 +76,7 @@ index b0b2392..a993008 100644
      if (cached_modref == wm) cached_modref = NULL;
      RtlFreeUnicodeString( &wm->ldr.FullDllName );
 diff --git a/dlls/ntdll/ntdll_misc.h b/dlls/ntdll/ntdll_misc.h
-index 2bf3cfa..35efa4e 100644
+index 2bf3cfac..35efa4eb 100644
 --- a/dlls/ntdll/ntdll_misc.h
 +++ b/dlls/ntdll/ntdll_misc.h
 @@ -166,6 +166,8 @@ extern NTSTATUS arm64ec_thread_init(void);
@@ -89,7 +89,7 @@ index 2bf3cfa..35efa4e 100644
  
  extern void *__os_arm64x_check_call;
 diff --git a/dlls/ntdll/signal_arm64ec.c b/dlls/ntdll/signal_arm64ec.c
-index 923ba88..df5d985 100644
+index 923ba889..df5d985d 100644
 --- a/dlls/ntdll/signal_arm64ec.c
 +++ b/dlls/ntdll/signal_arm64ec.c
 @@ -524,7 +524,7 @@ DEFINE_SYSCALL(NtQuerySystemTime, (LARGE_INTEGER *time))

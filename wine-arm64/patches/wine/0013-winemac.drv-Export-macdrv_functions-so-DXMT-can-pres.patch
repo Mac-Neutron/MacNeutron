@@ -42,7 +42,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  5 files changed, 154 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
-index 94fc3e7..3cad3e1 100644
+index e15f7083..b883740f 100644
 --- a/dlls/winemac.drv/cocoa_window.m
 +++ b/dlls/winemac.drv/cocoa_window.m
 @@ -243,6 +243,8 @@ @interface WineContentView : WineBaseView <NSTextInputClient, NSViewLayerContent
@@ -119,7 +119,7 @@ index 94fc3e7..3cad3e1 100644
  {
      OnMainThread(^{
 diff --git a/dlls/winemac.drv/event.c b/dlls/winemac.drv/event.c
-index 18185a6..dbb9369 100644
+index 18185a61..dbb9369c 100644
 --- a/dlls/winemac.drv/event.c
 +++ b/dlls/winemac.drv/event.c
 @@ -67,6 +67,7 @@ static const char *dbgstr_event(int type)
@@ -149,7 +149,7 @@ index 18185a6..dbb9369 100644
          macdrv_displays_changed(event);
          break;
 diff --git a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
-index 5ee84a2..51ee41c 100644
+index 89c498fe..daf19a25 100644
 --- a/dlls/winemac.drv/macdrv.h
 +++ b/dlls/winemac.drv/macdrv.h
 @@ -242,6 +242,7 @@ extern void macdrv_ime_set_text(HWND hwnd, CFStringRef text, bool complete,
@@ -169,7 +169,7 @@ index 5ee84a2..51ee41c 100644
  extern void macdrv_window_close_requested(HWND hwnd);
  extern void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event);
 diff --git a/dlls/winemac.drv/macdrv_cocoa.h b/dlls/winemac.drv/macdrv_cocoa.h
-index 78f92a8..38897fa 100644
+index 5157b38c..215ed7bf 100644
 --- a/dlls/winemac.drv/macdrv_cocoa.h
 +++ b/dlls/winemac.drv/macdrv_cocoa.h
 @@ -285,6 +285,7 @@ static inline CGPoint cgpoint_win_from_mac(CGPoint point)
@@ -199,7 +199,7 @@ index 78f92a8..38897fa 100644
  extern WineMetalSwapChain_id macdrv_create_offscreen_swapchain(void* hwnd, CGRect bounds);
  extern CAMetalLayer *macdrv_swapchain_get_layer(WineMetalSwapChain_id swapchain);
 diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
-index 7d8bf13..bdcfb57 100644
+index 552971f5..97124882 100644
 --- a/dlls/winemac.drv/window.c
 +++ b/dlls/winemac.drv/window.c
 @@ -1185,6 +1185,102 @@ bool macdrv_client_surface_acquire_metal_swapchain(struct macdrv_client_surface

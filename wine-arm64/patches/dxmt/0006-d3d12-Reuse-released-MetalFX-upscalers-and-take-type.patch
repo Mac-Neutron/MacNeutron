@@ -24,7 +24,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  4 files changed, 82 insertions(+), 16 deletions(-)
 
 diff --git a/src/d3d12/d3d12_command_list.cpp b/src/d3d12/d3d12_command_list.cpp
-index b3e4167..8b514f5 100644
+index 6d86041..8896fe5 100644
 --- a/src/d3d12/d3d12_command_list.cpp
 +++ b/src/d3d12/d3d12_command_list.cpp
 @@ -2101,10 +2101,17 @@ public:
@@ -74,7 +74,7 @@ index b3e4167..8b514f5 100644
      e->motion_scratch = std::move(motion_scratch);
      e->output_scratch = output_scratch;
 diff --git a/src/d3d12/d3d12_device.cpp b/src/d3d12/d3d12_device.cpp
-index f38893e..06fe4ad 100644
+index e2df3e5..24758aa 100644
 --- a/src/d3d12/d3d12_device.cpp
 +++ b/src/d3d12/d3d12_device.cpp
 @@ -268,11 +268,11 @@ class MTLD3D12TemporalScalerImpl : public ComObject<MTLD3D12TemporalScaler> {

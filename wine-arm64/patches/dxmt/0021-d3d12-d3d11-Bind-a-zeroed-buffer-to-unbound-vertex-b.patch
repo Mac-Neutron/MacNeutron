@@ -50,7 +50,7 @@ index 6d1e530..eab3987 100644
  
  class MTLD3D12CommandAllocatorImpl : public MTLD3D12Pageable<MTLD3D12CommandAllocator> {
 diff --git a/src/d3d12/d3d12_command_list.cpp b/src/d3d12/d3d12_command_list.cpp
-index b3a533b..9da806d 100644
+index 8ad5acc..687380a 100644
 --- a/src/d3d12/d3d12_command_list.cpp
 +++ b/src/d3d12/d3d12_command_list.cpp
 @@ -370,6 +370,10 @@ public:
@@ -103,7 +103,7 @@ index 4a29d02..02985e3 100644
        }
        case D3D12_INDIRECT_ARGUMENT_TYPE_INDEX_BUFFER_VIEW: {
 diff --git a/src/d3d12/d3d12_device.cpp b/src/d3d12/d3d12_device.cpp
-index 79d93fe..92fdfac 100644
+index cd979fc..bc9b3ec 100644
 --- a/src/d3d12/d3d12_device.cpp
 +++ b/src/d3d12/d3d12_device.cpp
 @@ -353,6 +353,7 @@ class MTLD3D12DeviceImpl : public MTLD3D12Object<ComObject<MTLD3D12Device, IMTLD
@@ -150,7 +150,7 @@ index 53a86d6..ca1127a 100644
    // GPU timestamp ticks per second (MacNeutron), measured once against QueryPerformanceCounter.
    virtual uint64_t TimestampFrequency() = 0;
 diff --git a/src/dxmt/dxmt_context.cpp b/src/dxmt/dxmt_context.cpp
-index bfa03d1..a8c0a13 100644
+index 7b29f1e..1dbba87 100644
 --- a/src/dxmt/dxmt_context.cpp
 +++ b/src/dxmt/dxmt_context.cpp
 @@ -94,10 +94,12 @@ ArgumentEncodingContext::encodeVertexBuffers(uint32_t slot_mask, uint64_t offset

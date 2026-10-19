@@ -14,7 +14,7 @@ new process spawned from a process's first thread failed with exit code 1
  1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
-index a6dc64c..186501c 100644
+index a6dc64c1..186501cc 100644
 --- a/dlls/ntdll/unix/loader.c
 +++ b/dlls/ntdll/unix/loader.c
 @@ -492,7 +492,9 @@ NTSTATUS exec_wineloader( char **argv, int socketfd, const struct pe_image_info

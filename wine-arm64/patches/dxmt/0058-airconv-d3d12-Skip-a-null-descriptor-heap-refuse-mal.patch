@@ -107,7 +107,7 @@ index 0feba8c..8f5b661 100644
    ShaderKind kind = ShaderKind::Invalid;
    uint32_t sm_major = 0, sm_minor = 0;
 diff --git a/src/d3d12/d3d12_command_list.cpp b/src/d3d12/d3d12_command_list.cpp
-index cad2d27..05eed93 100644
+index f66d29b..e8495bf 100644
 --- a/src/d3d12/d3d12_command_list.cpp
 +++ b/src/d3d12/d3d12_command_list.cpp
 @@ -718,7 +718,7 @@ public:

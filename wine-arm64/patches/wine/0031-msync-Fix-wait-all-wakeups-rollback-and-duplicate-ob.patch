@@ -27,7 +27,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 47 insertions(+), 52 deletions(-)
 
 diff --git a/dlls/ntdll/unix/msync.c b/dlls/ntdll/unix/msync.c
-index d842574..dc8a37e 100644
+index d8425746..dc8a37eb 100644
 --- a/dlls/ntdll/unix/msync.c
 +++ b/dlls/ntdll/unix/msync.c
 @@ -566,6 +566,7 @@ static void *request_shm_from_server( int entry, int tid )
@@ -203,7 +203,7 @@ index d842574..dc8a37e 100644
          } /* while (1) */
      } /* else (wait-all) */
 diff --git a/server/msync.c b/server/msync.c
-index bf5ce7e..acf0d62 100644
+index bf5ce7e4..acf0d62d 100644
 --- a/server/msync.c
 +++ b/server/msync.c
 @@ -416,20 +416,14 @@ static inline mach_msg_return_t destroy_all( unsigned int shm_idx )

@@ -13,7 +13,7 @@ removes that 16K fallback.
  1 file changed, 12 insertions(+)
 
 diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
-index ebfb6af..a6dc64c 100644
+index ebfb6af5..a6dc64c1 100644
 --- a/dlls/ntdll/unix/loader.c
 +++ b/dlls/ntdll/unix/loader.c
 @@ -451,6 +451,18 @@ static void preloader_exec( char **argv )

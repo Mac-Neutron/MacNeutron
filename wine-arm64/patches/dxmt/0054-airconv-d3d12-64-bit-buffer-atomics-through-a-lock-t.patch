@@ -379,7 +379,7 @@ index c92b050..78b1dc9 100644
  } // namespace dxmt::dxbc
 \ No newline at end of file
 diff --git a/src/d3d12/d3d12_command_list.cpp b/src/d3d12/d3d12_command_list.cpp
-index 18278f6..cad2d27 100644
+index c6efc20..f66d29b 100644
 --- a/src/d3d12/d3d12_command_list.cpp
 +++ b/src/d3d12/d3d12_command_list.cpp
 @@ -202,11 +202,11 @@ class MTLD3D12GraphicsCommandListImpl
@@ -429,7 +429,7 @@ index 61f0aa5..e55e3c5 100644
        if (inflight.semaphore)
          ReleaseSemaphore(inflight.semaphore, 1, nullptr);
 diff --git a/src/d3d12/d3d12_device.cpp b/src/d3d12/d3d12_device.cpp
-index 92fdfac..bb4c598 100644
+index bc9b3ec..58c74c3 100644
 --- a/src/d3d12/d3d12_device.cpp
 +++ b/src/d3d12/d3d12_device.cpp
 @@ -354,6 +354,8 @@ class MTLD3D12DeviceImpl : public MTLD3D12Object<ComObject<MTLD3D12Device, IMTLD

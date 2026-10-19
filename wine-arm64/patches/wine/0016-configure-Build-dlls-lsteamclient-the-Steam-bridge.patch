@@ -21,30 +21,30 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 3 insertions(+)
 
 diff --git a/configure b/configure
-index 5cf0500..4e02d1f 100755
+index 6b9a7809..57047e7f 100755
 --- a/configure
 +++ b/configure
-@@ -1244,6 +1244,7 @@ enable_l3codecx_ax
+@@ -1256,6 +1256,7 @@ enable_l3codecx_ax
  enable_loadperf
  enable_localspl
  enable_localui
 +enable_lsteamclient
  enable_lz32
+ enable_lzexpand
  enable_magnification
- enable_mapi32
-@@ -22407,6 +22408,7 @@ wine_fn_config_makefile dlls/localspl enable_localspl
+@@ -22258,6 +22259,7 @@ wine_fn_config_makefile dlls/localspl enable_localspl
  wine_fn_config_makefile dlls/localspl/tests enable_tests
  wine_fn_config_makefile dlls/localui enable_localui
  wine_fn_config_makefile dlls/localui/tests enable_tests
 +wine_fn_config_makefile dlls/lsteamclient enable_lsteamclient
  wine_fn_config_makefile dlls/lz32 enable_lz32
  wine_fn_config_makefile dlls/lz32/tests enable_tests
- wine_fn_config_makefile dlls/lzexpand.dll16 enable_win16
+ wine_fn_config_makefile dlls/lzexpand.dll16 enable_lzexpand
 diff --git a/configure.ac b/configure.ac
-index dd8c72f..4cacd56 100644
+index 0a888ce1..948c772e 100644
 --- a/configure.ac
 +++ b/configure.ac
-@@ -2870,6 +2870,7 @@ WINE_CONFIG_MAKEFILE(dlls/localspl)
+@@ -2790,6 +2790,7 @@ WINE_CONFIG_MAKEFILE(dlls/localspl)
  WINE_CONFIG_MAKEFILE(dlls/localspl/tests)
  WINE_CONFIG_MAKEFILE(dlls/localui)
  WINE_CONFIG_MAKEFILE(dlls/localui/tests)

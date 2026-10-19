@@ -1,4 +1,4 @@
-From 44754e176876bfd521b6180570f6b89921e18f20 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sat, 17 Oct 2026 23:56:43 -0400
 Subject: [PATCH] winemetal: WMTForward, for a guest DLL without a unix lib.

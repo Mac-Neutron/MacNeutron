@@ -21,10 +21,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/include/winnt.h b/include/winnt.h
-index 0cde7ab..731acbb 100644
+index f270727a..b5f885b8 100644
 --- a/include/winnt.h
 +++ b/include/winnt.h
-@@ -7970,7 +7970,7 @@ static FORCEINLINE LONGLONG WINAPI InterlockedXorRelease64( LONGLONG volatile *d
+@@ -8166,7 +8166,7 @@ static FORCEINLINE LONGLONG WINAPI InterlockedXorRelease64( LONGLONG volatile *d
  
  #endif  /* defined(__arm__) || defined(__aarch64__) */
  
@@ -33,14 +33,14 @@ index 0cde7ab..731acbb 100644
  /* On x86, Support old GCC with either no or buggy (GCC BZ#81316) __atomic_* support */
  #define __WINE_ATOMIC_LOAD_ACQUIRE(ptr, ret) do { C_ASSERT(sizeof(*(ptr)) <= sizeof(void *)); *(ret) = *(ptr); __asm__ __volatile__( "" ::: "memory" ); } while (0)
  #define __WINE_ATOMIC_LOAD_RELAXED(ptr, ret) do { C_ASSERT(sizeof(*(ptr)) <= sizeof(void *)); *(ret) = *(ptr); } while (0)
-@@ -7981,7 +7981,7 @@ static FORCEINLINE LONGLONG WINAPI InterlockedXorRelease64( LONGLONG volatile *d
+@@ -8177,7 +8177,7 @@ static FORCEINLINE LONGLONG WINAPI InterlockedXorRelease64( LONGLONG volatile *d
  #define __WINE_ATOMIC_LOAD_RELAXED(ptr, ret) __atomic_load(ptr, ret, __ATOMIC_RELAXED)
  #define __WINE_ATOMIC_STORE_RELEASE(ptr, val) __atomic_store(ptr, val, __ATOMIC_RELEASE)
  #define __WINE_ATOMIC_STORE_RELAXED(ptr, val) __atomic_store(ptr, val, __ATOMIC_RELAXED)
 -#endif  /* defined(__x86_64__) || defined(__i386__) */
 +#endif  /* (defined(__x86_64__) && !defined(__arm64ec__)) || defined(__i386__) */
  
- static FORCEINLINE LONG ReadAcquire( LONG const volatile *src )
+ static FORCEINLINE CHAR ReadAcquire8( CHAR const volatile *src )
  {
 -- 
 2.54.0 (Apple Git-157)

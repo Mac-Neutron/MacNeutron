@@ -6,13 +6,13 @@ applied to each tree ("dev" for a tree built with unexported work), and the sour
 patches and pins are in the MacNeutron repository (https://github.com/chadouming/MacNeutron), at the commit SOURCE's
 MACNEUTRON_COMMIT names. NOTICES.md quotes the notices that live only in source headers. Not legal advice.
 
-Wine 11.19 (the loader, wineserver, Wine's libraries and programs)
+Wine 11.20 (the loader, wineserver, Wine's libraries and programs)
   Licence: LGPL-2.1-or-later. Texts: wine/LICENSE, wine/COPYING.LIB, wine/AUTHORS; Wine's vendored libraries are
   listed in wine/NOTICES.md, and GSM (wine/gsm-COPYRIGHT) and FAudio (zlib licence, wine/faudio-LICENSE) carry their
   own texts. msync (patch 0015) and its helpers adapted from Apple's xnu (APSL-2.0): NOTICES.md. libxess.dll's XeSS
   declarations, copied from Intel's public headers (MIT): NOTICES.md.
   The ARM64 string routines in msvcrt.dll, ucrtbase.dll and msvcr80-120.dll come from Arm Optimized Routines (MIT): NOTICES.md.
-  Source: https://gitlab.winehq.org/wine/wine.git at WINE_COMMIT (tag wine-11.19), with the patches in the
+  Source: https://gitlab.winehq.org/wine/wine.git at WINE_COMMIT (tag wine-11.20), with the patches in the
   repository's wine-arm64/patches/wine (pinned in wine-arm64/pins).
 
 FEX (libarm64ecfex.dll and libarm64ecfex.so: runs x86_64 code)

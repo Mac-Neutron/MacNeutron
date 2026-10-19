@@ -23,10 +23,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 18 insertions(+), 8 deletions(-)
 
 diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
-index 4122550..785796d 100644
+index bf6924d4..b08f431c 100644
 --- a/dlls/ntdll/unix/signal_arm64.c
 +++ b/dlls/ntdll/unix/signal_arm64.c
-@@ -1549,20 +1549,21 @@ static void usr2_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -1554,20 +1554,21 @@ static void usr2_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
  
  
  #ifdef __APPLE__
@@ -53,7 +53,7 @@ index 4122550..785796d 100644
  }
  
  
-@@ -1578,6 +1579,7 @@ static void x18_call( void (*handler)( int, siginfo_t *, void * ), BOOL keep, in
+@@ -1583,6 +1584,7 @@ static void x18_call( void (*handler)( int, siginfo_t *, void * ), BOOL keep, in
                        void *_sigcontext )
  {
      static const char off_msg[] = "x18: PE stack running OFF\n";
@@ -61,7 +61,7 @@ index 4122550..785796d 100644
      ucontext_t *sigcontext = _sigcontext;
      ULONG_PTR pc = PC_sig(sigcontext), sp = SP_sig(sigcontext);
      BOOL was_on = os_custom_x18_abi_enabled(), on;
-@@ -1586,6 +1588,11 @@ static void x18_call( void (*handler)( int, siginfo_t *, void * ), BOOL keep, in
+@@ -1591,6 +1593,11 @@ static void x18_call( void (*handler)( int, siginfo_t *, void * ), BOOL keep, in
      if (was_on) os_set_custom_x18_abi_enabled( false );  /* before any libc call */
      if (sig == SIGTRAP && x18_toggle_trap( sigcontext ))
      {
@@ -73,7 +73,7 @@ index 4122550..785796d 100644
          signal( SIGTRAP, SIG_DFL );  /* the brk runs again on return, and kills the process */
          return;
      }
-@@ -1665,7 +1672,10 @@ void signal_init_process( TEB *teb )
+@@ -1670,7 +1677,10 @@ void signal_init_process( TEB *teb )
      sig_act.sa_flags = SA_SIGINFO | SA_RESTART | SA_ONSTACK;
  
  #ifdef __APPLE__
@@ -85,7 +85,7 @@ index 4122550..785796d 100644
  #endif
      sig_act.sa_sigaction = X18_HANDLER( int_handler );
      if (sigaction( SIGINT, &sig_act, NULL ) == -1) goto error;
-@@ -1687,8 +1697,8 @@ void signal_init_process( TEB *teb )
+@@ -1692,8 +1702,8 @@ void signal_init_process( TEB *teb )
      sig_act.sa_sigaction = X18_HANDLER( ill_handler );
      if (sigaction( SIGILL, &sig_act, NULL ) == -1) goto error;
  #ifdef __APPLE__

@@ -1,4 +1,4 @@
-From d8e150575224feaab825e713940894bf195a3ac5 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sun, 18 Oct 2026 19:04:33 -0400
 Subject: [PATCH] dxmt, d3d11: A VM host waits for D3D11's compiles.

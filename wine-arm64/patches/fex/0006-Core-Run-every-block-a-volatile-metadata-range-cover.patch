@@ -43,10 +43,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  6 files changed, 73 insertions(+), 26 deletions(-)
 
 diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
-index e05d849..51bd673 100644
+index 63280a4..7670361 100644
 --- a/FEXCore/Source/Interface/Core/Core.cpp
 +++ b/FEXCore/Source/Interface/Core/Core.cpp
-@@ -573,14 +573,9 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+@@ -579,14 +579,9 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
        }
  #endif
  
@@ -64,7 +64,7 @@ index e05d849..51bd673 100644
  
        // Set the block entry point
        Thread->OpDispatcher->SetNewBlockIfChanged(Block.Entry);
-@@ -665,13 +660,11 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+@@ -678,13 +673,11 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
            Thread->OpDispatcher->ResetHandledLock();
            Thread->OpDispatcher->ResetDecodeFailure();
            IR::ForceTSOMode ForceTSO = IR::ForceTSOMode::NoOverride;

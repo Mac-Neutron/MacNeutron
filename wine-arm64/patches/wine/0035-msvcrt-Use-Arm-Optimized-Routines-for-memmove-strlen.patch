@@ -30,7 +30,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 diff --git a/dlls/msvcrt/aor_string.h b/dlls/msvcrt/aor_string.h
 new file mode 100644
-index 0000000..a252884
+index 00000000..a2528845
 --- /dev/null
 +++ b/dlls/msvcrt/aor_string.h
 @@ -0,0 +1,1138 @@
@@ -1173,7 +1173,7 @@ index 0000000..a252884
 +
 +#endif /* __aarch64__ || __arm64ec__ */
 diff --git a/dlls/msvcrt/string.c b/dlls/msvcrt/string.c
-index 6b4ffbf..518bd5a 100644
+index 6b4ffbf4..518bd5a1 100644
 --- a/dlls/msvcrt/string.c
 +++ b/dlls/msvcrt/string.c
 @@ -33,6 +33,7 @@

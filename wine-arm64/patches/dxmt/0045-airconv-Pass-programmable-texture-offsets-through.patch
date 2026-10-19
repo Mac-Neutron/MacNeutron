@@ -137,7 +137,7 @@ index ecb2819..b71a480 100644
      auto lod = air.CreateCalculateLOD(tex, d->ResourceHandle, sampler, coord);
      Replace(call, ConstantU32(arg(6), 1) ? lod.first : lod.second);
 diff --git a/src/airconv/nt/air_builder.cpp b/src/airconv/nt/air_builder.cpp
-index 3857117..0f6488a 100644
+index c695c9e..a61360f 100644
 --- a/src/airconv/nt/air_builder.cpp
 +++ b/src/airconv/nt/air_builder.cpp
 @@ -519,7 +519,7 @@ AIRBuilder::CreateSampleCmpCommon(

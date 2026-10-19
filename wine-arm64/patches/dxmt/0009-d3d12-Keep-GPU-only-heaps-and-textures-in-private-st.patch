@@ -46,7 +46,7 @@ index a5d333e..679b849 100644
        buffer->rename(buffer->allocate(flags, pHeap->heap, Offset));
      else
 diff --git a/src/d3d12/d3d12_command_list.cpp b/src/d3d12/d3d12_command_list.cpp
-index 8b514f5..96793e5 100644
+index 8896fe5..1a32403 100644
 --- a/src/d3d12/d3d12_command_list.cpp
 +++ b/src/d3d12/d3d12_command_list.cpp
 @@ -2067,8 +2067,9 @@ public:
@@ -70,7 +70,7 @@ index 8b514f5..96793e5 100644
        props.output_offset_x = props.output_offset_y = 0;
        target = output_scratch.ptr();
 diff --git a/src/d3d12/d3d12_device.cpp b/src/d3d12/d3d12_device.cpp
-index ed1b9c5..79d93fe 100644
+index d36e77f..cd979fc 100644
 --- a/src/d3d12/d3d12_device.cpp
 +++ b/src/d3d12/d3d12_device.cpp
 @@ -37,7 +37,7 @@ namespace dxmt {

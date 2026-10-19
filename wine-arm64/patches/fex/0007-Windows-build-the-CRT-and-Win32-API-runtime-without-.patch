@@ -1,4 +1,4 @@
-From 1ca1fbbdbfdaffaa7f9fd40faf9ba3d9eeb1e822 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Wed, 14 Oct 2026 23:39:11 -0400
 Subject: [PATCH] Windows: build the CRT and Win32 API runtime without LTO

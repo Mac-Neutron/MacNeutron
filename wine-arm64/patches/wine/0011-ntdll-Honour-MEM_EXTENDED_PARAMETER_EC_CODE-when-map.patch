@@ -22,10 +22,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 11 insertions(+), 3 deletions(-)
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index c043ec4..e40e7b0 100644
+index 448156e1..b0607691 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -3506,7 +3506,7 @@ done:
+@@ -3112,7 +3112,7 @@ done:
  static unsigned int virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG_PTR limit_low,
                                           ULONG_PTR limit_high, SIZE_T commit_size,
                                           const LARGE_INTEGER *offset_ptr, SIZE_T *size_ptr,
@@ -34,7 +34,7 @@ index c043ec4..e40e7b0 100644
  {
      unsigned int res;
      mem_size_t full_size;
-@@ -3589,6 +3589,8 @@ static unsigned int virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG_P
+@@ -3195,6 +3195,8 @@ static unsigned int virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG_P
      }
      if (!(size = ROUND_SIZE( 0, size, page_mask ))) return STATUS_INVALID_PARAMETER;  /* wrap-around */
  
@@ -43,7 +43,7 @@ index c043ec4..e40e7b0 100644
      get_vprot_flags( protect, &vprot, FALSE );
      vprot |= sec_flags;
      if (!(sec_flags & SEC_RESERVE)) vprot |= VPROT_COMMITTED;
-@@ -3624,6 +3626,12 @@ static unsigned int virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG_P
+@@ -3230,6 +3232,12 @@ static unsigned int virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG_P
      {
          *addr_ptr = view->base;
          *size_ptr = size;
@@ -56,7 +56,7 @@ index c043ec4..e40e7b0 100644
          VIRTUAL_DEBUG_DUMP_VIEW( view );
      }
      else delete_view( view );
-@@ -6474,7 +6482,7 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
+@@ -6023,7 +6031,7 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
      }
  
      return virtual_map_section( handle, addr_ptr, 0, get_zero_bits_limit( zero_bits ), commit_size,
@@ -65,7 +65,7 @@ index c043ec4..e40e7b0 100644
  }
  
  /***********************************************************************
-@@ -6552,7 +6560,7 @@ NTSTATUS WINAPI NtMapViewOfSectionEx( HANDLE handle, HANDLE process, PVOID *addr
+@@ -6101,7 +6109,7 @@ NTSTATUS WINAPI NtMapViewOfSectionEx( HANDLE handle, HANDLE process, PVOID *addr
      }
  
      return virtual_map_section( handle, addr_ptr, limit_low, limit_high, 0,

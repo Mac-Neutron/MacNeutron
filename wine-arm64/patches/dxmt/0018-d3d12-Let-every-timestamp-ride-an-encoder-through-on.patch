@@ -53,7 +53,7 @@ index 3baea93..adeb211 100644
    uint8_t num_samples = 0;
    uint32_t barriers = 0; // the list's barrier calls before this encoder began (DXMT_STATS, ordering)
 diff --git a/src/d3d12/d3d12_command_list.cpp b/src/d3d12/d3d12_command_list.cpp
-index 1b5b171..b3a533b 100644
+index ea0de86..8ad5acc 100644
 --- a/src/d3d12/d3d12_command_list.cpp
 +++ b/src/d3d12/d3d12_command_list.cpp
 @@ -285,6 +285,7 @@ public:

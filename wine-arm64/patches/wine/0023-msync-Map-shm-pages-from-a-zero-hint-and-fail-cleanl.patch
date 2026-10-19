@@ -37,7 +37,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 18 insertions(+), 3 deletions(-)
 
 diff --git a/dlls/ntdll/unix/msync.c b/dlls/ntdll/unix/msync.c
-index e9794a8..d842574 100644
+index e9794a81..d8425746 100644
 --- a/dlls/ntdll/unix/msync.c
 +++ b/dlls/ntdll/unix/msync.c
 @@ -539,6 +539,14 @@ static void *request_shm_from_server( int entry, int tid )
@@ -68,7 +68,7 @@ index e9794a8..d842574 100644
          TRACE("Mapping page %d at %p.\n", entry, addr);
  
 diff --git a/server/msync.c b/server/msync.c
-index 42d7c5b..bf5ce7e 100644
+index 42d7c5b0..bf5ce7e4 100644
 --- a/server/msync.c
 +++ b/server/msync.c
 @@ -712,11 +712,14 @@ static void *get_shm( unsigned int idx )

@@ -23,7 +23,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 109 insertions(+), 2 deletions(-)
 
 diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
-index a993008..3158809 100644
+index f529f73e..cb5cf5c0 100644
 --- a/dlls/ntdll/loader.c
 +++ b/dlls/ntdll/loader.c
 @@ -49,6 +49,11 @@ WINE_DECLARE_DEBUG_CHANNEL(imports);

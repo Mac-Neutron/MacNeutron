@@ -1,4 +1,4 @@
-From edb0d919f286a0ebd817ba2a03606bc40b2e9428 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sun, 18 Oct 2026 19:54:35 -0400
 Subject: [PATCH] d3d11: IMTLD3D11ContextExt2 in the native build only.

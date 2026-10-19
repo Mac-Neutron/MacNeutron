@@ -1,6 +1,6 @@
 # wine-arm64: native arm64 Wine and FEX
 
-`make wine-arm64` builds the first stage of MacNeutron's native arm64 stack: upstream Wine 11.19 (ARM64EC and arm64),
+`make wine-arm64` builds the first stage of MacNeutron's native arm64 stack: upstream Wine 11.20 (ARM64EC and arm64),
 with our patches, FEX, which runs x64 Windows code inside it, and our DXMT built for arm64 (Direct3D 11/12; D3D10's front end bundled, untested),
 staged as one signed, entitled `build/wine-arm64/wine.app`. Every Windows process runs natively on arm64 with 4K
 pages; only the game's x86-64 code is translated. It also carries FreeType and gnutls built from pinned source
@@ -166,7 +166,6 @@ SteamID or the persona name; run it by hand the same way. The x18 hits in Valve'
 | `pins` | Wine tag and commit, FEX commit, and the source of FEX's macOS unixlib |
 | `deps.pins` | The five tarballs (FreeType, gnutls, nettle, GMP, FFmpeg), and lsteamclient's repository and commit |
 | `patches/wine/`, `patches/fex/`, `patches/dxmt/`, `patches/lsteamclient/` | The patch series (`git format-patch` output, applied with `git am`): the source of truth |
-| `patches/wine-master/` | Wine patches only Wine master needs, outside the series (it builds wine-11.19): 0037 puts 0002's pagezero reservation in master's mem-area units. They go back into `patches/wine/` with a re-pin to master |
 | `build.sh`, `bundle.sh` | Build, then assemble and sign `wine.app`, and check the result |
 | `wine.entitlements`, `Info.plist` | The loader's entitlements and the bundle's identity |
 | `licenses/` | The bundle's `licenses/README` (component, licence, source) and `NOTICES.md` (notices found only in source headers); `bundle.sh` adds the licence texts and `SOURCE` |
@@ -253,7 +252,7 @@ re-clone; that is why they wait for the rebase.
   - 0015: msync, by Zebediah Figura and Marc-Aurel Zent (LGPL-2.1+): CodeWeavers' CrossOver 26.3 msync as carried on
     `dappermint/winecx` branch `cx/wine1117` at `e0aa380780`, with millia ampora's msync commits there (`8df1826853`,
     `9be392b3b4`, `3a7a712d66`, `307f90fdb1`, `620d8c542f`, `a7ef7b3b01`, `ef72fdb55b`, `6d316146c2`), merged onto
-    Wine 11.19. The patch's message lists our changes to it.
+    Wine 11.19 and carried onto 11.20 for 0.7.0. The patch's message lists our changes to it.
   - 0004, 0017, 0018 and 0019 (strict x18 toggling) are ours, following Apple's rule in `os/arch/arm64.h` and our
     design in `docs/research/2026-10-02-native-arm64/x18-boundaries.md`.
   - 0016 (registering `dlls/lsteamclient` in configure) and the other Wine patches are ours.

@@ -41,7 +41,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  dlls/ntdll/unix/msync.c        | 1247 ++++++++++++++++++++++++++++++++
  dlls/ntdll/unix/msync.h        |   49 ++
  dlls/ntdll/unix/sync.c         |   79 +-
- include/wine/server_protocol.h |    4 +-
+ include/wine/server_protocol.h |    2 +
  server/Makefile.in             |    1 +
  server/inproc_sync.c           |  178 ++++-
  server/main.c                  |    3 +
@@ -51,17 +51,17 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  server/request_handlers.h      |    3 +-
  server/request_trace.h         |    1 +
  server/thread.c                |    7 +
- 15 files changed, 2471 insertions(+), 8 deletions(-)
+ 15 files changed, 2470 insertions(+), 7 deletions(-)
  create mode 100644 dlls/ntdll/unix/msync.c
  create mode 100644 dlls/ntdll/unix/msync.h
  create mode 100644 server/msync.c
  create mode 100644 server/msync.h
 
 diff --git a/dlls/ntdll/Makefile.in b/dlls/ntdll/Makefile.in
-index 1adf425..bff7207 100644
+index 4443dd4c..af107c48 100644
 --- a/dlls/ntdll/Makefile.in
 +++ b/dlls/ntdll/Makefile.in
-@@ -54,6 +54,7 @@ SOURCES = \
+@@ -53,6 +53,7 @@ SOURCES = \
  	unix/debug.c \
  	unix/env.c \
  	unix/file.c \
@@ -70,7 +70,7 @@ index 1adf425..bff7207 100644
  	unix/loadorder.c \
  	unix/process.c \
 diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
-index 9ac8448..45b0d6d 100644
+index 9ac84488..45b0d6d3 100644
 --- a/dlls/ntdll/unix/loader.c
 +++ b/dlls/ntdll/unix/loader.c
 @@ -88,6 +88,7 @@
@@ -91,7 +91,7 @@ index 9ac8448..45b0d6d 100644
      init_files();
 diff --git a/dlls/ntdll/unix/msync.c b/dlls/ntdll/unix/msync.c
 new file mode 100644
-index 0000000..e9794a8
+index 00000000..e9794a81
 --- /dev/null
 +++ b/dlls/ntdll/unix/msync.c
 @@ -0,0 +1,1247 @@
@@ -1344,7 +1344,7 @@ index 0000000..e9794a8
 +#endif /* __APPLE__ */
 diff --git a/dlls/ntdll/unix/msync.h b/dlls/ntdll/unix/msync.h
 new file mode 100644
-index 0000000..43af926
+index 00000000..43af926c
 --- /dev/null
 +++ b/dlls/ntdll/unix/msync.h
 @@ -0,0 +1,49 @@
@@ -1398,7 +1398,7 @@ index 0000000..43af926
 +
 +#endif /* __APPLE__ */
 diff --git a/dlls/ntdll/unix/sync.c b/dlls/ntdll/unix/sync.c
-index 829c712..0e9191c 100644
+index 829c7128..0e9191c7 100644
 --- a/dlls/ntdll/unix/sync.c
 +++ b/dlls/ntdll/unix/sync.c
 @@ -71,6 +71,7 @@
@@ -1516,10 +1516,10 @@ index 829c712..0e9191c 100644
          }
          SERVER_END_REQ;
 diff --git a/include/wine/server_protocol.h b/include/wine/server_protocol.h
-index e2ef2f5..c108fd4 100644
+index 6635ece4..7a06a70e 100644
 --- a/include/wine/server_protocol.h
 +++ b/include/wine/server_protocol.h
-@@ -6068,6 +6068,8 @@ struct get_inproc_sync_fd_reply
+@@ -6082,6 +6082,8 @@ struct get_inproc_sync_fd_reply
      struct reply_header __header;
      int           type;
      unsigned int access;
@@ -1528,16 +1528,8 @@ index e2ef2f5..c108fd4 100644
  };
  
  
-@@ -7184,6 +7186,6 @@ union generic_reply
-     struct alpc_create_port_reply alpc_create_port_reply;
- };
- 
--#define SERVER_PROTOCOL_VERSION 962
-+#define SERVER_PROTOCOL_VERSION 963
- 
- #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
 diff --git a/server/Makefile.in b/server/Makefile.in
-index 0dd5395..8fe7334 100644
+index 0dd53951..8fe73344 100644
 --- a/server/Makefile.in
 +++ b/server/Makefile.in
 @@ -16,6 +16,7 @@ SOURCES = \
@@ -1549,7 +1541,7 @@ index 0dd5395..8fe7334 100644
  	hook.c \
  	inproc_sync.c \
 diff --git a/server/inproc_sync.c b/server/inproc_sync.c
-index 522d9a4..d3dfab4 100644
+index 522d9a4e..d3dfab42 100644
 --- a/server/inproc_sync.c
 +++ b/server/inproc_sync.c
 @@ -32,6 +32,7 @@
@@ -1752,7 +1744,7 @@ index 522d9a4..d3dfab4 100644
      release_object( obj );
  }
 diff --git a/server/main.c b/server/main.c
-index 46419a0..19127ce 100644
+index 46419a09..19127cea 100644
 --- a/server/main.c
 +++ b/server/main.c
 @@ -40,6 +40,7 @@
@@ -1775,7 +1767,7 @@ index 46419a0..19127ce 100644
      set_current_time();
 diff --git a/server/msync.c b/server/msync.c
 new file mode 100644
-index 0000000..42d7c5b
+index 00000000..42d7c5b0
 --- /dev/null
 +++ b/server/msync.c
 @@ -0,0 +1,852 @@
@@ -2633,7 +2625,7 @@ index 0000000..42d7c5b
 +#endif /* __APPLE__ */
 diff --git a/server/msync.h b/server/msync.h
 new file mode 100644
-index 0000000..4d834c4
+index 00000000..4d834c47
 --- /dev/null
 +++ b/server/msync.h
 @@ -0,0 +1,51 @@
@@ -2689,10 +2681,10 @@ index 0000000..4d834c4
 +
 +#endif /* __APPLE__ */
 diff --git a/server/protocol.def b/server/protocol.def
-index 59aaa22..94613dc 100644
+index 2eaaa97f..448e1571 100644
 --- a/server/protocol.def
 +++ b/server/protocol.def
-@@ -4230,6 +4230,7 @@ enum inproc_sync_type
+@@ -4238,6 +4238,7 @@ enum inproc_sync_type
  @REPLY
      int           type;         /* inproc sync type */
      unsigned int access;        /* handle access rights */
@@ -2701,10 +2693,10 @@ index 59aaa22..94613dc 100644
  
  
 diff --git a/server/request_handlers.h b/server/request_handlers.h
-index 950b1bb..9f7b20f 100644
+index 90321ea7..bf3c88d1 100644
 --- a/server/request_handlers.h
 +++ b/server/request_handlers.h
-@@ -2332,7 +2332,8 @@ C_ASSERT( offsetof(struct get_inproc_sync_fd_request, handle) == 12 );
+@@ -2337,7 +2337,8 @@ C_ASSERT( offsetof(struct get_inproc_sync_fd_request, handle) == 12 );
  C_ASSERT( sizeof(struct get_inproc_sync_fd_request) == 16 );
  C_ASSERT( offsetof(struct get_inproc_sync_fd_reply, type) == 8 );
  C_ASSERT( offsetof(struct get_inproc_sync_fd_reply, access) == 12 );
@@ -2715,10 +2707,10 @@ index 950b1bb..9f7b20f 100644
  C_ASSERT( offsetof(struct get_inproc_alert_fd_reply, handle) == 8 );
  C_ASSERT( sizeof(struct get_inproc_alert_fd_reply) == 16 );
 diff --git a/server/request_trace.h b/server/request_trace.h
-index f6acb47..ec720c7 100644
+index e33e09d1..ebc8c1cf 100644
 --- a/server/request_trace.h
 +++ b/server/request_trace.h
-@@ -3413,6 +3413,7 @@ static void dump_get_inproc_sync_fd_reply( const struct get_inproc_sync_fd_reply
+@@ -3419,6 +3419,7 @@ static void dump_get_inproc_sync_fd_reply( const struct get_inproc_sync_fd_reply
  {
      fprintf( stderr, " type=%d", req->type );
      fprintf( stderr, ", access=%08x", req->access );
@@ -2727,7 +2719,7 @@ index f6acb47..ec720c7 100644
  
  static void dump_get_inproc_alert_fd_request( const struct get_inproc_alert_fd_request *req )
 diff --git a/server/thread.c b/server/thread.c
-index bdf48c4..7c16850 100644
+index bb9728f6..88d264f9 100644
 --- a/server/thread.c
 +++ b/server/thread.c
 @@ -59,6 +59,7 @@
@@ -2738,7 +2730,7 @@ index bdf48c4..7c16850 100644
  
  
  /* thread queues */
-@@ -2382,6 +2383,12 @@ DECL_HANDLER(get_inproc_alert_fd)
+@@ -2397,6 +2398,12 @@ DECL_HANDLER(get_inproc_alert_fd)
      if ((fd = get_inproc_sync_fd( current->alert_sync )) < 0) set_error( STATUS_INVALID_PARAMETER );
      else
      {
