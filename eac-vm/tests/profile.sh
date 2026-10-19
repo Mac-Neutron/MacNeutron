@@ -1,5 +1,6 @@
 #!/bin/sh
-# The guest profiler and DXMT's frame statistics (MACNEUTRON_PERF's, Direct3D forwarding spec §5.1): d3d12_clear.exe
+# The guest profiler (MACNEUTRON_PERF's) and DXMT's frame statistics (Direct3D forwarding spec §5.1; in the VM the
+# launcher counts frames on the host instead, so DXMT_STATS=1 is set here by hand): d3d12_clear.exe
 # (the share's dxmt-tests/, 1500 frames; DXMT keeps frame statistics for D3D12 only) run by eac-vm/guest/run-game.sh
 # as the launcher runs a game, with the header's MACNEUTRON_VM_PROFILE=1 and DXMT_STATS=1. The share's
 # traces/profile.txt must hold top's thread batches, and traces/dxmt/stats.txt DXMT's frame windows. Needs
@@ -10,7 +11,7 @@ SHARE=${MN_SHARE:-$ROOT/build/eac-vm-work/share}
 T=$(mktemp -d "${TMPDIR:-/tmp}/profile.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 rm -rf "$SHARE/traces/profile.txt" "$SHARE/traces/dxmt"  # an earlier run's would pass
-# MicroVM.swift's header: a `run` of d3d12_clear.exe with MACNEUTRON_PERF's variables, then the game script.
+# MicroVM.swift's header: a `run` of d3d12_clear.exe with the profiler's and DXMT's variables, then the game script.
 { echo "VERB=run APPID=0 GAME_DIR=/mnt/share/dxmt-tests EXE=d3d12_clear.exe MACNEUTRON_VM_PROFILE=1 DXMT_STATS=1"
   echo "set -- 1500"
   cat "$ROOT/eac-vm/guest/run-game.sh"; } > "$T/guest.sh"

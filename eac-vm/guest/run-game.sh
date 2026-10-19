@@ -9,7 +9,8 @@ export WINEDEBUG=${WINEDEBUG:--all}
 [ "${MACNEUTRON_DLSS:-}" = 1 ] && [ -z "${DXMT_ENABLE_NVEXT:-}" ] && export DXMT_ENABLE_NVEXT=1
 # The X screen is the Mac's display (the launcher's MN_SCREEN): games are offered its resolution and those below.
 Xvfb :0 -screen 0 "${MN_SCREEN:-1920x1080}x24" -nolisten tcp >/dev/null 2>&1 &
-# MACNEUTRON_PERF (the launcher's): DXMT's frame statistics, and every thread's CPU every 5 s, in the share's traces/.
+# MACNEUTRON_PERF (the launcher's) sets MACNEUTRON_VM_PROFILE: every thread's CPU every 5 s, in the share's traces/ (the
+# host counts the frames). DXMT_STATS=1, set by hand, keeps DXMT's frame statistics there too.
 [ "${DXMT_STATS:-}" = 1 ] && mkdir -p /mnt/share/traces/dxmt && export DXMT_STATS DXMT_DXIL_DUMP=/mnt/share/traces/dxmt
 [ "${MACNEUTRON_VM_PROFILE:-}" = 1 ] && top -b -H -d 5 -w 512 > /mnt/share/traces/profile.txt 2>&1 &
 # The keyboard and mouse; traces/capture says when the game takes the mouse, which the host then captures.
