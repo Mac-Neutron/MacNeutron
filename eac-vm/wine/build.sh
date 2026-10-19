@@ -48,6 +48,10 @@ wine)
     set -- CFLAGS="$F${LTO:+ $LTO}${U:+ $U}" x86_64_CFLAGS="$F"
     [ -z "$L" ] || set -- "$@" LDFLAGS="$L"
   fi
+  # Wine's makefiles don't track compiler flags: other configure inputs (the p profile's, PGO's) start a fresh build
+  # folder, as wine-arm64/build.sh does, or make would keep every object built with the old ones.
+  inputs=$(printf '%s\n' "$@")
+  [ "$(cat "$BUILD/.configure-inputs" 2> /dev/null)" = "$inputs" ] || rm -rf "$BUILD"
   mkdir -p "$BUILD" && cd "$BUILD"
   "$SRC/configure" --host=x86_64-linux-gnu --with-wine-tools="$TOOLS" --prefix=/opt/mn-wine --disable-tests \
     --enable-archs=x86_64 \
@@ -68,6 +72,7 @@ wine)
       || { grep -E "error|Error" make.log | head -20; exit 1; } ;;
   esac
   make -j"$JOBS" >> make.log 2>&1 || { grep -E "error|Error" make.log | head -20; exit 1; }
+  printf '%s\n' "$inputs" > .configure-inputs
   echo "built in $BUILD" ;;
 resume)
   cd "$BUILD"
