@@ -186,6 +186,11 @@ check_no_debug_info() {  # check_no_debug_info <dir or file>...: no dSYM, and no
   done)
   [ -z "$d" ] || { echo "release: $d has debug information" >&2; return 1; }
 }
+check_no_profile_runtime() {  # check_no_profile_runtime <dir or file>...: nothing from a PGO generate build, whose
+  # profile runtime (it reads LLVM_PROFILE_FILE) writes profiles wherever the binary runs
+  d=$(find "$@" -type f -size +0 -exec /usr/bin/grep -laF LLVM_PROFILE_FILE {} + | head -n 1)
+  [ -z "$d" ] || { echo "release: $d has the LLVM profile runtime (a PGO generate build)" >&2; return 1; }
+}
 
 check_pgo() {  # check_pgo <pgo dir>: the p build's PGO profiles, if any, name no home or build folder (privacy: they
   # name static functions by the path they were compiled from)
@@ -264,6 +269,13 @@ self_test() {
   passes "a p build without debug information" check_no_debug_info "$T/nodbg"
   mkdir -p "$T/nodbg/x.dSYM"
   refused "a p build with a dSYM" "release: $T/nodbg/x.dSYM is debug information" check_no_debug_info "$T/nodbg"
+  # Nothing shipped from an instrumented (PGO generate) build: such a binary writes profiles where it runs.
+  mkdir -p "$T/prof" "$T/noprof"
+  echo 'int main(void) { return 0; }' > "$T/m.c"
+  cc -fprofile-generate -o "$T/prof/m" "$T/m.c" && cc -o "$T/noprof/m" "$T/m.c"
+  refused "a p build with the profile runtime" "release: $T/prof/m has the LLVM profile runtime (a PGO generate build)" \
+    check_no_profile_runtime "$T/prof"
+  passes "a p build without the profile runtime" check_no_profile_runtime "$T/noprof"
   # The p build's PGO profiles, when there are any: none naming a home or build folder.
   mkdir -p "$T/pgo-none" "$T/pgo-ok" "$T/pgo-home"
   passes "a p build without PGO profiles" check_pgo "$T/pgo-none"
@@ -748,6 +760,14 @@ found=$(tar -xOf "$OUT/vm-parts/wine.tar" ./.mn-source-d3d 2> /dev/null || true)
 [ -z "$found" ] || check_stamp d3d "$found" "$(sh "$ROOT/eac-vm/image/stamps.sh" d3d)" || exit 1
 fex=$(awk -F'\t' '$2 == "/usr/share/fex-emu/.mn-source" { print $7 }' "$OUT/vm-parts/recipe/base.tsv")
 check_stamp fex "$(cat "$OUT/vm-parts/overlay/$fex" 2> /dev/null)" "$(sh "$ROOT/eac-vm/image/stamps.sh" fex)" || exit 1
+if [ $PROFILE = p ]; then  # the p build's VM parts (spec 2026-10-19-macneutron-performance-build §8)
+  rm -rf "$OUT/p-check"; mkdir -p "$OUT/p-check"
+  tar -xf "$OUT/vm-parts/wine.tar" -C "$OUT/p-check" || die "can't unpack the parts' wine.tar"
+  check_no_traces "$OUT/p-check/lib/wine/x86_64-unix/ntdll.so" "$WINE_TRACE_PROBE" || exit 1
+  check_no_debug_info "$OUT/p-check" "$OUT/vm-parts/overlay" || exit 1
+  check_no_profile_runtime "$OUT/p-check" "$OUT/vm-parts/overlay" || exit 1
+  rm -rf "$OUT/p-check"
+fi
 COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --no-acls --no-fflags --uid 0 --gid 0 --uname root --gname root \
   -C "$OUT/vm-parts" -cJf "$OUT/$PARTS" . || die "can't archive the VM parts"
 check_archive_owners "$OUT/$PARTS" || exit 1
@@ -765,15 +785,13 @@ echo "PASS the VM's parts ($PARTS) and manifest"
 
 # 3-4. MacNeutron.app (R4), its notarization (R2) and its zip.
 build_app
-if [ $PROFILE = p ]; then  # the p build (spec 2026-10-19-macneutron-performance-build §8), before notarization
-  rm -rf "$OUT/p-check"; mkdir -p "$OUT/p-check"
-  tar -xf "$OUT/vm-parts/wine.tar" -C "$OUT/p-check" || die "can't unpack the parts' wine.tar"
+if [ $PROFILE = p ]; then  # the p build (spec 2026-10-19-macneutron-performance-build §8), before notarization; its
+  # VM parts were checked before they were archived
   check_no_traces "$OUT/wine.app/Contents/Resources/lib/wine/aarch64-unix/ntdll.so" "$WINE_TRACE_PROBE" || exit 1
-  check_no_traces "$OUT/p-check/lib/wine/x86_64-unix/ntdll.so" "$WINE_TRACE_PROBE" || exit 1
   check_no_traces "$A/Contents/Helpers/vm/dxmt/d3d12.dylib" "$DXMT_DEBUG_PROBE" || exit 1
-  check_no_debug_info "$A" "$OUT/p-check" || exit 1
-  rm -rf "$OUT/p-check"
-  echo "PASS the p build: traces compiled out, no debug information"
+  check_no_debug_info "$A" || exit 1
+  check_no_profile_runtime "$A" || exit 1
+  echo "PASS the p build: traces compiled out, no debug information, no profile runtime"
 fi
 if [ $mode = release ]; then
   notarize_and_staple "$A" "$OUT/notary-app"

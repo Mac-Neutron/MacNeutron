@@ -62,6 +62,12 @@ wine_image() {
     || sudo install -m644 "$(dirname "$STEAM_FORWARDER")/.mn-source" "$WORK/wine/.mn-source-forwarder"
   [ "$DXMT_GUEST" = none ] || [ ! -f "$DXMT_GUEST/.mn-source" ] \
     || sudo install -m644 "$DXMT_GUEST/.mn-source" "$WORK/wine/.mn-source-dxmt"
+  # The p profile ships no debug information (release.sh check_no_debug_info): without -g, ELF files still carry
+  # some (wineserver from glibc's objects, the forwarder and winemetal.so built -g), so strip every ELF file.
+  if [ "${MACNEUTRON_PROFILE:-std}" = p ]; then
+    sudo find "$WORK/wine" -type f -exec sh -c \
+      'for f; do [ "$(head -c 4 "$f" | od -An -c | tr -d " ")" != 177ELF ] || strip --strip-debug "$f"; done' sh {} +
+  fi
   sudo rm -f "$OUT/wine.erofs"; sudo mkfs.erofs -L mn-wine -zlz4hc "$OUT/wine.erofs" "$WORK/wine" > /dev/null
   # The same tree as a tar, for a Mac's setup to make wine.erofs from (eac-vm/setup/parts.sh).
   sudo mkdir -p "$OUT/setup"; sudo tar --numeric-owner -C "$WORK/wine" -cf "$OUT/setup/wine.tar" .
