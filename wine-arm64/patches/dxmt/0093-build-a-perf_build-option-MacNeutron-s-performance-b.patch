@@ -1,0 +1,219 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Mon, 19 Oct 2026 16:03:27 -0400
+Subject: [PATCH] build: a perf_build option (MacNeutron's performance build)
+ compiling out logging below warnings, stats and capture.
+
+With -Dperf_build=true, DXMT_PERF_BUILD makes the TRACE and DEBUG macros
+empty (their arguments are never evaluated) and Logger::trace, debug and
+info empty inline functions; g_stats_on is a constexpr false, so every
+DXMT_STATS branch and the stat macros compile away; DXILCaptureMode() is
+an inline false and the capture folder is never read from
+DXMT_DXIL_DUMP, which leaves the DXIL dump and the pass dump (F9,
+DXMT_DUMP_FRAME) unreachable. Warnings and errors are unchanged.
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ meson.build                   |  5 +++++
+ meson.options                 |  1 +
+ src/d3d12/d3d12_dxil_dump.cpp |  7 +++++++
+ src/d3d12/d3d12_dxil_dump.hpp |  4 ++++
+ src/d3d12/d3d12_stats.cpp     |  2 ++
+ src/d3d12/d3d12_stats.hpp     | 15 +++++++++++++++
+ src/util/log/log.cpp          |  2 ++
+ src/util/log/log.hpp          | 11 +++++++++++
+ 8 files changed, 47 insertions(+)
+
+diff --git a/meson.build b/meson.build
+index 0c19e62..a52582b 100644
+--- a/meson.build
++++ b/meson.build
+@@ -145,6 +145,11 @@ endif
+ 
+ add_project_arguments('-DDXMT_PAGE_SIZE=4096', language: 'cpp')
+ 
++# MacNeutron: the performance build compiles trace, debug and info logging and the D3D12 stats and capture out.
++if get_option('perf_build')
++  add_project_arguments('-DDXMT_PERF_BUILD', language: ['c', 'cpp', 'objc', 'objcpp'])
++endif
++
+ # MacNeutron: memory DXMT hands to Metal comes from winemetal (WMTMemoryAlloc), which the VM's host maps too.
+ if get_option('guest_vm')
+   add_project_arguments('-DDXMT_GUEST_VM', language: ['c', 'cpp'])
+diff --git a/meson.options b/meson.options
+index a247f89..f5dcb9a 100644
+--- a/meson.options
++++ b/meson.options
+@@ -10,4 +10,5 @@ option('enable_nvapi', type : 'boolean', value : false)
+ option('enable_nvngx', type : 'boolean', value : false)
+ option('enable_d3d12', type : 'boolean', value : false)
+ option('guest_vm', type : 'boolean', value : false, description : 'MacNeutron: an x86-64 build for the EAC microVM\'s guest, whose winemetal.so forwards to the host; no Unix side of its own')
++option('perf_build', type : 'boolean', value : false, description : 'MacNeutron: the performance build (X.Y.Zp): trace, debug and info logging and the D3D12 stats and capture code compiled out')
+ option('translator_key_file', type : 'string', value : '', description : 'A file holding the shader translator\'s key; empty: DXMT\'s version keys the shader cache')
+diff --git a/src/d3d12/d3d12_dxil_dump.cpp b/src/d3d12/d3d12_dxil_dump.cpp
+index a9fda42..5d88ee2 100644
+--- a/src/d3d12/d3d12_dxil_dump.cpp
++++ b/src/d3d12/d3d12_dxil_dump.cpp
+@@ -40,6 +40,10 @@ const char *DXILStage(const uint8_t *blob, size_t size) {
+ // DXMT_DXIL_DUMP as a Windows path, created on first use; empty when capture is off. Wide, because the variable
+ // arrives as UTF-8 and the ANSI APIs would misread any name outside ASCII.
+ const std::wstring &CaptureFolder() {
++#ifdef DXMT_PERF_BUILD // never set: the performance build doesn't capture
++  static const std::wstring folder;
++  return folder;
++#else
+   static const std::wstring folder = [] {
+     std::string value = env::getEnvVar("DXMT_DXIL_DUMP");
+     // Launch options carry Mac paths; Wine's Z: drive is the Mac's root.
+@@ -51,13 +55,16 @@ const std::wstring &CaptureFolder() {
+     return wide;
+   }();
+   return folder;
++#endif
+ }
+ 
+ } // namespace
+ 
++#ifndef DXMT_PERF_BUILD
+ bool DXILCaptureMode() {
+   return !CaptureFolder().empty();
+ }
++#endif
+ 
+ bool
+ SM6Caps() {
+diff --git a/src/d3d12/d3d12_dxil_dump.hpp b/src/d3d12/d3d12_dxil_dump.hpp
+index 5ff3393..db57ab4 100644
+--- a/src/d3d12/d3d12_dxil_dump.hpp
++++ b/src/d3d12/d3d12_dxil_dump.hpp
+@@ -14,7 +14,11 @@ void DumpDXIL(const D3D12_SHADER_BYTECODE &Bytecode);
+ // True when DXMT_DXIL_DUMP is set. The device then reports what Unreal Engine's SM6 check needs (feature level 12_1,
+ // shader model up to 6.7, binding tier 3, wave ops, 64-bit atomics), so SM6-only games get as far as creating their
+ // DXIL pipelines, which are captured; a pipeline using an op the translator lacks fails with E_NOTIMPL.
++#ifdef DXMT_PERF_BUILD // MacNeutron's performance build never captures
++inline bool DXILCaptureMode() { return false; }
++#else
+ bool DXILCaptureMode();
++#endif
+ 
+ // Report what Shader Model 6 games check for (feature level 12_1, SM 6.7, binding tier 3, wave ops, 64-bit atomics):
+ // by default, so Unreal Engine 5 games start. DXMT_D3D12_SM6=0 reports SM 5.1, feature level 11_1, binding tier 2,
+diff --git a/src/d3d12/d3d12_stats.cpp b/src/d3d12/d3d12_stats.cpp
+index 27c61a7..1f53df4 100644
+--- a/src/d3d12/d3d12_stats.cpp
++++ b/src/d3d12/d3d12_stats.cpp
+@@ -17,6 +17,7 @@
+ #include <string>
+ #include <vector>
+ 
++#ifndef DXMT_PERF_BUILD // MacNeutron's performance build has no stats (d3d12_stats.hpp)
+ namespace dxmt {
+ 
+ bool g_stats_on = env::getEnvVar("DXMT_STATS") == "1";
+@@ -234,3 +235,4 @@ StatsFrame() {
+ }
+ 
+ } // namespace dxmt
++#endif
+diff --git a/src/d3d12/d3d12_stats.hpp b/src/d3d12/d3d12_stats.hpp
+index 8fae08e..406824b 100644
+--- a/src/d3d12/d3d12_stats.hpp
++++ b/src/d3d12/d3d12_stats.hpp
+@@ -8,6 +8,15 @@ namespace dxmt {
+ // <folder>/stats.txt every 5 seconds of presents, and once at exit: calls and microseconds per frame of each call,
+ // the time each thread spends in D3D12 (outermost calls only), counters such as encoder boundaries with no barrier,
+ // and Metal encoders labelled "pass-<n> <kind>" (n counts as F9's passes.txt does) for Instruments. Off: one branch.
++#ifdef DXMT_PERF_BUILD // MacNeutron's performance build: no stats, every call site's branch compiled out
++constexpr bool g_stats_on = false;
++inline unsigned StatId(const char *) { return 0; }
++inline void StatCount(unsigned, uint64_t = 1) {}
++inline void StatsFrame() {}
++inline unsigned StatsNextPass() { return 0; }
++inline uint64_t StatBegin() { return 0; }
++inline void StatEnd(unsigned, uint64_t) {}
++#else
+ extern bool g_stats_on;
+ 
+ unsigned StatId(const char *name); // registers a name; call sites keep the id in a static
+@@ -16,6 +25,7 @@ void StatsFrame();         // at each present
+ unsigned StatsNextPass(); // numbers encoders from 0 at each present, as passes.txt does
+ uint64_t StatBegin();
+ void StatEnd(unsigned id, uint64_t t0);
++#endif
+ 
+ struct StatScope {
+   unsigned id;
+@@ -29,6 +39,10 @@ struct StatScope {
+ 
+ } // namespace dxmt
+ 
++#ifdef DXMT_PERF_BUILD
++#define DXMT_STAT_SCOPE(name) ((void)0)
++#define DXMT_STAT_COUNT(name, n) ((void)0)
++#else
+ #define DXMT_STAT_SCOPE(name)                                                                                          \
+   static const unsigned dxmt_stat_id_ = ::dxmt::StatId(name);                                                          \
+   ::dxmt::StatScope dxmt_stat_scope_(dxmt_stat_id_)
+@@ -39,3 +53,4 @@ struct StatScope {
+       ::dxmt::StatCount(dxmt_stat_id_, n);                                                                             \
+     }                                                                                                                  \
+   } while (0)
++#endif
+diff --git a/src/util/log/log.cpp b/src/util/log/log.cpp
+index 96ced95..6137694 100644
+--- a/src/util/log/log.cpp
++++ b/src/util/log/log.cpp
+@@ -23,6 +23,7 @@ Logger::Logger(const std::string &fileName)
+ 
+ Logger::~Logger() {}
+ 
++#ifndef DXMT_PERF_BUILD
+ void Logger::trace(const std::string &message) {
+   s_instance.emitMsg(LogLevel::Trace, message);
+ }
+@@ -34,6 +35,7 @@ void Logger::debug(const std::string &message) {
+ void Logger::info(const std::string &message) {
+   s_instance.emitMsg(LogLevel::Info, message);
+ }
++#endif
+ 
+ void Logger::warn(const std::string &message) {
+   s_instance.emitMsg(LogLevel::Warn, message);
+diff --git a/src/util/log/log.hpp b/src/util/log/log.hpp
+index 7e16e20..45de1f0 100644
+--- a/src/util/log/log.hpp
++++ b/src/util/log/log.hpp
+@@ -41,9 +41,15 @@ public:
+   Logger(const std::string &file_name);
+   ~Logger();
+ 
++#ifdef DXMT_PERF_BUILD // MacNeutron's performance build: below warnings, nothing is logged
++  static void trace(const std::string &) {}
++  static void debug(const std::string &) {}
++  static void info(const std::string &) {}
++#else
+   static void trace(const std::string &message);
+   static void debug(const std::string &message);
+   static void info(const std::string &message);
++#endif
+   static void warn(const std::string &message);
+   static void err(const std::string &message);
+   static void log(LogLevel level, const std::string &message);
+@@ -72,9 +78,14 @@ private:
+ } // namespace dxmt
+ 
+ 
++#ifdef DXMT_PERF_BUILD // MacNeutron's performance build: no trace or debug call, nor its arguments
++#define TRACE(...) ((void)0)
++#define DEBUG(...) ((void)0)
++#else
+ #define TRACE(...) Logger::trace(str::format(__VA_ARGS__))
+ 
+ #define DEBUG(...) Logger::debug(str::format(__VA_ARGS__))
++#endif
+ 
+ #define WARN(...) Logger::warn(str::format(__VA_ARGS__))
+ 
+-- 
+2.54.0 (Apple Git-157)
+

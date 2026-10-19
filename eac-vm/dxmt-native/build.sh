@@ -12,6 +12,7 @@ D=$SRC/dxmt
 OUT=${BUILD_DIR:-$ROOT/build}/dxmt-native
 B=$OUT/build
 I=$OUT/install
+. "$ROOT/wine-arm64/lib.sh"  # p_flag; its die is replaced just below
 die() { echo "dxmt-native: $*" >&2; exit 1; }
 [ -d "$D/.git" ] || die "no DXMT tree at $D: run make wine-arm64 first"
 [ -f "$SRC/llvm-arm64/.complete" ] || die "no LLVM at $SRC/llvm-arm64: run make wine-arm64 first"
@@ -19,6 +20,10 @@ CPU=${MACNEUTRON_CPU:-apple-m5}
 set -- "$B" "$D" --buildtype release -Denable_d3d12=true -Denable_nvapi=false -Denable_nvngx=false \
   -Dwine_builtin_dll=false -Dnative_llvm_path="$SRC/llvm-arm64" -Dtranslator_key_file="$SRC/dxmt-translator-key"
 [ "$CPU" = generic ] || set -- "$@" -Dc_args="-mcpu=$CPU" -Dcpp_args="-mcpu=$CPU"
+# The p profile (spec 2026-10-19-macneutron-performance-build §4, §5): logging below warnings and the D3D12 stats and
+# capture code compiled out (fork patch perf_build), and with "dxmt" in its flags, ThinLTO.
+[ "${MACNEUTRON_PROFILE:-std}" != p ] || set -- "$@" -Dperf_build=true
+! p_flag dxmt || set -- "$@" -Db_lto=true -Db_lto_mode=thin
 # Its .metal files through wine-arm64/tools/xcrun-metal.sh, as the PE build's: the AIR modules winemetal.dylib embeds
 # name no build path (they ship in the app's VM helpers: arm64 release Ruling 20).
 mkdir -p "$OUT"
