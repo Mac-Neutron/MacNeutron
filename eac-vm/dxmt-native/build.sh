@@ -35,11 +35,14 @@ fi
 rm -rf "$I"  # first: a failed build leaves no dylibs from the last one
 meson compile -C "$B" > "$OUT/build.log" 2>&1 || die "building failed; see $OUT/build.log"
 mkdir -p "$I/lib" "$I/include-native"
-# One folder: each finds the others beside it (the build's rpaths name its own folders), signed again ad hoc as
-# arm64 needs after install_name_tool.
+# One folder: each finds the others beside it, its rpath @loader_path alone (the build's name its own folders: M1's
+# deferred minors), signed again ad hoc as arm64 needs after install_name_tool.
 for f in d3d12/d3d12 dxgi/dxgi d3d11/d3d11 d3d10/d3d10core nativemetal/winemetal; do
   lib=$I/lib/${f#*/}.dylib
   cp "$B/src/$f.dylib" "$lib"
+  for r in $(otool -l "$lib" | awk '$1 == "cmd" && $2 == "LC_RPATH" {getline; getline; print $2}'); do
+    install_name_tool -delete_rpath "$r" "$lib" 2> /dev/null
+  done
   install_name_tool -add_rpath @loader_path "$lib" 2> /dev/null
   codesign --force --sign - "$lib" 2> /dev/null
 done

@@ -25,6 +25,10 @@ WANT=$(echo $ROWS | wc -w | tr -d ' ')
 now() { perl -MTime::HiRes=time -e 'printf "%.2f\n", time'; }
 fail=0
 python3 -I "$D/compare.py" self-test || fail=1
+# Its own programs built first, so a stale one never passes for today's DXMT (M1's deferred minors); another's
+# (MN_GATE_PROGRAMS: the loopback's) are its caller's to build.
+[ -n "${MN_GATE_PROGRAMS:-}" ] || sh "$ROOT/eac-vm/dxmt-native/build-tests.sh" > "$R.build.txt" 2>&1 \
+  || { tail -3 "$R.build.txt"; echo "$NAME: building the programs failed"; exit 1; }
 for p in $ROWS; do [ -x "$P/$p" ] || { echo "$NAME: no $P/$p: run build-tests.sh first"; exit 1; }; done
 # shellcheck disable=SC2086  # the names, one word each
 MN_DXMT_ONLY=$(echo $ROWS) sh "$D/share.sh" || exit 1

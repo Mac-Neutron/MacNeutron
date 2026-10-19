@@ -71,7 +71,8 @@ static void List1() {
     CHECK(gpu->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator), (void **)&allocator));
     HRESULT reset = list ? list->Reset(allocator, nullptr) : E_FAIL;
     HRESULT close = list ? list->Close() : E_FAIL;
-    printf("list1 %08lx reset %08lx close %08lx\n", (unsigned long)(unsigned)hr, (unsigned long)reset, (unsigned long)close);
+    printf("list1 %08lx reset %08lx close %08lx\n", (unsigned long)(unsigned)hr, (unsigned long)(unsigned)reset,
+           (unsigned long)(unsigned)close);
 }
 
 static void Heap1() {
