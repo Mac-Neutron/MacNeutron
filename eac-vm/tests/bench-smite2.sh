@@ -44,7 +44,9 @@ mkdir -p "$SHARE/traces"
 # The game runs 60 s past the measured window (the lobby comes up in about 25 s): 2 minutes a run (maintainer,
 # 2026-10-18; it was 5).
 { echo "$RUNVAR=$((SECS + 60)) MACNEUTRON_VM_PROFILE=1"
-  echo "export MACNEUTRON_VM_D3D=${MACNEUTRON_VM_D3D:-guest}${MACNEUTRON_DLSS:+ MACNEUTRON_DLSS=$MACNEUTRON_DLSS}${MN_D3D_DESCRIPTORS:+ MN_D3D_DESCRIPTORS=$MN_D3D_DESCRIPTORS}${MACNEUTRON_VM_D3D_TRACE:+ MACNEUTRON_VM_D3D_TRACE=1}"; cat "$ROOT/eac-vm/tests/$GUEST"; } \
+  echo "export MACNEUTRON_VM_D3D=${MACNEUTRON_VM_D3D:-guest}${MACNEUTRON_DLSS:+ MACNEUTRON_DLSS=$MACNEUTRON_DLSS}${MN_D3D_DESCRIPTORS:+ MN_D3D_DESCRIPTORS=$MN_D3D_DESCRIPTORS}${MACNEUTRON_VM_D3D_TRACE:+ MACNEUTRON_VM_D3D_TRACE=1}"
+  [ -z "${BENCH_GUEST_ENV:-}" ] || echo "export $BENCH_GUEST_ENV"  # FEX_* settings, a training run's LLVM_PROFILE_FILE
+  cat "$ROOT/eac-vm/tests/$GUEST"; } \
   > "$T/guest.sh"
 # Forwarded, native DXMT's shader cache is the game's, as the launcher's (Launcher.swift).
 [ "${MACNEUTRON_VM_D3D:-}" != forward ] || export MN_D3D_STATE=$W/state/$APPID.dxmt
