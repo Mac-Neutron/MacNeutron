@@ -5,10 +5,10 @@
 # archives the folder as MacNeutron-<version>-vm-parts.tar.xz; macneutron vm-setup unpacks it into setup/parts.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 I=$W/images
 D=${1:?usage: parts.sh <out dir> [wine.app]}
-APP=${2:-$ROOT/build/wine-arm64/wine.app}  # whose licence texts the parts carry (the release passes its own)
+APP=${2:-${BUILD_DIR:-$ROOT/build}/wine-arm64/wine.app}  # whose licence texts the parts carry (the release passes its own)
 rm -rf "$D"
 mkdir -p "$D/share/bin"
 cp -c -R "$I/setup/recipe" "$I/setup/overlay" "$D/"

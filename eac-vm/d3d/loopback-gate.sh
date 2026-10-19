@@ -7,7 +7,7 @@
 # or the failures; exits 1 on one.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-OUT=$ROOT/build/d3d-loopback
+OUT=${BUILD_DIR:-$ROOT/build}/d3d-loopback
 LIB=$(sh "$ROOT/eac-vm/d3d/build-loopback.sh")
 ROWS=${MN_DXMT_ONLY:-"d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_copy d3d12_depth d3d12_dxil d3d12_dxil_exec
   d3d12_hazards d3d12_indirect d3d12_layered d3d12_lod d3d12_null d3d12_query d3d12_timestamp d3d12_triangle

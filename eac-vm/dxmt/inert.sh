@@ -8,8 +8,8 @@
 # shader cache once, whatever its sources compile to. Reported, not failed: a new meson option can't avoid it.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-S=$ROOT/build/wine-arm64-src
-T=$ROOT/build/eac-vm-work/inert
+S=${BUILD_DIR:-$ROOT/build}/wine-arm64-src
+T=${BUILD_DIR:-$ROOT/build}/eac-vm-work/inert
 base=$1 new=${2:-macneutron}
 PATH="$(sh "$ROOT/dxmt/toolchain.sh"):$PATH"
 . "$ROOT/wine-arm64/lib.sh"

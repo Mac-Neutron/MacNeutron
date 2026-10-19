@@ -9,7 +9,7 @@ ROOT="$(cd "$HERE/../../.." && pwd)"
 . "$ROOT/dxmt/lib.sh"
 REF="${MACNEUTRON_REFERENCE:-$HOME/Library/Application Support/MacNeutron Reference/rosetta-tool}"
 [ -f "$REF/../FROZEN" ] || die "no frozen Rosetta reference at $REF (run tools/freeze-rosetta-reference.sh)"
-SRC="$ROOT/build/dxmt-src"
+SRC="${BUILD_DIR:-$ROOT/build}/dxmt-src"
 DXC="$SRC/dxc/bin/x64/dxc.exe"
 if [ ! -f "$DXC" ]; then
   mkdir -p "$SRC"

@@ -9,8 +9,8 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 HERE=$ROOT/eac-vm/libkrun
-SRC=$ROOT/build/eac-vm-work/libkrun-src
-OUT=$ROOT/build/eac-vm-work/libkrun
+SRC=${BUILD_DIR:-$ROOT/build}/eac-vm-work/libkrun-src
+OUT=${BUILD_DIR:-$ROOT/build}/eac-vm-work/libkrun
 set -- $(cat "$HERE/PIN"); TAG=$1; SHA=$2
 CARGO=${CARGO:-$(brew --prefix rustup)/bin/cargo}
 

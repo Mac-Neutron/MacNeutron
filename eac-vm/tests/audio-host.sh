@@ -2,7 +2,7 @@
 # The VM host's audio player (eac-vm/host/audio.c) against a stand-in guest, on the Mac's real output (silence).
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-OUT=$ROOT/build/eac-vm-work/obj
+OUT=${BUILD_DIR:-$ROOT/build}/eac-vm-work/obj
 mkdir -p "$OUT"
 clang -O2 -std=gnu2x -Wall -Wextra -o "$OUT/audio-test" "$ROOT/eac-vm/host/audio-test.c" "$ROOT/eac-vm/host/audio.c" \
   -framework AudioToolbox -framework CoreAudio

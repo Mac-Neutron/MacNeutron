@@ -10,7 +10,7 @@
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/release/lib.sh"
-B="$ROOT/build"
+B="${BUILD_DIR:-$ROOT/build}"
 STAGED="$B/wine-arm64/wine.app"
 HELLO="$B/wine-arm64-tests/arm64-hello.exe"
 R0="$B/release/r0"

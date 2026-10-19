@@ -8,8 +8,8 @@
 # into MN_D3D_PROGRAMS_OUT, with no check (the loopback's gate compares them). MN_D3D_PROGRAMS: those programs only.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-I=$ROOT/build/dxmt-native/install
-OUT=${MN_D3D_PROGRAMS_OUT:-$ROOT/build/dxmt-native/tests}
+I=${BUILD_DIR:-$ROOT/build}/dxmt-native/install
+OUT=${MN_D3D_PROGRAMS_OUT:-${BUILD_DIR:-$ROOT/build}/dxmt-native/tests}
 LINK="$I/lib/d3d12.dylib $I/lib/dxgi.dylib $I/lib/d3d11.dylib $I/lib/d3d10core.dylib -Wl,-rpath,$I/lib"
 [ -z "${MN_D3D_PROGRAMS_LIB:-}" ] || LINK="$MN_D3D_PROGRAMS_LIB -Wl,-rpath,$(dirname "$MN_D3D_PROGRAMS_LIB")"
 T=$ROOT/dxmt/tests
@@ -33,7 +33,7 @@ for p in $PROGRAMS; do [ -x "$OUT/$p" ] || fail="$fail $p"; done
 [ -z "$fail" ] || { for p in $fail; do head -5 "$OUT/$p.build.txt"; done; echo "tests: FAIL builds:$fail"; exit 1; }
 [ -z "${MN_D3D_PROGRAMS_LIB:-}" ] || { echo "tests: ok (built against $MN_D3D_PROGRAMS_LIB)"; exit 0; }
 # The check: d3d12_null, natively and in a fresh macOS run (one row of the gate's invocations).
-W=$ROOT/build/eac-vm-work/share
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share
 [ -f "$W/dxmt-tests/timeout" ] || sh "$ROOT/eac-vm/dxmt/share.sh"
 /usr/bin/grep '^d3d12_null|' "$ROOT/eac-vm/dxmt/invocations" > "$OUT/check.invocations"
 MN_REF_INVOCATIONS="$OUT/check.invocations" MN_REF_OUT="$OUT/check-ref" MN_REF_RUNS=1 sh "$ROOT/eac-vm/dxmt/ref.sh" \

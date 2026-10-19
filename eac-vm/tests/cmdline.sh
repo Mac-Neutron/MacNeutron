@@ -6,7 +6,7 @@
 # Needs build/eac-vm-work/macneutron-vm. Prints "cmdline: ok" or "cmdline: FAIL <what>".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-VM=$ROOT/build/eac-vm-work/macneutron-vm
+VM=${BUILD_DIR:-$ROOT/build}/eac-vm-work/macneutron-vm
 T=$(mktemp -d "${TMPDIR:-/tmp}/cmdline.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/images" "$T/share"

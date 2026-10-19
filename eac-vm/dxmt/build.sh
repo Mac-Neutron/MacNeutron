@@ -11,8 +11,8 @@
 set -eu
 : "${MACNEUTRON_SIGN_IDENTITY:?set MACNEUTRON_SIGN_IDENTITY (DXMT NVIDIA DLLs are signed with it)}"
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-S=$ROOT/build/wine-arm64-src
-W=$ROOT/build/eac-vm-work
+S=${BUILD_DIR:-$ROOT/build}/wine-arm64-src
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 SDK=$W/guest-wine-sdk
 B=$W/dxmt-guest-build
 PATH="$(sh "$ROOT/dxmt/toolchain.sh"):$PATH"

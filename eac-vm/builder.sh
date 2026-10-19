@@ -3,8 +3,11 @@
 # the fidelity tests.
 #   builder.sh start               boot it (VM_SHARES="tag=/host/dir,..." adds virtiofs shares) and wait for ssh
 #   builder.sh stop                power it off
-#   builder.sh ssh <command>       run a command in it as `bench`
-#   builder.sh sync <host> <guest> copy a host directory into the guest (rsync --delete, without build/)
+#   builder.sh ssh <command>       run a command in it as `bench`, in BUILDER_HOME (HOME there too)
+#   builder.sh sync <host> <guest> copy a host directory into the guest (rsync --delete, without build/); a relative
+#                                  <guest> is under BUILDER_HOME
+# BUILDER_HOME: /home/bench, or the p profile's /home/bench/p (spec 2026-10-19-macneutron-performance-build §3), whose
+# builds then never meet the normal ones'. MACNEUTRON_PROFILE, when set, reaches the command.
 # Headless boot leaves the guest's sway session, and so its Steam, stopped.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -12,6 +15,7 @@ BUILDER_DIR=${BUILDER_DIR:-$ROOT/build/eac-vm-work/eacvm/fedora/vm}
 BUILDER_KEY=${BUILDER_KEY:-$ROOT/build/eac-vm-work/eacbench/key}
 BUILDER_MAC=${BUILDER_MAC:-52:54:00:ea:c0:02}
 VMHOST=$ROOT/build/eac-vm-work/vmhost
+BUILDER_HOME=${BUILDER_HOME:-/home/bench}
 SRC=$ROOT/eac-vm/host/vmhost.swift
 
 ip() {  # the lease macOS's DHCP server gave our MAC (written without leading zeros)
@@ -49,9 +53,15 @@ stop)
     sleep 2
   done
   rm -f "$BUILDER_DIR/vmhost.pid" ;;
-ssh) shift; sshx "$@" ;;
+ssh)
+  shift
+  pre="export HOME=$BUILDER_HOME; mkdir -p \"\$HOME\" && cd \"\$HOME\" || exit 1;"
+  [ -z "${MACNEUTRON_PROFILE:-}" ] || pre="$pre export MACNEUTRON_PROFILE=$MACNEUTRON_PROFILE;"
+  sshx "$pre" "$@" ;;
 sync)
+  case $3 in /*) dest=$3 ;; *) dest=$BUILDER_HOME/$3 ;; esac
+  sshx mkdir -p "$dest"
   rsync -a --delete --exclude build/ -e "ssh -q -i $BUILDER_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
-    "${2%/}/" "bench@$(ip):$3/" ;;
+    "${2%/}/" "bench@$(ip):$dest/" ;;
 *) sed -n '2,8p' "$0"; exit 2 ;;
 esac

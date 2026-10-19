@@ -7,11 +7,11 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 D3D=$ROOT/eac-vm/d3d
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 G=$W/d3d-gen
 O=$W/d3d-guest
-I=$ROOT/build/dxmt-native/install/include-native
-DXMT=$ROOT/build/wine-arm64-src/dxmt/src
+I=${BUILD_DIR:-$ROOT/build}/dxmt-native/install/include-native
+DXMT=${BUILD_DIR:-$ROOT/build}/wine-arm64-src/dxmt/src
 WMLIB=$W/dxmt-guest-build/src/winemetal/winemetal.dll.a
 PATH="$(sh "$ROOT/dxmt/toolchain.sh"):$PATH"
 [ -f "$WMLIB" ] || { echo "d3d-guest: no winemetal.dll import library: run eac-vm/dxmt/build.sh" >&2; exit 1; }

@@ -4,7 +4,7 @@
 # Prints the samples, then PASS or FAIL with the drop from the hold's peak to the sample 30 s after the unmap.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 mkdir -p "$W/share/bin"
 [ -x "$W/share/bin/memhog" ] || "$ROOT/eac-vm/builder.sh" ssh 'cat > /tmp/memhog.c && gcc -O2 -o /tmp/memhog /tmp/memhog.c && cat /tmp/memhog' \
   < "$ROOT/eac-vm/tests/memhog.c" > "$W/share/bin/memhog"

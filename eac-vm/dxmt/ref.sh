@@ -8,13 +8,13 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 WORK="${TMPDIR:-/tmp}/macneutron dxmt-guest-ref"
-OUT=${MN_REF_OUT:-$ROOT/build/eac-vm-work/share/dxmt-ref}
+OUT=${MN_REF_OUT:-${BUILD_DIR:-$ROOT/build}/eac-vm-work/share/dxmt-ref}
 T=$ROOT/dxmt/tests
-I=$ROOT/build/eac-vm-work/share/dxmt-tests
+I=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share/dxmt-tests
 TO=$(cat "$I/timeout")
 now() { perl -MTime::HiRes=time -e 'printf "%.2f\n", time'; }
 rm -rf "$WORK" "$OUT"; mkdir -p "$WORK/compat" "$OUT"
-"$ROOT/.build/release/macneutron" install --tool-dir "$WORK/ours" --wine-app "$ROOT/build/wine-arm64/wine.app" > /dev/null
+"$ROOT/.build/release/macneutron" install --tool-dir "$WORK/ours" --wine-app "${BUILD_DIR:-$ROOT/build}/wine-arm64/wine.app" > /dev/null
 stop() {
   [ ! -d "$WORK/compat/pfx" ] || WINEPREFIX="$WORK/compat/pfx" WINEMSYNC=1 \
     "$WORK/ours/wine.app/Contents/Resources/bin/wineserver" -k > /dev/null 2>&1 || true

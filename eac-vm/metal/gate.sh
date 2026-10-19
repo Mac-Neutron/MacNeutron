@@ -5,7 +5,7 @@
 # Rebuild first: eac-vm/libkrun/build.sh, eac-vm/host/build.sh, eac-vm/metal/build-guest.sh. Exits 1 on a miss.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 fail=0
 make -s -C "$ROOT/eac-vm/metal" ring-test executor-test || fail=1
 make -s -C "$ROOT/eac-vm/metal/wm" handles-test marshal-test memory-test || fail=1

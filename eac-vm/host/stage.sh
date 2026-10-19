@@ -4,7 +4,7 @@
 # lsteamclient.so beside it, whose ntdll.so imports resolve to the stand-in there too.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 D=${1:?usage: stage.sh <dest>}
 rm -rf "$D"
 mkdir -p "$D/libkrun" "$D/steam-forward/host" "$D/metal-host" "$D/dxmt"

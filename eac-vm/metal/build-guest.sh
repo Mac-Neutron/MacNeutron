@@ -5,22 +5,22 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B="$ROOT/eac-vm/builder.sh"
-OUT=$ROOT/build/eac-vm-work/share/bin
-WINEBUILD=${WINEBUILD:-/home/bench/wine-build64}
-DXMT=$ROOT/build/wine-arm64-src/dxmt/src
+OUT=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share/bin
+WINEBUILD=${WINEBUILD:-'$HOME/wine-build64'}  # the builder's, expanded there (BUILDER_HOME)
+DXMT=${BUILD_DIR:-$ROOT/build}/wine-arm64-src/dxmt/src
 # DXMT's winemetal headers (the tree MacNeutron builds), for the call table's structs.
-HDR=$ROOT/build/eac-vm-work/metal-dxmt-headers
+HDR=${BUILD_DIR:-$ROOT/build}/eac-vm-work/metal-dxmt-headers
 mkdir -p "$HDR"
 cp "$DXMT/winemetal/winemetal.h" "$DXMT/winemetal/winemetal_thunks.h" "$DXMT/winemetal/airconv_thunks.h" \
   "$DXMT/airconv/airconv_public.h" "$HDR/"
-"$B" sync "$ROOT/eac-vm/metal" /home/bench/mn-metal
-"$B" sync "$HDR" /home/bench/mn-metal-dxmt
+"$B" sync "$ROOT/eac-vm/metal" mn-metal
+"$B" sync "$HDR" mn-metal-dxmt
 # Direct3D forwarding's unix side (M2), slot MN_WM_D3D of winemetal.so, and its generated tables (eac-vm/d3d/gen.py).
-G=$ROOT/build/eac-vm-work/d3d-gen
-python3 -I "$ROOT/eac-vm/d3d/gen.py" --headers "$ROOT/build/dxmt-native/install/include-native" \
+G=${BUILD_DIR:-$ROOT/build}/eac-vm-work/d3d-gen
+python3 -I "$ROOT/eac-vm/d3d/gen.py" --headers "${BUILD_DIR:-$ROOT/build}/dxmt-native/install/include-native" \
   --rules "$ROOT/eac-vm/d3d/rules.txt" --out "$G" calls
-"$B" sync "$ROOT/eac-vm/d3d" /home/bench/mn-d3d
-"$B" sync "$G" /home/bench/mn-d3d-gen
+"$B" sync "$ROOT/eac-vm/d3d" mn-d3d
+"$B" sync "$G" mn-d3d-gen
 mkdir -p "$OUT/wm"
 CC="sh ~/mn-sysroot/cc-x86_64.sh -O2 -g -Wall -Wextra -DDXMT_GUEST_VM -I . -I ../mn-metal-dxmt -I wm -I ../mn-d3d-gen"
 build() {  # <output under bin/> <compiler arguments...>

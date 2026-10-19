@@ -20,8 +20,10 @@ set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 KVER=7.2.10-200.fc44.aarch64
 FEX_BIN=${FEX_BIN:-$HOME/fex-linux/build/Bin}
-OUT=${OUT:-/mnt/out}
-WORK=${WORK:-/var/tmp/mn-image}
+# The p profile (MACNEUTRON_PROFILE=p) builds its own set: through the builder's outp share, in its own work folder.
+case ${MACNEUTRON_PROFILE:-std} in std) SFX= ;; *) SFX=-$MACNEUTRON_PROFILE ;; esac
+OUT=${OUT:-/mnt/out$SFX}
+WORK=${WORK:-/var/tmp/mn-image$SFX}
 CACHE=${CACHE:-/var/cache/mn-image-rpms}
 WINE_STAGE=${WINE_STAGE:-$HOME/wine-stage/opt/mn-wine}
 # The Steam forwarder (eac-vm/steam-forward/build-guest.sh with WINEBUILD) replaces lsteamclient's Unix half: the guest
@@ -66,7 +68,7 @@ wine_image() {
   ls -la "$OUT/wine.erofs"
 }
 
-mountpoint -q "$OUT" || { sudo mkdir -p "$OUT"; sudo mount -t virtiofs out "$OUT"; }
+mountpoint -q "$OUT" || { sudo mkdir -p "$OUT"; sudo mount -t virtiofs "out${SFX#-}" "$OUT"; }
 [ "${1:-}" = wine ] && { wine_image; state_template; exit 0; }
 sudo rm -rf "$WORK"; sudo mkdir -p "$WORK/root" "$WORK/x86" "$WORK/x86-rpm"
 

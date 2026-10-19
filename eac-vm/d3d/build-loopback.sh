@@ -8,13 +8,13 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 D3D=$ROOT/eac-vm/d3d
 M=$ROOT/eac-vm/metal
-G=$ROOT/build/eac-vm-work/d3d-gen
-OUT=$ROOT/build/d3d-loopback
+G=${BUILD_DIR:-$ROOT/build}/eac-vm-work/d3d-gen
+OUT=${BUILD_DIR:-$ROOT/build}/d3d-loopback
 O=$OUT/obj
-I=$ROOT/build/dxmt-native/install/include-native
-LIB=$ROOT/build/dxmt-native/install/lib
+I=${BUILD_DIR:-$ROOT/build}/dxmt-native/install/include-native
+LIB=${BUILD_DIR:-$ROOT/build}/dxmt-native/install/lib
 NT=$ROOT/eac-vm/dxmt-native/tests
-DXMT=$ROOT/build/wine-arm64-src/dxmt/src
+DXMT=${BUILD_DIR:-$ROOT/build}/wine-arm64-src/dxmt/src
 [ -f "$LIB/d3d12.dylib" ] || { echo "no native DXMT: run eac-vm/dxmt-native/build.sh" >&2; exit 1; }
 python3 -I "$D3D/gen.py" --headers "$I" --rules "$D3D/rules.txt" --out "$G" calls
 rm -rf "$O"

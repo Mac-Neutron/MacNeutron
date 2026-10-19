@@ -6,9 +6,9 @@
 # build/eac-vm-work/dxmt, native DXMT (eac-vm/dxmt-native/build.sh), which the first Direct3D record loads.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 # The winemetal handler's C and Objective-C, compiled with clang: swiftc takes the objects.
-DXMT=$ROOT/build/wine-arm64-src/dxmt/src
+DXMT=${BUILD_DIR:-$ROOT/build}/wine-arm64-src/dxmt/src
 M=$ROOT/eac-vm/metal
 mkdir -p "$W/obj"
 objs=
@@ -21,9 +21,9 @@ done
 # Direct3D forwarding (M2): the tables and stubs from native DXMT's headers, its dispatcher, and native DXMT itself.
 G=$W/d3d-gen
 D3D=$ROOT/eac-vm/d3d
-I=$ROOT/build/dxmt-native/install/include-native
+I=${BUILD_DIR:-$ROOT/build}/dxmt-native/install/include-native
 NT=$ROOT/eac-vm/dxmt-native/tests
-[ -f "$ROOT/build/dxmt-native/install/lib/d3d12.dylib" ] || { echo "no native DXMT: run eac-vm/dxmt-native/build.sh" >&2; exit 1; }
+[ -f "${BUILD_DIR:-$ROOT/build}/dxmt-native/install/lib/d3d12.dylib" ] || { echo "no native DXMT: run eac-vm/dxmt-native/build.sh" >&2; exit 1; }
 python3 -I "$D3D/gen.py" --headers "$I" --rules "$D3D/rules.txt" --out "$G" calls
 for f in "$D3D/host/dispatch.c" "$D3D/host/memory.c" "$D3D/host/events.c" "$D3D/host/window.c" "$G/calls.c" \
   "$G/ifaces.c"; do
@@ -39,10 +39,10 @@ for f in "$G/stubs.cpp" "$D3D/host/native.cpp" "$D3D/guest/formats.cpp"; do  # f
 done
 rm -rf "$W/dxmt"
 mkdir -p "$W/dxmt"
-cp "$ROOT"/build/dxmt-native/install/lib/*.dylib "$ROOT/build/dxmt-native/install/lib/dxmt-replay" "$W/dxmt/"
+cp "$ROOT"/build/dxmt-native/install/lib/*.dylib "${BUILD_DIR:-$ROOT/build}/dxmt-native/install/lib/dxmt-replay" "$W/dxmt/"
 # Native DXMT's translator key, which the launcher stamps the VM's recordings with (MicroVM.swift): not code, so beside
 # dxmt/ (MacNeutron.app keeps it in Contents/Resources/vm with the scripts).
-cp "$ROOT/build/dxmt-native/install/lib/translator" "$W/dxmt-translator"
+cp "${BUILD_DIR:-$ROOT/build}/dxmt-native/install/lib/translator" "$W/dxmt-translator"
 clang -O2 -std=gnu2x -Wall -c -I"$W/libkrun/include" -o "$W/obj/input.c.o" "$ROOT/eac-vm/host/input.c"
 clang -O2 -std=gnu2x -Wall -c -o "$W/obj/audio.c.o" "$ROOT/eac-vm/host/audio.c"
 # The TPM's engine: libtpms (eac-vm/libtpms) on Homebrew's openssl@3, both linked in statically.

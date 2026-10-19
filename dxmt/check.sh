@@ -14,9 +14,9 @@ TESTS="$ROOT/build/dxmt-tests"
 S="$ROOT/dxmt/tests/shaders"
 LOOP="$ROOT/build/presenter/present_loop.exe"
 REF="${MACNEUTRON_REFERENCE:-$HOME/Library/Application Support/MacNeutron Reference/rosetta-tool}"
-WINEAPP="${MACNEUTRON_ARM64_APP:-$ROOT/build/wine-arm64/wine.app}"
+WINEAPP="${MACNEUTRON_ARM64_APP:-${BUILD_DIR:-$ROOT/build}/wine-arm64/wine.app}"
 ATESTS="${MACNEUTRON_ARM64_TESTS:-$TESTS}" ALOOP="${MACNEUTRON_ARM64_LOOP:-$LOOP}"
-TOOLS="${MACNEUTRON_ARM64_TOOLS:-$ROOT/build/wine-arm64}"
+TOOLS="${MACNEUTRON_ARM64_TOOLS:-${BUILD_DIR:-$ROOT/build}/wine-arm64}"
 WORK="${DXMT_CHECK_WORK:-${TMPDIR:-/tmp}/macneutron dxmt}"
 fail=0
 # The D3D12 caps rows read DXMT's defaults: nothing from the caller's shell.

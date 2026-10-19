@@ -3,7 +3,7 @@
 # tpm.c is built with its keychain read swapped for the test's, which can say no.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 OUT=$W/obj
 SSL=${OPENSSL:-$(brew --prefix openssl@3)}
 mkdir -p "$OUT"

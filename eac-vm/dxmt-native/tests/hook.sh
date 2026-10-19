@@ -2,8 +2,8 @@
 # Native DXMT's memory hooks (hook-test.cpp), against build.sh's install. Prints "hook: ok" or "hook: FAIL".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
-I=$ROOT/build/dxmt-native/install
-OUT=$ROOT/build/dxmt-native/tests
+I=${BUILD_DIR:-$ROOT/build}/dxmt-native/install
+OUT=${BUILD_DIR:-$ROOT/build}/dxmt-native/tests
 H=$ROOT/eac-vm/dxmt-native/tests
 mkdir -p "$OUT"
 rm -f "$OUT/hook-test"

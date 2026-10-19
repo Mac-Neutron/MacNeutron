@@ -6,7 +6,7 @@
 # Needs eac-vm/guest/build-input.sh's bin/mn-input in the share and the image with its udev rule.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 pgrep -x steam_osx > /dev/null || { echo "play: Mac Steam isn't running: start it and sign in first" >&2; exit 1; }
 { echo 'SMITE2_RUN_SECONDS=86400'
   printf 'MACNEUTRON_DLSS=%s MACNEUTRON_XESS=%s\n' "${MACNEUTRON_DLSS:-}" "${MACNEUTRON_XESS:-}"

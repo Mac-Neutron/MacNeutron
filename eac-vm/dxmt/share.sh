@@ -5,7 +5,7 @@
 # each run's timeout (MN_DXMT_TIMEOUT seconds, default 300).
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-D=$ROOT/build/eac-vm-work/share/dxmt-tests
+D=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share/dxmt-tests
 rm -rf "$D"; mkdir -p "$D"
 cp "$ROOT"/build/dxmt-tests/*.exe "$ROOT/build/presenter/present_loop.exe" "$D/"
 cp -R "$ROOT/dxmt/tests/shaders" "$ROOT/dxmt/tests/dxil" "$ROOT/dxmt/tests/dxbc" "$D/"

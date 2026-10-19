@@ -5,7 +5,7 @@
 # it would boot with. Needs build/eac-vm-work/macneutron-vm (eac-vm/host/build.sh). Prints "vcpus: ok" or "FAIL <what>".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-VM=$ROOT/build/eac-vm-work/macneutron-vm
+VM=${BUILD_DIR:-$ROOT/build}/eac-vm-work/macneutron-vm
 fail=
 default=$("$VM" --print-cpus 2> /dev/null) || fail="$fail print-cpus"
 cores=$(sysctl -n hw.physicalcpu)

@@ -20,9 +20,9 @@ for stage in ${*:-wine forwarder dxmt d3d fex}; do
         echo '$(stamp wine)' > wine-stage/opt/mn-wine/.mn-source" ;;
     forwarder)  # lsteamclient's Unix half for the guest (eac-vm/steam-forward/build-guest.sh), on that Wine build
       make -s -C "$ROOT/eac-vm/steam-forward" OUT="$W/steam-forward" "$W/steam-forward/descriptors.c"
-      $B sync "$ROOT/eac-vm/steam-forward" /home/bench/mn-steam-forward > /dev/null
-      $B sync "$W/steam-forward" /home/bench/mn-steam-gen > /dev/null
-      $B sync "$S/lsteamclient/lsteamclient" /home/bench/mn-lsc > /dev/null
+      $B sync "$ROOT/eac-vm/steam-forward" mn-steam-forward > /dev/null
+      $B sync "$W/steam-forward" mn-steam-gen > /dev/null
+      $B sync "$S/lsteamclient/lsteamclient" mn-lsc > /dev/null
       $B ssh "set -e; WINEBUILD=\$HOME/wine-build64 sh mn-steam-forward/build-guest.sh \$HOME/mn-steam-forward \$HOME/mn-lsc \
         \$HOME/wine-src/include \$HOME/mn-steam-gen \$HOME/mn-steam-out > /dev/null
         echo '$(stamp forwarder)' > mn-steam-out/.mn-source" ;;
@@ -37,10 +37,10 @@ for stage in ${*:-wine forwarder dxmt d3d fex}; do
       cp -R "$W/d3d-guest/x86_64-windows" "$W/d3d-guest-stage/"
       cp "$ROOT/eac-vm/d3d/guest/prefix.sh" "$W/d3d-guest-stage/"
       stamp d3d > "$W/d3d-guest-stage/.mn-source"
-      $B sync "$W/d3d-guest-stage" /home/bench/mn-d3d-guest > /dev/null ;;
+      $B sync "$W/d3d-guest-stage" mn-d3d-guest > /dev/null ;;
     fex)  # eac-vm/image/build-fex.sh in the builder, from fex-linux
-      $B sync "$W/fex-linux" /home/bench/fex-linux > /dev/null
-      $B sync "$ROOT/eac-vm/image" /home/bench/mn-image > /dev/null
+      $B sync "$W/fex-linux" fex-linux > /dev/null
+      $B sync "$ROOT/eac-vm/image" mn-image > /dev/null
       $B ssh "set -e; sh mn-image/build-fex.sh > /dev/null; echo '$(stamp fex)' > fex-linux/build/Bin/.mn-source" ;;
     *) echo "usage: guest-stages.sh [wine|forwarder|dxmt|d3d|fex]..." >&2; exit 2 ;;
   esac

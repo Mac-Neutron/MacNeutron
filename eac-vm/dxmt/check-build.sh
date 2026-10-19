@@ -4,7 +4,7 @@
 # Mach-O, no *-unix folder) came with them. Exits 1 at the first failure.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-D=${1:-$ROOT/build/eac-vm-work/dxmt-guest}
+D=${1:-${BUILD_DIR:-$ROOT/build}/eac-vm-work/dxmt-guest}
 PATH="$(sh "$ROOT/dxmt/toolchain.sh"):$PATH"
 fail() { echo "check-build: FAIL: $*"; exit 1; }
 for n in d3d10core d3d11 d3d12 dxgi winemetal; do

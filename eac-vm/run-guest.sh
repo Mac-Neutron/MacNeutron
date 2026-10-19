@@ -11,7 +11,7 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # MN_VM_DIR: the VM's folder when run from it (MacNeutron's launcher runs the copy host/build.sh puts there).
-W=${MN_VM_DIR:-$ROOT/build/eac-vm-work}
+W=${MN_VM_DIR:-${BUILD_DIR:-$ROOT/build}/eac-vm-work}
 SHARE=${MN_SHARE:-$W/share}
 # One run per share: a second would rewrite the first's script and results before its host refused the state disk.
 if [ -z "${MN_RUN_GUEST_LOCKED:-}" ]; then

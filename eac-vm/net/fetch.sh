@@ -4,7 +4,7 @@
 # build/eac-vm-work/gvproxy beside macneutron-vm. Never committed.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 set -- $(cat "$ROOT/eac-vm/net/PIN"); VER=$1 SUM=$2
 D=$W/gvproxy-$VER
 if [ "$(shasum -a 256 "$D/gvproxy-darwin" 2>/dev/null | cut -d' ' -f1)" != "$SUM" ]; then

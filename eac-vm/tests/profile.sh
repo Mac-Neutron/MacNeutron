@@ -7,7 +7,7 @@
 # build/eac-vm-work's images and host tools (MN_SHARE: another share). Prints "profile: ok" or "profile: FAIL <what>".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-SHARE=${MN_SHARE:-$ROOT/build/eac-vm-work/share}
+SHARE=${MN_SHARE:-${BUILD_DIR:-$ROOT/build}/eac-vm-work/share}
 T=$(mktemp -d "${TMPDIR:-/tmp}/profile.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 rm -rf "$SHARE/traces/profile.txt" "$SHARE/traces/dxmt"  # an earlier run's would pass

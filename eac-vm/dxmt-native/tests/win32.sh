@@ -3,8 +3,8 @@
 # fork's src/util/win32_native.h, natively. Prints "win32: ok" or "win32: FAIL <cases>".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
-D=$ROOT/build/wine-arm64-src/dxmt
-OUT=$ROOT/build/dxmt-native/tests
+D=${BUILD_DIR:-$ROOT/build}/wine-arm64-src/dxmt
+OUT=${BUILD_DIR:-$ROOT/build}/dxmt-native/tests
 mkdir -p "$OUT"
 H=$ROOT/eac-vm/dxmt-native/tests
 clang++ -std=c++20 -Wall -Wextra -Wno-unused-parameter -fsanitize=address,undefined -I"$D/include/native/windows" -I"$D/src/util" \

@@ -3,7 +3,7 @@
 # trees as APFS clones: no space, no download. A tree already in build/p is left as it is.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-B=$ROOT/build
+B=$ROOT/build  # always the normal build: p is seeded from it
 P=$B/p
 mkdir -p "$P/eac-vm-work"
 for t in wine-arm64-src dxmt-src llvm-mingw-src vm-setup-tools-src eac-vm-work/libkrun-src eac-vm-work/libtpms-src \

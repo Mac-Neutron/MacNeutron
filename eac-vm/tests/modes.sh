@@ -4,10 +4,10 @@
 # Needs build/eac-vm-work's images (eac-vm/image/build.sh). Prints what it got and "modes: ok" or "modes: FAIL <what>".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 T=$(mktemp -d "${TMPDIR:-/tmp}/modes.XXXXXX")
 trap 'rm -rf "$T"' EXIT
-"$ROOT/build/dxmt-src/llvm-mingw-own/bin/x86_64-w64-mingw32-clang" -O2 -Wall -o "$W/share/bin/modes.exe" \
+"${BUILD_DIR:-$ROOT/build}/dxmt-src/llvm-mingw-own/bin/x86_64-w64-mingw32-clang" -O2 -Wall -o "$W/share/bin/modes.exe" \
   "$ROOT/eac-vm/guest/win/modes.c"
 # MicroVM.swift's header: a `run` of modes.exe on a 2560x1600 Mac display, then the game script.
 { echo "VERB=run APPID=0 GAME_DIR=/mnt/share/bin EXE=modes.exe MN_SCREEN=2560x1600"; echo "set --"

@@ -6,7 +6,7 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 for p in threads:5 threads11:2; do
   name=${p%:*} want=${p#*:}
-  sh "$ROOT/eac-vm/d3d/both.sh" "$name" > "$ROOT/build/d3d-loopback.$name.txt" 2>&1 || { cat "$ROOT/build/d3d-loopback.$name.txt"; exit 1; }
-  [ "$(/usr/bin/grep -c ' 0 of ' "$ROOT/build/d3d-loopback/$name/native.lines")" -eq "$want" ] || { echo "threads: FAIL $name natively"; exit 1; }
+  sh "$ROOT/eac-vm/d3d/both.sh" "$name" > "${BUILD_DIR:-$ROOT/build}/d3d-loopback.$name.txt" 2>&1 || { cat "${BUILD_DIR:-$ROOT/build}/d3d-loopback.$name.txt"; exit 1; }
+  [ "$(/usr/bin/grep -c ' 0 of ' "${BUILD_DIR:-$ROOT/build}/d3d-loopback/$name/native.lines")" -eq "$want" ] || { echo "threads: FAIL $name natively"; exit 1; }
 done
 echo "threads: ok"

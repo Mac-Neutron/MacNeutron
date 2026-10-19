@@ -4,7 +4,7 @@
 # the template, no TPM) must end less than 128 MiB larger than the template. Prints "discard: ok" or "discard: FAIL <what>".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 OUT=$W/discard.txt
 T=$(mktemp -d "${TMPDIR:-/tmp}/discard.XXXXXX")
 trap 'rm -rf "$T"' EXIT

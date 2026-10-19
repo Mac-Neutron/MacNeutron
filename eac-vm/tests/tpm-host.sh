@@ -5,7 +5,7 @@
 # Prints "tpm-host: ok" or "tpm-host: FAIL <what>".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 OUT=$W/tpm-host.txt
 cat > "$W/tpm-run.sh" <<'GUEST'
 for n in /proc/device-tree/tpm@*; do echo "$n: $(tr -d '\0' < "$n/compatible")"; done

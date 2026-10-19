@@ -5,9 +5,9 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B="$ROOT/eac-vm/builder.sh"
-OUT=$ROOT/build/eac-vm-work/share/bin
+OUT=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share/bin
 mkdir -p "$OUT"
-"$B" sync "$ROOT/eac-vm/guest" /home/bench/mn-guest
+"$B" sync "$ROOT/eac-vm/guest" mn-guest
 CC="clang --target=x86_64-redhat-linux --sysroot=/var/cache/mn-sysroot-x86_64 -fuse-ld=lld -O2 -Wall -Wextra"
 # build <output> <compiler arguments>: in the builder, then out to the share
 build() {
@@ -18,6 +18,6 @@ build() {
 build libasound_module_pcm_mn.so -shared -fPIC -DPIC alsa-mn.c -lasound  # PIC: ALSA's plugin macros, dynamic build
 build alsa-play alsa-play.c -lasound
 chmod +x "$OUT/alsa-play"
-"$ROOT/build/dxmt-src/llvm-mingw-own/bin/x86_64-w64-mingw32-clang" -O2 -Wall -o "$OUT/waveout.exe" \
+"${BUILD_DIR:-$ROOT/build}/dxmt-src/llvm-mingw-own/bin/x86_64-w64-mingw32-clang" -O2 -Wall -o "$OUT/waveout.exe" \
   "$ROOT/eac-vm/guest/win/waveout.c" -lwinmm
 file "$OUT/libasound_module_pcm_mn.so" "$OUT/alsa-play" "$OUT/waveout.exe"

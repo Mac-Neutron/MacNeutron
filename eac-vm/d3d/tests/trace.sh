@@ -8,7 +8,7 @@ LIB=$(sh "$ROOT/eac-vm/d3d/build-loopback.sh")
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 name=ID3D12GraphicsCommandList::SetPredication
-id=$(/usr/bin/grep -o "\[[0-9]*\] = {\"$name\"" "$ROOT/build/eac-vm-work/d3d-gen/calls.c" | sed "s/^\[\([0-9]*\)\].*/\1/")
+id=$(/usr/bin/grep -o "\[[0-9]*\] = {\"$name\"" "${BUILD_DIR:-$ROOT/build}/eac-vm-work/d3d-gen/calls.c" | sed "s/^\[\([0-9]*\)\].*/\1/")
 MACNEUTRON_VM_D3D_TRACE=1 MN_D3D_LOOPBACK_TRACE=$T/guest.txt DXMT_LOG_PATH=none python3 -I - "$LIB" "$id" "$name" <<'EOF'
 import ctypes, sys
 lib = ctypes.CDLL(sys.argv[1])

@@ -17,7 +17,7 @@
 # wine) and the share's dxmt-tests (eac-vm/dxmt/share.sh). Prints "d3d-smoke: ok" or "d3d-smoke: FAIL <what>".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 SH=$W/share
 MN_DXMT_ONLY=d3d12_null sh "$ROOT/eac-vm/dxmt/share.sh" > /dev/null  # the share's shaders too (dies' D3D11 ones)
 "$(sh "$ROOT/dxmt/toolchain.sh")/x86_64-w64-mingw32-clang++" -std=c++17 -O1 -static -s -o "$SH/dxmt-tests/smoke.exe" \

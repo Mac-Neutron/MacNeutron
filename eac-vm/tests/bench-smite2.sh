@@ -10,7 +10,7 @@
 #   bench-smite2.sh <label> [seconds]
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work SHARE=$ROOT/build/eac-vm-work/share
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work SHARE=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share
 LABEL=${1:?usage: bench-smite2.sh <label> [seconds]} SECS=${2:-60}
 pgrep -x steam_osx > /dev/null || { echo "bench-smite2: Mac Steam isn't running" >&2; exit 1; }
 ! pgrep -x macneutron-vm > /dev/null || { echo "bench-smite2: a VM is running (a game being played?)" >&2; exit 1; }

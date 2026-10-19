@@ -5,9 +5,9 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 P=$1; shift
-I=$ROOT/build/dxmt-native/install
+I=${BUILD_DIR:-$ROOT/build}/dxmt-native/install
 H=$ROOT/eac-vm/dxmt-native/tests
-OUT=$ROOT/build/d3d-loopback/$P
+OUT=${BUILD_DIR:-$ROOT/build}/d3d-loopback/$P
 LIB=$(sh "$ROOT/eac-vm/d3d/build-loopback.sh")
 mkdir -p "$OUT"
 build() {  # build <name> <link...>

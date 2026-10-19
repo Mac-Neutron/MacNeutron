@@ -673,14 +673,19 @@ fi
 EW="${BUILD_DIR:-$ROOT/build}/eac-vm-work"  # the VM's work folder (r3 has its own W)
 PARTS="MacNeutron-$V-vm-parts.tar.xz"
 B="$ROOT/eac-vm/builder.sh"
-VM_SHARES="out=$EW/images" sh "$B" start > /dev/null || die "the builder (eac-vm/builder.sh) doesn't start"
-# Its /mnt/out must be this tree's images (a builder started elsewhere would build into another folder).
+# Both profiles' image folders, so one builder serves either release (out: the normal one, outp: the p profile's).
+mkdir -p "$ROOT/build/eac-vm-work/images" "$ROOT/build/p/eac-vm-work/images"
+VM_SHARES="out=$ROOT/build/eac-vm-work/images,outp=$ROOT/build/p/eac-vm-work/images" sh "$B" start > /dev/null \
+  || die "the builder (eac-vm/builder.sh) doesn't start"
+# Its /mnt/out (/mnt/out-p) must be this tree's images (a builder started elsewhere would build into another folder).
+sfx=; [ $PROFILE = std ] || sfx=-$PROFILE
 nonce=$(uuidgen)
 echo "$nonce" > "$EW/images/.release-nonce"
-[ "$(sh "$B" ssh 'cat /mnt/out/.release-nonce 2> /dev/null')" = "$nonce" ] \
-  || die "the builder's /mnt/out isn't $EW/images: stop it (eac-vm/builder.sh stop) and run the release again"
+[ "$(sh "$B" ssh "mountpoint -q /mnt/out$sfx || { sudo mkdir -p /mnt/out$sfx; sudo mount -t virtiofs out${sfx#-} /mnt/out$sfx; }
+  cat /mnt/out$sfx/.release-nonce 2> /dev/null")" = "$nonce" ] \
+  || die "the builder's /mnt/out$sfx isn't $EW/images: stop it (eac-vm/builder.sh stop) and run the release again"
 rm -f "$EW/images/.release-nonce"
-sh "$B" sync "$ROOT/eac-vm/image" /home/bench/mn-image > /dev/null || die "can't copy eac-vm/image into the builder"
+sh "$B" sync "$ROOT/eac-vm/image" mn-image > /dev/null || die "can't copy eac-vm/image into the builder"
 sh "$B" ssh 'sh ~/mn-image/build.sh > /tmp/image.log 2>&1' || die "the image build failed: the builder's /tmp/image.log"
 sh "$ROOT/eac-vm/setup/parts.sh" "$OUT/vm-parts" "$OUT/wine.app" > /dev/null || die "parts.sh failed"
 check_parts_paths "$OUT/vm-parts" || exit 1

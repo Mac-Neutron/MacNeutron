@@ -8,8 +8,8 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 HERE=$ROOT/eac-vm/libtpms
-SRC=$ROOT/build/eac-vm-work/libtpms-src
-OUT=$ROOT/build/eac-vm-work/libtpms
+SRC=${BUILD_DIR:-$ROOT/build}/eac-vm-work/libtpms-src
+OUT=${BUILD_DIR:-$ROOT/build}/eac-vm-work/libtpms
 set -- $(cat "$HERE/PIN"); TAG=$1; SHA=$2
 SSL=${OPENSSL:-$(brew --prefix openssl@3)}
 

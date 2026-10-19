@@ -13,10 +13,10 @@ set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 D=$ROOT/eac-vm/dxmt
 T=$ROOT/dxmt/tests
-P=${MN_GATE_PROGRAMS:-$ROOT/build/dxmt-native/tests}
-R=${MN_GATE_RUNS:-$ROOT/build/dxmt-native/runs}
+P=${MN_GATE_PROGRAMS:-${BUILD_DIR:-$ROOT/build}/dxmt-native/tests}
+R=${MN_GATE_RUNS:-${BUILD_DIR:-$ROOT/build}/dxmt-native/runs}
 NAME=${MN_GATE_NAME:-dxmt-native gate}
-REF=$ROOT/build/eac-vm-work/share/dxmt-ref
+REF=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share/dxmt-ref
 ROWS=${MN_DXMT_ONLY:-"d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_copy d3d12_depth d3d12_dxil
   d3d12_dxil_exec d3d12_hazards d3d12_indirect d3d12_layered d3d12_lod d3d12_null d3d12_query d3d12_timestamp
   d3d12_triangle d3d12_upscale d3d12_volume d3d12_vsread d3d11_api d3d11_compute d3d11_deferred d3d11_dynamic
@@ -34,7 +34,7 @@ for p in $ROWS; do [ -x "$P/$p" ] || { echo "$NAME: no $P/$p: run build-tests.sh
 MN_DXMT_ONLY=$(echo $ROWS) sh "$D/share.sh" || exit 1
 mkdir -p "$R"
 MN_REF_RUNS=1 sh "$D/ref.sh" > "$R.ref.txt" 2>&1 || { tail "$R.ref.txt"; exit 1; }
-TO=$(cat "$ROOT/build/eac-vm-work/share/dxmt-tests/timeout")
+TO=$(cat "${BUILD_DIR:-$ROOT/build}/eac-vm-work/share/dxmt-tests/timeout")
 rm -rf "$R"; mkdir -p "$R/cache"
 n=0
 while IFS='|' read -r name exe args prefixes; do
@@ -55,7 +55,7 @@ while IFS='|' read -r name exe args prefixes; do
   # shellcheck disable=SC2086  # the prefixes, one word each; one reference run: its measurements aren't compared
   python3 -I "$D/compare.py" "$name" "$REF/$name.1.txt" "$REF/$name.1.txt" "$R/$name.txt" $prefixes || fail=1
   echo "     time: macOS $(cat "$REF/$name.1.time") s, native $(cat "$R/$name.time") s"
-done < "$ROOT/build/eac-vm-work/share/dxmt-tests/invocations"
+done < "${BUILD_DIR:-$ROOT/build}/eac-vm-work/share/dxmt-tests/invocations"
 [ "$n" -eq "$WANT" ] || { echo "$NAME: $n programs ran, not $WANT"; fail=1; }
 [ $fail -eq 0 ] && echo "$NAME: all $n programs passed" || echo "$NAME: FAIL"
 exit $fail

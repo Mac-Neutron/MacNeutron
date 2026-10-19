@@ -3,7 +3,7 @@
 # exports its entry points. Prints "build: ok" or "build: FAIL <what>".
 set -u
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
-L=$ROOT/build/dxmt-native/install/lib
+L=${BUILD_DIR:-$ROOT/build}/dxmt-native/install/lib
 fail=
 sh "$ROOT/eac-vm/dxmt-native/build.sh" || fail=" build.sh"
 for e in "d3d12 _D3D12CreateDevice _D3D12GetDebugInterface _D3D12SerializeVersionedRootSignature" \

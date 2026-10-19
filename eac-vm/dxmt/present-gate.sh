@@ -14,7 +14,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 MODE=${1:-guest}
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 D=$ROOT/eac-vm/dxmt
 REF=$W/share/present-ref G=$W/share/traces/present INV=$W/present-invocations
 WINSHOT=$ROOT/build/wine-arm64-tests/winshot

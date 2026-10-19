@@ -7,7 +7,7 @@
 # 2026-10-17; MN_REF_RUNS=2: two, whose differing lines are masked).
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 D=$ROOT/eac-vm/dxmt
 REF=$W/share/dxmt-ref G=$W/share/traces/dxmt
 fail=0

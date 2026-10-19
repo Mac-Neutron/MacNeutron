@@ -12,7 +12,7 @@
 # failure.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 D=$ROOT/eac-vm/dxmt
 SH=$W/share
 REF=$SH/dxmt-ref G=$SH/traces/dxmt

@@ -7,9 +7,9 @@
 # win32_native.h, for programs built against them). Set up again when its options change (build/.setup-inputs).
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-SRC=$ROOT/build/wine-arm64-src
+SRC=${BUILD_DIR:-$ROOT/build}/wine-arm64-src
 D=$SRC/dxmt
-OUT=$ROOT/build/dxmt-native
+OUT=${BUILD_DIR:-$ROOT/build}/dxmt-native
 B=$OUT/build
 I=$OUT/install
 die() { echo "dxmt-native: $*" >&2; exit 1; }

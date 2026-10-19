@@ -7,8 +7,8 @@
 # build/eac-vm-work's images from eac-vm/image/build.sh. Prints "vm-setup: ok" or "vm-setup: FAIL <what>".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-W=$ROOT/build/eac-vm-work
-G=$ROOT/build/vm-setup-gate
+W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
+G=${BUILD_DIR:-$ROOT/build}/vm-setup-gate
 B="sh $ROOT/eac-vm/builder.sh"
 KVER=7.2.10-200.fc44.aarch64
 fail=

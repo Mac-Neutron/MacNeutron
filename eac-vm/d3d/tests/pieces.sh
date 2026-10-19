@@ -8,8 +8,8 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 LIB=$(sh "$ROOT/eac-vm/d3d/build-loopback.sh")
-P=$ROOT/build/d3d-loopback/tests/d3d11_dynamic
-MN_D3D_PROGRAMS=d3d11_dynamic MN_D3D_PROGRAMS_LIB=$LIB MN_D3D_PROGRAMS_OUT=$ROOT/build/d3d-loopback/tests \
+P=${BUILD_DIR:-$ROOT/build}/d3d-loopback/tests/d3d11_dynamic
+MN_D3D_PROGRAMS=d3d11_dynamic MN_D3D_PROGRAMS_LIB=$LIB MN_D3D_PROGRAMS_OUT=${BUILD_DIR:-$ROOT/build}/d3d-loopback/tests \
   sh "$ROOT/eac-vm/dxmt-native/build-tests.sh" > /dev/null
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
