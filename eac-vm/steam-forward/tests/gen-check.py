@@ -49,5 +49,12 @@ for what, call, name, want in cases:
     else:
         print(f'FAIL {what}: {got}, want {want}')
         failures += 1
+    # The WoW64 table's twin: the same shape, its pointers 4 bytes (MN_PTR32).
+    got = field('wow64_' + call, name)
+    if got and got[0] == want[0] and 'MN_PTR32' in got[1] and (want[1] == '0' or want[1] in got[1]) and got[2] == want[2]:
+        print(f'ok   {what} (wow64)')
+    else:
+        print(f'FAIL {what} (wow64): {got}, want {want} with MN_PTR32')
+        failures += 1
 print('gen-check: ' + ('FAIL' if failures else 'all passed'))
 sys.exit(1 if failures else 0)

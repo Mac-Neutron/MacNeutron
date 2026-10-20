@@ -1,5 +1,6 @@
 /* The forwarding client: see client.h. */
 #include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,7 +47,7 @@ static int ensure_connected(void) {
      * when mn-steam-host is gone), and a forwarded call must fail, not hang. Calls themselves are not bounded. */
     struct timeval two = { 2, 0 }, none = { 0, 0 };
     setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &two, sizeof two);
-    uint32_t mine = mn_table_checksum(mn_calls, mn_ncalls), theirs = 0;
+    uint32_t mine = mn_tables_checksum(), theirs = 0;
     if (mn_write_full(conn, &mine, 4) || mn_read_full(conn, &theirs, 4) || theirs != mine) {
         if (theirs && theirs != mine) fprintf(stderr, "mn-steam: host table %08x differs from ours %08x\n", theirs, mine);
         else fprintf(stderr, "mn-steam: no answer from the host\n");
@@ -57,23 +58,28 @@ static int ensure_connected(void) {
     return 0;
 }
 
+uint32_t mn_tables_checksum(void) {
+    return mn_table_checksum(mn_calls, mn_ncalls) ^ (mn_table_checksum(mn_calls_wow64, mn_ncalls) * 16777619u);
+}
+
 /* With no host to reach, answer as lsteamclient does when Steam isn't running: init and the registry setup succeed and
  * CreateInterface finds no interface, so SteamAPI_Init returns false. lsteamclient's PE side asserts on any failed
  * call, which would stop the game at an assertion dialog instead. */
 static uint32_t no_steam(const struct mn_call_desc *d, void *params) {
     if (!strcmp(d->name, "steamclient_init") || !strcmp(d->name, "steamclient_init_registry")) return 0;
     if (!strcmp(d->name, "steamclient_CreateInterface")) {
+        /* _ret comes first in the WoW64 params too */
         ((struct steamclient_CreateInterface_params *)params)->_ret.handle = 0;
         return 0;
     }
     return MN_STATUS_DISCONNECTED; /* ponytail: a host lost mid-game still asserts, as a Steam crash would */
 }
 
-uint32_t mn_client_call(uint32_t index, void *params) {
-    if (index >= mn_ncalls) return MN_STATUS_INVALID_PARAMETER;
-    const struct mn_call_desc *d = &mn_calls[index];
+/* One call: `wire` is its index, with MN_WOW64 for a WoW64 call. */
+static uint32_t call(const struct mn_call_desc *d, uint32_t wire, void *params) {
+    uint32_t index = wire & ~MN_WOW64;
     struct mn_buf req = {0};
-    int r = mn_pack_request(d, index, params, &req);
+    int r = mn_pack_request(d, wire, params, &req);
     if (r == MN_E_UNSUPPORTED) {
         static __thread uint32_t last; /* log each unsupported call once per run of repeats */
         if (last != index + 1) fprintf(stderr, "mn-steam: %s is not carried to the host\n", d->name);
@@ -99,4 +105,33 @@ uint32_t mn_client_call(uint32_t index, void *params) {
     free(msg);
     mn_buf_free(&req);
     return status == MN_STATUS_DISCONNECTED ? no_steam(d, params) : status;
+}
+
+uint32_t mn_client_call(uint32_t index, void *params) {
+    return index < mn_ncalls ? call(&mn_calls[index], index, params) : MN_STATUS_INVALID_PARAMETER;
+}
+uint32_t mn_client_call_wow64(uint32_t index, void *params) {
+    return index < mn_ncalls ? call(&mn_calls_wow64[index], index | MN_WOW64, params) : MN_STATUS_INVALID_PARAMETER;
+}
+
+/* lsteamclient's 32-bit side copies a returned string into memory it can reach through this call, as Proton's Unix
+ * side does: into the caller's buffer the first time, then the same buffer again for the same string (the caller frees
+ * its new one). The string is this process's kept copy (marshal.c), so the call is answered here, never sent.
+ * ponytail: a linear list, as marshal.c's kept copies. */
+struct seen { struct seen *next; uint64_t src; uint32_t dst; };
+static struct seen *seen_list;
+static pthread_mutex_t seen_lock = PTHREAD_MUTEX_INITIALIZER;
+NTSTATUS mn_wow64_get_unix_buffer(void *args) {
+    struct wow64_steamclient_get_unix_buffer_params *p = args;
+    if (!p->ptr.value || !p->buf.ptr) return MN_STATUS_INVALID_PARAMETER;
+    pthread_mutex_lock(&seen_lock);
+    struct seen *s = seen_list;
+    while (s && s->src != p->buf.ptr) s = s->next;
+    if (s) p->ptr.value = s->dst;
+    else {
+        memcpy((void *)(uintptr_t)p->ptr.value, (const void *)(uintptr_t)p->buf.ptr, p->buf.len);
+        if ((s = malloc(sizeof *s))) { s->src = p->buf.ptr; s->dst = p->ptr.value; s->next = seen_list; seen_list = s; }
+    }
+    pthread_mutex_unlock(&seen_lock);
+    return 0;
 }

@@ -34,9 +34,19 @@ int main(void) {
     struct steamclient_next_callback_params next = {0};
     s = mn_client_call(call_index("steamclient_next_callback"), &next);
     if (s != MN_STATUS_DISCONNECTED) { printf("FAIL next_callback: 0x%x, want 0x%x\n", s, MN_STATUS_DISCONNECTED); fail = 1; }
-    /* A 32-bit (WoW64) caller's params have another layout: refused, never forwarded. */
-    s = __wine_unix_call_wow64_funcs[call_index("steamclient_init")](&init);
-    if (s != MN_STATUS_NOT_IMPLEMENTED) { printf("FAIL wow64 init: 0x%x, want 0x%x\n", s, MN_STATUS_NOT_IMPLEMENTED); fail = 1; }
+    /* A 32-bit (WoW64) caller's calls are forwarded too, through their own descriptors: with no host, init and
+     * CreateInterface answer as the 64-bit ones do. */
+    struct wow64_steamclient_init_params init32 = {0};
+    s = __wine_unix_call_wow64_funcs[call_index("steamclient_init")](&init32);
+    if (s) { printf("FAIL wow64 init: 0x%x, want 0\n", s); fail = 1; }
+    struct wow64_steamclient_CreateInterface_params ci32 = {0};
+    ci32._ret.handle = 1;
+    s = __wine_unix_call_wow64_funcs[call_index("steamclient_CreateInterface")](&ci32);
+    if (s || ci32._ret.handle) { printf("FAIL wow64 CreateInterface: 0x%x, handle %llx, want 0 and 0\n", s, (unsigned long long)ci32._ret.handle); fail = 1; }
+    const struct mn_call_desc *d = &mn_calls_wow64[call_index("steamclient_init")];
+    int ptr32 = d->params_size == sizeof(struct wow64_steamclient_init_params) && d->nfields == 2;
+    for (unsigned i = 0; i < d->nfields; i++) ptr32 &= (d->fields[i].flags & MN_PTR32) != 0;
+    if (!ptr32) { printf("FAIL wow64 init's descriptor: size %u, %u fields, want 4-byte pointers\n", d->params_size, d->nfields); fail = 1; }
     if (!fail) printf("offline-test: ok\n");
     return fail;
 }
