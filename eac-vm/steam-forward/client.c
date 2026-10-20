@@ -90,17 +90,20 @@ static uint32_t call(const struct mn_call_desc *d, uint32_t wire, void *params) 
     uint32_t status = MN_STATUS_DISCONNECTED;
     struct mn_rep_hdr h;
     uint8_t *msg = NULL;
+    static __thread int lost; /* say a lost host once per run of failed calls (a 32-bit game's, with no 32-bit host) */
     if (ensure_connected() || mn_write_full(conn, req.data, req.len) || mn_read_full(conn, &h, sizeof h) ||
         h.magic != MN_MAGIC || h.len > MN_MAX_MESSAGE || !(msg = malloc(sizeof h + h.len))) {
-        fprintf(stderr, "mn-steam: %s: host unreachable\n", d->name);
+        if (!lost++) fprintf(stderr, "mn-steam: %s: host unreachable\n", d->name);
         drop();
     } else if (memcpy(msg, &h, sizeof h), mn_read_full(conn, msg + sizeof h, h.len)) {
-        fprintf(stderr, "mn-steam: %s: host closed the connection\n", d->name);
+        if (!lost++) fprintf(stderr, "mn-steam: %s: host closed the connection\n", d->name);
         drop();
     } else if ((r = mn_unpack_reply(d, msg, sizeof h + h.len, params, &status, reg_apply, reg_ctx))) {
         fprintf(stderr, "mn-steam: %s: bad reply (%d)\n", d->name, r);
         status = MN_STATUS_INVALID_PARAMETER;
         drop();
+    } else {
+        lost = 0;
     }
     free(msg);
     mn_buf_free(&req);

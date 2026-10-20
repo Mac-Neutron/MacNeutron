@@ -12,6 +12,7 @@
 #include <mach-o/dyld.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,7 +92,9 @@ static void *serve(void *arg) {
         int wow64 = (h.index & MN_WOW64) != 0, slot = -1;
         /* Without 32-bit calls here, closing makes the guest answer as with no Steam (client.c no_steam). */
         if (wow64 && (slot = low_take()) < 0) {
-            fprintf(stderr, "mn-steam-host: a 32-bit call can't run (32-bit calls unavailable), closing\n");
+            static atomic_flag said = ATOMIC_FLAG_INIT; /* once: a 32-bit game makes them all the time */
+            if (!atomic_flag_test_and_set(&said))
+                fprintf(stderr, "mn-steam-host: 32-bit calls can't run (unavailable): closing their connections\n");
             free(msg);
             break;
         }

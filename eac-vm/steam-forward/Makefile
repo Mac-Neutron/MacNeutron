@@ -43,7 +43,16 @@ $(OUT)/host-client: tests/host-client.c tests/script.c client.c marshal.c $(OUT)
 # (release.sh signs its copy again), ad hoc otherwise: then 32-bit calls are unavailable.
 HOST_APP = $(OUT)/host/mn-steam-host.app
 HOST_ENT = ../../release/entitlements/mn-steam-host.plist
-$(HOST_APP): $(OUT)/host/mn-steam-host $(OUT)/host/ntdll.so $(OUT)/host/lsteamclient.so host-Info.plist $(HOST_ENT)
+# The signing variables the bundle was made with, rewritten only when they change: exporting them after an ad hoc
+# build signs it again.
+HOST_SIGN = $(OUT)/host/.signing
+$(HOST_SIGN): FORCE
+	@mkdir -p $(@D); printf '%s\n' "$$MACNEUTRON_SIGN_IDENTITY" "$$MACNEUTRON_PROVISIONING_PROFILE" > $@.new; \
+	  if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
+FORCE:
+.PHONY: FORCE
+$(HOST_APP): $(OUT)/host/mn-steam-host $(OUT)/host/ntdll.so $(OUT)/host/lsteamclient.so host-Info.plist $(HOST_ENT) \
+             $(HOST_SIGN)
 	rm -rf $@ && mkdir -p $@/Contents/MacOS
 	cp host-Info.plist $@/Contents/Info.plist
 	cp $(OUT)/host/mn-steam-host $(OUT)/host/ntdll.so $(OUT)/host/lsteamclient.so $@/Contents/MacOS/
