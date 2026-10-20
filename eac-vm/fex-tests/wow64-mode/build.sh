@@ -1,12 +1,13 @@
 #!/bin/sh
 # Builds the freestanding static test binary.
 #   ./build.sh [clang] [output]     x86-64 binary (any host with clang and its x86-64 target): the one to run under FEX
-#   ./build.sh native [output]      binary for the host's own architecture (x86-64 or aarch64), built with the system cc:
-#                                   the reference run on a real Linux kernel
+#   ./build.sh native [output]      the same with the system cc on an x86-64 Linux: the reference run on a real kernel
+#                                   (the test is x86 code: there is no aarch64 build)
 set -e
 CC=${1:-clang}; OUT=${2:-wow64_mode_test}
 HERE=$(cd "$(dirname "$0")" && pwd)
 if [ "$CC" = native ]; then
+  [ "$(uname -m)" = x86_64 ] || { echo "wow64-mode is x86-64 code: a native build needs an x86-64 Linux" >&2; exit 2; }
   ${NATIVE_CC:-cc} -O1 -g0 -ffreestanding -fno-stack-protector -fno-builtin -fno-pic -fno-pie -fno-asynchronous-unwind-tables -Wall \
     -nostdlib -static -Wl,-e,_start -Wl,-z,norelro -o "$OUT" "$HERE/wow64_mode_test.c"
   echo "built $OUT (native)"; exit 0

@@ -17,7 +17,14 @@
 //   8. arch_prctl(ARCH_SET_FS) clears the %fs selector, as Linux does, so set_thread_area on the entry it named leaves
 //      %fs's base alone (a new thread's alloc_fs_sel after its parent loaded fs32_sel; CLONE_SETTLS clears it too);
 //   9. a legacy vsyscall (time at 0xffffffffff600400) from 64-bit code still returns (FEX's syscall entry must not
-//      read the instruction there: the page is FEX's own).
+//      read the instruction there: the page is FEX's own);
+//  10. 64-bit code reads a loaded %fs selector back, with mov and with push (the selector, not the base);
+//  11. mov m16,%fs (the selector from memory) in 64-bit code loads the entry's base;
+//  12. ljmp m16:32 from 64-bit code enters 32-bit code at 0x23 (wow64cpu's way in), which ljmps back;
+//  13. a fault in 32-bit code (a read of page 0): the SIGSEGV frame has cs 0x23 and the faulting rip, and returning
+//      from the handler resumes the 32-bit code;
+//  14. the signal frames' gs and fs words (REG_CSGSFS bits 16-47) are 0, as Linux writes them, though %fs holds a
+//      selector.
 // The expected values are Linux's documented behaviour, which Wine's x86-64 WoW64 relies on; no native x86-64 reference
 // run exists here yet. A fault the test doesn't expect prints the signal, rip and cs, then RESULT: FAIL.
 //
@@ -97,6 +104,33 @@ __asm__(".text\n.globl run32\nrun32:\n"
         ".data\n.balign 8\nback64: .long land64\n .word 0x33\n"
         ".text\n");
 
+// far32: rows 12 and 13. ljmp m16:32 from 64-bit code to 32-bit code (on stack32), which reads page 0 (a fault the
+// SIGSEGV handler skips), then ljmps back to 0x33.
+void far32(void);
+u64 push_fs(void);
+extern char segv32[];
+volatile u32 res_far_cs, res_far_after;
+u64 saved_rsp2;
+__asm__(".text\n.globl push_fs\npush_fs:\n push %fs\n pop %rax\n ret\n"
+        ".globl far32\nfar32:\n"
+        " mov %rsp, saved_rsp2(%rip)\n"
+        " mov $0x2b, %eax\n mov %eax, %ds\n mov %eax, %es\n"
+        " lea stack32+65536(%rip), %rsp\n"
+        " ljmpl *far32_to(%rip)\n"
+        ".code32\n"
+        "far32_code:\n"
+        " mov %cs, %eax\n mov %eax, res_far_cs\n"
+        ".globl segv32\nsegv32:\n movl 0x10, %eax\n"   // 5 bytes: A1 10 00 00 00
+        " movl $1, res_far_after\n"
+        " ljmp *far32_back\n"
+        ".code64\n"
+        "far32_land:\n"
+        " mov saved_rsp2(%rip), %rsp\n"
+        " ret\n"
+        ".data\n.balign 8\nfar32_to: .long far32_code\n .word 0x23\n"
+        ".balign 8\nfar32_back: .long far32_land\n .word 0x33\n"
+        ".text\n");
+
 static int failures;
 static void out(const char* s) { u64 n = 0; while (s[n]) ++n; sc3(SYS_write, 1, s, n); }
 static void outhex(u64 v) { char b[19]; int i = 18; b[i] = 0; do { b[--i] = "0123456789abcdef"[v & 15]; v >>= 4; } while (v); b[--i] = 'x'; b[--i] = '0'; out(b + i); }
@@ -111,23 +145,37 @@ static void fatal_handler(int sig, void* info, void* uc) {
   sc1(SYS_exit_group, 100);
 }
 
-// Row 6's ud2. An int 0x80 a FEX without 32-bit calls in 64-bit code refuses is skipped the same way (both are 2
-// bytes), so rows 1 and 2 report instead of the run dying there.
-static volatile u64 sig_cs, sig_rip;
+// Row 6's ud2. An int 0x80 a FEX without 32-bit calls in 64-bit code refuses with SIGILL is skipped the same way (both
+// are 2 bytes), so rows 1 and 2 report instead of the run dying there (0029's FEX hangs in it instead: the alarm ends
+// the run).
+static volatile u64 sig_cs, sig_rip, sig_gsfs;
 static void ill_handler(int sig, void* info, void* uc) {
   u64* gregs = (u64*)((char*)uc + 40);
   const unsigned char* p = (const unsigned char*)gregs[REG_RIP];
   if (!((p[0] == 0x0f && p[1] == 0x0b) || (p[0] == 0xcd && p[1] == 0x80))) fatal_handler(sig, info, uc);
   sig_cs = gregs[REG_CSGSFS] & 0xffff;
+  sig_gsfs |= (gregs[REG_CSGSFS] >> 16) & 0xffffffff;
   sig_rip = gregs[REG_RIP];
   gregs[REG_RIP] += 2;
+}
+
+// Row 13's read of page 0 in 32-bit code; any other SIGSEGV is fatal.
+static volatile u64 segv_cs, segv_rip;
+static void segv_handler(int sig, void* info, void* uc) {
+  u64* gregs = (u64*)((char*)uc + 40);
+  if (gregs[REG_RIP] != (u64)segv32) fatal_handler(sig, info, uc);
+  segv_cs = gregs[REG_CSGSFS] & 0xffff;
+  sig_gsfs |= (gregs[REG_CSGSFS] >> 16) & 0xffffffff;
+  segv_rip = gregs[REG_RIP];
+  gregs[REG_RIP] += 5;
 }
 
 __attribute__((used)) void entry_c(void) {
   struct ksigaction ill = {(void*)ill_handler, SA_SIGINFO | SA_RESTORER, (void*)restore_rt, 0};
   struct ksigaction fatal = {(void*)fatal_handler, SA_SIGINFO | SA_RESTORER, (void*)restore_rt, 0};
+  struct ksigaction segv = {(void*)segv_handler, SA_SIGINFO | SA_RESTORER, (void*)restore_rt, 0};
   sc6(SYS_rt_sigaction, SIGILL, (i64)&ill, 0, 8, 0, 0);
-  sc6(SYS_rt_sigaction, SIGSEGV, (i64)&fatal, 0, 8, 0, 0);
+  sc6(SYS_rt_sigaction, SIGSEGV, (i64)&segv, 0, 8, 0, 0);
   sc6(SYS_rt_sigaction, SIGBUS, (i64)&fatal, 0, 8, 0, 0);
   sc1(SYS_alarm, 60);
 
@@ -180,6 +228,28 @@ __attribute__((used)) void entry_c(void) {
   __asm__ volatile("mov $0xffffffffff600400, %%rax\n call *%%rax"
                    : "=a"(now) : "D"(0) : "rcx", "rdx", "rsi", "r8", "r9", "r10", "r11", "memory");
   check(now > 1700000000, "9. a legacy vsyscall (time) from 64-bit code returns the time");
+
+  // The entry's base is &tls32[1] since row 8.
+  u32 sel = desc.entry_number * 8 + 3, sel_read = 0, fs10 = 0, fs11 = 0;
+  u64 pushed = 0;
+  static volatile unsigned short sel16;
+  if (have_tls) {
+    sc2(SYS_arch_prctl, ARCH_SET_FS, 0x123400000000UL);
+    __asm__ volatile("mov %k2, %%fs\n mov %%fs, %k0\n movl %%fs:0, %1" : "=r"(sel_read), "=r"(fs10) : "r"(sel) : "memory");
+    pushed = push_fs();
+    sc2(SYS_arch_prctl, ARCH_SET_FS, 0x123400000000UL);
+    sel16 = (unsigned short)sel;
+    __asm__ volatile("movw %1, %%fs\n movl %%fs:0, %0" : "=r"(fs11) : "m"(sel16) : "memory");
+  }
+  check(have_tls && sel_read == sel && (pushed & 0xffff) == sel && fs10 == 0xBADBAD,
+        "10. 64-bit code reads the %fs selector back (mov %fs and push %fs give it, not the base)");
+  check(have_tls && fs11 == 0xBADBAD, "11. mov m16,%fs in 64-bit code loads the entry's base");
+
+  far32();
+  check(res_far_cs == 0x23 && res_far_after == 1, "12. ljmp m16:32 from 64-bit code enters 32-bit code at 0x23");
+  check(segv_cs == 0x23 && segv_rip == (u64)segv32 && res_far_after == 1,
+        "13. a fault in 32-bit code: frame cs 0x23, rip at the read, the handler's return resumes the 32-bit code");
+  check(sig_rip && segv_rip && sig_gsfs == 0, "14. the signal frames' gs and fs words are 0, as Linux writes them");
 
   out(failures ? "RESULT: FAIL\n" : "RESULT: PASS\n");
   sc1(SYS_exit_group, failures);
