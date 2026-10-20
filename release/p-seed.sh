@@ -7,7 +7,7 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 B=$ROOT/build  # always the normal build: p is seeded from it
 P=$B/p
-mkdir -p "$P/eac-vm-work" "$P/wine-arm64-src"
+mkdir -p "$P/eac-vm-work"  # not wine-arm64-src: the loop clones it whole when missing
 for t in wine-arm64-src dxmt-src llvm-mingw-src vm-setup-tools-src eac-vm-work/libkrun-src eac-vm-work/libtpms-src \
          eac-vm-work/wine-linux eac-vm-work/fex-linux eac-vm-work/gvproxy-v0.8.9 eac-vm-work/gvproxy eac-vm-work/share; do
   [ -e "$P/$t" ] || [ ! -e "$B/$t" ] || cp -c -R "$B/$t" "$P/$t"
