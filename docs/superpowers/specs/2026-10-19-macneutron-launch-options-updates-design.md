@@ -53,8 +53,9 @@ Facts the design rests on (read in the code, 2026-10-19):
 - Order, lowest first: the Games window's controls, the field's variables, Steam's launch options.
   `GameSettings.environment` puts the field's variables over the controls' (one merge); the launcher's existing merge
   keeps Steam's on top.
-- The field's arguments go after the game's own (`request.arguments`), for `run` and `waitforexitandrun` only. The
-  launcher loads the game's settings once and takes both from them.
+- The field's arguments go after the game's own (`request.arguments`), for `waitforexitandrun` only: Steam starts
+  the game with it, and its install scripts start redistributable installers with `run`. The launcher loads the
+  game's settings once and takes both from them.
 - Games window: a "Launch options" text field in the selected game's panel, saved on Return and when it loses focus.
   Its help says that in the game VM only the variables MacNeutron passes to the VM reach the game (its logging, DLSS
   and a few DXMT ones), and DXMT's reach its renderer on the Mac.
@@ -81,7 +82,7 @@ Facts the design rests on (read in the code, 2026-10-19):
 - **Which release.** `GET https://api.github.com/repos/chadouming/MacNeutron/releases?per_page=30` (ephemeral session;
   unauthenticated, 60 requests an hour is plenty for a daily check). A release counts if it is neither a draft nor a
   prerelease, its tag is `v` + a version of the running app's channel (`X.Y.Z` for a normal build, `X.Y.Zp` for a
-  performance build), and it has an asset `MacNeutron-<V>.zip`. The highest such version, compared as numbers
+  performance build), and it has the assets `MacNeutron-<V>.zip` and `SHA256SUMS`. The highest such version, compared as numbers
   (0.10.0 > 0.9.0), is offered if it is above the running app's `CFBundleShortVersionString`. A pure
   `pick(json:current:)` does this, for tests.
 - **Release builds only.** The updater is on only when the running app is signed with a Developer ID team
@@ -105,8 +106,9 @@ Facts the design rests on (read in the code, 2026-10-19):
   Any failure before step 6 leaves the installed app as it was and shows the error. Nothing checks for a running game
   (§2); the relaunched app's runtime and VM installs defer as they do today, and "Restart Steam" appears if the tools
   changed under Steam.
-- **When.** Settings' "Check for updates automatically" (default on, `UserDefaults`) checks at launch and from the
-  existing poll once 24 hours have passed since the last check (`UserDefaults`). A version found for the first time
+- **When.** Settings' "Check for updates automatically" (default on, `UserDefaults`) checks at launch, then hourly
+  looks whether 24 hours have passed since the last check (`UserDefaults`). The update state is its own model
+  (`UpdateModel`), next to `AppModel`. A version found for the first time
   posts one notification (`AppleScriptNotifier`, as the launcher's); the notified version is remembered so it isn't
   repeated.
 - **UI.** The menu shows "Update to X.Y.Z…" while one is available; it opens Settings. Settings' "Updates" row: the
@@ -121,7 +123,7 @@ Unit tests (`make test`), none touching the network, Steam's files or MacNeutron
 - `LaunchOptions.parse`: plain variables, arguments, a pasted `/usr/bin/env … %command% …` line, a repeated name, an
   empty line.
 - `GameSettings.environment` with the field over a control; the launcher's merge order (field under Steam) and its
-  arguments for `run` but not for another verb, with the existing launcher test fakes.
+  arguments for `waitforexitandrun` but not for `run`, with the existing launcher test fakes.
 - `SteamLocation.localConfig` and `steamLines` on a temp Steam folder (fake IDs); `problems` for the two warnings.
 - `Updater.pick` on a recorded-shape JSON: channel filtering, drafts and prereleases, a missing zip, numeric order,
   nothing newer.
