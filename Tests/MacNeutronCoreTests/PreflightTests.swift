@@ -78,7 +78,7 @@ private func markerExists(_ layout: ToolLayout) -> Bool {
         try testPreflight.check(layout, request: request(.waitforexitandrun, try exe(machine: PEImage.i386)))
     }
     #expect(PreflightError.thirtyTwoBit.description
-        == "This game is 32-bit. MacNeutron 0.1 runs 64-bit games only; 32-bit support is planned.")
+        == "This game is 32-bit. On macOS MacNeutron runs 64-bit games only; 32-bit games run in its game VM.")
 }
 
 @Test func otherMachineIsNamed() throws {
