@@ -18,7 +18,9 @@ enum mn_kind {
 enum { MN_IN_ONLY = 1,  /* const pointee: not copied back */
        MN_INNER = 2,    /* MN_FIXED whose pointee holds a pointer (inner_ptr) to inner_size_field bytes, copied back */
        MN_COUNT_PTR = 4,   /* MN_BUF whose count is behind the pointer at size_offset (a uint32_t *, in and out) */
-       MN_PTR32 = 8 };     /* a WoW64 call's: the pointer, its count pointer and its inner pointer are 4 bytes */
+       MN_PTR32 = 8,       /* a WoW64 call's: the pointer, its count pointer and its inner pointer are 4 bytes */
+       MN_CAP = 16 };      /* MN_BUF whose count is a capacity in and the size the callee needs out
+                            * (steamclient_next_callback): its request's bytes go back, and the callee's count */
 
 struct mn_field {
     uint16_t offset;      /* of the pointer in the params struct */

@@ -32,14 +32,16 @@ static char tmppath[TEMP_PATH_BUFFER_LENGTH]; /* steamclient_init's path buffer 
  * process, so the pointees are copied below 4 GiB, into a region mapped at start-up. Mapping there needs
  * com.apple.developer.cross-architecture-support, which the kernel honours for an executable in a bundle with its
  * provisioning profile (mn-steam-host.app). Its first MiB is WoW64 steamclient_init's path buffer; then one slot per
- * connection that has made a WoW64 call, as large as a message.
- * ponytail: 32 slots, so 32 guest threads in 32-bit Steam calls at once; more when a game needs them. */
+ * WoW64 call running, as large as a message: a call waits for a free one (a guest keeps a connection per thread for
+ * the thread's life, so a slot a connection would run out with the game's threads).
+ * ponytail: 32 slots, so 32 32-bit Steam calls at once; more if a game's calls ever queue on them. */
 #define LOW_BASE 0x20000000ul
 #define LOW_SLOT ((size_t)MN_MAX_MESSAGE + (4u << 20))
 #define LOW_SLOTS 32
 static uint8_t *low_region;
 static uint32_t low_busy;
 static pthread_mutex_t low_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t low_freed = PTHREAD_COND_INITIALIZER;
 static const char *low_init(void) {
     void *p = mmap((void *)LOW_BASE, (1u << 20) + LOW_SLOTS * LOW_SLOT, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
@@ -48,11 +50,16 @@ static const char *low_init(void) {
     return NULL;
 }
 static uint8_t *low_slot(int s) { return low_region + (1u << 20) + (size_t)s * LOW_SLOT; }
+/* A free slot, waiting for one; -1 when 32-bit calls are unavailable. */
 static int low_take(void) {
+    if (!low_region || !wow64_funcs) return -1;
     int s = -1;
     pthread_mutex_lock(&low_lock);
-    for (int i = 0; low_region && wow64_funcs && i < LOW_SLOTS && s < 0; i++)
-        if (!(low_busy & (1u << i))) { low_busy |= 1u << i; s = i; }
+    while (s < 0) {
+        for (int i = 0; i < LOW_SLOTS && s < 0; i++)
+            if (!(low_busy & (1u << i))) { low_busy |= 1u << i; s = i; }
+        if (s < 0) pthread_cond_wait(&low_freed, &low_lock);
+    }
     pthread_mutex_unlock(&low_lock);
     return s;
 }
@@ -60,13 +67,13 @@ static void low_give(int s) {
     madvise(low_slot(s), LOW_SLOT, MADV_FREE);
     pthread_mutex_lock(&low_lock);
     low_busy &= ~(1u << s);
+    pthread_cond_signal(&low_freed);
     pthread_mutex_unlock(&low_lock);
 }
 
 static void *serve(void *arg) {
     int fd = (int)(intptr_t)arg;
     uint32_t theirs, mine = mn_tables_checksum();
-    int slot = -1; /* this connection's low slot, from its first WoW64 call */
     if (mn_read_full(fd, &theirs, 4)) { close(fd); return NULL; } /* closed before the handshake: a probe */
     if (mn_write_full(fd, &mine, 4) || theirs != mine) {
         fprintf(stderr, "mn-steam-host: guest table %08x differs from ours %08x\n", theirs, mine);
@@ -81,11 +88,10 @@ static void *serve(void *arg) {
         if (!msg) break;
         memcpy(msg, &h, sizeof h);
         if (mn_read_full(fd, msg + sizeof h, h.len)) { free(msg); break; }
-        int wow64 = (h.index & MN_WOW64) != 0;
-        /* Without a slot the call can't run: closing makes the guest answer as with no Steam (client.c no_steam). */
-        if (wow64 && slot < 0 && (slot = low_take()) < 0) {
-            fprintf(stderr, "mn-steam-host: a 32-bit call can't run (%s), closing\n",
-                    low_region && wow64_funcs ? "no free slot" : "32-bit calls unavailable");
+        int wow64 = (h.index & MN_WOW64) != 0, slot = -1;
+        /* Without 32-bit calls here, closing makes the guest answer as with no Steam (client.c no_steam). */
+        if (wow64 && (slot = low_take()) < 0) {
+            fprintf(stderr, "mn-steam-host: a 32-bit call can't run (32-bit calls unavailable), closing\n");
             free(msg);
             break;
         }
@@ -94,7 +100,12 @@ static void *serve(void *arg) {
         struct mn_arena arena = { .low = wow64 ? low_slot(slot) : NULL, .low_cap = wow64 ? LOW_SLOT : 0 };
         int r = mn_unpack_request(table, mn_ncalls, msg, sizeof h + h.len, &index, &params, &arena);
         free(msg);
-        if (r) { fprintf(stderr, "mn-steam-host: malformed request (%d), closing\n", r); mn_arena_free(&arena); break; }
+        if (r) {
+            fprintf(stderr, "mn-steam-host: malformed request (%d), closing\n", r);
+            mn_arena_free(&arena);
+            if (slot >= 0) low_give(slot);
+            break;
+        }
         if (index == unix_steamclient_init && wow64)
             ((struct wow64_steamclient_init_params *)params)->g_tmppath.value = (uint32_t)(uintptr_t)low_region;
         else if (index == unix_steamclient_init)
@@ -107,10 +118,10 @@ static void *serve(void *arg) {
         r = mn_pack_reply(&table[index], status, params, &log, &rep);
         mn_buf_free(&log.entries);
         mn_arena_free(&arena);
+        if (slot >= 0) low_give(slot);
         if (r || mn_write_full(fd, rep.data, rep.len)) { mn_buf_free(&rep); break; }
         mn_buf_free(&rep);
     }
-    if (slot >= 0) low_give(slot);
     close(fd);
     return NULL;
 }

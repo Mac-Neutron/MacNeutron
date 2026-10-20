@@ -41,7 +41,8 @@ OVERRIDES = {
                                             'size_offset': 'offsetof(struct steamclient_get_unix_buffer_params, buf) + 8',
                                             'size_width': '8'}},
     # Callback records hold the guest's own function and object pointers, which the host only carries: bytes.
-    'steamclient_next_callback': {'callback': {'kind': 'MN_BUF', 'size': '1',
+    # Its size is the buffer's capacity in, the size the callback needs out (MN_CAP: Proton asks with no buffer first).
+    'steamclient_next_callback': {'callback': {'kind': 'MN_BUF', 'flags': 'MN_CAP', 'size': '1',
                                                'size_offset': 'offsetof(struct steamclient_next_callback_params, size)',
                                                'size_width': '4'}},
     # The message header: the host fills id, user and size; m_pubParam stays the guest's value.
@@ -95,7 +96,8 @@ def field_name(decl):
 
 
 def w32_decl(field):
-    """The declaration inside lsteamclient's W32_PTR(decl, name, type) (a WoW64 struct's 4-byte pointer), else None."""
+    """(declaration, pointer type) inside lsteamclient's W32_PTR(decl, name, type) (a WoW64 struct's 4-byte pointer),
+    else None."""
     m = re.match(r'^W32_PTR\s*\((.*)\)$', field.strip())
     if not m:
         return None
@@ -106,7 +108,8 @@ def w32_decl(field):
             args.append(cur); cur = ''
         else:
             cur += ch
-    return args[0].strip()
+    args.append(cur)
+    return args[0].strip(), args[2].strip()
 
 
 def wow64_overrides(name):
@@ -161,9 +164,9 @@ def main():
                 else:
                     descs.append((name, sname, None, ['no params struct']))
                 continue
-            decls = [w32_decl(f) for f in fields]
-            ptr32s = [d is not None for d in decls]
-            parsed = [field_name(d if d is not None else f) for d, f in zip(decls, fields)]
+            w32 = [w32_decl(f) for f in fields]
+            ptr32s = [d is not None for d in w32]
+            parsed = [field_name(d[0] if d is not None else f) for d, f in zip(w32, fields)]
             out, reasons = [], []
             for i, (fname, ftype) in enumerate(parsed):
                 ov = wow64_overrides(name) if wow64 else OVERRIDES.get(name, {})
@@ -191,9 +194,7 @@ def main():
                 flags = 'MN_IN_ONLY' if const else '0'
                 if ptr32s[i]:
                     flags = 'MN_PTR32' if flags == '0' else flags + ' | MN_PTR32'
-                # A W32_PTR field is an opaque struct ptr32 in C: its pointee is sized by the type it names.
-                ptype = re.sub(r'^const\s+', '', ftype.strip())
-                ptype = ptype[:-1].strip() if ptype.endswith('*') else ptype
+
                 count = count_ptr = None
                 for j in range(i + 1, min(i + 3, len(parsed))):
                     cname, ctype = parsed[j]
@@ -212,7 +213,9 @@ def main():
                             count = cname
                         break
                 access = f'((struct {sname} *)0)->{fname}'
-                size_of = f'sizeof({ptype})' if ptr32s[i] else f'sizeof(*{access})'
+                # A W32_PTR field is an opaque struct ptr32 in C: its pointee is sized through the pointer type it names
+                # (an array's too: char (*)[1024]).
+                size_of = f'sizeof(*({w32[i][1]})0)' if ptr32s[i] else f'sizeof(*{access})'
                 if stars > 1 and '(*)' not in t:
                     out.append((fname, {'kind': 'MN_UNSUPPORTED'})); reasons.append(f'{fname}: pointer to pointer')
                     kind = 'unsupported'

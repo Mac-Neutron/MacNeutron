@@ -210,7 +210,7 @@ int mn_unpack_request(const struct mn_call_desc *descs, uint32_t ndescs, const v
             return MN_E_FORMAT;
         }
         void *copy;
-        if (f->flags & MN_COUNT_PTR) {
+        if (f->flags & (MN_COUNT_PTR | MN_CAP)) { /* the request's length kept: the callee may raise the count */
             uint8_t *block = arena_alloc(arena, COUNT_PTR_PREFIX + (size_t)n, p32(f));
             if (!block) return MN_E_NOMEM;
             memcpy(block, &n, 4);
@@ -276,7 +276,7 @@ int mn_pack_reply(const struct mn_call_desc *d, uint32_t status, const void *hos
         }
         const void *p = get_ptr(host_params, f->offset, p32(f));
         if (!p || (f->flags & MN_IN_ONLY)) continue;
-        int64_t n = f->flags & MN_COUNT_PTR ? request_bytes(p) : field_bytes(f, host_params, p);
+        int64_t n = f->flags & (MN_COUNT_PTR | MN_CAP) ? request_bytes(p) : field_bytes(f, host_params, p);
         if (n < 0) { r = (int)n; break; }
         if (!(r = buf_u32(out, (uint32_t)n))) r = buf_put(out, p, (size_t)n);
         if (!r && (f->flags & MN_INNER)) {
@@ -376,6 +376,11 @@ int mn_unpack_reply(const struct mn_call_desc *d, const void *msg, size_t len, v
     }
     free(before);
     reply_fields(d, &c, params, 1);
+    /* An MN_CAP count is the callee's: the size it needs, which the caller reads (its bytes came at the capacity). */
+    for (uint16_t i = 0; i < d->nfields; i++) {
+        const struct mn_field *f = &d->fields[i];
+        if (f->kind == MN_BUF && (f->flags & MN_CAP)) memcpy((uint8_t *)params + f->size_offset, pb + f->size_offset, f->size_width);
+    }
     for (uint32_t i = 0; i < nreg; i++) {
         struct mn_reg_hdr e; memcpy(&e, take(&regs, sizeof e), sizeof e);
         const char *key = (const char *)take(&regs, e.key_len);

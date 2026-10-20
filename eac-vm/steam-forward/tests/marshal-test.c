@@ -28,6 +28,12 @@ struct item { uint64_t id; int32_t def; uint16_t quantity, flags; };
 struct items_params { uint64_t iface; int8_t _ret; int32_t result; struct item *items; uint32_t *count; };
 /* A WoW64 call's params: 32-bit pointers (lsteamclient's W32_PTR), a string, a counted buffer and a fixed out value. */
 struct w64_params { uint32_t str; uint32_t buf; uint32_t n; uint32_t out; };
+/* WoW64's count behind a pointer and callback message (32-bit inner pointer). */
+struct w64_prop_params { uint32_t buf; uint32_t size; };
+struct w64_cbmsg { int32_t user, id; uint32_t pub; int32_t cub; };
+struct w64_cb_params { uint64_t cookie; uint32_t msg; };
+/* steamclient_next_callback: size is the buffer's capacity in, the size the callback needs out (MN_CAP). */
+struct cap_params { int8_t _ret; void *callback; uint32_t size; };
 #pragma pack(pop)
 
 static const struct mn_field str_fields[] = { { offsetof(struct str_params, name), MN_STR_IN, MN_IN_ONLY } };
@@ -67,6 +73,35 @@ static const struct mn_field w64_fields[] = {
     { offsetof(struct w64_params, out), MN_FIXED, MN_PTR32, 8 },
 };
 static const struct mn_call_desc w64_desc = { "w64", sizeof(struct w64_params), 3, w64_fields };
+static const struct mn_field w64_prop_fields[] = {
+    { offsetof(struct w64_prop_params, buf), MN_BUF, MN_COUNT_PTR | MN_PTR32, 1, offsetof(struct w64_prop_params, size), 4 },
+    { offsetof(struct w64_prop_params, size), MN_FIXED, MN_PTR32, 4 },
+};
+static const struct mn_call_desc w64_prop_desc = { "w64prop", sizeof(struct w64_prop_params), 2, w64_prop_fields };
+static const struct mn_field w64_cb_fields[] = { { offsetof(struct w64_cb_params, msg), MN_FIXED, MN_INNER | MN_PTR32,
+    sizeof(struct w64_cbmsg), 0, 0, 0, offsetof(struct w64_cbmsg, pub), offsetof(struct w64_cbmsg, cub) } };
+static const struct mn_call_desc w64_cb_desc = { "w64cb", sizeof(struct w64_cb_params), 1, w64_cb_fields };
+static const struct mn_field cap_fields[] = { { offsetof(struct cap_params, callback), MN_BUF, MN_CAP, 1,
+    offsetof(struct cap_params, size), 4 } };
+static const struct mn_call_desc cap_desc = { "cap", sizeof(struct cap_params), 1, cap_fields };
+/* Proton's steamclient_next_callback with a 40-byte callback queued: the needed size out, copied only if it fits. */
+static void call_cap(void *p) {
+    struct cap_params *c = p;
+    uint32_t capacity = c->size;
+    c->size = 40;
+    c->_ret = 1;
+    if (40 <= capacity) memset(c->callback, 0x5a, 40);
+}
+static int cap_round(struct cap_params *p) {
+    struct mn_buf req = {0}, rep = {0};
+    uint32_t index, st; void *hp; struct mn_arena arena = {0};
+    int r = mn_pack_request(&cap_desc, 0, p, &req);
+    if (!r) r = mn_unpack_request(&cap_desc, 1, req.data, req.len, &index, &hp, &arena);
+    if (!r) { call_cap(hp); r = mn_pack_reply(&cap_desc, 0, hp, NULL, &rep); }
+    if (!r) r = mn_unpack_reply(&cap_desc, rep.data, rep.len, p, &st, NULL, NULL);
+    mn_arena_free(&arena); mn_buf_free(&req); mn_buf_free(&rep);
+    return r;
+}
 static const uint64_t w64_value = 0x1122334455667788ull;
 static void call_w64(void *p) {
     struct w64_params *s = p;
@@ -123,6 +158,32 @@ static void wow64_cases(void) {
     CHECK(mn_unpack_request(&w64_desc, 1, req.data, req.len, &index, &hp, &tiny) == MN_E_NOMEM, "wow64 low full");
     mn_arena_free(&tiny);
     mn_buf_free(&req);
+
+    { /* WoW64's count behind a pointer: both 32-bit pointers, the count's copy below 4 GiB too. */
+      char *gbuf = (char *)low + 1024; uint32_t *gsize = (uint32_t *)(low + 2048); *gsize = 8;
+      struct w64_prop_params pp = { (uint32_t)(uintptr_t)gbuf, (uint32_t)(uintptr_t)gsize };
+      struct mn_buf rq = {0};
+      struct mn_arena a = { .low = host, .low_cap = 1 << 20 };
+      int ok = !mn_pack_request(&w64_prop_desc, 0, &pp, &rq) &&
+               !mn_unpack_request(&w64_prop_desc, 1, rq.data, rq.len, &index, &hp, &a);
+      struct w64_prop_params *h = hp;
+      CHECK(ok && below(h->buf, host, 1 << 20) && below(h->size, host, 1 << 20) &&
+            *(uint32_t *)(uintptr_t)h->size == 8, "wow64 count behind a pointer: both copies in the low region");
+      mn_arena_free(&a); mn_buf_free(&rq); }
+
+    { /* WoW64's callback message: its inner 32-bit pointer's bytes, in the low region too. */
+      struct w64_cbmsg *m = (struct w64_cbmsg *)(low + 4096); uint8_t *pub = low + 4352;
+      memset(pub, 7, 24); m->user = 1; m->id = 2; m->pub = (uint32_t)(uintptr_t)pub; m->cub = 24;
+      struct w64_cb_params cp = { 99, (uint32_t)(uintptr_t)m };
+      struct mn_buf rq = {0};
+      struct mn_arena a = { .low = host, .low_cap = 1 << 20 };
+      int ok = !mn_pack_request(&w64_cb_desc, 0, &cp, &rq) &&
+               !mn_unpack_request(&w64_cb_desc, 1, rq.data, rq.len, &index, &hp, &a);
+      struct w64_cb_params *h = hp;
+      struct w64_cbmsg *hm = ok ? (struct w64_cbmsg *)(uintptr_t)h->msg : NULL;
+      CHECK(ok && below(h->msg, host, 1 << 20) && below(hm->pub, host, 1 << 20) &&
+            !memcmp((void *)(uintptr_t)hm->pub, pub, 24), "wow64 callback message: inner pointer's copy in the low region");
+      mn_arena_free(&a); mn_buf_free(&rq); }
     munmap(low, 2 << 20);
 }
 
@@ -308,6 +369,15 @@ int main(void) {
       struct mn_call_desc d2[NDESCS]; memcpy(d2, descs, sizeof d2); d2[2].fields = changed;
       CHECK(a == mn_table_checksum(descs, NDESCS) && a != mn_table_checksum(d2, NDESCS), "table checksum"); }
 
+    { /* steamclient_next_callback (MN_CAP): asked with no buffer, then too small, then large enough, the guest always
+       * learns the size the callback needs, and gets its bytes once they fit. Under ASan: no host over-read. */
+      struct cap_params p = { 0, NULL, 0 };
+      CHECK(!cap_round(&p) && p._ret == 1 && p.size == 40, "cap: no buffer, the needed size comes back");
+      uint8_t small[16] = {0}; p.callback = small; p.size = sizeof small;
+      CHECK(!cap_round(&p) && p.size == 40 && !small[0], "cap: too small, the needed size and nothing written");
+      uint8_t big[40] = {0}; p.callback = big; p.size = sizeof big;
+      CHECK(!cap_round(&p) && p.size == 40 && big[0] == 0x5a && big[39] == 0x5a, "cap: large enough, the bytes");
+    }
     wow64_cases();
     printf(failures ? "marshal-test: %d failure(s)\n" : "marshal-test: all passed\n", failures);
     return failures != 0;

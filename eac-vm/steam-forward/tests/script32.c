@@ -4,6 +4,7 @@
  * 32-bit memory by the guest's own steamclient_get_unix_buffer. Prints only redacted rows (no SteamID, persona or
  * ticket bytes). Returns 0 when every check passes. */
 #define _GNU_SOURCE
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -20,6 +21,23 @@ static uint32_t lstr(const char *s) { char *p = lalloc(strlen(s) + 1); strcpy(p,
 
 #define CALL(fn, p) do { uint32_t st_ = call(unix_##fn, &(p)); \
     if (st_) { printf("FAIL %s: status %#x\n", #fn, st_); return 1; } } while (0)
+
+/* More guest threads than mn-steam-host has low slots (32), each with its connection open while all of them call
+ * twice: every call must run (a slot is the call's, not the connection's). */
+#define THREADS 40
+static struct u_iface th_user;
+static pthread_barrier_t th_barrier;
+static uint8_t *th_ids[THREADS];
+static int th_failed;
+static void *th_steamid(void *arg) {
+    int i = (int)(intptr_t)arg;
+    struct wow64_ISteamUser_SteamUser023_GetSteamID_params sid = {0};
+    sid.u_iface = th_user; sid._ret.value = lo(th_ids[i]);
+    if (call(unix_ISteamUser_SteamUser023_GetSteamID, &sid)) __atomic_fetch_add(&th_failed, 1, __ATOMIC_RELAXED);
+    pthread_barrier_wait(&th_barrier);
+    if (call(unix_ISteamUser_SteamUser023_GetSteamID, &sid)) __atomic_fetch_add(&th_failed, 1, __ATOMIC_RELAXED);
+    return NULL;
+}
 
 int mn_script32(mn_call_fn fn) {
     call = fn;
@@ -61,6 +79,17 @@ int mn_script32(mn_call_fn fn) {
     uint64_t v; memcpy(&v, id, 8);
     printf(v ? "steamid ok\n" : "steamid FAIL\n");
     if (!v) return 1;
+
+    th_user = su._ret;
+    pthread_t th[THREADS];
+    pthread_barrier_init(&th_barrier, NULL, THREADS);
+    for (int i = 0; i < THREADS; i++) th_ids[i] = lalloc(8);
+    for (int i = 0; i < THREADS; i++) pthread_create(&th[i], NULL, th_steamid, (void *)(intptr_t)i);
+    for (int i = 0; i < THREADS; i++) pthread_join(th[i], NULL);
+    int same = 1;
+    for (int i = 0; i < THREADS; i++) same &= !memcmp(th_ids[i], id, 8);
+    if (th_failed || !same) { printf("FAIL %d threads: %d calls failed, ids %s\n", THREADS, th_failed, same ? "same" : "differ"); return 1; }
+    printf("%d threads at once: steamid ok\n", THREADS);
 
     uint32_t *cb = lalloc(4);
     struct wow64_ISteamUser_SteamUser023_GetAuthSessionTicket_params t = {0};
