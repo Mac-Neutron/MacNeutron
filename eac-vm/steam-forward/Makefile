@@ -37,7 +37,23 @@ $(OUT)/host/mn-steam-host: host.c client.c marshal.c $(OUT)/descriptors.c $(OUT)
 $(OUT)/host-client: tests/host-client.c tests/script.c client.c marshal.c $(OUT)/descriptors.c
 	$(CC) $(CFLAGS) $(LSCFLAGS) -o $@ tests/host-client.c tests/script.c client.c marshal.c $(OUT)/descriptors.c
 
-host: $(OUT)/host/mn-steam-host $(OUT)/host-client
+# The host as macneutron-vm runs it: a bundle (Contents/MacOS: the binary, its ntdll.so stand-in, the Mac Unix half)
+# with the cross-architecture entitlement and MacNeutron's provisioning profile, which the kernel needs before it maps
+# the WoW64 calls' region below 4 GiB. Signed when MACNEUTRON_SIGN_IDENTITY and MACNEUTRON_PROVISIONING_PROFILE are set
+# (release.sh signs its copy again), ad hoc otherwise: then 32-bit calls are unavailable.
+HOST_APP = $(OUT)/host/mn-steam-host.app
+HOST_ENT = ../../release/entitlements/mn-steam-host.plist
+$(HOST_APP): $(OUT)/host/mn-steam-host $(OUT)/host/ntdll.so $(OUT)/host/lsteamclient.so host-Info.plist $(HOST_ENT)
+	rm -rf $@ && mkdir -p $@/Contents/MacOS
+	cp host-Info.plist $@/Contents/Info.plist
+	cp $(OUT)/host/mn-steam-host $(OUT)/host/ntdll.so $(OUT)/host/lsteamclient.so $@/Contents/MacOS/
+	if [ -n "$$MACNEUTRON_SIGN_IDENTITY" ] && [ -n "$$MACNEUTRON_PROVISIONING_PROFILE" ]; then \
+	  cp -X "$$MACNEUTRON_PROVISIONING_PROFILE" $@/Contents/embedded.provisionprofile && \
+	  codesign -f -s "$$MACNEUTRON_SIGN_IDENTITY" --options runtime $@/Contents/MacOS/ntdll.so $@/Contents/MacOS/lsteamclient.so && \
+	  codesign -f -s "$$MACNEUTRON_SIGN_IDENTITY" --options runtime --entitlements $(HOST_ENT) $@; \
+	else codesign -f -s - $@; fi
+
+host: $(HOST_APP) $(OUT)/host-client
 .PHONY: host
 $(OUT)/offline-test: tests/offline-test.c client.c marshal.c $(OUT)/descriptors.c $(OUT)/guest_table.c
 	$(CC) $(CFLAGS) $(LSCFLAGS) -o $@ tests/offline-test.c client.c marshal.c $(OUT)/descriptors.c $(OUT)/guest_table.c

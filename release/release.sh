@@ -610,8 +610,9 @@ build_app() {
   make -s -C "$ROOT/eac-vm/steam-forward" OUT="$F" \
     MAC_UNIXLIB="$OUT/wine.app/Contents/Resources/lib/wine/aarch64-unix/lsteamclient.so" \
     CFLAGS="-O2 -Wall -Wextra -Wno-missing-field-initializers -std=c11 '-ffile-prefix-map=$ROOT=.'" \
-    "$F/host/mn-steam-host" > /dev/null || die "can't build mn-steam-host"
-  cp "$F/host/mn-steam-host" "$F/host/ntdll.so" "$F/host/lsteamclient.so" "$VMH/steam-forward/host/"
+    "$F/host/mn-steam-host.app" > /dev/null || die "can't build mn-steam-host"
+  rm -rf "$VMH/steam-forward/host/mn-steam-host.app"
+  cp -R "$F/host/mn-steam-host.app" "$VMH/steam-forward/host/"
   cp "${BUILD_DIR:-$ROOT/build}/vm-setup-tools/mkfs.erofs" "$A/Contents/Helpers/mkfs.erofs" || die "no mkfs.erofs"
   AL="$A/Contents/Resources/licenses"
   cp "$ROOT/LICENSE" "$AL/LICENSE"
@@ -670,14 +671,18 @@ EOF
     || die "signing $1 failed"; }
   signed_for() { codesign -f -s "$MACNEUTRON_SIGN_IDENTITY" --options runtime --timestamp --entitlements "$1" "$2" \
     > /dev/null 2>&1 || die "signing $2 failed"; }
-  for f in "$VMH/libkrun/libkrun.1.dylib" "$VMH"/metal-host/*.so "$VMH"/dxmt/* "$VMH/steam-forward/host/ntdll.so" \
-    "$VMH/steam-forward/host/lsteamclient.so" "$VMH/gvproxy" "$A/Contents/Helpers/mkfs.erofs"; do
+  SH="$VMH/steam-forward/host/mn-steam-host.app"
+  for f in "$VMH/libkrun/libkrun.1.dylib" "$VMH"/metal-host/*.so "$VMH"/dxmt/* "$SH/Contents/MacOS/ntdll.so" \
+    "$SH/Contents/MacOS/lsteamclient.so" "$VMH/gvproxy" "$A/Contents/Helpers/mkfs.erofs"; do
     sign "$f"
   done
-  signed_for "$ROOT/release/entitlements/mn-steam-host.plist" "$VMH/steam-forward/host/mn-steam-host"
+  # In its bundle with the provisioning profile: the cross-architecture entitlement maps 32-bit Steam calls' region.
+  cp -X "$MACNEUTRON_PROVISIONING_PROFILE" "$SH/Contents/embedded.provisionprofile" || die "no provisioning profile"
+  signed_for "$ROOT/release/entitlements/mn-steam-host.plist" "$SH"
   signed_for "$ROOT/release/entitlements/macneutron-vm.plist" "$VMH/macneutron-vm"
   check_hardened "$VMH" "$A/Contents/Helpers/mkfs.erofs" || exit 1
-  check_entitlement "$VMH/steam-forward/host/mn-steam-host" com.apple.security.cs.disable-library-validation || exit 1
+  check_entitlement "$SH" com.apple.security.cs.disable-library-validation || exit 1
+  check_entitlement "$SH" com.apple.developer.cross-architecture-support || exit 1
   check_entitlement "$VMH/macneutron-vm" com.apple.security.hypervisor || exit 1
   sign "$A/Contents/Helpers/macneutron"
   sign "$A"

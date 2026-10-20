@@ -226,7 +226,8 @@ if let appid = steamAppID {
   let sock = NSTemporaryDirectory() + "mn-steam-\(getpid()).sock"
   unlink(sock)
   let host = Process()
-  host.executableURL = URL(fileURLWithPath: exeDir + "/steam-forward/host/mn-steam-host")
+  // A bundle: its entitlement maps 32-bit Steam calls' region below 4 GiB (eac-vm/steam-forward/Makefile).
+  host.executableURL = URL(fileURLWithPath: exeDir + "/steam-forward/host/mn-steam-host.app/Contents/MacOS/mn-steam-host")
   host.arguments = ["--socket", sock, "--appid", appid, "--map", steamMap, "--parent", String(getpid())]
   do { try host.run() } catch { fail(5, "mn-steam-host: \(error)") }
   steamHostPID = host.processIdentifier
