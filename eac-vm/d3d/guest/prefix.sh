@@ -4,7 +4,8 @@
 # so the program's Direct3D runs on the host (Wine's d3d10.dll on that d3d10core); otherwise Wine's builtins, DXMT in
 # the guest (the default). Native then builtin: a 32-bit process finds no forwarding DLLs in syswow64 and falls back to
 # Wine's builtins (DXMT for i386 in the guest), unless MACNEUTRON_VM_D3D32=forward also links the i386 set there (M4b:
-# opt-in until 32-bit D3D12 forwards; in either mode, the links into mn-d3d an opted-in run left are removed). A
+# opt-in until 32-bit D3D12 forwards; in either mode, the links into mn-d3d an opted-in run left are replaced by Wine's
+# own builtins: wineboot ran before this, and a DLL missing from syswow64 isn't found). A
 # missing DLL of a set says so on stderr (n,b would take Wine's builtin for it silently). Installed as
 # /opt/mn-wine/lib/wine/mn-d3d/prefix.sh (eac-vm/image/build.sh).
 mn_d3d_root=/opt/mn-wine/lib/wine/mn-d3d
@@ -25,8 +26,11 @@ for mn_d3d_n in mnd3d d3d12 dxgi d3d11 d3d10core; do
   mn_d3d_l=$WINEPREFIX/drive_c/windows/syswow64/$mn_d3d_n.dll
   if [ -n "$mn_d3d_32" ]; then
     mn_d3d_link "$mn_d3d_root/i386-windows/$mn_d3d_n.dll" "$mn_d3d_l"
-  else  # an opted-in run's link: Wine's builtin comes back on the next update (n,b finds none meanwhile)
-    case $(readlink "$mn_d3d_l" 2> /dev/null) in "$mn_d3d_root"/*) rm -f "$mn_d3d_l" ;; esac
+  else  # an opted-in run's link: Wine's own builtin in its place, as wineboot puts it (a missing one isn't found)
+    case $(readlink "$mn_d3d_l" 2> /dev/null) in "$mn_d3d_root"/*)
+      rm -f "$mn_d3d_l"
+      [ ! -f "/opt/mn-wine/lib/wine/i386-windows/$mn_d3d_n.dll" ] || cp "/opt/mn-wine/lib/wine/i386-windows/$mn_d3d_n.dll" "$mn_d3d_l" ;;
+    esac
   fi
 done
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}$mn_d3d_o"

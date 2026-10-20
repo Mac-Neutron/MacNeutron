@@ -17,8 +17,8 @@
 # pipelines in MN_D3D_STATE's folder (a game's VM state). Needs the images (guest-stages.sh dxmt d3d, image/build.sh
 # wine) and the share's dxmt-tests (eac-vm/dxmt/share.sh). Prints "d3d-smoke: ok" or "d3d-smoke: FAIL <what>".
 # smoke32.exe, the same program for i686 (32-bit games, new WoW64), runs in each mode too, its "32:" lines the same
-# checks: forwarded through the i386 proxies (MACNEUTRON_VM_D3D32=forward, M4b's opt-in), and on DXMT built for i386 in
-# guest mode.
+# checks on DXMT built for i386 in guest mode; forwarded through the i386 proxies (MACNEUTRON_VM_D3D32=forward, M4b's
+# opt-in), D3D12 is refused (the refusal said once) and its D3D11 rows run: d3d11latency, conv, wmtforward.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
@@ -94,7 +94,14 @@ EOS
   echo "d3d-smoke: $mode: 32: ${dies:-0} of 3 processes ended mid-load, $(/usr/bin/grep '^status' "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null)"
   [ "${dies:-0}" -eq 3 ] || fail="$fail $mode-32-dies"
   /usr/bin/grep -qx 'status 0' "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null || fail="$fail $mode-32-status"
-  for c in $checks; do
+  # A 32-bit process forwarded has no D3D12 (refused, said once, until its data converts): its D3D11 rows.
+  checks32=$checks
+  if [ "$mode" = forward ]; then
+    checks32="d3d12refused d3d11latency conv wmtforward"
+    [ "$(/usr/bin/grep -c 'D3D12CreateDevice is refused in a 32-bit process' "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null)" = 1 ] ||
+      fail="$fail $mode-32-refusal-line"
+  fi
+  for c in $checks32; do
     got=$(/usr/bin/grep "^$c " "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null || true)
     echo "d3d-smoke: $mode: 32: ${got:-no $c line}"
     [ "$got" = "$c ok" ] || fail="$fail $mode-32-$c"

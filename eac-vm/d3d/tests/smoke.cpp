@@ -124,7 +124,7 @@ static HWND new_window() {
 }
 
 // A 320x240 flip-model swapchain on a new Wine window: the swapchain, or nullptr.
-static IDXGISwapChain1 *swapchain(ID3D12CommandQueue *queue, HWND *window, UINT flags = 0) {
+static IDXGISwapChain1 *swapchain(IUnknown *queue, HWND *window, UINT flags = 0) { // a D3D12 queue or a D3D11 device
     HWND w = new_window();
     IDXGIFactory2 *f = nullptr;
     IDXGISwapChain1 *sc = nullptr;
@@ -416,7 +416,7 @@ static int die() {
 // conv (32-bit games, M4b's review): data whose i386 layout differs, through the whole chain: a D3D11 buffer's initial
 // data read back through a staging map, an input layout's semantic names, a D3D10 buffer's map (a canary after the
 // pointer), a swapchain's GetHwnd (a canary after the HWND) and GetDesc's window, an adapter's GetDesc (WCHARs, SIZE_Ts,
-// a canary after it). "conv ok", or what failed.
+// a canary after it). "conv ok", or what failed. Without a D3D12 queue, the swapchain is the D3D11 device's.
 static void conv(ID3D12CommandQueue *queue) {
     std::string bad;
     ID3D11Device *dev = nullptr;
@@ -456,7 +456,7 @@ static void conv(ID3D12CommandQueue *queue) {
     if (m10.p) memset(m10.p, 1, 64), b10->Unmap();
     if (!ok || !m10.p || m10.canary != 0xC0FFEE11u) bad += " map10";
     HWND w = nullptr;
-    IDXGISwapChain1 *sc = swapchain(queue, &w);
+    IDXGISwapChain1 *sc = swapchain(queue ? (IUnknown *)queue : (IUnknown *)dev, &w);
     struct { HWND h; UINT32 canary; } gh = {nullptr, 0xC0FFEE22u};
     DXGI_SWAP_CHAIN_DESC desc = {};
     if (!sc || FAILED(sc->GetHwnd(&gh.h)) || gh.h != w || gh.canary != 0xC0FFEE22u) bad += " gethwnd";
@@ -499,20 +499,28 @@ int main(int argc, char **argv) {
     if (!t) return printf("eventthread FAIL thread\n"), 1;
     WaitForSingleObject(t, INFINITE);
     CloseHandle(t);
+    const char *mode = getenv("MACNEUTRON_VM_D3D");
+    bool forward = mode && !strcmp(mode, "forward");
     ID3D12Device *device = nullptr;
     ID3D12CommandQueue *queue = nullptr;
     D3D12_COMMAND_QUEUE_DESC qd = {};
     if (FAILED(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), (void **)&device)) ||
-        FAILED(device->CreateCommandQueue(&qd, __uuidof(ID3D12CommandQueue), (void **)&queue)))
+        FAILED(device->CreateCommandQueue(&qd, __uuidof(ID3D12CommandQueue), (void **)&queue))) {
+        if (sizeof(void *) == 4 && forward && !device) { // a 32-bit process forwarded: no D3D12 until it converts (M4b)
+            printf("d3d12refused ok\n");
+            printf("d3d11latency %s\n", d3d11_latency());
+            conv(nullptr);
+            wmt_forward();
+            return 0;
+        }
         return printf("eventthread FAIL device\n"), 1;
+    }
     printf("eventthread %s\n", event_thread(device, queue));
     printf("eventreuse %s\n", event_reuse(device, queue));
     name(queue);
     minimised(queue);
     printf("latency %s\n", latency(device, queue));
     printf("d3d11latency %s\n", d3d11_latency());
-    const char *mode = getenv("MACNEUTRON_VM_D3D");
-    bool forward = mode && !strcmp(mode, "forward");
     if (forward) printf("swapchain %s\n", own_answers(queue));
     else printf("swapchain untested: guest DXMT aborts on these\n");
     wmsize(queue);
