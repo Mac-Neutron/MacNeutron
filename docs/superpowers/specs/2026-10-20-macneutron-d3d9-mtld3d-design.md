@@ -85,6 +85,43 @@ D3D10-12), a wined3d fallback switch, and upstream contributions.
   Proton-style i386 Unix side exists, then an i386 Linux `mtld3d.so` there too.
 - Its own plan, after the inventory.
 
+### 5.1 The inventory (2026-10-20) and what it decided
+
+Taken over mtld3d 0.14.1's Unix side (54k lines) against winemetal's 153 slots and the VM's forwarding
+(`eac-vm/metal/wm`); the three tables are in `docs/research/2026-10-20-mtld3d-winemetal-inventory.md`.
+
+- **Encoding fits.** Every Metal encoder call is one replay loop (`metal/command.rs` `encode_pass`,
+  `encode_leading_blits`) over a flat command array per pass: one winemetal command list and one `encodeCommands` per
+  pass. No fences, events, argument buffers, indirect draws, heaps or residency sets anywhere.
+- **Resources fit**, but for: no vertex descriptor in `WMTRenderPipelineInfo` (every game pipeline uses
+  `[[stage_in]]`); no compile options on `newLibraryWithSource` (mtld3d sets MSL 2.4, `preserveInvariance`, math mode);
+  four render nodes missing (vertex bytes, vertex texture, vertex and fragment sampler state); no getters for texture
+  type, sample count or usage (mtld3d keeps them itself instead).
+- **Memory.** mtld3d hands Metal its own pages (`PageBox`, 16 KiB) and a readback's destination through
+  `newBufferWithBytesNoCopy`. In the VM a buffer's memory must be blob memory (`WMTMemoryAlloc`), and a readback must go
+  through a staging buffer.
+- **Callbacks.** Completion handlers (6 sites, 3 load-bearing) and the drawable's presented handler have no winemetal
+  form: a retirement thread per queue waits on each command buffer instead, and the present's command buffer stands in
+  for its presented time.
+- **macOS-only.** About 3,000 lines exist for Wine's macOS window code (view parking, client surfaces, the
+  `WineMetalLayer` bypass, the cursor overlay, the screen-parameter filter, the HUD's State Reporter, the Main Thread
+  Checker, App Nap activity): none has a counterpart in the VM, whose host window is MacNeutron's own.
+
+Decisions (rulings of the M2 plan, recorded here as the spec they bind):
+
+| Question | Decision | Why |
+|---|---|---|
+| One Metal layer or two | One source. A `mtl` module re-exports objc2's bindings on the product macOS build and, under the `winemetal` feature, is a facade with the same names over winemetal's call table. The Linux build always takes the facade | The Metal layer's code stays upstream's (each `git subtree pull` merges as before) and the macOS product keeps M1's behaviour; the facade is the only new Metal code |
+| How mtld3d.so reaches winemetal | It loads `winemetal.so` from its own folder and calls its 64-bit `__wine_unix_call_funcs` slots with winemetal's parameter structs, for 32- and 64-bit processes alike | Wine's Unix side of a process is 64-bit; the guest's `winemetal.so` exports the same table and forwards it |
+| How it is tested before the VM | The facade also builds for macOS (`winemetal` feature, aarch64-apple-darwin): that build runs M1's gates on macOS's own winemetal.so | Every VM-only difference except FEX and the transport is then found on the Mac |
+| macOS-only features under the facade | Left out: views are winemetal's (`CreateMetalViewFromHWND`), the hardware cursor is the game's, SDR only, occlusion as DXMT has it | The VM has none of the window code they serve; the product macOS build keeps them |
+| winemetal's gaps | Fork commits in DXMT: four render nodes appended to `WMTRenderCommandType`; two new slots appended to the table (a render pipeline with a vertex descriptor, a source library with compile options); the VM's command-list table and slot catalog grow by the same | Appending keeps every existing slot and node of DXMT's as it is |
+| Toolchains | The x86_64 and i686 PE pairs link llvm-mingw's CRTs as the ARM64X pair does (no xwin); the Linux `mtld3d.so` is built on the Mac with the pinned Rust's x86_64-unknown-linux-gnu target, llvm-mingw's clang and ld.lld, against the builder's x86-64 sysroot | No Microsoft SDK, no Rust in the builder |
+
+Milestones: **M2a** the facade, proved on macOS (M1's gates on the `winemetal` build); **M2b** mtld3d in the VM (the
+Linux build, the x86 PE pairs, the VM's wire, the image; Wine's d3d9 tests and our triangle program in the guest, 64-
+and 32-bit). Each has its own plan.
+
 ## 6. Gates
 
 M1: mtld3d's `make check` and `make test` (its end-to-end suite and Wine's D3D9 conformance corpus) against our Wine;
