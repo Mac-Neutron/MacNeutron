@@ -1,6 +1,7 @@
 // The guest's Direct3D side (M2 Task 6): proxies for the host's objects, in mnd3d.dll (and the loopback library).
 // The generated proxies (proxies.cpp) fill each method's params and call mn_d3d_call; this is what they share.
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -25,6 +26,8 @@ struct mn_proxy {
     uint64_t handle;
     mn_obj *obj;
 };
+// guest/unix.c's proxy_handle reads a proxy's magic and handle here, in a 32-bit process's (i686 build) too.
+static_assert(offsetof(mn_proxy, magic) == sizeof(void *) && offsetof(mn_proxy, handle) == 16, "mn_proxy's header");
 extern const void *mn_d3d_vtables[MN_D3D_IFACES][MN_D3D_MAX_SLOTS];
 
 // The unix side's call (unix.c: mn_d3d_unix_call; in mnd3d.dll through winemetal's WMTForward): 0, or a status.

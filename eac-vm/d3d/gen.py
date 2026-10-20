@@ -379,14 +379,14 @@ PTR = 8
 def ptr32():
     """The layouts as an i386 guest has them (MSVC's: 8-byte scalars stay 8-aligned)."""
     global PTR
-    saved = {n: SCALARS[n] for n in POINTER_SIZED + POINTER_SIZED_SIGNED}
+    saved, saved_ptr = {n: SCALARS[n] for n in POINTER_SIZED + POINTER_SIZED_SIGNED}, PTR
     PTR = 4
     SCALARS.update({n: (4, 4, "uint32_t") for n in POINTER_SIZED})
     SCALARS.update({n: (4, 4, "int32_t") for n in POINTER_SIZED_SIGNED})
     try:
         yield
     finally:
-        PTR = 8
+        PTR = saved_ptr  # a nested ptr32() leaves its caller's
         SCALARS.update(saved)
 # windows_base.h's structs (not a header the model reads).
 WELL_KNOWN = {"GUID": (16, 4), "IID": (16, 4), "LUID": (8, 4), "RECT": (16, 4), "POINT": (8, 4), "SIZE": (8, 4),
@@ -1454,35 +1454,52 @@ def emit_layout32(model, calls):
     return "\n".join(out)
 
 
-def emit_convert32(model, calls):
-    """convert32.c (M4b): for a 32-bit process, field-for-field converters between each struct's i386 and x86-64
-    layouts where they differ, and per call the params members to convert (guest/convert32.h); a call whose data
-    can't be moved flat (a pointer inside to data whose layout differs, a union with pointer-sized members, an array
-    of interface pointers inside a struct, a by-value struct that differs, one_if) is refused for 32-bit callers."""
-    l64, l32 = {}, {}
+def layouts32(model):
+    """Each struct's x86-64 and i386 layouts, and the structs whose layouts differ: in size, a field's offset or a
+    field's size (a pointer shrinking inside padding or a union keeps every offset)."""
+    def shape(st):
+        _, _, lay = struct_layout(model, st)
+        return {k: (off, shape(f.inline) if f.inline is not None else -1 if f.bits is not None
+                    else size_align(model, f.type)[0]) for k, (off, f) in lay.items()}
+    l64, l32, s64, s32 = {}, {}, {}, {}
     for n, st in model.structs.items():
         if "." in n:
             continue
         try:
-            l64[n] = struct_layout(model, st)
+            l64[n], s64[n] = struct_layout(model, st), shape(st)
         except RuleError:
             continue
     with ptr32():
         for n in l64:
-            l32[n] = struct_layout(model, model.structs[n])
-    differ = {n for n in l64 if l64[n][0] != l32[n][0] or
-              {k: v[0] for k, v in l64[n][2].items()} != {k: v[0] for k, v in l32[n][2].items()}}
+            l32[n], s32[n] = struct_layout(model, model.structs[n]), shape(model.structs[n])
+    return l64, l32, {n for n in l64 if l64[n][0] != l32[n][0] or s64[n] != s32[n]}
+
+
+# Refused for a 32-bit process until its Direct3D 12 forwards (M4b Task 4): the game falls back to D3D11 rather than
+# run D3D12 half-converted.
+REFUSE32 = ("::D3D12CreateDevice",)
+
+
+def emit_convert32(model, calls):
+    """convert32.c (M4b): for a 32-bit process, field-for-field converters between each struct's i386 and x86-64
+    layouts where they differ, and per call the params members to convert (guest/convert32.h); a call whose data
+    can't be moved flat (a pointer inside to data whose layout differs, a union with pointer-sized members, an array
+    of interface pointers inside a struct, a by-value struct that differs, one_if, more than 16 members) is refused
+    for 32-bit callers, and so is REFUSE32's. A memory size out (a SIZE_T field named *Memory: DXGI_ADAPTER_DESC*'s)
+    saturates at 3 GiB, as DXVK reports them to 32-bit games, instead of losing its upper half; other SIZE_Ts (a
+    descriptor handle, a range) are cut as pointers are."""
+    l64, l32, differ = layouts32(model)
     pointer_sized = POINTER_SIZED + POINTER_SIZED_SIGNED
 
-    def element(t, d, s, out):
-        """One value of type t at d (x86-64) and s (i386): its moves, or False."""
+    def element(t, d, s, out, memory=False):
+        """One value of type t at d (x86-64) and s (i386): its moves, or False. memory: a memory size."""
         base = resolve(model, t)
         if stars(t):
             if stars(t) > 1 or (base in differ and not is_interface(model, base)):
                 return False
             out.append(("zx", d, s, 0))
         elif base in POINTER_SIZED:
-            out.append(("zx", d, s, 0))
+            out.append(("size" if memory and base == "SIZE_T" else "zx", d, s, 0))
         elif base in POINTER_SIZED_SIGNED:
             out.append(("sx", d, s, 0))
         elif base in differ:
@@ -1521,7 +1538,7 @@ def emit_convert32(model, calls):
             with ptr32():
                 e32 = size_align(model, f.type)[0]
             for i in range(count):
-                if not element(f.type, d + i * e64, s + i * e32, out):
+                if not element(f.type, d + i * e64, s + i * e32, out, name.endswith("Memory")):
                     return False
         return True
 
@@ -1554,6 +1571,9 @@ def emit_convert32(model, calls):
     used, rows, refused = set(), {}, set()
     for mid in sorted(calls):
         c = calls[mid]
+        if c.name in REFUSE32:
+            refused.add(mid)
+            continue
         if not c.method:
             continue
         params = {p.name: (i, p) for i, p in enumerate(c.method.params)}
@@ -1593,7 +1613,7 @@ def emit_convert32(model, calls):
             fns = f"c32in_{conv}, c32out_{conv}" if conv else "NULL, NULL"
             mine.append(f"{{offsetof(struct mn_d3d_p_{mid}, {rename[f.param]}), {kind}, {direction}, {size64}, "
                         f"{size32}, {fns}, {count}, {width}, {deref}}}")
-        if not ok:
+        if not ok or len(mine) > 16:  # mn_d3d_unix_call32's bound
             refused.add(mid)
         elif mine:
             rows[mid] = mine
@@ -1606,6 +1626,10 @@ def emit_convert32(model, calls):
            "__attribute__((unused)) static void sx(uint8_t *d, const uint8_t *s) {",
            "    int32_t v; memcpy(&v, s, 4); int64_t w = v; memcpy(d, &w, 8);",
            "}",
+           "__attribute__((unused)) static void size(uint8_t *d, const uint8_t *s) { zx(d, s); }",
+           "__attribute__((unused)) static void sat(uint8_t *d, const uint8_t *s) { /* a SIZE_T out: at most 3 GiB */",
+           "    uint64_t v; memcpy(&v, s, 8); uint32_t w = v > 0xc0000000u ? 0xc0000000u : (uint32_t)v; memcpy(d, &w, 4);",
+           "}",
            ""]
     for n in sorted(used):
         out.append(f"static void c32in_{n}(const uint8_t *s, uint8_t *d) {{ /* {l32[n][0]} -> {l64[n][0]} bytes */")
@@ -1615,7 +1639,8 @@ def emit_convert32(model, calls):
         out.append("}")
         out.append(f"static void c32out_{n}(const uint8_t *s, uint8_t *d) {{")
         for op, d, s, size in flat[n]:
-            out.append(f"    memcpy(d + {s}, s + {d}, {size if op == 'copy' else 4});")
+            out.append(f"    sat(d + {s}, s + {d});" if op == "size" else
+                       f"    memcpy(d + {s}, s + {d}, {size if op == 'copy' else 4});")
         out.append("}")
     for mid in sorted(rows):
         out.append(f"static const struct mn_c32_member m{mid}[] = {{ /* {calls[mid].name} */")

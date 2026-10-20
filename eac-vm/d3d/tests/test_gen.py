@@ -317,5 +317,49 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(size("DXGI_SAMPLE_DESC"), 8)
 
 
+
+class Convert32Test(unittest.TestCase):
+    """M4b: a 32-bit process's layouts (ptr32()) and emit_convert32's per-call rows and refusals."""
+    @classmethod
+    def setUpClass(cls):
+        cls.m = model()
+        cls.calls = gen.classify(cls.m, gen.parse_rules(gen.read(RULES), cls.m))
+        cls.c = gen.emit_convert32(cls.m, cls.calls)
+
+    def mid(self, name):
+        return next(i for i, c in self.calls.items() if c.name == name)
+
+    def rows(self, name):
+        start = self.c.find(f"m{self.mid(name)}[] = {{ /* {name} */")
+        return "" if start < 0 else self.c[start:self.c.index("};", start)]
+
+    def test_nested_ptr32_keeps_the_i386_pointer_size(self):
+        with gen.ptr32():
+            with gen.ptr32():
+                pass
+            self.assertEqual(gen.PTR, 4)
+        self.assertEqual(gen.PTR, 8)
+
+    def test_a_pointer_shrinking_in_padding_differs(self):
+        differ = gen.layouts32(self.m)[2]
+        self.assertIn("D3D12_BUFFER_BARRIER", differ)  # same offsets and size, a 4-byte pointer
+        self.assertIn("D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS", differ)  # inside a union
+        self.assertNotIn("D3D12_HEAP_PROPERTIES", differ)
+
+    def test_d3d12_device_creation_is_refused(self):
+        self.assertIn(f"[{self.mid('::D3D12CreateDevice')}] = {{1, 0, NULL}}", self.c)  # the game falls back to D3D11
+
+    def test_initial_data_is_bytes(self):
+        self.assertNotIn("pInitialData", self.rows("ID3D11Device::CreateBuffer"))
+
+    def test_a_wstruct_desc_is_a_struct_out(self):
+        self.assertIn("MN_C32_STRUCT, MN_C32_OUT", self.rows("IDXGIAdapter::GetDesc"))
+
+    def test_memory_sizes_saturate(self):
+        conv = lambda n: self.c[self.c.index(f"static void c32out_{n}("):][:self.c[self.c.index(f"static void c32out_{n}("):].index("}")]
+        self.assertEqual(conv("DXGI_ADAPTER_DESC").count("sat("), 3)  # dedicated video, dedicated and shared system
+        self.assertNotIn("sat(", conv("D3D12_CPU_DESCRIPTOR_HANDLE"))  # a handle: cut, never clamped
+
+
 if __name__ == "__main__":
     unittest.main()

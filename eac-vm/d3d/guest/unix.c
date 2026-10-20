@@ -352,15 +352,26 @@ int32_t mn_d3d_unix_call(void *args) {
  * can't be moved flat is refused. The copies live for the call: an asynchronous call's record is packed before
  * mn_d3d_unix_call returns. */
 #define E_NOTIMPL_ ((int32_t)0x80004001)
+/* A call refused for a 32-bit process: said once on stderr, and counted as refused in the trace. */
+static int32_t refused32(uint32_t id) {
+    static _Atomic uint64_t said[(MN_D3D_CALLS + 63) / 64];
+    uint64_t bit = 1ull << (id % 64);
+    if (!(atomic_fetch_or(&said[id / 64], bit) & bit))
+        fprintf(stderr, "mn-d3d: %s is refused in a 32-bit process (not converted yet)\n", mn_d3d_calls[id].name);
+    pthread_once(&once, init);
+    if (counts) why[id] = 1, atomic_fetch_add_explicit(&counts[id], 1, memory_order_relaxed);
+    return E_NOTIMPL_;
+}
 int32_t mn_d3d_unix_call32(void *args) {
     const struct mn_d3d_args *a = args;
     if (a->id < MN_D3D_FIRST || a->id >= MN_D3D_CALLS || !mn_c32_calls[a->id].n)
-        return a->id >= MN_D3D_FIRST && a->id < MN_D3D_CALLS && mn_c32_calls[a->id].refuse ? E_NOTIMPL_ : mn_d3d_unix_call(args);
+        return a->id >= MN_D3D_FIRST && a->id < MN_D3D_CALLS && mn_c32_calls[a->id].refuse ? refused32(a->id)
+                                                                                            : mn_d3d_unix_call(args);
     const struct mn_c32_call *c = &mn_c32_calls[a->id];
     uint8_t *params = (void *)(uintptr_t)a->params;
     uint64_t orig[16], counts[16];
     uint8_t *copies[16] = {0};
-    if (c->n > 16) return E_NOTIMPL_;
+    if (c->n > 16) return refused32(a->id); /* gen.py refuses such a call already */
     int32_t s = 0;
     for (uint16_t i = 0; i < c->n; i++) {
         const struct mn_c32_member *m = &c->members[i];
