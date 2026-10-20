@@ -182,7 +182,8 @@ private struct LaunchOptionsField: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("Launch options")
-                TextField("", text: $draft, prompt: Text("DXMT_D3D12_SM6=0 -dx12"))
+                TextField("Launch options", text: $draft, prompt: Text("DXMT_D3D12_SM6=0 -dx12"))
+                    .labelsHidden()  // the Text beside it shows the name; VoiceOver reads the field's own
                     .focused($focused)
                     .onSubmit(save)
                     .onChange(of: focused) { _, now in if !now { save() } }

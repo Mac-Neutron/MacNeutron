@@ -37,9 +37,10 @@ final class UpdateModel {
         automatic = defaults.object(forKey: "checkForUpdates") as? Bool ?? true
         guard hourly, team != nil else { return }
         timer = Task { [weak self] in
+            await self?.checkAtLaunch()
             while !Task.isCancelled {
-                await self?.checkIfDue()
                 try? await Task.sleep(for: .seconds(3600))
+                await self?.checkIfDue()
             }
         }
     }
@@ -71,6 +72,13 @@ final class UpdateModel {
         } catch {
             notice = "Couldn't check for updates: \(error.localizedDescription)"
         }
+    }
+
+    /// At launch, `check` whenever automatic checks are on: what a check found isn't kept across launches, so an update
+    /// found earlier the same day is offered again.
+    func checkAtLaunch() async {
+        guard automatic else { return }
+        await check()
     }
 
     /// `check`, when automatic checks are on and a day has passed since the last one.

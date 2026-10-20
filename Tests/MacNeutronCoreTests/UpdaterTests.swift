@@ -3,12 +3,13 @@ import Foundation
 import Testing
 @testable import MacNeutronCore
 
-/// GitHub's release list, as much of it as the updater reads; each asset is at https://example.invalid/<tag>/<name>.
-func releasesJSON(_ entries: [(tag: String, draft: Bool, prerelease: Bool, assets: [String])]) -> Data {
+/// GitHub's release list, as much of it as the updater reads; each asset is at <base>/<tag>/<name>.
+func releasesJSON(_ entries: [(tag: String, draft: Bool, prerelease: Bool, assets: [String])],
+                  base: String = "https://example.invalid") -> Data {
     let releases: [[String: Any]] = entries.map { entry in
         ["tag_name": entry.tag, "draft": entry.draft, "prerelease": entry.prerelease,
-         "html_url": "https://example.invalid/\(entry.tag)",
-         "assets": entry.assets.map { ["name": $0, "browser_download_url": "https://example.invalid/\(entry.tag)/\($0)"] }]
+         "html_url": "\(base)/\(entry.tag)",
+         "assets": entry.assets.map { ["name": $0, "browser_download_url": "\(base)/\(entry.tag)/\($0)"] }]
     }
     return try! JSONSerialization.data(withJSONObject: releases)
 }
@@ -29,6 +30,24 @@ func releasesJSON(_ entries: [(tag: String, draft: Bool, prerelease: Bool, asset
     #expect(Updater.pick(json, current: "0.10.0") == nil)  // nothing newer
     #expect(Updater.pick(json, current: "dev") == nil)
     #expect(Updater.pick(Data("{".utf8), current: "0.8.0") == nil)
+}
+
+@Test func pickIgnoresReleasesWithoutHTTPSLinks() {
+    let entry = [(tag: "v0.9.0", draft: false, prerelease: false, assets: ["MacNeutron-0.9.0.zip", "SHA256SUMS"])]
+    #expect(Updater.pick(releasesJSON(entry), current: "0.8.0") != nil)
+    #expect(Updater.pick(releasesJSON(entry, base: "file:///Applications"), current: "0.8.0") == nil)
+    #expect(Updater.pick(releasesJSON(entry, base: "http://example.invalid"), current: "0.8.0") == nil)
+}
+
+@Test func aWorkFolderHoldingTheOnlyAppIsKept() throws {
+    let dir = try makeTempDir()
+    let app = dir.appending(path: "MacNeutron.app"), work = dir.appending(path: "work")
+    try write("old", to: work.appending(path: "old.app/v"))
+    Updater.discard(work, keepingFor: app)  // a swap whose roll-back failed: the app's path is empty
+    #expect(FileManager.default.fileExists(atPath: work.appending(path: "old.app/v").path(percentEncoded: false)))
+    try write("new", to: app.appending(path: "v"))
+    Updater.discard(work, keepingFor: app)
+    #expect(!FileManager.default.fileExists(atPath: work.path(percentEncoded: false)))
 }
 
 @Test func canReplaceNeedsAWritableFolderOutsideTranslocation() throws {

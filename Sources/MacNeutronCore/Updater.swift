@@ -34,8 +34,8 @@ public enum Updater {
     public static let identifier = "io.github.chadouming.MacNeutron"
 
     /// The newest release of the running build's channel (`X.Y.Z`, or `X.Y.Zp` for a performance build) above
-    /// `current`, from GitHub's release list: drafts, prereleases and releases without `MacNeutron-<V>.zip` and
-    /// `SHA256SUMS` don't count. Versions compare as numbers.
+    /// `current`, from GitHub's release list: drafts, prereleases, releases without `MacNeutron-<V>.zip` and
+    /// `SHA256SUMS`, and releases with a link that isn't https don't count. Versions compare as numbers.
     public static func pick(_ json: Data, current: String) -> Release? {
         guard let running = version(current),
               let list = try? JSONDecoder().decode([GitHubRelease].self, from: json) else { return nil }
@@ -46,7 +46,9 @@ public enum Updater {
                   running.numbers.lexicographicallyPrecedes(found.numbers),
                   best.map({ $0.numbers.lexicographicallyPrecedes(found.numbers) }) ?? true,
                   let zip = entry.assets.first(where: { $0.name == "MacNeutron-\(name).zip" }),
-                  let sums = entry.assets.first(where: { $0.name == "SHA256SUMS" })
+                  let sums = entry.assets.first(where: { $0.name == "SHA256SUMS" }),
+                  // The reply's links are opened and downloaded: https only (a file: or http: one is skipped).
+                  [entry.html_url, zip.browser_download_url, sums.browser_download_url].allSatisfy({ $0.scheme == "https" })
             else { continue }
             best = (found.numbers, Release(version: name, page: entry.html_url, zip: zip.browser_download_url,
                                            sums: sums.browser_download_url))
@@ -91,10 +93,17 @@ public enum Updater {
             try verify(new, team: team, version: release.version, log: work.appending(path: "spctl.txt"))
             try swap(new, into: app, aside: work.appending(path: "old.app", directoryHint: .isDirectory))
         } catch {
-            try? fm.removeItem(at: work)
+            discard(work, keepingFor: app)
             throw error
         }
         return work
+    }
+
+    /// Removes the work folder, unless the app's own path is empty: then the folder holds the only copy of the app (a
+    /// swap whose roll-back failed too), and it stays.
+    static func discard(_ work: URL, keepingFor app: URL) {
+        guard FileManager.default.fileExists(atPath: app.path(percentEncoded: false)) else { return }
+        try? FileManager.default.removeItem(at: work)
     }
 
     /// The app's signature is valid (strict, every architecture, nested code), it is this app signed by `team`, it is

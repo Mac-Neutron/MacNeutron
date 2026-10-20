@@ -16,17 +16,20 @@ private final class FakeGitHub: @unchecked Sendable {
 
 @MainActor private final class Clock { var date = Date(timeIntervalSince1970: 1_800_000_000) }
 
-@MainActor private func makeUpdates(team: String? = "ABCDE12345")
+/// A model whose defaults are a plist in a temp folder (CFPreferences takes an absolute path as a domain): a named
+/// suite would leave a plist in ~/Library/Preferences for every run.
+@MainActor private func makeUpdates(team: String? = "ABCDE12345") throws
     -> (UpdateModel, FakeGitHub, RecordingNotifier, Clock) {
     let github = FakeGitHub(), notifier = RecordingNotifier(), clock = Clock()
+    let suite = try makeTempDir().appending(path: "defaults.plist").path(percentEncoded: false)
     let model = UpdateModel(current: "0.8.0", app: URL(filePath: "/Applications/MacNeutron.app"), team: team,
-                            defaults: UserDefaults(suiteName: UUID().uuidString)!, notifier: notifier,
+                            defaults: try #require(UserDefaults(suiteName: suite)), notifier: notifier,
                             get: github.get, now: { clock.date }, hourly: false)
     return (model, github, notifier, clock)
 }
 
 @MainActor @Test func checkFindsAReleaseAndNotifiesOnce() async throws {
-    let (model, _, notifier, _) = makeUpdates()
+    let (model, _, notifier, _) = try makeUpdates()
     await model.check()
     #expect(model.available?.version == "0.9.0")
     #expect(notifier.posted == ["MacNeutron 0.9.0 is available."])
@@ -35,7 +38,7 @@ private final class FakeGitHub: @unchecked Sendable {
 }
 
 @MainActor @Test func checkIfDueWaitsADayAndHonoursTheSwitch() async throws {
-    let (model, github, _, clock) = makeUpdates()
+    let (model, github, _, clock) = try makeUpdates()
     await model.checkIfDue()
     #expect(github.calls == 1)
     clock.date += 23 * 3600
@@ -51,9 +54,19 @@ private final class FakeGitHub: @unchecked Sendable {
 }
 
 @MainActor @Test func devBuildsNeverCheck() async throws {
-    let (model, github, _, _) = makeUpdates(team: nil)
+    let (model, github, _, _) = try makeUpdates(team: nil)
     #expect(!model.enabled)
     await model.check()
     await model.checkIfDue()
     #expect(github.calls == 0)
+}
+
+@MainActor @Test func launchChecksEvenWithinADay() async throws {
+    let (model, github, _, _) = try makeUpdates()
+    await model.checkIfDue()
+    await model.checkAtLaunch()  // relaunched within the day: the update found is offered again
+    #expect(github.calls == 2)
+    model.automatic = false
+    await model.checkAtLaunch()
+    #expect(github.calls == 2)
 }
