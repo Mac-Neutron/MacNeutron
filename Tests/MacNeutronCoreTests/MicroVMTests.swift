@@ -78,6 +78,39 @@ private let game = "/Users/someone/Library/Application Support/Steam/steamapps/c
     #expect(f.launcherLog.contains("exit=3"))
 }
 
+/// A 32-bit PE in a Steam library (the VM's game folder).
+private func i386GameInLibrary(named name: String = "Game.exe") throws -> String {
+    let url = try makeTempDir().appending(path: "steamapps/common/Old Game/\(name)")
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try peBytes(machine: PEImage.i386).write(to: url)
+    return url.path(percentEncoded: false)
+}
+
+@Test func a32BitGameRunsInTheMicroVM() throws {
+    let f = try makeVMFixture()
+    #expect(f.launcher.launch(["waitforexitandrun", try i386GameInLibrary()], environment: f.env) == 0)
+    #expect(f.runner.calls.map(\.tool) == ["run-guest.sh"])
+    #expect(f.notifier.posted.isEmpty)
+}
+
+@Test func a32BitInstallerRunsInTheMicroVM() throws {
+    // Proton runs a game's 32-bit redistributable installers; in the VM they run too.
+    let f = try makeVMFixture()
+    #expect(f.launcher.launch(["run", try i386GameInLibrary(named: "Setup.exe"), "/quiet"], environment: f.env) == 0)
+    #expect(f.runner.calls.map(\.tool) == ["run-guest.sh"])
+    #expect(!f.launcherLog.contains("skipped 32-bit installer"))
+}
+
+@Test func a32BitGameOptedOutOfTheVMIsRefused() throws {
+    let f = try makeVMFixture()
+    var env = f.env
+    env["MACNEUTRON_VM"] = "0"
+    #expect(f.launcher.launch(["waitforexitandrun", try i386GameInLibrary()], environment: env) == 1)
+    #expect(f.runner.calls.isEmpty)
+    #expect(f.notifier.posted
+        == ["This game is 32-bit. On macOS MacNeutron runs 64-bit games only; 32-bit games run in its game VM."])
+}
+
 @Test func theGuestScriptCarriesTheLaunch() throws {
     let scripts = Scripts()
     let f = try makeVMFixture(scripts: scripts)

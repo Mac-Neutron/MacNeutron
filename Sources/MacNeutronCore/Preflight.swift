@@ -11,7 +11,7 @@ public enum PreflightError: Error, Equatable, CustomStringConvertible {
         switch self {
         case .unsupportedSystem: "MacNeutron needs macOS 27 or later on an Apple Silicon Mac."
         case .runtimeMissing: "MacNeutron's runtime is missing or damaged. Open MacNeutron to repair it."
-        case .thirtyTwoBit: "This game is 32-bit. MacNeutron 0.1 runs 64-bit games only; 32-bit support is planned."
+        case .thirtyTwoBit: "This game is 32-bit. On macOS MacNeutron runs 64-bit games only; 32-bit games run in its game VM."
         case .unsupportedMachine(let machine):
             "This game is built for \(Self.name(of: machine)), which MacNeutron can't run."
         case .unsupportedCPU(let cpu, let missing):
@@ -68,8 +68,9 @@ public struct Preflight: Sendable {
 
     /// Returns the runtime's identity. A missing or unreadable runtime writes the damaged marker, which makes the
     /// app reinstall it. The target's machine type is checked only for the game (`waitforexitandrun`); a target that
-    /// isn't PE (a script, a missing file) isn't checked.
-    public func check(_ layout: ToolLayout, request: LaunchRequest) throws(PreflightError) -> String {
+    /// isn't PE (a script, a missing file) isn't checked. A 32-bit game passes when it runs in the microVM (new WoW64).
+    public func check(_ layout: ToolLayout, request: LaunchRequest, inMicroVM: Bool = false) throws(PreflightError)
+        -> String {
         guard systemSupported() else { throw .unsupportedSystem }
         let fm = FileManager.default
         guard fm.isExecutableFile(atPath: layout.wine.path(percentEncoded: false)),
@@ -90,7 +91,7 @@ public struct Preflight: Sendable {
         if request.verb == .waitforexitandrun, let machine = PEImage.machine(of: URL(filePath: request.target)) {
             switch machine {
             case PEImage.amd64, PEImage.arm64: break
-            case PEImage.i386: throw .thirtyTwoBit
+            case PEImage.i386: if !inMicroVM { throw .thirtyTwoBit }
             default: throw .unsupportedMachine(machine)
             }
         }

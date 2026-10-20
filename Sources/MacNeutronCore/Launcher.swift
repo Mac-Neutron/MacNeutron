@@ -95,14 +95,17 @@ public struct Launcher: Sendable {
         // A performance build (X.Y.Zp) keeps one launcher.log line a launch unless MACNEUTRON_LOG asks for more.
         log.setQuiet(layout.isPerformanceBuild && !logging)
         let gameLog = logging ? log.gameLog(appID: context.appID) : nil
+        let inMicroVM = MicroVM.wanted(environment: environment, verb: request.verb)
+            && MicroVM.guestPath(request.target) != nil
         let identity: String
         do {
-            identity = try preflight.check(layout, request: request)
+            identity = try preflight.check(layout, request: request, inMicroVM: inMicroVM)
         } catch {
             return fail(error.description, argv: argv, notify: true, gameLog: gameLog)
         }
-        // Steam's install scripts start redistributable installers with `run`; a 32-bit one can't run here.
-        if request.verb == .run, PEImage.machine(of: URL(filePath: request.target)) == PEImage.i386 {
+        // Steam's install scripts start redistributable installers with `run`; a 32-bit one can't run on macOS. In the
+        // VM it runs, as Proton runs them.
+        if !inMicroVM, request.verb == .run, PEImage.machine(of: URL(filePath: request.target)) == PEImage.i386 {
             log.append("skipped 32-bit installer \(URL(filePath: request.target).lastPathComponent)")
             return 0
         }
