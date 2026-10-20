@@ -9,6 +9,8 @@ games in MacNeutron's VM) the assignment kept the low 32 bits of
 recommendedMaxWorkingSetSize, which can be near zero. Saturate at
 0xC0000000, the value DXVK reports to 32-bit games. A 64-bit build is
 unchanged.
+
+Assisted-by: Claude Code: claude-opus-5-5
 ---
  src/dxgi/dxgi_adapter.cpp | 10 +++++++---
  1 file changed, 7 insertions(+), 3 deletions(-)
