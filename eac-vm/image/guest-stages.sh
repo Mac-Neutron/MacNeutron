@@ -30,7 +30,7 @@ for stage in ${*:-wine forwarder dxmt d3d fex}; do
       $B ssh "set -e; WINEBUILD=\$HOME/wine-build64 sh mn-steam-forward/build-guest.sh \$HOME/mn-steam-forward \$HOME/mn-lsc \
         \$HOME/wine-src/include \$HOME/mn-steam-gen \$HOME/mn-steam-out > /dev/null
         echo '$(stamp forwarder)' > mn-steam-out/.mn-source" ;;
-    dxmt)  # DXMT's x86-64 DLLs (on the Mac) and the guest winemetal.so (through the builder), staged into it
+    dxmt)  # DXMT's x86-64 and i386 DLLs (on the Mac) and the guest winemetal.so (through the builder), staged into it
       sh "$ROOT/eac-vm/dxmt/build.sh" > /dev/null
       sh "$ROOT/eac-vm/metal/build-guest.sh" > /dev/null
       stamp dxmt > "$W/dxmt-guest/.mn-source"
