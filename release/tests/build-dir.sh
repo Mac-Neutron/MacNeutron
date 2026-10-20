@@ -1,7 +1,7 @@
 #!/bin/sh
 # The p profile's folders (spec 2026-10-19-macneutron-performance-build §3): every build script resolves build/ through
-# BUILD_DIR, except the folders both profiles share (bridge, release, perf, the test programs, p itself), and every
-# builder path is relative to BUILDER_HOME. Prints "build-dir: ok" or "build-dir: FAIL" with the offending lines.
+# BUILD_DIR, except the folders both profiles share (bridge, release, perf, the test programs, p itself) and lines
+# marked "# build-dir: " (release.sh's checks on the normal build), and every builder path is relative to BUILDER_HOME. Prints "build-dir: ok" or "build-dir: FAIL" with the offending lines.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
@@ -10,7 +10,7 @@ shared='bridge|release|perf|presenter|dxmt-tests|wine-arm64-tests|p|eac-vm-work/
 # Each line with its BUILD_DIR forms taken out first, so a second, bare one beside them still shows ("$ROOT"/build too).
 bad=$( { /usr/bin/grep -rnE '\$ROOT"?/build' eac-vm dxmt wine-arm64 release --include='*.sh' --exclude-dir=tests --exclude=p-seed.sh || true; } |
   sed -E 's/\$\{BUILD_DIR:-\$ROOT\/build\}//g' | /usr/bin/grep -E '\$ROOT"?/build' |
-  /usr/bin/grep -vE "\\\$ROOT\"?/build/($shared)([/\"' *]|\$)" || true)
+  /usr/bin/grep -vE "\\\$ROOT\"?/build/($shared)([/\"' *]|\$)" | /usr/bin/grep -vF '# build-dir: ' || true)
 # Makefiles likewise: a build/ path only through BUILD_DIR.
 mk=$( { /usr/bin/grep -rnE '(\.\./|ROOT\)/)build/' eac-vm --include=Makefile || true; } | /usr/bin/grep -v 'BUILD_DIR' || true)
 bad="$bad${mk:+

@@ -199,7 +199,8 @@ check_env() {  # check_env <profile>: no variable left from a dev, p or PGO buil
   [ -z "${MACNEUTRON_P_FLAGS+x}" ] || _ce="$_ce MACNEUTRON_P_FLAGS"
   [ "${MACNEUTRON_PROFILE:-$1}" = "$1" ] || _ce="$_ce MACNEUTRON_PROFILE"
   _ce_sfx=; [ "$1" = std ] || _ce_sfx=/$1
-  [ "${BUILD_DIR:-$ROOT/build$_ce_sfx}" = "$ROOT/build$_ce_sfx" ] || _ce="$_ce BUILD_DIR"
+  _ce_b=$ROOT/build$_ce_sfx  # build-dir: the profile's own folder, on purpose
+  [ "${BUILD_DIR:-$_ce_b}" = "$_ce_b" ] || _ce="$_ce BUILD_DIR"
   [ "${BUILDER_HOME:-/home/bench$_ce_sfx}" = "/home/bench$_ce_sfx" ] || _ce="$_ce BUILDER_HOME"
   [ -z "$_ce" ] || { echo "release: unset$_ce: a release builds with its profile's defaults" >&2; return 1; }
 }
@@ -729,8 +730,9 @@ if [ $PROFILE = p ]; then
   [ $mode = check ] || check_pgo "$ROOT/pgo" || exit 1
   # The normal build's files it must leave alone (check_untouched, at the end): stamped by the check run that starts
   # `make release` (before p-seed and the p wine-arm64 build), else when this run starts.
-  set -- "$ROOT/build/wine-arm64/wine.app/Contents/Info.plist" "$ROOT/build/eac-vm-work/images/manifest.sha256" \
-    "$ROOT/build/eac-vm-work/images/base.erofs"
+  NB=$ROOT/build  # build-dir: the normal build, on purpose
+  set -- "$NB/wine-arm64/wine.app/Contents/Info.plist" "$NB/eac-vm-work/images/manifest.sha256" \
+    "$NB/eac-vm-work/images/base.erofs"
   mkdir -p "$ROOT/build/p"
   if [ $mode = check ]; then
     stamps "$@" > "$ROOT/build/p/untouched.txt"
@@ -866,8 +868,8 @@ out=$(sh "$ROOT/release/verify-sources.sh" "$OUT/$TGZ" "$OUT/wine.app/Contents/R
 printf '%s\n' "$out"
 [ "$st" = 0 ] && [ "$(printf '%s\n' "$out" | tail -n 1)" = "PASS sources" ] || die "R5: the source archive fails"
 
-[ $PROFILE = std ] || check_untouched "$UNTOUCHED" "$ROOT/build/wine-arm64/wine.app/Contents/Info.plist" \
-  "$ROOT/build/eac-vm-work/images/manifest.sha256" "$ROOT/build/eac-vm-work/images/base.erofs" || exit 1
+[ $PROFILE = std ] || check_untouched "$UNTOUCHED" "$NB/wine-arm64/wine.app/Contents/Info.plist" \
+  "$NB/eac-vm-work/images/manifest.sha256" "$NB/eac-vm-work/images/base.erofs" || exit 1
 
 # 6. Checksums and sizes; the commands that publish it, for the maintainer.
 ( cd "$OUT" && shasum -a 256 "$ZIP" "$TGZ" "$PARTS" > SHA256SUMS )
