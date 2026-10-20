@@ -149,7 +149,8 @@ stamp=$(stamp_of "$ROOT/wine-arm64/pins" "$PATCHES"/*.patch "$FEX_PATCHES"/*.pat
   "$ROOT/presenter/present.m" "$ROOT/presenter/cmaa2.metal" "$ROOT/presenter/sharpen.metal" \
   "$ROOT/presenter/CMAA2-LICENSE.txt" "$ROOT/LICENSE" \
   "$ROOT/wine-arm64/tools/xcrun-metal.sh" "$ROOT/dxmt/toolchain.sh" "$ROOT/dxmt/llvm-mingw.sh" \
-  "$ROOT/wine-arm64/tools/authenticode-sign.swift" \
+  "$ROOT/wine-arm64/tools/authenticode-sign.swift" "$ROOT/dxmt/mtld3d-build.sh" "$ROOT/dxmt/mtld3d-tools.sh" \
+  "$ROOT/dxmt/mtld3d-mingw-cc.sh" "$ROOT/dxmt/mtld3d-notices.py" \
   "$ROOT"/wine-arm64/patches/llvm/*.patch)
 # Another CPU, LTO setting or toolchain is another build.
 stamp=$(printf '%s %s %s %s' "$stamp" "$MACNEUTRON_CPU" "$MACNEUTRON_LTO" "$TOOLCHAIN_BIN" | shasum -a 256 \
