@@ -17,6 +17,10 @@ PATH="$(sh "$ROOT/dxmt/toolchain.sh"):$PATH"
 [ -f "$WMLIB" ] || { echo "d3d-guest: no winemetal.dll import library: run eac-vm/dxmt/build.sh" >&2; exit 1; }
 python3 -I "$D3D/gen.py" --headers "$I" --rules "$D3D/rules.txt" --out "$G" calls
 rm -rf "$O"; mkdir -p "$O/obj" "$O/x86_64-windows"
+# A 32-bit process's (M4b): gen.py's i386 layouts against llvm-mingw's i686 headers, and its converters' roundtrip.
+i686-w64-mingw32-clang++ -std=c++17 -fsyntax-only "$G/layout32.cpp"
+cc -O1 -Wall -I"$D3D/guest" -I"$G" -o "$O/convert32-test" "$D3D/tests/convert32-test.c" "$G/convert32.c"
+"$O/convert32-test" > /dev/null || { "$O/convert32-test"; exit 1; }
 CXF="-std=c++17 -O2 -Wall -Werror -Wno-extern-c-compat -DWIDL_EXPLICIT_AGGREGATE_RETURNS -I$I/d3d12 -I$DXMT/d3d12 -I$DXMT/util -I$G -I$D3D
   -I$D3D/guest"
 # DXMT's own Win32 window code (M3 Task 3: the window changes native DXMT asks for, made in the guest), copied beside
