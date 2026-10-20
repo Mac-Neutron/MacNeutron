@@ -25,8 +25,9 @@ SH=$W/share
 MN_DXMT_ONLY=d3d12_null sh "$ROOT/eac-vm/dxmt/share.sh" > /dev/null  # the share's shaders too (dies' D3D11 ones)
 "$(sh "$ROOT/dxmt/toolchain.sh")/x86_64-w64-mingw32-clang++" -std=c++17 -O1 -static -s -o "$SH/dxmt-tests/smoke.exe" \
   "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ld3d11 -ldxgi
-"$(sh "$ROOT/dxmt/toolchain.sh")/i686-w64-mingw32-clang++" -std=c++17 -O1 -static -s -o "$SH/dxmt-tests/smoke32.exe" \
-  "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ld3d11 -ldxgi
+# Large-address-aware, as many 32-bit games are: memory for it may then go up to 4 GiB.
+"$(sh "$ROOT/dxmt/toolchain.sh")/i686-w64-mingw32-clang++" -std=c++17 -O1 -static -s -Wl,--large-address-aware \
+  -o "$SH/dxmt-tests/smoke32.exe" "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ld3d11 -ldxgi
 fail=
 for mode in forward guest; do
   G=$W/d3d-smoke-$mode.sh
@@ -46,7 +47,12 @@ for i in 1 2 3; do  # processes that end mid-load (M4's final review): the host 
   echo "die status \$?" >> \$O/d3d-smoke.raw
 done
 timeout -k 10 60 wine \$T/smoke.exe < /dev/null >> \$O/d3d-smoke.raw 2>&1
-timeout -k 10 60 wine \$T/smoke32.exe < /dev/null > \$O/d3d-smoke32.raw 2>&1
+: > \$O/d3d-smoke32.raw
+for i in 1 2 3; do  # smoke.cpp's die compiles shaders: the 32-bit SM50 calls
+  timeout -k 10 60 wine \$T/smoke32.exe die < /dev/null >> \$O/d3d-smoke32.raw 2>&1
+  echo "die status \$?" >> \$O/d3d-smoke32.raw
+done
+timeout -k 10 60 wine \$T/smoke32.exe < /dev/null >> \$O/d3d-smoke32.raw 2>&1
 echo "status \$?" >> \$O/d3d-smoke32.raw
 timeout 20 wineserver -k
 tr -d '\r' < \$O/d3d-smoke.raw > \$O/d3d-smoke-$mode.txt
@@ -82,6 +88,9 @@ EOS
     echo "d3d-smoke: $mode: ${got:-no $c line}"
     [ "$got" = "$c ok" ] || fail="$fail $mode-$c"
   done
+  dies=$(/usr/bin/grep -c '^die status 0$' "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null || true)
+  echo "d3d-smoke: $mode: 32: ${dies:-0} of 3 processes ended mid-load"
+  [ "${dies:-0}" -eq 3 ] || fail="$fail $mode-32-dies"
   for c in $checks; do
     got=$(/usr/bin/grep "^$c " "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null || true)
     echo "d3d-smoke: $mode: 32: ${got:-no $c line}"

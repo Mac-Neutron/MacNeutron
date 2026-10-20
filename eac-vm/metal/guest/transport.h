@@ -9,10 +9,10 @@ struct mn_blob { uint32_t gem; uint64_t blob_id, size; void *ptr; uint8_t low; }
 
 int mn_open(void);                                   /* once per process: 0 or -errno */
 int mn_blob_alloc(uint64_t size, struct mn_blob *b); /* rounded up to MN_PAGE; guest and host share ptr's memory */
-/* The same below 2 GiB, for a 32-bit (WoW64) process's DXMT: mapped over a range Wine's allocator reserved and
+/* The same within a 32-bit (WoW64) process's address space, for its DXMT: mapped over a range Wine's allocator reserved and
  * committed, so Wine's view of the 32-bit address space stays right (as winevulkan places a WoW64 mapping). */
 int mn_blob_alloc_low(uint64_t size, struct mn_blob *b);
-/* Memory below 2 GiB from Wine's allocator (committed, read-write), or NULL; and its release. */
+/* Memory in the 32-bit address space from Wine's allocator (committed, read-write), or NULL; and its release. */
 void *mn_low_alloc(uint64_t size);
 void mn_low_free(void *p);
 int mn_blob_free(struct mn_blob *b);                 /* a synchronous MN_OP_BLOB_RELEASE, then GEM_CLOSE */

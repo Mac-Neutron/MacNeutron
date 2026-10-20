@@ -51,14 +51,30 @@ static int ctrl(uint32_t type, uint64_t ring_blob, uint64_t arg, uint32_t ring_i
 extern int32_t NtAllocateVirtualMemory(void *process, void **addr, uintptr_t zero_bits, size_t *size, uint32_t type,
                                        uint32_t protect) __attribute__((weak));
 extern int32_t NtFreeVirtualMemory(void *process, void **addr, size_t *size, uint32_t type) __attribute__((weak));
+extern int32_t NtQuerySystemInformation(uint32_t cls, void *info, uint32_t size, uint32_t *ret) __attribute__((weak));
 #define CURRENT_PROCESS ((void *)~(uintptr_t)0)
 enum { MEM_COMMIT = 0x1000, MEM_RESERVE = 0x2000, MEM_RELEASE = 0x8000, PAGE_READWRITE = 0x04 };
+
+/* The mask Wine's own unix libraries give a WoW64 process's allocations (win32u, wow64): its 32-bit address space's
+ * top, 4 GiB for a large-address-aware program, 2 GiB otherwise (SystemEmulationBasicInformation's HighestUserAddress,
+ * at 40 in the 64-bit SYSTEM_BASIC_INFORMATION). */
+static uintptr_t zero_bits(void) {
+    static uintptr_t bits; /* the same value whichever thread computes it */
+    if (!bits) {
+        uint8_t info[64] = {0};
+        uint64_t highest = 0;
+        if (NtQuerySystemInformation && !NtQuerySystemInformation(62, info, sizeof info, NULL))
+            memcpy(&highest, info + 40, sizeof highest);
+        bits = (uintptr_t)highest | 0x7fffffff;
+    }
+    return bits;
+}
 
 void *mn_low_alloc(uint64_t size) {
     void *at = NULL;
     size_t n = size;
     if (!NtAllocateVirtualMemory ||
-        NtAllocateVirtualMemory(CURRENT_PROCESS, &at, 0x7fffffff, &n, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE))
+        NtAllocateVirtualMemory(CURRENT_PROCESS, &at, zero_bits(), &n, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE))
         return NULL;
     return at;
 }
