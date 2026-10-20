@@ -4,6 +4,9 @@
 # game through steam.exe, and every process in the prefix waited for. Exits with the game's status.
 export WINEPREFIX=/home/mn/pfx SteamAppId=$APPID SteamGameId=$APPID DISPLAY=:0 PATH=/opt/mn-wine/bin:$PATH
 export WINEDEBUG=${WINEDEBUG:--all}
+# Under FEX Mesa's CPU detection picks AVX2 paths that LLVM then fails to select: llvmpipe, a 32-bit game's Direct3D
+# until it has DXMT, crashes without this.
+export GALLIUM_OVERRIDE_CPU_CAPS=sse4.1
 # As the launcher's LaunchEnvironment: XeSS and DLSS on MetalFX.
 [ "${MACNEUTRON_XESS:-}" = 1 ] || export WINEDLLOVERRIDES="libxess,libxess_dx11=b"
 [ "${MACNEUTRON_DLSS:-}" = 1 ] && [ -z "${DXMT_ENABLE_NVEXT:-}" ] && export DXMT_ENABLE_NVEXT=1
