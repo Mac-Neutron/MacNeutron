@@ -1,7 +1,8 @@
 #!/bin/sh
 # Builds our Wine (eac-vm/wine-patches on build/wine-arm64-src/wine) for x86-64 Linux, in the Fedora builder:
 #   build.sh tools     Wine's build tools (winebuild, widl, wrc, ...) for the builder itself
-#   build.sh wine      the x86-64 Linux build against eac-vm/sysroot, PE side with clang + lld
+#   build.sh wine      the x86-64 Linux build against eac-vm/sysroot with new WoW64 (i386 and x86-64 PE code over the
+#                      64-bit Unix side: no 32-bit Linux libraries), PE side with clang + lld
 #   build.sh resume    make again in an existing build
 #   build.sh install   make install into $STAGE (prefix /opt/mn-wine)
 # Sources in $SRC (rsync of build/eac-vm-work/wine-linux without .git). Logs beside each build directory.
@@ -45,7 +46,7 @@ wine)
       *) U= PL= ;;
     esac
     L="$LTO${LTO:+${PL:+ }}$PL"
-    set -- CFLAGS="$F${LTO:+ $LTO}${U:+ $U}" x86_64_CFLAGS="$F"
+    set -- CFLAGS="$F${LTO:+ $LTO}${U:+ $U}" x86_64_CFLAGS="$F" i386_CFLAGS="$F"
     [ -z "$L" ] || set -- "$@" LDFLAGS="$L"
   fi
   # Wine's makefiles don't track compiler flags: other configure inputs (the p profile's, PGO's) start a fresh build
@@ -54,10 +55,10 @@ wine)
   [ "$(cat "$BUILD/.configure-inputs" 2> /dev/null)" = "$inputs" ] || rm -rf "$BUILD"
   mkdir -p "$BUILD" && cd "$BUILD"
   "$SRC/configure" --host=x86_64-linux-gnu --with-wine-tools="$TOOLS" --prefix=/opt/mn-wine --disable-tests \
-    --enable-archs=x86_64 \
+    --enable-archs=i386,x86_64 \
     CC="clang --target=x86_64-redhat-linux --sysroot=$SYSROOT" \
     CXX="clang++ --target=x86_64-redhat-linux --sysroot=$SYSROOT" \
-    x86_64_CC="clang --target=x86_64-windows -fuse-ld=lld" \
+    x86_64_CC="clang --target=x86_64-windows -fuse-ld=lld" i386_CC="clang --target=i686-windows -fuse-ld=lld" \
     AR=llvm-ar RANLIB=llvm-ranlib STRIP=llvm-strip \
     PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib64/pkgconfig:$SYSROOT/usr/share/pkgconfig" PKG_CONFIG_SYSROOT_DIR="$SYSROOT" \
     "$@" > configure.log 2>&1 || { tail -20 configure.log; exit 1; }

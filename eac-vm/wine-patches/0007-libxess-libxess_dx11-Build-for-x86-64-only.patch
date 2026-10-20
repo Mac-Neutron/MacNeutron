@@ -1,0 +1,37 @@
+From 1fdf0ada1764066d3c875c4d6b657a79c8922842 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Tue, 20 Oct 2026 12:26:31 -0400
+Subject: [PATCH 7/7] libxess, libxess_dx11: Build for x86-64 only.
+
+XeSS has no 32-bit runtime (Intel ships x64 only), and these follow its 64-bit structures: their size asserts fail in
+an i386 build (the guest's new WoW64).
+---
+ dlls/libxess/Makefile.in      | 2 ++
+ dlls/libxess_dx11/Makefile.in | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/dlls/libxess/Makefile.in b/dlls/libxess/Makefile.in
+index e36bcd05..b85b7e5f 100644
+--- a/dlls/libxess/Makefile.in
++++ b/dlls/libxess/Makefile.in
+@@ -1,4 +1,6 @@
+ MODULE = libxess.dll
++# XeSS has no 32-bit runtime (Intel ships x64 only), and these follow its 64-bit structures.
++ENABLE_ARCHS = x86_64
+ 
+ VER_FILEDESCRIPTION_STR = "Wine XeSS on MetalFX"
+ VER_PRODUCTVERSION      = 2,0,1,0
+diff --git a/dlls/libxess_dx11/Makefile.in b/dlls/libxess_dx11/Makefile.in
+index ca233d56..2d7588d1 100644
+--- a/dlls/libxess_dx11/Makefile.in
++++ b/dlls/libxess_dx11/Makefile.in
+@@ -1,4 +1,6 @@
+ MODULE = libxess_dx11.dll
++# XeSS has no 32-bit runtime (Intel ships x64 only), and these follow its 64-bit structures.
++ENABLE_ARCHS = x86_64
+ PARENTSRC = ../libxess
+ 
+ VER_FILEDESCRIPTION_STR = "Wine XeSS stand-in"
+-- 
+2.54.0 (Apple Git-157)
+

@@ -28,3 +28,6 @@ treat as XeSS unavailable.
 **Proton's EAC changes** (`eac-vm/wine-patches`, plan 3b Task 1): PROTON_EAC_RUNTIME for the bridge files, the bridge
 loaded only when its native `.so` sits next to the Windows library, the EAC launcher and EOS bootstrapper handling,
 and the `download-alt.easyanticheat.net` DNS hack. These are why the guest runs our Wine and not upstream's.
+
+**New WoW64** (0007, the 32-bit games' spec 2026-10-20 §5): the guest builds i386 and x86-64 PE code over the 64-bit
+Unix side; libxess and libxess_dx11 stay x86-64 only (XeSS ships x64 only, and their size asserts are x64's).

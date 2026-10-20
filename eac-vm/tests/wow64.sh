@@ -43,10 +43,12 @@ for _ in $(seq 15); do
   [ -n "$pid" ] && break
   sleep 1
 done
+# The guest has no awk: a start address of 8 hex digits or fewer is below 4 GiB.
+low_maps() { while read -r range rest; do start=${range%%-*}; [ ${#start} -gt 8 ] || echo "  $range $rest"; done < "$1"; }
 if [ -n "$pid" ]; then
-  echo "maps below 4 GiB of 32-bit process $pid:"
-  awk '{ split($1, a, "-"); if (length(a[1]) <= 8) print "  " $0 }' "/proc/$pid/maps"
-  check "7 low-fex" "$(awk '{ split($1, a, "-"); if (length(a[1]) <= 8 && /FEXMem/) n++ } END { print n + 0 }' "/proc/$pid/maps")" 0
+  low_maps "/proc/$pid/maps" > /home/mn/wow64-low-maps.txt
+  echo "maps below 4 GiB of 32-bit process $pid:"; cat /home/mn/wow64-low-maps.txt
+  check "7 low-fex" "$(grep -c FEXMem /home/mn/wow64-low-maps.txt)" 0
 else
   check "7 low-fex" "no 32-bit process" 0
 fi
