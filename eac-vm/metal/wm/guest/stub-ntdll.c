@@ -1,5 +1,6 @@
 /* A stand-in for Wine's ntdll.so, for the plain-Linux test programs only (milestone 4b-1): the guest winemetal.so
- * links ntdll.so for NtSetEvent, which here records the handle; mn_stub_signalled waits for one. */
+ * links ntdll.so for NtSetEvent, which here records the handle; mn_stub_signalled waits for one; and NtClose (Direct3D
+ * forwarding's events), which closes nothing here. */
 #include <pthread.h>
 #include <stdint.h>
 #include <time.h>
@@ -15,6 +16,11 @@ unsigned int NtSetEvent(void *handle, int *prev_state) {
     if (nevents < 64) events[nevents++] = (uint64_t)(uintptr_t)handle;
     pthread_cond_broadcast(&cond);
     pthread_mutex_unlock(&lock);
+    return 0;
+}
+
+unsigned int NtClose(void *handle) {
+    (void)handle;
     return 0;
 }
 
