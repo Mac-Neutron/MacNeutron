@@ -61,7 +61,8 @@ public struct MicroVM: Sendable {
 
     /// The launch options the guest reads (run-game.sh), as the launcher's own environment has them.
     static let passed = ["MACNEUTRON_DLSS", "MACNEUTRON_XESS", "DXMT_ENABLE_NVEXT", "MACNEUTRON_LOG", "MN_SCREEN",
-                         "MACNEUTRON_VM_PROFILE", "DXMT_STATS", "MACNEUTRON_VM_D3D", "MACNEUTRON_VM_D3D_TRACE", "DXMT_LOG_LEVEL",
+                         "MACNEUTRON_VM_PROFILE", "DXMT_STATS", "MACNEUTRON_VM_D3D", "MACNEUTRON_VM_D3D32",
+                         "MACNEUTRON_VM_D3D_TRACE", "DXMT_LOG_LEVEL",
                          "WINEDEBUG"]
     /// What a performance build's guest doesn't get: its stats and profiler are compiled out or off.
     static let notPassedToPerformance: Set = ["MACNEUTRON_VM_PROFILE", "DXMT_STATS"]

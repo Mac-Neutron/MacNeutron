@@ -56,6 +56,10 @@ wine_image() {
   if [ "$D3D_GUEST" != none ] && [ -f "$D3D_GUEST/x86_64-windows/mnd3d.dll" ]; then
     sudo mkdir -p "$WORK/wine/lib/wine/mn-d3d/x86_64-windows"
     sudo install -m644 "$D3D_GUEST"/x86_64-windows/*.dll "$WORK/wine/lib/wine/mn-d3d/x86_64-windows/"
+    if [ -d "$D3D_GUEST/i386-windows" ]; then  # 32-bit processes' (M4b), linked into syswow64 on opt-in
+      sudo mkdir -p "$WORK/wine/lib/wine/mn-d3d/i386-windows"
+      sudo install -m644 "$D3D_GUEST"/i386-windows/*.dll "$WORK/wine/lib/wine/mn-d3d/i386-windows/"
+    fi
     sudo install -m644 "$D3D_GUEST/prefix.sh" "$WORK/wine/lib/wine/mn-d3d/"
     [ ! -f "$D3D_GUEST/.mn-source" ] || sudo install -m644 "$D3D_GUEST/.mn-source" "$WORK/wine/.mn-source-d3d"
   fi

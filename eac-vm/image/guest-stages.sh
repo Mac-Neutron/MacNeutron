@@ -38,7 +38,7 @@ for stage in ${*:-wine forwarder dxmt d3d fex}; do
     d3d)  # Direct3D forwarding's guest DLLs (eac-vm/d3d/build-guest.sh, on the Mac) and prefix.sh, staged in the builder
       sh "$ROOT/eac-vm/d3d/build-guest.sh" > /dev/null
       rm -rf "$W/d3d-guest-stage"; mkdir -p "$W/d3d-guest-stage"
-      cp -R "$W/d3d-guest/x86_64-windows" "$W/d3d-guest-stage/"
+      cp -R "$W/d3d-guest/x86_64-windows" "$W/d3d-guest/i386-windows" "$W/d3d-guest-stage/"
       cp "$ROOT/eac-vm/d3d/guest/prefix.sh" "$W/d3d-guest-stage/"
       stamp d3d > "$W/d3d-guest-stage/.mn-source"
       $B sync "$W/d3d-guest-stage" mn-d3d-guest > /dev/null ;;

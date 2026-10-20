@@ -15,10 +15,9 @@
 # host ran from (native DXMT's logs go to the run's traces), and forwarded, native DXMT's shader cache and recorded
 # pipelines in MN_D3D_STATE's folder (a game's VM state). Needs the images (guest-stages.sh dxmt d3d, image/build.sh
 # wine) and the share's dxmt-tests (eac-vm/dxmt/share.sh). Prints "d3d-smoke: ok" or "d3d-smoke: FAIL <what>".
-# smoke32.exe, the same program for i686 (32-bit games, new WoW64), runs in each mode too, its "32:" lines the guest
-# checks: a 32-bit process runs on guest DXMT built for i386 in both modes (prefix.sh's builtins fallback) until there
-# are 32-bit forwarding proxies, so it runs with MACNEUTRON_VM_D3D=guest (forwarded, smoke.cpp tries what guest DXMT
-# aborts on).
+# smoke32.exe, the same program for i686 (32-bit games, new WoW64), runs in each mode too, its "32:" lines the same
+# checks: forwarded through the i386 proxies (MACNEUTRON_VM_D3D32=forward, M4b's opt-in), and on DXMT built for i386 in
+# guest mode.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
@@ -33,7 +32,7 @@ for mode in forward guest; do
   G=$W/d3d-smoke-$mode.sh
   cat > "$G" <<EOS
 export PATH=/opt/mn-wine/bin:\$PATH WINEDEBUG=-all DISPLAY=:0 WINEPREFIX=/home/mn/d3d-smoke DXMT_MAX_ANISOTROPY=0
-export MACNEUTRON_VM_D3D=$mode MACNEUTRON_VM_D3D_TRACE=1
+export MACNEUTRON_VM_D3D=$mode MACNEUTRON_VM_D3D_TRACE=1 MACNEUTRON_VM_D3D32=$mode
 T=/mnt/share/dxmt-tests O=/mnt/share/traces
 mkdir -p \$O
 Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
@@ -47,7 +46,7 @@ for i in 1 2 3; do  # processes that end mid-load (M4's final review): the host 
   echo "die status \$?" >> \$O/d3d-smoke.raw
 done
 timeout -k 10 60 wine \$T/smoke.exe < /dev/null >> \$O/d3d-smoke.raw 2>&1
-MACNEUTRON_VM_D3D=guest timeout -k 10 60 wine \$T/smoke32.exe < /dev/null > \$O/d3d-smoke32.raw 2>&1
+timeout -k 10 60 wine \$T/smoke32.exe < /dev/null > \$O/d3d-smoke32.raw 2>&1
 echo "status \$?" >> \$O/d3d-smoke32.raw
 timeout 20 wineserver -k
 tr -d '\r' < \$O/d3d-smoke.raw > \$O/d3d-smoke-$mode.txt
@@ -83,7 +82,7 @@ EOS
     echo "d3d-smoke: $mode: ${got:-no $c line}"
     [ "$got" = "$c ok" ] || fail="$fail $mode-$c"
   done
-  for c in eventthread name minimised latency d3d11latency wmtforward wmsize; do
+  for c in $checks; do
     got=$(/usr/bin/grep "^$c " "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null || true)
     echo "d3d-smoke: $mode: 32: ${got:-no $c line}"
     [ "$got" = "$c ok" ] || fail="$fail $mode-32-$c"
