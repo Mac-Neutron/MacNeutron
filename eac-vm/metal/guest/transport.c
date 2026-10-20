@@ -47,9 +47,30 @@ static int ctrl(uint32_t type, uint64_t ring_blob, uint64_t arg, uint32_t ring_i
     return 0;
 }
 
+/* Wine's, from the ntdll.so winemetal.so links; weak, as the plain-Linux test programs have none. */
+extern int32_t NtAllocateVirtualMemory(void *process, void **addr, uintptr_t zero_bits, size_t *size, uint32_t type,
+                                       uint32_t protect) __attribute__((weak));
+extern int32_t NtFreeVirtualMemory(void *process, void **addr, size_t *size, uint32_t type) __attribute__((weak));
+#define CURRENT_PROCESS ((void *)~(uintptr_t)0)
+enum { MEM_COMMIT = 0x1000, MEM_RESERVE = 0x2000, MEM_RELEASE = 0x8000, PAGE_READWRITE = 0x04 };
+
+void *mn_low_alloc(uint64_t size) {
+    void *at = NULL;
+    size_t n = size;
+    if (!NtAllocateVirtualMemory ||
+        NtAllocateVirtualMemory(CURRENT_PROCESS, &at, 0x7fffffff, &n, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE))
+        return NULL;
+    return at;
+}
+void mn_low_free(void *p) {
+    size_t n = 0;
+    if (p && NtFreeVirtualMemory) NtFreeVirtualMemory(CURRENT_PROCESS, &p, &n, MEM_RELEASE);
+}
+
 static void blob_close(struct mn_blob *b) {
     struct drm_gem_close gc = { .handle = b->gem };
-    munmap(b->ptr, b->size);
+    if (b->low) mn_low_free(b->ptr); /* Wine's release replaces our mapping too */
+    else munmap(b->ptr, b->size);
     ioctl(fd, DRM_IOCTL_GEM_CLOSE, &gc);
 }
 
@@ -104,7 +125,7 @@ int mn_open(void) {
     return r;
 }
 
-static int blob_alloc(uint64_t size, uint64_t blob_id, struct mn_blob *b) {
+static int blob_alloc(uint64_t size, uint64_t blob_id, struct mn_blob *b, int low) {
     size = (size + MN_PAGE - 1) / MN_PAGE * MN_PAGE;
     struct drm_virtgpu_resource_create_blob cb = {
         .blob_mem = VIRTGPU_BLOB_MEM_HOST3D, .blob_flags = VIRTGPU_BLOB_FLAG_USE_MAPPABLE, .size = size,
@@ -112,26 +133,30 @@ static int blob_alloc(uint64_t size, uint64_t blob_id, struct mn_blob *b) {
     };
     if (ioctl(fd, DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB, &cb)) return -errno;
     struct drm_virtgpu_map m = { .handle = cb.bo_handle };
-    void *p = MAP_FAILED;
-    if (!ioctl(fd, DRM_IOCTL_VIRTGPU_MAP, &m))
-        p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)m.offset);
+    void *p = MAP_FAILED, *at = low ? mn_low_alloc(size) : NULL;
+    if ((!low || at) && !ioctl(fd, DRM_IOCTL_VIRTGPU_MAP, &m))
+        p = mmap(at, size, PROT_READ | PROT_WRITE, MAP_SHARED | (at ? MAP_FIXED : 0), fd, (off_t)m.offset);
     if (p == MAP_FAILED) {
-        int e = errno;
+        int e = low && !at ? ENOMEM : errno;
+        mn_low_free(at);
         struct drm_gem_close gc = { .handle = cb.bo_handle };
         ioctl(fd, DRM_IOCTL_GEM_CLOSE, &gc);
         return -e;
     }
-    *b = (struct mn_blob){ .gem = cb.bo_handle, .blob_id = cb.blob_id, .size = size, .ptr = p };
+    *b = (struct mn_blob){ .gem = cb.bo_handle, .blob_id = cb.blob_id, .size = size, .ptr = p, .low = at != NULL };
     return 0;
 }
 
-int mn_blob_alloc(uint64_t size, struct mn_blob *b) { return blob_alloc(size, atomic_fetch_add(&next_blob_id, 1), b); }
+int mn_blob_alloc(uint64_t size, struct mn_blob *b) { return blob_alloc(size, atomic_fetch_add(&next_blob_id, 1), b, 0); }
+int mn_blob_alloc_low(uint64_t size, struct mn_blob *b) {
+    return blob_alloc(size, atomic_fetch_add(&next_blob_id, 1), b, 1);
+}
 
 int mn_drained(void) {
     pthread_mutex_lock(&open_lock);
     int r = trap ? 0 : open_locked();
     if (!r && !trap) {
-        r = blob_alloc(MN_PAGE, MN_TRAP_BLOB_ID | atomic_fetch_add(&next_blob_id, 1), &trap_blob);
+        r = blob_alloc(MN_PAGE, MN_TRAP_BLOB_ID | atomic_fetch_add(&next_blob_id, 1), &trap_blob, 0);
         if (!r) trap = trap_blob.ptr;
     }
     pthread_mutex_unlock(&open_lock);

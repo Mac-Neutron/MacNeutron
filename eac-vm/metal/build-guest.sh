@@ -31,9 +31,11 @@ build() {  # <output under bin/> <compiler arguments...>
 build metal-probe -std=gnu11 tests/probe.c -lpthread
 build metal-transport-test -std=gnu11 tests/transport-test.c guest/transport.c ring.c -lpthread
 WM="wm/calls.c wm/cmdlist.c wm/marshal.c wm/slots.c wm/guest/ghandles.c wm/guest/galloc.c guest/transport.c ring.c"
+WM="$WM wm/guest/wow64.c wm/guest/sm50-args32.c"  # the WoW64 table (32-bit DXMT)
 D3D="../mn-d3d/guest/unix.c ../mn-d3d-gen/calls.c ../mn-d3d-gen/ifaces.c"
 build wm/winemetal.so -std=gnu2x -DMN_WM_GUEST -fPIC -shared wm/guest/winemetal.c $WM $D3D $WINEBUILD/dlls/ntdll/ntdll.so \
   -lpthread
 build wm/ntdll.so -std=gnu2x -fPIC -shared -Wl,-soname,ntdll.so wm/guest/stub-ntdll.c -lpthread
 build metal-wm-test -std=gnu2x wm/tests/guest-test.c wm/tests/sequence.c wm/tests/galloc-cases.c -ldl -lpthread
+build metal-sm50-args32-test -std=gnu2x wm/tests/sm50-args32-test.c wm/guest/sm50-args32.c
 file "$OUT"/metal-* "$OUT"/wm/*
