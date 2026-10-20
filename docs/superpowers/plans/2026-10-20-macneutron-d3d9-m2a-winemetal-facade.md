@@ -37,8 +37,12 @@ llvm-mingw 20261006.
 ## Review Focus
 
 - A winemetal slot or node index that drifts from the table (a later DXMT change reordering it) would call the wrong
-  function: the facade checks, on macOS, each slot it uses against its symbol name (`dladdr`) at load and refuses to
-  start on a mismatch (Task 2 test).
+  function: a facade test checks each slot it uses against its symbol name (`dladdr`) on macOS's winemetal.so (a
+  test, not a load-time check: release bundles strip symbols and the guest's forwarders have other names).
+- Autoreleased returns (`MTLCommandQueue_commandBuffer`, `MetalDrawable_texture`, `MTLDevice_name`, ...) need a real
+  pool on macOS: under the facade `autoreleasepool` is winemetal's (slot 10 in, slot 1 out) on macOS and a no-op on
+  Linux; every wrapped return follows the VM catalog's +1/autoreleased column (`Retained` takes +1, a +0 return is
+  retained first).
 - A struct the facade fills where winemetal assigns every field (texture, sampler, pipeline descriptors): an unset
   field must get Metal's default, not zero (`normalized_coords`, `max_anisotropy`, `rasterization_enabled`,
   `sample_count`, `depth`, `array_length`, `lod_max_clamp`) — Task 2's tests read the created object back.
@@ -53,6 +57,11 @@ llvm-mingw 20261006.
   device subtests do this).
 
 ---
+
+Order: Task 1, then Task 5's mechanical half (the empty facade crate with the six module names, the `crate::mtl`
+switch, the feature and the rewritten `use` lines), so `cargo check --features mtld3d-unix/winemetal` lists every item
+the facade must provide; Tasks 2-4 then fill that list, each `cargo check` a RED→GREEN meter; Task 5 finishes the
+behaviour (cfg-outs, attach, readback, page hook).
 
 ### Task 1: winemetal's four render nodes and two slots
 
@@ -95,7 +104,8 @@ llvm-mingw 20261006.
 - Create (DXMT tree): `mtld3d/unix/mtl/Cargo.toml`, `mtld3d/unix/mtl/src/lib.rs` and modules `table.rs` (loader and
   slot calls), `objc.rs` (the `objc2`-shaped base: `Retained`, `ProtocolObject`, `autoreleasepool`, `Message`),
   `foundation.rs` (`NSString`, `NSError`, `NSRange`), `metal/*.rs` (device, buffer, texture, sampler, depth-stencil,
-  library, function, pipeline, enums and descriptor types)
+  library, function, pipeline, enums and descriptor types; the enum and struct definitions copied from objc2-metal
+  carry its MIT notice in their header)
 - Modify: `mtld3d/unix/Cargo.toml` (workspace member)
 - Test: `mtld3d/unix/mtl/tests/objects.rs`
 
@@ -148,8 +158,9 @@ llvm-mingw 20261006.
 - [ ] Step 1: write `tests/encode.rs`: a render pass clearing a 64x64 texture and drawing a triangle with vertex
   bytes, a vertex texture and both sampler binds, read back by a blit into a Shared buffer (centre and corner
   pixels); cull and fill changes between two draws coalesce (the second draw's culled triangle is absent); a
-  completion handler runs exactly once per buffer, in commit order over 100 buffers; a buffer whose fragment shader
-  faults reports an error status in its handler.
+  completion handler runs exactly once per buffer, in commit order over 100 buffers; a buffer whose status reads
+  as an error (through a seam that fakes `status`: a real GPU fault isn't deterministic on Apple Silicon) runs its
+  handler with that status.
 - [ ] Step 2: run it: FAIL (no encoder yet).
 - [ ] Step 3: implement.
 - [ ] Step 4: `cargo +1.99.0 test -p mtld3d-mtl` passes.
@@ -203,7 +214,9 @@ llvm-mingw 20261006.
   fails); record the first errors.
 - [ ] Step 2: implement until it builds; mtld3d's own unit tests pass in both builds (`cargo test` in `unix/` with and
   without `--features mtld3d-unix/winemetal`, the M1 ruling's `--lib --bins --tests`).
-- [ ] Step 3: `MTLD3D_SO=<loopback mtld3d.so> OLD=<pre-mtld3d wine.app> sh dxmt/d3d9-check.sh`: eight `ok`s.
+- [ ] Step 3: `MTLD3D_SO=<loopback mtld3d.so> OLD=<pre-mtld3d wine.app> sh dxmt/d3d9-check.sh`: eight `ok`s (the
+  loopback `.so` signed with `MACNEUTRON_SIGN_IDENTITY` before the swap, which edits a copy of wine.app, never the
+  build's).
 - [ ] Step 4: the product build's `dxmt/d3d9-check.sh` still passes.
 - [ ] Step 5: commit (DXMT 0105, repo scripts).
 
