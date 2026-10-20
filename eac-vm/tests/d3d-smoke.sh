@@ -78,6 +78,7 @@ EOS
   lines=$(/usr/bin/grep -c '^null ' "$out" 2> /dev/null || true)
   echo "d3d-smoke: $mode: ${lines:-0} null lines, $(/usr/bin/grep '^status' "$out" 2> /dev/null), macneutron-vm peak $((peak / 1024)) MiB"
   [ "${lines:-0}" -eq 18 ] || { fail="$fail $mode-lines"; tail -5 "$out" 2> /dev/null || true; }
+  /usr/bin/grep -qx 'status 0' "$out" 2> /dev/null || fail="$fail $mode-status"
   [ -z "$(ls -A "$C")" ] || fail="$fail $mode-cwd($(ls -A "$C" | tr '\n' ' '))"
   dies=$(/usr/bin/grep -c '^die status 0$' "$out" 2> /dev/null || true)
   echo "d3d-smoke: $mode: ${dies:-0} of 3 processes ended mid-load, and the host outlived them"
@@ -90,8 +91,9 @@ EOS
     [ "$got" = "$c ok" ] || fail="$fail $mode-$c"
   done
   dies=$(/usr/bin/grep -c '^die status 0$' "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null || true)
-  echo "d3d-smoke: $mode: 32: ${dies:-0} of 3 processes ended mid-load"
+  echo "d3d-smoke: $mode: 32: ${dies:-0} of 3 processes ended mid-load, $(/usr/bin/grep '^status' "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null)"
   [ "${dies:-0}" -eq 3 ] || fail="$fail $mode-32-dies"
+  /usr/bin/grep -qx 'status 0' "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null || fail="$fail $mode-32-status"
   for c in $checks; do
     got=$(/usr/bin/grep "^$c " "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null || true)
     echo "d3d-smoke: $mode: 32: ${got:-no $c line}"

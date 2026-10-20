@@ -26,6 +26,16 @@ check "2 fresh-syswow64" "$([ -f "$WINEPREFIX/drive_c/windows/syswow64/kernel32.
 cmd32() { wine 'C:\windows\syswow64\cmd.exe' /c "$1" 2>/dev/null | tr -d '\r'; }
 check "3 cmd32" "$(cmd32 'echo %PROCESSOR_ARCHITECTURE%')" x86
 check "4 cmd32-wow" "$(cmd32 'echo %PROCESSOR_ARCHITEW6432%')" AMD64
+if [ -d /home/mn/pfx64 ]; then
+  rm -rf /home/mn/pfx64-up; cp -a /home/mn/pfx64 /home/mn/pfx64-up  # the original stays 64-bit-only for the next run
+  WINEPREFIX=/home/mn/pfx64-up wineboot -i >/dev/null 2>&1  # as run-game.sh: wine.inf is newer than the prefix
+  check "5 upgrade" "$([ -f /home/mn/pfx64-up/drive_c/windows/syswow64/kernel32.dll ] && echo present)" present
+  check "5 upgrade-cmd32" "$(WINEPREFIX=/home/mn/pfx64-up cmd32 'echo %PROCESSOR_ARCHITECTURE%')" x86
+  WINEPREFIX=/home/mn/pfx64-up wineserver -k
+else
+  check "5 upgrade" missing-pfx64 present
+  check "5 upgrade-cmd32" missing-pfx64 x86
+fi
 # run-game.sh runs wineboot -i at every launch (an update only when wine.inf changed): its cost on an up-to-date prefix.
 for n in 1 2; do
   t0=$(date +%s%N); wineboot -i >/dev/null 2>&1; t1=$(date +%s%N)
@@ -53,20 +63,12 @@ low_maps() { while read -r range rest; do start=${range%%-*}; [ ${#start} -gt 8 
 if [ -n "$pid" ]; then
   low_maps "/proc/$pid/maps" > /home/mn/wow64-low-maps.txt
   echo "maps below 4 GiB of 32-bit process $pid:"; cat /home/mn/wow64-low-maps.txt
-  check "7 low-fex" "$(grep -c FEXMem /home/mn/wow64-low-maps.txt)" 0
+  # FEX's named regions (FEXMem) and files (its binary, libraries, root); an unnamed anonymous one can't be told from
+  # Wine's own, so the printed list stays the evidence.
+  check "7 low-fex" "$(grep -ci fex /home/mn/wow64-low-maps.txt)" 0
 else
   check "7 low-fex" "no 32-bit process" 0
 fi
 wineserver -k
 
-if [ -d /home/mn/pfx64 ]; then
-  rm -rf /home/mn/pfx64-up; cp -a /home/mn/pfx64 /home/mn/pfx64-up  # the original stays 64-bit-only for the next run
-  WINEPREFIX=/home/mn/pfx64-up wineboot -i >/dev/null 2>&1  # as run-game.sh: wine.inf is newer than the prefix
-  check "5 upgrade" "$([ -f /home/mn/pfx64-up/drive_c/windows/syswow64/kernel32.dll ] && echo present)" present
-  check "5 upgrade-cmd32" "$(WINEPREFIX=/home/mn/pfx64-up cmd32 'echo %PROCESSOR_ARCHITECTURE%')" x86
-  WINEPREFIX=/home/mn/pfx64-up wineserver -k
-else
-  check "5 upgrade" missing-pfx64 present
-  check "5 upgrade-cmd32" missing-pfx64 x86
-fi
 exit $fail

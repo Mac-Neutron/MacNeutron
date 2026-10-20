@@ -3,7 +3,7 @@
 # (run-guest.sh passes the script no arguments), e.g. Rogue Company's 32-bit EAC launcher:
 #   { echo 'EAC_APPID=872200 EAC_PREFIX=/home/mn/roguecompany EAC_DIR="/mnt/games/Rogue Company/<folder>"'
 #     echo 'EAC_EXE=RogueCompanyEAC.exe EAC_ARGS= EAC_EXPECT='; cat eac-vm/tests/eac.sh; } > /tmp/eac-rc.sh
-# EAC_ARGS is split by the shell; an empty EAC_EXPECT reports the launcher's result without judging it.
+# EAC_ARGS is split by the shell, never globbed; an empty EAC_EXPECT reports the launcher's result without judging it.
 # Run with --steam-appid <the game's> --ram-mib 16384 (Steam forwarded to Mac Steam) and the game in the Mac's Steam
 # library (shared read-only at /mnt/games). Needs in the share, never committed (Valve's and Epic's files):
 #   eac-runtime/v2/          the Proton EasyAntiCheat Runtime (Steam app 1826330)
@@ -59,8 +59,10 @@ rm -rf "$EACLOG"
 sampler=$!
 cd "$EAC_DIR"
 start=$(date +%s)
+set -f  # $EAC_ARGS is split into words, never glob-expanded
 timeout -s KILL "$RUN" wine 'C:\Program Files (x86)\Steam\steam.exe' "Z:$(printf '%s' "$EAC_DIR/$EAC_EXE" | tr / '\\')" \
   $EAC_ARGS > /home/mn/eac-run.log 2>&1
+set +f
 echo "ran $(( $(date +%s) - start )) s"
 wait "$sampler"
 timeout 20 wineserver -k
