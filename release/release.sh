@@ -192,6 +192,16 @@ check_no_profile_runtime() {  # check_no_profile_runtime <dir or file>...: nothi
   [ -z "$d" ] || { echo "release: $d has the LLVM profile runtime (a PGO generate build)" >&2; return 1; }
 }
 
+stamps() {  # stamps <file>...: each file's path, modification time and size ("none" when missing), a line each
+  for f; do echo "$f $(stat -f '%m %z' "$f" 2> /dev/null || echo none)"; done
+}
+check_untouched() {  # check_untouched <stamps> <file>...: a p release left the normal build's files as stamped
+  s=$1; shift
+  for f; do
+    printf '%s\n' "$s" | /usr/bin/grep -qxF "$(stamps "$f")" || { echo "release: the p build changed $f" >&2; return 1; }
+  done
+}
+
 check_pgo() {  # check_pgo <pgo dir>: the p build's PGO profiles, if any, name no home or build folder (privacy: they
   # name static functions by the path they were compiled from)
   for f in "$1"/*.profdata; do
@@ -276,6 +286,13 @@ self_test() {
   refused "a p build with the profile runtime" "release: $T/prof/m has the LLVM profile runtime (a PGO generate build)" \
     check_no_profile_runtime "$T/prof"
   passes "a p build without the profile runtime" check_no_profile_runtime "$T/noprof"
+  # The normal build's files, which a p release leaves alone (u3 missing both times).
+  printf a > "$T/u1"; printf b > "$T/u2"
+  s=$(stamps "$T/u1" "$T/u2" "$T/u3")
+  passes "a p release that left the normal build alone" check_untouched "$s" "$T/u1" "$T/u2" "$T/u3"
+  printf bb > "$T/u2"
+  refused "a p release that changed the normal build" "release: the p build changed $T/u2" \
+    check_untouched "$s" "$T/u1" "$T/u2" "$T/u3"
   # The p build's PGO profiles, when there are any: none naming a home or build folder.
   mkdir -p "$T/pgo-none" "$T/pgo-ok" "$T/pgo-home"
   passes "a p build without PGO profiles" check_pgo "$T/pgo-none"
@@ -684,6 +701,17 @@ if [ $PROFILE = p ]; then
   V=${V}p
   export MACNEUTRON_PROFILE=p BUILD_DIR="$ROOT/build/p" BUILDER_HOME=/home/bench/p
   [ $mode = check ] || check_pgo "$ROOT/pgo" || exit 1
+  # The normal build's files it must leave alone (check_untouched, at the end): stamped by the check run that starts
+  # `make release` (before p-seed and the p wine-arm64 build), else when this run starts.
+  set -- "$ROOT/build/wine-arm64/wine.app/Contents/Info.plist" "$ROOT/build/eac-vm-work/images/manifest.sha256" \
+    "$ROOT/build/eac-vm-work/images/base.erofs"
+  mkdir -p "$ROOT/build/p"
+  if [ $mode = check ]; then
+    stamps "$@" > "$ROOT/build/p/untouched.txt"
+  else
+    UNTOUCHED=$(cat "$ROOT/build/p/untouched.txt" 2> /dev/null || stamps "$@")
+    rm -f "$ROOT/build/p/untouched.txt"
+  fi
 else
   check_version "$ROOT" "$V" || exit 2
 fi
@@ -811,6 +839,9 @@ out=$(sh "$ROOT/release/verify-sources.sh" "$OUT/$TGZ" "$OUT/wine.app/Contents/R
   || st=$?
 printf '%s\n' "$out"
 [ "$st" = 0 ] && [ "$(printf '%s\n' "$out" | tail -n 1)" = "PASS sources" ] || die "R5: the source archive fails"
+
+[ $PROFILE = std ] || check_untouched "$UNTOUCHED" "$ROOT/build/wine-arm64/wine.app/Contents/Info.plist" \
+  "$ROOT/build/eac-vm-work/images/manifest.sha256" "$ROOT/build/eac-vm-work/images/base.erofs" || exit 1
 
 # 6. Checksums and sizes; the commands that publish it, for the maintainer.
 ( cd "$OUT" && shasum -a 256 "$ZIP" "$TGZ" "$PARTS" > SHA256SUMS )
