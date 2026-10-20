@@ -95,8 +95,9 @@ public struct Launcher: Sendable {
         // A performance build (X.Y.Zp) keeps one launcher.log line a launch unless MACNEUTRON_LOG asks for more.
         log.setQuiet(layout.isPerformanceBuild && !logging)
         let gameLog = logging ? log.gameLog(appID: context.appID) : nil
-        let inMicroVM = MicroVM.wanted(environment: environment, verb: request.verb)
-            && MicroVM.guestPath(request.target) != nil
+        let vmWanted = MicroVM.wanted(environment: environment, verb: request.verb)
+        let vmTarget = vmWanted ? MicroVM.guestPath(request.target) : nil  // a game in a Steam library: in the VM
+        let inMicroVM = vmTarget != nil
         let identity: String
         do {
             identity = try preflight.check(layout, request: request, inMicroVM: inMicroVM)
@@ -110,17 +111,15 @@ public struct Launcher: Sendable {
             return 0
         }
 
-        if MicroVM.wanted(environment: environment, verb: request.verb) {
-            if let (library, guest) = MicroVM.guestPath(request.target) {
-                // In the VM or not at all: a launch before the app's setup finishes is refused, never run on macOS.
-                guard let vm = MicroVM.find(root: microVMRoot, environment: environment, verb: request.verb) else {
-                    return fail("MacNeutron's game VM isn't ready yet: open MacNeutron, and launch the game again "
-                                + "once its Settings say \"Game VM: ready\".", argv: argv, notify: true, gameLog: gameLog)
-                }
-                return runInMicroVM(vm, request, context, library: library, guest: guest, environment, gameLog, argv)
+        if let (library, guest) = vmTarget {
+            // In the VM or not at all: a launch before the app's setup finishes is refused, never run on macOS.
+            guard let vm = MicroVM.find(root: microVMRoot, environment: environment, verb: request.verb) else {
+                return fail("MacNeutron's game VM isn't ready yet: open MacNeutron, and launch the game again "
+                            + "once its Settings say \"Game VM: ready\".", argv: argv, notify: true, gameLog: gameLog)
             }
-            log.append("note: \(request.target) is not in a Steam library: it runs on macOS")
+            return runInMicroVM(vm, request, context, library: library, guest: guest, environment, gameLog, argv)
         }
+        if vmWanted { log.append("note: \(request.target) is not in a Steam library: it runs on macOS") }
 
         let (backend, note) = GraphicsBackend.select(requested: environment["MACNEUTRON_GRAPHICS"])
         var env = LaunchEnvironment.build(base: environment, context: context, backend: backend, logging: logging)

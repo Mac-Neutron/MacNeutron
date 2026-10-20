@@ -138,7 +138,7 @@ private func makeFixture(runner: FakeRunner = winebootCreatingPrefix(), identity
     #expect(FileManager.default.fileExists(atPath: f.launcher.layout.runtimeDamagedMarker.path(percentEncoded: false)))
 }
 
-private let thirtyTwoBitText = "This game is 32-bit. On macOS MacNeutron runs 64-bit games only; 32-bit games run in its game VM."
+private let thirtyTwoBitText = "This game is 32-bit. On macOS MacNeutron runs 64-bit games only; 32-bit games in a Steam library run in its game VM."
 
 private func i386Exe(named name: String) throws -> String {
     let url = try makeTempDir().appending(path: name)

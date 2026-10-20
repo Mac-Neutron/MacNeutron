@@ -101,6 +101,15 @@ private func i386GameInLibrary(named name: String = "Game.exe") throws -> String
     #expect(!f.launcherLog.contains("skipped 32-bit installer"))
 }
 
+@Test func a32BitGameWaitsForTheVMLikeAnyOther() throws {
+    // Before the app's setup finishes a 32-bit game gets the VM's message, not the macOS refusal.
+    let f = try makeVMFixture(vmInstalled: false)
+    #expect(f.launcher.launch(["waitforexitandrun", try i386GameInLibrary()], environment: f.env) == 1)
+    #expect(f.runner.calls.isEmpty)
+    #expect(f.notifier.posted.count == 1)
+    #expect(f.notifier.posted.contains { $0.contains("game VM isn't ready") })
+}
+
 @Test func a32BitGameOptedOutOfTheVMIsRefused() throws {
     let f = try makeVMFixture()
     var env = f.env
@@ -108,7 +117,7 @@ private func i386GameInLibrary(named name: String = "Game.exe") throws -> String
     #expect(f.launcher.launch(["waitforexitandrun", try i386GameInLibrary()], environment: env) == 1)
     #expect(f.runner.calls.isEmpty)
     #expect(f.notifier.posted
-        == ["This game is 32-bit. On macOS MacNeutron runs 64-bit games only; 32-bit games run in its game VM."])
+        == ["This game is 32-bit. On macOS MacNeutron runs 64-bit games only; 32-bit games in a Steam library run in its game VM."])
 }
 
 @Test func theGuestScriptCarriesTheLaunch() throws {

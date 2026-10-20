@@ -11,7 +11,7 @@ public enum PreflightError: Error, Equatable, CustomStringConvertible {
         switch self {
         case .unsupportedSystem: "MacNeutron needs macOS 27 or later on an Apple Silicon Mac."
         case .runtimeMissing: "MacNeutron's runtime is missing or damaged. Open MacNeutron to repair it."
-        case .thirtyTwoBit: "This game is 32-bit. On macOS MacNeutron runs 64-bit games only; 32-bit games run in its game VM."
+        case .thirtyTwoBit: "This game is 32-bit. On macOS MacNeutron runs 64-bit games only; 32-bit games in a Steam library run in its game VM."
         case .unsupportedMachine(let machine):
             "This game is built for \(Self.name(of: machine)), which MacNeutron can't run."
         case .unsupportedCPU(let cpu, let missing):
