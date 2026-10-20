@@ -25,10 +25,12 @@ smoke: build bridge wine-arm64
 	sh Tests/Smoke/smoke.sh
 
 # The Steam bridge (docs/superpowers/specs/2026-09-28-macneutron-steam-bridge-design.md): steam.exe and its test
-# helper for the arm64 runtime in $(BRIDGE)/arm64, and the x64 steamprobe.exe, which runs under FEX.
+# helper for the arm64 runtime in $(BRIDGE)/arm64, and the x64 steamprobe.exe, which runs under FEX (steamprobe32.exe:
+# the same for a 32-bit game's steam_api.dll, in the VM).
 bridge:
 	mkdir -p $(BRIDGE)/arm64/tests
 	$(MINGW) -fms-extensions -mwindows -o $(BRIDGE)/steamprobe.exe bridge/probe.c
+	$(MINGW_BIN)/i686-w64-mingw32-clang -O3 -flto=thin -static -s -fms-extensions -mwindows -o $(BRIDGE)/steamprobe32.exe bridge/probe.c
 	$(MINGW_A64) -mwindows -o $(BRIDGE)/arm64/steam.exe bridge/steam.c -ladvapi32 -lntdll -luser32 -lshell32 -lshlwapi -lole32
 	$(MINGW_A64) -mwindows -o $(BRIDGE)/arm64/tests/helper.exe bridge/tests/helper.c -ladvapi32 -lshell32 -luser32
 	$(MINGW_A64) -o $(BRIDGE)/arm64/tests/helper-console.exe bridge/tests/helper.c -ladvapi32 -lshell32 -luser32

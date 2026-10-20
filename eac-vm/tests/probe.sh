@@ -3,7 +3,10 @@
 # Prints only redacted rows (probe.sh's filter). Needs in the share: bin/steamprobe.exe, bin/steam.exe and a game's
 # bin/steam_api64.dll. Expects Steam through the forwarder when the host has --steam-appid (EXPECT=ok), or a refused
 # Steam with Wine still running when it hasn't (EXPECT=refused). Exits 1 on a miss.
+# PROBE_ARCH=32 (the 32-bit games' spec, §8): bin/steamprobe32.exe through a 32-bit game's bin/steam_api.dll, its
+# lsteamclient calls WoW64 ones, with the prefix's steamclient.dll as run-game.sh puts it.
 EXPECT=${EXPECT:-ok}
+if [ "${PROBE_ARCH:-64}" = 32 ]; then PROBE=steamprobe32.exe API=steam_api.dll; else PROBE=steamprobe.exe API=steam_api64.dll; fi
 export WINEPREFIX=/home/mn/probe-$EXPECT WINEDEBUG=-all SteamAppId=480 SteamGameId=480 DISPLAY=:0 PATH=/opt/mn-wine/bin:$PATH
 Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
 # A fresh prefix: the registry check must see only this run's writes.
@@ -13,9 +16,10 @@ STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
 cp /opt/mn-wine/lib/wine/x86_64-windows/lsteamclient.dll "$STEAM/steamclient64.dll"
+cp /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll "$STEAM/steamclient.dll"
 # To a file, not $(...): Wine's services outlive a killed launcher and would hold the pipe open.
-timeout -s KILL ${PROBE_TIMEOUT:-120} wine 'C:\Program Files (x86)\Steam\steam.exe' 'Z:\mnt\share\bin\steamprobe.exe' \
-  'Z:\mnt\share\bin\steam_api64.dll' fault > /tmp/probe.out 2>&1
+timeout -s KILL ${PROBE_TIMEOUT:-120} wine 'C:\Program Files (x86)\Steam\steam.exe' "Z:\\mnt\\share\\bin\\$PROBE" \
+  "Z:\\mnt\\share\\bin\\$API" fault > /tmp/probe.out 2>&1
 ran=$?  # 137: killed, the probe never finished (an assertion dialog waits on the invisible display)
 echo "probe exit: $ran"
 rows=$(LC_ALL=C tr -d '\r' < /tmp/probe.out | LC_ALL=C grep -E '^(load|init|SteamUser|auth ticket|fault|steamid)' |

@@ -36,6 +36,10 @@ STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
 [ -f /mnt/share/valve/steamclient64.dll ] && cp /mnt/share/valve/steamclient64.dll "$STEAM/steamclient64.dll"
+# A 32-bit game's client: steam.exe names it SteamClientDll when it's there. ponytail: Wine's own i386 lsteamclient.dll;
+# Proton puts Valve's signed 32-bit steamclient.dll there and redirects its exports, which Wine patch 0036 does for the
+# 64-bit one only, so a SteamStub-protected 32-bit game stops at its error 3 until 0036 covers i386.
+cp /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll "$STEAM/steamclient.dll"
 : > /mnt/share/traces/ready  # the prefix is done: the launcher's toast goes (traces/: the share is root's)
 cd "$GAME_DIR" || exit 1
 if [ "$VERB" = waitforexitandrun ]; then

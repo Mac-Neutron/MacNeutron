@@ -23,6 +23,17 @@ static __declspec(noinline) void store_through_null(void) { *nowhere = 1; }
 
 static void *find(const char *name) { return (void *)GetProcAddress(api, name); }
 
+#ifdef __i386__
+/* i686 MinGW clang has no __try: steamprobe32.exe catches the same fault with a vectored handler, which ends the run. */
+static int fault_status;
+static LONG CALLBACK caught(EXCEPTION_POINTERS *e) {
+    if (e->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION) return EXCEPTION_CONTINUE_SEARCH;
+    printf("fault: caught\n");
+    fflush(stdout);
+    ExitProcess(fault_status);
+}
+#endif
+
 #define NEED(var, name) \
     if (!(*(void **)&(var) = find(name))) { printf("missing export %s\n", name); return 1; }
 
@@ -120,6 +131,13 @@ int main(int argc, char **argv)
     if (argc > 2 && !strcmp(argv[2], "fault"))
     {
         fflush(stdout);  /* the rows above survive if the fault isn't caught */
+#ifdef __i386__
+        fault_status = steam_id && name && *name && got_ticket ? 0 : 1;
+        AddVectoredExceptionHandler(1, caught);
+        store_through_null();
+        printf("fault: none raised\n");
+        return 1;
+#else
         __try
         {
             store_through_null();
@@ -130,6 +148,7 @@ int main(int argc, char **argv)
         {
             printf("fault: caught\n");
         }
+#endif
     }
     return steam_id && name && *name && got_ticket ? 0 : 1;
 }
