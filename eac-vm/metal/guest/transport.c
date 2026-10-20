@@ -70,7 +70,9 @@ static uintptr_t zero_bits(void) {
     return bits;
 }
 
-void *mn_low_alloc(uint64_t size) {
+/* Memory in the 32-bit address space from Wine's allocator (committed, read-write), or NULL; and its release: 0, or -1
+ * when Wine didn't release the range. */
+static void *mn_low_alloc(uint64_t size) {
     void *at = NULL;
     size_t n = size;
     if (!NtAllocateVirtualMemory ||
@@ -78,15 +80,16 @@ void *mn_low_alloc(uint64_t size) {
         return NULL;
     return at;
 }
-void mn_low_free(void *p) {
+static int mn_low_free(void *p) {
     size_t n = 0;
-    if (p && NtFreeVirtualMemory) NtFreeVirtualMemory(CURRENT_PROCESS, &p, &n, MEM_RELEASE);
+    return !p || (NtFreeVirtualMemory && !NtFreeVirtualMemory(CURRENT_PROCESS, &p, &n, MEM_RELEASE)) ? 0 : -1;
 }
 
 static void blob_close(struct mn_blob *b) {
     struct drm_gem_close gc = { .handle = b->gem };
-    if (b->low) mn_low_free(b->ptr); /* Wine's release replaces our mapping too */
-    else munmap(b->ptr, b->size);
+    if (!b->low) munmap(b->ptr, b->size);
+    else if (mn_low_free(b->ptr)) /* Wine's release replaces our mapping too; failing that, drop the BO's pages */
+        mmap(b->ptr, b->size, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     ioctl(fd, DRM_IOCTL_GEM_CLOSE, &gc);
 }
 

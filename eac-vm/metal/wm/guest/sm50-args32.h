@@ -32,9 +32,24 @@ struct mn_sm50_gs_pass_through32 {
 struct mn_sm50_geometry32 { struct mn_sm50_arg32 h; bool strip_topology; };
 struct mn_sm50_tessellator32 { struct mn_sm50_arg32 h; uint32_t max_potential_tess_factor; };
 struct mn_sm50_root_signature32 { struct mn_sm50_arg32 h; uint32_t bytecode, bytecode_length; };
+/* DXMT's i386 layouts (its airconv_public.h's *_DATA built for i686). */
+#include <stddef.h>
+_Static_assert(sizeof(struct mn_sm50_stream_output32) == 36 && offsetof(struct mn_sm50_stream_output32, elements) == 32,
+               "stream output");
+_Static_assert(sizeof(struct mn_sm50_common32) == 16, "common");
+_Static_assert(sizeof(struct mn_sm50_pixel32) == 52 && offsetof(struct mn_sm50_pixel32, disable_depth_output) == 13 &&
+               offsetof(struct mn_sm50_pixel32, unorm_output_reg_mask) == 16, "pixel shader");
+_Static_assert(sizeof(struct mn_sm50_input_layout32) == 24 && offsetof(struct mn_sm50_input_layout32, elements) == 20,
+               "input layout");
+_Static_assert(sizeof(struct mn_sm50_gs_pass_through32) == 16 &&
+               offsetof(struct mn_sm50_gs_pass_through32, RasterizationDisabled) == 12, "geometry pass-through");
+_Static_assert(sizeof(struct mn_sm50_geometry32) == 12 && sizeof(struct mn_sm50_tessellator32) == 12 &&
+               sizeof(struct mn_sm50_root_signature32) == 16, "geometry, tessellator, root signature");
 
-/* The 64-bit chain for the 32-bit one at args32 (0: none, *out NULL), malloc'd; 0, or -1 when out of memory. Types it
- * doesn't know, and SM50_SHADER_ARGUMENT_TYPE_MAX, are left out, as airconv skips them. */
+/* The 64-bit chain for the 32-bit one at args32 (0: none, *out NULL), malloc'd; 0, or -1 when out of memory or longer
+ * than MN_WM_SM50_ARGS_MAX arguments (a looping chain). Types it doesn't know, and SM50_SHADER_ARGUMENT_TYPE_MAX, are
+ * left out, as airconv skips them; they count towards the bound. */
+#define MN_WM_SM50_ARGS_MAX 64 /* the 64-bit marshaller's own bound (wm/slots.c's MAX_ARGS) */
 int mn_wm_sm50_args32(uint32_t args32, struct SM50_SHADER_COMPILATION_ARGUMENT_DATA **out);
 void mn_wm_sm50_args_free(struct SM50_SHADER_COMPILATION_ARGUMENT_DATA *first);
 #endif

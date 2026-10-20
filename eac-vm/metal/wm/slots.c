@@ -172,16 +172,12 @@ static void *field_ptr(const void *params, unsigned off) {
 }
 static void set_field(void *params, unsigned off, uint64_t v) { memcpy((uint8_t *)params + off, &v, sizeof v); }
 
-/* Slot 77's copy of a bitcode, which DXMT reads until slot 78: below 2 GiB for a 32-bit process's (galloc.h). */
-static void *bitcode_alloc(uint64_t n) { return mn_wm_wow64 ? mn_low_alloc(n) : malloc(n); }
-static void bitcode_free(void *p) { mn_wm_wow64 ? mn_low_free(p) : free(p); }
-
 /* A release of an SM50 handle (75, 78, 80): the table's, on both sides. */
 static NTSTATUS_T release_pack(void *params, struct mn_wm_out *o, int bitcode) {
     mn_handle h;
     memcpy(&h, params, sizeof h);
     uint64_t att = mn_gh_attached(h);
-    if (bitcode && MN_GH_TAG(att) == MN_GH_PTR) bitcode_free((void *)(uintptr_t)MN_GH_VALUE(att)); /* slot 77's copy */
+    if (bitcode && MN_GH_TAG(att) == MN_GH_PTR) free((void *)(uintptr_t)MN_GH_VALUE(att)); /* slot 77's copy */
     if (mn_gh_release(h) < 0) return MN_STATUS_INVALID_HANDLE;
     return mn_wm_emit(o, &h, sizeof h);
 }
@@ -208,6 +204,8 @@ NTSTATUS_T mn_wm_sm50_pack(unsigned slot, void *params, struct mn_wm_out *o) {
     case 80: return release_pack(params, o, 0);
     case 78: return release_pack(params, o, 1);
     case 77: { /* the size first; the bytes come in the second step (sm50_unpack) */
+        struct sm50_get_compiled_bitcode_params *a = params;
+        if (a->data_out) memset(a->data_out, 0, sizeof *a->data_out); /* a failure: DXMT sees no bitcode */
         set_field(rec, offsetof(struct sm50_get_compiled_bitcode_params, data_out), 0);
         return mn_wm_emit(o, rec, c->params_size);
     }
@@ -274,11 +272,12 @@ NTSTATUS_T mn_wm_sm50_unpack(unsigned slot, void *params, const struct mn_wm_out
         s = mn_wm_copy_back(o, r, len, pos);
         break;
     }
-    case 77: { /* now the bytes, into memory of ours the caller reads until slot 78 */
+    case 77: { /* now the bytes, into memory of ours the caller reads until slot 78 (a 32-bit caller too: DXMT passes
+              * Data on as a 64-bit value, never dereferencing it) */
         struct sm50_get_compiled_bitcode_params *a = params;
         uint64_t size;
         memcpy(&size, r + offsetof(struct sm50_get_compiled_bitcode_params, data_out), sizeof size);
-        uint8_t *buf = size <= (64ull << 20) ? bitcode_alloc(size ? size : 1) : NULL;
+        uint8_t *buf = size <= (64ull << 20) ? malloc(size ? size : 1) : NULL;
         if (!buf) {
             s = MN_STATUS_UNSUCCESSFUL;
             break;
@@ -291,12 +290,12 @@ NTSTATUS_T mn_wm_sm50_unpack(unsigned slot, void *params, const struct mn_wm_out
         if ((s = mn_wm_emit(&o2, &q, sizeof q)) || (s = mn_wm_emit_data(&o2, buf, size, WMF_OUT)) ||
             (s = (NTSTATUS_T)mn_call(MN_OP_WM + 77, o2.buf, o2.len, reply2, sizeof reply2, &n)) ||
             (s = mn_wm_copy_back(&o2, reply2, n, PAD8(sizeof q)))) {
-            bitcode_free(buf);
+            free(buf);
             break;
         }
         mn_handle h = (mn_handle)(uintptr_t)a->bitcode;
         uint64_t old = mn_gh_attached(h);
-        if (MN_GH_TAG(old) == MN_GH_PTR) bitcode_free((void *)(uintptr_t)MN_GH_VALUE(old));
+        if (MN_GH_TAG(old) == MN_GH_PTR) free((void *)(uintptr_t)MN_GH_VALUE(old));
         mn_gh_attach(h, MN_GH_PTR | (uintptr_t)buf);
         a->data_out->Data = buf;
         a->data_out->Size = size;

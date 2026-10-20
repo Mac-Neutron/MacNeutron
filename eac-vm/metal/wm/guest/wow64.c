@@ -2,7 +2,8 @@
  * params are the same for both widths (its WMTMemoryPointer is 8 bytes, its i386 code zeroes the upper half), so each
  * entry is the 64-bit one, after marking the process 32-bit (galloc.h: its memory then goes below 2 GiB), except:
  * SM50's calls whose i386 params hold 32-bit pointers or an argument chain (airconv_thunks.h's *_params32,
- * sm50-args32.h), converted here, slot 83 included, which DXMT's own WoW64 table leaves out; and Direct3D forwarding
+ * sm50-args32.h), converted here (slot 83's too, though both of DXMT's tables leave it NULL and the 64-bit table here
+ * refuses it, so a DXMT that adds it gets converted params); and Direct3D forwarding
  * (MN_WM_D3D), whose 32-bit calls eac-vm/d3d/guest/unix.c converts (M4b). */
 #include <stdint.h>
 #include "airconv_thunks.h"
@@ -16,7 +17,7 @@ extern const unixlib_entry_t __wine_unix_call_funcs[];
 
 static void *p64(uint32_t v) { return (void *)(uintptr_t)v; }
 static NTSTATUS_T call64(unsigned slot, void *p) {
-    mn_wm_wow64 = 1;
+    if (!mn_wm_wow64) mn_wm_wow64 = 1; /* once: a store a call would share galloc's hot cache line */
     return __wine_unix_call_funcs[slot](p);
 }
 
@@ -82,7 +83,7 @@ __attribute__((weak)) int32_t mn_d3d_unix_call32(void *args) {
     return (int32_t)MN_STATUS_NOT_IMPLEMENTED;
 }
 static NTSTATUS_T d3d32(void *args) {
-    mn_wm_wow64 = 1;
+    if (!mn_wm_wow64) mn_wm_wow64 = 1;
     return (NTSTATUS_T)mn_d3d_unix_call32(args);
 }
 
@@ -93,7 +94,7 @@ W(0) W(1) W(2) W(3) W(4) W(5) W(6) W(7) W(8) W(9)
 W10(1) W10(2) W10(3) W10(4) W10(5) W10(6) W10(7) W10(8) W10(9) W10(10) W10(11) W10(12) W10(13) W10(14)
 W(150) W(151) W(152) W(153) W(154)
 
-const unixlib_entry_t __wine_unix_call_wow64_funcs[MN_WM_D3D + 1] = {
+const unixlib_entry_t __wine_unix_call_wow64_funcs[] = {
     w0, w1, w2, w3, w4, w5, w6, w7, w8, w9,
     S10(1) S10(2) S10(3) S10(4) S10(5) S10(6)
     w70, w71, w72, w73, sm50_initialize, w75, sm50_compile, sm50_get_compiled_bitcode, w78, sm50_get_error_message,
@@ -103,4 +104,5 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[MN_WM_D3D + 1] = {
     S10(9) S10(10) S10(11) S10(12) S10(13) S10(14)
     w150, w151, w152, w153, w154, d3d32,
 };
-_Static_assert(sizeof __wine_unix_call_wow64_funcs / sizeof *__wine_unix_call_wow64_funcs == MN_WM_D3D + 1, "table size");
+_Static_assert(sizeof __wine_unix_call_wow64_funcs / sizeof *__wine_unix_call_wow64_funcs == MN_WM_D3D + 1,
+               "an entry per slot");

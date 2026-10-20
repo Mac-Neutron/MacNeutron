@@ -27,7 +27,7 @@ int main(void) {
     struct mn_sm50_input_layout32 ia = {{lo(put(&gs, sizeof gs)), SM50_SHADER_IA_INPUT_LAYOUT}, SM50_INDEX_BUFFER_FORMAT_UINT32,
                                         0x5, 3, elems};
     struct mn_sm50_arg32 max = {lo(put(&ia, sizeof ia)), SM50_SHADER_ARGUMENT_TYPE_MAX};
-    struct mn_sm50_pixel32 ps = {{lo(put(&max, sizeof max)), SM50_SHADER_PSO_PIXEL_SHADER}, 0xff, true, false, 0x3,
+    struct mn_sm50_pixel32 ps = {{lo(put(&max, sizeof max)), SM50_SHADER_PSO_PIXEL_SHADER}, 0xff, false, true, 0x3,
                                  {1, 2, 3, 4, 5, 6, 7, 8}};
     struct mn_sm50_common32 co = {{lo(put(&ps, sizeof ps)), SM50_SHADER_COMMON}, SM50_SHADER_METAL_320, (enum SM50_SHADER_FLAG)6};
     struct mn_sm50_stream_output32 so = {{lo(put(&co, sizeof co)), SM50_SHADER_EMULATE_VERTEX_STREAM_OUTPUT}, 2, 4,
@@ -45,8 +45,8 @@ int main(void) {
     CHECK(a && a->type == SM50_SHADER_COMMON && m->metal_version == SM50_SHADER_METAL_320 && m->flags == 6, "common");
     a = a ? a->next : NULL;
     struct SM50_SHADER_PSO_PIXEL_SHADER_DATA *p = (void *)a;
-    CHECK(a && a->type == SM50_SHADER_PSO_PIXEL_SHADER && p->sample_mask == 0xff && p->dual_source_blending &&
-          !p->disable_depth_output && p->unorm_output_reg_mask == 3 && p->pixel_formats[7] == 8, "pixel shader");
+    CHECK(a && a->type == SM50_SHADER_PSO_PIXEL_SHADER && p->sample_mask == 0xff && !p->dual_source_blending &&
+          p->disable_depth_output && p->unorm_output_reg_mask == 3 && p->pixel_formats[7] == 8, "pixel shader");
     a = a ? a->next : NULL; /* SM50_SHADER_ARGUMENT_TYPE_MAX is left out */
     struct SM50_SHADER_IA_INPUT_LAYOUT_DATA *i = (void *)a;
     CHECK(a && a->type == SM50_SHADER_IA_INPUT_LAYOUT && i->index_buffer_format == SM50_INDEX_BUFFER_FORMAT_UINT32 &&
@@ -71,6 +71,15 @@ int main(void) {
     mn_wm_sm50_args_free(c);
     c = (void *)1;
     CHECK(mn_wm_sm50_args32(0, &c) == 0 && !c, "no chain");
+    /* A looping chain, of a type left out and of one converted: refused past the 64-bit marshaller's bound. */
+    struct mn_sm50_arg32 *loop = put(&max, sizeof max);
+    loop->next = lo(loop);
+    c = (void *)1;
+    CHECK(mn_wm_sm50_args32(lo(loop), &c) == -1 && !c, "a looping chain of unknown types is refused");
+    struct mn_sm50_tessellator32 *loop2 = put(&te, sizeof te);
+    loop2->h.next = lo(loop2);
+    c = (void *)1;
+    CHECK(mn_wm_sm50_args32(lo(loop2), &c) == -1 && !c, "a looping chain of arguments is refused");
     printf(failures ? "sm50-args32-test: %d failure(s)\n" : "sm50-args32-test: ok\n", failures);
     return failures != 0;
 }

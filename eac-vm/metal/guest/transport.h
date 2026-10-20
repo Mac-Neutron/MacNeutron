@@ -12,9 +12,6 @@ int mn_blob_alloc(uint64_t size, struct mn_blob *b); /* rounded up to MN_PAGE; g
 /* The same within a 32-bit (WoW64) process's address space, for its DXMT: mapped over a range Wine's allocator reserved and
  * committed, so Wine's view of the 32-bit address space stays right (as winevulkan places a WoW64 mapping). */
 int mn_blob_alloc_low(uint64_t size, struct mn_blob *b);
-/* Memory in the 32-bit address space from Wine's allocator (committed, read-write), or NULL; and its release. */
-void *mn_low_alloc(uint64_t size);
-void mn_low_free(void *p);
 int mn_blob_free(struct mn_blob *b);                 /* a synchronous MN_OP_BLOB_RELEASE, then GEM_CLOSE */
 int mn_send(uint32_t op, const void *p, uint32_t len); /* asynchronous, on this thread's ring: 0 or -errno */
 /* Synchronous: returns the host's status (negative: an error), with up to cap reply bytes in reply. */

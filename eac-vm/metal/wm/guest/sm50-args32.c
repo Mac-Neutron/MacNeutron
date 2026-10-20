@@ -85,8 +85,14 @@ static void *convert(const struct mn_sm50_arg32 *a, int *known) {
 
 int mn_wm_sm50_args32(uint32_t args32, struct SM50_SHADER_COMPILATION_ARGUMENT_DATA **out) {
     struct SM50_SHADER_COMPILATION_ARGUMENT_DATA head = {0}, *last = &head;
+    int n = 0;
     for (const struct mn_sm50_arg32 *a = p64(args32); a; a = p64(a->next)) {
         int known;
+        if (++n > MN_WM_SM50_ARGS_MAX) {
+            mn_wm_sm50_args_free(head.next);
+            *out = NULL;
+            return -1;
+        }
         struct SM50_SHADER_COMPILATION_ARGUMENT_DATA *d = convert(a, &known);
         if (!known) continue;
         if (!d) {
