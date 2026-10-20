@@ -106,8 +106,9 @@ L="$R/licenses"
 S="$B/wine-arm64-src"
 mkdir -p "$L/wine" "$L/fex" "$L/llvm" "$L/llvm-mingw" "$L/macneutron" "$L/mtld3d"
 put "$DXMT_TREE/mtld3d" LICENSE "$L/mtld3d/"  # zlib
-[ -f "$S/mtld3d-notices/INDEX" ] || die "no $S/mtld3d-notices (build.sh collects them): run make wine-arm64"
-cp -R "$S/mtld3d-notices" "$L/mtld3d/crates"  # the crates mtld3d's binaries link
+[ -f "$S/mtld3d-notices/crates/INDEX" ] || die "no $S/mtld3d-notices (build.sh collects them): run make wine-arm64"
+cp -R "$S/mtld3d-notices/crates" "$L/mtld3d/crates"  # the crates mtld3d's binaries link
+cp -R "$S/mtld3d-notices/rust" "$L/mtld3d/rust"      # and Rust's standard library
 for f in README NOTICES.md; do put "$ROOT/wine-arm64/licenses" "$f" "$L/"; done
 put "$ROOT" LICENSE "$L/macneutron/"  # the presenter's and the patch files' (arm64 release spec §7.1)
 put "$ROOT/presenter" CMAA2-LICENSE.txt "$L/macneutron/"  # the presenter's CMAA2 shaders' (Apache-2.0)

@@ -33,8 +33,13 @@ check() {  # check <wine.app> <build dir>
     licenses/llvm/LICENSE.TXT licenses/llvm/COPYRIGHT.regex \
     licenses/llvm-mingw/LICENSE.TXT licenses/llvm-mingw/COPYING.MinGW-w64-runtime.txt \
     licenses/macneutron/LICENSE licenses/macneutron/CMAA2-LICENSE.txt \
-    licenses/mtld3d/LICENSE licenses/mtld3d/crates/INDEX
+    licenses/mtld3d/LICENSE licenses/mtld3d/crates/INDEX \
+    licenses/mtld3d/rust/COPYRIGHT-library.html licenses/mtld3d/rust/licenses/MIT.txt \
+    licenses/mtld3d/rust/licenses/Apache-2.0.txt
   do [ -s "$R/$f" ] || miss "$f"; done
+  # snmalloc's C++, which snmalloc-sys compiles into mtld3d's binaries, is Microsoft's: its own MIT notice.
+  g -qF "Microsoft Corporation" "$R"/licenses/mtld3d/crates/snmalloc-sys-*/LICENSE-snmalloc 2> /dev/null \
+    || miss "licenses/mtld3d/crates/snmalloc-sys-*/LICENSE-snmalloc (Microsoft's MIT notice for snmalloc)"
   # mtld3d's crates (dxmt/mtld3d-notices.py): a folder of licence files for each one its INDEX names.
   while read -r crate version _; do  # "<crate> <version>: <terms>"
     version=${version%:}

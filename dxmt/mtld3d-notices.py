@@ -1,11 +1,14 @@
-"""The licence files of the crates mtld3d's shipped binaries link (D3D9 spec §4; wine.app carries every notice its
+"""The licence files of the code mtld3d's shipped binaries link (D3D9 spec §4; wine.app carries every notice its
 binaries need, ship-base spec §4): d3d9.dll and mtld3d.dll (aarch64- and arm64ec-pc-windows-msvc) and mtld3d.so
 (aarch64-apple-darwin). Each crate's LICENSE*, LICENCE*, COPYING*, NOTICE* and UNLICENSE* files go to
-<out>/<name>-<version>/, and <out>/INDEX lists every crate with its licence expression. mtld3d's own crates are its
-zlib LICENSE (bundle.sh ships it); the snmalloc-sys it vendors is third-party code and is listed. A crate that ships no
-licence file (the objc2 family, MIT or a choice including MIT) gets MIT's text with its manifest's authors as the
-copyright line; one with no file and no MIT among its terms stops the run, to be handled by hand.
-    python3 -I mtld3d-notices.py <mtld3d tree> <out> <cargo>   (cargo: the toolchain's, with `+<toolchain>` as needed)
+<out>/crates/<name>-<version>/, and <out>/crates/INDEX lists every crate with its licence expression. mtld3d's own
+crates are its zlib LICENSE (bundle.sh ships it); the snmalloc-sys it vendors is third-party code and is listed. A crate
+that ships no licence file (the objc2 family, MIT or a choice including MIT) gets MIT's text with its manifest's authors
+as the copyright line; one with no file and no MIT among its terms stops the run, to be handled by hand. A crate that
+compiles another project's code in gets that project's notice too (EMBEDDED). Rust's standard library, which every
+binary links, has its notices in the toolchain: its COPYRIGHT-library.html and licenses/ go to <out>/rust/.
+    python3 -I mtld3d-notices.py <mtld3d tree> <out> <cargo>   (cargo: the toolchain's, with `+<toolchain>` as needed;
+    its rustc is the one beside it)
 """
 import json
 import os
@@ -33,6 +36,9 @@ WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEM
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
+# crate -> (file, project, its MIT copyright holder): another project's code the crate compiles in. snmalloc-sys builds
+# snmalloc's C++ (its upstream/ folder), Microsoft's, under MIT; the crate ships no copy of snmalloc's LICENSE.
+EMBEDDED = {"snmalloc-sys": ("LICENSE-snmalloc", "snmalloc", "Microsoft Corporation.")}
 
 
 def main(tree, out, cargo):
@@ -60,12 +66,12 @@ def main(tree, out, cargo):
                 if not own:
                     crates[key] = (folder, p.get("license") or "(none given)", p.get("authors") or [])
     shutil.rmtree(out, ignore_errors=True)
-    os.makedirs(out)
+    os.makedirs(os.path.join(out, "crates"))
     index = []
     for (name, version), (folder, expression, authors) in sorted(crates.items()):
         files = sorted(f for f in os.listdir(folder)
                        if f.lower().startswith(PREFIXES) and os.path.isfile(os.path.join(folder, f)))
-        dest = os.path.join(out, f"{name}-{version}")
+        dest = os.path.join(out, "crates", f"{name}-{version}")
         os.makedirs(dest)
         for f in files:
             shutil.copyfile(os.path.join(folder, f), os.path.join(dest, f))
@@ -75,9 +81,21 @@ def main(tree, out, cargo):
             with open(os.path.join(dest, "LICENSE-MIT"), "w") as f:
                 f.write(MIT.format(authors=", ".join(authors) or f"the {name} authors"))
         note = "" if files else " (MIT's text written here: the crate ships none)"
+        if name in EMBEDDED:
+            file, project, holder = EMBEDDED[name]
+            with open(os.path.join(dest, file), "w") as f:
+                f.write(MIT.format(authors=holder))
+            note += f"; {project}, which it compiles in: MIT, {holder} ({file})"
         index.append(f"{name} {version}: {expression}{note}")
-    with open(os.path.join(out, "INDEX"), "w") as f:
+    with open(os.path.join(out, "crates", "INDEX"), "w") as f:
         f.write("\n".join(index) + "\n")
+    rustc = cargo[:]
+    rustc[0] = os.path.join(os.path.dirname(rustc[0]), "rustc")
+    sysroot = subprocess.run(rustc + ["--print", "sysroot"], check=True, capture_output=True, text=True).stdout.strip()
+    docs = os.path.join(sysroot, "share", "doc", "rust")
+    os.makedirs(os.path.join(out, "rust"))
+    shutil.copyfile(os.path.join(docs, "COPYRIGHT-library.html"), os.path.join(out, "rust", "COPYRIGHT-library.html"))
+    shutil.copytree(os.path.join(docs, "licenses"), os.path.join(out, "rust", "licenses"))
     print(f"mtld3d-notices: {len(crates)} crates, {sum(1 for line in index if 'ships none' in line)} with MIT's text "
           f"written for them", file=sys.stderr)
 
