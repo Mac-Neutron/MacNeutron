@@ -1,4 +1,4 @@
-From de36f49d15975cbbdb298e93022126a88809bad1 Mon Sep 17 00:00:00 2001
+From 69de6ff752e2e4a9621ee3f9e938584e100f81be Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Tue, 20 Oct 2026 12:11:47 -0400
 Subject: [PATCH] FEXCore: mov to %fs/%gs in 64-bit code loads the selector and
@@ -6,7 +6,9 @@ Subject: [PATCH] FEXCore: mov to %fs/%gs in 64-bit code loads the selector and
 
 ---
  .../Interface/Core/OpcodeDispatcher.cpp       | 54 +++++--------------
- 1 file changed, 14 insertions(+), 40 deletions(-)
+ .../LinuxSyscalls/Syscalls/Thread.cpp         |  2 +
+ .../LinuxSyscalls/x64/Thread.cpp              |  3 ++
+ 3 files changed, 19 insertions(+), 40 deletions(-)
 
 diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 index 961ecf1..f8a6cb7 100644
@@ -103,6 +105,41 @@ index 961ecf1..f8a6cb7 100644
      break;
    default: break; // Do nothing
    }
+diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/Thread.cpp b/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/Thread.cpp
+index c6a48e7..58f983d 100644
+--- a/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/Thread.cpp
++++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/Thread.cpp
+@@ -524,6 +524,7 @@ void RegisterThread(FEX::HLE::SyscallHandler* Handler) {
+         return -EPERM;
+       }
+       Frame->State.gs_cached = addr;
++      Frame->State.gs_idx = 0; // as Linux: the selector no longer names the base
+       Result = 0;
+       break;
+     case 0x1002: // ARCH_SET_FS
+@@ -532,6 +533,7 @@ void RegisterThread(FEX::HLE::SyscallHandler* Handler) {
+         return -EPERM;
+       }
+       Frame->State.fs_cached = addr;
++      Frame->State.fs_idx = 0; // as Linux: the selector no longer names the base
+       Result = 0;
+       break;
+     case 0x1003: // ARCH_GET_FS
+diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/x64/Thread.cpp b/Source/Tools/LinuxEmulation/LinuxSyscalls/x64/Thread.cpp
+index c25ff5b..260d6e4 100644
+--- a/Source/Tools/LinuxEmulation/LinuxSyscalls/x64/Thread.cpp
++++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/x64/Thread.cpp
+@@ -218,7 +218,10 @@ uint64_t SyscallHandler::write_ldt(FEXCore::Core::CpuStateFrame* Frame, void* pt
+ 
+ namespace FEX::HLE::x64 {
+ uint64_t SetThreadArea(FEXCore::Core::CpuStateFrame* Frame, void* tls) {
++  // CLONE_SETTLS: Linux sets the base through ARCH_SET_FS, which clears the selector; a selector the parent loaded
++  // (Wine's fs32_sel) must not make the child's set_thread_area reload its base.
+   Frame->State.fs_cached = reinterpret_cast<uint64_t>(tls);
++  Frame->State.fs_idx = 0;
+   return 0;
+ }
+ 
 -- 
 2.54.0 (Apple Git-157)
 

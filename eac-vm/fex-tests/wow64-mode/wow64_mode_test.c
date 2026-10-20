@@ -13,7 +13,11 @@
 //   4. IRETQ to 0x23 runs 32-bit code (mov %cs, inc/dec at 0x40-0x4f, pusha/popa) and ljmp returns to 0x33;
 //   5. 32-bit code reads the TLS base through %fs:0;
 //   6. ud2 in 32-bit code: the SIGILL frame has cs 0x23 and the ud2's rip, sigreturn resumes the 32-bit code;
-//   7. an x87 load in 32-bit code whose address wraps at 4 GiB reads the wrapped address.
+//   7. an x87 load in 32-bit code whose address wraps at 4 GiB reads the wrapped address;
+//   8. arch_prctl(ARCH_SET_FS) clears the %fs selector, as Linux does, so set_thread_area on the entry it named leaves
+//      %fs's base alone (a new thread's alloc_fs_sel after its parent loaded fs32_sel; CLONE_SETTLS clears it too);
+//   9. a legacy vsyscall (time at 0xffffffffff600400) from 64-bit code still returns (FEX's syscall entry must not
+//      read the instruction there: the page is FEX's own).
 // The expected values are Linux's documented behaviour, which Wine's x86-64 WoW64 relies on; no native x86-64 reference
 // run exists here yet. A fault the test doesn't expect prints the signal, rip and cs, then RESULT: FAIL.
 //
@@ -45,6 +49,7 @@ static inline i64 int80(i64 nr, u64 a) {
 
 enum { SYS_write = 1, SYS_rt_sigaction = 13, SYS_alarm = 37, SYS_arch_prctl = 158, SYS_exit_group = 231 };
 enum { NR32_set_thread_area = 243, NR32_get_thread_area = 244, ARCH_SET_FS = 0x1002 };
+static u64 marker64 = 0x6464646464646464;
 enum { SIGILL = 4, SIGBUS = 7, SIGSEGV = 11, SA_SIGINFO = 4, SA_RESTORER = 0x04000000, REG_RIP = 16, REG_CSGSFS = 18 };
 
 struct user_desc { u32 entry_number, base_addr, limit, flags; };
@@ -158,6 +163,23 @@ __attribute__((used)) void entry_c(void) {
         "6. a signal in 32-bit code: frame cs 0x23, rip at the ud2, sigreturn resumes the 32-bit code");
   check(res_x87 == 0x40200000, // 2.5f
         "7. an x87 load in 32-bit code whose address wraps at 4 GiB reads the wrapped address");
+
+  u32 fs_after = 0, sel_after = 1;
+  i64 r_again = -1;
+  if (have_tls) {
+    sc2(SYS_arch_prctl, ARCH_SET_FS, &marker64);
+    tls32[1] = 0xBADBAD;
+    desc.base_addr = (u32)(u64)&tls32[1];
+    r_again = int80(NR32_set_thread_area, (u64)&desc);
+    __asm__ volatile("movl %%fs:0, %0\n mov %%fs, %1" : "=r"(fs_after), "=r"(sel_after) : : "memory");
+  }
+  check(have_tls && r_again == 0 && fs_after == 0x64646464 && sel_after == 0,
+        "8. arch_prctl clears the %fs selector: set_thread_area on its old entry leaves the base alone");
+
+  i64 now = 0;
+  __asm__ volatile("mov $0xffffffffff600400, %%rax\n call *%%rax"
+                   : "=a"(now) : "D"(0) : "rcx", "rdx", "rsi", "r8", "r9", "r10", "r11", "memory");
+  check(now > 1700000000, "9. a legacy vsyscall (time) from 64-bit code returns the time");
 
   out(failures ? "RESULT: FAIL\n" : "RESULT: PASS\n");
   sc1(SYS_exit_group, failures);
