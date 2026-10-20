@@ -1,0 +1,80 @@
+// Direct3D 9 on the macOS path (D3D9 spec §6, M1): a 256x256 window, a HAL device, then up to 60 frames of a clear to
+// blue and a fixed-function pretransformed red triangle over the centre, each read back through GetRenderTargetData and
+// presented, until one shows the triangle: mtld3d leaves a draw out of its frame while its pipeline builds
+// (shader.asyncCompile, on by default), so the first frames may show the clear alone, as they do in a game.
+// Prints, each "ok" or "FAIL <what>": "d3d9 module" (mtld3d's mtld3d.dll is loaded once Direct3DCreate9 ran: the
+// d3d9.dll is mtld3d's, not Wine's wined3d one), "d3d9 clear" (a corner of the first frame is 0x0000ff), "d3d9
+// triangle" (a frame's centre is 0xff0000) and "d3d9 present" (every present D3D_OK). Exits with the number of failures.
+#include <windows.h>
+#include <d3d9.h>
+#include <cstdio>
+
+static int failures;
+static void row(const char *what, bool ok, const char *why) {
+    if (ok) printf("d3d9 %s ok\n", what);
+    else printf("d3d9 %s FAIL %s\n", what, why), ++failures;
+}
+
+int main() {
+    WNDCLASSW wc = {};
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"d3d9_triangle";
+    RegisterClassW(&wc);
+    RECT r = {0, 0, 256, 256};
+    AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
+    HWND hwnd = CreateWindowW(L"d3d9_triangle", L"d3d9_triangle", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100,
+                              r.right - r.left, r.bottom - r.top, nullptr, nullptr, wc.hInstance, nullptr);
+    IDirect3D9 *d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    row("module", d3d && GetModuleHandleW(L"mtld3d.dll"), d3d ? "no mtld3d.dll in the process" : "Direct3DCreate9");
+    if (!d3d || !hwnd) return printf("d3d9 clear FAIL no device\n"), failures + 3;
+
+    D3DPRESENT_PARAMETERS pp = {};
+    pp.BackBufferWidth = 256, pp.BackBufferHeight = 256, pp.BackBufferFormat = D3DFMT_X8R8G8B8, pp.BackBufferCount = 1;
+    pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = hwnd, pp.Windowed = TRUE;
+    pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    IDirect3DDevice9 *dev = nullptr;
+    HRESULT hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd, D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp,
+                                   &dev);
+    if (FAILED(hr)) return printf("d3d9 clear FAIL CreateDevice %08lx\n", (unsigned long)hr), failures + 3;
+
+    struct Vertex { float x, y, z, rhw; DWORD color; };
+    const Vertex tri[3] = {{128, 16, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
+                           {240, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
+                           {16, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)}};
+    IDirect3DSurface9 *rt = nullptr, *sys = nullptr;
+    bool read = SUCCEEDED(dev->GetRenderTarget(0, &rt)) &&
+                SUCCEEDED(dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr));
+    DWORD corner = 0, centre = 0;
+    int frames = 0, presented = 0;
+    while (frames < 60 && centre != 0xff0000) {
+        dev->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 255), 1.0f, 0);
+        dev->BeginScene();
+        dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+        dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, tri, sizeof *tri);
+        dev->EndScene();
+        D3DLOCKED_RECT lr = {};
+        read = read && SUCCEEDED(dev->GetRenderTargetData(rt, sys)) &&
+               SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY));
+        if (!read) break;
+        const BYTE *p = (const BYTE *)lr.pBits;
+        if (!frames++) corner = *(const DWORD *)(p + 2 * lr.Pitch + 2 * 4) & 0xffffff;
+        centre = *(const DWORD *)(p + 128 * lr.Pitch + 128 * 4) & 0xffffff;
+        sys->UnlockRect();
+        presented += dev->Present(nullptr, nullptr, nullptr, nullptr) == D3D_OK;
+    }
+    char why[64];
+    snprintf(why, sizeof why, read ? "corner %06lx" : "no readback", (unsigned long)corner);
+    row("clear", read && corner == 0x0000ff, why);
+    snprintf(why, sizeof why, read ? "centre %06lx after %d frames" : "no readback", (unsigned long)centre, frames);
+    row("triangle", read && centre == 0xff0000, why);
+    snprintf(why, sizeof why, "%d of %d", presented, frames);
+    row("present", frames && presented == frames, why);
+
+    if (sys) sys->Release();
+    if (rt) rt->Release();
+    dev->Release();
+    d3d->Release();
+    DestroyWindow(hwnd);
+    return failures;
+}

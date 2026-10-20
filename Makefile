@@ -52,26 +52,26 @@ presenter:
 presenter-check: build wine-arm64 presenter
 	sh presenter/check.sh
 
-# D3D12, D3D11 and D3D10 test programs for our DXMT, built in parallel (one compiler per core), and dxbc.exe, which
+# D3D12, D3D11 and D3D10 test programs for our DXMT, and D3D9's for mtld3d, built in parallel (one compiler per core), and dxbc.exe, which
 # compiles the D3D11 and D3D10 ones' shaders into dxmt/tests/shaders/d3d11 (run on the macOS runtime: dxmt/tests/dxbc.cpp).
-DXMT_TESTS = $(patsubst dxmt/tests/%.cpp,build/dxmt-tests/%.exe,$(wildcard dxmt/tests/d3d1[012]_*.cpp)) \
+DXMT_TESTS = $(patsubst dxmt/tests/%.cpp,build/dxmt-tests/%.exe,$(wildcard dxmt/tests/d3d1[012]_*.cpp dxmt/tests/d3d9_*.cpp)) \
 	build/dxmt-tests/dxbc.exe
 dxmt-tests:
 	mkdir -p build/dxmt-tests
 	$(MAKE) -s -j$(shell sysctl -n hw.ncpu) $(DXMT_TESTS)
 build/dxmt-tests/%.exe: dxmt/tests/%.cpp dxmt/tests/d3d12_common.hpp dxmt/tests/d3d11_common.hpp
-	$(MINGWXX) -std=c++17 -o $@ $< -ld3d12 -ld3d11 -ld3d10 -ld3dcompiler -ldxgi -luser32 -lpsapi
+	$(MINGWXX) -std=c++17 -o $@ $< -ld3d12 -ld3d11 -ld3d10 -ld3d9 -ld3dcompiler -ldxgi -luser32 -lpsapi
 
 # The same programs and present_loop for ARM64EC, for the arm64 runtime (arm64 DXMT spec §7), built in parallel.
 MINGW_EC = $(MINGW_BIN)/arm64ec-w64-mingw32-clang -O3 -flto=thin -static -s $(PE_MARCH)
 MINGWXX_EC = $(MINGW_BIN)/arm64ec-w64-mingw32-clang++ -O3 -flto=thin -static -s $(PE_MARCH)
-DXMT_TESTS_EC = $(patsubst dxmt/tests/%.cpp,build/dxmt-tests-arm64ec/%.exe,$(wildcard dxmt/tests/d3d1[012]_*.cpp)) \
+DXMT_TESTS_EC = $(patsubst dxmt/tests/%.cpp,build/dxmt-tests-arm64ec/%.exe,$(wildcard dxmt/tests/d3d1[012]_*.cpp dxmt/tests/d3d9_*.cpp)) \
 	build/dxmt-tests-arm64ec/present_loop.exe
 dxmt-tests-arm64ec:
 	mkdir -p build/dxmt-tests-arm64ec
 	$(MAKE) -s -j$(shell sysctl -n hw.ncpu) $(DXMT_TESTS_EC)
 build/dxmt-tests-arm64ec/%.exe: dxmt/tests/%.cpp dxmt/tests/d3d12_common.hpp dxmt/tests/d3d11_common.hpp
-	$(MINGWXX_EC) -std=c++17 -o $@ $< -ld3d12 -ld3d11 -ld3d10 -ld3dcompiler -ldxgi -luser32 -lpsapi
+	$(MINGWXX_EC) -std=c++17 -o $@ $< -ld3d12 -ld3d11 -ld3d10 -ld3d9 -ld3dcompiler -ldxgi -luser32 -lpsapi
 build/dxmt-tests-arm64ec/present_loop.exe: presenter/tests/present_loop.c
 	$(MINGW_EC) -o $@ $< -ld3d11 -ldxgi -luser32 -lgdi32 -ldxguid -luuid
 
