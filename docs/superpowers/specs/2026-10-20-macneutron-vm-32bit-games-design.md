@@ -63,14 +63,14 @@ is not touched.
 |---|---|
 | 0030 GDT | A 64-bit process's default GDT gets the kernel's other user segments beside `0x33`: entry 4 (`0x23`, 32-bit code: L=0, D=1, base 0, 4 GiB limit) and entry 5 (`0x2b`, data). Threads inherit them as they inherit the rest of the GDT. |
 | 0031 Mode per block | The two "Expected operating mode to not change at runtime" asserts go. The x87 stack pass takes the GPR size of the block it optimizes (`Core.cpp` passes the decoder's per-block mode), not the process's, so a 32-bit block's x87 memory addresses wrap at 4 GiB. |
-| 0032 FS and GS in 64-bit code | `mov` and `pop` to `%fs`/`%gs` with a non-null selector store the selector and load the descriptor's 32-bit base, as the CPU does. A null selector stores the selector and keeps the base (`ponytail:` AMD's behaviour; Intel clears it, add that when a program needs it). Reading `%fs`/`%gs` gives the selector instead of 0. |
+| 0032 FS and GS in 64-bit code | `mov` and `pop` to `%fs`/`%gs` with a non-null selector store the selector and load the descriptor's 32-bit base, as the CPU does. A null selector loads base 0, as Intel CPUs do (AMD keeps the base; Wine never loads a null `%fs` there). Reading `%fs`/`%gs` gives the selector instead of 0. |
 | 0033 `int 0x80` in a 64-bit process | The syscall handler tells `int 0x80` (`CD 80`) from `syscall` (`0F 05`) by the instruction at the saved RIP. `int 0x80` uses the i386 ABI (`eax`, then `ebx`, `ecx`, `edx`, `esi`, `edi`, `ebp`): `set_thread_area` (243) and `get_thread_area` (244) run FEX's x32 implementation, which writes the thread's GDT TLS entries 12-14; any other number answers `-ENOSYS` (`ponytail:` the two Wine makes; the x32 table when a program needs more). |
 
 Known ceilings, each a `ponytail:` comment where it lives:
 - Compiled blocks are looked up by RIP alone; a RIP run in both modes would reuse the first mode's code. Wine's 32-bit
   and 64-bit code never share an address.
 - FEX's code cache (`EnableCodeCachingWIP`, off by default) assumes one mode; it stays off.
-- A seccomp filter sees an `int 0x80` call as an x86-64 one. Wine's own filter already fails to install under FEX.
+- A seccomp filter doesn't see an `int 0x80` call from a 64-bit process (it is answered before the filter runs). Wine's own filter already fails to install under FEX.
 
 The test, `eac-vm/fex-tests/wow64-mode/` (a freestanding static x86-64 binary, built like `open-efault`), prints a row
 for each step:
