@@ -26,8 +26,16 @@ static int buf_u32(struct mn_buf *b, uint32_t v) { return buf_put(b, &v, 4); }
 void mn_arena_free(struct mn_arena *a) {
     for (size_t i = 0; i < a->n; i++) free(a->ptrs[i]);
     free(a->ptrs); a->ptrs = NULL; a->n = a->cap = 0;
+    a->low_used = 0;
 }
-static void *arena_alloc(struct mn_arena *a, size_t n) {
+static void *arena_alloc(struct mn_arena *a, size_t n, int low) {
+    if (low) {
+        size_t at = (a->low_used + 15) & ~(size_t)15;
+        if (!a->low || at > a->low_cap || n > a->low_cap - at) return NULL;
+        memset(a->low + at, 0, n);
+        a->low_used = at + n;
+        return a->low + at;
+    }
     if (a->n == a->cap) {
         size_t cap = a->cap ? a->cap * 2 : 16;
         void **p = realloc(a->ptrs, cap * sizeof(*p));
@@ -56,8 +64,16 @@ static int take_u32(struct cur *c, uint32_t *v) {
 
 /* ---- fields ---- */
 
-static void *get_ptr(const void *base, uint16_t off) { void *p; memcpy(&p, (const uint8_t *)base + off, sizeof p); return p; }
-static void set_ptr(void *base, uint16_t off, void *v) { memcpy((uint8_t *)base + off, &v, sizeof v); }
+/* A pointer field: the native width, or 4 bytes zero-extended for an MN_PTR32 field (a WoW64 call's). */
+static void *get_ptr(const void *base, uint16_t off, int ptr32) {
+    if (ptr32) { uint32_t v; memcpy(&v, (const uint8_t *)base + off, 4); return (void *)(uintptr_t)v; }
+    void *p; memcpy(&p, (const uint8_t *)base + off, sizeof p); return p;
+}
+static void set_ptr(void *base, uint16_t off, void *v, int ptr32) {
+    if (ptr32) { uint32_t w = (uint32_t)(uintptr_t)v; memcpy((uint8_t *)base + off, &w, 4); return; }
+    memcpy((uint8_t *)base + off, &v, sizeof v);
+}
+static int p32(const struct mn_field *f) { return (f->flags & MN_PTR32) != 0; }
 
 /* A count field: unsigned, a negative signed value counts as 0. */
 static uint64_t get_count(const void *base, uint16_t off, uint8_t width) {
@@ -73,7 +89,7 @@ static uint64_t get_count(const void *base, uint16_t off, uint8_t width) {
 /* An MN_COUNT_PTR buffer's count: the uint32_t its count pointer points at, 0 for a NULL one. Only where that pointer
  * is this side's own (the guest's params, or the host's after unpacking). */
 static uint64_t ptr_count(const void *params, const struct mn_field *f) {
-    const void *p = get_ptr(params, f->size_offset);
+    const void *p = get_ptr(params, f->size_offset, p32(f));
     uint32_t n = 0;
     if (p) memcpy(&n, p, 4);
     return n;
@@ -143,13 +159,13 @@ int mn_pack_request(const struct mn_call_desc *d, uint32_t index, const void *pa
     for (uint16_t i = 0; !r && i < d->nfields; i++) {
         const struct mn_field *f = &d->fields[i];
         if (f->kind == MN_RET_BUF) continue; /* output only */
-        const void *p = get_ptr(params, f->offset);
+        const void *p = get_ptr(params, f->offset, p32(f));
         if (!p) { r = buf_u32(out, MN_NULL); continue; }
         int64_t n = field_bytes(f, params, p);
         if (n < 0) { r = (int)n; break; }
         if (!(r = buf_u32(out, (uint32_t)n))) r = buf_put(out, p, (size_t)n);
         if (!r && (f->flags & MN_INNER)) {
-            const void *inner = get_ptr(p, f->inner_ptr);
+            const void *inner = get_ptr(p, f->inner_ptr, p32(f));
             int32_t m = inner_count(p, f);
             if (!inner) r = buf_u32(out, MN_NULL);
             else if (!(r = buf_u32(out, (uint32_t)m))) r = buf_put(out, inner, (size_t)m);
@@ -174,7 +190,7 @@ int mn_unpack_request(const struct mn_call_desc *descs, uint32_t ndescs, const v
         if (d->fields[i].kind == MN_UNSUPPORTED) return MN_E_UNSUPPORTED;
     const uint8_t *pb = take(&c, d->params_size);
     if (!pb) return MN_E_FORMAT;
-    uint8_t *params = arena_alloc(arena, d->params_size);
+    uint8_t *params = arena_alloc(arena, d->params_size, 0);
     if (!params) return MN_E_NOMEM;
     memcpy(params, pb, d->params_size);
     for (uint16_t i = 0; i < d->nfields; i++) {
@@ -182,7 +198,7 @@ int mn_unpack_request(const struct mn_call_desc *descs, uint32_t ndescs, const v
         if (f->kind == MN_RET_BUF) continue;
         uint32_t n;
         if (take_u32(&c, &n)) return MN_E_FORMAT;
-        if (n == MN_NULL) { set_ptr(params, f->offset, NULL); continue; }
+        if (n == MN_NULL) { set_ptr(params, f->offset, NULL, p32(f)); continue; }
         const uint8_t *src = take(&c, n);
         if (!src) return MN_E_FORMAT;
         if (f->kind == MN_STR_IN) {
@@ -194,34 +210,34 @@ int mn_unpack_request(const struct mn_call_desc *descs, uint32_t ndescs, const v
         }
         void *copy;
         if (f->flags & MN_COUNT_PTR) {
-            uint8_t *block = arena_alloc(arena, COUNT_PTR_PREFIX + (size_t)n);
+            uint8_t *block = arena_alloc(arena, COUNT_PTR_PREFIX + (size_t)n, p32(f));
             if (!block) return MN_E_NOMEM;
             memcpy(block, &n, 4);
             copy = block + COUNT_PTR_PREFIX;
-        } else if (!(copy = arena_alloc(arena, n))) {
+        } else if (!(copy = arena_alloc(arena, n, p32(f)))) {
             return MN_E_NOMEM;
         }
         memcpy(copy, src, n);
-        set_ptr(params, f->offset, copy);
+        set_ptr(params, f->offset, copy, p32(f));
         if (f->flags & MN_INNER) {
             uint32_t m;
             if (take_u32(&c, &m)) return MN_E_FORMAT;
-            if (m == MN_NULL) { set_ptr(copy, f->inner_ptr, NULL); continue; }
+            if (m == MN_NULL) { set_ptr(copy, f->inner_ptr, NULL, p32(f)); continue; }
             const uint8_t *isrc = take(&c, m);
             if (!isrc || (int64_t)m != inner_count(copy, f)) return MN_E_FORMAT;
-            void *icopy = arena_alloc(arena, m);
+            void *icopy = arena_alloc(arena, m, p32(f));
             if (!icopy) return MN_E_NOMEM;
             memcpy(icopy, isrc, m);
-            set_ptr(copy, f->inner_ptr, icopy);
+            set_ptr(copy, f->inner_ptr, icopy, p32(f));
         }
     }
     if (c.left) return MN_E_FORMAT;
     /* The callee writes up to its count: the count must be what the buffer the guest sent holds, no more. */
     for (uint16_t i = 0; i < d->nfields; i++) {
         const struct mn_field *f = &d->fields[i];
-        const void *buf = get_ptr(params, f->offset);
+        const void *buf = get_ptr(params, f->offset, p32(f));
         if (!(f->flags & MN_COUNT_PTR) || !buf) continue;
-        if (!get_ptr(params, f->size_offset) || ptr_count(params, f) * f->size != request_bytes(buf)) return MN_E_FORMAT;
+        if (!get_ptr(params, f->size_offset, p32(f)) || ptr_count(params, f) * f->size != request_bytes(buf)) return MN_E_FORMAT;
     }
     *index = h.index;
     *host_params = params;
@@ -257,13 +273,13 @@ int mn_pack_reply(const struct mn_call_desc *d, uint32_t status, const void *hos
             else if (!(r = buf_u32(out, (uint32_t)len))) r = buf_put(out, (const void *)(uintptr_t)ptr, (size_t)len);
             continue;
         }
-        const void *p = get_ptr(host_params, f->offset);
+        const void *p = get_ptr(host_params, f->offset, p32(f));
         if (!p || (f->flags & MN_IN_ONLY)) continue;
         int64_t n = f->flags & MN_COUNT_PTR ? request_bytes(p) : field_bytes(f, host_params, p);
         if (n < 0) { r = (int)n; break; }
         if (!(r = buf_u32(out, (uint32_t)n))) r = buf_put(out, p, (size_t)n);
         if (!r && (f->flags & MN_INNER)) {
-            const void *inner = get_ptr(p, f->inner_ptr);
+            const void *inner = get_ptr(p, f->inner_ptr, p32(f));
             int32_t m = inner_count(p, f);
             if (!inner) r = buf_u32(out, MN_NULL);
             else if (!(r = buf_u32(out, (uint32_t)m))) r = buf_put(out, inner, (size_t)m);
@@ -292,18 +308,18 @@ static int reply_fields(const struct mn_call_desc *d, struct cur *c, void *param
             if (apply) set_ubuf(params, f->offset, (uintptr_t)copy, copy ? n : 0);
             continue;
         }
-        void *p = get_ptr(params, f->offset);
+        void *p = get_ptr(params, f->offset, p32(f));
         if (!p || (f->flags & MN_IN_ONLY)) continue;
         uint32_t n;
         if (take_u32(c, &n)) return MN_E_FORMAT;
         const uint8_t *src = take(c, n);
         if (!src) return MN_E_FORMAT;
         if ((int64_t)n != field_bytes(f, params, p)) return MN_E_MISMATCH;
-        void *inner = (f->flags & MN_INNER) ? get_ptr(p, f->inner_ptr) : NULL;
+        void *inner = (f->flags & MN_INNER) ? get_ptr(p, f->inner_ptr, p32(f)) : NULL;
         int32_t want_inner = (f->flags & MN_INNER) ? inner_count(p, f) : 0;
         if (apply) {
             memcpy(p, src, n);
-            if (f->flags & MN_INNER) set_ptr(p, f->inner_ptr, inner); /* the caller's buffer, not the host's */
+            if (f->flags & MN_INNER) set_ptr(p, f->inner_ptr, inner, p32(f)); /* the caller's buffer, not the host's */
         }
         if (f->flags & MN_INNER) {
             uint32_t m;
@@ -346,12 +362,12 @@ int mn_unpack_reply(const struct mn_call_desc *d, const void *msg, size_t len, v
     /* Then apply: the params' bytes, with the caller's own pointers kept, then the pointees. */
     void *saved[64];
     if (d->nfields > 64) return MN_E_UNSUPPORTED;
-    for (uint16_t i = 0; i < d->nfields; i++) saved[i] = get_ptr(params, d->fields[i].offset);
+    for (uint16_t i = 0; i < d->nfields; i++) saved[i] = get_ptr(params, d->fields[i].offset, p32(&d->fields[i]));
     uint8_t *before = malloc(d->params_size ? d->params_size : 1);
     if (!before) return MN_E_NOMEM;
     memcpy(before, params, d->params_size);
     memcpy(params, pb, d->params_size);
-    for (uint16_t i = 0; i < d->nfields; i++) set_ptr(params, d->fields[i].offset, saved[i]);
+    for (uint16_t i = 0; i < d->nfields; i++) set_ptr(params, d->fields[i].offset, saved[i], p32(&d->fields[i]));
     /* Counts are inputs: the lengths were checked against the caller's values, so keep those. */
     for (uint16_t i = 0; i < d->nfields; i++) {
         const struct mn_field *f = &d->fields[i];

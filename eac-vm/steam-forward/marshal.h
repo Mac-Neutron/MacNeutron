@@ -17,7 +17,8 @@ enum mn_kind {
 };
 enum { MN_IN_ONLY = 1,  /* const pointee: not copied back */
        MN_INNER = 2,    /* MN_FIXED whose pointee holds a pointer (inner_ptr) to inner_size_field bytes, copied back */
-       MN_COUNT_PTR = 4 }; /* MN_BUF whose count is behind the pointer at size_offset (a uint32_t *, in and out) */
+       MN_COUNT_PTR = 4,   /* MN_BUF whose count is behind the pointer at size_offset (a uint32_t *, in and out) */
+       MN_PTR32 = 8 };     /* a WoW64 call's: the pointer, its count pointer and its inner pointer are 4 bytes */
 
 struct mn_field {
     uint16_t offset;      /* of the pointer in the params struct */
@@ -38,8 +39,9 @@ struct mn_call_desc {
 struct mn_buf { uint8_t *data; size_t len, cap; };
 void mn_buf_free(struct mn_buf *b);
 
-/* Allocations the host makes for one call, freed together. */
-struct mn_arena { void **ptrs; size_t n, cap; };
+/* Allocations the host makes for one call, freed together. MN_PTR32 pointees go in `low` (the caller's region below
+ * 4 GiB, `low_cap` bytes; none: the call fails with MN_E_NOMEM), which mn_arena_free empties. */
+struct mn_arena { void **ptrs; size_t n, cap; uint8_t *low; size_t low_used, low_cap; };
 void mn_arena_free(struct mn_arena *a);
 
 /* A registry write recorded on the host, replayed by the guest. */
