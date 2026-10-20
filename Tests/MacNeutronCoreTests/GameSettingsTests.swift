@@ -67,3 +67,11 @@ import Testing
     try write(#"{"metalFX":false,"postAA":"cmaa2"}"#, to: store.directory.appending(path: "10.json"))
     #expect(try store.load("10").environment["DXMT_MAX_ANISOTROPY"] == "16")
 }
+
+@Test func launchOptionsFieldSitsOverTheControls() {
+    let settings = GameSettings(graphics: "dxmt", launchOptions: "MACNEUTRON_GRAPHICS=wined3d DXMT_D3D12_SM6=0 -dx12")
+    #expect(settings.environment["MACNEUTRON_GRAPHICS"] == "wined3d")
+    #expect(settings.environment["DXMT_D3D12_SM6"] == "0")
+    #expect(settings.launchArguments == ["-dx12"])
+    #expect(GameSettings().launchArguments.isEmpty)
+}
