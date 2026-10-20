@@ -207,6 +207,19 @@ private func i386Exe(named name: String) throws -> String {
     #expect(f.runner.calls.last?.environment["DXMT_MAX_ANISOTROPY"] == nil)
 }
 
+@Test func mtld3dLogsInTheLogFolderNotTheGames() throws {
+    // mtld3d writes mtld3d-logs/ beside the game's exe unless told otherwise: ours go to ~/Library/Logs/MacNeutron.
+    let f = try makeFixture()
+    let dir = f.launcher.log.directory.appending(path: "mtld3d").path(percentEncoded: false)
+    _ = f.launcher.launch(["run", "/g/Game.exe"], environment: f.env)
+    #expect(f.runner.calls.last?.environment["MTLD3D_CONFIG"] == "log.dir=Z:\(dir)")
+    // The user's MTLD3D_CONFIG comes after ours: mtld3d applies its entries in order, so theirs win.
+    var env = f.env
+    env["MTLD3D_CONFIG"] = "log.dir=logs;present.maxFps=60"
+    _ = f.launcher.launch(["run", "/g/Game.exe"], environment: env)
+    #expect(f.runner.calls.last?.environment["MTLD3D_CONFIG"] == "log.dir=Z:\(dir);log.dir=logs;present.maxFps=60")
+}
+
 @Test func everyLaunchIsLoggedWithVersions() throws {
     let f = try makeFixture()
     _ = f.launcher.launch(["run", "/g/Game.exe"], environment: f.env)

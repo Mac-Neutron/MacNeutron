@@ -123,6 +123,10 @@ public struct Launcher: Sendable {
 
         let (backend, note) = GraphicsBackend.select(requested: environment["MACNEUTRON_GRAPHICS"])
         var env = LaunchEnvironment.build(base: environment, context: context, backend: backend, logging: logging)
+        // mtld3d (Direct3D 9) writes its logs to mtld3d-logs/ beside the game's exe unless told otherwise: ours go to
+        // the log folder. The user's MTLD3D_CONFIG comes after it: mtld3d applies the entries in order, so theirs win.
+        env["MTLD3D_CONFIG"] = (["log.dir=Z:" + log.directory.appending(path: "mtld3d").path(percentEncoded: false)]
+            + [env["MTLD3D_CONFIG"]].compactMap { $0 }).joined(separator: ";")
         // MACNEUTRON_PERF=1: DXMT's frame statistics, for eac-vm/tests/perf-compare.sh. The user's own settings win.
         // DXMT keeps stats.txt in its DXIL dump folder, which also turns on its capture mode: every new shader, root
         // signature and pipeline is saved there too (a little CPU, and files that build up in the folder): the
