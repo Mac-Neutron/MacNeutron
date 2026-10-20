@@ -1573,8 +1573,8 @@ def emit_convert32(model, calls):
             if (f.nested and f.nested.name == "handle") or words:
                 kind, size64, size32, conv = "MN_C32_WORDS", 8, 4, None
             elif base in differ and not stars(elem_t):
-                if f.size != l64[base][0]:  # not the struct on the wire: bytes own code packed (size=aux0)
-                    continue
+                if isinstance(f.size, int) and f.size != l64[base][0]:  # bytes own code packed (size=aux0), not
+                    continue  # the struct; a wstruct's size is an expression for the struct
                 if flat[base] is None or f.one_if or p.array:
                     ok = False
                     continue

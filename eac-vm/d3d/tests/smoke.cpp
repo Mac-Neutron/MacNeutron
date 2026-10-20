@@ -415,7 +415,8 @@ static int die() {
 
 // conv (32-bit games, M4b's review): data whose i386 layout differs, through the whole chain: a D3D11 buffer's initial
 // data read back through a staging map, an input layout's semantic names, a D3D10 buffer's map (a canary after the
-// pointer), a swapchain's GetHwnd (a canary after the HWND) and GetDesc's window. "conv ok", or what failed.
+// pointer), a swapchain's GetHwnd (a canary after the HWND) and GetDesc's window, an adapter's GetDesc (WCHARs, SIZE_Ts,
+// a canary after it). "conv ok", or what failed.
 static void conv(ID3D12CommandQueue *queue) {
     std::string bad;
     ID3D11Device *dev = nullptr;
@@ -460,6 +461,14 @@ static void conv(ID3D12CommandQueue *queue) {
     DXGI_SWAP_CHAIN_DESC desc = {};
     if (!sc || FAILED(sc->GetHwnd(&gh.h)) || gh.h != w || gh.canary != 0xC0FFEE22u) bad += " gethwnd";
     if (!sc || FAILED(sc->GetDesc(&desc)) || desc.OutputWindow != w) bad += " swapdesc";
+    IDXGIDevice *xd = nullptr;
+    IDXGIAdapter *ad = nullptr;
+    struct { DXGI_ADAPTER_DESC d; UINT32 canary; } ade = {{}, 0xC0FFEE33u};
+    if (FAILED(dev->QueryInterface(__uuidof(IDXGIDevice), (void **)&xd)) || FAILED(xd->GetAdapter(&ad)) ||
+        FAILED(ad->GetDesc(&ade.d)) || !ade.d.Description[0] || !ade.d.VendorId || ade.canary != 0xC0FFEE33u)
+        bad += " adapterdesc";
+    if (ad) ad->Release();
+    if (xd) xd->Release();
     if (sc) sc->Release();
     if (w) DestroyWindow(w);
     if (b10) b10->Release();
