@@ -54,6 +54,7 @@ struct GamesView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     optionsToggles(row)
                     optionsPickers(row)
+                    LaunchOptionsField(row: row).id(row.id)  // a fresh draft for each game
                 }
                 .padding(10)
             }
@@ -161,5 +162,46 @@ struct GamesView: View {
     private func anisotropyBinding(_ row: GameRow) -> Binding<String> {
         Binding(get: { row.settings.anisotropy.flatMap { ["game", "4", "8"].contains($0) ? $0 : nil } ?? "16" },
                 set: { value in Task { await model.update(row.id) { $0.anisotropy = value == "16" ? nil : value } } })
+    }
+}
+
+/// The selected game's launch options (`GameSettings.launchOptions`), saved on Return and when the field is left; with
+/// the game's own Steam launch line, which wins over it, and what's wrong with that line.
+private struct LaunchOptionsField: View {
+    @Environment(AppModel.self) private var model
+    let row: GameRow
+    @State private var draft: String
+    @FocusState private var focused: Bool
+
+    init(row: GameRow) {
+        self.row = row
+        _draft = State(initialValue: row.settings.launchOptions ?? "")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Launch options")
+                TextField("", text: $draft, prompt: Text("DXMT_D3D12_SM6=0 -dx12"))
+                    .focused($focused)
+                    .onSubmit(save)
+                    .onChange(of: focused) { _, now in if !now { save() } }
+                    .onDisappear(perform: save)
+                    .help("Variables and game arguments, e.g. DXMT_D3D12_SM6=0 -dx12. In the game VM only the variables MacNeutron passes to the VM reach the game (its logging, DLSS and a few DXMT ones); DXMT's reach its renderer on the Mac.")
+            }
+            if let line = row.steamLaunchOptions {
+                Text("Steam's launch options: \(line)").foregroundStyle(.secondary).textSelection(.enabled)
+                ForEach(LaunchOptions.problems(steamLine: line, appEnvironment: row.settings.environment), id: \.self) {
+                    Text($0).foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        let value = draft.trimmingCharacters(in: .whitespaces)
+        guard value != (row.settings.launchOptions ?? "") else { return }
+        let id = row.id
+        Task { await model.update(id) { $0.launchOptions = value.isEmpty ? nil : value } }
     }
 }

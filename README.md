@@ -64,9 +64,12 @@ CLI isn't beside one (a tool folder assembled from `.build/release/`).
 
 ## Per-game options
 
-Use the app's Games window, or Steam launch options:
+Use the app's Games window, or Steam launch options. The Games window's **Launch options** field takes any of the
+variables below and game arguments, without `/usr/bin/env` or `%command%` (`DXMT_D3D12_SM6=0 -dx12`). It also shows the
+game's Steam launch line, which wins over it, and says when that line won't start the game. In the game VM, only the
+variables MacNeutron passes to the VM (its logging, DLSS and a few DXMT ones) reach the game.
 
-Start launch options with `/usr/bin/env`. macOS Steam runs them without a shell, so the Linux-style
+In Steam, start launch options with `/usr/bin/env`. macOS Steam runs them without a shell, so the Linux-style
 `VAR=value %command%` fails to launch.
 
 | Launch options | Effect |

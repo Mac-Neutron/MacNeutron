@@ -111,6 +111,21 @@ private func makeModel(steamRunning: Bool = false,
     #expect(snapshot.status == .off)
 }
 
+@MainActor @Test func snapshotReadsSteamLaunchLines() async throws {
+    let (model, mode, _) = try await makeModel()
+    func snapshot() -> Snapshot {
+        AppModel.loadSnapshot(steam: mode.steam, layout: model.layout, store: model.store, mode: mode, fallbackApps: [])
+    }
+    #expect(snapshot().steamLaunchOptions.isEmpty)  // no localconfig.vdf
+    try write("\"UserLocalConfigStore\" { \"Software\" { \"Valve\" { \"Steam\" { \"apps\" { \"\(cats.appID)\" { "
+              + "\"LaunchOptions\" \"/usr/bin/env MACNEUTRON_LOG=1 %command%\" } } } } } }",
+              to: mode.steam.root.appending(path: "userdata/12345/config/localconfig.vdf"))
+    let read = snapshot()
+    #expect(read.steamLaunchOptions == [cats.appID: "/usr/bin/env MACNEUTRON_LOG=1 %command%"])
+    model.apply(read, generation: model.generation)
+    #expect(model.games.first { $0.id == cats.appID }?.steamLaunchOptions == "/usr/bin/env MACNEUTRON_LOG=1 %command%")
+}
+
 @MainActor @Test func loginToggleReportsWhenMacOSWantsApproval() async throws {
     let login = FakeLoginItem(statusAfterRegister: .requiresApproval)
     let (model, _, _) = try await makeModel(loginItem: login.item)
