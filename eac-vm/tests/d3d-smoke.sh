@@ -15,12 +15,18 @@
 # host ran from (native DXMT's logs go to the run's traces), and forwarded, native DXMT's shader cache and recorded
 # pipelines in MN_D3D_STATE's folder (a game's VM state). Needs the images (guest-stages.sh dxmt d3d, image/build.sh
 # wine) and the share's dxmt-tests (eac-vm/dxmt/share.sh). Prints "d3d-smoke: ok" or "d3d-smoke: FAIL <what>".
+# smoke32.exe, the same program for i686 (32-bit games, new WoW64), runs in each mode too, its "32:" lines the guest
+# checks: a 32-bit process runs on guest DXMT built for i386 in both modes (prefix.sh's builtins fallback) until there
+# are 32-bit forwarding proxies, so it runs with MACNEUTRON_VM_D3D=guest (forwarded, smoke.cpp tries what guest DXMT
+# aborts on).
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 SH=$W/share
 MN_DXMT_ONLY=d3d12_null sh "$ROOT/eac-vm/dxmt/share.sh" > /dev/null  # the share's shaders too (dies' D3D11 ones)
 "$(sh "$ROOT/dxmt/toolchain.sh")/x86_64-w64-mingw32-clang++" -std=c++17 -O1 -static -s -o "$SH/dxmt-tests/smoke.exe" \
+  "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ld3d11 -ldxgi
+"$(sh "$ROOT/dxmt/toolchain.sh")/i686-w64-mingw32-clang++" -std=c++17 -O1 -static -s -o "$SH/dxmt-tests/smoke32.exe" \
   "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ld3d11 -ldxgi
 fail=
 for mode in forward guest; do
@@ -41,10 +47,14 @@ for i in 1 2 3; do  # processes that end mid-load (M4's final review): the host 
   echo "die status \$?" >> \$O/d3d-smoke.raw
 done
 timeout -k 10 60 wine \$T/smoke.exe < /dev/null >> \$O/d3d-smoke.raw 2>&1
+MACNEUTRON_VM_D3D=guest timeout -k 10 60 wine \$T/smoke32.exe < /dev/null > \$O/d3d-smoke32.raw 2>&1
+echo "status \$?" >> \$O/d3d-smoke32.raw
 timeout 20 wineserver -k
 tr -d '\r' < \$O/d3d-smoke.raw > \$O/d3d-smoke-$mode.txt
+tr -d '\r' < \$O/d3d-smoke32.raw > \$O/d3d-smoke32-$mode.txt
 EOS
-  rm -f "$SH"/traces/d3d-guest.*.txt "$SH/traces/d3d-host.txt" "$SH/traces/d3d-smoke-$mode.txt"
+  rm -f "$SH"/traces/d3d-guest.*.txt "$SH/traces/d3d-host.txt" "$SH/traces/d3d-smoke-$mode.txt" \
+    "$SH/traces/d3d-smoke32-$mode.txt"
   C=$W/d3d-smoke-cwd; rm -rf "$C"; mkdir -p "$C"
   # The game's native DXMT state (M3 Task 8): its shader cache and recorded pipelines, forwarded
   ST=$W/d3d-smoke-state; rm -rf "$ST"
@@ -72,6 +82,11 @@ EOS
     got=$(/usr/bin/grep "^$c " "$out" 2> /dev/null || true)
     echo "d3d-smoke: $mode: ${got:-no $c line}"
     [ "$got" = "$c ok" ] || fail="$fail $mode-$c"
+  done
+  for c in eventthread name minimised latency d3d11latency wmtforward wmsize; do
+    got=$(/usr/bin/grep "^$c " "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null || true)
+    echo "d3d-smoke: $mode: 32: ${got:-no $c line}"
+    [ "$got" = "$c ok" ] || fail="$fail $mode-32-$c"
   done
   if [ "$mode" = forward ]; then
     # Pacing is the guest's: no present held its vCPU waiting for a drawable or the GPU (latency's frames)
