@@ -192,6 +192,17 @@ check_no_profile_runtime() {  # check_no_profile_runtime <dir or file>...: nothi
   [ -z "$d" ] || { echo "release: $d has the LLVM profile runtime (a PGO generate build)" >&2; return 1; }
 }
 
+check_env() {  # check_env <profile>: no variable left from a dev, p or PGO build that changes what a release builds;
+  # BUILD_DIR and BUILDER_HOME only as the profile sets them
+  _ce=
+  [ -z "${MACNEUTRON_PGO+x}" ] || _ce="$_ce MACNEUTRON_PGO"
+  [ -z "${MACNEUTRON_P_FLAGS+x}" ] || _ce="$_ce MACNEUTRON_P_FLAGS"
+  [ "${MACNEUTRON_PROFILE:-$1}" = "$1" ] || _ce="$_ce MACNEUTRON_PROFILE"
+  _ce_sfx=; [ "$1" = std ] || _ce_sfx=/$1
+  [ "${BUILD_DIR:-$ROOT/build$_ce_sfx}" = "$ROOT/build$_ce_sfx" ] || _ce="$_ce BUILD_DIR"
+  [ "${BUILDER_HOME:-/home/bench$_ce_sfx}" = "/home/bench$_ce_sfx" ] || _ce="$_ce BUILDER_HOME"
+  [ -z "$_ce" ] || { echo "release: unset$_ce: a release builds with its profile's defaults" >&2; return 1; }
+}
 stamps() {  # stamps <file>...: each file's path, modification time and size ("none" when missing), a line each
   for f; do echo "$f $(stat -f '%m %z' "$f" 2> /dev/null || echo none)"; done
 }
@@ -286,6 +297,20 @@ self_test() {
   refused "a p build with the profile runtime" "release: $T/prof/m has the LLVM profile runtime (a PGO generate build)" \
     check_no_profile_runtime "$T/prof"
   passes "a p build without the profile runtime" check_no_profile_runtime "$T/noprof"
+  # No variable left from a dev, p or PGO build changes what a release builds.
+  with() { (unset MACNEUTRON_PGO MACNEUTRON_P_FLAGS MACNEUTRON_PROFILE BUILD_DIR BUILDER_HOME; export "$1"; shift; "$@") }
+  passes "a release without build variables" with X=1 check_env std
+  passes "a p release with its own build folder and builder home" with BUILDER_HOME=/home/bench/p check_env p
+  refused "a release with MACNEUTRON_PGO" "release: unset MACNEUTRON_PGO: a release builds with its profile's defaults" \
+    with MACNEUTRON_PGO=generate check_env p
+  refused "a p release with MACNEUTRON_P_FLAGS" "release: unset MACNEUTRON_P_FLAGS: a release builds with its profile's defaults" \
+    with MACNEUTRON_P_FLAGS=wine check_env p
+  refused "a normal release with the p profile's" "release: unset MACNEUTRON_PROFILE: a release builds with its profile's defaults" \
+    with MACNEUTRON_PROFILE=p check_env std
+  refused "a normal release with the p builder home" "release: unset BUILDER_HOME: a release builds with its profile's defaults" \
+    with BUILDER_HOME=/home/bench/p check_env std
+  refused "a normal release with the p build folder" "release: unset BUILD_DIR: a release builds with its profile's defaults" \
+    with BUILD_DIR="$ROOT/build/p" check_env std
   # The normal build's files, which a p release leaves alone (u3 missing both times).
   printf a > "$T/u1"; printf b > "$T/u2"
   s=$(stamps "$T/u1" "$T/u2" "$T/u3")
@@ -695,6 +720,7 @@ case "$#:${1:-}" in
   *) V= ;;
 esac
 [ -n "$V" ] || { echo "$usage" >&2; exit 2; }
+check_env $PROFILE || exit 2
 if [ $PROFILE = p ]; then
   # The p build (spec 2026-10-19-macneutron-performance-build): X.Y.Zp from build/p and the builder's p home.
   check_version_p "$ROOT" "$V" || exit 2
