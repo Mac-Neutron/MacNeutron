@@ -52,7 +52,8 @@ enum { MN_E_UNSUPPORTED = -1, MN_E_FORMAT = -2, MN_E_TOO_BIG = -3, MN_E_MISMATCH
 
 /* Guest: the request for one call. */
 int mn_pack_request(const struct mn_call_desc *d, uint32_t index, const void *params, struct mn_buf *out);
-/* Host: the call's index and a host copy of its params (pointers into `arena`). `msg` excludes nothing: header first. */
+/* Host: the call's index (without MN_WOW64: `descs` is the table that bit names) and a host copy of its params
+ * (pointers into `arena`). `msg` excludes nothing: header first. */
 int mn_unpack_request(const struct mn_call_desc *descs, uint32_t ndescs, const void *msg, size_t len,
                       uint32_t *index, void **host_params, struct mn_arena *arena);
 /* Host: the reply, after the call ran on host_params; the registry writes the call made go along. */

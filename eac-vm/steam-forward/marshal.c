@@ -184,8 +184,9 @@ int mn_unpack_request(const struct mn_call_desc *descs, uint32_t ndescs, const v
     const uint8_t *hp = take(&c, sizeof(struct mn_req_hdr));
     if (!hp) return MN_E_FORMAT;
     struct mn_req_hdr h; memcpy(&h, hp, sizeof h);
-    if (h.magic != MN_MAGIC || h.index >= ndescs || h.len != c.left) return MN_E_FORMAT;
-    const struct mn_call_desc *d = &descs[h.index];
+    uint32_t i = h.index & ~MN_WOW64; /* the caller chose `descs` by that bit */
+    if (h.magic != MN_MAGIC || i >= ndescs || h.len != c.left) return MN_E_FORMAT;
+    const struct mn_call_desc *d = &descs[i];
     for (uint16_t i = 0; i < d->nfields; i++)
         if (d->fields[i].kind == MN_UNSUPPORTED) return MN_E_UNSUPPORTED;
     const uint8_t *pb = take(&c, d->params_size);
@@ -239,7 +240,7 @@ int mn_unpack_request(const struct mn_call_desc *descs, uint32_t ndescs, const v
         if (!(f->flags & MN_COUNT_PTR) || !buf) continue;
         if (!get_ptr(params, f->size_offset, p32(f)) || ptr_count(params, f) * f->size != request_bytes(buf)) return MN_E_FORMAT;
     }
-    *index = h.index;
+    *index = i;
     *host_params = params;
     return 0;
 }
