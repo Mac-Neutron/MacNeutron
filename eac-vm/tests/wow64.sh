@@ -26,10 +26,10 @@ check "2 fresh-syswow64" "$([ -f "$WINEPREFIX/drive_c/windows/syswow64/kernel32.
 cmd32() { wine 'C:\windows\syswow64\cmd.exe' /c "$1" 2>/dev/null | tr -d '\r'; }
 check "3 cmd32" "$(cmd32 'echo %PROCESSOR_ARCHITECTURE%')" x86
 check "4 cmd32-wow" "$(cmd32 'echo %PROCESSOR_ARCHITEW6432%')" AMD64
-# run-game.sh runs wineboot -u at every launch: its cost on an up-to-date prefix, now that it covers syswow64 too.
+# run-game.sh runs wineboot -i at every launch (an update only when wine.inf changed): its cost on an up-to-date prefix.
 for n in 1 2; do
-  t0=$(date +%s%N); wineboot -u >/dev/null 2>&1; t1=$(date +%s%N)
-  echo "wineboot -u on an up-to-date prefix ($n): $(( (t1 - t0) / 1000000 )) ms"
+  t0=$(date +%s%N); wineboot -i >/dev/null 2>&1; t1=$(date +%s%N)
+  echo "wineboot -i on an up-to-date prefix ($n): $(( (t1 - t0) / 1000000 )) ms"
 done
 
 # Forwarded Direct3D (the VM's default) puts 64-bit forwarding DLLs in system32 only: a 32-bit process must fall back
@@ -61,7 +61,7 @@ wineserver -k
 
 if [ -d /home/mn/pfx64 ]; then
   rm -rf /home/mn/pfx64-up; cp -a /home/mn/pfx64 /home/mn/pfx64-up  # the original stays 64-bit-only for the next run
-  WINEPREFIX=/home/mn/pfx64-up wineboot -u >/dev/null 2>&1
+  WINEPREFIX=/home/mn/pfx64-up wineboot -i >/dev/null 2>&1  # as run-game.sh: wine.inf is newer than the prefix
   check "5 upgrade" "$([ -f /home/mn/pfx64-up/drive_c/windows/syswow64/kernel32.dll ] && echo present)" present
   check "5 upgrade-cmd32" "$(WINEPREFIX=/home/mn/pfx64-up cmd32 'echo %PROCESSOR_ARCHITECTURE%')" x86
   WINEPREFIX=/home/mn/pfx64-up wineserver -k
