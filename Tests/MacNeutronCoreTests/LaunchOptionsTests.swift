@@ -15,3 +15,27 @@ import Testing
     #expect(LaunchOptions.parse("1A=2").arguments == ["1A=2"])  // not a shell name
     #expect(LaunchOptions.parse("  ").environment.isEmpty && LaunchOptions.parse("").arguments.isEmpty)
 }
+
+@Test func steamLinesAreEachAppsLaunchOptions() throws {
+    let file = try makeTempDir().appending(path: "localconfig.vdf")
+    try write("""
+        "UserLocalConfigStore" { "Software" { "Valve" { "Steam" { "apps" {
+          "42" { "LaunchOptions" "/usr/bin/env MACNEUTRON_LOG=1 %command%" }
+          "43" { "LaunchOptions" "" }
+          "44" { "LastPlayed" "1" }
+        } } } } }
+        """, to: file)
+    #expect(LaunchOptions.steamLines(localConfig: file) == [42: "/usr/bin/env MACNEUTRON_LOG=1 %command%"])
+    try write("{ not vdf", to: file)
+    #expect(LaunchOptions.steamLines(localConfig: file).isEmpty)
+    #expect(LaunchOptions.steamLines(localConfig: file.appending(path: "missing")).isEmpty)
+}
+
+@Test func steamLineProblems() {
+    #expect(LaunchOptions.problems(steamLine: "MACNEUTRON_LOG=1 %command%", appEnvironment: [:])
+        == ["Steam can't start the game with this line: begin it with /usr/bin/env"])
+    #expect(LaunchOptions.problems(steamLine: "/usr/bin/env MACNEUTRON_LOG=1 DXMT_MAX_ANISOTROPY=4 %command%",
+                                   appEnvironment: ["DXMT_MAX_ANISOTROPY": "16", "MACNEUTRON_LOG": "1", "X": "1"])
+        == ["Steam's launch options override: DXMT_MAX_ANISOTROPY, MACNEUTRON_LOG"])
+    #expect(LaunchOptions.problems(steamLine: "/usr/bin/env %command% -dx12", appEnvironment: ["A": "1"]).isEmpty)
+}
