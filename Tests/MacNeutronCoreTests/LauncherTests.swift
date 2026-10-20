@@ -239,6 +239,20 @@ private func i386Exe(named name: String) throws -> String {
     #expect(wine["WINEMSYNC"] == nil)
 }
 
+@Test func launchOptionsFieldAppliesUnderSteamAndAddsArguments() throws {
+    let f = try makeFixture()
+    try f.launcher.settings.save(GameSettings(launchOptions: "MACNEUTRON_GRAPHICS=wined3d DXMT_D3D12_SM6=0 -dx12"), for: "42")
+    var env = f.env
+    env["MACNEUTRON_GRAPHICS"] = "dxmt"  // Steam's launch options win over the field
+    #expect(f.launcher.launch(["waitforexitandrun", "/g/Game.exe", "-windowed"], environment: env) == 0)
+    let game = try #require(f.runner.calls.first { $0.arguments.first == "/g/Game.exe" })
+    #expect(game.arguments == ["/g/Game.exe", "-windowed", "-dx12"])
+    #expect(game.environment["DXMT_D3D12_SM6"] == "0")
+    #expect(game.environment["WINEDLLOVERRIDES"]?.hasPrefix("dxgi=n,b;d3d10core=n,b;d3d11=n,b") == true)  // dxmt
+    _ = f.launcher.launch(["run", "/g/Setup.exe"], environment: env)  // an install script's run
+    #expect(f.runner.calls.last { $0.arguments.first == "/g/Setup.exe" }?.arguments == ["/g/Setup.exe"])
+}
+
 @Test func oldGraphicsValueRunsDXMTWithANote() throws {
     let f = try makeFixture()
     try f.launcher.settings.save(GameSettings(graphics: "dxvk"), for: "42")

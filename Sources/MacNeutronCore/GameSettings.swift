@@ -23,13 +23,16 @@ public struct GameSettings: Codable, Equatable, Sendable {
     /// Frame generation on MetalFX (MACNEUTRON_FRAMEGEN): a frame interpolated between each two the game renders, when
     /// it runs DLSS on MetalFX. nil/false: off.
     public var frameGen: Bool?
+    /// The Games window's launch options (`LaunchOptions.parse`): variables over the controls' and game arguments.
+    /// Steam's own launch options still win over both. nil: none.
+    public var launchOptions: String?
 
     /// MACNEUTRON_UPSCALE's presets, XeSS's ratios: the back buffer keeps this fraction of the window's pixels.
     public static let upscalePresets = ["ultra-quality", "quality", "balanced", "performance", "ultra-performance"]
 
     public init(graphics: String? = nil, log: Bool? = nil, msync: Bool? = nil, runAs: RunAs? = nil, metalFX: Bool? = nil,
                 postAA: String? = nil, anisotropy: String? = nil, upscale: String? = nil, metalHUD: Bool? = nil,
-                dlss: Bool? = nil, frameGen: Bool? = nil) {
+                dlss: Bool? = nil, frameGen: Bool? = nil, launchOptions: String? = nil) {
         self.graphics = graphics
         self.log = log
         self.msync = msync
@@ -41,6 +44,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
         self.metalHUD = metalHUD
         self.dlss = dlss
         self.frameGen = frameGen
+        self.launchOptions = launchOptions
     }
 
     /// The launch-option variables these settings stand for (`runAs` is for the mapping planner only).
@@ -67,8 +71,12 @@ public struct GameSettings: Codable, Equatable, Sendable {
         if metalHUD == true { env["MTL_HUD_ENABLED"] = "1" }
         if dlss == true { env["MACNEUTRON_DLSS"] = "1" }
         if frameGen == true { env["MACNEUTRON_FRAMEGEN"] = "1" }
+        env.merge(LaunchOptions.parse(launchOptions ?? "").environment) { _, field in field }
         return env
     }
+
+    /// The launch options field's game arguments, after the game's own.
+    public var launchArguments: [String] { LaunchOptions.parse(launchOptions ?? "").arguments }
 }
 
 /// `games/<appid>.json`, written atomically so the launcher never reads half a file.

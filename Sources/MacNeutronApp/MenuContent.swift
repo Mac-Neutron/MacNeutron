@@ -4,6 +4,7 @@ import SwiftUI
 
 struct MenuContent: View {
     @Environment(AppModel.self) private var model
+    @Environment(UpdateModel.self) private var updates
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -39,6 +40,9 @@ struct MenuContent: View {
         }
         Button("Show logs") { NSWorkspace.shared.open(LauncherLog.standard.directory) }
         Divider()
+        if let release = updates.available {
+            Button("Update to \(release.version)…") { show("settings", with: openWindow) }
+        }
         Button("Settings…") { show("settings", with: openWindow) }
         Button("Quit MacNeutron") { NSApplication.shared.terminate(nil) }
             .keyboardShortcut("q")

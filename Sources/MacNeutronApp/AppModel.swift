@@ -8,6 +8,8 @@ struct GameRow: Identifiable, Equatable {
     let app: AppInfo
     let installed: Bool
     var settings: GameSettings
+    /// The game's own launch options in Steam (read only); nil when it has none.
+    var steamLaunchOptions: String?
 
     var id: UInt32 { app.appID }
     var name: String { app.name.isEmpty ? "App \(app.appID)" : app.name }
@@ -46,6 +48,8 @@ struct Snapshot: Sendable {
     var settings: [String: GameSettings]
     var orphans: [OrphanPrefix]
     var status: SteamPlayStatus
+    /// Each game's launch options in Steam, by app ID.
+    var steamLaunchOptions: [UInt32: String] = [:]
 }
 
 /// Everything the menu, setup, games and settings views show, and every action they take.
@@ -237,7 +241,8 @@ final class AppModel {
         games = snapshot.apps
             .filter { MappingPlanner.mappableTypes.contains($0.type) && !$0.oslist.isDisjoint(with: ["windows", "macos"]) }
             .map { GameRow(app: $0, installed: snapshot.installed.contains($0.appID),
-                           settings: snapshot.settings[String($0.appID)] ?? GameSettings()) }
+                           settings: snapshot.settings[String($0.appID)] ?? GameSettings(),
+                           steamLaunchOptions: snapshot.steamLaunchOptions[$0.appID]) }
             .sorted { ($0.installed ? 0 : 1, $0.name.lowercased()) < ($1.installed ? 0 : 1, $1.name.lowercased()) }
         orphans = snapshot.orphans
         readStatus = snapshot.status
@@ -255,7 +260,8 @@ final class AppModel {
         let plan = MappingPlanner.plan(apps: apps, runAs: store.runAsOverrides())
         return Snapshot(runtime: InstalledRuntime.read(layout, identity: identity), apps: apps,
                         appInfoError: appInfoError, installed: steam.installedAppIDs(), settings: store.all(),
-                        orphans: OrphanPrefixes.find(in: steam), status: mode.status(plan: plan))
+                        orphans: OrphanPrefixes.find(in: steam), status: mode.status(plan: plan),
+                        steamLaunchOptions: steam.localConfig.map(LaunchOptions.steamLines(localConfig:)) ?? [:])
     }
 
     func plan() -> [String: ToolMapping] {

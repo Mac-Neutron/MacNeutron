@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(UpdateModel.self) private var updates
     @Environment(\.openWindow) private var openWindow
     @State private var confirmingTurnOff = false
     @State private var confirmingRebuild = false
@@ -16,6 +17,25 @@ struct SettingsView: View {
                     Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
                 }
                 .foregroundStyle(.orange)
+            }
+            if updates.enabled {
+                LabeledContent("Updates") {
+                    HStack {
+                        Toggle("Check automatically", isOn: Binding(get: { updates.automatic }, set: { updates.automatic = $0 }))
+                        Button("Check now") { Task { await updates.check() } }
+                            .disabled(updates.working)
+                    }
+                }
+                if let release = updates.available {
+                    LabeledContent("MacNeutron \(release.version) is available") {
+                        HStack {
+                            Link("Release notes", destination: release.page)
+                            Button("Install and relaunch") { Task { await updates.install() } }
+                                .disabled(updates.working)
+                        }
+                    }
+                }
+                if let notice = updates.notice { Text(notice).foregroundStyle(.secondary).textSelection(.enabled) }
             }
             LabeledContent("Runtime") {
                 Button("Repair runtime") { Task { await model.installRuntime(force: true) } }

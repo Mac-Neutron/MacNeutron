@@ -68,7 +68,7 @@ public struct Launcher: Sendable {
     /// Returns the exit code for Steam. Never throws: every failure is logged and becomes exit 1.
     public func launch(_ argv: [String], environment steamEnvironment: [String: String]) -> Int32 {
         var environment = steamEnvironment
-        let request: LaunchRequest
+        var request: LaunchRequest
         let context: CompatContext
         do {
             request = try LaunchRequest.parse(argv)
@@ -76,12 +76,20 @@ public struct Launcher: Sendable {
         } catch {
             return fail("\(error)", argv: argv, notify: false)
         }
+        let gameSettings: GameSettings
         do {
-            environment = try withSettings(environment, appID: context.appID)
+            gameSettings = try settings.load(context.appID)
         } catch {
             log.append("note: ignoring unreadable game settings for \(context.appID): \(error)")
             // The defaults still apply (16x anisotropic filtering is a default, not an empty setting).
-            environment = GameSettings().environment.merging(environment) { _, launchOption in launchOption }
+            gameSettings = GameSettings()
+        }
+        environment = gameSettings.environment.merging(environment) { _, launchOption in launchOption }
+        // The launch options field's arguments follow the game's own when Steam starts the game, not when its install
+        // scripts start a redistributable's installer (`run`).
+        if request.verb == .waitforexitandrun, !gameSettings.launchArguments.isEmpty {
+            request = LaunchRequest(verb: request.verb, target: request.target,
+                                    arguments: request.arguments + gameSettings.launchArguments)
         }
         let logging = environment["MACNEUTRON_LOG"] == "1" || environment["MACNEUTRON_LOG"] == "2"
         // A performance build (X.Y.Zp) keeps one launcher.log line a launch unless MACNEUTRON_LOG asks for more.

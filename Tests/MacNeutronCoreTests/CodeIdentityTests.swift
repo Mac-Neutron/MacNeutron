@@ -55,3 +55,7 @@ private func cdHash(_ bundle: URL) throws -> String? {
     try write("#!/bin/sh\n", to: macOS.appending(path: "wine"), executable: true)
     #expect(CodeIdentity.of(unsigned) == nil)
 }
+
+@Test func adHocSignedAppsHaveNoTeam() throws {
+    #expect(CodeIdentity.team(of: try makeSignedWineApp(at: try makeTempDir())) == nil)
+}

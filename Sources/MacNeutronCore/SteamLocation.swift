@@ -65,6 +65,25 @@ public struct SteamLocation: Equatable, Sendable {
         return nodes.node(at: ["Registry", "HKCU", "Software", "Valve", "Steam", "language"])?.stringValue
     }
 
+    /// The `localconfig.vdf` of the account Steam logged in last (`loginusers.vdf`'s `MostRecent`), else of the only
+    /// account in `userdata`; nil otherwise. The account ID makes the path and nothing else: never log or show it.
+    /// Only `MostRecent` is read from `loginusers.vdf`, which also holds account names.
+    public var localConfig: URL? {
+        let userdata = root.appending(path: "userdata", directoryHint: .isDirectory)
+        var account: String?
+        if let text = try? String(contentsOf: root.appending(path: "config/loginusers.vdf"), encoding: .utf8),
+           let users = (try? KeyValues.parse(text))?.node(at: ["users"]),
+           let recent = users.children.first(where: { $0.children.node(at: ["MostRecent"])?.stringValue == "1" }),
+           let id = UInt64(KeyValues.unescape(recent.key)) {
+            account = String(id & 0xFFFF_FFFF)
+        } else {
+            let folders = ((try? FileManager.default.contentsOfDirectory(atPath: userdata.path(percentEncoded: false))) ?? [])
+                .filter { UInt32($0) != nil }
+            if folders.count == 1 { account = folders[0] }
+        }
+        return account.map { userdata.appending(path: "\($0)/config/localconfig.vdf") }
+    }
+
     static func samePath(_ a: URL, _ b: URL) -> Bool {
         func normal(_ url: URL) -> String {
             var path = url.standardizedFileURL.resolvingSymlinksInPath().path(percentEncoded: false)

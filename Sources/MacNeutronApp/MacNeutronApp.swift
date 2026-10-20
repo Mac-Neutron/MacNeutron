@@ -5,6 +5,9 @@ import SwiftUI
 @main
 struct MacNeutronApp: App {
     @State private var model = AppModel(vmRoot: AppModel.bundledVMTools != nil ? MicroVM.standardRoot : nil)
+    @State private var updates = UpdateModel(
+        current: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev",
+        app: Bundle.main.bundleURL, team: CodeIdentity.team(of: Bundle.main.bundleURL))
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {
@@ -13,7 +16,7 @@ struct MacNeutronApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent().environment(model)
+            MenuContent().environment(model).environment(updates)
         } label: {
             Image(systemName: model.status.symbol)
         }
@@ -34,7 +37,7 @@ struct MacNeutronApp: App {
         .windowResizability(.contentSize)
 
         Window("MacNeutron Settings", id: "settings") {
-            SettingsView().environment(model)
+            SettingsView().environment(model).environment(updates)
         }
         .windowResizability(.contentSize)
     }
