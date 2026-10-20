@@ -32,8 +32,14 @@ check() {  # check <wine.app> <build dir>
     licenses/fex/range-v3-LICENSE.txt licenses/fex/cephes-LICENSE \
     licenses/llvm/LICENSE.TXT licenses/llvm/COPYRIGHT.regex \
     licenses/llvm-mingw/LICENSE.TXT licenses/llvm-mingw/COPYING.MinGW-w64-runtime.txt \
-    licenses/macneutron/LICENSE licenses/macneutron/CMAA2-LICENSE.txt
+    licenses/macneutron/LICENSE licenses/macneutron/CMAA2-LICENSE.txt \
+    licenses/mtld3d/LICENSE licenses/mtld3d/crates/INDEX
   do [ -s "$R/$f" ] || miss "$f"; done
+  # mtld3d's crates (dxmt/mtld3d-notices.py): a folder of licence files for each one its INDEX names.
+  while read -r crate version _; do  # "<crate> <version>: <terms>"
+    version=${version%:}
+    ls "$R/licenses/mtld3d/crates/$crate-$version"/* > /dev/null 2>&1 || miss "licenses/mtld3d/crates/$crate-$version"
+  done < "$R/licenses/mtld3d/crates/INDEX" 2> /dev/null
 
   # 2. Notices that live only in source headers: the committed NOTICES.md names each holder.
   for h in "Regents of the University of California" "VIXL authors" "Rich Felker" "Arm Limited" "Will Faust" \

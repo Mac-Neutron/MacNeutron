@@ -529,6 +529,19 @@ sh "$ROOT/wine-arm64/tools/xcrun-metal.sh" -sdk macosx metal -o "$SRC/presenter/
      "$SRC/presenter/cmaa2.air" "$SRC/presenter/sharpen.air" \
   >> "$SRC/presenter.log" 2>&1 || die "building the presenter's shaders failed; see $SRC/presenter.log"
 
+# 7b. mtld3d (D3D9 spec §4), Direct3D 9: its ARM64X d3d9.dll and mtld3d.dll and its mtld3d.so, by its own Makefile in
+#     the DXMT tree's mtld3d/ (dxmt/mtld3d-build.sh), against an installed copy of this Wine (bin/winebuild and
+#     lib/wine's aarch64 archives); bundle.sh puts them in wine.app.
+rm -rf "$SRC/wine-sdk"
+make -C "$SRC/wine-build" install DESTDIR="$SRC/wine-sdk" > "$SRC/wine-sdk.log" 2>&1 \
+  || die "installing Wine for mtld3d's build failed; see $SRC/wine-sdk.log"
+echo "wine-arm64: building mtld3d (log: $SRC/mtld3d.log)" >&2
+BUILD_DIR="$B" sh "$ROOT/dxmt/mtld3d-build.sh" "$SRC/wine-sdk/usr/local" > /dev/null 2> "$SRC/mtld3d.log" \
+  || die "building mtld3d failed; see $SRC/mtld3d.log"
+# The crates its binaries link, their licence files (bundle.sh: licenses/mtld3d/crates).
+PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH" python3 -I "$ROOT/dxmt/mtld3d-notices.py" "$D/mtld3d" \
+  "$SRC/mtld3d-notices" "cargo +$MTLD3D_RUST" 2>> "$SRC/mtld3d.log" || die "collecting mtld3d's crate licences failed; see $SRC/mtld3d.log"
+
 # 8. Bundle and sign (make install into wine.app, the loader's entitlements, every check on the result). First the
 #    bundle's licenses/SOURCE (ship-base spec §4): the inputs it is built from, each tree's series or dev.
 write_source "$SRC/SOURCE" "$mac"

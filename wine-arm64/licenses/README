@@ -29,6 +29,13 @@ DXMT (the Direct3D to Metal DLLs in ../DXMT/aarch64-windows, winemetal.dll and w
   Source: https://github.com/chadouming/dxmt.git at DXMT_COMMIT (../DXMT/version names it too) with its submodules
   at the DXMT_SUBMODULE_* commits, and the patches in the repository's wine-arm64/patches/dxmt (pinned in dxmt/pins).
 
+mtld3d 0.14.1 (Direct3D 9: d3d9.dll and mtld3d.dll in lib/wine/aarch64-windows, mtld3d.so in lib/wine/aarch64-unix)
+  Licence: zlib, mtld3d/LICENSE. The crates its binaries link (snmalloc-sys among them, MIT, with MacNeutron's ARM64EC
+  change): mtld3d/crates, each crate's own licence files, and mtld3d/crates/INDEX naming every crate and its terms.
+  Source: https://github.com/athei/mtld3d.git at release 0.14.1 (0c172127), in the DXMT fork's mtld3d/ with the
+  patches in the repository's wine-arm64/patches/dxmt; the crates from crates.io at the versions mtld3d's Cargo.lock
+  files pin.
+
 LLVM 15.0.7 (linked statically into winemetal.so)
   Licence: Apache-2.0 WITH LLVM-exception, llvm/LICENSE.TXT; its regular-expression code, llvm/COPYRIGHT.regex;
   ConvertUTF (Unicode, Inc.) and the regex notice: NOTICES.md.
