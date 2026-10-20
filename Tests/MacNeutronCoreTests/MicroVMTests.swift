@@ -32,13 +32,18 @@ final class Scripts: @unchecked Sendable {
 }
 
 private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts: Scripts = Scripts(),
-                           display: (width: Int, height: Int)? = nil, version: String? = nil) throws -> VMFixture {
+                           display: (width: Int, height: Int)? = nil, version: String? = nil,
+                           console: String? = nil) throws -> VMFixture {
     let vm = try makeVMFolder()
     let layout = try makeToolLayout()
     if let version { try setRuntimeVersion(version, of: layout) }
     let runner = FakeRunner { call in
         guard call.tool == "run-guest.sh" else { return 0 }
         scripts.add(call.arguments.first)
+        if let console, let share = call.environment["MN_SHARE"] {  // macneutron-vm's guest console
+            try? FileManager.default.createDirectory(atPath: share, withIntermediateDirectories: true)
+            try? console.write(toFile: share + "/console.log", atomically: true, encoding: .utf8)
+        }
         return status
     }
     let notifier = RecordingNotifier()
@@ -377,4 +382,27 @@ final class Status: @unchecked Sendable {
     let call = try #require(f.runner.calls.first { $0.tool == "run-guest.sh" })
     #expect(!call.arguments.contains("--console"))
     #expect(!(scripts.all.first ?? "").contains("MACNEUTRON_PROFILE="))
+}
+
+@Test func aVMGameGetsWineDebugAsOnMacOS() throws {
+    // LaunchEnvironment's WINEDEBUG: nothing unless logging, MACNEUTRON_LOG=1 and =2's channels, the user's own wins.
+    for (log, user, want) in [(nil, nil, "-all"), ("1", nil, "warn+all,warn-seh,+loaddll,warn+steamclient"),
+                              ("2", nil, "warn+all,+loaddll,+steamclient"), ("1", "+relay", "+relay")] {
+        let scripts = Scripts()
+        let f = try makeVMFixture(scripts: scripts, version: "0.7.1p")
+        var env = f.env
+        env["MACNEUTRON_LOG"] = log
+        env["WINEDEBUG"] = user
+        _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+        #expect((scripts.all.first ?? "").contains("WINEDEBUG='\(want)'\n"), "MACNEUTRON_LOG=\(log ?? "-")")
+    }
+}
+
+@Test func aLoggedVMGamesLogEndsWithTheGuestConsole() throws {
+    let f = try makeVMFixture(console: "[    0.1] Linux version\n")
+    var env = f.env
+    env["MACNEUTRON_LOG"] = "1"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    let log = try String(contentsOf: f.launcher.log.directory.appending(path: "steam-2437170.log"), encoding: .utf8)
+    #expect(log.hasSuffix("--- the VM's console ---\n[    0.1] Linux version\n"))
 }

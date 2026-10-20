@@ -33,13 +33,7 @@ public enum LaunchEnvironment {
             if base["MACNEUTRON_DISPLAY_SCALE"] == nil { env["MACNEUTRON_DISPLAY_SCALE"] = ratio }
             if base["MACNEUTRON_SHARPEN"] == nil { env["MACNEUTRON_SHARPEN"] = upscaleSharpness }
         }
-        // MACNEUTRON_LOG=1 leaves out seh warnings (Unreal logs through OutputDebugString, an exception each line)
-        // and steamclient's per-frame trace, which filled game logs by the gigabyte; MACNEUTRON_LOG=2 keeps them.
-        if base["WINEDEBUG"] == nil {
-            env["WINEDEBUG"] = !logging ? "-all"
-                : base["MACNEUTRON_LOG"] == "2" ? "warn+all,+loaddll,+steamclient"
-                : "warn+all,warn-seh,+loaddll,warn+steamclient"
-        }
+        env["WINEDEBUG"] = wineDebug(base, logging: logging)
         // msync off means unset, whoever set it: Wine's client and server must agree on it.
         if base["MACNEUTRON_NO_MSYNC"] == "1" {
             env.removeValue(forKey: "WINEMSYNC")
@@ -50,6 +44,15 @@ public enum LaunchEnvironment {
             env["DXMT_PIPELINE_RECORD"] = ShaderPrecache.folder(for: context).path(percentEncoded: false)
         }
         return env
+    }
+
+    /// Wine's WINEDEBUG, the user's if they set one (the microVM's guest gets it too). MACNEUTRON_LOG=1 leaves out seh
+    /// warnings (Unreal logs through OutputDebugString, an exception each line) and steamclient's per-frame trace,
+    /// which filled game logs by the gigabyte; MACNEUTRON_LOG=2 keeps them.
+    static func wineDebug(_ base: [String: String], logging: Bool) -> String {
+        base["WINEDEBUG"] ?? (!logging ? "-all"
+            : base["MACNEUTRON_LOG"] == "2" ? "warn+all,+loaddll,+steamclient"
+            : "warn+all,warn-seh,+loaddll,warn+steamclient")
     }
 
     /// How much the presenter sharpens the frame it upscales: contra-adaptive, so edges gain and flat areas and noise

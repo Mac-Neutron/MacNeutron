@@ -215,6 +215,7 @@ public struct Launcher: Sendable {
         var environment = launchEnvironment
         // Direct3D forwarding by default (M5 passed, 2026-10-19): native DXMT on the Mac draws; =guest keeps DXMT in the guest.
         if environment["MACNEUTRON_VM_D3D"] == nil { environment["MACNEUTRON_VM_D3D"] = "forward" }
+        environment["WINEDEBUG"] = LaunchEnvironment.wineDebug(environment, logging: gameLog != nil)
         if environment["MN_SCREEN"].map(MicroVM.isScreenSize) != true {
             environment["MN_SCREEN"] = display().map { "\($0.width)x\($0.height)" }
         }
@@ -287,6 +288,11 @@ public struct Launcher: Sendable {
                                         environment: env, output: gameLog, started: vmRun.started)
             log.summary("verb=\(request.verb.rawValue) appid=\(context.appID) backend=vm vm=\(vm.root.path(percentEncoded: false))"
                        + " exit=\(status)")
+            // A logged game's log ends with the guest's console (kernel, services): the one log a player sends.
+            if let gameLog, let console = try? String(contentsOf: vm.share(appID: context.appID)
+                .appending(path: "console.log"), encoding: .utf8) {
+                append("--- the VM's console ---\n" + console, to: gameLog)
+            }
             // macneutron-vm's 7: the game's TPM didn't start, so the guest never ran (run-guest.sh removed the last
             // run.status first).
             let ran = vm.share(appID: context.appID).appending(path: "run.status")
