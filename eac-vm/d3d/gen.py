@@ -1569,9 +1569,12 @@ def emit_convert32(model, calls):
             elem_t = p.type[: p.type.rindex("*")].strip() if stars(p.type) else p.type
             base = resolve(model, elem_t)
             direction = {"WMF_IN": "MN_C32_IN", "WMF_OUT": "MN_C32_OUT", "WMF_INOUT": "MN_C32_IN | MN_C32_OUT"}[f.kind]
-            if f.nested and f.nested.name == "handle":
-                kind, size64, size32, conv = "MN_C32_HANDLES", 8, 4, None
+            words = f.size == 8 and (stars(elem_t) or base in pointer_sized)  # a pointer or HWND out, a Map's void *
+            if (f.nested and f.nested.name == "handle") or words:
+                kind, size64, size32, conv = "MN_C32_WORDS", 8, 4, None
             elif base in differ and not stars(elem_t):
+                if f.size != l64[base][0]:  # not the struct on the wire: bytes own code packed (size=aux0)
+                    continue
                 if flat[base] is None or f.one_if or p.array:
                     ok = False
                     continue

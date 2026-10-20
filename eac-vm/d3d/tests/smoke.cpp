@@ -33,11 +33,13 @@
 // A failed step prints "<line> FAIL <step>".
 #include <windows.h>
 #include <d3d12.h>
+#include <d3d10.h>
 #include <d3d11_4.h>
 #include <dxgi1_4.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 
 static DWORD WINAPI first(void *) {
@@ -411,6 +413,65 @@ static int die() {
     return 0; // the process ends now, nothing released: its pipelines still compiling
 }
 
+// conv (32-bit games, M4b's review): data whose i386 layout differs, through the whole chain: a D3D11 buffer's initial
+// data read back through a staging map, an input layout's semantic names, a D3D10 buffer's map (a canary after the
+// pointer), a swapchain's GetHwnd (a canary after the HWND) and GetDesc's window. "conv ok", or what failed.
+static void conv(ID3D12CommandQueue *queue) {
+    std::string bad;
+    ID3D11Device *dev = nullptr;
+    ID3D11DeviceContext *ctx = nullptr;
+    D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
+    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, &level, 1, D3D11_SDK_VERSION, &dev,
+                                 nullptr, &ctx)))
+        return (void)printf("conv FAIL device\n");
+    unsigned char init[64];
+    for (int i = 0; i < 64; i++) init[i] = (unsigned char)(i * 3 + 1);
+    D3D11_BUFFER_DESC bd = {64, D3D11_USAGE_DEFAULT, D3D11_BIND_VERTEX_BUFFER, 0, 0, 0};
+    D3D11_BUFFER_DESC sbd = {64, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ, 0, 0};
+    D3D11_SUBRESOURCE_DATA sd = {init, 0, 0};
+    D3D11_MAPPED_SUBRESOURCE m = {};
+    ID3D11Buffer *b = nullptr, *st = nullptr;
+    bool ok = SUCCEEDED(dev->CreateBuffer(&bd, &sd, &b)) && SUCCEEDED(dev->CreateBuffer(&sbd, nullptr, &st));
+    if (ok) {
+        ctx->CopyResource(st, b);
+        ok = SUCCEEDED(ctx->Map(st, 0, D3D11_MAP_READ, 0, &m)) && m.pData && !memcmp(m.pData, init, sizeof init);
+        if (m.pData) ctx->Unmap(st, 0);
+    }
+    if (!ok) bad += " initdata";
+    std::vector<char> vs = file("shaders/d3d11/vsia.vs.dxbc");
+    D3D11_INPUT_ELEMENT_DESC el[] = {
+        {"A", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"B", 0, DXGI_FORMAT_R32G32_FLOAT, 1, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"C", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 8, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"D", 0, DXGI_FORMAT_R32_UINT, 3, 4, D3D11_INPUT_PER_VERTEX_DATA, 0}};
+    ID3D11InputLayout *il = nullptr;
+    if (vs.empty() || FAILED(dev->CreateInputLayout(el, 4, vs.data(), vs.size(), &il))) bad += " inputlayout";
+    ID3D10Device *d10 = nullptr;
+    ID3D10Buffer *b10 = nullptr;
+    struct { void *p; UINT32 canary; } m10 = {nullptr, 0xC0FFEE11u};
+    D3D10_BUFFER_DESC bd10 = {64, D3D10_USAGE_DYNAMIC, D3D10_BIND_VERTEX_BUFFER, D3D10_CPU_ACCESS_WRITE, 0};
+    ok = SUCCEEDED(D3D10CreateDevice(nullptr, D3D10_DRIVER_TYPE_HARDWARE, nullptr, 0, D3D10_SDK_VERSION, &d10)) &&
+         SUCCEEDED(d10->CreateBuffer(&bd10, nullptr, &b10)) && SUCCEEDED(b10->Map(D3D10_MAP_WRITE_DISCARD, 0, &m10.p));
+    if (m10.p) memset(m10.p, 1, 64), b10->Unmap();
+    if (!ok || !m10.p || m10.canary != 0xC0FFEE11u) bad += " map10";
+    HWND w = nullptr;
+    IDXGISwapChain1 *sc = swapchain(queue, &w);
+    struct { HWND h; UINT32 canary; } gh = {nullptr, 0xC0FFEE22u};
+    DXGI_SWAP_CHAIN_DESC desc = {};
+    if (!sc || FAILED(sc->GetHwnd(&gh.h)) || gh.h != w || gh.canary != 0xC0FFEE22u) bad += " gethwnd";
+    if (!sc || FAILED(sc->GetDesc(&desc)) || desc.OutputWindow != w) bad += " swapdesc";
+    if (sc) sc->Release();
+    if (w) DestroyWindow(w);
+    if (b10) b10->Release();
+    if (d10) d10->Release();
+    if (il) il->Release();
+    if (st) st->Release();
+    if (b) b->Release();
+    ctx->Release();
+    dev->Release();
+    printf("conv %s\n", bad.empty() ? "ok" : ("FAIL" + bad).c_str());
+}
+
 static void wmt_forward() {
     auto forward = (UINT32(WINAPI *)(UINT32, void *))GetProcAddress(LoadLibraryA("winemetal.dll"), "WMTForward");
     if (!forward) return (void)printf("wmtforward FAIL no WMTForward\n");
@@ -444,6 +505,7 @@ int main(int argc, char **argv) {
     if (forward) printf("swapchain %s\n", own_answers(queue));
     else printf("swapchain untested: guest DXMT aborts on these\n");
     wmsize(queue);
+    conv(queue);
     queue->Release();
     device->Release();
     wmt_forward();

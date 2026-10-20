@@ -389,7 +389,7 @@ int32_t mn_d3d_unix_call32(void *args) {
             for (uint64_t k = 0; k < counts[i]; k++) {
                 if (m->kind == MN_C32_STRUCT) {
                     m->in(src + k * m->size32, copies[i] + k * m->size64);
-                } else { /* an interface pointer: 4 bytes to 8 */
+                } else { /* a word: 4 bytes to 8 */
                     uint32_t v;
                     memcpy(&v, src + k * 4, 4);
                     uint64_t w = v;
@@ -403,9 +403,12 @@ int32_t mn_d3d_unix_call32(void *args) {
     for (uint16_t i = 0; i < c->n; i++) {
         const struct mn_c32_member *m = &c->members[i];
         if (!copies[i]) continue;
-        if (!s && (m->dir & MN_C32_OUT) && m->kind == MN_C32_STRUCT)
-            for (uint64_t k = 0; k < counts[i]; k++)
-                m->out(copies[i] + k * m->size64, (uint8_t *)(uintptr_t)orig[i] + k * m->size32);
+        if (!s && (m->dir & MN_C32_OUT))
+            for (uint64_t k = 0; k < counts[i]; k++) {
+                uint8_t *to32 = (uint8_t *)(uintptr_t)orig[i] + k * m->size32;
+                if (m->kind == MN_C32_STRUCT) m->out(copies[i] + k * m->size64, to32);
+                else memcpy(to32, copies[i] + k * 8, 4); /* a word: its low 4 bytes (below 4 GiB in this process) */
+            }
         memcpy(params + m->offset, &orig[i], 8);
         free(copies[i]);
     }

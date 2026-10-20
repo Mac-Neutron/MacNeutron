@@ -8,6 +8,7 @@
 # "latency ok" (the frame latency object, and GPU-bound presents that hold no vCPU on the host: mn-d3d's "slow:" lines),
 # "d3d11latency ok" (M4: D3D11's GPU-bound presents, paced by the device's latency, likewise), and three
 # `smoke.exe die` runs first, each ending mid-load with status 0, that the host outlives (M4's final review)
+# and "conv ok" (data whose i386 layout differs, end to end: initial data, an input layout, a D3D10 map, GetHwnd, GetDesc)
 # and "wmtforward ok" (fork 0079 refuses a call past the guest's table) and "wmsize ok" (a window resizing its buffers
 # from WM_SIZE through full screen and ResizeTarget), and forwarded "swapchain ok" (DXGI's answers where DXMT has none) and "eventreuse ok" (a closed event's
 # reused handle takes no stray set; guest DXMT has that bug too). Prints macneutron-vm's peak resident size in each
@@ -24,10 +25,10 @@ W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 SH=$W/share
 MN_DXMT_ONLY=d3d12_null sh "$ROOT/eac-vm/dxmt/share.sh" > /dev/null  # the share's shaders too (dies' D3D11 ones)
 "$(sh "$ROOT/dxmt/toolchain.sh")/x86_64-w64-mingw32-clang++" -std=c++17 -O1 -static -s -o "$SH/dxmt-tests/smoke.exe" \
-  "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ld3d11 -ldxgi
+  "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ld3d10 -ld3d11 -ldxgi
 # Large-address-aware, as many 32-bit games are: memory for it may then go up to 4 GiB.
 "$(sh "$ROOT/dxmt/toolchain.sh")/i686-w64-mingw32-clang++" -std=c++17 -O1 -static -s -Wl,--large-address-aware \
-  -o "$SH/dxmt-tests/smoke32.exe" "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ld3d11 -ldxgi
+  -o "$SH/dxmt-tests/smoke32.exe" "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ld3d10 -ld3d11 -ldxgi
 fail=
 for mode in forward guest; do
   G=$W/d3d-smoke-$mode.sh
@@ -81,7 +82,7 @@ EOS
   dies=$(/usr/bin/grep -c '^die status 0$' "$out" 2> /dev/null || true)
   echo "d3d-smoke: $mode: ${dies:-0} of 3 processes ended mid-load, and the host outlived them"
   [ "${dies:-0}" -eq 3 ] || fail="$fail $mode-dies"
-  checks="eventthread name minimised latency d3d11latency wmtforward wmsize"
+  checks="eventthread name minimised latency d3d11latency wmtforward wmsize conv"
   [ "$mode" = guest ] || checks="$checks eventreuse swapchain"
   for c in $checks; do
     got=$(/usr/bin/grep "^$c " "$out" 2> /dev/null || true)

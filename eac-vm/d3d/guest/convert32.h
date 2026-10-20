@@ -8,7 +8,9 @@
 #include <stdint.h>
 
 enum { MN_C32_IN = 1, MN_C32_OUT = 2 };
-enum { MN_C32_STRUCT = 1, MN_C32_HANDLES = 2 }; /* a struct (or an array of them); an array of interface pointers */
+/* A struct (or an array of them); or pointer-sized words, 4 bytes in the caller and 8 on the wire (interface pointers,
+ * an HWND out, a map's address out). */
+enum { MN_C32_STRUCT = 1, MN_C32_WORDS = 2 };
 struct mn_c32_member {
     uint16_t offset;  /* the params member: a u64 holding the caller's 32-bit pointer */
     uint8_t kind, dir;

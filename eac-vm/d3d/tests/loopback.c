@@ -90,6 +90,10 @@ int mn_blob_alloc(uint64_t size, struct mn_blob *b) {
     pthread_mutex_unlock(&worker);
     return 0;
 }
+/* The 32-bit (WoW64) placements guest/transport.c makes below 4 GiB: the loopback has no 32-bit callers. */
+int mn_blob_alloc_low(uint64_t size, struct mn_blob *b) { return mn_blob_alloc(size, b); }
+void *mn_low_alloc(uint64_t size) { return calloc(1, size ? size : 1); }
+void mn_low_free(void *p) { free(p); }
 
 int mn_blob_free(struct mn_blob *b) {
     pthread_mutex_lock(&worker);
