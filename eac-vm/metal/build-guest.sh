@@ -22,7 +22,7 @@ python3 -I "$ROOT/eac-vm/d3d/gen.py" --headers "${BUILD_DIR:-$ROOT/build}/dxmt-n
 "$B" sync "$ROOT/eac-vm/d3d" mn-d3d
 "$B" sync "$G" mn-d3d-gen
 mkdir -p "$OUT/wm"
-CC="sh ~/mn-sysroot/cc-x86_64.sh -O2 -g -Wall -Wextra -DDXMT_GUEST_VM -I . -I ../mn-metal-dxmt -I wm -I ../mn-d3d-gen"
+CC="sh ~/mn-sysroot/cc-x86_64.sh -O2 -g -Wall -Wextra -DDXMT_GUEST_VM -I . -I ../mn-metal-dxmt -I wm -I ../mn-d3d-gen -I ../mn-d3d/guest"
 build() {  # <output under bin/> <compiler arguments...>
   out=$1; shift
   "$B" ssh "cd ~/mn-metal && $CC -o /tmp/metal-out $* && cat /tmp/metal-out" > "$OUT/$out.tmp"
@@ -32,7 +32,7 @@ build metal-probe -std=gnu11 tests/probe.c -lpthread
 build metal-transport-test -std=gnu11 tests/transport-test.c guest/transport.c ring.c -lpthread
 WM="wm/calls.c wm/cmdlist.c wm/marshal.c wm/slots.c wm/guest/ghandles.c wm/guest/galloc.c guest/transport.c ring.c"
 WM="$WM wm/guest/wow64.c wm/guest/sm50-args32.c"  # the WoW64 table (32-bit DXMT)
-D3D="../mn-d3d/guest/unix.c ../mn-d3d-gen/calls.c ../mn-d3d-gen/ifaces.c"
+D3D="../mn-d3d/guest/unix.c ../mn-d3d-gen/calls.c ../mn-d3d-gen/ifaces.c ../mn-d3d-gen/convert32.c"
 build wm/winemetal.so -std=gnu2x -DMN_WM_GUEST -fPIC -shared wm/guest/winemetal.c $WM $D3D $WINEBUILD/dlls/ntdll/ntdll.so \
   -lpthread
 build wm/ntdll.so -std=gnu2x -fPIC -shared -Wl,-soname,ntdll.so wm/guest/stub-ntdll.c -lpthread

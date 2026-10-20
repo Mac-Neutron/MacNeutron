@@ -3,7 +3,7 @@
  * entry is the 64-bit one, after marking the process 32-bit (galloc.h: its memory then goes below 2 GiB), except:
  * SM50's calls whose i386 params hold 32-bit pointers or an argument chain (airconv_thunks.h's *_params32,
  * sm50-args32.h), converted here, slot 83 included, which DXMT's own WoW64 table leaves out; and Direct3D forwarding
- * (MN_WM_D3D), refused until there are 32-bit forwarding proxies. */
+ * (MN_WM_D3D), whose 32-bit calls eac-vm/d3d/guest/unix.c converts (M4b). */
 #include <stdint.h>
 #include "airconv_thunks.h"
 #include "calls.h"
@@ -75,9 +75,15 @@ static NTSTATUS_T sm50_get_arguments_info(void *args) {
     return call64(unix_sm50_get_arguments_info, &p);
 }
 
-static NTSTATUS_T d3d_refused(void *args) {
+/* Direct3D forwarding's 32-bit calls (M4b): eac-vm/d3d/guest/unix.c converts their data; a build without it (the
+ * tests') refuses. */
+__attribute__((weak)) int32_t mn_d3d_unix_call32(void *args) {
     (void)args;
-    return MN_STATUS_NOT_IMPLEMENTED;
+    return (int32_t)MN_STATUS_NOT_IMPLEMENTED;
+}
+static NTSTATUS_T d3d32(void *args) {
+    mn_wm_wow64 = 1;
+    return (NTSTATUS_T)mn_d3d_unix_call32(args);
 }
 
 #define W(n) __attribute__((unused)) static NTSTATUS_T w##n(void *p) { return call64(n, p); }
@@ -95,6 +101,6 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[MN_WM_D3D + 1] = {
     sm50_compile_tessellation_pipeline_vertex, sm50_compile_tessellation_pipeline_hull,
     sm50_compile_tessellation_pipeline_domain, w86, w87, sm50_get_arguments_info, w89,
     S10(9) S10(10) S10(11) S10(12) S10(13) S10(14)
-    w150, w151, w152, w153, w154, d3d_refused,
+    w150, w151, w152, w153, w154, d3d32,
 };
 _Static_assert(sizeof __wine_unix_call_wow64_funcs / sizeof *__wine_unix_call_wow64_funcs == MN_WM_D3D + 1, "table size");
