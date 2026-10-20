@@ -3,8 +3,8 @@
 # calls `cargo +<toolchain>`; Homebrew's rustup keeps them beside its own binary, off PATH), and `lld-link` and
 # `llvm-lib`, the names its windows/.cargo/config.toml calls with no path, linked onto the Rust toolchain's rust-lld and
 # llvm-ar (LLD and llvm-ar choose their mode from the name they run under), as its `make setup-rust` links them, but
-# under build/ rather than ~/.cargo/bin. Needs rustup's MTLD3D_RUST toolchain with llvm-tools (dxmt/pins). Messages go
-# to stderr.
+# under build/ rather than ~/.cargo/bin; and mingw-cc and mingw-c++, dxmt/mtld3d-mingw-cc.sh, the C and C++ compiler of
+# its two ARM64X targets. Needs rustup's MTLD3D_RUST toolchain with llvm-tools (dxmt/pins). Messages go to stderr.
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/dxmt/pins"
@@ -21,4 +21,6 @@ ln -sf "$proxies/cargo" "$T/cargo"
 ln -sf "$proxies/rustc" "$T/rustc"
 ln -sf "$bin/rust-lld" "$T/lld-link"
 ln -sf "$bin/llvm-ar" "$T/llvm-lib"
+ln -sf "$ROOT/dxmt/mtld3d-mingw-cc.sh" "$T/mingw-cc"
+ln -sf "$ROOT/dxmt/mtld3d-mingw-cc.sh" "$T/mingw-c++"
 echo "$T"
