@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Tue, 20 Oct 2026 16:23:48 -0400
+Subject: [PATCH] dxgi: A 32-bit build's adapter memory sizes saturate at 3
+ GiB.
+
+DXGI_ADAPTER_DESC's memory sizes are SIZE_T: in an i386 build (32-bit
+games in MacNeutron's VM) the assignment kept the low 32 bits of
+recommendedMaxWorkingSetSize, which can be near zero. Saturate at
+0xC0000000, the value DXVK reports to 32-bit games. A 64-bit build is
+unchanged.
+---
+ src/dxgi/dxgi_adapter.cpp | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/src/dxgi/dxgi_adapter.cpp b/src/dxgi/dxgi_adapter.cpp
+index a0c2068..20576be 100644
+--- a/src/dxgi/dxgi_adapter.cpp
++++ b/src/dxgi/dxgi_adapter.cpp
+@@ -176,10 +176,14 @@ public:
+ 
+     pDesc->SubSysId = 0;
+     pDesc->Revision = 0;
++    uint64_t video = device_.recommendedMaxWorkingSetSize();
+     if (device_.hasUnifiedMemory())
+-      pDesc->DedicatedVideoMemory = device_.recommendedMaxWorkingSetSize() / 2; // FIXME: use a more appropriate value
+-    else
+-      pDesc->DedicatedVideoMemory = device_.recommendedMaxWorkingSetSize();
++      video /= 2; // FIXME: use a more appropriate value
++    // A 32-bit build's SIZE_T: at most 3 GiB, as DXVK reports it to 32-bit
++    // games, rather than its low 32 bits (near zero on some Macs).
++    if (sizeof(SIZE_T) < 8 && video > 0xC0000000ull)
++      video = 0xC0000000ull;
++    pDesc->DedicatedVideoMemory = (SIZE_T)video;
+     pDesc->DedicatedSystemMemory = 0;
+     pDesc->SharedSystemMemory = 0;
+     pDesc->AdapterLuid = GetAdapterLuid(device_);
+-- 
+2.54.0 (Apple Git-157)
+

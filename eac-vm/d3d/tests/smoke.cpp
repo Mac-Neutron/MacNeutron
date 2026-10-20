@@ -467,6 +467,8 @@ static void conv(ID3D12CommandQueue *queue) {
     if (FAILED(dev->QueryInterface(__uuidof(IDXGIDevice), (void **)&xd)) || FAILED(xd->GetAdapter(&ad)) ||
         FAILED(ad->GetDesc(&ade.d)) || !ade.d.Description[0] || !ade.d.VendorId || ade.canary != 0xC0FFEE33u)
         bad += " adapterdesc";
+    // A 32-bit process's memory sizes saturate at 3 GiB (an M5 Mac's is above), never cut to their low half.
+    if (sizeof(void *) == 4 && ade.d.DedicatedVideoMemory != 0xC0000000u) bad += " videomemory";
     if (ad) ad->Release();
     if (xd) xd->Release();
     if (sc) sc->Release();
