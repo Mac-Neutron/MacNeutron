@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Wed, 21 Oct 2026 15:02:32 -0400
+Subject: [PATCH] mtld3d: in the VM a commit reaches the host before any wait
+ on its buffer
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The facade's commit is queued on the encoder thread's ring, and the VM
+host runs each ring in its own order only: the retirement thread's
+waitUntilCompleted (another ring) could reach the host first, return at
+once for a buffer not yet committed, and run its handlers before the
+GPU did. mtld3d then read staging and readbacks the GPU hadn't written
+(Wine's visual tests, 32 sites in the guest). On Linux a synchronous
+status query follows each commit. visual in the guest: 63 → 31, the
+macOS figure (an experiment with every commit synchronous gave 31 too).
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ mtld3d/unix/mtl/src/metal/command.rs | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/mtld3d/unix/mtl/src/metal/command.rs b/mtld3d/unix/mtl/src/metal/command.rs
+index 70d7ee4e..b455b93e 100644
+--- a/mtld3d/unix/mtl/src/metal/command.rs
++++ b/mtld3d/unix/mtl/src/metal/command.rs
+@@ -914,6 +914,12 @@ pub unsafe trait MTLCommandBuffer: NSObjectProtocol {
+         let mut params = wmt::ObjNoRet { handle: cb };
+         // SAFETY: slot 12 commits a live buffer.
+         unsafe { table::call(wmt::COMMAND_BUFFER_COMMIT, &mut params) };
++        // In the VM's guest the commit is queued on this thread's ring, and the host takes each ring's calls in that
++        // ring's order only: a synchronous call here has the host commit the buffer before another thread's wait on
++        // it (the retirement thread's, a readback's) arrives from that thread's ring. A wait on a buffer not yet
++        // committed returns at once, and its handlers ran before the GPU did (Wine's visual tests: 32 sites).
++        #[cfg(target_os = "linux")]
++        let _ = super::query_u64(wmt::COMMAND_BUFFER_STATUS, cb);
+         let handlers = {
+             // Marked under the pending lock, which a presented handler added now checks it under.
+             let mut map = pending();
+-- 
+2.54.0 (Apple Git-157)
+
