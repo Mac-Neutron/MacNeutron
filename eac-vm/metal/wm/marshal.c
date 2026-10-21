@@ -5,6 +5,7 @@
  * from the host: when the Metal object made over it goes, or at once if the call fails. */
 #include "marshal.h"
 #include <stdatomic.h>
+#include <stdio.h>
 #include "cmdlist.h"
 #include <stdlib.h>
 #include <string.h>
@@ -674,6 +675,15 @@ static NTSTATUS_T take_blob(struct mn_wm_state *k, uint64_t want, struct mn_wm_h
 
 /* Translates and copies one struct's fields in place (base is the host's copy); regions come from the record. A
  * handle that doesn't translate fails the call, but only after every region was read: so is each blob region's. */
+/* A handle field the table refuses: which, for the first 32 of the process (the executor's own line names only the
+ * slot). */
+static void bad_field(const struct mn_wm_state *k, const struct mn_wm_field *f, mn_handle h) {
+    static _Atomic unsigned said;
+    if (atomic_fetch_add(&said, 1) >= 32) return;
+    fprintf(stderr, "mn-wm: slot %u (%s) field at %u: handle %#llx is not bound (released, never bound, or another "
+            "kind)\n", k->slot, k->call->name ? k->call->name : "?", f->offset, (unsigned long long)h);
+}
+
 static NTSTATUS_T unpack_fields(struct mn_wm_state *k, const struct mn_wm_field *fields, unsigned n, uint8_t *base,
                                 int depth) {
     if (depth > MAX_DEPTH) return MN_STATUS_INVALID_PARAMETER;
@@ -692,7 +702,10 @@ static NTSTATUS_T unpack_fields(struct mn_wm_state *k, const struct mn_wm_field 
             if (!h) continue;
             int ok;
             void *obj = mn_ht_get(k->c->ht, h, (enum mn_hkind)f->hkind, &ok);
-            if (!ok && !k->status) k->status = MN_STATUS_INVALID_HANDLE;
+            if (!ok && !k->status) {
+                k->status = MN_STATUS_INVALID_HANDLE;
+                bad_field(k, f, h);
+            }
             memcpy(base + f->offset, &obj, sizeof obj);
             continue;
         }

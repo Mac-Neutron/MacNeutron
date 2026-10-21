@@ -135,6 +135,19 @@ uint64_t mn_wm_node_payload(const struct mn_wm_node *t, const uint8_t *node) {
 }
 
 #ifndef MN_WM_GUEST
+#include <stdatomic.h>
+#include <stdio.h>
+/* A list node's handle the table refuses: which, and why, for the first 32 of the process (the executor's own line
+ * names only the slot). */
+static void bad_handle(unsigned slot, uint32_t node, uint16_t type, mn_handle h, struct mn_ht *ht) {
+    static _Atomic unsigned said;
+    if (atomic_fetch_add(&said, 1) >= 32) return;
+    int any;
+    mn_ht_get(ht, h, MN_HK_ANY, &any);
+    fprintf(stderr, "mn-wm: slot %u list node %u (type %u): handle %#llx %s\n", slot, node, type,
+            (unsigned long long)h, any ? "is not an Objective-C object" : "is not bound (released, or never bound)");
+}
+
 /* The guest's flat list (k->data) as winemetal's linked list, in host memory: each node copied, its type the one
  * checked (whatever the guest writes now), its handles translated, its payload pointing into the region. */
 NTSTATUS_T mn_wm_encode(struct mn_wm_state *k) {
@@ -167,7 +180,10 @@ NTSTATUS_T mn_wm_encode(struct mn_wm_state *k) {
             if (!g) continue;
             int ok;
             void *obj = mn_ht_get(k->c->ht, g, MN_HK_OBJC, &ok);
-            if (!ok) return MN_STATUS_INVALID_HANDLE;
+            if (!ok) {
+                bad_handle(k->slot, i, type, g, k->c->ht);
+                return MN_STATUS_INVALID_HANDLE;
+            }
             memcpy(n + t->handles[h], &obj, 8);
         }
         if (t->payload) {

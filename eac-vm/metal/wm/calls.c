@@ -130,7 +130,8 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
     C(25, MTLDevice_newLibrary, unixcall_mtldevice_newlibrary, S, MN_SP_NONE, HIN(unixcall_mtldevice_newlibrary, device),
       HIN(unixcall_mtldevice_newlibrary, data), HOUT(unixcall_mtldevice_newlibrary, ret_error, AR),
       HOUT(unixcall_mtldevice_newlibrary, ret_library, P1)),
-    C(26, MTLLibrary_newFunction, G_UOR, Q, MN_SP_NONE, HIN(G_UOR, handle), STR(G_UOR, arg), HOUT(G_UOR, ret, P1)),
+    /* Sync since D3D9 M2b: nil is the answer for a name the library lacks, which mtld3d checks. */
+    C(26, MTLLibrary_newFunction, G_UOR, S, MN_SP_NONE, HIN(G_UOR, handle), STR(G_UOR, arg), HOUT(G_UOR, ret, P1)),
     QUERY2(27, NSString_lengthOfBytesUsingEncoding),
     NEW(28, NSObject_description, AR),
     C(29, MTLDevice_newComputePipelineState, unixcall_mtldevice_newcomputepso, S, MN_SP_NONE,
