@@ -1,7 +1,8 @@
 # Direct3D 9 in the guest (D3D9 M2b gate, the guest's half): mtld3d on the guest winemetal.so, its share folder from
 # eac-vm/dxmt/d3d9-gate.sh (/mnt/share/d3d9). Writes /mnt/share/traces/d3d9/:
 #   unit-<name>.txt and .status  mtld3d's Linux unit tests, the facade's on the guest winemetal.so outside Wine (its
-#                                stub ntdll.so beside it, as metal-wm-test runs)
+#                                stub ntdll.so beside it, as metal-wm-test runs); unit-32-<name>, their i686 builds
+#                                on the i686 winemetal.so
 #   tri<64|32>-<fresh|nomarker|updated>.txt  d3d9_triangle (x86-64 and i386) in a new prefix, again with mtld3d.dll's
 #                                markers removed from system32 and syswow64 (a prefix made before mtld3d), and
 #                                after run-game.sh's update of such a prefix
@@ -16,9 +17,10 @@ T=/mnt/share/d3d9 O=/mnt/share/traces/d3d9 B=/mnt/share/bin
 rm -rf "$O"; mkdir -p "$O/logs"
 export MTLD3D_CONFIG="log.dir=Z:$O/logs"
 Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
-for t in "$T"/unit/*; do
-  n=${t##*/}
-  MTLD3D_WINEMETAL=$B/wm/winemetal.so LD_LIBRARY_PATH=$B/wm timeout -k 10 900 "$t" > "$O/unit-$n.txt" 2>&1
+for t in "$T"/unit/* "$T"/unit32/*; do  # unit32: i686, on the i686 winemetal.so (named 32-<crate>)
+  n=${t##*/} wm=$B/wm
+  [ "${t%/*}" = "$T/unit" ] || n=32-$n wm=$B/wm/i386
+  MTLD3D_WINEMETAL=$wm/winemetal.so LD_LIBRARY_PATH=$wm timeout -k 10 900 "$t" > "$O/unit-$n.txt" 2>&1
   echo $? > "$O/unit-$n.status"
   echo "guest: unit $n status $(cat "$O/unit-$n.status")"
 done

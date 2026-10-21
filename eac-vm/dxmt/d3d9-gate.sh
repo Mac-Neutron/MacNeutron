@@ -16,17 +16,21 @@ M=$B/wine-arm64-src/dxmt/mtld3d
 S=$W/share/d3d9 G=$W/share/traces/d3d9
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', want '$3'"; fail=1; fi; }
-rm -rf "$S"; mkdir -p "$S/unit" "$S/winetests/x64" "$S/winetests/x86"
+rm -rf "$S"; mkdir -p "$S/unit" "$S/unit32" "$S/winetests/x64" "$S/winetests/x86"
 echo "${MN_WOW64:-old}" > "$S/wow64"
-# The Linux unit tests (release profile, as their macOS runs) and the runner; each test binary under its crate's name.
-sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" test --release --no-run --message-format=json -p mtld3d-shared -p mtld3d-unix \
-  -p mtld3d-mtl 2> "$W/d3d9-gate-build.log" | python3 -I -c '
+# The Linux unit tests (release profile, as their macOS runs), x86_64 and i686 (old WoW64's, on the i686
+# winemetal.so), and the runner; each test binary under its crate's name.
+for a in x86_64 i686; do
+  case $a in x86_64) u=$S/unit ;; *) u=$S/unit32 ;; esac
+  MTLD3D_LINUX=$a sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" test --release --no-run --message-format=json -p mtld3d-shared \
+    -p mtld3d-unix -p mtld3d-mtl 2>> "$W/d3d9-gate-build.log" | python3 -I -c '
 import json, shutil, sys
 for line in sys.stdin:
     m = json.loads(line)
     if m.get("reason") == "compiler-artifact" and m.get("executable") and m["profile"]["test"]:
-        shutil.copy(m["executable"], sys.argv[1] + "/" + m["target"]["name"])' "$S/unit" \
-  || { echo "FAIL the Linux test binaries: see $W/d3d9-gate-build.log"; exit 1; }
+        shutil.copy(m["executable"], sys.argv[1] + "/" + m["target"]["name"])' "$u" \
+    || { echo "FAIL the $a Linux test binaries: see $W/d3d9-gate-build.log"; exit 1; }
+done
 sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" build --release -p mtld3d-conformance 2>> "$W/d3d9-gate-build.log" \
   || { echo "FAIL the Linux runner: see $W/d3d9-gate-build.log"; exit 1; }
 cp "$M/unix/target-linux/x86_64-unknown-linux-gnu/release/mtld3d-conformance" "$S/"
@@ -42,8 +46,8 @@ done
 rm -rf "$G"
 MN_RUN_TIMEOUT=7200 "$ROOT/eac-vm/run-guest.sh" "$ROOT/eac-vm/tests/d3d9.sh" > "$W/d3d9-guest-run.txt" 2>&1 \
   || { echo "FAIL the guest run: see $W/d3d9-guest-run.txt"; fail=1; }
-for f in "$S"/unit/*; do
-  n=${f##*/}
+for f in "$S"/unit/* "$S"/unit32/*; do
+  n=${f##*/}; [ "${f%/*}" = "$S/unit" ] || n=32-$n
   check "unit $n" "$(cat "$G/unit-$n.status" 2> /dev/null)/$(/usr/bin/grep -c '^test result: ok' "$G/unit-$n.txt" 2> /dev/null)" 0/1
 done
 for r in tri64-fresh tri32-fresh tri64-updated tri32-updated; do
