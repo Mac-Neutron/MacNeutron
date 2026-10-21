@@ -49,3 +49,4 @@ d3d12_dlss_quality|d3d12_dlss.exe|C:\windows\system32\nvngx.dll quality|dlss
 d3d12_dlss_performance|d3d12_dlss.exe|C:\windows\system32\nvngx.dll performance|dlss
 d3d12_dlss_inverted|d3d12_dlss.exe|C:\windows\system32\nvngx.dll inverted|dlss
 d3d12_dlss_refuse|d3d12_dlss.exe|C:\windows\system32\nvngx.dll refuse|dlss
+d3d9_triangle|d3d9_triangle.exe||d3d9

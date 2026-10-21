@@ -10,6 +10,10 @@ export GALLIUM_OVERRIDE_CPU_CAPS=sse4.1
 # As the launcher's LaunchEnvironment: XeSS and DLSS on MetalFX.
 [ "${MACNEUTRON_XESS:-}" = 1 ] || export WINEDLLOVERRIDES="libxess,libxess_dx11=b"
 [ "${MACNEUTRON_DLSS:-}" = 1 ] && [ -z "${DXMT_ENABLE_NVEXT:-}" ] && export DXMT_ENABLE_NVEXT=1
+# Direct3D 9's mtld3d logs into the share's traces/mtld3d, not beside the game's exe (as the launcher's on macOS); a
+# MTLD3D_CONFIG of the user's comes after it, so theirs win.
+mkdir -p /mnt/share/traces/mtld3d
+export MTLD3D_CONFIG="log.dir=Z:/mnt/share/traces/mtld3d${MTLD3D_CONFIG:+;$MTLD3D_CONFIG}"
 # The X screen is the Mac's display (the launcher's MN_SCREEN): games are offered its resolution and those below.
 Xvfb :0 -screen 0 "${MN_SCREEN:-1920x1080}x24" -nolisten tcp >/dev/null 2>&1 &
 # MACNEUTRON_PERF (the launcher's) sets MACNEUTRON_VM_PROFILE: every thread's CPU every 5 s, in the share's traces/ (the
@@ -26,6 +30,9 @@ INPUT_LOG=/home/mn/mn-input.log
 # .update-timestamp), as Wine would by itself, but with MacNeutron's overrides (the Mono prompt would wait on Xvfb). A
 # forced update at every launch cost ~10 s once it covered syswow64 (new WoW64).
 if [ -n "$(find "$WINEPREFIX/drive_c/windows" -name '*.dll' -size 0 -print -delete 2>/dev/null)" ]; then up=-u; else up=-i; fi
+# A prefix made before the image had mtld3d (Direct3D 9) has no marker for its mtld3d.dll, a builtin with no Windows
+# counterpart, and Wine finds a builtin only through its marker: a forced update writes it, once.
+[ -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" ] || up=-u
 WINEDLLOVERRIDES="mscoree,mshtml=" wineboot $up >/dev/null 2>&1
 # Xvfb has one mode and can't change it: Wine offers games its standard modes and takes their changes itself (the
 # drawable has the game's size; the host window scales it). Read when the desktop starts: once per prefix, a restart.
