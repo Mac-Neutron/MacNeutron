@@ -17,10 +17,11 @@ $B sync "$ROOT/eac-vm/sysroot" mn-sysroot > /dev/null
 for stage in ${*:-wine forwarder dxmt d3d fex}; do
   echo "guest-stages: $stage" >&2
   case $stage in
-    wine)  # eac-vm/wine/build.sh in the builder, from eac-vm/wine/sync.sh's copies
+    wine)  # eac-vm/wine/build.sh in the builder, from eac-vm/wine/sync.sh's copies: the x86-64 build, the 32-bit one
+      # (old WoW64's Unix side), and the stage with both when WINE32=1 (else the 64-bit build's alone)
       sh "$ROOT/eac-vm/wine/sync.sh"
       $B ssh "set -e; [ -x wine-tools/tools/winebuild/winebuild ] || sh mn-wine-build/build.sh tools
-        sh mn-wine-build/build.sh wine; sh mn-wine-build/build.sh install
+        sh mn-wine-build/build.sh wine; sh mn-wine-build/build.sh wine32; WINE32=${WINE32:-} sh mn-wine-build/build.sh install
         echo '$(stamp wine)' > wine-stage/opt/mn-wine/.mn-source" ;;
     forwarder)  # lsteamclient's Unix half for the guest (eac-vm/steam-forward/build-guest.sh), on that Wine build
       make -s -C "$ROOT/eac-vm/steam-forward" OUT="$W/steam-forward" "$W/steam-forward/descriptors.c"
