@@ -350,8 +350,8 @@ static NTSTATUS_T guest_special(unsigned slot, uint8_t *params, struct mn_wm_out
         struct WMTBufferInfo *info = a->info.ptr;
         uint8_t *base = mn_gptr(MN_GH_VALUE(att));
         if (!info || !base) return MN_STATUS_INVALID_PARAMETER;
-        o->fix = &info->memory.ptr; /* the buffer's memory, once the host made it */
-        o->fix_value = base + a->offset;
+        o->fix = &info->memory; /* the buffer's memory, once the host made it */
+        o->fix_value = (uintptr_t)(base + a->offset);
         return emit_hold(o, 0, 0, 0, MN_GH_VALUE(att)); /* the buffer holds the heap's region */
     }
     case 36:
@@ -372,8 +372,8 @@ static NTSTATUS_T guest_special(unsigned slot, uint8_t *params, struct mn_wm_out
     case 71: { /* the guest's own device value goes back in place of the host's (none comes) */
         struct WMTLayerProps *props = ((struct unixcall_generic_obj_ptr_noret *)params)->arg.ptr;
         if (!props) return MN_STATUS_INVALID_PARAMETER;
-        o->fix = (void **)&props->device;
-        o->fix_value = (void *)(uintptr_t)props->device;
+        o->fix = &props->device;
+        o->fix_value = props->device;
         return 0;
     }
     case 73:  /* releasing a view (milestone 4c) */
@@ -474,7 +474,7 @@ NTSTATUS_T mn_wm_unpack_call(const struct mn_wm_call *c, void *params, const str
         if (!k++) first = h;
     }
     NTSTATUS_T s = mn_wm_copy_back(out, r, len, pos);
-    if (out->fix && (first || c->special == MN_SP_LAYER)) *out->fix = out->fix_value;
+    if (out->fix && (first || c->special == MN_SP_LAYER)) memcpy(out->fix, &out->fix_value, sizeof out->fix_value);
     mn_wm_scratch_done();
     return s;
 }

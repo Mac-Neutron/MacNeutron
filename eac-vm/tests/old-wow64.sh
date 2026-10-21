@@ -7,6 +7,9 @@ export PATH=/opt/mn-wine/bin:$PATH DISPLAY=:0 WINEDLLOVERRIDES="mscoree,mshtml="
 Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
 W=/opt/mn-wine/lib/wine
 check "1 i386-unix" "$([ -f $W/i386-unix/ntdll.so ] && [ -x $W/i386-unix/wine ] && echo present)" present
+# The 64-bit tree owns what both install: bin/wine is the x86-64 loader (ELF class 2), which execs i386-unix/wine for a
+# 32-bit image; a 64-bit game never starts in FEX's 32-bit mode.
+check "1 bin/wine 64-bit" "$(head -c 5 /opt/mn-wine/bin/wine | od -An -tx1 | tr -d ' \n')" 7f454c4602
 export WINEPREFIX=/home/mn/old-wow64
 rm -rf "$WINEPREFIX"
 WINEDEBUG=-all wineboot -i >/dev/null 2>&1

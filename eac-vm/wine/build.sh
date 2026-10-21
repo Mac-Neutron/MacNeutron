@@ -79,13 +79,18 @@ wine)
 wine32)
   # Old WoW64's 32-bit Unix side (spec 2026-10-20-macneutron-vm-old-wow64-design §3): the i386 build over the multilib
   # sysroot, joined to the x86-64 build (--with-wine64), whose install it shares: its i386-unix and i386 loader beside
-  # x86_64-unix, its i386 PE DLLs the same sources as the x86-64 build's. ponytail: the std profile's flags only; the
-  # p profile's when a 32-bit game's Unix side shows in a profile. pkg-config looks in lib64 last: the i686 packages'
-  # .pc files name private dependencies whose i686 -devel packages the sysroot doesn't carry (zlib, libpng, ...), and
-  # a dynamic link reads only the packages' own flags.
+  # x86_64-unix, its i386 PE DLLs the same sources as the x86-64 build's (whose copies the install keeps). The p
+  # profile's no -g and no traces (the release checks both); ponytail: -O2, without the 64-bit side's -O3, LTO and PGO,
+  # until a 32-bit game's Unix side shows in a profile. pkg-config looks in lib64 last: the i686 packages' .pc files
+  # name private dependencies whose i686 -devel packages the sysroot doesn't carry (zlib, libpng, ...), and a dynamic
+  # link reads only the packages' own flags.
   BUILD32=${BUILD32:-$HOME/wine-build32}
   SYSROOT32=${SYSROOT32:-/var/cache/mn-sysroot-multilib}
   ln -sf /usr/bin/ld.lld "$HOME/mn-cross-bin/i686-redhat-linux-ld"
+  set --
+  [ "${MACNEUTRON_PROFILE:-std}" != p ] || set -- CFLAGS="-O2 -DWINE_NO_TRACE_MSGS" i386_CFLAGS="-O2 -DWINE_NO_TRACE_MSGS"
+  inputs=$(printf '%s\n' "$@")  # as the x86-64 build's: other flags, a fresh build folder
+  [ "$(cat "$BUILD32/.configure-inputs" 2> /dev/null)" = "$inputs" ] || rm -rf "$BUILD32"
   mkdir -p "$BUILD32" && cd "$BUILD32"
   [ -f Makefile ] || "$SRC/configure" --host=i686-linux-gnu --with-wine64="$BUILD" --with-wine-tools="$TOOLS" \
     --prefix=/opt/mn-wine --disable-tests --enable-archs=i386 \
@@ -93,10 +98,11 @@ wine32)
     CXX="clang++ --target=i686-redhat-linux --sysroot=$SYSROOT32" \
     i386_CC="clang --target=i686-windows -fuse-ld=lld" AR=llvm-ar RANLIB=llvm-ranlib STRIP=llvm-strip \
     PKG_CONFIG_LIBDIR="$SYSROOT32/usr/lib/pkgconfig:$SYSROOT32/usr/share/pkgconfig:$SYSROOT32/usr/lib64/pkgconfig" \
-    PKG_CONFIG_SYSROOT_DIR="$SYSROOT32" \
+    PKG_CONFIG_SYSROOT_DIR="$SYSROOT32" "$@" \
     > configure.log 2>&1 || { tail -20 configure.log; rm -f Makefile; exit 1; }
   grep -E "^configure: (WARNING|error)|could not find|won't be supported" configure.log || true
   make -j"$JOBS" > make.log 2>&1 || { grep -E "error|Error" make.log | head -20; exit 1; }
+  printf '%s\n' "$inputs" > .configure-inputs
   echo "built in $BUILD32" ;;
 resume)
   cd "$BUILD"
@@ -104,11 +110,13 @@ resume)
   echo "built in $BUILD" ;;
 install)
   rm -rf "$STAGE" && mkdir -p "$STAGE"
-  make -C "$BUILD" install DESTDIR="$STAGE" > "$BUILD/install.log" 2>&1
-  # The 32-bit build's after (old WoW64, a 32-bit program's default): its i386-unix, bin/wine and i386-windows into the
-  # same prefix. WINE32=0 leaves it out: new WoW64 alone.
+  # The 32-bit build first (old WoW64, a 32-bit program's default): its i386-unix and i386 loader. Then the x86-64
+  # build's, as Wine's shared-WoW64 install goes, so what both install is the 64-bit tree's: bin/wine (the x86-64
+  # loader, which execs i386-unix/wine for a 32-bit image) and i386-windows (the p profile's flags). WINE32=0 leaves
+  # the 32-bit build out: new WoW64 alone.
   B32=${BUILD32:-$HOME/wine-build32}
   [ "${WINE32:-1}" = 0 ] || make -C "$B32" install DESTDIR="$STAGE" > "$B32/install.log" 2>&1
+  make -C "$BUILD" install DESTDIR="$STAGE" > "$BUILD/install.log" 2>&1
   du -sh "$STAGE/opt/mn-wine" ;;
 *) sed -n '2,7p' "$0"; exit 2 ;;
 esac

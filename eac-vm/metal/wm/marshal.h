@@ -33,8 +33,8 @@ struct mn_wm_out {
     struct mn_wm_region regions[MN_WM_MAX_REGIONS]; /* the memory a reply's regions go back to */
     unsigned nholds;
     uint64_t holds[MN_WM_MAX_HOLDS]; /* regions this call holds for the host (mn_ghold), undone if it never gets there */
-    void **fix;                      /* after the reply, if its first handle came back (71: always): *fix = fix_value */
-    void *fix_value;
+    void *fix;                       /* after the reply, if its first handle came back (71: always): the 8 bytes at fix */
+    uint64_t fix_value;              /* become fix_value (a pointer zero-extended, as a 32-bit caller's high half is 0) */
     void *out_at[MN_WM_MAX_OUTS];    /* SM50: where each picked handle goes, through the caller's out-pointers */
 };
 /* Builds slot's record from params, picking the handles it returns and writing them into params at once. 0, or an

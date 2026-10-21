@@ -825,6 +825,7 @@ if [ $PROFILE = p ]; then  # the p build's VM parts (spec 2026-10-19-macneutron-
   rm -rf "$OUT/p-check"; mkdir -p "$OUT/p-check"
   tar -xf "$OUT/vm-parts/wine.tar" -C "$OUT/p-check" || die "can't unpack the parts' wine.tar"
   check_no_traces "$OUT/p-check/lib/wine/x86_64-unix/ntdll.so" "$WINE_TRACE_PROBE" || exit 1
+  check_no_traces "$OUT/p-check/lib/wine/i386-unix/ntdll.so" "$WINE_TRACE_PROBE" || exit 1  # old WoW64's
   check_no_debug_info "$OUT/p-check" "$OUT/vm-parts/overlay" || exit 1
   check_no_profile_runtime "$OUT/p-check" "$OUT/vm-parts/overlay" || exit 1
   rm -rf "$OUT/p-check"

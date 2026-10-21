@@ -51,6 +51,25 @@ int mn_galloc_cases(const struct mn_galloc_env *env) {
     int zeroed = 1;
     for (unsigned i = 0; b4 && i < PAGE; i++) zeroed &= ((unsigned char *)p4)[i] == 0;
     EXPECT(zeroed, "reused memory not zeroed");
+    /* An emulated heap (Shared: a guest region of its own) and buffers placed in it (slots 138, 141): each buffer's
+     * memory is the heap's at its offset, in all 8 bytes of its WMTMemoryPointer (a 32-bit caller's high half 0, which
+     * DXMT's i386 code checks). */
+    struct WMTHeapInfo hi = {.size = 4 * PAGE, .options = WMTResourceStorageModeShared, .type = WMTHeapTypePlacement};
+    struct unixcall_mtldevice_newheap h = {device, {&hi}, 0};
+    env->call(138, &h);
+    EXPECT(h.ret, "a Shared heap");
+    uint64_t m[2] = {0, 0};
+    for (int i = 0; h.ret && i < 2; i++) {
+        struct WMTBufferInfo bi = {.length = PAGE, .options = WMTResourceStorageModeShared};
+        struct unixcall_mtlheap_newbuffer nb = {h.ret, {&bi}, (uint64_t)i * PAGE, 0};
+        env->call(141, &nb);
+        memcpy(&m[i], &bi.memory, sizeof m[i]);
+        EXPECT(nb.ret && m[i], "a heap's buffer");
+        if (nb.ret) env->call(1, &nb.ret);
+    }
+    EXPECT(m[1] - m[0] == PAGE && (uint64_t)(uintptr_t)m[0] == m[0] && (uint64_t)(uintptr_t)m[1] == m[1],
+           "a heap buffer's memory, all 8 bytes");
+    if (h.ret) env->call(1, &h.ret);
     env->call(1, &b2);
     env->call(1, &b3);
     env->call(1, &b4);

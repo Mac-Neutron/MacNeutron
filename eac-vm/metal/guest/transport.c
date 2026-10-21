@@ -57,18 +57,22 @@ enum { MEM_COMMIT = 0x1000, MEM_RESERVE = 0x2000, MEM_RELEASE = 0x8000, PAGE_REA
 
 /* The mask Wine's own unix libraries give a WoW64 process's allocations (win32u, wow64): its 32-bit address space's
  * top, 4 GiB for a large-address-aware program, 2 GiB otherwise (SystemEmulationBasicInformation's HighestUserAddress,
- * after 24 bytes and two pointers in SYSTEM_BASIC_INFORMATION: at 40 in a 64-bit process, at 32 in an i386 one, whose
- * ntdll takes a mask too under old WoW64). */
+ * at 40 in the 64-bit SYSTEM_BASIC_INFORMATION, which Wine fills only at its exact size). An i386 process (old WoW64)
+ * gives none: Wine keeps its allocations inside the program's own address space. */
 static uintptr_t zero_bits(void) {
+#ifdef __i386__
+    return 0;
+#else
     static uintptr_t bits; /* the same value whichever thread computes it */
     if (!bits) {
         uint8_t info[64] = {0};
-        uintptr_t highest = 0;
+        uint64_t highest = 0;
         if (NtQuerySystemInformation && !NtQuerySystemInformation(62, info, sizeof info, NULL))
-            memcpy(&highest, info + 24 + 2 * sizeof(void *), sizeof highest);
-        bits = highest | 0x7fffffff;
+            memcpy(&highest, info + 40, sizeof highest);
+        bits = (uintptr_t)highest | 0x7fffffff;
     }
     return bits;
+#endif
 }
 
 /* Memory in the 32-bit address space from Wine's allocator (committed, read-write), or NULL; and its release: 0, or -1

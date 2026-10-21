@@ -59,7 +59,8 @@ private func makeSetup() throws -> SetupFixture {
     try write("wine\n", to: tmp.appending(path: "wine/bin/wine"))
     try run("/usr/bin/tar", ["-C", tmp.appending(path: "wine").path, "-cf", parts.appending(path: "wine.tar").path, "."])
     for (name, text) in [("cmdline.txt", "root=LABEL=mn-base\n"), ("packages.lock", "kernel-core\n"),
-                         ("state-template.img", "empty ext4\n"), ("share/bin/mn-input", "input\n")] {
+                         ("state-template.img", "empty ext4\n"), ("share/bin/mn-input", "input\n"),
+                         ("share/bin/lib/plugin.so", "a 32-bit plugin\n")] {
         try write(text, to: parts.appending(path: name))
     }
     let archive = tmp.appending(path: "parts.tar.xz")
@@ -106,6 +107,8 @@ private func setUp(_ f: SetupFixture, requests: Requests = Requests(), minFreeGB
     #expect(try Data(contentsOf: images.appending(path: "vmlinuz")) == Data("kernel\n".utf8))
     #expect(try Data(contentsOf: images.appending(path: "x86-64-rootfs.erofs")) == Data("an x86-64 root\n".utf8))
     #expect(try Data(contentsOf: f.vm.appending(path: "share/bin/mn-input")) == Data("input\n".utf8))
+    // A tool in a folder of share/bin (the ALSA plugin per width, lib/ and lib64/): at the same path.
+    #expect(try Data(contentsOf: f.vm.appending(path: "share/bin/lib/plugin.so")) == Data("a 32-bit plugin\n".utf8))
     #expect(try Data(contentsOf: f.vm.appending(path: "state/1.img")) == Data("a game's disk\n".utf8))
     #expect(!FileManager.default.fileExists(atPath: f.vm.appending(path: "setup").path))
     #expect(MicroVM.imagesComplete(f.vm))
