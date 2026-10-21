@@ -30,7 +30,7 @@ for _ in $(seq 15); do
 done
 if [ -n "$pid" ]; then
   echo "info FEX's maps in 32-bit process $pid:"
-  grep -i fex "/proc/$pid/maps" | sed 's/^/  /'
+  grep -i fex "/proc/$pid/maps" | grep -v /RootFS/ | sed 's/^/  /'  # its own, not its root's libraries
 fi
 wineserver -k
 # metal-probe's steps from an i686 process (FEX's x32 layer: the virtio-gpu ioctls of a 32-bit process).
