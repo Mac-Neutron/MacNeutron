@@ -58,6 +58,10 @@ D3D10-12), a wined3d fallback switch, and upstream contributions.
 
 - **Import:** `git subtree add --prefix=mtld3d` of athei/mtld3d at `0c17212` into the DXMT fork tree
   (`build/wine-arm64-src/dxmt`, branch `macneutron`); the series in `wine-arm64/patches/dxmt` gains it as a patch.
+  As imported (0095), it is one squash commit carrying git subtree's `git-subtree-dir` and `git-subtree-split`
+  trailers, which `git subtree pull --squash --prefix=mtld3d <athei/mtld3d> <tag>` reads to find its base. That pull
+  is untried (it fetches upstream): the first upstream release taken in is its test, and 0095's message, which says
+  it works, is only as true as that.
 - **Build:** `wine-arm64/build.sh`'s DXMT step (`make wine-arm64`) also runs mtld3d's Makefile, with `WINE_SDK` = our
   arm64 Wine build tree,
   `LLVM_MINGW` and `ARM64X_LLD` = our pinned llvm-mingw, for the i686 and ARM64X PE pairs and `aarch64-apple-darwin`

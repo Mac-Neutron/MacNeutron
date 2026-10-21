@@ -38,6 +38,24 @@ need_tool ninja ninja; need_tool meson meson; need_tool pkg-config pkg-config
 need_tool msgfmt gettext  # without it Wine's configure only warns, and the bundle has no translations
 # DXMT compiles its own Metal shaders; Xcode ships the compiler as a separate component.
 xcrun metal --version > /dev/null 2>&1 || missing="$missing, Metal Toolchain (xcodebuild -downloadComponent MetalToolchain)"
+# mtld3d (Direct3D 9) builds with rustup's MTLD3D_RUST toolchain (dxmt/pins), its llvm-tools, and a target for each
+# of its builds: the ARM64X halves and mtld3d.so here, the VM guest's x86 pairs and Linux mtld3d.so (eac-vm).
+need_tool rustup rustup
+if command -v rustup > /dev/null 2>&1; then
+  . "$ROOT/dxmt/pins"
+  if ! rustup toolchain list 2> /dev/null | /usr/bin/grep -q "^$MTLD3D_RUST"; then
+    missing="$missing, Rust $MTLD3D_RUST (rustup toolchain install $MTLD3D_RUST --component llvm-tools)"
+  else
+    installed=$(rustup target list --installed --toolchain "$MTLD3D_RUST" 2> /dev/null)
+    for t in aarch64-pc-windows-msvc arm64ec-pc-windows-msvc aarch64-apple-darwin x86_64-pc-windows-msvc \
+      i686-pc-windows-msvc x86_64-unknown-linux-gnu; do
+      printf '%s\n' "$installed" | /usr/bin/grep -qx "$t" \
+        || missing="$missing, Rust target $t (rustup target add --toolchain $MTLD3D_RUST $t)"
+    done
+    rustup component list --installed --toolchain "$MTLD3D_RUST" 2> /dev/null | /usr/bin/grep -q '^llvm-tools' \
+      || missing="$missing, Rust llvm-tools (rustup component add --toolchain $MTLD3D_RUST llvm-tools)"
+  fi
+fi
 die_if_missing
 check_signing  # before anything is fetched or built
 # llvm-mingw's arm64ec- and aarch64-w64-mingw32 wrappers, for the Windows side of Wine.
@@ -83,7 +101,8 @@ EC_LTO=$UNIX_LTO EC_LTO_ON=$LTO_ON
 # move the tree into place. Recorded before the move: a stop in between leaves no tree, so it's redone.
 patch_tree() {
   for p in "$3"/*.patch; do
-    git -C "$1" am -q "$p" || { git -C "$1" am --abort; die "patch $(basename "$p") does not apply to $5"; }
+    # --keep-cr: a vendored file with CRLF line ends keeps them (0098, snmalloc-sys) as its commit has them.
+    git -C "$1" am -q --keep-cr "$p" || { git -C "$1" am --abort; die "patch $(basename "$p") does not apply to $5"; }
   done
   git -C "$1" rev-parse HEAD > "$SRC/$2.applied"
   echo "$4" > "$SRC/$2.series"

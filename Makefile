@@ -143,6 +143,7 @@ WA_TESTS = $(patsubst wine-arm64/tests/%.c,build/wine-arm64-tests/%.exe,$(wildca
 	$(patsubst wine-arm64/tests/%.cpp,build/wine-arm64-tests/%.exe,$(wildcard wine-arm64/tests/*.cpp))
 WA_FLAGS = -O1 -fms-extensions -D_WIN32_WINNT=0x0A00
 WA_FLAGS_arm64ec-viewec = -lonecore
+WA_FLAGS_arm64-reserved = -lonecore
 WA_FLAGS_x64-bench = -O2
 WA_FLAGS_arm64-fonts-tls = -lgdi32 -lsecur32 -ldwrite -lcrypt32
 WA_FLAGS_arm64-x18v = -lntdll
