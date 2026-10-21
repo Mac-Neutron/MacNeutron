@@ -13,6 +13,8 @@ export GALLIUM_OVERRIDE_CPU_CAPS=sse4.1
 # A 32-bit program's Unix side is a 32-bit Linux process (old WoW64, Proton's default) when the image has one; the
 # launch option MACNEUTRON_VM_WOW64=1, or Proton's PROTON_USE_WOW64=1, keeps it on the 64-bit one (new WoW64).
 if [ "${MACNEUTRON_VM_WOW64:-}" = 1 ] || [ "${PROTON_USE_WOW64:-}" = 1 ]; then export WINEARCH=wow64; fi
+# The 32-bit Unix side's libraries FEX's RootFS lacks (i686 libasound); 64-bit processes skip them.
+export LD_LIBRARY_PATH="/opt/mn-wine/lib/mn-i386${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 # Direct3D 9's mtld3d logs into the share's traces/mtld3d, not beside the game's exe (as the launcher's on macOS); a
 # MTLD3D_CONFIG of the user's comes after it, so theirs win.
 mkdir -p /mnt/share/traces/mtld3d

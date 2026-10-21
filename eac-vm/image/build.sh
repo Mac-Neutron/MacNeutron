@@ -64,6 +64,15 @@ wine_image() {
     sudo install -m644 "$D3D_GUEST/prefix.sh" "$WORK/wine/lib/wine/mn-d3d/"
     [ ! -f "$D3D_GUEST/.mn-source" ] || sudo install -m644 "$D3D_GUEST/.mn-source" "$WORK/wine/.mn-source-d3d"
   fi
+  # Old WoW64's 32-bit Unix side needs an i686 libasound, which FEX's RootFS lacks: Fedora's, from the multilib sysroot,
+  # with its licence, on the 32-bit loader's library path (run-game.sh); a 64-bit process skips it (another ELF class).
+  if [ -d "$WORK/wine/lib/wine/i386-unix" ]; then
+    M32=/var/cache/mn-sysroot-multilib
+    sudo mkdir -p "$WORK/wine/lib/mn-i386"
+    sudo cp -a "$M32"/usr/lib/libasound.so.2.* "$WORK/wine/lib/mn-i386/"
+    sudo ln -sf "$(basename "$(ls "$M32"/usr/lib/libasound.so.2.*.* | head -1)")" "$WORK/wine/lib/mn-i386/libasound.so.2"
+    sudo cp "$M32"/usr/share/licenses/alsa-lib/COPYING "$WORK/wine/lib/mn-i386/COPYING.alsa-lib"
+  fi
   # What the forwarder and DXMT were built from, beside the Wine stage's own (guest-stages.sh; release.sh checks them).
   [ ! -f "$(dirname "$STEAM_FORWARDER")/.mn-source" ] \
     || sudo install -m644 "$(dirname "$STEAM_FORWARDER")/.mn-source" "$WORK/wine/.mn-source-forwarder"
