@@ -83,6 +83,7 @@ struct mn_wm_ctx {
     _Atomic uint64_t presented;      /* drawables presented (slots 47 and 48, present.m) */
     struct mn_notifyq *_Atomic notify; /* MN_NOTIFY_REGION_FREE goes here (memory.m) */
     _Atomic uint32_t d3d_removed;      /* Direct3D: the HRESULT that removed the device; every later call answers it */
+    _Atomic uint32_t refused_said;     /* refused handles named on stderr (marshal.c, cmdlist.c): 32 a context */
 };
 int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const void *rec, uint32_t len, void *reply,
                         uint32_t cap, uint32_t *reply_len);

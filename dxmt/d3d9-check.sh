@@ -34,7 +34,7 @@ launch() {
 # check <name> [rows]: the rows (default the four) ok, else each missing one named.
 check() {
   for r in ${2:-module clear triangle present}; do
-    got=$(grep "^d3d9 $r " "$WORK/$1.txt" || echo "d3d9 $r: no line")
+    got=$(/usr/bin/grep "^d3d9 $r " "$WORK/$1.txt" || echo "d3d9 $r: no line")
     echo "d3d9-check: $1: $got"
     [ "$got" = "d3d9 $r ok" ] || fail="$fail $1-$r"
   done

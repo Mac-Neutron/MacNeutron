@@ -1,14 +1,16 @@
 #!/bin/sh
-# mtld3d's VM guest build (D3D9 M2b), as dxmt/mtld3d-build.sh --guest left it in <folder> (default build/mtld3d-guest):
+# mtld3d's VM guest build (D3D9 M2b), as dxmt/mtld3d-build.sh --guest left it in <folder> (default
+# ${BUILD_DIR:-build}/mtld3d-guest):
 # each d3d9.dll exports d3d9.def's names undecorated and each mtld3d.dll its unix-call entry, both are Wine builtins of
 # their machine importing ntdll.dll, and mtld3d.so is an x86-64 ELF library with both unix-call tables, needing only
 # glibc, libgcc_s and libstdc++ (snmalloc's). Prints a row a check; exits 1 on a FAIL.
 #   mtld3d_guest_test.sh [<folder>]
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-G=${1:-$ROOT/build/mtld3d-guest}
+B=${BUILD_DIR:-$ROOT/build}
+G=${1:-$B/mtld3d-guest}
 LM=$(dirname "$(sh "$ROOT/dxmt/toolchain.sh")")
-DEF=$ROOT/build/wine-arm64-src/dxmt/mtld3d/windows/d3d9/d3d9.def
+DEF=$B/wine-arm64-src/dxmt/mtld3d/windows/d3d9/d3d9.def
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', want '$3'"; fail=1; fi; }
 exports() { "$LM/bin/llvm-readobj" --coff-exports "$1" 2> /dev/null | sed -n 's/^ *Name: \(..*\)$/\1/p' | sort | tr '\n' ' '; }

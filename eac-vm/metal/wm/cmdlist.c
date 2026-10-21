@@ -137,14 +137,13 @@ uint64_t mn_wm_node_payload(const struct mn_wm_node *t, const uint8_t *node) {
 #ifndef MN_WM_GUEST
 #include <stdatomic.h>
 #include <stdio.h>
-/* A list node's handle the table refuses: which, and why, for the first 32 of the process (the executor's own line
+/* A list node's handle the table refuses: which, and why, for the first 32 of the context (the executor's own line
  * names only the slot). */
-static void bad_handle(unsigned slot, uint32_t node, uint16_t type, mn_handle h, struct mn_ht *ht) {
-    static _Atomic unsigned said;
-    if (atomic_fetch_add(&said, 1) >= 32) return;
+static void bad_handle(struct mn_wm_ctx *c, unsigned slot, uint32_t node, uint16_t type, mn_handle h) {
+    if (atomic_fetch_add(&c->refused_said, 1) >= 32) return;
     int any;
-    mn_ht_get(ht, h, MN_HK_ANY, &any);
-    fprintf(stderr, "mn-wm: slot %u list node %u (type %u): handle %#llx %s\n", slot, node, type,
+    mn_ht_get(c->ht, h, MN_HK_ANY, &any);
+    fprintf(stderr, "mn-wm: context %u slot %u list node %u (type %u): handle %#llx %s\n", c->ctx_id, slot, node, type,
             (unsigned long long)h, any ? "is not an Objective-C object" : "is not bound (released, or never bound)");
 }
 
@@ -181,7 +180,7 @@ NTSTATUS_T mn_wm_encode(struct mn_wm_state *k) {
             int ok;
             void *obj = mn_ht_get(k->c->ht, g, MN_HK_OBJC, &ok);
             if (!ok) {
-                bad_handle(k->slot, i, type, g, k->c->ht);
+                bad_handle(k->c, k->slot, i, type, g);
                 return MN_STATUS_INVALID_HANDLE;
             }
             memcpy(n + t->handles[h], &obj, 8);

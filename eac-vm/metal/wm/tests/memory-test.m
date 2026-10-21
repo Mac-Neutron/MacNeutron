@@ -31,7 +31,11 @@
  *                         drawable takes the view's size instead)
  *   view-left             a context ending with a view still bound leaves no metal view in the window
  *   hud                   DeveloperHUDProperties_instance (62), which every swapchain asks for, answers nil here
- *                         without a failed call */
+ *                         without a failed call
+ *   wait-uncommitted      a wait (13) on a buffer whose commit, from another thread (its own ring), the host hasn't
+ *                         reached returns once that commit ran and the buffer completed: Metal's wait blocks for a
+ *                         later commit, so a wait needs no order across rings (a commit does: a queue runs its
+ *                         buffers in the order the host commits them) */
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
@@ -549,6 +553,31 @@ static void view_left(void) {
     [content release];
 }
 
+static obj_handle_t late_cb;
+static void *commit_late(void *arg) { /* another thread: its own ring */
+    (void)arg;
+    usleep(100000);
+    struct unixcall_generic_obj_noret c = {late_cb};
+    CHECK(W(12, &c) == 0);
+    return NULL;
+}
+
+static void wait_uncommitted(void) {
+    obj_handle_t q = new_queue(), pool = pool_push();
+    struct unixcall_generic_obj_obj_ret nc = {q, 0};
+    CHECK(W(11, &nc) == 0 && nc.ret);
+    late_cb = nc.ret;
+    pthread_t t;
+    pthread_create(&t, NULL, commit_late, NULL);
+    struct unixcall_generic_obj_noret w = {late_cb};
+    CHECK(W(13, &w) == 0);
+    struct unixcall_generic_obj_uint64_ret st = {late_cb, 0};
+    CHECK(W(14, &st) == 0 && st.ret == MTLCommandBufferStatusCompleted);
+    pthread_join(t, NULL);
+    release(pool);
+    release(q);
+}
+
 static void *run(void *arg) {
     (void)arg;
     struct { const char *name; void (*fn)(void); } tests[] = {
@@ -560,6 +589,7 @@ static void *run(void *arg) {
         {"frames", frames},
         {"props", props},
         {"nil-drawable", nil_drawable}, {"view-left", view_left}, {"hud", hud},
+        {"wait-uncommitted", wait_uncommitted},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         @autoreleasepool {

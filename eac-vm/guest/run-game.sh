@@ -39,8 +39,10 @@ INPUT_LOG=/home/mn/mn-input.log
 # forced update at every launch cost ~10 s once it covered syswow64 (new WoW64).
 if [ -n "$(find "$WINEPREFIX/drive_c/windows" -name '*.dll' -size 0 -print -delete 2>/dev/null)" ]; then up=-u; else up=-i; fi
 # A prefix made before the image had mtld3d (Direct3D 9) has no marker for its mtld3d.dll, a builtin with no Windows
-# counterpart, and Wine finds a builtin only through its marker: a forced update writes it, once.
-[ -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" ] || up=-u
+# counterpart, and Wine finds a builtin only through its marker: a forced update writes it, once (both widths': an
+# update cut short may have written system32's alone; a prefix without syswow64 has no 32-bit side to mark).
+W=$WINEPREFIX/drive_c/windows
+[ -f "$W/system32/mtld3d.dll" ] && { [ ! -d "$W/syswow64" ] || [ -f "$W/syswow64/mtld3d.dll" ]; } || up=-u
 WINEDLLOVERRIDES="mscoree,mshtml=" wineboot $up >/dev/null 2>&1
 # Xvfb has one mode and can't change it: Wine offers games its standard modes and takes their changes itself (the
 # drawable has the game's size; the host window scales it). Read when the desktop starts: once per prefix, a restart.

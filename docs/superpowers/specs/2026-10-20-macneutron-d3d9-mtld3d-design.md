@@ -116,7 +116,7 @@ Decisions (rulings of the M2 plan, recorded here as the spec they bind):
 | Question | Decision | Why |
 |---|---|---|
 | One Metal layer or two | One source. A `mtl` module re-exports objc2's bindings on the product macOS build and, under the `winemetal` feature, is a facade with the same names over winemetal's call table. The Linux build always takes the facade | The Metal layer's code stays upstream's (each `git subtree pull` merges as before) and the macOS product keeps M1's behaviour; the facade is the only new Metal code |
-| How mtld3d.so reaches winemetal | It loads `winemetal.so` from its own folder and calls its 64-bit `__wine_unix_call_funcs` slots with winemetal's parameter structs, for 32- and 64-bit processes alike | Wine's Unix side of a process is 64-bit; the guest's `winemetal.so` exports the same table and forwards it |
+| How mtld3d.so reaches winemetal | It loads `winemetal.so` from its own folder and calls its `__wine_unix_call_funcs` slots with winemetal's parameter structs; a 32-bit process (marked by every entry of mtld3d.so's own WoW64 table, before any Metal call) calls `__wine_unix_call_wow64_funcs` instead, whose entries for the facade's slots take the same structs (amended in M2b) | Under new WoW64 a process's Unix side is 64-bit, but the guest hands a 32-bit process memory below 2 GiB, where its i386 PE side writes, only through the WoW64 table; old WoW64's i686 `winemetal.so` exports that table as its `__wine_unix_call_funcs` |
 | How it is tested before the VM | The facade also builds for macOS (`winemetal` feature, aarch64-apple-darwin): that build runs M1's gates on macOS's own winemetal.so | Every VM-only difference except FEX and the transport is then found on the Mac |
 | macOS-only features under the facade | Left out: views are winemetal's (`CreateMetalViewFromHWND`), the hardware cursor is the game's, SDR only, occlusion as DXMT has it | The VM has none of the window code they serve; the product macOS build keeps them |
 | winemetal's gaps | Fork commits in DXMT: four render nodes appended to `WMTRenderCommandType`; two new slots appended to the table (a render pipeline with a vertex descriptor, a source library with compile options); the VM's command-list table and slot catalog grow by the same | Appending keeps every existing slot and node of DXMT's as it is |
@@ -130,7 +130,10 @@ and 32-bit). Each has its own plan.
 
 M1: mtld3d's `make check` and `make test` (its end-to-end suite and Wine's D3D9 conformance corpus) against our Wine;
 MacNeutron's `make dxmt-check` and `make test` unchanged; one 64-bit D3D9 program or game rendering on the macOS path.
-M2: the same suite in the VM; one 32-bit D3D9 game playing there.
+M2: the same suite in the VM; one 32-bit D3D9 game playing there. Amended in M1 and M2b: mtld3d's end-to-end suite
+waits for a yes to `xwin` (its test executables link against Microsoft's CRT and SDK, which llvm-mingw's CRT, enough
+for the DLLs, doesn't replace for a Rust test harness), so the gated suite is mtld3d's unit tests, Wine's D3D9
+conformance corpus (both lanes in the VM, eac-vm/dxmt/d3d9-gate.sh) and our triangle program.
 
 ## 7. Risks
 

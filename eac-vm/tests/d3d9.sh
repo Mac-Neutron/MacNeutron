@@ -46,7 +46,9 @@ rm -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" "$WINEPREFIX/drive_c/win
 tri d3d9_triangle.exe tri64-nomarker  # Wine finds no builtin without its marker: these fail
 tri d3d9_triangle32.exe tri32-nomarker
 # As run-game.sh: a prefix without mtld3d.dll's marker gets a forced update, which writes both.
-[ -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" ] || wineboot -u > /dev/null 2>&1
+W=$WINEPREFIX/drive_c/windows
+[ -f "$W/system32/mtld3d.dll" ] && { [ ! -d "$W/syswow64" ] || [ -f "$W/syswow64/mtld3d.dll" ]; } \
+  || wineboot -u > /dev/null 2>&1
 timeout 20 wineserver -k
 tri d3d9_triangle.exe tri64-updated
 tri d3d9_triangle32.exe tri32-updated
