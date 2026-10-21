@@ -1,7 +1,10 @@
 # mtld3d's repr(C) structs as two builds' DWARF lays them out (dxmt/mtld3d-layout32-check.sh): reads
 # `dwarfdump --debug-info` of the x86-64 and the i686 mtld3d.so, and the Rust sources naming the structs to compare,
-# and prints each struct whose size or field offsets differ, then "<n> structs, <m> differ". A source file is named
-# with the crate and the folder its modules start from, as <crate>=<src folder>=<file>.
+# and prints each struct whose size or field offsets differ, then "<n> structs, <m> differ". A declared struct DWARF
+# lacks (unused by mtld3d.so, or behind a cfg) is listed as absent, and counts as differing when it is one of the shared
+# crate's params (the PE/Unix calls'). Alignment alone DWARF doesn't say: the crates' own layout tests check it (the
+# D3D9 gate runs them for i686). A source file is named with the crate and the folder its modules start from, as
+# <crate>=<src folder>=<file>.
 #   python3 -I mtld3d-layouts.py <x86-64 dump> <i686 dump> <crate=src=file...>
 import re
 import sys
@@ -85,6 +88,11 @@ def base(name):
 wide, narrow = layouts(sys.argv[1]), layouts(sys.argv[2])
 names = repr_c(sys.argv[3:])
 checked = differ = 0
+found = {base(k) for k in set(wide) & set(narrow)}
+for n in sorted(names - found):
+    must = n.startswith('mtld3d_shared::params::') and not n.endswith('::U64After4')  # the probe's own struct
+    print('absent%s: %s' % (' (a params struct)' if must else '', n))
+    differ += must
 for k in sorted(set(wide) & set(narrow)):
     if base(k) not in names:
         continue

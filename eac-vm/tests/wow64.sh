@@ -34,6 +34,13 @@ if [ -d /home/mn/pfx64 ]; then
   check "5 upgrade" "$([ -f /home/mn/pfx64-up/drive_c/windows/syswow64/kernel32.dll ] && echo present)" present
   check "5 upgrade-cmd32" "$(WINEPREFIX=/home/mn/pfx64-up cmd32 'echo %PROCESSOR_ARCHITECTURE%')" x86
   WINEPREFIX=/home/mn/pfx64-up wineserver -k
+  # The same prefix's 32-bit program under old WoW64 (the image's default, which this script otherwise leaves): it
+  # runs, on a Unix side of its own (no wow64.dll).
+  if [ -d /opt/mn-wine/lib/wine/i386-unix ]; then
+    out=$(unset WINEARCH; WINEPREFIX=/home/mn/pfx64-up WINEDEBUG=+loaddll wine 'C:\windows\syswow64\cmd.exe' /c 'echo hi' 2>&1 | tr -d '\r')
+    check "5 upgrade-old-wow64" "$(echo "$out" | grep -cx hi)/$(echo "$out" | grep -c 'wow64.dll')" 1/0
+    WINEPREFIX=/home/mn/pfx64-up wineserver -k
+  fi
 else
   check "5 upgrade" missing-pfx64 present
   check "5 upgrade-cmd32" missing-pfx64 x86

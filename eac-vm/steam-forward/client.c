@@ -131,24 +131,27 @@ uint32_t mn_client_call_wow64(uint32_t index, void *params) {
  * its new one). The string is this process's kept copy (marshal.c), so the call is answered here, never sent.
  * ponytail: a linear list, as marshal.c's kept copies. */
 struct seen { struct seen *next; uint64_t src; uint32_t dst; };
-/* A W32_PTR field's 32-bit value: a struct holding it in a 64-bit build, the pointer itself in an i686 one. */
+/* A W32_PTR field's 32-bit value, read and written: a struct holding it in a 64-bit build, the pointer itself in an
+ * i686 one. */
 #ifdef __i386__
-#define W32_VALUE(f) (*(uint32_t *)&(f))
+#define W32_GET(f) ((uint32_t)(uintptr_t)(f))
+#define W32_SET(f, v) ((f) = (void *)(uintptr_t)(v))
 #else
-#define W32_VALUE(f) ((f).value)
+#define W32_GET(f) ((f).value)
+#define W32_SET(f, v) ((f).value = (v))
 #endif
 static struct seen *seen_list;
 static pthread_mutex_t seen_lock = PTHREAD_MUTEX_INITIALIZER;
 NTSTATUS mn_wow64_get_unix_buffer(void *args) {
     struct wow64_steamclient_get_unix_buffer_params *p = args;
-    if (!W32_VALUE(p->ptr) || !p->buf.ptr) return MN_STATUS_INVALID_PARAMETER;
+    if (!W32_GET(p->ptr) || !p->buf.ptr) return MN_STATUS_INVALID_PARAMETER;
     pthread_mutex_lock(&seen_lock);
     struct seen *s = seen_list;
     while (s && s->src != p->buf.ptr) s = s->next;
-    if (s) W32_VALUE(p->ptr) = s->dst;
+    if (s) W32_SET(p->ptr, s->dst);
     else {
-        memcpy((void *)(uintptr_t)W32_VALUE(p->ptr), (const void *)(uintptr_t)p->buf.ptr, p->buf.len);
-        if ((s = malloc(sizeof *s))) { s->src = p->buf.ptr; s->dst = W32_VALUE(p->ptr); s->next = seen_list; seen_list = s; }
+        memcpy((void *)(uintptr_t)W32_GET(p->ptr), (const void *)(uintptr_t)p->buf.ptr, p->buf.len);
+        if ((s = malloc(sizeof *s))) { s->src = p->buf.ptr; s->dst = W32_GET(p->ptr); s->next = seen_list; seen_list = s; }
     }
     pthread_mutex_unlock(&seen_lock);
     return 0;

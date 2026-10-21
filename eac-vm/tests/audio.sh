@@ -10,15 +10,16 @@ export PATH=/opt/mn-wine/bin:$PATH WINEDEBUG=-all DISPLAY=:0 WINEPREFIX=/home/mn
 B=/mnt/share/bin
 Xvfb :0 -screen 0 1280x720x24 -nolisten tcp >/dev/null 2>&1 &
 "$B/alsa-play" 2 2>&1 | tee /tmp/alsa.txt
-# The same from an i686 process (old WoW64's 32-bit Unix side), with the i686 libasound wine.erofs carries, when it does.
-if [ -d /opt/mn-wine/lib/mn-i386 ]; then
+# The same from an i686 process (old WoW64's 32-bit Unix side), with the i686 libasound wine.erofs carries, on an image
+# with that side (one without the library then fails these rows).
+if [ -d /opt/mn-wine/lib/wine/i386-unix ]; then
   LD_LIBRARY_PATH=/opt/mn-wine/lib/mn-i386 "$B/alsa-play32" 2 2>&1 | tee /tmp/alsa32.txt
   rows32=alsa32
 fi
 WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1
 wine "$B/waveout.exe" 2>&1 | tr -d '\r' | tee /tmp/waveout.txt
 # A 32-bit program's: winealsa in the 32-bit Unix side (old WoW64), when the image has it.
-if [ -d /opt/mn-wine/lib/mn-i386 ]; then
+if [ -d /opt/mn-wine/lib/wine/i386-unix ]; then
   LD_LIBRARY_PATH=/opt/mn-wine/lib/mn-i386 wine "$B/waveout32.exe" 2>&1 | tr -d '\r' | tee /tmp/waveout32.txt
   rows32="$rows32 waveout32"
 fi

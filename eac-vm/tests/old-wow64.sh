@@ -20,6 +20,19 @@ wow() { WINEDEBUG=+loaddll wine 'C:\windows\syswow64\cmd.exe' /c 'echo hi' 2>&1 
 check "3 old WoW64 (no wow64.dll)" "$(wow)" 0
 check "4 WINEARCH=wow64 (wow64.dll)" "$(WINEARCH=wow64 wow | sed 's/^[1-9][0-9]*$/loaded/')" loaded
 wineserver -k
+# FEX's own maps in a 32-bit process's 4 GiB (old WoW64's x32 mode: they share that space with the program), listed.
+sleep 20 | wine 'C:\windows\syswow64\cmd.exe' >/dev/null 2>&1 &
+pid=
+for _ in $(seq 15); do
+  pid=$(grep -l "$W/i386-windows/kernel32.dll" /proc/[0-9]*/maps 2>/dev/null | head -n 1 | cut -d/ -f3)
+  [ -n "$pid" ] && break
+  sleep 1
+done
+if [ -n "$pid" ]; then
+  echo "info FEX's maps in 32-bit process $pid:"
+  grep -i fex "/proc/$pid/maps" | sed 's/^/  /'
+fi
+wineserver -k
 # metal-probe's steps from an i686 process (FEX's x32 layer: the virtio-gpu ioctls of a 32-bit process).
 out=$(/mnt/share/bin/metal-probe32 2>&1)
 echo "$out"

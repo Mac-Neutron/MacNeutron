@@ -45,9 +45,13 @@ wine_image() {
     || { echo "no DXMT guest stage at $DXMT_GUEST" >&2; exit 1; }
   sudo rm -rf "$WORK/wine"; sudo mkdir -p "$WORK"; sudo cp -a "$WINE_STAGE" "$WORK/wine"
   sudo install -m755 "$STEAM_FORWARDER" "$WORK/wine/lib/wine/x86_64-unix/lsteamclient.so"
-  # Its i686 build, for old WoW64's 32-bit Unix side, when the Wine has one.
+  # Its i686 build, for old WoW64's 32-bit Unix side, when the Wine has one (else a 32-bit game's Steam would be Wine's
+  # own lsteamclient.so).
   F32=$(dirname "$STEAM_FORWARDER")/i386/lsteamclient.so
-  [ ! -d "$WORK/wine/lib/wine/i386-unix" ] || [ ! -f "$F32" ] || sudo install -m755 "$F32" "$WORK/wine/lib/wine/i386-unix/"
+  if [ -d "$WORK/wine/lib/wine/i386-unix" ]; then
+    [ -f "$F32" ] || { echo "no i686 Steam forwarder at $F32, and the Wine has i386-unix" >&2; exit 1; }
+    sudo install -m755 "$F32" "$WORK/wine/lib/wine/i386-unix/"
+  fi
   # Milestone 4b-2: D3D through DXMT and the Metal transport, not wined3d/vkd3d on llvmpipe; since 4c it presents in
   # the host's window too.
   if [ "$DXMT_GUEST" != none ]; then
@@ -57,8 +61,11 @@ wine_image() {
     # winemetal.so, and mtld3d.so behind mtld3d's d3d9.dll, which replaces Wine's (Direct3D 9, D3D9 M2b); and their i686
     # builds for old WoW64's 32-bit Unix side, when the Wine has one.
     sudo install -m755 "$DXMT_GUEST"/x86_64-unix/*.so "$WORK/wine/lib/wine/x86_64-unix/"
-    [ ! -d "$WORK/wine/lib/wine/i386-unix" ] || [ ! -d "$DXMT_GUEST/i386-unix" ] ||
+    if [ -d "$WORK/wine/lib/wine/i386-unix" ]; then
+      [ -f "$DXMT_GUEST/i386-unix/winemetal.so" ] && [ -f "$DXMT_GUEST/i386-unix/mtld3d.so" ] ||
+        { echo "no i686 winemetal.so and mtld3d.so in $DXMT_GUEST/i386-unix, and the Wine has i386-unix" >&2; exit 1; }
       sudo install -m755 "$DXMT_GUEST"/i386-unix/*.so "$WORK/wine/lib/wine/i386-unix/"
+    fi
   fi
   if [ "$D3D_GUEST" != none ] && [ -f "$D3D_GUEST/x86_64-windows/mnd3d.dll" ]; then
     sudo mkdir -p "$WORK/wine/lib/wine/mn-d3d/x86_64-windows"
