@@ -1,0 +1,19 @@
+# The i686 half of the multilib sysroot (eac-vm/sysroot/build.sh with MULTILIB=1): what the 32-bit guest Wine
+# (old WoW64's i386 Unix side, eac-vm/wine/build.sh wine32) and the 32-bit Unix modules build against.
+glibc-devel
+libgcc
+libstdc++-devel
+freetype-devel
+gnutls-devel
+libX11-devel
+libXext-devel
+libXrandr-devel
+libXi-devel
+libXcursor-devel
+libXfixes-devel
+libXinerama-devel
+libXcomposite-devel
+libXrender-devel
+mesa-libGL-devel
+alsa-lib-devel
+fontconfig-devel
