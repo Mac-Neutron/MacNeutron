@@ -34,6 +34,7 @@ MN_DXMT_ONLY=d3d12_null sh "$ROOT/eac-vm/dxmt/share.sh" > /dev/null  # the share
 fail=
 case ${MN_WOW64:-old} in new) arch='export WINEARCH=wow64' ;; *) arch= ;; esac
 for mode in forward guest; do
+  m32=$mode; [ -n "$arch" ] || m32=guest  # smoke.cpp expects forwarding from MACNEUTRON_VM_D3D=forward
   G=$W/d3d-smoke-$mode.sh
   cat > "$G" <<EOS
 export PATH=/opt/mn-wine/bin:\$PATH WINEDEBUG=-all DISPLAY=:0 WINEPREFIX=/home/mn/d3d-smoke DXMT_MAX_ANISOTROPY=0
@@ -54,10 +55,10 @@ done
 timeout -k 10 60 wine \$T/smoke.exe < /dev/null >> \$O/d3d-smoke.raw 2>&1
 : > \$O/d3d-smoke32.raw
 for i in 1 2 3; do  # smoke.cpp's die compiles shaders: the 32-bit SM50 calls
-  timeout -k 10 60 wine \$T/smoke32.exe die < /dev/null >> \$O/d3d-smoke32.raw 2>&1
+  MACNEUTRON_VM_D3D=$m32 timeout -k 10 60 wine \$T/smoke32.exe die < /dev/null >> \$O/d3d-smoke32.raw 2>&1
   echo "die status \$?" >> \$O/d3d-smoke32.raw
 done
-timeout -k 10 60 wine \$T/smoke32.exe < /dev/null >> \$O/d3d-smoke32.raw 2>&1
+MACNEUTRON_VM_D3D=$m32 timeout -k 10 60 wine \$T/smoke32.exe < /dev/null >> \$O/d3d-smoke32.raw 2>&1
 echo "status \$?" >> \$O/d3d-smoke32.raw
 timeout 20 wineserver -k
 tr -d '\r' < \$O/d3d-smoke.raw > \$O/d3d-smoke-$mode.txt
