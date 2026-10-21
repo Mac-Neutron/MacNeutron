@@ -22,3 +22,9 @@ Patches:
   added by hand from `target/ffier-krun.json`.
 - 0006: start the vmm worker thread on macOS. The v2 builder starts it only for SEV, TDX or an x86 split irqchip,
   but on macOS it maps gpu blobs (and virtiofs DAX windows) into the guest; without it the first blob map panics.
+- 0007, 0008: a TPM 2.0 over TIS MMIO whose commands a host backend runs (eac-vm/host/tpm.c), held until an aborted
+  command ends.
+- 0009: trap blobs: the drained rings a guest vCPU's store names run on that vCPU's thread (the handler macneutron-vm
+  sets).
+- 0010: a disk's last 4 KiB is kept out of discards and write-zeroes: imago serves one reaching the image's end by
+  truncating the file, and the next boot finds the disk shorter than its filesystem (fsck fails, /home isn't mounted).
