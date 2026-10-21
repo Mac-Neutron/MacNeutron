@@ -5,11 +5,13 @@
 # Microsoft's headers for the -msvc triple Rust builds for. llvm-mingw's <triple>-clang supplies the target and sysroot;
 # the --target=<arch>-pc-windows-msvc cc-rs adds comes after it and would win, so it's dropped. MTLD3D_LLVM_MINGW names
 # llvm-mingw's root. The same for its x86 PE pairs (the VM guest's, D3D9 M2b), and, as linux-cc and linux-c++, the C,
-# C++ and linker of its x86_64-unknown-linux-gnu build: llvm-mingw's clang and ld.lld for Fedora's x86-64 triple,
-# against the builder's sysroot as eac-vm/sysroot/fetch.sh copies it (MTLD3D_SYSROOT).
+# C++ and linker of its x86_64-unknown-linux-gnu and i686-unknown-linux-gnu builds: llvm-mingw's clang and ld.lld for
+# Fedora's triple (MTLD3D_LINUX_TRIPLE, x86-64's by default), against the builder's sysroot as eac-vm/sysroot/fetch.sh
+# copies it (MTLD3D_SYSROOT).
 case $(basename "$0") in *++) tool=clang++ ;; *) tool=clang ;; esac
 case $(basename "$0") in
-  linux-*) exec "$MTLD3D_LLVM_MINGW/bin/$tool" --target=x86_64-redhat-linux --sysroot="${MTLD3D_SYSROOT:?}" -fuse-ld=lld \
+  linux-*) exec "$MTLD3D_LLVM_MINGW/bin/$tool" --target="${MTLD3D_LINUX_TRIPLE:-x86_64-redhat-linux}" \
+    --sysroot="${MTLD3D_SYSROOT:?}" -fuse-ld=lld \
     "$@" ;;
 esac
 # The Rust target: cc-rs's --target, or cargo's TARGET (cc-rs's compiler-family probe passes no --target).

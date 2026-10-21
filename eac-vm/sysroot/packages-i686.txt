@@ -3,6 +3,7 @@
 glibc-devel
 libgcc
 libstdc++-devel
+libatomic
 freetype-devel
 gnutls-devel
 libX11-devel

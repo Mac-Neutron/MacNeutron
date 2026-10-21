@@ -80,8 +80,9 @@ if [ ! -f "$B32/build.ninja" ] || [ "$(cat "$B32/.setup-inputs" 2> /dev/null)" !
 fi
 meson compile -C "$B32" >> "$W/dxmt-guest.log" 2>&1 || { echo "dxmt-guest: i386 build failed; see $W/dxmt-guest.log" >&2; exit 1; }
 meson install -C "$B32" >> "$W/dxmt-guest.log" 2>&1 || { echo "dxmt-guest: i386 install failed; see $W/dxmt-guest.log" >&2; exit 1; }
-# mtld3d (Direct3D 9, D3D9 M2b), from the same tree: its x86_64 and i386 pairs and its x86_64 Linux mtld3d.so, on the
-# same import libraries, in build/mtld3d-guest (stage.sh takes them from there).
+# mtld3d (Direct3D 9, D3D9 M2b), from the same tree: its x86_64 and i386 pairs and its x86_64 and i686 Linux
+# mtld3d.so (the i686 one old WoW64's), on the same import libraries, in build/mtld3d-guest (stage.sh takes them from
+# there).
 sh "$ROOT/dxmt/mtld3d-build.sh" --guest "$SDK" >> "$W/dxmt-guest.log" 2>&1 \
   || { echo "dxmt-guest: mtld3d's guest build failed; see $W/dxmt-guest.log" >&2; exit 1; }
 echo "dxmt-guest: installed $W/dxmt-guest"

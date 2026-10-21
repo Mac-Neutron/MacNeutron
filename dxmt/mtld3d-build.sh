@@ -9,8 +9,9 @@
 # With --guest, the VM guest's instead (D3D9 M2b): the x86_64 and i386 pairs, each crate a static library linked by
 # llvm-mingw's lld-link against its CRT as the ARM64X halves are (MTLD3D_MINGW_CRT), with <GUEST_SDK>'s Wine archives
 # (eac-vm/dxmt/build.sh's guest-wine-sdk), and the x86_64 Linux mtld3d.so on the builder's sysroot
-# (dxmt/mtld3d-linux-cargo.sh); not through mtld3d's Makefile, whose x86 leaves want a whole x86 Wine. Prints the
-# x86_64-windows, i386-windows and x86_64-unix folders.
+# (dxmt/mtld3d-linux-cargo.sh) and its i686 build for old WoW64's 32-bit Unix side (on the multilib one, its boundary
+# structs checked against the x86_64 build's, dxmt/mtld3d-layout32-check.sh); not through mtld3d's Makefile, whose x86
+# leaves want a whole x86 Wine. Prints the x86_64-windows, i386-windows, x86_64-unix and i386-unix folders.
 # With --loopback, only the loopback mtld3d.so (D3D9 spec §5.1: the winemetal facade on macOS, aarch64-apple-darwin
 # with the winemetal feature, production profile, in target-wm), which dxmt/d3d9-check.sh and mtld3d-conformance.sh
 # take as MTLD3D_SO; prints its path.
@@ -55,7 +56,7 @@ maps="-ffile-prefix-map=$HOME=~ -ffile-prefix-map=$CH/registry/src=crates -ffile
 cxx="-fno-exceptions -fno-rtti -fno-threadsafe-statics -DSNMALLOC_USE_THREAD_CLEANUP -include stdlib.h $maps"
 if [ -n "$GUEST" ]; then
   O="${BUILD_DIR:-$ROOT/build}/mtld3d-guest"
-  rm -rf "$O"; mkdir -p "$O/x86_64-windows" "$O/i386-windows" "$O/x86_64-unix"
+  rm -rf "$O"; mkdir -p "$O/x86_64-windows" "$O/i386-windows" "$O/x86_64-unix" "$O/i386-unix"
   # pe <rust target> <mingw triple> <lld machine> <entry> <Wine arch> <compiler-rt arch> <-march>: one PE pair.
   pe() {
     cxx_pe="$7 -fno-omit-frame-pointer -fno-exceptions -fno-rtti -fno-threadsafe-statics -DSNMALLOC_USE_THREAD_CLEANUP \
@@ -94,7 +95,11 @@ if [ -n "$GUEST" ]; then
   sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" build -q --profile production -p mtld3d-unix >&2
   "$LM/bin/llvm-objcopy" --strip-debug "$M/unix/target-linux/x86_64-unknown-linux-gnu/production/libmtld3d_unix.so" \
     "$O/x86_64-unix/mtld3d.so"
-  echo "$O/x86_64-windows"; echo "$O/i386-windows"; echo "$O/x86_64-unix"
+  sh "$ROOT/dxmt/mtld3d-layout32-check.sh" >&2
+  MTLD3D_LINUX=i686 sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" build -q --profile production -p mtld3d-unix >&2
+  "$LM/bin/llvm-objcopy" --strip-debug "$M/unix/target-linux-i686/i686-unknown-linux-gnu/production/libmtld3d_unix.so" \
+    "$O/i386-unix/mtld3d.so"
+  echo "$O/x86_64-windows"; echo "$O/i386-windows"; echo "$O/x86_64-unix"; echo "$O/i386-unix"
   exit 0
 fi
 # mtld3d.so for the macOS wine.app is built for (its unix/.cargo/config.toml names 15.0, which the environment beats).
