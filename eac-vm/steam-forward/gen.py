@@ -315,12 +315,16 @@ def main():
             f.write(f'static NTSTATUS f{idx}(void *p) {{ return mn_client_call({idx}, p); }}\n')
             if name != 'steamclient_get_unix_buffer':
                 f.write(f'static NTSTATUS w{idx}(void *p) {{ return mn_client_call_wow64({idx}, p); }}\n')
-        f.write('\nconst unixlib_entry_t __wine_unix_call_funcs[] = {\n')
+        wow64_entries = ''.join('    mn_wow64_get_unix_buffer,\n' if name == 'steamclient_get_unix_buffer'
+                                else f'    w{idx},\n' for idx, (name, _, _, _) in enumerate(descs))
+        # An i686 build is old WoW64's 32-bit Unix side: its one table takes its 32-bit callers' params, the WoW64 ones.
+        f.write('\n#ifdef __i386__\nconst unixlib_entry_t __wine_unix_call_funcs[] = {\n')
+        f.write(wow64_entries)
+        f.write('};\n#else\nconst unixlib_entry_t __wine_unix_call_funcs[] = {\n')
         f.write(''.join(f'    f{idx},\n' for idx in range(len(descs))))
         f.write('};\nconst unixlib_entry_t __wine_unix_call_wow64_funcs[] = {\n')
-        f.write(''.join('    mn_wow64_get_unix_buffer,\n' if name == 'steamclient_get_unix_buffer' else f'    w{idx},\n'
-                        for idx, (name, _, _, _) in enumerate(descs)))
-        f.write('};\n')
+        f.write(wow64_entries)
+        f.write('};\n#endif\n')
     with open(os.path.join(out_dir, 'report.txt'), 'w') as f:
         for label, wow64 in (('', False), ('wow64 ', True)):
             tdescs, treport, tcounts = tables[wow64]

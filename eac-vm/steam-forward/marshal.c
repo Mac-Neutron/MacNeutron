@@ -411,3 +411,12 @@ uint32_t mn_table_checksum(const struct mn_call_desc *descs, unsigned n) {
     }
     return h;
 }
+
+#define MN_HANDSHAKE_WOW64_ONLY 0x32626e6du /* "mnb2": a 32-bit guest's mark */
+uint32_t mn_handshake_value(uint32_t full, uint32_t wow64, int wow64_only) {
+    return wow64_only ? (wow64 * 16777619u) ^ MN_HANDSHAKE_WOW64_ONLY : full;
+}
+int mn_handshake_accept(uint32_t theirs, uint32_t full, uint32_t wow64, int *wow64_only) {
+    *wow64_only = theirs != full;
+    return theirs == full || theirs == mn_handshake_value(full, wow64, 1);
+}

@@ -71,5 +71,11 @@ int mn_unpack_reply(const struct mn_call_desc *d, const void *msg, size_t len, v
 
 /* FNV-1a over every size and offset in the table: guest and host exchange it before their first call. */
 uint32_t mn_table_checksum(const struct mn_call_desc *descs, unsigned n);
+/* The handshake's value from the two tables' checksums (full: both, wow64: the WoW64 table's): a 64-bit guest's is
+ * full; an i686 guest's (old WoW64's 32-bit Unix side, which makes WoW64 calls only, and whose 64-bit table compiles
+ * to other layouts) is its WoW64 checksum, marked. accept: the host's test of a guest's value; *wow64_only: an i686
+ * guest. */
+uint32_t mn_handshake_value(uint32_t full, uint32_t wow64, int wow64_only);
+int mn_handshake_accept(uint32_t theirs, uint32_t full, uint32_t wow64, int *wow64_only);
 
 #endif

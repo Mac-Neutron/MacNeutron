@@ -45,6 +45,9 @@ wine_image() {
     || { echo "no DXMT guest stage at $DXMT_GUEST" >&2; exit 1; }
   sudo rm -rf "$WORK/wine"; sudo mkdir -p "$WORK"; sudo cp -a "$WINE_STAGE" "$WORK/wine"
   sudo install -m755 "$STEAM_FORWARDER" "$WORK/wine/lib/wine/x86_64-unix/lsteamclient.so"
+  # Its i686 build, for old WoW64's 32-bit Unix side, when the Wine has one.
+  F32=$(dirname "$STEAM_FORWARDER")/i386/lsteamclient.so
+  [ ! -d "$WORK/wine/lib/wine/i386-unix" ] || [ ! -f "$F32" ] || sudo install -m755 "$F32" "$WORK/wine/lib/wine/i386-unix/"
   # Milestone 4b-2: D3D through DXMT and the Metal transport, not wined3d/vkd3d on llvmpipe; since 4c it presents in
   # the host's window too.
   if [ "$DXMT_GUEST" != none ]; then

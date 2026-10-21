@@ -23,12 +23,14 @@ for stage in ${*:-wine forwarder dxmt d3d fex}; do
       $B ssh "set -e; [ -x wine-tools/tools/winebuild/winebuild ] || sh mn-wine-build/build.sh tools
         sh mn-wine-build/build.sh wine; sh mn-wine-build/build.sh wine32; WINE32=${WINE32:-} sh mn-wine-build/build.sh install
         echo '$(stamp wine)' > wine-stage/opt/mn-wine/.mn-source" ;;
-    forwarder)  # lsteamclient's Unix half for the guest (eac-vm/steam-forward/build-guest.sh), on that Wine build
+    forwarder)  # lsteamclient's Unix half for the guest (eac-vm/steam-forward/build-guest.sh), on that Wine build and its
+      # 32-bit one (old WoW64)
       make -s -C "$ROOT/eac-vm/steam-forward" OUT="$W/steam-forward" "$W/steam-forward/descriptors.c"
       $B sync "$ROOT/eac-vm/steam-forward" mn-steam-forward > /dev/null
       $B sync "$W/steam-forward" mn-steam-gen > /dev/null
       $B sync "$S/lsteamclient/lsteamclient" mn-lsc > /dev/null
-      $B ssh "set -e; WINEBUILD=\$HOME/wine-build64 sh mn-steam-forward/build-guest.sh \$HOME/mn-steam-forward \$HOME/mn-lsc \
+      $B sync "$ROOT/eac-vm/sysroot" mn-sysroot > /dev/null
+      $B ssh "set -e; WINEBUILD=\$HOME/wine-build64 WINEBUILD32=\$HOME/wine-build32 sh mn-steam-forward/build-guest.sh \$HOME/mn-steam-forward \$HOME/mn-lsc \
         \$HOME/wine-src/include \$HOME/mn-steam-gen \$HOME/mn-steam-out > /dev/null
         echo '$(stamp forwarder)' > mn-steam-out/.mn-source" ;;
     dxmt)  # DXMT's x86-64 and i386 DLLs (on the Mac) and the guest winemetal.so (through the builder), staged into it

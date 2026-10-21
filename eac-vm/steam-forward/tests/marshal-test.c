@@ -369,6 +369,16 @@ int main(void) {
       struct mn_call_desc d2[NDESCS]; memcpy(d2, descs, sizeof d2); d2[2].fields = changed;
       CHECK(a == mn_table_checksum(descs, NDESCS) && a != mn_table_checksum(d2, NDESCS), "table checksum"); }
 
+    { /* The handshake: a 64-bit guest sends both tables' value, an i686 one (old WoW64's 32-bit Unix side, whose
+       * 64-bit table compiles to other layouts) its WoW64 table's alone, marked; the host takes either, nothing else. */
+      uint32_t full = 0x1234abcdu, wow = 0x5e9521afu;
+      int only32 = -1;
+      CHECK(mn_handshake_accept(mn_handshake_value(full, wow, 0), full, wow, &only32) && only32 == 0, "handshake: 64-bit");
+      CHECK(mn_handshake_accept(mn_handshake_value(full, wow, 1), full, wow, &only32) && only32 == 1, "handshake: 32-bit");
+      CHECK(mn_handshake_value(full, wow, 1) != full, "handshake: the 32-bit value is not the 64-bit one");
+      CHECK(!mn_handshake_accept(full ^ 1, full, wow, &only32) && !mn_handshake_accept(wow, full, wow, &only32),
+            "handshake: another table refused"); }
+
     { /* steamclient_next_callback (MN_CAP): asked with no buffer, then too small, then large enough, the guest always
        * learns the size the callback needs, and gets its bytes once they fit. Under ASan: no host over-read. */
       struct cap_params p = { 0, NULL, 0 };

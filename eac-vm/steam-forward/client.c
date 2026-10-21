@@ -47,7 +47,7 @@ static int ensure_connected(void) {
      * when mn-steam-host is gone), and a forwarded call must fail, not hang. Calls themselves are not bounded. */
     struct timeval two = { 2, 0 }, none = { 0, 0 };
     setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &two, sizeof two);
-    uint32_t mine = mn_tables_checksum(), theirs = 0;
+    uint32_t mine = mn_handshake_mine(), theirs = 0;
     if (mn_write_full(conn, &mine, 4) || mn_read_full(conn, &theirs, 4) || theirs != mine) {
         if (theirs && theirs != mine) fprintf(stderr, "mn-steam: host table %08x differs from ours %08x\n", theirs, mine);
         else fprintf(stderr, "mn-steam: no answer from the host\n");
@@ -60,6 +60,15 @@ static int ensure_connected(void) {
 
 uint32_t mn_tables_checksum(void) {
     return mn_table_checksum(mn_calls, mn_ncalls) ^ (mn_table_checksum(mn_calls_wow64, mn_ncalls) * 16777619u);
+}
+
+/* What this guest sends in the handshake: an i686 build (old WoW64's 32-bit Unix side) makes WoW64 calls only. */
+uint32_t mn_handshake_mine(void) {
+#ifdef __i386__
+    return mn_handshake_value(mn_tables_checksum(), mn_table_checksum(mn_calls_wow64, mn_ncalls), 1);
+#else
+    return mn_tables_checksum();
+#endif
 }
 
 /* With no host to reach, answer as lsteamclient does when Steam isn't running: init and the registry setup succeed and
@@ -122,18 +131,24 @@ uint32_t mn_client_call_wow64(uint32_t index, void *params) {
  * its new one). The string is this process's kept copy (marshal.c), so the call is answered here, never sent.
  * ponytail: a linear list, as marshal.c's kept copies. */
 struct seen { struct seen *next; uint64_t src; uint32_t dst; };
+/* A W32_PTR field's 32-bit value: a struct holding it in a 64-bit build, the pointer itself in an i686 one. */
+#ifdef __i386__
+#define W32_VALUE(f) (*(uint32_t *)&(f))
+#else
+#define W32_VALUE(f) ((f).value)
+#endif
 static struct seen *seen_list;
 static pthread_mutex_t seen_lock = PTHREAD_MUTEX_INITIALIZER;
 NTSTATUS mn_wow64_get_unix_buffer(void *args) {
     struct wow64_steamclient_get_unix_buffer_params *p = args;
-    if (!p->ptr.value || !p->buf.ptr) return MN_STATUS_INVALID_PARAMETER;
+    if (!W32_VALUE(p->ptr) || !p->buf.ptr) return MN_STATUS_INVALID_PARAMETER;
     pthread_mutex_lock(&seen_lock);
     struct seen *s = seen_list;
     while (s && s->src != p->buf.ptr) s = s->next;
-    if (s) p->ptr.value = s->dst;
+    if (s) W32_VALUE(p->ptr) = s->dst;
     else {
-        memcpy((void *)(uintptr_t)p->ptr.value, (const void *)(uintptr_t)p->buf.ptr, p->buf.len);
-        if ((s = malloc(sizeof *s))) { s->src = p->buf.ptr; s->dst = p->ptr.value; s->next = seen_list; seen_list = s; }
+        memcpy((void *)(uintptr_t)W32_VALUE(p->ptr), (const void *)(uintptr_t)p->buf.ptr, p->buf.len);
+        if ((s = malloc(sizeof *s))) { s->src = p->buf.ptr; s->dst = W32_VALUE(p->ptr); s->next = seen_list; seen_list = s; }
     }
     pthread_mutex_unlock(&seen_lock);
     return 0;

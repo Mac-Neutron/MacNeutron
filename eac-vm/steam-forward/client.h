@@ -12,6 +12,7 @@
 extern const struct mn_call_desc mn_calls[];
 extern const struct mn_call_desc mn_calls_wow64[]; /* the same calls with a 32-bit caller's params (gen.py) */
 extern const unsigned int mn_ncalls;
+uint32_t mn_handshake_mine(void); /* the handshake's value this guest sends (marshal.h's mn_handshake_value) */
 /* Both tables' checksum, which guest and host exchange before their first call. */
 uint32_t mn_tables_checksum(void);
 

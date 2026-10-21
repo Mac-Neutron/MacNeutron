@@ -75,8 +75,12 @@ static void low_give(int s) {
 static void *serve(void *arg) {
     int fd = (int)(intptr_t)arg;
     uint32_t theirs, mine = mn_tables_checksum();
+    int only32 = 0; /* an i686 guest (old WoW64): its WoW64 calls alone */
     if (mn_read_full(fd, &theirs, 4)) { close(fd); return NULL; } /* closed before the handshake: a probe */
-    if (mn_write_full(fd, &mine, 4) || theirs != mine) {
+    int ok = mn_handshake_accept(theirs, mine, mn_table_checksum(mn_calls_wow64, mn_ncalls), &only32);
+    /* The value accepted goes back, which the guest checks against its own; else ours, which it reports. */
+    uint32_t answer = ok ? theirs : mine;
+    if (mn_write_full(fd, &answer, 4) || !ok) {
         fprintf(stderr, "mn-steam-host: guest table %08x differs from ours %08x\n", theirs, mine);
         close(fd);
         return NULL;
@@ -90,6 +94,7 @@ static void *serve(void *arg) {
         memcpy(msg, &h, sizeof h);
         if (mn_read_full(fd, msg + sizeof h, h.len)) { free(msg); break; }
         int wow64 = (h.index & MN_WOW64) != 0, slot = -1;
+        if (only32 && !wow64) { fprintf(stderr, "mn-steam-host: a 64-bit call from a 32-bit guest\n"); free(msg); break; }
         /* Without 32-bit calls here, closing makes the guest answer as with no Steam (client.c no_steam). */
         if (wow64 && (slot = low_take()) < 0) {
             static atomic_flag said = ATOMIC_FLAG_INIT; /* once: a 32-bit game makes them all the time */
