@@ -1,13 +1,17 @@
-// Direct3D 9 on the macOS path (D3D9 spec §6, M1): a 256x256 window, a HAL device, then up to 60 frames of a clear to
-// blue and a fixed-function pretransformed red triangle over the centre, each read back through GetRenderTargetData and
-// presented, until one shows the triangle: mtld3d leaves a draw out of its frame while its pipeline builds
-// (shader.asyncCompile, on by default), so the first frames may show the clear alone, as they do in a game.
+// Direct3D 9 (D3D9 spec §6): a 256x256 window, a HAL device, then frames of a clear to blue and a fixed-function
+// pretransformed red triangle over the centre, each read back through GetRenderTargetData and presented, until one shows
+// the triangle and 10 more have been presented (at most 300): mtld3d leaves a draw out of its frame while its pipeline
+// builds (shader.asyncCompile, on by default), so the first frames may show the clear alone, as they do in a game.
 // Prints, each "ok" or "FAIL <what>": "d3d9 module" (mtld3d's mtld3d.dll is loaded once Direct3DCreate9 ran: the
 // d3d9.dll is mtld3d's, not Wine's wined3d one), "d3d9 clear" (a corner of the first frame is 0x0000ff), "d3d9
-// triangle" (a frame's centre is 0xff0000) and "d3d9 present" (every present D3D_OK). Exits with the number of failures.
+// triangle" (a frame's centre is 0xff0000) and "d3d9 present" (every present D3D_OK, at least 10 of them); and
+// "frames: <n>". With the argument "vsync" the device presents at D3DPRESENT_INTERVAL_ONE, as most games do, and
+// "d3d9 vsync" says 60 more presents took under 5 s (a display paces them at its rate; a present the layer never
+// reports presented makes each one wait out mtld3d's 1 s cap). Exits with the number of failures.
 #include <windows.h>
 #include <d3d9.h>
 #include <cstdio>
+#include <cstring>
 
 static int failures;
 static void row(const char *what, bool ok, const char *why) {
@@ -15,7 +19,8 @@ static void row(const char *what, bool ok, const char *why) {
     else printf("d3d9 %s FAIL %s\n", what, why), ++failures;
 }
 
-int main() {
+int main(int argc, char **argv) {
+    const bool vsync = argc > 1 && !strcmp(argv[1], "vsync");
     WNDCLASSW wc = {};
     wc.lpfnWndProc = DefWindowProcW;
     wc.hInstance = GetModuleHandleW(nullptr);
@@ -32,7 +37,7 @@ int main() {
     D3DPRESENT_PARAMETERS pp = {};
     pp.BackBufferWidth = 256, pp.BackBufferHeight = 256, pp.BackBufferFormat = D3DFMT_X8R8G8B8, pp.BackBufferCount = 1;
     pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = hwnd, pp.Windowed = TRUE;
-    pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    pp.PresentationInterval = vsync ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
     IDirect3DDevice9 *dev = nullptr;
     HRESULT hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd, D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp,
                                    &dev);
@@ -46,8 +51,8 @@ int main() {
     bool read = SUCCEEDED(dev->GetRenderTarget(0, &rt)) &&
                 SUCCEEDED(dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr));
     DWORD corner = 0, centre = 0;
-    int frames = 0, presented = 0;
-    while (frames < 60 && centre != 0xff0000) {
+    int frames = 0, presented = 0, after = 0;
+    while (frames < 300 && after < 10) {
         dev->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 255), 1.0f, 0);
         dev->BeginScene();
         dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
@@ -59,9 +64,10 @@ int main() {
         if (!read) break;
         const BYTE *p = (const BYTE *)lr.pBits;
         if (!frames++) corner = *(const DWORD *)(p + 2 * lr.Pitch + 2 * 4) & 0xffffff;
-        centre = *(const DWORD *)(p + 128 * lr.Pitch + 128 * 4) & 0xffffff;
+        if (centre != 0xff0000) centre = *(const DWORD *)(p + 128 * lr.Pitch + 128 * 4) & 0xffffff;
         sys->UnlockRect();
         presented += dev->Present(nullptr, nullptr, nullptr, nullptr) == D3D_OK;
+        after += centre == 0xff0000;
     }
     char why[64];
     snprintf(why, sizeof why, read ? "corner %06lx" : "no readback", (unsigned long)corner);
@@ -69,7 +75,23 @@ int main() {
     snprintf(why, sizeof why, read ? "centre %06lx after %d frames" : "no readback", (unsigned long)centre, frames);
     row("triangle", read && centre == 0xff0000, why);
     snprintf(why, sizeof why, "%d of %d", presented, frames);
-    row("present", frames && presented == frames, why);
+    row("present", frames >= 10 && presented == frames, why);
+    printf("frames: %d\n", frames);
+    if (vsync) {
+        LARGE_INTEGER f, t0, t1;
+        QueryPerformanceFrequency(&f);
+        QueryPerformanceCounter(&t0);
+        int ok = 0;
+        for (int i = 0; i < 60; i++) {
+            dev->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 255), 1.0f, 0);
+            ok += dev->Present(nullptr, nullptr, nullptr, nullptr) == D3D_OK;
+        }
+        QueryPerformanceCounter(&t1);
+        double s = (double)(t1.QuadPart - t0.QuadPart) / (double)f.QuadPart;
+        printf("vsync: 60 presents in %.2f s\n", s);
+        snprintf(why, sizeof why, "%d of 60 presents in %.1f s", ok, s);
+        row("vsync", ok == 60 && s < 5.0, why);
+    }
 
     if (sys) sys->Release();
     if (rt) rt->Release();

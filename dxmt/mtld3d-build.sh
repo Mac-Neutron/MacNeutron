@@ -11,12 +11,26 @@
 # (eac-vm/dxmt/build.sh's guest-wine-sdk), and the x86_64 Linux mtld3d.so on the builder's sysroot
 # (dxmt/mtld3d-linux-cargo.sh); not through mtld3d's Makefile, whose x86 leaves want a whole x86 Wine. Prints the
 # x86_64-windows, i386-windows and x86_64-unix folders.
+# With --loopback, only the loopback mtld3d.so (D3D9 spec §5.1: the winemetal facade on macOS, aarch64-apple-darwin
+# with the winemetal feature, production profile, in target-wm), which dxmt/d3d9-check.sh and mtld3d-conformance.sh
+# take as MTLD3D_SO; prints its path.
 #   mtld3d-build.sh <WINE_SDK>
 #   mtld3d-build.sh --guest <GUEST_SDK>
+#   mtld3d-build.sh --loopback
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/dxmt/pins"
 GUEST=; [ "${1:-}" != --guest ] || { GUEST=1; shift; }
+if [ "${1:-}" = --loopback ]; then
+  M="${BUILD_DIR:-$ROOT/build}/wine-arm64-src/dxmt/mtld3d"
+  T=$M/unix/target-wm/aarch64-apple-darwin/production
+  ( cd "$M/unix" && env PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 \
+    CARGO_TARGET_DIR=target-wm cargo "+$MTLD3D_RUST" build -q --profile production --target aarch64-apple-darwin \
+    -p mtld3d-unix --features mtld3d-unix/winemetal ) >&2
+  cp -c "$T/libmtld3d_unix.dylib" "$T/mtld3d.so"
+  echo "$T/mtld3d.so"
+  exit 0
+fi
 [ $# = 1 ] && [ -d "$1" ] || { echo "usage: mtld3d-build.sh [--guest] <WINE_SDK>" >&2; exit 2; }
 SDK=$(cd "$1" && pwd)
 M="${BUILD_DIR:-$ROOT/build}/wine-arm64-src/dxmt/mtld3d"
