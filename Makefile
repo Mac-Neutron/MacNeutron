@@ -62,6 +62,11 @@ dxmt-tests:
 build/dxmt-tests/%.exe: dxmt/tests/%.cpp dxmt/tests/d3d12_common.hpp dxmt/tests/d3d11_common.hpp
 	$(MINGWXX) -std=c++17 -o $@ $< -ld3d12 -ld3d11 -ld3d10 -ld3d9 -ld3dcompiler -ldxgi -luser32 -lpsapi
 
+# D3D9's for i386 too, the VM guest's 32-bit lane (D3D9 M2b: mtld3d's i386 pair under the guest's new WoW64).
+build/dxmt-tests-i386/%.exe: dxmt/tests/%.cpp
+	mkdir -p build/dxmt-tests-i386
+	$(MINGW_BIN)/i686-w64-mingw32-clang++ -O2 -static -s -std=c++17 -Wl,--large-address-aware -o $@ $< -ld3d9 -luser32
+
 # The same programs and present_loop for ARM64EC, for the arm64 runtime (arm64 DXMT spec §7), built in parallel.
 MINGW_EC = $(MINGW_BIN)/arm64ec-w64-mingw32-clang -O3 -flto=thin -static -s $(PE_MARCH)
 MINGWXX_EC = $(MINGW_BIN)/arm64ec-w64-mingw32-clang++ -O3 -flto=thin -static -s $(PE_MARCH)
