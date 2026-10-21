@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include "airconv_thunks.h"
 #include "marshal.h"
+#include "sm50-wire.h"
 #include "winemetal_thunks.h"
 #ifndef MN_WM_HOST
 #include "../guest/transport.h"
@@ -25,59 +26,51 @@
 #define MAX_LOGS 64
 #define MAX_MESSAGE (1u << 20)
 
-/* The compile slots' layouts: 76 has one shader, the pipeline compiles two. */
+/* The compile slots' layouts (sm50-wire.h, as the records below): 76 has one shader, the pipeline compiles two. */
 struct compile_layout { uint8_t shaders, args, name, bitcode, error, ret; };
 static const struct compile_layout *compile_layout(unsigned slot) {
-    static const struct compile_layout one = {1, offsetof(struct sm50_compile_params, args),
-                                              offsetof(struct sm50_compile_params, func_name),
-                                              offsetof(struct sm50_compile_params, bitcode),
-                                              offsetof(struct sm50_compile_params, error),
-                                              offsetof(struct sm50_compile_params, ret)};
-#define TWO(st, a) {2, offsetof(struct st, a), offsetof(struct st, func_name), offsetof(struct st, bitcode),          \
-                    offsetof(struct st, error), offsetof(struct st, ret)}
-    static const struct compile_layout vertex = TWO(sm50_compile_geometry_pipeline_vertex_params, vertex_args);
-    static const struct compile_layout geometry = TWO(sm50_compile_geometry_pipeline_geometry_params, geometry_args);
-    static const struct compile_layout hull = TWO(sm50_compile_tessellation_pipeline_hull_params, hull_args);
-    static const struct compile_layout domain = TWO(sm50_compile_tessellation_pipeline_domain_params, domain_args);
+#define LAYOUT(n, st) {n, offsetof(struct st, args), offsetof(struct st, func_name), offsetof(struct st, bitcode),       \
+                       offsetof(struct st, error), offsetof(struct st, ret)}
+    static const struct compile_layout one = LAYOUT(1, mn_sm50_compile), two = LAYOUT(2, mn_sm50_compile2);
     switch (slot) {
     case 76: return &one;
-    case 81: return &vertex;
-    case 82: return &geometry;
-    case 84: return &hull;
-    case 85: return &domain;
+    case 81: case 82: case 84: case 85: return &two;
     default: return NULL;
     }
 }
 
-/* SM50 compile arguments: a list through next (offset 0), its type at offset 8. */
+/* SM50 compile arguments (sm50-wire.h): a list through next (offset 0), its type at offset 8. */
 struct arg_type { uint8_t size, payload, count, count_width, elem; };
 static const struct arg_type arg_types[] = {
-    [SM50_SHADER_EMULATE_VERTEX_STREAM_OUTPUT] = {sizeof(struct SM50_SHADER_EMULATE_VERTEX_STREAM_OUTPUT_DATA),
-        offsetof(struct SM50_SHADER_EMULATE_VERTEX_STREAM_OUTPUT_DATA, elements),
-        offsetof(struct SM50_SHADER_EMULATE_VERTEX_STREAM_OUTPUT_DATA, num_elements), 4,
+    [SM50_SHADER_EMULATE_VERTEX_STREAM_OUTPUT] = {sizeof(struct mn_sm50_stream_output),
+        offsetof(struct mn_sm50_stream_output, elements), offsetof(struct mn_sm50_stream_output, num_elements), 4,
         sizeof(struct SM50_STREAM_OUTPUT_ELEMENT)},
-    [SM50_SHADER_COMMON] = {.size = sizeof(struct SM50_SHADER_COMMON_DATA)},
-    [SM50_SHADER_PSO_PIXEL_SHADER] = {.size = sizeof(struct SM50_SHADER_PSO_PIXEL_SHADER_DATA)},
-    [SM50_SHADER_IA_INPUT_LAYOUT] = {sizeof(struct SM50_SHADER_IA_INPUT_LAYOUT_DATA),
-        offsetof(struct SM50_SHADER_IA_INPUT_LAYOUT_DATA, elements),
-        offsetof(struct SM50_SHADER_IA_INPUT_LAYOUT_DATA, num_elements), 4, sizeof(struct SM50_IA_INPUT_ELEMENT)},
-    [SM50_SHADER_GS_PASS_THROUGH] = {.size = sizeof(struct SM50_SHADER_GS_PASS_THROUGH_DATA)},
-    [SM50_SHADER_PSO_GEOMETRY_SHADER] = {.size = sizeof(struct SM50_SHADER_PSO_GEOMETRY_SHADER_DATA)},
-    [SM50_SHADER_PSO_TESSELLATOR] = {.size = sizeof(struct SM50_SHADER_PSO_TESSELLATOR_DATA)},
-    [SM50_SHADER_ROOT_SIGNATURE] = {sizeof(struct SM50_SHADER_ROOT_SIGNATURE_DATA),
-        offsetof(struct SM50_SHADER_ROOT_SIGNATURE_DATA, bytecode),
-        offsetof(struct SM50_SHADER_ROOT_SIGNATURE_DATA, bytecode_length), 8, 1},
-    [SM50_SHADER_ROOT_SIGNATURE2] = {sizeof(struct SM50_SHADER_ROOT_SIGNATURE_DATA),
-        offsetof(struct SM50_SHADER_ROOT_SIGNATURE_DATA, bytecode),
-        offsetof(struct SM50_SHADER_ROOT_SIGNATURE_DATA, bytecode_length), 8, 1},
+    [SM50_SHADER_COMMON] = {.size = sizeof(struct mn_sm50_common)},
+    [SM50_SHADER_PSO_PIXEL_SHADER] = {.size = sizeof(struct mn_sm50_pixel)},
+    [SM50_SHADER_IA_INPUT_LAYOUT] = {sizeof(struct mn_sm50_input_layout),
+        offsetof(struct mn_sm50_input_layout, elements), offsetof(struct mn_sm50_input_layout, num_elements), 4,
+        sizeof(struct SM50_IA_INPUT_ELEMENT)},
+    [SM50_SHADER_GS_PASS_THROUGH] = {.size = sizeof(struct mn_sm50_gs_pass_through)},
+    [SM50_SHADER_PSO_GEOMETRY_SHADER] = {.size = sizeof(struct mn_sm50_geometry)},
+    [SM50_SHADER_PSO_TESSELLATOR] = {.size = sizeof(struct mn_sm50_tessellator)},
+    [SM50_SHADER_ROOT_SIGNATURE] = {sizeof(struct mn_sm50_root_signature),
+        offsetof(struct mn_sm50_root_signature, bytecode), offsetof(struct mn_sm50_root_signature, bytecode_length), 8,
+        1},
+    [SM50_SHADER_ROOT_SIGNATURE2] = {sizeof(struct mn_sm50_root_signature),
+        offsetof(struct mn_sm50_root_signature, bytecode), offsetof(struct mn_sm50_root_signature, bytecode_length), 8,
+        1},
 };
 #define NARG_TYPES (sizeof arg_types / sizeof *arg_types)
 
-static inline const uint8_t *next_arg(const uint8_t *node) {
-    const uint8_t *next;
-    memcpy(&next, node, sizeof next);
-    return next;
+/* A wire pointer (a uint64_t) as one of this process's. */
+static inline void *ptr_of(uint64_t v) { return (void *)(uintptr_t)v; }
+static inline uint64_t u64_at(const uint8_t *p) {
+    uint64_t v;
+    memcpy(&v, p, sizeof v);
+    return v;
 }
+
+static inline const uint8_t *next_arg(const uint8_t *node) { return ptr_of(u64_at(node)); }
 
 static const struct arg_type *arg_type(const uint8_t *node) {
     uint32_t type;
@@ -141,8 +134,7 @@ static NTSTATUS_T emit_args(struct mn_wm_out *o, const uint8_t *head) {
         memset(w + at, 0, 8); /* next */
         if (t->payload) {
             uint64_t len = arg_payload(t, n), off = ~0ull;
-            const void *src;
-            memcpy(&src, n + t->payload, sizeof src);
+            const void *src = ptr_of(u64_at(n + t->payload));
             if (len) {
                 if (!src || pat + len > total) {
                     free(w);
@@ -165,11 +157,7 @@ static NTSTATUS_T emit_string(struct mn_wm_out *o, const char *str) {
     return str ? mn_wm_emit_data(o, str, strlen(str) + 1, WMF_IN) : mn_wm_emit_none(o);
 }
 
-static void *field_ptr(const void *params, unsigned off) {
-    void *p;
-    memcpy(&p, (const uint8_t *)params + off, sizeof p);
-    return p;
-}
+static void *field_ptr(const void *params, unsigned off) { return ptr_of(u64_at((const uint8_t *)params + off)); }
 static void set_field(void *params, unsigned off, uint64_t v) { memcpy((uint8_t *)params + off, &v, sizeof v); }
 
 /* A release of an SM50 handle (75, 78, 80): the table's, on both sides. */
@@ -189,14 +177,13 @@ NTSTATUS_T mn_wm_sm50_pack(unsigned slot, void *params, struct mn_wm_out *o) {
     NTSTATUS_T s;
     switch (slot) {
     case 74: {
-        struct sm50_initialize_params *a = params, *r = (void *)rec;
-        mn_handle hs = pick(o, a->shader), he = pick(o, a->error);
+        struct mn_sm50_initialize *a = params, *r = (void *)rec;
+        mn_handle hs = pick(o, ptr_of(a->shader)), he = pick(o, ptr_of(a->error));
         if (!hs) return MN_STATUS_INVALID_PARAMETER;
-        r->shader = (void *)(uintptr_t)hs, r->error = (void *)(uintptr_t)he, r->bytecode = NULL;
-        r->reflection = a->reflection ? (void *)1 : NULL;
+        r->shader = hs, r->error = he, r->bytecode = 0, r->reflection = a->reflection != 0;
         if ((s = mn_wm_emit(o, rec, c->params_size)) ||
-            (s = mn_wm_emit_data(o, a->bytecode, a->bytecode_size, WMF_IN)) ||
-            (s = mn_wm_emit_data(o, a->reflection, sizeof(struct MTL_SHADER_REFLECTION), WMF_OUT)))
+            (s = mn_wm_emit_data(o, ptr_of(a->bytecode), a->bytecode_size, WMF_IN)) ||
+            (s = mn_wm_emit_data(o, ptr_of(a->reflection), sizeof(struct MTL_SHADER_REFLECTION), WMF_OUT)))
             return s;
         return 0;
     }
@@ -204,26 +191,27 @@ NTSTATUS_T mn_wm_sm50_pack(unsigned slot, void *params, struct mn_wm_out *o) {
     case 80: return release_pack(params, o, 0);
     case 78: return release_pack(params, o, 1);
     case 77: { /* the size first; the bytes come in the second step (sm50_unpack) */
-        struct sm50_get_compiled_bitcode_params *a = params;
-        if (a->data_out) memset(a->data_out, 0, sizeof *a->data_out); /* a failure: DXMT sees no bitcode */
-        set_field(rec, offsetof(struct sm50_get_compiled_bitcode_params, data_out), 0);
+        struct mn_sm50_get_compiled_bitcode *a = params;
+        if (a->data_out) memset(ptr_of(a->data_out), 0, sizeof(struct SM50_COMPILED_BITCODE)); /* a failure: no bitcode */
+        set_field(rec, offsetof(struct mn_sm50_get_compiled_bitcode, data_out), 0);
         return mn_wm_emit(o, rec, c->params_size);
     }
     case 79: {
-        struct sm50_get_error_message_params *a = params;
+        struct mn_sm50_get_error_message *a = params;
         if (!a->buffer_size || a->buffer_size > MAX_MESSAGE || !a->buffer) return MN_STATUS_INVALID_PARAMETER;
         if ((s = mn_wm_emit(o, rec, c->params_size))) return s;
-        return mn_wm_emit_data(o, a->buffer, a->buffer_size, WMF_OUT);
+        return mn_wm_emit_data(o, ptr_of(a->buffer), a->buffer_size, WMF_OUT);
     }
     case 88: {
-        struct sm50_get_arguments_info_params *a = params;
-        uint64_t att = mn_gh_attached((mn_handle)(uintptr_t)a->shader);
+        struct mn_sm50_get_arguments_info *a = params;
+        uint64_t att = mn_gh_attached(a->shader);
         if (MN_GH_TAG(att) != MN_GH_FORMAT) return MN_STATUS_INVALID_PARAMETER; /* its counts, from slot 74 */
         uint64_t ncb = MN_GH_VALUE(att) >> 31 & 0x7fffffff, nargs = MN_GH_VALUE(att) & 0x7fffffff;
         if ((s = mn_wm_emit(o, rec, c->params_size)) ||
-            (s = mn_wm_emit_data(o, a->constant_buffers, ncb * sizeof(struct MTL_SM50_SHADER_ARGUMENT), WMF_OUT)))
+            (s = mn_wm_emit_data(o, ptr_of(a->constant_buffers), ncb * sizeof(struct MTL_SM50_SHADER_ARGUMENT),
+                                 WMF_OUT)))
             return s;
-        return mn_wm_emit_data(o, a->arguments, nargs * sizeof(struct MTL_SM50_SHADER_ARGUMENT), WMF_OUT);
+        return mn_wm_emit_data(o, ptr_of(a->arguments), nargs * sizeof(struct MTL_SM50_SHADER_ARGUMENT), WMF_OUT);
     }
     default: {
         const struct compile_layout *l = compile_layout(slot);
@@ -262,10 +250,10 @@ NTSTATUS_T mn_wm_sm50_unpack(unsigned slot, void *params, const struct mn_wm_out
     NTSTATUS_T s = 0;
     switch (slot) {
     case 74: {
-        const struct sm50_initialize_params *rp = reply;
-        struct sm50_initialize_params *a = params;
-        unsigned offs[2] = {offsetof(struct sm50_initialize_params, shader), offsetof(struct sm50_initialize_params, error)};
-        mn_handle hs = (mn_handle)(uintptr_t)rp->shader;
+        const struct mn_sm50_initialize *rp = reply;
+        struct mn_sm50_initialize *a = params;
+        unsigned offs[2] = {offsetof(struct mn_sm50_initialize, shader), offsetof(struct mn_sm50_initialize, error)};
+        mn_handle hs = rp->shader;
         give_outs(o, r, offs);
         if (hs) mn_gh_attach(hs, MN_GH_FORMAT | rp->bytecode_size); /* the reflection's counts */
         a->ret = rp->ret;
@@ -274,9 +262,8 @@ NTSTATUS_T mn_wm_sm50_unpack(unsigned slot, void *params, const struct mn_wm_out
     }
     case 77: { /* now the bytes, into memory of ours the caller reads until slot 78 (a 32-bit caller too: DXMT passes
               * Data on as a 64-bit value, never dereferencing it) */
-        struct sm50_get_compiled_bitcode_params *a = params;
-        uint64_t size;
-        memcpy(&size, r + offsetof(struct sm50_get_compiled_bitcode_params, data_out), sizeof size);
+        struct mn_sm50_get_compiled_bitcode *a = params;
+        uint64_t size = u64_at(r + offsetof(struct mn_sm50_get_compiled_bitcode, data_out));
         uint8_t *buf = size <= (64ull << 20) ? malloc(size ? size : 1) : NULL;
         if (!buf) {
             s = MN_STATUS_UNSUCCESSFUL;
@@ -285,7 +272,7 @@ NTSTATUS_T mn_wm_sm50_unpack(unsigned slot, void *params, const struct mn_wm_out
         mn_wm_scratch_done();
         static _Thread_local uint8_t rec2[64], reply2[MN_REPLY_BYTES];
         struct mn_wm_out o2 = {.buf = rec2, .cap = sizeof rec2};
-        struct sm50_get_compiled_bitcode_params q = {a->bitcode, (void *)(uintptr_t)size};
+        struct mn_sm50_get_compiled_bitcode q = {a->bitcode, size};
         uint32_t n = 0;
         if ((s = mn_wm_emit(&o2, &q, sizeof q)) || (s = mn_wm_emit_data(&o2, buf, size, WMF_OUT)) ||
             (s = (NTSTATUS_T)mn_call(MN_OP_WM + 77, o2.buf, o2.len, reply2, sizeof reply2, &n)) ||
@@ -293,19 +280,20 @@ NTSTATUS_T mn_wm_sm50_unpack(unsigned slot, void *params, const struct mn_wm_out
             free(buf);
             break;
         }
-        mn_handle h = (mn_handle)(uintptr_t)a->bitcode;
-        uint64_t old = mn_gh_attached(h);
+        mn_handle h = a->bitcode;
+        uint64_t old = mn_gh_attached(h), data = (uintptr_t)buf;
         if (MN_GH_TAG(old) == MN_GH_PTR) free((void *)(uintptr_t)MN_GH_VALUE(old));
         mn_gh_attach(h, MN_GH_PTR | (uintptr_t)buf);
-        a->data_out->Data = buf;
-        a->data_out->Size = size;
+        struct SM50_COMPILED_BITCODE *out = ptr_of(a->data_out);
+        memcpy(&out->Data, &data, sizeof data); /* sm50_ptr64_t: a pointer, or 64 bits in an i686 build */
+        out->Size = size;
         break;
     }
     case 79: {
-        struct sm50_get_error_message_params *a = params;
-        a->ret_size = ((const struct sm50_get_error_message_params *)reply)->ret_size;
+        struct mn_sm50_get_error_message *a = params;
+        a->ret_size = ((const struct mn_sm50_get_error_message *)reply)->ret_size;
         s = mn_wm_copy_back(o, r, len, pos);
-        if (a->buffer_size) a->buffer[a->buffer_size - 1] = 0;
+        if (a->buffer_size) ((char *)ptr_of(a->buffer))[a->buffer_size - 1] = 0;
         break;
     }
     case 88: s = mn_wm_copy_back(o, r, len, pos); break;

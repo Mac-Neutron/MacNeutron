@@ -1,11 +1,12 @@
 /* SM50's compilation arguments as DXMT built for i386 lays them out (its PE side builds the chain; winemetal.so's WoW64
- * table converts it to airconv's 64-bit chain before forwarding, wm/guest/wow64.c). Every argument starts with its
- * 32-bit next pointer and its type; its pointers are 32-bit, the rest as in airconv_public.h. */
+ * table converts it to the wire's chain before forwarding, wm/guest/wow64.c). Every argument starts with its 32-bit next
+ * pointer and its type; its pointers are 32-bit, the rest as in airconv_public.h. */
 #ifndef MN_WM_SM50_ARGS32_H
 #define MN_WM_SM50_ARGS32_H
 #include <stdbool.h>
 #include <stdint.h>
 #include "airconv_public.h"
+#include "../sm50-wire.h"
 
 struct mn_sm50_arg32 { uint32_t next; enum SM50_SHADER_COMPILATION_ARGUMENT_TYPE type; };
 struct mn_sm50_stream_output32 {
@@ -46,10 +47,10 @@ _Static_assert(sizeof(struct mn_sm50_gs_pass_through32) == 16 &&
 _Static_assert(sizeof(struct mn_sm50_geometry32) == 12 && sizeof(struct mn_sm50_tessellator32) == 12 &&
                sizeof(struct mn_sm50_root_signature32) == 16, "geometry, tessellator, root signature");
 
-/* The 64-bit chain for the 32-bit one at args32 (0: none, *out NULL), malloc'd; 0, or -1 when out of memory or longer
- * than MN_WM_SM50_ARGS_MAX arguments (a looping chain). Types it doesn't know, and SM50_SHADER_ARGUMENT_TYPE_MAX, are
- * left out, as airconv skips them; they count towards the bound. */
-#define MN_WM_SM50_ARGS_MAX 64 /* the 64-bit marshaller's own bound (wm/slots.c's MAX_ARGS) */
-int mn_wm_sm50_args32(uint32_t args32, struct SM50_SHADER_COMPILATION_ARGUMENT_DATA **out);
-void mn_wm_sm50_args_free(struct SM50_SHADER_COMPILATION_ARGUMENT_DATA *first);
+/* The wire's chain (sm50-wire.h) for the 32-bit one at args32 (0: none, *out NULL), malloc'd; 0, or -1 when out of
+ * memory or longer than MN_WM_SM50_ARGS_MAX arguments (a looping chain). Types it doesn't know, and
+ * SM50_SHADER_ARGUMENT_TYPE_MAX, are left out, as airconv skips them; they count towards the bound. */
+#define MN_WM_SM50_ARGS_MAX 64 /* the marshaller's own bound (wm/slots.c's MAX_ARGS) */
+int mn_wm_sm50_args32(uint32_t args32, struct mn_sm50_arg **out);
+void mn_wm_sm50_args_free(struct mn_sm50_arg *first);
 #endif

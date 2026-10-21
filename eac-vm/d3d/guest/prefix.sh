@@ -21,6 +21,11 @@ if [ "${MACNEUTRON_VM_D3D:-guest}" = forward ] && [ -f "$mn_d3d_dir/mnd3d.dll" ]
   done
   mn_d3d_o="d3d12,dxgi,d3d11,d3d10core,mnd3d=n,b"
   [ "${MACNEUTRON_VM_D3D32:-guest}" != forward ] || [ ! -f "$mn_d3d_root/i386-windows/mnd3d.dll" ] || mn_d3d_32=1
+  # Old WoW64's i686 winemetal.so has no forwarding (its Unix side is 64-bit only): new WoW64's.
+  if [ -n "$mn_d3d_32" ] && [ "${WINEARCH:-}" != wow64 ] && [ -d /opt/mn-wine/lib/wine/i386-unix ]; then
+    echo "mn-d3d: MACNEUTRON_VM_D3D32=forward needs MACNEUTRON_VM_WOW64=1: DXMT for i386 runs in the guest" >&2
+    mn_d3d_32=
+  fi
 fi
 for mn_d3d_n in mnd3d d3d12 dxgi d3d11 d3d10core; do
   mn_d3d_l=$WINEPREFIX/drive_c/windows/syswow64/$mn_d3d_n.dll

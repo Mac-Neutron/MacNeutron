@@ -54,8 +54,11 @@ wine_image() {
     sudo install -m644 "$DXMT_GUEST"/x86_64-windows/*.dll "$WORK/wine/lib/wine/x86_64-windows/"
     # 32-bit games' (new WoW64): DXMT for i386 over Wine's i386 D3D, the same winemetal.so behind it (its WoW64 table).
     [ ! -d "$DXMT_GUEST/i386-windows" ] || sudo install -m644 "$DXMT_GUEST"/i386-windows/*.dll "$WORK/wine/lib/wine/i386-windows/"
-    # winemetal.so, and mtld3d.so behind mtld3d's d3d9.dll, which replaces Wine's (Direct3D 9, D3D9 M2b).
+    # winemetal.so, and mtld3d.so behind mtld3d's d3d9.dll, which replaces Wine's (Direct3D 9, D3D9 M2b); and their i686
+    # builds for old WoW64's 32-bit Unix side, when the Wine has one.
     sudo install -m755 "$DXMT_GUEST"/x86_64-unix/*.so "$WORK/wine/lib/wine/x86_64-unix/"
+    [ ! -d "$WORK/wine/lib/wine/i386-unix" ] || [ ! -d "$DXMT_GUEST/i386-unix" ] ||
+      sudo install -m755 "$DXMT_GUEST"/i386-unix/*.so "$WORK/wine/lib/wine/i386-unix/"
   fi
   if [ "$D3D_GUEST" != none ] && [ -f "$D3D_GUEST/x86_64-windows/mnd3d.dll" ]; then
     sudo mkdir -p "$WORK/wine/lib/wine/mn-d3d/x86_64-windows"

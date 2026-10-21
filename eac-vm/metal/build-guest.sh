@@ -1,12 +1,15 @@
 #!/bin/sh
 # Builds the Metal transport's guest programs for x86-64 Linux, on the Mac through the builder (eac-vm/sysroot's
 # compiler), into the VM share's bin/: 4a's probe and transport test, and 4b's guest winemetal.so (linked against the
-# builder's x86-64 Wine build, $WINEBUILD), the stub ntdll.so the test programs load in its place, and metal-wm-test.
+# builder's x86-64 Wine build, $WINEBUILD), the stub ntdll.so the test programs load in its place, and metal-wm-test;
+# and for old WoW64's 32-bit Unix side (i686, on the builder's i386 Wine build, $WINEBUILD32) bin/wm/i386's winemetal.so
+# and stub ntdll.so, and metal-wm-test32.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B="$ROOT/eac-vm/builder.sh"
 OUT=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share/bin
 WINEBUILD=${WINEBUILD:-'$HOME/wine-build64'}  # the builder's, expanded there (BUILDER_HOME)
+WINEBUILD32=${WINEBUILD32:-'$HOME/wine-build32'}
 DXMT=${BUILD_DIR:-$ROOT/build}/wine-arm64-src/dxmt/src
 # DXMT's winemetal headers (the tree MacNeutron builds), for the call table's structs.
 HDR=${BUILD_DIR:-$ROOT/build}/eac-vm-work/metal-dxmt-headers
@@ -38,4 +41,17 @@ build wm/winemetal.so -std=gnu2x -DMN_WM_GUEST -fPIC -shared wm/guest/winemetal.
 build wm/ntdll.so -std=gnu2x -fPIC -shared -Wl,-soname,ntdll.so wm/guest/stub-ntdll.c -lpthread
 build metal-wm-test -std=gnu2x wm/tests/guest-test.c wm/tests/sequence.c wm/tests/galloc-cases.c -ldl -lpthread
 build metal-sm50-args32-test -std=gnu2x wm/tests/sm50-args32-test.c wm/guest/sm50-args32.c
-file "$OUT"/metal-* "$OUT"/wm/*
+# i686: -malign-double lays DXMT's structs out as its i386 PE side does and the wire's as the x86-64 build's
+# (layout32-check.sh, which fails the build otherwise); none of these files hands libc a struct the flag changes (no
+# stat, no flock). Its table is the WoW64 one (guest/wow64.c); Direct3D forwarding's Unix side stays out, as 32-bit
+# forwarding is new WoW64's (eac-vm/d3d/guest/prefix.sh).
+I686=-malign-double
+sh "$ROOT/eac-vm/metal/layout32-check.sh" $I686 >&2
+CC="sh ~/mn-sysroot/cc-i686.sh $I686 -O2 -g -Wall -Wextra -DDXMT_GUEST_VM -I . -I ../mn-metal-dxmt -I wm"
+mkdir -p "$OUT/wm/i386"
+build wm/i386/winemetal.so -std=gnu2x -DMN_WM_GUEST -fPIC -shared wm/guest/winemetal.c $WM $WINEBUILD32/dlls/ntdll/ntdll.so \
+  -lpthread
+build wm/i386/ntdll.so -std=gnu2x -fPIC -shared -Wl,-soname,ntdll.so wm/guest/stub-ntdll.c -lpthread
+build metal-wm-test32 -std=gnu2x wm/tests/guest-test.c wm/tests/sequence.c wm/tests/galloc-cases.c -ldl -lpthread
+build metal-sm50-args32-test32 -std=gnu2x wm/tests/sm50-args32-test.c wm/guest/sm50-args32.c
+file "$OUT"/metal-* "$OUT"/wm/* "$OUT"/wm/i386/*

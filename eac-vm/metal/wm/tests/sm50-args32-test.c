@@ -1,11 +1,13 @@
-/* M4a: a 32-bit caller's SM50 compilation arguments (DXMT for i386) convert field for field to airconv's 64-bit chain,
- * for every argument type, in their order (wm/guest/sm50-args32.c). The chain sits below 4 GiB, as a 32-bit process's
- * memory does. Prints a line per check; exits 1 on a failure. */
+/* M4a: a 32-bit caller's SM50 compilation arguments (DXMT for i386) convert field for field to the wire's chain
+ * (sm50-wire.h: airconv's 64-bit layouts), for every argument type, in their order (wm/guest/sm50-args32.c), in a
+ * 64-bit build and an i686 one (old WoW64). The chain sits below 4 GiB, as a 32-bit process's memory does. Prints a
+ * line per check; exits 1 on a failure. */
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
 #include "guest/sm50-args32.h"
+#include "sm50-wire.h"
 
 static int failures;
 #define CHECK(c, what) do { printf("%s %s\n", (c) ? "ok  " : "FAIL", what); failures += !(c); } while (0)
@@ -34,38 +36,39 @@ int main(void) {
                                          {16, 32, 0, 0}, elems};
     uint32_t first = lo(put(&so, sizeof so));
 
-    struct SM50_SHADER_COMPILATION_ARGUMENT_DATA *c = NULL, *a;
+    struct mn_sm50_arg *c = NULL, *a;
+#define NEXT(a) ((a) ? (struct mn_sm50_arg *)(uintptr_t)(a)->next : NULL)
     CHECK(mn_wm_sm50_args32(first, &c) == 0 && c, "a chain converts");
     a = c;
-    struct SM50_SHADER_EMULATE_VERTEX_STREAM_OUTPUT_DATA *o = (void *)a;
+    struct mn_sm50_stream_output *o = (void *)a;
     CHECK(a && a->type == SM50_SHADER_EMULATE_VERTEX_STREAM_OUTPUT && o->num_output_slots == 2 && o->num_elements == 4 &&
-          o->strides[1] == 32 && (uintptr_t)o->elements == elems, "stream output");
-    a = a ? a->next : NULL;
-    struct SM50_SHADER_COMMON_DATA *m = (void *)a;
+          o->strides[1] == 32 && o->elements == elems, "stream output");
+    a = NEXT(a);
+    struct mn_sm50_common *m = (void *)a;
     CHECK(a && a->type == SM50_SHADER_COMMON && m->metal_version == SM50_SHADER_METAL_320 && m->flags == 6, "common");
-    a = a ? a->next : NULL;
-    struct SM50_SHADER_PSO_PIXEL_SHADER_DATA *p = (void *)a;
+    a = NEXT(a);
+    struct mn_sm50_pixel *p = (void *)a;
     CHECK(a && a->type == SM50_SHADER_PSO_PIXEL_SHADER && p->sample_mask == 0xff && !p->dual_source_blending &&
           p->disable_depth_output && p->unorm_output_reg_mask == 3 && p->pixel_formats[7] == 8, "pixel shader");
-    a = a ? a->next : NULL; /* SM50_SHADER_ARGUMENT_TYPE_MAX is left out */
-    struct SM50_SHADER_IA_INPUT_LAYOUT_DATA *i = (void *)a;
+    a = NEXT(a); /* SM50_SHADER_ARGUMENT_TYPE_MAX is left out */
+    struct mn_sm50_input_layout *i = (void *)a;
     CHECK(a && a->type == SM50_SHADER_IA_INPUT_LAYOUT && i->index_buffer_format == SM50_INDEX_BUFFER_FORMAT_UINT32 &&
-          i->slot_mask == 5 && i->num_elements == 3 && (uintptr_t)i->elements == elems, "input layout (type MAX left out)");
-    a = a ? a->next : NULL;
-    struct SM50_SHADER_GS_PASS_THROUGH_DATA *g = (void *)a;
+          i->slot_mask == 5 && i->num_elements == 3 && i->elements == elems, "input layout (type MAX left out)");
+    a = NEXT(a);
+    struct mn_sm50_gs_pass_through *g = (void *)a;
     CHECK(a && a->type == SM50_SHADER_GS_PASS_THROUGH && g->DataEncoded == 0x12345678 && g->RasterizationDisabled,
           "geometry pass-through");
-    a = a ? a->next : NULL;
-    CHECK(a && a->type == SM50_SHADER_PSO_GEOMETRY_SHADER && ((struct SM50_SHADER_PSO_GEOMETRY_SHADER_DATA *)a)->strip_topology,
+    a = NEXT(a);
+    CHECK(a && a->type == SM50_SHADER_PSO_GEOMETRY_SHADER && ((struct mn_sm50_geometry *)a)->strip_topology,
           "geometry shader");
-    a = a ? a->next : NULL;
-    CHECK(a && a->type == SM50_SHADER_PSO_TESSELLATOR &&
-          ((struct SM50_SHADER_PSO_TESSELLATOR_DATA *)a)->max_potential_tess_factor == 64, "tessellator");
-    a = a ? a->next : NULL;
-    struct SM50_SHADER_ROOT_SIGNATURE_DATA *r = (void *)a;
-    CHECK(a && a->type == SM50_SHADER_ROOT_SIGNATURE && (uintptr_t)r->bytecode == bytecode && r->bytecode_length == 9,
+    a = NEXT(a);
+    CHECK(a && a->type == SM50_SHADER_PSO_TESSELLATOR && ((struct mn_sm50_tessellator *)a)->max_potential_tess_factor == 64,
+          "tessellator");
+    a = NEXT(a);
+    struct mn_sm50_root_signature *r = (void *)a;
+    CHECK(a && a->type == SM50_SHADER_ROOT_SIGNATURE && r->bytecode == bytecode && r->bytecode_length == 9,
           "root signature");
-    a = a ? a->next : NULL;
+    a = NEXT(a);
     r = (void *)a;
     CHECK(a && a->type == SM50_SHADER_ROOT_SIGNATURE2 && r->bytecode_length == 77 && !a->next, "root signature 2, last");
     mn_wm_sm50_args_free(c);

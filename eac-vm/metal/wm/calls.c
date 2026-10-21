@@ -2,6 +2,7 @@
 #include "calls.h"
 #include <stddef.h>
 #include "airconv_thunks.h"
+#include "sm50-wire.h" /* SM50's records */
 #include "winemetal_thunks.h"
 
 #define Q MN_WM_QUEUED
@@ -228,21 +229,21 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
       HOUTK(unixcall_create_metal_view_from_hwnd, ret_view, MN_HK_VIEW, P1),
       HOUT(unixcall_create_metal_view_from_hwnd, ret_layer, BR)),
     C(73, ReleaseMetalView, G_NR, Q, MN_SP_VIEW, HINK(G_NR, handle, MN_HK_VIEW)),
-    C0(74, SM50Initialize, sm50_initialize_params, S, MN_SP_SM50),
+    C0(74, SM50Initialize, mn_sm50_initialize, S, MN_SP_SM50),
     C0(75, SM50Destroy, sm50_destroy_params, Q, MN_SP_SM50),
-    C0(76, SM50Compile, sm50_compile_params, S, MN_SP_SM50),
-    C0(77, SM50GetCompiledBitcode, sm50_get_compiled_bitcode_params, S, MN_SP_SM50),
+    C0(76, SM50Compile, mn_sm50_compile, S, MN_SP_SM50),
+    C0(77, SM50GetCompiledBitcode, mn_sm50_get_compiled_bitcode, S, MN_SP_SM50),
     C0(78, SM50DestroyBitcode, sm50_destroy_bitcode_params, Q, MN_SP_SM50),
-    C0(79, SM50GetErrorMessage, sm50_get_error_message_params, S, MN_SP_SM50),
+    C0(79, SM50GetErrorMessage, mn_sm50_get_error_message, S, MN_SP_SM50),
     C0(80, SM50FreeError, sm50_free_error_params, Q, MN_SP_SM50),
-    C0(81, SM50CompileGeometryPipelineVertex, sm50_compile_geometry_pipeline_vertex_params, S, MN_SP_SM50),
-    C0(82, SM50CompileGeometryPipelineGeometry, sm50_compile_geometry_pipeline_geometry_params, S, MN_SP_SM50),
+    C0(81, SM50CompileGeometryPipelineVertex, mn_sm50_compile2, S, MN_SP_SM50),
+    C0(82, SM50CompileGeometryPipelineGeometry, mn_sm50_compile2, S, MN_SP_SM50),
     R(83, (none), 0, MN_STATUS_NOT_SUPPORTED), /* NULL in winemetal */
-    C0(84, SM50CompileTessellationPipelineHull, sm50_compile_tessellation_pipeline_hull_params, S, MN_SP_SM50),
-    C0(85, SM50CompileTessellationPipelineDomain, sm50_compile_tessellation_pipeline_domain_params, S, MN_SP_SM50),
+    C0(84, SM50CompileTessellationPipelineHull, mn_sm50_compile2, S, MN_SP_SM50),
+    C0(85, SM50CompileTessellationPipelineDomain, mn_sm50_compile2, S, MN_SP_SM50),
     C(86, MTLCommandEncoder_setLabel, G_ONR, Q, MN_SP_NONE, HIN(G_ONR, handle), HIN(G_ONR, arg)),
     C(87, MTLDevice_setShouldMaximizeConcurrentCompilation, G_UNR, Q, MN_SP_NONE, HIN(G_UNR, handle)),
-    C0(88, SM50GetArgumentsInfo, sm50_get_arguments_info_params, S, MN_SP_SM50),
+    C0(88, SM50GetArgumentsInfo, mn_sm50_get_arguments_info, S, MN_SP_SM50),
     C(89, MTLCommandBuffer_error, G_OR, S, MN_SP_NONE, HIN(G_OR, handle), HOUT(G_OR, ret, AR)),
     NEW(90, MTLCommandBuffer_logs, AR),
     C(91, MTLLogContainer_enumerate, unixcall_enumerate, S, MN_SP_ENUMERATE, HIN(unixcall_enumerate, enumerable)),

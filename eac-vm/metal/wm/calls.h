@@ -10,6 +10,16 @@
 
 #define MN_WM_SLOTS 158
 #define MN_WM_D3D 155 /* the guest winemetal.so's own: Direct3D forwarding's (eac-vm/d3d/guest/unix.c) */
+
+/* The guest winemetal.so's tables: an x86-64 build exports the 64-bit one and the WoW64 one (guest/wow64.c), an i686
+ * build (old WoW64's 32-bit Unix side) the WoW64 one alone, as its __wine_unix_call_funcs. */
+#ifdef __i386__
+#define MN_WM_TABLE64 mn_wm_table64
+#define MN_WM_TABLE32 __wine_unix_call_funcs
+#else
+#define MN_WM_TABLE64 __wine_unix_call_funcs
+#define MN_WM_TABLE32 __wine_unix_call_wow64_funcs
+#endif
 #define MN_WM_STATS 0x800u /* op MN_OP_WM + 0x800: struct mn_wm_stats; the forwarder's own ops are past any slot */
 #define MN_OP_WM 0x1000u   /* a call is op MN_OP_WM + slot */
 
