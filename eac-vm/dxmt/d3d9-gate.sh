@@ -30,11 +30,11 @@ else
     case $a in x86_64) u=$S/unit ;; *) u=$S/unit32 ;; esac
     MTLD3D_LINUX=$a sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" test --release --no-run --message-format=json -p mtld3d-shared \
       -p mtld3d-unix -p mtld3d-mtl 2>> "$W/d3d9-gate-build.log" | python3 -I -c '
-  import json, shutil, sys
-  for line in sys.stdin:
-      m = json.loads(line)
-      if m.get("reason") == "compiler-artifact" and m.get("executable") and m["profile"]["test"]:
-          shutil.copy(m["executable"], sys.argv[1] + "/" + m["target"]["name"])' "$u" \
+import json, shutil, sys
+for line in sys.stdin:
+    m = json.loads(line)
+    if m.get("reason") == "compiler-artifact" and m.get("executable") and m["profile"]["test"]:
+        shutil.copy(m["executable"], sys.argv[1] + "/" + m["target"]["name"])' "$u" \
       || { echo "FAIL the $a Linux test binaries: see $W/d3d9-gate-build.log"; exit 1; }
   done
   sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" build --release -p mtld3d-conformance 2>> "$W/d3d9-gate-build.log" \
@@ -66,17 +66,27 @@ done
 for r in tri64-nomarker tri32-nomarker; do
   check "$r fails without the marker" "$(/usr/bin/grep -c '^d3d9 module ok' "$G/$r.txt" 2> /dev/null)" 0
 done
-# The runner's per-subtest lines: "<leg>/<subtest>  baseline(failed=N crash=N) current(failed=N crash=N) ...".
+# The runner's per-subtest lines: "<leg>/<subtest>  baseline(failed=N crash=N) current(failed=N crash=N) executed=N
+# <status>".
 figure() { sed -n "s|^$1/$2 .*current(failed=\([0-9]*\) crash=\([0-9]*\)).*|\1 \2|p" "$G/conf-$3.txt" 2> /dev/null; }
-# The x64 lane: at most the macOS product's figures, no crash, and no failing site of its own beyond the macOS run's
-# triaged ones (dxmt/mtld3d-triaged.txt, as dxmt/mtld3d-conformance.sh rules them). The guest fails a few display-mode
-# sites fewer than macOS (Xvfb's mode emulation).
-for want in "stateblock 0" "visual 31" "device 739" "d3d9ex 74"; do
+executed() { sed -n "s|^$1/$2 .* executed=\([0-9]*\) .*|\1|p" "$G/conf-$3.txt" 2> /dev/null; }
+# Each subtest: the macOS product's failures, and the tests it executes at least, the lower of the macOS run's and the
+# guest's (2026-10-21: the guest runs 19 fewer d3d9ex display-mode tests under Xvfb, macOS 7 fewer device ones), so a
+# run that returned early without crashing doesn't pass as an improvement.
+WANT="stateblock 0 14738,visual 31 211219,device 739 159542,d3d9ex 74 2407"
+# The x64 lane: at most the macOS product's figures, no crash, those tests executed, and no failing site of its own
+# beyond the macOS run's triaged ones (dxmt/mtld3d-triaged.txt, as dxmt/mtld3d-conformance.sh rules them). The guest
+# fails a few display-mode sites fewer than macOS (Xvfb's mode emulation).
+IFS=, read -r w1 w2 w3 w4 <<EOF2
+$WANT
+EOF2
+for want in "$w1" "$w2" "$w3" "$w4"; do
   set -- $want
-  got=$(figure arm64x "$1" x64)
-  echo "info conformance x64 $1: failed ${got% *}, crash ${got#* } (macOS $2)"
+  got=$(figure arm64x "$1" x64) ran=$(executed arm64x "$1" x64)
+  echo "info conformance x64 $1: failed ${got% *}, crash ${got#* }, executed ${ran:-?} (macOS $2; at least $3)"
   check "conformance x64 $1: at most $2, no crash" \
     "$([ -n "$got" ] && [ "${got% *}" -le "$2" ] && [ "${got#* }" = 0 ] && echo ok)" ok
+  check "conformance x64 $1: at least $3 tests executed" "$([ -n "$ran" ] && [ "$ran" -ge "$3" ] && echo ok)" ok
 done
 # A lane's new failing sites outside dxmt/mtld3d-triaged.txt (dxmt/mtld3d-conformance.sh's rule), "none" if none.
 untriaged() {
@@ -89,13 +99,18 @@ untriaged() {
 }
 check "conformance x64: no untriaged new failing site" "$(untriaged x64)" none
 # The i386 lane: at most the baseline's failures (the macOS i686-arm64 leg's) and its crashes (that leg crashes once in
-# device, which the runner names by subtest, not by site), and no untriaged new site.
+# device, which the runner names by subtest, not by site), the x64 lane's tests executed but where the baseline crashes
+# (the run ends before Wine's summary), and no untriaged new site.
 base() { sed -n "s|^$1/$2 .*baseline(failed=\([0-9]*\) crash=\([0-9]*\)).*|\1 \2|p" "$G/conf-$3.txt" 2> /dev/null; }
-for t in stateblock visual device d3d9ex; do
-  got=$(figure i686-arm64 $t x86) base=$(base i686-arm64 $t x86)
-  echo "info conformance x86 $t: failed ${got% *}, crash ${got#* } (baseline ${base% *}, crash ${base#* })"
-  check "conformance x86 $t: at most the baseline's failures and crashes" "$([ -n "$got" ] && [ -n "$base" ] &&
+for want in "$w1" "$w2" "$w3" "$w4"; do
+  set -- $want
+  got=$(figure i686-arm64 $1 x86) base=$(base i686-arm64 $1 x86) ran=$(executed i686-arm64 $1 x86)
+  echo "info conformance x86 $1: failed ${got% *}, crash ${got#* }, executed ${ran:-?} (baseline ${base% *}, crash" \
+    "${base#* })"
+  check "conformance x86 $1: at most the baseline's failures and crashes" "$([ -n "$got" ] && [ -n "$base" ] &&
     [ "${got% *}" -le "${base% *}" ] && [ "${got#* }" -le "${base#* }" ] && echo ok)" ok
+  [ "${base#* }" != 0 ] || check "conformance x86 $1: at least $3 tests executed" \
+    "$([ -n "$ran" ] && [ "$ran" -ge "$3" ] && echo ok)" ok
 done
 check "conformance x86: no untriaged new failing site" "$(untriaged x86)" none
 [ $fail -eq 0 ] && echo "d3d9 gate: ok" || echo "d3d9 gate: FAIL"
