@@ -4,7 +4,9 @@
 # build/wine-arm64/wine.app): its four lines, "d3d9 module/clear/triangle/present ok", say mtld3d drew it. With
 # OLD=<another wine.app> the same run again in a prefix that wine.app made first, which the launcher's prefix update
 # must give mtld3d.dll's marker (a player's prefix from before mtld3d). Prints "d3d9-check: ok" or what failed; exits 1
-# on a miss. DXMT_CHECK_WORK names the work folder (default a temporary one).
+# on a miss. DXMT_CHECK_WORK names the work folder (default a temporary one). MTLD3D_SO=<mtld3d.so> runs that build of
+# mtld3d's Unix side instead (the loopback build of D3D9 spec §5.1), swapped into the tool folder's own wine.app and
+# signed with MACNEUTRON_SIGN_IDENTITY (ad hoc without one).
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -37,6 +39,11 @@ check() {
 }
 rm -rf "$WORK/ours" "$WORK/compat"; mkdir -p "$WORK/compat"
 "$CLI" install --tool-dir "$WORK/ours" --wine-app "$APP" > /dev/null || { echo "d3d9-check: install failed" >&2; exit 1; }
+if [ -n "${MTLD3D_SO:-}" ]; then
+  so="$WORK/ours/wine.app/Contents/Resources/lib/wine/aarch64-unix/mtld3d.so"
+  rm -f "$so" && cp "$MTLD3D_SO" "$so" && codesign -f -s "${MACNEUTRON_SIGN_IDENTITY:--}" "$so" 2> /dev/null \
+    || { echo "d3d9-check: could not put $MTLD3D_SO in the tool folder" >&2; exit 1; }
+fi
 launch ours fresh fresh
 check fresh
 if [ -n "${OLD:-}" ]; then

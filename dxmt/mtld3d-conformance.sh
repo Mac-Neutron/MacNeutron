@@ -4,7 +4,8 @@
 # mtld3d it ships (default build/wine-arm64/wine.app), in a prefix of its own (build/mtld3d-conformance/prefix). The
 # runner diffs each site's failure count against mtld3d's baseline.txt and exits non-zero on a regression. Not through
 # mtld3d's `make conformance-arm64x`: its install step writes the layer into WINE_SDK, which would break wine.app's
-# signature. The environment is the one that Makefile exports to its test runs.
+# signature. The environment is the one that Makefile exports to its test runs. MTLD3D_SO=<mtld3d.so> runs that build
+# of mtld3d's Unix side instead (the loopback build of D3D9 spec §5.1), in an APFS clone of wine.app beside the prefix.
 #   mtld3d-conformance.sh [<wine.app>] [runner args, e.g. --only device]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,6 +13,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 B="${BUILD_DIR:-$ROOT/build}"
 APP="$B/wine-arm64/wine.app"
 case ${1:-} in *.app) APP=$1; shift ;; esac
+if [ -n "${MTLD3D_SO:-}" ]; then
+  C="$B/mtld3d-conformance/wine.app"
+  rm -rf "$C"; mkdir -p "$B/mtld3d-conformance"; cp -cR "$APP" "$C"
+  so="$C/Contents/Resources/lib/wine/aarch64-unix/mtld3d.so"
+  rm -f "$so" && cp "$MTLD3D_SO" "$so" && codesign -f -s "${MACNEUTRON_SIGN_IDENTITY:--}" "$so" 2> /dev/null \
+    || { echo "mtld3d-conformance: could not put $MTLD3D_SO in $C" >&2; exit 1; }
+  APP=$C
+fi
 R="$(cd "$APP/Contents/Resources" && pwd)"
 M="$B/wine-arm64-src/dxmt/mtld3d"
 EXE="$B/wine-arm64-tests/winetests/x64/d3d9_test.exe"
