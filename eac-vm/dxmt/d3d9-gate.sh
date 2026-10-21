@@ -2,10 +2,10 @@
 # Direct3D 9 in the VM (D3D9 M2b gate), from the Mac: mtld3d's Linux unit tests in the guest, the facade's on the guest
 # winemetal.so; d3d9_triangle for x86-64 and i386 in a new prefix and in one without mtld3d.dll's markers that
 # run-game.sh's update then fixes; and Wine's d3d9 tests through mtld3d's runner, the x64 lane held to the macOS
-# product's figures (D3D9 spec §5.1's loopback run: stateblock 0, visual 31, device 739, d3d9ex 74, no crash) and the
-# i386 lane to no crash beyond its baseline's. Builds the Linux test binaries and the runner
-# (dxmt/mtld3d-linux-cargo.sh); needs the image with mtld3d (guest-stages.sh dxmt, image/build.sh wine), the VM host
-# (host/build.sh), make build/dxmt-tests/d3d9_triangle.exe build/dxmt-tests-i386/d3d9_triangle.exe, and make
+# product's figures at most (D3D9 spec §5.1's loopback run: stateblock 0, visual 31, device 739, d3d9ex 74, no crash,
+# no untriaged new site) and the i386 lane to no crash beyond its baseline's. Builds the Linux test binaries and the
+# runner (dxmt/mtld3d-linux-cargo.sh); needs the image with mtld3d (guest-stages.sh dxmt, image/build.sh wine), the VM
+# host (host/build.sh), make build/dxmt-tests/d3d9_triangle.exe build/dxmt-tests-i386/d3d9_triangle.exe, and make
 # wine-arm64-winetests (the x64 and x86 d3d9_test.exe). One VM run. Prints a line a check; exits 1 on a FAIL.
 # The 32-bit rows run under old WoW64, the image's default, or with MN_WOW64=new under new WoW64.
 set -u
@@ -61,10 +61,22 @@ for r in tri64-nomarker tri32-nomarker; do
 done
 # The runner's per-subtest lines: "<leg>/<subtest>  baseline(failed=N crash=N) current(failed=N crash=N) ...".
 figure() { sed -n "s|^$1/$2 .*current(failed=\([0-9]*\) crash=\([0-9]*\)).*|\1 \2|p" "$G/conf-$3.txt" 2> /dev/null; }
+# The x64 lane: at most the macOS product's figures, no crash, and no failing site of its own beyond the macOS run's
+# triaged ones (dxmt/mtld3d-triaged.txt, as dxmt/mtld3d-conformance.sh rules them). The guest fails a few display-mode
+# sites fewer than macOS (Xvfb's mode emulation).
 for want in "stateblock 0" "visual 31" "device 739" "d3d9ex 74"; do
   set -- $want
-  check "conformance x64 $1" "$(figure arm64x "$1" x64)" "$2 0"
+  got=$(figure arm64x "$1" x64)
+  echo "info conformance x64 $1: failed ${got% *}, crash ${got#* } (macOS $2)"
+  check "conformance x64 $1: at most $2, no crash" \
+    "$([ -n "$got" ] && [ "${got% *}" -le "$2" ] && [ "${got#* }" = 0 ] && echo ok)" ok
 done
+left=$(awk -v triaged="$ROOT/dxmt/mtld3d-triaged.txt" '
+  BEGIN { while ((getline l < triaged) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); ok[f[1] " " f[2]] = 1 } }
+  /^[a-z0-9_+@-]+\/[a-z0-9]+ / { sub_ = $1; next }
+  /^  [a-z0-9_]+\.c:[0-9]+ .*REGRESSION/ { if (!((sub_ " " $1) in ok)) printf "%s %s ", sub_, $1 }
+' "$G/conf-x64.txt" 2> /dev/null)
+check "conformance x64: no untriaged new failing site" "${left:-none}" none
 # The i386 lane: no crash beyond the baseline's own (macOS's i686-arm64 leg crashes once in device).
 base_crash() { sed -n "s|^$1/$2 .*baseline(failed=[0-9]* crash=\([0-9]*\)).*|\1|p" "$G/conf-$3.txt" 2> /dev/null; }
 for t in stateblock visual device d3d9ex; do
