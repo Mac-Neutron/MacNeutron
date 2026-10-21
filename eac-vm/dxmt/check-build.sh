@@ -1,7 +1,8 @@
 #!/bin/sh
 # check-build.sh: DXMT's guest build (build.sh) is what the VM's Wine loads. Its five DLLs are x86-64 Wine builtins, and
 # i386 ones (32-bit games), winemetal.dll exports WMTMemoryAlloc and WMTMemoryFree, d3d12.dll imports winemetal.dll, and nothing macOS (no
-# Mach-O, no *-unix folder) came with them. Exits 1 at the first failure.
+# Mach-O, no *-unix folder) came with them; and mtld3d's guest build (dxmt/tests/mtld3d_guest_test.sh). Exits 1 at the
+# first failure.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 D=${1:-${BUILD_DIR:-$ROOT/build}/eac-vm-work/dxmt-guest}
@@ -25,4 +26,5 @@ done
 [ -z "$(find "$D" -name '*-unix')" ] || fail "a *-unix folder: $(find "$D" -name '*-unix' | head -1)"
 macho=$(find "$D" -type f -exec file {} + | /usr/bin/grep Mach-O || true)
 [ -z "$macho" ] || fail "Mach-O: $macho"
+sh "$ROOT/dxmt/tests/mtld3d_guest_test.sh" > /dev/null || fail "mtld3d's guest build: dxmt/tests/mtld3d_guest_test.sh"
 echo "check-build: ok ($(ls "$D/x86_64-windows" | wc -l | tr -d ' ') files in x86_64-windows, $(ls "$D/i386-windows" | wc -l | tr -d ' ') in i386-windows)"

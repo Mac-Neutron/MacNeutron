@@ -9,7 +9,7 @@
 # With --guest, the VM guest's instead (D3D9 M2b): the x86_64 and i386 pairs, each crate a static library linked by
 # llvm-mingw's lld-link against its CRT as the ARM64X halves are (MTLD3D_MINGW_CRT), with <GUEST_SDK>'s Wine archives
 # (eac-vm/dxmt/build.sh's guest-wine-sdk), and the x86_64 Linux mtld3d.so on the builder's sysroot
-# (eac-vm/sysroot/fetch.sh); not through mtld3d's Makefile, whose x86 leaves want a whole x86 Wine. Prints the
+# (dxmt/mtld3d-linux-cargo.sh); not through mtld3d's Makefile, whose x86 leaves want a whole x86 Wine. Prints the
 # x86_64-windows, i386-windows and x86_64-unix folders.
 #   mtld3d-build.sh <WINE_SDK>
 #   mtld3d-build.sh --guest <GUEST_SDK>
@@ -42,7 +42,6 @@ cxx="-fno-exceptions -fno-rtti -fno-threadsafe-statics -DSNMALLOC_USE_THREAD_CLE
 if [ -n "$GUEST" ]; then
   O="${BUILD_DIR:-$ROOT/build}/mtld3d-guest"
   rm -rf "$O"; mkdir -p "$O/x86_64-windows" "$O/i386-windows" "$O/x86_64-unix"
-  SYSROOT=$(sh "$ROOT/eac-vm/sysroot/fetch.sh")
   # pe <rust target> <mingw triple> <lld machine> <entry> <Wine arch> <compiler-rt arch> <-march>: one PE pair.
   pe() {
     cxx_pe="$7 -fno-omit-frame-pointer -fno-exceptions -fno-rtti -fno-threadsafe-statics -DSNMALLOC_USE_THREAD_CLEANUP \
@@ -77,13 +76,8 @@ if [ -n "$GUEST" ]; then
   }
   pe x86_64-pc-windows-msvc x86_64-w64-mingw32 x64 DllMainCRTStartup x86_64-windows x86_64 -march=x86-64-v2
   pe i686-pc-windows-msvc i686-w64-mingw32 x86 DllMainCRTStartup@12 i386-windows i386 -march=pentium4
-  # The guest's mtld3d.so: always the winemetal facade (build.rs), its C, C++ and link through linux-cc.
-  ( cd "$M/unix" && env PATH="$TOOLS:$PATH" MTLD3D_LLVM_MINGW="$LM" MTLD3D_SYSROOT="$SYSROOT" \
-    "CC_x86_64-unknown-linux-gnu=$TOOLS/linux-cc" "CXX_x86_64-unknown-linux-gnu=$TOOLS/linux-c++" \
-    "AR_x86_64-unknown-linux-gnu=$LM/bin/llvm-ar" "CFLAGS_x86_64-unknown-linux-gnu=$maps" \
-    "CXXFLAGS_x86_64-unknown-linux-gnu=$maps" CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="$TOOLS/linux-cc" \
-    CARGO_TARGET_DIR=target-linux cargo "+$MTLD3D_RUST" build -q --profile production \
-    --target x86_64-unknown-linux-gnu -p mtld3d-unix ) >&2
+  # The guest's mtld3d.so: always the winemetal facade (build.rs).
+  sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" build -q --profile production -p mtld3d-unix >&2
   "$LM/bin/llvm-objcopy" --strip-debug "$M/unix/target-linux/x86_64-unknown-linux-gnu/production/libmtld3d_unix.so" \
     "$O/x86_64-unix/mtld3d.so"
   echo "$O/x86_64-windows"; echo "$O/i386-windows"; echo "$O/x86_64-unix"

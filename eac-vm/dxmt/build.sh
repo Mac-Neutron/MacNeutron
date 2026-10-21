@@ -1,7 +1,8 @@
 #!/bin/sh
 # build.sh: our DXMT (build/wine-arm64-src/dxmt, the series with 0071) for the EAC microVM's x86-64 guest, built on the
 # Mac with MacNeutron's llvm-mingw and installed into build/eac-vm-work/dxmt-guest/x86_64-windows, and for i386 into
-# i386-windows (32-bit games under the guest Wine's new WoW64; no NVIDIA DLLs: NGX has no 32-bit runtime). It links against the
+# i386-windows (32-bit games under the guest Wine's new WoW64; no NVIDIA DLLs: NGX has no 32-bit runtime); then the
+# tree's mtld3d (Direct3D 9) into build/mtld3d-guest (dxmt/mtld3d-build.sh --guest). It links against the
 # guest Wine's import libraries, from the builder into guest-wine-sdk (a library is replaced only when the builder's
 # differs, and the copies already there are used if the builder is off); winebuild is the Mac's own (it only marks the
 # DLLs as builtins). Set up again in a new build folder when the options or the cross file change (.setup-inputs).
@@ -79,4 +80,8 @@ if [ ! -f "$B32/build.ninja" ] || [ "$(cat "$B32/.setup-inputs" 2> /dev/null)" !
 fi
 meson compile -C "$B32" >> "$W/dxmt-guest.log" 2>&1 || { echo "dxmt-guest: i386 build failed; see $W/dxmt-guest.log" >&2; exit 1; }
 meson install -C "$B32" >> "$W/dxmt-guest.log" 2>&1 || { echo "dxmt-guest: i386 install failed; see $W/dxmt-guest.log" >&2; exit 1; }
+# mtld3d (Direct3D 9, D3D9 M2b), from the same tree: its x86_64 and i386 pairs and its x86_64 Linux mtld3d.so, on the
+# same import libraries, in build/mtld3d-guest (stage.sh takes them from there).
+sh "$ROOT/dxmt/mtld3d-build.sh" --guest "$SDK" >> "$W/dxmt-guest.log" 2>&1 \
+  || { echo "dxmt-guest: mtld3d's guest build failed; see $W/dxmt-guest.log" >&2; exit 1; }
 echo "dxmt-guest: installed $W/dxmt-guest"
