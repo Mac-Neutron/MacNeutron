@@ -398,7 +398,10 @@ static NTSTATUS_T guest_special(unsigned slot, uint8_t *params, struct mn_wm_out
 }
 
 void mn_wm_unwind(const struct mn_wm_out *out, int reached_host) {
-    for (unsigned i = 0; i < out->nouts; i++) mn_gh_drop(out->outs[i]);
+    for (unsigned i = 0; i < out->nouts; i++) {
+        mn_gh_drop(out->outs[i]);
+        if (out->out_at[i]) memset(out->out_at[i], 0, sizeof(mn_handle)); /* the caller sees no handle */
+    }
     mn_wm_enumerate_unwind(); /* slot 91's handles aren't outs: the host binds as many as it reads */
     if (!reached_host) /* else the host frees each region the record named */
         for (unsigned i = 0; i < out->nholds; i++) mn_gunhold(out->holds[i]);
@@ -437,6 +440,7 @@ static NTSTATUS_T pack(const struct mn_wm_call *c, unsigned slot, void *params, 
             return MN_STATUS_UNSUCCESSFUL;
         }
         if (f->hkind == MN_HK_POOL) mn_gh_pool_push(h);
+        out->out_at[out->nouts] = (uint8_t *)params + f->offset;
         out->outs[out->nouts++] = h;
         memcpy((uint8_t *)params + f->offset, &h, sizeof h);
     }

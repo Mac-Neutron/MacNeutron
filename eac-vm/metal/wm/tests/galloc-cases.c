@@ -51,6 +51,13 @@ int mn_galloc_cases(const struct mn_galloc_env *env) {
     int zeroed = 1;
     for (unsigned i = 0; b4 && i < PAGE; i++) zeroed &= ((unsigned char *)p4)[i] == 0;
     EXPECT(zeroed, "reused memory not zeroed");
+    /* A no-copy buffer over memory the allocator didn't hand out (the host can't map it) is refused, and leaves no
+     * handle in the caller's params: one would look made, then fail every use. */
+    static uint8_t foreign[2 * PAGE];
+    struct WMTBufferInfo fi = {.length = PAGE, .options = WMTResourceStorageModeShared};
+    fi.memory.ptr = (void *)(((uintptr_t)foreign + PAGE - 1) & ~(uintptr_t)(PAGE - 1));
+    struct unixcall_mtldevice_newbuffer fb = {device, {&fi}, 0};
+    EXPECT(env->call(18, &fb) != 0 && !fb.ret, "a no-copy buffer over foreign memory: refused, no handle left");
     /* An emulated heap (Shared: a guest region of its own) and buffers placed in it (slots 138, 141): each buffer's
      * memory is the heap's at its offset, in all 8 bytes of its WMTMemoryPointer (a 32-bit caller's high half 0, which
      * DXMT's i386 code checks). */

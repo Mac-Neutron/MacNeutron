@@ -1,7 +1,8 @@
 // Direct3D 9 (D3D9 spec §6): a 256x256 window, a HAL device, then frames of a clear to blue and a fixed-function
 // pretransformed red triangle over the centre, each read back through GetRenderTargetData and presented, until one shows
-// the triangle and 10 more have been presented (at most 300): mtld3d leaves a draw out of its frame while its pipeline
-// builds (shader.asyncCompile, on by default), so the first frames may show the clear alone, as they do in a game.
+// the triangle and 10 more have been presented (for up to 10 s): mtld3d leaves a draw out of its frame while its
+// pipeline builds (shader.asyncCompile, on by default), so the first frames may show the clear alone, as they do in a
+// game (in the VM's busy DXMT gate the build has taken over 300 frames).
 // Prints, each "ok" or "FAIL <what>": "d3d9 module" (mtld3d's mtld3d.dll is loaded once Direct3DCreate9 ran: the
 // d3d9.dll is mtld3d's, not Wine's wined3d one), "d3d9 clear" (a corner of the first frame is 0x0000ff), "d3d9
 // triangle" (a frame's centre is 0xff0000) and "d3d9 present" (every present D3D_OK, at least 10 of them); and
@@ -52,7 +53,8 @@ int main(int argc, char **argv) {
                 SUCCEEDED(dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr));
     DWORD corner = 0, centre = 0;
     int frames = 0, presented = 0, after = 0;
-    while (frames < 300 && after < 10) {
+    const ULONGLONG until = GetTickCount64() + 10000;
+    while (after < 10 && GetTickCount64() < until) {
         dev->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 255), 1.0f, 0);
         dev->BeginScene();
         dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
