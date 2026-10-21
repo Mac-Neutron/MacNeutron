@@ -127,6 +127,9 @@ private func i386GameInLibrary(named name: String = "Game.exe") throws -> String
     env["MACNEUTRON_DLSS"] = "1"
     env["MACNEUTRON_VM_D3D"] = "forward"
     env["MACNEUTRON_VM_D3D32"] = "forward"
+    env["MACNEUTRON_VM_WOW64"] = "1"
+    env["PROTON_USE_WOW64"] = "1"
+    env["MTLD3D_CONFIG"] = "debug.capsAll=true"
     _ = f.launcher.launch(["waitforexitandrun", game, "-homedir=SMITE2Alpha", "it's quoted", ""], environment: env)
     let script = try #require(scripts.all.first)
     #expect(!FileManager.default.fileExists(atPath: try #require(f.runner.calls.first?.arguments.first)))
@@ -137,6 +140,9 @@ private func i386GameInLibrary(named name: String = "Game.exe") throws -> String
     #expect(script.contains("MACNEUTRON_DLSS='1'\n"))
     #expect(script.contains("MACNEUTRON_VM_D3D='forward'\n"))
     #expect(script.contains("MACNEUTRON_VM_D3D32='forward'\n"))
+    #expect(script.contains("MACNEUTRON_VM_WOW64='1'\n"))
+    #expect(script.contains("PROTON_USE_WOW64='1'\n"))
+    #expect(script.contains("MTLD3D_CONFIG='debug.capsAll=true'\n"))
     #expect(script.hasSuffix("# run-game.sh\nwine steam.exe \"$EXE\" \"$@\"\n"))
 }
 

@@ -10,6 +10,9 @@ export GALLIUM_OVERRIDE_CPU_CAPS=sse4.1
 # As the launcher's LaunchEnvironment: XeSS and DLSS on MetalFX.
 [ "${MACNEUTRON_XESS:-}" = 1 ] || export WINEDLLOVERRIDES="libxess,libxess_dx11=b"
 [ "${MACNEUTRON_DLSS:-}" = 1 ] && [ -z "${DXMT_ENABLE_NVEXT:-}" ] && export DXMT_ENABLE_NVEXT=1
+# A 32-bit program's Unix side is a 32-bit Linux process (old WoW64, Proton's default) when the image has one; the
+# launch option MACNEUTRON_VM_WOW64=1, or Proton's PROTON_USE_WOW64=1, keeps it on the 64-bit one (new WoW64).
+if [ "${MACNEUTRON_VM_WOW64:-}" = 1 ] || [ "${PROTON_USE_WOW64:-}" = 1 ]; then export WINEARCH=wow64; fi
 # Direct3D 9's mtld3d logs into the share's traces/mtld3d, not beside the game's exe (as the launcher's on macOS); a
 # MTLD3D_CONFIG of the user's comes after it, so theirs win.
 mkdir -p /mnt/share/traces/mtld3d
