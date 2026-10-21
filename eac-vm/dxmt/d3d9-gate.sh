@@ -1,12 +1,12 @@
 #!/bin/sh
 # Direct3D 9 in the VM (D3D9 M2b gate), from the Mac: mtld3d's Linux unit tests in the guest, the facade's on the guest
 # winemetal.so; d3d9_triangle for x86-64 and i386 in a new prefix and in one without mtld3d.dll's markers that
-# run-game.sh's update then fixes; and Wine's
-# d3d9 tests through mtld3d's runner, the x64 lane held to the macOS product's figures (D3D9 spec §5.1's loopback
-# run: stateblock 0, visual 31, device 739, d3d9ex 74, no crash) and the i386 lane to no crash. Builds the Linux test
-# binaries and the runner (dxmt/mtld3d-linux-cargo.sh); needs the image with mtld3d (guest-stages.sh dxmt, image/build.sh
-# wine), the VM host (host/build.sh), make build/dxmt-tests/d3d9_triangle.exe build/dxmt-tests-i386/d3d9_triangle.exe,
-# and make wine-arm64-winetests (the x64 and x86 d3d9_test.exe). One VM run. Prints a line a check; exits 1 on a FAIL.
+# run-game.sh's update then fixes; and Wine's d3d9 tests through mtld3d's runner, the x64 lane held to the macOS
+# product's figures (D3D9 spec §5.1's loopback run: stateblock 0, visual 31, device 739, d3d9ex 74, no crash) and the
+# i386 lane to no crash beyond its baseline's. Builds the Linux test binaries and the runner
+# (dxmt/mtld3d-linux-cargo.sh); needs the image with mtld3d (guest-stages.sh dxmt, image/build.sh wine), the VM host
+# (host/build.sh), make build/dxmt-tests/d3d9_triangle.exe build/dxmt-tests-i386/d3d9_triangle.exe, and make
+# wine-arm64-winetests (the x64 and x86 d3d9_test.exe). One VM run. Prints a line a check; exits 1 on a FAIL.
 # The 32-bit rows run under old WoW64, the image's default, or with MN_WOW64=new under new WoW64.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -65,10 +65,12 @@ for want in "stateblock 0" "visual 31" "device 739" "d3d9ex 74"; do
   set -- $want
   check "conformance x64 $1" "$(figure arm64x "$1" x64)" "$2 0"
 done
+# The i386 lane: no crash beyond the baseline's own (macOS's i686-arm64 leg crashes once in device).
+base_crash() { sed -n "s|^$1/$2 .*baseline(failed=[0-9]* crash=\([0-9]*\)).*|\1|p" "$G/conf-$3.txt" 2> /dev/null; }
 for t in stateblock visual device d3d9ex; do
-  got=$(figure i686-arm64 $t x86)
-  echo "info conformance x86 $t: failed ${got% *}, crash ${got#* }"
-  check "conformance x86 $t no crash" "${got#* }" 0
+  got=$(figure i686-arm64 $t x86) base=$(base_crash i686-arm64 $t x86)
+  echo "info conformance x86 $t: failed ${got% *}, crash ${got#* } (baseline ${base:-?})"
+  check "conformance x86 $t no crash beyond the baseline" "$([ -n "$base" ] && [ "${got#* }" -le "$base" ] 2> /dev/null && echo ok)" ok
 done
 [ $fail -eq 0 ] && echo "d3d9 gate: ok" || echo "d3d9 gate: FAIL"
 exit $fail
