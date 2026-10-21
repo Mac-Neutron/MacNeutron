@@ -111,6 +111,11 @@ static const struct mn_wm_node render[] = {
     [WMTRenderCommandSetBlendFactor] = N(wmtcmd_render_setblendcolor),
     [WMTRenderCommandSetStencilRef] = N(wmtcmd_render_setstencilref),
     [WMTRenderCommandSetDepthStencilState] = N1(wmtcmd_render_setdepthstencilstate, depth_stencil_state),
+    /* mtld3d's direct binds (D3D9 M2b, DXMT's MacNeutron nodes) */
+    [WMTRenderCommandSetVertexBytes] = NP(wmtcmd_render_setbytes, bytes, length, 1),
+    [WMTRenderCommandSetVertexTexture] = N1(wmtcmd_render_settexture, texture),
+    [WMTRenderCommandSetVertexSamplerState] = N1(wmtcmd_render_setsampler, sampler),
+    [WMTRenderCommandSetFragmentSamplerState] = N1(wmtcmd_render_setsampler, sampler),
 };
 
 const struct mn_wm_node *mn_wm_nodes(unsigned slot, unsigned *ntypes) {

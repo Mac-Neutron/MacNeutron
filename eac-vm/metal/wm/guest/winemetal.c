@@ -110,7 +110,7 @@ int mn_wm_stats(struct mn_wm_stats *st) {
                   slot##t##8, slot##t##9,
 STUB(0) STUB(1) STUB(2) STUB(3) STUB(4) STUB(5) STUB(6) STUB(7) STUB(8) STUB(9)
 STUB10(1) STUB10(2) STUB10(3) STUB10(4) STUB10(5) STUB10(6) STUB10(7) STUB10(8) STUB10(9) STUB10(10) STUB10(11)
-STUB10(12) STUB10(13) STUB10(14) STUB(150) STUB(151) STUB(152)
+STUB10(12) STUB10(13) STUB10(14) STUB(150) STUB(151) STUB(152) STUB(156) STUB(157)
 
 /* DXMT 0071's WMTMemoryAlloc and WMTMemoryFree: memory DXMT makes Metal buffers over, from the blob allocator, so the
  * host maps it too. A freed allocation comes back once every buffer over it is gone (galloc.h). */
@@ -141,8 +141,8 @@ __attribute__((weak)) int32_t mn_d3d_unix_call(void *args) {
 static NTSTATUS_T d3d(void *args) { return (NTSTATUS_T)mn_d3d_unix_call(args); }
 
 typedef NTSTATUS_T (*unixlib_entry_t)(void *params);
-const unixlib_entry_t __wine_unix_call_funcs[MN_WM_D3D + 1] = {
+const unixlib_entry_t __wine_unix_call_funcs[MN_WM_SLOTS] = {
     slot0, slot1, slot2, slot3, slot4, slot5, slot6, slot7, slot8, slot9,
     SLOT10(1) SLOT10(2) SLOT10(3) SLOT10(4) SLOT10(5) SLOT10(6) SLOT10(7) SLOT10(8) SLOT10(9) SLOT10(10) SLOT10(11)
-    SLOT10(12) SLOT10(13) SLOT10(14) slot150, slot151, slot152, slot153, slot154, d3d,
+    SLOT10(12) SLOT10(13) SLOT10(14) slot150, slot151, slot152, slot153, slot154, d3d, slot156, slot157,
 };

@@ -92,7 +92,7 @@ static NTSTATUS_T d3d32(void *args) {
 #define S10(t) w##t##0, w##t##1, w##t##2, w##t##3, w##t##4, w##t##5, w##t##6, w##t##7, w##t##8, w##t##9,
 W(0) W(1) W(2) W(3) W(4) W(5) W(6) W(7) W(8) W(9)
 W10(1) W10(2) W10(3) W10(4) W10(5) W10(6) W10(7) W10(8) W10(9) W10(10) W10(11) W10(12) W10(13) W10(14)
-W(150) W(151) W(152) W(153) W(154)
+W(150) W(151) W(152) W(153) W(154) W(156) W(157)
 
 const unixlib_entry_t __wine_unix_call_wow64_funcs[] = {
     w0, w1, w2, w3, w4, w5, w6, w7, w8, w9,
@@ -102,7 +102,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] = {
     sm50_compile_tessellation_pipeline_vertex, sm50_compile_tessellation_pipeline_hull,
     sm50_compile_tessellation_pipeline_domain, w86, w87, sm50_get_arguments_info, w89,
     S10(9) S10(10) S10(11) S10(12) S10(13) S10(14)
-    w150, w151, w152, w153, w154, d3d32,
+    w150, w151, w152, w153, w154, d3d32, w156, w157,
 };
-_Static_assert(sizeof __wine_unix_call_wow64_funcs / sizeof *__wine_unix_call_wow64_funcs == MN_WM_D3D + 1,
+_Static_assert(sizeof __wine_unix_call_wow64_funcs / sizeof *__wine_unix_call_wow64_funcs == MN_WM_SLOTS,
                "an entry per slot");
