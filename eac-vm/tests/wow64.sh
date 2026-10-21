@@ -7,6 +7,8 @@
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1: $2"; else echo "FAIL $1: got '$2', want '$3'"; fail=1; fi; }
 export PATH=/opt/mn-wine/bin:$PATH WINEDEBUG=-all DISPLAY=:0
+# New WoW64's rows, as MACNEUTRON_VM_WOW64=1 runs a game (the image's default is old WoW64: old-wow64.sh).
+export WINEARCH=wow64
 export WINEDLLOVERRIDES="mscoree,mshtml="  # as MacNeutron's prefixes: no Mono or Gecko prompt waiting on Xvfb
 Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
 mkdir -p /home/mn

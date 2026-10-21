@@ -7,8 +7,10 @@
 #                                after run-game.sh's update of such a prefix
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
-# and logs/, mtld3d's logs (MTLD3D_CONFIG log.dir).
+# and logs/, mtld3d's logs (MTLD3D_CONFIG log.dir). The 32-bit rows run under old WoW64 (the image's default: the i686
+# mtld3d.so and winemetal.so), or new WoW64 when the share's wow64 file says new (d3d9-gate.sh MN_WOW64=new).
 export PATH=/opt/mn-wine/bin:$PATH WINEDEBUG=-all DISPLAY=:0
+[ "$(cat /mnt/share/d3d9/wow64 2> /dev/null)" != new ] || export WINEARCH=wow64
 export WINEDLLOVERRIDES="mscoree,mshtml="  # as MacNeutron's prefixes: no Mono or Gecko prompt waiting on Xvfb
 T=/mnt/share/d3d9 O=/mnt/share/traces/d3d9 B=/mnt/share/bin
 rm -rf "$O"; mkdir -p "$O/logs"

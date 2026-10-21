@@ -5,7 +5,7 @@
 #                      64-bit Unix side: no 32-bit Linux libraries), PE side with clang + lld
 #   build.sh wine32    the i386 Linux build (old WoW64's 32-bit Unix side) against the multilib sysroot, joined to it
 #   build.sh resume    make again in an existing build
-#   build.sh install   make install into $STAGE (prefix /opt/mn-wine)
+#   build.sh install   make install into $STAGE (prefix /opt/mn-wine), the 32-bit build too unless WINE32=0
 # Sources in $SRC (rsync of build/eac-vm-work/wine-linux without .git). Logs beside each build directory.
 set -eu
 SRC=${SRC:-$HOME/wine-src}
@@ -105,10 +105,10 @@ resume)
 install)
   rm -rf "$STAGE" && mkdir -p "$STAGE"
   make -C "$BUILD" install DESTDIR="$STAGE" > "$BUILD/install.log" 2>&1
-  # With WINE32=1 the 32-bit build's after (old WoW64): its i386-unix, bin/wine and i386-windows into the same prefix.
-  # ponytail: opt-in while old WoW64 is being built (M3, M4): the image keeps new WoW64 until then.
+  # The 32-bit build's after (old WoW64, a 32-bit program's default): its i386-unix, bin/wine and i386-windows into the
+  # same prefix. WINE32=0 leaves it out: new WoW64 alone.
   B32=${BUILD32:-$HOME/wine-build32}
-  [ "${WINE32:-}" != 1 ] || make -C "$B32" install DESTDIR="$STAGE" > "$B32/install.log" 2>&1
+  [ "${WINE32:-1}" = 0 ] || make -C "$B32" install DESTDIR="$STAGE" > "$B32/install.log" 2>&1
   du -sh "$STAGE/opt/mn-wine" ;;
 *) sed -n '2,7p' "$0"; exit 2 ;;
 esac

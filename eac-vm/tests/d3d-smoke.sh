@@ -18,7 +18,9 @@
 # wine) and the share's dxmt-tests (eac-vm/dxmt/share.sh). Prints "d3d-smoke: ok" or "d3d-smoke: FAIL <what>".
 # smoke32.exe, the same program for i686 (32-bit games, new WoW64), runs in each mode too, its "32:" lines the same
 # checks on DXMT built for i386 in guest mode; forwarded through the i386 proxies (MACNEUTRON_VM_D3D32=forward, M4b's
-# opt-in), D3D12 is refused (the refusal said once) and its D3D11 rows run: d3d11latency, conv, wmtforward.
+# opt-in), D3D12 is refused (the refusal said once) and its D3D11 rows run: d3d11latency, conv, wmtforward. That is
+# with MN_WOW64=new (WINEARCH=wow64, as MACNEUTRON_VM_WOW64=1); by default, old WoW64 (the image's), a 32-bit process
+# has no forwarding: prefix.sh says so once, and its rows are guest mode's in both modes.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
@@ -30,11 +32,13 @@ MN_DXMT_ONLY=d3d12_null sh "$ROOT/eac-vm/dxmt/share.sh" > /dev/null  # the share
 "$(sh "$ROOT/dxmt/toolchain.sh")/i686-w64-mingw32-clang++" -std=c++17 -O1 -static -s -Wl,--large-address-aware \
   -o "$SH/dxmt-tests/smoke32.exe" "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ld3d10 -ld3d11 -ldxgi
 fail=
+case ${MN_WOW64:-old} in new) arch='export WINEARCH=wow64' ;; *) arch= ;; esac
 for mode in forward guest; do
   G=$W/d3d-smoke-$mode.sh
   cat > "$G" <<EOS
 export PATH=/opt/mn-wine/bin:\$PATH WINEDEBUG=-all DISPLAY=:0 WINEPREFIX=/home/mn/d3d-smoke DXMT_MAX_ANISOTROPY=0
 export MACNEUTRON_VM_D3D=$mode MACNEUTRON_VM_D3D_TRACE=1 MACNEUTRON_VM_D3D32=$mode
+$arch
 T=/mnt/share/dxmt-tests O=/mnt/share/traces
 mkdir -p \$O
 Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
@@ -83,7 +87,8 @@ EOS
   dies=$(/usr/bin/grep -c '^die status 0$' "$out" 2> /dev/null || true)
   echo "d3d-smoke: $mode: ${dies:-0} of 3 processes ended mid-load, and the host outlived them"
   [ "${dies:-0}" -eq 3 ] || fail="$fail $mode-dies"
-  checks="eventthread name minimised latency d3d11latency wmtforward wmsize conv"
+  guest_checks="eventthread name minimised latency d3d11latency wmtforward wmsize conv"
+  checks=$guest_checks
   [ "$mode" = guest ] || checks="$checks eventreuse swapchain"
   for c in $checks; do
     got=$(/usr/bin/grep "^$c " "$out" 2> /dev/null || true)
@@ -96,10 +101,14 @@ EOS
   /usr/bin/grep -qx 'status 0' "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null || fail="$fail $mode-32-status"
   # A 32-bit process forwarded has no D3D12 (refused, said once, until its data converts): its D3D11 rows.
   checks32=$checks
-  if [ "$mode" = forward ]; then
+  if [ "$mode" = forward ] && [ -n "$arch" ]; then
     checks32="d3d12refused d3d11latency conv wmtforward"
     [ "$(/usr/bin/grep -c 'D3D12CreateDevice is refused in a 32-bit process' "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null)" = 1 ] ||
       fail="$fail $mode-32-refusal-line"
+  elif [ "$mode" = forward ]; then
+    checks32=$guest_checks
+    [ "$(/usr/bin/grep -c 'MACNEUTRON_VM_D3D32=forward needs MACNEUTRON_VM_WOW64=1' "$W/d3d-smoke-$mode.log" 2> /dev/null)" = 1 ] ||
+      fail="$fail $mode-32-old-wow64-line"
   fi
   for c in $checks32; do
     got=$(/usr/bin/grep "^$c " "$SH/traces/d3d-smoke32-$mode.txt" 2> /dev/null || true)

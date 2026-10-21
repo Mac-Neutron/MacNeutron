@@ -7,6 +7,7 @@
 # binaries and the runner (dxmt/mtld3d-linux-cargo.sh); needs the image with mtld3d (guest-stages.sh dxmt, image/build.sh
 # wine), the VM host (host/build.sh), make build/dxmt-tests/d3d9_triangle.exe build/dxmt-tests-i386/d3d9_triangle.exe,
 # and make wine-arm64-winetests (the x64 and x86 d3d9_test.exe). One VM run. Prints a line a check; exits 1 on a FAIL.
+# The 32-bit rows run under old WoW64, the image's default, or with MN_WOW64=new under new WoW64.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -16,6 +17,7 @@ S=$W/share/d3d9 G=$W/share/traces/d3d9
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', want '$3'"; fail=1; fi; }
 rm -rf "$S"; mkdir -p "$S/unit" "$S/winetests/x64" "$S/winetests/x86"
+echo "${MN_WOW64:-old}" > "$S/wow64"
 # The Linux unit tests (release profile, as their macOS runs) and the runner; each test binary under its crate's name.
 sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" test --release --no-run --message-format=json -p mtld3d-shared -p mtld3d-unix \
   -p mtld3d-mtl 2> "$W/d3d9-gate-build.log" | python3 -I -c '
