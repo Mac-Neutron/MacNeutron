@@ -1,5 +1,7 @@
 # Wine's d3d9 test sites mtld3d's conformance run fails here and was triaged as not mtld3d's to fix (D3D9 M1):
 # <leg>/<subtest> <file>:<line> <why>. dxmt/mtld3d-conformance.sh passes a run whose only new failing sites are these.
 arm64x/device device.c:14544 Wine counts every display attached to the desktop; mtld3d reports one adapter (a Mac with two displays fails it)
-arm64x/device device.c:14946 the cursor clip rectangle after a mode change is the Mac driver's, not the virtual screen's
+arm64x/device device.c:14946 the cursor clip rectangle after a mode change is the display driver's (the Mac driver's; in the VM X11's), not the virtual screen's
 arm64x/device device.c:15104 win_skip counts as a failure under Wine: mtld3d exports no Direct3DCreate9On12 (Direct3D 9 on 12)
+i686-arm64/device device.c:14946 as arm64x's: the cursor clip rectangle after a mode change is the display driver's (the VM's 32-bit lane)
+i686-arm64/device device.c:15104 as arm64x's: win_skip counts as a failure; mtld3d exports no Direct3DCreate9On12 (the VM's 32-bit lane)

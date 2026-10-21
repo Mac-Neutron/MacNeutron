@@ -3,11 +3,12 @@
 # winemetal.so; d3d9_triangle for x86-64 and i386 in a new prefix and in one without mtld3d.dll's markers that
 # run-game.sh's update then fixes; and Wine's d3d9 tests through mtld3d's runner, the x64 lane held to the macOS
 # product's figures at most (D3D9 spec §5.1's loopback run: stateblock 0, visual 31, device 739, d3d9ex 74, no crash,
-# no untriaged new site) and the i386 lane to no crash beyond its baseline's. Builds the Linux test binaries and the
-# runner (dxmt/mtld3d-linux-cargo.sh); needs the image with mtld3d (guest-stages.sh dxmt, image/build.sh wine), the VM
-# host (host/build.sh), make build/dxmt-tests/d3d9_triangle.exe build/dxmt-tests-i386/d3d9_triangle.exe, and make
-# wine-arm64-winetests (the x64 and x86 d3d9_test.exe). One VM run. Prints a line a check; exits 1 on a FAIL.
-# The 32-bit rows run under old WoW64, the image's default, or with MN_WOW64=new under new WoW64.
+# no untriaged new site) and the i386 lane to its baseline's failures and crashes at most, no untriaged new site.
+# Builds the Linux test binaries and the runner (dxmt/mtld3d-linux-cargo.sh); needs the image with mtld3d
+# (guest-stages.sh dxmt, image/build.sh wine), the VM host (host/build.sh), make build/dxmt-tests/d3d9_triangle.exe
+# build/dxmt-tests-i386/d3d9_triangle.exe, and make wine-arm64-winetests (the x64 and x86 d3d9_test.exe). One VM run.
+# Prints a line a check; exits 1 on a FAIL. The 32-bit rows run under old WoW64, the image's default, or with
+# MN_WOW64=new under new WoW64.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -16,38 +17,44 @@ M=$B/wine-arm64-src/dxmt/mtld3d
 S=$W/share/d3d9 G=$W/share/traces/d3d9
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', want '$3'"; fail=1; fi; }
-rm -rf "$S"; mkdir -p "$S/unit" "$S/unit32" "$S/winetests/x64" "$S/winetests/x86"
-echo "${MN_WOW64:-old}" > "$S/wow64"
-# The Linux unit tests (release profile, as their macOS runs), x86_64 and i686 (old WoW64's, on the i686
-# winemetal.so), and the runner; each test binary under its crate's name.
-for a in x86_64 i686; do
-  case $a in x86_64) u=$S/unit ;; *) u=$S/unit32 ;; esac
-  MTLD3D_LINUX=$a sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" test --release --no-run --message-format=json -p mtld3d-shared \
-    -p mtld3d-unix -p mtld3d-mtl 2>> "$W/d3d9-gate-build.log" | python3 -I -c '
-import json, shutil, sys
-for line in sys.stdin:
-    m = json.loads(line)
-    if m.get("reason") == "compiler-artifact" and m.get("executable") and m["profile"]["test"]:
-        shutil.copy(m["executable"], sys.argv[1] + "/" + m["target"]["name"])' "$u" \
-    || { echo "FAIL the $a Linux test binaries: see $W/d3d9-gate-build.log"; exit 1; }
-done
-sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" build --release -p mtld3d-conformance 2>> "$W/d3d9-gate-build.log" \
-  || { echo "FAIL the Linux runner: see $W/d3d9-gate-build.log"; exit 1; }
-cp "$M/unix/target-linux/x86_64-unknown-linux-gnu/release/mtld3d-conformance" "$S/"
-mkdir -p "$S/conformance" && cp "$M/unix/conformance/baseline.txt" "$M/unix/conformance/CONFORMANCE.md" "$S/conformance/"
-cp "$B/dxmt-tests/d3d9_triangle.exe" "$S/" && cp "$B/dxmt-tests-i386/d3d9_triangle.exe" "$S/d3d9_triangle32.exe" \
-  || { echo "FAIL no d3d9_triangle.exe: make build/dxmt-tests/d3d9_triangle.exe build/dxmt-tests-i386/d3d9_triangle.exe"; exit 1; }
-for l in x64 x86; do
-  cp "$B/wine-arm64-tests/winetests/$l/d3d9_test.exe" "$S/winetests/$l/" \
-    || { echo "FAIL no $l d3d9_test.exe: make wine-arm64-winetests"; exit 1; }
-done
-# The tests' Wine version: our Wine's, whose tree they were built from (dxmt/mtld3d-conformance.sh's).
-"$B/wine-arm64/wine.app/Contents/Resources/bin/wine" --version > "$S/tests-wine-version"
-rm -rf "$G"
-MN_RUN_TIMEOUT=7200 "$ROOT/eac-vm/run-guest.sh" "$ROOT/eac-vm/tests/d3d9.sh" > "$W/d3d9-guest-run.txt" 2>&1 \
-  || { echo "FAIL the guest run: see $W/d3d9-guest-run.txt"; fail=1; }
-for f in "$S"/unit/* "$S"/unit32/*; do
-  n=${f##*/}; [ "${f%/*}" = "$S/unit" ] || n=32-$n
+# D3D9_GATE_TRACES=<folder>: no build and no run, the checks on a saved run's traces (a copy of $G).
+if [ -n "${D3D9_GATE_TRACES:-}" ]; then
+  G=$D3D9_GATE_TRACES
+  units=$(cd "$G" && ls unit-*.status | sed 's/^unit-//; s/\.status$//')
+else
+  rm -rf "$S"; mkdir -p "$S/unit" "$S/unit32" "$S/winetests/x64" "$S/winetests/x86"
+  echo "${MN_WOW64:-old}" > "$S/wow64"
+  # The Linux unit tests (release profile, as their macOS runs), x86_64 and i686 (old WoW64's, on the i686
+  # winemetal.so), and the runner; each test binary under its crate's name.
+  for a in x86_64 i686; do
+    case $a in x86_64) u=$S/unit ;; *) u=$S/unit32 ;; esac
+    MTLD3D_LINUX=$a sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" test --release --no-run --message-format=json -p mtld3d-shared \
+      -p mtld3d-unix -p mtld3d-mtl 2>> "$W/d3d9-gate-build.log" | python3 -I -c '
+  import json, shutil, sys
+  for line in sys.stdin:
+      m = json.loads(line)
+      if m.get("reason") == "compiler-artifact" and m.get("executable") and m["profile"]["test"]:
+          shutil.copy(m["executable"], sys.argv[1] + "/" + m["target"]["name"])' "$u" \
+      || { echo "FAIL the $a Linux test binaries: see $W/d3d9-gate-build.log"; exit 1; }
+  done
+  sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" build --release -p mtld3d-conformance 2>> "$W/d3d9-gate-build.log" \
+    || { echo "FAIL the Linux runner: see $W/d3d9-gate-build.log"; exit 1; }
+  cp "$M/unix/target-linux/x86_64-unknown-linux-gnu/release/mtld3d-conformance" "$S/"
+  mkdir -p "$S/conformance" && cp "$M/unix/conformance/baseline.txt" "$M/unix/conformance/CONFORMANCE.md" "$S/conformance/"
+  cp "$B/dxmt-tests/d3d9_triangle.exe" "$S/" && cp "$B/dxmt-tests-i386/d3d9_triangle.exe" "$S/d3d9_triangle32.exe" \
+    || { echo "FAIL no d3d9_triangle.exe: make build/dxmt-tests/d3d9_triangle.exe build/dxmt-tests-i386/d3d9_triangle.exe"; exit 1; }
+  for l in x64 x86; do
+    cp "$B/wine-arm64-tests/winetests/$l/d3d9_test.exe" "$S/winetests/$l/" \
+      || { echo "FAIL no $l d3d9_test.exe: make wine-arm64-winetests"; exit 1; }
+  done
+  # The tests' Wine version: our Wine's, whose tree they were built from (dxmt/mtld3d-conformance.sh's).
+  "$B/wine-arm64/wine.app/Contents/Resources/bin/wine" --version > "$S/tests-wine-version"
+  rm -rf "$G"
+  MN_RUN_TIMEOUT=7200 "$ROOT/eac-vm/run-guest.sh" "$ROOT/eac-vm/tests/d3d9.sh" > "$W/d3d9-guest-run.txt" 2>&1 \
+    || { echo "FAIL the guest run: see $W/d3d9-guest-run.txt"; fail=1; }
+  units=$(ls "$S/unit"; ls "$S/unit32" | sed 's/^/32-/')
+fi
+for n in $units; do
   check "unit $n" "$(cat "$G/unit-$n.status" 2> /dev/null)/$(/usr/bin/grep -c '^test result: ok' "$G/unit-$n.txt" 2> /dev/null)" 0/1
 done
 for r in tri64-fresh tri32-fresh tri64-updated tri32-updated; do
@@ -71,18 +78,25 @@ for want in "stateblock 0" "visual 31" "device 739" "d3d9ex 74"; do
   check "conformance x64 $1: at most $2, no crash" \
     "$([ -n "$got" ] && [ "${got% *}" -le "$2" ] && [ "${got#* }" = 0 ] && echo ok)" ok
 done
-left=$(awk -v triaged="$ROOT/dxmt/mtld3d-triaged.txt" '
-  BEGIN { while ((getline l < triaged) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); ok[f[1] " " f[2]] = 1 } }
-  /^[a-z0-9_+@-]+\/[a-z0-9]+ / { sub_ = $1; next }
-  /^  [a-z0-9_]+\.c:[0-9]+ .*REGRESSION/ { if (!((sub_ " " $1) in ok)) printf "%s %s ", sub_, $1 }
-' "$G/conf-x64.txt" 2> /dev/null)
-check "conformance x64: no untriaged new failing site" "${left:-none}" none
-# The i386 lane: no crash beyond the baseline's own (macOS's i686-arm64 leg crashes once in device).
-base_crash() { sed -n "s|^$1/$2 .*baseline(failed=[0-9]* crash=\([0-9]*\)).*|\1|p" "$G/conf-$3.txt" 2> /dev/null; }
+# A lane's new failing sites outside dxmt/mtld3d-triaged.txt (dxmt/mtld3d-conformance.sh's rule), "none" if none.
+untriaged() {
+  left=$(awk -v triaged="$ROOT/dxmt/mtld3d-triaged.txt" '
+    BEGIN { while ((getline l < triaged) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); ok[f[1] " " f[2]] = 1 } }
+    /^[a-z0-9_+@-]+\/[a-z0-9]+ / { sub_ = $1; next }
+    /^  [a-z0-9_]+\.c:[0-9]+ .*REGRESSION/ { if (!((sub_ " " $1) in ok)) printf "%s %s ", sub_, $1 }
+  ' "$G/conf-$1.txt" 2> /dev/null)
+  echo "${left:-none}"
+}
+check "conformance x64: no untriaged new failing site" "$(untriaged x64)" none
+# The i386 lane: at most the baseline's failures (the macOS i686-arm64 leg's) and its crashes (that leg crashes once in
+# device, which the runner names by subtest, not by site), and no untriaged new site.
+base() { sed -n "s|^$1/$2 .*baseline(failed=\([0-9]*\) crash=\([0-9]*\)).*|\1 \2|p" "$G/conf-$3.txt" 2> /dev/null; }
 for t in stateblock visual device d3d9ex; do
-  got=$(figure i686-arm64 $t x86) base=$(base_crash i686-arm64 $t x86)
-  echo "info conformance x86 $t: failed ${got% *}, crash ${got#* } (baseline ${base:-?})"
-  check "conformance x86 $t no crash beyond the baseline" "$([ -n "$base" ] && [ "${got#* }" -le "$base" ] 2> /dev/null && echo ok)" ok
+  got=$(figure i686-arm64 $t x86) base=$(base i686-arm64 $t x86)
+  echo "info conformance x86 $t: failed ${got% *}, crash ${got#* } (baseline ${base% *}, crash ${base#* })"
+  check "conformance x86 $t: at most the baseline's failures and crashes" "$([ -n "$got" ] && [ -n "$base" ] &&
+    [ "${got% *}" -le "${base% *}" ] && [ "${got#* }" -le "${base#* }" ] && echo ok)" ok
 done
+check "conformance x86: no untriaged new failing site" "$(untriaged x86)" none
 [ $fail -eq 0 ] && echo "d3d9 gate: ok" || echo "d3d9 gate: FAIL"
 exit $fail
