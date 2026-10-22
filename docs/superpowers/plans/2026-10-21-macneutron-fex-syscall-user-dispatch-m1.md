@@ -127,7 +127,8 @@ git commit -m "eac-vm fex-tests: sud, syscall user dispatch as Wine uses it (RED
   `struct { bool On {}; uint64_t Offset {}; uint64_t Len {}; uint64_t Selector {}; } SyscallUserDispatch {};`
 - Produces, in `SignalDelegator`:
   `[[noreturn]] void ForceExitSignal(int Signal);` (Linux `force_exit_sig`: the process dies by `Signal`, whatever the
-  guest's handler or mask) and `void ForceGuestSignal(FEX::HLE::ThreadStateObject* Thread, siginfo_t* Info);` (Linux
+  guest's handler or mask: SIG_DFL, then the host unblock is `1ULL << (Signal - 1)`, not SIGSEGV's, before `raise`;
+  otherwise a blocked SIGSYS falls through to the `SYS_exit` fallback, which ends one thread with 159, and row 15c fails) and `void ForceGuestSignal(FEX::HLE::ThreadStateObject* Thread, siginfo_t* Info);` (Linux
   `force_sig_info`: guest-blocked — `Thread->SignalInfo.CurrentSignalMask.Val` — or guest `SIG_IGN` → `ForceExitSignal`;
   else `QueueSignal(::getpid(), FHU::Syscalls::gettid(), signo, Info, true)`)
 - Produces, in `SyscallHandler`:
@@ -140,7 +141,8 @@ git commit -m "eac-vm fex-tests: sud, syscall user dispatch as Wine uses it (RED
   `case PR_SET_SYSCALL_USER_DISPATCH: return FEX::HLE::_SyscallHandler->SetSyscallUserDispatch(Frame, arg2, arg3, arg4, arg5);`
   (define 59 if the headers lack it). `SetSyscallUserDispatch` per spec §4.1: OFF with any nonzero argument → `-EINVAL`;
   ON with `Offset && Offset + Len <= Offset` → `-EINVAL`; ON with `Selector && Selector + 1 > 0x7FFF'FFFF'F000` →
-  `-EFAULT`; other modes → `-EINVAL`; else store and return 0.
+  `-EFAULT`; other modes → `-EINVAL`; else store and return 0. (`CreateThread` builds a fresh `ThreadStateObject`, checked
+  2026-10-21.)
 - [ ] **Step 2: The kill and delivery helpers** in `SignalDelegator` (Interfaces above).
 - [ ] **Step 3: The check.** First statement after `Is64Bit` in `SyscallHandler::HandleSyscall`:
   `if (CheckSyscallUserDispatch(Frame, Is64Bit)) return;`, commented: before patch 0033's `int 0x80` branch and before
@@ -153,7 +155,7 @@ ip = Frame->State.rip + 2
 if (!Is64Bit && (ip == VDSO_kernel_sigreturn + 8 || ip == VDSO_kernel_rt_sigreturn + 7)) return false   // FEX::VDSO::GetVDSOSymbols()
 if (ip - Offset < Len) return false
 if (Selector):
-  CopyFromUser(&b, Selector, 1) == EFAULT → ForceExitSignal(SIGSEGV)
+  CopyFromUser(&b, Selector, 1) == EFAULT → ForceExitSignal(SIGSEGV)   // TryHandleSafeFault turns the fault into EFAULT
   b == 0 → return false;  b != 1 → ForceExitSignal(SIGSYS)
 Thread->SeccompTrapRIP = ip
 ForceGuestSignal(Thread, {SIGSYS, si_errno 0, si_code 2, si_call_addr ip, si_syscall RAX (EAX when !Is64Bit), si_arch Is64Bit ? X86_64 : I386})
@@ -226,6 +228,7 @@ then re-export 0036).
   eac-vm/tests/wine.sh` (exit 0) and Task 3 Step 5's run (exit 0).
 - [ ] **Step 3: Hand AoE2 to the maintainer.** Ask them to launch AoE2 DE from MacNeutron (dev app from this worktree)
   and close it or let it crash. Then: `/usr/bin/grep -c 'could not enable syscall user dispatch'
-  build/eac-vm-work/runs/813780/run.log`. Expected: 0 (was 9). Note where AoE2 now stops: M2's starting point.
+  build/eac-vm-work/runs/813780/run.log` (`run-guest.sh` deletes it at each run's start, so it is this run's).
+  Expected: 0 (was 9). Note where AoE2 now stops: M2's starting point.
 - [ ] **Step 4: Record** — update the `fex-syscall-user-dispatch` memory (M1 done, 0036 unreleased, AoE2's new stop)
   and report to the maintainer; M2's plan is written next.
