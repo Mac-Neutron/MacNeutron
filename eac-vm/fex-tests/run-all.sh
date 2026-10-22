@@ -40,6 +40,7 @@ sigreturn-eflags    sigreturn_eflags_test       PASS -
 maps-probe          maps_probe_test             PASS -
 tf-iret             tf_iret_test                PASS -
 wow64-mode          wow64_mode_test             PASS -
+sud                 sud_test                    PASS -
 pop-fault           pop_fault_test              FAIL -
 '
 
