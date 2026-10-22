@@ -1,5 +1,5 @@
 # Syscall user dispatch in the guest (spec 2026-10-21-macneutron-fex-syscall-user-dispatch-design §4.3): a Windows
-# program's own `syscall` (rawsyscall.exe, eac-vm/guest/win/rawsyscall.c, in the share's bin/ from guest/build-sud.sh)
+# program's own `syscall` (rawsyscall.exe, eac-vm/guest/win/rawsyscall.c, in the share's bin/ from guest/build-win-tests.sh)
 # reaches Wine's dispatcher under FEX, and no Wine process logs "could not enable syscall user dispatch".
 # Exits 1 if any check misses.
 fail=0

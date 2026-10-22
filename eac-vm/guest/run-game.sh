@@ -46,8 +46,12 @@ W=$WINEPREFIX/drive_c/windows
 WINEDLLOVERRIDES="mscoree,mshtml=" wineboot $up >/dev/null 2>&1
 # Xvfb has one mode and can't change it: Wine offers games its standard modes and takes their changes itself (the
 # drawable has the game's size; the host window scales it). Read when the desktop starts: once per prefix, a restart.
-if ! grep -q '^"EmulateModeset"="Y"' "$WINEPREFIX/user.reg" 2>/dev/null; then
+# And a crashing game ends: winedbg --auto prints its report and exits instead of waiting behind its crash window on
+# Xvfb (Proton's Wine sets ShowCrashDialog=0 in wine.inf's [Debugger]; the macOS prefix gets it from PrefixManager).
+if ! grep -q '^"EmulateModeset"="Y"' "$WINEPREFIX/user.reg" 2>/dev/null ||
+   ! grep -q '^"ShowCrashDialog"=dword:00000000' "$WINEPREFIX/user.reg" 2>/dev/null; then
   wine reg add 'HKCU\Software\Wine\X11 Driver' /v EmulateModeset /d Y /f >/dev/null 2>&1
+  wine reg add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f >/dev/null 2>&1
   wineserver -k
 fi
 # MACNEUTRON_VM_D3D=forward (the launcher's): the game's Direct3D through mnd3d.dll to the host's native DXMT.
