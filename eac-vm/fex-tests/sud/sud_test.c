@@ -19,6 +19,8 @@
 //   15    the process is killed: by SIGSYS for a selector value other than 0/1, by SIGSEGV for an unreadable selector,
 //         by SIGSYS when SIGSYS is blocked or ignored (force_sig_info)
 //   16-17 a fork child and a new thread start with dispatch off
+//   18    a thread dispatching in a loop while another keeps sending it SIGUSR1 (Wine's NtSuspendThread and
+//         NtGetContextThread) loses no dispatched syscall to the other signal
 // The handler runs on a sigaltstack (SA_ONSTACK, as Wine's). x86-64 only; native run pending.
 // Build: eac-tests/sud/build.sh [clang]   Run: ./sud_test   (exit status = number of failed checks)
 
@@ -46,8 +48,9 @@ static inline i64 sc6(i64 nr, i64 a, i64 b, i64 c, i64 d, i64 e, i64 f) {
 
 enum { SYS_read = 0, SYS_write = 1, SYS_mmap = 9, SYS_munmap = 11, SYS_rt_sigaction = 13, SYS_rt_sigprocmask = 14,
        SYS_nanosleep = 35, SYS_getpid = 39, SYS_clone = 56, SYS_fork = 57, SYS_exit = 60, SYS_wait4 = 61,
-       SYS_sigaltstack = 131, SYS_prctl = 157, SYS_exit_group = 231, SYS_pipe2 = 293 };
-enum { SIGSEGV = 11, SIGSYS = 31 };
+       SYS_sched_yield = 24, SYS_gettid = 186, SYS_tgkill = 234, SYS_sigaltstack = 131, SYS_prctl = 157,
+       SYS_exit_group = 231, SYS_pipe2 = 293 };
+enum { SIGUSR1 = 10, SIGSEGV = 11, SIGSYS = 31 };
 #define SA_SIGINFO 0x4
 #define SA_ONSTACK 0x08000000
 #define SA_RESTORER 0x04000000
@@ -150,6 +153,26 @@ __asm__(".text\n.balign 16\n.globl spawn_thread\nspawn_thread:\n"   // i64(stack
         "3:\n  ret\n");
 extern i64 spawn_thread(u64 stacktop, void (*fn)(void));
 
+// Row 18's worker: dispatch is per thread, so it turns it on itself.
+static u64 race_stack[16384] __attribute__((aligned(16)));
+static volatile int race_tid, race_done;
+static volatile u64 race_calls, race_lost, usr1_count;
+static void usr1_handler(int sig, void* si, void* uc) { (void)sig; (void)si; (void)uc; ++usr1_count; }
+static void race_fn(void) {
+  race_tid = (int)sc0(SYS_gettid);
+  sud(PR_SYS_DISPATCH_ON, 0, ip, 0);
+  for (int i = 0; i < 20000; ++i) {
+    if (call_gadget(SYS_getpid, 0, 0, 0) != MAGIC) ++race_lost;
+    ++race_calls;
+  }
+  sud_off();
+  // ponytail: SIGUSR1 blocked before exiting. A thread exiting under a SIGUSR1 flood after trapped syscalls can crash FEX
+  // in the frame machinery seccomp traps share (not this patch's); unblock it here once that is fixed.
+  u64 usr1 = 1UL << (SIGUSR1 - 1);
+  sc4(SYS_rt_sigprocmask, 0 /* SIG_BLOCK */, &usr1, 0, 8);
+  race_done = 1;
+}
+
 static char altstack[65536] __attribute__((aligned(16)));
 
 __attribute__((used)) void entry_c(void) {
@@ -160,7 +183,8 @@ __attribute__((used)) void entry_c(void) {
   check((u64)gadget > (u64)&entry_c && (i64)gadget > 0, "the gadget page lies above the program");
 
   struct kstack ss = {altstack, 0, sizeof altstack};
-  struct ksigaction sa = {(void*)handler, SA_SIGINFO | SA_RESTORER | SA_ONSTACK, (void*)restore_rt, 0};
+  // SIGUSR1 blocked while it runs, as in Wine's handlers (sa_mask = server_block_set).
+  struct ksigaction sa = {(void*)handler, SA_SIGINFO | SA_RESTORER | SA_ONSTACK, (void*)restore_rt, 1UL << (SIGUSR1 - 1)};
   check(sc2(SYS_sigaltstack, &ss, 0) == 0 && sc4(SYS_rt_sigaction, SIGSYS, &sa, 0, 8) == 0,
         "SIGSYS handler installed on a sigaltstack");
 
@@ -324,6 +348,26 @@ __attribute__((used)) void entry_c(void) {
     for (int waits = 0; tid > 0 && !thread_done && waits < 5000; ++waits) sc2(SYS_nanosleep, &one_ms, 0);
     sud_off();
     check(thread_done && thread_result == pid && count == c0, "17 a new thread starts with dispatch off");
+  }
+
+  // 18: no dispatched syscall lost to another signal
+  {
+    struct ksigaction usr1 = {(void*)usr1_handler, SA_SIGINFO | SA_RESTORER, (void*)restore_rt, 0};
+    sc4(SYS_rt_sigaction, SIGUSR1, &usr1, 0, 8);
+    const u64 c0 = count;
+    if (spawn_thread((u64)(race_stack + 16384), race_fn) > 0) {
+      while (!race_tid) sc0(SYS_sched_yield);
+      // About one SIGUSR1 per dispatch: an unthrottled flood also crashes the shared frame machinery now and then.
+      struct { i64 s, ns; } pause = {0, 20000};
+      while (!race_done) {
+        sc3(SYS_tgkill, pid, race_tid, SIGUSR1);
+        sc2(SYS_nanosleep, &pause, 0);
+      }
+    }
+    out("   18: "); outhex(race_lost); out(" lost of "); outhex(race_calls); out(", SIGUSR1 handled "); outhex(usr1_count);
+    out(", SIGSYS handled "); outhex(count - c0); out("\n");
+    check(race_calls == 20000 && race_lost == 0 && count - c0 == 20000 && usr1_count > 0,
+          "18 20000 dispatches while SIGUSR1 keeps arriving: none lost");
   }
 
   out(failures ? "RESULT: FAIL\n" : "RESULT: PASS\n");

@@ -1,4 +1,4 @@
-From 642a3a426a289dc3ce9785a2f41a6fba7ed154cc Mon Sep 17 00:00:00 2001
+From 71216b399febfffae383ba1b4f784c4fd4f90843 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Wed, 21 Oct 2026 20:33:57 -0400
 Subject: [PATCH] LinuxSyscalls: emulate syscall user dispatch
@@ -14,20 +14,41 @@ SYS_USER_DISPATCH) through the SECCOMP_RET_TRAP frame path and doesn't
 run. A bad selector value, an unreadable selector or a blocked/ignored
 SIGSYS kill the process as Linux does (ForceExitSignal, generalised from
 ForceGuestSigSegv).
+
+The trap path's post-syscall RIP is now taken only by the SIGSYS queued
+for it: another signal arriving while QueueSignal makes its syscalls took
+it before, and the SIGSYS was then never sent (a Windows syscall
+returned its own number).
 ---
- .../LinuxSyscalls/SignalDelegator.cpp         | 40 +++++---
+ .../LinuxSyscalls/SignalDelegator.cpp         | 49 +++++++---
  .../LinuxSyscalls/SignalDelegator.h           |  6 ++
  .../LinuxEmulation/LinuxSyscalls/Syscalls.cpp | 97 +++++++++++++++++++
  .../LinuxEmulation/LinuxSyscalls/Syscalls.h   |  5 +
  .../LinuxSyscalls/Syscalls/Thread.cpp         |  8 ++
  .../LinuxSyscalls/ThreadManager.h             | 22 +++--
- 6 files changed, 161 insertions(+), 17 deletions(-)
+ 6 files changed, 168 insertions(+), 19 deletions(-)
 
 diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp b/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp
-index 3fbf953..c70bfef 100644
+index 3fbf953..be73f92 100644
 --- a/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp
 +++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp
-@@ -965,27 +965,45 @@ void SignalDelegator::ForceGuestSigSegv(uint64_t BadSP) {
+@@ -330,8 +330,13 @@ bool SignalDelegator::HandleDispatcherGuestSignal(FEXCore::Core::InternalThreadS
+   // itself, so the ucontext RIP now differs from it: rt_sigreturn then takes the path that restores the handler's
+   // registers and resumes at the ucontext RIP, instead of the path that resets to the interrupted state and re-runs
+   // the syscall (discarding the handler's return value). See SeccompEmulator for the kernel semantics.
+-  ContextBackup->SeccompTrapRIP = ThreadObject->SeccompTrapRIP;
+-  ThreadObject->SeccompTrapRIP = 0;
++  // Only the SIGSYS queued for that syscall takes it. Another signal can arrive while QueueSignal is still making its
++  // syscalls (Wine's SIGUSR1 for NtSuspendThread, say): its handler must see the syscall instruction, so that its return
++  // resumes the queueing; entered past the syscall, it would resume there and the SIGSYS would never be sent.
++  const auto* SigInfo = static_cast<const siginfo_t*>(info);
++  if (Signal == SIGSYS && SigInfo->si_code > 0 && reinterpret_cast<uint64_t>(SigInfo->si_call_addr) == ThreadObject->SeccompTrapRIP) {
++    ContextBackup->SeccompTrapRIP = std::exchange(ThreadObject->SeccompTrapRIP, 0);
++  }
+   ContextBackup->SavedJITStackSP = ThreadObject->JITStackSP;
+ 
+   auto Frame = Thread->CurrentFrame;
+@@ -965,27 +970,45 @@ void SignalDelegator::ForceGuestSigSegv(uint64_t BadSP) {
  
    // The guest handler must not run, and the disposition must not be re-read as the guest's action: otherwise the
    // re-raised SIGSEGV would re-enter SetupFrame_x64 with the same bad SP. force_sigsegv resets to SIG_DFL first.
