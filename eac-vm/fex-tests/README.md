@@ -50,6 +50,7 @@ eac-tests/<name>/build.sh native [output]    # where supported: built with the h
 | `proc-maps` | `/proc/self/maps` lists only x86-64 process mappings: everything below `TASK_SIZE_MAX` except `[vsyscall]`, every file-backed ELF mapping x86-64. | 0033 |
 | `smc-remote-write` | A code page the guest made RWX (and executed from again) can be written by another process with `process_vm_writev` (Wine's `NtWriteVirtualMemory`), and the new code runs. | 0035 |
 | `sud` | Syscall user dispatch (`PR_SET_SYSCALL_USER_DISPATCH`) as Wine's ntdll uses it for a Windows program's own `syscall`: the prctl's argument checks, the range and the selector, the SIGSYS (`si_code` 2, `si_call_addr`, ucontext RIP/RAX), the dispatched syscall never runs, a handler that rewinds RIP re-runs it, the kills (bad selector value, unreadable selector, SIGSYS blocked or ignored), fork children and new threads start off, a SIGUSR1 arriving mid-dispatch loses nothing. x86-64 only. | 0036 |
+| `ud-trap` | An invalid opcode (`60` in 64-bit code, `mov cs, ax`) is SIGILL `ILL_ILLOPN` with trap 6 and `si_addr`/RIP at the instruction, as Linux's `do_error_trap`. x86-64 only. | 0037 |
 | `pop-fault` | A faulting `pop` to memory leaves RSP unchanged. Its patch (0021) is withdrawn, so it is **expected to fail** on this branch. | — |
 | `bench` | Not a pass/fail test: micro-benchmarks for code-churn invalidation (`EXTRA="-DINVAL_MODE=1 -DINVAL_THREADS=190"`) and the self-modifying-code modes; `tso_probe.c` is an ordinary Arm64 program printing the TSO `prctl` state. | 0002, 0004 |
 
@@ -65,6 +66,7 @@ Expected results (same binaries on all three):
 | `restart-syscall` | PASS | SIGILL | PASS |
 | `maps-probe` | PASS | hang (timeout) | PASS |
 | `sud` | PASS (derived from the kernel source; native run pending) | FAIL | PASS |
+| `ud-trap` | PASS (derived from the kernel source; native run pending) | FAIL | PASS |
 | `pop-fault` | PASS | FAIL | FAIL (withdrawn 0021) |
 
 Each test fails without the patch it names: the series was built one patch at a time and each test flips from FAIL to
