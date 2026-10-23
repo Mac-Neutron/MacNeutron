@@ -1,0 +1,120 @@
+From 32635968b72efa9705b9a7b6019985388878057e Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Fri, 23 Oct 2026 09:38:27 -0400
+Subject: [PATCH] msvcp: Implement std::_Throw_Cpp_error.
+
+It throws the std::system_error of the STL's thread error codes, as
+std::thread and std::unique_lock call it (MSVC STL thread0.cpp); the stub
+ended the process instead. Age of Empires II DE's main thread called it
+while starting its UI thread.
+---
+ dlls/msvcp110/msvcp110.spec         |  2 +-
+ dlls/msvcp120/msvcp120.spec         |  2 +-
+ dlls/msvcp120_app/msvcp120_app.spec |  2 +-
+ dlls/msvcp140/msvcp140.spec         |  2 +-
+ dlls/msvcp90/exception.c            | 23 +++++++++++++++++++++++
+ dlls/msvcp_win/msvcp_win.spec       |  2 +-
+ 6 files changed, 28 insertions(+), 5 deletions(-)
+
+diff --git a/dlls/msvcp110/msvcp110.spec b/dlls/msvcp110/msvcp110.spec
+index 61cc1bc7..8cf06414 100644
+--- a/dlls/msvcp110/msvcp110.spec
++++ b/dlls/msvcp110/msvcp110.spec
+@@ -1779,7 +1779,7 @@
+ @ cdecl -arch=win32 ?_Syserror_map@std@@YAPBDH@Z(long) _Syserror_map
+ @ cdecl -arch=win64 ?_Syserror_map@std@@YAPEBDH@Z(long) _Syserror_map
+ @ cdecl ?_Throw_C_error@std@@YAXH@Z(long) _Throw_C_error
+-@ stub ?_Throw_Cpp_error@std@@YAXH@Z
++@ cdecl ?_Throw_Cpp_error@std@@YAXH@Z(long) _Throw_Cpp_error
+ @ cdecl -arch=win32 ?_Throw_future_error@std@@YAXABVerror_code@1@@Z(ptr) _Throw_future_error
+ @ cdecl -arch=win64 ?_Throw_future_error@std@@YAXAEBVerror_code@1@@Z(ptr) _Throw_future_error
+ @ stub ?_Throw_lock_error@threads@stdext@@YAXXZ
+diff --git a/dlls/msvcp120/msvcp120.spec b/dlls/msvcp120/msvcp120.spec
+index 665fad53..d9ae1285 100644
+--- a/dlls/msvcp120/msvcp120.spec
++++ b/dlls/msvcp120/msvcp120.spec
+@@ -1740,7 +1740,7 @@
+ @ cdecl -arch=win32 ?_Syserror_map@std@@YAPBDH@Z(long) _Syserror_map
+ @ cdecl -arch=win64 ?_Syserror_map@std@@YAPEBDH@Z(long) _Syserror_map
+ @ cdecl ?_Throw_C_error@std@@YAXH@Z(long) _Throw_C_error
+-@ stub ?_Throw_Cpp_error@std@@YAXH@Z
++@ cdecl ?_Throw_Cpp_error@std@@YAXH@Z(long) _Throw_Cpp_error
+ @ cdecl -arch=win32 ?_Throw_future_error@std@@YAXABVerror_code@1@@Z(ptr) _Throw_future_error
+ @ cdecl -arch=win64 ?_Throw_future_error@std@@YAXAEBVerror_code@1@@Z(ptr) _Throw_future_error
+ @ stub ?_Throw_lock_error@threads@stdext@@YAXXZ
+diff --git a/dlls/msvcp120_app/msvcp120_app.spec b/dlls/msvcp120_app/msvcp120_app.spec
+index bab10fae..82f55f7e 100644
+--- a/dlls/msvcp120_app/msvcp120_app.spec
++++ b/dlls/msvcp120_app/msvcp120_app.spec
+@@ -1740,7 +1740,7 @@
+ @ cdecl -arch=win32 ?_Syserror_map@std@@YAPBDH@Z(long) msvcp120.?_Syserror_map@std@@YAPBDH@Z
+ @ cdecl -arch=win64 ?_Syserror_map@std@@YAPEBDH@Z(long) msvcp120.?_Syserror_map@std@@YAPEBDH@Z
+ @ cdecl ?_Throw_C_error@std@@YAXH@Z(long) msvcp120.?_Throw_C_error@std@@YAXH@Z
+-@ stub ?_Throw_Cpp_error@std@@YAXH@Z
++@ cdecl ?_Throw_Cpp_error@std@@YAXH@Z(long) msvcp120.?_Throw_Cpp_error@std@@YAXH@Z
+ @ cdecl -arch=win32 ?_Throw_future_error@std@@YAXABVerror_code@1@@Z(ptr) msvcp120.?_Throw_future_error@std@@YAXABVerror_code@1@@Z
+ @ cdecl -arch=win64 ?_Throw_future_error@std@@YAXAEBVerror_code@1@@Z(ptr) msvcp120.?_Throw_future_error@std@@YAXAEBVerror_code@1@@Z
+ @ stub ?_Throw_lock_error@threads@stdext@@YAXXZ
+diff --git a/dlls/msvcp140/msvcp140.spec b/dlls/msvcp140/msvcp140.spec
+index efe111e8..a5ba63f5 100644
+--- a/dlls/msvcp140/msvcp140.spec
++++ b/dlls/msvcp140/msvcp140.spec
+@@ -1625,7 +1625,7 @@
+ @ cdecl -arch=win32 ?_Syserror_map@std@@YAPBDH@Z(long) _Syserror_map
+ @ cdecl -arch=win64 ?_Syserror_map@std@@YAPEBDH@Z(long) _Syserror_map
+ @ cdecl ?_Throw_C_error@std@@YAXH@Z(long) _Throw_C_error
+-@ stub ?_Throw_Cpp_error@std@@YAXH@Z
++@ cdecl ?_Throw_Cpp_error@std@@YAXH@Z(long) _Throw_Cpp_error
+ @ cdecl -arch=win32 ?_Throw_future_error@std@@YAXABVerror_code@1@@Z(ptr) _Throw_future_error
+ @ cdecl -arch=win64 ?_Throw_future_error@std@@YAXAEBVerror_code@1@@Z(ptr) _Throw_future_error
+ @ cdecl -arch=arm ?_Tidy@?$_Yarn@D@std@@AAAXXZ(ptr) _Yarn_char__Tidy
+diff --git a/dlls/msvcp90/exception.c b/dlls/msvcp90/exception.c
+index 22d17497..4b704fed 100644
+--- a/dlls/msvcp90/exception.c
++++ b/dlls/msvcp90/exception.c
+@@ -1242,6 +1242,29 @@ void __cdecl _Throw_C_error(int code)
+     _CxxThrowException(&se, &system_error_exception_type);
+ }
+ 
++/* ?_Throw_Cpp_error@std@@YAXH@Z */
++void __cdecl _Throw_Cpp_error(int code)
++{
++    /* the STL's _BUSY, _INVALID_ARGUMENT, _NO_SUCH_PROCESS, _NOT_ENOUGH_MEMORY, _OPERATION_NOT_PERMITTED,
++     * _RESOURCE_DEADLOCK_WOULD_OCCUR and _RESOURCE_UNAVAILABLE_TRY_AGAIN */
++    static const errno_t codes[] = { EBUSY, EINVAL, ESRCH, ENOMEM, EPERM, EDEADLK, EAGAIN };
++    system_error se;
++    const char *msg;
++
++    WARN("(%d) from %p\n", code, __builtin_return_address(0));
++
++    if (code < 0 || code >= ARRAY_SIZE(codes))
++        abort();
++
++    msg = strerror(codes[code]);
++    MSVCP_runtime_error_ctor(&se.base, &msg);
++    se.code.code = codes[code];
++    se.code.category = std_generic_category();
++    se.base.e.vtable = &system_error_vtable;
++
++    _CxxThrowException(&se, &system_error_exception_type);
++}
++
+ /* compute the this pointer for a base class of a given type */
+ static inline void *get_this_pointer( const this_ptr_offsets *off, void *object )
+ {
+diff --git a/dlls/msvcp_win/msvcp_win.spec b/dlls/msvcp_win/msvcp_win.spec
+index 96ad11cf..17a0da0a 100644
+--- a/dlls/msvcp_win/msvcp_win.spec
++++ b/dlls/msvcp_win/msvcp_win.spec
+@@ -1624,7 +1624,7 @@
+ @ cdecl -arch=win32 ?_Syserror_map@std@@YAPBDH@Z(long) msvcp140.?_Syserror_map@std@@YAPBDH@Z
+ @ cdecl -arch=win64 ?_Syserror_map@std@@YAPEBDH@Z(long) msvcp140.?_Syserror_map@std@@YAPEBDH@Z
+ @ cdecl ?_Throw_C_error@std@@YAXH@Z(long) msvcp140.?_Throw_C_error@std@@YAXH@Z
+-@ stub ?_Throw_Cpp_error@std@@YAXH@Z
++@ cdecl ?_Throw_Cpp_error@std@@YAXH@Z(long) msvcp140.?_Throw_Cpp_error@std@@YAXH@Z
+ @ cdecl -arch=win32 ?_Throw_future_error@std@@YAXABVerror_code@1@@Z(ptr) msvcp140.?_Throw_future_error@std@@YAXABVerror_code@1@@Z
+ @ cdecl -arch=win64 ?_Throw_future_error@std@@YAXAEBVerror_code@1@@Z(ptr) msvcp140.?_Throw_future_error@std@@YAXAEBVerror_code@1@@Z
+ @ cdecl -arch=arm ?_Tidy@?$_Yarn@D@std@@AAAXXZ(ptr) msvcp140.?_Tidy@?$_Yarn@D@std@@AAAXXZ
+-- 
+2.54.0 (Apple Git-157)
+
