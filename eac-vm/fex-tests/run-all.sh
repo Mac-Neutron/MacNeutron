@@ -44,6 +44,7 @@ sud                 sud_test                    PASS -
 ud-trap             ud_trap_test                PASS -
 ud-flood            ud_flood_test               PASS -
 signal-nest         signal_nest_test            PASS -
+jit-capacity        jit_capacity_test           PASS -
 pop-fault           pop_fault_test              FAIL -
 '
 

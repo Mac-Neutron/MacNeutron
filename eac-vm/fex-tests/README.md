@@ -53,6 +53,7 @@ eac-tests/<name>/build.sh native [output]    # where supported: built with the h
 | `ud-trap` | An invalid opcode (`60` in 64-bit code, `mov cs, ax`) is SIGILL `ILL_ILLOPN` with trap 6 and `si_addr`/RIP at the instruction, as Linux's `do_error_trap`; also on a code page made RWX and rewritten (an SMC hot page), where FEX spun forever. x86-64 only. | 0037, 0038 |
 | `ud-flood` | A thread executing `ud2` in a loop, whose SIGILL handler checks every general register and the stack pointer, clears them and moves the stack 512 bytes down (as Wine's exception dispatch does for Age of Empires II DE's nanomites), while another thread floods it with SIGUSR1: every SIGILL sees the loop's registers. A SIGUSR1 while FEX spilled the registers before raising the SIGILL, or after an earlier `rt_sigreturn` left "all spilled" set, handed the thread the previous return's registers: 0 runs in 3 passed; 3 in 5 with only the first half of 0041, 0 in 6 with only the second, 8 in 8 with both. x86-64 only. | 0041 |
 | `signal-nest` | A thread making 20000 dispatched syscalls while another floods it with SIGUSR1, then exiting under the flood. Before 0039/0040 it died by SIGSEGV in every run (0/11); with both it passed 7 runs in 8, the eighth resuming with a stale guest register file after a SIGUSR1 `rt_sigreturn`; with 0041, 28 in 28. | 0039, 0040, 0041 |
+| `jit-capacity` | A large self-modifying program within the JIT's SMC hot set: 2,048 code pages each written next to its running code stop faulting once hot (at most 40 faults a page; a hot set of 1,536 pages left 116,224), and rewritten functions return their new values. Reads FEX's statistics (it re-execs itself with `FEX_PROFILESTATS=1`); natively the measurement reports SKIP. x86-64 only. | 0042 |
 | `pop-fault` | A faulting `pop` to memory leaves RSP unchanged. Its patch (0021) is withdrawn, so it is **expected to fail** on this branch. | — |
 | `bench` | Not a pass/fail test: micro-benchmarks for code-churn invalidation (`EXTRA="-DINVAL_MODE=1 -DINVAL_THREADS=190"`) and the self-modifying-code modes; `tso_probe.c` is an ordinary Arm64 program printing the TSO `prctl` state. | 0002, 0004 |
 
@@ -70,6 +71,7 @@ Expected results (same binaries on all three):
 | `sud` | PASS (derived from the kernel source; native run pending) | FAIL | PASS |
 | `ud-trap` | PASS (derived from the kernel source; native run pending) | FAIL | PASS |
 | `ud-flood`, `signal-nest` | PASS (derived from the kernel source; native run pending) | not run | PASS |
+| `jit-capacity` | PASS (measurements SKIP; native run pending) | FAIL | PASS |
 | `pop-fault` | PASS | FAIL | FAIL (withdrawn 0021) |
 
 Each test fails without the patch it names: the series was built one patch at a time and each test flips from FAIL to
