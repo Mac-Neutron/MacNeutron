@@ -103,7 +103,9 @@ if [ -n "$GUEST" ]; then
   exit 0
 fi
 # mtld3d.so for the macOS wine.app is built for (its unix/.cargo/config.toml names 15.0, which the environment beats).
-env PATH="$TOOLS:$PATH" MTLD3D_LLVM_MINGW="$LM" MACOSX_DEPLOYMENT_TARGET=27.0 \
+# MAKEFLAGS=: a variable on our own make's command line would beat mtld3d's Makefile (make release PROFILE=p made it
+# build cargo profile `p`).
+env PATH="$TOOLS:$PATH" MTLD3D_LLVM_MINGW="$LM" MACOSX_DEPLOYMENT_TARGET=27.0 MAKEFLAGS= \
   "CC_aarch64-pc-windows-msvc=$TOOLS/mingw-cc" "CC_arm64ec-pc-windows-msvc=$TOOLS/mingw-cc" \
   "CXX_aarch64-pc-windows-msvc=$TOOLS/mingw-c++" "CXX_arm64ec-pc-windows-msvc=$TOOLS/mingw-c++" \
   "CFLAGS_aarch64-pc-windows-msvc=$maps" "CFLAGS_arm64ec-pc-windows-msvc=$maps" \
