@@ -4,6 +4,17 @@
 # game through steam.exe, and every process in the prefix waited for. Exits with the game's status.
 export WINEPREFIX=/home/mn/pfx SteamAppId=$APPID SteamGameId=$APPID DISPLAY=:0 PATH=/opt/mn-wine/bin:$PATH
 export WINEDEBUG=${WINEDEBUG:--all}
+# MN_MAC_HOME (the launcher's): the profile is the Mac prefix's, which mn-runner mounted at users/steamuser (spec
+# 2026-10-23-macneutron-vm-shared-saves §4.5), so Steam Cloud and the game use the same saves. Wine names the profile
+# after $USER: steamuser, Proton's name. And the XDG folders are the Mac's, which the profile's links name, so when
+# Wine sets a profile's folders up (a new prefix, a Wine update) it makes the links macOS Wine made.
+if [ -n "${MN_MAC_HOME:-}" ]; then
+  export USER=steamuser
+  mkdir -p "$HOME/.config"
+  printf 'XDG_%s_DIR="%s"\n' DESKTOP "$MN_MAC_HOME/Desktop" DOCUMENTS "$MN_MAC_HOME/Documents" \
+    DOWNLOAD "$MN_MAC_HOME/Downloads" MUSIC "$MN_MAC_HOME/Music" PICTURES "$MN_MAC_HOME/Pictures" \
+    VIDEOS "$MN_MAC_HOME/Movies" > "$HOME/.config/user-dirs.dirs"
+fi
 # Under FEX Mesa's CPU detection picks AVX2 paths that LLVM then fails to select: llvmpipe, a 32-bit game's Direct3D
 # until it has DXMT, crashes without this.
 export GALLIUM_OVERRIDE_CPU_CAPS=sse4.1
