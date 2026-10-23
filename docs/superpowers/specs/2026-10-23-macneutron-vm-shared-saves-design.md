@@ -1,6 +1,7 @@
 # A game in the VM uses the saves Steam Cloud syncs
 
-Status: design approved in conversation 2026-10-23; this spec awaits the maintainer's review.
+Status: approved 2026-10-23; implemented 2026-10-23 on branch vm-shared-saves (plan
+`docs/superpowers/plans/2026-10-23-macneutron-vm-shared-saves.md`); §8's checks passed.
 Parent: `2026-10-15-macneutron-eac-vm-route-design.md` (every game runs in the VM since 0.6.0).
 
 ## 1. Goal
@@ -61,7 +62,10 @@ and keeps permission bits as the Mac file's own mode, with no xattrs. The C API 
 
 The permission mode is fixed when the device is made (`Fs::new` takes it), so patch 0012 adds a constructor:
 `FsDevice::new_simplified(tag, host_path)` in `src/libkrun/src/api/device_builders.rs`, exported by ffier as
-`krun_fs_device_new_simplified`, which makes the device with `LinuxSimplified`. Our fork only (no upstream PR without the maintainer).
+`krun_fs_device_new_simplified`, which makes the device with `LinuxSimplified`. Such a share serves no extended
+attributes (as `LinuxSimplified`'s own documentation says; patch 0011's `xattr` switch is off for it), and the macOS
+passthrough no longer stores a create's security context (`security.selinux`, which the guest kernel sends with
+create, mkdir, mknod and symlink) on a share without them: the first gate run found it on every file the guest made. Our fork only (no upstream PR without the maintainer).
 
 ### 4.2 macneutron-vm
 
@@ -146,16 +150,16 @@ A run that left `mounts.failed` ends with a notification, "MacNeutron couldn't s
 
 ## 8. Checks before relying on the design
 
-These are believed from the sources but not run; the plan's first tasks prove them, and a failure comes back here:
+These were believed from the sources; all passed in `eac-vm/tests/user-shares.sh` on 2026-10-23 (rows in brackets):
 - Wine's profile-link code (shell32 `_SHCreateSymbolicLinks` at wine-11.20) leaves an existing real `Documents` folder
-  alone and recreates a link only to the XDG folder named, so a Steam-made real folder keeps its files.
+  alone and recreates a link only to the XDG folder named, so a Steam-made real folder keeps its files [real-documents-kept, links-unchanged].
 - libkrun's simplified mode handles symlinks (`readlink`, `symlink`) and `rename` across the profile as LinuxComplete
-  does.
-- A virtiofs mount over a directory of the read-only `games` mount works in the guest kernel.
+  does [link-rename].
+- A virtiofs mount over a directory of the read-only `games` mount works in the guest kernel [odd-name].
 - `wineboot` makes a new prefix around a `drive_c/users/steamuser` that is already a mount (mn-runner mounts before
-  any Wine process runs).
+  any Wine process runs) [profile-name].
 - Wine with `USER=steamuser` on a prefix made as `users/mn` uses `users/steamuser` from that run on (the profile path
-  comes from `$USER` at each start; the registry's shell folders use `%USERPROFILE%`).
+  comes from `$USER` at each start; the registry's shell folders use `%USERPROFILE%`) [old-prefix].
 
 ## 9. Not in this spec
 

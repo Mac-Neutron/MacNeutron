@@ -171,6 +171,13 @@ As under Proton, a game sees its Steam library as drive `S:`, so it finds itself
 `steam.exe` follows Proton's: `steam://` links from the game open Mac Steam, and a game that restarts itself through
 Steam restarts in place.
 
+In the game VM a game's saves are the Mac's: the VM gets the profile Steam Cloud syncs
+(`steamapps/compatdata/<appid>/pfx/drive_c/users/steamuser`), your `~/Documents` (as a game on macOS has it) and the
+game's own folder in its library, all read-write, so Steam Cloud works as on macOS and no save lives only on the VM's
+disk. Your files there keep their owner and get no extended attributes from the VM. If macOS doesn't let Steam open
+your Documents folder, a game in the VM doesn't start: MacNeutron says so, and System Settings → Privacy & Security →
+Files and Folders allows it.
+
 Games wrapped in Valve's DRM (SteamStub, Palworld among them) check the signature of `steamclient64.dll` in the prefix.
 As Proton does, MacNeutron puts Valve's own signed copy there, and the runtime sends its calls to the bridge. macOS
 Steam has no Windows files, so MacNeutron downloads Valve's Windows client package (about 64 MB) from Valve's servers
