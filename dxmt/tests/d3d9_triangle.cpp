@@ -5,10 +5,12 @@
 // game (in the VM's busy DXMT gate the build has taken over 300 frames).
 // Prints, each "ok" or "FAIL <what>": "d3d9 module" (mtld3d's mtld3d.dll is loaded once Direct3DCreate9 ran: the
 // d3d9.dll is mtld3d's, not Wine's wined3d one), "d3d9 clear" (a corner of the first frame is 0x0000ff), "d3d9
-// triangle" (a frame's centre is 0xff0000) and "d3d9 present" (every present D3D_OK, at least 10 of them); and
-// "frames: <n>". With the argument "vsync" the device presents at D3DPRESENT_INTERVAL_ONE, as most games do, and
-// "d3d9 vsync" says 60 more presents took under 5 s (a display paces them at its rate; a present the layer never
-// reports presented makes each one wait out mtld3d's 1 s cap). Exits with the number of failures.
+// triangle" (a frame's centre is 0xff0000), "d3d9 present" (every present D3D_OK, at least 10 of them) and "d3d9
+// imports" (this program imports d3d9.dll, so mtld3d redirected its EnumDisplaySettingsW import: the bounded mode
+// list; d3d9_dynamic.cpp has a run-time load's); and "frames: <n>". With the argument "vsync" the device presents at
+// D3DPRESENT_INTERVAL_ONE, as most games do, and "d3d9 vsync" says 60 more presents took under 5 s (a display paces
+// them at its rate; a present the layer never reports presented makes each one wait out mtld3d's 1 s cap). Exits with
+// the number of failures.
 #include <windows.h>
 #include <d3d9.h>
 #include <cstdio>
@@ -33,6 +35,10 @@ int main(int argc, char **argv) {
                               r.right - r.left, r.bottom - r.top, nullptr, nullptr, wc.hInstance, nullptr);
     IDirect3D9 *d3d = Direct3DCreate9(D3D_SDK_VERSION);
     row("module", d3d && GetModuleHandleW(L"mtld3d.dll"), d3d ? "no mtld3d.dll in the process" : "Direct3DCreate9");
+    // A dllimport function's address is its import slot's content: d3d9.dll is imported here, so mtld3d redirected it.
+    row("imports", (void *)&EnumDisplaySettingsW !=
+                       (void *)GetProcAddress(GetModuleHandleW(L"user32.dll"), "EnumDisplaySettingsW"),
+        "EnumDisplaySettingsW still user32's");
     if (!d3d || !hwnd) return printf("d3d9 clear FAIL no device\n"), failures + 3;
 
     D3DPRESENT_PARAMETERS pp = {};
