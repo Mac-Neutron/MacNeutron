@@ -96,15 +96,19 @@ rm -f "$STATE"
 run "" "$T/old-prefix.sh"
 run "$MOUNTS" "$T/wine.sh" "$W2"
 check old-prefix 'profile_name'
+# Images whose mn-runner predates the user shares (a launch while the app's setup still updates them) mount nothing:
+# run-game.sh then won't start Wine on a profile only the VM has, and says why in traces/mounts.failed.
+run "" "$T/wine.sh" "$W2"
+check no-mounts '[ -s "$T/share/traces/mounts.failed" ] && ! profile_name'
 
 # Refused: a path outside the three places, a `..` component, a tag macneutron-vm doesn't serve. Each run leaves
-# mounts.failed and never starts run.sh (its marker).
+# traces/mounts.failed and never starts run.sh (its marker).
 printf ': > /mnt/share/traces/ran\n' > "$T/marker.sh"
 refused=0
 for m in "game /etc/x" "profile /home/mn/pfx/drive_c/users/../../x" "nosuch /mnt/games/Gate's Game 2"; do
   run "$m
 " "$T/marker.sh"
-  if [ -s "$T/share/mounts.failed" ] && [ ! -e "$T/share/traces/ran" ]; then refused=$((refused + 1)); fi
+  if [ -s "$T/share/traces/mounts.failed" ] && [ ! -e "$T/share/traces/ran" ]; then refused=$((refused + 1)); fi
 done
 check refused '[ $refused = 3 ]'
 if [ -z "$fail" ]; then echo "user-shares: ok"; else echo "user-shares: FAIL$fail"; exit 1; fi

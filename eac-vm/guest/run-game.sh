@@ -9,6 +9,13 @@ export WINEDEBUG=${WINEDEBUG:--all}
 # after $USER: steamuser, Proton's name. And the XDG folders are the Mac's, which the profile's links name, so when
 # Wine sets a profile's folders up (a new prefix, a Wine update) it makes the links macOS Wine made.
 if [ -n "${MN_MAC_HOME:-}" ]; then
+  # Images whose mn-runner predates the shares (a launch while the app's setup still updates them) mounted nothing:
+  # then no game, rather than one whose saves stay on this disk while Steam Cloud syncs the Mac's.
+  if ! mountpoint -q "$WINEPREFIX/drive_c/users/steamuser"; then
+    why="the game VM's images can't share saves yet: launch the game again once MacNeutron's Settings say"
+    echo "$why \"Game VM: ready\"" > /mnt/share/traces/mounts.failed
+    exit 78
+  fi
   export USER=steamuser
   mkdir -p "$HOME/.config"
   printf 'XDG_%s_DIR="%s"\n' DESKTOP "$MN_MAC_HOME/Desktop" DOCUMENTS "$MN_MAC_HOME/Documents" \

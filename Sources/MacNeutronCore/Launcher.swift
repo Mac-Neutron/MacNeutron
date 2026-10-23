@@ -248,13 +248,14 @@ public struct Launcher: Sendable {
         defer { vmRun.end() }
         do {
             // The folders Steam Cloud syncs, read-write in the guest (MicroVM.userShares): mn-runner mounts the run
-            // share's `mounts` before the game, or leaves mounts.failed and powers off without it.
+            // share's `mounts` before the game, or leaves traces/mounts.failed and powers off without it; run-game.sh
+            // leaves it too when the profile isn't mounted (images older than these tools).
             let shares = try MicroVM.userShares(prefix: context.prefix, library: library, guest: guest, home: home)
             environment["MN_MAC_HOME"] = home  // run-game.sh's XDG folders: the Mac's, as the profile's links name them
             let share = vm.share(appID: context.appID)
             try FileManager.default.createDirectory(at: share, withIntermediateDirectories: true)
             try MicroVM.mountsFile(shares).write(to: share.appending(path: "mounts"), atomically: true, encoding: .utf8)
-            let mountsFailed = share.appending(path: "mounts.failed")
+            let mountsFailed = share.appending(path: "traces/mounts.failed")
             try? FileManager.default.removeItem(at: mountsFailed)  // an earlier run's
             let script = try vm.script(verb: request.verb, appID: context.appID, guest: guest,
                                        arguments: request.arguments, environment: environment,

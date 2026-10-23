@@ -48,8 +48,10 @@ private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts:
             try? FileManager.default.createDirectory(atPath: share, withIntermediateDirectories: true)
             try? console.write(toFile: share + "/console.log", atomically: true, encoding: .utf8)
         }
-        if let mountsFailed, let share = call.environment["MN_SHARE"] {  // mn-runner's word on a mount that failed
-            try? mountsFailed.write(toFile: share + "/mounts.failed", atomically: true, encoding: .utf8)
+        // mn-runner's word on a mount that failed, or run-game.sh's on a profile that isn't mounted (older images)
+        if let mountsFailed, let share = call.environment["MN_SHARE"] {
+            try? FileManager.default.createDirectory(atPath: share + "/traces", withIntermediateDirectories: true)
+            try? mountsFailed.write(toFile: share + "/traces/mounts.failed", atomically: true, encoding: .utf8)
         }
         return status
     }
@@ -184,7 +186,7 @@ private func profileShare(_ f: VMFixture) throws -> String? {
 
 @Test func anOldMountsFailedDoesNotRefuseTheNextRun() throws {
     let f = try makeVMFixture()
-    try write("an earlier run's\n", to: f.vm.appending(path: "runs/2437170/mounts.failed"))
+    try write("an earlier run's\n", to: f.vm.appending(path: "runs/2437170/traces/mounts.failed"))
     let status = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
     #expect(status == 0)
     #expect(!f.notifier.posted.contains { $0.contains("couldn't share") })

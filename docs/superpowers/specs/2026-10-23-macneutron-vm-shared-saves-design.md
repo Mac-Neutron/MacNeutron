@@ -81,8 +81,8 @@ Before the boot, for the game's appid:
   missing) the launch is refused before the boot, naming System Settings > Privacy & Security > Files and Folders;
 - the game folder: the target's `steamapps/common/<game>` (from `MicroVM.guestPath`).
 
-It removes a `mounts.failed` an earlier run left, passes `--user-share profile=… --user-share documents=… --user-share
-game=…` and writes the run share's `mounts` file, one `<tag> <guest path>` line each:
+It removes a `traces/mounts.failed` an earlier run left, passes `--user-share profile=… --user-share documents=…
+--user-share game=…` and writes the run share's `mounts` file, one `<tag> <guest path>` line each:
 
 ```
 profile /home/mn/pfx/drive_c/users/steamuser
@@ -101,9 +101,10 @@ Before it hands over to `mn`, when the share has a `mounts` file:
   owned by `mn`), so what a game puts there survives the run.
 - For each line it makes the mount point and runs `mount -t virtiofs <tag> <path>`. A guest path outside
   `/home/mn/pfx/drive_c/users/`, `/Users/` and `/mnt/games/`, or one with a `..` component, is refused.
-- On any failure it writes the reason to the share's `mounts.failed`, and to `run.log`, and powers off without running
-  `run.sh` (no `run.status`): a game never runs on a profile that exists only in the VM. A marker, not a status:
-  `run.status` carries the game's own exit status, which can be any number.
+- On any failure it writes the reason to the share's `traces/mounts.failed` (where run-game.sh, as `mn`, can write too)
+  and to `run.log`, and powers off without running `run.sh` (no `run.status`): a game never runs on a profile that
+  exists only in the VM. A marker, not a status: `run.status` carries the game's own exit status, which can be any
+  number.
 
 The game mount goes over the game's folder inside the read-only `games` mount (a mount point on a read-only virtiofs
 mount needs only the directory, which exists).
@@ -112,14 +113,19 @@ mount needs only the directory, which exists).
 
 Wine runs with `USER=steamuser`, so its profile is `users/steamuser` like Proton's: Wine 11.20 names the profile from
 `$USER` (`set_home_dir`, `dlls/ntdll/unix/loader.c`). `$HOME/.config/user-dirs.dirs` names the Mac's six folders under
-`$MN_MAC_HOME` (`XDG_VIDEOS_DIR` = `…/Movies`), so when Wine makes the profile's folder links (a new prefix, or a
-prefix update after a Wine change) it makes exactly the links macOS Wine made. Nothing else changes; `wineserver -w`
+`$MN_MAC_HOME` (`XDG_VIDEOS_DIR` = `…/Movies`), so when Wine makes the profile's folder links (a new prefix, or a prefix
+update after a Wine change) it makes exactly the links macOS Wine made. Before that, it checks the profile is a mount:
+images whose mn-runner predates the shares (a game started while the app's setup still updates them after an update, or
+a development app on a release's VM folder) mount nothing, and Wine would then make `users/steamuser` on the VM's disk
+while Steam Cloud syncs the Mac's. Then it leaves the reason in `traces/mounts.failed` and exits 78 without starting
+Wine (found in the maintainer's end-to-end run, 2026-10-23; gate row `no-mounts`). Nothing else changes; `wineserver -w`
 and the rest stay as they are.
 
 ### 4.6 The launcher's refusal
 
-A run that left `mounts.failed` ends with a notification, "MacNeutron couldn't share this game's saves with the game VM:
-<mounts.failed's first line>", and the reason in `launcher.log`. Steam then runs its exit pass on the untouched Mac profile.
+A run that left `traces/mounts.failed` ends with a notification, "MacNeutron couldn't share this game's saves with the
+game VM: <traces/mounts.failed's first line>", and the reason in `launcher.log`. Steam then runs its exit pass on the
+untouched Mac profile.
 
 ## 5. Safety
 
@@ -142,7 +148,7 @@ A run that left `mounts.failed` ends with a notification, "MacNeutron couldn't s
 ## 7. Testing
 
 - Swift unit tests: the launcher passes the three shares and writes `mounts`; the profile resolves as a link, as a real
-  folder, and when missing (made); a run that left `mounts.failed` is refused with its reason.
+  folder, and when missing (made); a run that left `traces/mounts.failed` is refused with its reason.
 - Guest gate `eac-vm/tests/user-shares.sh` (`profile.sh` is the guest profiler's): a file written in the VM's profile, Documents and game folder is on the Mac,
   owned by the Mac user, with no xattrs, and a guest chmod is the file's own mode; the Mac profile's links are byte-identical after `wineboot -u` in the VM; a
   failed mount stops the run before Wine starts.
