@@ -51,7 +51,8 @@ eac-tests/<name>/build.sh native [output]    # where supported: built with the h
 | `smc-remote-write` | A code page the guest made RWX (and executed from again) can be written by another process with `process_vm_writev` (Wine's `NtWriteVirtualMemory`), and the new code runs. | 0035 |
 | `sud` | Syscall user dispatch (`PR_SET_SYSCALL_USER_DISPATCH`) as Wine's ntdll uses it for a Windows program's own `syscall`: the prctl's argument checks, the range and the selector, the SIGSYS (`si_code` 2, `si_call_addr`, ucontext RIP/RAX), the dispatched syscall never runs, a handler that rewinds RIP re-runs it, the kills (bad selector value, unreadable selector, SIGSYS blocked or ignored), fork children and new threads start off, a SIGUSR1 arriving mid-dispatch loses nothing. x86-64 only. | 0036 |
 | `ud-trap` | An invalid opcode (`60` in 64-bit code, `mov cs, ax`) is SIGILL `ILL_ILLOPN` with trap 6 and `si_addr`/RIP at the instruction, as Linux's `do_error_trap`; also on a code page made RWX and rewritten (an SMC hot page), where FEX spun forever. x86-64 only. | 0037, 0038 |
-| `signal-nest` | Stress, not in `run-all.sh`: a thread making 20000 dispatched syscalls while another floods it with SIGUSR1, then exiting under the flood. Before 0039/0040 it died by SIGSEGV in every run (0/11); with both it passes 7 runs in 8. The residual failure is a guest register file restored wrong after a SIGUSR1 sigreturn (guest RIP a host JIT address), seen only under this synthetic flood; run it by hand several times. | 0039, 0040 |
+| `ud-flood` | A thread executing `ud2` in a loop, whose SIGILL handler checks every general register and the stack pointer, clears them and moves the stack 512 bytes down (as Wine's exception dispatch does for Age of Empires II DE's nanomites), while another thread floods it with SIGUSR1: every SIGILL sees the loop's registers. A SIGUSR1 while FEX spilled the registers before raising the SIGILL, or after an earlier `rt_sigreturn` left "all spilled" set, handed the thread the previous return's registers: 0 runs in 3 passed; 3 in 5 with only the first half of 0041, 0 in 6 with only the second, 8 in 8 with both. x86-64 only. | 0041 |
+| `signal-nest` | A thread making 20000 dispatched syscalls while another floods it with SIGUSR1, then exiting under the flood. Before 0039/0040 it died by SIGSEGV in every run (0/11); with both it passed 7 runs in 8, the eighth resuming with a stale guest register file after a SIGUSR1 `rt_sigreturn`; with 0041, 28 in 28. | 0039, 0040, 0041 |
 | `pop-fault` | A faulting `pop` to memory leaves RSP unchanged. Its patch (0021) is withdrawn, so it is **expected to fail** on this branch. | — |
 | `bench` | Not a pass/fail test: micro-benchmarks for code-churn invalidation (`EXTRA="-DINVAL_MODE=1 -DINVAL_THREADS=190"`) and the self-modifying-code modes; `tso_probe.c` is an ordinary Arm64 program printing the TSO `prctl` state. | 0002, 0004 |
 
@@ -68,6 +69,7 @@ Expected results (same binaries on all three):
 | `maps-probe` | PASS | hang (timeout) | PASS |
 | `sud` | PASS (derived from the kernel source; native run pending) | FAIL | PASS |
 | `ud-trap` | PASS (derived from the kernel source; native run pending) | FAIL | PASS |
+| `ud-flood`, `signal-nest` | PASS (derived from the kernel source; native run pending) | not run | PASS |
 | `pop-fault` | PASS | FAIL | FAIL (withdrawn 0021) |
 
 Each test fails without the patch it names: the series was built one patch at a time and each test flips from FAIL to

@@ -42,6 +42,8 @@ tf-iret             tf_iret_test                PASS -
 wow64-mode          wow64_mode_test             PASS -
 sud                 sud_test                    PASS -
 ud-trap             ud_trap_test                PASS -
+ud-flood            ud_flood_test               PASS -
+signal-nest         signal_nest_test            PASS -
 pop-fault           pop_fault_test              FAIL -
 '
 
