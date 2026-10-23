@@ -5,7 +5,7 @@ import Foundation
 /// `macneutron vm-setup` (spec §4.5): the VM folder's images from the app's manifest. Downloads and the image set being
 /// built live in <vm>/setup; the set swaps in whole, its manifest.sha256 already written, and never while a VM runs
 /// from the folder (exit 75; the next run swaps it without rebuilding). The games' own files (state/, runs/) and a
-/// developer's linked folder are never touched.
+/// developer's folder (`VMToolsInstaller.isDeveloperFolder`) are never touched.
 public enum VMSetup {
     /// The setup's own children (tar, mkfs.erofs), ended with it: the app quitting ends vm-setup with SIGTERM, and
     /// vm-setup ends them before it exits. A group keeps a test's children apart from the ones tests beside it run.
@@ -53,7 +53,7 @@ public enum VMSetup {
                     runningExecutables: () -> [String] = RunningProcesses.executablePaths,
                     progress: (String) -> Void = { print($0) }) async throws -> Int32 {
         if VMToolsInstaller.isDeveloperFolder(vm) {
-            progress("vm-setup: \(vm.path(percentEncoded: false)) is a developer's link: left alone")
+            progress("vm-setup: \(vm.path(percentEncoded: false)) is a developer's folder: left alone")
             return 0
         }
         guard let hash = manifestHash(manifestFile) else { throw CocoaError(.fileReadNoSuchFile) }

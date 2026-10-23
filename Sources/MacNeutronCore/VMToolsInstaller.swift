@@ -6,7 +6,7 @@ public enum VMToolsInstallOutcome: Equatable, Sendable {
     case installed, unchanged
     /// A VM runs from the folder (its executable's path): the old tools stay until it ends.
     case deferred(String)
-    /// The folder is a developer's link to build/eac-vm-work: never written.
+    /// The folder is a developer's (`isDeveloperFolder`): never written.
     case developerFolder
 }
 
@@ -145,20 +145,26 @@ public enum VMToolsInstaller {
         return hash.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    /// The folder itself is a symlink to a folder that's there: a developer's link to build/eac-vm-work. A link whose
-    /// folder is gone (its build/ deleted) isn't one: `removeDeadLink` makes way for a real folder.
+    /// A developer's folder (build/eac-vm-work, usually linked here): its images are eac-vm's own build, whose
+    /// manifest.sha256 says `dev` (eac-vm/image/build.sh). Any other folder, linked or not (a player's VM moved to another
+    /// drive), is the app's to update.
     public static func isDeveloperFolder(_ vm: URL) -> Bool {
-        isLink(vm) && FileManager.default.fileExists(atPath: linkPath(vm))
+        (try? String(contentsOf: vm.appending(path: "images/manifest.sha256"), encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) == "dev"
     }
 
-    /// A link whose folder is gone holds nothing: removed, so a setup makes a real folder there. True if it removed one.
+    /// The folder is a link to a folder that isn't there (its drive disconnected, or a developer's build/ deleted): the
+    /// link's target. Nil for any other folder.
+    public static func missingTarget(_ vm: URL) -> String? {
+        guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: linkPath(vm)),
+              !FileManager.default.fileExists(atPath: linkPath(vm)) else { return nil }
+        return target
+    }
+
+    /// Rebuild's way past a missing folder: the link goes, so a setup makes a real folder there. True if it removed one.
     public static func removeDeadLink(_ vm: URL) -> Bool {
-        guard isLink(vm), !FileManager.default.fileExists(atPath: linkPath(vm)) else { return false }
+        guard missingTarget(vm) != nil else { return false }
         return (try? FileManager.default.removeItem(atPath: linkPath(vm))) != nil
-    }
-
-    private static func isLink(_ vm: URL) -> Bool {
-        (try? FileManager.default.destinationOfSymbolicLink(atPath: linkPath(vm))) != nil
     }
 
     /// The folder's path without its trailing "/", which would follow a link.

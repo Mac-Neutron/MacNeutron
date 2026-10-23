@@ -21,8 +21,8 @@ struct SetupView: View {
             }
 
             if model.vmManifest != nil {
-                Step(done: !model.vmSetupRunning && !model.vmSetupNeeded, title: "Game VM",
-                     detail: model.vmNotice ?? (model.vmSetupNeeded ? "Sets itself up after the runtime." : "Ready.")) {
+                Step(done: model.vmReady, title: "Game VM",
+                     detail: model.vmStatus ?? (model.vmReady ? "Ready." : "Sets itself up after the runtime.")) {
                     if model.vmSetupRunning { ProgressView().controlSize(.small) }
                 }
             }

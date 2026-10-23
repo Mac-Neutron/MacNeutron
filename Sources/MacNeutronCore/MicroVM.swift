@@ -24,10 +24,15 @@ public struct MicroVM: Sendable {
     static func find(root: URL, environment: [String: String], verb: Verb) -> MicroVM? {
         guard wanted(environment: environment, verb: verb) else { return nil }
         let folder = environment["MACNEUTRON_VM_DIR"].map { URL(filePath: $0, directoryHint: .isDirectory) } ?? root
+        return isReady(folder) ? MicroVM(root: folder) : nil
+    }
+
+    /// A launch would run in the folder's VM: macneutron-vm and a complete image set there, no tools swap under way.
+    public static func isReady(_ folder: URL) -> Bool {
         let vm = folder.appending(path: "macneutron-vm").path(percentEncoded: false)
         let installing = folder.appending(path: ".installing").path(percentEncoded: false)  // VMToolsInstaller's swap
         return FileManager.default.isExecutableFile(atPath: vm) && imagesComplete(folder)
-            && !FileManager.default.fileExists(atPath: installing) ? MicroVM(root: folder) : nil
+            && !FileManager.default.fileExists(atPath: installing)
     }
 
     /// The setup (`macneutron vm-setup`) writes images/manifest.sha256 last, once the whole set is in place; the image

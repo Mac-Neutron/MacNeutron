@@ -356,9 +356,14 @@ final class AppModel {
     // MARK: The microVM's host tools
 
     /// From `Contents/Helpers/vm` into the VM folder after each runtime install, off the main thread; deferred while a
-    /// VM runs from the folder (the poll retries). Never into a developer's linked folder.
+    /// VM runs from the folder or the folder is missing (the poll retries). Never into a developer's folder.
     func installVMTools() async {
         guard let tools = vmTools, let root = vmRoot, !vmToolsInstalling else { return }
+        // Maybe a disconnected drive: the poll carries on once it's back, and only Rebuild replaces the link.
+        if vmFolderMissing != nil {
+            vmToolsDeferred = true
+            return
+        }
         vmToolsInstalling = true
         let install = vmInstaller
         let result = await Task.detached { Result { try install(tools, root) } }.value
@@ -375,12 +380,25 @@ final class AppModel {
 
     // MARK: The game VM's images
 
-    /// The app ships a manifest, the folder isn't a developer's link, and its images aren't the manifest's.
+    /// The app ships a manifest, the folder isn't a developer's, and its images aren't the manifest's.
     var vmSetupNeeded: Bool {
         guard let vmManifest, let vmRoot, !VMToolsInstaller.isDeveloperFolder(vmRoot) else { return false }
         let current = try? String(contentsOf: vmRoot.appending(path: "images/manifest.sha256"), encoding: .utf8)
         return current?.trimmingCharacters(in: .whitespacesAndNewlines) != VMSetup.manifestHash(vmManifest)
     }
+
+    /// The folder is a link to a folder that isn't there (its drive disconnected): the link's target.
+    var vmFolderMissing: String? { vmRoot.flatMap(VMToolsInstaller.missingTarget) }
+
+    /// The Game VM line Setup and Settings show: a missing folder's, else the setup's.
+    var vmStatus: String? {
+        vmFolderMissing.map {
+            "Game VM: its folder \($0) is missing. Reconnect its drive, or Rebuild to start a new VM here."
+        } ?? vmNotice
+    }
+
+    /// A game would run: the images are the manifest's and the launcher's own check (`MicroVM.isReady`) passes.
+    var vmReady: Bool { !vmSetupRunning && !vmSetupNeeded && vmRoot.map(MicroVM.isReady) == true }
 
     /// `macneutron vm-setup` for the app's manifest (spec §4.6), its progress lines read into `vmNotice` and both its
     /// streams appended to vm-setup.log. One at a time; a deferral (75) waits for the poll, a failure for Retry.
@@ -454,8 +472,8 @@ final class AppModel {
     /// setup waits while a game runs from the old one, then removes it). Games' disks, TPMs and runs are never touched.
     func rebuildVM() async {
         guard vmManifest != nil, let vmRoot, !vmSetupRunning, !VMToolsInstaller.isDeveloperFolder(vmRoot) else { return }
-        // A developer's link to a deleted build/: a real folder with the app's tools takes its place, and their install
-        // starts the setup (the new folder has no images).
+        // A link to a missing folder (a disconnected drive, a developer's deleted build/): a real folder with the app's
+        // tools takes its place, and their install starts the setup (the new folder has no images).
         if VMToolsInstaller.removeDeadLink(vmRoot) {
             await installVMTools()
             await vmSetupTask?.value

@@ -597,19 +597,60 @@ private func makeManifest() throws -> URL {
     #expect(FileManager.default.fileExists(atPath: vmRoot.appending(path: "images/manifest.sha256").path))
 }
 
-@MainActor @Test func rebuildReplacesALinkToADeletedBuild() async throws {
+@MainActor @Test func rebuildReplacesALinkToAMissingFolder() async throws {
     // The folder linked to a developer's build/eac-vm-work, then build/ was deleted: Rebuild makes a real folder.
     let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
     let link = String(vmRoot.path(percentEncoded: false).dropLast())
     try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: "/nonexistent/build/eac-vm-work")
-    let fake = try fakeHelper("exit 0")
+    // Like the real setup, it leaves the manifest's images behind.
+    let fake = try fakeHelper("mkdir -p '\(link)/images'\necho \(VMSetup.manifestHash(manifest)!) > '\(link)/images/manifest.sha256'")
     let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest)
-    #expect(calls(fake.calls).isEmpty)  // the tools couldn't go through the dead link
+    #expect(calls(fake.calls).isEmpty)
+    #expect(model.vmFolderMissing == "/nonexistent/build/eac-vm-work")
+    #expect(model.vmStatus == "Game VM: its folder /nonexistent/build/eac-vm-work is missing. Reconnect its drive, "
+            + "or Rebuild to start a new VM here.")
+    #expect(model.errorMessage == nil)
     await model.rebuildVM()
     #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: link)) == nil)
     #expect(FileManager.default.fileExists(atPath: vmRoot.appending(path: "macneutron-vm").path))
     #expect(calls(fake.calls).count == 1)
-    #expect(model.vmNotice == "Game VM: ready")
+    #expect(model.vmStatus == "Game VM: ready")
+    #expect(model.vmReady)
+}
+
+@MainActor @Test func aMissingFolderWaitsForItsDrive() async throws {
+    // A player's VM on a drive that isn't connected: the app waits, and carries on once the drive is back.
+    let drive = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    try FileManager.default.createSymbolicLink(atPath: String(vmRoot.path(percentEncoded: false).dropLast()),
+                                               withDestinationPath: String(drive.path(percentEncoded: false).dropLast()))
+    try write("game\n", to: drive.appending(path: "state/1.img"))
+    let away = drive.deletingLastPathComponent().appending(path: "unplugged", directoryHint: .isDirectory)
+    try FileManager.default.moveItem(at: drive, to: away)
+    let fake = try fakeHelper("exit 0")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest)
+    await model.pollRuntime()
+    #expect(model.vmFolderMissing != nil)
+    #expect(!model.vmReady)
+    #expect(calls(fake.calls).isEmpty)
+    try FileManager.default.moveItem(at: away, to: drive)  // plugged back in
+    await model.pollRuntime()
+    await model.vmSetupTask?.value
+    #expect(model.vmFolderMissing == nil)
+    #expect(FileManager.default.fileExists(atPath: drive.appending(path: "macneutron-vm").path))
+    #expect(calls(fake.calls).count == 1)
+    #expect(try String(contentsOf: drive.appending(path: "state/1.img"), encoding: .utf8) == "game\n")
+}
+
+@MainActor @Test func readyMeansTheLauncherWouldRunIt() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    try write(VMSetup.manifestHash(manifest)! + "\n", to: vmRoot.appending(path: "images/manifest.sha256"))
+    let fake = try fakeHelper("exit 0")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest)
+    #expect(model.vmReady)
+    try FileManager.default.removeItem(at: vmRoot.appending(path: "macneutron-vm"))
+    #expect(!model.vmSetupNeeded)
+    #expect(!model.vmReady)  // the launcher would refuse a game: Setup mustn't say Ready
 }
 
 @MainActor @Test func progressSplitAcrossWritesIsOneLine() async throws {

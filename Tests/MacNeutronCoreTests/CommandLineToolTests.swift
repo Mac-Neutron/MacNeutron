@@ -106,9 +106,10 @@ import Testing
                                       executable: URL(filePath: "/x")) == 2)
     #expect(await CommandLineTool.run(["vm-setup", "--vm", try makeTempDir().path], environment: [:],
                                       executable: URL(filePath: "/x")) == 2)
-    // With both, it runs: a developer's linked folder is left alone, and that's a success.
-    let link = try makeTempDir().appending(path: "vm")
-    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: try makeTempDir())
+    // With both, it runs: a developer's folder (images saying `dev`) is left alone, and that's a success.
+    let link = try makeTempDir().appending(path: "vm"), work = try makeTempDir()
+    try write("dev\n", to: work.appending(path: "images/manifest.sha256"))
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: work)
     let manifest = try makeTempDir().appending(path: "vm-manifest.json")
     try write("{}", to: manifest)
     #expect(await CommandLineTool.run(["vm-setup", "--manifest", manifest.path, "--vm", link.path], environment: [:],

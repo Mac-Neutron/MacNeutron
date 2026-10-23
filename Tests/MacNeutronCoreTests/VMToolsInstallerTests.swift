@@ -85,9 +85,10 @@ private func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding
     #expect(text(vm.appending(path: "libkrun/libkrun.1.dylib")) == "a libkrun/libkrun.1.dylib\n")
 }
 
-@Test func aSymlinkedFolderIsLeftAlone() throws {
+@Test func aDevelopersFolderIsLeftAlone() throws {
+    // build/eac-vm-work linked in: eac-vm/image/build.sh's images say `dev`.
     let target = try makeTempDir().appending(path: "eac-vm-work", directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+    try write("dev\n", to: target.appending(path: "images/manifest.sha256"))
     let vm = try makeTempDir().appending(path: "vm")
     try FileManager.default.createSymbolicLink(at: vm, withDestinationURL: target)
     let outcome = try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [] })
@@ -95,19 +96,32 @@ private func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding
     let valve = try makeTempDir()
     try write("valve\n", to: valve.appending(path: "steamclient64.dll"))
     try VMToolsInstaller.copyValveClient(ValveInstall(version: "1", folder: valve), into: vm)
-    #expect(try FileManager.default.contentsOfDirectory(atPath: target.path).isEmpty)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: target.path) == ["images"])
     #expect(!VMToolsInstaller.removeDeadLink(vm))
-    #expect(VMToolsInstaller.isDeveloperFolder(vm))
+    #expect(VMToolsInstaller.missingTarget(vm) == nil)
 }
 
-@Test func aLinkToADeletedBuildIsNotADeveloperFolder() throws {
-    // build/ deleted under the link: the app's setup and Rebuild must not skip it as a developer's folder forever.
+@Test func aFolderMovedAndLinkedBackIsUpdated() throws {
+    // A player's VM moved to another drive with a link left behind: still the app's to update.
+    let target = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    try write("1234\n", to: target.appending(path: "images/manifest.sha256"))
+    let vm = try makeTempDir().appending(path: "vm")
+    try FileManager.default.createSymbolicLink(at: vm, withDestinationURL: target)
+    #expect(!VMToolsInstaller.isDeveloperFolder(vm))
+    #expect(try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [] }) == .installed)
+    #expect(text(target.appending(path: "libkrun/libkrun.1.dylib")) == "a libkrun/libkrun.1.dylib\n")
+}
+
+@Test func aLinkToAMissingFolderIsReportedThenReplacedOnRequest() throws {
+    // Its drive disconnected, or a developer's build/ deleted: nothing removes the link but `removeDeadLink`.
     let vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
     let link = String(vm.path(percentEncoded: false).dropLast())  // no trailing "/": the link itself
-    try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: "/nonexistent/build/eac-vm-work")
+    try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: "/Volumes/Gone/vm")
     #expect(!VMToolsInstaller.isDeveloperFolder(vm))
+    #expect(VMToolsInstaller.missingTarget(vm) == "/Volumes/Gone/vm")
     #expect(VMToolsInstaller.removeDeadLink(vm))
     #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: link)) == nil)
+    #expect(VMToolsInstaller.missingTarget(vm) == nil)
     _ = try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [] })
     #expect(text(vm.appending(path: "libkrun/libkrun.1.dylib")) == "a libkrun/libkrun.1.dylib\n")
 }

@@ -62,7 +62,7 @@ struct SettingsView: View {
                             .disabled(model.vmSetupRunning)
                     }
                 }
-                if let notice = model.vmNotice { Text(notice).foregroundStyle(.secondary).textSelection(.enabled) }
+                if let notice = model.vmStatus { Text(notice).foregroundStyle(.secondary).textSelection(.enabled) }
             }
             LabeledContent("Setup") {
                 Button("Run setup again") { show("setup", with: openWindow) }
@@ -80,7 +80,8 @@ struct SettingsView: View {
         .confirmationDialog("Rebuild the game VM?", isPresented: $confirmingRebuild) {
             Button("Rebuild", role: .destructive) { Task { await model.rebuildVM() } }
         } message: {
-            Text("It downloads about 1.35 GB again. Games' saves and settings are kept.")
+            Text(model.vmFolderMissing == nil ? "It downloads about 1.35 GB again. Games' saves and settings are kept."
+                 : "It downloads about 1.35 GB and starts a new VM here. The games' disks in the missing folder won't be used.")
         }
         .confirmationDialog("Turn off Steam Play mode?", isPresented: $confirmingTurnOff) {
             Button("Turn off and restart Steam", role: .destructive) { Task { await model.disableSteamPlay() } }
