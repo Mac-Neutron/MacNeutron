@@ -34,10 +34,13 @@ INPUT_LOG=/home/mn/mn-input.log
 [ "${MACNEUTRON_PROFILE:-}" != p ] || [ -n "${MACNEUTRON_LOG:-}" ] || INPUT_LOG=/dev/null
 [ -x /mnt/share/bin/mn-input ] && /mnt/share/bin/mn-input :0 /mnt/share/traces/capture > "$INPUT_LOG" 2>&1 &
 # A VM that died mid-wineboot leaves DLLs of 0 bytes, which wineboot then keeps: remove them, and a forced update
-# writes them again. Otherwise wineboot --init updates the prefix only when Wine's wine.inf changed (its
-# .update-timestamp), as Wine would by itself, but with MacNeutron's overrides (the Mono prompt would wait on Xvfb). A
-# forced update at every launch cost ~10 s once it covered syswow64 (new WoW64).
-if [ -n "$(find "$WINEPREFIX/drive_c/windows" -name '*.dll' -size 0 -print -delete 2>/dev/null)" ]; then up=-u; else up=-i; fi
+# writes them again. Otherwise only the session's start: the first Wine process runs wineboot --init by itself, which
+# starts services.exe and updates the prefix only when Wine's wine.inf changed (its .update-timestamp), here with
+# MacNeutron's overrides (the Mono prompt would wait on Xvfb); wineboot -s alone does nothing more. Not -i: a second
+# --init starts a second services.exe, through which service starts time out (Age of Empires II DE waited 10 s on
+# SamSs, Wine's lsass.exe, at every launch; eac-vm/tests/services.sh). A forced update at every launch cost ~10 s once
+# it covered syswow64 (new WoW64).
+if [ -n "$(find "$WINEPREFIX/drive_c/windows" -name '*.dll' -size 0 -print -delete 2>/dev/null)" ]; then up=-u; else up=-s; fi
 # A prefix made before the image had mtld3d (Direct3D 9) has no marker for its mtld3d.dll, a builtin with no Windows
 # counterpart, and Wine finds a builtin only through its marker: a forced update writes it, once (both widths': an
 # update cut short may have written system32's alone; a prefix without syswow64 has no 32-bit side to mark).
