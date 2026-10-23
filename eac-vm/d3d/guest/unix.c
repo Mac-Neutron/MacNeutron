@@ -20,6 +20,7 @@
 extern unsigned int NtSetEvent(void *handle, void *prev_state), NtClose(void *handle); /* Wine's ntdll.so */
 #endif
 #include "mnd3d_params.h"
+#include "convert32.h"
 #include "../mn_d3d.h"
 
 extern const struct mn_wm_call mn_d3d_calls[MN_D3D_CALLS];
@@ -68,11 +69,16 @@ static void *arena_ptr(uint64_t blob, uint64_t offset) {
 static __thread int foreign; /* the call being packed has an object that isn't a proxy (said once a method) */
 static _Atomic uint64_t foreign_said[(MN_D3D_CALLS + 63) / 64];
 
+/* A proxy's handle. A 32-bit process's proxies are i386 ones: the magic follows a 4-byte vtable pointer; the handle is
+ * 8-aligned at 16 in both. */
+_Static_assert(offsetof(struct mn_d3d_proxy_hdr, handle) == 16, "the handle's offset, as an i386 proxy has it");
 static int proxy_handle(uint64_t value, mn_handle *h) {
-    const struct mn_d3d_proxy_hdr *p = (const void *)(uintptr_t)value;
+    const uint8_t *p = (const void *)(uintptr_t)value;
     if (!p) return *h = 0, 0;
-    if (p->magic != MN_D3D_PROXY_MAGIC) return foreign = 1, -1;
-    *h = p->handle;
+    uint32_t magic;
+    memcpy(&magic, p + (mn_wm_wow64 ? 4 : offsetof(struct mn_d3d_proxy_hdr, magic)), sizeof magic);
+    if (magic != MN_D3D_PROXY_MAGIC) return foreign = 1, -1;
+    memcpy(h, p + offsetof(struct mn_d3d_proxy_hdr, handle), sizeof *h);
     return 0;
 }
 
@@ -124,7 +130,10 @@ static void *listener(void *arg) {
 
 static void events(void) {
     uint32_t n = 0;
-    if (mn_blob_alloc(MN_NOTIFY_BYTES, &queue_blob) || mn_blob_alloc(MIRROR_BYTES, &mirror_blob)) return;
+    /* The mirror's slots are read by the proxies: below 4 GiB for a 32-bit process's (galloc.h) */
+    if (mn_blob_alloc(MN_NOTIFY_BYTES, &queue_blob) ||
+        (mn_wm_wow64 ? mn_blob_alloc_low : mn_blob_alloc)(MIRROR_BYTES, &mirror_blob))
+        return;
     memset(queue_blob.ptr, 0, queue_blob.size);
     memset(mirror_blob.ptr, 0, mirror_blob.size);
     struct mn_d3d_notify a = {queue_blob.blob_id, mirror_blob.blob_id, mirror_blob.size};
@@ -336,4 +345,83 @@ int32_t mn_d3d_unix_call(void *args) {
         }
         return (int32_t)s;
     }
+}
+
+/* A 32-bit (WoW64) process's call (M4b, convert32.h): its i386 proxies' params are the 64-bit ones, but the data they
+ * point at whose i386 layout differs is converted to x86-64 copies for the call, and outputs back; a call whose data
+ * can't be moved flat is refused. The copies live for the call: an asynchronous call's record is packed before
+ * mn_d3d_unix_call returns. */
+#define E_NOTIMPL_ ((int32_t)0x80004001)
+/* A call refused for a 32-bit process: said once on stderr, and counted as refused in the trace. */
+static int32_t refused32(uint32_t id) {
+    static _Atomic uint64_t said[(MN_D3D_CALLS + 63) / 64];
+    uint64_t bit = 1ull << (id % 64);
+    if (!(atomic_fetch_or(&said[id / 64], bit) & bit))
+        fprintf(stderr, "mn-d3d: %s is refused in a 32-bit process (not converted yet)\n", mn_d3d_calls[id].name);
+    pthread_once(&once, init);
+    if (counts) why[id] = 1, atomic_fetch_add_explicit(&counts[id], 1, memory_order_relaxed);
+    return E_NOTIMPL_;
+}
+int32_t mn_d3d_unix_call32(void *args) {
+    const struct mn_d3d_args *a = args;
+    if (a->id < MN_D3D_FIRST || a->id >= MN_D3D_CALLS || !mn_c32_calls[a->id].n)
+        return a->id >= MN_D3D_FIRST && a->id < MN_D3D_CALLS && mn_c32_calls[a->id].refuse ? refused32(a->id)
+                                                                                            : mn_d3d_unix_call(args);
+    const struct mn_c32_call *c = &mn_c32_calls[a->id];
+    uint8_t *params = (void *)(uintptr_t)a->params;
+    uint64_t orig[16], counts[16];
+    uint8_t *copies[16] = {0};
+    if (c->n > 16) return refused32(a->id); /* gen.py refuses such a call already */
+    int32_t s = 0;
+    for (uint16_t i = 0; i < c->n; i++) {
+        const struct mn_c32_member *m = &c->members[i];
+        memcpy(&orig[i], params + m->offset, 8);
+        counts[i] = 1;
+        if (m->count_offset >= 0) {
+            uint64_t n = 0;
+            if (m->count_deref) {
+                uint64_t at;
+                uint32_t v = 0;
+                memcpy(&at, params + m->count_offset, 8);
+                if (at) memcpy(&v, (void *)(uintptr_t)at, 4);
+                n = v;
+            } else {
+                memcpy(&n, params + m->count_offset, m->count_width); /* little-endian: the low bytes */
+            }
+            counts[i] = n;
+        }
+        if (!orig[i] || !counts[i]) continue;
+        if (counts[i] > (64u << 20) / m->size64 || !(copies[i] = calloc(counts[i], m->size64))) {
+            s = E_OUTOFMEMORY_;
+            break;
+        }
+        const uint8_t *src = (const void *)(uintptr_t)orig[i];
+        if (m->dir & MN_C32_IN)
+            for (uint64_t k = 0; k < counts[i]; k++) {
+                if (m->kind == MN_C32_STRUCT) {
+                    m->in(src + k * m->size32, copies[i] + k * m->size64);
+                } else { /* a word: 4 bytes to 8 */
+                    uint32_t v;
+                    memcpy(&v, src + k * 4, 4);
+                    uint64_t w = v;
+                    memcpy(copies[i] + k * 8, &w, 8);
+                }
+            }
+        uint64_t to = (uintptr_t)copies[i];
+        memcpy(params + m->offset, &to, 8);
+    }
+    if (!s) s = mn_d3d_unix_call(args);
+    for (uint16_t i = 0; i < c->n; i++) {
+        const struct mn_c32_member *m = &c->members[i];
+        if (!copies[i]) continue;
+        if (!s && (m->dir & MN_C32_OUT))
+            for (uint64_t k = 0; k < counts[i]; k++) {
+                uint8_t *to32 = (uint8_t *)(uintptr_t)orig[i] + k * m->size32;
+                if (m->kind == MN_C32_STRUCT) m->out(copies[i] + k * m->size64, to32);
+                else memcpy(to32, copies[i] + k * 8, 4); /* a word: its low 4 bytes (below 4 GiB in this process) */
+            }
+        memcpy(params + m->offset, &orig[i], 8);
+        free(copies[i]);
+    }
+    return s;
 }

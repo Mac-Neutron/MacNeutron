@@ -49,5 +49,25 @@ for what, call, name, want in cases:
     else:
         print(f'FAIL {what}: {got}, want {want}')
         failures += 1
+    # The WoW64 table's twin: the same shape, its pointers 4 bytes (MN_PTR32).
+    got = field('wow64_' + call, name)
+    if got and got[0] == want[0] and 'MN_PTR32' in got[1] and (want[1] == '0' or want[1] in got[1]) and got[2] == want[2]:
+        print(f'ok   {what} (wow64)')
+    else:
+        print(f'FAIL {what} (wow64): {got}, want {want} with MN_PTR32')
+        failures += 1
+# A W32_PTR to an array (char (*errMsg)[1024]): its pointee is the array, not a pointer's 8 bytes (M3's review).
+call = 'wow64_ISteamNetworkingSockets_SteamNetworkingSockets012_SetCertificate'
+m = re.search(r'\{ offsetof\(struct ' + call + r'_params, errMsg\), MN_FIXED, [^,]+, ([^}]*?), 0, 0, 0, 0, 0 \}', text)
+size = m.group(1) if m else None
+ok = size == 'sizeof(*(char (*)[1024])0)'
+print(('ok   ' if ok else 'FAIL ') + f'wow64 SetCertificate errMsg sized as its array: {size}')
+failures += not ok
+# steamclient_next_callback's size is a capacity in and the needed size out (MN_CAP), in both tables.
+for c in ('steamclient_next_callback', 'wow64_steamclient_next_callback'):
+    got = field(c, 'callback')
+    ok = bool(got) and 'MN_CAP' in got[1]
+    print(('ok   ' if ok else 'FAIL ') + f'{c} callback MN_CAP: {got}')
+    failures += not ok
 print('gen-check: ' + ('FAIL' if failures else 'all passed'))
 sys.exit(1 if failures else 0)

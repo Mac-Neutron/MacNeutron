@@ -41,10 +41,11 @@ export WINEMSYNC=1
 # NEEDS_DXMT: the steps that run DXMT, after `dxmt` puts its front ends in that prefix.
 G1="g1-hello g1-seh g1-threads g1-kuser g1-smc g1-tsc g1-unaligned"
 STEPS="macos signature boot pages unentitled arm64 isec g3-cpu fex $G1 g2-litmus viewec wxflip wxflip-x64 msync x18"
+STEPS="$STEPS reserved"
 STEPS="$STEPS g5-jit"
 STEPS="$STEPS fonts-tls steam-bridge dxmt dxmt-present dxmt-arm64ec dxmt-x64 g4-bench"
 NEEDS_DXMT="dxmt-present dxmt-arm64ec dxmt-x64"
-NEEDS_PREFIX="pages arm64 isec g3-cpu fex $G1 g2-litmus viewec wxflip wxflip-x64 msync x18 g5-jit fonts-tls steam-bridge"
+NEEDS_PREFIX="pages arm64 isec g3-cpu fex $G1 g2-litmus viewec wxflip wxflip-x64 msync x18 reserved g5-jit fonts-tls steam-bridge"
 NEEDS_PREFIX="$NEEDS_PREFIX dxmt $NEEDS_DXMT g4-bench"
 NEEDS_FEX="$G1 g2-litmus wxflip-x64 msync x18 g5-jit steam-bridge $NEEDS_DXMT g4-bench"
 # The media steps (video playback spec §8): run by name (make media-check), each its arm64 program and its x64 twin
@@ -844,6 +845,8 @@ run_step() {
     g1-tsc) step g1-tsc 60 exe_cmd x64-tsc; grep '^info ' "$WORK/g1-tsc.log" ;;
     g2-litmus) step g2-litmus 1800 g2_litmus_cmd; grep '^info ' "$WORK/g2-litmus.log" ;;
     viewec) step viewec 60 exe_cmd arm64ec-viewec ;;
+    # Wine patch 0042: a top-down reservation bounded to a window of the soft pagezero lands inside it.
+    reserved) step reserved 60 exe_cmd arm64-reserved ;;
     wxflip) step wxflip 60 wxflip_cmd; grep '^info ' "$WORK/wxflip.log" ;;
     wxflip-x64) step wxflip-x64 60 wxflip_x64_cmd; grep '^info ' "$WORK/wxflip-x64.log" ;;
     msync) step msync 300 msync_cmd; grep '^info ' "$WORK/msync.log" ;;

@@ -19,5 +19,8 @@ void *mn_gptr(uint64_t id);        /* the region's guest address, or NULL */
 unsigned mn_gholders(uint64_t id); /* for tests */
 void mn_gdrain(void);              /* reads the context's notify queue now */
 void mn_galloc_forget(void);       /* in a child after fork: the parent's blobs are the parent context's */
+/* A 32-bit (WoW64) process: set by winemetal.so's WoW64 table before it forwards, so before any allocation for 32-bit
+ * code. Its blobs (and slot 77's bitcode copies, slots.c) then go below 2 GiB, where its DXMT reaches them. */
+extern int mn_wm_wow64;
 
 #endif

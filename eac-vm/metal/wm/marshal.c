@@ -5,6 +5,7 @@
  * from the host: when the Metal object made over it goes, or at once if the call fails. */
 #include "marshal.h"
 #include <stdatomic.h>
+#include <stdio.h>
 #include "cmdlist.h"
 #include <stdlib.h>
 #include <string.h>
@@ -349,8 +350,8 @@ static NTSTATUS_T guest_special(unsigned slot, uint8_t *params, struct mn_wm_out
         struct WMTBufferInfo *info = a->info.ptr;
         uint8_t *base = mn_gptr(MN_GH_VALUE(att));
         if (!info || !base) return MN_STATUS_INVALID_PARAMETER;
-        o->fix = &info->memory.ptr; /* the buffer's memory, once the host made it */
-        o->fix_value = base + a->offset;
+        o->fix = &info->memory; /* the buffer's memory, once the host made it */
+        o->fix_value = (uintptr_t)(base + a->offset);
         return emit_hold(o, 0, 0, 0, MN_GH_VALUE(att)); /* the buffer holds the heap's region */
     }
     case 36:
@@ -371,8 +372,8 @@ static NTSTATUS_T guest_special(unsigned slot, uint8_t *params, struct mn_wm_out
     case 71: { /* the guest's own device value goes back in place of the host's (none comes) */
         struct WMTLayerProps *props = ((struct unixcall_generic_obj_ptr_noret *)params)->arg.ptr;
         if (!props) return MN_STATUS_INVALID_PARAMETER;
-        o->fix = (void **)&props->device;
-        o->fix_value = (void *)(uintptr_t)props->device;
+        o->fix = &props->device;
+        o->fix_value = props->device;
         return 0;
     }
     case 73:  /* releasing a view (milestone 4c) */
@@ -397,7 +398,10 @@ static NTSTATUS_T guest_special(unsigned slot, uint8_t *params, struct mn_wm_out
 }
 
 void mn_wm_unwind(const struct mn_wm_out *out, int reached_host) {
-    for (unsigned i = 0; i < out->nouts; i++) mn_gh_drop(out->outs[i]);
+    for (unsigned i = 0; i < out->nouts; i++) {
+        mn_gh_drop(out->outs[i]);
+        if (out->out_at[i]) memset(out->out_at[i], 0, sizeof(mn_handle)); /* the caller sees no handle */
+    }
     mn_wm_enumerate_unwind(); /* slot 91's handles aren't outs: the host binds as many as it reads */
     if (!reached_host) /* else the host frees each region the record named */
         for (unsigned i = 0; i < out->nholds; i++) mn_gunhold(out->holds[i]);
@@ -436,6 +440,7 @@ static NTSTATUS_T pack(const struct mn_wm_call *c, unsigned slot, void *params, 
             return MN_STATUS_UNSUCCESSFUL;
         }
         if (f->hkind == MN_HK_POOL) mn_gh_pool_push(h);
+        out->out_at[out->nouts] = (uint8_t *)params + f->offset;
         out->outs[out->nouts++] = h;
         memcpy((uint8_t *)params + f->offset, &h, sizeof h);
     }
@@ -473,7 +478,7 @@ NTSTATUS_T mn_wm_unpack_call(const struct mn_wm_call *c, void *params, const str
         if (!k++) first = h;
     }
     NTSTATUS_T s = mn_wm_copy_back(out, r, len, pos);
-    if (out->fix && (first || c->special == MN_SP_LAYER)) *out->fix = out->fix_value;
+    if (out->fix && (first || c->special == MN_SP_LAYER)) memcpy(out->fix, &out->fix_value, sizeof out->fix_value);
     mn_wm_scratch_done();
     return s;
 }
@@ -674,6 +679,15 @@ static NTSTATUS_T take_blob(struct mn_wm_state *k, uint64_t want, struct mn_wm_h
 
 /* Translates and copies one struct's fields in place (base is the host's copy); regions come from the record. A
  * handle that doesn't translate fails the call, but only after every region was read: so is each blob region's. */
+/* A handle field the table refuses: which, for the first 32 of the context (the executor's own line names only the
+ * slot). */
+static void bad_field(const struct mn_wm_state *k, const struct mn_wm_field *f, mn_handle h) {
+    if (atomic_fetch_add(&k->c->refused_said, 1) >= 32) return;
+    fprintf(stderr, "mn-wm: context %u slot %u (%s) field at %u: handle %#llx is not bound (released, never bound, or "
+            "another kind)\n", k->c->ctx_id, k->slot, k->call->name ? k->call->name : "?", f->offset,
+            (unsigned long long)h);
+}
+
 static NTSTATUS_T unpack_fields(struct mn_wm_state *k, const struct mn_wm_field *fields, unsigned n, uint8_t *base,
                                 int depth) {
     if (depth > MAX_DEPTH) return MN_STATUS_INVALID_PARAMETER;
@@ -692,7 +706,10 @@ static NTSTATUS_T unpack_fields(struct mn_wm_state *k, const struct mn_wm_field 
             if (!h) continue;
             int ok;
             void *obj = mn_ht_get(k->c->ht, h, (enum mn_hkind)f->hkind, &ok);
-            if (!ok && !k->status) k->status = MN_STATUS_INVALID_HANDLE;
+            if (!ok && !k->status) {
+                k->status = MN_STATUS_INVALID_HANDLE;
+                bad_field(k, f, h);
+            }
             memcpy(base + f->offset, &obj, sizeof obj);
             continue;
         }
@@ -774,8 +791,8 @@ static int32_t host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const s
                          NTSTATUS_T (*invoke)(void *params), const void *rec, uint32_t len, void *reply, uint32_t cap,
                          uint32_t *reply_len);
 
-int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const void *rec, uint32_t len, void *reply,
-                        uint32_t cap, uint32_t *reply_len) {
+static int32_t wm_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const void *rec, uint32_t len, void *reply,
+                       uint32_t cap, uint32_t *reply_len) {
     int sync = reply != NULL;
     *reply_len = 0;
     if (slot == MN_WM_STATS) {
@@ -810,6 +827,15 @@ int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const vo
     return host_call(c, ring, slot, call, NULL, rec, len, reply, cap, reply_len);
 }
 
+/* Each call in a host autorelease pool of its own, drained on the thread that ran it (see invoke.m). */
+int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const void *rec, uint32_t len, void *reply,
+                        uint32_t cap, uint32_t *reply_len) {
+    void *pool = mn_wm_autorelease_push();
+    int32_t r = wm_call(c, ring, slot, rec, len, reply, cap, reply_len);
+    mn_wm_autorelease_pop(pool);
+    return r;
+}
+
 int32_t mn_wm_host_call_table(struct mn_wm_ctx *c, void *ring, const struct mn_wm_call *call,
                               NTSTATUS_T (*invoke)(void *params), const void *rec, uint32_t len, void *reply,
                               uint32_t cap, uint32_t *reply_len) {
@@ -817,7 +843,10 @@ int32_t mn_wm_host_call_table(struct mn_wm_ctx *c, void *ring, const struct mn_w
     *reply_len = 0;
     if (call->mode == MN_WM_REFUSED || call->mode == MN_WM_LOCAL) return failed(c, sync, call->refuse_status);
     if (len < (uint32_t)PAD8(call->params_size)) return failed(c, sync, MN_STATUS_INVALID_PARAMETER);
-    return host_call(c, ring, NO_SLOT, call, invoke, rec, len, reply, cap, reply_len);
+    void *pool = mn_wm_autorelease_push();
+    int32_t r = host_call(c, ring, NO_SLOT, call, invoke, rec, len, reply, cap, reply_len);
+    mn_wm_autorelease_pop(pool);
+    return r;
 }
 
 /* A call whose record checked out so far: its params translated, run (invoke, a winemetal slot, or its special), its

@@ -95,6 +95,21 @@ where access(f, R_OK) != 0 {
 // One VM per state disk: two writers would corrupt its ext4. The lock lives as long as this process.
 let stateLock = open(state, O_RDWR)
 if stateLock < 0 || flock(stateLock, LOCK_EX | LOCK_NB) != 0 { fail(3, "\(state) is in use") }
+// A state disk shorter than its ext4 filesystem grows back to the filesystem's size: libkrun before its patch 0010 cut
+// the image at the start of a discard that reached its end (2026-10-21), and fsck then refuses the disk, so /home isn't
+// mounted. What was cut had been discarded, which reads as zeroes, so growing the file restores the disk as it was.
+var superblock = [UInt8](repeating: 0, count: 1024)
+if pread(stateLock, &superblock, 1024, 1024) == 1024, superblock[56] == 0x53, superblock[57] == 0xef {
+  func le32(_ at: Int) -> UInt64 { (0..<4).reduce(0) { $0 | UInt64(superblock[at + $1]) << (8 * UInt64($1)) } }
+  let blocks = le32(4) | (le32(0x60) & 0x80 != 0 ? le32(0x150) << 32 : 0)  // s_blocks_count_hi with INCOMPAT_64BIT
+  let bytes = blocks << (10 + le32(24))
+  var st = stat()
+  if fstat(stateLock, &st) == 0, UInt64(st.st_size) < bytes {
+    if ftruncate(stateLock, off_t(bytes)) != 0 { fail(3, "\(state): can't grow it back to its filesystem's \(bytes) bytes") }
+    FileHandle.standardError.write("macneutron-vm: \(state) was \(st.st_size) bytes, its filesystem \(bytes): grown back\n"
+      .data(using: .utf8)!)
+  }
+}
 // MN_VM_CMDLINE_EXTRA (Direct3D forwarding M5): tick and RCU parameters appended to the images' command line, for
 // measuring. Only these: the kernel takes a parameter's last value, so lockdown=, module.sig_enforce= or init= must
 // never get in. Anything else is refused whole, and said.
@@ -226,7 +241,8 @@ if let appid = steamAppID {
   let sock = NSTemporaryDirectory() + "mn-steam-\(getpid()).sock"
   unlink(sock)
   let host = Process()
-  host.executableURL = URL(fileURLWithPath: exeDir + "/steam-forward/host/mn-steam-host")
+  // A bundle: its entitlement maps 32-bit Steam calls' region below 4 GiB (eac-vm/steam-forward/Makefile).
+  host.executableURL = URL(fileURLWithPath: exeDir + "/steam-forward/host/mn-steam-host.app/Contents/MacOS/mn-steam-host")
   host.arguments = ["--socket", sock, "--appid", appid, "--map", steamMap, "--parent", String(getpid())]
   do { try host.run() } catch { fail(5, "mn-steam-host: \(error)") }
   steamHostPID = host.processIdentifier

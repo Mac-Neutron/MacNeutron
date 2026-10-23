@@ -33,9 +33,10 @@ struct mn_wm_out {
     struct mn_wm_region regions[MN_WM_MAX_REGIONS]; /* the memory a reply's regions go back to */
     unsigned nholds;
     uint64_t holds[MN_WM_MAX_HOLDS]; /* regions this call holds for the host (mn_ghold), undone if it never gets there */
-    void **fix;                      /* after the reply, if its first handle came back (71: always): *fix = fix_value */
-    void *fix_value;
-    void *out_at[MN_WM_MAX_OUTS];    /* SM50: where each picked handle goes, through the caller's out-pointers */
+    void *fix;                       /* after the reply, if its first handle came back (71: always): the 8 bytes at fix */
+    uint64_t fix_value;              /* become fix_value (a pointer zero-extended, as a 32-bit caller's high half is 0) */
+    void *out_at[MN_WM_MAX_OUTS];    /* where each picked handle went in the caller's params (SM50: goes, through the
+                                      * caller's out-pointers) */
 };
 /* Builds slot's record from params, picking the handles it returns and writing them into params at once. 0, or an
  * NTSTATUS to return without sending: a refused slot, a dead handle, or a record past cap. */
@@ -49,8 +50,8 @@ NTSTATUS_T mn_wm_unpack_call(const struct mn_wm_call *c, void *params, const str
                              uint32_t len);
 /* A synchronous call's reply: its outputs into params and the memory it points to; nil handles' indexes freed. */
 NTSTATUS_T mn_wm_unpack(unsigned slot, void *params, const struct mn_wm_out *out, const void *reply, uint32_t len);
-/* The call failed: frees the handles mn_wm_pack picked, and, if it never reached the host, its holds (else the host
- * frees each region the record named). */
+/* The call failed: frees the handles mn_wm_pack picked, zeroing where each went (the caller's params or out-pointers:
+ * none was made), and, if it never reached the host, its holds (else the host frees each region the record named). */
 void mn_wm_unwind(const struct mn_wm_out *out, int reached_host);
 /* A listener handle's notify queue, and its blob (for mn_notify_wait); NULL if h isn't one. */
 struct mn_notify;
@@ -82,6 +83,7 @@ struct mn_wm_ctx {
     _Atomic uint64_t presented;      /* drawables presented (slots 47 and 48, present.m) */
     struct mn_notifyq *_Atomic notify; /* MN_NOTIFY_REGION_FREE goes here (memory.m) */
     _Atomic uint32_t d3d_removed;      /* Direct3D: the HRESULT that removed the device; every later call answers it */
+    _Atomic uint32_t refused_said;     /* refused handles named on stderr (marshal.c, cmdlist.c): 32 a context */
 };
 int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const void *rec, uint32_t len, void *reply,
                         uint32_t cap, uint32_t *reply_len);
@@ -170,6 +172,8 @@ void mn_wm_will_release(void *obj);
 
 /* invoke.m: winemetal's own slot (mn_wm_funcs), an Objective-C exception becoming STATUS_INVALID_PARAMETER; and the
  * table's release of an object, by kind. */
+void *mn_wm_autorelease_push(void); /* a host autorelease pool around one forwarded call (invoke.m) */
+void mn_wm_autorelease_pop(void *pool);
 NTSTATUS_T mn_wm_invoke(unsigned slot, void *params);
 void mn_wm_release_object(enum mn_hkind kind, void *obj);
 

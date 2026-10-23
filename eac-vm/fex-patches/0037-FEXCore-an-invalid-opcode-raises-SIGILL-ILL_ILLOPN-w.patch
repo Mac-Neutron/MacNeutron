@@ -1,0 +1,52 @@
+From 07a7fb413c6c10ee747a50dd60396eb5a811b715 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Thu, 22 Oct 2026 06:17:55 -0400
+Subject: [PATCH] FEXCore: an invalid opcode raises SIGILL ILL_ILLOPN with trap
+ 6, as Linux
+
+InvalidOp and a MOV to CS raised SIGILL with si_code 0 and trap 0, where
+Linux's do_error_trap reports #UD as ILL_ILLOPN with trap 6 (X86_TRAP_UD).
+Wine maps trap 6 to EXCEPTION_ILLEGAL_INSTRUCTION and logged "unexpected
+trap 0" for FEX's.
+---
+ FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+index 545afb8..4dcca95 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -1249,12 +1249,12 @@ void OpDispatchBuilder::MOVSegOp(OpcodeArgs, bool ToSeg) {
+       break;
+     case FEXCore::X86State::REG_RCX: // CS
+     case FEXCore::X86State::REG_R9:  // CS
+-      // CPL3 can't write to this
++      // CPL3 can't write to this: MOV to CS is #UD, which Linux reports as SIGILL ILL_ILLOPN with trap 6.
+       Break(FEXCore::IR::BreakDefinition {
+         .ErrorRegister = 0,
+         .Signal = SIGILL,
+-        .TrapNumber = 0,
+-        .si_code = 0,
++        .TrapNumber = X86State::X86_TRAPNO_UD,
++        .si_code = 2, ///< ILL_ILLOPN
+       });
+       break;
+     case FEXCore::X86State::REG_RDX: // SS
+@@ -5184,11 +5184,12 @@ void OpDispatchBuilder::PermissionRestrictedOp(OpcodeArgs) {
+ }
+ 
+ void OpDispatchBuilder::InvalidOp(OpcodeArgs) {
++  // #UD, as Linux reports it (do_error_trap): SIGILL ILL_ILLOPN with trap 6. Wine logs "unexpected trap" for trap 0.
+   BreakOp(Op, FEXCore::IR::BreakDefinition {
+                 .ErrorRegister = 0,
+                 .Signal = SIGILL,
+-                .TrapNumber = 0,
+-                .si_code = 0,
++                .TrapNumber = X86State::X86_TRAPNO_UD,
++                .si_code = 2, ///< ILL_ILLOPN
+               });
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

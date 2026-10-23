@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Wed, 21 Oct 2026 13:04:50 -0400
+Subject: [PATCH] mtld3d: a 32-bit facade keeps an index's newest handle; the
+ pool test waits for releases in flight
+
+objc2::addr_of on a 32-bit build no longer lets an older generation of
+an index (a handler's handle that outlived its object) replace the live
+object's; unit tests on both widths (RED on i686 with a plain store).
+autoreleased_returns_go_with_their_pool waits up to 10 s for the live
+count to settle: the retirement threads' last releases can still be
+queued on their rings behind the VM host's one executor (it failed 1 in
+2 to 1 in 5 parallel runs on x86_64; 10 runs pass on both widths).
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ mtld3d/unix/mtl/src/objc2.rs       |  8 +++++++-
+ mtld3d/unix/mtl/src/objc2/tests.rs | 21 +++++++++++++++++++++
+ mtld3d/unix/mtl/tests/objects.rs   | 10 ++++++++--
+ 3 files changed, 36 insertions(+), 3 deletions(-)
+ create mode 100644 mtld3d/unix/mtl/src/objc2/tests.rs
+
+diff --git a/mtld3d/unix/mtl/src/objc2.rs b/mtld3d/unix/mtl/src/objc2.rs
+index 68608432..efbbf61d 100644
+--- a/mtld3d/unix/mtl/src/objc2.rs
++++ b/mtld3d/unix/mtl/src/objc2.rs
+@@ -23,7 +23,10 @@ pub fn addr_of(handle: u64) -> usize {
+     {
+         let index = (handle & 0xffff_ffff) as usize;
+         if let Some(slot) = guest_handles().get(index) {
+-            slot.store(handle, core::sync::atomic::Ordering::Release);
++            // An older generation of the index (a handler's handle that outlived its object) never replaces the live
++            // object's.
++            let newer = |old: u64| (old == 0 || handle >> 32 >= old >> 32).then_some(handle);
++            let _ = slot.try_update(core::sync::atomic::Ordering::Release, core::sync::atomic::Ordering::Relaxed, newer);
+         }
+         index
+     }
+@@ -345,3 +348,6 @@ pub fn from_autoreleased<P: ?Sized>(handle: u64) -> Option<Retained<runtime::Pro
+     // SAFETY: a live object (its pool hasn't drained: we're inside the call that returned it).
+     unsafe { Retained::retain(addr_of(handle) as *mut runtime::ProtocolObject<P>) }
+ }
++
++#[cfg(test)]
++mod tests;
+diff --git a/mtld3d/unix/mtl/src/objc2/tests.rs b/mtld3d/unix/mtl/src/objc2/tests.rs
+new file mode 100644
+index 00000000..4500d741
+--- /dev/null
++++ b/mtld3d/unix/mtl/src/objc2/tests.rs
+@@ -0,0 +1,21 @@
++//! A handle's address and back ([`super::addr_of`], [`super::handle_at`]).
++
++/// The address gives the handle back, on either width.
++#[test]
++fn a_handle_comes_back_from_its_address() {
++    let handle = 3_u64 << 32 | 91;
++    assert_eq!(super::handle_at(super::addr_of(handle)), handle);
++}
++
++/// A 32-bit build keeps the newest generation of an index.
++///
++/// A stale handle (a handler's, after its object went and the index was reused) leaves the live
++/// object's in place.
++#[cfg(target_pointer_width = "32")]
++#[test]
++fn an_older_generation_leaves_the_live_handle() {
++    let (live, stale) = (2_u64 << 32 | 77, 1_u64 << 32 | 77);
++    assert_eq!(super::addr_of(live), 77);
++    assert_eq!(super::addr_of(stale), 77);
++    assert_eq!(super::handle_at(77), live);
++}
+diff --git a/mtld3d/unix/mtl/tests/objects.rs b/mtld3d/unix/mtl/tests/objects.rs
+index b414e038..f8d5ce65 100644
+--- a/mtld3d/unix/mtl/tests/objects.rs
++++ b/mtld3d/unix/mtl/tests/objects.rs
+@@ -140,8 +140,14 @@ fn autoreleased_returns_go_with_their_pool() {
+             cb.waitUntilCompleted();
+         });
+     }
+-    let after = guest_live_handles();
+-    // Other tests run beside this one and hold handles of their own meanwhile.
++    // Other tests run beside this one and hold handles of their own meanwhile, and the retirement threads' last
++    // releases may still be queued on their rings (the VM host has one executor for every ring): up to 10 s for them.
++    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
++    let mut after = guest_live_handles();
++    while after >= before + 100 && std::time::Instant::now() < deadline {
++        std::thread::sleep(std::time::Duration::from_millis(20));
++        after = guest_live_handles();
++    }
+     assert!(after < before + 100, "{} handles left of 1000 command buffers", after.saturating_sub(before));
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

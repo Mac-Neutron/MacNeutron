@@ -1372,5 +1372,10 @@ expect "then the game only hits" "$(counters e2e)" "d3d12 shader cache: function
 expect "and draws as D3DMetal" "$(drawn e2e)" "$(drawn cache-ref-a)"
 expect "and the stamp holds the current builds" "$(cut -d ' ' -f 1 "$P/replayed")" "${V:-no DXMT/translator}"
 
+# 11. Direct3D 9 through mtld3d on ours (D3D9 spec §6, M1; D3DMetal, the reference, has none): dxmt/d3d9-check.sh's
+#     four rows, also in a prefix made by $OLD first when the caller names a wine.app from before mtld3d.
+expect "a D3D9 program draws through mtld3d" \
+  "$(DXMT_CHECK_WORK="$WORK/d3d9" sh "$ROOT/dxmt/d3d9-check.sh" "$WINEAPP" | tail -1)" "d3d9-check: ok"
+
 [ $fail = 0 ] && echo "dxmt-check: all passed"
 exit $fail

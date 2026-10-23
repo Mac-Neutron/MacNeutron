@@ -1,0 +1,405 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Tue, 20 Oct 2026 20:44:52 -0400
+Subject: [PATCH] mtld3d: readbacks staged and PageBox pages from the unix side
+ under the winemetal facade
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+MacNeutron's Direct3D 9 on winemetal (D3D9 spec §5.1): in the VM's guest
+a Metal buffer is made only over memory winemetal handed out, so under
+the facade a readback goes through a staging buffer copied out once
+complete, and the PE side takes its PageBox pages from two new unix
+calls (AllocPages, FreePages) when GetDeviceInfo sets PAGES_FROM_UNIX;
+the loopback build serves them with anonymous mappings, the VM build
+with winemetal's guest allocator.
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ mtld3d/unix/shared/src/lib.rs         |  4 +++
+ mtld3d/unix/shared/src/mtl.rs         |  5 +++
+ mtld3d/unix/shared/src/params.rs      | 22 ++++++++++++
+ mtld3d/unix/unix/src/handlers.rs      | 27 +++++++++++++++
+ mtld3d/unix/unix/src/lib.rs           |  2 ++
+ mtld3d/unix/unix/src/metal.rs         | 22 ++++++++++++
+ mtld3d/unix/unix/src/metal/command.rs | 29 +++++++++++++---
+ mtld3d/windows/core/src/page_box.rs   | 49 +++++++++++++++++++++++++--
+ mtld3d/windows/d3d9/src/direct3d9.rs  | 19 +++++++++++
+ mtld3d/windows/d3d9/src/lib.rs        |  1 +
+ 10 files changed, 174 insertions(+), 6 deletions(-)
+
+diff --git a/mtld3d/unix/shared/src/lib.rs b/mtld3d/unix/shared/src/lib.rs
+index f44a67f6..095c6c4f 100644
+--- a/mtld3d/unix/shared/src/lib.rs
++++ b/mtld3d/unix/shared/src/lib.rs
+@@ -39,6 +39,7 @@ pub use ffi_boundary::{
+ pub use log_filter::{init_logger, init_logger_to, init_logger_to_filter};
+ pub use mtl_handle::MetalHandle;
+ pub use params::{
++    AllocPagesParams, FreePagesParams,
+     AttachMetalLayerParams, BlitTextureToBufferParams, BufferCreateDesc, CreateBackbufferParams,
+     CreateColorTargetParams, CreateCommandQueueParams, CreateDepthTextureParams,
+     DestroyCommandQueueParams, DestroyResourcesBulkParams, DetachMetalLayerParams, ExtraColorDesc,
+@@ -73,6 +74,9 @@ pub enum Thunks {
+     CreateShaderProgram,
+     CancelShaderProgram,
+     PresentClientSurface,
++    /// MacNeutron: `PageBox` pages from the Unix side (`DeviceCapsFlags::PAGES_FROM_UNIX`).
++    AllocPages,
++    FreePages,
+ }
+ 
+ pub trait Thunk {
+diff --git a/mtld3d/unix/shared/src/mtl.rs b/mtld3d/unix/shared/src/mtl.rs
+index cb609bf6..ae4cba1b 100644
+--- a/mtld3d/unix/shared/src/mtl.rs
++++ b/mtld3d/unix/shared/src/mtl.rs
+@@ -788,6 +788,11 @@ bitflags! {
+         /// waits for the last submitted command buffer before it copies
+         /// out of a resolve target when this is set.
+         const RESOLVE_NEEDS_RETIRE = 1 << 6;
++        /// MacNeutron: `PageBox` pages come from the Unix side (`AllocPages`/`FreePages`).
++        ///
++        /// Set by the winemetal facade's build (D3D9 spec §5.1): in the VM's guest a buffer made over memory must
++        /// be over memory winemetal handed out, which the PE side's own allocator never is.
++        const PAGES_FROM_UNIX = 1 << 7;
+     }
+ }
+ 
+diff --git a/mtld3d/unix/shared/src/params.rs b/mtld3d/unix/shared/src/params.rs
+index 91f6ffee..307fb136 100644
+--- a/mtld3d/unix/shared/src/params.rs
++++ b/mtld3d/unix/shared/src/params.rs
+@@ -170,6 +170,28 @@ impl Thunk for GetDeviceInfoParams {
+     const CODE: u32 = Thunks::GetDeviceInfo as u32;
+ }
+ 
++/// MacNeutron: `len` bytes of zeroed pages for a `PageBox`, from the Unix side (`ptr` 0 on failure).
++#[repr(C, align(8))]
++pub struct AllocPagesParams {
++    pub len: u64,
++    pub ptr: u64, // out
++}
++
++impl Thunk for AllocPagesParams {
++    const CODE: u32 = Thunks::AllocPages as u32;
++}
++
++/// MacNeutron: gives back what `AllocPages` handed out.
++#[repr(C, align(8))]
++pub struct FreePagesParams {
++    pub ptr: u64,
++    pub len: u64,
++}
++
++impl Thunk for FreePagesParams {
++    const CODE: u32 = Thunks::FreePages as u32;
++}
++
+ #[repr(C, align(8))]
+ pub struct CreateCommandQueueParams {
+     pub device_handle: MetalHandle<MTLDeviceKind>, // out
+diff --git a/mtld3d/unix/unix/src/handlers.rs b/mtld3d/unix/unix/src/handlers.rs
+index d255f069..23c8cabd 100644
+--- a/mtld3d/unix/unix/src/handlers.rs
++++ b/mtld3d/unix/unix/src/handlers.rs
+@@ -3,6 +3,7 @@ use std::sync::Arc;
+ 
+ use log::{debug, error, info, warn};
+ use mtld3d_shared::{
++    AllocPagesParams, FreePagesParams,
+     AttachMetalLayerParams, BlitTextureToBufferParams, CreateBackbufferParams,
+     CreateColorTargetParams, CreateCommandQueueParams, CreateDepthTextureParams,
+     DestroyCommandQueueParams, DestroyResourcesBulkParams, DetachMetalLayerParams,
+@@ -197,6 +198,9 @@ pub extern "C" fn get_device_info_handler(args: *mut c_void) -> i32 {
+     if let Some((name, registry_id, caps)) = metal::default_device_info() {
+         params.registry_id = registry_id;
+         params.caps = caps;
++        // MacNeutron: under the winemetal facade PageBox pages come from here (the VM's guest Metal takes no others).
++        #[cfg(mtl_facade)]
++        params.caps.insert(mtld3d_shared::mtl::DeviceCapsFlags::PAGES_FROM_UNIX);
+ 
+         if params.name_ptr != 0 && params.name_buf_len > 0 {
+             let buf_len =
+@@ -224,6 +228,29 @@ pub extern "C" fn get_device_info_handler(args: *mut c_void) -> i32 {
+     STATUS_SUCCESS
+ }
+ 
++/// MacNeutron: zeroed pages for a PageBox (`DeviceCapsFlags::PAGES_FROM_UNIX`): under the winemetal facade, memory
++/// Metal can be made over: winemetal's guest allocator in the VM (`WMTMemoryAlloc`), anonymous pages on macOS.
++pub extern "C" fn alloc_pages_handler(args: *mut c_void) -> i32 {
++    // SAFETY: unix-call handler params; PE side passes *mut AllocPagesParams.
++    let Some(mut params) = (unsafe { InPtrMut::<AllocPagesParams>::opt(args) }) else {
++        return -1;
++    };
++    params.ptr = usize::try_from(params.len).ok().map_or(0, |len| metal::alloc_pages(len) as u64);
++    STATUS_SUCCESS
++}
++
++/// MacNeutron: gives back pages `alloc_pages_handler` handed out.
++pub extern "C" fn free_pages_handler(args: *mut c_void) -> i32 {
++    // SAFETY: unix-call handler params; PE side passes *mut FreePagesParams.
++    let Some(params) = (unsafe { InPtr::<FreePagesParams>::opt(args) }) else {
++        return -1;
++    };
++    if let Ok(len) = usize::try_from(params.len) {
++        metal::free_pages(params.ptr as usize as *mut u8, len);
++    }
++    STATUS_SUCCESS
++}
++
+ /// The record a thunk names, or `None` after a warning.
+ ///
+ /// A null or unknown handle is a device whose creation failed or one already
+diff --git a/mtld3d/unix/unix/src/lib.rs b/mtld3d/unix/unix/src/lib.rs
+index a3ea41f6..fdc088b2 100644
+--- a/mtld3d/unix/unix/src/lib.rs
++++ b/mtld3d/unix/unix/src/lib.rs
+@@ -104,6 +104,8 @@ const fn dispatch(code: Thunks) -> UnixCallFn {
+         Thunks::DetachMetalLayer => arp!(handlers::detach_metal_layer_handler),
+         Thunks::SetPresentWaitPolicy => arp!(handlers::set_present_wait_policy_handler),
+         Thunks::PresentClientSurface => arp!(handlers::present_client_surface_handler),
++        Thunks::AllocPages => arp!(handlers::alloc_pages_handler),
++        Thunks::FreePages => arp!(handlers::free_pages_handler),
+     }
+ }
+ 
+diff --git a/mtld3d/unix/unix/src/metal.rs b/mtld3d/unix/unix/src/metal.rs
+index 244cce49..d526ddd9 100644
+--- a/mtld3d/unix/unix/src/metal.rs
++++ b/mtld3d/unix/unix/src/metal.rs
+@@ -58,3 +58,25 @@ pub use texture::{
+ };
+ pub use upload_quad::ensure_upload_pipeline;
+ pub use upscale::is_supported as upscale_is_supported;
++
++/// MacNeutron: `len` bytes of zeroed pages Metal can be made over, or null (the `AllocPages` thunk).
++///
++/// macOS (the facade's loopback build, and the product build, which never asks): anonymous pages, 16 KiB-aligned as
++/// the kernel maps them on Apple Silicon. The VM's guest: winemetal's own allocator (M2b).
++#[must_use]
++pub fn alloc_pages(len: usize) -> *mut u8 {
++    // SAFETY: an anonymous private mapping; nothing else names the range.
++    let ptr = unsafe {
++        libc::mmap(core::ptr::null_mut(), len, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_ANON | libc::MAP_PRIVATE, -1, 0)
++    };
++    if ptr == libc::MAP_FAILED { core::ptr::null_mut() } else { ptr.cast() }
++}
++
++/// MacNeutron: gives back `alloc_pages`' pages (the `FreePages` thunk).
++pub fn free_pages(ptr: *mut u8, len: usize) {
++    if !ptr.is_null() {
++        // SAFETY: a mapping alloc_pages made of `len` bytes, no longer used (the PE side frees a PageBox once
++        // Metal no longer reads it).
++        unsafe { libc::munmap(ptr.cast(), len) };
++    }
++}
+diff --git a/mtld3d/unix/unix/src/metal/command.rs b/mtld3d/unix/unix/src/metal/command.rs
+index d430a235..8b485b6c 100644
+--- a/mtld3d/unix/unix/src/metal/command.rs
++++ b/mtld3d/unix/unix/src/metal/command.rs
+@@ -3823,17 +3823,23 @@ pub fn blit_texture_to_buffer(args: &BlitArgs<'_>) -> bool {
+     // CPU read on `waitUntilCompleted` return. On UMA the storage mode
+     // collapses to Shared semantics and synchronize is a no-op, so
+     // there's no Apple-Silicon overhead.
++    // MacNeutron: under the winemetal facade the GPU writes a staging buffer of its own, copied into the caller's
++    // memory once complete: in the VM the caller's pages are guest memory Metal can't be given.
++    #[cfg(mtl_facade)]
++    let dst_buffer = device.newBufferWithLength_options(to_usize(dst_len), MTLResourceOptions::StorageModeShared);
+     // SAFETY: `ptr` is the PE-supplied dst pointer (non-null by the check
+     // above); `dst_len` matches its allocation; deallocator is None so the
+     // PE allocation is never freed by Metal.
+-    let Some(dst_buffer) = (unsafe {
++    #[cfg(not(mtl_facade))]
++    let dst_buffer = unsafe {
+         device.newBufferWithBytesNoCopy_length_options_deallocator(
+             ptr,
+             to_usize(dst_len),
+             MTLResourceOptions::StorageModeManaged,
+             None,
+         )
+-    }) else {
++    };
++    let Some(dst_buffer) = dst_buffer else {
+         error!(target: LOG_TARGET, "blit_texture_to_buffer: newBufferWithBytesNoCopy failed");
+         return false;
+     };
+@@ -4029,11 +4035,26 @@ pub fn blit_texture_to_buffer(args: &BlitArgs<'_>) -> bool {
+     let status = cmd_buf.status();
+     diagnostics::completion(&cmd_buf, status, None, "readback-wait");
+     // The wrapper owns no pages; the caller keeps the destination allocation.
+-    readback_completed(status, || {
++    let completed = readback_completed(status, || {
+         let error = cmd_buf.error();
+         diagnostics::failure(&cmd_buf, None, "readback-wait", error.as_deref());
+         error
+-    })
++    });
++    #[cfg(mtl_facade)]
++    if completed {
++        // SAFETY: the staging buffer's `dst_len` bytes, written by the completed blit, into the caller's
++        // allocation of that length.
++        unsafe {
++            core::ptr::copy_nonoverlapping(
++                dst_buffer.contents().as_ptr().cast::<u8>(),
++                ptr.as_ptr().cast::<u8>(),
++                to_usize(dst_len),
++            );
++        }
++    }
++    #[cfg(not(mtl_facade))]
++    let _ = ptr;
++    completed
+ }
+ 
+ /// Accept a readback only after Metal reports successful completion.
+diff --git a/mtld3d/windows/core/src/page_box.rs b/mtld3d/windows/core/src/page_box.rs
+index eab55d9d..4c989263 100644
+--- a/mtld3d/windows/core/src/page_box.rs
++++ b/mtld3d/windows/core/src/page_box.rs
+@@ -270,9 +270,31 @@ pub struct PageBox {
+     readers: AtomicU32,
+ }
+ 
++/// MacNeutron: where `PageBox` pages come from when the Unix side asks for them (`PAGES_FROM_UNIX`): the VM's guest
++/// Metal is made only over memory winemetal handed out. Zeroed pages of a whole number of [`PAGE_SIZE`]s.
++#[derive(Clone, Copy)]
++pub struct PageAllocator {
++    pub alloc: fn(usize) -> Option<NonNull<u8>>,
++    pub free: fn(NonNull<u8>, usize),
++}
++
++/// The allocator `set_page_allocator` installed.
++///
++/// Process-wide by necessity: every `PageBox` constructor reads it, from any device and thread, and the Unix side's
++/// answer it follows is one per process (the `GetDeviceInfo` cache). Set once, before the first page.
++static PAGE_ALLOCATOR: std::sync::OnceLock<PageAllocator> = std::sync::OnceLock::new();
++
++/// Installs the Unix side's page allocator for every `PageBox` made from here on (each keeps the allocator it came
++/// from: one made before is freed as it was made).
++pub fn set_page_allocator(allocator: PageAllocator) {
++    let _ = PAGE_ALLOCATOR.set(allocator);
++}
++
+ /// The runtime responsible for releasing a page allocation.
+ enum PageOwnership {
+     Native(Layout),
++    /// MacNeutron: pages from the [`PageAllocator`].
++    Hooked,
+     #[cfg(not(windows))]
+     Guest {
+         completion: LeaseCompletionPtr,
+@@ -337,6 +359,9 @@ impl PageBox {
+     /// staging.
+     #[must_use]
+     pub fn try_new_uninit(logical_len: usize) -> Option<Self> {
++        if let Some(allocator) = PAGE_ALLOCATOR.get() {
++            return Self::try_new_hooked(allocator, logical_len);
++        }
+         let (len, layout) = Self::try_layout_for(logical_len)?;
+         // SAFETY: `try_layout_for` returns a non-zero-size, page-aligned Layout.
+         let ptr = NonNull::new(unsafe { alloc::alloc(layout) })?;
+@@ -348,12 +373,24 @@ impl PageBox {
+     /// The same fallback-only contract as [`Self::try_new_uninit`].
+     #[must_use]
+     pub fn try_new_zeroed(logical_len: usize) -> Option<Self> {
++        if let Some(allocator) = PAGE_ALLOCATOR.get() {
++            return Self::try_new_hooked(allocator, logical_len);
++        }
+         let (len, layout) = Self::try_layout_for(logical_len)?;
+         // SAFETY: `try_layout_for` returns a non-zero-size, page-aligned Layout.
+         let ptr = NonNull::new(unsafe { alloc::alloc_zeroed(layout) })?;
+         Some(Self::adopt(ptr, len, logical_len, layout))
+     }
+ 
++    /// MacNeutron: zeroed pages from the installed allocator, counted as `adopt` counts.
++    fn try_new_hooked(allocator: &PageAllocator, logical_len: usize) -> Option<Self> {
++        let (len, _) = Self::try_layout_for(logical_len)?;
++        let ptr = (allocator.alloc)(len)?;
++        let mut page_box = Self::adopt(ptr, len, logical_len, Layout::new::<u8>());
++        page_box.ownership = PageOwnership::Hooked;
++        Some(page_box)
++    }
++
+     /// Wrap a fresh allocation of `layout` and count it.
+     fn adopt(ptr: NonNull<u8>, len: usize, logical_len: usize, layout: Layout) -> Self {
+         note_alloc(len);
+@@ -418,7 +455,7 @@ impl PageBox {
+     /// Whether the allocating runtime can park this box in its recycle pool.
+     #[must_use]
+     pub const fn is_native_owned(&self) -> bool {
+-        matches!(self.ownership, PageOwnership::Native(_))
++        matches!(self.ownership, PageOwnership::Native(_) | PageOwnership::Hooked)
+     }
+ 
+     /// Address of the fixed-width reader count kept alive by a page lease.
+@@ -429,7 +466,7 @@ impl PageBox {
+ 
+     const fn reader_count(&self) -> &AtomicU32 {
+         match &self.ownership {
+-            PageOwnership::Native(_) => &self.readers,
++            PageOwnership::Native(_) | PageOwnership::Hooked => &self.readers,
+             #[cfg(not(windows))]
+             PageOwnership::Guest { readers, .. } => {
+                 // SAFETY: from_guest_lease pins the original aligned counter until Drop.
+@@ -544,6 +581,14 @@ impl Drop for PageBox {
+     fn drop(&mut self) {
+         let layout = match &self.ownership {
+             PageOwnership::Native(layout) => *layout,
++            PageOwnership::Hooked => {
++                note_free(self.len);
++                PAGEBOX_LIVE_BYTES.fetch_sub(self.len as u64, core::sync::atomic::Ordering::Relaxed);
++                if let Some(allocator) = PAGE_ALLOCATOR.get() {
++                    (allocator.free)(self.ptr, self.len);
++                }
++                return;
++            }
+             #[cfg(not(windows))]
+             PageOwnership::Guest { completion, .. } => {
+                 // SAFETY: from_guest_lease keeps this cell alive until this final acknowledgment.
+diff --git a/mtld3d/windows/d3d9/src/direct3d9.rs b/mtld3d/windows/d3d9/src/direct3d9.rs
+index 0f802fbf..9c338477 100644
+--- a/mtld3d/windows/d3d9/src/direct3d9.rs
++++ b/mtld3d/windows/d3d9/src/direct3d9.rs
+@@ -756,6 +756,25 @@ fn device_info() -> &'static CachedDeviceInfo {
+     &INFO
+ }
+ 
++/// MacNeutron: `PageBox` pages from the Unix side when it asks (`PAGES_FROM_UNIX`, the winemetal facade's build):
++/// installed at the first interface, before any page.
++pub fn install_page_allocator() {
++    if !device_info().caps.contains(DeviceCapsFlags::PAGES_FROM_UNIX) {
++        return;
++    }
++    fn alloc(len: usize) -> Option<core::ptr::NonNull<u8>> {
++        let mut params = mtld3d_shared::AllocPagesParams { len: len as u64, ptr: 0 };
++        unix_call(&mut params);
++        core::ptr::NonNull::new(params.ptr as usize as *mut u8)
++    }
++    fn free(ptr: core::ptr::NonNull<u8>, len: usize) {
++        let mut params = mtld3d_shared::FreePagesParams { ptr: ptr.as_ptr() as usize as u64, len: len as u64 };
++        unix_call(&mut params);
++    }
++    mtld3d_core::page_box::set_page_allocator(mtld3d_core::page_box::PageAllocator { alloc, free });
++    log::info!(target: LOG_TARGET, "page boxes: pages from the unix side (winemetal)");
++}
++
+ /// Whether the Metal device can create border-colour samplers.
+ ///
+ /// `GetDeviceCaps` strips `D3DPTADDRESSCAPS_BORDER` when it cannot
+diff --git a/mtld3d/windows/d3d9/src/lib.rs b/mtld3d/windows/d3d9/src/lib.rs
+index 7b48cf59..256f57a5 100644
+--- a/mtld3d/windows/d3d9/src/lib.rs
++++ b/mtld3d/windows/d3d9/src/lib.rs
+@@ -302,6 +302,7 @@ fn create_interface(extended: bool) -> *mut Direct3D9 {
+     // interface names it again and the unix side keeps the file it has.
+     let cfg = config::load();
+     log_sink::open(&cfg);
++    direct3d9::install_page_allocator();
+     // The page-box pool is one per process; the interface resolved most
+     // recently sizes it.
+     page_box_pool::PAGEBOX_POOL
+-- 
+2.54.0 (Apple Git-157)
+

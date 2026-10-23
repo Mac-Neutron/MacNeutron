@@ -5,10 +5,13 @@
 #include <stdint.h>
 #include "../proto.h"
 
-struct mn_blob { uint32_t gem; uint64_t blob_id, size; void *ptr; };
+struct mn_blob { uint32_t gem; uint64_t blob_id, size; void *ptr; uint8_t low; };
 
 int mn_open(void);                                   /* once per process: 0 or -errno */
 int mn_blob_alloc(uint64_t size, struct mn_blob *b); /* rounded up to MN_PAGE; guest and host share ptr's memory */
+/* The same within a 32-bit (WoW64) process's address space, for its DXMT: mapped over a range Wine's allocator reserved and
+ * committed, so Wine's view of the 32-bit address space stays right (as winevulkan places a WoW64 mapping). */
+int mn_blob_alloc_low(uint64_t size, struct mn_blob *b);
 int mn_blob_free(struct mn_blob *b);                 /* a synchronous MN_OP_BLOB_RELEASE, then GEM_CLOSE */
 int mn_send(uint32_t op, const void *p, uint32_t len); /* asynchronous, on this thread's ring: 0 or -errno */
 /* Synchronous: returns the host's status (negative: an error), with up to cap reply bytes in reply. */

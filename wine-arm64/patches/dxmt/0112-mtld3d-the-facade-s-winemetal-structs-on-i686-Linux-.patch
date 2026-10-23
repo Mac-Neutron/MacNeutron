@@ -1,0 +1,562 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Wed, 21 Oct 2026 10:24:12 -0400
+Subject: [PATCH] mtld3d: the facade's winemetal structs on i686 Linux too (old
+ WoW64)
+
+An i686 mtld3d.so (old WoW64's 32-bit Unix side in the VM's guest) talks
+to an i686 winemetal.so that takes DXMT's i386 layouts, the x86_64 ones.
+Rust gives i686 Linux a 4-byte u64 and pointer: winemetal's memory
+pointers are wmt::Ptr (8 bytes, the upper half 0 in a 32-bit process),
+structs the C side aligns to 8 say align(8), and the draw nodes and
+NewTextureView spell out the C padding; the scissor node takes u64s
+rather than objc2's NSUInteger. The x86_64 and aarch64 layouts don't
+change. The shared crate's u64 alignment probe skips i686 Linux, where
+MacNeutron's mtld3d-layout32-check.sh compares every repr(C) struct of
+the shared crate and the facade with the x86_64 build's (132 structs).
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ mtld3d/.gitignore                        |  1 +
+ mtld3d/scripts/derive_inventory.txt      |  1 +
+ mtld3d/unix/mtl/src/lib.rs               |  6 +-
+ mtld3d/unix/mtl/src/metal.rs             | 31 +++++-----
+ mtld3d/unix/mtl/src/metal/command.rs     | 42 +++++++++++---
+ mtld3d/unix/mtl/src/metal/descriptors.rs |  2 +-
+ mtld3d/unix/mtl/src/metal_fx.rs          |  2 +-
+ mtld3d/unix/mtl/src/quartz_core.rs       |  4 +-
+ mtld3d/unix/mtl/src/wmt.rs               | 72 +++++++++++++++++-------
+ mtld3d/unix/shared/src/params.rs         | 20 +++++--
+ 10 files changed, 125 insertions(+), 56 deletions(-)
+
+diff --git a/mtld3d/.gitignore b/mtld3d/.gitignore
+index 2b3014c8..e289de5b 100644
+--- a/mtld3d/.gitignore
++++ b/mtld3d/.gitignore
+@@ -3,6 +3,7 @@
+ /unix/target
+ /unix/target-wm
+ /unix/target-linux
++/unix/target-linux-i686
+ /windows/target-native
+ /.wine-isolated
+ .DS_Store
+diff --git a/mtld3d/scripts/derive_inventory.txt b/mtld3d/scripts/derive_inventory.txt
+index a1462514..c6b93f9d 100644
+--- a/mtld3d/scripts/derive_inventory.txt
++++ b/mtld3d/scripts/derive_inventory.txt
+@@ -15,6 +15,7 @@ unix/mtl/src/metal/command.rs Dispatch Clone,Copy
+ unix/mtl/src/metal/command.rs Draw Clone,Copy
+ unix/mtl/src/metal/command.rs DrawIndexed Clone,Copy
+ unix/mtl/src/metal/command.rs Raster Clone,Copy,PartialEq
++unix/mtl/src/metal/command.rs ScissorRect Clone,Copy
+ unix/mtl/src/metal/command.rs SetBuffer Clone,Copy
+ unix/mtl/src/metal/command.rs SetBytes Clone,Copy
+ unix/mtl/src/metal/command.rs SetHandle Clone,Copy
+diff --git a/mtld3d/unix/mtl/src/lib.rs b/mtld3d/unix/mtl/src/lib.rs
+index 439503e6..b282b8d2 100644
+--- a/mtld3d/unix/mtl/src/lib.rs
++++ b/mtld3d/unix/mtl/src/lib.rs
+@@ -53,17 +53,17 @@ pub mod memory {
+     /// Null when it has none.
+     #[must_use]
+     pub fn alloc(len: usize) -> *mut u8 {
+-        let mut params = wmt::Memory { length: len as u64, ptr: core::ptr::null_mut() };
++        let mut params = wmt::Memory { length: len as u64, ptr: wmt::Ptr::null() };
+         // SAFETY: slot 153 writes the allocation's address, or null.
+         let status = unsafe { table::call(wmt::MEMORY_ALLOC, &mut params) };
+-        if status == 0 { params.ptr.cast() } else { core::ptr::null_mut() }
++        if status == 0 { params.ptr.get().cast() } else { core::ptr::null_mut() }
+     }
+ 
+     /// Gives back memory [`alloc`] returned (slot 154).
+     ///
+     /// Winemetal keeps it until no buffer is made over it.
+     pub fn free(ptr: *mut u8) {
+-        let mut params = wmt::Memory { length: 0, ptr: ptr.cast() };
++        let mut params = wmt::Memory { length: 0, ptr: wmt::Ptr::new(ptr.cast()) };
+         // SAFETY: slot 154 on an allocation of slot 153's.
+         unsafe { table::call(wmt::MEMORY_FREE, &mut params) };
+     }
+diff --git a/mtld3d/unix/mtl/src/metal.rs b/mtld3d/unix/mtl/src/metal.rs
+index 1034330c..298c09a0 100644
+--- a/mtld3d/unix/mtl/src/metal.rs
++++ b/mtld3d/unix/mtl/src/metal.rs
+@@ -195,7 +195,7 @@ pub unsafe trait MTLTexture: MTLResource {
+             size: wmt::Size { width: region.size.width as u64, height: region.size.height as u64, depth: region.size.depth as u64 },
+             level: level as u64,
+             slice: slice as u64,
+-            data: pixel_bytes.as_ptr(),
++            data: wmt::Ptr::new(pixel_bytes.as_ptr()),
+             bytes_per_row: bytes_per_row as u64,
+             bytes_per_image: bytes_per_image as u64,
+         };
+@@ -258,6 +258,7 @@ fn texture_view(
+         slice_start: slices.location as u16,
+         slice_count: slices.length as u16,
+         swizzle: wmt::TextureSwizzleChannels { r: s[0], g: s[1], b: s[2], a: s[3] },
++        padding: [0; 4],
+         ret: 0,
+         gpu_resource_id: 0,
+     };
+@@ -452,15 +453,15 @@ pub fn MTLCreateSystemDefaultDevice() -> Option<Retained<ProtocolObject<dyn MTLD
+ }
+ 
+ fn new_buffer(device: u64, length: usize, options: MTLResourceOptions, memory: *mut c_void) -> Option<Retained<ProtocolObject<dyn MTLBuffer>>> {
+-    let mut info = wmt::BufferInfo { length: length as u64, options: options.bits() as u64, memory, gpu_address: 0 };
+-    let mut params = wmt::NewWithInfo { device, info: (&raw mut info).cast(), ret: 0 };
++    let mut info = wmt::BufferInfo { length: length as u64, options: options.bits() as u64, memory: wmt::Ptr::new(memory), gpu_address: 0 };
++    let mut params = wmt::NewWithInfo { device, info: wmt::Ptr::new((&raw mut info).cast()), ret: 0 };
+     // SAFETY: slot 18 fills the info's memory and GPU address.
+     unsafe { table::call(wmt::DEVICE_NEW_BUFFER, &mut params) };
+     let buffer = objc2::from_plus_one(params.ret)?;
+     meta::with(params.ret, |e| {
+         e.device = device;
+         e.buffer_length = length as u64;
+-        e.buffer_contents = info.memory as usize;
++        e.buffer_contents = info.memory.get() as usize;
+         e.storage_mode = ((options.bits() >> MTLResourceStorageModeShift) & 0xf) as u64;
+     });
+     Some(buffer)
+@@ -517,7 +518,7 @@ pub unsafe trait MTLDevice: NSObjectProtocol {
+     }
+     fn newDepthStencilStateWithDescriptor(&self, descriptor: &MTLDepthStencilDescriptor) -> Option<Retained<ProtocolObject<dyn MTLDepthStencilState>>> {
+         let info = descriptor.info();
+-        let mut params = wmt::NewWithConstInfo { device: handle_of(self), info: (&raw const info).cast(), ret: 0 };
++        let mut params = wmt::NewWithConstInfo { device: handle_of(self), info: wmt::Ptr::new((&raw const info).cast()), ret: 0 };
+         // SAFETY: slot 20 reads the info.
+         unsafe { table::call(wmt::DEVICE_NEW_DEPTH_STENCIL_STATE, &mut params) };
+         let state = objc2::from_plus_one(params.ret)?;
+@@ -527,7 +528,7 @@ pub unsafe trait MTLDevice: NSObjectProtocol {
+     }
+     fn newTextureWithDescriptor(&self, descriptor: &MTLTextureDescriptor) -> Option<Retained<ProtocolObject<dyn MTLTexture>>> {
+         let (mut info, texture) = descriptor.info();
+-        let mut params = wmt::NewWithInfo { device: handle_of(self), info: (&raw mut info).cast(), ret: 0 };
++        let mut params = wmt::NewWithInfo { device: handle_of(self), info: wmt::Ptr::new((&raw mut info).cast()), ret: 0 };
+         // SAFETY: slot 21 reads the info and fills its GPU resource id.
+         unsafe { table::call(wmt::DEVICE_NEW_TEXTURE, &mut params) };
+         let created = objc2::from_plus_one(params.ret)?;
+@@ -541,7 +542,7 @@ pub unsafe trait MTLDevice: NSObjectProtocol {
+     }
+     fn newSamplerStateWithDescriptor(&self, descriptor: &MTLSamplerDescriptor) -> Option<Retained<ProtocolObject<dyn MTLSamplerState>>> {
+         let mut info = descriptor.info();
+-        let mut params = wmt::NewWithInfo { device: handle_of(self), info: (&raw mut info).cast(), ret: 0 };
++        let mut params = wmt::NewWithInfo { device: handle_of(self), info: wmt::Ptr::new((&raw mut info).cast()), ret: 0 };
+         // SAFETY: slot 19 reads the info and fills its GPU resource id.
+         unsafe { table::call(wmt::DEVICE_NEW_SAMPLER_STATE, &mut params) };
+         let sampler = objc2::from_plus_one(params.ret)?;
+@@ -560,9 +561,9 @@ pub unsafe trait MTLDevice: NSObjectProtocol {
+             let opts = options.info();
+             let mut params = wmt::NewLibrarySourceOptions {
+                 device,
+-                source: text.as_ptr(),
++                source: wmt::Ptr::new(text.as_ptr()),
+                 length: text.len() as u64,
+-                options: &raw const opts,
++                options: wmt::Ptr::new(&raw const opts),
+                 ret_error: 0,
+                 ret_library: 0,
+             };
+@@ -570,7 +571,7 @@ pub unsafe trait MTLDevice: NSObjectProtocol {
+             unsafe { table::call(wmt::DEVICE_NEW_LIBRARY_WITH_SOURCE_OPTIONS, &mut params) };
+             (params.ret_library, params.ret_error)
+         } else {
+-            let mut params = wmt::NewLibrarySource { device, source: text.as_ptr(), length: text.len() as u64, ret_error: 0, ret_library: 0 };
++            let mut params = wmt::NewLibrarySource { device, source: wmt::Ptr::new(text.as_ptr()), length: text.len() as u64, ret_error: 0, ret_library: 0 };
+             // SAFETY: slot 144 reads the source.
+             unsafe { table::call(wmt::DEVICE_NEW_LIBRARY_WITH_SOURCE, &mut params) };
+             (params.ret_library, params.ret_error)
+@@ -592,8 +593,8 @@ pub unsafe trait MTLDevice: NSObjectProtocol {
+         let (pso, error) = if let Some(vertex) = vertex {
+             let mut params = wmt::NewPipelineVertex {
+                 device,
+-                info: (&raw const info).cast(),
+-                vertex: (&raw const vertex).cast(),
++                info: wmt::Ptr::new((&raw const info).cast()),
++                vertex: wmt::Ptr::new((&raw const vertex).cast()),
+                 ret_error: 0,
+                 ret_pso: 0,
+             };
+@@ -601,7 +602,7 @@ pub unsafe trait MTLDevice: NSObjectProtocol {
+             unsafe { table::call(wmt::DEVICE_NEW_RENDER_PIPELINE_STATE_WITH_VERTEX_DESCRIPTOR, &mut params) };
+             (params.ret_pso, params.ret_error)
+         } else {
+-            let mut params = wmt::NewPipeline { device, info: (&raw const info).cast(), ret_error: 0, ret_pso: 0 };
++            let mut params = wmt::NewPipeline { device, info: wmt::Ptr::new((&raw const info).cast()), ret_error: 0, ret_pso: 0 };
+             // SAFETY: slot 34 reads the info.
+             unsafe { table::call(wmt::DEVICE_NEW_RENDER_PIPELINE_STATE, &mut params) };
+             (params.ret_pso, params.ret_error)
+@@ -623,7 +624,7 @@ pub unsafe trait MTLDevice: NSObjectProtocol {
+     ) -> Result<Retained<ProtocolObject<dyn MTLComputePipelineState>>, Retained<NSError>> {
+         let info = wmt::ComputePipelineInfo {
+             compute_function: compute_function.handle(),
+-            binary_archives_for_lookup: core::ptr::null(),
++            binary_archives_for_lookup: wmt::Ptr::null(),
+             binary_archive_for_serialization: 0,
+             num_binary_archives_for_lookup: 0,
+             fail_on_binary_archive_miss: false,
+@@ -632,7 +633,7 @@ pub unsafe trait MTLDevice: NSObjectProtocol {
+             immutable_buffers: 0,
+         };
+         let device = handle_of(self);
+-        let mut params = wmt::NewPipeline { device, info: (&raw const info).cast(), ret_error: 0, ret_pso: 0 };
++        let mut params = wmt::NewPipeline { device, info: wmt::Ptr::new((&raw const info).cast()), ret_error: 0, ret_pso: 0 };
+         // SAFETY: slot 29 reads the info.
+         unsafe { table::call(wmt::DEVICE_NEW_COMPUTE_PIPELINE_STATE, &mut params) };
+         match objc2::from_plus_one(params.ret_pso) {
+diff --git a/mtld3d/unix/mtl/src/metal/command.rs b/mtld3d/unix/mtl/src/metal/command.rs
+index 0bf7483c..edd75e9a 100644
+--- a/mtld3d/unix/mtl/src/metal/command.rs
++++ b/mtld3d/unix/mtl/src/metal/command.rs
+@@ -44,7 +44,8 @@ const MAX_NODES: usize = 65_536;
+ /// Bytes of nodes and payloads past which a list is handed over before it ends.
+ const MAX_BYTES: usize = 4 << 20;
+ 
+-#[repr(C)]
++// `align(8)` where the C node is (i686 Linux's own `u64` aligns to 4; see `wmt`).
++#[repr(C, align(8))]
+ struct Node<T> {
+     ty: u16,
+     reserved: [u16; 3],
+@@ -108,7 +109,7 @@ impl Nodes {
+             unsafe { *base.add(pointer) = base.add(payload) as u64 };
+         }
+         // SAFETY: start 0 is the head; the list stays put for the call.
+-        let mut params = wmt::ObjCmdNoRet { encoder, cmd_head: unsafe { base.add(self.starts[0]) }.cast() };
++        let mut params = wmt::ObjCmdNoRet { encoder, cmd_head: wmt::Ptr::new(unsafe { base.add(self.starts[0]) }.cast()) };
+         // SAFETY: an encodeCommands slot over a well-formed list.
+         unsafe { table::call(slot, &mut params) };
+         self.words.clear();
+@@ -182,13 +183,13 @@ fn handle_or_zero<T: ?Sized>(obj: Option<&T>) -> u64 {
+ 
+ // --- Node bodies (`wmtcmd_*` past the header).
+ 
+-#[repr(C)]
++#[repr(C, align(8))]
+ #[derive(Clone, Copy)]
+ struct SetBuffer { buffer: u64, offset: u64, index: u8 }
+-#[repr(C)]
++#[repr(C, align(8))]
+ #[derive(Clone, Copy)]
+ struct SetBytes { bytes: u64, length: u64, index: u8 }
+-#[repr(C)]
++#[repr(C, align(8))]
+ #[derive(Clone, Copy)]
+ struct SetObject { object: u64, index: u8 }
+ #[repr(C)]
+@@ -197,15 +198,29 @@ struct SetHandle { handle: u64 }
+ #[repr(C)]
+ #[derive(Clone, Copy)]
+ struct SetRasterizer { fill: u8, cull: u8, clip: u8, winding: u8, bias: f32, slope: f32, clamp: f32 }
+-#[repr(C)]
++#[repr(C, align(8))]
+ #[derive(Clone, Copy)]
+ struct SetVisibility { offset: u64, mode: u8 }
+ #[repr(C)]
+ #[derive(Clone, Copy)]
+-struct Draw { primitive: u8, start: u64, count: u64, instances: u32, base_instance: u32 }
++struct Draw { primitive: u8, padding: [u8; 7], start: u64, count: u64, instances: u32, base_instance: u32 }
++#[repr(C, align(8))]
++#[derive(Clone, Copy)]
++struct DrawIndexed {
++    primitive: u8,
++    index_type: u8,
++    padding: [u8; 6],
++    count: u64,
++    buffer: u64,
++    offset: u64,
++    instances: u32,
++    base_vertex: i32,
++    base_instance: u32,
++}
++/// `WMTScissorRect`: objc2's `MTLScissorRect` holds `NSUInteger`s.
+ #[repr(C)]
+ #[derive(Clone, Copy)]
+-struct DrawIndexed { primitive: u8, index_type: u8, count: u64, buffer: u64, offset: u64, instances: u32, base_vertex: i32, base_instance: u32 }
++struct ScissorRect { x: u64, y: u64, width: u64, height: u64 }
+ #[repr(C)]
+ #[derive(Clone, Copy)]
+ struct BlendColor { red: f32, green: f32, blue: f32, alpha: f32, stencil_ref: u8 }
+@@ -316,6 +331,7 @@ pub unsafe trait MTLRenderCommandEncoder: MTLCommandEncoder {
+         });
+     }
+     fn setScissorRect(&self, rect: MTLScissorRect) {
++        let rect = ScissorRect { x: rect.x as u64, y: rect.y as u64, width: rect.width as u64, height: rect.height as u64 };
+         record(handle_of(self), |s| { s.nodes.push(wmt::RENDER_SET_SCISSOR_RECT, rect); });
+     }
+     fn setTriangleFillMode(&self, fill_mode: MTLTriangleFillMode) {
+@@ -367,7 +383,14 @@ pub unsafe trait MTLRenderCommandEncoder: MTLCommandEncoder {
+         record(handle_of(self), |s| {
+             s.nodes.push(
+                 wmt::RENDER_DRAW,
+-                Draw { primitive: primitive_type.0 as u8, start: vertex_start as u64, count: vertex_count as u64, instances: 1, base_instance: 0 },
++                Draw {
++                    primitive: primitive_type.0 as u8,
++                    padding: [0; 7],
++                    start: vertex_start as u64,
++                    count: vertex_count as u64,
++                    instances: 1,
++                    base_instance: 0,
++                },
+             );
+         });
+     }
+@@ -391,6 +414,7 @@ pub unsafe trait MTLRenderCommandEncoder: MTLCommandEncoder {
+                 DrawIndexed {
+                     primitive: primitive_type.0 as u8,
+                     index_type: index_type.0 as u8,
++                    padding: [0; 6],
+                     count: index_count as u64,
+                     buffer,
+                     offset: index_buffer_offset as u64,
+diff --git a/mtld3d/unix/mtl/src/metal/descriptors.rs b/mtld3d/unix/mtl/src/metal/descriptors.rs
+index e48ceeb7..4c170870 100644
+--- a/mtld3d/unix/mtl/src/metal/descriptors.rs
++++ b/mtld3d/unix/mtl/src/metal/descriptors.rs
+@@ -669,7 +669,7 @@ impl MTLRenderPipelineDescriptor {
+             tessellation_output_winding_order: 0,
+             tessellation_factor_step: 0,
+             binary_archive_for_serialization: 0,
+-            binary_archives_for_lookup: core::ptr::null(),
++            binary_archives_for_lookup: wmt::Ptr::null(),
+             num_binary_archives_for_lookup: 0,
+             fail_on_binary_archive_miss: false,
+             support_indirect_command_buffers: false,
+diff --git a/mtld3d/unix/mtl/src/metal_fx.rs b/mtld3d/unix/mtl/src/metal_fx.rs
+index 0ca0c3c2..69561692 100644
+--- a/mtld3d/unix/mtl/src/metal_fx.rs
++++ b/mtld3d/unix/mtl/src/metal_fx.rs
+@@ -100,7 +100,7 @@ impl MTLFXSpatialScalerDescriptor {
+     /// objc2's contract.
+     pub unsafe fn newSpatialScalerWithDevice(&self, device: &ProtocolObject<dyn MTLDevice>) -> Option<Retained<ProtocolObject<dyn MTLFXSpatialScaler>>> {
+         let info = *lock(&self.d);
+-        let mut params = wmt::NewWithConstInfo { device: device.handle(), info: (&raw const info).cast(), ret: 0 };
++        let mut params = wmt::NewWithConstInfo { device: device.handle(), info: wmt::Ptr::new((&raw const info).cast()), ret: 0 };
+         // SAFETY: slot 57 reads the info.
+         unsafe { table::call(wmt::DEVICE_NEW_SPATIAL_SCALER, &mut params) };
+         let scaler = objc2::from_plus_one(params.ret)?;
+diff --git a/mtld3d/unix/mtl/src/quartz_core.rs b/mtld3d/unix/mtl/src/quartz_core.rs
+index c102809a..3f743765 100644
+--- a/mtld3d/unix/mtl/src/quartz_core.rs
++++ b/mtld3d/unix/mtl/src/quartz_core.rs
+@@ -64,7 +64,7 @@ impl CAMetalLayer {
+ 
+     fn props(&self) -> wmt::LayerProps {
+         let mut props = wmt::LayerProps::default();
+-        let mut params = wmt::ObjPtrNoRet { handle: handle_of(self), arg: (&raw mut props).cast() };
++        let mut params = wmt::ObjPtrNoRet { handle: handle_of(self), arg: wmt::Ptr::new((&raw mut props).cast()) };
+         // SAFETY: slot 71 fills the props.
+         unsafe { table::call(wmt::LAYER_GET_PROPS, &mut params) };
+         props
+@@ -73,7 +73,7 @@ impl CAMetalLayer {
+     fn set(&self, f: impl FnOnce(&mut wmt::LayerProps)) {
+         let mut props = self.props();
+         f(&mut props);
+-        let mut params = wmt::ObjConstPtrNoRet { handle: handle_of(self), arg: (&raw const props).cast() };
++        let mut params = wmt::ObjConstPtrNoRet { handle: handle_of(self), arg: wmt::Ptr::new((&raw const props).cast()) };
+         // SAFETY: slot 70 reads the props.
+         unsafe { table::call(wmt::LAYER_SET_PROPS, &mut params) };
+     }
+diff --git a/mtld3d/unix/mtl/src/wmt.rs b/mtld3d/unix/mtl/src/wmt.rs
+index 302ab25a..c99b10ae 100644
+--- a/mtld3d/unix/mtl/src/wmt.rs
++++ b/mtld3d/unix/mtl/src/wmt.rs
+@@ -2,6 +2,11 @@
+ //!
+ //! The ones the facade passes, laid out as the 64-bit Unix side reads them. Enums are their C base
+ //! types: `WMTLoadAction`, `WMTStoreAction` and `WMTGPUFamily` have none and are `int`.
++//!
++//! The same layouts on i686 Linux (old WoW64's Unix side in the VM's guest), whose winemetal.so
++//! takes DXMT's i386 ones: a pointer is a [`Ptr`], and a struct the C side aligns to 8 says so
++//! (`align(8)`), as this target's `u64` aligns to 4 (MacNeutron's `mtld3d-layout32-check.sh`
++//! compares the two builds).
+ 
+ 
+ /// A winemetal object.
+@@ -9,6 +14,34 @@
+ /// On macOS the Objective-C object's address, in the VM's guest a handle the guest picked.
+ pub type Handle = u64;
+ 
++/// A pointer in winemetal's structs (`WMTMemoryPointer`).
++///
++/// 8 bytes on either width, its upper half 0 in a 32-bit process.
++#[repr(C)]
++pub struct Ptr<T> {
++    ptr: *mut T,
++    #[cfg(target_pointer_width = "32")]
++    high: u32,
++}
++
++impl<T> Ptr<T> {
++    /// `ptr`, mutable or not.
++    #[must_use]
++    pub const fn new(ptr: *const T) -> Self {
++        Self {
++            ptr: ptr.cast_mut(),
++            #[cfg(target_pointer_width = "32")]
++            high: 0,
++        }
++    }
++
++    #[must_use]
++    pub const fn null() -> Self { Self::new(core::ptr::null()) }
++
++    #[must_use]
++    pub const fn get(&self) -> *mut T { self.ptr }
++}
++
+ // Slots: the entries of winemetal.so's `__wine_unix_call_funcs`, numbered as the VM guest's catalog does.
+ pub const RETAIN: u32 = 0;
+ pub const RELEASE: u32 = 1;
+@@ -195,40 +228,40 @@ pub struct ObjObjDoubleNoRet { pub handle: Handle, pub arg0: Handle, pub arg1: f
+ #[derive(Default)]
+ pub struct ObjObjU64NoRet { pub handle: Handle, pub arg0: Handle, pub arg1: u64 }
+ #[repr(C)]
+-pub struct ObjPtrNoRet { pub handle: Handle, pub arg: *mut core::ffi::c_void }
++pub struct ObjPtrNoRet { pub handle: Handle, pub arg: Ptr<core::ffi::c_void> }
+ #[repr(C)]
+-pub struct Memory { pub length: u64, pub ptr: *mut core::ffi::c_void }
++pub struct Memory { pub length: u64, pub ptr: Ptr<core::ffi::c_void> }
+ #[repr(C)]
+-pub struct ObjConstPtrNoRet { pub handle: Handle, pub arg: *const core::ffi::c_void }
++pub struct ObjConstPtrNoRet { pub handle: Handle, pub arg: Ptr<core::ffi::c_void> }
+ #[repr(C)]
+-pub struct ObjCmdNoRet { pub encoder: Handle, pub cmd_head: *const core::ffi::c_void }
++pub struct ObjCmdNoRet { pub encoder: Handle, pub cmd_head: Ptr<core::ffi::c_void> }
+ 
+-#[repr(C)]
++#[repr(C, align(8))]
+ pub struct NSStringGetCString { pub str: Handle, pub buffer_ptr: u64, pub max_length: u64, pub encoding: u64, pub ret: u32 }
+ pub const UTF8_STRING_ENCODING: u64 = 4;
+ 
+ #[repr(C)]
+-pub struct NewWithInfo { pub device: Handle, pub info: *mut core::ffi::c_void, pub ret: Handle }
++pub struct NewWithInfo { pub device: Handle, pub info: Ptr<core::ffi::c_void>, pub ret: Handle }
+ #[repr(C)]
+-pub struct NewWithConstInfo { pub device: Handle, pub info: *const core::ffi::c_void, pub ret: Handle }
++pub struct NewWithConstInfo { pub device: Handle, pub info: Ptr<core::ffi::c_void>, pub ret: Handle }
+ #[repr(C)]
+-pub struct NewPipeline { pub device: Handle, pub info: *const core::ffi::c_void, pub ret_error: Handle, pub ret_pso: Handle }
++pub struct NewPipeline { pub device: Handle, pub info: Ptr<core::ffi::c_void>, pub ret_error: Handle, pub ret_pso: Handle }
+ #[repr(C)]
+ pub struct NewPipelineVertex {
+     pub device: Handle,
+-    pub info: *const core::ffi::c_void,
+-    pub vertex: *const core::ffi::c_void,
++    pub info: Ptr<core::ffi::c_void>,
++    pub vertex: Ptr<core::ffi::c_void>,
+     pub ret_error: Handle,
+     pub ret_pso: Handle,
+ }
+ #[repr(C)]
+-pub struct NewLibrarySource { pub device: Handle, pub source: *const u8, pub length: u64, pub ret_error: Handle, pub ret_library: Handle }
++pub struct NewLibrarySource { pub device: Handle, pub source: Ptr<u8>, pub length: u64, pub ret_error: Handle, pub ret_library: Handle }
+ #[repr(C)]
+ pub struct NewLibrarySourceOptions {
+     pub device: Handle,
+-    pub source: *const u8,
++    pub source: Ptr<u8>,
+     pub length: u64,
+-    pub options: *const CompileOptions,
++    pub options: Ptr<CompileOptions>,
+     pub ret_error: Handle,
+     pub ret_library: Handle,
+ }
+@@ -238,7 +271,7 @@ pub struct NewLibrarySourceOptions {
+ pub struct CompileOptions { pub language_version: u64, pub preserve_invariance: u8, pub math_mode: u8, pub padding: [u8; 6] }
+ 
+ #[repr(C)]
+-pub struct BufferInfo { pub length: u64, pub options: u64, pub memory: *mut core::ffi::c_void, pub gpu_address: u64 }
++pub struct BufferInfo { pub length: u64, pub options: u64, pub memory: Ptr<core::ffi::c_void>, pub gpu_address: u64 }
+ 
+ #[repr(C)]
+ #[derive(Default)]
+@@ -320,6 +353,7 @@ pub struct NewTextureView {
+     pub slice_start: u16,
+     pub slice_count: u16,
+     pub swizzle: TextureSwizzleChannels,
++    pub padding: [u8; 4],
+     pub ret: Handle,
+     pub gpu_resource_id: u64,
+ }
+@@ -359,7 +393,7 @@ pub struct RenderPipelineInfo {
+     pub tessellation_output_winding_order: u8,
+     pub tessellation_factor_step: u8,
+     pub binary_archive_for_serialization: Handle,
+-    pub binary_archives_for_lookup: *const core::ffi::c_void,
++    pub binary_archives_for_lookup: Ptr<core::ffi::c_void>,
+     pub num_binary_archives_for_lookup: u8,
+     pub fail_on_binary_archive_miss: bool,
+     pub support_indirect_command_buffers: bool,
+@@ -378,7 +412,7 @@ pub struct VertexDescriptorInfo { pub attributes: [VertexAttributeInfo; 31], pub
+ #[repr(C)]
+ pub struct ComputePipelineInfo {
+     pub compute_function: Handle,
+-    pub binary_archives_for_lookup: *const core::ffi::c_void,
++    pub binary_archives_for_lookup: Ptr<core::ffi::c_void>,
+     pub binary_archive_for_serialization: Handle,
+     pub num_binary_archives_for_lookup: u8,
+     pub fail_on_binary_archive_miss: bool,
+@@ -407,7 +441,7 @@ pub struct ColorAttachmentInfo {
+     pub resolve_depth_plane: u32,
+ }
+ 
+-#[repr(C)]
++#[repr(C, align(8))]
+ #[derive(Default)]
+ pub struct DepthAttachmentInfo {
+     pub texture: Handle,
+@@ -419,7 +453,7 @@ pub struct DepthAttachmentInfo {
+     pub clear_depth: f32,
+ }
+ 
+-#[repr(C)]
++#[repr(C, align(8))]
+ #[derive(Default)]
+ pub struct StencilAttachmentInfo {
+     pub texture: Handle,
+@@ -469,7 +503,7 @@ pub struct ReplaceRegion {
+     pub size: Size,
+     pub level: u64,
+     pub slice: u64,
+-    pub data: *mut core::ffi::c_void,
++    pub data: Ptr<core::ffi::c_void>,
+     pub bytes_per_row: u64,
+     pub bytes_per_image: u64,
+ }
+diff --git a/mtld3d/unix/shared/src/params.rs b/mtld3d/unix/shared/src/params.rs
+index 1304fec0..43878381 100644
+--- a/mtld3d/unix/shared/src/params.rs
++++ b/mtld3d/unix/shared/src/params.rs
+@@ -24,14 +24,22 @@ use super::{
+ // smashing the PE return address. This is the wow64-divergence the host-only
+ // `#[test]` size checks could never catch. The self-contained probe proves the
+ // alignment property; the per-struct asserts pin the device-lifecycle layouts.
++//
++// MacNeutron: i686 Linux (its old-WoW64 Unix side in the VM's guest)
++// aligns `u64` to 4, so the probe skips it; there MacNeutron's
++// `mtld3d-layout32-check.sh` compares every `repr(C)` struct with the
++// x86_64 build's instead.
+ const _: () = {
+-    #[repr(C)]
+-    struct U64After4 {
+-        a: u32,
+-        b: u64,
++    #[cfg(not(all(target_arch = "x86", target_os = "linux")))]
++    {
++        #[repr(C)]
++        struct U64After4 {
++            a: u32,
++            b: u64,
++        }
++        // 8 (not 4) ⇒ repr(C) u64 is 8-aligned on this target.
++        assert!(core::mem::offset_of!(U64After4, b) == 8);
+     }
+-    // 8 (not 4) ⇒ repr(C) u64 is 8-aligned on this target.
+-    assert!(core::mem::offset_of!(U64After4, b) == 8);
+     // Device create / render / destroy structs: align must be 8 and size
+     // identical on all targets.
+     assert!(core::mem::align_of::<CreateCommandQueueParams>() == 8);
+-- 
+2.54.0 (Apple Git-157)
+

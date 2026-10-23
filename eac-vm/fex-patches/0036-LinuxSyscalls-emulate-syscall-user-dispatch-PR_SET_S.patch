@@ -1,0 +1,331 @@
+From 71216b399febfffae383ba1b4f784c4fd4f90843 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Wed, 21 Oct 2026 20:33:57 -0400
+Subject: [PATCH] LinuxSyscalls: emulate syscall user dispatch
+ (PR_SET_SYSCALL_USER_DISPATCH) as Linux 6.11 does
+
+Wine's x86-64 ntdll enables it per thread so a Windows program's own
+`syscall` reaches its dispatcher as a SIGSYS. FEX passed the prctl to the
+host, which can't do it for guest code. Now the prctl keeps per-thread
+state (off in new threads and fork children) and every guest syscall is
+checked first, before ptrace and seccomp: outside the range and not
+allowed by the selector, it is delivered as SIGSYS (si_code
+SYS_USER_DISPATCH) through the SECCOMP_RET_TRAP frame path and doesn't
+run. A bad selector value, an unreadable selector or a blocked/ignored
+SIGSYS kill the process as Linux does (ForceExitSignal, generalised from
+ForceGuestSigSegv).
+
+The trap path's post-syscall RIP is now taken only by the SIGSYS queued
+for it: another signal arriving while QueueSignal makes its syscalls took
+it before, and the SIGSYS was then never sent (a Windows syscall
+returned its own number).
+---
+ .../LinuxSyscalls/SignalDelegator.cpp         | 49 +++++++---
+ .../LinuxSyscalls/SignalDelegator.h           |  6 ++
+ .../LinuxEmulation/LinuxSyscalls/Syscalls.cpp | 97 +++++++++++++++++++
+ .../LinuxEmulation/LinuxSyscalls/Syscalls.h   |  5 +
+ .../LinuxSyscalls/Syscalls/Thread.cpp         |  8 ++
+ .../LinuxSyscalls/ThreadManager.h             | 22 +++--
+ 6 files changed, 168 insertions(+), 19 deletions(-)
+
+diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp b/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp
+index 3fbf953..be73f92 100644
+--- a/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp
++++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.cpp
+@@ -330,8 +330,13 @@ bool SignalDelegator::HandleDispatcherGuestSignal(FEXCore::Core::InternalThreadS
+   // itself, so the ucontext RIP now differs from it: rt_sigreturn then takes the path that restores the handler's
+   // registers and resumes at the ucontext RIP, instead of the path that resets to the interrupted state and re-runs
+   // the syscall (discarding the handler's return value). See SeccompEmulator for the kernel semantics.
+-  ContextBackup->SeccompTrapRIP = ThreadObject->SeccompTrapRIP;
+-  ThreadObject->SeccompTrapRIP = 0;
++  // Only the SIGSYS queued for that syscall takes it. Another signal can arrive while QueueSignal is still making its
++  // syscalls (Wine's SIGUSR1 for NtSuspendThread, say): its handler must see the syscall instruction, so that its return
++  // resumes the queueing; entered past the syscall, it would resume there and the SIGSYS would never be sent.
++  const auto* SigInfo = static_cast<const siginfo_t*>(info);
++  if (Signal == SIGSYS && SigInfo->si_code > 0 && reinterpret_cast<uint64_t>(SigInfo->si_call_addr) == ThreadObject->SeccompTrapRIP) {
++    ContextBackup->SeccompTrapRIP = std::exchange(ThreadObject->SeccompTrapRIP, 0);
++  }
+   ContextBackup->SavedJITStackSP = ThreadObject->JITStackSP;
+ 
+   auto Frame = Thread->CurrentFrame;
+@@ -965,27 +970,45 @@ void SignalDelegator::ForceGuestSigSegv(uint64_t BadSP) {
+ 
+   // The guest handler must not run, and the disposition must not be re-read as the guest's action: otherwise the
+   // re-raised SIGSEGV would re-enter SetupFrame_x64 with the same bad SP. force_sigsegv resets to SIG_DFL first.
+-  SignalHandler& Handler = HostHandlers[SIGSEGV];
++  ForceExitSignal(SIGSEGV);
++}
++
++void SignalDelegator::ForceExitSignal(int Signal) {
++  // Linux force_exit_sig / force_sigsegv: whatever the guest's handler or mask, the process dies from Signal. The
++  // disposition goes to SIG_DFL first, so the guest handler never runs and raise() cannot re-enter FEX.
++  SignalHandler& Handler = HostHandlers[Signal];
+   Handler.GuestAction.sigaction_handler.handler = SIG_DFL;
+   Handler.OldAction.handler = SIG_DFL;
+-  ::signal(SIGSEGV, SIG_DFL);
++  ::signal(Signal, SIG_DFL);
+ 
+   CTX->FlushAndCloseCodeMap();
+   FEX::HLE::_SyscallHandler->TM.CleanupForExit();
+ 
+-  // Now die from SIGSEGV itself, so the parent sees a signal death (WTERMSIG == SIGSEGV), exactly as Linux reports
+-  // force_sigsegv. The host disposition is SIG_DFL, so raise() cannot re-enter FEX. When the guest signal being set up
+-  // is itself a SIGSEGV we are inside FEX's host SIGSEGV handler, where the kernel blocks SIGSEGV: unblock it, as
+-  // force_sigsegv does, or the raise would stay pending and only this thread would exit.
+-  uint64_t SegvMask = 1ULL << (SIGSEGV - 1);
+-  ::syscall(SYS_rt_sigprocmask, SIG_UNBLOCK, &SegvMask, nullptr, 8);
+-  ::raise(SIGSEGV);
++  // Now die from the signal itself, so the parent sees a signal death (WTERMSIG == Signal), exactly as Linux reports
++  // it. The signal may be blocked here (inside FEX's host SIGSEGV handler the kernel blocks SIGSEGV; a guest that
++  // blocked SIGSYS has it blocked on the host too): unblock it, or the raise would stay pending and only this thread
++  // would exit.
++  uint64_t Mask = 1ULL << (Signal - 1);
++  ::syscall(SYS_rt_sigprocmask, SIG_UNBLOCK, &Mask, nullptr, 8);
++  ::raise(Signal);
+ 
+-  // Unreachable barring a blocked SIGSEGV: nothing has set up a guest frame to return into.
+-  ::syscall(SYS_exit, 128 + SIGSEGV);
++  // Unreachable barring a blocked signal: nothing has set up a guest frame to return into.
++  ::syscall(SYS_exit, 128 + Signal);
+   FEX_UNREACHABLE;
+ }
+ 
++void SignalDelegator::ForceGuestSignal(FEX::HLE::ThreadStateObject* Thread, siginfo_t* Info) {
++  // Linux force_sig_info: a signal the guest has blocked or ignored can't be delivered, and the kernel then resets it
++  // to the default action, which kills the process.
++  const int Signal = Info->si_signo;
++  const bool Blocked = Thread->SignalInfo.CurrentSignalMask.Val & (1ULL << (Signal - 1));
++  const bool Ignored = HostHandlers[Signal].GuestAction.sigaction_handler.handler == SIG_IGN;
++  if (Blocked || Ignored) {
++    ForceExitSignal(Signal);
++  }
++  QueueSignal(::getpid(), FHU::Syscalls::gettid(), Signal, Info, true);
++}
++
+ void SignalDelegator::QueueSignal(pid_t tgid, pid_t tid, int Signal, siginfo_t* info, bool IgnoreMask) {
+   bool WasIgnored {};
+   bool WasMasked {};
+diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.h b/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.h
+index 236da05..afbe212 100644
+--- a/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.h
++++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/SignalDelegator.h
+@@ -113,6 +113,12 @@ public:
+   // offending address once, clean up, and die from SIGSEGV. Used when the guest signal frame cannot be written.
+   [[noreturn]] void ForceGuestSigSegv(uint64_t BadSP);
+ 
++  // Linux force_exit_sig: the process dies from Signal, whatever the guest's handler or mask.
++  [[noreturn]] void ForceExitSignal(int Signal);
++  // Linux force_sig_info: queues Info's signal past the guest's mask, or kills the process with it when the guest
++  // blocked or ignored it.
++  void ForceGuestSignal(FEX::HLE::ThreadStateObject* Thread, siginfo_t* Info);
++
+   void SetVDSOSymbols() {
+     // Get symbols from VDSO.
+     VDSOPointers = FEX::VDSO::GetVDSOSymbols();
+diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls.cpp b/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls.cpp
+index c082e1f..f1063a1 100644
+--- a/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls.cpp
++++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls.cpp
+@@ -26,6 +26,7 @@ $end_info$
+ #include "LinuxSyscalls/x32/Types.h"
+ #include "LinuxSyscalls/x64/Types.h"
+ #include "Thunks.h"
++#include "VDSO_Emulation.h"
+ 
+ #include <FEXCore/Config/Config.h>
+ #include <FEXCore/Core/Context.h>
+@@ -62,6 +63,7 @@ $end_info$
+ #include <system_error>
+ #include <syscall.h>
+ #include <sys/mman.h>
++#include <sys/uio.h>
+ #include <sys/utsname.h>
+ #include <thread>
+ #include <unistd.h>
+@@ -943,11 +945,106 @@ void SyscallHandler::HandleSyscallImpl(FEXCore::Core::CpuStateFrame* Frame, uint
+   SetResult(Frame, Result);
+ }
+ 
++uint64_t SyscallHandler::SetSyscallUserDispatch(FEXCore::Core::CpuStateFrame* Frame, uint64_t Mode, uint64_t Offset, uint64_t Len,
++                                                uint64_t Selector) {
++  constexpr uint64_t DispatchOff = 0; // PR_SYS_DISPATCH_OFF
++  constexpr uint64_t DispatchOn = 1;  // PR_SYS_DISPATCH_ON
++  // x86-64 TASK_SIZE_MAX: access_ok() rejects a selector beyond it.
++  constexpr uint64_t TaskSizeMax = 0x7FFF'FFFF'F000ULL;
++
++  auto& Dispatch = FEX::HLE::ThreadManager::GetStateObjectFromCPUState(Frame)->SyscallUserDispatch;
++  switch (Mode) {
++  case DispatchOff:
++    if (Offset || Len || Selector) {
++      return -EINVAL;
++    }
++    Dispatch = {};
++    return 0;
++  case DispatchOn:
++    // A non-empty region that doesn't wrap; offset 0 skips the check, as in Linux.
++    if (Offset && Offset + Len <= Offset) {
++      return -EINVAL;
++    }
++    if (Selector && Selector + 1 > TaskSizeMax) {
++      return -EFAULT;
++    }
++    Dispatch = {.On = true, .Offset = Offset, .Len = Len, .Selector = Selector};
++    return 0;
++  default: return -EINVAL;
++  }
++}
++
++bool SyscallHandler::CheckSyscallUserDispatch(FEXCore::Core::CpuStateFrame* Frame, bool Is64Bit) {
++  auto Thread = FEX::HLE::ThreadManager::GetStateObjectFromCPUState(Frame);
++  const auto& Dispatch = Thread->SyscallUserDispatch;
++  if (!Dispatch.On) {
++    return false;
++  }
++
++  // Linux checks the address after the instruction; `syscall` and `int 0x80` are both two bytes.
++  const uint64_t IP = Frame->State.rip + 2;
++
++  // The kernel lets a 32-bit vDSO sigreturn through (arch_syscall_is_vdso_sigreturn: the landing pad after its
++  // `int 0x80`). FEX's trampolines are those: `pop eax; mov eax, 0x77; int 0x80` and `mov eax, 0xad; int 0x80`.
++  if (!Is64Bit) {
++    const auto& VDSO = FEX::VDSO::GetVDSOSymbols();
++    if (IP == reinterpret_cast<uint64_t>(VDSO.VDSO_kernel_sigreturn) + 8 || IP == reinterpret_cast<uint64_t>(VDSO.VDSO_kernel_rt_sigreturn) + 7) {
++      return false;
++    }
++  }
++
++  if (IP - Dispatch.Offset < Dispatch.Len) {
++    return false;
++  }
++
++  if (Dispatch.Selector) {
++    // Linux's __get_user: an unreadable selector kills the process with SIGSEGV. CopyFromUser can't probe it (FEX dies
++    // on a fault inside it), process_vm_readv on ourselves reports the fault as an error instead.
++    // ponytail: one host syscall per out-of-range syscall while a selector is set; a resumable fault location in
++    // HandleFrontendSIGSEGV if it ever shows in a profile.
++    uint8_t State {};
++    iovec Local {&State, 1};
++    iovec Remote {reinterpret_cast<void*>(Dispatch.Selector), 1};
++    if (::process_vm_readv(::getpid(), &Local, 1, &Remote, 1, 0) != 1) {
++      SignalDelegation->ForceExitSignal(SIGSEGV);
++    }
++    if (State == 0) { // SYSCALL_DISPATCH_FILTER_ALLOW
++      return false;
++    }
++    if (State != 1) { // not SYSCALL_DISPATCH_FILTER_BLOCK
++      SignalDelegation->ForceExitSignal(SIGSYS);
++    }
++  }
++
++  // Dispatch: SIGSYS for the syscall, which doesn't run. RAX keeps its number, the handler's view of it (Linux rolls
++  // the syscall back the same way). The frame is entered at IP, see SeccompTrapRIP.
++  siginfo_t Info {
++    .si_signo = SIGSYS,
++    .si_errno = 0,
++    .si_code = 2, // SYS_USER_DISPATCH
++  };
++  Info.si_call_addr = reinterpret_cast<void*>(IP);
++  Info.si_syscall = static_cast<int>(Frame->State.gregs[FEXCore::X86State::REG_RAX]);
++  // ponytail: a 64-bit process's `int 0x80` reports AUDIT_ARCH_X86_64 here where Linux says AUDIT_ARCH_I386; check the
++  // instruction when a program cares.
++  Info.si_arch = Is64Bit ? AUDIT_ARCH_X86_64 : AUDIT_ARCH_I386;
++  Thread->SeccompTrapRIP = IP;
++  SignalDelegation->ForceGuestSignal(Thread, &Info);
++  return true;
++}
++
+ void SyscallHandler::HandleSyscall(FEXCore::Core::CpuStateFrame* Frame) {
+   // Grab the return address which will be inside the JIT.
+   const uint64_t JITPC = reinterpret_cast<uint64_t>(__builtin_extract_return_addr(__builtin_return_address(0)));
+   const auto Is64Bit = Is64BitMode();
+ 
++  // Syscall user dispatch comes first, as in Linux (before ptrace and seccomp), and covers every entry, `int 0x80` from
++  // 64-bit code included. A dispatched syscall returns before the RIP advance below: a handler that turns dispatch off
++  // and backs RIP up onto the syscall (Wine's fallback) then runs it again.
++  if (CheckSyscallUserDispatch(Frame, Is64Bit)) {
++    return;
++  }
++
+   // TODO: At some point these will be runtime selectable based on `syscall` versus `int 0x80` entrypoint.
+   // Done for one case: `int 0x80` (CD 80 at RIP) in a 64-bit process uses the i386 ABI, number in eax and first
+   // argument in ebx, and Linux answers it from its compat table.
+diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls.h b/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls.h
+index a164455..9263b97 100644
+--- a/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls.h
++++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls.h
+@@ -131,6 +131,11 @@ public:
+ 
+   void HandleSyscall(FEXCore::Core::CpuStateFrame* Frame) final override;
+ 
++  // Syscall user dispatch (prctl PR_SET_SYSCALL_USER_DISPATCH), as Linux 6.11's kernel/entry/syscall_user_dispatch.c.
++  uint64_t SetSyscallUserDispatch(FEXCore::Core::CpuStateFrame* Frame, uint64_t Mode, uint64_t Offset, uint64_t Len, uint64_t Selector);
++  // True when the syscall at Frame->State.rip was dispatched as a SIGSYS (or the process killed): it must not run.
++  bool CheckSyscallUserDispatch(FEXCore::Core::CpuStateFrame* Frame, bool Is64Bit);
++
+   void DefaultProgramBreak(uint64_t Base, uint64_t Size);
+   void DeserializeSeccompFD(FEX::HLE::ThreadStateObject* Thread, int FD) {
+     if (FD == -1) {
+diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/Thread.cpp b/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/Thread.cpp
+index 58f983d..46b77f8 100644
+--- a/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/Thread.cpp
++++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/Thread.cpp
+@@ -320,6 +320,8 @@ uint64_t ForkGuest(FEXCore::Core::InternalThreadState* Thread, FEXCore::Core::Cp
+     ThreadObject->ThreadInfo.PID = ::getpid();
+     FEX::HLE::_SyscallHandler->FM.UpdatePID(ThreadObject->ThreadInfo.PID);
+     ThreadObject->ThreadInfo.clear_child_tid = nullptr;
++    // Linux clears syscall user dispatch for every new task (dup_task_struct).
++    ThreadObject->SyscallUserDispatch = {};
+ 
+     // only a  single thread running so no need to remove anything from the thread array
+ 
+@@ -492,6 +494,12 @@ void RegisterThread(FEX::HLE::SyscallHandler* Handler) {
+                             return FEX::HLE::_SyscallHandler->SeccompEmulator.Handle(Frame, Operation, 0, reinterpret_cast<void*>(arg3));
+                           }
+                           case PR_GET_SECCOMP: return FEX::HLE::_SyscallHandler->SeccompEmulator.GetSeccomp(Frame);
++#ifndef PR_SET_SYSCALL_USER_DISPATCH
++#define PR_SET_SYSCALL_USER_DISPATCH 59
++#endif
++                          // Emulated, never passed on: the host's would trap FEX's own syscalls.
++                          case PR_SET_SYSCALL_USER_DISPATCH:
++                            return FEX::HLE::_SyscallHandler->SetSyscallUserDispatch(Frame, arg2, arg3, arg4, arg5);
+                           case PR_GET_AUXV: {
+                             if (arg4 || arg5) {
+                               return -EINVAL;
+diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/ThreadManager.h b/Source/Tools/LinuxEmulation/LinuxSyscalls/ThreadManager.h
+index 7c86004..84644f8 100644
+--- a/Source/Tools/LinuxEmulation/LinuxSyscalls/ThreadManager.h
++++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/ThreadManager.h
+@@ -93,14 +93,24 @@ struct ThreadStateObject : public FEXCore::Allocator::FEXAllocOperators {
+   uint32_t SeccompMode {SECCOMP_MODE_DISABLED};
+   fextl::vector<FEX::HLE::SeccompFilterInfo*> Filters {};
+ 
+-  // Set to the address just past the syscall instruction when a SECCOMP_RET_TRAP has been queued for that syscall,
+-  // zero otherwise. The next guest signal frame is entered with this address in its ucontext, the way Linux reports a
+-  // seccomp trap for the instruction following the syscall. It is consumed by HandleDispatcherGuestSignal and
+-  // deliberately differs from the CpuStateFrame's RIP at trap time (the syscall instruction itself), which is what
+-  // makes rt_sigreturn take the path that restores the guest handler's registers. See the SECCOMP_RET_TRAP handling
+-  // in SeccompEmulator for the Linux semantics this reproduces.
++  // Set to the address just past the syscall instruction when a SECCOMP_RET_TRAP or a syscall user dispatch has queued
++  // a SIGSYS for that syscall, zero otherwise. The next guest signal frame is entered with this address in its
++  // ucontext, the way Linux reports both for the instruction following the syscall. It is consumed by
++  // HandleDispatcherGuestSignal and deliberately differs from the CpuStateFrame's RIP at trap time (the syscall
++  // instruction itself), which is what makes rt_sigreturn take the path that restores the guest handler's registers.
++  // See the SECCOMP_RET_TRAP handling in SeccompEmulator for the Linux semantics this reproduces.
+   uint64_t SeccompTrapRIP {};
+ 
++  // Syscall user dispatch (prctl PR_SET_SYSCALL_USER_DISPATCH), per thread as in Linux: a syscall whose address (just
++  // past the instruction) lies outside [Offset, Offset + Len) raises SIGSYS instead of running, unless the byte at
++  // Selector says ALLOW. A new thread or fork child starts with it off. See SyscallHandler::CheckSyscallUserDispatch.
++  struct {
++    bool On {};
++    uint64_t Offset {};
++    uint64_t Len {};
++    uint64_t Selector {};
++  } SyscallUserDispatch {};
++
+   // Host stack pointer that guest code currently runs at when it is not the dispatcher's own level: a guest signal handler
+   // entered from the C++ half of a syscall runs below that handler's frames. 0 means ReturningStackLocation. Lets rt_sigreturn
+   // drop abandoned syscall-handler frames instead of leaking them.
+-- 
+2.54.0 (Apple Git-157)
+

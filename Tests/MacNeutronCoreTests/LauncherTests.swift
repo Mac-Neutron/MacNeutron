@@ -138,7 +138,7 @@ private func makeFixture(runner: FakeRunner = winebootCreatingPrefix(), identity
     #expect(FileManager.default.fileExists(atPath: f.launcher.layout.runtimeDamagedMarker.path(percentEncoded: false)))
 }
 
-private let thirtyTwoBitText = "This game is 32-bit. MacNeutron 0.1 runs 64-bit games only; 32-bit support is planned."
+private let thirtyTwoBitText = "This game is 32-bit. On macOS MacNeutron runs 64-bit games only; 32-bit games in a Steam library run in its game VM."
 
 private func i386Exe(named name: String) throws -> String {
     let url = try makeTempDir().appending(path: name)
@@ -205,6 +205,19 @@ private func i386Exe(named name: String) throws -> String {
     try f.launcher.settings.save(GameSettings(anisotropy: "game"), for: "42")
     _ = f.launcher.launch(["run", "/g/Game.exe"], environment: f.env)
     #expect(f.runner.calls.last?.environment["DXMT_MAX_ANISOTROPY"] == nil)
+}
+
+@Test func mtld3dLogsInTheLogFolderNotTheGames() throws {
+    // mtld3d writes mtld3d-logs/ beside the game's exe unless told otherwise: ours go to ~/Library/Logs/MacNeutron.
+    let f = try makeFixture()
+    let dir = f.launcher.log.directory.appending(path: "mtld3d").path(percentEncoded: false)
+    _ = f.launcher.launch(["run", "/g/Game.exe"], environment: f.env)
+    #expect(f.runner.calls.last?.environment["MTLD3D_CONFIG"] == "log.dir=Z:\(dir)")
+    // The user's MTLD3D_CONFIG comes after ours: mtld3d applies its entries in order, so theirs win.
+    var env = f.env
+    env["MTLD3D_CONFIG"] = "log.dir=logs;present.maxFps=60"
+    _ = f.launcher.launch(["run", "/g/Game.exe"], environment: env)
+    #expect(f.runner.calls.last?.environment["MTLD3D_CONFIG"] == "log.dir=Z:\(dir);log.dir=logs;present.maxFps=60")
 }
 
 @Test func everyLaunchIsLoggedWithVersions() throws {

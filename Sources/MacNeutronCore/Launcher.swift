@@ -95,32 +95,38 @@ public struct Launcher: Sendable {
         // A performance build (X.Y.Zp) keeps one launcher.log line a launch unless MACNEUTRON_LOG asks for more.
         log.setQuiet(layout.isPerformanceBuild && !logging)
         let gameLog = logging ? log.gameLog(appID: context.appID) : nil
+        let vmWanted = MicroVM.wanted(environment: environment, verb: request.verb)
+        let vmTarget = vmWanted ? MicroVM.guestPath(request.target) : nil  // a game in a Steam library: in the VM
+        let inMicroVM = vmTarget != nil
         let identity: String
         do {
-            identity = try preflight.check(layout, request: request)
+            identity = try preflight.check(layout, request: request, inMicroVM: inMicroVM)
         } catch {
             return fail(error.description, argv: argv, notify: true, gameLog: gameLog)
         }
-        // Steam's install scripts start redistributable installers with `run`; a 32-bit one can't run here.
-        if request.verb == .run, PEImage.machine(of: URL(filePath: request.target)) == PEImage.i386 {
+        // Steam's install scripts start redistributable installers with `run`; a 32-bit one can't run on macOS. In the
+        // VM it runs, as Proton runs them.
+        if !inMicroVM, request.verb == .run, PEImage.machine(of: URL(filePath: request.target)) == PEImage.i386 {
             log.append("skipped 32-bit installer \(URL(filePath: request.target).lastPathComponent)")
             return 0
         }
 
-        if MicroVM.wanted(environment: environment, verb: request.verb) {
-            if let (library, guest) = MicroVM.guestPath(request.target) {
-                // In the VM or not at all: a launch before the app's setup finishes is refused, never run on macOS.
-                guard let vm = MicroVM.find(root: microVMRoot, environment: environment, verb: request.verb) else {
-                    return fail("MacNeutron's game VM isn't ready yet: open MacNeutron, and launch the game again "
-                                + "once its Settings say \"Game VM: ready\".", argv: argv, notify: true, gameLog: gameLog)
-                }
-                return runInMicroVM(vm, request, context, library: library, guest: guest, environment, gameLog, argv)
+        if let (library, guest) = vmTarget {
+            // In the VM or not at all: a launch before the app's setup finishes is refused, never run on macOS.
+            guard let vm = MicroVM.find(root: microVMRoot, environment: environment, verb: request.verb) else {
+                return fail("MacNeutron's game VM isn't ready yet: open MacNeutron, and launch the game again "
+                            + "once its Settings say \"Game VM: ready\".", argv: argv, notify: true, gameLog: gameLog)
             }
-            log.append("note: \(request.target) is not in a Steam library: it runs on macOS")
+            return runInMicroVM(vm, request, context, library: library, guest: guest, environment, gameLog, argv)
         }
+        if vmWanted { log.append("note: \(request.target) is not in a Steam library: it runs on macOS") }
 
         let (backend, note) = GraphicsBackend.select(requested: environment["MACNEUTRON_GRAPHICS"])
         var env = LaunchEnvironment.build(base: environment, context: context, backend: backend, logging: logging)
+        // mtld3d (Direct3D 9) writes its logs to mtld3d-logs/ beside the game's exe unless told otherwise: ours go to
+        // the log folder. The user's MTLD3D_CONFIG comes after it: mtld3d applies the entries in order, so theirs win.
+        env["MTLD3D_CONFIG"] = (["log.dir=Z:" + log.directory.appending(path: "mtld3d").path(percentEncoded: false)]
+            + [env["MTLD3D_CONFIG"]].compactMap { $0 }).joined(separator: ";")
         // MACNEUTRON_PERF=1: DXMT's frame statistics, for eac-vm/tests/perf-compare.sh. The user's own settings win.
         // DXMT keeps stats.txt in its DXIL dump folder, which also turns on its capture mode: every new shader, root
         // signature and pipeline is saved there too (a little CPU, and files that build up in the folder): the

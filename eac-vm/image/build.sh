@@ -45,17 +45,46 @@ wine_image() {
     || { echo "no DXMT guest stage at $DXMT_GUEST" >&2; exit 1; }
   sudo rm -rf "$WORK/wine"; sudo mkdir -p "$WORK"; sudo cp -a "$WINE_STAGE" "$WORK/wine"
   sudo install -m755 "$STEAM_FORWARDER" "$WORK/wine/lib/wine/x86_64-unix/lsteamclient.so"
+  # Its i686 build, for old WoW64's 32-bit Unix side, when the Wine has one (else a 32-bit game's Steam would be Wine's
+  # own lsteamclient.so).
+  F32=$(dirname "$STEAM_FORWARDER")/i386/lsteamclient.so
+  if [ -d "$WORK/wine/lib/wine/i386-unix" ]; then
+    [ -f "$F32" ] || { echo "no i686 Steam forwarder at $F32, and the Wine has i386-unix" >&2; exit 1; }
+    sudo install -m755 "$F32" "$WORK/wine/lib/wine/i386-unix/"
+  fi
   # Milestone 4b-2: D3D through DXMT and the Metal transport, not wined3d/vkd3d on llvmpipe; since 4c it presents in
   # the host's window too.
   if [ "$DXMT_GUEST" != none ]; then
     sudo install -m644 "$DXMT_GUEST"/x86_64-windows/*.dll "$WORK/wine/lib/wine/x86_64-windows/"
-    sudo install -m755 "$DXMT_GUEST/x86_64-unix/winemetal.so" "$WORK/wine/lib/wine/x86_64-unix/"
+    # 32-bit games' (new WoW64): DXMT for i386 over Wine's i386 D3D, the same winemetal.so behind it (its WoW64 table).
+    [ ! -d "$DXMT_GUEST/i386-windows" ] || sudo install -m644 "$DXMT_GUEST"/i386-windows/*.dll "$WORK/wine/lib/wine/i386-windows/"
+    # winemetal.so, and mtld3d.so behind mtld3d's d3d9.dll, which replaces Wine's (Direct3D 9, D3D9 M2b); and their i686
+    # builds for old WoW64's 32-bit Unix side, when the Wine has one.
+    sudo install -m755 "$DXMT_GUEST"/x86_64-unix/*.so "$WORK/wine/lib/wine/x86_64-unix/"
+    if [ -d "$WORK/wine/lib/wine/i386-unix" ]; then
+      [ -f "$DXMT_GUEST/i386-unix/winemetal.so" ] && [ -f "$DXMT_GUEST/i386-unix/mtld3d.so" ] ||
+        { echo "no i686 winemetal.so and mtld3d.so in $DXMT_GUEST/i386-unix, and the Wine has i386-unix" >&2; exit 1; }
+      sudo install -m755 "$DXMT_GUEST"/i386-unix/*.so "$WORK/wine/lib/wine/i386-unix/"
+    fi
   fi
   if [ "$D3D_GUEST" != none ] && [ -f "$D3D_GUEST/x86_64-windows/mnd3d.dll" ]; then
     sudo mkdir -p "$WORK/wine/lib/wine/mn-d3d/x86_64-windows"
     sudo install -m644 "$D3D_GUEST"/x86_64-windows/*.dll "$WORK/wine/lib/wine/mn-d3d/x86_64-windows/"
+    if [ -d "$D3D_GUEST/i386-windows" ]; then  # 32-bit processes' (M4b), linked into syswow64 on opt-in
+      sudo mkdir -p "$WORK/wine/lib/wine/mn-d3d/i386-windows"
+      sudo install -m644 "$D3D_GUEST"/i386-windows/*.dll "$WORK/wine/lib/wine/mn-d3d/i386-windows/"
+    fi
     sudo install -m644 "$D3D_GUEST/prefix.sh" "$WORK/wine/lib/wine/mn-d3d/"
     [ ! -f "$D3D_GUEST/.mn-source" ] || sudo install -m644 "$D3D_GUEST/.mn-source" "$WORK/wine/.mn-source-d3d"
+  fi
+  # Old WoW64's 32-bit Unix side needs an i686 libasound, which FEX's RootFS lacks: Fedora's, from the multilib sysroot,
+  # with its licence, on the 32-bit loader's library path (run-game.sh); a 64-bit process skips it (another ELF class).
+  if [ -d "$WORK/wine/lib/wine/i386-unix" ]; then
+    M32=/var/cache/mn-sysroot-multilib
+    sudo mkdir -p "$WORK/wine/lib/mn-i386"
+    sudo cp -a "$M32"/usr/lib/libasound.so.2.* "$WORK/wine/lib/mn-i386/"
+    sudo ln -sf "$(basename "$(ls "$M32"/usr/lib/libasound.so.2.*.* | head -1)")" "$WORK/wine/lib/mn-i386/libasound.so.2"
+    sudo cp "$M32"/usr/share/licenses/alsa-lib/COPYING "$WORK/wine/lib/mn-i386/COPYING.alsa-lib"
   fi
   # What the forwarder and DXMT were built from, beside the Wine stage's own (guest-stages.sh; release.sh checks them).
   [ ! -f "$(dirname "$STEAM_FORWARDER")/.mn-source" ] \

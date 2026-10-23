@@ -22,6 +22,7 @@ struct gblob {
     uint8_t *used;     /* per page: FREE, USED or DIRTY (free, and written since the blob was made) */
     struct rinfo *r;   /* per page: a region's record at its first page */
 };
+int mn_wm_wow64;
 static struct gblob **blobs;
 static size_t nblobs;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -98,7 +99,8 @@ static struct gblob *new_blob(uint32_t pages) {
         return NULL;
     }
     blobs = grown;
-    if (mn_blob_alloc((uint64_t)pages * MN_PAGE, &g->b) || !(g->used = calloc(pages, 1)) ||
+    if ((mn_wm_wow64 ? mn_blob_alloc_low : mn_blob_alloc)((uint64_t)pages * MN_PAGE, &g->b) ||
+        !(g->used = calloc(pages, 1)) ||
         !(g->r = calloc(pages, sizeof *g->r))) {
         free(g->used);
         free(g);

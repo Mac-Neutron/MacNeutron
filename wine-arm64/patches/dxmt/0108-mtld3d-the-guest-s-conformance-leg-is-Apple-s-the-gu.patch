@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Tue, 20 Oct 2026 22:09:54 -0400
+Subject: [PATCH] mtld3d: the guest's conformance leg is Apple's; the guest's
+ translation test says unknown
+
+MacNeutron's VM guest runs mtld3d's conformance runner as an x86_64
+Linux program over the Mac's Apple GPU: its leg is the Apple one, not
+Intel/AMD's (mac2). translated() answers None on Linux by design, which
+the Linux test asserts.
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ mtld3d/unix/conformance/src/model.rs      | 5 +++--
+ mtld3d/unix/unix/src/translation/tests.rs | 8 ++++++++
+ 2 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/mtld3d/unix/conformance/src/model.rs b/mtld3d/unix/conformance/src/model.rs
+index 606ab2e0..d85983e7 100644
+--- a/mtld3d/unix/conformance/src/model.rs
++++ b/mtld3d/unix/conformance/src/model.rs
+@@ -196,10 +196,11 @@ impl Gpu {
+     /// Read from the runner's own architecture: an Apple Silicon Mac carries
+     /// an Apple-family GPU and nothing else, an Intel Mac carries an Intel or
+     /// AMD GPU and never an Apple one, and the runner binary is always the
+-    /// host's architecture.
++    /// host's architecture. MacNeutron: a Linux runner is its microVM guest's,
++    /// whose Metal is an Apple Silicon Mac's.
+     #[must_use]
+     pub const fn host() -> Self {
+-        if cfg!(target_arch = "aarch64") {
++        if cfg!(any(target_arch = "aarch64", target_os = "linux")) {
+             Self::Apple
+         } else {
+             Self::Mac2
+diff --git a/mtld3d/unix/unix/src/translation/tests.rs b/mtld3d/unix/unix/src/translation/tests.rs
+index a06b6104..bba0b1e4 100644
+--- a/mtld3d/unix/unix/src/translation/tests.rs
++++ b/mtld3d/unix/unix/src/translation/tests.rs
+@@ -5,6 +5,7 @@
+ 
+ use super::translated;
+ 
++#[cfg(not(target_os = "linux"))]
+ #[test]
+ fn the_kernel_answers_for_this_process() {
+     let answer = translated();
+@@ -13,3 +14,10 @@ fn the_kernel_answers_for_this_process() {
+         assert_eq!(answer, Some(false), "an arm64 process is never translated");
+     }
+ }
++
++/// MacNeutron: the VM's guest asks no kernel (FEX is named by none).
++#[cfg(target_os = "linux")]
++#[test]
++fn the_guest_says_unknown() {
++    assert_eq!(translated(), None);
++}
+-- 
+2.54.0 (Apple Git-157)
+

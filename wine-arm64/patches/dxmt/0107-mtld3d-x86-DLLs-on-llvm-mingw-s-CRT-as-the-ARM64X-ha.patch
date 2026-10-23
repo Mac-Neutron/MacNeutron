@@ -1,0 +1,127 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Tue, 20 Oct 2026 21:39:11 -0400
+Subject: [PATCH] mtld3d: x86 DLLs on llvm-mingw's CRT, as the ARM64X halves
+ (MTLD3D_MINGW_CRT)
+
+MacNeutron's VM guest links mtld3d's x86_64 and i386 pairs as static
+libraries on llvm-mingw's CRT, the way the ARM64X halves link (no
+Microsoft SDK). With MTLD3D_MINGW_CRT set the shim bundles Wine's
+unix_lib.o into its static library and d3d9 takes arm64_crt.rs's CRT
+pieces (the type_info vtable, snmalloc's thread-exit callback), plus
+_fltused, which LLVM's x86 code for the -msvc targets references.
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ mtld3d/windows/d3d9/build.rs         | 9 +++++++++
+ mtld3d/windows/d3d9/src/arm64_crt.rs | 9 ++++++++-
+ mtld3d/windows/d3d9/src/lib.rs       | 8 ++++----
+ mtld3d/windows/shim/build.rs         | 8 ++++++--
+ 4 files changed, 27 insertions(+), 7 deletions(-)
+
+diff --git a/mtld3d/windows/d3d9/build.rs b/mtld3d/windows/d3d9/build.rs
+index 07520dae..a4111291 100644
+--- a/mtld3d/windows/d3d9/build.rs
++++ b/mtld3d/windows/d3d9/build.rs
+@@ -21,6 +21,15 @@ fn main() {
+         println!("cargo:rustc-cfg=mtld3d_crumb");
+     }
+ 
++    // MacNeutron: the x86 DLLs linked as static libraries on llvm-mingw's CRT, as
++    // the ARM64X halves are (the VM guest's, `MTLD3D_MINGW_CRT`), take the CRT
++    // pieces `src/arm64_crt.rs` supplies.
++    println!("cargo::rustc-check-cfg=cfg(mingw_crt)");
++    println!("cargo:rerun-if-env-changed=MTLD3D_MINGW_CRT");
++    if std::env::var_os("MTLD3D_MINGW_CRT").is_some() {
++        println!("cargo:rustc-cfg=mingw_crt");
++    }
++
+     println!("cargo::rustc-check-cfg=cfg(perf_tracking)");
+     println!("cargo:rerun-if-env-changed=MTLD3D_PERF");
+     if std::env::var("MTLD3D_PERF").is_ok_and(|v| !v.is_empty() && v != "0") {
+diff --git a/mtld3d/windows/d3d9/src/arm64_crt.rs b/mtld3d/windows/d3d9/src/arm64_crt.rs
+index 13848f13..80c00a7b 100644
+--- a/mtld3d/windows/d3d9/src/arm64_crt.rs
++++ b/mtld3d/windows/d3d9/src/arm64_crt.rs
+@@ -3,7 +3,8 @@
+ //! The i386 and `x86_64` DLLs link MSVC's `msvcrt.lib`, whose static part defines
+ //! everything below. The two ARM64X halves link llvm-mingw's CRT instead (see
+ //! `windows-arm64x` in the Makefile), which defines none of it, and MSVC's
+-//! ARM64 and ARM64EC libraries are not available to this build.
++//! ARM64 and ARM64EC libraries are not available to this build. MacNeutron: so
++//! do the x86 DLLs of its VM guest (`cfg(mingw_crt)`, `MTLD3D_MINGW_CRT`).
+ 
+ use core::ffi::c_void;
+ 
+@@ -22,6 +23,12 @@ use crate::DLL_THREAD_DETACH;
+ #[unsafe(export_name = "??_7type_info@@6B@")]
+ pub static TYPE_INFO_VFTABLE: [usize; 1] = [0];
+ 
++/// MSVC's marker that an image uses floating point, which LLVM's x86 code for the
++/// `-msvc` targets references and MSVC's CRT defines; nothing reads it.
++#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
++#[unsafe(no_mangle)]
++pub static _fltused: i32 = 0;
++
+ /// The TLS callback that tears down snmalloc's per-thread allocator.
+ ///
+ /// The loader finds it in this image's TLS callback array, which the linker
+diff --git a/mtld3d/windows/d3d9/src/lib.rs b/mtld3d/windows/d3d9/src/lib.rs
+index 256f57a5..d7d8da8b 100644
+--- a/mtld3d/windows/d3d9/src/lib.rs
++++ b/mtld3d/windows/d3d9/src/lib.rs
+@@ -1,4 +1,4 @@
+-#[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
++#[cfg(any(target_arch = "aarch64", target_arch = "arm64ec", mingw_crt))]
+ mod arm64_crt;
+ mod bound_buffers;
+ mod bound_rt;
+@@ -65,8 +65,8 @@ use crate::{
+ 
+ const DLL_PROCESS_ATTACH: u32 = 1;
+ const DLL_PROCESS_DETACH: u32 = 0;
+-/// The reason a thread's exit gives a TLS callback, which only the ARM64X halves install.
+-#[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
++/// The reason a thread's exit gives a TLS callback, which only the DLLs on llvm-mingw's CRT install.
++#[cfg(any(target_arch = "aarch64", target_arch = "arm64ec", mingw_crt))]
+ const DLL_THREAD_DETACH: u32 = 3;
+ 
+ /// Single source of truth for the `log` crate target, so callers don't hard-code the string.
+@@ -166,7 +166,7 @@ pub extern "system" fn dll_main(instance: *mut c_void, reason: u32, _reserved: *
+     if reason != DLL_PROCESS_ATTACH {
+         return 1;
+     }
+-    #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
++    #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec", mingw_crt))]
+     arm64_crt::attach();
+     init_logger(instance);
+     attach_process(instance);
+diff --git a/mtld3d/windows/shim/build.rs b/mtld3d/windows/shim/build.rs
+index 6a7dd434..4a7a3152 100644
+--- a/mtld3d/windows/shim/build.rs
++++ b/mtld3d/windows/shim/build.rs
+@@ -49,8 +49,11 @@ fn main() {
+     // image by the Makefile, and cargo hands link arguments to a cdylib only.
+     // So for those the object travels inside the static library instead, as a
+     // native library rustc bundles into it; the link that follows pulls it in
+-    // through the unix-call symbols the shim references.
+-    if matches!(object_arch, "aarch64-windows" | "arm64ec-windows") {
++    // through the unix-call symbols the shim references. MacNeutron: so do the
++    // x86 DLLs linked on llvm-mingw's CRT (`MTLD3D_MINGW_CRT`, the VM guest's).
++    if matches!(object_arch, "aarch64-windows" | "arm64ec-windows")
++        || std::env::var_os("MTLD3D_MINGW_CRT").is_some()
++    {
+         bundle_unix_lib(&llvm_ar, &unix_lib_path, &out_dir);
+     } else {
+         println!("cargo:rustc-link-arg-cdylib={unix_lib_path}");
+@@ -60,6 +63,7 @@ fn main() {
+     }
+ 
+     println!("cargo:rerun-if-env-changed=WINE_SDK");
++    println!("cargo:rerun-if-env-changed=MTLD3D_MINGW_CRT");
+     println!("cargo:rerun-if-env-changed=LLVM_AR");
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

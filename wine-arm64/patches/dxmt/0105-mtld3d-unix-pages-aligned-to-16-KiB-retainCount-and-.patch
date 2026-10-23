@@ -1,0 +1,165 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Tue, 20 Oct 2026 20:55:18 -0400
+Subject: [PATCH] mtld3d: unix pages aligned to 16 KiB; retainCount and
+ from_retained in the facade; ObjC-fixture tests macOS-only
+
+A Wine process's anonymous mappings are 4 KiB-aligned and a page lease
+needs PAGE_SIZE (16 KiB): every lease over such a page was refused and
+the device latched D3DERR_DEVICELOST. The facade answers retainCount
+from its own count and casts with from_retained; the tests that build
+Objective-C fixtures (encoder infos, NSError user info) stay macOS-only,
+and attachment.rs's tests keep their path under the facade's #[path].
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ mtld3d/unix/mtl/src/meta.rs                   |  6 ++++
+ mtld3d/unix/mtl/src/objc2.rs                  | 15 +++++++++-
+ mtld3d/unix/unix/src/metal.rs                 | 28 +++++++++++++++----
+ .../unix/src/metal/command/diagnostics.rs     |  3 +-
+ mtld3d/unix/unix/src/metal/command/tests.rs   |  6 +++-
+ .../unix/unix/src/metal/macdrv/attachment.rs  |  1 +
+ 6 files changed, 51 insertions(+), 8 deletions(-)
+
+diff --git a/mtld3d/unix/mtl/src/meta.rs b/mtld3d/unix/mtl/src/meta.rs
+index 142d2096..6549de71 100644
+--- a/mtld3d/unix/mtl/src/meta.rs
++++ b/mtld3d/unix/mtl/src/meta.rs
+@@ -73,6 +73,12 @@ pub fn release(handle: u64) {
+     }
+ }
+ 
++/// The facade's count of `handle`'s references (0 for an object it holds none of).
++#[must_use]
++pub fn refs(handle: u64) -> usize {
++    read(handle, |e| e.map_or(0, |e| e.refs as usize))
++}
++
+ /// Runs `f` on `handle`'s entry, made if the object is unknown (one winemetal made, such as a drawable's texture).
+ pub fn with<R>(handle: u64, f: impl FnOnce(&mut Entry) -> R) -> R {
+     let mut table = lock();
+diff --git a/mtld3d/unix/mtl/src/objc2.rs b/mtld3d/unix/mtl/src/objc2.rs
+index a88cef38..6392f8c5 100644
+--- a/mtld3d/unix/mtl/src/objc2.rs
++++ b/mtld3d/unix/mtl/src/objc2.rs
+@@ -209,6 +209,13 @@ pub mod runtime {
+             unsafe { &*(core::ptr::from_ref(obj).cast::<Self>()) }
+         }
+ 
++        /// The same reference through this protocol (objc2's `from_retained`).
++        #[must_use]
++        pub fn from_retained<T: Message>(obj: super::Retained<T>) -> super::Retained<Self> {
++            // SAFETY: a zero-sized view of the same object, its +1 handed over.
++            unsafe { super::Retained::cast_unchecked(obj) }
++        }
++
+         /// The object's winemetal handle.
+         #[must_use]
+         pub fn handle(&self) -> u64 {
+@@ -261,7 +268,13 @@ pub mod runtime {
+     pub type AnyObject = ProtocolObject<dyn core::any::Any>;
+ 
+     /// objc2's `NSObjectProtocol`.
+-    pub trait NSObjectProtocol {}
++    pub trait NSObjectProtocol {
++        /// The facade's count of the object's references (the references this process holds, which is what a
++        /// retain-discipline test compares).
++        fn retainCount(&self) -> usize {
++            meta::refs(core::ptr::from_ref(self).cast::<u8>() as usize as u64)
++        }
++    }
+     impl<P: ?Sized> NSObjectProtocol for ProtocolObject<P> {}
+ }
+ 
+diff --git a/mtld3d/unix/unix/src/metal.rs b/mtld3d/unix/unix/src/metal.rs
+index d526ddd9..b513b3a5 100644
+--- a/mtld3d/unix/unix/src/metal.rs
++++ b/mtld3d/unix/unix/src/metal.rs
+@@ -61,15 +61,33 @@ pub use upscale::is_supported as upscale_is_supported;
+ 
+ /// MacNeutron: `len` bytes of zeroed pages Metal can be made over, or null (the `AllocPages` thunk).
+ ///
+-/// macOS (the facade's loopback build, and the product build, which never asks): anonymous pages, 16 KiB-aligned as
+-/// the kernel maps them on Apple Silicon. The VM's guest: winemetal's own allocator (M2b).
++/// macOS (the facade's loopback build, and the product build, which never asks): anonymous pages aligned to the
++/// 16 KiB `PAGE_SIZE` a page lease requires; a Wine process's mappings are only 4 KiB-aligned, so the mapping is
++/// made 16 KiB larger and trimmed. The VM's guest: winemetal's own allocator (M2b).
+ #[must_use]
+ pub fn alloc_pages(len: usize) -> *mut u8 {
++    const ALIGN: usize = 16 * 1024;
++    let Some(total) = len.checked_add(ALIGN) else { return core::ptr::null_mut() };
+     // SAFETY: an anonymous private mapping; nothing else names the range.
+-    let ptr = unsafe {
+-        libc::mmap(core::ptr::null_mut(), len, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_ANON | libc::MAP_PRIVATE, -1, 0)
++    let raw = unsafe {
++        libc::mmap(core::ptr::null_mut(), total, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_ANON | libc::MAP_PRIVATE, -1, 0)
+     };
+-    if ptr == libc::MAP_FAILED { core::ptr::null_mut() } else { ptr.cast() }
++    if raw == libc::MAP_FAILED {
++        return core::ptr::null_mut();
++    }
++    let raw = raw as usize;
++    let start = raw.next_multiple_of(ALIGN);
++    // SAFETY: the head and tail of the mapping just made, outside [start, start + len): both page-aligned.
++    unsafe {
++        if start > raw {
++            libc::munmap(raw as *mut libc::c_void, start - raw);
++        }
++        let end = start + len;
++        if raw + total > end {
++            libc::munmap(end as *mut libc::c_void, raw + total - end);
++        }
++    }
++    start as *mut u8
+ }
+ 
+ /// MacNeutron: gives back `alloc_pages`' pages (the `FreePages` thunk).
+diff --git a/mtld3d/unix/unix/src/metal/command/diagnostics.rs b/mtld3d/unix/unix/src/metal/command/diagnostics.rs
+index a4044902..d715a2f7 100644
+--- a/mtld3d/unix/unix/src/metal/command/diagnostics.rs
++++ b/mtld3d/unix/unix/src/metal/command/diagnostics.rs
+@@ -608,5 +608,6 @@ fn append_signposts(output: &mut String, signposts: Option<&AnyObject>) {
+     output.push(']');
+ }
+ 
+-#[cfg(test)]
++// MacNeutron: the encoder-info fixtures are Objective-C classes the winemetal facade doesn't have.
++#[cfg(all(test, not(mtl_facade)))]
+ mod tests;
+diff --git a/mtld3d/unix/unix/src/metal/command/tests.rs b/mtld3d/unix/unix/src/metal/command/tests.rs
+index 406dcba7..a25b9e10 100644
+--- a/mtld3d/unix/unix/src/metal/command/tests.rs
++++ b/mtld3d/unix/unix/src/metal/command/tests.rs
+@@ -46,7 +46,9 @@ use crate::mtl::objc2::{
+     rc::Retained,
+     runtime::{AnyObject, ProtocolObject},
+ };
+-use crate::mtl::objc2_foundation::{NSDictionary, NSError, NSLocalizedDescriptionKey, NSString};
++#[cfg(not(mtl_facade))]
++use crate::mtl::objc2_foundation::{NSDictionary, NSError, NSLocalizedDescriptionKey};
++use crate::mtl::objc2_foundation::NSString;
+ use crate::mtl::objc2_metal::{
+     MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder,
+     MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLDevice, MTLOrigin, MTLPixelFormat,
+@@ -1201,6 +1203,8 @@ fn readback_completion_rejects_failed_and_unfinished_states() {
+ }
+ 
+ /// A real `NSError` crosses the same completion decision without any GPU submission.
++// MacNeutron: the driver error's details are Foundation objects the winemetal facade doesn't make.
++#[cfg(not(mtl_facade))]
+ #[test]
+ fn readback_completion_preserves_driver_error_details() {
+     let description = "Caused GPU Hang Error (00000003:kIOAccelCommandBufferCallbackErrorHang)";
+diff --git a/mtld3d/unix/unix/src/metal/macdrv/attachment.rs b/mtld3d/unix/unix/src/metal/macdrv/attachment.rs
+index 1a81783b..f96ecf2b 100644
+--- a/mtld3d/unix/unix/src/metal/macdrv/attachment.rs
++++ b/mtld3d/unix/unix/src/metal/macdrv/attachment.rs
+@@ -800,4 +800,5 @@ pub fn current_headroom(att: &Arc<Attachment>) -> f32 {
+ }
+ 
+ #[cfg(test)]
++#[cfg_attr(mtl_facade, path = "attachment/tests.rs")]
+ mod tests;
+-- 
+2.54.0 (Apple Git-157)
+

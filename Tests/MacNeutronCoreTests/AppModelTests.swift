@@ -383,7 +383,7 @@ private func makeValveModel(layout: ToolLayout, cdn: FakeValveCDN, appVersion: S
 /// A stand-in for MacNeutron.app's Contents/Helpers/vm.
 private func makeVMTools() throws -> URL {
     let tools = try makeTempDir().appending(path: "vm-tools", directoryHint: .isDirectory)
-    for file in ["macneutron-vm", "libkrun/libkrun.1.dylib", "steam-forward/host/mn-steam-host", "gvproxy",
+    for file in ["macneutron-vm", "libkrun/libkrun.1.dylib", "steam-forward/host/mn-steam-host.app/Contents/MacOS/mn-steam-host", "gvproxy",
                  "metal-host/winemetal.so", "dxmt/d3d12.dylib", "run-guest.sh", "run-game.sh", "dxmt-translator"] {
         try write("\(file)\n", to: tools.appending(path: file), executable: true)
     }

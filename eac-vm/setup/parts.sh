@@ -10,10 +10,11 @@ I=$W/images
 D=${1:?usage: parts.sh <out dir> [wine.app]}
 APP=${2:-${BUILD_DIR:-$ROOT/build}/wine-arm64/wine.app}  # whose licence texts the parts carry (the release passes its own)
 rm -rf "$D"
-mkdir -p "$D/share/bin"
+mkdir -p "$D/share/bin/lib64" "$D/share/bin/lib"
 cp -c -R "$I/setup/recipe" "$I/setup/overlay" "$D/"
 cp -c "$I/setup/wine.tar" "$I/cmdline.txt" "$I/packages.lock" "$I/state-template.img" "$D/"
 cp "$W/share/bin/libasound_module_pcm_mn.so" "$W/share/bin/mn-input" "$W/share/bin/steam.exe" "$D/share/bin/"
+for l in lib64 lib; do cp "$W/share/bin/$l/libasound_module_pcm_mn.so" "$D/share/bin/$l/"; done
 # The licences of what the parts hold, from wine.app (the same Wine, DXMT, FEX and lsteamclient trees' texts).
 L=$D/licenses
 mkdir -p "$L/dxmt"

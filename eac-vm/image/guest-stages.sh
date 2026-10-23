@@ -17,20 +17,23 @@ $B sync "$ROOT/eac-vm/sysroot" mn-sysroot > /dev/null
 for stage in ${*:-wine forwarder dxmt d3d fex}; do
   echo "guest-stages: $stage" >&2
   case $stage in
-    wine)  # eac-vm/wine/build.sh in the builder, from eac-vm/wine/sync.sh's copies
+    wine)  # eac-vm/wine/build.sh in the builder, from eac-vm/wine/sync.sh's copies: the x86-64 build, the 32-bit one
+      # (old WoW64's Unix side), and the stage with both (WINE32=0: the 64-bit build's alone)
       sh "$ROOT/eac-vm/wine/sync.sh"
       $B ssh "set -e; [ -x wine-tools/tools/winebuild/winebuild ] || sh mn-wine-build/build.sh tools
-        sh mn-wine-build/build.sh wine; sh mn-wine-build/build.sh install
+        sh mn-wine-build/build.sh wine; sh mn-wine-build/build.sh wine32; WINE32=${WINE32:-} sh mn-wine-build/build.sh install
         echo '$(stamp wine)' > wine-stage/opt/mn-wine/.mn-source" ;;
-    forwarder)  # lsteamclient's Unix half for the guest (eac-vm/steam-forward/build-guest.sh), on that Wine build
+    forwarder)  # lsteamclient's Unix half for the guest (eac-vm/steam-forward/build-guest.sh), on that Wine build and its
+      # 32-bit one (old WoW64)
       make -s -C "$ROOT/eac-vm/steam-forward" OUT="$W/steam-forward" "$W/steam-forward/descriptors.c"
       $B sync "$ROOT/eac-vm/steam-forward" mn-steam-forward > /dev/null
       $B sync "$W/steam-forward" mn-steam-gen > /dev/null
       $B sync "$S/lsteamclient/lsteamclient" mn-lsc > /dev/null
-      $B ssh "set -e; WINEBUILD=\$HOME/wine-build64 sh mn-steam-forward/build-guest.sh \$HOME/mn-steam-forward \$HOME/mn-lsc \
+      $B sync "$ROOT/eac-vm/sysroot" mn-sysroot > /dev/null
+      $B ssh "set -e; WINEBUILD=\$HOME/wine-build64 WINEBUILD32=\$HOME/wine-build32 sh mn-steam-forward/build-guest.sh \$HOME/mn-steam-forward \$HOME/mn-lsc \
         \$HOME/wine-src/include \$HOME/mn-steam-gen \$HOME/mn-steam-out > /dev/null
         echo '$(stamp forwarder)' > mn-steam-out/.mn-source" ;;
-    dxmt)  # DXMT's x86-64 DLLs (on the Mac) and the guest winemetal.so (through the builder), staged into it
+    dxmt)  # DXMT's x86-64 and i386 DLLs (on the Mac) and the guest winemetal.so (through the builder), staged into it
       sh "$ROOT/eac-vm/dxmt/build.sh" > /dev/null
       sh "$ROOT/eac-vm/metal/build-guest.sh" > /dev/null
       stamp dxmt > "$W/dxmt-guest/.mn-source"
@@ -38,7 +41,7 @@ for stage in ${*:-wine forwarder dxmt d3d fex}; do
     d3d)  # Direct3D forwarding's guest DLLs (eac-vm/d3d/build-guest.sh, on the Mac) and prefix.sh, staged in the builder
       sh "$ROOT/eac-vm/d3d/build-guest.sh" > /dev/null
       rm -rf "$W/d3d-guest-stage"; mkdir -p "$W/d3d-guest-stage"
-      cp -R "$W/d3d-guest/x86_64-windows" "$W/d3d-guest-stage/"
+      cp -R "$W/d3d-guest/x86_64-windows" "$W/d3d-guest/i386-windows" "$W/d3d-guest-stage/"
       cp "$ROOT/eac-vm/d3d/guest/prefix.sh" "$W/d3d-guest-stage/"
       stamp d3d > "$W/d3d-guest-stage/.mn-source"
       $B sync "$W/d3d-guest-stage" mn-d3d-guest > /dev/null ;;

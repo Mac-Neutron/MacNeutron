@@ -1,7 +1,7 @@
 # Our Wine on x86-64 Linux: what each macOS patch does
 
 The guest Wine is the same tree as the macOS one: Wine 11.20 plus our series (`build/wine-arm64-src/wine`,
-branch `macneutron`, 40 commits over wine-11.20, 7298a818) plus `eac-vm/wine-patches` (Proton 11's EAC changes). Built
+branch `macneutron`, 42 commits over wine-11.20, 7298a818) plus `eac-vm/wine-patches` (Proton 11's EAC changes). Built
 with `--enable-archs=x86_64` for `x86_64-linux-gnu`, so every patch falls in one of four groups.
 
 **Compiled out (`__APPLE__` or `__aarch64__`/ARM64EC only).** The loader and memory work: e7ca11cc (loader link
@@ -15,8 +15,10 @@ plus db0153de (ARM64 string routines in msvcrt). The x86-64 build has none of th
 wineserver uses its plain server-side sync. 97cb9aea (makedep) only matters with a hybrid arch.
 
 **Active, and the same as on macOS.** e3aaf5fd (win32u text metrics with no font), 8699ded1 (the Windows 2003 SP1+
-critical-section LockCount encoding), 26130284 (no wineboot wait window while a prefix is updated) and 42321e57
-(WINEDEBUG read before init_startup_info drops argv[0]: a child crashed without a trace's lazy read) are
+critical-section LockCount encoding), 26130284 (no wineboot wait window while a prefix is updated), 42321e57
+(WINEDEBUG read before init_startup_info drops argv[0]: a child crashed without a trace's lazy read) df0e5392
+(map_reserved_area skips a reserved area its aligned start passes: mtld3d's aligned reservations) and 21d6c56b (its
+top-down search starts at the lower limit) are
 platform-neutral fixes. 3b389503 builds lsteamclient; the guest replaces its Unix half with the forwarder
 (`eac-vm/steam-forward`, plan 3b Task 5). d8b1c118 (a genuine steamclient64.dll's exports jump to lsteamclient.dll) is
 what SteamStub games need here too.
@@ -28,3 +30,6 @@ treat as XeSS unavailable.
 **Proton's EAC changes** (`eac-vm/wine-patches`, plan 3b Task 1): PROTON_EAC_RUNTIME for the bridge files, the bridge
 loaded only when its native `.so` sits next to the Windows library, the EAC launcher and EOS bootstrapper handling,
 and the `download-alt.easyanticheat.net` DNS hack. These are why the guest runs our Wine and not upstream's.
+
+**New WoW64** (0007, the 32-bit games' spec 2026-10-20 §5): the guest builds i386 and x86-64 PE code over the 64-bit
+Unix side; libxess and libxess_dx11 stay x86-64 only (XeSS ships x64 only, and their size asserts are x64's).

@@ -7,5 +7,6 @@ extern struct mn_wm_ctx loop_ctx; /* the one context (made by the first transpor
 void *loop_ring(void);            /* this thread's ring_state */
 int loop_mapped(const void *p);   /* 1 while p's page is still mapped */
 int loop_blob_free_of(const void *p); /* the guest frees the blob holding p (the host may still hold it) */
+void loop_host_thread(int n);         /* this thread's host calls run on host thread n (1 or 2), or here (0) */
 
 #endif

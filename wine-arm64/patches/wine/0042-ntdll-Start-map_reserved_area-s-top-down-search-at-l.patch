@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Tue, 20 Oct 2026 22:14:21 -0400
+Subject: [PATCH] ntdll: Start map_reserved_area()'s top-down search at
+ limit_low.
+
+The top-down branch took a reserved area's own start as the lower bound
+of the space it fits the view into, so a view could be placed below
+limit_low when the area extended below it: a 64 KiB top-down
+reservation bounded to a 48 KiB window of the macOS soft pagezero came
+back below the window.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ dlls/ntdll/unix/virtual.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 2f96a37..b69301d 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -1839,7 +1839,7 @@ static void *map_reserved_area( void *limit_low, void *limit_high, size_t size,
+         for (area = find_mem_area( end ); end > limit_low; end = mem_area_end( --area ))
+         {
+             if (mem_area_state( area ) != AREA_RESERVED) continue;
+-            start = ROUND_ADDR( (char *)mem_area_base( area ) + align_mask, align_mask );
++            start = ROUND_ADDR( (char *)max( mem_area_base( area ), limit_low ) + align_mask, align_mask );
+             if (start >= end || (char *)end - (char *)start < size) continue;
+             ptr = ROUND_ADDR( (char *)end - size, align_mask );
+             break;
+-- 
+2.54.0 (Apple Git-157)
+

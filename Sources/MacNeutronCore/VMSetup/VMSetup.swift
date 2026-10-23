@@ -129,9 +129,13 @@ public enum VMSetup {
         let (new, old) = (built.path(percentEncoded: false), vm.appending(path: "images").path(percentEncoded: false))
         let swapped = fm.fileExists(atPath: old) ? renamex_np(new, old, UInt32(RENAME_SWAP)) : rename(new, old)
         guard swapped == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        // The guest's tools, once the images are in: each file replaced in one rename.
+        // The guest's tools, once the images are in: each file replaced in one rename, at its path under share/bin
+        // (the ALSA plugin of each width is in lib/ and lib64/).
         let bin = parts.appending(path: "share/bin", directoryHint: .isDirectory)
-        for name in (try? fm.contentsOfDirectory(atPath: bin.path(percentEncoded: false))) ?? [] {
+        for name in (try? fm.subpathsOfDirectory(atPath: bin.path(percentEncoded: false))) ?? [] {
+            var isDirectory: ObjCBool = false
+            guard fm.fileExists(atPath: bin.appending(path: name).path(percentEncoded: false), isDirectory: &isDirectory),
+                  !isDirectory.boolValue else { continue }
             try RuntimeInstaller.installFile(bin.appending(path: name), at: vm.appending(path: "share/bin/\(name)"))
         }
         try fm.removeItem(at: setup)  // the old set, the downloads and the parts

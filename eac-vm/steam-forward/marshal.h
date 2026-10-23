@@ -17,7 +17,10 @@ enum mn_kind {
 };
 enum { MN_IN_ONLY = 1,  /* const pointee: not copied back */
        MN_INNER = 2,    /* MN_FIXED whose pointee holds a pointer (inner_ptr) to inner_size_field bytes, copied back */
-       MN_COUNT_PTR = 4 }; /* MN_BUF whose count is behind the pointer at size_offset (a uint32_t *, in and out) */
+       MN_COUNT_PTR = 4,   /* MN_BUF whose count is behind the pointer at size_offset (a uint32_t *, in and out) */
+       MN_PTR32 = 8,       /* a WoW64 call's: the pointer, its count pointer and its inner pointer are 4 bytes */
+       MN_CAP = 16 };      /* MN_BUF whose count is a capacity in and the size the callee needs out
+                            * (steamclient_next_callback): its request's bytes go back, and the callee's count */
 
 struct mn_field {
     uint16_t offset;      /* of the pointer in the params struct */
@@ -38,8 +41,9 @@ struct mn_call_desc {
 struct mn_buf { uint8_t *data; size_t len, cap; };
 void mn_buf_free(struct mn_buf *b);
 
-/* Allocations the host makes for one call, freed together. */
-struct mn_arena { void **ptrs; size_t n, cap; };
+/* Allocations the host makes for one call, freed together. MN_PTR32 pointees go in `low` (the caller's region below
+ * 4 GiB, `low_cap` bytes; none: the call fails with MN_E_NOMEM), which mn_arena_free empties. */
+struct mn_arena { void **ptrs; size_t n, cap; uint8_t *low; size_t low_used, low_cap; };
 void mn_arena_free(struct mn_arena *a);
 
 /* A registry write recorded on the host, replayed by the guest. */
@@ -50,7 +54,8 @@ enum { MN_E_UNSUPPORTED = -1, MN_E_FORMAT = -2, MN_E_TOO_BIG = -3, MN_E_MISMATCH
 
 /* Guest: the request for one call. */
 int mn_pack_request(const struct mn_call_desc *d, uint32_t index, const void *params, struct mn_buf *out);
-/* Host: the call's index and a host copy of its params (pointers into `arena`). `msg` excludes nothing: header first. */
+/* Host: the call's index (without MN_WOW64: `descs` is the table that bit names) and a host copy of its params
+ * (pointers into `arena`). `msg` excludes nothing: header first. */
 int mn_unpack_request(const struct mn_call_desc *descs, uint32_t ndescs, const void *msg, size_t len,
                       uint32_t *index, void **host_params, struct mn_arena *arena);
 /* Host: the reply, after the call ran on host_params; the registry writes the call made go along. */
@@ -66,5 +71,11 @@ int mn_unpack_reply(const struct mn_call_desc *d, const void *msg, size_t len, v
 
 /* FNV-1a over every size and offset in the table: guest and host exchange it before their first call. */
 uint32_t mn_table_checksum(const struct mn_call_desc *descs, unsigned n);
+/* The handshake's value from the two tables' checksums (full: both, wow64: the WoW64 table's): a 64-bit guest's is
+ * full; an i686 guest's (old WoW64's 32-bit Unix side, which makes WoW64 calls only, and whose 64-bit table compiles
+ * to other layouts) is its WoW64 checksum, marked. accept: the host's test of a guest's value; *wow64_only: an i686
+ * guest. */
+uint32_t mn_handshake_value(uint32_t full, uint32_t wow64, int wow64_only);
+int mn_handshake_accept(uint32_t theirs, uint32_t full, uint32_t wow64, int *wow64_only);
 
 #endif

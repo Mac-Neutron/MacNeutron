@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Wed, 21 Oct 2026 15:10:31 -0400
+Subject: [PATCH] mtld3d: the Unix side's page allocator is installed when the
+ library loads (Linux)
+
+0117 installed it at the first device. The source latches at the first
+PageBox, and mtld3d.so's own tests make PageBoxes (and no-copy buffers
+over them) before any device: in the guest they then took native pages
+the host can't map. Two tests had passed only because the guest left a
+refused buffer's handle behind (fixed with it); now an .init_array entry
+installs it before any page, Wine's load and a test binary's alike
+(mtld3d_unix 233/233 on both widths in the guest).
+
+Assisted-by: Claude Code: claude-opus-5-5
+---
+ mtld3d/unix/unix/src/handlers.rs |  1 -
+ mtld3d/unix/unix/src/metal.rs    | 16 ++++++++++++----
+ 2 files changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/mtld3d/unix/unix/src/handlers.rs b/mtld3d/unix/unix/src/handlers.rs
+index 1212681d..50b05b6a 100644
+--- a/mtld3d/unix/unix/src/handlers.rs
++++ b/mtld3d/unix/unix/src/handlers.rs
+@@ -293,7 +293,6 @@ pub extern "C" fn create_command_queue_handler(args: *mut c_void) -> i32 {
+         return -1;
+     };
+     let params: &mut CreateCommandQueueParams = &mut params;
+-    metal::install_page_allocator();
+ 
+     let gate = if params.gate_file_ptr == 0 || params.gate_file_len == 0 {
+         None
+diff --git a/mtld3d/unix/unix/src/metal.rs b/mtld3d/unix/unix/src/metal.rs
+index 999a4f29..b0dfc4d1 100644
+--- a/mtld3d/unix/unix/src/metal.rs
++++ b/mtld3d/unix/unix/src/metal.rs
+@@ -125,7 +125,8 @@ pub fn free_pages(ptr: *mut u8, _len: usize) {
+ ///
+ /// The encoder's staging rows become no-copy buffers, which there must be made over the guest
+ /// allocator's memory, the host's mapping; any other page fails (the PE side's boxes take the same
+-/// pages through `PAGES_FROM_UNIX`). Set at the first device, before the encoder's first page.
++/// pages through `PAGES_FROM_UNIX`). Set when the library loads (`INSTALL_PAGE_ALLOCATOR`), before
++/// any page: the source latches at the first.
+ #[cfg(target_os = "linux")]
+ pub fn install_page_allocator() {
+     fn alloc(len: usize) -> Option<core::ptr::NonNull<u8>> {
+@@ -137,6 +138,13 @@ pub fn install_page_allocator() {
+     mtld3d_core::page_box::set_page_allocator_source(|| Some(mtld3d_core::page_box::PageAllocator { alloc, free }));
+ }
+ 
+-/// Native pages on macOS: Metal takes any page-aligned memory there.
+-#[cfg(not(target_os = "linux"))]
+-pub const fn install_page_allocator() {}
++/// `install_page_allocator` at the library's load, a test binary's included.
++#[cfg(target_os = "linux")]
++#[used]
++#[unsafe(link_section = ".init_array")]
++static INSTALL_PAGE_ALLOCATOR: extern "C" fn() = {
++    extern "C" fn install() {
++        install_page_allocator();
++    }
++    install
++};
+-- 
+2.54.0 (Apple Git-157)
+

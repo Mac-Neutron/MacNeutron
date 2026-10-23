@@ -4,7 +4,8 @@
     gen.py <lsteamclient dir> <out dir>
 
 Writes <out>/descriptors.c (one mn_call_desc per entry of the 64-bit __wine_unix_call_funcs table, in table order,
-sized and offset by the compiler on each side), <out>/guest_table.c (the guest's forwarding tables) and <out>/report.txt (shape counts, every buffer and its count field,
+sized and offset by the compiler on each side, and its WoW64 twin from the wow64_ params, whose W32_PTR pointers are
+4 bytes: MN_PTR32), <out>/guest_table.c (the guest's forwarding tables) and <out>/report.txt (shape counts, every buffer and its count field,
 every unsupported call with the reason). The rules, which the report lists:
 
   - `const char *` is a string in, unless a byte count (cb*, cub*) follows it: then a buffer in.
@@ -18,7 +19,7 @@ every unsupported call with the reason). The rules, which the report lists:
     TradeItems, StartPurchase, GetItemsWithPrices) take the first count after the run of pointers that follows them.
     One element where Steam writes or reads many is a host heap overflow.
   - Pointers to pointers, pointees that hold pointers, and `void *_ret` are unsupported.
-  - `struct u_iface`, `struct u_buffer`, function pointers and interface objects (`w_I…`, `struct w_iface *`) are host
+  - `struct u_iface`, `struct u_buffer`, function pointers and interface objects (`w_I…`, `w32_I…`, `struct w_iface *`) are host
     or guest values carried as they are: not described.
 OVERRIDES fixes or adds fields by call; CHECKED lists the calls whose description was reviewed by hand (Task 6).
 """
@@ -40,7 +41,8 @@ OVERRIDES = {
                                             'size_offset': 'offsetof(struct steamclient_get_unix_buffer_params, buf) + 8',
                                             'size_width': '8'}},
     # Callback records hold the guest's own function and object pointers, which the host only carries: bytes.
-    'steamclient_next_callback': {'callback': {'kind': 'MN_BUF', 'size': '1',
+    # Its size is the buffer's capacity in, the size the callback needs out (MN_CAP: Proton asks with no buffer first).
+    'steamclient_next_callback': {'callback': {'kind': 'MN_BUF', 'flags': 'MN_CAP', 'size': '1',
                                                'size_offset': 'offsetof(struct steamclient_next_callback_params, size)',
                                                'size_width': '4'}},
     # The message header: the host fills id, user and size; m_pubParam stays the guest's value.
@@ -93,6 +95,38 @@ def field_name(decl):
     return m.group(1), decl[:m.start()].strip() + (m.group(2) or '')
 
 
+def w32_decl(field):
+    """(declaration, pointer type) inside lsteamclient's W32_PTR(decl, name, type) (a WoW64 struct's 4-byte pointer),
+    else None."""
+    m = re.match(r'^W32_PTR\s*\((.*)\)$', field.strip())
+    if not m:
+        return None
+    args, depth, cur = [], 0, ''
+    for ch in m.group(1):
+        depth += {'(': 1, ')': -1}.get(ch, 0)
+        if ch == ',' and depth == 0:
+            args.append(cur); cur = ''
+        else:
+            cur += ch
+    args.append(cur)
+    return args[0].strip(), args[2].strip()
+
+
+def wow64_overrides(name):
+    """OVERRIDES for the WoW64 table: its params and callback structs, its pointers 4 bytes. The guest answers
+    steamclient_get_unix_buffer itself (client.c), so the host never runs it."""
+    if name == 'steamclient_get_unix_buffer':
+        return {'ptr': {'kind': 'MN_UNSUPPORTED'}}
+    out = {}
+    for fname, d in OVERRIDES.get(name, {}).items():
+        if d is not None:
+            d = {k: v.replace(f'struct {name}_params', f'struct wow64_{name}_params').replace('w_CallbackMsg_t', 'w32_CallbackMsg_t')
+                 for k, v in d.items()}
+            d['flags'] = 'MN_PTR32' if d.get('flags', '0') == '0' else d['flags'] + ' | MN_PTR32'
+        out[fname] = d
+    return out
+
+
 def main():
     src, out_dir = sys.argv[1], sys.argv[2]
     texts = {f: strip_comments(open(os.path.join(src, f), errors='replace').read())
@@ -118,165 +152,192 @@ def main():
             return False
         return any('*' in f or any(holds_pointers(w, seen + (tname,)) for w in re.findall(r'\w+', f)) for f in body)
 
-    descs, report, counts = [], [], {}
-    for idx, name in enumerate(names):
-        sname = name + '_params'
-        fields = structs.get(sname)
-        if fields is None:
-            if name in NO_PARAMS:
-                descs.append((name, None, [], []))
-            else:
-                descs.append((name, sname, None, ['no params struct']))
-            continue
-        parsed = [field_name(f) for f in fields]
-        out, reasons = [], []
-        for i, (fname, ftype) in enumerate(parsed):
-            ov = OVERRIDES.get(name, {})
-            if fname in ov:
-                if ov[fname] is not None:
-                    out.append((fname, ov[fname]))
-                    counts['override'] = counts.get('override', 0) + 1
+    tables = {}
+    for wow64 in (False, True):
+        descs, report, counts = [], [], {}
+        for idx, name in enumerate(names):
+            sname = ('wow64_' if wow64 else '') + name + '_params'
+            fields = structs.get(sname)
+            if fields is None:
+                if name in NO_PARAMS:
+                    descs.append((name, None, [], []))
+                else:
+                    descs.append((name, sname, None, ['no params struct']))
                 continue
-            t = ftype.replace('struct ', '').strip()
-            if t == 'u_buffer' and fname == '_ret':
-                # A host pointer and length (a string Steam returned): the bytes come back as a guest copy.
-                out.append((fname, {'kind': 'MN_RET_BUF'}))
-                counts['returned buffer'] = counts.get('returned buffer', 0) + 1
-                continue
-            if '(*)' in t and '(' in t.split('(*)')[1][:2]:
-                continue  # function pointer: a guest value the host carries back
-            if '*' not in t:
-                continue
-            if t.startswith(('u_iface', 'u_buffer')) or re.match(r'(const )?w_I\w+ \*$', t) or t.startswith('w_iface'):
-                continue
-            const = t.startswith('const ')
-            base = t[6:] if const else t
-            stars = base.count('*')
-            pointee = base.replace('*', '').strip()
-            flags = 'MN_IN_ONLY' if const else '0'
-            count = count_ptr = None
-            for j in range(i + 1, min(i + 3, len(parsed))):
-                cname, ctype = parsed[j]
-                if '*' in ctype:
-                    if ctype.replace(' ', '') == 'uint32_t*' and COUNT_NAME.search(cname):
-                        count_ptr = cname  # the count behind a pointer, which the callee rewrites
-                    break  # a count after the next pointer belongs to that pointer
-                if INT.match(ctype.replace('struct ', '').strip()) and COUNT_NAME.search(cname):
-                    count = cname
-                    break
-            if not count and not count_ptr and re.search(r'Array|Prices', fname):
-                for cname, ctype in parsed[i + 1:]:
+            w32 = [w32_decl(f) for f in fields]
+            ptr32s = [d is not None for d in w32]
+            parsed = [field_name(d[0] if d is not None else f) for d, f in zip(w32, fields)]
+            out, reasons = [], []
+            for i, (fname, ftype) in enumerate(parsed):
+                ov = wow64_overrides(name) if wow64 else OVERRIDES.get(name, {})
+                if fname in ov:
+                    if ov[fname] is not None:
+                        out.append((fname, ov[fname]))
+                        counts['override'] = counts.get('override', 0) + 1
+                    continue
+                t = ftype.replace('struct ', '').strip()
+                if t == 'u_buffer' and fname == '_ret':
+                    # A host pointer and length (a string Steam returned): the bytes come back as a guest copy.
+                    out.append((fname, {'kind': 'MN_RET_BUF'}))
+                    counts['returned buffer'] = counts.get('returned buffer', 0) + 1
+                    continue
+                if '(*)' in t and '(' in t.split('(*)')[1][:2]:
+                    continue  # function pointer: a guest value the host carries back
+                if '*' not in t:
+                    continue
+                if t.startswith(('u_iface', 'u_buffer')) or re.match(r'(const )?w(32)?_I\w+ \*$', t) or t.startswith('w_iface'):
+                    continue
+                const = t.startswith('const ')
+                base = t[6:] if const else t
+                stars = base.count('*')
+                pointee = base.replace('*', '').strip()
+                flags = 'MN_IN_ONLY' if const else '0'
+                if ptr32s[i]:
+                    flags = 'MN_PTR32' if flags == '0' else flags + ' | MN_PTR32'
+
+                count = count_ptr = None
+                for j in range(i + 1, min(i + 3, len(parsed))):
+                    cname, ctype = parsed[j]
                     if '*' in ctype:
-                        continue  # another of the parallel arrays
+                        if ctype.replace(' ', '') == 'uint32_t*' and COUNT_NAME.search(cname):
+                            count_ptr = cname  # the count behind a pointer, which the callee rewrites
+                        break  # a count after the next pointer belongs to that pointer
                     if INT.match(ctype.replace('struct ', '').strip()) and COUNT_NAME.search(cname):
                         count = cname
-                    break
-            access = f'((struct {sname} *)0)->{fname}'
-            if stars > 1 and '(*)' not in t:
-                out.append((fname, {'kind': 'MN_UNSUPPORTED'})); reasons.append(f'{fname}: pointer to pointer')
-                kind = 'unsupported'
-            elif fname == '_ret' and pointee == 'void':
-                out.append((fname, {'kind': 'MN_UNSUPPORTED'})); reasons.append('_ret: returns a host pointer')
-                kind = 'unsupported'
-            elif typedefs.get(pointee, pointee) not in structs and re.match(r'(w_)?Steam\w*$', pointee) \
-                    and not any(re.search(r'typedef[^;]*\b' + pointee + r'\s*;', t) and '{' in t for t in ()):
-                tn = re.escape(typedefs.get(pointee, pointee))
-                if any(re.search(r'\b(struct\s+)?' + tn + r'\s*\{', t) or re.search(r'\}\s*' + tn + r'\s*;', t)
-                       for t in texts.values()):
-                    out.append((fname, {'kind': 'MN_FIXED', 'flags': flags, 'size': f'sizeof(*{access})'}))
-                    kind = 'fixed'
-                else:
-                    out.append((fname, {'kind': 'MN_UNSUPPORTED'})); reasons.append(f'{fname}: {pointee} is incomplete')
+                        break
+                if not count and not count_ptr and re.search(r'Array|Prices', fname):
+                    for cname, ctype in parsed[i + 1:]:
+                        if '*' in ctype:
+                            continue  # another of the parallel arrays
+                        if INT.match(ctype.replace('struct ', '').strip()) and COUNT_NAME.search(cname):
+                            count = cname
+                        break
+                access = f'((struct {sname} *)0)->{fname}'
+                # A W32_PTR field is an opaque struct ptr32 in C: its pointee is sized through the pointer type it names
+                # (an array's too: char (*)[1024]).
+                size_of = f'sizeof(*({w32[i][1]})0)' if ptr32s[i] else f'sizeof(*{access})'
+                if stars > 1 and '(*)' not in t:
+                    out.append((fname, {'kind': 'MN_UNSUPPORTED'})); reasons.append(f'{fname}: pointer to pointer')
                     kind = 'unsupported'
-            elif holds_pointers(pointee):
-                out.append((fname, {'kind': 'MN_UNSUPPORTED'})); reasons.append(f'{fname}: {pointee} holds pointers')
-                kind = 'unsupported'
-            elif pointee == 'char' and const and not (count and count.lower().startswith(('cb', 'cub'))):
-                out.append((fname, {'kind': 'MN_STR_IN', 'flags': 'MN_IN_ONLY'}))
-                kind = 'string'
-            elif pointee in BYTE_TYPES and '(*)' not in t:
-                if count:
-                    out.append((fname, {'kind': 'MN_BUF', 'flags': flags, 'size': '1',
+                elif fname == '_ret' and pointee == 'void':
+                    out.append((fname, {'kind': 'MN_UNSUPPORTED'})); reasons.append('_ret: returns a host pointer')
+                    kind = 'unsupported'
+                elif typedefs.get(pointee, pointee) not in structs and re.match(r'(w_)?Steam\w*$', pointee) \
+                        and not any(re.search(r'typedef[^;]*\b' + pointee + r'\s*;', t) and '{' in t for t in ()):
+                    tn = re.escape(typedefs.get(pointee, pointee))
+                    if any(re.search(r'\b(struct\s+)?' + tn + r'\s*\{', t) or re.search(r'\}\s*' + tn + r'\s*;', t)
+                           for t in texts.values()):
+                        out.append((fname, {'kind': 'MN_FIXED', 'flags': flags, 'size': size_of}))
+                        kind = 'fixed'
+                    else:
+                        out.append((fname, {'kind': 'MN_UNSUPPORTED'})); reasons.append(f'{fname}: {pointee} is incomplete')
+                        kind = 'unsupported'
+                elif holds_pointers(pointee):
+                    out.append((fname, {'kind': 'MN_UNSUPPORTED'})); reasons.append(f'{fname}: {pointee} holds pointers')
+                    kind = 'unsupported'
+                elif pointee == 'char' and const and not (count and count.lower().startswith(('cb', 'cub'))):
+                    out.append((fname, {'kind': 'MN_STR_IN', 'flags': flags}))
+                    kind = 'string'
+                elif pointee in BYTE_TYPES and '(*)' not in t:
+                    if count:
+                        out.append((fname, {'kind': 'MN_BUF', 'flags': flags, 'size': '1',
+                                            'size_offset': f'offsetof(struct {sname}, {count})',
+                                            'size_width': f'sizeof(((struct {sname} *)0)->{count})'}))
+                        report.append(f'buffer {name}.{fname} <- {count}')
+                        kind = 'buffer'
+                    elif count_ptr:
+                        out.append((fname, {'kind': 'MN_BUF', 'flags': 'MN_COUNT_PTR' if flags == '0' else
+                                            flags + ' | MN_COUNT_PTR', 'size': '1',
+                                            'size_offset': f'offsetof(struct {sname}, {count_ptr})', 'size_width': '4'}))
+                        report.append(f'buffer {name}.{fname} <- *{count_ptr}')
+                        kind = 'buffer'
+                    elif pointee in ('uint8_t', 'int8_t'):
+                        out.append((fname, {'kind': 'MN_FIXED', 'flags': flags, 'size': '1'}))
+                        kind = 'fixed'
+                    else:
+                        out.append((fname, {'kind': 'MN_UNSUPPORTED'})); reasons.append(f'{fname}: {t} with no count field')
+                        kind = 'unsupported'
+                elif count and '(*)' not in t:
+                    out.append((fname, {'kind': 'MN_BUF', 'flags': flags, 'size': size_of,
                                         'size_offset': f'offsetof(struct {sname}, {count})',
                                         'size_width': f'sizeof(((struct {sname} *)0)->{count})'}))
-                    report.append(f'buffer {name}.{fname} <- {count}')
-                    kind = 'buffer'
-                elif count_ptr:
+                    report.append(f'array  {name}.{fname} <- {count}')
+                    kind = 'array'
+                elif count_ptr and '(*)' not in t:
                     out.append((fname, {'kind': 'MN_BUF', 'flags': 'MN_COUNT_PTR' if flags == '0' else
-                                        flags + ' | MN_COUNT_PTR', 'size': '1',
+                                        flags + ' | MN_COUNT_PTR', 'size': size_of,
                                         'size_offset': f'offsetof(struct {sname}, {count_ptr})', 'size_width': '4'}))
-                    report.append(f'buffer {name}.{fname} <- *{count_ptr}')
-                    kind = 'buffer'
-                elif pointee in ('uint8_t', 'int8_t'):
-                    out.append((fname, {'kind': 'MN_FIXED', 'flags': flags, 'size': '1'}))
-                    kind = 'fixed'
+                    report.append(f'array  {name}.{fname} <- *{count_ptr}')
+                    kind = 'array'
                 else:
-                    out.append((fname, {'kind': 'MN_UNSUPPORTED'})); reasons.append(f'{fname}: {t} with no count field')
-                    kind = 'unsupported'
-            elif count and '(*)' not in t:
-                out.append((fname, {'kind': 'MN_BUF', 'flags': flags, 'size': f'sizeof(*{access})',
-                                    'size_offset': f'offsetof(struct {sname}, {count})',
-                                    'size_width': f'sizeof(((struct {sname} *)0)->{count})'}))
-                report.append(f'array  {name}.{fname} <- {count}')
-                kind = 'array'
-            elif count_ptr and '(*)' not in t:
-                out.append((fname, {'kind': 'MN_BUF', 'flags': 'MN_COUNT_PTR' if flags == '0' else
-                                    flags + ' | MN_COUNT_PTR', 'size': f'sizeof(*{access})',
-                                    'size_offset': f'offsetof(struct {sname}, {count_ptr})', 'size_width': '4'}))
-                report.append(f'array  {name}.{fname} <- *{count_ptr}')
-                kind = 'array'
-            else:
-                out.append((fname, {'kind': 'MN_FIXED', 'flags': flags, 'size': f'sizeof(*{access})'}))
-                kind = 'fixed'
-            counts[kind] = counts.get(kind, 0) + 1
-        descs.append((name, sname, out, reasons))
+                    out.append((fname, {'kind': 'MN_FIXED', 'flags': flags, 'size': size_of}))
+                    kind = 'fixed'
+                counts[kind] = counts.get(kind, 0) + 1
+            descs.append((name, sname, out, reasons))
+        tables[wow64] = (descs, report, counts)
+    descs, report, counts = tables[False]
 
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, 'descriptors.c'), 'w') as f:
         f.write('/* Generated by eac-vm/steam-forward/gen.py from lsteamclient: do not edit. */\n'
                 '#include <stddef.h>\n#include "unixlib.h" /* includes unixlib_generated.h */\n#include "marshal.h"\n\n'
                 'static const struct mn_field mn_unsupported_field[] = { { 0, MN_UNSUPPORTED } };\n\n')
-        for idx, (name, sname, out, _) in enumerate(descs):
-            if not out:
-                continue
-            f.write(f'static const struct mn_field f{idx}[] = {{\n')
-            for fname, d in out:
-                vals = [f'offsetof(struct {sname}, {fname})', d['kind'], d.get('flags', '0'), d.get('size', '0'),
-                        d.get('size_offset', '0'), d.get('size_width', '0'), '0', d.get('inner_ptr', '0'),
-                        d.get('inner_size', '0')]
-                f.write('    { ' + ', '.join(vals) + ' },\n')
+        # The 64-bit table (f<idx>, mn_calls) and the WoW64 one (w<idx>, mn_calls_wow64): same calls, same order.
+        for prefix, table, wow64 in (('f', 'mn_calls', False), ('w', 'mn_calls_wow64', True)):
+            tdescs = tables[wow64][0]
+            for idx, (name, sname, out, _) in enumerate(tdescs):
+                if not out:
+                    continue
+                f.write(f'static const struct mn_field {prefix}{idx}[] = {{\n')
+                for fname, d in out:
+                    vals = [f'offsetof(struct {sname}, {fname})', d['kind'], d.get('flags', '0'), d.get('size', '0'),
+                            d.get('size_offset', '0'), d.get('size_width', '0'), '0', d.get('inner_ptr', '0'),
+                            d.get('inner_size', '0')]
+                    f.write('    { ' + ', '.join(vals) + ' },\n')
+                f.write('};\n')
+            f.write(f'\nconst struct mn_call_desc {table}[] = {{\n')
+            for idx, (name, sname, out, _) in enumerate(tdescs):
+                if out is None:
+                    f.write(f'    {{ "{name}", 0, 1, mn_unsupported_field }},\n')
+                elif sname is None:
+                    f.write(f'    {{ "{name}", 0, 0, NULL }},\n')
+                else:
+                    f.write(f'    {{ "{name}", sizeof(struct {sname}), {len(out)}, {f"{prefix}{idx}" if out else "NULL"} }},\n')
             f.write('};\n')
-        f.write('\nconst struct mn_call_desc mn_calls[] = {\n')
-        for idx, (name, sname, out, _) in enumerate(descs):
-            if out is None:
-                f.write(f'    {{ "{name}", 0, 1, mn_unsupported_field }},\n')
-            elif sname is None:
-                f.write(f'    {{ "{name}", 0, 0, NULL }},\n')
-            else:
-                f.write(f'    {{ "{name}", sizeof(struct {sname}), {len(out)}, {f"f{idx}" if out else "NULL"} }},\n')
-        f.write('};\nconst unsigned int mn_ncalls = sizeof(mn_calls) / sizeof(mn_calls[0]);\n')
-    # The guest's Unix-call tables: each 64-bit entry forwards its own index; WoW64 calls are not carried.
+        f.write('const unsigned int mn_ncalls = sizeof(mn_calls) / sizeof(mn_calls[0]);\n')
+    # The guest's Unix-call tables: each entry forwards its own index, the WoW64 ones with their 32-bit params; the
+    # guest answers steamclient_get_unix_buffer's WoW64 call itself (client.c).
     with open(os.path.join(out_dir, 'guest_table.c'), 'w') as f:
         f.write('/* Generated by eac-vm/steam-forward/gen.py: do not edit. */\n'
-                '#include "unixlib.h"\n#include "client.h"\n\n')
-        for idx in range(len(descs)):
+                '#include "unixlib.h"\n#include "client.h"\n\n'
+                'NTSTATUS mn_wow64_get_unix_buffer(void *params);\n')
+        for idx, (name, _, _, _) in enumerate(descs):
             f.write(f'static NTSTATUS f{idx}(void *p) {{ return mn_client_call({idx}, p); }}\n')
-        f.write('static NTSTATUS wow64_refused(void *p) { (void)p; return MN_STATUS_NOT_IMPLEMENTED; }\n\n')
-        f.write('const unixlib_entry_t __wine_unix_call_funcs[] = {\n')
+            if name != 'steamclient_get_unix_buffer':
+                f.write(f'static NTSTATUS w{idx}(void *p) {{ return mn_client_call_wow64({idx}, p); }}\n')
+        wow64_entries = ''.join('    mn_wow64_get_unix_buffer,\n' if name == 'steamclient_get_unix_buffer'
+                                else f'    w{idx},\n' for idx, (name, _, _, _) in enumerate(descs))
+        # An i686 build is old WoW64's 32-bit Unix side: its one table takes its 32-bit callers' params, the WoW64 ones.
+        f.write('\n#ifdef __i386__\nconst unixlib_entry_t __wine_unix_call_funcs[] = {\n')
+        f.write(wow64_entries)
+        f.write('};\n#else\nconst unixlib_entry_t __wine_unix_call_funcs[] = {\n')
         f.write(''.join(f'    f{idx},\n' for idx in range(len(descs))))
         f.write('};\nconst unixlib_entry_t __wine_unix_call_wow64_funcs[] = {\n')
-        f.write('    wow64_refused,\n' * len(descs))
-        f.write('};\n')
-    unsupported = [(n, r) for n, _, o, r in descs if r]
+        f.write(wow64_entries)
+        f.write('};\n#endif\n')
     with open(os.path.join(out_dir, 'report.txt'), 'w') as f:
-        f.write(f'calls {len(descs)}, unsupported {len(unsupported)}\n')
-        for k in sorted(counts):
-            f.write(f'fields {k} {counts[k]}\n')
-        f.write('\n'.join(sorted(report)) + '\n\n')
-        for n, r in unsupported:
-            f.write(f'unsupported {n}: {"; ".join(r)}\n')
-    print(f'{len(descs)} calls, {len(unsupported)} unsupported; fields: {counts}')
-
+        for label, wow64 in (('', False), ('wow64 ', True)):
+            tdescs, treport, tcounts = tables[wow64]
+            unsupported = [(n, r) for n, _, o, r in tdescs if r]
+            f.write(f'{label}calls {len(tdescs)}, unsupported {len(unsupported)}\n')
+            for k in sorted(tcounts):
+                f.write(f'{label}fields {k} {tcounts[k]}\n')
+            f.write('\n'.join(sorted(treport)) + '\n\n')
+            for n, r in unsupported:
+                f.write(f'{label}unsupported {n}: {"; ".join(r)}\n')
+    for label, wow64 in (('', False), ('wow64: ', True)):
+        tdescs, _, tcounts = tables[wow64]
+        print(f'{label}{len(tdescs)} calls, {len([1 for d in tdescs if d[3]])} unsupported; fields: {tcounts}')
 
 if __name__ == '__main__':
     main()

@@ -1,0 +1,82 @@
+#!/bin/sh
+# Direct3D 9 on the macOS path (D3D9 spec §6, M1): build/dxmt-tests/d3d9_triangle.exe (`make dxmt-tests`) through the
+# launcher just built (`make build`), on the tool folder `macneutron install` assembles from <wine.app> (default
+# build/wine-arm64/wine.app): its lines "d3d9 module/clear/triangle/present ok" say mtld3d drew it, and "d3d9 imports
+# ok" that it redirected the program's EnumDisplaySettingsW import (d3d9 is a static import there). d3d9_dynamic.exe's
+# "d3d9 module/imports ok" say a run-time load of mtld3d's d3d9.dll left the program's imports alone. Then with
+# vsync ("d3d9 vsync ok": 60 presents at D3DPRESENT_INTERVAL_ONE paced, not waiting out mtld3d's 1 s cap), and in the
+# same prefix as another wine.app left it (its stamp another runtime's, mtld3d.dll's marker gone), which the launcher's
+# prefix update must give the marker back. With OLD=<another wine.app> the same run again in a prefix that wine.app
+# made first (it must lack mtld3d.dll: a player's prefix from before mtld3d). Prints "d3d9-check: ok" or what failed;
+# exits 1 on a miss. DXMT_CHECK_WORK names the work folder (default a temporary one). MTLD3D_SO=<mtld3d.so> runs that build of
+# mtld3d's Unix side instead (the loopback build of D3D9 spec §5.1), swapped into the tool folder's own wine.app and
+# signed with MACNEUTRON_SIGN_IDENTITY (ad hoc without one). MTLD3D_PE=<folder> does the same with its ARM64X d3d9.dll
+# and mtld3d.dll (mtld3d-build.sh's first folder): a build of mtld3d's PE side checked without rebuilding wine.app.
+#   d3d9-check.sh [<wine.app>]
+set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+APP=$(cd "${1:-$ROOT/build/wine-arm64/wine.app}" && pwd)
+EXE="$ROOT/build/dxmt-tests/d3d9_triangle.exe" DYN="$ROOT/build/dxmt-tests/d3d9_dynamic.exe"
+CLI="$ROOT/.build/release/macneutron"
+for e in "$EXE" "$DYN"; do [ -f "$e" ] || { echo "d3d9-check: no $e: run make dxmt-tests" >&2; exit 2; }; done
+[ -x "$CLI" ] || { echo "d3d9-check: no $CLI: run make build" >&2; exit 2; }
+WORK=${DXMT_CHECK_WORK:-$(mktemp -d "${TMPDIR:-/tmp}/macneutron-d3d9.XXXXXX")}
+fail=
+# launch <tool> <compat> <name> [arg]: d3d9_triangle.exe (or $PROG) [arg] through <tool>'s launcher in the prefix of <compat>,
+# killed after 120 s; its lines in $WORK/<name>.txt. MACNEUTRON_VM=0: the macOS path, whatever VM folder this Mac has.
+launch() {
+  env STEAM_COMPAT_DATA_PATH="$WORK/compat/$2" SteamAppId=0 MACNEUTRON_VM=0 MACNEUTRON_GRAPHICS=dxmt \
+    MACNEUTRON_NO_STEAM_BRIDGE=1 MACNEUTRON_NO_METALFX=1 \
+    "$WORK/$1/bin/macneutron" launch waitforexitandrun "${PROG:-$EXE}" ${4:+"$4"} > "$WORK/$3.out" 2>&1 &
+  pid=$!
+  ( sleep 120; kill "$pid" 2> /dev/null ) > /dev/null 2>&1 & dog=$!
+  wait "$pid" || true
+  { kill "$dog" && wait "$dog"; } 2> /dev/null || true
+  tr -d '\r' < "$WORK/$3.out" > "$WORK/$3.txt"
+}
+# check <name> [rows]: the rows (default the four) ok, else each missing one named.
+check() {
+  for r in ${2:-module clear triangle present}; do
+    got=$(/usr/bin/grep "^d3d9 $r " "$WORK/$1.txt" || echo "d3d9 $r: no line")
+    echo "d3d9-check: $1: $got"
+    [ "$got" = "d3d9 $r ok" ] || fail="$fail $1-$r"
+  done
+}
+rm -rf "$WORK/ours" "$WORK/compat"; mkdir -p "$WORK/compat"
+"$CLI" install --tool-dir "$WORK/ours" --wine-app "$APP" > /dev/null || { echo "d3d9-check: install failed" >&2; exit 1; }
+if [ -n "${MTLD3D_SO:-}" ]; then
+  so="$WORK/ours/wine.app/Contents/Resources/lib/wine/aarch64-unix/mtld3d.so"
+  rm -f "$so" && cp "$MTLD3D_SO" "$so" && codesign -f -s "${MACNEUTRON_SIGN_IDENTITY:--}" "$so" 2> /dev/null \
+    || { echo "d3d9-check: could not put $MTLD3D_SO in the tool folder" >&2; exit 1; }
+fi
+for dll in d3d9.dll mtld3d.dll; do
+  [ -n "${MTLD3D_PE:-}" ] || break
+  pe="$WORK/ours/wine.app/Contents/Resources/lib/wine/aarch64-windows/$dll"
+  rm -f "$pe" && cp "$MTLD3D_PE/$dll" "$pe" || { echo "d3d9-check: could not put $MTLD3D_PE/$dll in the tool folder" >&2; exit 1; }
+  # Marked builtin as bundle.sh marks it: Wine loads no unmarked copy from its builtin folder.
+  [ "$dll" != d3d9.dll ] || "${BUILD_DIR:-$ROOT/build}/wine-arm64-src/wine-build/tools/winebuild/winebuild" --builtin "$pe" \
+    || { echo "d3d9-check: could not mark $pe builtin" >&2; exit 1; }
+done
+launch ours fresh fresh
+check fresh "module clear triangle present imports"
+PROG=$DYN; launch ours fresh dynamic; PROG=  # (an assignment before a function call outlives it in sh)
+check dynamic "module imports"
+launch ours fresh vsync vsync
+check vsync vsync
+P="$WORK/compat/fresh/pfx/drive_c/windows/system32/mtld3d.dll"
+rm -f "$P" && echo "wine.app another msync=0" > "$WORK/compat/fresh/version"
+launch ours fresh stale
+check stale
+[ -f "$P" ] || { echo "d3d9-check: stale: the prefix update wrote no mtld3d.dll marker"; fail="$fail stale-marker"; }
+if [ -n "${OLD:-}" ]; then
+  rm -rf "$WORK/old"
+  "$CLI" install --tool-dir "$WORK/old" --wine-app "$(cd "$OLD" && pwd)" > /dev/null \
+    || { echo "d3d9-check: install of OLD failed" >&2; exit 1; }
+  env STEAM_COMPAT_DATA_PATH="$WORK/compat/old" SteamAppId=0 "$WORK/old/bin/macneutron" launch getcompatpath "$WORK" \
+    > /dev/null 2>&1 || { echo "d3d9-check: OLD made no prefix" >&2; exit 1; }
+  [ ! -f "$WORK/compat/old/pfx/drive_c/windows/system32/mtld3d.dll" ] \
+    || { echo "d3d9-check: OLD's prefix has mtld3d.dll already: OLD is no wine.app from before mtld3d" >&2; exit 1; }
+  launch ours old updated
+  check updated
+fi
+[ -z "$fail" ] && echo "d3d9-check: ok" || { echo "d3d9-check: FAIL$fail"; exit 1; }

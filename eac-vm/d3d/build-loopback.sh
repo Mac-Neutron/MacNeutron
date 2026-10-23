@@ -19,7 +19,7 @@ DXMT=${BUILD_DIR:-$ROOT/build}/wine-arm64-src/dxmt/src
 python3 -I "$D3D/gen.py" --headers "$I" --rules "$D3D/rules.txt" --out "$G" calls
 rm -rf "$O"
 mkdir -p "$O"
-CF="-O1 -g -Wall -std=gnu2x -DMN_D3D_LOOPBACK -DDXMT_GUEST_VM -I$M -I$M/wm -I$G -I$I -I$D3D -I$DXMT/winemetal -I$DXMT/airconv"
+CF="-O1 -g -Wall -std=gnu2x -DMN_D3D_LOOPBACK -DDXMT_GUEST_VM -I$M -I$M/wm -I$G -I$I -I$D3D -I$D3D/guest -I$DXMT/winemetal -I$DXMT/airconv"
 CXF="-O1 -g -Wall -Werror -Wno-extern-c-compat -std=c++17 -DMN_D3D_LOOPBACK -DWIDL_EXPLICIT_AGGREGATE_RETURNS -include $NT/native-prelude.h
   -I$NT/include -I$I/d3d12 -I$I/windows -I$I/directx -I$I -I$DXMT/util -I$DXMT/d3d12 -I$DXMT/d3d11 -I$G -I$D3D -I$D3D/host -I$D3D/guest"
 objs=
@@ -37,7 +37,7 @@ for f in wm/host/invoke.m wm/host/memory.m wm/host/events.m wm/host/present.m wm
   compile "clang $CF" "$M/$f"
 done
 for f in "$G/calls.c" "$G/ifaces.c" "$D3D/host/dispatch.c" "$D3D/host/memory.c" "$D3D/host/events.c" \
-  "$D3D/host/window.c" "$D3D/guest/unix.c"; do
+  "$D3D/host/window.c" "$D3D/guest/unix.c" "$G/convert32.c"; do
   compile "clang $CF" "$f"
 done
 compile "clang $CF -DMN_D3D_NATIVE_DIR=\"$LIB\"" "$D3D/tests/loopback.c"

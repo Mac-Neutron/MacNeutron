@@ -15,7 +15,8 @@ MN_RUN_TIMEOUT=900 "$ROOT/eac-vm/run-guest.sh" "$ROOT/eac-vm/tests/metal-transpo
 printf '/mnt/share/bin/metal-transport-test no-test-ops\n' > "$W/metal-no-test-ops.sh"
 MN_RUN_TIMEOUT=120 "$ROOT/eac-vm/run-guest.sh" "$W/metal-no-test-ops.sh" || fail=1
 MN_RUN_TIMEOUT=300 "$ROOT/eac-vm/run-guest.sh" "$ROOT/eac-vm/tests/metal-wm.sh" || fail=1
-printf 'LD_LIBRARY_PATH=/mnt/share/bin/wm /mnt/share/bin/metal-wm-test cross-thread\n' > "$W/metal-wm-cross.sh"
+printf 'LD_LIBRARY_PATH=/mnt/share/bin/wm /mnt/share/bin/metal-wm-test cross-thread &&
+LD_LIBRARY_PATH=/mnt/share/bin/wm/i386 /mnt/share/bin/metal-wm-test32 cross-thread\n' > "$W/metal-wm-cross.sh"
 MN_RUN_TIMEOUT=300 "$ROOT/eac-vm/run-guest.sh" "$W/metal-wm-cross.sh" --metal-test-ops || fail=1
 [ $fail -eq 0 ] && echo "metal gates: all passed" || echo "metal gates: FAIL"
 exit $fail

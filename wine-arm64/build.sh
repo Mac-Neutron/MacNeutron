@@ -38,6 +38,24 @@ need_tool ninja ninja; need_tool meson meson; need_tool pkg-config pkg-config
 need_tool msgfmt gettext  # without it Wine's configure only warns, and the bundle has no translations
 # DXMT compiles its own Metal shaders; Xcode ships the compiler as a separate component.
 xcrun metal --version > /dev/null 2>&1 || missing="$missing, Metal Toolchain (xcodebuild -downloadComponent MetalToolchain)"
+# mtld3d (Direct3D 9) builds with rustup's MTLD3D_RUST toolchain (dxmt/pins), its llvm-tools, and a target for each
+# of its builds: the ARM64X halves and mtld3d.so here, the VM guest's x86 pairs and Linux mtld3d.so (eac-vm).
+need_tool rustup rustup
+if command -v rustup > /dev/null 2>&1; then
+  . "$ROOT/dxmt/pins"
+  if ! rustup toolchain list 2> /dev/null | /usr/bin/grep -q "^$MTLD3D_RUST"; then
+    missing="$missing, Rust $MTLD3D_RUST (rustup toolchain install $MTLD3D_RUST --component llvm-tools)"
+  else
+    installed=$(rustup target list --installed --toolchain "$MTLD3D_RUST" 2> /dev/null)
+    for t in aarch64-pc-windows-msvc arm64ec-pc-windows-msvc aarch64-apple-darwin x86_64-pc-windows-msvc \
+      i686-pc-windows-msvc x86_64-unknown-linux-gnu; do
+      printf '%s\n' "$installed" | /usr/bin/grep -qx "$t" \
+        || missing="$missing, Rust target $t (rustup target add --toolchain $MTLD3D_RUST $t)"
+    done
+    rustup component list --installed --toolchain "$MTLD3D_RUST" 2> /dev/null | /usr/bin/grep -q '^llvm-tools' \
+      || missing="$missing, Rust llvm-tools (rustup component add --toolchain $MTLD3D_RUST llvm-tools)"
+  fi
+fi
 die_if_missing
 check_signing  # before anything is fetched or built
 # llvm-mingw's arm64ec- and aarch64-w64-mingw32 wrappers, for the Windows side of Wine.
@@ -83,7 +101,8 @@ EC_LTO=$UNIX_LTO EC_LTO_ON=$LTO_ON
 # move the tree into place. Recorded before the move: a stop in between leaves no tree, so it's redone.
 patch_tree() {
   for p in "$3"/*.patch; do
-    git -C "$1" am -q "$p" || { git -C "$1" am --abort; die "patch $(basename "$p") does not apply to $5"; }
+    # --keep-cr: a vendored file with CRLF line ends keeps them (0098, snmalloc-sys) as its commit has them.
+    git -C "$1" am -q --keep-cr "$p" || { git -C "$1" am --abort; die "patch $(basename "$p") does not apply to $5"; }
   done
   git -C "$1" rev-parse HEAD > "$SRC/$2.applied"
   echo "$4" > "$SRC/$2.series"
@@ -149,7 +168,8 @@ stamp=$(stamp_of "$ROOT/wine-arm64/pins" "$PATCHES"/*.patch "$FEX_PATCHES"/*.pat
   "$ROOT/presenter/present.m" "$ROOT/presenter/cmaa2.metal" "$ROOT/presenter/sharpen.metal" \
   "$ROOT/presenter/CMAA2-LICENSE.txt" "$ROOT/LICENSE" \
   "$ROOT/wine-arm64/tools/xcrun-metal.sh" "$ROOT/dxmt/toolchain.sh" "$ROOT/dxmt/llvm-mingw.sh" \
-  "$ROOT/wine-arm64/tools/authenticode-sign.swift" \
+  "$ROOT/wine-arm64/tools/authenticode-sign.swift" "$ROOT/dxmt/mtld3d-build.sh" "$ROOT/dxmt/mtld3d-tools.sh" \
+  "$ROOT/dxmt/mtld3d-mingw-cc.sh" "$ROOT/dxmt/mtld3d-notices.py" \
   "$ROOT"/wine-arm64/patches/llvm/*.patch)
 # Another CPU, LTO setting or toolchain is another build.
 stamp=$(printf '%s %s %s %s' "$stamp" "$MACNEUTRON_CPU" "$MACNEUTRON_LTO" "$TOOLCHAIN_BIN" | shasum -a 256 \
@@ -528,6 +548,19 @@ sh "$ROOT/wine-arm64/tools/xcrun-metal.sh" -sdk macosx metal -o "$SRC/presenter/
   && /usr/bin/xcrun -sdk macosx metallib -o "$SRC/presenter/libmacneutron-present.metallib" \
      "$SRC/presenter/cmaa2.air" "$SRC/presenter/sharpen.air" \
   >> "$SRC/presenter.log" 2>&1 || die "building the presenter's shaders failed; see $SRC/presenter.log"
+
+# 7b. mtld3d (D3D9 spec §4), Direct3D 9: its ARM64X d3d9.dll and mtld3d.dll and its mtld3d.so, by its own Makefile in
+#     the DXMT tree's mtld3d/ (dxmt/mtld3d-build.sh), against an installed copy of this Wine (bin/winebuild and
+#     lib/wine's aarch64 archives); bundle.sh puts them in wine.app.
+rm -rf "$SRC/wine-sdk"
+make -C "$SRC/wine-build" install DESTDIR="$SRC/wine-sdk" > "$SRC/wine-sdk.log" 2>&1 \
+  || die "installing Wine for mtld3d's build failed; see $SRC/wine-sdk.log"
+echo "wine-arm64: building mtld3d (log: $SRC/mtld3d.log)" >&2
+BUILD_DIR="$B" sh "$ROOT/dxmt/mtld3d-build.sh" "$SRC/wine-sdk/usr/local" > /dev/null 2> "$SRC/mtld3d.log" \
+  || die "building mtld3d failed; see $SRC/mtld3d.log"
+# The crates its binaries link, their licence files (bundle.sh: licenses/mtld3d/crates).
+PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH" python3 -I "$ROOT/dxmt/mtld3d-notices.py" "$D/mtld3d" \
+  "$SRC/mtld3d-notices" "cargo +$MTLD3D_RUST" 2>> "$SRC/mtld3d.log" || die "collecting mtld3d's crate licences failed; see $SRC/mtld3d.log"
 
 # 8. Bundle and sign (make install into wine.app, the loader's entitlements, every check on the result). First the
 #    bundle's licenses/SOURCE (ship-base spec §4): the inputs it is built from, each tree's series or dev.

@@ -11,6 +11,7 @@
 #define MN_MAGIC 0x46534e4du /* "MNSF" */
 #define MN_NULL 0xffffffffu
 #define MN_MAX_MESSAGE (64u << 20)
+#define MN_WOW64 0x80000000u /* in a request's index: a WoW64 call (mn_calls_wow64, the host's WoW64 functions) */
 
 struct mn_req_hdr { uint32_t magic, index, len; };
 struct mn_rep_hdr { uint32_t magic, status, len; };

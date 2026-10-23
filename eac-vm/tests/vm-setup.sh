@@ -64,7 +64,8 @@ done
 rm -rf "$W/images/gate"
 
 # The result boots: the pinned kernel, lockdown, signed modules, the TPM, then sound under FEX and Wine.
-cp "$W/share/bin/alsa-play" "$W/share/bin/waveout.exe" "$VM/share/bin/"
+cp "$W/share/bin/alsa-play" "$W/share/bin/alsa-play32" "$W/share/bin/waveout.exe" "$W/share/bin/waveout32.exe" \
+  "$VM/share/bin/"  # audio.sh's 32-bit rows run on an image with the 32-bit Unix side
 {
   printf 'uname -r\ncat /sys/kernel/security/lockdown\ncat /sys/module/module/parameters/sig_enforce\nls /dev/tpm0\n'
   cat "$ROOT/eac-vm/tests/audio.sh"
