@@ -12,9 +12,10 @@
 #   state-template.img   the same, empty, never attached: each game's own state disk starts as an APFS clone of it
 #                        (run-guest.sh MN_STATE), so the images above are one copy for every game
 #   cmdline.txt, packages.lock
-# Pinning: the first build downloads packages.txt's closure and the x86-64 RootFS into $CACHE and checks every
-# package's Fedora signature; builds install from that cache only, never from the live repositories, and fail if the
-# result differs from packages.lock beside this script (UPDATE_LOCK=1 accepts a new set; copy $OUT/packages.lock here).
+# Pinning: the first build downloads packages.lock's packages (packages.txt's closure and the x86-64 RootFS, with
+# UPDATE_LOCK=1) into $CACHE and checks every package's Fedora signature; builds install from that cache only, never
+# from the live repositories, and fail if the result differs from packages.lock beside this script (UPDATE_LOCK=1
+# accepts a new set; copy $OUT/packages.lock here).
 # `build.sh wine` remakes wine.erofs only. Wine's x86-64 libraries come from the RootFS (all there but libodbc).
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -110,15 +111,26 @@ mountpoint -q "$OUT" || { sudo mkdir -p "$OUT"; sudo mount -t virtiofs "out${SFX
 [ "${1:-}" = wine ] && { wine_image; state_template; exit 0; }
 sudo rm -rf "$WORK"; sudo mkdir -p "$WORK/root" "$WORK/x86" "$WORK/x86-rpm"
 
-# The cache is for one packages.txt: a changed list refetches (otherwise an added package would silently be missing).
-if [ ! -f "$CACHE/.complete" ] || ! cmp -s "$HERE/packages.txt" "$CACHE/packages.txt"; then
+# The cache is for one packages.txt and one lock: a changed one refetches (otherwise an added package would silently be
+# missing, or the lock's own packages never fetched).
+KEY=$(cat "$HERE/packages.txt" "$HERE/packages.lock" 2> /dev/null || true)
+if [ ! -f "$CACHE/.complete" ] || [ "$KEY" != "$(cat "$CACHE/packages.txt" 2> /dev/null)" ]; then
   sudo rm -rf "$CACHE"; sudo mkdir -p "$CACHE/base" "$CACHE/x86"
-  sudo dnf -y -q download --destdir="$CACHE/base" --resolve --alldeps --setopt=install_weak_deps=False \
-    $(grep -v '^#' "$HERE/packages.txt")
-  sudo dnf -y -q download --destdir="$CACHE/x86" fex-emu-rootfs-fedora
+  if [ -f "$HERE/packages.lock" ] && [ -z "${UPDATE_LOCK:-}" ]; then
+    # The lock's own packages: the mirrors keep only each package's newest build, Fedora's updates-archive every update.
+    rpm -q fedora-repos-archive > /dev/null || sudo dnf -y -q install fedora-repos-archive
+    sudo dnf -y -q download --enablerepo=updates-archive --destdir="$CACHE/base" \
+      $(grep -v '^fex-emu-rootfs-fedora-' "$HERE/packages.lock")
+    sudo dnf -y -q download --enablerepo=updates-archive --destdir="$CACHE/x86" \
+      $(grep '^fex-emu-rootfs-fedora-' "$HERE/packages.lock")
+  else
+    sudo dnf -y -q download --destdir="$CACHE/base" --resolve --alldeps --setopt=install_weak_deps=False \
+      $(grep -v '^#' "$HERE/packages.txt")
+    sudo dnf -y -q download --destdir="$CACHE/x86" fex-emu-rootfs-fedora
+  fi
   bad=$(rpmkeys --checksig "$CACHE"/base/*.rpm "$CACHE"/x86/*.rpm | grep -v ': digests signatures OK$' || true)
   [ -z "$bad" ] || { echo "$bad"; echo "packages without a valid Fedora signature; cache removed" >&2; sudo rm -rf "$CACHE"; exit 1; }
-  sudo cp "$HERE/packages.txt" "$CACHE/packages.txt"
+  printf '%s\n' "$KEY" | sudo tee "$CACHE/packages.txt" > /dev/null
   sudo touch "$CACHE/.complete"
 fi
 
