@@ -6,7 +6,7 @@
 # virtio-input, fed by eac-vm/host/input.c (include/libkrun_input.h); patch 0007's TpmDevice is a TPM 2.0 over TIS MMIO, its
 # commands run by eac-vm/host/tpm.c (include/libkrun_tpm.h); patch 0009's trap blobs call the handler macneutron-vm sets
 # (include/libkrun_trap.h); patch 0010 keeps a disk's last 4 KiB out of discards and write-zeroes, which imago would
-# otherwise serve by truncating the image. The Makefile is skipped on purpose: on macOS it downloads a Debian sysroot for the guest init blob, which we don't use.
+# otherwise serve by truncating the image; patch 0011 gives a read-only share no extended attributes. The Makefile is skipped on purpose: on macOS it downloads a Debian sysroot for the guest init blob, which we don't use.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 HERE=$ROOT/eac-vm/libkrun

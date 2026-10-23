@@ -28,3 +28,5 @@ Patches:
   sets).
 - 0010: a disk's last 4 KiB is kept out of discards and write-zeroes: imago serves one reaching the image's end by
   truncating the file, and the next boot finds the disk shorter than its filesystem (fsck fails, /home isn't mounted).
+- 0011: a read-only share (the game share, `games`) serves no extended attributes: the guest's FUSE keeps the first
+  ENOSYS, so Wine's two getxattrs per listed file stop being host round trips (eac-vm/tests/games-xattr.sh).
