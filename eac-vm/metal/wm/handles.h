@@ -19,7 +19,8 @@ typedef uint64_t mn_handle; /* (generation << 32) | index; 0 = null */
 enum mn_hkind {
     MN_HK_ANY = 0, /* lookups only: slots 0 and 1 take any kind */
     MN_HK_OBJC = 1, MN_HK_SM50_SHADER, MN_HK_SM50_BITCODE, MN_HK_SM50_ERROR, MN_HK_LISTENER, MN_HK_HEAP_EMU,
-    MN_HK_POOL, /* an NSAutoreleasePool: only its own ring may release it, and nothing else takes it */
+    MN_HK_POOL, /* a guest's NSAutoreleasePool (a stand-in on the host, invoke.m): only its own ring may release it,
+                 * and nothing else takes it */
     MN_HK_ANY_OBJC, /* lookups only: an Objective-C object or an emulated heap (residency sets, heap slots) */
     MN_HK_VIEW,     /* a metal view (slot 72): its release is winemetal's slot 73, which takes it off the window */
     MN_HK_D3D,      /* a native DXMT COM object (Direct3D forwarding): its release is its own Release */

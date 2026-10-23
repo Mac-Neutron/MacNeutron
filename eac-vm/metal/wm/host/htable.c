@@ -232,9 +232,9 @@ static void unbind(struct mn_ht *t, struct hentry *e) {
     t->live--;
 }
 
-/* With the lock: pops pool and the pools inside it, dropping a reference from each of their handles. Inner pools are
- * unbound only: draining the outer NSAutoreleasePool releases them. */
-static int pop(struct mn_ht *t, void *ring, mn_handle pool) {
+/* With the lock: pops pool and the pools inside it, dropping a reference from each of their handles. Inner pools'
+ * stand-ins (invoke.m) join run, to be released once the lock is let go; pool's own is its caller's. */
+static int pop(struct mn_ht *t, void *ring, mn_handle pool, struct pendings *run) {
     struct ringpools *rp = ringpools(t, ring, 0);
     size_t k = rp ? rp->n : 0;
     while (k > 0 && rp->stack[k - 1].h != pool) k--;
@@ -251,6 +251,7 @@ static int pop(struct mn_ht *t, void *ring, mn_handle pool) {
             struct hentry *e = entry(t, MN_H_INDEX(p.h), 0);
             unbind(t, e);
             e->busy = 0;
+            pend(run, MN_HK_POOL, e->obj);
             e->obj = NULL;
         }
     }
@@ -270,22 +271,26 @@ void mn_ht_pool_push(struct mn_ht *t, void *ring, mn_handle pool) {
 }
 
 void mn_ht_pool_pop(struct mn_ht *t, void *ring, mn_handle pool) {
+    struct pendings run = {0};
     pthread_mutex_lock(&t->lock);
-    pop(t, ring, pool);
+    pop(t, ring, pool, &run);
     pthread_cond_broadcast(&t->cond);
     pthread_mutex_unlock(&t->lock);
+    run_pending(t, &run);
 }
 
 void mn_ht_ring_end(struct mn_ht *t, void *ring) {
+    struct pendings run = {0};
     pthread_mutex_lock(&t->lock);
     struct ringpools *rp = ringpools(t, ring, 0);
     if (rp) {
-        if (rp->n) {
+        if (rp->n) { /* the pools the thread left open go with it */
             mn_handle bottom = rp->stack[0].h;
-            pop(t, ring, bottom);
+            pop(t, ring, bottom, &run);
             struct hentry *e = entry(t, MN_H_INDEX(bottom), 0);
-            unbind(t, e); /* drained by the thread's exit, like the pools above it */
+            unbind(t, e);
             e->busy = 0;
+            pend(&run, MN_HK_POOL, e->obj);
             e->obj = NULL;
         }
         free(rp->stack);
@@ -293,6 +298,7 @@ void mn_ht_ring_end(struct mn_ht *t, void *ring) {
         pthread_cond_broadcast(&t->cond);
     }
     pthread_mutex_unlock(&t->lock);
+    run_pending(t, &run);
 }
 
 int mn_ht_release(struct mn_ht *t, void *ring, mn_handle h) {
@@ -304,8 +310,8 @@ int mn_ht_release(struct mn_ht *t, void *ring, mn_handle h) {
     int r = -1;
     if (e && e->refs && (!pool || e->ring == ring)) {
         r = 0;
-        if (pool) { /* at once, on its own ring's thread: an NSAutoreleasePool is drained where it was made */
-            pop(t, ring, h);
+        if (pool) { /* at once, from its own ring */
+            pop(t, ring, h, &run);
             e->refs = 0;
             unbind(t, e);
             e->busy = 0;
@@ -356,9 +362,7 @@ void mn_ht_free(struct mn_ht *t) {
         struct hentry *chunk = t->chunks[c];
         if (!chunk) continue;
         for (uint32_t i = 0; i < CHUNK; i++)
-            /* A pool died with its ring's thread, which drained it. */
-            if (chunk[i].busy && S_KIND(chunk[i].state) != MN_HK_POOL)
-                pend_at(&run, S_KIND(chunk[i].state), chunk[i].obj, chunk[i].seq);
+            if (chunk[i].busy) pend_at(&run, S_KIND(chunk[i].state), chunk[i].obj, chunk[i].seq);
         free(chunk);
     }
     for (size_t i = 0; i < t->nrp; i++) {

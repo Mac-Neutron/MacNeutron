@@ -408,6 +408,8 @@ static void exception(void) {
     CHECK(call(33, &e) == 0 && host_status == 0 && calls[33] == 1);
 }
 
+/* The host's pool is a stand-in (invoke.m), not winemetal's (slot 10 isn't called): releasing the guest's releases
+ * what it holds. */
 static void pool(void) {
     struct unixcall_generic_obj_ret p = {0};
     CHECK(call(10, &p) == 0 && p.ret);
@@ -416,10 +418,12 @@ static void pool(void) {
     obj_handle_t h = p.ret;
     CHECK(call(1, &h) == 0);
     mn_ht_sweep(ctx.ht, ring_state);
-    CHECK(releases[POOL] == 1 && releases[CMDBUF] == 1);
+    CHECK(releases[POOL] == 0 && releases[CMDBUF] == 1);
     int ok;
     mn_ht_get(ctx.ht, cb.ret, MN_HK_OBJC, &ok);
     CHECK(!ok && mn_gh_retain(cb.ret) == -1); /* gone on both sides */
+    mn_ht_get(ctx.ht, p.ret, MN_HK_POOL, &ok);
+    CHECK(!ok);
 }
 
 /* Every node type of each encoder, each node's bytes a pattern, its handles the string's and its payload bytes. */

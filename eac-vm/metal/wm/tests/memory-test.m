@@ -35,7 +35,11 @@
  *   wait-uncommitted      a wait (13) on a buffer whose commit, from another thread (its own ring), the host hasn't
  *                         reached returns once that commit ran and the buffer completed: Metal's wait blocks for a
  *                         later commit, so a wait needs no order across rings (a commit does: a queue runs its
- *                         buffers in the order the host commits them) */
+ *                         buffers in the order the host commits them)
+ *   pools-one-host        two guest threads (rings) whose calls run on one host thread, as drained rings run on
+ *                         whichever vCPU traps: each opens a pool (10) and autoreleases a command buffer in it (11),
+ *                         then the first releases its pool before the second does; then the same with the second
+ *                         thread's calls moved to another host thread before its release */
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
@@ -578,6 +582,44 @@ static void wait_uncommitted(void) {
     release(q);
 }
 
+/* The second guest thread of pools-one-host: its pool and command buffer, its release once the first thread's ran. */
+static obj_handle_t second_q;
+static int second_moves;
+static dispatch_semaphore_t second_opened, first_released;
+static void *second_thread(void *arg) {
+    (void)arg;
+    loop_host_thread(1);
+    obj_handle_t pool = pool_push();
+    struct unixcall_generic_obj_obj_ret nc = {second_q, 0};
+    CHECK(W(11, &nc) == 0 && nc.ret);
+    dispatch_semaphore_signal(second_opened);
+    dispatch_semaphore_wait(first_released, DISPATCH_TIME_FOREVER);
+    if (second_moves) loop_host_thread(2);
+    release(pool);
+    return NULL;
+}
+
+static void pools_one_host(void) {
+    for (second_moves = 0; second_moves < 2; second_moves++) {
+        obj_handle_t q = new_queue();
+        second_q = q;
+        second_opened = dispatch_semaphore_create(0), first_released = dispatch_semaphore_create(0);
+        loop_host_thread(1);
+        obj_handle_t pool = pool_push();
+        struct unixcall_generic_obj_obj_ret nc = {q, 0};
+        CHECK(W(11, &nc) == 0 && nc.ret);
+        pthread_t t;
+        pthread_create(&t, NULL, second_thread, NULL);
+        dispatch_semaphore_wait(second_opened, DISPATCH_TIME_FOREVER);
+        release(pool); /* on the host thread, under the second thread's pool */
+        dispatch_semaphore_signal(first_released);
+        pthread_join(t, NULL);
+        loop_host_thread(0);
+        sweep();
+        release(q);
+    }
+}
+
 static void *run(void *arg) {
     (void)arg;
     struct { const char *name; void (*fn)(void); } tests[] = {
@@ -589,7 +631,7 @@ static void *run(void *arg) {
         {"frames", frames},
         {"props", props},
         {"nil-drawable", nil_drawable}, {"view-left", view_left}, {"hud", hud},
-        {"wait-uncommitted", wait_uncommitted},
+        {"wait-uncommitted", wait_uncommitted}, {"pools-one-host", pools_one_host},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         @autoreleasepool {

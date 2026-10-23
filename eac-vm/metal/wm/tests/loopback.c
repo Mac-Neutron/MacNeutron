@@ -1,6 +1,7 @@
 /* The guest and the host in one Mac process (milestone 4b-1 tests): the guest transport's calls go straight to the
  * host's winemetal dispatcher, and the executor's blobs are this file's mmaps, freed by the "guest" and held by the
- * host as the executor does. Each thread is its own ring. The guest's addresses are the host's here. */
+ * host as the executor does. Each thread is its own ring. The guest's addresses are the host's here. A thread's host
+ * side runs on that thread, or on a host thread loop_host_thread picks, as a drained ring runs on whichever vCPU traps. */
 #include "loopback.h"
 #include <pthread.h>
 #include <stdatomic.h>
@@ -65,18 +66,64 @@ int mn_blob_free(struct mn_blob *b) {
     return f ? 0 : -22;
 }
 
+/* Host threads a guest thread's calls can be sent to (loop_host_thread): each runs one call at a time for its caller,
+ * who waits. */
+struct hcall { void *ring; uint32_t slot, len, cap, *reply_len; const void *p; void *reply; int32_t ret; int pending; };
+struct hthread { pthread_t t; pthread_mutex_t m; pthread_cond_t c; struct hcall *call; };
+static struct hthread hthreads[3];
+static _Thread_local int host_thread;
+
+static void *host_loop(void *arg) {
+    struct hthread *h = arg;
+    pthread_mutex_lock(&h->m);
+    for (;;) {
+        while (!h->call || !h->call->pending) pthread_cond_wait(&h->c, &h->m);
+        struct hcall *k = h->call;
+        pthread_mutex_unlock(&h->m);
+        k->ret = mn_wm_host_call(&loop_ctx, k->ring, k->slot, k->p, k->len, k->reply, k->cap, k->reply_len);
+        pthread_mutex_lock(&h->m);
+        k->pending = 0;
+        h->call = NULL;
+        pthread_cond_broadcast(&h->c);
+    }
+    return NULL;
+}
+
+void loop_host_thread(int n) {
+    pthread_mutex_lock(&lock);
+    if (n > 0 && n < 3 && !hthreads[n].t) {
+        pthread_mutex_init(&hthreads[n].m, NULL);
+        pthread_cond_init(&hthreads[n].c, NULL);
+        pthread_create(&hthreads[n].t, NULL, host_loop, &hthreads[n]);
+    }
+    pthread_mutex_unlock(&lock);
+    host_thread = n > 0 && n < 3 ? n : 0;
+}
+
+static int32_t host_call(uint32_t slot, const void *p, uint32_t len, void *reply, uint32_t cap, uint32_t *reply_len) {
+    if (!host_thread) return mn_wm_host_call(&loop_ctx, ring_state, slot, p, len, reply, cap, reply_len);
+    struct hthread *h = &hthreads[host_thread];
+    struct hcall k = {ring_state, slot, len, cap, reply_len, p, reply, 0, 1};
+    pthread_mutex_lock(&h->m);
+    while (h->call) pthread_cond_wait(&h->c, &h->m);
+    h->call = &k;
+    pthread_cond_broadcast(&h->c);
+    while (k.pending) pthread_cond_wait(&h->c, &h->m);
+    pthread_mutex_unlock(&h->m);
+    return k.ret;
+}
+
 int mn_send(uint32_t op, const void *p, uint32_t len) {
     uint32_t n;
     mn_open();
-    mn_wm_host_call(&loop_ctx, ring_state, op - MN_OP_WM, p, len, NULL, 0, &n);
+    host_call(op - MN_OP_WM, p, len, NULL, 0, &n);
     return 0; /* the guest never hears of a queued call's fate */
 }
 
 int mn_call(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap, uint32_t *reply_len) {
     mn_open();
     static uint8_t none[8];
-    return mn_wm_host_call(&loop_ctx, ring_state, op - MN_OP_WM, p, len, reply ? reply : none, reply ? cap : 0,
-                           reply_len);
+    return host_call(op - MN_OP_WM, p, len, reply ? reply : none, reply ? cap : 0, reply_len);
 }
 
 void mn_forget(void) {}

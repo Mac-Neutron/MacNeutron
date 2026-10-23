@@ -791,8 +791,8 @@ static int32_t host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const s
                          NTSTATUS_T (*invoke)(void *params), const void *rec, uint32_t len, void *reply, uint32_t cap,
                          uint32_t *reply_len);
 
-int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const void *rec, uint32_t len, void *reply,
-                        uint32_t cap, uint32_t *reply_len) {
+static int32_t wm_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const void *rec, uint32_t len, void *reply,
+                       uint32_t cap, uint32_t *reply_len) {
     int sync = reply != NULL;
     *reply_len = 0;
     if (slot == MN_WM_STATS) {
@@ -827,6 +827,15 @@ int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const vo
     return host_call(c, ring, slot, call, NULL, rec, len, reply, cap, reply_len);
 }
 
+/* Each call in a host autorelease pool of its own, drained on the thread that ran it (see invoke.m). */
+int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const void *rec, uint32_t len, void *reply,
+                        uint32_t cap, uint32_t *reply_len) {
+    void *pool = mn_wm_autorelease_push();
+    int32_t r = wm_call(c, ring, slot, rec, len, reply, cap, reply_len);
+    mn_wm_autorelease_pop(pool);
+    return r;
+}
+
 int32_t mn_wm_host_call_table(struct mn_wm_ctx *c, void *ring, const struct mn_wm_call *call,
                               NTSTATUS_T (*invoke)(void *params), const void *rec, uint32_t len, void *reply,
                               uint32_t cap, uint32_t *reply_len) {
@@ -834,7 +843,10 @@ int32_t mn_wm_host_call_table(struct mn_wm_ctx *c, void *ring, const struct mn_w
     *reply_len = 0;
     if (call->mode == MN_WM_REFUSED || call->mode == MN_WM_LOCAL) return failed(c, sync, call->refuse_status);
     if (len < (uint32_t)PAD8(call->params_size)) return failed(c, sync, MN_STATUS_INVALID_PARAMETER);
-    return host_call(c, ring, NO_SLOT, call, invoke, rec, len, reply, cap, reply_len);
+    void *pool = mn_wm_autorelease_push();
+    int32_t r = host_call(c, ring, NO_SLOT, call, invoke, rec, len, reply, cap, reply_len);
+    mn_wm_autorelease_pop(pool);
+    return r;
 }
 
 /* A call whose record checked out so far: its params translated, run (invoke, a winemetal slot, or its special), its

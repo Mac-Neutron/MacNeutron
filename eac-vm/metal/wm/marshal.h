@@ -172,6 +172,8 @@ void mn_wm_will_release(void *obj);
 
 /* invoke.m: winemetal's own slot (mn_wm_funcs), an Objective-C exception becoming STATUS_INVALID_PARAMETER; and the
  * table's release of an object, by kind. */
+void *mn_wm_autorelease_push(void); /* a host autorelease pool around one forwarded call (invoke.m) */
+void mn_wm_autorelease_pop(void *pool);
 NTSTATUS_T mn_wm_invoke(unsigned slot, void *params);
 void mn_wm_release_object(enum mn_hkind kind, void *obj);
 

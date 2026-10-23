@@ -180,14 +180,13 @@ static void nested_pools(void) {
     mn_ht_bind(t, ring(0), H(1, 22), MN_HK_POOL, obj(22), MN_OWN_PLUS1);
     mn_ht_pool_push(t, ring(0), H(1, 22));
     mn_ht_bind(t, ring(0), H(1, 23), MN_HK_OBJC, obj(23), MN_OWN_AUTORELEASED);
-    /* The outer pool takes the inner one with it: draining the outer NSAutoreleasePool releases the inner one, so the
-     * table only unbinds it. */
+    /* The outer pool takes the inner one with it: the host's pools are stand-ins (invoke.m), each released once. */
     mn_ht_release(t, ring(0), H(1, 20));
     mn_ht_sweep(t, NULL);
-    CHECK(released[20] == 1 && released[21] == 1 && released[22] == 0 && released[23] == 1);
+    CHECK(released[20] == 1 && released[21] == 1 && released[22] == 1 && released[23] == 1);
     CHECK(mn_ht_live(t) == 0);
     mn_ht_free(t);
-    CHECK(released[22] == 0);
+    CHECK(released[22] == 1);
     mn_handle p1 = mn_gh_alloc(MN_OWN_PLUS1);
     mn_gh_pool_push(p1);
     mn_handle p2 = mn_gh_alloc(MN_OWN_PLUS1);
@@ -324,8 +323,8 @@ static void threads(void) {
     mn_ht_free(t);
 }
 
-/* A ring whose thread ended with a pool open: the pool went with the thread, its handles lose that reference, and a
- * later ring at the same address starts with no pools. */
+/* A ring whose thread ended with a pool open: the pool goes with it (its stand-in released), its handles lose that
+ * reference, and a later ring at the same address starts with no pools. */
 static void ring_end(void) {
     struct mn_ht *t = table();
     int ok;
@@ -334,7 +333,7 @@ static void ring_end(void) {
     mn_ht_bind(t, ring(0), H(1, 71), MN_HK_OBJC, obj(71), MN_OWN_AUTORELEASED);
     mn_ht_ring_end(t, ring(0));
     mn_ht_sweep(t, NULL);
-    CHECK(released[71] == 1 && released[70] == 0); /* the thread drained the pool itself */
+    CHECK(released[71] == 1 && released[70] == 1);
     mn_ht_get(t, H(1, 70), MN_HK_POOL, &ok);
     CHECK(!ok);
     mn_ht_bind(t, ring(0), H(1, 72), MN_HK_OBJC, obj(72), MN_OWN_AUTORELEASED); /* the next ring there: no pool */

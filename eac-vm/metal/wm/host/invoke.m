@@ -5,7 +5,20 @@
 #include "../marshal.h"
 #include "loader.h"
 
+/* A guest's NSAutoreleasePool (slot 10) is a stand-in object here, not a host pool: a drained ring runs on whichever
+ * vCPU traps, so one guest thread's calls move between host threads and several guest threads' share one, while host
+ * pools must be popped in order on the thread that pushed them. The handle table (htable.c) keeps the guest's pools and
+ * releases what each holds; every call drains its own host pool (mn_wm_host_call). */
+void *objc_autoreleasePoolPush(void);
+void objc_autoreleasePoolPop(void *pool);
+void *mn_wm_autorelease_push(void) { return objc_autoreleasePoolPush(); }
+void mn_wm_autorelease_pop(void *pool) { objc_autoreleasePoolPop(pool); }
+
 NTSTATUS_T mn_wm_invoke(unsigned slot, void *params) {
+    if (slot == 10) { /* NSAutoreleasePool_alloc_init */
+        *(uint64_t *)params = (uint64_t)(uintptr_t)[[NSObject alloc] init];
+        return 0;
+    }
     @try {
         return mn_wm_funcs[slot](params);
     } @catch (id e) {
@@ -22,7 +35,9 @@ void mn_wm_release_object(enum mn_hkind kind, void *obj) {
         mn_wm_will_release(obj);
         mn_wm_invoke(1, &obj);
         return;
-    case MN_HK_POOL:     /* releasing a pool drains it: the table calls this on the pool's own ring */
+    case MN_HK_POOL: /* the stand-in (mn_wm_invoke): the table released what the guest's pool held */
+        [(id)obj release];
+        return;
     case MN_HK_HEAP_EMU: /* an MNHeap (memory.m) */
         mn_wm_invoke(1, &obj);
         return;
