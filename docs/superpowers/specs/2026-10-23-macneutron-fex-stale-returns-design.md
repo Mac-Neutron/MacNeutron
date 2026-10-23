@@ -33,8 +33,8 @@ sooner, in every launch.
 
 ## 3. Decisions
 
-- **Patch the return points of a discarded translation** (the maintainer's option 1). When a translation's lookup
-  entries are erased, each return point in it is rewritten to branch to a small stub that sends the thread to the
+- **Patch the return points of a discarded translation** (the maintainer's option 1). When a page a translation
+  covers is invalidated, each return point in it is rewritten to branch to a small stub that sends the thread to the
   dispatcher with that return point's guest RIP. Nothing changes on the call/return fast path.
 - Rejected: clearing every thread's shadow stack on every invalidation. Measured as a throwaway: AoE2's menu 49 -> 54-58
   s, invalidation time 8.7 -> 17.1 s, shadow-stack flushes 139k -> 12M in 60 s. Rejected: a generation tag in each
@@ -106,6 +106,8 @@ no more than 2 s slower than 0042's ~49 s; FEX stats show no new cost in invalid
   one translates < 1%; RED retranslated all of them every pass; GREEN settled by pass 4).
 - Acceptance: AoE2 10 launches, all reach the menu, median faster than 0043's.
 - Memory: the buffer grows only when the previous one fills, so a program that fits in 128 MiB never maps more.
+- Status (2026-10-23): held. On the fixed 0043, 7 of 10 launches reached the menu (some at 32-33 s); 3 hung on a grey
+  window: a second 512 MiB bug remains (fex-linux branch exp/0044-on-0043b).
 
 ## 6. Shipping
 
