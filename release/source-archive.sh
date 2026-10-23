@@ -8,6 +8,7 @@
 # - lsteamclient.tar: the files of its clean sparse worktree (its blob-less clone can't be git archived offline):
 #   Proton's lsteamclient/ without the Steamworks SDK folders and gen_wrapper.py, exactly what the build used;
 # - the five pinned tarballs (FreeType, gnutls, nettle, GMP, FFmpeg) as downloaded;
+# - Fedora's alsa-lib source RPM (eac-vm/image/alsa-lib.pin): the source of the VM parts' i686 libasound;
 # - SOURCES.txt: tree, pin, applied commit, patch count, file. release/verify-sources.sh checks it all (R5).
 # release.sh calls it after its refusals: every tree applied, the repository clean. BUILD_DIR replaces build/.
 set -eu
@@ -91,6 +92,11 @@ done < "$ROOT/eac-vm/setup-tools/PIN"
 for u in "$FREETYPE_URL" "$GNUTLS_URL" "$NETTLE_URL" "$GMP_URL" "$FFMPEG_URL"; do
   cp -c "$S/${u##*/}" "$W/" || die "no ${u##*/} in $S"
 done
+# The VM parts' i686 libasound is Fedora's binary (LGPL-2.1-or-later): its source RPM, one copy for both profiles.
+. "$ROOT/eac-vm/image/alsa-lib.pin"; . "$ROOT/dxmt/fetch.sh"
+mkdir -p "$ROOT/build/vm-sources"
+FETCH_TAG=release fetch "$ALSA_LIB_SRPM_URL" "$ROOT/build/vm-sources/${ALSA_LIB_SRPM_URL##*/}" "$ALSA_LIB_SRPM_SHA256"
+cp -c "$ROOT/build/vm-sources/${ALSA_LIB_SRPM_URL##*/}" "$W/"
 
 cp "$W/SOURCES.txt" "$OUT/SOURCES.txt"
 COPYFILE_DISABLE=1 tar -czf "$OUT/$N.tar.gz.tmp" --no-mac-metadata --no-xattrs --no-acls --no-fflags --uid 0 --gid 0 \

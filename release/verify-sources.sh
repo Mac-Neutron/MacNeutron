@@ -8,7 +8,8 @@
 # - each *_SERIES recomputed from the archived pins and patches, with the archived lib.sh's tree_series;
 # - each submodule's tar against the gitlink its tree records at the tree's applied commit, and against SOURCE's
 #   FEX_SUBMODULE_* and DXMT_SUBMODULE_*, one for one;
-# - each tarball's SHA-256 against SOURCE's *_SHA256;
+# - each tarball's SHA-256 against SOURCE's *_SHA256, and alsa-lib's source RPM against the archived
+#   eac-vm/image/alsa-lib.pin;
 # - LLVM_TAG and LLVM_MINGW_SHA256 cited only: present in SOURCE, equal to the archived dxmt/pins.
 # Read-only. BUILD_DIR replaces build/.
 set -eu
@@ -107,6 +108,12 @@ for t in FREETYPE GNUTLS NETTLE GMP FFMPEG; do
   if [ -z "$f" ] || [ ! -f "$f" ]; then bad "no $t tarball (${u:-no ${t}_URL in SOURCE})"; continue; fi
   [ "$(shasum -a 256 "$f" | cut -d ' ' -f 1)" = "$(key "${t}_SHA256")" ] || bad "${u##*/} doesn't match ${t}_SHA256"
 done
+u=$(pin eac-vm/image/alsa-lib.pin ALSA_LIB_SRPM_URL)
+if [ -z "$u" ] || [ ! -f "$D/${u##*/}" ]; then bad "no alsa-lib source RPM (${u:-no eac-vm/image/alsa-lib.pin})"
+else
+  [ "$(shasum -a 256 "$D/${u##*/}" | cut -d ' ' -f 1)" = "$(pin eac-vm/image/alsa-lib.pin ALSA_LIB_SRPM_SHA256)" ] \
+    || bad "${u##*/} doesn't match eac-vm/image/alsa-lib.pin"
+fi
 for k in LLVM_TAG LLVM_MINGW_SHA256; do
   v=$(key "$k")
   [ -n "$v" ] && [ "$v" = "$(pin dxmt/pins "$k")" ] || bad "SOURCE's $k (${v:-none}) isn't the archived dxmt/pins'"

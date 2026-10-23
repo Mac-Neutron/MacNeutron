@@ -1,0 +1,6 @@
+# Fedora's alsa-lib for i686, whose libasound.so.2 the VM parts' wine.tar carries in lib/mn-i386 (old WoW64's 32-bit
+# Unix side, for 32-bit games' sound: FEX's RootFS has none). build.sh takes it from the builder's multilib sysroot only
+# at this version; the release's source archive carries this source RPM (release/source-archive.sh, verify-sources.sh).
+ALSA_LIB_NVR=alsa-lib-1.2.16.1-1.fc44
+ALSA_LIB_SRPM_URL=https://kojipkgs.fedoraproject.org/packages/alsa-lib/1.2.16.1/1.fc44/src/alsa-lib-1.2.16.1-1.fc44.src.rpm
+ALSA_LIB_SRPM_SHA256=a9ecbfb7038ff9707d3f23d59b5cf4f6eaa3b41758fede2bbc669801128b637d

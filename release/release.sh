@@ -662,7 +662,9 @@ this Mac (Contents/Helpers/mkfs.erofs, and Contents/Helpers/macneutron's vm-setu
   (BSD-2-Clause, lz4-LICENSE). Their source is in the release's source archive (erofs-utils.tar, lz4.tar).
 - macneutron reads Fedora's packages with zstd's decoder (BSD-3-Clause, zstd-LICENSE).
 The VM's Fedora packages are downloaded from Fedora (its mirrors, or its build system, Koji) to this Mac by the setup;
-MacNeutron never ships them. MacNeutron's own VM parts are a separate download, built from the release's sources.
+MacNeutron ships none of them but one: its VM parts carry Fedora's alsa-lib for i686 (LGPL-2.1-or-later), whose
+source RPM is in the release's source archive. MacNeutron's own VM parts are a separate download, built from the
+release's sources.
 EOF
   out=$(check_no_valve "$A" 2>&1) || die "A7: $out"
   out=$(build_paths "$A")  # no build path ships (Ruling 20)

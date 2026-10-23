@@ -81,6 +81,9 @@ wine_image() {
   # with its licence, on the 32-bit loader's library path (run-game.sh); a 64-bit process skips it (another ELF class).
   if [ -d "$WORK/wine/lib/wine/i386-unix" ]; then
     M32=/var/cache/mn-sysroot-multilib
+    . "$HERE/alsa-lib.pin"  # only the version whose source the release archives
+    have=$(rpm --root "$M32" -q alsa-lib.i686)
+    [ "$have" = "$ALSA_LIB_NVR.i686" ] || { echo "build.sh: the multilib sysroot has $have, not alsa-lib.pin's $ALSA_LIB_NVR" >&2; exit 1; }
     sudo mkdir -p "$WORK/wine/lib/mn-i386"
     sudo cp -a "$M32"/usr/lib/libasound.so.2.* "$WORK/wine/lib/mn-i386/"
     sudo ln -sf "$(basename "$(ls "$M32"/usr/lib/libasound.so.2.*.* | head -1)")" "$WORK/wine/lib/mn-i386/libasound.so.2"

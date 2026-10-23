@@ -21,12 +21,14 @@ mkdir -p "$L/dxmt"
 for d in wine fex lsteamclient macneutron; do cp -R "$APP/Contents/Resources/licenses/$d" "$L/"; done
 cp "$APP/Contents/Resources/DXMT/LICENSE" "$APP/Contents/Resources/DXMT/COPYING.LIB" "$APP/Contents/Resources/DXMT/LICENSE.OLD" \
   "$L/dxmt/"
-cat > "$L/README" << 'EOF'
+. "$ROOT/eac-vm/image/alsa-lib.pin"
+cat > "$L/README" << EOF
 MacNeutron's VM parts: the game VM's own files. macneutron vm-setup builds the VM's images from them and from
-Fedora's packages, which it downloads from Fedora to the Mac (MacNeutron never ships those).
+Fedora's packages, which it downloads from Fedora to the Mac (MacNeutron ships none of those but one library, below).
 - wine.tar: MacNeutron's Wine for x86-64 Linux (LGPL-2.1-or-later, wine/), with DXMT's Direct3D DLLs and its guest
   winemetal.so (LGPL-2.1-or-later, dxmt/), and Proton's lsteamclient (BSD-3-Clause, lsteamclient/) with MacNeutron's
-  Steam forwarder (MIT, macneutron/).
+  Steam forwarder (MIT, macneutron/). Its lib/mn-i386 holds Fedora's alsa-lib for i686 ($ALSA_LIB_NVR:
+  libasound.so.2, LGPL-2.1-or-later, COPYING.alsa-lib beside it), for 32-bit games' sound.
 - overlay/: FEX for Linux (MIT, fex/); MacNeutron's tso-litmus and image configuration (MIT, macneutron/); and data
   the image build generated from Fedora's packages with their own tools: the user database (systemd-sysusers), the
   library cache (glibc's ldconfig), the kernel module lists (kmod's depmod, from the kernel's modules), systemd's
@@ -35,6 +37,7 @@ Fedora's packages, which it downloads from Fedora to the Mac (MacNeutron never s
   packages.lock.
 - share/bin: MacNeutron's guest tools (MIT, macneutron/).
 The source is in the release's source archive (MacNeutron-<version>-source.tar.gz): wine-linux.tar is this Wine
-(eac-vm/wine-patches on its BASE), dxmt.tar is DXMT, lsteamclient.tar is lsteamclient, and MacNeutron.tar holds the rest.
+(eac-vm/wine-patches on its BASE), dxmt.tar is DXMT, lsteamclient.tar is lsteamclient, and MacNeutron.tar holds the
+rest; ${ALSA_LIB_SRPM_URL##*/} is Fedora's source of the i686 libasound.
 EOF
 echo "$D"
