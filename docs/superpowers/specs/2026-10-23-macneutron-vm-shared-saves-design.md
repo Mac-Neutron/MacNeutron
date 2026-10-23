@@ -59,7 +59,9 @@ chmod write that xattr onto the Mac's files. `LinuxSimplified` reports every fil
 and keeps permission bits as the Mac file's own mode, with no xattrs. The C API (`krun_fs_device_new`,
 `_new_read_only`) can't select it.
 
-Patch 0012 adds `krun_fs_device_set_simplified_permissions(device)`, which sets `Config::semantics = LinuxSimplified` for that device. Our fork only (no upstream PR without the maintainer).
+The permission mode is fixed when the device is made (`Fs::new` takes it), so patch 0012 adds a constructor:
+`FsDevice::new_simplified(tag, host_path)` in `src/libkrun/src/api/device_builders.rs`, exported by ffier as
+`krun_fs_device_new_simplified`, which makes the device with `LinuxSimplified`. Our fork only (no upstream PR without the maintainer).
 
 ### 4.2 macneutron-vm
 
@@ -71,11 +73,12 @@ A repeatable `--user-share <tag>=<host dir>`: a writable virtiofs device in simp
 Before the boot, for the game's appid:
 - the profile: `compatdata/<appid>/pfx/drive_c/users/steamuser`, resolved through its link if it is one; made as a
   real folder (and its parents) if missing;
-- Documents: `~/Documents`;
+- Documents: `~/Documents`, which must be listable: when macOS's privacy settings refuse it to Steam (or it's
+  missing) the launch is refused before the boot, naming System Settings > Privacy & Security > Files and Folders;
 - the game folder: the target's `steamapps/common/<game>` (from `MicroVM.guestPath`).
 
-It passes `--user-share profile=… --user-share documents=… --user-share game=…` and writes the run share's `mounts`
-file, one `<tag> <guest path>` line each:
+It removes a `mounts.failed` an earlier run left, passes `--user-share profile=… --user-share documents=… --user-share
+game=…` and writes the run share's `mounts` file, one `<tag> <guest path>` line each:
 
 ```
 profile /home/mn/pfx/drive_c/users/steamuser
@@ -112,7 +115,7 @@ and the rest stay as they are.
 ### 4.6 The launcher's refusal
 
 A run that left `mounts.failed` ends with a notification, "MacNeutron couldn't share this game's saves with the game VM:
-<reason from run.log>", and the reason in `launcher.log`. Steam then runs its exit pass on the untouched Mac profile.
+<mounts.failed's first line>", and the reason in `launcher.log`. Steam then runs its exit pass on the untouched Mac profile.
 
 ## 5. Safety
 
@@ -136,9 +139,8 @@ A run that left `mounts.failed` ends with a notification, "MacNeutron couldn't s
 
 - Swift unit tests: the launcher passes the three shares and writes `mounts`; the profile resolves as a link, as a real
   folder, and when missing (made); a run that left `mounts.failed` is refused with its reason.
-- libkrun: simplified mode reports the caller's uid and stores chmod as the file's own mode, no xattr.
-- Guest gate `eac-vm/tests/profile.sh`: a file written in the VM's profile, Documents and game folder is on the Mac,
-  owned by the Mac user, with no xattrs; the Mac profile's links are byte-identical after `wineboot -u` in the VM; a
+- Guest gate `eac-vm/tests/user-shares.sh` (`profile.sh` is the guest profiler's): a file written in the VM's profile, Documents and game folder is on the Mac,
+  owned by the Mac user, with no xattrs, and a guest chmod is the file's own mode; the Mac profile's links are byte-identical after `wineboot -u` in the VM; a
   failed mount stops the run before Wine starts.
 - End to end (the maintainer): Palworld in the VM shows its cloud saves; save, quit; `cloud_log.txt` shows the upload.
 
