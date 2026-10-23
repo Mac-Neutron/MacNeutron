@@ -7,6 +7,32 @@ find /home/mn -xdev ! -user mn -exec chown -h mn:mn {} + 2>/dev/null
 # Where scripts leave larger outputs for the host (the share itself stays root's: run.sh, run.log, run.status).
 install -d -o mn -g mn /mnt/share/traces
 find /mnt/share/traces ! -user mn -exec chown -h mn:mn {} + 2>/dev/null
+# The folders Steam Cloud syncs for the game, the Mac's own (the launcher's `mounts`, a `<tag> <path>` line each: spec
+# 2026-10-23-macneutron-vm-shared-saves §4.4), mounted before the game, or no game: a run never keeps its saves on a
+# profile only this disk has. /Users is the Mac's home's parent, so the profile's links to the Mac's folders resolve:
+# Documents is shared, the others are folders of mn's here.
+mounts_failed() {
+  echo "$1" > /mnt/share/mounts.failed
+  echo "mn-runner: $1" > /mnt/share/run.log
+  sync
+  systemctl poweroff --no-block
+  exit 0
+}
+if [ -f /mnt/share/mounts ]; then
+  mount -t tmpfs -o mode=755 tmpfs /Users || mounts_failed "no tmpfs at /Users"
+  while read -r tag path; do
+    case $path in /home/mn/pfx/drive_c/users/?*|/Users/?*|/mnt/games/?*) ;; *) mounts_failed "$tag: $path isn't a share's place" ;; esac
+    case $path/ in */../*) mounts_failed "$tag: $path has a .. in it" ;; esac
+    mkdir -p "$path" || mounts_failed "$tag: no mount point $path"
+    [ "$tag" != documents ] || for d in Desktop Downloads Music Pictures Movies; do
+      install -d -o mn -g mn "/home/mn/$d" && ln -sfn "/home/mn/$d" "${path%/*}/$d"
+    done
+  done < /mnt/share/mounts
+  find /home/mn /Users -xdev -mindepth 1 ! -user mn -exec chown -h mn:mn {} + 2>/dev/null
+  while read -r tag path; do
+    mount -t virtiofs "$tag" "$path" || mounts_failed "$tag: not mounted at $path"
+  done < /mnt/share/mounts
+fi
 cd /home/mn
 setpriv --reuid=mn --regid=mn --init-groups --reset-env sh -c 'export DISPLAY=:0; exec sh /mnt/share/run.sh' \
   > /mnt/share/run.log 2>&1

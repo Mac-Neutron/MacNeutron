@@ -29,7 +29,7 @@ if [ "$SHARE" != "$W/share" ]; then
     [ ! -d "$W/share/$d" ] || cp -cR "$W/share/$d" "$SHARE/$d"
   done
 fi
-rm -f "$SHARE/run.log" "$SHARE/run.status" "$SHARE/console.log" "$SHARE/traces/ready"
+rm -f "$SHARE/run.log" "$SHARE/run.status" "$SHARE/console.log" "$SHARE/traces/ready" "$SHARE/mounts.failed"
 cp "$script" "$SHARE/run.sh"
 STATE=${MN_STATE:-$W/state/default.img}
 # Before 2026-10-17 the default state disk, and its TPM, lived in images/: moved once.

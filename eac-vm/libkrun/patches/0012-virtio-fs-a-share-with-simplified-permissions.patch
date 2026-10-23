@@ -1,0 +1,173 @@
+From ec531caa264a17443cdbc00cc85010ad5b6772ff Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Fri, 23 Oct 2026 18:37:21 -0400
+Subject: [PATCH] virtio/fs: a share with simplified permissions
+
+FsDevice::new_simplified (krun_fs_device_new_simplified) makes a writable
+share with PermissionSemantics::LinuxSimplified, which the C API couldn't
+select: every file shows as owned by the guest process asking and
+permission bits are the host file's own mode, so a guest user whose uid
+isn't the host user's can write the host user's folders without the
+override xattr landing on them. Such a share serves no extended attributes
+either, as the semantics' own documentation says, so the guest can't
+store any on the host's files; that includes the security context a
+create, mkdir, mknod or symlink request carries, which the macOS
+passthrough stored as security.selinux even on a share without xattrs.
+
+Assisted-by: Claude Code: claude-opus-5-5
+Signed-off-by: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+---
+ include/libkrun.h                             |  8 ++++++
+ src/devices/src/virtio/fs/device.rs           |  6 ++--
+ .../src/virtio/fs/macos/passthrough.rs        | 10 +++----
+ src/libkrun/src/api/device_builders.rs        | 28 +++++++++++++++----
+ 4 files changed, 40 insertions(+), 12 deletions(-)
+
+diff --git a/include/libkrun.h b/include/libkrun.h
+index 17962fed..3c1f1d2d 100644
+--- a/include/libkrun.h
++++ b/include/libkrun.h
+@@ -219,6 +219,14 @@ typedef KrunFsDevice (*krun_fs_device_new_fn)(KrunStr tag, KrunStr host_path, Kr
+ /** Create a read-only virtiofs device sharing a host directory. */
+ KrunFsDevice krun_fs_device_new_read_only(KrunStr tag, KrunStr host_path, KrunError* err_out);
+ typedef KrunFsDevice (*krun_fs_device_new_read_only_fn)(KrunStr tag, KrunStr host_path, KrunError* err_out);
++/**
++ * Create a virtiofs device sharing a host directory with simplified permissions
++ * (`PermissionSemantics::LinuxSimplified`): every file shows as owned by the guest
++ * process asking, permission bits are the host file's own mode, and no extended
++ * attributes are stored, so the host's files keep their owner and gain no xattrs.
++ */
++KrunFsDevice krun_fs_device_new_simplified(KrunStr tag, KrunStr host_path, KrunError* err_out);
++typedef KrunFsDevice (*krun_fs_device_new_simplified_fn)(KrunStr tag, KrunStr host_path, KrunError* err_out);
+ /**
+  * Create a virtiofs device with no host directory (NullFs).
+  *
+diff --git a/src/devices/src/virtio/fs/device.rs b/src/devices/src/virtio/fs/device.rs
+index a1b11cbd..7e4700d4 100644
+--- a/src/devices/src/virtio/fs/device.rs
++++ b/src/devices/src/virtio/fs/device.rs
+@@ -89,8 +89,10 @@ impl Fs {
+             semantics,
+             attr_timeout,
+             // A read-only share serves no extended attributes: the first getxattr or listxattr answers ENOSYS, which
+-            // the guest's FUSE keeps, so later ones fail EOPNOTSUPP without a round trip to the host.
+-            xattr: !read_only,
++            // the guest's FUSE keeps, so later ones fail EOPNOTSUPP without a round trip to the host. Nor does a
++            // simplified one, whose host files must gain none (LinuxSimplified: "Extended attributes are not
++            // supported").
++            xattr: !read_only && matches!(semantics, PermissionSemantics::LinuxComplete),
+             ..Default::default()
+         });
+ 
+diff --git a/src/devices/src/virtio/fs/macos/passthrough.rs b/src/devices/src/virtio/fs/macos/passthrough.rs
+index f6a863ea..b0c29079 100644
+--- a/src/devices/src/virtio/fs/macos/passthrough.rs
++++ b/src/devices/src/virtio/fs/macos/passthrough.rs
+@@ -1064,7 +1064,7 @@ impl PassthroughFs {
+             let ihandle = InodeHandle::Fd(fd);
+ 
+             // Set security context
+-            if let Some(secctx) = extensions.secctx {
++            if let Some(secctx) = extensions.secctx.filter(|_| self.cfg.xattr) {
+                 set_secctx(&ihandle, secctx, false)?
+             };
+ 
+@@ -1118,7 +1118,7 @@ impl PassthroughFs {
+         }
+ 
+         // Set security context
+-        if let Some(secctx) = extensions.secctx {
++        if let Some(secctx) = extensions.secctx.filter(|_| self.cfg.xattr) {
+             let ihandle = InodeHandle::Path(c_path);
+             set_secctx(&ihandle, secctx, false)?
+         };
+@@ -1533,7 +1533,7 @@ impl FileSystem for PassthroughFs {
+         if res == 0 {
+             let ihandle = InodeHandle::Path(c_path);
+             // Set security context
+-            if let Some(secctx) = extensions.secctx {
++            if let Some(secctx) = extensions.secctx.filter(|_| self.cfg.xattr) {
+                 set_secctx(&ihandle, secctx, false)?
+             };
+ 
+@@ -1677,7 +1677,7 @@ impl FileSystem for PassthroughFs {
+         }
+ 
+         // Set security context
+-        if let Some(secctx) = extensions.secctx {
++        if let Some(secctx) = extensions.secctx.filter(|_| self.cfg.xattr) {
+             set_secctx(&ihandle, secctx, false)?
+         };
+ 
+@@ -2157,7 +2157,7 @@ impl FileSystem for PassthroughFs {
+             let ihandle = InodeHandle::Path(c_path);
+ 
+             // Set security context
+-            if let Some(secctx) = extensions.secctx {
++            if let Some(secctx) = extensions.secctx.filter(|_| self.cfg.xattr) {
+                 set_secctx(&ihandle, secctx, true)?
+             };
+ 
+diff --git a/src/libkrun/src/api/device_builders.rs b/src/libkrun/src/api/device_builders.rs
+index 1bea9597..02ff0b6f 100644
+--- a/src/libkrun/src/api/device_builders.rs
++++ b/src/libkrun/src/api/device_builders.rs
+@@ -496,12 +496,25 @@ impl<'a> FsDevice<'a> {
+     /// - `tag`: the filesystem tag visible to the guest (e.g. `"/dev/root"`).
+     /// - `host_path`: the host directory to share.
+     pub fn new(tag: &str, host_path: &str) -> Result<Self, VmmError> {
+-        Self::new_inner(tag, Some(host_path.to_string()), false)
++        Self::new_inner(tag, Some(host_path.to_string()), false, PermissionSemantics::LinuxComplete)
+     }
+ 
+     /// Create a read-only virtiofs device sharing a host directory.
+     pub fn new_read_only(tag: &str, host_path: &str) -> Result<Self, VmmError> {
+-        Self::new_inner(tag, Some(host_path.to_string()), true)
++        Self::new_inner(tag, Some(host_path.to_string()), true, PermissionSemantics::LinuxComplete)
++    }
++
++    /// Create a virtiofs device sharing a host directory with simplified permissions
++    /// ([`PermissionSemantics::LinuxSimplified`]): every file shows as owned by the guest
++    /// process asking, permission bits are the host file's own mode, and no extended
++    /// attributes are stored, so the host's files keep their owner and gain no xattrs.
++    pub fn new_simplified(tag: &str, host_path: &str) -> Result<Self, VmmError> {
++        Self::new_inner(
++            tag,
++            Some(host_path.to_string()),
++            false,
++            PermissionSemantics::LinuxSimplified,
++        )
+     }
+ 
+     /// Create a virtiofs device with no host directory (NullFs).
+@@ -510,7 +523,7 @@ impl<'a> FsDevice<'a> {
+     /// virtual entries and [`set_overlay`](Self::set_overlay) to attach
+     /// them.
+     pub fn new_null(tag: &str) -> Result<Self, VmmError> {
+-        Self::new_inner(tag, None, false)
++        Self::new_inner(tag, None, false, PermissionSemantics::LinuxComplete)
+     }
+ 
+     /// Set a pre-built [`FsOverlay`] on this device.
+@@ -533,11 +546,16 @@ impl<'a> FsDevice<'a> {
+ 
+ #[cfg(not(any(feature = "tee", feature = "aws-nitro")))]
+ impl<'a> FsDevice<'a> {
+-    fn new_inner(tag: &str, host_path: Option<String>, read_only: bool) -> Result<Self, VmmError> {
++    fn new_inner(
++        tag: &str,
++        host_path: Option<String>,
++        read_only: bool,
++        semantics: PermissionSemantics,
++    ) -> Result<Self, VmmError> {
+         let exit_code = Arc::new(AtomicI32::new(i32::MAX));
+         let fs = devices::virtio::Fs::new(
+             tag.to_string(),
+-            PermissionSemantics::LinuxComplete,
++            semantics,
+             host_path,
+             exit_code.clone(),
+             read_only,
+-- 
+2.54.0 (Apple Git-157)
+
