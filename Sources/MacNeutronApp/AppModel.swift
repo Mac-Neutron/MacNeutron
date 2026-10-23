@@ -454,6 +454,13 @@ final class AppModel {
     /// setup waits while a game runs from the old one, then removes it). Games' disks, TPMs and runs are never touched.
     func rebuildVM() async {
         guard vmManifest != nil, let vmRoot, !vmSetupRunning, !VMToolsInstaller.isDeveloperFolder(vmRoot) else { return }
+        // A developer's link to a deleted build/: a real folder with the app's tools takes its place, and their install
+        // starts the setup (the new folder has no images).
+        if VMToolsInstaller.removeDeadLink(vmRoot) {
+            await installVMTools()
+            await vmSetupTask?.value
+            return
+        }
         try? FileManager.default.removeItem(at: vmRoot.appending(path: "setup", directoryHint: .isDirectory))
         await setUpVM()
     }

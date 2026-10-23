@@ -145,11 +145,26 @@ public enum VMToolsInstaller {
         return hash.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    /// The folder itself is a symlink: a developer's link to build/eac-vm-work.
+    /// The folder itself is a symlink to a folder that's there: a developer's link to build/eac-vm-work. A link whose
+    /// folder is gone (its build/ deleted) isn't one: `removeDeadLink` makes way for a real folder.
     public static func isDeveloperFolder(_ vm: URL) -> Bool {
+        isLink(vm) && FileManager.default.fileExists(atPath: linkPath(vm))
+    }
+
+    /// A link whose folder is gone holds nothing: removed, so a setup makes a real folder there. True if it removed one.
+    public static func removeDeadLink(_ vm: URL) -> Bool {
+        guard isLink(vm), !FileManager.default.fileExists(atPath: linkPath(vm)) else { return false }
+        return (try? FileManager.default.removeItem(atPath: linkPath(vm))) != nil
+    }
+
+    private static func isLink(_ vm: URL) -> Bool {
+        (try? FileManager.default.destinationOfSymbolicLink(atPath: linkPath(vm))) != nil
+    }
+
+    /// The folder's path without its trailing "/", which would follow a link.
+    private static func linkPath(_ vm: URL) -> String {
         let path = vm.path(percentEncoded: false)
-        let link = path.hasSuffix("/") ? String(path.dropLast()) : path
-        return (try? FileManager.default.destinationOfSymbolicLink(atPath: link)) != nil
+        return path.hasSuffix("/") ? String(path.dropLast()) : path
     }
 
     /// The first running executable under the folder, by its real path (the kernel reports /private/var/…) or as given.

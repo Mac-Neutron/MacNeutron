@@ -96,6 +96,20 @@ private func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding
     try write("valve\n", to: valve.appending(path: "steamclient64.dll"))
     try VMToolsInstaller.copyValveClient(ValveInstall(version: "1", folder: valve), into: vm)
     #expect(try FileManager.default.contentsOfDirectory(atPath: target.path).isEmpty)
+    #expect(!VMToolsInstaller.removeDeadLink(vm))
+    #expect(VMToolsInstaller.isDeveloperFolder(vm))
+}
+
+@Test func aLinkToADeletedBuildIsNotADeveloperFolder() throws {
+    // build/ deleted under the link: the app's setup and Rebuild must not skip it as a developer's folder forever.
+    let vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    let link = String(vm.path(percentEncoded: false).dropLast())  // no trailing "/": the link itself
+    try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: "/nonexistent/build/eac-vm-work")
+    #expect(!VMToolsInstaller.isDeveloperFolder(vm))
+    #expect(VMToolsInstaller.removeDeadLink(vm))
+    #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: link)) == nil)
+    _ = try VMToolsInstaller.install(from: try makeTools("a"), into: vm, runningExecutables: { [] })
+    #expect(text(vm.appending(path: "libkrun/libkrun.1.dylib")) == "a libkrun/libkrun.1.dylib\n")
 }
 
 @Test func valveClientReachesTheVM() throws {

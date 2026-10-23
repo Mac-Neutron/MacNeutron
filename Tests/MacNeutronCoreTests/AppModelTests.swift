@@ -597,6 +597,21 @@ private func makeManifest() throws -> URL {
     #expect(FileManager.default.fileExists(atPath: vmRoot.appending(path: "images/manifest.sha256").path))
 }
 
+@MainActor @Test func rebuildReplacesALinkToADeletedBuild() async throws {
+    // The folder linked to a developer's build/eac-vm-work, then build/ was deleted: Rebuild makes a real folder.
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    let link = String(vmRoot.path(percentEncoded: false).dropLast())
+    try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: "/nonexistent/build/eac-vm-work")
+    let fake = try fakeHelper("exit 0")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest)
+    #expect(calls(fake.calls).isEmpty)  // the tools couldn't go through the dead link
+    await model.rebuildVM()
+    #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: link)) == nil)
+    #expect(FileManager.default.fileExists(atPath: vmRoot.appending(path: "macneutron-vm").path))
+    #expect(calls(fake.calls).count == 1)
+    #expect(model.vmNotice == "Game VM: ready")
+}
+
 @MainActor @Test func progressSplitAcrossWritesIsOneLine() async throws {
     let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
     let log = try makeTempDir().appending(path: "vm-setup.log")
