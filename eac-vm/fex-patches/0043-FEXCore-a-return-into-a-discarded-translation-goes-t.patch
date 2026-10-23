@@ -1,0 +1,351 @@
+From 8d4d61de3e775ed832f284caba9c7a8817aa38ab Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Fri, 23 Oct 2026 10:59:45 -0400
+Subject: [PATCH] FEXCore: a return into a discarded translation goes to the
+ dispatcher
+
+A thread's call-return stack holds host addresses inside translations. An
+invalidation empties a thread's stack only when that thread's own lookup
+cache had the range (InvalidateThreadCachedCodeRange), and a thread that
+entered a block through another thread's link never looked it up: its
+next ret ran the old translation of rewritten code. A code buffer refill
+empties every stack, which hid it; with translations living longer, Age
+of Empires II DE's protector, which rewrites code under its callers, broke
+the game's locks.
+
+The JIT now records each call's return point (l_CallReturn) and emits a
+16-byte stub per point after the jump thunks, `ldr TMP1, <RIP>; b common;
+RIP`, common storing the return block's guest RIP and exiting to the
+dispatcher. The block tail lists the points (offsets) and the stubs'
+start. Lookup entries keep their translation's start, and
+GuestToHostMap::Erase patches every return point of the translation to
+branch to its stub, once per translation. Nothing changes on the call or
+return path. The offline code cache's mappings have no translation start
+and are not patched. Disk cache format 30 -> 31 (the tail changed).
+
+fex-tests callret-stale: a thread that entered A through another thread's
+link, parked in A's callee while A is rewritten, returned into the old
+code 64/64 (call rel32), 64/64 (call rax), 512/512 (4 threads); 0 with
+this change.
+---
+ FEXCore/Source/Interface/Core/CPUBackend.h    | 23 ++++++-
+ FEXCore/Source/Interface/Core/CodeCache.cpp   |  2 +-
+ FEXCore/Source/Interface/Core/Core.cpp        |  4 +-
+ FEXCore/Source/Interface/Core/DiskCache.h     |  2 +-
+ .../Source/Interface/Core/JIT/BranchOps.cpp   |  6 ++
+ FEXCore/Source/Interface/Core/JIT/JIT.cpp     | 69 +++++++++++++++++++
+ FEXCore/Source/Interface/Core/JIT/JITClass.h  |  9 +++
+ FEXCore/Source/Interface/Core/LookupCache.h   | 18 +++--
+ 8 files changed, 124 insertions(+), 9 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/CPUBackend.h b/FEXCore/Source/Interface/Core/CPUBackend.h
+index 0183694..bd7a984 100644
+--- a/FEXCore/Source/Interface/Core/CPUBackend.h
++++ b/FEXCore/Source/Interface/Core/CPUBackend.h
+@@ -95,7 +95,16 @@ namespace CPU {
+       // If this block represents a single guest instruction.
+       bool SingleInst;
+ 
+-      uint8_t _Pad[3];
++      // Set once the return points have been patched (PatchDiscardedReturnPoints).
++      uint8_t ReturnPointsPatched;
++
++      uint8_t _Pad[2];
++
++      // The return points of calls that push a host return address (u32 offsets from the block's start, at
++      // OffsetToReturnPoints from it), and their stubs (16 bytes each, the first at OffsetToReturnStubs from the start).
++      uint32_t NumberOfReturnPoints;
++      uint32_t OffsetToReturnPoints;
++      uint32_t OffsetToReturnStubs;
+     };
+ 
+     /**
+@@ -162,5 +171,17 @@ namespace CPU {
+     void RegisterForSignalHandler(fextl::shared_ptr<CodeBuffer>);
+   };
+ 
++  /**
++   * @brief Sends every return point of a discarded translation to the dispatcher
++   *
++   * A thread's call-return stack can hold host addresses inside a translation that an invalidation discarded (a thread
++   * that entered it through another thread's block link keeps its stack). Each return point is overwritten with a
++   * branch to its stub, which stores the return block's guest RIP and exits to the dispatcher. Done once per
++   * translation; called with the lookup map's write lock and the code invalidation mutex held.
++   *
++   * @param TranslationBegin - The translation's start (its JITCodeHeader)
++   */
++  void PatchDiscardedReturnPoints(uint8_t* TranslationBegin);
++
+ } // namespace CPU
+ } // namespace FEXCore
+diff --git a/FEXCore/Source/Interface/Core/CodeCache.cpp b/FEXCore/Source/Interface/Core/CodeCache.cpp
+index 8deb9f7..a921119 100644
+--- a/FEXCore/Source/Interface/Core/CodeCache.cpp
++++ b/FEXCore/Source/Interface/Core/CodeCache.cpp
+@@ -808,7 +808,7 @@ bool CodeCache::EnableLoadedSection(Core::InternalThreadState* Thread, MappedCod
+       LOGMAN_THROW_A_FMT(Block.HostCode < Code.CodeBuffer.size_bytes(), "Host offset {:#x} out of range ({:#x})", Block.HostCode,
+                          Code.CodeBuffer.size_bytes());
+       auto HostCode = &Code.CodeBuffer[Block.HostCode];
+-      LookupCache.AddBlockMapping(Guest + BinarySection.FileStartVA, std::move(Block.CodePages), HostCode, WriteLock);
++      LookupCache.AddBlockMapping(Guest + BinarySection.FileStartVA, std::move(Block.CodePages), HostCode, nullptr, WriteLock);
+     }
+ 
+     // Guest code pages
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index 404cbc7..ebb956a 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -893,7 +893,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+         uintptr_t CachedHostCode = 0;
+         for (size_t i = 0; i < Hit->EntryPointRIPs.size(); i++) {
+           void* HostAddr = LoadedCode.BlockBegin + Hit->EntryPointHostOffsets[i];
+-          Thread->LookupCache->AddBlockMapping(Thread, Hit->EntryPointRIPs[i], Hit->GuestPages, HostAddr);
++          Thread->LookupCache->AddBlockMapping(Thread, Hit->EntryPointRIPs[i], Hit->GuestPages, HostAddr, LoadedCode.BlockBegin);
+           if (Hit->EntryPointRIPs[i] == GuestRIP) {
+             CachedHostCode = reinterpret_cast<uintptr_t>(HostAddr);
+           }
+@@ -1005,7 +1005,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+ 
+   // Insert to lookup cache
+   for (auto [GuestAddr, HostAddr] : CompiledCode.EntryPoints) {
+-    Thread->LookupCache->AddBlockMapping(Thread, GuestAddr, CodePages, HostAddr);
++    Thread->LookupCache->AddBlockMapping(Thread, GuestAddr, CodePages, HostAddr, CompiledCode.BlockBegin);
+   }
+ 
+   // Clear any relocations that might have been generated
+diff --git a/FEXCore/Source/Interface/Core/DiskCache.h b/FEXCore/Source/Interface/Core/DiskCache.h
+index ab0264d..0b43365 100644
+--- a/FEXCore/Source/Interface/Core/DiskCache.h
++++ b/FEXCore/Source/Interface/Core/DiskCache.h
+@@ -249,7 +249,7 @@ namespace DiskCache {
+   // The current version of the diskcache.
+   // This must be changed any time codegen changes occur!
+   // Be aware of the impact of changing this frequently!
+-  static constexpr uint16_t FormatVersion = 30;
++  static constexpr uint16_t FormatVersion = 31;
+ 
+   static constexpr uint32_t LOOKUP_KEY_MAX_BUCKET_DEPTH = 500;
+ 
+diff --git a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
+index ac594e0..94bcd24 100644
+--- a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
+@@ -188,6 +188,9 @@ DEF_OP(ExitFunction) {
+ 
+       EmitLinkedBranch(NewRIP, Op->Hint == IR::BranchHint::Call, Op->PatchSiteAddress, Op->PatchSiteSize);
+       (void)Bind(&l_CallReturn);
++      if (Op->Hint == IR::BranchHint::Call && !Op->CallReturnBlock.IsInvalid()) {
++        PendingReturnPoints.push_back({GetCursorAddress<uint64_t>(), Op->CallReturnBlock.ID()});
++      }
+ #ifdef ARCHITECTURE_arm64ec
+     }
+ #endif
+@@ -251,6 +254,9 @@ DEF_OP(ExitFunction) {
+       }
+       blr(TMP2);
+       (void)Bind(&l_CallReturn);
++      if (!Op->CallReturnBlock.IsInvalid()) {
++        PendingReturnPoints.push_back({GetCursorAddress<uint64_t>(), Op->CallReturnBlock.ID()});
++      }
+     } else if (Op->Hint == IR::BranchHint::Return) {
+       ret(TMP2);
+     } else {
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+index a54eea9..ad2cef7 100644
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -563,6 +563,30 @@ static void IndirectBlockDelinker(FEXCore::Context::ExitFunctionLinkData* Record
+   // No need to reset HostCode here as the exit linker pointer is stored separately, and if the block is relinked it will be updated.
+ }
+ 
++void PatchDiscardedReturnPoints(uint8_t* TranslationBegin) {
++  const auto Header = reinterpret_cast<const CPUBackend::JITCodeHeader*>(TranslationBegin);
++  const auto Tail = reinterpret_cast<CPUBackend::JITCodeTail*>(TranslationBegin + Header->OffsetToBlockTail);
++  if (Tail->NumberOfReturnPoints == 0 ||
++      std::atomic_ref<uint8_t>(*ARMEmitter::DualMap::WriteAddr(&Tail->ReturnPointsPatched)).exchange(1, std::memory_order_relaxed)) {
++    return;
++  }
++
++  const auto Points = TranslationBegin + Tail->OffsetToReturnPoints;
++  for (uint32_t i = 0; i < Tail->NumberOfReturnPoints; ++i) {
++    uint32_t Offset;
++    memcpy(&Offset, Points + i * sizeof(uint32_t), sizeof(Offset));
++    const auto Point = reinterpret_cast<uintptr_t>(TranslationBegin + Offset);
++    const auto Stub = reinterpret_cast<uintptr_t>(TranslationBegin + Tail->OffsetToReturnStubs + i * 16);
++
++    uint32_t BranchInst = 0;
++    ARMEmitter::Emitter BranchEmit(reinterpret_cast<uint8_t*>(&BranchInst), 4);
++    BranchEmit.b(Stub / 4 - Point / 4);
++
++    std::atomic_ref<uint32_t>(*ARMEmitter::DualMap::WriteAddr(reinterpret_cast<uint32_t*>(Point))).store(BranchInst, std::memory_order::relaxed);
++    ARMEmitter::Emitter::ClearICache(reinterpret_cast<void*>(Point), 4);
++  }
++}
++
+ uint64_t Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEXCore::Context::ExitFunctionLinkData* Record) {
+   auto Thread = Frame->Thread;
+   bool TFSet = Thread->CurrentFrame->State.flags[X86State::RFLAG_TF_RAW_LOC];
+@@ -908,6 +932,8 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+   JumpTargets.clear();
+   CallReturnTargets.clear();
+   PendingJumpThunks.clear();
++  PendingReturnPoints.clear();
++  ReturnBlockRIPs.clear();
+   JumpTargets.resize(IR->GetHeader()->BlockCount, {});
+   Relocations.resize(PrevNumAllocations, FEXCore::CPU::Relocation::Default()); // Discard any relocations generated from a previous attempt
+ 
+@@ -986,6 +1012,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+ 
+       if (BlockIROp->EntryPoint) {
+         uint64_t BlockStartRIP = Entry + BlockIROp->GuestEntryOffset;
++        ReturnBlockRIPs[Node] = BlockStartRIP;
+ 
+         const auto IsReturnTarget = CallReturnTargets.try_emplace(Node).first;
+         if (PendingTargetLabel) {
+@@ -1070,6 +1097,37 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+   BindOrRestart(&l_ExitLink);
+   PlaceNamedSymbolLiteral(InsertNamedSymbolLiteral(RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_EXITFUNCTION_LINKER));
+ 
++  // A stub per return point (PatchDiscardedReturnPoints): `ldr TMP1, <RIP>; b <common>; RIP`, 16 bytes; common stores the
++  // return block's guest RIP and exits to the dispatcher, as an exit with an unlinked RIP does.
++  fextl::vector<uint32_t> ReturnPointOffsets;
++  uint32_t ReturnStubsOffset = 0;
++  for (const auto& Point : PendingReturnPoints) {
++    if (ReturnBlockRIPs.contains(Point.ReturnBlock)) {
++      ReturnPointOffsets.push_back(Point.Location - reinterpret_cast<uint64_t>(CodeData.BlockBegin));
++    } else {
++      LOGMAN_MSG_A_FMT("Return block without an entry point");
++    }
++  }
++  if (!ReturnPointOffsets.empty()) {
++    Align(8);
++    ReturnStubsOffset = GetCursorAddress<uint8_t*>() - CodeData.BlockBegin;
++    ARMEmitter::ForwardLabel l_ReturnCommon;
++    for (const auto& Point : PendingReturnPoints) {
++      if (!ReturnBlockRIPs.contains(Point.ReturnBlock)) {
++        continue;
++      }
++      ARMEmitter::ForwardLabel l_RIP;
++      ldr(TMP1, &l_RIP);
++      b_OrRestart(&l_ReturnCommon);
++      BindOrRestart(&l_RIP);
++      PlaceNamedSymbolLiteral(InsertGuestRIPLiteral(ReturnBlockRIPs[Point.ReturnBlock]));
++    }
++    BindOrRestart(&l_ReturnCommon);
++    str(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
++    ldr(TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.DispatcherLoopTop));
++    br(TMP2);
++  }
++
+   // CodeSize not including the header or tail data.
+   const uint64_t CodeOnlySize = GetCursorAddress<uint8_t*>() - CodeBegin;
+ 
+@@ -1083,6 +1141,9 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+     .GuestSize = Size,
+     .SpinLockFutex = 0,
+     .SingleInst = SingleInst,
++    .ReturnPointsPatched = 0,
++    .NumberOfReturnPoints = static_cast<uint32_t>(ReturnPointOffsets.size()),
++    .OffsetToReturnStubs = ReturnStubsOffset,
+   };
+ 
+   // Entries that live after the JITCodeTail.
+@@ -1123,6 +1184,14 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+     }
+   }
+ 
++  // The return points' offsets, after the RIP entries.
++  if (!ReturnPointOffsets.empty()) {
++    JITRIPEntriesLocation = reinterpret_cast<uint8_t*>(AlignUp(reinterpret_cast<uintptr_t>(JITRIPEntriesLocation), sizeof(uint32_t)));
++    JITBlockTail.OffsetToReturnPoints = JITRIPEntriesLocation - CodeData.BlockBegin;
++    memcpy(JITRIPEntriesLocation, ReturnPointOffsets.data(), ReturnPointOffsets.size() * sizeof(uint32_t));
++    JITRIPEntriesLocation += ReturnPointOffsets.size() * sizeof(uint32_t);
++  }
++
+   SetCursorOffset(JITRIPEntriesLocation - CodeData.BlockBegin);
+   // Make sure code is 16B aligned on the tail.
+   // Can't use Align16B here as vl64pair can cause non-4byte alignment.
+diff --git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+index 331b3c5..643a2ae 100644
+--- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
++++ b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+@@ -111,6 +111,15 @@ private:
+   };
+   fextl::vector<PendingJumpThunk> PendingJumpThunks;
+ 
++  // The return points (l_CallReturn) of calls that push a host return address on the call-return stack. A discarded
++  // translation's are patched to branch to their stub, which exits to the dispatcher (PatchDiscardedReturnPoints).
++  struct PendingReturnPoint {
++    uint64_t Location;
++    IR::NodeID ReturnBlock;
++  };
++  fextl::vector<PendingReturnPoint> PendingReturnPoints;
++  fextl::map<IR::NodeID, uint64_t> ReturnBlockRIPs;
++
+   Utils::PoolBufferWithTimedRetirement<uint8_t*, 5000, 500> TempCodeBufferAllocator;
+ 
+   static uint64_t ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEXCore::Context::ExitFunctionLinkData* Record);
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.h b/FEXCore/Source/Interface/Core/LookupCache.h
+index d42c792..66dba01 100644
+--- a/FEXCore/Source/Interface/Core/LookupCache.h
++++ b/FEXCore/Source/Interface/Core/LookupCache.h
+@@ -85,6 +85,9 @@ struct GuestToHostMap {
+   struct BlockEntry {
+     uint64_t HostCode;
+     fextl::vector<uint64_t> CodePages;
++    // The translation's start (its JITCodeHeader), whose return points are patched when the entry is erased; null when
++    // unknown (the offline code cache's mappings).
++    uint8_t* TranslationBegin;
+   };
+ 
+   fextl::robin_map<uint64_t, BlockEntry> BlockList;
+@@ -94,14 +97,15 @@ struct GuestToHostMap {
+   GuestToHostMap();
+ 
+   // Adds to Guest -> Host code mapping
+-  const BlockEntry& AddBlockMapping(uint64_t Address, std::span<const uint64_t> CodePages, void* HostCode, const LookupCacheWriteLockToken&) {
++  const BlockEntry& AddBlockMapping(uint64_t Address, std::span<const uint64_t> CodePages, void* HostCode, uint8_t* TranslationBegin,
++                                    const LookupCacheWriteLockToken&) {
+     // This may replace an existing mapping
+     // NOTE: Generally no previous entry should exist, however there is one exception:
+     //       If the backend updates the active thread's CodeBuffer, the new associated LookupCache
+     //       may already contain the block address. Since is comparatively rare, we'll just leak
+     //       one of the two blocks in this case.
+     return BlockList
+-      .insert_or_assign(Address, BlockEntry {(uintptr_t)HostCode, fextl::vector<uint64_t>(CodePages.begin(), CodePages.end())})
++      .insert_or_assign(Address, BlockEntry {(uintptr_t)HostCode, fextl::vector<uint64_t>(CodePages.begin(), CodePages.end()), TranslationBegin})
+       .first->second;
+   }
+ 
+@@ -121,6 +125,11 @@ struct GuestToHostMap {
+       it->second(it->first.HostLink);
+     }
+ 
++    // Threads may still hold return addresses into the translation on their call-return stacks
++    if (auto Entry = BlockList.find(Address); Entry != BlockList.end() && Entry->second.TranslationBegin) {
++      CPU::PatchDiscardedReturnPoints(Entry->second.TranslationBegin);
++    }
++
+     // Remove from BlockList
+     return BlockList.erase(Address) != 0;
+   }
+@@ -297,13 +306,14 @@ public:
+   }
+ 
+   // Adds to Guest -> Host code mapping
+-  void AddBlockMapping(FEXCore::Core::InternalThreadState* Thread, uint64_t Address, std::span<const uint64_t> CodePages, void* HostCode) {
++  void AddBlockMapping(FEXCore::Core::InternalThreadState* Thread, uint64_t Address, std::span<const uint64_t> CodePages, void* HostCode,
++                       uint8_t* TranslationBegin) {
+     std::optional<FEXCore::SHMStats::AccumulationBlock<uint64_t>> LockTime(
+       Thread->ThreadStats ? &Thread->ThreadStats->AccumulatedCacheWriteLockTime : nullptr);
+     auto lk = Shared->AcquireWriteLock();
+     LockTime.reset();
+ 
+-    const auto& Entry = Shared->AddBlockMapping(Address, CodePages, HostCode, lk);
++    const auto& Entry = Shared->AddBlockMapping(Address, CodePages, HostCode, TranslationBegin, lk);
+ 
+     // There is no need to update L1 or L2, they will get updated on first lookup
+     // However, adding to L1 here increases performance
+-- 
+2.54.0 (Apple Git-157)
+
