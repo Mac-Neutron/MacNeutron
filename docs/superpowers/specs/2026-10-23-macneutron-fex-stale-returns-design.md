@@ -64,15 +64,18 @@ sooner, in every launch.
 
 ### 4.2 Patching at invalidation
 
-- `GuestToHostMap::BlockEntry` gains the translation's start (`CompiledCode.BlockBegin`, the `JITCodeHeader`), passed
-  by both `AddBlockMapping` callers (`CompileBlock` and the disk-cache hit in `Core.cpp`). The entry's own first
-  instruction can't be used to find it: it often is the return point that gets patched.
-- `GuestToHostMap::Erase` (its only caller is `InvalidateRange`), before removing an entry: if the entry's
-  translation has return points and `ReturnPointsPatched` is not set, write `b <stub k>` over each return point's first
-  instruction (a 32-bit atomic store through `ARMEmitter::DualMap::WriteAddr`, then `ClearICache` of the 4 bytes, as
-  `DirectBlockDelinker` does) and set the byte. All entries of a translation are listed under every page it covers, so
-  they are erased together and the work is done once.
-- Locking: `Erase` runs with the shared lookup map's write lock and `CodeInvalidationMutex` held, so no thread compiles,
+- `GuestToHostMap` gains `TranslationsByPage`: for each guest page, the translations covering it (their
+  `JITCodeHeader`), filled by `AddBlockExecutableRange` from the compile and disk-cache paths (the offline code cache
+  passes none). `InvalidateRange` patches every translation listed under the invalidated pages and drops those lists;
+  `ClearCache` empties it. Patching: if the translation has return points and `ReturnPointsPatched` is not set, write
+  `b <stub k>` over each return point's first instruction (a 32-bit atomic store through
+  `ARMEmitter::DualMap::WriteAddr`, then `ClearICache` of the 4 bytes, as `DirectBlockDelinker` does) and set the byte.
+- Not through the lookup entries (the first version, changed after the final review): `insert_or_assign` lets a later
+  translation take over an address, so a discarded translation whose entries were all taken over was never patched,
+  and a current one that took over an entry of a discarded one was patched while its return block's entry still led
+  to the patched return point (a thread looped between the stub and the dispatcher). All of a translation's entries
+  are listed under every page it covers, so after `InvalidateRange` no entry leads into a patched translation.
+- Locking: `InvalidateRange` runs with the shared lookup map's write lock and `CodeInvalidationMutex` held, so no thread compiles,
   links or unlinks meanwhile. A thread already past a return point's first instruction finishes that block on the old
   code, as one already inside a discarded translation does today.
 - Translations dropped by a code buffer replacement are not patched: each thread empties its own shadow stack when it

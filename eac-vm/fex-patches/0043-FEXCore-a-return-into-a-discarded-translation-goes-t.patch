@@ -1,4 +1,4 @@
-From 8d4d61de3e775ed832f284caba9c7a8817aa38ab Mon Sep 17 00:00:00 2001
+From 2f0ae063a88656451958663a6c8388c499f20878 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Fri, 23 Oct 2026 10:59:45 -0400
 Subject: [PATCH] FEXCore: a return into a discarded translation goes to the
@@ -17,16 +17,23 @@ The JIT now records each call's return point (l_CallReturn) and emits a
 16-byte stub per point after the jump thunks, `ldr TMP1, <RIP>; b common;
 RIP`, common storing the return block's guest RIP and exiting to the
 dispatcher. The block tail lists the points (offsets) and the stubs'
-start. Lookup entries keep their translation's start, and
-GuestToHostMap::Erase patches every return point of the translation to
-branch to its stub, once per translation. Nothing changes on the call or
-return path. The offline code cache's mappings have no translation start
-and are not patched. Disk cache format 30 -> 31 (the tail changed).
+start. GuestToHostMap lists the translations covering each guest page
+(TranslationsByPage, filled with the code pages), and InvalidateRange
+patches every return point of each translation listed under the
+invalidated pages to branch to its stub, once per translation. They are
+found through their pages, not their lookup entries: a later translation
+can take those over (insert_or_assign), which would leave a discarded
+translation unpatched, or patch a current one whose return block entry
+still leads to the patched point. Nothing changes on the call or return
+path. The offline code cache's mappings have no translation start and
+are not patched. Disk cache format 30 -> 31 (the tail changed).
 
 fex-tests callret-stale: a thread that entered A through another thread's
 link, parked in A's callee while A is rewritten, returned into the old
 code 64/64 (call rel32), 64/64 (call rax), 512/512 (4 threads); 0 with
-this change.
+this change. Two rows where a later translation took over lookup entries:
+stale returns 16/16 and a hang with patching through the entries; 0 and
+no hang through the pages.
 ---
  FEXCore/Source/Interface/Core/CPUBackend.h    | 23 ++++++-
  FEXCore/Source/Interface/Core/CodeCache.cpp   |  2 +-
@@ -35,8 +42,9 @@ this change.
  .../Source/Interface/Core/JIT/BranchOps.cpp   |  6 ++
  FEXCore/Source/Interface/Core/JIT/JIT.cpp     | 69 +++++++++++++++++++
  FEXCore/Source/Interface/Core/JIT/JITClass.h  |  9 +++
- FEXCore/Source/Interface/Core/LookupCache.h   | 18 +++--
- 8 files changed, 124 insertions(+), 9 deletions(-)
+ FEXCore/Source/Interface/Core/LookupCache.cpp |  1 +
+ FEXCore/Source/Interface/Core/LookupCache.h   | 26 ++++++-
+ 9 files changed, 134 insertions(+), 8 deletions(-)
 
 diff --git a/FEXCore/Source/Interface/Core/CPUBackend.h b/FEXCore/Source/Interface/Core/CPUBackend.h
 index 0183694..bd7a984 100644
@@ -79,40 +87,40 @@ index 0183694..bd7a984 100644
  } // namespace CPU
  } // namespace FEXCore
 diff --git a/FEXCore/Source/Interface/Core/CodeCache.cpp b/FEXCore/Source/Interface/Core/CodeCache.cpp
-index 8deb9f7..a921119 100644
+index 8deb9f7..9d8b8e4 100644
 --- a/FEXCore/Source/Interface/Core/CodeCache.cpp
 +++ b/FEXCore/Source/Interface/Core/CodeCache.cpp
-@@ -808,7 +808,7 @@ bool CodeCache::EnableLoadedSection(Core::InternalThreadState* Thread, MappedCod
-       LOGMAN_THROW_A_FMT(Block.HostCode < Code.CodeBuffer.size_bytes(), "Host offset {:#x} out of range ({:#x})", Block.HostCode,
-                          Code.CodeBuffer.size_bytes());
-       auto HostCode = &Code.CodeBuffer[Block.HostCode];
--      LookupCache.AddBlockMapping(Guest + BinarySection.FileStartVA, std::move(Block.CodePages), HostCode, WriteLock);
-+      LookupCache.AddBlockMapping(Guest + BinarySection.FileStartVA, std::move(Block.CodePages), HostCode, nullptr, WriteLock);
-     }
+@@ -831,7 +831,7 @@ bool CodeCache::EnableLoadedSection(Core::InternalThreadState* Thread, MappedCod
+         Entrypoint += BinarySection.FileStartVA;
+       }
  
-     // Guest code pages
+-      if (LookupCache.AddBlockExecutableRange(Entrypoints, CodePage, FEXCore::Utils::FEX_PAGE_SIZE, WriteLock)) {
++      if (LookupCache.AddBlockExecutableRange(Entrypoints, CodePage, FEXCore::Utils::FEX_PAGE_SIZE, nullptr, WriteLock)) {
+         CTX.SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+       }
+     }
 diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
-index 404cbc7..ebb956a 100644
+index 404cbc7..2cf4724 100644
 --- a/FEXCore/Source/Interface/Core/Core.cpp
 +++ b/FEXCore/Source/Interface/Core/Core.cpp
-@@ -893,7 +893,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
-         uintptr_t CachedHostCode = 0;
-         for (size_t i = 0; i < Hit->EntryPointRIPs.size(); i++) {
-           void* HostAddr = LoadedCode.BlockBegin + Hit->EntryPointHostOffsets[i];
--          Thread->LookupCache->AddBlockMapping(Thread, Hit->EntryPointRIPs[i], Hit->GuestPages, HostAddr);
-+          Thread->LookupCache->AddBlockMapping(Thread, Hit->EntryPointRIPs[i], Hit->GuestPages, HostAddr, LoadedCode.BlockBegin);
-           if (Hit->EntryPointRIPs[i] == GuestRIP) {
-             CachedHostCode = reinterpret_cast<uintptr_t>(HostAddr);
+@@ -883,7 +883,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+       auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode);
+       if (LoadedCode.BlockBegin) {
+         for (auto& CodePage : Hit->GuestPages) {
+-          if (Thread->LookupCache->AddBlockExecutableRange(Thread, Hit->EntryPointRIPs, CodePage, FEXCore::Utils::FEX_PAGE_SIZE)) {
++          if (Thread->LookupCache->AddBlockExecutableRange(Thread, Hit->EntryPointRIPs, CodePage, FEXCore::Utils::FEX_PAGE_SIZE, LoadedCode.BlockBegin)) {
+             SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
            }
-@@ -1005,7 +1005,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
- 
-   // Insert to lookup cache
-   for (auto [GuestAddr, HostAddr] : CompiledCode.EntryPoints) {
--    Thread->LookupCache->AddBlockMapping(Thread, GuestAddr, CodePages, HostAddr);
-+    Thread->LookupCache->AddBlockMapping(Thread, GuestAddr, CodePages, HostAddr, CompiledCode.BlockBegin);
-   }
- 
-   // Clear any relocations that might have been generated
+         }
+@@ -979,7 +979,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+     CodePages.reserve(BlockInfo->CodePages.size());
+     CodePages.insert(CodePages.end(), BlockInfo->CodePages.begin(), BlockInfo->CodePages.end());
+     for (auto CodePage : BlockInfo->CodePages) {
+-      if (Thread->LookupCache->AddBlockExecutableRange(Thread, BlockInfo->EntryPoints, CodePage, FEXCore::Utils::FEX_PAGE_SIZE)) {
++      if (Thread->LookupCache->AddBlockExecutableRange(Thread, BlockInfo->EntryPoints, CodePage, FEXCore::Utils::FEX_PAGE_SIZE, CompiledCode.BlockBegin)) {
+         SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+       }
+     }
 diff --git a/FEXCore/Source/Interface/Core/DiskCache.h b/FEXCore/Source/Interface/Core/DiskCache.h
 index ab0264d..0b43365 100644
 --- a/FEXCore/Source/Interface/Core/DiskCache.h
@@ -285,67 +293,87 @@ index 331b3c5..643a2ae 100644
    Utils::PoolBufferWithTimedRetirement<uint8_t*, 5000, 500> TempCodeBufferAllocator;
  
    static uint64_t ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEXCore::Context::ExitFunctionLinkData* Record);
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.cpp b/FEXCore/Source/Interface/Core/LookupCache.cpp
+index 0b23030..b484507 100644
+--- a/FEXCore/Source/Interface/Core/LookupCache.cpp
++++ b/FEXCore/Source/Interface/Core/LookupCache.cpp
+@@ -106,6 +106,7 @@ void GuestToHostMap::ClearCache(const LookupCacheWriteLockToken&) {
+   BlockLinks = BlockLinks_pma->new_object<BlockLinksMapType>();
+   // All code is gone, clear the block list
+   BlockList.clear();
++  TranslationsByPage.clear();
+ }
+ 
+ } // namespace FEXCore
 diff --git a/FEXCore/Source/Interface/Core/LookupCache.h b/FEXCore/Source/Interface/Core/LookupCache.h
-index d42c792..66dba01 100644
+index d42c792..9daaf3b 100644
 --- a/FEXCore/Source/Interface/Core/LookupCache.h
 +++ b/FEXCore/Source/Interface/Core/LookupCache.h
-@@ -85,6 +85,9 @@ struct GuestToHostMap {
-   struct BlockEntry {
-     uint64_t HostCode;
-     fextl::vector<uint64_t> CodePages;
-+    // The translation's start (its JITCodeHeader), whose return points are patched when the entry is erased; null when
-+    // unknown (the offline code cache's mappings).
-+    uint8_t* TranslationBegin;
-   };
+@@ -91,6 +91,10 @@ struct GuestToHostMap {
  
-   fextl::robin_map<uint64_t, BlockEntry> BlockList;
-@@ -94,14 +97,15 @@ struct GuestToHostMap {
+   fextl::map<uint64_t, fextl::vector<uint64_t>> CodePages;
+ 
++  // The translations (their JITCodeHeader) covering each page, whose return points are patched when the page is invalidated.
++  // Found through the pages, not through BlockList: a later translation may have taken over a translation's entries.
++  fextl::map<uint64_t, fextl::vector<uint8_t*>> TranslationsByPage;
++
    GuestToHostMap();
  
    // Adds to Guest -> Host code mapping
--  const BlockEntry& AddBlockMapping(uint64_t Address, std::span<const uint64_t> CodePages, void* HostCode, const LookupCacheWriteLockToken&) {
-+  const BlockEntry& AddBlockMapping(uint64_t Address, std::span<const uint64_t> CodePages, void* HostCode, uint8_t* TranslationBegin,
-+                                    const LookupCacheWriteLockToken&) {
-     // This may replace an existing mapping
-     // NOTE: Generally no previous entry should exist, however there is one exception:
-     //       If the backend updates the active thread's CodeBuffer, the new associated LookupCache
-     //       may already contain the block address. Since is comparatively rare, we'll just leak
-     //       one of the two blocks in this case.
-     return BlockList
--      .insert_or_assign(Address, BlockEntry {(uintptr_t)HostCode, fextl::vector<uint64_t>(CodePages.begin(), CodePages.end())})
-+      .insert_or_assign(Address, BlockEntry {(uintptr_t)HostCode, fextl::vector<uint64_t>(CodePages.begin(), CodePages.end()), TranslationBegin})
-       .first->second;
+@@ -129,6 +133,16 @@ struct GuestToHostMap {
+   bool InvalidateRange(uint64_t Start, uint64_t Length) {
+     auto lk = AcquireWriteLock();
+ 
++    // Threads may still hold return addresses into the range's translations on their call-return stacks
++    auto TranslationsLower = TranslationsByPage.lower_bound(Start >> 12);
++    auto TranslationsUpper = TranslationsByPage.upper_bound((Start + Length - 1) >> 12);
++    for (auto it = TranslationsLower; it != TranslationsUpper; it++) {
++      for (auto TranslationBegin : it->second) {
++        CPU::PatchDiscardedReturnPoints(TranslationBegin);
++      }
++    }
++    TranslationsByPage.erase(TranslationsLower, TranslationsUpper);
++
+     auto lower = CodePages.lower_bound(Start >> 12);
+     auto upper = CodePages.upper_bound((Start + Length - 1) >> 12);
+ 
+@@ -147,13 +161,18 @@ struct GuestToHostMap {
+     BlockLinks->insert({{GuestDestination, HostLink}, delinker});
    }
  
-@@ -121,6 +125,11 @@ struct GuestToHostMap {
-       it->second(it->first.HostLink);
+-  bool AddBlockExecutableRange(const std::ranges::input_range auto& Addresses, uint64_t Start, uint64_t Length, const LookupCacheWriteLockToken&) {
++  // TranslationBegin: the translation of Addresses, or null when unknown (the offline code cache's mappings)
++  bool AddBlockExecutableRange(const std::ranges::input_range auto& Addresses, uint64_t Start, uint64_t Length, uint8_t* TranslationBegin,
++                               const LookupCacheWriteLockToken&) {
+     bool rv = false;
+ 
+     for (auto CurrentPage = Start >> 12, EndPage = (Start + Length - 1) >> 12; CurrentPage <= EndPage; CurrentPage++) {
+       auto& CodePage = CodePages[CurrentPage];
+       rv |= CodePage.empty();
+       CodePage.insert(CodePage.end(), Addresses.begin(), Addresses.end());
++      if (TranslationBegin) {
++        TranslationsByPage[CurrentPage].push_back(TranslationBegin);
++      }
      }
  
-+    // Threads may still hold return addresses into the translation on their call-return stacks
-+    if (auto Entry = BlockList.find(Address); Entry != BlockList.end() && Entry->second.TranslationBegin) {
-+      CPU::PatchDiscardedReturnPoints(Entry->second.TranslationBegin);
-+    }
-+
-     // Remove from BlockList
-     return BlockList.erase(Address) != 0;
-   }
-@@ -297,13 +306,14 @@ public:
-   }
+     return rv;
+@@ -287,13 +306,14 @@ public:
  
-   // Adds to Guest -> Host code mapping
--  void AddBlockMapping(FEXCore::Core::InternalThreadState* Thread, uint64_t Address, std::span<const uint64_t> CodePages, void* HostCode) {
-+  void AddBlockMapping(FEXCore::Core::InternalThreadState* Thread, uint64_t Address, std::span<const uint64_t> CodePages, void* HostCode,
-+                       uint8_t* TranslationBegin) {
+   // Appends a list of Block {Address} to CodePages [Start, Start + Length)
+   // Returns true if new pages are marked as containing code
+-  bool AddBlockExecutableRange(FEXCore::Core::InternalThreadState* Thread, auto& Addresses, uint64_t Start, uint64_t Length) {
++  bool AddBlockExecutableRange(FEXCore::Core::InternalThreadState* Thread, auto& Addresses, uint64_t Start, uint64_t Length,
++                               uint8_t* TranslationBegin) {
      std::optional<FEXCore::SHMStats::AccumulationBlock<uint64_t>> LockTime(
        Thread->ThreadStats ? &Thread->ThreadStats->AccumulatedCacheWriteLockTime : nullptr);
      auto lk = Shared->AcquireWriteLock();
      LockTime.reset();
  
--    const auto& Entry = Shared->AddBlockMapping(Address, CodePages, HostCode, lk);
-+    const auto& Entry = Shared->AddBlockMapping(Address, CodePages, HostCode, TranslationBegin, lk);
+-    return Shared->AddBlockExecutableRange(Addresses, Start, Length, lk);
++    return Shared->AddBlockExecutableRange(Addresses, Start, Length, TranslationBegin, lk);
+   }
  
-     // There is no need to update L1 or L2, they will get updated on first lookup
-     // However, adding to L1 here increases performance
+   // Adds to Guest -> Host code mapping
 -- 
 2.54.0 (Apple Git-157)
 
