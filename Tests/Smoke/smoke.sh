@@ -62,7 +62,7 @@ for backend in dxmt wined3d; do
 done
 check "arm64ec exitcode" 2 shared dxmt exitcode-arm64ec.exe "a b" "c"
 
-text="This game is 32-bit. MacNeutron 0.1 runs 64-bit games only; 32-bit support is planned."
+text="This game is 32-bit. On macOS MacNeutron runs 64-bit games only; 32-bit games in a Steam library run in its game VM."
 before=$(wc -l 2> /dev/null < "$LOG" || echo 0)
 launch shared dxmt exitcode-i386.exe 2> /dev/null && got=0 || got=$?
 seen=$(tail -n "+$((before + 1))" "$LOG" | LC_ALL=C /usr/bin/grep -cF "$text" || true)
