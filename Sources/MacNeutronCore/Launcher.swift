@@ -46,6 +46,8 @@ public struct Launcher: Sendable {
     public let microVMRoot: URL
     /// The Mac's display in pixels (MicroVM.mainDisplay): the guest's screen, unless a launch option sets MN_SCREEN.
     public let display: @Sendable () -> (width: Int, height: Int)?
+    /// The Mac user's home: its Documents go to a VM game (MicroVM.userShares).
+    public let home: String
     let stopRequested = StopFlag()
     let vmRun = VMRun()
 
@@ -53,7 +55,8 @@ public struct Launcher: Sendable {
                 notifier: any Notifier = AppleScriptNotifier(), preflight: Preflight = Preflight(),
                 settings: GameSettingsStore = GameSettingsStore(), steam: SteamLocation = SteamLocation(),
                 microVMRoot: URL = MicroVM.standardRoot,
-                display: @escaping @Sendable () -> (width: Int, height: Int)? = MicroVM.mainDisplay) {
+                display: @escaping @Sendable () -> (width: Int, height: Int)? = MicroVM.mainDisplay,
+                home: String = NSHomeDirectory()) {
         self.layout = layout
         self.runner = runner
         self.log = log
@@ -63,6 +66,7 @@ public struct Launcher: Sendable {
         self.steam = steam
         self.microVMRoot = microVMRoot
         self.display = display
+        self.home = home
     }
 
     /// Returns the exit code for Steam. Never throws: every failure is logged and becomes exit 1.
@@ -243,6 +247,15 @@ public struct Launcher: Sendable {
         vmRun.begin()
         defer { vmRun.end() }
         do {
+            // The folders Steam Cloud syncs, read-write in the guest (MicroVM.userShares): mn-runner mounts the run
+            // share's `mounts` before the game, or leaves mounts.failed and powers off without it.
+            let shares = try MicroVM.userShares(prefix: context.prefix, library: library, guest: guest, home: home)
+            environment["MN_MAC_HOME"] = home  // run-game.sh's XDG folders: the Mac's, as the profile's links name them
+            let share = vm.share(appID: context.appID)
+            try FileManager.default.createDirectory(at: share, withIntermediateDirectories: true)
+            try MicroVM.mountsFile(shares).write(to: share.appending(path: "mounts"), atomically: true, encoding: .utf8)
+            let mountsFailed = share.appending(path: "mounts.failed")
+            try? FileManager.default.removeItem(at: mountsFailed)  // an earlier run's
             let script = try vm.script(verb: request.verb, appID: context.appID, guest: guest,
                                        arguments: request.arguments, environment: environment,
                                        performance: layout.isPerformanceBuild)
@@ -298,10 +311,17 @@ public struct Launcher: Sendable {
             env["MN_RUN_TIMEOUT"] = env["MN_RUN_TIMEOUT"] ?? "86400"
             let status = try runner.run(vm.runGuest, [file.path(percentEncoded: false), "--steam-appid", context.appID,
                                                       "--ram-mib", "16384", "--steam-map", "\(library)=/mnt/games"]
+                                                     + shares.flatMap { ["--user-share", "\($0.tag)=\($0.host)"] }
                                                      + (quiet ? ["--console", "/dev/null"] : []),
                                         environment: env, output: gameLog, started: vmRun.started)
             log.summary("verb=\(request.verb.rawValue) appid=\(context.appID) backend=vm vm=\(vm.root.path(percentEncoded: false))"
                        + " exit=\(status)")
+            if let reason = try? String(contentsOf: mountsFailed, encoding: .utf8) {
+                let message = "MacNeutron couldn't share this game's saves with the game VM: "
+                    + (reason.split(separator: "\n").first.map(String.init) ?? "")
+                log.summary("error: \(message)")
+                notifier.post(title: "MacNeutron", message: message)
+            }
             // A logged game's log ends with the guest's console (kernel, services): the one log a player sends.
             if let gameLog, let console = try? String(contentsOf: vm.share(appID: context.appID)
                 .appending(path: "console.log"), encoding: .utf8) {

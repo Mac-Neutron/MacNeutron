@@ -68,7 +68,7 @@ public struct MicroVM: Sendable {
     static let passed = ["MACNEUTRON_DLSS", "MACNEUTRON_XESS", "DXMT_ENABLE_NVEXT", "MACNEUTRON_LOG", "MN_SCREEN",
                          "MACNEUTRON_VM_PROFILE", "DXMT_STATS", "MACNEUTRON_VM_D3D", "MACNEUTRON_VM_D3D32",
                          "MACNEUTRON_VM_D3D_TRACE", "DXMT_LOG_LEVEL", "MACNEUTRON_VM_WOW64", "PROTON_USE_WOW64",
-                         "MTLD3D_CONFIG", "WINEDEBUG"]
+                         "MTLD3D_CONFIG", "WINEDEBUG", "MN_MAC_HOME"]
     /// What a performance build's guest doesn't get: its stats and profiler are compiled out or off.
     static let notPassedToPerformance: Set = ["MACNEUTRON_VM_PROFILE", "DXMT_STATS"]
 
@@ -103,4 +103,57 @@ public struct MicroVM: Sendable {
         }
         return lines.joined(separator: "\n") + "\n" + (try String(contentsOf: gameScript, encoding: .utf8))
     }
+}
+
+/// A Mac folder a game in the VM gets read-write (spec 2026-10-23-macneutron-vm-shared-saves §3): macneutron-vm's
+/// `--user-share <tag>=<host>`, which the guest's mn-runner mounts at `guest` (the run share's `mounts` file).
+public struct UserShare: Equatable, Sendable {
+    public let tag: String
+    public let host: String
+    public let guest: String
+}
+
+public enum UserShareError: Error, CustomStringConvertible {
+    /// ~/Documents can't be listed: macOS's privacy settings refused it to Steam, or it's missing.
+    case documentsUnreadable(String)
+
+    public var description: String {
+        switch self {
+        case .documentsUnreadable(let path):
+            "MacNeutron can't open your Documents folder (\(path)), so a game in the VM couldn't reach its saves there. "
+                + "Allow Steam in System Settings > Privacy & Security > Files and Folders, then launch the game again."
+        }
+    }
+}
+
+extension MicroVM {
+    /// The guest prefix's profile, Proton's name for it (run-game.sh runs Wine as steamuser).
+    static let guestProfile = "/home/mn/pfx/drive_c/users/steamuser"
+
+    /// The folders Steam Cloud syncs for the game, as the guest gets them: the Mac prefix's profile (users/steamuser,
+    /// or the profile it links to: macOS Wine's, named after the Mac user, ProfileLinks), made when missing as
+    /// Steam's and Proton's layout has it; ~/Documents, which the profile's Documents link names; and the game's own
+    /// folder in its library (`guest` is the game's path in the guest, MicroVM.guestPath's).
+    static func userShares(prefix: URL, library: String, guest: String, home: String) throws -> [UserShare] {
+        let fm = FileManager.default
+        let users = prefix.appending(path: "drive_c/users").path(percentEncoded: false)
+        var profile = users + "/steamuser"
+        // One level, as Steam and macOS Wine name it (resolvingSymlinksInPath would also turn /var into /private/var).
+        if let target = try? fm.destinationOfSymbolicLink(atPath: profile) {
+            profile = target.hasPrefix("/") ? target : users + "/" + target
+        }
+        try fm.createDirectory(atPath: profile, withIntermediateDirectories: true)  // a dangling link's folder too
+        let documents = home + "/Documents"
+        do { _ = try fm.contentsOfDirectory(atPath: documents) } catch { throw UserShareError.documentsUnreadable(documents) }
+        var shares = [UserShare(tag: "profile", host: profile, guest: guestProfile),
+                      UserShare(tag: "documents", host: documents, guest: documents)]
+        let inGames = guest.hasPrefix("/mnt/games/") ? guest.dropFirst("/mnt/games/".count) : ""
+        if inGames.contains("/"), let folder = inGames.split(separator: "/").first {
+            shares.append(UserShare(tag: "game", host: library + "/" + folder, guest: "/mnt/games/" + folder))
+        }
+        return shares
+    }
+
+    /// The run share's `mounts`: a `<tag> <guest path>` line per share, read by mn-runner.
+    static func mountsFile(_ shares: [UserShare]) -> String { shares.map { "\($0.tag) \($0.guest)\n" }.joined() }
 }

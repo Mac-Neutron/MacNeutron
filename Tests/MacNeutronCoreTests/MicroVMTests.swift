@@ -18,6 +18,10 @@ private struct VMFixture {
     let notifier: RecordingNotifier
     let vm: URL
     let env: [String: String]
+    /// The launcher's home (its Documents/ made) and the game's compatdata folder.
+    let home: String
+    let dataPath: URL
+    let scripts: Scripts
     var launcherLog: String { (try? String(contentsOf: launcher.log.launcherLog, encoding: .utf8)) ?? "" }
 }
 
@@ -33,7 +37,7 @@ final class Scripts: @unchecked Sendable {
 
 private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts: Scripts = Scripts(),
                            display: (width: Int, height: Int)? = nil, version: String? = nil,
-                           console: String? = nil) throws -> VMFixture {
+                           console: String? = nil, mountsFailed: String? = nil) throws -> VMFixture {
     let vm = try makeVMFolder()
     let layout = try makeToolLayout()
     if let version { try setRuntimeVersion(version, of: layout) }
@@ -44,18 +48,25 @@ private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts:
             try? FileManager.default.createDirectory(atPath: share, withIntermediateDirectories: true)
             try? console.write(toFile: share + "/console.log", atomically: true, encoding: .utf8)
         }
+        if let mountsFailed, let share = call.environment["MN_SHARE"] {  // mn-runner's word on a mount that failed
+            try? mountsFailed.write(toFile: share + "/mounts.failed", atomically: true, encoding: .utf8)
+        }
         return status
     }
     let notifier = RecordingNotifier()
+    let home = try makeTempDir().appending(path: "home", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: home.appending(path: "Documents"), withIntermediateDirectories: true)
     let launcher = Launcher(layout: layout, runner: runner,
                             log: LauncherLog(directory: try makeTempDir().appending(path: "Logs")),
                             notifier: notifier, preflight: testPreflight,
                             settings: GameSettingsStore(directory: try makeTempDir().appending(path: "games")),
                             steam: try makeSteamLocation(),
                             microVMRoot: vmInstalled ? vm : try makeTempDir().appending(path: "no-vm"),
-                            display: { display })
-    let env = steamEnvironment(dataPath: try makeTempDir().appending(path: "compatdata/2437170"), appID: "2437170")
-    return VMFixture(launcher: launcher, runner: runner, notifier: notifier, vm: vm, env: env)
+                            display: { display }, home: String(home.path(percentEncoded: false).dropLast()))
+    let dataPath = try makeTempDir().appending(path: "compatdata/2437170", directoryHint: .isDirectory)
+    let env = steamEnvironment(dataPath: dataPath, appID: "2437170")
+    return VMFixture(launcher: launcher, runner: runner, notifier: notifier, vm: vm, env: env,
+                     home: String(home.path(percentEncoded: false).dropLast()), dataPath: dataPath, scripts: scripts)
 }
 
 private let game = "/Users/someone/Library/Application Support/Steam/steamapps/common/SMITE 2/Windows/Hemingway.exe"
@@ -67,8 +78,12 @@ private let game = "/Users/someone/Library/Application Support/Steam/steamapps/c
     let call = try #require(f.runner.calls.first)
     #expect(f.runner.calls.count == 1)  // no host prefix, no host Wine
     #expect(call.tool == "run-guest.sh")
+    let profile = f.dataPath.appending(path: "pfx/drive_c/users/steamuser").path(percentEncoded: false)
     #expect(Array(call.arguments.dropFirst()) == ["--steam-appid", "2437170", "--ram-mib", "16384", "--steam-map",
-                                                   "/Users/someone/Library/Application Support/Steam/steamapps/common=/mnt/games"])
+                                                   "/Users/someone/Library/Application Support/Steam/steamapps/common=/mnt/games",
+                                                   "--user-share", "profile=\(profile)",
+                                                   "--user-share", "documents=\(f.home)/Documents",
+                                                   "--user-share", "game=/Users/someone/Library/Application Support/Steam/steamapps/common/SMITE 2"])
     #expect(call.environment["MN_VM_DIR"] == f.vm.path(percentEncoded: false))
     #expect(call.environment["MN_STATE"] == f.vm.appending(path: "state/2437170.img").path(percentEncoded: false))
     #expect(call.environment["MN_SHARE"] == f.vm.appending(path: "runs/2437170").path(percentEncoded: false))
@@ -76,6 +91,103 @@ private let game = "/Users/someone/Library/Application Support/Steam/steamapps/c
     #expect(call.environment["MN_TOAST"] == f.launcher.layout.launcherBinary.path(percentEncoded: false))
     #expect(f.launcherLog.contains("verb=waitforexitandrun appid=2437170 backend=vm"))
     #expect(f.launcherLog.contains("exit=3"))
+}
+
+// A game in the VM uses the saves Steam Cloud syncs (spec 2026-10-23-macneutron-vm-shared-saves): its Mac prefix's
+// profile, ~/Documents and its own folder, shared read-write.
+
+@Test func aVMGameGetsItsProfileDocumentsAndFolder() throws {
+    let f = try makeVMFixture()
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    let call = try #require(f.runner.calls.first)
+    let profile = f.dataPath.appending(path: "pfx/drive_c/users/steamuser").path(percentEncoded: false)
+    #expect(Array(call.arguments.dropFirst(7)) == [  // after the script, appid, RAM and --steam-map pairs
+        "--user-share", "profile=\(profile)",
+        "--user-share", "documents=\(f.home)/Documents",
+        "--user-share", "game=/Users/someone/Library/Application Support/Steam/steamapps/common/SMITE 2"])
+    #expect(try String(contentsOf: f.vm.appending(path: "runs/2437170/mounts"), encoding: .utf8) ==
+            "profile /home/mn/pfx/drive_c/users/steamuser\ndocuments \(f.home)/Documents\ngame /mnt/games/SMITE 2\n")
+    #expect(f.scripts.all.first?.contains("MN_MAC_HOME='\(f.home)'") == true)
+    #expect(FileManager.default.fileExists(atPath: profile))  // made: Steam's and Proton's layout
+}
+
+/// The `profile=` share run-guest.sh was given.
+private func profileShare(_ f: VMFixture) throws -> String? {
+    let call = try #require(f.runner.calls.first)
+    return call.arguments.first { $0.hasPrefix("profile=") }.map { String($0.dropFirst("profile=".count)) }
+}
+
+@Test func aLinkedProfileIsSharedAsItsTarget() throws {
+    // macOS Wine's profile is named after the Mac user; users/steamuser links to it (ProfileLinks).
+    let f = try makeVMFixture()
+    let users = f.dataPath.appending(path: "pfx/drive_c/users")
+    try FileManager.default.createDirectory(at: users.appending(path: "chad"), withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(atPath: users.appending(path: "steamuser").path(percentEncoded: false),
+                                               withDestinationPath: "chad")
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(try profileShare(f) == users.appending(path: "chad").path(percentEncoded: false))
+}
+
+@Test func aDanglingProfileLinkGetsItsFolderBack() throws {
+    let f = try makeVMFixture()
+    let users = f.dataPath.appending(path: "pfx/drive_c/users")
+    try FileManager.default.createDirectory(at: users, withIntermediateDirectories: true)
+    let link = users.appending(path: "steamuser").path(percentEncoded: false)
+    try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: "chad")
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link) == "chad")  // the link stays
+    var folder: ObjCBool = false
+    #expect(FileManager.default.fileExists(atPath: users.appending(path: "chad").path(percentEncoded: false),
+                                           isDirectory: &folder) && folder.boolValue)
+    #expect(try profileShare(f) == users.appending(path: "chad").path(percentEncoded: false))
+}
+
+@Test func aGameFolderWithAnApostropheStaysOnePath() throws {
+    let f = try makeVMFixture()
+    let bg3 = "/Users/someone/Library/Application Support/Steam/steamapps/common/Baldur's Gate 3/bin/bg3.exe"
+    _ = f.launcher.launch(["waitforexitandrun", bg3], environment: f.env)
+    let call = try #require(f.runner.calls.first)
+    #expect(call.arguments.contains("game=/Users/someone/Library/Application Support/Steam/steamapps/common/Baldur's Gate 3"))
+    #expect(try String(contentsOf: f.vm.appending(path: "runs/2437170/mounts"), encoding: .utf8)
+        .hasSuffix("game /mnt/games/Baldur's Gate 3\n"))
+}
+
+@Test func aLibraryOnAnotherDriveSharesThatLibrarysGame() throws {
+    let f = try makeVMFixture()
+    _ = f.launcher.launch(["waitforexitandrun", "/Volumes/Games/SteamLibrary/steamapps/common/X/X.exe"], environment: f.env)
+    let call = try #require(f.runner.calls.first)
+    #expect(call.arguments.contains("game=/Volumes/Games/SteamLibrary/steamapps/common/X"))
+}
+
+@Test func documentsThatCantBeListedRefuseTheLaunch() throws {
+    // macOS's privacy settings refused Steam the Documents folder: never a run without it.
+    let f = try makeVMFixture()
+    let documents = f.home + "/Documents"
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: documents)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: documents) }
+    let status = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(status != 0)
+    #expect(f.runner.calls.isEmpty)
+    #expect(f.notifier.posted.contains(UserShareError.documentsUnreadable(documents).description))
+    #expect(UserShareError.documentsUnreadable("/D").description == "MacNeutron can't open your Documents folder (/D), so "
+            + "a game in the VM couldn't reach its saves there. Allow Steam in System Settings > Privacy & Security > Files "
+            + "and Folders, then launch the game again.")
+}
+
+@Test func aFailedMountIsToldToThePlayer() throws {
+    let f = try makeVMFixture(status: 1, mountsFailed: "no virtiofs tag game\n")
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    let message = "MacNeutron couldn't share this game's saves with the game VM: no virtiofs tag game"
+    #expect(f.notifier.posted.contains(message))
+    #expect(f.launcherLog.contains(message))
+}
+
+@Test func anOldMountsFailedDoesNotRefuseTheNextRun() throws {
+    let f = try makeVMFixture()
+    try write("an earlier run's\n", to: f.vm.appending(path: "runs/2437170/mounts.failed"))
+    let status = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(status == 0)
+    #expect(!f.notifier.posted.contains { $0.contains("couldn't share") })
 }
 
 /// A 32-bit PE in a Steam library (the VM's game folder).
