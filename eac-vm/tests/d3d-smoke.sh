@@ -8,7 +8,8 @@
 # "latency ok" (the frame latency object, and GPU-bound presents that hold no vCPU on the host: mn-d3d's "slow:" lines),
 # "rawexport ok" (dxgi.dll's CreateDXGIFactory1 called at its export table's RVA, as NVIDIA Streamline does: code),
 # "warp ok" (EnumWarpAdapter answers an adapter, as DXVK's: 3DMark's Steel Nomad uses it unchecked), "resource2 ok"
-# (a D3D12 resource answers ID3D12Resource2's GetDesc1: Steel Nomad asks a swapchain's GetBuffer for it),
+# (a D3D12 resource answers ID3D12Resource2's GetDesc1: Steel Nomad asks a swapchain's GetBuffer for it), the rows
+# of dxmt/tests/d3d12_list7.cpp (List3 to List7: "list4 ok", ..., run as list7.exe and list7_32.exe after each smoke),
 # "d3d11latency ok" (M4: D3D11's GPU-bound presents, paced by the device's latency, likewise), and three
 # `smoke.exe die` runs first, each ending mid-load with status 0, that the host outlives (M4's final review)
 # and "conv ok" (data whose i386 layout differs, end to end: initial data, an input layout, a D3D10 map, GetHwnd, GetDesc)
@@ -35,6 +36,11 @@ MN_DXMT_ONLY=d3d12_null sh "$ROOT/eac-vm/dxmt/share.sh" > /dev/null  # the share
 # Large-address-aware, as many 32-bit games are: memory for it may then go up to 4 GiB.
 "$(sh "$ROOT/dxmt/toolchain.sh")/i686-w64-mingw32-clang++" -std=c++17 -O1 -static -s -Wl,--large-address-aware \
   -o "$SH/dxmt-tests/smoke32.exe" "$ROOT/eac-vm/d3d/tests/smoke.cpp" -ld3d12 -ld3d10 -ld3d11 -ldxgi
+# DXMT's List3 to List7 rows (dxmt/tests/d3d12_list7.cpp), the same program the Mac's gates run, after each smoke.
+"$(sh "$ROOT/dxmt/toolchain.sh")/x86_64-w64-mingw32-clang++" -std=c++17 -O1 -static -s -I"$ROOT/dxmt/tests" \
+  -o "$SH/dxmt-tests/list7.exe" "$ROOT/dxmt/tests/d3d12_list7.cpp" -ld3d12 -ldxgi
+"$(sh "$ROOT/dxmt/toolchain.sh")/i686-w64-mingw32-clang++" -std=c++17 -O1 -static -s -Wl,--large-address-aware \
+  -I"$ROOT/dxmt/tests" -o "$SH/dxmt-tests/list7_32.exe" "$ROOT/dxmt/tests/d3d12_list7.cpp" -ld3d12 -ldxgi
 fail=
 case ${MN_WOW64:-old} in new) arch='export WINEARCH=wow64' ;; *) arch= ;; esac
 for mode in forward guest; do
@@ -57,6 +63,7 @@ for i in 1 2 3; do  # processes that end mid-load (M4's final review): the host 
   echo "die status \$?" >> \$O/d3d-smoke.raw
 done
 timeout -k 10 60 wine \$T/smoke.exe < /dev/null >> \$O/d3d-smoke.raw 2>&1
+timeout -k 10 60 wine \$T/list7.exe < /dev/null >> \$O/d3d-smoke.raw 2>&1
 : > \$O/d3d-smoke32.raw
 for i in 1 2 3; do  # smoke.cpp's die compiles shaders: the 32-bit SM50 calls
   MACNEUTRON_VM_D3D=$m32 timeout -k 10 60 wine \$T/smoke32.exe die < /dev/null >> \$O/d3d-smoke32.raw 2>&1
@@ -64,6 +71,7 @@ for i in 1 2 3; do  # smoke.cpp's die compiles shaders: the 32-bit SM50 calls
 done
 MACNEUTRON_VM_D3D=$m32 timeout -k 10 60 wine \$T/smoke32.exe < /dev/null >> \$O/d3d-smoke32.raw 2>&1
 echo "status \$?" >> \$O/d3d-smoke32.raw
+MACNEUTRON_VM_D3D=$m32 timeout -k 10 60 wine \$T/list7_32.exe < /dev/null >> \$O/d3d-smoke32.raw 2>&1
 timeout 20 wineserver -k
 tr -d '\r' < \$O/d3d-smoke.raw > \$O/d3d-smoke-$mode.txt
 tr -d '\r' < \$O/d3d-smoke32.raw > \$O/d3d-smoke32-$mode.txt
@@ -92,7 +100,7 @@ EOS
   dies=$(/usr/bin/grep -c '^die status 0$' "$out" 2> /dev/null || true)
   echo "d3d-smoke: $mode: ${dies:-0} of 3 processes ended mid-load, and the host outlived them"
   [ "${dies:-0}" -eq 3 ] || fail="$fail $mode-dies"
-  guest_checks="eventthread resource2 name minimised latency d3d11latency rawexport warp wmtforward wmsize conv"
+  guest_checks="eventthread resource2 name minimised latency d3d11latency rawexport warp wmtforward wmsize conv list4"
   checks=$guest_checks
   [ "$mode" = guest ] || checks="$checks eventreuse swapchain shared"
   for c in $checks; do

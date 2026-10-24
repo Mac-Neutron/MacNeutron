@@ -98,11 +98,6 @@ export d3d10core.dll HRESULT D3D10CoreRegisterLayers(void);
 ID3D12ProtectedSession::* refuse
 ID3D12ProtectedResourceSession::* refuse
 ID3D12ProtectedResourceSession1::* refuse
-ID3D12GraphicsCommandList3::* refuse
-ID3D12GraphicsCommandList4::* refuse
-ID3D12GraphicsCommandList5::* refuse
-ID3D12GraphicsCommandList6::* refuse
-ID3D12GraphicsCommandList7::* refuse
 ID3D12LifetimeOwner::* refuse
 ID3D12LifetimeTracker::* refuse
 ID3D12SwapChainAssistant::* refuse
@@ -165,6 +160,20 @@ ID3D12Device::CreateSharedHandle refuse
 ID3D12Device3::OpenExistingHeapFromAddress refuse
 ID3D12Device5::CreateStateObject refuse
 ID3D12Device7::AddToStateObject refuse
+# List3 to List7's methods behind caps DXMT reports off (protected sessions, meta commands, ray tracing, VRS, mesh
+# shaders): DXMT does nothing for them either (command list 7 spec §6.1).
+ID3D12GraphicsCommandList3::SetProtectedResourceSession refuse
+ID3D12GraphicsCommandList4::InitializeMetaCommand refuse
+ID3D12GraphicsCommandList4::ExecuteMetaCommand refuse
+ID3D12GraphicsCommandList4::BuildRaytracingAccelerationStructure refuse
+ID3D12GraphicsCommandList4::EmitRaytracingAccelerationStructurePostbuildInfo refuse
+ID3D12GraphicsCommandList4::CopyRaytracingAccelerationStructure refuse
+ID3D12GraphicsCommandList4::SetPipelineState1 refuse
+ID3D12GraphicsCommandList4::DispatchRays refuse
+ID3D12GraphicsCommandList5::RSSetShadingRate refuse
+ID3D12GraphicsCommandList5::RSSetShadingRateImage refuse
+ID3D12GraphicsCommandList6::DispatchMesh refuse
+ID3D12GraphicsCommandList7::Barrier refuse
 # DXGI's device interfaces are D3D11's (M4).
 IDXGIDevice::CreateSurface refuse
 IDXGIDevice::QueryResourceResidency refuse
@@ -263,6 +272,8 @@ ID3D12GraphicsCommandList::OMSetRenderTargets render_target_descriptors in count
 ID3D12GraphicsCommandList::OMSetRenderTargets depth_stencil_descriptor in one
 ID3D12GraphicsCommandList::RSSetScissorRects rects in count=rect_count
 ID3D12GraphicsCommandList::ResourceBarrier barriers in count=barrier_count
+ID3D12GraphicsCommandList4::BeginRenderPass render_targets in count=render_targets_count
+ID3D12GraphicsCommandList4::BeginRenderPass depth_stencil in one
 ID3D12GraphicsCommandList::SetComputeRoot32BitConstants data in count=constant_count unit=4
 ID3D12GraphicsCommandList::SetGraphicsRoot32BitConstants data in count=constant_count unit=4
 ID3D12GraphicsCommandList::IASetVertexBuffers views in count=view_count
@@ -341,6 +352,8 @@ IDXGIFactory5::CheckFeatureSupport support_data inout size=support_data_size
 
 # Structs with pointers.
 struct D3D12_RESOURCE_BARRIER.UNIONNAME union=Type Transition=0 Aliasing=1 UAV=2
+struct D3D12_RENDER_PASS_ENDING_ACCESS.UNIONNAME union=Type Resolve=2
+struct D3D12_RENDER_PASS_ENDING_ACCESS_RESOLVE_PARAMETERS.pSubresourceParameters in count=SubresourceCount
 struct D3D12_DISCARD_REGION.pRects in count=NumRects
 struct D3D12_SHADER_BYTECODE.pShaderBytecode in size=BytecodeLength
 struct D3D12_STREAM_OUTPUT_DESC.pSODeclaration in count=NumEntries
