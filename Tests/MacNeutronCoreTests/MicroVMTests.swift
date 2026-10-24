@@ -119,6 +119,29 @@ private func profileShare(_ f: VMFixture) throws -> String? {
     return call.arguments.first { $0.hasPrefix("profile=") }.map { String($0.dropFirst("profile=".count)) }
 }
 
+@Test func aVMOnlyProfileGetsSteamsXPNameLinks() throws {
+    // Steam's Auto-Cloud roots are the profile's XP names (ProfileLinks), which only a macOS launch made before: a
+    // game never run on macOS kept its saves where Steam doesn't look.
+    let f = try makeVMFixture()
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    let profile = f.dataPath.appending(path: "pfx/drive_c/users/steamuser").path(percentEncoded: false)
+    let fm = FileManager.default
+    #expect(try fm.destinationOfSymbolicLink(atPath: profile + "/Local Settings/Application Data") == "../AppData/Local")
+    #expect(try fm.destinationOfSymbolicLink(atPath: profile + "/Application Data") == "AppData/Roaming")
+    #expect(try fm.destinationOfSymbolicLink(atPath: profile + "/My Documents") == "Documents")
+}
+
+@Test func cloudFilesSteamPutInAnXPFolderReachTheGame() throws {
+    // Steam's launch download makes real XP-name folders in a profile no macOS launch prepared.
+    let f = try makeVMFixture()
+    let profile = f.dataPath.appending(path: "pfx/drive_c/users/steamuser")
+    try write("cloud\n", to: profile.appending(path: "Local Settings/Application Data/Game/save.sav"))
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(try String(contentsOf: profile.appending(path: "AppData/Local/Game/save.sav"), encoding: .utf8) == "cloud\n")
+    #expect(try FileManager.default.destinationOfSymbolicLink(
+        atPath: profile.appending(path: "Local Settings/Application Data").path(percentEncoded: false)) == "../AppData/Local")
+}
+
 @Test func aLinkedProfileIsSharedAsItsTarget() throws {
     // macOS Wine's profile is named after the Mac user; users/steamuser links to it (ProfileLinks).
     let f = try makeVMFixture()

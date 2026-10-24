@@ -251,6 +251,12 @@ public struct Launcher: Sendable {
             // share's `mounts` before the game, or leaves traces/mounts.failed and powers off without it; run-game.sh
             // leaves it too when the profile isn't mounted (images older than these tools).
             let shares = try MicroVM.userShares(prefix: context.prefix, library: library, guest: guest, home: home)
+            // Steam's Auto-Cloud roots are the profile's XP names (ProfileLinks): a game no macOS launch prepared has
+            // none, so they're made here, under the prefix's lock as PrefixManager makes them, merging what Steam's
+            // launch download put in real XP-name folders.
+            let profileName = URL(filePath: shares[0].host).lastPathComponent
+            let links = try withFileLock(at: context.lockFile) { ProfileLinks.apply(prefix: context.prefix, user: profileName) }
+            for note in links.notes { log.append("note: \(note)") }
             environment["MN_MAC_HOME"] = home  // run-game.sh's XDG folders: the Mac's, as the profile's links name them
             let share = vm.share(appID: context.appID)
             try FileManager.default.createDirectory(at: share, withIntermediateDirectories: true)
