@@ -15,12 +15,13 @@ SSL=${OPENSSL:-$(brew --prefix openssl@3)}
 
 [ -d "$SRC/.git" ] || git clone -q --depth 1 --branch "$TAG" https://github.com/stefanberger/libtpms.git "$SRC"
 if [ "$(git -C "$SRC" rev-parse HEAD)" != "$SHA" ]; then
-  git -C "$SRC" fetch -q --depth 1 origin tag "$TAG" && git -C "$SRC" checkout -q "$SHA"
+  git -C "$SRC" fetch -q --depth 1 origin "$SHA" && git -C "$SRC" checkout -q "$SHA"  # a tag's or a branch's commit
 fi
 [ "$(git -C "$SRC" rev-parse HEAD)" = "$SHA" ] || { echo "libtpms: $SRC is not at $SHA" >&2; exit 1; }
 rm -rf "$OUT" && mkdir -p "$OUT/include/libtpms" "$OUT/obj"
 cp "$SRC"/include/libtpms/*.h "$OUT/include/libtpms/"
-set -- $(echo "${TAG#v}" | tr . ' ')
+# The version libtpms' own configure.ac declares (a branch pin has no version in its name).
+set -- $(sed -n 's/^AC_INIT(\[libtpms\], *\[\([0-9.]*\)\].*/\1/p' "$SRC/configure.ac" | tr . ' ')
 sed -e "s/@LIBTPMS_VER_MAJOR@/$1/" -e "s/@LIBTPMS_VER_MINOR@/$2/" -e "s/@LIBTPMS_VER_MICRO@/$3/" \
   "$SRC/include/libtpms/tpm_library.h.in" > "$OUT/include/libtpms/tpm_library.h"
 printf '#define WITH_TPM2 1\n#define USE_OPENSSL_CRYPTO_LIBRARY 1\n' > "$OUT/obj/config.h"
@@ -32,7 +33,10 @@ COMMON="-O2 -w -include tpm_library_conf.h -DOPENSSL_SUPPRESS_DEPRECATED -DTPM_L
   -DUSE_OPENSSL_FUNCTIONS_RSA=1 -DUSE_OPENSSL_FUNCTIONS_SSKDF=1 -DUSE_EC_POINT_GET_AFFINE_COORDINATES_API=1"
 TPM2="-D_POSIX_ -DTPM_POSIX"
 INC="$SRC/src:$OUT/obj:$OUT/include/libtpms:$SSL/include"
-INC2="$SRC/src/tpm2:$SRC/src/tpm2/crypto:$SRC/src/tpm2/crypto/openssl"
+# The TPM 2 sources' include folders, as libtpms_tpm2_la_CFLAGS in src/Makefile.am names them (they moved to the TCG
+# reference layout after 0.10).
+INC2=$(sed -n '/^libtpms_tpm2_la_CFLAGS/,/^$/p' "$SRC/src/Makefile.am" | sed -n 's#.*-I *\$(srcdir)/\([^ \\]*\).*#\1#p' |
+  sed "s#/\$##; s#^#$SRC/src/#" | paste -sd: -)
 sources() {  # the .c files of automake variable $1 (its = and += lists)
   awk -v v="$1" '$1 == v && ($2 == "=" || $2 == "+=") {on=1; next} on {print} on && !/\\$/ {on=0}' "$SRC/src/Makefile.am" |
     tr -d '\\' | tr ' \t' '\n\n' | /usr/bin/grep '\.c$'

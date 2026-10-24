@@ -57,6 +57,7 @@
 *********************************************************/
 #include "../common/zstd_deps.h"   /* ZSTD_memcpy, ZSTD_memmove, ZSTD_memset */
 #include "../common/allocations.h"  /* ZSTD_customMalloc, ZSTD_customCalloc, ZSTD_customFree */
+#include "../common/bmi2.h"
 #include "../common/error_private.h"
 #include "../common/zstd_internal.h"  /* blockProperties_t */
 #include "../common/mem.h"         /* low level memory routines */
@@ -115,8 +116,7 @@ static size_t ZSTD_DDictHashSet_emplaceDDict(ZSTD_DDictHashSet* hashSet, const Z
             hashSet->ddictPtrTable[idx] = ddict;
             return 0;
         }
-        idx &= idxRangeMask;
-        idx++;
+        idx = (idx + 1) & idxRangeMask;
     }
     DEBUGLOG(4, "Final idx after probing for dictID %u is: %zu", dictID, idx);
     hashSet->ddictPtrTable[idx] = ddict;
@@ -163,8 +163,7 @@ static const ZSTD_DDict* ZSTD_DDictHashSet_getDDict(ZSTD_DDictHashSet* hashSet, 
             /* currDictID == 0 implies a NULL ddict entry */
             break;
         } else {
-            idx &= idxRangeMask;    /* Goes to start of table when we reach the end */
-            idx++;
+            idx = (idx + 1) & idxRangeMask;    /* Goes to start of table when we reach the end */
         }
     }
     DEBUGLOG(4, "Final idx after probing for dictID %u is: %zu", dictID, idx);
@@ -269,7 +268,7 @@ static void ZSTD_initDCtx_internal(ZSTD_DCtx* dctx)
     dctx->oversizedDuration = 0;
     dctx->isFrameDecompression = 1;
 #if DYNAMIC_BMI2
-    dctx->bmi2 = ZSTD_cpuSupportsBmi2();
+    ZSTD_SET_BMI2(dctx->bmi2, ZSTD_cpuSupportsBmi2());
 #endif
     dctx->ddictSet = NULL;
     ZSTD_DCtx_resetParameters(dctx);
