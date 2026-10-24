@@ -1,6 +1,9 @@
 # DXMT's D3D12 command lists up to ID3D12GraphicsCommandList7, with render passes and enhanced barriers
 
-Status: design approved in sections 2026-10-24; spec awaiting the maintainer's review.
+Status: approved 2026-10-24; implemented 2026-10-24 on branch vm-mixed-arch-games (plan
+`docs/superpowers/plans/2026-10-24-macneutron-d3d12-command-list-7.md`, DXMT 0124-0127); §7's gates passed. Steel
+Nomad gets past CreateCommandList; its next blocker is a shared fence handle (`CreateSharedHandle` on a fence,
+`dx_fence.cpp:88`, E_NOTIMPL), a feature of its own.
 Branch: `vm-mixed-arch-games` (DXMT patches from 0124 in `wine-arm64/patches/dxmt`).
 Related: `2026-09-29-macneutron-d3d12-stubs-design.md` (silent stubs break scenes), `2026-10-01-macneutron-gpu-overlap-design.md`
 (barriers order encoders), `2026-10-02-macneutron-gpu-efficiency-design.md` (B6 merges, E7 barrier names),
