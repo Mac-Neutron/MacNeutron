@@ -1,8 +1,8 @@
-From 50fabb3595832ca37c272b79107de4a2a1f369f8 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Thu, 15 Oct 2026 20:26:43 -0400
-Subject: [PATCH 28/28] FEXInterpreter: HostTSO, for a host that runs the whole
- VM with TSO
+Subject: [PATCH] FEXInterpreter: HostTSO, for a host that runs the whole VM
+ with TSO
 
 MacNeutron's microVM sets Apple's ACTLR_EL1.EnTSO on every vCPU from the host, so a stock guest kernel
 (no PR_SET_MEM_MODEL) runs everything with TSO ordering. HostTSO (FEX_HOSTTSO) tells FEX so: it calls
@@ -19,10 +19,10 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
  2 files changed, 16 insertions(+)
 
 diff --git a/FEXCore/Source/Interface/Config/Config.json.in b/FEXCore/Source/Interface/Config/Config.json.in
-index c153789..af041ed 100644
+index bce7b25..82eeb53 100644
 --- a/FEXCore/Source/Interface/Config/Config.json.in
 +++ b/FEXCore/Source/Interface/Config/Config.json.in
-@@ -639,6 +639,15 @@
+@@ -651,6 +651,15 @@
            "Highly likely to break any multithreaded application if disabled."
          ]
        },
@@ -39,7 +39,7 @@ index c153789..af041ed 100644
          "Type": "bool",
          "Default": "false",
 diff --git a/Source/Tools/FEXInterpreter/FEXInterpreter.cpp b/Source/Tools/FEXInterpreter/FEXInterpreter.cpp
-index 20564c3..029c668 100644
+index 869f946..84ae9dd 100644
 --- a/Source/Tools/FEXInterpreter/FEXInterpreter.cpp
 +++ b/Source/Tools/FEXInterpreter/FEXInterpreter.cpp
 @@ -266,6 +266,13 @@ bool QueryInterpreterInstalled(bool ExecutedWithFD, const FEX::Config::PortableI
@@ -56,3 +56,6 @@ index 20564c3..029c668 100644
      // Check to see if this is supported.
      auto Result = prctl(PR_GET_MEM_MODEL, 0, 0, 0, 0);
      if (Result == -1) {
+-- 
+2.54.0 (Apple Git-157)
+

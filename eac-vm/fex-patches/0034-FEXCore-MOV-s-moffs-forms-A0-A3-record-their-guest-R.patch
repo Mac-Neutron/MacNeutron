@@ -1,4 +1,4 @@
-From cbff193d9b6ede91dfb1e8c984381b1ecdc27f49 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Tue, 20 Oct 2026 16:30:14 -0400
 Subject: [PATCH] FEXCore: MOV's moffs forms (A0-A3) record their guest RIP, so
@@ -13,7 +13,7 @@ handler that resumes re-ran the block's earlier instructions.
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
-index b02dbdf..ee937b8 100644
+index c295d2b..d5bd4ed 100644
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
 @@ -248,9 +248,10 @@ public:

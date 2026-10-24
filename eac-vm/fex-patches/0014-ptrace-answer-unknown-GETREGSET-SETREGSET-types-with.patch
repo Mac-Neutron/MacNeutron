@@ -1,7 +1,7 @@
-From a73f726e82739d314d381f2f4c9af79b6612b00d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: build <build@invalid>
 Date: Thu, 8 Oct 2026 20:37:07 +0300
-Subject: [PATCH 14/28] ptrace: answer unknown GETREGSET/SETREGSET types with
+Subject: [PATCH] ptrace: answer unknown GETREGSET/SETREGSET types with
  -EINVAL, and serve NT_X86_XSTATE
 
 kernel/ptrace.c ptrace_regset() looks the requested regset type up in the
@@ -98,3 +98,6 @@ index 78f76be..83efef3 100644
    }
  
    default: return false;
+-- 
+2.54.0 (Apple Git-157)
+

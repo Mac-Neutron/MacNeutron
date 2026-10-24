@@ -1,8 +1,8 @@
-From c7b7a3ea810999fd395055e600f41ee1f95e4637 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Thu, 22 Oct 2026 10:49:04 -0400
-Subject: [PATCH 39/40] LinuxSyscalls: a thread's exit blocks every signal
- before its teardown
+Subject: [PATCH] LinuxSyscalls: a thread's exit blocks every signal before its
+ teardown
 
 exit freed the signal alt stack (ReleaseDeferredTLSState) and the thread
 object (DestroyThread) with signals still deliverable; a signal arriving

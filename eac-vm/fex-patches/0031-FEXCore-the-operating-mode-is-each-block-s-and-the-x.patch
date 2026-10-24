@@ -1,4 +1,4 @@
-From 36310e5698ff520287ec77a3f9eb8683299d63b4 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Tue, 20 Oct 2026 12:11:01 -0400
 Subject: [PATCH] FEXCore: the operating mode is each block's, and the x87 pass
@@ -12,7 +12,7 @@ Subject: [PATCH] FEXCore: the operating mode is each block's, and the x87 pass
  4 files changed, 11 insertions(+), 3 deletions(-)
 
 diff --git a/FEXCore/Source/Interface/Core/Frontend.cpp b/FEXCore/Source/Interface/Core/Frontend.cpp
-index 6667f16..5ff27bf 100644
+index ca6b645..de91e3f 100644
 --- a/FEXCore/Source/Interface/Core/Frontend.cpp
 +++ b/FEXCore/Source/Interface/Core/Frontend.cpp
 @@ -1763,8 +1763,11 @@ void Decoder::SetupDecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState*
@@ -29,10 +29,10 @@ index 6667f16..5ff27bf 100644
    EntryPoint = PC;
    BlockInfo.EntryPoints = {PC};
 diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-index 731f912..961ecf1 100644
+index b3e1af2..7134f4f 100644
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-@@ -4039,7 +4039,7 @@ void OpDispatchBuilder::BeginFunction(uint64_t RIP, const fextl::vector<FEXCore:
+@@ -4138,7 +4138,7 @@ void OpDispatchBuilder::BeginFunction(uint64_t RIP, const fextl::vector<FEXCore:
                                        uint32_t NumInstructions, bool _Is64BitMode, bool MonoBackpatcherBlock) {
    Entry = RIP;
    Is64BitMode = _Is64BitMode;

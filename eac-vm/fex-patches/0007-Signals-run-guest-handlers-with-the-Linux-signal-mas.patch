@@ -1,7 +1,7 @@
-From 2862a469520e59b65d7728070f29e7624e3d831d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 10:54:18 +0300
-Subject: [PATCH 07/28] Signals: run guest handlers with the Linux signal mask;
+Subject: [PATCH] Signals: run guest handlers with the Linux signal mask;
  optional signal trace
 
 While a guest signal handler runs, Linux blocks (interrupted mask | sa_mask | the signal unless SA_NODEFER) and rt_sigreturn
@@ -37,10 +37,10 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
  create mode 100644 Source/Tools/LinuxEmulation/LinuxSyscalls/SignalTrace.h
 
 diff --git a/FEXCore/Source/Interface/Config/Config.json.in b/FEXCore/Source/Interface/Config/Config.json.in
-index 5e94fdf..c5daac1 100644
+index ce59429..b86c7ac 100644
 --- a/FEXCore/Source/Interface/Config/Config.json.in
 +++ b/FEXCore/Source/Interface/Config/Config.json.in
-@@ -591,6 +591,25 @@
+@@ -603,6 +603,25 @@
            "ProfileSampleHz samples every guest thread instead of only the main one."
          ]
        },
@@ -474,3 +474,6 @@ index d1ab9cd..84c6129 100644
      if (Result != -1 && event) {
        FaultSafeUserMemAccess::VerifyIsWritable(event, sizeof(FEX::HLE::epoll_event_x86));
        *event = Event;
+-- 
+2.54.0 (Apple Git-157)
+

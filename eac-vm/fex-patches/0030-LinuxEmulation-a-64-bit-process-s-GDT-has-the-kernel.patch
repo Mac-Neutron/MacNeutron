@@ -1,4 +1,4 @@
-From b97b253ce7ae2ebed5bff7511fa9e0585356b9bb Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Tue, 20 Oct 2026 12:09:57 -0400
 Subject: [PATCH] LinuxEmulation: a 64-bit process's GDT has the kernel's

@@ -1,8 +1,8 @@
-From 87db53f16873cd82ca34d73ad92ef47e208e1dbd Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 02:13:58 +0300
-Subject: [PATCH 04/28] Skip the per-thread cache walk when an invalidated
- range holds no translated code
+Subject: [PATCH] Skip the per-thread cache walk when an invalidated range
+ holds no translated code
 
 Every guest mmap/munmap/mprotect invalidates its range, and the invalidation visited every thread: lock the shared
 lookup cache, search the thread's page map, reset the thread's frontend executable-range cache. With ~200 threads (a Unity
@@ -89,7 +89,7 @@ index 8f20971..38efa00 100644
      FEXCORE_PROFILE_SCOPED("InvalidateCallRet");
      FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedCallRetFlushCount, 1);
 diff --git a/FEXCore/Source/Interface/Core/Frontend.cpp b/FEXCore/Source/Interface/Core/Frontend.cpp
-index 78d5f1a..6667f16 100644
+index 31d647a..ca6b645 100644
 --- a/FEXCore/Source/Interface/Core/Frontend.cpp
 +++ b/FEXCore/Source/Interface/Core/Frontend.cpp
 @@ -94,6 +94,12 @@ bool Decoder::CheckRangeExecutable(uint64_t Address, uint64_t Size) {
@@ -204,3 +204,6 @@ index 2d9c27a..21bd969 100644
      }
  
      // Callback while holding the locks.
+-- 
+2.54.0 (Apple Git-157)
+

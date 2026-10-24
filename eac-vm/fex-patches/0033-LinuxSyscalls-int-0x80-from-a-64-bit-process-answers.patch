@@ -1,4 +1,4 @@
-From 4babd142a8e728c66a49f6d69c3c50cc4f1fff0d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Tue, 20 Oct 2026 12:12:52 -0400
 Subject: [PATCH] LinuxSyscalls: int 0x80 from a 64-bit process answers
@@ -12,11 +12,11 @@ Subject: [PATCH] LinuxSyscalls: int 0x80 from a 64-bit process answers
  4 files changed, 49 insertions(+), 35 deletions(-)
 
 diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-index f8a6cb7..0319fa9 100644
+index 5104e1a..73ce6c4 100644
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-@@ -4824,12 +4824,8 @@ void OpDispatchBuilder::INTOp(OpcodeArgs) {
-     if (CTX->HostFeatures.HostType == FEXCore::HostFeatures::HostTypeEnum::Linux) {
+@@ -4925,12 +4925,8 @@ void OpDispatchBuilder::INTOp(OpcodeArgs) {
+     if (CTX->HostFeatures.ProcessFeatures.HostType == FEXCore::HostFeatures::HostTypeEnum::Linux) {
        constexpr uint8_t SYSCALL_LITERAL = 0x80;
        if (Literal == SYSCALL_LITERAL) {
 -        if (Is64BitMode) [[unlikely]] {

@@ -1,8 +1,8 @@
-From 66080566bdd9ab38f6cdaaeb56b772b64e053425 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 12:00:27 +0300
-Subject: [PATCH 08/28] Signals: do not leave InSyscallInfo set for a guest
- handler entered from a syscall handler
+Subject: [PATCH] Signals: do not leave InSyscallInfo set for a guest handler
+ entered from a syscall handler
 
 HandleDispatcherGuestSignal cleared Frame->InSyscallInfo only when the signal interrupted JIT code. When it interrupted the
 C++ half of a syscall handler (a thread blocked in or finishing a syscall, tgkill/kill/tkill to self), the JIT's Syscall op had
@@ -92,3 +92,6 @@ index 17d05dd..7237439 100644
      if (!IsAddressInDispatcher(OldPC)) {
        // This is likely to cause issues but in some cases it isn't fatal
        // This can also happen if we have put a signal on hold, then we just reenabled the signal
+-- 
+2.54.0 (Apple Git-157)
+

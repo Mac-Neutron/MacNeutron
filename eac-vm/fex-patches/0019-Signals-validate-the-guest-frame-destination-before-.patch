@@ -1,8 +1,8 @@
-From f386ae3aec732ff761a698fb2c970e4836a32668 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 00:51:12 +0300
-Subject: [PATCH 19/28] Signals: validate the guest frame destination before
- writing it
+Subject: [PATCH] Signals: validate the guest frame destination before writing
+ it
 
 SetupFrame_x64 computed the frame address from the interrupted RSP and stored into it with no probing. When that
 RSP is not a live, writable guest mapping, the store lands in whatever host mapping sits at that address and FEX
@@ -185,3 +185,6 @@ index f51940f..deba62c 100644
    FEXCore::x86_64::ucontext_t* guest_uctx = reinterpret_cast<FEXCore::x86_64::ucontext_t*>(UContextLocation);
    siginfo_t* guest_siginfo = reinterpret_cast<siginfo_t*>(SigInfoLocation);
    // Store where the host context lives in the guest stack.
+-- 
+2.54.0 (Apple Git-157)
+

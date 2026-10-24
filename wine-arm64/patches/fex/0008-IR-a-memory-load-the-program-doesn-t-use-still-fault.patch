@@ -18,7 +18,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 6 insertions(+), 1 deletion(-)
 
 diff --git a/FEXCore/Source/Interface/IR/IR.json b/FEXCore/Source/Interface/IR/IR.json
-index 8805200..3136fdf 100644
+index 728e1c0..9e7c67a 100644
 --- a/FEXCore/Source/Interface/IR/IR.json
 +++ b/FEXCore/Source/Interface/IR/IR.json
 @@ -530,7 +530,10 @@

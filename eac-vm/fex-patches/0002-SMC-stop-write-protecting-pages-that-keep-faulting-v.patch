@@ -1,8 +1,8 @@
-From 9a5da5b4449dc81943d3a0f3fc8603c90ceaf751 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 01:52:28 +0300
-Subject: [PATCH 02/28] SMC: stop write-protecting pages that keep faulting,
- verify their code in the JIT instead
+Subject: [PATCH] SMC: stop write-protecting pages that keep faulting, verify
+ their code in the JIT instead
 
 With SMCChecks=mtrack a page that mixes code with data that is written all the time (trampoline pools, JIT heaps,
 anti-cheat hook pages) takes a SIGSEGV, an invalidation and a re-translation for every write.
@@ -23,10 +23,10 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
  create mode 100644 Source/Tools/LinuxEmulation/LinuxSyscalls/SMCHotPages.h
 
 diff --git a/FEXCore/Source/Interface/Config/Config.json.in b/FEXCore/Source/Interface/Config/Config.json.in
-index 938377f..94f4597 100644
+index 264349a..c4b674a 100644
 --- a/FEXCore/Source/Interface/Config/Config.json.in
 +++ b/FEXCore/Source/Interface/Config/Config.json.in
-@@ -574,6 +574,16 @@
+@@ -586,6 +586,16 @@
            "\tfull: Validate code before every run (slow)"
          ]
        },
@@ -284,3 +284,6 @@ index 94bdd37..342223c 100644
      auto lk = FEXCore::GuardSignalDeferringSection<std::shared_lock>(VMATracking.Mutex, Thread);
  
      // Find the first mapping at or after the range ends, or ::end().
+-- 
+2.54.0 (Apple Git-157)
+

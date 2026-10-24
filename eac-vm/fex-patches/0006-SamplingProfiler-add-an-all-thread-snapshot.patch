@@ -1,7 +1,7 @@
-From 32b7d2e359eff5e94e47449fe111c5626cb583bd Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 10:54:09 +0300
-Subject: [PATCH 06/28] SamplingProfiler: add an all-thread snapshot
+Subject: [PATCH] SamplingProfiler: add an all-thread snapshot
 
 The PC sampler only signals threads that used CPU, so it cannot show where a blocked or wedged thread is waiting. Creating
 /dev/shm/fex-<pid>-snapshot makes the profiler signal every thread of the process once; each handler stores the thread's x86
@@ -135,3 +135,6 @@ index 9645e24..5bd0f83 100644
        const uint32_t Idx = Count.fetch_add(1, std::memory_order_relaxed);
        if (Records && Idx < MaxSamples) {
          Records[Idx] = {ArchHelpers::Context::GetPc(UContext),
+-- 
+2.54.0 (Apple Git-157)
+

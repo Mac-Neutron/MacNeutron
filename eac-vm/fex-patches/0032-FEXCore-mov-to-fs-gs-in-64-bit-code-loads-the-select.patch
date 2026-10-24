@@ -1,4 +1,4 @@
-From 69de6ff752e2e4a9621ee3f9e938584e100f81be Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Tue, 20 Oct 2026 12:11:47 -0400
 Subject: [PATCH] FEXCore: mov to %fs/%gs in 64-bit code loads the selector and
@@ -11,10 +11,10 @@ Subject: [PATCH] FEXCore: mov to %fs/%gs in 64-bit code loads the selector and
  3 files changed, 19 insertions(+), 40 deletions(-)
 
 diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-index 961ecf1..f8a6cb7 100644
+index 7134f4f..5104e1a 100644
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-@@ -1226,20 +1226,11 @@ void OpDispatchBuilder::FLAGControlOp(OpcodeArgs) {
+@@ -1232,20 +1232,11 @@ void OpDispatchBuilder::FLAGControlOp(OpcodeArgs) {
  
  
  void OpDispatchBuilder::MOVSegOp(OpcodeArgs, bool ToSeg) {
@@ -40,7 +40,7 @@ index 961ecf1..f8a6cb7 100644
  
    if (ToSeg) {
      Ref Src = LoadSourceGPR_WithOpSize(Op, Op->Src[0], OpSize::i16Bit, Op->Flags);
-@@ -1272,23 +1263,13 @@ void OpDispatchBuilder::MOVSegOp(OpcodeArgs, bool ToSeg) {
+@@ -1278,23 +1269,13 @@ void OpDispatchBuilder::MOVSegOp(OpcodeArgs, bool ToSeg) {
        break;
      case FEXCore::X86State::REG_RBP: // GS
      case FEXCore::X86State::REG_R13: // GS
@@ -68,7 +68,7 @@ index 961ecf1..f8a6cb7 100644
        break;
      default: UnimplementedOp(Op); return;
      }
-@@ -1314,19 +1295,11 @@ void OpDispatchBuilder::MOVSegOp(OpcodeArgs, bool ToSeg) {
+@@ -1320,19 +1301,11 @@ void OpDispatchBuilder::MOVSegOp(OpcodeArgs, bool ToSeg) {
        break;
      case FEXCore::X86State::REG_RBP: // GS
      case FEXCore::X86State::REG_R13: // GS
@@ -90,7 +90,7 @@ index 961ecf1..f8a6cb7 100644
        break;
      default: UnimplementedOp(Op); return;
      }
-@@ -4267,11 +4240,12 @@ void OpDispatchBuilder::UpdatePrefixFromSegment(Ref Segment, uint32_t SegmentReg
+@@ -4366,11 +4339,12 @@ void OpDispatchBuilder::UpdatePrefixFromSegment(Ref Segment, uint32_t SegmentReg
    case FEXCore::X86Tables::DecodeFlags::FLAG_DS_PREFIX:
      _StoreContextGPR(OpSize::i32Bit, NewSegment, offsetof(FEXCore::Core::CPUState, ds_cached));
      break;

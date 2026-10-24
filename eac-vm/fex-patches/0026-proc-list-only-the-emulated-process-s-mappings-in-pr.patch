@@ -1,7 +1,7 @@
-From de2e35fd78aa0040d886f6997b5571b576689dff Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Sun, 11 Oct 2026 13:01:24 +0300
-Subject: [PATCH 26/28] proc: list only the emulated process's mappings in
+Subject: [PATCH] proc: list only the emulated process's mappings in
  /proc/<pid>/maps
 
 On x86-64 Linux every user mapping of a process lies below TASK_SIZE_MAX,
@@ -50,7 +50,7 @@ Upstream: FEX main 14c92681 (2026-10-07) has no /proc/<pid>/maps emulation.
  2 files changed, 61 insertions(+)
 
 diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/EmulatedFiles/EmulatedFiles.cpp b/Source/Tools/LinuxEmulation/LinuxSyscalls/EmulatedFiles/EmulatedFiles.cpp
-index e5267e8..885849e 100644
+index 8c6f8c1..ce55821 100644
 --- a/Source/Tools/LinuxEmulation/LinuxSyscalls/EmulatedFiles/EmulatedFiles.cpp
 +++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/EmulatedFiles/EmulatedFiles.cpp
 @@ -25,6 +25,8 @@ $end_info$
@@ -62,7 +62,7 @@ index e5267e8..885849e 100644
  #include <cstring>
  #include <fcntl.h>
  #include <filesystem>
-@@ -609,6 +611,22 @@ EmulatedFDManager::EmulatedFDManager(FEXCore::Context::Context* ctx)
+@@ -610,6 +612,22 @@ EmulatedFDManager::EmulatedFDManager(FEXCore::Context::Context* ctx)
  
  EmulatedFDManager::~EmulatedFDManager() {}
  
@@ -85,7 +85,7 @@ index e5267e8..885849e 100644
  int32_t EmulatedFDManager::Open(const char* pathname, int flags, uint32_t mode) {
    auto Creator = FDReadCreators.end();
    if (pathname) {
-@@ -616,12 +634,54 @@ int32_t EmulatedFDManager::Open(const char* pathname, int flags, uint32_t mode)
+@@ -617,12 +635,54 @@ int32_t EmulatedFDManager::Open(const char* pathname, int flags, uint32_t mode)
    }
  
    if (Creator == FDReadCreators.end()) {
@@ -152,3 +152,6 @@ index fca0ff2..b98ef4b 100644
    static int32_t ProcStatus(FEXCore::Context::Context* ctx, int32_t fd, const char* pathname, int32_t flags, mode_t mode);
    const uint32_t ThreadsConfig;
  };
+-- 
+2.54.0 (Apple Git-157)
+

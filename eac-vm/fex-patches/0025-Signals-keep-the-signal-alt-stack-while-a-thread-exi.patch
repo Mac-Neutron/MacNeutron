@@ -1,8 +1,7 @@
-From 8031923202f351d35afcb21ba6dfd9bc7c9357fb Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 22:35:05 +0300
-Subject: [PATCH 25/28] Signals: keep the signal alt stack while a thread exits
- on it
+Subject: [PATCH] Signals: keep the signal alt stack while a thread exits on it
 
 A guest thread can leave from inside a signal handler that FEX runs on the thread's host alt stack. Wine does this whenever
 it terminates another thread: the target gets SIGQUIT, and when the target is in user mode the handler ends it right there
@@ -157,3 +156,6 @@ index 8b9c259..00188fc 100644
        // We have ownership of the thread object. Make sure to clean it up to prevent memory leaks.
        FEX::HLE::_SyscallHandler->TM.DestroyThread(ThreadObject, true);
        if (Status == 0) {
+-- 
+2.54.0 (Apple Git-157)
+

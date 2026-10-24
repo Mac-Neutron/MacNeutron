@@ -1,4 +1,4 @@
-From 63686edc0ef65b3204d1c8413c0d9b98fc14f855 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Fri, 23 Oct 2026 10:59:45 -0400
 Subject: [PATCH] FEXCore: a return into a discarded translation goes to the
@@ -122,15 +122,15 @@ index 404cbc7..2cf4724 100644
        }
      }
 diff --git a/FEXCore/Source/Interface/Core/DiskCache.h b/FEXCore/Source/Interface/Core/DiskCache.h
-index 0b43365..40dcfcc 100644
+index b3341a4..aea5286 100644
 --- a/FEXCore/Source/Interface/Core/DiskCache.h
 +++ b/FEXCore/Source/Interface/Core/DiskCache.h
 @@ -249,7 +249,7 @@ namespace DiskCache {
    // The current version of the diskcache.
    // This must be changed any time codegen changes occur!
    // Be aware of the impact of changing this frequently!
--  static constexpr uint16_t FormatVersion = 31;
-+  static constexpr uint16_t FormatVersion = 32;
+-  static constexpr uint16_t FormatVersion = 37;
++  static constexpr uint16_t FormatVersion = 38;
  
    static constexpr uint32_t LOOKUP_KEY_MAX_BUCKET_DEPTH = 500;
  
@@ -159,10 +159,10 @@ index ac594e0..94bcd24 100644
        ret(TMP2);
      } else {
 diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
-index a54eea9..ad2cef7 100644
+index 64e799e..fee2189 100644
 --- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
 +++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
-@@ -563,6 +563,30 @@ static void IndirectBlockDelinker(FEXCore::Context::ExitFunctionLinkData* Record
+@@ -537,6 +537,30 @@ static void IndirectBlockDelinker(FEXCore::Context::ExitFunctionLinkData* Record
    // No need to reset HostCode here as the exit linker pointer is stored separately, and if the block is relinked it will be updated.
  }
  
@@ -193,7 +193,7 @@ index a54eea9..ad2cef7 100644
  uint64_t Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEXCore::Context::ExitFunctionLinkData* Record) {
    auto Thread = Frame->Thread;
    bool TFSet = Thread->CurrentFrame->State.flags[X86State::RFLAG_TF_RAW_LOC];
-@@ -908,6 +932,8 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+@@ -880,6 +904,8 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
    JumpTargets.clear();
    CallReturnTargets.clear();
    PendingJumpThunks.clear();
@@ -202,7 +202,7 @@ index a54eea9..ad2cef7 100644
    JumpTargets.resize(IR->GetHeader()->BlockCount, {});
    Relocations.resize(PrevNumAllocations, FEXCore::CPU::Relocation::Default()); // Discard any relocations generated from a previous attempt
  
-@@ -986,6 +1012,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+@@ -958,6 +984,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
  
        if (BlockIROp->EntryPoint) {
          uint64_t BlockStartRIP = Entry + BlockIROp->GuestEntryOffset;
@@ -210,7 +210,7 @@ index a54eea9..ad2cef7 100644
  
          const auto IsReturnTarget = CallReturnTargets.try_emplace(Node).first;
          if (PendingTargetLabel) {
-@@ -1070,6 +1097,37 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+@@ -1042,6 +1069,37 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
    BindOrRestart(&l_ExitLink);
    PlaceNamedSymbolLiteral(InsertNamedSymbolLiteral(RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_EXITFUNCTION_LINKER));
  
@@ -248,7 +248,7 @@ index a54eea9..ad2cef7 100644
    // CodeSize not including the header or tail data.
    const uint64_t CodeOnlySize = GetCursorAddress<uint8_t*>() - CodeBegin;
  
-@@ -1083,6 +1141,9 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+@@ -1055,6 +1113,9 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
      .GuestSize = Size,
      .SpinLockFutex = 0,
      .SingleInst = SingleInst,
@@ -258,7 +258,7 @@ index a54eea9..ad2cef7 100644
    };
  
    // Entries that live after the JITCodeTail.
-@@ -1123,6 +1184,14 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+@@ -1095,6 +1156,14 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
      }
    }
  
@@ -274,7 +274,7 @@ index a54eea9..ad2cef7 100644
    // Make sure code is 16B aligned on the tail.
    // Can't use Align16B here as vl64pair can cause non-4byte alignment.
 diff --git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Interface/Core/JIT/JITClass.h
-index 331b3c5..643a2ae 100644
+index 3d052a6..a6324bc 100644
 --- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
 +++ b/FEXCore/Source/Interface/Core/JIT/JITClass.h
 @@ -111,6 +111,15 @@ private:

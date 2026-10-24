@@ -1,4 +1,4 @@
-From 90061333fe08abb90d3113c56cbcb9697a2ebed2 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Fri, 16 Oct 2026 07:59:17 -0400
 Subject: [PATCH] FD: open, openat and openat2 return EFAULT for a path pointer
@@ -72,3 +72,6 @@ index 9acf01f..9cdb07c 100644
        open_how HostHow {};
        size_t HostSize = std::min(sizeof(open_how), usize);
        memcpy(&HostHow, how, HostSize);
+-- 
+2.54.0 (Apple Git-157)
+

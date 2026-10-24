@@ -1,4 +1,4 @@
-From 07a7fb413c6c10ee747a50dd60396eb5a811b715 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Thu, 22 Oct 2026 06:17:55 -0400
 Subject: [PATCH] FEXCore: an invalid opcode raises SIGILL ILL_ILLOPN with trap
@@ -13,10 +13,10 @@ trap 0" for FEX's.
  1 file changed, 6 insertions(+), 5 deletions(-)
 
 diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-index 545afb8..4dcca95 100644
+index 05c017f..2d2ba44 100644
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-@@ -1249,12 +1249,12 @@ void OpDispatchBuilder::MOVSegOp(OpcodeArgs, bool ToSeg) {
+@@ -1255,12 +1255,12 @@ void OpDispatchBuilder::MOVSegOp(OpcodeArgs, bool ToSeg) {
        break;
      case FEXCore::X86State::REG_RCX: // CS
      case FEXCore::X86State::REG_R9:  // CS
@@ -32,7 +32,7 @@ index 545afb8..4dcca95 100644
        });
        break;
      case FEXCore::X86State::REG_RDX: // SS
-@@ -5184,11 +5184,12 @@ void OpDispatchBuilder::PermissionRestrictedOp(OpcodeArgs) {
+@@ -5293,11 +5293,12 @@ void OpDispatchBuilder::PermissionRestrictedOp(OpcodeArgs) {
  }
  
  void OpDispatchBuilder::InvalidOp(OpcodeArgs) {

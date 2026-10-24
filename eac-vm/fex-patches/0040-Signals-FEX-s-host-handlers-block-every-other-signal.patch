@@ -1,8 +1,8 @@
-From 8d6afab981dfd6037322ac5c594a4d9b8b80e3a9 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Thu, 22 Oct 2026 10:45:05 -0400
-Subject: [PATCH 40/40] Signals: FEX's host handlers block every other signal
- while they run
+Subject: [PATCH] Signals: FEX's host handlers block every other signal while
+ they run
 
 A host handler's mask was the guest's sa_mask for that signal, so a guest
 signal could land inside FEX's own handler code, e.g. a SIGUSR1 during the

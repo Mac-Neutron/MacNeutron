@@ -1,9 +1,8 @@
-From d6bd10f22c608b15a9a566e1dc8408008d15631a Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 21:57:46 +0300
-Subject: [PATCH 24/28] JIT: raise the single-step trap on the target of an
- IRETQ that loads TF, and never leave single-step mode through the lookup
- caches
+Subject: [PATCH] JIT: raise the single-step trap on the target of an IRETQ
+ that loads TF, and never leave single-step mode through the lookup caches
 
 Two places let a single-step trap land later than on x86:
 
@@ -77,10 +76,10 @@ index c2b1d8e..c418630 100644
        // First try to pop from the call-ret stack, otherwise follow the normal path (but ending in a ret)
        ldp<ARMEmitter::IndexType::POST>(TMP1, TMP2, REG_CALLRET_SP, 0x10);
 diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
-index 2d4af10..a54eea9 100644
+index d906433..64e799e 100644
 --- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
 +++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
-@@ -886,6 +886,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+@@ -858,6 +858,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
    this->DebugData = DebugData;
    this->IR = IR;
    RequiresFarARM64Jumps = false;
@@ -89,7 +88,7 @@ index 2d4af10..a54eea9 100644
  
    // Prepare restart via long jump in case branch encoding fails.
 diff --git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Interface/Core/JIT/JITClass.h
-index 17e7691..331b3c5 100644
+index d0b4c5c..3d052a6 100644
 --- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
 +++ b/FEXCore/Source/Interface/Core/JIT/JITClass.h
 @@ -82,6 +82,7 @@ private:
@@ -101,7 +100,7 @@ index 17e7691..331b3c5 100644
    uint32_t SSANodeMultiplier {24};
  
 diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-index 0f7a00e..731f912 100644
+index a99a656..b3e1af2 100644
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 @@ -164,7 +164,8 @@ void OpDispatchBuilder::IRETOp(OpcodeArgs) {
@@ -115,10 +114,10 @@ index 0f7a00e..731f912 100644
  }
  
 diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
-index 71766e0..b02dbdf 100644
+index 75d1360..c295d2b 100644
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
-@@ -1875,8 +1875,11 @@ private:
+@@ -1885,8 +1885,11 @@ private:
        // An exception should still be raised after an instruction that unsets TF, leave the unblocked bit set but unset
        // the TF bit to cause such behaviour. The handling code at the start of the next block will then unset the
        // unblocked bit before raising the exception.
@@ -132,3 +131,6 @@ index 71766e0..b02dbdf 100644
        _StoreContextGPR(OpSize::i8Bit, NewPackedTF, ARRAY_OFFSETOF(FEXCore::Core::CPUState, flags, BitOffset));
      } else {
        _StoreContextGPR(OpSize::i8Bit, Value, ARRAY_OFFSETOF(FEXCore::Core::CPUState, flags, BitOffset));
+-- 
+2.54.0 (Apple Git-157)
+

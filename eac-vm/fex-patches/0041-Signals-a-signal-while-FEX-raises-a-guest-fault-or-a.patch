@@ -1,4 +1,4 @@
-From 4830bf329d238cb89a5f337198de1c462e1f9fc5 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Thu, 22 Oct 2026 21:30:58 -0400
 Subject: [PATCH] Signals: a signal while FEX raises a guest fault or after a
@@ -33,7 +33,7 @@ on signal stack" or jump to their stack.
  4 files changed, 24 insertions(+), 1 deletion(-)
 
 diff --git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
-index 176665e..4d1d83c 100644
+index 5637b8c..e64c8a8 100644
 --- a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
 +++ b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
 @@ -403,6 +403,7 @@ void Dispatcher::EmitDispatcher() {
@@ -60,7 +60,7 @@ index 176665e..4d1d83c 100644
  
      // hlt/udf = SIGILL
      // brk = SIGTRAP
-@@ -2775,6 +2778,8 @@ SignalDelegatorConfig Dispatcher::MakeSignalDelegatorConfig() const {
+@@ -2750,6 +2753,8 @@ SignalDelegatorConfig Dispatcher::MakeSignalDelegatorConfig() const {
  
      .SRAGPRMapping = GetSRAGPRMapping(),
      .SRAFPRMapping = GetSRAFPRMapping(),
@@ -70,7 +70,7 @@ index 176665e..4d1d83c 100644
  }
  
 diff --git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.h b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.h
-index c742a4e..82585aa 100644
+index 6f460fc..3a7284d 100644
 --- a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.h
 +++ b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.h
 @@ -90,6 +90,7 @@ private:

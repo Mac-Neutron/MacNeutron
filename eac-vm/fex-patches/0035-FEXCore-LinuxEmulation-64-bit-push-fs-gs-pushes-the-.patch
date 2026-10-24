@@ -1,4 +1,4 @@
-From 3bb9e30550e718f5bf7a4b0783ea3fd3bdf56fd2 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Tue, 20 Oct 2026 16:30:14 -0400
 Subject: [PATCH] FEXCore, LinuxEmulation: 64-bit push %fs/%gs pushes the
@@ -14,10 +14,10 @@ from): a WoW64 process's 64-bit code has a 32-bit TEB's selector in
  2 files changed, 5 insertions(+), 4 deletions(-)
 
 diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-index 0319fa9..545afb8 100644
+index 73ce6c4..05c017f 100644
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-@@ -380,11 +380,12 @@ void OpDispatchBuilder::PUSHSegmentOp(OpcodeArgs, uint32_t SegmentReg) {
+@@ -385,11 +385,12 @@ void OpDispatchBuilder::PUSHSegmentOp(OpcodeArgs, uint32_t SegmentReg) {
      case FEXCore::X86Tables::DecodeFlags::FLAG_DS_PREFIX:
        Src = _LoadContextGPR(SrcSize, offsetof(FEXCore::Core::CPUState, ds_cached));
        break;

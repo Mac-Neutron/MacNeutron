@@ -7,7 +7,7 @@ WINE_COMMIT=7298a818b79446bae153b8d5aa27235ab3703bf9
 # FEX, which runs x86_64 code on the arm64 Wine: this one commit (main has moved past it) and its submodules; the
 # patches in wine-arm64/patches/fex apply on top.
 FEX_REPO=https://github.com/FEX-Emu/FEX.git
-FEX_COMMIT=741e146fdf5a89517e1a67e3c899907cfba6131a
+FEX_COMMIT=9eb5d92c0dc1b5893d9cdf838f6e7c86acb9cc35
 # Where patches/fex's macOS unixlib helpers come from (one commit on top of FEX 4ed80fd, the 0.6.0 pin); the build
 # doesn't fetch it.
 FEX_MACOS_REPO=https://github.com/dappermint/FEX.git

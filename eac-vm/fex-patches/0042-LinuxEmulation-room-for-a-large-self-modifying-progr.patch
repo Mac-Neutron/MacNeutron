@@ -1,4 +1,4 @@
-From 7740725522467e6451b5f505b5814fbfbd543396 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Fri, 23 Oct 2026 08:11:18 -0400
 Subject: [PATCH] LinuxEmulation: room for a large self-modifying program's SMC

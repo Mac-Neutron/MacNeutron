@@ -1,8 +1,8 @@
-From 3eaecefa7c36ae5745dff1d073e3a34b727f5861 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: StonkGuy <68372320+StonkGuy@users.noreply.github.com>
 Date: Thu, 8 Oct 2026 22:07:31 +0300
-Subject: [PATCH 16/28] Signals: restore EFLAGS from the frame on rt_sigreturn
- even when RIP is unchanged
+Subject: [PATCH] Signals: restore EFLAGS from the frame on rt_sigreturn even
+ when RIP is unchanged
 
 Linux sigreturn always applies the frame's EFLAGS through FIX_EFLAGS (arch/x86/include/asm/sighandling.h),
 which covers TF. A handler that clears TF in its ucontext must therefore stop single-stepping, and one that
@@ -41,3 +41,6 @@ index f9945a2..e4053cd 100644
  #define COPY_REG(x) Frame->State.gregs[FEXCore::X86State::REG_##x] = guest_uctx->uc_mcontext.gregs[FEXCore::x86_64::FEX_REG_##x];
      COPY_REG(R8);
      COPY_REG(R9);
+-- 
+2.54.0 (Apple Git-157)
+
