@@ -15,6 +15,8 @@
 //   barrierglobal  the same with a global barrier
 //   layout3  OPTIONS12 reports enhanced barriers; the device answers ID3D12Device10, whose CreateCommittedResource3
 //          makes an upload buffer from layout UNDEFINED (mapped) and a texture with a castable format
+// Built for i386 (the VM's 32-bit lane: DXMT's D3D12 there has no descriptor heaps, as it embeds no heap pointer in a
+// descriptor handle), the rows that need views print "untested" instead.
 #include "d3d12_common.hpp"
 
 static char fail_text[256];
@@ -355,13 +357,11 @@ int main() {
     printf("list4 %s\n", list4(gpu));
     if (FAILED(gpu.list->QueryInterface(__uuidof(ID3D12GraphicsCommandList7), (void **)&list)))
         return printf("list7 FAIL QueryInterface(ID3D12GraphicsCommandList7)\n"), 0;
-    printf("resolveregion %s\n", resolveregion(gpu, list));
-    printf("renderpass %s\n", renderpass(gpu, list));
-    printf("mrt %s\n", mrt(gpu, list));
-    printf("depthpass %s\n", depthpass(gpu, list));
-    printf("suspend %s\n", suspend(gpu, list));
-    printf("barrier %s\n", barrier(gpu, list));
-    printf("barrierglobal %s\n", barrierglobal(gpu, list));
+    static const struct { const char *name; const char *(*row)(Gpu &, ID3D12GraphicsCommandList7 *); } views[] = {
+        {"resolveregion", resolveregion}, {"renderpass", renderpass}, {"mrt", mrt}, {"depthpass", depthpass},
+        {"suspend", suspend}, {"barrier", barrier}, {"barrierglobal", barrierglobal}};
+    for (auto &v : views)
+        printf("%s %s\n", v.name, sizeof(void *) == 4 ? "untested: no descriptor heaps in 32-bit DXMT" : v.row(gpu, list));
     printf("layout3 %s\n", layout3(gpu));
     list->Release();
     return 0;

@@ -171,7 +171,9 @@ Each WARNs (once per method if DXMT has a once helper, else per call as OMSetDep
 - Where gen.py can't express a nesting (a count outside the union it counts), a hand-written special in
   `guest/proxy.cpp` flattens it instead.
 - 32-bit forwarded D3D12 (opt-in) keeps the generator's rule: a struct holding a union with pointer members is refused
-  for 32-bit callers. The default 32-bit lane runs guest DXMT, which has it all.
+  for 32-bit callers. The default 32-bit lane runs guest DXMT, which has the interfaces; its D3D12 has no descriptor
+  heaps at all, though (i386 embeds no heap pointer in a descriptor handle: IMPLEMENT_ME), so there only the rows
+  without views run (found 2026-10-24; not this work's to change).
 
 ## 7. Tests
 
