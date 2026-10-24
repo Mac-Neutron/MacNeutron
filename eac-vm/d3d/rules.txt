@@ -112,8 +112,9 @@ ID3D12DeviceRemovedExtendedDataSettings1::* refuse
 ID3D12DeviceRemovedExtendedData::* refuse
 ID3D12DeviceRemovedExtendedData1::* refuse
 ID3D12DeviceRemovedExtendedData2::* refuse
-ID3D12Resource1::* refuse
-ID3D12Resource2::* refuse
+# A resource's newer interfaces are asked of the host (a swapchain's GetBuffer may want them: 3DMark's Steel Nomad).
+ID3D12Resource1::GetProtectedResourceSession refuse
+ID3D12Resource2::GetDesc1 sync
 ID3D12Heap1::* refuse
 ID3D12MetaCommand::* refuse
 ID3D12ShaderCacheSession::* refuse

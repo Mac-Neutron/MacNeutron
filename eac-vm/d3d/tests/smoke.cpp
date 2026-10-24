@@ -265,6 +265,25 @@ static const char *shared() {
     return bad ? bad : "ok";
 }
 
+// A D3D12 resource answers ID3D12Resource2 and its GetDesc1 (3DMark's Steel Nomad asks a swapchain's GetBuffer for it).
+static const char *resource2(ID3D12Device *device) {
+    D3D12_HEAP_PROPERTIES heap = {D3D12_HEAP_TYPE_DEFAULT};
+    D3D12_RESOURCE_DESC d = {};
+    d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER, d.Width = 4096, d.Height = 1, d.DepthOrArraySize = 1;
+    d.MipLevels = 1, d.SampleDesc.Count = 1, d.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    ID3D12Resource *r = nullptr;
+    ID3D12Resource2 *r2 = nullptr;
+    if (FAILED(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &d, D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                               __uuidof(ID3D12Resource), (void **)&r)))
+        return "FAIL resource";
+    HRESULT hr = r->QueryInterface(__uuidof(ID3D12Resource2), (void **)&r2);
+    r->Release();
+    if (FAILED(hr) || !r2) return "FAIL ID3D12Resource2";
+    D3D12_RESOURCE_DESC1 d1 = r2->GetDesc1();
+    r2->Release();
+    return d1.Width == 4096 && d1.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER ? "ok" : "FAIL GetDesc1";
+}
+
 // IDXGIFactory4::EnumWarpAdapter answers an adapter (the first, as DXVK's): 3DMark's Steel Nomad wraps it unchecked.
 static const char *warp() {
     IDXGIFactory4 *f = nullptr;
@@ -590,6 +609,7 @@ int main(int argc, char **argv) {
         return printf("eventthread FAIL device\n"), 1;
     }
     printf("eventthread %s\n", event_thread(device, queue));
+    printf("resource2 %s\n", resource2(device));
     printf("eventreuse %s\n", event_reuse(device, queue));
     name(queue);
     minimised(queue);
