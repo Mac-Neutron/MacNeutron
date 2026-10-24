@@ -102,3 +102,15 @@ private let kept = ["state/231350.img", "state/555.img", "state/0.img", "state/f
     #expect(UninstalledDrives.remove(vm: vm, steam: steam) == [])
     #expect(exists(vm, "state/999.img"))
 }
+
+// Logged only when the drive is gone: not for one that couldn't be removed (nor for one a concurrent refresh took).
+@Test func aDriveThatCantBeRemovedIsNotLoggedAsDeleted() throws {
+    let steam = try makeSteam()
+    let vm = try makeVM(steam: steam)
+    let state = vm.appending(path: "state").path(percentEncoded: false)
+    try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: state)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: state) }
+    #expect(UninstalledDrives.remove(vm: vm, steam: steam) == [])
+    #expect(exists(vm, "state/999.img"))
+    #expect(exists(vm, "runs/999/library"))  // so the next round tries again
+}

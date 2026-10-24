@@ -32,11 +32,15 @@ public enum UninstalledDrives {
             guard lock >= 0 else { continue }  // its VM runs: the next round
             defer { close(lock) }
             let image = state.appending(path: name)
+            guard fm.fileExists(atPath: image.path(percentEncoded: false)) else { continue }  // a concurrent refresh's
             let folders = [state.appending(path: "\(id).tpm"), state.appending(path: "\(id).dxmt"),
                            runs.appending(path: "\(id)")]
             let bytes = Int64((try? image.resourceValues(forKeys: [.totalFileAllocatedSizeKey]))?.totalFileAllocatedSize ?? 0)
                 + folders.reduce(0) { $0 + OrphanPrefixes.size(of: $1) }
-            for item in [image] + folders + [runs.appending(path: "\(id).lock")] { try? fm.removeItem(at: item) }
+            // The drive first: one that can't go keeps its folders, the library record among them, for the next round.
+            try? fm.removeItem(at: image)
+            guard !fm.fileExists(atPath: image.path(percentEncoded: false)) else { continue }
+            for item in folders + [runs.appending(path: "\(id).lock")] { try? fm.removeItem(at: item) }
             lines.append("deleted the game VM drive of app \(id): Steam uninstalled it "
                          + "(\(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)))")
         }
