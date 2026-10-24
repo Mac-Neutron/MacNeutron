@@ -101,7 +101,7 @@ EOS
   echo "d3d-smoke: $mode: ${dies:-0} of 3 processes ended mid-load, and the host outlived them"
   [ "${dies:-0}" -eq 3 ] || fail="$fail $mode-dies"
   guest_checks="eventthread resource2 name minimised latency d3d11latency rawexport warp wmtforward wmsize conv list4 resolveregion
-    renderpass mrt depthpass suspend"
+    renderpass mrt depthpass suspend barrier barrierglobal layout3"
   checks=$guest_checks
   [ "$mode" = guest ] || checks="$checks eventreuse swapchain shared"
   for c in $checks; do

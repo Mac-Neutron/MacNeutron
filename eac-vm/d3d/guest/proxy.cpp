@@ -9,6 +9,7 @@
 #include <vector>
 #include "proxy.h"
 #include "formats.h"
+#include "d3d12_barrier_legacy.hpp" // DXMT's: enhanced barriers as legacy ones
 #ifndef MN_D3D_LOOPBACK
 #include "wsi_window.hpp" // DXMT's own Win32 window code, built in (build-guest.sh): the window's changes, made here
 #endif
@@ -1828,6 +1829,14 @@ static void STDMETHODCALLTYPE om_uav(mn_proxy *This, UINT nrtv, ID3D11RenderTarg
     PX(om_uav, px_om_uav)(This, nrtv, rtvs, dsv, start, nuav, uavs, counts);
 }
 
+// Enhanced barriers (a special the guest answers whole): the legacy barriers they mean, as DXMT's own Barrier makes them, through the forwarded
+// ResourceBarrier (their groups' arrays sit in a union counted outside it, which the generator can't carry).
+static void STDMETHODCALLTYPE barrier(mn_proxy *This, UINT32 count, const D3D12_BARRIER_GROUP *groups) {
+    thread_local std::vector<D3D12_RESOURCE_BARRIER> legacy;
+    dxmt::LegacyBarriers(count, groups, legacy);
+    ((ID3D12GraphicsCommandList *)This)->ResourceBarrier((UINT)legacy.size(), legacy.data());
+}
+
 // DXMT has no meta commands: it answers so, and so do we (their descriptions hold names the wire doesn't carry).
 static HRESULT STDMETHODCALLTYPE meta_commands(mn_proxy *, UINT *count, D3D12_META_COMMAND_DESC *) {
     if (!count) return E_INVALIDARG;
@@ -1883,6 +1892,7 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"IDXGISwapChain1::GetRotation", (const void *)get_rotation},
         {"IDXGISwapChain2::SetSourceSize", (const void *)set_source_size},
         {"IDXGISwapChain2::GetSourceSize", (const void *)get_source_size},
+        {"ID3D12GraphicsCommandList7::Barrier", (const void *)barrier},
         {"ID3D12Device5::EnumerateMetaCommands", (const void *)meta_commands},
         {"ID3D12Device5::EnumerateMetaCommandParameters", (const void *)meta_command_parameters},
         {"ID3D12Device::CheckFeatureSupport", (const void *)check_feature},

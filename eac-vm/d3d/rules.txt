@@ -113,8 +113,6 @@ ID3D12Resource2::GetDesc1 sync
 ID3D12Heap1::* refuse
 ID3D12MetaCommand::* refuse
 ID3D12ShaderCacheSession::* refuse
-ID3D12Device9::* refuse
-ID3D12Device10::* refuse
 ID3D12VirtualizationGuestDevice::* refuse
 ID3D12Tools::* refuse
 ID3D12SDKConfiguration::* refuse
@@ -172,7 +170,9 @@ ID3D12GraphicsCommandList4::DispatchRays refuse
 ID3D12GraphicsCommandList5::RSSetShadingRate refuse
 ID3D12GraphicsCommandList5::RSSetShadingRateImage refuse
 ID3D12GraphicsCommandList6::DispatchMesh refuse
-ID3D12GraphicsCommandList7::Barrier refuse
+# Device9's shader cache sessions: DXMT's cache isn't the program's to drive.
+ID3D12Device9::CreateShaderCacheSession refuse
+ID3D12Device9::ShaderCacheControl refuse
 # DXGI's device interfaces are D3D11's (M4).
 IDXGIDevice::CreateSurface refuse
 IDXGIDevice::QueryResourceResidency refuse
@@ -244,6 +244,9 @@ ID3D12Device3::EnqueueMakeResident own
 ID3D12Device1::SetEventOnMultipleFenceCompletion own
 ID3D12Device1::SetEventOnMultipleFenceCompletion fences in count=fence_count
 ID3D12Device1::SetEventOnMultipleFenceCompletion values in count=fence_count
+# Enhanced barriers: their groups' arrays sit in a union counted outside it, which the generator can't carry; the guest
+# hands ResourceBarrier the legacy barriers they mean, as DXMT does (its d3d12_barrier_legacy.hpp, guest/proxy.cpp).
+ID3D12GraphicsCommandList7::Barrier special
 # Their descriptions hold names: DXMT has no meta commands (a count of 0; E_INVALIDARG), answered in the guest.
 ID3D12Device5::EnumerateMetaCommands special
 ID3D12Device5::EnumerateMetaCommandParameters special
@@ -272,6 +275,16 @@ ID3D12GraphicsCommandList::OMSetRenderTargets depth_stencil_descriptor in one
 ID3D12GraphicsCommandList::RSSetScissorRects rects in count=rect_count
 ID3D12GraphicsCommandList::ResourceBarrier barriers in count=barrier_count
 ID3D12GraphicsCommandList1::ResolveSubresourceRegion src_rect in one
+ID3D12Device10::CreateCommittedResource3 heap_properties in one
+ID3D12Device10::CreateCommittedResource3 desc in one
+ID3D12Device10::CreateCommittedResource3 optimized_clear_value in one
+ID3D12Device10::CreateCommittedResource3 castable_formats in count=castable_formats_count
+ID3D12Device10::CreatePlacedResource2 desc in one
+ID3D12Device10::CreatePlacedResource2 optimized_clear_value in one
+ID3D12Device10::CreatePlacedResource2 castable_formats in count=castable_formats_count
+ID3D12Device10::CreateReservedResource2 desc in one
+ID3D12Device10::CreateReservedResource2 optimized_clear_value in one
+ID3D12Device10::CreateReservedResource2 castable_formats in count=castable_formats_count
 ID3D12GraphicsCommandList4::BeginRenderPass render_targets in count=render_targets_count
 ID3D12GraphicsCommandList4::BeginRenderPass depth_stencil in one
 ID3D12GraphicsCommandList::SetComputeRoot32BitConstants data in count=constant_count unit=4

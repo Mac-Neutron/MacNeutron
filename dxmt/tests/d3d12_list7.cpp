@@ -11,6 +11,10 @@
 //   depthpass  no render targets, a depth target cleared 1.0 then CLEAR 0.25 by the pass: 0.25 everywhere
 //   suspend  a SUSPENDING pass in one list (CLEAR red, ending in a resolve to dst) and a RESUMING one in the next
 //          (CLEAR green, then a resolve to dst2 after it): dst red, dst2 green; both passes' accesses happen
+//   barrier  a buffer cleared as a UAV, a List7 Barrier (UNORDERED_ACCESS to COPY_SOURCE), a copy out: the cleared words
+//   barrierglobal  the same with a global barrier
+//   layout3  OPTIONS12 reports enhanced barriers; the device answers ID3D12Device10, whose CreateCommittedResource3
+//          makes an upload buffer from layout UNDEFINED (mapped) and a texture with a castable format
 #include "d3d12_common.hpp"
 
 static char fail_text[256];
@@ -263,6 +267,87 @@ static const char *suspend(Gpu &gpu, ID3D12GraphicsCommandList7 *list) {
     return strcmp(r, "ok") ? r : Expect(second, "dst2", [](int, int) { return kGreen; });
 }
 
+// A 256-byte buffer cleared to 0x1234 through a UAV, then `barrier`, then copied out: the words read back.
+template <class Between> static const char *ClearedThrough(Gpu &gpu, ID3D12GraphicsCommandList7 *list, Between between) {
+    ID3D12Resource *buffer = gpu.Buffer(D3D12_HEAP_TYPE_DEFAULT, 256, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                                        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    ID3D12Resource *readback = gpu.Buffer(D3D12_HEAP_TYPE_READBACK, 256, D3D12_RESOURCE_STATE_COPY_DEST);
+    ID3D12DescriptorHeap *visible, *cpu;
+    D3D12_DESCRIPTOR_HEAP_DESC hd = {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
+    TRY(gpu.device->CreateDescriptorHeap(&hd, __uuidof(ID3D12DescriptorHeap), (void **)&visible), "CreateDescriptorHeap");
+    hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    TRY(gpu.device->CreateDescriptorHeap(&hd, __uuidof(ID3D12DescriptorHeap), (void **)&cpu), "CreateDescriptorHeap");
+    D3D12_UNORDERED_ACCESS_VIEW_DESC ud = {DXGI_FORMAT_R32_UINT, D3D12_UAV_DIMENSION_BUFFER};
+    ud.Buffer.NumElements = 64;
+    gpu.device->CreateUnorderedAccessView(buffer, nullptr, &ud, visible->GetCPUDescriptorHandleForHeapStart());
+    gpu.device->CreateUnorderedAccessView(buffer, nullptr, &ud, cpu->GetCPUDescriptorHandleForHeapStart());
+    list->SetDescriptorHeaps(1, &visible);
+    const UINT values[4] = {0x1234, 0x1234, 0x1234, 0x1234};
+    list->ClearUnorderedAccessViewUint(visible->GetGPUDescriptorHandleForHeapStart(),
+                                       cpu->GetCPUDescriptorHandleForHeapStart(), buffer, values, 0, nullptr);
+    between(buffer);
+    list->CopyBufferRegion(readback, 0, buffer, 0, 256);
+    gpu.Submit();
+    uint32_t *words;
+    D3D12_RANGE all = {0, 256};
+    TRY(readback->Map(0, &all, (void **)&words), "Map");
+    int wrong = -1;
+    for (int i = 0; i < 64 && wrong < 0; i++)
+        if (words[i] != 0x1234) wrong = i;
+    uint32_t got = wrong < 0 ? 0 : words[wrong];
+    readback->Unmap(0, nullptr);
+    readback->Release(), buffer->Release(), visible->Release(), cpu->Release();
+    if (wrong < 0) return "ok";
+    snprintf(fail_text, sizeof fail_text, "FAIL word %d %08x want 00001234", wrong, (unsigned)got);
+    return fail_text;
+}
+
+// SyncBefore ALL: a UAV clear's scope (CLEAR_UNORDERED_ACCESS_VIEW) is outside ALL_SHADING.
+static const char *barrier(Gpu &gpu, ID3D12GraphicsCommandList7 *list) {
+    return ClearedThrough(gpu, list, [&](ID3D12Resource *buffer) {
+        D3D12_BUFFER_BARRIER b = {D3D12_BARRIER_SYNC_ALL, D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
+                                  D3D12_BARRIER_ACCESS_COPY_SOURCE, buffer, 0, UINT64_MAX};
+        D3D12_BARRIER_GROUP g = {D3D12_BARRIER_TYPE_BUFFER, 1};
+        g.pBufferBarriers = &b;
+        list->Barrier(1, &g);
+    });
+}
+
+static const char *barrierglobal(Gpu &gpu, ID3D12GraphicsCommandList7 *list) {
+    return ClearedThrough(gpu, list, [&](ID3D12Resource *) {
+        D3D12_GLOBAL_BARRIER b = {D3D12_BARRIER_SYNC_ALL, D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
+                                  D3D12_BARRIER_ACCESS_COPY_SOURCE};
+        D3D12_BARRIER_GROUP g = {D3D12_BARRIER_TYPE_GLOBAL, 1};
+        g.pGlobalBarriers = &b;
+        list->Barrier(1, &g);
+    });
+}
+
+static const char *layout3(Gpu &gpu) {
+    D3D12_FEATURE_DATA_D3D12_OPTIONS12 options = {};
+    TRY(gpu.device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &options, sizeof options), "OPTIONS12");
+    if (!options.EnhancedBarriersSupported) return "FAIL OPTIONS12 EnhancedBarriersSupported FALSE";
+    ID3D12Device10 *device;
+    TRY(gpu.device->QueryInterface(__uuidof(ID3D12Device10), (void **)&device), "QueryInterface(ID3D12Device10)");
+    D3D12_HEAP_PROPERTIES upload = {D3D12_HEAP_TYPE_UPLOAD}, gpu_only = {D3D12_HEAP_TYPE_DEFAULT};
+    D3D12_RESOURCE_DESC1 d = {D3D12_RESOURCE_DIMENSION_BUFFER, 0, 4096, 1, 1, 1, DXGI_FORMAT_UNKNOWN, {1, 0},
+                              D3D12_TEXTURE_LAYOUT_ROW_MAJOR};
+    ID3D12Resource *buffer, *texture;
+    TRY(device->CreateCommittedResource3(&upload, D3D12_HEAP_FLAG_NONE, &d, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr,
+                                         nullptr, 0, nullptr, __uuidof(ID3D12Resource), (void **)&buffer),
+        "CreateCommittedResource3(buffer)");
+    void *p;
+    TRY(buffer->Map(0, nullptr, &p), "Map");
+    buffer->Unmap(0, nullptr);
+    D3D12_RESOURCE_DESC1 td = {D3D12_RESOURCE_DIMENSION_TEXTURE2D, 0, 4, 4, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM, {1, 0}};
+    DXGI_FORMAT castable = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    TRY(device->CreateCommittedResource3(&gpu_only, D3D12_HEAP_FLAG_NONE, &td, D3D12_BARRIER_LAYOUT_COMMON, nullptr,
+                                         nullptr, 1, &castable, __uuidof(ID3D12Resource), (void **)&texture),
+        "CreateCommittedResource3(texture)");
+    texture->Release(), buffer->Release(), device->Release();
+    return "ok";
+}
+
 int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);
     Gpu gpu;
@@ -275,6 +360,9 @@ int main() {
     printf("mrt %s\n", mrt(gpu, list));
     printf("depthpass %s\n", depthpass(gpu, list));
     printf("suspend %s\n", suspend(gpu, list));
+    printf("barrier %s\n", barrier(gpu, list));
+    printf("barrierglobal %s\n", barrierglobal(gpu, list));
+    printf("layout3 %s\n", layout3(gpu));
     list->Release();
     return 0;
 }

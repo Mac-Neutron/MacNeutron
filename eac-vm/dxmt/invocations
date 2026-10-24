@@ -32,7 +32,7 @@ d3d12_dxil_exec|d3d12_dxil_exec.exe|@T/dxil|group threads
 d3d12_hazards|d3d12_hazards.exe|@S|hazard ts-many
 d3d12_indirect|d3d12_indirect.exe|@S/indirect.vs.dxil @S/indirect.ps.dxil @S/indirect.cs.dxil @S/indirect.vsid.dxil @S/indirect.psid.dxil @S/indirect.vsvid.dxil @S/indirect.vsstart.dxil|indirect
 d3d12_layered|d3d12_layered.exe|@S/layered.vs.dxil @S/layered.ps.dxil|layered
-d3d12_list7|d3d12_list7.exe||list4 resolveregion renderpass mrt depthpass suspend
+d3d12_list7|d3d12_list7.exe||list4 resolveregion renderpass mrt depthpass suspend barrier barrierglobal layout3
 d3d12_lod|d3d12_lod.exe|@S/lod.vs.dxil @S/lod.ps.dxil|lod
 d3d12_null|d3d12_null.exe|@S/null.cs.dxil|null
 d3d12_query|d3d12_query.exe|@S/depth.vs.dxil @S/depth.ps.dxil|query

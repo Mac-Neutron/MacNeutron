@@ -27,7 +27,8 @@ AS_DXMT = {'ID3D12Device::CreateSharedHandle', 'ID3D12Device3::OpenExistingHeapF
            'ID3D12GraphicsCommandList4::EmitRaytracingAccelerationStructurePostbuildInfo',
            'ID3D12GraphicsCommandList4::CopyRaytracingAccelerationStructure', 'ID3D12GraphicsCommandList4::SetPipelineState1',
            'ID3D12GraphicsCommandList4::DispatchRays', 'ID3D12GraphicsCommandList5::RSSetShadingRate',
-           'ID3D12GraphicsCommandList5::RSSetShadingRateImage', 'ID3D12GraphicsCommandList6::DispatchMesh'}
+           'ID3D12GraphicsCommandList5::RSSetShadingRateImage', 'ID3D12GraphicsCommandList6::DispatchMesh',
+           'ID3D12Device9::CreateShaderCacheSession', 'ID3D12Device9::ShaderCacheControl'}
 
 
 def read(path):
