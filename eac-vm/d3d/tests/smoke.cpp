@@ -230,6 +230,41 @@ static const char *own_answers(ID3D12CommandQueue *queue) {
     return bad ? bad : "ok";
 }
 
+// A texture asked to be shared, as ANGLE's pbuffer (Chromium's GPU process) and D3D10's keyed mutex: made unshared,
+// its handle refused with the out value left alone, so ANGLE goes on without it (proxy.cpp's kSharedMisc).
+static const char *shared() {
+    ID3D11Device *dev = nullptr;
+    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &dev,
+                                 nullptr, nullptr)))
+        return "FAIL device";
+    D3D11_TEXTURE2D_DESC d = {};
+    d.Width = d.Height = 1, d.MipLevels = d.ArraySize = 1, d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    d.SampleDesc.Count = 1, d.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    d.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
+    ID3D11Texture2D *t = nullptr;
+    IDXGIResource *r = nullptr;
+    ID3D10Device *d10 = nullptr;
+    ID3D10Texture2D *t10 = nullptr;
+    HANDLE h = (HANDLE)1;
+    const char *bad = nullptr;
+    if (FAILED(dev->CreateTexture2D(&d, nullptr, &t))) bad = "FAIL create";
+    else if (FAILED(t->QueryInterface(__uuidof(IDXGIResource), (void **)&r))) bad = "FAIL IDXGIResource";
+    else if (SUCCEEDED(r->GetSharedHandle(&h)) || h != (HANDLE)1) bad = "FAIL GetSharedHandle";
+    D3D10_TEXTURE2D_DESC d10d = {};
+    d10d.Width = d10d.Height = 1, d10d.MipLevels = d10d.ArraySize = 1, d10d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    d10d.SampleDesc.Count = 1, d10d.BindFlags = D3D10_BIND_RENDER_TARGET;
+    d10d.MiscFlags = D3D10_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+    if (!bad && (FAILED(dev->QueryInterface(__uuidof(ID3D10Device), (void **)&d10)) ||
+                 FAILED(d10->CreateTexture2D(&d10d, nullptr, &t10))))
+        bad = "FAIL d3d10 keyed mutex";
+    if (t10) t10->Release();
+    if (d10) d10->Release();
+    if (r) r->Release();
+    if (t) t->Release();
+    dev->Release();
+    return bad ? bad : "ok";
+}
+
 static void minimised(ID3D12CommandQueue *queue) {
     HWND w;
     IDXGISwapChain1 *sc = swapchain(queue, &w);
@@ -521,7 +556,7 @@ int main(int argc, char **argv) {
     minimised(queue);
     printf("latency %s\n", latency(device, queue));
     printf("d3d11latency %s\n", d3d11_latency());
-    if (forward) printf("swapchain %s\n", own_answers(queue));
+    if (forward) printf("swapchain %s\n", own_answers(queue)), printf("shared %s\n", shared());
     else printf("swapchain untested: guest DXMT aborts on these\n");
     wmsize(queue);
     conv(queue);

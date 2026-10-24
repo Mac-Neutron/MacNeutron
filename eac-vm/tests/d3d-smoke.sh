@@ -10,7 +10,8 @@
 # `smoke.exe die` runs first, each ending mid-load with status 0, that the host outlives (M4's final review)
 # and "conv ok" (data whose i386 layout differs, end to end: initial data, an input layout, a D3D10 map, GetHwnd, GetDesc)
 # and "wmtforward ok" (fork 0079 refuses a call past the guest's table) and "wmsize ok" (a window resizing its buffers
-# from WM_SIZE through full screen and ResizeTarget), and forwarded "swapchain ok" (DXGI's answers where DXMT has none) and "eventreuse ok" (a closed event's
+# from WM_SIZE through full screen and ResizeTarget), and forwarded "swapchain ok" (DXGI's answers where DXMT has none),
+# "shared ok" (a texture asked to be shared is made, unshared: ANGLE's pbuffer) and "eventreuse ok" (a closed event's
 # reused handle takes no stray set; guest DXMT has that bug too). Prints macneutron-vm's peak resident size in each
 # (forwarding loads native DXMT, a second LLVM beside the Wine build's), and that nothing lands in the folder the VM
 # host ran from (native DXMT's logs go to the run's traces), and forwarded, native DXMT's shader cache and recorded
@@ -90,7 +91,7 @@ EOS
   [ "${dies:-0}" -eq 3 ] || fail="$fail $mode-dies"
   guest_checks="eventthread name minimised latency d3d11latency wmtforward wmsize conv"
   checks=$guest_checks
-  [ "$mode" = guest ] || checks="$checks eventreuse swapchain"
+  [ "$mode" = guest ] || checks="$checks eventreuse swapchain shared"
   for c in $checks; do
     got=$(/usr/bin/grep "^$c " "$out" 2> /dev/null || true)
     echo "d3d-smoke: $mode: ${got:-no $c line}"

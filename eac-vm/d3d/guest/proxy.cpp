@@ -1299,6 +1299,16 @@ static ID3D11DeviceContext *context_of(IUnknown *resource10) {
 }
 static const int kMapTries = 64; // then the host waits: DXMT's view of the GPU may lag the fence's
 
+// A resource asked to be shared is made unshared: handles shared across processes mean nothing across the VM (rules.txt
+// refuses GetSharedHandle and OpenSharedResource), and native DXMT, which has no D3DKMT device, fails such a texture
+// outright. ANGLE's pbuffers are, so Chromium's GPU process ended at its start (3DMark's UI); with the handle refused,
+// ANGLE goes on without one. D3D10's keyed mutex is another bit (D3D11's 0x10 is DRAWINDIRECT_ARGS).
+// ponytail: GetDesc then answers the flags without these; a consumer in another guest process would need the handles.
+template <class Data> constexpr UINT kSharedMisc =
+    D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+template <> constexpr UINT kSharedMisc<D3D10_SUBRESOURCE_DATA> =
+    D3D10_RESOURCE_MISC_SHARED | D3D10_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+
 #define MN_CREATE(fn, NAME, Desc, Data, T, DESC, INIT, OUT)                                                            \
     static HRESULT STDMETHODCALLTYPE fn(mn_proxy *This, const Desc *desc, const Data *init, T **out) {                \
         mn_res r = desc ? described(*desc) : mn_res{};                                                                 \
@@ -1308,8 +1318,10 @@ static const int kMapTries = 64; // then the host waits: DXMT's view of the GPU 
         }                                                                                                              \
         std::vector<uint8_t> flat;                                                                                     \
         if (desc && init) flat = pack(r, (const D3D11_SUBRESOURCE_DATA *)init);                                        \
+        Desc unshared = desc ? *desc : Desc{};                                                                         \
+        unshared.MiscFlags &= ~kSharedMisc<Data>;                                                                      \
         mn_d3d_p_##NAME p = {};                                                                                        \
-        p.self = (uintptr_t)This, p.DESC = (uintptr_t)desc, p.OUT = (uintptr_t)out;                                   \
+        p.self = (uintptr_t)This, p.DESC = desc ? (uintptr_t)&unshared : 0, p.OUT = (uintptr_t)out;                   \
         p.INIT = flat.empty() ? 0 : (uintptr_t)flat.data(), p.aux[0] = flat.size();                                  \
         int32_t s = mn_d3d_call(MN_D3D_ID_##NAME, &p);                                                                 \
         HRESULT hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;                                                      \
