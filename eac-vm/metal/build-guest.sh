@@ -3,7 +3,7 @@
 # compiler), into the VM share's bin/: 4a's probe and transport test, and 4b's guest winemetal.so (linked against the
 # builder's x86-64 Wine build, $WINEBUILD), the stub ntdll.so the test programs load in its place, and metal-wm-test;
 # and for old WoW64's 32-bit Unix side (i686, on the builder's i386 Wine build, $WINEBUILD32) bin/wm/i386's winemetal.so
-# and stub ntdll.so, and metal-wm-test32.
+# and stub ntdll.so, metal-wm-test32 and metal-probe32.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B="$ROOT/eac-vm/builder.sh"
@@ -54,4 +54,5 @@ build wm/i386/winemetal.so -std=gnu2x -DMN_WM_GUEST -fPIC -shared wm/guest/winem
 build wm/i386/ntdll.so -std=gnu2x -fPIC -shared -Wl,-soname,ntdll.so wm/guest/stub-ntdll.c -lpthread
 build metal-wm-test32 -std=gnu2x wm/tests/guest-test.c wm/tests/sequence.c wm/tests/galloc-cases.c -ldl -lpthread
 build metal-sm50-args32-test32 -std=gnu2x wm/tests/sm50-args32-test.c wm/guest/sm50-args32.c
+build metal-probe32 -std=gnu11 tests/probe.c -lpthread  # old-wow64.sh's row 5
 file "$OUT"/metal-* "$OUT"/wm/* "$OUT"/wm/i386/*
