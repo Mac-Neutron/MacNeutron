@@ -115,45 +115,41 @@ cp /mnt/share/bin/steam.exe "$W/system32/steam.exe"  # the one Proton runs (prot
 # 64-bit one only, so a SteamStub-protected 32-bit game stops at its error 3 until 0036 covers i386.
 cp /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll "$STEAM/steamclient.dll"
 # Steam's install scripts (spec 2026-10-24-macneutron-install-scripts-design), which Mac Steam never runs: the launcher's
-# MN_INSTALL_REG (their Registry entries) and mn_install_script (their Run Process steps, InstallScripts.shell). As
-# Steam runs a step: unless its HasRunKey DWORD, named after it, in the prefix's own registry (HKLM\Software in the
-# 32-bit view, as Steam and Proton's marks above have it) is at least its minimum; exit 0 writes the minimum, anything
-# else is retried at the next launch. The registry files are current here: earlier boots' servers saved them as they
-# ended, and the block above waits for its own. The guest has no awk: fixed strings only.
-mn_hasrun() {  # <key> <name>: the DWORD's hex digits, or nothing
-  local f k n l
-  case $1 in HKEY_LOCAL_MACHINE\\*) f=$WINEPREFIX/system.reg;; *) f=$WINEPREFIX/user.reg;; esac
-  k=$(printf '%s' "${1#*\\}" | sed 's/\\/\\\\/g')
-  n=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  l=$(grep -n -i -F "[$k] " "$f" 2>/dev/null | grep '^[0-9]*:\[' | head -1 | cut -d: -f1)
-  [ -n "$l" ] && tail -n "+$((l + 1))" "$f" | sed '/^\[/q' | grep -i -F "\"$n\"=dword:" | head -1 | sed 's/.*=dword://'
+# installscript.reg in the run share (their Registry entries, UTF-16, imported when they changed) and mn_install_script
+# (their Run Process steps, InstallScripts.shell). As Steam runs a step: unless its HasRunKey DWORD, named after it, in
+# the prefix's own registry (HKLM\Software in the 32-bit view, as Steam and Proton's marks above have it) is at least
+# its minimum; exit 0 writes the minimum, anything else is retried at the next launch. The registry files are current
+# here: earlier boots' servers saved them as they ended, and the block above waits for its own. The guest has no awk
+# or cmp: the launcher writes the key and name as Wine's files have them, and they're looked for as fixed strings.
+mn_hasrun() {  # <system.reg|user.reg> <key as the file has it> <"name" as the file has it>: the DWORD's hex digits
+  local l
+  l=$(grep -n -i -F "[$2] " "$WINEPREFIX/$1" 2>/dev/null | grep '^[0-9]*:\[' | head -1 | cut -d: -f1)
+  [ -n "$l" ] && tail -n "+$((l + 1))" "$WINEPREFIX/$1" | sed '/^\[/q' | grep -i -F "$3=dword:" | head -1 | sed 's/.*=dword://'
 }
-mn_run() {  # <key> <name> <minimum> <folder> <process> <args...>, the step run in its folder
-  local key=$1 name=$2 min=$3 dir=$4 v s=0
-  shift 4
-  v=$(mn_hasrun "$key" "$name")
+mn_run() {  # <key> <name> <minimum> <file> <file's key> <file's name> <folder> <process> <args...>
+  local key=$1 name=$2 min=$3 v s=0
+  v=$(mn_hasrun "$4" "$5" "$6")
   [ "$((0x${v:-0}))" -lt "$min" ] || return 0
+  local dir=$7
+  shift 7
   case $(printf '%s' "$1" | tr '[:upper:]' '[:lower:]') in
     *.cmd|*.bat) set -- cmd /c "$@";;
     *.msi) set -- msiexec /i "$@";;
   esac
+  # In its folder, or drive_c when the folder's case differs from the disk's (C:\windows\System32 is system32 here).
   # An installer waiting for a click on the screen nobody sees (Xvfb) mustn't hold the game forever: a timeout is a
   # failure, and what it left running goes. ponytail: Wine's status is the code mod 256 (a failure ending 0x00 passes).
-  (cd "$dir" && timeout "${MN_INSTALL_TIMEOUT:-900}" wine "$@") >/dev/null 2>&1 || s=$?
+  (cd "$dir" 2>/dev/null || cd "$WINEPREFIX/drive_c"; timeout "${MN_INSTALL_TIMEOUT:-900}" wine "$@") >/dev/null 2>&1 || s=$?
   [ "$s" != 124 ] || wineserver -k
   echo "$name exit $s" >> /mnt/share/traces/installscript.log
   [ "$s" != 0 ] || wine reg add "$key" /v "$name" /t REG_DWORD /d "$min" /f >/dev/null 2>&1
 }
-if [ -n "${MN_INSTALL_REG:-}" ] || command -v mn_install_script >/dev/null; then
+if [ -f /mnt/share/installscript.reg ] || command -v mn_install_script >/dev/null; then
   mkdir -p "$WINEPREFIX/drive_c/users/steamuser/AppData/Local/Temp"  # msiexec's; a profile made empty has none
-  if [ -n "${MN_INSTALL_REG:-}" ]; then
-    # Imported when the text changed (compared in the shell: the image has no cmp). ponytail: reg import reads it in
-    # the ANSI code page, so a non-ASCII value needs a UTF-8 guest locale.
-    if [ "$(cat "$WINEPREFIX/.mn-installscript.reg" 2>/dev/null)" != "$(printf '%s' "$MN_INSTALL_REG")" ]; then
-      printf '%s' "$MN_INSTALL_REG" > /tmp/mn-installscript.reg
-      wine reg import 'Z:\tmp\mn-installscript.reg' >/dev/null 2>&1 &&
-        cp /tmp/mn-installscript.reg "$WINEPREFIX/.mn-installscript.reg"
-    fi
+  if [ -f /mnt/share/installscript.reg ] &&
+     [ "$(sha256sum < /mnt/share/installscript.reg)" != "$(sha256sum < "$WINEPREFIX/.mn-installscript.reg" 2>/dev/null)" ]; then
+    wine reg import 'Z:\mnt\share\installscript.reg' >/dev/null 2>&1 &&
+      cp /mnt/share/installscript.reg "$WINEPREFIX/.mn-installscript.reg"
   fi
   ! command -v mn_install_script >/dev/null || mn_install_script
 fi
