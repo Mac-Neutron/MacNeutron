@@ -257,6 +257,11 @@ private func i386GameInLibrary(named name: String = "Game.exe") throws -> String
     #expect(script.contains("MACNEUTRON_VM_WOW64='1'\n"))
     #expect(script.contains("PROTON_USE_WOW64='1'\n"))
     #expect(script.contains("MTLD3D_CONFIG='debug.capsAll=true'\n"))
+    // Exported, so Wine's processes get them (a forwarder trace, guest DXMT's NVIDIA extension or log level)
+    let exported = try #require(script.split(separator: "\n").first { $0.hasPrefix("export ") })
+    for key in ["MACNEUTRON_DLSS", "MACNEUTRON_VM_D3D", "MTLD3D_CONFIG"] {
+        #expect(exported.split(separator: " ").contains(Substring(key)))
+    }
     #expect(script.hasSuffix("# run-game.sh\nwine steam.exe \"$EXE\" \"$@\"\n"))
 }
 

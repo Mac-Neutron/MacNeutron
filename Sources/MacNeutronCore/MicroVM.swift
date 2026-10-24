@@ -98,9 +98,13 @@ public struct MicroVM: Sendable {
                      "EXE=\(Self.quoted("Z:" + guest.replacingOccurrences(of: "/", with: "\\")))",
                      (["set --"] + arguments.map(Self.quoted)).joined(separator: " ")]
         if performance { lines.append("MACNEUTRON_PROFILE=\(Self.quoted("p"))") }
+        var set: [String] = []
         for key in Self.passed where !(performance && Self.notPassedToPerformance.contains(key)) {
-            if let value = environment[key] { lines.append("\(key)=\(Self.quoted(value))") }
+            if let value = environment[key] { lines.append("\(key)=\(Self.quoted(value))"); set.append(key) }
         }
+        // The game's environment too, as a launch option is under Proton: guest DXMT and the forwarder read some
+        // (DXMT_LOG_LEVEL, DXMT_ENABLE_NVEXT, MACNEUTRON_VM_D3D_TRACE), which run-game.sh doesn't export itself.
+        if !set.isEmpty { lines.append("export " + set.joined(separator: " ")) }
         return lines.joined(separator: "\n") + "\n" + (try String(contentsOf: gameScript, encoding: .utf8))
     }
 }
