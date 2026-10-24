@@ -70,24 +70,25 @@ Order, each step with its smoke row first (RED):
 ### 4.2 BeginRenderPass and EndRenderPass
 
 BeginRenderPass(NumRenderTargets, pRenderTargets, pDepthStencil, Flags):
-1. Unless Flags has RESUMING_PASS, the beginning accesses:
+1. The beginning accesses:
    - CLEAR: a full-view ClearRenderTargetView, or ClearDepthStencilView with the depth and stencil planes each from
      their own access (D3D12_CLEAR_FLAG_DEPTH / _STENCIL). `FoldClears` makes them the pass's load actions at its first
      draw: no clear encoder of their own.
    - PRESERVE, DISCARD, NO_ACCESS, PRESERVE_LOCAL_RENDER/SRV/UAV, and a type DXMT doesn't know: nothing.
 2. OMSetRenderTargets with the descs' `cpuDescriptor`s. The depth-stencil view is bound unless both of its planes'
    beginning accesses are NO_ACCESS.
-3. The ending accesses (with each resolve's subresource parameters copied) and Flags are kept in the list.
+3. The ending accesses (with each resolve's subresource parameters copied) are kept in the list.
 
-EndRenderPass: unless the kept Flags has SUSPENDING_PASS, each RESOLVE ending access's subresource parameters, one
-ResolveSubresourceRegion each (its source and destination, subresources, rectangle, offset, Format, ResolveMode).
-DISCARD, PRESERVE, NO_ACCESS and the rest: nothing (DiscardResource already does nothing).
+EndRenderPass: each RESOLVE ending access's subresource parameters, one ResolveSubresourceRegion each (its source and
+destination, subresources, rectangle, offset, Format, ResolveMode). DISCARD, PRESERVE, NO_ACCESS and the rest: nothing
+(DiscardResource already does nothing).
 
-So a suspended pass and the pass that resumes it (another list, or the same) clear once at the start and resolve once
-at the end, one logical pass, as the spec has them.
-
-Flags ALLOW_UAV_WRITES and BIND_READ_ONLY_DEPTH/STENCIL: accepted, nothing done (read-only depth comes from the view's
-own flags, as today). RenderPassesTier stays TIER_0 (emulated).
+Every flag is accepted and changes nothing. SUSPENDING_PASS and RESUMING_PASS only say "a logical flow of passes is
+straddling command list boundaries": the same surface-flow rules apply across them as between any two passes, so
+both passes' accesses take effect (DirectX-Specs, RenderPasses, "Suspend and Resume"; its HLK test: "no rendering
+difference" against ENDING_PRESERVE/BEGINNING_PRESERVE). Corrected 2026-10-24 from a first version that skipped the
+resuming pass's beginning and the suspending pass's ending accesses. ALLOW_UAV_WRITES and BIND_READ_ONLY_DEPTH/STENCIL:
+read-only depth comes from the view's own flags, as today. RenderPassesTier stays TIER_0 (emulated).
 
 ## 5. Enhanced barriers
 
@@ -180,7 +181,7 @@ and 32-bit; a row the 32-bit forward lane refuses by §6.2 expects that).
 | Row | Checks |
 |---|---|
 | `list4` | CreateCommandList for List4, 5, 6 and 7 succeeds and QueryInterface answers each (today E_NOINTERFACE); the §6.1 methods can be called. |
-| `renderpass` | A CLEAR into a 4x MSAA target ending in a RESOLVE reads back the clear colour. A SUSPENDING pass in one list (CLEAR red) and a RESUMING pass in the next (whose CLEAR says green, ending in the RESOLVE) read back red. |
+| `renderpass` | A CLEAR into a 4x MSAA target ending in a RESOLVE reads back the clear colour. A SUSPENDING pass in one list (CLEAR red, ending in a RESOLVE) and a RESUMING pass in the next (CLEAR green, ending PRESERVE, then a resolve to a second texture): the first texture red, the second green (both passes' accesses happened). |
 | `resolveregion` | A 2x2 rectangle resolved to (2,2): those pixels the source's colour, (0,0) still the destination's earlier colour. |
 | `barrier` | OPTIONS12 reports TRUE. A compute UAV write, a buffer Barrier (UNORDERED_ACCESS to COPY_SOURCE), a copy to a readback buffer: the written values; again with a global barrier. CreateCommittedResource3 of an upload buffer with layout UNDEFINED succeeds. |
 

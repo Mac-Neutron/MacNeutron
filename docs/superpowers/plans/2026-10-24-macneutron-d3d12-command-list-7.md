@@ -54,6 +54,7 @@ forwards it all, translating barrier groups in the guest with the same header.
 1. A depth-only render pass (no render targets, a depth-stencil with CLEAR), as shadow maps do: the depth is cleared.
    Pinned by Task 4's `depthpass` row.
 2. Two render targets, one CLEAR and one PRESERVE, as G-buffers do: only the CLEAR one changes. Task 4's `mrt` row.
+   (Suspend/resume across lists is the spec's flow, not a review item: Task 4's `suspend` row pins it.)
 3. A RESOLVE ending with two subresource parameters (two half rectangles), forwarded: both halves resolved. Task 4's
    `renderpass` row.
 4. A resolve the spec leaves out (MAX mode): nothing happens to the destination and nothing aborts. Task 3's
@@ -131,7 +132,9 @@ struct D3D12_RENDER_PASS_ENDING_ACCESS_RESOLVE_PARAMETERS.pSubresourceParameters
 - [ ] **Step 6: Generator and its tests**
 
 Run: `make -C eac-vm/d3d test` and `python3 -I eac-vm/d3d/tests/coverage.py self-test`
-Expected: the unittest run `OK`, `layout: ok`, roundtrip passes, `coverage: ok` self-test.
+Expected: the unittest run `OK`, `layout: ok`, roundtrip passes, `coverage: ok` self-test. Roundtrip builds marshal
+cases from the rules, so it is the first real check of BeginRenderPass's nested union and counted array: read its
+output for the method, not only the exit status.
 
 - [ ] **Step 7: Native and loopback green**
 
@@ -250,7 +253,8 @@ d3d-smoke.sh.
 - Produces: in `MTLD3D12GraphicsCommandListImpl`,
   `struct PendingResolve { ID3D12Resource *src, *dst; DXGI_FORMAT format; D3D12_RESOLVE_MODE mode;
   std::vector<D3D12_RENDER_PASS_ENDING_ACCESS_RESOLVE_SUBRESOURCE_PARAMETERS> subresources; };`,
-  `std::vector<PendingResolve> pass_resolves_;` and `D3D12_RENDER_PASS_FLAGS pass_flags_;`, both cleared by Reset.
+  `std::vector<PendingResolve> pass_resolves_;`, cleared by Reset. No flag is kept: every flag changes nothing (spec
+  §4.2 as corrected 2026-10-24).
 
 - [ ] **Step 1: The rows**
 
@@ -265,14 +269,16 @@ submits, reads back through a readback buffer:
   ending PRESERVE. Assert RT0 all green, RT1 all blue.
 - `depthpass` (Review Focus 1): no render targets; a single-sample 4x4 D32_FLOAT target pre-cleared 1.0; depth CLEAR
   0.25, PRESERVE ending. Copied out (CopyTextureRegion to a footprint), every value 0.25f.
-- `suspend`: the 4x MSAA target pre-cleared blue; list A: Begin with CLEAR red, ending RESOLVE into dst, flags
-  SUSPENDING_PASS; End. List B: Begin with CLEAR green, the same RESOLVE, flags RESUMING_PASS; End. Both lists in one
-  ExecuteCommandLists. Assert every dst texel red (a list that ignored the flags gives green; one that swapped them,
-  blue).
+- `suspend`: the 4x MSAA target pre-cleared blue, `dst` and `dst2` pre-cleared black; list A: Begin with CLEAR red,
+  ending RESOLVE into dst (whole), flags SUSPENDING_PASS; End. List B: Begin with CLEAR green, ending PRESERVE, flags
+  RESUMING_PASS; End; then `ResolveSubresource(dst2, 0, target, 0, R8G8B8A8_UNORM)` after the pass. Both lists in
+  one ExecuteCommandLists. Assert dst all red and dst2 all green: both passes' accesses happened (an implementation
+  that skipped the suspending pass's ending leaves dst black; one that skipped the resuming pass's beginning gives
+  dst2 red).
 
 - [ ] **Step 2: See them fail**
 
-Run: Task 1 Step 3's command. Expected: `renderpass FAIL …` (dst black), `mrt FAIL`, `depthpass FAIL`, `suspend FAIL`.
+Run: Task 1 Step 3's command. Expected: `renderpass FAIL …` (dst black), `mrt FAIL`, `depthpass FAIL`, `suspend FAIL` (dst black).
 
 - [ ] **Step 3: Check the rows against D3DMetal once**
 
@@ -286,18 +292,19 @@ D3DMetal FAIL means the row is wrong, unless D3DMetal lacks the feature: note wh
 
 - [ ] **Step 4: Implement**
 
-Spec §4.2. BeginRenderPass: `pass_flags_ = Flags`, `pass_resolves_` refilled from the ending accesses (RT descs, then
-the depth's and stencil's), copying each subresource array; unless RESUMING_PASS, a CLEAR beginning access is a full
+Spec §4.2. BeginRenderPass: `pass_resolves_` refilled from the ending accesses (RT descs, then the depth's and
+stencil's), copying each subresource array; a CLEAR beginning access is a full
 `ClearRenderTargetView(cpuDescriptor, Clear.ClearValue.Color, 0, nullptr)`, or one `ClearDepthStencilView` with
 D3D12_CLEAR_FLAG_DEPTH and/or _STENCIL from the two accesses; then `OMSetRenderTargets(NumRenderTargets, handles,
-FALSE, pDepthStencil && !(both planes NO_ACCESS) ? &pDepthStencil->cpuDescriptor : nullptr)`. EndRenderPass: unless
-`pass_flags_` has SUSPENDING_PASS, one ResolveSubresourceRegion per kept subresource parameter
-(`&SrcRect`, Dst/Src subresources, DstX/DstY, the access's Format and ResolveMode); then clear the kept state. Other
-access types do nothing.
+FALSE, pDepthStencil && !(both planes NO_ACCESS) ? &pDepthStencil->cpuDescriptor : nullptr)`. EndRenderPass: one
+ResolveSubresourceRegion per kept subresource parameter (`&SrcRect`, Dst/Src subresources, DstX/DstY, the access's
+Format and ResolveMode); then clear the kept state. Flags are ignored; other access types do nothing. A comment cites
+the spec's Suspend and Resume section for why the flags change nothing.
 
 - [ ] **Step 5: Green**
 
-Run: Task 1 Step 7. Expected: every row so far `ok`, native and loopback.
+Run: Task 1 Step 7. Expected: every row so far `ok`, native and loopback. Then one mutation natively: EndRenderPass
+skipping its resolves when Flags has SUSPENDING_PASS gives `suspend FAIL`; revert.
 
 - [ ] **Step 6: Commit**
 
