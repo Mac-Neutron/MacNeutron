@@ -27,6 +27,8 @@ Done when:
   Its second launch runs none of them.
 - The values Steam uses to remember a script ran (HasRunKey) are in the VM prefix's registry, where Proton's prefix
   keeps them.
+- When Steam uninstalls a game, its VM drive is deleted (§4.9; added at the maintainer's request, 2026-10-24). A
+  reinstall gets a new prefix and runs the scripts again, as with Proton.
 - The gates in §7 pass.
 
 ## 2. What Steam does
@@ -244,13 +246,17 @@ VM.
 - `eac-vm/guest/run-game.sh`: Temp, the marks, `mn_run`, the call. run-game.sh comes from the VM folder, not the
   image, so no image rebuild is needed.
 - One guest gate (§7).
+- §4.9:
+  - New: `Sources/MacNeutronCore/UninstalledDrives.swift`, with its tests.
+  - `SteamLocation.swift`: the `apps` lists of `libraryfolders.vdf`.
+  - `AppModel.swift`: the call after a refresh, and a `log` parameter so tests never write the real launcher.log.
 - Docs: P1-4's status and D-16's text (§5).
 
 ### 4.8 Not built (each a line in the log when met)
 
 - "Firewall": Wine has none. Under Proton, Valve's evaluator reaches Wine's firewall stubs, so the effect is the same.
-- "Run Process On Uninstall", and the removal of values on uninstall or verify: these are Steam's uninstall. The VM
-  state disk outlives it, so a reinstall finds its marks.
+- "Run Process On Uninstall", and the removal of values on uninstall or verify: these are Steam's uninstall. After
+  an uninstall the whole VM drive goes (§4.9), and the values with it.
 - `kvsignatures`: Valve's key isn't ours to check. Anyone who can change a script in the game folder can change the
   game's exe.
 - Steam's progress UI. The first-run toast covers the first launch; a step that becomes due after an update just delays
@@ -258,6 +264,39 @@ VM.
 - Language blocks, `process 2+`, `%ROOTDRIVE%`, other `Requirement_OS` keys: until a game needs them.
 - A game on macOS (`MACNEUTRON_VM=0`, or not in a library): no scripts. The i386 skip (Launcher.swift:113) stands, and
   its redistributables can't run there.
+
+### 4.9 When Steam uninstalls a game, its VM drive goes
+
+Linux Steam deletes `compatdata/<appid>`, the whole Proton prefix, when it uninstalls a game. Mac Steam deletes
+nothing. MacNeutron already lists an uninstalled game's Mac prefix under "Leftover data" (`OrphanPrefixes`), for the
+player to delete by hand, because it holds the profile and so the saves. Nothing touches the game's VM drive, which is
+the rest of its prefix: Windows, Program Files, ProgramData, the registry, installed redistributables, its TPM and its
+shader cache. That drive now goes on its own, as Proton's prefix does.
+
+- **Who and when.** MacNeutron.app, whenever it re-reads Steam's files: every minute, and when Steam starts or quits.
+  It runs off the main thread, after the snapshot (`AppModel.refresh`). The launcher only runs during launches, so it
+  can't notice an uninstall.
+- **What counts as uninstalled.** A drive `state/<id>.img` whose `<id>` is a Steam app ID (1 to 0x7fffffff) that meets
+  both conditions:
+  - It's in no library's `apps` list in `steamapps/libraryfolders.vdf`.
+  - It has no `appmanifest_<id>.acf` in any library.
+
+  `libraryfolders.vdf` keeps listing a game whose library is on a disconnected drive, so that game's drive stays.
+  When the file can't be read or parsed (Steam rewriting it), nothing is deleted that round. Drives with other names
+  are never touched: the dev VM's test drives (`fonts.img`), and `0.img`.
+- **A running VM is never touched.** The deletion holds the game's run lock `runs/<id>.lock` (`open` with
+  `O_EXLOCK | O_NONBLOCK`), the lock run-guest.sh takes with `lockf`. If it's held, the drive waits for the next round.
+  While the deletion runs, a launch of that game is refused, as a second VM is.
+- **What goes:** `state/<id>.img`, `state/<id>.tpm/`, `state/<id>.dxmt/`, `runs/<id>/` and `runs/<id>.lock`.
+- **What stays:**
+  - The Mac prefix `compatdata/<id>`, which is Mac Steam's and holds the saves: it's still in "Leftover data".
+  - The TPM's 32-byte key in the login keychain. It's macneutron-vm's item, and deleting it from the app could raise a
+    keychain prompt. The code will carry a `ponytail:` note.
+- **Told:** one summary line per drive in launcher.log, `deleted the game VM drive of app <id>: Steam uninstalled it
+  (<size>)`. There's no notification.
+- **What's lost:** what a game kept outside its profile, such as saves in its registry, ProgramData or
+  `C:\users\Public`. That's the same as Proton deleting its prefix. Steam Cloud and the profile on the Mac aren't
+  touched.
 
 ## 5. Proton parity
 
@@ -274,6 +313,9 @@ What differs, each for a macOS reason:
 - **The scripts run in the game's own VM boot, not in a `run` before it.** A second VM on the same state disk is
   refused. One boot also saves a first launch the cost of a second.
 - **No signature check, no progress UI** (§4.8).
+- **Uninstall deletes the VM drive but not the Mac prefix** (§4.9). The VM drive is the part of the prefix MacNeutron
+  owns, and it goes as Proton's prefix does. The Mac prefix is Mac Steam's, which deletes nothing; it stays in
+  "Leftover data" with its warning about saves.
 
 New D-16 text for the bridge spec's Amendment 2:
 
@@ -323,6 +365,14 @@ VM prefix. Step 4 (a notification for the i386 skip) is dropped: macOS runs no s
   - `MinimumHasRunValue 5` writes 5, and the step is skipped on the second boot.
   - A .NET 4.0 entry is skipped thanks to Proton's marks.
   - A Registry entry lands in Wow6432Node, and the second boot doesn't import it again.
+- **Swift, `UninstalledDrivesTests` and one `AppModelTests` row** (§4.9), with temp folders only. The tests check that:
+  - An uninstalled app's drive and its folders go.
+  - An installed app's drive stays.
+  - The drive of an app listed only in `libraryfolders.vdf` (its drive disconnected) stays.
+  - Nothing goes when `libraryfolders.vdf` is unreadable.
+  - Drives with other names stay, and so does `0.img`.
+  - A drive whose run lock is held stays.
+  - A refresh of the app deletes an uninstalled game's drive and logs it.
 - **Maintainer:** 3DMark Demo, launched from Steam.
   - First launch: launcher.log shows VC 2012 x86 and x64, dxsetup and FmSysInfo exiting 0. On the dev prefix,
     SystemInfo runs once more, because nothing set FmSysInfo.

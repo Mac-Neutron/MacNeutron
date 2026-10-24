@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A game launched in the VM gets its Steam install scripts run in its prefix before the game, as Linux Steam runs them through Proton.
+**Goal:** A game launched in the VM gets its Steam install scripts run in its prefix before the game, as Linux Steam runs them through Proton. A game Steam uninstalls loses its VM drive, as Linux Steam deletes the Proton prefix.
 
 **Architecture:**
 - The launcher reads Steam's app manifests and the scripts they list (`InstallScripts.swift`) and puts a plan into the
@@ -10,6 +10,8 @@
 - run-game.sh imports the scripts' registry entries when they change. It runs each "Run Process" step unless the
   prefix's registry already has its HasRunKey value, and marks the step after exit 0.
 - Proton's nine CommonRedist marks go into run-game.sh's one-time registry block.
+- MacNeutron.app's refresh deletes the VM drive of any app that Steam lists nowhere any more
+  (`UninstalledDrives.swift`).
 
 **Tech Stack:** Swift 6 (MacNeutronCore, swift-testing), POSIX sh in the guest (Fedora image: coreutils, grep, sed;
 **no awk**), Wine's `reg`, `cmd` and `msiexec`, llvm-mingw for the gate's test program.
@@ -30,6 +32,12 @@ Proton's marks in run-game.sh's registry block).
 - Proton's nine marks are exactly spec §2's: `.NET\4.8`, `4.7.2`, `4.6.2`, `4.5.2`, `4.0`, `4.0 Client Profile`, `3.5`,
   `3.5 Client Profile` and `XNA\4.0`. Each sits under `HKEY_LOCAL_MACHINE\Software\Wow6432Node\Valve\Steam\Apps\CommonRedist\`,
   with a value named after its last component, `dword:00000001`.
+- A VM drive is deleted only when all of these hold:
+  - Its app ID, from `state/<id>.img`, is in 1...0x7fffffff.
+  - The ID is in no `libraryfolders.vdf` `apps` list.
+  - It has no `appmanifest_<id>.acf` in any library.
+  - `libraryfolders.vdf` could be read.
+  - `runs/<id>.lock` isn't held.
 - Standing rules:
   - Commit locally with explicit paths only; never push.
   - Launcher tests use a temp `MACNEUTRON_VM_DIR` or `MACNEUTRON_VM=0`.
@@ -38,7 +46,7 @@ Proton's marks in run-game.sh's registry block).
   - Never open MacNeutron.app, and never start or quit Steam. The 3DMark loop exception allows
     `open steam://rungameid/231350` while Steam runs.
   - Write `~`, not the home path, in docs.
-- Lighter testing: each task runs its own tests. The full gates come once, in Task 4.
+- Lighter testing: each task runs its own tests. The full gates come once, in Task 5.
 
 ## Review Focus
 
@@ -393,11 +401,99 @@ git add eac-vm/guest/run-game.sh eac-vm/guest/win/exitcode.c eac-vm/guest/build-
 git commit -m "eac-vm/guest: run-game.sh runs a game's Steam install scripts, with Proton's CommonRedist marks" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-### Task 4: Docs, the milestone gates and the maintainer's 3DMark check
+### Task 4: An uninstalled game's VM drive is deleted (spec §4.9)
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-09-28-macneutron-steam-bridge-design.md`. Replace D-16 (≈ line 179) with spec
-  §5's text, verbatim.
+- Create: `Sources/MacNeutronCore/UninstalledDrives.swift`
+- Create: `Tests/MacNeutronCoreTests/UninstalledDrivesTests.swift`
+- Modify: `Sources/MacNeutronCore/SteamLocation.swift` (next to `installedAppIDs()`)
+- Modify: `Sources/MacNeutronApp/AppModel.swift`. `init` gains `log: LauncherLog = .standard`, and `refresh()` gains the
+  call.
+- Test: `Tests/MacNeutronCoreTests/AppModelTests.swift`
+
+**Interfaces:**
+- Consumes: `SteamLocation.libraries()`, `SteamLocation.installedAppIDs()`, `KeyValues.parse`,
+  `OrphanPrefixes.size(of:)` for the folders' size, `LauncherLog.summary`.
+- Produces:
+
+```swift
+extension SteamLocation {
+    /// The app IDs in every library's `apps` list in steamapps/libraryfolders.vdf, a library on a disconnected drive
+    /// included. Nil when the file can't be read or parsed.
+    public func listedAppIDs() -> Set<UInt32>?
+}
+/// Spec 2026-10-24-macneutron-install-scripts-design §4.9: Steam uninstalled a game, so its VM drive goes.
+public enum UninstalledDrives {
+    /// Deletes the drive (state/<id>.img, .tpm/, .dxmt/; runs/<id>/, runs/<id>.lock) of every app Steam lists
+    /// nowhere, except one whose VM runs. Returns one launcher.log line per drive deleted.
+    public static func remove(vm: URL, steam: SteamLocation) -> [String]
+}
+```
+
+The core tests build two temp folders:
+- A Steam root with `steamapps/libraryfolders.vdf`. Its library "0" lists `apps` 231350 and 555; 555 is listed but has
+  no manifest, as if its drive were disconnected. There's also `steamapps/appmanifest_231350.acf`.
+- A VM folder with `state/231350.img`, `state/555.img`, `state/999.img`, `state/0.img`, `state/fonts.img`,
+  `state/999.tpm/id`, `state/999.dxmt/x`, `runs/999/console.log` and `runs/999.lock`.
+
+- [ ] **Step 1: Write the failing tests**
+
+- `anUninstalledGamesDriveGoes`:
+  - `remove` deletes 999's five paths, and leaves `231350.img`, `555.img`, `0.img` and `fonts.img`.
+  - It returns one line, which starts with `"deleted the game VM drive of app 999: Steam uninstalled it ("`.
+- `nothingGoesWithoutLibraryFolders`: with `libraryfolders.vdf` missing, then holding `"libraryfolders" {`, `remove`
+  returns `[]` and every drive stays.
+- `aRunningVMsDriveStays`:
+  - With the test holding `runs/999.lock` (`open(path, O_RDONLY | O_EXLOCK)`), `remove` returns `[]` and 999 stays.
+  - After the test closes the file, a second `remove` deletes 999.
+- `listedAppIDsReadsEveryLibrary` (SteamLocationTests or the same file): two libraries' `apps` give the union. A
+  missing or unparsable file gives `nil`.
+- `aRefreshDeletesAnUninstalledGamesDrive` (AppModelTests): use `makeVMModel` with a temp `log:`.
+  - Put `state/999.img` in its `vmRoot`, and a `libraryfolders.vdf` without 999 in its Steam root.
+  - After `await model.refresh()`, the drive is gone and the log's launcher.log has the line.
+
+- [ ] **Step 2: Run the tests to see them fail**
+
+Run: `swift test --filter "UninstalledDrivesTests|AppModelTests"`
+Expected: build failure, `cannot find 'UninstalledDrives' in scope`.
+
+- [ ] **Step 3: Implement**
+
+- `listedAppIDs()`: read `root/steamapps/libraryfolders.vdf` and collect the keys of every `libraryfolders/<n>/apps`
+  block.
+- `remove(vm:steam:)`:
+  - If `listedAppIDs()` is nil, return `[]`.
+  - For each `state/<digits>.img` whose ID is in 1...0x7fffffff, in neither `listedAppIDs()` nor `installedAppIDs()`:
+    - Open `runs/<id>.lock` with `O_RDONLY | O_CREAT | O_EXLOCK | O_NONBLOCK, 0o644`. If that fails, skip the drive.
+    - Otherwise, holding the lock, sum the sizes: the image's `totalFileAllocatedSize`, plus `OrphanPrefixes.size(of:)`
+      of `.tpm/`, `.dxmt/` and `runs/<id>/`.
+    - Remove the five paths (`try?`; missing ones are fine), then close the file.
+    - Return the line with `ByteCountFormatter.string(fromByteCount:countStyle: .file)`.
+  - Add a `ponytail:` comment: the TPM's keychain key stays (spec §4.9).
+- AppModel:
+  - Store `log`.
+  - At the end of `refresh()`, when `vmRoot` is set, run
+    `await Task.detached { UninstalledDrives.remove(vm: root, steam: steam) }.value`.
+  - Pass each returned line to `log.summary`.
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `swift test --filter "UninstalledDrivesTests|AppModelTests|SteamLocationTests"`
+Expected: all pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add Sources/MacNeutronCore/UninstalledDrives.swift Sources/MacNeutronCore/SteamLocation.swift Sources/MacNeutronApp/AppModel.swift Tests/MacNeutronCoreTests/UninstalledDrivesTests.swift Tests/MacNeutronCoreTests/AppModelTests.swift
+git commit -m "app: a game Steam uninstalled loses its VM drive, as Linux Steam deletes its Proton prefix" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+### Task 5: Docs, the milestone gates and the maintainer's 3DMark check
+
+**Files:**
+- Modify: `docs/superpowers/specs/2026-09-28-macneutron-steam-bridge-design.md`:
+  - Replace D-16 (≈ line 179) with spec §5's text, verbatim.
+  - Add a **D-35** after D-34 with spec §5's uninstall bullet.
 - Modify: `docs/superpowers/specs/2026-10-12-macneutron-proton-parity-design.md`. Add a status line under **P1-4**:
   steps 1 and 3 are replaced by the install-scripts spec, step 2 is its §4.6 in the VM prefix, and step 4 is dropped.
 
@@ -421,7 +517,7 @@ Expected: each prints `ok`.
 
 ```bash
 git add docs/superpowers/specs/2026-09-28-macneutron-steam-bridge-design.md docs/superpowers/specs/2026-10-12-macneutron-proton-parity-design.md docs/superpowers/plans/2026-10-24-macneutron-install-scripts.md
-git commit -m "docs: D-16 and P1-4 follow the install-scripts spec" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "docs: D-16, D-35 and P1-4 follow the install-scripts spec" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 - [ ] **Step 5: Hand the 3DMark check to the maintainer**
@@ -437,3 +533,6 @@ Expected (spec §7):
 - 3DMark's "EasyFMSI not installed" error is gone.
 - Steel Nomad: SUCCESS.
 - The second launch has no `install script` lines.
+- No uninstall is staged for this. The next time the maintainer uninstalls a game that ran in the VM, launcher.log
+  gets `deleted the game VM drive of app <id>` within a minute, and `state/<id>.img` is gone. Its compatdata stays in
+  "Leftover data".
