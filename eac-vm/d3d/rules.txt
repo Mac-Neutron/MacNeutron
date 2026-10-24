@@ -153,7 +153,7 @@ ID3D12CommandQueue::UpdateTileMappings refuse
 ID3D12CommandQueue::CopyTileMappings refuse
 ID3D12Device::GetResourceTiling refuse
 # And the ones DXMT answers E_NOTIMPL itself, whose arguments would need rules for nothing (tests/coverage.py's AS_DXMT).
-ID3D12Device::CreateSharedHandle refuse
+ID3D12Device::OpenSharedHandleByName refuse
 ID3D12Device3::OpenExistingHeapFromAddress refuse
 ID3D12Device5::CreateStateObject refuse
 ID3D12Device7::AddToStateObject refuse
@@ -244,6 +244,10 @@ ID3D12Device3::EnqueueMakeResident own
 ID3D12Device1::SetEventOnMultipleFenceCompletion own
 ID3D12Device1::SetEventOnMultipleFenceCompletion fences in count=fence_count
 ID3D12Device1::SetEventOnMultipleFenceCompletion values in count=fence_count
+# A fence's shared handles: the guest's own (guest/proxy.cpp, DXMT's d3d12_shared_fence.hpp), as a guest handle means
+# nothing to the host; a handle opens the fence's own proxy. No names (DXMT has none: OpenSharedHandleByName above).
+ID3D12Device::CreateSharedHandle special
+ID3D12Device::OpenSharedHandle special
 # Enhanced barriers: their groups' arrays sit in a union counted outside it, which the generator can't carry; the guest
 # hands ResourceBarrier the legacy barriers they mean, as DXMT does (its d3d12_barrier_legacy.hpp, guest/proxy.cpp).
 ID3D12GraphicsCommandList7::Barrier special

@@ -10,6 +10,7 @@
 #include "proxy.h"
 #include "formats.h"
 #include "d3d12_barrier_legacy.hpp" // DXMT's: enhanced barriers as legacy ones
+#include "d3d12_shared_fence.hpp"   // and a fence's shared handles
 #ifndef MN_D3D_LOOPBACK
 #include "wsi_window.hpp" // DXMT's own Win32 window code, built in (build-guest.sh): the window's changes, made here
 #endif
@@ -319,6 +320,17 @@ static UINT64 STDMETHODCALLTYPE completed_value(mn_proxy *This) {
     mn_d3d_p_ID3D12Fence_GetCompletedValue p = {};
     p.self = (uintptr_t)This;
     return mn_d3d_call(MN_D3D_ID_ID3D12Fence_GetCompletedValue, &p) ? 0 : p.ret;
+}
+
+// A fence's shared handles (specials): the guest's own, kept by DXMT's table (d3d12_shared_fence.hpp), as a guest handle
+// means nothing to the host. A handle opens the same proxy: its host fence and mirror slot are the fence's.
+static HRESULT STDMETHODCALLTYPE create_shared_handle(mn_proxy *, ID3D12DeviceChild *object, const SECURITY_ATTRIBUTES *,
+                                                      DWORD, LPCWSTR name, HANDLE *handle) {
+    return dxmt::ShareFence(object, name, handle);
+}
+
+static HRESULT STDMETHODCALLTYPE open_shared_handle(mn_proxy *, HANDLE handle, REFIID riid, void **object) {
+    return dxmt::OpenSharedFence(handle, riid, object);
 }
 
 // A CPU signal: complete at once, here too, before the host hears of it; it sets the value, lower too (M3 Task 5).
@@ -1926,6 +1938,8 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"ID3D12Fence::Signal", (const void *)fence_signal},
         {"ID3D12Fence::SetEventOnCompletion", (const void *)set_event},
         {"ID3D12Device1::SetEventOnMultipleFenceCompletion", (const void *)set_event_multiple},
+        {"ID3D12Device::CreateSharedHandle", (const void *)create_shared_handle},
+        {"ID3D12Device::OpenSharedHandle", (const void *)open_shared_handle},
         {"ID3D12Resource::Map", (const void *)map},
         {"ID3D12Object::SetName", (const void *)set_name},
         {"ID3D10Blob::GetBufferPointer", (const void *)blob_pointer},

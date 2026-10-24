@@ -19,7 +19,7 @@ import tempfile
 
 # Refused in the guest with the E_NOTIMPL native DXMT answers itself (rules.txt: "the ones DXMT answers E_NOTIMPL
 # itself"): the program gets what forwarding would give it (SMITE 2 calls OpenExistingHeapFromAddress, M3 Task 10).
-AS_DXMT = {'ID3D12Device::CreateSharedHandle', 'ID3D12Device3::OpenExistingHeapFromAddress',
+AS_DXMT = {'ID3D12Device::OpenSharedHandleByName', 'ID3D12Device3::OpenExistingHeapFromAddress',
            'ID3D12Device5::CreateStateObject', 'ID3D12Device7::AddToStateObject',
            # List3 to List7's methods behind caps DXMT reports off (rules.txt)
            'ID3D12GraphicsCommandList3::SetProtectedResourceSession', 'ID3D12GraphicsCommandList4::InitializeMetaCommand',
