@@ -265,6 +265,20 @@ static const char *shared() {
     return bad ? bad : "ok";
 }
 
+// IDXGIFactory4::EnumWarpAdapter answers an adapter (the first, as DXVK's): 3DMark's Steel Nomad wraps it unchecked.
+static const char *warp() {
+    IDXGIFactory4 *f = nullptr;
+    IDXGIAdapter1 *a = nullptr;
+    if (FAILED(CreateDXGIFactory2(0, __uuidof(IDXGIFactory4), (void **)&f))) return "FAIL factory";
+    HRESULT hr = f->EnumWarpAdapter(__uuidof(IDXGIAdapter1), (void **)&a);
+    f->Release();
+    if (FAILED(hr) || !a) return "FAIL EnumWarpAdapter";
+    DXGI_ADAPTER_DESC1 d = {};
+    hr = a->GetDesc1(&d);
+    a->Release();
+    return SUCCEEDED(hr) ? "ok" : "FAIL GetDesc1";
+}
+
 // dxgi.dll's export read from its export table, as NVIDIA Streamline's sl.interposer.dll does: code, not a forwarder
 // (whose RVA is its string's, inside the export directory), and a factory when called.
 static const char *raw_export() {
@@ -582,6 +596,7 @@ int main(int argc, char **argv) {
     printf("latency %s\n", latency(device, queue));
     printf("d3d11latency %s\n", d3d11_latency());
     printf("rawexport %s\n", raw_export());
+    printf("warp %s\n", warp());
     if (forward) printf("swapchain %s\n", own_answers(queue)), printf("shared %s\n", shared());
     else printf("swapchain untested: guest DXMT aborts on these\n");
     wmsize(queue);
