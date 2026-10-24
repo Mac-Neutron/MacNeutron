@@ -604,17 +604,22 @@ private func gameWithInstallScript(_ script: String) throws -> String {
             "Run Process" { "setup" { "HasRunKey" "HKEY_CURRENT_USER\\Software\\Game" "process 1" "%INSTALLDIR%\\setup.exe" } }
         }
         """#)
+    let registry = f.vm.appending(path: "runs/2437170/installscript.reg")
     _ = f.launcher.launch(["waitforexitandrun", exe], environment: f.env)
+    // The Registry entries go as a UTF-16 file in the run share (run-game.sh imports it when it changed).
+    let data = try Data(contentsOf: registry)
+    #expect(data.prefix(2) == Data([0xFF, 0xFE]))
+    #expect(String(data: data.dropFirst(2), encoding: .utf16LittleEndian)?.contains(#""v"="1""#) == true)
     _ = f.launcher.launch(["run", exe], environment: f.env)
     #expect(scripts.all.count == 2)
     let game = try #require(scripts.all.first), run = try #require(scripts.all.last)
     let body = try #require(game.range(of: "# run-game.sh"))
     #expect(game.range(of: "mn_install_script() {\n").map { $0.lowerBound < body.lowerBound } == true)
-    #expect(game.range(of: "MN_INSTALL_REG='").map { $0.lowerBound < body.lowerBound } == true)
-    #expect(game.contains(#"  mn_run 'HKEY_CURRENT_USER\Software\Game' 'setup' '1' '/mnt/games/Game' 'Z:\mnt\games\Game\setup.exe'"#
+    #expect(game.contains(#"  mn_run 'HKEY_CURRENT_USER\Software\Game' 'setup' '1' 'user.reg' 'Software\\Game' '"setup"' '/mnt/games/Game' 'Z:\mnt\games\Game\setup.exe'"#
                           + "\n"))
-    // Mac Steam never sends an install script's `run`: Proton's generic verb gets none.
-    #expect(!run.contains("mn_install_script") && !run.contains("MN_INSTALL_REG"))
+    // Mac Steam never sends an install script's `run`: Proton's generic verb gets none, and no earlier registry file.
+    #expect(!run.contains("mn_install_script"))
+    #expect(!FileManager.default.fileExists(atPath: registry.path(percentEncoded: false)))
 }
 
 @Test func installScriptResultsReachLauncherLog() throws {

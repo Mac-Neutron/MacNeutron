@@ -265,9 +265,17 @@ public struct Launcher: Sendable {
             // runs them, so run-game.sh does, in the game's prefix before the game, and says how each step went.
             let installScripts = request.verb == .waitforexitandrun
                 ? InstallScripts.plan(steamapps: URL(filePath: library, directoryHint: .isDirectory).deletingLastPathComponent(),
-                                      appID: context.appID)
+                                      appID: context.appID,
+                                      gameFolder: MicroVM.gameFolder(guest))
                 : InstallScripts()
             for note in installScripts.notes { log.append("install script \(context.appID): \(note)") }
+            // Their Registry entries, which run-game.sh imports when they changed: none from an earlier run.
+            let registry = share.appending(path: "installscript.reg")
+            if installScripts.registry.isEmpty {
+                try? FileManager.default.removeItem(at: registry)
+            } else {
+                try installScripts.registryFile.write(to: registry)
+            }
             let installResults = share.appending(path: "traces/installscript.log")
             try? FileManager.default.removeItem(at: installResults)  // an earlier run's
             let script = try vm.script(verb: request.verb, appID: context.appID, guest: guest,

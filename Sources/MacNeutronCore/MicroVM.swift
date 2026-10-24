@@ -152,11 +152,17 @@ extension MicroVM {
         do { _ = try fm.contentsOfDirectory(atPath: documents) } catch { throw UserShareError.documentsUnreadable(documents) }
         var shares = [UserShare(tag: "profile", host: profile, guest: guestProfile),
                       UserShare(tag: "documents", host: documents, guest: documents)]
-        let inGames = guest.hasPrefix("/mnt/games/") ? guest.dropFirst("/mnt/games/".count) : ""
-        if inGames.contains("/"), let folder = inGames.split(separator: "/").first {
+        if let folder = gameFolder(guest) {
             shares.append(UserShare(tag: "game", host: library + "/" + folder, guest: "/mnt/games/" + folder))
         }
         return shares
+    }
+
+    /// The game's own folder in its library (its writable share), from its path in the guest; nil for a file at the
+    /// library's top.
+    static func gameFolder(_ guest: String) -> String? {
+        let inGames = guest.hasPrefix("/mnt/games/") ? guest.dropFirst("/mnt/games/".count) : ""
+        return inGames.contains("/") ? inGames.split(separator: "/").first.map(String.init) : nil
     }
 
     /// The run share's `mounts`: a `<tag> <guest path>` line per share, read by mn-runner.

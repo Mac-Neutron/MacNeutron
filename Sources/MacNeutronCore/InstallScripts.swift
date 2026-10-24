@@ -16,35 +16,45 @@ struct InstallScripts: Equatable {
         /// Its Windows path, ending .exe, .cmd, .bat or .msi.
         let process: String
         let arguments: [String]
+
+        /// The prefix's registry file that keeps `key`, and `key` (from its hive down) and `name` as Wine writes them
+        /// there: what run-game.sh's mn_hasrun looks for, with fixed strings.
+        var file: String { key.hasPrefix(#"HKEY_LOCAL_MACHINE\"#) ? "system.reg" : "user.reg" }
+        var fileKey: String { InstallScripts.wineEscaped(String(key.drop { $0 != "\\" }.dropFirst()), escaping: "[]") }
+        var fileName: String { "\"" + InstallScripts.wineEscaped(name, escaping: "\"") + "\"" }
     }
 
-    /// REGEDIT4 text of every Registry entry, "" when none.
+    /// The Registry entries as a "Windows Registry Editor Version 5.00" text, "" when none.
     var registry = ""
+    /// `registry` as run-game.sh imports it (the run share's installscript.reg): UTF-16LE with its byte-order mark,
+    /// which Wine's reg import reads whatever the characters (a REGEDIT4 file it reads in the ANSI code page).
+    var registryFile: Data { Data([0xFF, 0xFE]) + Data(registry.utf16.flatMap { [UInt8($0 & 0xFF), UInt8($0 >> 8)] }) }
     var runs: [Run] = []
     /// One per thing skipped, for launcher.log.
     var notes: [String] = []
 
-    /// The plan as the guest's launch script has it, in front of run-game.sh: the registry text as MN_INSTALL_REG,
-    /// the runs as mn_install_script's mn_run calls, every word single-quoted (nothing from a script is parsed as
-    /// shell). "" with nothing to do; no function without runs (an empty one is a syntax error).
+    /// The runs as the guest's launch script has them, in front of run-game.sh: mn_install_script's mn_run calls,
+    /// every word single-quoted (nothing from a script is parsed as shell). "" without runs (an empty function is a
+    /// syntax error); the registry goes as a file (`registryFile`).
     var shell: String {
-        var out = registry.isEmpty ? "" : "MN_INSTALL_REG=\(MicroVM.quoted(registry))\n"
-        if !runs.isEmpty {
-            out += "mn_install_script() {\n"
-            for run in runs {
-                let words = [run.key, run.name, String(run.minimum), run.folder, run.process] + run.arguments
-                out += "  mn_run " + words.map(MicroVM.quoted).joined(separator: " ") + "\n"
-            }
-            out += "}\n"
+        guard !runs.isEmpty else { return "" }
+        var out = "mn_install_script() {\n"
+        for run in runs {
+            let words = [run.key, run.name, String(run.minimum), run.file, run.fileKey, run.fileName, run.folder,
+                         run.process] + run.arguments
+            out += "  mn_run " + words.map(MicroVM.quoted).joined(separator: " ") + "\n"
         }
-        return out
+        return out + "}\n"
     }
 
     /// The game's scripts and those of the shared depots it uses (dependencies first; Steam's order is undocumented).
-    /// Nothing for a game without an app manifest in `steamapps` (a launch from outside Steam).
-    static func plan(steamapps: URL, appID: String) -> InstallScripts {
+    /// Nothing for a game without an app manifest in `steamapps` (a launch from outside Steam). `gameFolder`, the folder
+    /// the game was launched from, is its own scripts' folder and %INSTALLDIR% (the share that's writable in the VM),
+    /// whatever its manifest's `installdir` says.
+    static func plan(steamapps: URL, appID: String, gameFolder: String? = nil) -> InstallScripts {
         var result = InstallScripts()
-        guard let game = Manifest(steamapps: steamapps, appID: appID) else { return result }
+        guard var game = Manifest(steamapps: steamapps, appID: appID) else { return result }
+        if let gameFolder { game.installdir = gameFolder }
         var scripts: [(app: Manifest, path: String)] = []
         var owners: [String: Manifest?] = [:]
         for (depot, owner) in game.shared {
@@ -61,13 +71,13 @@ struct InstallScripts: Equatable {
         for (app, path) in scripts {
             result.add(script: path, of: app, steamapps: steamapps, blocks: &blocks, seen: &seen)
         }
-        if !blocks.isEmpty { result.registry = "REGEDIT4\n\n" + blocks.joined(separator: "\n") }
+        if !blocks.isEmpty { result.registry = "Windows Registry Editor Version 5.00\n\n" + blocks.joined(separator: "\n") }
         return result
     }
 
     /// An app's `appmanifest_<id>.acf`: its folder in steamapps/common, its scripts by depot, its shared depots' owners.
     private struct Manifest {
-        let installdir: String
+        var installdir: String
         let scripts: [(depot: String, path: String)]
         let shared: [(depot: String, owner: String)]
 
@@ -90,10 +100,12 @@ struct InstallScripts: Equatable {
                               seen: inout Set<String>) {
         let name = app.installdir + "/" + path.replacingOccurrences(of: "\\", with: "/")
         let file = steamapps.appending(path: "common/" + name)
-        guard var text = try? String(contentsOf: file, encoding: .utf8) else {
-            notes.append("\(name): not found")
-            return
+        guard FileManager.default.fileExists(atPath: file.path(percentEncoded: false)) else {
+            return notes.append("\(name): not found")
         }
+        // UTF-8, else a Windows code page's (Steam's parser takes bytes as they come)
+        guard var text = (try? String(contentsOf: file, encoding: .utf8)) ?? (try? String(contentsOf: file, encoding: .windowsCP1252))
+        else { return notes.append("\(name): unreadable (neither UTF-8 nor Windows-1252)") }
         if text.hasPrefix("\u{FEFF}") { text.removeFirst() }
         guard let root = (try? KeyValues.parse(text))?.node(at: ["InstallScript"]) else {
             notes.append("\(name): not an install script Steam's parser reads")
@@ -145,6 +157,7 @@ struct InstallScripts: Equatable {
 
     private mutating func addRegistry(_ node: KVNode, script: String, installdir: String, blocks: inout [String]) {
         let path = KeyValues.unescape(node.key)
+        guard !path.contains(where: \.isNewline) else { return notes.append("\(script): a key on several lines isn't applied") }
         guard let key = Self.registryKey(path) else { return notes.append("\(script): \(path) isn't HKLM or HKCU") }
         var lines: [String] = []
         for type in node.children {
@@ -221,9 +234,10 @@ struct InstallScripts: Equatable {
         return (out, nil)
     }
 
-    /// A Windows path's folder in the guest: `Z:\a\b\x.exe` is /a/b, `C:\a\x.exe` the prefix's drive_c/a.
+    /// A Windows path's folder in the guest: `Z:\a\b\x.exe` is /a/b, `C:\a\x.exe` the prefix's drive_c/a, and a bare
+    /// program (msiexec.exe), which Windows finds in its system folder, system32.
     private static func folder(of process: String) -> String? {
-        guard let cut = process.lastIndex(of: "\\") else { return nil }
+        guard let cut = process.lastIndex(of: "\\") else { return "/home/mn/pfx/drive_c/windows/system32" }
         let folder = process[..<cut]
         let rest = folder.dropFirst(2).replacingOccurrences(of: "\\", with: "/")
         switch folder.prefix(2).lowercased() {
@@ -264,6 +278,29 @@ struct InstallScripts: Equatable {
         current += String(repeating: "\\", count: backslashes)
         if started { result.append(current) }
         return result
+    }
+
+    /// A name as Wine's server writes it in the prefix's registry files (server/registry.c dump_strW): `\` and the
+    /// `escaping` characters get a backslash, a control character its C or octal escape, anything past ASCII \x and
+    /// its UTF-16 unit in hex, four digits when an ASCII hex digit follows.
+    static func wineEscaped(_ text: String, escaping: String) -> String {
+        let units = Array(text.utf16), controls = Array(".......abtnvfr.............e....")
+        var out = ""
+        for (index, unit) in units.enumerated() {
+            let next = index + 1 < units.count ? units[index + 1] : nil
+            func isNext(_ test: (Character) -> Bool) -> Bool { next.map { $0 < 128 && test(Character(UnicodeScalar(UInt8($0)))) } ?? false }
+            if unit > 127 {
+                out += String(format: isNext(\.isHexDigit) ? "\\x%04x" : "\\x%x", UInt32(unit))
+            } else if unit < 32 {
+                if controls[Int(unit)] != "." { out += "\\" + String(controls[Int(unit)]) }
+                else { out += String(format: isNext { ("0"..."7").contains($0) } ? "\\%03o" : "\\%o", UInt32(unit)) }
+            } else {
+                let character = Character(UnicodeScalar(UInt8(unit)))
+                if character == "\\" || escaping.contains(character) { out += "\\" }
+                out.append(character)
+            }
+        }
+        return out
     }
 
     /// A name or string as a .reg file writes it.

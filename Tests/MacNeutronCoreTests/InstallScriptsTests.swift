@@ -208,7 +208,7 @@ private let commonRedistKey = #"HKEY_LOCAL_MACHINE\Software\Wow6432Node\Valve\St
                           arguments: ["Futuremark_SystemInfo_5_93_1517.msi"]))
     #expect(result.runs == expected)
     #expect(result.registry == #"""
-        REGEDIT4
+        Windows Registry Editor Version 5.00
 
         [HKEY_LOCAL_MACHINE\Software\Wow6432Node\Futuremark\3DMark]
         "Install_Path"="Z:\\mnt\\games\\3DMark Demo"
@@ -378,7 +378,7 @@ private let commonRedistKey = #"HKEY_LOCAL_MACHINE\Software\Wow6432Node\Valve\St
         }
         """#)
     #expect(result.registry == #"""
-        REGEDIT4
+        Windows Registry Editor Version 5.00
 
         [HKEY_CURRENT_USER\Software\Game]
         "v"="a\"b\\c"
@@ -413,21 +413,83 @@ private let commonRedistKey = #"HKEY_LOCAL_MACHINE\Software\Wow6432Node\Valve\St
 
 @Test func theShellQuotesEveryWord() {
     var plan = InstallScripts()
-    plan.registry = "REGEDIT4\n\n[X]\n"
+    plan.registry = "Windows Registry Editor Version 5.00\n\n[X]\n"
     plan.runs = [.init(key: #"HKEY_CURRENT_USER\Software\T"#, name: "n", minimum: 1, folder: "/mnt/games/Jeu d'été",
                        process: #"Z:\mnt\games\Jeu d'été\setup.exe"#, arguments: ["/S", "it's"])]
     #expect(plan.shell == #"""
-        MN_INSTALL_REG='REGEDIT4
-
-        [X]
-        '
         mn_install_script() {
-          mn_run 'HKEY_CURRENT_USER\Software\T' 'n' '1' '/mnt/games/Jeu d'\''été' 'Z:\mnt\games\Jeu d'\''été\setup.exe' '/S' 'it'\''s'
+          mn_run 'HKEY_CURRENT_USER\Software\T' 'n' '1' 'user.reg' 'Software\\T' '"n"' '/mnt/games/Jeu d'\''été' 'Z:\mnt\games\Jeu d'\''été\setup.exe' '/S' 'it'\''s'
         }
 
         """#)
-    // Registry entries alone: no function (an empty one is a shell syntax error).
+    // Registry entries alone: no function (an empty one is a shell syntax error); they go as a file.
     plan.runs = []
-    #expect(plan.shell == "MN_INSTALL_REG='REGEDIT4\n\n[X]\n'\n")
+    #expect(plan.shell == "")
     #expect(InstallScripts().shell == "")
+}
+
+// Wine's reg import reads a REGEDIT4 file in the ANSI code page: the registry goes as UTF-16, where é survives.
+@Test func theRegistryGoesAsAUTF16File() {
+    var plan = InstallScripts()
+    plan.registry = "Windows Registry Editor Version 5.00\n\n[X]\n\"v\"=\"Jeu d'été\"\n"
+    #expect(plan.registryFile.prefix(2) == Data([0xFF, 0xFE]))
+    #expect(String(data: plan.registryFile.dropFirst(2), encoding: .utf16LittleEndian) == plan.registry)
+}
+
+// run-game.sh finds a step's value with fixed strings in system.reg or user.reg, as Wine's server writes them there
+// (server/registry.c dump_strW): `\` and a key's [ ] or a name's " escaped, anything past ASCII as \x and its UTF-16
+// unit, four digits when a hex digit follows.
+@Test func aHasRunValueIsLookedForAsWineWritesIt() {
+    let lm = InstallScripts.Run(key: #"HKEY_LOCAL_MACHINE\Software\Wow6432Node\MNTest\K[x]é"#, name: #"j"[é]\y0"#,
+                                minimum: 1, folder: "/", process: #"Z:\a.exe"#, arguments: [])
+    #expect(lm.file == "system.reg")
+    #expect(lm.fileKey == #"Software\\Wow6432Node\\MNTest\\K\[x\]\xe9"#)
+    #expect(lm.fileName == #""j\"[\xe9]\\y0""#)
+    let cu = InstallScripts.Run(key: #"HKEY_CURRENT_USER\SOFTWARE\Valve\Steam\Apps\231350"#, name: "é1\u{1}",
+                                minimum: 1, folder: "/", process: #"Z:\a.exe"#, arguments: [])
+    #expect(cu.file == "user.reg")
+    #expect(cu.fileKey == #"SOFTWARE\\Valve\\Steam\\Apps\\231350"#)
+    #expect(cu.fileName == #""\x00e91\1""#)
+}
+
+@Test func aBareProgramRunsFromSystem32() throws {
+    let result = try plan(script: runScript(#""msi" { "HasRunKey" "HKEY_CURRENT_USER\\Software\\T" "process 1" "msiexec.exe" "command 1" "/i x.msi" }"#))
+    #expect(result.runs.first?.folder == "/home/mn/pfx/drive_c/windows/system32")
+    #expect(result.runs.first?.process == "msiexec.exe")
+    #expect(result.runs.first?.arguments == ["/i", "x.msi"])
+}
+
+// %INSTALLDIR% is the folder the game was launched from, whose share is writable, even when the manifest names it
+// otherwise (an installdir renamed in an update).
+@Test func theGamesOwnFolderIsTheOneItWasLaunchedFrom() throws {
+    let steamapps = try makeTempDir().appending(path: "steamapps", directoryHint: .isDirectory)
+    try write(gameManifest("42", installdir: "Old Name", scripts: [("43", "installscript.vdf")]),
+              to: steamapps.appending(path: "appmanifest_42.acf"))
+    try write(runScript(#""s" { "HasRunKey" "HKEY_CURRENT_USER\\Software\\T" "process 1" "%INSTALLDIR%\\setup.exe" }"#),
+              to: steamapps.appending(path: "common/Game/installscript.vdf"))
+    let result = InstallScripts.plan(steamapps: steamapps, appID: "42", gameFolder: "Game")
+    #expect(result.runs.first?.process == #"Z:\mnt\games\Game\setup.exe"#)
+    #expect(result.runs.first?.folder == "/mnt/games/Game")
+}
+
+@Test func aWindows1252ScriptIsRead() throws {
+    let steamapps = try makeTempDir().appending(path: "steamapps", directoryHint: .isDirectory)
+    try write(gameManifest("42", installdir: "Game", scripts: [("43", "installscript.vdf")]),
+              to: steamapps.appending(path: "appmanifest_42.acf"))
+    let script = #""InstallScript" { "Registry" { "HKEY_CURRENT_USER\\Software\\Game" { "string" { "v" "Café" } } } }"#
+    let file = steamapps.appending(path: "common/Game/installscript.vdf")
+    try write("", to: file)
+    try #require(script.data(using: .windowsCP1252)).write(to: file)
+    let result = InstallScripts.plan(steamapps: steamapps, appID: "42")
+    #expect(result.registry.contains(#""v"="Café""#))
+    #expect(result.notes == [])
+    // Bytes no code page reads: unreadable, not missing.
+    try Data([0x22, 0x81, 0x22]).write(to: file)
+    #expect(InstallScripts.plan(steamapps: steamapps, appID: "42").notes.first?.contains("unreadable") == true)
+}
+
+@Test func aKeyOnSeveralLinesIsSkipped() throws {
+    let result = try plan(script: "\"InstallScript\" { \"Registry\" { \"HKEY_CURRENT_USER\\\\Software\\\\a\nb\" { \"string\" { \"v\" \"1\" } } } }")
+    #expect(result.registry == "")
+    #expect(result.notes.count == 1)
 }
