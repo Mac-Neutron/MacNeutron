@@ -1,7 +1,7 @@
 # Our Wine on x86-64 Linux: what each macOS patch does
 
 The guest Wine is the same tree as the macOS one: Wine 11.20 plus our series (`build/wine-arm64-src/wine`,
-branch `macneutron`, 42 commits over wine-11.20, 7298a818) plus `eac-vm/wine-patches` (Proton 11's EAC changes). Built
+branch `macneutron`, 43 commits over wine-11.20, 7298a818) plus `eac-vm/wine-patches` (Proton 11's EAC changes). Built
 with `--enable-archs=x86_64` for `x86_64-linux-gnu`, so every patch falls in one of four groups.
 
 **Compiled out (`__APPLE__` or `__aarch64__`/ARM64EC only).** The loader and memory work: e7ca11cc (loader link
@@ -18,7 +18,8 @@ wineserver uses its plain server-side sync. 97cb9aea (makedep) only matters with
 critical-section LockCount encoding), 26130284 (no wineboot wait window while a prefix is updated), 42321e57
 (WINEDEBUG read before init_startup_info drops argv[0]: a child crashed without a trace's lazy read) df0e5392
 (map_reserved_area skips a reserved area its aligned start passes: mtld3d's aligned reservations) and 21d6c56b (its
-top-down search starts at the lower limit) are
+top-down search starts at the lower limit) and patch 0043 (639f389b on the tree rebuilt 2026-10-23: a mount point,
+such as the games share's root, answers FSCTL_GET_REPARSE_POINT as the reparse point Wine calls it) are
 platform-neutral fixes. 3b389503 builds lsteamclient; the guest replaces its Unix half with the forwarder
 (`eac-vm/steam-forward`, plan 3b Task 5). d8b1c118 (a genuine steamclient64.dll's exports jump to lsteamclient.dll) is
 what SteamStub games need here too.

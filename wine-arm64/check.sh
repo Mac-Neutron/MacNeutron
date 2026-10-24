@@ -61,6 +61,8 @@ NEEDS_FEX="$NEEDS_FEX $LANES"
 # The batch's gated steps (batch Tasks 4-8): each needs the prefix with FEX; they run after the rest.
 BATCH="fex-vmd winetests ec-hook crt steamclient"
 STEPS="$STEPS $BATCH" NEEDS_PREFIX="$NEEDS_PREFIX $BATCH" NEEDS_FEX="$NEEDS_FEX $BATCH"
+# Wine patch 0043: a mount point (APFS's Preboot volume; Wine lists no /dev) answers FSCTL_GET_REPARSE_POINT as one.
+STEPS="$STEPS mountpoint" NEEDS_PREFIX="$NEEDS_PREFIX mountpoint" NEEDS_FEX="$NEEDS_FEX mountpoint"
 
 # The processes running the runtime's executables. Wine rewrites argv, so `pkill -f <path>` finds nothing; the kernel
 # knows the executable. The Rosetta tool folders' (the launcher, Wine and its server): g4-bench's, and the reference's
@@ -869,6 +871,7 @@ run_step() {
     ec-hook) step ec-hook 60 ec_hook_cmd ;;
     crt) step crt 300 crt_cmd ;;
     steamclient) step steamclient 120 steamclient_cmd; LC_ALL=C /usr/bin/grep -E '^(skip|info) ' "$WORK/steamclient.log" ;;
+    mountpoint) step mountpoint 60 exe_cmd x64-mountpoint mount 'Z:\System\Volumes\Preboot' dir 'Z:\System\Volumes' ;;
     *) die "no runner for $1" ;;
   esac
 }

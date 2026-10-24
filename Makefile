@@ -156,6 +156,7 @@ WA_FLAGS_x64-sync = -lsynchronization
 WA_FLAGS_arm64-xcall = -O2 -fno-builtin -lshlwapi
 WA_FLAGS_arm64-crt = -fno-builtin
 WA_FLAGS_x64-steamclient = -municode -lwintrust
+WA_FLAGS_x64-mountpoint = -municode
 # The media programs (video playback spec §8) built for x64 too, from the same source: games are x64, run under FEX.
 WA_MEDIA_X64 = $(patsubst wine-arm64/tests/arm64-media-%.c,build/wine-arm64-tests/x64-media-%.exe,\
 	$(wildcard wine-arm64/tests/arm64-media-*.c))
