@@ -61,6 +61,9 @@ NEEDS_FEX="$NEEDS_FEX $LANES"
 # The batch's gated steps (batch Tasks 4-8): each needs the prefix with FEX; they run after the rest.
 BATCH="fex-vmd winetests ec-hook crt steamclient"
 STEPS="$STEPS $BATCH" NEEDS_PREFIX="$NEEDS_PREFIX $BATCH" NEEDS_FEX="$NEEDS_FEX $BATCH"
+# DXMT 0131: a D3D12 swapchain's last Release frees it (its view over the window goes with it): d3d12_clear's last line.
+STEPS="$STEPS dxmt-release" NEEDS_PREFIX="$NEEDS_PREFIX dxmt-release" NEEDS_FEX="$NEEDS_FEX dxmt-release"
+NEEDS_DXMT="$NEEDS_DXMT dxmt-release"
 # Wine patch 0043: a mount point (APFS's Preboot volume; Wine lists no /dev) answers FSCTL_GET_REPARSE_POINT as one.
 STEPS="$STEPS mountpoint" NEEDS_PREFIX="$NEEDS_PREFIX mountpoint" NEEDS_FEX="$NEEDS_FEX mountpoint"
 
@@ -828,6 +831,12 @@ steamclient_cmd() {
   [ "$(dllmain_calls steamclient64.dll)" -ge 1 ] || { echo "FAIL steamclient: the builtin copy's DllMain didn't run"; return 1; }
 }
 
+dxmt_release_cmd() {
+  dxmt_run "$B/dxmt-tests/d3d12_clear.exe" 10 2> "$WORK/dxmt-release.err" | tr -d '\r' > "$WORK/dxmt-release.txt" || true
+  grep '^swapchain release' "$WORK/dxmt-release.txt" || { tail -n 3 "$WORK/dxmt-release.txt"; return 1; }
+  grep -qx 'swapchain release 0 0' "$WORK/dxmt-release.txt"
+}
+
 run_step() {
   case $1 in
     macos) step macos 10 macos_cmd ;;
@@ -871,6 +880,7 @@ run_step() {
     ec-hook) step ec-hook 60 ec_hook_cmd ;;
     crt) step crt 300 crt_cmd ;;
     steamclient) step steamclient 120 steamclient_cmd; LC_ALL=C /usr/bin/grep -E '^(skip|info) ' "$WORK/steamclient.log" ;;
+    dxmt-release) step dxmt-release 120 dxmt_release_cmd ;;
     mountpoint) step mountpoint 60 exe_cmd x64-mountpoint mount 'Z:\System\Volumes\Preboot' dir 'Z:\System\Volumes' ;;
     *) die "no runner for $1" ;;
   esac
