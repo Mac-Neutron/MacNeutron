@@ -69,28 +69,31 @@ WINEDLLOVERRIDES="mscoree,mshtml=" wineboot $up >/dev/null 2>&1
 # drawable has the game's size; the host window scales it). Read when the desktop starts: once per prefix, a restart.
 # And a crashing game ends: winedbg --auto prints its report and exits instead of waiting behind its crash window on
 # Xvfb (Proton's Wine sets ShowCrashDialog=0 in wine.inf's [Debugger]; the macOS prefix gets it from PrefixManager).
-# And Wine's TrueType fonts are registered by their names in Windows\Fonts (linked below), as Proton's prefix has them:
-# Wine registers them by their /opt path only, which Chromium 49 (3DMark's UI) skips, being outside Windows\Fonts; its
-# page process found no font at all and died at its first text.
+# And the fonts linked below are registered by their names in Windows\Fonts, Proton's default prefix's values: Wine
+# registers its own by their /opt path only, which Chromium 49 (3DMark's UI) skips, being outside Windows\Fonts; its
+# page process found no font at all (Blink asks for Times New Roman, Arial, Microsoft Sans Serif...) and died.
 if ! grep -q '^"EmulateModeset"="Y"' "$WINEPREFIX/user.reg" 2>/dev/null ||
    ! grep -q '^"ShowCrashDialog"=dword:00000000' "$WINEPREFIX/user.reg" 2>/dev/null ||
-   ! grep -q '^"Tahoma (TrueType)"="tahoma.ttf"' "$WINEPREFIX/system.reg" 2>/dev/null; then
+   ! grep -q '^"Arial (TrueType)"="arial.ttf"' "$WINEPREFIX/system.reg" 2>/dev/null; then
   wine reg add 'HKCU\Software\Wine\X11 Driver' /v EmulateModeset /d Y /f >/dev/null 2>&1
   wine reg add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f >/dev/null 2>&1
-  for e in Tahoma:tahoma Tahoma\ Bold:tahomabd Marlett:marlett Symbol:symbol Webdings:webdings Wingdings:wingding; do
-    wine reg add 'HKLM\Software\Microsoft\Windows NT\CurrentVersion\Fonts' /v "${e%:*} (TrueType)" /d "${e#*:}.ttf" /f \
-      >/dev/null 2>&1
-  done
+  { printf 'REGEDIT4\n\n[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts]\n'
+    for e in Arial:arial Arial\ Bold:arialbd Courier\ New:cour Courier\ New\ Bold:courbd Times\ New\ Roman:times \
+             Tahoma:tahoma Tahoma\ Bold:tahomabd Marlett:marlett Symbol:symbol Webdings:webdings Wingdings:wingding; do
+      printf '"%s (TrueType)"="%s.ttf"\n' "${e%:*}" "${e#*:}"
+    done; } > /tmp/mn-fonts.reg
+  wine reg import 'Z:\tmp\mn-fonts.reg' >/dev/null 2>&1
   wineserver -k
 fi
 # MACNEUTRON_VM_D3D=forward (the launcher's): the game's Direct3D through mnd3d.dll to the host's native DXMT.
 [ -f /opt/mn-wine/lib/wine/mn-d3d/prefix.sh ] && . /opt/mn-wine/lib/wine/mn-d3d/prefix.sh
-# Wine's TrueType fonts in the prefix's Windows\Fonts, as Proton links them (proton's create_fonts_symlinks), a font of
-# the game's own left alone: what the registry names above (and a program loading fonts by file from there) finds.
+# Proton's Windows-named fonts (eac-vm/fonts) and Wine's own TrueType fonts in the prefix's Windows\Fonts, as Proton
+# links them (its create_fonts_symlinks), a font of the game's own left alone: what the registry names above (and a
+# program loading fonts by file from there) finds.
 for F in "$W"/[Ff]onts; do break; done
 [ -d "$F" ] || F=$W/Fonts
 mkdir -p "$F"
-for f in /opt/mn-wine/share/wine/fonts/*.tt[fc]; do
+for f in /opt/mn-wine/share/fonts/*.tt[fc] /opt/mn-wine/share/wine/fonts/*.tt[fc]; do
   [ -f "$f" ] || continue
   [ -e "$F/${f##*/}" ] && [ ! -L "$F/${f##*/}" ] || ln -sf "$f" "$F/${f##*/}"
 done

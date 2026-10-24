@@ -1,0 +1,5 @@
+# fontforge -script generatefont.pe <source .sfd> <PostScript name> <family> <full name> <out .ttf>: the font under
+# those names, as Proton's fonts/scripts/generatefont.pe makes its fonts.
+Open($1)
+SetFontNames($2, $3, $4)
+Generate($5)

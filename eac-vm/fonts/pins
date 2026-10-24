@@ -1,0 +1,5 @@
+# Proton's Windows-named fonts (its Makefile.in "Fonts"), built by eac-vm/fonts/build.sh from the Liberation fonts at
+# Proton's submodule commit (fonts/liberation-fonts, SIL OFL 1.1). SHA-256 recorded at first download, 2026-10-23.
+LIBERATION_COMMIT=4b0192046158094654e865245832c66d2104219e
+LIBERATION_URL=https://github.com/liberationfonts/liberation-fonts/archive/$LIBERATION_COMMIT.tar.gz
+LIBERATION_SHA256=fa7bdde21ad476b24786f5563b468fd0dd4c5dd4b9ecf48a20f17b13d84f26a8

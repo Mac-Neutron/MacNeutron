@@ -21,7 +21,7 @@ sudo sysctl -q --system
 grep -q ip_resolve /etc/dnf/dnf.conf || echo ip_resolve=4 | sudo tee -a /etc/dnf/dnf.conf >/dev/null
 
 sudo dnf -y -q install clang lld llvm cmake ninja-build git python3 python3-setuptools gcc-c++ \
-  fex-emu fex-emu-rootfs-fedora fex-emu-filesystem erofs-fuse wget \
+  fex-emu fex-emu-rootfs-fedora fex-emu-filesystem erofs-fuse wget fontforge patch \
   sway xorg-x11-server-Xwayland foot dbus-x11 mesa-dri-drivers mesa-vulkan-drivers
 sudo dnf -y -q remove 'qemu-user-static*' || true
 

@@ -3,7 +3,7 @@
 # tree's sources, each stamped (.mn-source) with what it was built from (stamps.sh), which release.sh checks against
 # the trees its source archive carries. Needs the builder (eac-vm/builder.sh start); Wine's x86-64 build is most of it.
 # dxmt needs MACNEUTRON_SIGN_IDENTITY (eac-vm/dxmt/build.sh signs DXMT's NVIDIA DLLs with it); d3d needs dxmt's build.
-#   guest-stages.sh [wine|forwarder|dxmt|d3d|fex]...   all five, in that order, by default
+#   guest-stages.sh [wine|forwarder|dxmt|d3d|fonts|fex]...   all six, in that order, by default
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
@@ -14,7 +14,7 @@ stamp() { sh "$ROOT/eac-vm/image/stamps.sh" "$1"; }
 $B sync "$ROOT/eac-vm/sysroot" mn-sysroot > /dev/null
 # The guest's PGO profile (pgo/guest.profdata), which builder-side builds use under the p profile.
 [ ! -f "$ROOT/pgo/guest.profdata" ] || $B sync "$ROOT/pgo" pgo > /dev/null
-for stage in ${*:-wine forwarder dxmt d3d fex}; do
+for stage in ${*:-wine forwarder dxmt d3d fonts fex}; do
   echo "guest-stages: $stage" >&2
   case $stage in
     wine)  # eac-vm/wine/build.sh in the builder, from eac-vm/wine/sync.sh's copies: the x86-64 build, the 32-bit one
@@ -45,10 +45,20 @@ for stage in ${*:-wine forwarder dxmt d3d fex}; do
       cp "$ROOT/eac-vm/d3d/guest/prefix.sh" "$W/d3d-guest-stage/"
       stamp d3d > "$W/d3d-guest-stage/.mn-source"
       $B sync "$W/d3d-guest-stage" mn-d3d-guest > /dev/null ;;
+    fonts)  # Proton's Windows-named fonts (eac-vm/fonts/build.sh in the builder), from the pinned Liberation sources
+      . "$ROOT/eac-vm/fonts/pins"
+      die() { echo "guest-stages: $*" >&2; exit 1; }
+      FETCH_TAG=fonts; . "$ROOT/dxmt/fetch.sh"
+      mkdir -p "${BUILD_DIR:-$ROOT/build}/fonts-src"
+      fetch "$LIBERATION_URL" "${BUILD_DIR:-$ROOT/build}/fonts-src/liberation-fonts-$LIBERATION_COMMIT.tar.gz" "$LIBERATION_SHA256"
+      rm -rf "$W/fonts-stage"; cp -R "$ROOT/eac-vm/fonts" "$W/fonts-stage"
+      cp "${BUILD_DIR:-$ROOT/build}/fonts-src/liberation-fonts-$LIBERATION_COMMIT.tar.gz" "$W/fonts-stage/"
+      $B sync "$W/fonts-stage" mn-fonts > /dev/null
+      $B ssh "set -e; sh mn-fonts/build.sh" ;;
     fex)  # eac-vm/image/build-fex.sh in the builder, from fex-linux
       $B sync "$W/fex-linux" fex-linux > /dev/null
       $B sync "$ROOT/eac-vm/image" mn-image > /dev/null
       $B ssh "set -e; sh mn-image/build-fex.sh > /dev/null; echo '$(stamp fex)' > fex-linux/build/Bin/.mn-source" ;;
-    *) echo "usage: guest-stages.sh [wine|forwarder|dxmt|d3d|fex]..." >&2; exit 2 ;;
+    *) echo "usage: guest-stages.sh [wine|forwarder|dxmt|d3d|fonts|fex]..." >&2; exit 2 ;;
   esac
 done
