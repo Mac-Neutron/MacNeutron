@@ -1,7 +1,7 @@
-From 05b82d7ca2cfd02ff22b11e66b2dd1e86b488b88 Mon Sep 17 00:00:00 2001
+From 0db5afe715ae6e3299da8722cd8f38e5ff9aefd7 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Fri, 16 Oct 2026 22:12:54 -0400
-Subject: [PATCH] devices: a TPM 2.0 over TIS MMIO, run by a host backend
+Subject: [PATCH 4/9] devices: a TPM 2.0 over TIS MMIO, run by a host backend
 
 MacNeutron's microVM will need a TPM 2.0 for anti-cheat that asks for one.
 TpmDevice (krun_tpm_device_new, libkrun_tpm.h) puts a TPM behind the TCG PC
@@ -14,6 +14,7 @@ a failed one answers TPM_RC_FAILURE.
 AttachContext::register_platform puts a non-virtio MMIO device on the bus with
 a device-tree node (macOS, aarch64).
 ---
+ .../libkrun-via-cdylib-weak/ffier-krun.json   |  61 +++
  include/libkrun.h                             |  20 +-
  include/libkrun_tpm.h                         |  28 ++
  src/devices/src/fdt/aarch64.rs                |  14 +
@@ -23,33 +24,120 @@ a device-tree node (macOS, aarch64).
  src/libkrun/src/api/device_builders.rs        | 113 ++++++
  src/libkrun/src/api/mod.rs                    |   6 +
  .../src/vmm/device_manager/hvf/mmio.rs        |  27 +-
- 9 files changed, 587 insertions(+), 3 deletions(-)
+ 10 files changed, 648 insertions(+), 3 deletions(-)
  create mode 100644 include/libkrun_tpm.h
  create mode 100644 src/devices/src/legacy/tpm_tis.rs
 
+diff --git a/bindings/libkrun-via-cdylib-weak/ffier-krun.json b/bindings/libkrun-via-cdylib-weak/ffier-krun.json
+index c727d433..7e125131 100644
+--- a/bindings/libkrun-via-cdylib-weak/ffier-krun.json
++++ b/bindings/libkrun-via-cdylib-weak/ffier-krun.json
+@@ -320,6 +320,14 @@
+         }
+       }
+     },
++    "TpmDevice": {
++      "kind": {
++        "handle": {
++          "c_name": "KrunTpmDevice"
++        }
++      },
++      "type_tag": 16777243
++    },
+     "TsiFlags": {
+       "kind": {
+         "bitflags": {
+@@ -2541,6 +2549,47 @@
+         }
+       ],
+       "cfg": "feature = \"input\""
++    },
++    {
++      "name": "TpmDevice",
++      "destroy_ffi_name": "krun_tpm_device_destroy",
++      "is_builder_type": false,
++      "methods": [
++        {
++          "name": "new",
++          "doc": [
++            " Create from a backend vtable.",
++            "",
++            " # Safety",
++            "",
++            " `backend` must point to a valid `struct krun_tpm_backend` of at least `backend_size` bytes. It is copied; its",
++            " userdata must outlive the VM."
++          ],
++          "receiver": "none",
++          "params": [
++            {
++              "name": "backend",
++              "param_kind": "regular",
++              "type": "*const core::ffi::c_void"
++            },
++            {
++              "name": "backend_size",
++              "param_kind": "regular",
++              "type": "usize"
++            }
++          ],
++          "ret": {
++            "return_kind": "result",
++            "ok": {
++              "type": "TpmDevice"
++            },
++            "err_type": "VmmError",
++            "c_convention": "handle_or_null"
++          },
++          "ffi_name": "krun_tpm_device_new"
++        }
++      ],
++      "cfg": "all(target_os = \"macos\", target_arch = \"aarch64\")"
+     }
+   ],
+   "errors": [
+@@ -3197,6 +3246,18 @@
+       ],
+       "methods": []
+     },
++    {
++      "trait_name": "AttachDevice",
++      "struct_name": "TpmDevice",
++      "lifetimes": [
++        "a"
++      ],
++      "trait_lifetime_args": [
++        "a"
++      ],
++      "methods": [],
++      "cfg": "all(target_os = \"macos\", target_arch = \"aarch64\")"
++    },
+     {
+       "trait_name": "Error",
+       "struct_name": "VmmError",
 diff --git a/include/libkrun.h b/include/libkrun.h
-index 2139fe1e..17962fed 100644
+index d21e1cc2..397f40be 100644
 --- a/include/libkrun.h
 +++ b/include/libkrun.h
-@@ -28,14 +28,15 @@ typedef void* KrunVhostUserDevice;
+@@ -29,7 +29,8 @@ typedef void* KrunVhostUserDevice;
  typedef void* KrunDisplayBackend;
  typedef void* KrunGpuDevice;
  typedef void* KrunInputDevice;
 -typedef void* KrunAttachDevice; /* KrunFsDevice | KrunConsoleDevice | KrunBlockDevice | KrunNetDevice | KrunGpuDevice | KrunInputDevice | KrunVhostUserDevice | KrunBalloonDevice | KrunRngDevice | KrunVsockDevice */
 +typedef void* KrunTpmDevice;
 +typedef void* KrunAttachDevice; /* KrunFsDevice | KrunConsoleDevice | KrunBlockDevice | KrunNetDevice | KrunGpuDevice | KrunInputDevice | KrunVhostUserDevice | KrunBalloonDevice | KrunRngDevice | KrunVsockDevice | KrunTpmDevice */
+ typedef void* KrunDeviceManager; /* KrunMmioDeviceManager | KrunPciDeviceManager */
  typedef void* KrunError; /* KrunVmmError | KrunVtableError */
  typedef void* KrunPushStr; /* KrunVtablePushStr */
- 
+@@ -37,7 +38,7 @@ typedef void* KrunPushStr; /* KrunVtablePushStr */
  #ifndef KRUN_PRIMITIVES_DEFINED
  #define KRUN_PRIMITIVES_DEFINED
  
--typedef void* KrunObject; /* KrunVmmError | KrunMmioDeviceManager | KrunFsDevice | KrunConsoleDevice | KrunConsoleBuilder | KrunFsOverlay | KrunPayload | KrunNitroConfig | KrunVmmBuilder | KrunVmm | KrunVmmHandle | KrunBalloonDevice | KrunRngDevice | KrunVsockDevice | KrunBlockDevice | KrunNetDevice | KrunDisplayInfoBuilder | KrunVhostUserDevice | KrunDisplayBackend | KrunGpuDevice | KrunInputDevice */
-+typedef void* KrunObject; /* KrunVmmError | KrunMmioDeviceManager | KrunFsDevice | KrunConsoleDevice | KrunConsoleBuilder | KrunFsOverlay | KrunPayload | KrunNitroConfig | KrunVmmBuilder | KrunVmm | KrunVmmHandle | KrunBalloonDevice | KrunRngDevice | KrunVsockDevice | KrunBlockDevice | KrunNetDevice | KrunDisplayInfoBuilder | KrunVhostUserDevice | KrunDisplayBackend | KrunGpuDevice | KrunInputDevice | KrunTpmDevice */
+-typedef void* KrunObject; /* KrunVmmError | KrunMmioDeviceManager | KrunPciDeviceManager | KrunFsDevice | KrunConsoleDevice | KrunConsoleBuilder | KrunFsOverlay | KrunPayload | KrunNitroConfig | KrunVmmBuilder | KrunVmm | KrunVmmHandle | KrunBalloonDevice | KrunRngDevice | KrunVsockDevice | KrunBlockDevice | KrunNetDevice | KrunDisplayInfoBuilder | KrunVhostUserDevice | KrunDisplayBackend | KrunGpuDevice | KrunInputDevice */
++typedef void* KrunObject; /* KrunVmmError | KrunMmioDeviceManager | KrunPciDeviceManager | KrunFsDevice | KrunConsoleDevice | KrunConsoleBuilder | KrunFsOverlay | KrunPayload | KrunNitroConfig | KrunVmmBuilder | KrunVmm | KrunVmmHandle | KrunBalloonDevice | KrunRngDevice | KrunVsockDevice | KrunBlockDevice | KrunNetDevice | KrunDisplayInfoBuilder | KrunVhostUserDevice | KrunDisplayBackend | KrunGpuDevice | KrunInputDevice | KrunTpmDevice */
  
  typedef uint64_t KrunResult;
  #define KRUN_RESULT_SUCCESS 0
-@@ -641,6 +642,21 @@ typedef KrunInputDevice (*krun_input_device_new_from_fd_fn)(int input_fd, KrunEr
+@@ -665,6 +666,21 @@ typedef KrunInputDevice (*krun_input_device_new_from_fd_fn)(int input_fd, KrunEr
  void krun_input_device_destroy(KrunInputDevice handle);
  typedef void (*krun_input_device_destroy_fn)(KrunInputDevice handle);
  
@@ -68,9 +156,9 @@ index 2139fe1e..17962fed 100644
 +void krun_tpm_device_destroy(KrunTpmDevice handle);
 +typedef void (*krun_tpm_device_destroy_fn)(KrunTpmDevice handle);
 +
- /* KrunPushStrVtable ------------------------------------------------- */
+ /* DeviceManager (dispatch) ------------------------------------------ */
  
- #define KRUN_PUSH_STR_TYPE_TAG 16777228
+ /** Add a device to this manager, preserving the order devices are added. */
 diff --git a/include/libkrun_tpm.h b/include/libkrun_tpm.h
 new file mode 100644
 index 00000000..546d9220
@@ -138,10 +226,10 @@ index 79930b5d..92abf919 100644
              DeviceType::Virtio(_) => {
                  ordered_virtio_device.push(info);
 diff --git a/src/devices/src/legacy/mod.rs b/src/devices/src/legacy/mod.rs
-index 0c8e8b37..853c9253 100644
+index d06377c3..4abbe151 100644
 --- a/src/devices/src/legacy/mod.rs
 +++ b/src/devices/src/legacy/mod.rs
-@@ -30,6 +30,7 @@ mod kvmgicv3;
+@@ -32,6 +32,7 @@ mod kvmgicv3;
  mod kvmioapic;
  #[cfg(target_arch = "aarch64")]
  mod rtc_pl031;
@@ -149,7 +237,7 @@ index 0c8e8b37..853c9253 100644
  #[cfg(target_os = "macos")]
  mod vcpu;
  #[cfg(target_arch = "x86_64")]
-@@ -76,6 +77,7 @@ pub use self::kvmgicv3::KvmGicV3;
+@@ -80,6 +81,7 @@ pub use self::kvmgicv3::KvmGicV3;
  pub use self::kvmioapic::KvmIoapic;
  #[cfg(target_arch = "aarch64")]
  pub use self::rtc_pl031::RTC;
@@ -541,10 +629,10 @@ index 00000000..28cac737
 +    }
 +}
 diff --git a/src/devices/src/lib.rs b/src/devices/src/lib.rs
-index 36288440..ac328f77 100644
+index 548b9fae..a004fce3 100644
 --- a/src/devices/src/lib.rs
 +++ b/src/devices/src/lib.rs
-@@ -50,6 +50,9 @@ pub enum DeviceType {
+@@ -53,6 +53,9 @@ pub enum DeviceType {
      /// Device Type: RTC.
      #[cfg(target_arch = "aarch64")]
      RTC,
@@ -555,19 +643,19 @@ index 36288440..ac328f77 100644
  
  impl fmt::Display for DeviceType {
 diff --git a/src/libkrun/src/api/device_builders.rs b/src/libkrun/src/api/device_builders.rs
-index e4c4e16e..1bea9597 100644
+index 48f14e6c..6b4f8008 100644
 --- a/src/libkrun/src/api/device_builders.rs
 +++ b/src/libkrun/src/api/device_builders.rs
-@@ -29,6 +29,8 @@ use devices::virtio::gpu::VIRGLRENDERER_NO_VIRGL;
- #[cfg(feature = "gpu")]
- use krun_display::IntoDisplayBackend;
+@@ -36,6 +36,8 @@ use krun_display::IntoDisplayBackend;
  use devices::legacy::IrqChip;
+ #[cfg(not(feature = "tee"))]
+ use devices::virtio::balloon::FreePageReportingMode;
 +#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 +use devices::{BusDevice, DeviceType};
  #[cfg(feature = "blk")]
  use devices::virtio::block::{DiskFormat, SyncMode};
  #[cfg(not(any(feature = "tee", feature = "aws-nitro")))]
-@@ -132,6 +134,22 @@ impl<'a> AttachContext<'a> {
+@@ -166,6 +168,22 @@ impl<'a> AttachContext<'a> {
              .map_err(|e| VmmError::Internal(format!("{e:?}")))
      }
  
@@ -590,7 +678,7 @@ index e4c4e16e..1bea9597 100644
      /// Register a cleanup callback invoked on VM shutdown.
      pub fn push_exit_observer(&mut self, observer: Arc<Mutex<dyn VmmExitObserver>>) {
          self.vmm.exit_observers.push(observer);
-@@ -1912,6 +1930,101 @@ impl<'a> AttachDevice<'a> for InputDevice<'a> {
+@@ -2089,6 +2107,101 @@ impl<'a> AttachDevice<'a> for InputDevice<'a> {
      }
  }
  
@@ -693,11 +781,11 @@ index e4c4e16e..1bea9597 100644
  /// children vec of the deepest parent.
  #[cfg(not(any(feature = "tee", feature = "aws-nitro")))]
 diff --git a/src/libkrun/src/api/mod.rs b/src/libkrun/src/api/mod.rs
-index 2e188181..57d8175c 100644
+index 0ed07dc6..723a6872 100644
 --- a/src/libkrun/src/api/mod.rs
 +++ b/src/libkrun/src/api/mod.rs
-@@ -36,6 +36,8 @@ pub use device_builders::NetDevice;
- pub use device_builders::NetFlags;
+@@ -41,6 +41,8 @@ pub use device_builders::NetFlags;
+ pub use device_builders::PciDeviceManager;
  #[cfg(not(feature = "tee"))]
  pub use device_builders::RngDevice;
 +#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -705,12 +793,12 @@ index 2e188181..57d8175c 100644
  #[cfg(all(feature = "vhost-user", target_os = "linux"))]
  pub use device_builders::VhostUserDevice;
  pub use device_builders::{
-@@ -113,6 +115,10 @@ ffier::library_definition!("krun", library_tag = 1,
+@@ -128,6 +130,10 @@ ffier::library_definition!("krun", library_tag = 1,
      #[cfg(not(feature = "tee"))]
      crate::api::device_builders::AttachDevice for crate::api::device_builders::RngDevice,
      crate::api::device_builders::AttachDevice for crate::api::device_builders::VsockDevice,
 +    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-+    crate::api::device_builders::TpmDevice = 25,
++    crate::api::device_builders::TpmDevice = 27,
 +    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 +    crate::api::device_builders::AttachDevice for crate::api::device_builders::TpmDevice,
      trait ffier_builtins::PushStr = 12,
@@ -761,6 +849,3 @@ index 17eba6b2..4aa7917d 100644
      #[cfg(target_arch = "aarch64")]
      /// Register a GPIO
      pub fn register_mmio_gpio(
--- 
-2.54.0 (Apple Git-157)
-

@@ -1,7 +1,7 @@
-From ec531caa264a17443cdbc00cc85010ad5b6772ff Mon Sep 17 00:00:00 2001
+From fc72cba56d796343b494e90e6b95f921772c7a0d Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Fri, 23 Oct 2026 18:37:21 -0400
-Subject: [PATCH] virtio/fs: a share with simplified permissions
+Subject: [PATCH 9/9] virtio/fs: a share with simplified permissions
 
 FsDevice::new_simplified (krun_fs_device_new_simplified) makes a writable
 share with PermissionSemantics::LinuxSimplified, which the C API couldn't
@@ -17,23 +17,71 @@ passthrough stored as security.selinux even on a share without xattrs.
 Assisted-by: Claude Code: claude-opus-5-5
 Signed-off-by: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 ---
- include/libkrun.h                             |  8 ++++++
+ .../libkrun-via-cdylib-weak/ffier-krun.json   | 36 +++++++++++++++++++
+ include/libkrun.h                             |  8 +++++
  src/devices/src/virtio/fs/device.rs           |  6 ++--
- .../src/virtio/fs/macos/passthrough.rs        | 10 +++----
- src/libkrun/src/api/device_builders.rs        | 28 +++++++++++++++----
- 4 files changed, 40 insertions(+), 12 deletions(-)
+ .../src/virtio/fs/macos/passthrough.rs        | 10 +++---
+ src/libkrun/src/api/device_builders.rs        | 28 ++++++++++++---
+ 5 files changed, 76 insertions(+), 12 deletions(-)
 
+diff --git a/bindings/libkrun-via-cdylib-weak/ffier-krun.json b/bindings/libkrun-via-cdylib-weak/ffier-krun.json
+index 7e125131..977d0929 100644
+--- a/bindings/libkrun-via-cdylib-weak/ffier-krun.json
++++ b/bindings/libkrun-via-cdylib-weak/ffier-krun.json
+@@ -583,6 +583,42 @@
+           },
+           "ffi_name": "krun_fs_device_new_read_only"
+         },
++        {
++          "name": "new_simplified",
++          "doc": [
++            " Create a virtiofs device sharing a host directory with simplified permissions",
++            " ([`PermissionSemantics::LinuxSimplified`]): every file shows as owned by the guest",
++            " process asking, permission bits are the host file's own mode, and no extended",
++            " attributes are stored, so the host's files keep their owner and gain no xattrs."
++          ],
++          "receiver": "none",
++          "params": [
++            {
++              "name": "tag",
++              "param_kind": "regular",
++              "type": "str",
++              "ref_kind": "shared"
++            },
++            {
++              "name": "host_path",
++              "param_kind": "regular",
++              "type": "str",
++              "ref_kind": "shared"
++            }
++          ],
++          "ret": {
++            "return_kind": "result",
++            "ok": {
++              "type": "FsDevice",
++              "type_args": [
++                "a"
++              ]
++            },
++            "err_type": "VmmError",
++            "c_convention": "handle_or_null"
++          },
++          "ffi_name": "krun_fs_device_new_simplified"
++        },
+         {
+           "name": "new_null",
+           "doc": [
 diff --git a/include/libkrun.h b/include/libkrun.h
-index 17962fed..3c1f1d2d 100644
+index 397f40be..ace94574 100644
 --- a/include/libkrun.h
 +++ b/include/libkrun.h
-@@ -219,6 +219,14 @@ typedef KrunFsDevice (*krun_fs_device_new_fn)(KrunStr tag, KrunStr host_path, Kr
+@@ -224,6 +224,14 @@ typedef KrunFsDevice (*krun_fs_device_new_fn)(KrunStr tag, KrunStr host_path, Kr
  /** Create a read-only virtiofs device sharing a host directory. */
  KrunFsDevice krun_fs_device_new_read_only(KrunStr tag, KrunStr host_path, KrunError* err_out);
  typedef KrunFsDevice (*krun_fs_device_new_read_only_fn)(KrunStr tag, KrunStr host_path, KrunError* err_out);
 +/**
 + * Create a virtiofs device sharing a host directory with simplified permissions
-+ * (`PermissionSemantics::LinuxSimplified`): every file shows as owned by the guest
++ * ([`PermissionSemantics::LinuxSimplified`]): every file shows as owned by the guest
 + * process asking, permission bits are the host file's own mode, and no extended
 + * attributes are stored, so the host's files keep their owner and gain no xattrs.
 + */
@@ -43,10 +91,10 @@ index 17962fed..3c1f1d2d 100644
   * Create a virtiofs device with no host directory (NullFs).
   *
 diff --git a/src/devices/src/virtio/fs/device.rs b/src/devices/src/virtio/fs/device.rs
-index a1b11cbd..7e4700d4 100644
+index d2b6dad7..c29f3d0e 100644
 --- a/src/devices/src/virtio/fs/device.rs
 +++ b/src/devices/src/virtio/fs/device.rs
-@@ -89,8 +89,10 @@ impl Fs {
+@@ -90,8 +90,10 @@ impl Fs {
              semantics,
              attr_timeout,
              // A read-only share serves no extended attributes: the first getxattr or listxattr answers ENOSYS, which
@@ -109,10 +157,10 @@ index f6a863ea..b0c29079 100644
              };
  
 diff --git a/src/libkrun/src/api/device_builders.rs b/src/libkrun/src/api/device_builders.rs
-index 1bea9597..02ff0b6f 100644
+index 6b4f8008..4dab3683 100644
 --- a/src/libkrun/src/api/device_builders.rs
 +++ b/src/libkrun/src/api/device_builders.rs
-@@ -496,12 +496,25 @@ impl<'a> FsDevice<'a> {
+@@ -646,12 +646,25 @@ impl<'a> FsDevice<'a> {
      /// - `tag`: the filesystem tag visible to the guest (e.g. `"/dev/root"`).
      /// - `host_path`: the host directory to share.
      pub fn new(tag: &str, host_path: &str) -> Result<Self, VmmError> {
@@ -140,7 +188,7 @@ index 1bea9597..02ff0b6f 100644
      }
  
      /// Create a virtiofs device with no host directory (NullFs).
-@@ -510,7 +523,7 @@ impl<'a> FsDevice<'a> {
+@@ -660,7 +673,7 @@ impl<'a> FsDevice<'a> {
      /// virtual entries and [`set_overlay`](Self::set_overlay) to attach
      /// them.
      pub fn new_null(tag: &str) -> Result<Self, VmmError> {
@@ -149,7 +197,7 @@ index 1bea9597..02ff0b6f 100644
      }
  
      /// Set a pre-built [`FsOverlay`] on this device.
-@@ -533,11 +546,16 @@ impl<'a> FsDevice<'a> {
+@@ -683,11 +696,16 @@ impl<'a> FsDevice<'a> {
  
  #[cfg(not(any(feature = "tee", feature = "aws-nitro")))]
  impl<'a> FsDevice<'a> {
@@ -168,6 +216,3 @@ index 1bea9597..02ff0b6f 100644
              host_path,
              exit_code.clone(),
              read_only,
--- 
-2.54.0 (Apple Git-157)
-

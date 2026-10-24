@@ -1,7 +1,7 @@
-From 694e1ca5c96b9136eca95c257ceb0007fd837a1d Mon Sep 17 00:00:00 2001
+From 0a7d3e206c5e2eb9ea307065a8f406893ba9dc6d Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sat, 17 Oct 2026 22:21:12 -0400
-Subject: [PATCH] virtio/gpu: trap blobs, run on the storing vCPU's thread
+Subject: [PATCH 6/9] virtio/gpu: trap blobs, run on the storing vCPU's thread
 
 A dxmt-context blob whose id has bit 63 set is left unmapped in the VM:
 its map takes its guest range out of the host-visible window (backed
@@ -231,10 +231,10 @@ index bcfcc96d..8310c1b9 100644
          self.map_sender
              .send(WorkerMessage::GpuRemoveMapping(
 diff --git a/src/libkrun/src/vmm/macos/vstate.rs b/src/libkrun/src/vmm/macos/vstate.rs
-index eeaacb80..0b4dc29d 100644
+index 5f5ee218..17a10b39 100644
 --- a/src/libkrun/src/vmm/macos/vstate.rs
 +++ b/src/libkrun/src/vmm/macos/vstate.rs
-@@ -387,6 +387,11 @@ impl Vcpu {
+@@ -440,6 +440,11 @@ impl Vcpu {
                      Ok(VcpuEmulation::Handled)
                  }
                  VcpuExit::MmioRead(addr, data) => {
@@ -246,7 +246,7 @@ index eeaacb80..0b4dc29d 100644
                      if let Some(ref mmio_bus) = self.mmio_bus {
                          debug!("vCPU {vcpuid} MMIO read 0x{addr:x}");
                          mmio_bus.read(vcpuid, addr, data);
-@@ -394,6 +399,10 @@ impl Vcpu {
+@@ -447,6 +452,10 @@ impl Vcpu {
                      Ok(VcpuEmulation::Handled)
                  }
                  VcpuExit::MmioWrite(addr, data) => {
@@ -293,6 +293,3 @@ index 8242d302..28a17007 100644
      #[test]
      fn duplicate_blob_id_refused() {
          let _l = LOCK.lock().unwrap();
--- 
-2.54.0 (Apple Git-157)
-

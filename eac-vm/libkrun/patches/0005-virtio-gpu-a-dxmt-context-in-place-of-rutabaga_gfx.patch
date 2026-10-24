@@ -1,7 +1,7 @@
-From e661e506c9c6a3cbfe12b017a729b21a7460527a Mon Sep 17 00:00:00 2001
+From 5435468196c764c8551190ea7408ee1293c4f78f Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Fri, 16 Oct 2026 11:36:34 -0400
-Subject: [PATCH 5/6] virtio/gpu: a dxmt context in place of rutabaga_gfx
+Subject: [PATCH 3/9] virtio/gpu: a dxmt context in place of rutabaga_gfx
 
 MacNeutron's EAC microVM forwards DXMT's Metal calls from the guest to the
 host through a virtio-gpu context type, dxmt (capset 24). rutabaga_gfx needs
@@ -15,16 +15,17 @@ The macOS blob map refuses an offset off a host page (Hypervisor.framework
 maps whole pages), and GpuDevice::without_display builds a device without
 scanouts or virgl capsets, so the device offers one capset: the context's.
 ---
- Cargo.lock                               |  72 +--
- Cargo.toml                               |   5 +
- include/libkrun.h                        |   2 +
- src/devices/src/virtio/gpu/device.rs     |  16 +
- src/devices/src/virtio/gpu/mod.rs        |   1 +
- src/devices/src/virtio/gpu/virtio_gpu.rs |  28 +-
- src/libkrun/src/api/device_builders.rs   |  19 +
- src/rutabaga_dxmt/Cargo.toml             |  15 +
- src/rutabaga_dxmt/src/lib.rs             | 684 +++++++++++++++++++++++
- 9 files changed, 776 insertions(+), 66 deletions(-)
+ Cargo.lock                                    |  72 +-
+ Cargo.toml                                    |   5 +
+ .../libkrun-via-cdylib-weak/ffier-krun.json   |  19 +
+ include/libkrun.h                             |   3 +
+ src/devices/src/virtio/gpu/device.rs          |  16 +
+ src/devices/src/virtio/gpu/mod.rs             |   1 +
+ src/devices/src/virtio/gpu/virtio_gpu.rs      |  28 +-
+ src/libkrun/src/api/device_builders.rs        |  19 +
+ src/rutabaga_dxmt/Cargo.toml                  |  15 +
+ src/rutabaga_dxmt/src/lib.rs                  | 684 ++++++++++++++++++
+ 10 files changed, 796 insertions(+), 66 deletions(-)
  create mode 100644 src/rutabaga_dxmt/Cargo.toml
  create mode 100644 src/rutabaga_dxmt/src/lib.rs
 
@@ -213,24 +214,55 @@ index aeaeaf8f..53c23f7a 100644
  #panic = "abort"
  
  [profile.release]
+diff --git a/bindings/libkrun-via-cdylib-weak/ffier-krun.json b/bindings/libkrun-via-cdylib-weak/ffier-krun.json
+index 635a371c..c727d433 100644
+--- a/bindings/libkrun-via-cdylib-weak/ffier-krun.json
++++ b/bindings/libkrun-via-cdylib-weak/ffier-krun.json
+@@ -2429,6 +2429,25 @@
+             "type": "Self"
+           },
+           "ffi_name": "krun_gpu_device_shm_size"
++        },
++        {
++          "name": "without_display",
++          "doc": [
++            " A gpu device without scanouts, for a guest that only uses its contexts and blobs."
++          ],
++          "receiver": "none",
++          "params": [
++            {
++              "name": "shm_size",
++              "param_kind": "regular",
++              "type": "usize"
++            }
++          ],
++          "ret": {
++            "return_kind": "value",
++            "type": "GpuDevice"
++          },
++          "ffi_name": "krun_gpu_device_without_display"
+         }
+       ],
+       "cfg": "feature = \"gpu\""
 diff --git a/include/libkrun.h b/include/libkrun.h
-index 9bef7493..2139fe1e 100644
+index 56c76897..d21e1cc2 100644
 --- a/include/libkrun.h
 +++ b/include/libkrun.h
-@@ -610,6 +610,8 @@ KrunGpuDevice krun_gpu_device_new(uint32_t virgl_flags, KrunDisplayBackend backe
+@@ -633,6 +633,9 @@ KrunGpuDevice krun_gpu_device_new(uint32_t virgl_flags, KrunDisplayBackend backe
  typedef KrunGpuDevice (*krun_gpu_device_new_fn)(uint32_t virgl_flags, KrunDisplayBackend backend);
  void krun_gpu_device_shm_size(KrunGpuDevice* handle, size_t size);
  typedef void (*krun_gpu_device_shm_size_fn)(KrunGpuDevice* handle, size_t size);
++/** A gpu device without scanouts, for a guest that only uses its contexts and blobs. */
 +KrunGpuDevice krun_gpu_device_without_display(size_t shm_size);
 +typedef KrunGpuDevice (*krun_gpu_device_without_display_fn)(size_t shm_size);
  void krun_gpu_device_destroy(KrunGpuDevice handle);
  typedef void (*krun_gpu_device_destroy_fn)(KrunGpuDevice handle);
  
 diff --git a/src/devices/src/virtio/gpu/device.rs b/src/devices/src/virtio/gpu/device.rs
-index 11a2d9c1..329866fc 100644
+index 24443473..9a6a090a 100644
 --- a/src/devices/src/virtio/gpu/device.rs
 +++ b/src/devices/src/virtio/gpu/device.rs
-@@ -246,6 +246,7 @@ impl VirtioDevice for Gpu {
+@@ -251,6 +251,7 @@ impl VirtioDevice for Gpu {
  #[cfg(test)]
  mod tests {
      use super::*;
@@ -238,7 +270,7 @@ index 11a2d9c1..329866fc 100644
      use crate::display::NoopDisplayBackend;
      use krun_display::IntoDisplayBackend;
  
-@@ -268,4 +269,19 @@ mod tests {
+@@ -273,4 +274,19 @@ mod tests {
          let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u32;
          assert_eq!(u32::from_le_bytes(data), page_size);
      }
@@ -338,10 +370,10 @@ index fa09f59b..bcfcc96d 100644
      fn checked_blob_map_addr_rejects_out_of_range_and_wrapping_offsets() {
          use super::checked_blob_map_addr;
 diff --git a/src/libkrun/src/api/device_builders.rs b/src/libkrun/src/api/device_builders.rs
-index 71936050..e4c4e16e 100644
+index 117cd7cc..48f14e6c 100644
 --- a/src/libkrun/src/api/device_builders.rs
 +++ b/src/libkrun/src/api/device_builders.rs
-@@ -22,6 +22,12 @@ use crate::vmm::builder::{attach_mmio_device, setup_terminal_raw_mode};
+@@ -27,6 +27,12 @@ use crate::vmm::builder::{attach_mmio_device, setup_terminal_raw_mode};
  use crate::vmm::device_manager::shm::ShmManager;
  #[cfg(any(feature = "gpu", feature = "vhost-user"))]
  use devices::display::{DisplayInfo, DisplayInfoEdid, PhysicalSize};
@@ -352,9 +384,9 @@ index 71936050..e4c4e16e 100644
 +#[cfg(feature = "gpu")]
 +use krun_display::IntoDisplayBackend;
  use devices::legacy::IrqChip;
- #[cfg(feature = "blk")]
- use devices::virtio::block::{DiskFormat, SyncMode};
-@@ -1646,6 +1652,19 @@ impl GpuDevice {
+ #[cfg(not(feature = "tee"))]
+ use devices::virtio::balloon::FreePageReportingMode;
+@@ -1823,6 +1829,19 @@ impl GpuDevice {
          self.shm_size = size;
          self
      }

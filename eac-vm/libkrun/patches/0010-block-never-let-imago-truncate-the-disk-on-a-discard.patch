@@ -1,7 +1,7 @@
-From 3f6c1671089c428e036c9897460d21b5e980b83e Mon Sep 17 00:00:00 2001
+From 38c7f88d0fa3cf462b76d05996d18d9b033052d0 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Wed, 21 Oct 2026 17:42:04 -0400
-Subject: [PATCH] block: never let imago truncate the disk on a discard or
+Subject: [PATCH 7/9] block: never let imago truncate the disk on a discard or
  write-zeroes at its end
 
 imago's file storage handles a discard or write-zeroes reaching the
@@ -189,6 +189,3 @@ index 9aec9fc2..f304d937 100644
 +        std::fs::remove_file(&path).unwrap();
 +    }
 +}
--- 
-2.54.0 (Apple Git-157)
-

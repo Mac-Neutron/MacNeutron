@@ -8,7 +8,9 @@
 # (include/libkrun_trap.h); patch 0010 keeps a disk's last 4 KiB out of discards and write-zeroes, which imago would
 # otherwise serve by truncating the image; patch 0011 gives a read-only share no extended attributes; patch 0012 adds
 # krun_fs_device_new_simplified, a writable share whose files show as the guest user's, with no extended attributes
-# (macneutron-vm's --user-share). The Makefile is skipped on purpose: on macOS it downloads a Debian sysroot for the guest init blob, which we don't use.
+# (macneutron-vm's --user-share). include/libkrun.h is generated: a patch that changes the C API runs libkrun's
+# `make gen-libkrun-bindings` (ffier-gen-c-header at the ffier tag its Cargo.toml names) and commits the header and
+# bindings/ it writes, never a hand edit. The Makefile is skipped on purpose: on macOS it downloads a Debian sysroot for the guest init blob, which we don't use.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 HERE=$ROOT/eac-vm/libkrun

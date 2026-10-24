@@ -179,8 +179,11 @@ for i in stride(from: 1, to: argv.count - 1, by: 2) where argv[i] == "--user-sha
   add(krun_fs_device_new_simplified(kstr(tag), kstr(dir), &err), tag)
 }
 add(krun_rng_device_new(&err), "rng")
-// Free page reporting gives the guest's freed memory back to macOS (our libkrun's balloon patch).
-add(krun_balloon_device_new(&err), "balloon")
+// Free page reporting gives the guest's freed memory back to macOS: Replace swaps reported pages for fresh memory, as
+// madvise() alone keeps whatever the guest wrote to them.
+let balloon = made(krun_balloon_device_new(&err), "balloon")
+krun_balloon_device_set_free_page_reporting_mode(balloon, UInt32(KRUN_FREE_PAGE_REPORTING_MODE_REPLACE))
+add(balloon, "balloon")
 // The Metal transport (spec §5.6): virtio-gpu with the dxmt context and an 8 GiB host-visible window for its blobs.
 // MacNeutron's winemetal.so beside our stand-ins for its Wine libraries (eac-vm/metal/wm, milestone 4b-1); with
 // --metal-test-ops, 4a's test ops too.

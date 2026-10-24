@@ -1,7 +1,8 @@
-From c509d00e1bcba7fae1d131b562a188c5b0f935f6 Mon Sep 17 00:00:00 2001
+From 79728dcb3e4cb5d04f3160ab06f26194bd182f65 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sat, 17 Oct 2026 08:05:33 -0400
-Subject: [PATCH] devices/tpm: hold the device until an aborted command ends
+Subject: [PATCH 5/9] devices/tpm: hold the device until an aborted command
+ ends
 
 An aborted command kept running on its thread while the device went straight back to
 Ready, so a guest aborting again and again started a new thread each time, all queued
@@ -101,6 +102,3 @@ index 28cac737..38db998f 100644
      #[test]
      fn a_failed_backend_answers_tpm_rc_failure() {
          struct Panics;
--- 
-2.54.0 (Apple Git-157)
-

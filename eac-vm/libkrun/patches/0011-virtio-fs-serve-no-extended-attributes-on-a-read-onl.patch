@@ -1,7 +1,8 @@
-From b663ce86bdacba7bbb5b843fecde906195790596 Mon Sep 17 00:00:00 2001
+From c87996b9f3221b56cd01f70b45b3b989bd8c248d Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Thu, 22 Oct 2026 23:54:44 -0400
-Subject: [PATCH] virtio/fs: serve no extended attributes on a read-only share
+Subject: [PATCH 8/9] virtio/fs: serve no extended attributes on a read-only
+ share
 
 A read-only share's passthrough runs with xattr support off: its first
 getxattr or listxattr answers ENOSYS, which the guest's FUSE keeps, and
@@ -18,10 +19,10 @@ Signed-off-by: Chad Cormier Roussel <chadcormierroussel@gmail.com>
  1 file changed, 3 insertions(+)
 
 diff --git a/src/devices/src/virtio/fs/device.rs b/src/devices/src/virtio/fs/device.rs
-index 27aacee2..a1b11cbd 100644
+index 1be01ea7..d2b6dad7 100644
 --- a/src/devices/src/virtio/fs/device.rs
 +++ b/src/devices/src/virtio/fs/device.rs
-@@ -88,6 +88,9 @@ impl Fs {
+@@ -89,6 +89,9 @@ impl Fs {
              root_dir,
              semantics,
              attr_timeout,
@@ -31,6 +32,3 @@ index 27aacee2..a1b11cbd 100644
              ..Default::default()
          });
  
--- 
-2.54.0 (Apple Git-157)
-
