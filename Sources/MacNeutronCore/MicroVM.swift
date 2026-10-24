@@ -88,10 +88,11 @@ public struct MicroVM: Sendable {
         }
     }
 
-    /// The guest's script for one launch: its facts as shell assignments, then run-game.sh. A performance build's
-    /// (X.Y.Zp) says MACNEUTRON_PROFILE=p, which keeps run-game.sh quiet unless MACNEUTRON_LOG is set.
+    /// The guest's script for one launch: its facts as shell assignments, the game's install scripts
+    /// (InstallScripts.shell), then run-game.sh. A performance build's (X.Y.Zp) says MACNEUTRON_PROFILE=p, which keeps
+    /// run-game.sh quiet unless MACNEUTRON_LOG is set.
     func script(verb: Verb, appID: String, guest: String, arguments: [String],
-                environment: [String: String], performance: Bool = false) throws -> String {
+                environment: [String: String], performance: Bool = false, installScript: String = "") throws -> String {
         let folder = (guest as NSString).deletingLastPathComponent
         var lines = ["VERB=\(Self.quoted(verb.rawValue))", "APPID=\(Self.quoted(appID))",
                      "GAME_DIR=\(Self.quoted(folder))",
@@ -105,7 +106,7 @@ public struct MicroVM: Sendable {
         // The game's environment too, as a launch option is under Proton: guest DXMT and the forwarder read some
         // (DXMT_LOG_LEVEL, DXMT_ENABLE_NVEXT, MACNEUTRON_VM_D3D_TRACE), which run-game.sh doesn't export itself.
         if !set.isEmpty { lines.append("export " + set.joined(separator: " ")) }
-        return lines.joined(separator: "\n") + "\n" + (try String(contentsOf: gameScript, encoding: .utf8))
+        return lines.joined(separator: "\n") + "\n" + installScript + (try String(contentsOf: gameScript, encoding: .utf8))
     }
 }
 

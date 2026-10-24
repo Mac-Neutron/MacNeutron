@@ -410,3 +410,24 @@ private let commonRedistKey = #"HKEY_LOCAL_MACHINE\Software\Wow6432Node\Valve\St
     #expect(InstallScripts.registryKey(#"HKCU\Software\X"#) == #"HKEY_CURRENT_USER\Software\X"#)
     #expect(InstallScripts.registryKey(#"HKEY_CLASSES_ROOT\X"#) == nil)
 }
+
+@Test func theShellQuotesEveryWord() {
+    var plan = InstallScripts()
+    plan.registry = "REGEDIT4\n\n[X]\n"
+    plan.runs = [.init(key: #"HKEY_CURRENT_USER\Software\T"#, name: "n", minimum: 1, folder: "/mnt/games/Jeu d'été",
+                       process: #"Z:\mnt\games\Jeu d'été\setup.exe"#, arguments: ["/S", "it's"])]
+    #expect(plan.shell == #"""
+        MN_INSTALL_REG='REGEDIT4
+
+        [X]
+        '
+        mn_install_script() {
+          mn_run 'HKEY_CURRENT_USER\Software\T' 'n' '1' '/mnt/games/Jeu d'\''été' 'Z:\mnt\games\Jeu d'\''été\setup.exe' '/S' 'it'\''s'
+        }
+
+        """#)
+    // Registry entries alone: no function (an empty one is a shell syntax error).
+    plan.runs = []
+    #expect(plan.shell == "MN_INSTALL_REG='REGEDIT4\n\n[X]\n'\n")
+    #expect(InstallScripts().shell == "")
+}

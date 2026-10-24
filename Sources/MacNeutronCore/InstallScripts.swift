@@ -24,6 +24,22 @@ struct InstallScripts: Equatable {
     /// One per thing skipped, for launcher.log.
     var notes: [String] = []
 
+    /// The plan as the guest's launch script has it, in front of run-game.sh: the registry text as MN_INSTALL_REG,
+    /// the runs as mn_install_script's mn_run calls, every word single-quoted (nothing from a script is parsed as
+    /// shell). "" with nothing to do; no function without runs (an empty one is a syntax error).
+    var shell: String {
+        var out = registry.isEmpty ? "" : "MN_INSTALL_REG=\(MicroVM.quoted(registry))\n"
+        if !runs.isEmpty {
+            out += "mn_install_script() {\n"
+            for run in runs {
+                let words = [run.key, run.name, String(run.minimum), run.folder, run.process] + run.arguments
+                out += "  mn_run " + words.map(MicroVM.quoted).joined(separator: " ") + "\n"
+            }
+            out += "}\n"
+        }
+        return out
+    }
+
     /// The game's scripts and those of the shared depots it uses (dependencies first; Steam's order is undocumented).
     /// Nothing for a game without an app manifest in `steamapps` (a launch from outside Steam).
     static func plan(steamapps: URL, appID: String) -> InstallScripts {
