@@ -11,6 +11,7 @@ OUT=${2:?usage: licences.sh <gvproxy binary> <out dir>}
 S=${BUILD_DIR:-$ROOT/build}/gvproxy-src
 set -- $(cat "$ROOT/eac-vm/net/SOURCE"); TAG=$1 SHA=$2
 [ -d "$S/.git" ] || git clone -q --depth 1 --branch "$TAG" https://github.com/containers/gvisor-tap-vsock.git "$S"
+[ "$(git -C "$S" rev-parse HEAD)" = "$SHA" ] || { git -C "$S" fetch -q --depth 1 origin "$SHA" && git -C "$S" checkout -q "$SHA"; }
 [ "$(git -C "$S" rev-parse HEAD)" = "$SHA" ] || { echo "licences: $S is not at $SHA" >&2; exit 1; }
 GO=$(LC_ALL=C /usr/bin/grep -aoE 'go1\.[0-9]+(\.[0-9]+)?' "$BIN" | head -n 1)
 [ -n "$GO" ] || { echo "licences: no Go version in $BIN" >&2; exit 1; }
