@@ -1,6 +1,7 @@
 # A game's Steam install scripts run in its VM prefix
 
-Status: proposed 2026-10-24, waiting for the maintainer's approval. No code yet.
+Status: approved 2026-10-24 (approach B; Proton's marks in run-game.sh's registry block). Plan:
+`docs/superpowers/plans/2026-10-24-macneutron-install-scripts.md`.
 Parent: `2026-10-15-macneutron-eac-vm-route-design.md` (every game runs in the VM since 0.6.0).
 Amends: the parity spec's P1-4 (`2026-10-12-macneutron-proton-parity-design.md`) and the bridge spec's D-16
 (`2026-09-28-macneutron-steam-bridge-design.md`, Amendment 2). Unblocks D-33's GamingRepair (§9).
