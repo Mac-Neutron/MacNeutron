@@ -55,6 +55,7 @@ eac-tests/<name>/build.sh native [output]    # where supported: built with the h
 | `signal-nest` | A thread making 20000 dispatched syscalls while another floods it with SIGUSR1, then exiting under the flood. Before 0039/0040 it died by SIGSEGV in every run (0/11); with both it passed 7 runs in 8, the eighth resuming with a stale guest register file after a SIGUSR1 `rt_sigreturn`; with 0041, 28 in 28. | 0039, 0040, 0041 |
 | `jit-capacity` | A large self-modifying program within the JIT's SMC hot set: 2,048 code pages each written next to its running code stop faulting once hot (at most 40 faults a page; a hot set of 1,536 pages left 116,224), and rewritten functions return their new values. Reads FEX's statistics (it re-execs itself with `FEX_PROFILESTATS=1`); natively the measurement reports SKIP. x86-64 only. | 0042 |
 | `callret-stale` | A return into code rewritten during the call, by a thread that entered the caller through another thread's block link: a thread parked in the callee while the caller's `mov eax, imm32` is rewritten must return the new value (call rel32 and call rax, 64 rounds each; four threads parked in the same call, 128 rounds; 16 rounds where a later translation took over all lookup entries of the one the thread waits in; 16 where the thread's own translation took over an entry of an older one that is then discarded through another page). FEX's call-return stack kept the old translation's host address for such a thread: 64/64, 64/64 and 512/512 returns ran the old code; a first fix that patched translations through their lookup entries left 16/16 stale returns and a hang. Re-execs itself with `FEX_SMCHOTPAGEFAULTS=0`. x86-64 only. | 0043 |
+| `dead-load` | A load whose result nothing uses still faults: HotSpot's interpreter null check (`cmp (%rcx),%rax`, flags unused) and a dead `mov`, with `rcx` = 0. Stock FEX drops both loads (IR `LoadMem` without side effects). | wine-arm64 fex 0008 |
 | `pop-fault` | A faulting `pop` to memory leaves RSP unchanged. Its patch (0021) is withdrawn, so it is **expected to fail** on this branch. | — |
 | `bench` | Not a pass/fail test: micro-benchmarks for code-churn invalidation (`EXTRA="-DINVAL_MODE=1 -DINVAL_THREADS=190"`) and the self-modifying-code modes; `tso_probe.c` is an ordinary Arm64 program printing the TSO `prctl` state. | 0002, 0004 |
 
@@ -74,6 +75,7 @@ Expected results (same binaries on all three):
 | `ud-flood`, `signal-nest` | PASS (derived from the kernel source; native run pending) | not run | PASS |
 | `jit-capacity` | PASS (measurements SKIP; native run pending) | FAIL | PASS |
 | `callret-stale` | PASS (derived from the kernel source; native run pending) | FAIL | PASS |
+| `dead-load` | PASS (x86 faults on every memory operand; native run pending) | FAIL | PASS |
 | `pop-fault` | PASS | FAIL | FAIL (withdrawn 0021) |
 
 Each test fails without the patch it names: the series was built one patch at a time and each test flips from FAIL to

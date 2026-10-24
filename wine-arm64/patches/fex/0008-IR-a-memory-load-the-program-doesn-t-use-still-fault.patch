@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sat, 24 Oct 2026 15:28:55 -0400
+Subject: [PATCH] IR: a memory load the program doesn't use still faults
+
+LoadMem and LoadMemTSO had no side effects, so the dead-code pass
+dropped a load once nothing used its value, and with it the fault an
+x86 memory operand raises on an unmapped address. HotSpot's interpreter
+null-checks a receiver with `cmp (%reg),%rax` and ignores the flags: the
+fault is the check. Under FEX the compare went, a null receiver reached
+the method, and its first field load faulted where the JVM expects none
+(3DMark's Java backend died in String.trim() after every benchmark).
+Both loads are side-effecting now.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ FEXCore/Source/Interface/IR/IR.json | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/FEXCore/Source/Interface/IR/IR.json b/FEXCore/Source/Interface/IR/IR.json
+index 8805200..3136fdf 100644
+--- a/FEXCore/Source/Interface/IR/IR.json
++++ b/FEXCore/Source/Interface/IR/IR.json
+@@ -530,7 +530,10 @@
+       },
+ 
+       "SSA = LoadMem RegisterClass:$Class, OpSize:#Size, GPR:$Addr, GPR:$Offset, OpSize:$Align, MemOffsetType:$OffsetType, u8:$OffsetScale": {
++        "Desc": ["Loads from memory. Kept when nothing uses the value: an x86 memory operand faults on an unmapped address",
++                 "whatever happens to what it read (HotSpot's null check is a cmp whose flags nothing reads)"],
+         "Inline": ["", "Mem"],
++        "HasSideEffects": true,
+         "DestSize": "Size"
+       },
+ 
+@@ -575,9 +578,11 @@
+       },
+ 
+       "SSA = LoadMemTSO RegisterClass:$Class, OpSize:#Size, GPR:$Addr, GPR:$Offset, OpSize:$Align, MemOffsetType:$OffsetType, u8:$OffsetScale": {
+-        "Desc": ["Does a x86 TSO compatible load from memory. Offset must be Invalid()."
++        "Desc": ["Does a x86 TSO compatible load from memory. Offset must be Invalid().",
++                 "Kept when nothing uses the value, as LoadMem is: the fault is the x86 operand's side effect."
+                 ],
+         "Inline": ["", "Memtso"],
++        "HasSideEffects": true,
+         "DestSize": "Size"
+       },
+ 
+-- 
+2.54.0 (Apple Git-157)
+
