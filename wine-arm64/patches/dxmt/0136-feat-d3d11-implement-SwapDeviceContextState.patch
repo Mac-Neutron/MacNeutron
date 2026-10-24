@@ -1,0 +1,115 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Feifan He <feifan@codeweavers.com>
+Date: Mon, 5 Oct 2026 18:56:35 +0800
+Subject: [PATCH] feat(d3d11): implement `SwapDeviceContextState()`
+
+Signed-off-by: Feifan He <feifan@codeweavers.com>
+(cherry picked from commit e18643447659dc05af9d160781c35c748a162715)
+---
+ src/d3d11/d3d11_context_def.cpp   |  5 +++++
+ src/d3d11/d3d11_context_imm.cpp   | 28 ++++++++++++++++++++++++++++
+ src/d3d11/d3d11_context_impl.cpp  |  6 ------
+ src/d3d11/d3d11_context_state.hpp |  2 ++
+ 4 files changed, 35 insertions(+), 6 deletions(-)
+
+diff --git a/src/d3d11/d3d11_context_def.cpp b/src/d3d11/d3d11_context_def.cpp
+index 9e9b8168..a49dd164 100644
+--- a/src/d3d11/d3d11_context_def.cpp
++++ b/src/d3d11/d3d11_context_def.cpp
+@@ -463,6 +463,11 @@ public:
+     return context_flag;
+   }
+ 
++  void STDMETHODCALLTYPE
++  SwapDeviceContextState(ID3DDeviceContextState *pState, ID3DDeviceContextState **ppPreviousState) override {
++    // MSDN: SwapDeviceContextState is not supported on a deferred context.
++  }
++
+   HRESULT
+   AcquireSync(ID3D11Resource *pResource, UINT64 Key, DWORD dwMilliseconds) override {
+     return DXGI_ERROR_INVALID_CALL;
+diff --git a/src/d3d11/d3d11_context_imm.cpp b/src/d3d11/d3d11_context_imm.cpp
+index 723cc552..1618c979 100644
+--- a/src/d3d11/d3d11_context_imm.cpp
++++ b/src/d3d11/d3d11_context_imm.cpp
+@@ -1,4 +1,5 @@
+ #include "config/config.hpp"
++#include "d3d11_context_state.hpp"
+ #include "d3d11_fence.hpp"
+ #include "d3d11_private.h"
+ #include "d3d11_query.hpp"
+@@ -717,6 +718,32 @@ public:
+     return 0;
+   }
+ 
++  void
++  STDMETHODCALLTYPE
++  SwapDeviceContextState(ID3DDeviceContextState *pState, ID3DDeviceContextState **ppPreviousState) override {
++    InitReturnPtr(ppPreviousState);
++
++    if (!pState)
++      return;
++
++    std::lock_guard<d3d11_device_mutex> lock(mutex);
++
++    ResetEncodingContextState();
++
++    if (!state_object_)
++      state_object_ = new MTLD3D11DeviceContextState(device);
++    
++    state_object_->state = std::move(state_);
++
++    if (ppPreviousState)
++      *ppPreviousState = state_object_.ref();
++
++    state_object_ = static_cast<MTLD3D11DeviceContextState *>(pState);
++    state_ = std::move(state_object_->state);
++    
++    RestoreEncodingContextState();
++  }
++
+   HRESULT
+   AcquireSync(ID3D11Resource *pResource, UINT64 Key, DWORD dwMilliseconds) override {
+     std::lock_guard<d3d11_device_mutex> lock(mutex);
+@@ -759,6 +786,7 @@ private:
+   std::atomic<uint32_t> refcount = 0;
+   D3D11Multithread d3dmt_;
+   bool ignore_map_flag_no_wait_;
++  Com<MTLD3D11DeviceContextState, false> state_object_;
+ };
+ 
+ std::unique_ptr<MTLD3D11DeviceContextBase>
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+index b08b6edd..c057df61 100644
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -1912,12 +1912,6 @@ public:
+   // State Machine
+   //-----------------------------------------------------------------------------
+ 
+-  void
+-  STDMETHODCALLTYPE
+-  SwapDeviceContextState(ID3DDeviceContextState *pState, ID3DDeviceContextState **ppPreviousState) override {
+-    UNIMPLEMENTED("SwapDeviceContextState");
+-  }
+-
+   void
+   STDMETHODCALLTYPE
+   ClearState() override {
+diff --git a/src/d3d11/d3d11_context_state.hpp b/src/d3d11/d3d11_context_state.hpp
+index 8198b436..ce748ffd 100644
+--- a/src/d3d11/d3d11_context_state.hpp
++++ b/src/d3d11/d3d11_context_state.hpp
+@@ -211,6 +211,8 @@ public:
+ 
+     return E_NOINTERFACE;
+   }
++
++  D3D11ContextState state = {};
+ };
+ 
+ } // namespace dxmt
+\ No newline at end of file
+-- 
+2.54.0 (Apple Git-157)
+

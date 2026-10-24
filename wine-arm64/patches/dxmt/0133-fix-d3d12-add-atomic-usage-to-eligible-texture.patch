@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Feifan He <feifan@codeweavers.com>
+Date: Thu, 22 Oct 2026 10:18:12 +0800
+Subject: [PATCH] fix(d3d12): add atomic usage to eligible texture
+
+- Allow unordered access
+- R32UINT / R32SINT / R32G32UINT
+
+Signed-off-by: Feifan He <feifan@codeweavers.com>
+(cherry picked from commit bf67ddcd037957489194b6c09430126f74406481)
+---
+ src/d3d12/d3d12_texture.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/d3d12/d3d12_texture.cpp b/src/d3d12/d3d12_texture.cpp
+index ef7905fc..939edffc 100644
+--- a/src/d3d12/d3d12_texture.cpp
++++ b/src/d3d12/d3d12_texture.cpp
+@@ -114,6 +114,9 @@ PopulateWMTTextureInfo(MTLD3D12Device *Device, WMTTextureInfo &InfoOut, const D3
+     Usage |= WMTTextureUsageRenderTarget;
+   if (Desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) {
+     Usage |= WMTTextureUsageShaderRead | WMTTextureUsageShaderWrite;
++    if (Format.PixelFormat == WMTPixelFormatR32Uint || Format.PixelFormat == WMTPixelFormatR32Sint ||
++        (Format.PixelFormat == WMTPixelFormatRG32Uint && Device->GetMTLDevice().supportsFamily(WMTGPUFamilyApple8)))
++      Usage |= WMTTextureUsageShaderAtomic;
+     // MacNeutron: MetalFX wants its output ShaderRead|ShaderWrite|RenderTarget (and Private): a 2D UAV of a format
+     // Metal renders to can then be the temporal upscaler's output, written directly (no scratch, no copy).
+     // DXMT_D3D12_PRIVATE=0 (IsPrivateHeap false for every heap) leaves this out too.
+-- 
+2.54.0 (Apple Git-157)
+

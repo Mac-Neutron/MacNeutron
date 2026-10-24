@@ -1,0 +1,511 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Feifan He <feifan@codeweavers.com>
+Date: Tue, 6 Oct 2026 18:07:15 +0800
+Subject: [PATCH] feat(d3d11, dxgi): implement dxgi surface
+
+Basically it follows DXVK implementation. GDI surface is not implemented.
+
+Signed-off-by: Feifan He <feifan@codeweavers.com>
+(cherry picked from commit a148782d431249405acdb1531dbb0c7e737bbece)
+---
+ src/d3d11/d3d11_resource.hpp         |  22 ++-
+ src/d3d11/d3d11_resource_staging.cpp |  20 +++
+ src/d3d11/d3d11_surface.cpp          | 252 +++++++++++++++++++++++++++
+ src/d3d11/d3d11_surface.hpp          |  47 +++++
+ src/d3d11/d3d11_texture_dynamic.cpp  |  12 ++
+ src/d3d11/d3d11_texture_linear.cpp   |   8 +
+ src/d3d11/meson.build                |   1 +
+ src/dxgi/dxgi_resource.hpp           |   3 +-
+ 8 files changed, 360 insertions(+), 5 deletions(-)
+ create mode 100644 src/d3d11/d3d11_surface.cpp
+ create mode 100644 src/d3d11/d3d11_surface.hpp
+
+diff --git a/src/d3d11/d3d11_resource.hpp b/src/d3d11/d3d11_resource.hpp
+index f5602e74..9a5a6928 100644
+--- a/src/d3d11/d3d11_resource.hpp
++++ b/src/d3d11/d3d11_resource.hpp
+@@ -8,6 +8,7 @@
+ #include "com/com_pointer.hpp"
+ #include "com/com_guid.hpp"
+ #include "d3d11_view.hpp"
++#include "d3d11_surface.hpp"
+ #include "dxgi_resource.hpp"
+ #include "log/log.hpp"
+ #include "../d3d10/d3d10_buffer.hpp"
+@@ -129,6 +130,7 @@ struct D3D11ResourceCommon : ID3D11Resource {
+   virtual HRESULT GetSharedHandle(HANDLE *pSharedHandle) = 0;
+   virtual HRESULT
+   CreateSharedHandle(const SECURITY_ATTRIBUTES *Attributes, DWORD Access, const WCHAR *pName, HANDLE *pNTHandle) = 0;
++  virtual HRESULT CreateSubresourceSurface(UINT Index, IDXGISurface2 **ppSurface) = 0;
+ 
+   virtual Rc<StagingResource> staging(UINT Subresource) = 0;
+   virtual Rc<DynamicBuffer> dynamicBuffer(UINT *pBufferLength, UINT *pBindFlags) = 0;
+@@ -193,8 +195,8 @@ public:
+       desc(desc),
+       dxgi_resource(this),
+       keyed_mutex(this, device->GetImmediateContextPrivate()),
+-      d3d10(reinterpret_cast<tag::COM *>(this), device->GetImmediateContextPrivate()) {
+-    // D3D11ResourceCommonß::bind_flags_
++      d3d10(reinterpret_cast<tag::COM *>(this), device->GetImmediateContextPrivate()),
++      dxgi_surface(this) {
+     this->bind_flags_ = desc.BindFlags;
+   }
+ 
+@@ -243,7 +245,17 @@ public:
+       *ppvObject = ref(&dxgi_resource);
+       return S_OK;
+     }
+-  
++
++    if ((riid == __uuidof(IDXGISurface) || riid == __uuidof(IDXGISurface1) || riid == __uuidof(IDXGISurface2))) {
++      if constexpr (tag::dimension == D3D11_RESOURCE_DIMENSION_TEXTURE1D ||
++                    tag::dimension == D3D11_RESOURCE_DIMENSION_TEXTURE2D) {
++        if (this->desc.ArraySize * this->desc.MipLevels == 1) {
++          *ppvObject = ref(&dxgi_surface);
++          return S_OK;
++        }
++      }
++    }
++
+     if (riid == __uuidof(IDXGIKeyedMutex)) {
+       if (!(this->desc.MiscFlags & D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX))
+         return E_NOINTERFACE;
+@@ -316,12 +328,16 @@ public:
+       override {
+     return E_INVALIDARG;
+   }
++  virtual HRESULT CreateSubresourceSurface(UINT Index, IDXGISurface2 **ppSurface) override {
++    return DXGI_ERROR_INVALID_CALL;
++  }
+ 
+ protected:
+   tag::DESC1 desc;
+   MTLDXGIResource<TResourceBase<tag, Base...>> dxgi_resource;
+   MTLDXGIKeyedMutex<TResourceBase<tag, Base...>, IMTLD3D11DeviceContext> keyed_mutex;
+   tag::D3D10_IMPL d3d10;
++  D3D11DXGISurface dxgi_surface;
+ };
+ 
+ template <typename RESOURCE_IMPL_ = ID3D11Resource,
+diff --git a/src/d3d11/d3d11_resource_staging.cpp b/src/d3d11/d3d11_resource_staging.cpp
+index 5ba6cb37..68b4a46f 100644
+--- a/src/d3d11/d3d11_resource_staging.cpp
++++ b/src/d3d11/d3d11_resource_staging.cpp
+@@ -37,6 +37,14 @@ public:
+   dynamicTexture(UINT , UINT *, UINT *) final {
+     return {};
+   };
++
++  HRESULT CreateSubresourceSurface(UINT Index, IDXGISurface2 **ppSurface) override {
++    if (Index != 0)
++      return E_INVALIDARG;
++    auto surface = Com(new D3D11DXGISurface(this, Index));
++    *ppSurface = surface.ref();
++    return S_OK;
++  }
+ };
+ 
+ HRESULT
+@@ -91,6 +99,18 @@ public:
+   dynamicTexture(UINT , UINT *, UINT *) final {
+     return {};
+   };
++
++  HRESULT CreateSubresourceSurface(UINT Index, IDXGISurface2 **ppSurface) override {
++    if constexpr (std::is_same_v<typename tag_texture::DESC1, D3D11_TEXTURE3D_DESC1>) {
++      if (this->desc.Depth > 1)
++        return E_INVALIDARG;
++    }
++    if (Index > subresources.size())
++      return E_INVALIDARG;
++    auto surface = Com(new D3D11DXGISurface(this, Index));
++    *ppSurface = surface.ref();
++    return S_OK;
++  }
+ };
+ 
+ #pragma endregion
+diff --git a/src/d3d11/d3d11_surface.cpp b/src/d3d11/d3d11_surface.cpp
+new file mode 100644
+index 00000000..b2ddcb6c
+--- /dev/null
++++ b/src/d3d11/d3d11_surface.cpp
+@@ -0,0 +1,252 @@
++/*
++ * Copyright 2026 Feifan He for CodeWeavers
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
++ */
++#include "d3d11_surface.hpp"
++#include "com/com_object.hpp"
++#include "d3d11_resource.hpp"
++
++namespace dxmt {
++
++D3D11DXGISurface::D3D11DXGISurface(ID3D11Resource *pResource) :
++    resource_(pResource),
++    subresource_(0),
++    surface_from_subresource_(false) {}
++
++D3D11DXGISurface::D3D11DXGISurface(ID3D11Resource *pParentResource, UINT Subresource) :
++    resource_(pParentResource),
++    subresource_(Subresource),
++    surface_from_subresource_(true) {}
++
++ULONG STDMETHODCALLTYPE
++D3D11DXGISurface::AddRef() {
++  return resource_->AddRef();
++}
++
++ULONG STDMETHODCALLTYPE
++D3D11DXGISurface::Release() {
++  return resource_->Release();
++}
++
++HRESULT STDMETHODCALLTYPE
++D3D11DXGISurface::QueryInterface(REFIID riid, void **ppvObject) {
++
++  InitReturnPtr(ppvObject);
++
++  // Only a subset of interfaces are available for subresource surfaces
++  if (surface_from_subresource_) {
++    if (riid == __uuidof(IUnknown) || riid == __uuidof(IDXGIObject) || riid == __uuidof(IDXGIDeviceSubObject) ||
++        riid == __uuidof(IDXGISurface) || riid == __uuidof(IDXGISurface1) || riid == __uuidof(IDXGISurface2)) {
++      *ppvObject = ref(this);
++      return S_OK;
++    }
++
++    return E_NOINTERFACE;
++  }
++
++  return resource_->QueryInterface(riid, ppvObject);
++}
++
++HRESULT STDMETHODCALLTYPE
++D3D11DXGISurface::GetPrivateData(REFGUID Name, UINT *pDataSize, void *pData) {
++  return resource_->GetPrivateData(Name, pDataSize, pData);
++}
++
++HRESULT STDMETHODCALLTYPE
++D3D11DXGISurface::SetPrivateData(REFGUID Name, UINT DataSize, const void *pData) {
++  return resource_->SetPrivateData(Name, DataSize, pData);
++}
++
++HRESULT STDMETHODCALLTYPE
++D3D11DXGISurface::SetPrivateDataInterface(REFGUID Name, const IUnknown *pUnknown) {
++  return resource_->SetPrivateDataInterface(Name, pUnknown);
++}
++
++HRESULT STDMETHODCALLTYPE
++D3D11DXGISurface::GetParent(REFIID riid, void **ppParent) {
++  return GetDevice(riid, ppParent);
++}
++
++HRESULT STDMETHODCALLTYPE
++D3D11DXGISurface::GetDevice(REFIID riid, void **ppDevice) {
++  Com<ID3D11Device> device;
++  resource_->GetDevice(&device);
++  return device->QueryInterface(riid, ppDevice);
++}
++
++HRESULT STDMETHODCALLTYPE
++D3D11DXGISurface::GetDesc(DXGI_SURFACE_DESC *pDesc) {
++  auto d3d11_resource = GetResourceCommon(resource_);
++
++  if (!pDesc)
++    return DXGI_ERROR_INVALID_CALL;
++
++  union {
++    D3D11_BUFFER_DESC Buffer;
++    D3D11_TEXTURE1D_DESC Texture1D;
++    D3D11_TEXTURE2D_DESC Texture2D;
++    D3D11_TEXTURE3D_DESC Texture3D;
++  } desc;
++  D3D11_RESOURCE_DIMENSION dimension;
++  d3d11_resource->GetDesc(&desc);
++  d3d11_resource->GetType(&dimension);
++
++  if (surface_from_subresource_) {
++    if (d3d11_resource->texture()) {
++      switch (dimension) {
++      case D3D11_RESOURCE_DIMENSION_TEXTURE1D: {
++        pDesc->Width = std::max(1u, desc.Texture1D.Width >> (subresource_ % desc.Texture1D.MipLevels));
++        pDesc->Height = 1U;
++        pDesc->Format = desc.Texture1D.Format;
++        pDesc->SampleDesc = {1, 0};
++        break;
++      }
++      case D3D11_RESOURCE_DIMENSION_TEXTURE2D: {
++        pDesc->Width = std::max(1u, desc.Texture2D.Width >> (subresource_ % desc.Texture2D.MipLevels));
++        pDesc->Height = std::max(1u, desc.Texture2D.Height >> (subresource_ % desc.Texture2D.MipLevels));
++        pDesc->Format = desc.Texture2D.Format;
++        pDesc->SampleDesc = desc.Texture2D.SampleDesc;
++        break;
++      }
++      case D3D11_RESOURCE_DIMENSION_TEXTURE3D: {
++        pDesc->Width = std::max(1u, desc.Texture3D.Width >> (subresource_ % desc.Texture3D.MipLevels));
++        pDesc->Height = std::max(1u, desc.Texture3D.Height >> (subresource_ % desc.Texture3D.MipLevels));
++        pDesc->Format = desc.Texture3D.Format;
++        pDesc->SampleDesc = {1, 0};
++        break;
++      }
++      default:
++        return DXGI_ERROR_INVALID_CALL;
++      }
++      return S_OK;
++    } else if (d3d11_resource->buffer()) {
++      pDesc->Width = desc.Buffer.ByteWidth;
++      pDesc->Height = 1;
++      pDesc->Format = DXGI_FORMAT_UNKNOWN;
++      pDesc->SampleDesc = {1, 0};
++      return S_OK;
++    } else {
++      return DXGI_ERROR_INVALID_CALL;
++    }
++  } else if (d3d11_resource->texture()) {
++    switch (dimension) {
++    case D3D11_RESOURCE_DIMENSION_TEXTURE1D: {
++      pDesc->Width = desc.Texture1D.Width;
++      pDesc->Height = 1U;
++      pDesc->Format = desc.Texture1D.Format;
++      pDesc->SampleDesc = {1, 0};
++      break;
++    }
++    case D3D11_RESOURCE_DIMENSION_TEXTURE2D: {
++      pDesc->Width = desc.Texture2D.Width;
++      pDesc->Height = desc.Texture2D.Height;
++      pDesc->Format = desc.Texture2D.Format;
++      pDesc->SampleDesc = desc.Texture2D.SampleDesc;
++      break;
++    }
++    case D3D11_RESOURCE_DIMENSION_TEXTURE3D: {
++      pDesc->Width = desc.Texture3D.Width;
++      pDesc->Height = desc.Texture3D.Height;
++      pDesc->Format = desc.Texture3D.Format;
++      pDesc->SampleDesc = {1, 0};
++      break;
++    }
++    default:
++      return DXGI_ERROR_INVALID_CALL;
++    }
++    return S_OK;
++  } else {
++    return DXGI_ERROR_INVALID_CALL;
++  }
++}
++
++HRESULT STDMETHODCALLTYPE
++D3D11DXGISurface::Map(DXGI_MAPPED_RECT *pLockedRect, UINT MapFlags) {
++  Com<ID3D11Device> device;
++  Com<ID3D11DeviceContext> context;
++
++  resource_->GetDevice(&device);
++  device->GetImmediateContext(&context);
++
++  if (pLockedRect) {
++    pLockedRect->Pitch = 0;
++    pLockedRect->pBits = nullptr;
++  }
++
++  D3D11_MAP map_type;
++
++  if (MapFlags & DXGI_MAP_READ && MapFlags & DXGI_MAP_WRITE)
++    map_type = D3D11_MAP_READ_WRITE;
++  else if (MapFlags & DXGI_MAP_READ)
++    map_type = D3D11_MAP_READ;
++  else if (MapFlags & DXGI_MAP_WRITE && MapFlags & DXGI_MAP_DISCARD)
++    map_type = D3D11_MAP_WRITE_DISCARD;
++  else if (MapFlags & DXGI_MAP_WRITE)
++    map_type = D3D11_MAP_WRITE;
++  else
++    return DXGI_ERROR_INVALID_CALL;
++
++  D3D11_MAPPED_SUBRESOURCE sr;
++  HRESULT hr = context->Map(resource_, subresource_, map_type, 0, pLockedRect ? &sr : nullptr);
++
++  if (hr != S_OK)
++    return hr;
++
++  pLockedRect->Pitch = sr.RowPitch;
++  pLockedRect->pBits = reinterpret_cast<unsigned char *>(sr.pData);
++  return hr;
++}
++
++HRESULT STDMETHODCALLTYPE
++D3D11DXGISurface::Unmap() {
++  Com<ID3D11Device> device;
++  Com<ID3D11DeviceContext> context;
++
++  resource_->GetDevice(&device);
++  device->GetImmediateContext(&context);
++
++  context->Unmap(resource_, subresource_);
++  return S_OK;
++}
++
++HRESULT STDMETHODCALLTYPE
++D3D11DXGISurface::GetDC(BOOL Discard, HDC *phdc) {
++  // TODO(gdi-surface)
++  return DXGI_ERROR_INVALID_CALL;
++}
++
++HRESULT STDMETHODCALLTYPE
++D3D11DXGISurface::ReleaseDC(RECT *pDirtyRect) {
++  // TODO(gdi-surface)
++  return DXGI_ERROR_INVALID_CALL;
++}
++
++HRESULT STDMETHODCALLTYPE
++D3D11DXGISurface::GetResource(REFIID riid, void **ppParentResource, UINT *pSubresourceIndex) {
++  HRESULT hr;
++
++  if (!ppParentResource)
++    return E_POINTER;
++
++  InitReturnPtr(ppParentResource);
++  hr = resource_->QueryInterface(riid, ppParentResource);
++  if (SUCCEEDED(hr))
++    *pSubresourceIndex = subresource_;
++
++  return hr;
++}
++
++}; // namespace dxmt
+\ No newline at end of file
+diff --git a/src/d3d11/d3d11_surface.hpp b/src/d3d11/d3d11_surface.hpp
+new file mode 100644
+index 00000000..4a5193aa
+--- /dev/null
++++ b/src/d3d11/d3d11_surface.hpp
+@@ -0,0 +1,47 @@
++#pragma once
++#include "d3d11_device.hpp"
++
++namespace dxmt {
++
++class D3D11DXGISurface : public IDXGISurface2 {
++
++public:
++  D3D11DXGISurface(ID3D11Resource *pResource);
++
++  D3D11DXGISurface(ID3D11Resource *pParentResource, UINT Subresource);
++
++  ULONG STDMETHODCALLTYPE AddRef();
++
++  ULONG STDMETHODCALLTYPE Release();
++
++  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppvObject);
++
++  HRESULT STDMETHODCALLTYPE GetPrivateData(REFGUID Name, UINT *pDataSize, void *pData);
++
++  HRESULT STDMETHODCALLTYPE SetPrivateData(REFGUID Name, UINT DataSize, const void *pData);
++
++  HRESULT STDMETHODCALLTYPE SetPrivateDataInterface(REFGUID Name, const IUnknown *pUnknown);
++
++  HRESULT STDMETHODCALLTYPE GetParent(REFIID riid, void **ppParent);
++
++  HRESULT STDMETHODCALLTYPE GetDevice(REFIID riid, void **ppDevice);
++
++  HRESULT STDMETHODCALLTYPE GetDesc(DXGI_SURFACE_DESC *pDesc);
++
++  HRESULT STDMETHODCALLTYPE Map(DXGI_MAPPED_RECT *pLockedRect, UINT MapFlags);
++
++  HRESULT STDMETHODCALLTYPE Unmap();
++
++  HRESULT STDMETHODCALLTYPE GetDC(BOOL Discard, HDC *phdc);
++
++  HRESULT STDMETHODCALLTYPE ReleaseDC(RECT *pDirtyRect);
++
++  HRESULT STDMETHODCALLTYPE GetResource(REFIID riid, void **ppParentResource, UINT *pSubresourceIndex);
++
++private:
++  ID3D11Resource *resource_;
++  UINT subresource_;
++  bool surface_from_subresource_;
++};
++
++} // namespace dxmt
+\ No newline at end of file
+diff --git a/src/d3d11/d3d11_texture_dynamic.cpp b/src/d3d11/d3d11_texture_dynamic.cpp
+index adee3840..972958e4 100644
+--- a/src/d3d11/d3d11_texture_dynamic.cpp
++++ b/src/d3d11/d3d11_texture_dynamic.cpp
+@@ -97,6 +97,18 @@ public:
+   void SetMinLOD(float MinLod) override { min_lod = MinLod; }
+ 
+   float GetMinLOD() override { return min_lod; }
++
++  HRESULT CreateSubresourceSurface(UINT Index, IDXGISurface2 **ppSurface) override {
++    if constexpr (std::is_same_v<typename tag_texture::DESC1, D3D11_TEXTURE3D_DESC1>) {
++      if (this->desc.Depth > 1)
++        return E_INVALIDARG;
++    }
++    if (Index > subresources_.size())
++      return E_INVALIDARG;
++    auto surface = Com(new D3D11DXGISurface(this, Index));
++    *ppSurface = surface.ref();
++    return S_OK;
++  }
+ };
+ 
+ template <typename tag>
+diff --git a/src/d3d11/d3d11_texture_linear.cpp b/src/d3d11/d3d11_texture_linear.cpp
+index 450982e9..385a1bf5 100644
+--- a/src/d3d11/d3d11_texture_linear.cpp
++++ b/src/d3d11/d3d11_texture_linear.cpp
+@@ -85,6 +85,14 @@ TDynamicLinearTexture(
+   HRESULT
+   STDMETHODCALLTYPE
+   CreateShaderResourceView(const D3D11_SHADER_RESOURCE_VIEW_DESC1 *pDesc, ID3D11ShaderResourceView1 **ppView) override;
++
++  HRESULT CreateSubresourceSurface(UINT Index, IDXGISurface2 **ppSurface) override {
++    if (Index)
++      return E_INVALIDARG;
++    auto surface = Com(new D3D11DXGISurface(this, Index));
++    *ppSurface = surface.ref();
++    return S_OK;
++  }
+ };
+ 
+ template<>
+diff --git a/src/d3d11/meson.build b/src/d3d11/meson.build
+index 948db2a5..47238521 100644
+--- a/src/d3d11/meson.build
++++ b/src/d3d11/meson.build
+@@ -27,6 +27,7 @@ d3d11_src = [
+   'd3d11_context_def.cpp',
+   'd3d11_multithread.cpp',
+   'd3d11_fence.cpp',
++  'd3d11_surface.cpp',
+ ]
+ 
+ d3d10_src = [
+diff --git a/src/dxgi/dxgi_resource.hpp b/src/dxgi/dxgi_resource.hpp
+index 79fbcf02..0a6a0e8c 100644
+--- a/src/dxgi/dxgi_resource.hpp
++++ b/src/dxgi/dxgi_resource.hpp
+@@ -81,8 +81,7 @@ public:
+   HRESULT
+   STDMETHODCALLTYPE
+   CreateSubresourceSurface(UINT index, IDXGISurface2 **surface) final {
+-    ERR_ONCE("DXGIResource::CreateSubresourceSurface: stub");
+-    return E_NOTIMPL;
++    return resource_->CreateSubresourceSurface(index, surface);
+   }
+ 
+   HRESULT
+-- 
+2.54.0 (Apple Git-157)
+
