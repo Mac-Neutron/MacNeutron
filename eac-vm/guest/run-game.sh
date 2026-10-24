@@ -80,6 +80,7 @@ fi
 STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
+cp /mnt/share/bin/steam.exe "$W/system32/steam.exe"  # the one Proton runs (proton:2120)
 [ -f /mnt/share/valve/steamclient64.dll ] && cp /mnt/share/valve/steamclient64.dll "$STEAM/steamclient64.dll"
 # A 32-bit game's client: steam.exe names it SteamClientDll when it's there. ponytail: Wine's own i386 lsteamclient.dll;
 # Proton puts Valve's signed 32-bit steamclient.dll there and redirects its exports, which Wine patch 0036 does for the
@@ -88,7 +89,11 @@ cp /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll "$STEAM/steamclient.dll"
 : > /mnt/share/traces/ready  # the prefix is done: the launcher's toast goes (traces/: the share is root's)
 cd "$GAME_DIR" || exit 1
 if [ "$VERB" = waitforexitandrun ]; then
-  wine 'C:\Program Files (x86)\Steam\steam.exe' "$EXE" "$@"
+  # As Proton runs it: Wine's x86-64 loader through its preloader, never re-executed (WINELOADERNOEXEC). The `wine`
+  # command restarts steam.exe through start.exe, which waits for it, while steam.exe waits for every program in the
+  # prefix to end: start.exe never did, so no game's VM ever powered off (eac-vm/tests/game-exit.sh).
+  L=/opt/mn-wine/lib/wine/x86_64-unix
+  WINELOADERNOEXEC=1 "$L/wine-preloader" "$L/wine" 'C:\windows\system32\steam.exe' "$EXE" "$@"
 else
   wine "$EXE" "$@"  # run: Steam's install scripts' redistributables
 fi
