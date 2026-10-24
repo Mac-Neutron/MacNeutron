@@ -6,6 +6,8 @@
  *              drawable (slots 70, 67, 66) cleared to (0, 0.3, 0), blitted into a Shared buffer and presented (47)
  *              reads (0, 77, 0)
  *   two-views  a second HWND's view goes on top; slot 73 on it leaves the first on top, its layer intact
+ *   place      a guest window's view sits where mn_window_place puts its client area on its monitor, and keeps that
+ *              place, as fractions of the window, when the window resizes
  *   release    slot 73 on the last view leaves no metal view in the window
  *   capture    Control+Option captures the mouse: a move with deltas reaches the input sink as EV_REL; without the
  *              chord, a move is EV_ABS; the chord again lets it go
@@ -37,14 +39,14 @@ static id<MTLDevice> device;
 static NSView *content; /* the window's content view, kept past the views' release */
 static obj_handle_t view1, layer1;
 
-/* The content view's metal views, back to front. */
+/* The window's metal views, back to front: each in its guest window's area (a subview of the content view). */
 static NSArray *metal_views(void) {
-    __block NSArray *a;
+    __block NSMutableArray *a;
     on_main(^{
-        a = [[content.subviews filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSView *v, id b) {
-            (void)b;
-            return [v.layer isKindOfClass:[CAMetalLayer class]];
-        }]] retain];
+        a = [[NSMutableArray alloc] init];
+        for (NSView *area in content.subviews)
+            for (NSView *v in area.subviews)
+                if ([v.layer isKindOfClass:[CAMetalLayer class]]) [a addObject:v];
     });
     return [a autorelease];
 }
@@ -205,6 +207,29 @@ static void capture(void) {
     set_sink(NULL);
 }
 
+/* A guest window's view sits where its client area is on its monitor (mn_window_place, the forwarder's window state):
+ * 640,360 of a 1280x720 area on 2560x1440 is the window's middle, at half its size, followed when the window shrinks. */
+static void place(void) {
+    void (*place)(uint64_t, int32_t, int32_t, uint32_t, uint32_t, uint32_t, uint32_t) =
+        dlsym(RTLD_DEFAULT, "mn_window_place");
+    CHECK(place && view1 && content);
+    if (!place || !view1 || !content) return;
+    place(0x1234, 640, 360, 1280, 720, 2560, 1440);
+    __block NSRect got = NSZeroRect, want = NSZeroRect, resized = NSZeroRect;
+    on_main(^{ /* after the place, which the main queue runs first */
+        NSSize b = content.bounds.size;
+        got = [((NSView *)view1) convertRect:((NSView *)view1).bounds toView:content];
+        want = NSMakeRect(b.width / 4, b.height / 4, b.width / 2, b.height / 2);
+        NSWindow *w = content.window;
+        [w setContentSize:NSMakeSize(b.width / 2, b.height / 2)]; /* never past the screen */
+        resized = [((NSView *)view1) convertRect:((NSView *)view1).bounds toView:content];
+        [w setContentSize:b];
+    });
+    CHECK(fabs(got.origin.x - want.origin.x) < 1 && fabs(got.origin.y - want.origin.y) < 1);
+    CHECK(fabs(got.size.width - want.size.width) < 1 && fabs(got.size.height - want.size.height) < 1);
+    CHECK(fabs(resized.size.width - want.size.width / 2) < 1 && fabs(resized.origin.x - want.origin.x / 2) < 1);
+}
+
 static void no_quit(void) {
     __block NSApplicationTerminateReply r = NSTerminateNow;
     on_main(^{
@@ -217,7 +242,8 @@ static void no_quit(void) {
 static void *run(void *arg) {
     (void)arg;
     struct { const char *name; void (*fn)(void); } tests[] = {
-        {"view", view}, {"two-views", two_views}, {"capture", capture}, {"no-quit", no_quit}, {"release", release},
+        {"view", view},       {"two-views", two_views}, {"place", place},
+        {"capture", capture}, {"no-quit", no_quit},     {"release", release},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         @autoreleasepool {

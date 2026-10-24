@@ -672,7 +672,16 @@ static mn_d3d_window window_state(HWND hwnd) {
     DWORD pid = 0;
     if (front == hwnd) w.flags |= 2;
     if (front && GetWindowThreadProcessId(front, &pid) && pid == GetCurrentProcessId()) w.flags |= 8;
-    w.monitor = (uintptr_t)MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+    HMONITOR m = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+    w.monitor = (uintptr_t)m;
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof mi;
+    POINT origin = {0, 0};
+    if (GetMonitorInfoW(m, &mi) && ClientToScreen(hwnd, &origin)) {
+        w.x = origin.x - mi.rcMonitor.left, w.y = origin.y - mi.rcMonitor.top;
+        w.monitor_width = (uint32_t)(mi.rcMonitor.right - mi.rcMonitor.left);
+        w.monitor_height = (uint32_t)(mi.rcMonitor.bottom - mi.rcMonitor.top);
+    }
     return w;
 }
 

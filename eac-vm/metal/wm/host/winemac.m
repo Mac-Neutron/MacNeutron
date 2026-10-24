@@ -1,8 +1,9 @@
 /* The VM host's stand-in for Wine's winemac.so (milestone 4c), which MacNeutron's winemetal.so links: winemetal finds
  * the window code through `macdrv_functions` (dlsym, DXMT's struct macdrv_functions_t). Every guest HWND maps to one
  * window, "MacNeutron VM", made on the main thread at first use, MN_VM_WINDOW=WxH points (default 1280x720), not
- * closable: milestone 5 owns its life. A metal view is a CAMetalLayer-backed view filling the content view, the newest
- * on top, as Wine's (dlls/winemac.drv/cocoa_window.m).
+ * closable: milestone 5 owns its life. A metal view is a CAMetalLayer-backed view filling its guest window's area
+ * (MNWindowArea: where that window is on the guest's screen), the newest on top, as Wine's
+ * (dlls/winemac.drv/cocoa_window.m).
  * Input: the content view takes the window's keyboard and mouse and posts them as evdev events to the sink
  * macneutron-vm sets (mn_window_set_input_sink, eac-vm/host/input.c, the guest's virtio-input device). Keys by macOS
  * key code; Command combinations stay the Mac's. The mouse is absolute (the Mac cursor is the game's) until the game
@@ -233,6 +234,63 @@ static BOOL game_wants_capture; /* main thread: the guest's word, mn_window_set_
 }
 @end
 
+/* A guest window's place in the window: its metal views go in it, placed where that window's client area is on its
+ * monitor (mn_window_place, from the forwarder's window state), so the window shows the guest's screen as it is and
+ * the input's mapping of window to screen holds for a windowed program too (3DMark's launcher sat mid-screen, its
+ * clicks landing elsewhere); until placed, the whole window, as a full-screen game's. */
+@interface MNWindowArea : NSView
+@end
+
+@implementation MNWindowArea
+- (NSView *)hitTest:(NSPoint)p {
+    (void)p;
+    return nil;
+}
+@end
+
+static NSWindow *the_window(void);
+static NSMutableDictionary<NSNumber *, MNWindowArea *> *areas; /* by guest HWND; main thread only */
+static NSMutableDictionary<NSNumber *, NSValue *> *places;     /* each one's last place, as fractions of the screen */
+
+static void put(MNWindowArea *a, NSRect f) {
+    NSRect b = a.superview.bounds;
+    a.frame = NSMakeRect(b.size.width * f.origin.x, b.size.height * (1 - f.origin.y - f.size.height),
+                         b.size.width * f.size.width, b.size.height * f.size.height);
+}
+
+/* ponytail: an area per guest window that ever presents, kept for the run; a game has one or two */
+static MNWindowArea *area_of(void *hwnd) {
+    NSView *content = the_window().contentView;
+    if (!areas) areas = [[NSMutableDictionary alloc] init], places = [[NSMutableDictionary alloc] init];
+    NSNumber *k = @((uint64_t)(uintptr_t)hwnd);
+    MNWindowArea *a = areas[k];
+    if (!a) {
+        a = [[[MNWindowArea alloc] initWithFrame:content.bounds] autorelease];
+        a.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMinXMargin | NSViewMaxXMargin |
+                             NSViewMinYMargin | NSViewMaxYMargin; /* stays put, as fractions, when the window resizes */
+        areas[k] = a;
+        [content addSubview:a];
+        if (places[k]) put(a, places[k].rectValue);
+    }
+    return a;
+}
+
+/* d3d/host/window.c's, for each window state the guest pushes: the client area's origin and size on a monitor of that
+ * size, Win32's (an emulated mode's: a full-screen game fills the window whatever its mode). */
+__attribute__((visibility("default"))) void mn_window_place(uint64_t hwnd, int32_t x, int32_t y, uint32_t width,
+                                                            uint32_t height, uint32_t monitor_width,
+                                                            uint32_t monitor_height) {
+    if (!monitor_width || !monitor_height || !width || !height) return;
+    NSRect f = NSMakeRect((double)x / monitor_width, (double)y / monitor_height, (double)width / monitor_width,
+                          (double)height / monitor_height);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!areas) areas = [[NSMutableDictionary alloc] init], places = [[NSMutableDictionary alloc] init];
+        NSNumber *k = @(hwnd);
+        places[k] = [NSValue valueWithRect:f];
+        if (areas[k]) put(areas[k], f);
+    });
+}
+
 static NSWindow *window; /* main thread only */
 
 static NSWindow *the_window(void) {
@@ -288,9 +346,8 @@ static struct macdrv_win_data *get_win_data(void *hwnd) {
     if (!d) abort(); /* winemetal reads it unchecked */
     d->hwnd = hwnd;
     on_main(^{
-        NSWindow *w = the_window();
-        d->cocoa_window = w;
-        d->client_cocoa_view = w.contentView;
+        d->cocoa_window = the_window();
+        d->client_cocoa_view = area_of(hwnd);
     });
     return d;
 }
@@ -300,9 +357,10 @@ static void release_win_data(struct macdrv_win_data *d) { free(d); }
 static void *create_metal_view(void *v, void *device) {
     __block MNMetalView *view = nil;
     on_main(^{
-        NSView *content = v;
-        view = [[MNMetalView alloc] initWithFrame:content.bounds device:device];
-        [content addSubview:view positioned:NSWindowAbove relativeTo:nil];
+        NSView *area = v;
+        view = [[MNMetalView alloc] initWithFrame:area.bounds device:device];
+        [area addSubview:view positioned:NSWindowAbove relativeTo:nil];
+        [area.superview addSubview:area positioned:NSWindowAbove relativeTo:nil]; /* the newest view on top */
     });
     return view; /* +1: release_metal_view's */
 }
