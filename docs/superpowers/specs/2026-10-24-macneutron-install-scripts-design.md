@@ -151,42 +151,54 @@ front of run-game.sh, the same way the launch's other facts get there.
 
 ### 4.2 What the guest gets
 
-The launch script gets one more fact and one function. Every value is single-quoted with `MicroVM.quoted`, so nothing
-from a script is ever parsed as shell. For 3DMark Demo:
+The launch script gets one function, and the run share one file. Every word in the function is single-quoted with
+`MicroVM.quoted`, so nothing from a script is ever parsed as shell. For 3DMark Demo:
 
 ```sh
-MN_INSTALL_REG='REGEDIT4
-
-[HKEY_LOCAL_MACHINE\Software\Wow6432Node\Futuremark\3DMark]
-"Install_Path"="Z:\\mnt\\games\\3DMark Demo"
-'
 mn_install_script() {
-  mn_run 'HKEY_LOCAL_MACHINE\Software\Wow6432Node\Valve\Steam\Apps\CommonRedist\vcredist\2012' 'x86 Update 4' 1 \
+  mn_run 'HKEY_LOCAL_MACHINE\Software\Wow6432Node\Valve\Steam\Apps\CommonRedist\vcredist\2012' 'x86 Update 4' '1' \
+    'system.reg' 'Software\\Wow6432Node\\Valve\\Steam\\Apps\\CommonRedist\\vcredist\\2012' '"x86 Update 4"' \
     '/mnt/games/Steamworks Shared/_CommonRedist/vcredist/2012' \
     'Z:\mnt\games\Steamworks Shared\_CommonRedist\vcredist\2012\vcredist_x86.exe' '/quiet' '/norestart'
   # ... x64 Update 4, dxsetup; .NET 4.5.2 (pre-marked by Proton's marks, §4.6, so mn_run skips it)
-  mn_run 'HKEY_CURRENT_USER\SOFTWARE\Valve\Steam\Apps\231350' 'FmSysInfo' 1517 '/mnt/games/3DMark Demo' \
+  mn_run 'HKEY_CURRENT_USER\SOFTWARE\Valve\Steam\Apps\231350' 'FmSysInfo' '1517' \
+    'user.reg' 'SOFTWARE\\Valve\\Steam\\Apps\\231350' '"FmSysInfo"' '/mnt/games/3DMark Demo' \
     'Z:\mnt\games\3DMark Demo\SystemInfoSetupAssistant.exe' 'Futuremark_SystemInfo_5_93_1517.msi'
 }
 ```
 
-The fourth argument is the process's folder as a Unix path, the working directory it runs in. The launcher knows it:
-`Z:\X` is `/X`, and `C:\X` is `/home/mn/pfx/drive_c/X`. A game with no scripts gets neither the fact nor the function.
+Each step names its value twice:
+- **For `wine reg add`:** the key and name as written in the script (after the Wow6432Node mapping).
+- **For the lookup:** the registry file, and the key and `"name"` as Wine's server writes them there (server/registry.c
+  `dump_strW`): `\` and a key's `[` `]` or a name's `"` escaped, anything past ASCII as `\x` and its UTF-16 unit. The
+  launcher computes these, so the guest only matches fixed strings.
+
+Then come the process's folder as a Unix path, its working directory (`Z:\X` is `/X`, `C:\X` is
+`/home/mn/pfx/drive_c/X`, and a bare program such as `msiexec.exe` runs from `system32`), and the process and its
+arguments.
+
+The Registry entries go as `installscript.reg` in the run share. It's a "Windows Registry Editor Version 5.00" file in
+UTF-16LE with its byte-order mark, because Wine's `reg import` reads a REGEDIT4 file in the ANSI code page, which would
+garble any character past it. A game with no scripts gets neither the function nor the file; the launcher removes an
+earlier run's file.
 
 ### 4.3 Where they run
 
 In `eac-vm/guest/run-game.sh`, after the prefix, registry and font setup, and before `: > /mnt/share/traces/ready`.
-The first-run toast ("Setting up <game>") stays up until the scripts are done. mn-runner runs the script as root, and
-Wine runs as `USER=steamuser`, as for the game.
+The first-run toast ("Setting up <game>") stays up until the scripts are done. mn-runner runs the script as the
+unprivileged user mn (`setpriv`), and Wine runs as `USER=steamuser`, as for the game. The image has no awk and no
+cmp, so the script only uses grep, sed and coreutils.
 1. `mkdir -p` the profile's `AppData/Local/Temp`. msiexec needs it, and a profile folder made empty by
    `MicroVM.userShares` doesn't have it.
-2. If `MN_INSTALL_REG` differs from the last text applied (kept in `/home/mn/pfx/.mn-installscript.reg`), import it with
-   `wine reg import` and store it. A launch whose registry entries haven't changed pays nothing.
-3. `mn_install_script`, if defined. `mn_run <key> <name> <minimum> <dir> <process> <args...>` does this:
-   - It reads the current value from the prefix's `system.reg` (HKLM) or `user.reg` (HKCU) with awk. It returns if the
-     value is ≥ `<minimum>`. When nothing is due, no Wine process starts.
-   - In `<dir>` it runs `.exe` with `wine <process> <args>`, `.cmd`/`.bat` with `wine cmd /c <process> <args>`, and `.msi`
-     with `wine msiexec /i <process> <args>`. That covers CreateProcess, and ShellExecuteEx for the rest.
+2. If `installscript.reg`'s `sha256sum` differs from the last file applied (kept as `/home/mn/pfx/.mn-installscript.reg`),
+   it's imported with `wine reg import` and stored. A launch whose registry entries haven't changed pays nothing.
+3. `mn_install_script`, if defined. Each `mn_run` does this:
+   - It looks for the step's value in the prefix's `system.reg` or `user.reg`, with grep and sed on fixed strings. It
+     returns if the value is ≥ the minimum. When nothing is due, no Wine process starts.
+   - It runs `.exe` with `wine <process> <args>`, `.cmd`/`.bat` with `wine cmd /c <process> <args>`, and `.msi` with
+     `wine msiexec /i <process> <args>`. That covers CreateProcess, and ShellExecuteEx for the rest. It runs in the
+     process's folder, or in `drive_c` when that folder's case differs from the disk's (`System32` is `system32` on the
+     state disk).
    - It appends `<name> exit <status>` to `/mnt/share/traces/installscript.log`.
    - On exit 0 it runs `wine reg add <key> /v <name> /t REG_DWORD /d <minimum> /f`.
 4. The game starts as now. run-game.sh's final `wineserver -w` covers installers that leave children behind.
@@ -203,7 +215,8 @@ Steam on Windows and Proton's prefix use. So:
 - A new state disk is a new prefix, and everything runs again, as with a new Proton prefix.
 
 Reading the .reg files is safe at that point. The marks were flushed when an earlier boot's wineserver exited.
-Proton's marks are written by run-game.sh's registry block, which ends with `wineserver -k`. Within one run, each
+Proton's marks are written by run-game.sh's registry block, which ends with `wineserver -k` and waits for the
+server to exit. Within one run, each
 `(key, name)` pair is checked once (§4.1 dedups).
 
 The value written is `MinimumHasRunValue`, or 1 when the entry has none. The documentation says Steam writes 1 and is
