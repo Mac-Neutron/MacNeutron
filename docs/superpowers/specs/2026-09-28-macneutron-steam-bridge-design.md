@@ -176,8 +176,13 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
 - **D-15:** msync instead of fsync and ntsync, and DXMT on Metal instead of DXVK and vkd3d (macOS has no futex, ntsync or
   Vulkan). The Proton graphics and sync variables don't apply: of Proton's variables, the launcher reads only
   `PROTON_SET_GAME_DRIVE`, and steam.exe only `PROTON_HIDE_PROCESS_WINDOW` and `PROTON_WAIT_ATTACH`.
-- **D-16:** Install scripts don't run: Mac Steam has no `legacycompat/iscriptevaluator.exe`, and our runtime can't run
-  the i386 redistributable installers (the launcher skips a 32-bit `run` target). Revise after the P1-4 probe.
+- **D-16:** Install scripts are run by MacNeutron, not by Steam. Mac Steam has the job (`steamclient.dylib`:
+  `CRunWindowsCompatInstallScriptJob`, `legacycompat/iscriptevaluator.exe`) but ships no `legacycompat`, so it never
+  calls the tool's `run`. For a game in the VM, the launcher reads the scripts Steam's app manifests list, and
+  run-game.sh evaluates them in the game's prefix before the game. It follows Steam's documented rules: a HasRunKey
+  DWORD in the 32-bit view, exit 0 marks the step, anything else retries. It also writes Proton's `[ProtonOverrides]`
+  CommonRedist marks (spec `2026-10-24-macneutron-install-scripts-design.md`). A game on macOS still runs none: its
+  i386 installers can't run there.
 - **D-17:** Mac Steam's `LC_ALL` still passes through (P1-2, not yet). P1-2 sets `LC_ALL` from `HOST_LC_ALL`, or drops
   it when that is empty, as Proton does; with `LC_ALL` dropped the locale comes from CoreFoundation (the Mac's
   settings), because Mac Steam sends no `LANG`. Four Steam languages (Arabic, Latin American Spanish, Thai, Vietnamese)
@@ -243,6 +248,10 @@ game ─▶ steam_api64.dll ─▶ steamclient64.dll ─(Wine 0036)▶ lsteamcli
   - the path is converted as UTF-8 (`CP_UNIXCP`, as in `run_process`): the byte-narrowed form of a non-ASCII path is
     what stalled Wine's lookup (D-32);
   - still only behind Proton's `\Source SDK Base` gate, and only the first `-game`.
+- **D-35:** Uninstall deletes the VM drive but not the Mac prefix (install-scripts spec §4.9). Linux Steam deletes
+  `compatdata/<appid>`, the whole Proton prefix; Mac Steam deletes nothing. The VM drive is the part of the prefix
+  MacNeutron owns, so MacNeutron.app deletes it once Steam lists the game nowhere. The Mac prefix is Mac Steam's; it stays
+  in "Leftover data" with its warning about saves.
 
 ## 1. Goal
 
