@@ -8,8 +8,10 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 B=$ROOT/build  # always the normal build: p is seeded from it
 P=$B/p
 mkdir -p "$P/eac-vm-work"  # not wine-arm64-src: the loop clones it whole when missing
+# gvproxy-<commit>: eac-vm/net/fetch.sh's build, which the gvproxy link names.
+GV=eac-vm-work/$(readlink "$B/eac-vm-work/gvproxy" 2> /dev/null | cut -d/ -f1)
 for t in wine-arm64-src dxmt-src llvm-mingw-src vm-setup-tools-src eac-vm-work/libkrun-src eac-vm-work/libtpms-src \
-         eac-vm-work/wine-linux eac-vm-work/fex-linux eac-vm-work/gvproxy-v0.8.9 eac-vm-work/gvproxy eac-vm-work/share; do
+         eac-vm-work/wine-linux eac-vm-work/fex-linux "$GV" eac-vm-work/gvproxy eac-vm-work/share; do
   [ -e "$P/$t" ] || [ ! -e "$B/$t" ] || cp -c -R "$B/$t" "$P/$t"
 done
 rev() { git -C "$1" rev-parse HEAD 2> /dev/null || echo none; }
