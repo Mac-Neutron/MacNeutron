@@ -101,9 +101,25 @@ check old-prefix 'profile_name'
 run "" "$T/wine.sh" "$W2"
 check no-mounts '[ -s "$T/share/traces/mounts.failed" ] && ! profile_name'
 
+# A Mac home on another volume (/Volumes/<disk>/Users/<name>): Documents and its sibling folders under /Volumes too.
+printf '%s\n' 'echo vm > /Volumes/Gate/Users/gate/Documents/v.txt' \
+  '[ "$(readlink /Volumes/Gate/Users/gate/Desktop)" = /home/mn/Desktop ] && : > /mnt/share/traces/ran' > "$T/volumes.sh"
+run "profile /home/mn/pfx/drive_c/users/steamuser
+documents /Volumes/Gate/Users/gate/Documents
+game /mnt/games/Gate's Game 2
+" "$T/volumes.sh"
+check volumes-home '[ -f "$D/v.txt" ] && [ -e "$T/share/traces/ran" ]'
+# A game can plant links on its state disk: a mount point reached through one is refused, never mounted where it leads.
+printf '%s\n' 'mkdir -p /home/mn/pfx/drive_c /home/mn/elsewhere' 'rm -rf /home/mn/pfx/drive_c/users' \
+  'ln -s /home/mn/elsewhere /home/mn/pfx/drive_c/users' > "$T/plant.sh"
+rm -f "$STATE"
+run "" "$T/plant.sh"
+printf ': > /mnt/share/traces/ran\n' > "$T/marker.sh"
+run "$MOUNTS" "$T/marker.sh"
+check linked-pfx '[ -s "$T/share/traces/mounts.failed" ] && [ ! -e "$T/share/traces/ran" ]'
+
 # Refused: a path outside the three places, a `..` component, a tag macneutron-vm doesn't serve. Each run leaves
 # traces/mounts.failed and never starts run.sh (its marker).
-printf ': > /mnt/share/traces/ran\n' > "$T/marker.sh"
 refused=0
 for m in "game /etc/x" "profile /home/mn/pfx/drive_c/users/../../x" "nosuch /mnt/games/Gate's Game 2"; do
   run "$m

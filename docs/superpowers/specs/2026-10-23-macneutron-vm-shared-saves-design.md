@@ -100,7 +100,9 @@ Before it hands over to `mn`, when the share has a `mounts` file:
   `Desktop`, `Downloads`, `Music`, `Pictures` and `Movies` as links to `/home/mn/<name>` (folders on the state disk,
   owned by `mn`), so what a game puts there survives the run.
 - For each line it makes the mount point and runs `mount -t virtiofs <tag> <path>`. A guest path outside
-  `/home/mn/pfx/drive_c/users/`, `/Users/` and `/mnt/games/`, or one with a `..` component, is refused.
+  `/home/mn/pfx/drive_c/users/`, `/Users/`, `/Volumes/` (a Mac home on another disk; a tmpfs too) and `/mnt/games/`,
+  one with a `..` component, or a mount point reached through a link (the state disk is the game's to write: root
+  would mount where a planted link leads) is refused.
 - On any failure it writes the reason to the share's `traces/mounts.failed` (where run-game.sh, as `mn`, can write too)
   and to `run.log`, and powers off without running `run.sh` (no `run.status`): a game never runs on a profile that
   exists only in the VM. A marker, not a status: `run.status` carries the game's own exit status, which can be any
