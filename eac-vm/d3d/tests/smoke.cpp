@@ -265,6 +265,31 @@ static const char *shared() {
     return bad ? bad : "ok";
 }
 
+// dxgi.dll's export read from its export table, as NVIDIA Streamline's sl.interposer.dll does: code, not a forwarder
+// (whose RVA is its string's, inside the export directory), and a factory when called.
+static const char *raw_export() {
+    HMODULE m = LoadLibraryA("dxgi.dll");
+    if (!m) return "FAIL dxgi.dll";
+    BYTE *b = (BYTE *)m;
+    auto nt = (IMAGE_NT_HEADERS *)(b + ((IMAGE_DOS_HEADER *)b)->e_lfanew);
+    IMAGE_DATA_DIRECTORY dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    auto ex = (IMAGE_EXPORT_DIRECTORY *)(b + dir.VirtualAddress);
+    auto names = (DWORD *)(b + ex->AddressOfNames);
+    auto ords = (WORD *)(b + ex->AddressOfNameOrdinals);
+    auto fns = (DWORD *)(b + ex->AddressOfFunctions);
+    for (DWORD i = 0; i < ex->NumberOfNames; i++) {
+        if (strcmp((char *)b + names[i], "CreateDXGIFactory1")) continue;
+        DWORD rva = fns[ords[i]];
+        if (rva >= dir.VirtualAddress && rva < dir.VirtualAddress + dir.Size) return "FAIL forwarded";
+        IDXGIFactory1 *f = nullptr;
+        auto create = (HRESULT(WINAPI *)(REFIID, void **))(b + rva);
+        if (FAILED(create(__uuidof(IDXGIFactory1), (void **)&f))) return "FAIL CreateDXGIFactory1";
+        f->Release();
+        return "ok";
+    }
+    return "FAIL no CreateDXGIFactory1";
+}
+
 static void minimised(ID3D12CommandQueue *queue) {
     HWND w;
     IDXGISwapChain1 *sc = swapchain(queue, &w);
@@ -556,6 +581,7 @@ int main(int argc, char **argv) {
     minimised(queue);
     printf("latency %s\n", latency(device, queue));
     printf("d3d11latency %s\n", d3d11_latency());
+    printf("rawexport %s\n", raw_export());
     if (forward) printf("swapchain %s\n", own_answers(queue)), printf("shared %s\n", shared());
     else printf("swapchain untested: guest DXMT aborts on these\n");
     wmsize(queue);

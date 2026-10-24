@@ -6,6 +6,7 @@
 # made its first Direct3D call on a thread that has ended, is set from a Wine thread of its own), "name ok" (SetName
 # reads back in the guest's WCHARs), "minimised ok" (a minimised window's present costs the host's vCPU no sleep),
 # "latency ok" (the frame latency object, and GPU-bound presents that hold no vCPU on the host: mn-d3d's "slow:" lines),
+# "rawexport ok" (dxgi.dll's CreateDXGIFactory1 called at its export table's RVA, as NVIDIA Streamline does: code),
 # "d3d11latency ok" (M4: D3D11's GPU-bound presents, paced by the device's latency, likewise), and three
 # `smoke.exe die` runs first, each ending mid-load with status 0, that the host outlives (M4's final review)
 # and "conv ok" (data whose i386 layout differs, end to end: initial data, an input layout, a D3D10 map, GetHwnd, GetDesc)
@@ -89,7 +90,7 @@ EOS
   dies=$(/usr/bin/grep -c '^die status 0$' "$out" 2> /dev/null || true)
   echo "d3d-smoke: $mode: ${dies:-0} of 3 processes ended mid-load, and the host outlived them"
   [ "${dies:-0}" -eq 3 ] || fail="$fail $mode-dies"
-  guest_checks="eventthread name minimised latency d3d11latency wmtforward wmsize conv"
+  guest_checks="eventthread name minimised latency d3d11latency rawexport wmtforward wmsize conv"
   checks=$guest_checks
   [ "$mode" = guest ] || checks="$checks eventreuse swapchain shared"
   for c in $checks; do
