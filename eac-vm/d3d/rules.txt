@@ -149,7 +149,6 @@ ID3D12GraphicsCommandList::CopyTiles refuse
 ID3D12GraphicsCommandList1::AtomicCopyBufferUINT refuse
 ID3D12GraphicsCommandList1::AtomicCopyBufferUINT64 refuse
 ID3D12GraphicsCommandList1::SetSamplePositions refuse
-ID3D12GraphicsCommandList1::ResolveSubresourceRegion refuse
 ID3D12GraphicsCommandList1::SetViewInstanceMask refuse
 ID3D12GraphicsCommandList2::WriteBufferImmediate refuse
 ID3D12CommandQueue::UpdateTileMappings refuse
@@ -272,6 +271,7 @@ ID3D12GraphicsCommandList::OMSetRenderTargets render_target_descriptors in count
 ID3D12GraphicsCommandList::OMSetRenderTargets depth_stencil_descriptor in one
 ID3D12GraphicsCommandList::RSSetScissorRects rects in count=rect_count
 ID3D12GraphicsCommandList::ResourceBarrier barriers in count=barrier_count
+ID3D12GraphicsCommandList1::ResolveSubresourceRegion src_rect in one
 ID3D12GraphicsCommandList4::BeginRenderPass render_targets in count=render_targets_count
 ID3D12GraphicsCommandList4::BeginRenderPass depth_stencil in one
 ID3D12GraphicsCommandList::SetComputeRoot32BitConstants data in count=constant_count unit=4
