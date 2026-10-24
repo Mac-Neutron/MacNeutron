@@ -1,4 +1,4 @@
-From 2f0ae063a88656451958663a6c8388c499f20878 Mon Sep 17 00:00:00 2001
+From 63686edc0ef65b3204d1c8413c0d9b98fc14f855 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Fri, 23 Oct 2026 10:59:45 -0400
 Subject: [PATCH] FEXCore: a return into a discarded translation goes to the
@@ -26,7 +26,7 @@ can take those over (insert_or_assign), which would leave a discarded
 translation unpatched, or patch a current one whose return block entry
 still leads to the patched point. Nothing changes on the call or return
 path. The offline code cache's mappings have no translation start and
-are not patched. Disk cache format 30 -> 31 (the tail changed).
+are not patched. Disk cache format 31 -> 32 (the tail changed).
 
 fex-tests callret-stale: a thread that entered A through another thread's
 link, parked in A's callee while A is rewritten, returned into the old
@@ -122,15 +122,15 @@ index 404cbc7..2cf4724 100644
        }
      }
 diff --git a/FEXCore/Source/Interface/Core/DiskCache.h b/FEXCore/Source/Interface/Core/DiskCache.h
-index ab0264d..0b43365 100644
+index 0b43365..40dcfcc 100644
 --- a/FEXCore/Source/Interface/Core/DiskCache.h
 +++ b/FEXCore/Source/Interface/Core/DiskCache.h
 @@ -249,7 +249,7 @@ namespace DiskCache {
    // The current version of the diskcache.
    // This must be changed any time codegen changes occur!
    // Be aware of the impact of changing this frequently!
--  static constexpr uint16_t FormatVersion = 30;
-+  static constexpr uint16_t FormatVersion = 31;
+-  static constexpr uint16_t FormatVersion = 31;
++  static constexpr uint16_t FormatVersion = 32;
  
    static constexpr uint32_t LOOKUP_KEY_MAX_BUCKET_DEPTH = 500;
  
