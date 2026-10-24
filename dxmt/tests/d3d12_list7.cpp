@@ -15,6 +15,9 @@
 //   barrierglobal  the same with a global barrier
 //   layout3  OPTIONS12 reports enhanced barriers; the device answers ID3D12Device10, whose CreateCommittedResource3
 //          makes an upload buffer from layout UNDEFINED (mapped) and a texture with a castable format
+//   d3d12_list7.exe order: only an ordering scenario for DXMT_D3D12_OVERLAP=1's DXMT_STATS counts
+//          (eac-vm/dxmt-native/build-tests.sh): a pass clearing a 4x MSAA target and resolving it at its end, then a
+//          pass clearing the target again; prints "order ok" once it ran
 // Built for i386 (the VM's 32-bit lane: DXMT's D3D12 there has no descriptor heaps, as it embeds no heap pointer in a
 // descriptor handle), the rows that need views print "untested" instead.
 #include "d3d12_common.hpp"
@@ -350,13 +353,35 @@ static const char *layout3(Gpu &gpu) {
     return "ok";
 }
 
-int main() {
+// Encoders: the clear, the resolve (which reads and stores the target), the second clear. With overlap the resolve
+// waits on the first clear and the second clear on the resolve: two encoders with a dependency list.
+static const char *order(Gpu &gpu, ID3D12GraphicsCommandList7 *list) {
+    ID3D12Resource *target = Target(gpu, 4), *dst = Target(gpu, 1, DXGI_FORMAT_R8G8B8A8_UNORM,
+                                                           D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+                                                           D3D12_RESOURCE_STATE_RESOLVE_DEST);
+    auto rtv = View(gpu, target, D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    D3D12_RENDER_PASS_ENDING_ACCESS_RESOLVE_SUBRESOURCE_PARAMETERS whole = {0, 0, 0, 0, {0, 0, 4, 4}};
+    auto first = PassTarget(rtv, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR, kRedF);
+    ResolveInto(first, target, dst, 1, &whole);
+    list->BeginRenderPass(1, &first, nullptr, D3D12_RENDER_PASS_FLAG_NONE);
+    list->EndRenderPass();
+    auto second = PassTarget(rtv, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR, kGreenF);
+    list->BeginRenderPass(1, &second, nullptr, D3D12_RENDER_PASS_FLAG_NONE);
+    list->EndRenderPass();
+    gpu.Submit();
+    target->Release(), dst->Release();
+    return "ok";
+}
+
+int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     Gpu gpu;
     ID3D12GraphicsCommandList7 *list;
     printf("list4 %s\n", list4(gpu));
     if (FAILED(gpu.list->QueryInterface(__uuidof(ID3D12GraphicsCommandList7), (void **)&list)))
         return printf("list7 FAIL QueryInterface(ID3D12GraphicsCommandList7)\n"), 0;
+    if (argc > 1 && !strcmp(argv[1], "order"))
+        return printf("order %s\n", order(gpu, list)), 0;
     static const struct { const char *name; const char *(*row)(Gpu &, ID3D12GraphicsCommandList7 *); } views[] = {
         {"resolveregion", resolveregion}, {"renderpass", renderpass}, {"mrt", mrt}, {"depthpass", depthpass},
         {"suspend", suspend}, {"barrier", barrier}, {"barrierglobal", barrierglobal}};

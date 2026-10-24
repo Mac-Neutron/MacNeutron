@@ -66,11 +66,11 @@ int main() {
                                D3D12_BARRIER_ACCESS_RENDER_TARGET, D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
                                D3D12_BARRIER_LAYOUT_RENDER_TARGET, D3D12_BARRIER_LAYOUT_SHADER_RESOURCE, R};
     CHECK(2, Transition(One(Texture(t)), D3D12_RESOURCE_STATE_RENDER_TARGET, SR));
-    // 3-4: nothing earlier to wait on
+    // 3: nothing earlier to wait on; 4: no access before, but a scope to wait for (an execution dependency): any
     CHECK(3, One(Buffer({D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_NO_ACCESS,
                          D3D12_BARRIER_ACCESS_COPY_DEST, R, 0, 256})).empty());
-    CHECK(4, One(Buffer({D3D12_BARRIER_SYNC_ALL, D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_NO_ACCESS,
-                         D3D12_BARRIER_ACCESS_COPY_DEST, R, 0, 256})).empty());
+    CHECK(4, AnyAliasing(One(Buffer({D3D12_BARRIER_SYNC_ALL, D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_NO_ACCESS,
+                                     D3D12_BARRIER_ACCESS_COPY_DEST, R, 0, 256}))));
     // 5-7: global barriers name no resource
     CHECK(5, Uav(One(Global({D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_PIXEL_SHADING,
                              D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_ACCESS_SHADER_RESOURCE})), nullptr));
@@ -78,6 +78,14 @@ int main() {
                                      D3D12_BARRIER_ACCESS_RENDER_TARGET, D3D12_BARRIER_ACCESS_SHADER_RESOURCE}))));
     CHECK(7, One(Global({D3D12_BARRIER_SYNC_PIXEL_SHADING, D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
                          D3D12_BARRIER_ACCESS_COPY_SOURCE})).empty());
+    // 14-16: a global read then a write still orders (write after read): before UAV writes a UAV barrier, else any;
+    // nothing after, nothing
+    CHECK(14, Uav(One(Global({D3D12_BARRIER_SYNC_PIXEL_SHADING, D3D12_BARRIER_SYNC_COMPUTE_SHADING,
+                              D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS})), nullptr));
+    CHECK(15, AnyAliasing(One(Global({D3D12_BARRIER_SYNC_PIXEL_SHADING, D3D12_BARRIER_SYNC_RENDER_TARGET,
+                                      D3D12_BARRIER_ACCESS_SHADER_RESOURCE, D3D12_BARRIER_ACCESS_RENDER_TARGET}))));
+    CHECK(16, One(Global({D3D12_BARRIER_SYNC_PIXEL_SHADING, D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
+                          D3D12_BARRIER_ACCESS_NO_ACCESS})).empty());
     // 8: UAV to UAV is a UAV barrier on the resource
     CHECK(8, Uav(One(Buffer({D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_SYNC_COMPUTE_SHADING,
                              D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS, R, 0, 256})), R));

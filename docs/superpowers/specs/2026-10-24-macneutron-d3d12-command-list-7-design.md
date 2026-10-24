@@ -120,14 +120,17 @@ Access bits to the legacy state with the same meaning (`LegacyState`):
 | any other bit (acceleration structures, video, sampler feedback) | unknown: a join, opacity kOpaqueUnknown |
 
 Each barrier:
-- SyncBefore NONE or AccessBefore NO_ACCESS: nothing earlier to wait on; skipped.
+- SyncBefore NONE: nothing earlier to wait on; skipped. AccessBefore NO_ACCESS with another SyncBefore: still a scope
+  to wait for (an execution dependency), a join naming any resource.
 - A texture or buffer barrier names its resource and is classified as a transition between the two states: read to
   read skipped; out of a write state encoders list (RENDER_TARGET, DEPTH_WRITE, COPY_DEST, RESOLVE_DEST) a
   write-ended resource; into or out of UNORDERED_ACCESS a join (kOpaqueUavState; UAV to UAV kOpaqueUavBarrier, a UAV
   barrier); into or out of COMMON a join (kOpaqueCommon); otherwise a join naming the resource. A resource with
   ALLOW_SIMULTANEOUS_ACCESS joins (kOpaqueSimultaneous), as in ResourceBarrier.
-- A global barrier names no resource: AccessBefore read-only, skipped; only UNORDERED_ACCESS, a join
-  (kOpaqueUavBarrier); otherwise a join (kOpaqueUnknown).
+- A global barrier names no resource: reads before and reads (or no access) after, skipped; UNORDERED_ACCESS before, or
+  reads before UNORDERED_ACCESS after (a write after read, as a legacy move into UNORDERED_ACCESS orders), a join
+  (kOpaqueUavBarrier); otherwise a join (kOpaqueUnknown). (Corrected 2026-10-24 after the final review: the first
+  version skipped any global read before, and any NO_ACCESS before, losing those orderings.)
 - Ignored: sync stages (DXMT orders whole encoders, at least as strict), layouts (Metal has none), the DISCARD flag,
   subresource ranges (per resource, as ResourceBarrier).
 

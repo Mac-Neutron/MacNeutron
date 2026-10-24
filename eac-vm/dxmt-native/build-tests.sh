@@ -63,5 +63,17 @@ rm -rf "$X"
 [ "$recorded" -gt 0 ] && [ "$dumped" -gt 0 ] \
   || { echo "tests: FAIL DXMT's files: $recorded recorded, $dumped dumped"; exit 1; }
 [ "${rows:-0}" -gt 0 ] || { tail -3 "$OUT/check-replay.txt"; echo "tests: FAIL the native replay: ${rows:-0} cache rows"; exit 1; }
+# Command list 7 (fork 0125-0126): with DXMT_D3D12_OVERLAP=1, a render pass's end resolve waits on the pass that
+# cleared its source, and the next pass over that source waits on the resolve, which reads and stores it (d3d12_list7
+# order: two encoders with a dependency list; one, the resolve free to overlap its source's writer, before).
+if [ -x "$OUT/d3d12_list7" ]; then
+  X=$(mktemp -d "${TMPDIR:-/tmp}/dxmt-native-order.XXXXXX")
+  DXMT_LOG_PATH=none DXMT_D3D12_OVERLAP=1 DXMT_STATS=1 DXMT_DXIL_DUMP="$X/dump" DXMT_SHADER_CACHE_PATH="$X/cache" \
+    "$OUT/d3d12_list7" order > "$OUT/check-order.txt" 2>&1 || true
+  deps=$(/usr/bin/grep -oE 'encoders with a dependency list [0-9]+' "$X/dump/stats.txt" 2> /dev/null || true)
+  rm -rf "$X"
+  [ "$deps" = "encoders with a dependency list 2" ] \
+    || { echo "tests: FAIL a render pass's resolve isn't ordered: ${deps:-no stats}"; exit 1; }
+fi
 echo "tests: ok"
 
