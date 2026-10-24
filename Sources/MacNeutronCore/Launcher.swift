@@ -254,6 +254,10 @@ public struct Launcher: Sendable {
             environment["MN_MAC_HOME"] = home  // run-game.sh's XDG folders: the Mac's, as the profile's links name them
             let share = vm.share(appID: context.appID)
             try FileManager.default.createDirectory(at: share, withIntermediateDirectories: true)
+            // Where the game ran from: the app deletes the drive of a game Steam uninstalled only while Steam still lists
+            // this library (UninstalledDrives), not when Steam's list was reset.
+            try ((library as NSString).deletingLastPathComponent)
+                .write(to: share.appending(path: "library"), atomically: true, encoding: .utf8)
             try MicroVM.mountsFile(shares).write(to: share.appending(path: "mounts"), atomically: true, encoding: .utf8)
             let mountsFailed = share.appending(path: "traces/mounts.failed")
             try? FileManager.default.removeItem(at: mountsFailed)  // an earlier run's
@@ -330,6 +334,12 @@ public struct Launcher: Sendable {
             for line in ((try? String(contentsOf: installResults, encoding: .utf8)) ?? "").split(separator: "\n") {
                 let entry = "install script \(context.appID): \(line)"
                 if line.hasSuffix(" exit 0") { log.append(entry) } else { log.summary(entry) }
+                // Timed out (run-game.sh's MN_INSTALL_TIMEOUT): likely waiting for a click, and it will again.
+                if line.hasSuffix(" exit 124") {
+                    notifier.post(title: "MacNeutron", message: "\(Self.gameName(request.target))'s install step "
+                                  + "\"\(line.dropLast(" exit 124".count))\" was stopped after waiting too long, maybe for a "
+                                  + "click in a window the game VM can't show. It runs again at the next launch.")
+                }
             }
             if let reason = try? String(contentsOf: mountsFailed, encoding: .utf8) {
                 let message = "MacNeutron couldn't share this game's saves with the game VM: "

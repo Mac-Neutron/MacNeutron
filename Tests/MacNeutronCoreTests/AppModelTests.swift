@@ -420,6 +420,8 @@ private func makeVMModel(vmRoot: URL, layout: ToolLayout? = nil, cdn: FakeValveC
               to: model.steam.root.appending(path: "steamapps/libraryfolders.vdf"))
     let drive = vmRoot.appending(path: "state/999.img")
     try write("disk", to: drive)
+    try write(model.steam.root.appending(path: "steamapps").path(percentEncoded: false),
+              to: vmRoot.appending(path: "runs/999/library"))  // the launcher's record of where it ran from
     await model.refresh()
     #expect(!FileManager.default.fileExists(atPath: drive.path(percentEncoded: false)))
     let text = (try? String(contentsOf: log.launcherLog, encoding: .utf8)) ?? ""

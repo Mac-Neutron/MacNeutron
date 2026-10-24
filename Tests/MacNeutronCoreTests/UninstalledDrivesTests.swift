@@ -26,11 +26,14 @@ private func makeSteam() throws -> SteamLocation {
 }
 
 /// A VM folder with drives for 231350, 555, 999 (uninstalled, with its TPM, shader cache and run share), 0 and a
-/// test's named drive.
-private func makeVM() throws -> URL {
+/// test's named drive, each run from the Steam root's library (the launcher's runs/<id>/library).
+private func makeVM(steam: SteamLocation) throws -> URL {
     let vm = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
     for name in ["231350.img", "555.img", "999.img", "0.img", "fonts.img", "999.tpm/id", "999.dxmt/x"] {
         try write("disk", to: vm.appending(path: "state/\(name)"))
+    }
+    for id in ["231350", "555", "999", "0"] {
+        try write(steam.root.appending(path: "steamapps").path(percentEncoded: false), to: vm.appending(path: "runs/\(id)/library"))
     }
     try write("console", to: vm.appending(path: "runs/999/console.log"))
     try write("", to: vm.appending(path: "runs/999.lock"))
@@ -45,8 +48,9 @@ private let app999 = ["state/999.img", "state/999.tpm", "state/999.dxmt", "runs/
 private let kept = ["state/231350.img", "state/555.img", "state/0.img", "state/fonts.img"]
 
 @Test func anUninstalledGamesDriveGoes() throws {
-    let vm = try makeVM()
-    let lines = UninstalledDrives.remove(vm: vm, steam: try makeSteam())
+    let steam = try makeSteam()
+    let vm = try makeVM(steam: steam)
+    let lines = UninstalledDrives.remove(vm: vm, steam: steam)
     for path in app999 { #expect(!exists(vm, path), "\(path) is still there") }
     for path in kept { #expect(exists(vm, path), "\(path) was deleted") }
     #expect(lines.count == 1)
@@ -54,8 +58,8 @@ private let kept = ["state/231350.img", "state/555.img", "state/0.img", "state/f
 }
 
 @Test func nothingGoesWithoutLibraryFolders() throws {
-    let vm = try makeVM()
     let steam = try makeSteam()
+    let vm = try makeVM(steam: steam)
     let file = steam.root.appending(path: "steamapps/libraryfolders.vdf")
     try FileManager.default.removeItem(at: file)
     #expect(UninstalledDrives.remove(vm: vm, steam: steam) == [])
@@ -65,8 +69,8 @@ private let kept = ["state/231350.img", "state/555.img", "state/0.img", "state/f
 }
 
 @Test func aRunningVMsDriveStays() throws {
-    let vm = try makeVM()
     let steam = try makeSteam()
+    let vm = try makeVM(steam: steam)
     // run-guest.sh's lockf holds it while the VM runs.
     let fd = open(vm.appending(path: "runs/999.lock").path(percentEncoded: false), O_RDONLY | O_EXLOCK)
     #expect(fd >= 0)
@@ -85,4 +89,16 @@ private let kept = ["state/231350.img", "state/555.img", "state/0.img", "state/f
     #expect(steam.listedAppIDs() == [231350, 555, 872200])
     try write("\"libraryfolders\"\n{\n", to: file)
     #expect(steam.listedAppIDs() == nil)
+}
+
+// Steam's library list reset (Steam reinstalled) or a library taken off it: its games' drives are kept, as are drives
+// no launch has recorded a library for.
+@Test func aDriveFromALibrarySteamNoLongerListsStays() throws {
+    let steam = try makeSteam()
+    let vm = try makeVM(steam: steam)
+    try write("/Volumes/Games/steamapps", to: vm.appending(path: "runs/999/library"))
+    #expect(UninstalledDrives.remove(vm: vm, steam: steam) == [])
+    try FileManager.default.removeItem(at: vm.appending(path: "runs/999/library"))
+    #expect(UninstalledDrives.remove(vm: vm, steam: steam) == [])
+    #expect(exists(vm, "state/999.img"))
 }

@@ -8,11 +8,13 @@ import Foundation
 /// could raise a keychain prompt.
 public enum UninstalledDrives {
     /// Deletes the drive (state/<id>.img, .tpm/, .dxmt/; runs/<id>/, runs/<id>.lock) of every app Steam lists nowhere:
-    /// in no library's `apps` list and with no app manifest. Nothing when libraryfolders.vdf can't be read, and never
-    /// a drive whose VM runs (run-guest.sh holds its run lock). Returns one launcher.log line per drive deleted.
+    /// in no library's `apps` list and with no app manifest. Only while Steam still lists the library the game last ran
+    /// from (the launcher's runs/<id>/library): a reset list (Steam reinstalled) names none of a drive's games, and a
+    /// drive without the record stays. Nothing when libraryfolders.vdf can't be read, and never a drive whose VM runs
+    /// (run-guest.sh holds its run lock). Returns one launcher.log line per drive deleted.
     public static func remove(vm: URL, steam: SteamLocation) -> [String] {
         guard let listed = steam.listedAppIDs() else { return [] }
-        let installed = steam.installedAppIDs()
+        let installed = steam.installedAppIDs(), libraries = steam.libraries()
         let fm = FileManager.default
         let state = vm.appending(path: "state", directoryHint: .isDirectory)
         let runs = vm.appending(path: "runs", directoryHint: .isDirectory)
@@ -20,7 +22,10 @@ public enum UninstalledDrives {
         for name in ((try? fm.contentsOfDirectory(atPath: state.path(percentEncoded: false))) ?? []).sorted() {
             // A Steam app's drive only: not a test's (fonts.img), nor 0.img.
             guard name.hasSuffix(".img"), let id = UInt32(name.dropLast(4)), "\(id).img" == name, id != 0,
-                  id < 0x8000_0000, !listed.contains(id), !installed.contains(id) else { continue }
+                  id < 0x8000_0000, !listed.contains(id), !installed.contains(id),
+                  let ranFrom = try? String(contentsOf: runs.appending(path: "\(id)/library"), encoding: .utf8),
+                  libraries.contains(where: { SteamLocation.samePath($0, URL(filePath: ranFrom, directoryHint: .isDirectory)) })
+            else { continue }
             try? fm.createDirectory(at: runs, withIntermediateDirectories: true)
             let lock = open(runs.appending(path: "\(id).lock").path(percentEncoded: false),
                             O_RDONLY | O_CREAT | O_EXLOCK | O_NONBLOCK, 0o644)

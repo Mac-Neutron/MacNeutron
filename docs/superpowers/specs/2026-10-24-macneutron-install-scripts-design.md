@@ -229,7 +229,9 @@ These follow Steam's rules:
   game starts. This was added in the plan, and the maintainer approved it with the plan (2026-10-24).
 - After the run, the launcher copies `traces/installscript.log` into launcher.log. A step that failed goes in as a
   summary line, so performance builds keep it. Successes go in as ordinary lines.
-- No notification: Steam itself only retries.
+- No notification for a failure: Steam itself only retries. A timed-out step (exit 124) is the exception: it
+  probably waited for a click and will again, costing the timeout at every launch. So the player gets a notification
+  naming the game and the step, and a launch option can set `MN_INSTALL_TIMEOUT` (final review, 2026-10-24).
 
 ### 4.6 Proton's marks
 
@@ -288,6 +290,10 @@ shader cache. That drive now goes on its own, as Proton's prefix does.
   `libraryfolders.vdf` keeps listing a game whose library is on a disconnected drive, so that game's drive stays.
   When the file can't be read or parsed (Steam rewriting it), nothing is deleted that round. Drives with other names
   are never touched: the dev VM's test drives (`fonts.img`), and `0.img`.
+- **Only while Steam still lists the game's library.** Each VM launch records the library it ran from
+  (`runs/<id>/library`). A drive goes only while `libraryfolders.vdf` still names that library. A list Steam reset
+  (Steam reinstalled) names none of the drive's games, and a library taken off the list keeps its games' drives. A
+  drive with no record stays: one from before this change, until its game next launches (final review, 2026-10-24).
 - **A running VM is never touched.** The deletion holds the game's run lock `runs/<id>.lock` (`open` with
   `O_EXLOCK | O_NONBLOCK`), the lock run-guest.sh takes with `lockf`. If it's held, the drive waits for the next round.
   While the deletion runs, a launch of that game is refused, as a second VM is.

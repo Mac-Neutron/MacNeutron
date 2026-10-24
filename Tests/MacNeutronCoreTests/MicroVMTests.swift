@@ -644,3 +644,25 @@ private func gameWithInstallScript(_ script: String) throws -> String {
     _ = f.launcher.launch(["waitforexitandrun", exe], environment: f.env)
     #expect(f.launcherLog.split(separator: "\n").contains { $0.contains("install script 2437170: ") && $0.contains("Firewall") })
 }
+
+// Where a game ran from, for the app's cleanup of uninstalled games' drives (UninstalledDrives): a drive whose library
+// Steam's list no longer names is kept.
+@Test func aVMRunRecordsItsLibrary() throws {
+    let f = try makeVMFixture()
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(try String(contentsOf: f.vm.appending(path: "runs/2437170/library"), encoding: .utf8)
+            == "/Users/someone/Library/Application Support/Steam/steamapps")
+}
+
+// An installer that waited for a click nobody could give costs the timeout at every launch: the player hears of it,
+// and a launch option sets the timeout.
+@Test func aTimedOutInstallScriptIsToldToThePlayer() throws {
+    let scripts = Scripts()
+    let f = try makeVMFixture(scripts: scripts, installLog: "x86 Update 4 exit 0\nUE4 Prerequisites exit 124\n")
+    var env = f.env
+    env["MN_INSTALL_TIMEOUT"] = "120"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    #expect(f.notifier.posted == ["SMITE 2's install step \"UE4 Prerequisites\" was stopped after waiting too long, maybe "
+                                  + "for a click in a window the game VM can't show. It runs again at the next launch."])
+    #expect(scripts.all.first?.contains("MN_INSTALL_TIMEOUT='120'\n") == true)
+}
