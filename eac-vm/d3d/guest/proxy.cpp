@@ -1834,7 +1834,8 @@ static void STDMETHODCALLTYPE om_uav(mn_proxy *This, UINT nrtv, ID3D11RenderTarg
 static void STDMETHODCALLTYPE barrier(mn_proxy *This, UINT32 count, const D3D12_BARRIER_GROUP *groups) {
     thread_local std::vector<D3D12_RESOURCE_BARRIER> legacy;
     dxmt::LegacyBarriers(count, groups, legacy);
-    ((ID3D12GraphicsCommandList *)This)->ResourceBarrier((UINT)legacy.size(), legacy.data());
+    if (!legacy.empty()) // none when they order nothing, as DXMT's own Barrier
+        ((ID3D12GraphicsCommandList *)This)->ResourceBarrier((UINT)legacy.size(), legacy.data());
 }
 
 // DXMT has no meta commands: it answers so, and so do we (their descriptions hold names the wire doesn't carry).

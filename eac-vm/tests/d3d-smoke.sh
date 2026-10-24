@@ -47,7 +47,8 @@ for mode in forward guest; do
   m32=$mode; [ -n "$arch" ] || m32=guest  # smoke.cpp expects forwarding from MACNEUTRON_VM_D3D=forward
   G=$W/d3d-smoke-$mode.sh
   # list7_32.exe where a 32-bit process has D3D12 (forwarded with new WoW64 it's refused, said once a process)
-  list7_32_run='MACNEUTRON_VM_D3D='$m32' timeout -k 10 60 wine $T/list7_32.exe < /dev/null >> $O/d3d-smoke32.raw 2>&1'
+  list7_32_run='MACNEUTRON_VM_D3D='$m32' timeout -k 10 60 wine $T/list7_32.exe Z:$T/shaders/depth.vs.dxil'
+  list7_32_run="$list7_32_run"' Z:$T/shaders/depth.ps.dxil < /dev/null >> $O/d3d-smoke32.raw 2>&1'
   [ "$mode" = guest ] || [ -z "$arch" ] || list7_32_run=:
   cat > "$G" <<EOS
 export PATH=/opt/mn-wine/bin:\$PATH WINEDEBUG=-all DISPLAY=:0 WINEPREFIX=/home/mn/d3d-smoke DXMT_MAX_ANISOTROPY=0
@@ -66,7 +67,7 @@ for i in 1 2 3; do  # processes that end mid-load (M4's final review): the host 
   echo "die status \$?" >> \$O/d3d-smoke.raw
 done
 timeout -k 10 60 wine \$T/smoke.exe < /dev/null >> \$O/d3d-smoke.raw 2>&1
-timeout -k 10 60 wine \$T/list7.exe < /dev/null >> \$O/d3d-smoke.raw 2>&1
+timeout -k 10 60 wine \$T/list7.exe Z:\$T/shaders/depth.vs.dxil Z:\$T/shaders/depth.ps.dxil < /dev/null >> \$O/d3d-smoke.raw 2>&1
 : > \$O/d3d-smoke32.raw
 for i in 1 2 3; do  # smoke.cpp's die compiles shaders: the 32-bit SM50 calls
   MACNEUTRON_VM_D3D=$m32 timeout -k 10 60 wine \$T/smoke32.exe die < /dev/null >> \$O/d3d-smoke32.raw 2>&1
@@ -104,7 +105,7 @@ EOS
   echo "d3d-smoke: $mode: ${dies:-0} of 3 processes ended mid-load, and the host outlived them"
   [ "${dies:-0}" -eq 3 ] || fail="$fail $mode-dies"
   guest_checks="eventthread resource2 name minimised latency d3d11latency rawexport warp wmtforward wmsize conv"
-  list7="list4 resolveregion renderpass mrt depthpass suspend barrier barrierglobal layout3"
+  list7="list4 resolveregion renderpass drawpass mrt depthpass suspend barrier barrierglobal layout3"
   list7_32="list4 layout3"  # i386 DXMT's D3D12 has no descriptor heaps: d3d12_list7's other rows print untested there
   checks="$guest_checks $list7"
   [ "$mode" = guest ] || checks="$checks eventreuse swapchain shared"

@@ -31,6 +31,31 @@ wait
 fail=
 for p in $PROGRAMS; do [ -x "$OUT/$p" ] || fail="$fail $p"; done
 [ -z "$fail" ] || { for p in $fail; do head -5 "$OUT/$p.build.txt"; done; echo "tests: FAIL builds:$fail"; exit 1; }
+# Command list 7's checks, natively and through the loopback forwarder when built against it. Its orderings, through
+# DXMT_STATS:
+# d3d12_list7 order (fork 0128): with DXMT_D3D12_OVERLAP=1 a render pass's end resolve waits on the pass that cleared
+# its source and the next pass over that source waits on the resolve, two encoders with a dependency list (one, the
+# resolve free to overlap its source's writer, before); d3d12_list7 emptybarrier (fork 0129): Barrier calls that order
+# nothing make no barrier call, so the clears' one boundary has none (DXMT's and the guest's Barrier alike).
+stats() {  # stats <command...>: its run's DXMT_STATS file
+  X=$(mktemp -d "${TMPDIR:-/tmp}/dxmt-native-stats.XXXXXX")
+  env DXMT_LOG_PATH=none DXMT_STATS=1 DXMT_DXIL_DUMP="$X/dump" DXMT_SHADER_CACHE_PATH="$X/cache" "$@" > /dev/null 2>&1 || true
+  cat "$X/dump/stats.txt" 2> /dev/null || true
+  rm -rf "$X"
+}
+if [ -x "$OUT/d3d12_list7" ]; then
+  deps=$(stats env DXMT_D3D12_OVERLAP=1 "$OUT/d3d12_list7" order | /usr/bin/grep -oE 'encoders with a dependency list [0-9]+' || true)
+  [ "$deps" = "encoders with a dependency list 2" ] \
+    || { echo "tests: FAIL a render pass's resolve isn't ordered: ${deps:-no stats}"; exit 1; }
+  bounds=$(stats "$OUT/d3d12_list7" emptybarrier | /usr/bin/grep -oE 'encoder boundaries [0-9]+, [0-9]+ with no barrier' || true)
+  [ "$bounds" = "encoder boundaries 1, 1 with no barrier" ] \
+    || { echo "tests: FAIL a Barrier that orders nothing made a barrier call: ${bounds:-no stats}"; exit 1; }
+  # ResolveSubresourceRegion under Metal's validation layer (fork 0129): a rectangle past the destination's edge and a
+  # larger destination are Metal misuse unless clipped and resolved through the scratch texture (an assertion ends it).
+  valid=$(MTL_DEBUG_LAYER=1 DXMT_LOG_PATH=none "$OUT/d3d12_list7" resolveregion 2> /dev/null | /usr/bin/grep '^resolveregion ' \
+    || true)
+  [ "$valid" = "resolveregion ok" ] || { echo "tests: FAIL resolveregion under Metal's validation: ${valid:-it ended}"; exit 1; }
+fi
 [ -z "${MN_D3D_PROGRAMS_LIB:-}" ] || { echo "tests: ok (built against $MN_D3D_PROGRAMS_LIB)"; exit 0; }
 # The check: d3d12_null, natively and in a fresh macOS run (one row of the gate's invocations).
 W=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share
@@ -63,17 +88,5 @@ rm -rf "$X"
 [ "$recorded" -gt 0 ] && [ "$dumped" -gt 0 ] \
   || { echo "tests: FAIL DXMT's files: $recorded recorded, $dumped dumped"; exit 1; }
 [ "${rows:-0}" -gt 0 ] || { tail -3 "$OUT/check-replay.txt"; echo "tests: FAIL the native replay: ${rows:-0} cache rows"; exit 1; }
-# Command list 7 (fork 0125-0126): with DXMT_D3D12_OVERLAP=1, a render pass's end resolve waits on the pass that
-# cleared its source, and the next pass over that source waits on the resolve, which reads and stores it (d3d12_list7
-# order: two encoders with a dependency list; one, the resolve free to overlap its source's writer, before).
-if [ -x "$OUT/d3d12_list7" ]; then
-  X=$(mktemp -d "${TMPDIR:-/tmp}/dxmt-native-order.XXXXXX")
-  DXMT_LOG_PATH=none DXMT_D3D12_OVERLAP=1 DXMT_STATS=1 DXMT_DXIL_DUMP="$X/dump" DXMT_SHADER_CACHE_PATH="$X/cache" \
-    "$OUT/d3d12_list7" order > "$OUT/check-order.txt" 2>&1 || true
-  deps=$(/usr/bin/grep -oE 'encoders with a dependency list [0-9]+' "$X/dump/stats.txt" 2> /dev/null || true)
-  rm -rf "$X"
-  [ "$deps" = "encoders with a dependency list 2" ] \
-    || { echo "tests: FAIL a render pass's resolve isn't ordered: ${deps:-no stats}"; exit 1; }
-fi
 echo "tests: ok"
 

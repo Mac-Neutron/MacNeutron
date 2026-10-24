@@ -1,12 +1,17 @@
 // ID3D12GraphicsCommandList3 to 7 (DXMT command list 7 spec §7):
-//   d3d12_list7.exe
+//   d3d12_list7.exe [<depth.vs.dxil> <depth.ps.dxil>] [<row>]   (shaders/depth.hlsl's quad, for drawpass)
 // Prints one line a row, "<row> ok" or "<row> FAIL <what>"; a failed row doesn't end the program.
 //   list4  CreateCommandList answers ID3D12GraphicsCommandList4, 5, 6 and 7; the List7 one answers List3 to 6, and the
 //          methods behind caps DXMT reports off (protected sessions, VRS) can be called as those tiers allow
 //   resolveregion  ResolveSubresourceRegion of a 2x2 rectangle of a red 4x MSAA target to (2,2) of a blue one: those
-//          four texels red, the rest still blue; a MAX resolve of (0,0) (which DXMT leaves out) doesn't abort
+//          four texels red, the rest still blue; a MAX resolve of (0,0) (which DXMT leaves out) doesn't abort; one
+//          to (3,0) colours only its part inside, (3,0) and (3,1); a whole one into a larger blue target fills its
+//          top-left 4x4 alone
 //   renderpass  BeginRenderPass clears a 4x MSAA target green (and its 4x MSAA depth to 0.5) and EndRenderPass
 //          resolves it in two halves into a black texture: all green
+//   drawpass  a red quad drawn over the left half of a 4x MSAA target its pass clears green (the clear its first
+//          draw's load action), resolved at the pass's end: left half red, right half green ("untested" with no
+//          shaders given)
 //   mrt    two targets, the first CLEAR green and the second PRESERVE: the first green, the second still blue
 //   depthpass  no render targets, a depth target cleared 1.0 then CLEAR 0.25 by the pass: 0.25 everywhere
 //   suspend  a SUSPENDING pass in one list (CLEAR red, ending in a resolve to dst) and a RESUMING one in the next
@@ -14,10 +19,15 @@
 //   barrier  a buffer cleared as a UAV, a List7 Barrier (UNORDERED_ACCESS to COPY_SOURCE), a copy out: the cleared words
 //   barrierglobal  the same with a global barrier
 //   layout3  OPTIONS12 reports enhanced barriers; the device answers ID3D12Device10, whose CreateCommittedResource3
-//          makes an upload buffer from layout UNDEFINED (mapped) and a texture with a castable format
+//          makes an upload buffer from layout UNDEFINED (mapped) and a texture with a castable format; its creations
+//          that fail leave their out pointer null
+//   d3d12_list7.exe <row>: that row alone (eac-vm/dxmt-native/build-tests.sh runs resolveregion under Metal's
+//          validation layer, which the barrier rows' UAV clears don't pass yet)
 //   d3d12_list7.exe order: only an ordering scenario for DXMT_D3D12_OVERLAP=1's DXMT_STATS counts
 //          (eac-vm/dxmt-native/build-tests.sh): a pass clearing a 4x MSAA target and resolving it at its end, then a
 //          pass clearing the target again; prints "order ok" once it ran
+//   d3d12_list7.exe emptybarrier: only two clears with Barrier calls between them that order nothing (no groups, a
+//          group of no barriers, a barrier with nothing to wait on), for DXMT_STATS's boundaries: none with a barrier
 // Built for i386 (the VM's 32-bit lane: DXMT's D3D12 there has no descriptor heaps, as it embeds no heap pointer in a
 // descriptor handle), the rows that need views print "untested" instead.
 #include "d3d12_common.hpp"
@@ -50,16 +60,17 @@ static D3D12_CPU_DESCRIPTOR_HANDLE View(Gpu &gpu, ID3D12Resource *r, D3D12_DESCR
     return h;
 }
 
-// A 4x4 texture's 16 four-byte texels, row by row: copied out from `state` through a readback buffer (the list is
-// submitted and reopened).
-static std::vector<uint32_t> Read(Gpu &gpu, ID3D12Resource *r, D3D12_RESOURCE_STATES state) {
+// A 4x4 texture's 16 four-byte texels (or a larger one's 4x4 `box`), row by row: copied out from `state` through a
+// readback buffer (the list is submitted and reopened).
+static std::vector<uint32_t> Read(Gpu &gpu, ID3D12Resource *r, D3D12_RESOURCE_STATES state,
+                                  const D3D12_BOX *box = nullptr) {
     ID3D12Resource *buffer = gpu.Buffer(D3D12_HEAP_TYPE_READBACK, 4 * 256, D3D12_RESOURCE_STATE_COPY_DEST);
     D3D12_RESOURCE_DESC d = r->GetDesc();
     D3D12_TEXTURE_COPY_LOCATION dst = {buffer, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT}, src = {r};
     dst.PlacedFootprint.Footprint = {d.Format, 4, 4, 1, 256};
     src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
     if (state != D3D12_RESOURCE_STATE_COPY_SOURCE) gpu.Barrier(r, state, D3D12_RESOURCE_STATE_COPY_SOURCE);
-    gpu.list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+    gpu.list->CopyTextureRegion(&dst, 0, 0, 0, &src, box);
     gpu.Submit();
     uint8_t *p;
     D3D12_RANGE all = {0, 4 * 256};
@@ -136,11 +147,26 @@ static const char *resolveregion(Gpu &gpu, ID3D12GraphicsCommandList7 *list) {
     D3D12_RECT rect = {0, 0, 2, 2}, corner = {0, 0, 1, 1};
     list->ResolveSubresourceRegion(dst, 0, 2, 2, src, 0, &rect, DXGI_FORMAT_R8G8B8A8_UNORM, D3D12_RESOLVE_MODE_AVERAGE);
     list->ResolveSubresourceRegion(dst, 0, 0, 0, src, 0, &corner, DXGI_FORMAT_R8G8B8A8_UNORM, D3D12_RESOLVE_MODE_MAX);
+    // A rectangle past the destination's edge: only its part inside, (3,0) and (3,1)
+    list->ResolveSubresourceRegion(dst, 0, 3, 0, src, 0, &rect, DXGI_FORMAT_R8G8B8A8_UNORM, D3D12_RESOLVE_MODE_AVERAGE);
+    // A larger destination at (0,0): its top-left 4x4 red, the rest still blue
+    D3D12_RESOURCE_DESC wide = Tex2D(8, 8, DXGI_FORMAT_R8G8B8A8_UNORM, 1, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
+    ID3D12Resource *large = gpu.Texture(wide, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    list->ClearRenderTargetView(View(gpu, large, D3D12_DESCRIPTOR_HEAP_TYPE_RTV), kBlueF, 0, nullptr);
+    gpu.Barrier(large, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+    list->ResolveSubresourceRegion(large, 0, 0, 0, src, 0, nullptr, DXGI_FORMAT_R8G8B8A8_UNORM, D3D12_RESOLVE_MODE_AVERAGE);
     auto texels = Read(gpu, dst, D3D12_RESOURCE_STATE_RESOLVE_DEST);
-    src->Release();
-    dst->Release();
+    D3D12_BOX left = {0, 0, 0, 4, 4, 1}, right = {4, 0, 0, 8, 4, 1};
+    auto large_left = Read(gpu, large, D3D12_RESOURCE_STATE_RESOLVE_DEST, &left);
+    auto large_right = Read(gpu, large, D3D12_RESOURCE_STATE_COPY_SOURCE, &right);
+    src->Release(), dst->Release(), large->Release();
     // (0,0) unchecked: D3D12 resolves MAX (D3DMetal does), DXMT warns and skips it (spec §4.1)
-    return Expect(texels, "texel", [](int x, int y) { return !x && !y ? 0 : x >= 2 && y >= 2 ? kRed : kBlue; });
+    const char *r = Expect(texels, "texel", [](int x, int y) {
+        return !x && !y ? 0 : (x >= 2 && y >= 2) || (x == 3 && y <= 1) ? kRed : kBlue;
+    });
+    if (strcmp(r, "ok")) return r;
+    r = Expect(large_left, "larger destination", [](int, int) { return kRed; });
+    return strcmp(r, "ok") ? r : Expect(large_right, "larger destination's rest", [](int, int) { return kBlue; });
 }
 
 // The Gpu's list, then `other`, in one ExecuteCommandLists; waits (10 s at most) and reopens the Gpu's list.
@@ -207,6 +233,46 @@ static const char *renderpass(Gpu &gpu, ID3D12GraphicsCommandList7 *list) {
     auto texels = Read(gpu, dst, D3D12_RESOURCE_STATE_RESOLVE_DEST);
     target->Release(), dst->Release(), depth->Release();
     return Expect(texels, "texel", [](int, int) { return kGreen; });
+}
+
+static std::vector<char> vs_bytes, ps_bytes; // depth.hlsl's vsmain and psmain, when given
+
+// A red quad over the left half of a 4x MSAA target inside a pass that clears it green and resolves it at its end.
+static const char *drawpass(Gpu &gpu, ID3D12GraphicsCommandList7 *list) {
+    if (vs_bytes.empty() || ps_bytes.empty()) return "untested: no shaders given";
+    ID3D12RootSignature *root = CbvRootSignature(gpu);
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC gd;
+    QuadPipeline(gpu, root, vs_bytes, ps_bytes, &gd)->Release();
+    gd.SampleDesc.Count = 4;
+    ID3D12PipelineState *pso;
+    TRY(gpu.device->CreateGraphicsPipelineState(&gd, __uuidof(ID3D12PipelineState), (void **)&pso), "PSO (4x MSAA)");
+    struct { float rect[4], color[4], z; } draw = {{-1, -1, 0, 1}, {1, 0, 0, 1}, 0};
+    ID3D12Resource *cbuf = gpu.Buffer(D3D12_HEAP_TYPE_UPLOAD, 256, D3D12_RESOURCE_STATE_GENERIC_READ);
+    void *p;
+    TRY(cbuf->Map(0, nullptr, &p), "Map");
+    memcpy(p, &draw, sizeof draw);
+    cbuf->Unmap(0, nullptr);
+    ID3D12Resource *target = Target(gpu, 4), *dst = Target(gpu);
+    list->ClearRenderTargetView(View(gpu, dst, D3D12_DESCRIPTOR_HEAP_TYPE_RTV), kBlackF, 0, nullptr);
+    gpu.Barrier(dst, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+    D3D12_RENDER_PASS_ENDING_ACCESS_RESOLVE_SUBRESOURCE_PARAMETERS whole = {0, 0, 0, 0, {0, 0, 4, 4}};
+    auto rt = PassTarget(View(gpu, target, D3D12_DESCRIPTOR_HEAP_TYPE_RTV), D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR,
+                         kGreenF);
+    ResolveInto(rt, target, dst, 1, &whole);
+    list->BeginRenderPass(1, &rt, nullptr, D3D12_RENDER_PASS_FLAG_NONE);
+    D3D12_VIEWPORT viewport = {0, 0, 4, 4, 0, 1};
+    D3D12_RECT scissor = {0, 0, 4, 4};
+    list->SetGraphicsRootSignature(root);
+    list->SetPipelineState(pso);
+    list->RSSetViewports(1, &viewport);
+    list->RSSetScissorRects(1, &scissor);
+    list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    list->SetGraphicsRootConstantBufferView(0, cbuf->GetGPUVirtualAddress());
+    list->DrawInstanced(6, 1, 0, 0);
+    list->EndRenderPass();
+    auto texels = Read(gpu, dst, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+    target->Release(), dst->Release(), cbuf->Release(), pso->Release(), root->Release();
+    return Expect(texels, "texel", [](int x, int) { return x < 2 ? kRed : kGreen; });
 }
 
 static const char *mrt(Gpu &gpu, ID3D12GraphicsCommandList7 *list) {
@@ -349,7 +415,27 @@ static const char *layout3(Gpu &gpu) {
     TRY(device->CreateCommittedResource3(&gpu_only, D3D12_HEAP_FLAG_NONE, &td, D3D12_BARRIER_LAYOUT_COMMON, nullptr,
                                          nullptr, 1, &castable, __uuidof(ID3D12Resource), (void **)&texture),
         "CreateCommittedResource3(texture)");
-    texture->Release(), buffer->Release(), device->Release();
+    texture->Release(), buffer->Release();
+    // A failed creation leaves no stale object behind: its out pointer is null
+    ID3D12Resource *stale = (ID3D12Resource *)1;
+    if (SUCCEEDED(device->CreateCommittedResource3(nullptr, D3D12_HEAP_FLAG_NONE, &d, D3D12_BARRIER_LAYOUT_UNDEFINED,
+                                                   nullptr, nullptr, 0, nullptr, __uuidof(ID3D12Resource), (void **)&stale)) ||
+        stale)
+        return "FAIL CreateCommittedResource3(no heap properties) left its out pointer";
+    stale = (ID3D12Resource *)1;
+    if (SUCCEEDED(device->CreatePlacedResource2(nullptr, 0, &d, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, 0, nullptr,
+                                                __uuidof(ID3D12Resource), (void **)&stale)) ||
+        stale)
+        return "FAIL CreatePlacedResource2(no heap) left its out pointer";
+    stale = (ID3D12Resource *)1;
+    D3D12_RESOURCE_DESC rd = {D3D12_RESOURCE_DIMENSION_BUFFER, 0, 65536, 1, 1, 1, DXGI_FORMAT_UNKNOWN, {1, 0},
+                              D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE};
+    if (SUCCEEDED(device->CreateReservedResource2(&rd, D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, nullptr, 0, nullptr,
+                                                  __uuidof(ID3D12Resource), (void **)&stale)))
+        stale->Release();
+    else if (stale)
+        return "FAIL CreateReservedResource2 failed and left its out pointer";
+    device->Release();
     return "ok";
 }
 
@@ -373,21 +459,49 @@ static const char *order(Gpu &gpu, ID3D12GraphicsCommandList7 *list) {
     return "ok";
 }
 
+// Two clears of a target, and between them Barrier calls with nothing to order: no barrier call at all.
+static const char *emptybarrier(Gpu &gpu, ID3D12GraphicsCommandList7 *list) {
+    ID3D12Resource *target = Target(gpu), *other = Target(gpu);
+    list->ClearRenderTargetView(View(gpu, target, D3D12_DESCRIPTOR_HEAP_TYPE_RTV), kRedF, 0, nullptr);
+    list->Barrier(0, nullptr);
+    D3D12_BARRIER_GROUP none = {D3D12_BARRIER_TYPE_BUFFER, 0};
+    list->Barrier(1, &none);
+    D3D12_GLOBAL_BARRIER nothing = {D3D12_BARRIER_SYNC_NONE, D3D12_BARRIER_SYNC_ALL, D3D12_BARRIER_ACCESS_NO_ACCESS,
+                                    D3D12_BARRIER_ACCESS_COPY_DEST};
+    D3D12_BARRIER_GROUP global = {D3D12_BARRIER_TYPE_GLOBAL, 1};
+    global.pGlobalBarriers = &nothing;
+    list->Barrier(1, &global);
+    list->ClearRenderTargetView(View(gpu, other, D3D12_DESCRIPTOR_HEAP_TYPE_RTV), kGreenF, 0, nullptr);
+    gpu.Submit();
+    target->Release(), other->Release();
+    return "ok";
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     Gpu gpu;
     ID3D12GraphicsCommandList7 *list;
-    printf("list4 %s\n", list4(gpu));
+    int arg = 1;
+    if (argc > 2 && strstr(argv[1], ".dxil")) // the quad's shaders first
+        vs_bytes = Load(argv[1]), ps_bytes = Load(argv[2]), arg = 3;
+    const char *only = argc > arg ? argv[arg] : nullptr; // one row (or scenario) by name
+    auto run = [&](const char *name) { return !only || !strcmp(only, name); };
+    if (run("list4")) printf("list4 %s\n", list4(gpu));
     if (FAILED(gpu.list->QueryInterface(__uuidof(ID3D12GraphicsCommandList7), (void **)&list)))
         return printf("list7 FAIL QueryInterface(ID3D12GraphicsCommandList7)\n"), 0;
-    if (argc > 1 && !strcmp(argv[1], "order"))
+    if (only && !strcmp(only, "order"))
         return printf("order %s\n", order(gpu, list)), 0;
+    if (only && !strcmp(only, "emptybarrier"))
+        return printf("emptybarrier %s\n", emptybarrier(gpu, list)), 0;
     static const struct { const char *name; const char *(*row)(Gpu &, ID3D12GraphicsCommandList7 *); } views[] = {
-        {"resolveregion", resolveregion}, {"renderpass", renderpass}, {"mrt", mrt}, {"depthpass", depthpass},
+        {"resolveregion", resolveregion}, {"renderpass", renderpass}, {"drawpass", drawpass}, {"mrt", mrt},
+        {"depthpass", depthpass},
         {"suspend", suspend}, {"barrier", barrier}, {"barrierglobal", barrierglobal}};
     for (auto &v : views)
-        printf("%s %s\n", v.name, sizeof(void *) == 4 ? "untested: no descriptor heaps in 32-bit DXMT" : v.row(gpu, list));
-    printf("layout3 %s\n", layout3(gpu));
+        if (run(v.name))
+            printf("%s %s\n", v.name,
+                   sizeof(void *) == 4 ? "untested: no descriptor heaps in 32-bit DXMT" : v.row(gpu, list));
+    if (run("layout3")) printf("layout3 %s\n", layout3(gpu));
     list->Release();
     return 0;
 }

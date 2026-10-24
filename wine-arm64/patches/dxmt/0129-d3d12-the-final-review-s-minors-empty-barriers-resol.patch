@@ -1,0 +1,122 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sat, 24 Oct 2026 12:00:29 -0400
+Subject: [PATCH] d3d12: the final review's minors: empty barriers, resolve
+ extents, out pointers
+
+A Barrier whose groups order nothing makes no ResourceBarrier call (one would
+still part the passes on either side). ResolveSubresourceRegion clips its
+rectangle to the destination at (DstX, DstY), takes the whole-attachment
+resolve only for a destination the source's size (a larger one goes through
+the scratch texture), and queries the destination's format only where it is
+used; the scratch path's ceiling is named. Device10's creates clear their out
+pointer first.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/d3d12/d3d12_command_list.cpp | 35 +++++++++++++++++++++++---------
+ src/d3d12/d3d12_device.cpp       |  3 +++
+ 2 files changed, 28 insertions(+), 10 deletions(-)
+
+diff --git a/src/d3d12/d3d12_command_list.cpp b/src/d3d12/d3d12_command_list.cpp
+index f9d4712..6559335 100644
+--- a/src/d3d12/d3d12_command_list.cpp
++++ b/src/d3d12/d3d12_command_list.cpp
+@@ -2137,9 +2137,8 @@ public:
+     auto *pSrc = static_cast<MTLD3D12Resource *>(pSrcResource);
+     if (!pDst || !pSrc || !pDst->texture || !pSrc->texture)
+       return;
+-    MTL_DXGI_FORMAT_DESC format_desc, dst_format;
+-    if (FAILED(MTLQueryDXGIFormat(device_->GetMTLDevice(), Format, format_desc)) ||
+-        FAILED(MTLQueryDXGIFormat(device_->GetMTLDevice(), pDstResource->GetDesc().Format, dst_format))) {
++    MTL_DXGI_FORMAT_DESC format_desc;
++    if (FAILED(MTLQueryDXGIFormat(device_->GetMTLDevice(), Format, format_desc))) {
+       ERR("ResolveSubresourceRegion: invalid format ", Format);
+       return;
+     }
+@@ -2153,18 +2152,32 @@ public:
+     }
+     auto &src = pSrc->texture, &dst = pDst->texture;
+     LONG width = src->width(), height = src->height();
++    auto DstMips = dst->miplevelCount();
++    auto DstLevel = DstSubresource % DstMips, DstSlice = DstSubresource / DstMips;
++    LONG dst_width = std::max(1u, dst->width() >> DstLevel), dst_height = std::max(1u, dst->height() >> DstLevel);
++    if ((LONG)DstX >= dst_width || (LONG)DstY >= dst_height)
++      return;
++    // The rectangle as much of it as is inside the source, and fits the destination at (DstX, DstY).
+     D3D12_RECT rect = pSrcRect ? *pSrcRect : D3D12_RECT{0, 0, width, height};
+-    rect = {std::max(rect.left, (LONG)0), std::max(rect.top, (LONG)0), std::min(rect.right, width),
+-            std::min(rect.bottom, height)};
++    rect.left = std::max(rect.left, (LONG)0);
++    rect.top = std::max(rect.top, (LONG)0);
++    rect.right = std::min({rect.right, width, rect.left + dst_width - (LONG)DstX});
++    rect.bottom = std::min({rect.bottom, height, rect.top + dst_height - (LONG)DstY});
+     if (rect.right <= rect.left || rect.bottom <= rect.top)
+       return;
+-    auto DstMips = dst->miplevelCount();
+-    auto DstLevel = DstSubresource % DstMips, DstSlice = DstSubresource / DstMips;
+-    if (!DstX && !DstY && !rect.left && !rect.top && rect.right == width && rect.bottom == height) {
++    if (!DstX && !DstY && !rect.left && !rect.top && rect.right == width && rect.bottom == height &&
++        dst_width == width && dst_height == height) { // the whole source onto a destination its size
+       EncodeResolve(src.ptr(), SrcSubresource, dst.ptr(), DstLevel, DstSlice, format_desc.PixelFormat);
+       return;
+     }
++    MTL_DXGI_FORMAT_DESC dst_format;
++    if (FAILED(MTLQueryDXGIFormat(device_->GetMTLDevice(), pDstResource->GetDesc().Format, dst_format))) {
++      ERR("ResolveSubresourceRegion: invalid destination format ", pDstResource->GetDesc().Format);
++      return;
++    }
+     // A part: Metal resolves whole attachments, so the whole into a scratch texture, then the rectangle copied out.
++    // ponytail: a scratch texture the source's size and a whole resolve a call (two for a pass resolved in two
++    // halves); one scratch per source and slice an EndRenderPass, or kept by the allocator for reuse, if it shows.
+     WMTTextureInfo info = {};
+     info.pixel_format = format_desc.PixelFormat;
+     info.type = WMTTextureType2D;
+@@ -2347,12 +2360,14 @@ public:
+   }
+ 
+   // Enhanced barriers (OPTIONS12): one call is one ResourceBarrier call of the legacy barriers they mean to DXMT
+-  // (d3d12_barrier_legacy.hpp), which ResourceBarrier classifies as its own.
++  // (d3d12_barrier_legacy.hpp), which ResourceBarrier classifies as its own; none when they order nothing (a barrier
++  // call would still part the passes on either side).
+   void STDMETHODCALLTYPE
+   Barrier(UINT32 NumBarrierGroups, const D3D12_BARRIER_GROUP *pBarrierGroups) {
+     DXMT_STAT_SCOPE("list.Barrier");
+     LegacyBarriers(NumBarrierGroups, pBarrierGroups, legacy_barriers_);
+-    ResourceBarrier(legacy_barriers_.size(), legacy_barriers_.data());
++    if (!legacy_barriers_.empty())
++      ResourceBarrier(legacy_barriers_.size(), legacy_barriers_.data());
+   }
+ #undef WARN_ONCE
+ 
+diff --git a/src/d3d12/d3d12_device.cpp b/src/d3d12/d3d12_device.cpp
+index 94b05d3..037a929 100644
+--- a/src/d3d12/d3d12_device.cpp
++++ b/src/d3d12/d3d12_device.cpp
+@@ -1775,6 +1775,7 @@ public:
+       void **ppResource
+   ) {
+     DXMT_STAT_SCOPE("device.CreateCommittedResource3");
++    InitReturnPtr(ppResource);
+     if (!pHeapProps)
+       return E_INVALIDARG;
+     IgnoreCastableFormats(NumCastableFormats);
+@@ -1791,6 +1792,7 @@ public:
+       REFIID riid, void **ppResource
+   ) {
+     DXMT_STAT_SCOPE("device.CreatePlacedResource2");
++    InitReturnPtr(ppResource);
+     if (!pHeap)
+       return E_INVALIDARG;
+     IgnoreCastableFormats(NumCastableFormats);
+@@ -1807,6 +1809,7 @@ public:
+       DXGI_FORMAT *pCastableFormats, REFIID riid, void **ppResource
+   ) {
+     DXMT_STAT_SCOPE("device.CreateReservedResource2");
++    InitReturnPtr(ppResource);
+     return E_NOTIMPL; // as CreateReservedResource1
+   }
+ 
+-- 
+2.54.0 (Apple Git-157)
+
