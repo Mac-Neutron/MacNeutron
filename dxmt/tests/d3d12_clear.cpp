@@ -6,6 +6,8 @@
 // swapchain created FRAME_LATENCY_WAITABLE_OBJECT keeps that flag (and its waitable object) through a ResizeBuffers
 // given ALLOW_MODE_SWITCH alone, as DXGI can't add or remove it after creation; then "resize size <w>x<h>": that
 // swapchain's size after a ResizeBuffers given 0x0 (its window's, times DXMT_RENDER_SCALE).
+// Last "swapchain release <n> <n>": what each swapchain's last Release returns, 0 when it's freed (DXMT 0131: one was
+// created with a reference nobody held, so a game's swapchain, and its view over the window, outlived the game).
 #define WIDL_EXPLICIT_AGGREGATE_RETURNS  // D3D12 methods that return structs: the MSVC ABI under mingw
 #include <windows.h>
 #include <d3d12.h>
@@ -152,5 +154,8 @@ int main(int argc, char **argv) {
     printf("resize waitable 0x%x %d\n", resized.Flags, object != nullptr);
     printf("resize size %ux%u\n", resized.Width, resized.Height);
     if (object) CloseHandle(object);
+    swap1->Release();
+    waitable1->Release();
+    printf("swapchain release %lu %lu\n", (unsigned long)swap->Release(), (unsigned long)waitable->Release());
     return 0;
 }

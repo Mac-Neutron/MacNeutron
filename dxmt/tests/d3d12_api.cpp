@@ -149,6 +149,62 @@ static void MultiFence() {
            (unsigned long)(unsigned)hr_all, all_early, all_late, (unsigned long)wait, (unsigned long)(unsigned)hr_none, none_set);
 }
 
+// A fence's shared handle, as 3DMark's Steel Nomad makes one (SHARED | SHARED_CROSS_ADAPTER, GENERIC_ALL, no name) and
+// opens it on its display device: an unshared fence has none; the handle opens on this device and on a second one, and
+// the three fences are one (a CPU signal, a queue's signal, another device's queue waiting); the handle keeps the fence
+// with every fence object let go; once closed it opens nothing, and nor does an event of the program's.
+static const char *SharedFence() {
+    static char text[160];
+#define SHARED_TRY(expr, what) do { HRESULT hr_ = (expr); if (FAILED(hr_)) { \
+    snprintf(text, sizeof text, "FAIL %s %08x", what, (unsigned)hr_); return text; } } while (0)
+#define SHARED_EXPECT(cond, what) do { if (!(cond)) { snprintf(text, sizeof text, "FAIL %s", what); return text; } } while (0)
+    ID3D12Fence *plain, *a, *b, *c, *d = nullptr;
+    HANDLE h = nullptr;
+    SHARED_TRY(gpu->device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void **)&plain), "CreateFence");
+    HRESULT hr = gpu->device->CreateSharedHandle(plain, nullptr, GENERIC_ALL, nullptr, &h);
+    if (hr != E_INVALIDARG || h) { snprintf(text, sizeof text, "FAIL unshared fence's handle %08x", (unsigned)hr); return text; }
+    plain->Release();
+    SHARED_TRY(gpu->device->CreateFence(1, (D3D12_FENCE_FLAGS)(D3D12_FENCE_FLAG_SHARED | D3D12_FENCE_FLAG_SHARED_CROSS_ADAPTER),
+                                        __uuidof(ID3D12Fence), (void **)&a), "CreateFence(shared)");
+    SHARED_TRY(gpu->device->CreateSharedHandle(a, nullptr, GENERIC_ALL, nullptr, &h), "CreateSharedHandle");
+    SHARED_EXPECT(h, "a null handle");
+    SHARED_TRY(gpu->device->OpenSharedHandle(h, __uuidof(ID3D12Fence), (void **)&b), "OpenSharedHandle");
+    SHARED_EXPECT(b->GetCompletedValue() == 1, "opened fence's value");
+    SHARED_TRY(a->Signal(5), "Signal");
+    SHARED_EXPECT(b->GetCompletedValue() == 5, "a CPU signal on the opened fence");
+    HANDLE e = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    SHARED_TRY(gpu->queue->Signal(b, 7), "queue Signal");
+    SHARED_TRY(a->SetEventOnCompletion(7, e), "SetEventOnCompletion");
+    SHARED_EXPECT(WaitForSingleObject(e, 1000) == WAIT_OBJECT_0, "a queue's signal of the opened fence");
+    ID3D12Device *second;
+    SHARED_TRY(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), (void **)&second), "D3D12CreateDevice");
+    SHARED_TRY(second->OpenSharedHandle(h, __uuidof(ID3D12Fence), (void **)&c), "OpenSharedHandle(second device)");
+    ID3D12CommandQueue *queue;
+    D3D12_COMMAND_QUEUE_DESC qd = {D3D12_COMMAND_LIST_TYPE_DIRECT};
+    SHARED_TRY(second->CreateCommandQueue(&qd, __uuidof(ID3D12CommandQueue), (void **)&queue), "CreateCommandQueue");
+    SHARED_TRY(queue->Wait(c, 9), "Wait");
+    SHARED_TRY(queue->Signal(c, 10), "Signal(second device)");
+    SHARED_EXPECT(a->GetCompletedValue() == 7, "the second device's queue didn't wait");
+    SHARED_TRY(b->Signal(9), "Signal(9)");
+    SHARED_TRY(a->SetEventOnCompletion(10, e), "SetEventOnCompletion(10)");
+    SHARED_EXPECT(WaitForSingleObject(e, 1000) == WAIT_OBJECT_0, "the second device's queue's wait and signal");
+    a->Release(); b->Release(); c->Release();
+    SHARED_TRY(gpu->device->OpenSharedHandle(h, __uuidof(ID3D12Fence), (void **)&d), "OpenSharedHandle(fences let go)");
+    SHARED_EXPECT(d->GetCompletedValue() == 10, "the handle's fence");
+    d->Release();
+    SHARED_EXPECT(CloseHandle(h), "CloseHandle");
+    d = nullptr;
+    hr = gpu->device->OpenSharedHandle(h, __uuidof(ID3D12Fence), (void **)&d);
+    SHARED_EXPECT(hr == E_INVALIDARG && !d, "a closed handle opens");
+    hr = gpu->device->OpenSharedHandle(e, __uuidof(ID3D12Fence), (void **)&d);
+    SHARED_EXPECT(hr == E_INVALIDARG && !d, "an event opens");
+    CloseHandle(e);
+    queue->Release(); second->Release();
+    return "ok";
+#undef SHARED_TRY
+#undef SHARED_EXPECT
+}
+
 template <typename T> static void Feature(int id) {
     T data = {};
     printf("feature %d %08lx\n", id, (unsigned long)(unsigned)gpu->device->CheckFeatureSupport((D3D12_FEATURE)id, &data, sizeof data));
@@ -244,6 +300,7 @@ int main(int argc, char **argv) {
     if (Section("heap1")) Heap1();
     if (Section("residency")) Residency();
     if (Section("multifence")) MultiFence();
+    if (Section("sharedfence")) printf("sharedfence %s\n", SharedFence());
     if (Section("library")) Library(root);
     if (Section("markers")) Markers();
     if (Section("cachedblob")) CachedBlob(root);

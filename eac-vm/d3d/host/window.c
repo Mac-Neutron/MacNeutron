@@ -1,6 +1,7 @@
 /* The guest's windows and displays (M3 Task 2): what each context last pushed (ops 7 and 8), and the hooks native
  * DXMT's window system answers from (fork 0082's WMTSetWsiHooks). A hook in a call answers its context's; off a call
  * (DXMT's own threads), a window's latest in any context and the last context's displays. */
+#include <dlfcn.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +39,12 @@ int mn_d3d_window_set(uint32_t ctx_id, const struct mn_d3d_window *w) {
     if (!k && (k = calloc(1, sizeof *k))) k->ctx_id = ctx_id, k->next = wins, wins = k;
     if (k) k->w = *w, k->seq = ++seq;
     pthread_mutex_unlock(&lock);
+    /* Where the host's window shows it (winemac.m, macneutron-vm's own window code; absent from the tests' builds), so
+     * a windowed program sits where the guest's screen has it and the window's input, mapped to that screen, finds it. */
+    static void (*place)(uint64_t, int32_t, int32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+    if (!place) place = (void (*)(uint64_t, int32_t, int32_t, uint32_t, uint32_t, uint32_t, uint32_t))dlsym(
+                    RTLD_DEFAULT, "mn_window_place");
+    if (place && !(w->flags & 1)) place(w->hwnd, w->x, w->y, w->width, w->height, w->monitor_width, w->monitor_height);
     return k ? 0 : -1;
 }
 

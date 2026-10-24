@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sat, 24 Oct 2026 11:34:52 -0400
+Subject: [PATCH] d3d12: a render pass's resolve and a global read-to-write
+ barrier, ordered
+
+A resolve pass now lists its source as written (its store action stores it):
+a render pass's end resolve has no barrier before or after it, so under
+DXMT_D3D12_OVERLAP=1 it ran beside the pass that drew its source, and the
+source's next writer beside it.
+
+Enhanced barriers: a global barrier from reads to a write orders again (a
+UAV barrier before UAV writes, otherwise one naming any resource), as the
+legacy move into a write state does; the first version skipped it, so a B6
+merge could join the passes on either side. No access before with a SyncBefore
+other than NONE is an execution dependency: a barrier naming any resource.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/d3d12/d3d12_barrier_legacy.hpp | 21 ++++++++++++++-------
+ src/d3d12/d3d12_command_list.cpp   |  3 +++
+ 2 files changed, 17 insertions(+), 7 deletions(-)
+
+diff --git a/src/d3d12/d3d12_barrier_legacy.hpp b/src/d3d12/d3d12_barrier_legacy.hpp
+index 7af24a9..832de60 100644
+--- a/src/d3d12/d3d12_barrier_legacy.hpp
++++ b/src/d3d12/d3d12_barrier_legacy.hpp
+@@ -76,8 +76,12 @@ LegacyResourceBarrier(
+     D3D12_BARRIER_SYNC sync_before, D3D12_BARRIER_ACCESS before, D3D12_BARRIER_ACCESS after,
+     ID3D12Resource *resource, std::vector<D3D12_RESOURCE_BARRIER> &out
+ ) {
+-  if (sync_before == D3D12_BARRIER_SYNC_NONE || before == D3D12_BARRIER_ACCESS_NO_ACCESS)
++  if (sync_before == D3D12_BARRIER_SYNC_NONE)
+     return; // nothing earlier to wait on
++  if (before == D3D12_BARRIER_ACCESS_NO_ACCESS) {
++    out.push_back(AnyResourceBarrier()); // still a scope to wait for: an execution dependency
++    return;
++  }
+   bool known_before, known_after = true;
+   auto state_before = LegacyState(before, &known_before);
+   // No access after: whatever wrote it still has to end, as when it leaves for COMMON.
+@@ -106,12 +110,15 @@ LegacyBarriers(UINT32 group_count, const D3D12_BARRIER_GROUP *groups, std::vecto
+         if (!group.pGlobalBarriers)
+           break;
+         auto &b = group.pGlobalBarriers[i];
+-        if (b.SyncBefore == D3D12_BARRIER_SYNC_NONE || b.AccessBefore == D3D12_BARRIER_ACCESS_NO_ACCESS ||
+-            ReadOnlyAccess(b.AccessBefore))
+-          break;
+-        out.push_back(
+-            b.AccessBefore == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS ? UavBarrier(nullptr) : AnyResourceBarrier()
+-        );
++        bool reads = ReadOnlyAccess(b.AccessBefore);
++        if (b.SyncBefore == D3D12_BARRIER_SYNC_NONE ||
++            (reads && (ReadOnlyAccess(b.AccessAfter) || b.AccessAfter == D3D12_BARRIER_ACCESS_NO_ACCESS)))
++          break; // nothing earlier to wait on, or reads then reads (or nothing)
++        // UAV writes before, or reads before UAV writes (a write after read, as a legacy move into UNORDERED_ACCESS
++        // orders): a UAV barrier; any other write on either side: any resource.
++        bool uav = b.AccessBefore == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS ||
++                   (reads && b.AccessAfter == D3D12_BARRIER_ACCESS_UNORDERED_ACCESS);
++        out.push_back(uav ? UavBarrier(nullptr) : AnyResourceBarrier());
+         break;
+       }
+       case D3D12_BARRIER_TYPE_TEXTURE:
+diff --git a/src/d3d12/d3d12_command_list.cpp b/src/d3d12/d3d12_command_list.cpp
+index c91cc13..f9d4712 100644
+--- a/src/d3d12/d3d12_command_list.cpp
++++ b/src/d3d12/d3d12_command_list.cpp
+@@ -1237,6 +1237,9 @@ public:
+     resolve->type = EncoderType::Resolve;
+     resolve->writes_unknown = false;
+     allocator_->Writes(dst);
++    // And the source, which the pass stores (StoreAndMultisampleResolve): a render pass's resolve has no barrier before
++    // or after it, so it waits on the source's writers, and the source's next writer on it (GPU overlap spec §3.1).
++    allocator_->Writes(src);
+ 
+     TextureViewDescriptor src_desc;
+     src_desc.format = format;
+-- 
+2.54.0 (Apple Git-157)
+

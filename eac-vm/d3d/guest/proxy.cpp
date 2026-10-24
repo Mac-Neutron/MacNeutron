@@ -9,6 +9,8 @@
 #include <vector>
 #include "proxy.h"
 #include "formats.h"
+#include "d3d12_barrier_legacy.hpp" // DXMT's: enhanced barriers as legacy ones
+#include "d3d12_shared_fence.hpp"   // and a fence's shared handles
 #ifndef MN_D3D_LOOPBACK
 #include "wsi_window.hpp" // DXMT's own Win32 window code, built in (build-guest.sh): the window's changes, made here
 #endif
@@ -318,6 +320,17 @@ static UINT64 STDMETHODCALLTYPE completed_value(mn_proxy *This) {
     mn_d3d_p_ID3D12Fence_GetCompletedValue p = {};
     p.self = (uintptr_t)This;
     return mn_d3d_call(MN_D3D_ID_ID3D12Fence_GetCompletedValue, &p) ? 0 : p.ret;
+}
+
+// A fence's shared handles (specials): the guest's own, kept by DXMT's table (d3d12_shared_fence.hpp), as a guest handle
+// means nothing to the host. A handle opens the same proxy: its host fence and mirror slot are the fence's.
+static HRESULT STDMETHODCALLTYPE create_shared_handle(mn_proxy *, ID3D12DeviceChild *object, const SECURITY_ATTRIBUTES *,
+                                                      DWORD, LPCWSTR name, HANDLE *handle) {
+    return dxmt::ShareFence(object, name, handle);
+}
+
+static HRESULT STDMETHODCALLTYPE open_shared_handle(mn_proxy *, HANDLE handle, REFIID riid, void **object) {
+    return dxmt::OpenSharedFence(handle, riid, object);
 }
 
 // A CPU signal: complete at once, here too, before the host hears of it; it sets the value, lower too (M3 Task 5).
@@ -672,7 +685,16 @@ static mn_d3d_window window_state(HWND hwnd) {
     DWORD pid = 0;
     if (front == hwnd) w.flags |= 2;
     if (front && GetWindowThreadProcessId(front, &pid) && pid == GetCurrentProcessId()) w.flags |= 8;
-    w.monitor = (uintptr_t)MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+    HMONITOR m = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+    w.monitor = (uintptr_t)m;
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof mi;
+    POINT origin = {0, 0};
+    if (GetMonitorInfoW(m, &mi) && ClientToScreen(hwnd, &origin)) {
+        w.x = origin.x - mi.rcMonitor.left, w.y = origin.y - mi.rcMonitor.top;
+        w.monitor_width = (uint32_t)(mi.rcMonitor.right - mi.rcMonitor.left);
+        w.monitor_height = (uint32_t)(mi.rcMonitor.bottom - mi.rcMonitor.top);
+    }
     return w;
 }
 
@@ -1299,6 +1321,16 @@ static ID3D11DeviceContext *context_of(IUnknown *resource10) {
 }
 static const int kMapTries = 64; // then the host waits: DXMT's view of the GPU may lag the fence's
 
+// A resource asked to be shared is made unshared: handles shared across processes mean nothing across the VM (rules.txt
+// refuses GetSharedHandle and OpenSharedResource), and native DXMT, which has no D3DKMT device, fails such a texture
+// outright. ANGLE's pbuffers are, so Chromium's GPU process ended at its start (3DMark's UI); with the handle refused,
+// ANGLE goes on without one. D3D10's keyed mutex is another bit (D3D11's 0x10 is DRAWINDIRECT_ARGS).
+// ponytail: GetDesc then answers the flags without these; a consumer in another guest process would need the handles.
+template <class Data> constexpr UINT kSharedMisc =
+    D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+template <> constexpr UINT kSharedMisc<D3D10_SUBRESOURCE_DATA> =
+    D3D10_RESOURCE_MISC_SHARED | D3D10_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+
 #define MN_CREATE(fn, NAME, Desc, Data, T, DESC, INIT, OUT)                                                            \
     static HRESULT STDMETHODCALLTYPE fn(mn_proxy *This, const Desc *desc, const Data *init, T **out) {                \
         mn_res r = desc ? described(*desc) : mn_res{};                                                                 \
@@ -1308,8 +1340,10 @@ static const int kMapTries = 64; // then the host waits: DXMT's view of the GPU 
         }                                                                                                              \
         std::vector<uint8_t> flat;                                                                                     \
         if (desc && init) flat = pack(r, (const D3D11_SUBRESOURCE_DATA *)init);                                        \
+        Desc unshared = desc ? *desc : Desc{};                                                                         \
+        unshared.MiscFlags &= ~kSharedMisc<Data>;                                                                      \
         mn_d3d_p_##NAME p = {};                                                                                        \
-        p.self = (uintptr_t)This, p.DESC = (uintptr_t)desc, p.OUT = (uintptr_t)out;                                   \
+        p.self = (uintptr_t)This, p.DESC = desc ? (uintptr_t)&unshared : 0, p.OUT = (uintptr_t)out;                   \
         p.INIT = flat.empty() ? 0 : (uintptr_t)flat.data(), p.aux[0] = flat.size();                                  \
         int32_t s = mn_d3d_call(MN_D3D_ID_##NAME, &p);                                                                 \
         HRESULT hr = s ? mn_d3d_hr(s) : (HRESULT)(uint32_t)p.ret;                                                      \
@@ -1807,6 +1841,15 @@ static void STDMETHODCALLTYPE om_uav(mn_proxy *This, UINT nrtv, ID3D11RenderTarg
     PX(om_uav, px_om_uav)(This, nrtv, rtvs, dsv, start, nuav, uavs, counts);
 }
 
+// Enhanced barriers (a special the guest answers whole): the legacy barriers they mean, as DXMT's own Barrier makes them, through the forwarded
+// ResourceBarrier (their groups' arrays sit in a union counted outside it, which the generator can't carry).
+static void STDMETHODCALLTYPE barrier(mn_proxy *This, UINT32 count, const D3D12_BARRIER_GROUP *groups) {
+    thread_local std::vector<D3D12_RESOURCE_BARRIER> legacy;
+    dxmt::LegacyBarriers(count, groups, legacy);
+    if (!legacy.empty()) // none when they order nothing, as DXMT's own Barrier
+        ((ID3D12GraphicsCommandList *)This)->ResourceBarrier((UINT)legacy.size(), legacy.data());
+}
+
 // DXMT has no meta commands: it answers so, and so do we (their descriptions hold names the wire doesn't carry).
 static HRESULT STDMETHODCALLTYPE meta_commands(mn_proxy *, UINT *count, D3D12_META_COMMAND_DESC *) {
     if (!count) return E_INVALIDARG;
@@ -1862,6 +1905,7 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"IDXGISwapChain1::GetRotation", (const void *)get_rotation},
         {"IDXGISwapChain2::SetSourceSize", (const void *)set_source_size},
         {"IDXGISwapChain2::GetSourceSize", (const void *)get_source_size},
+        {"ID3D12GraphicsCommandList7::Barrier", (const void *)barrier},
         {"ID3D12Device5::EnumerateMetaCommands", (const void *)meta_commands},
         {"ID3D12Device5::EnumerateMetaCommandParameters", (const void *)meta_command_parameters},
         {"ID3D12Device::CheckFeatureSupport", (const void *)check_feature},
@@ -1894,6 +1938,8 @@ const void *mn_d3d_special(const char *name, const void *fallback) {
         {"ID3D12Fence::Signal", (const void *)fence_signal},
         {"ID3D12Fence::SetEventOnCompletion", (const void *)set_event},
         {"ID3D12Device1::SetEventOnMultipleFenceCompletion", (const void *)set_event_multiple},
+        {"ID3D12Device::CreateSharedHandle", (const void *)create_shared_handle},
+        {"ID3D12Device::OpenSharedHandle", (const void *)open_shared_handle},
         {"ID3D12Resource::Map", (const void *)map},
         {"ID3D12Object::SetName", (const void *)set_name},
         {"ID3D10Blob::GetBufferPointer", (const void *)blob_pointer},

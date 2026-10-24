@@ -35,7 +35,14 @@ struct mn_d3d_query { uint64_t handle; uint8_t iid[16]; uint64_t out; }; /* repl
 /* Ops 7 and 8 (M3): the guest's window and displays as Win32 has them there, pushed before the calls that read them
  * (host/window.c keeps the latest of each, by context). flags: 1 minimised, 2 foreground, 4 a window. A display's
  * modes follow it, `modes` of them, the current one first and then EnumDisplaySettings' list. */
-struct mn_d3d_window { uint64_t hwnd, monitor; uint32_t width, height, flags, pad; }; /* flags 8: the process in front */
+/* x and y: the client area's origin on its monitor, whose size is monitor_width by monitor_height (both as Win32 has
+ * them, an emulated mode's), where the host's window shows it (winemac.m's mn_window_place). */
+struct mn_d3d_window {
+    uint64_t hwnd, monitor;
+    uint32_t width, height, flags; /* flags 8: the process in front */
+    int32_t x, y;
+    uint32_t monitor_width, monitor_height, pad;
+};
 /* D3D11's and D3D10's initial data and updates (M4 Task 4, rules.txt's own): uint32_t count, pad, then count of these,
  * then the bytes each names (offset from the region's start). */
 struct mn_d3d_sub { uint32_t offset, pitch, slice, size; };

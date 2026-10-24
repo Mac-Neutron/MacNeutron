@@ -485,6 +485,8 @@ expect "and the waitable object it was created with" "$(grep '^resize waitable' 
   "resize waitable 0x42 1"
 expect "the swapchain reports the window's size" \
   "$(grep -c '^resize size [0-9][0-9]*x[0-9][0-9]*$' "$WORK/clear.txt" || true)" 1
+expect "a swapchain's last Release frees it (DXMT 0131)" "$(grep '^swapchain release' "$WORK/clear.txt" || echo none)" \
+  "swapchain release 0 0"
 # MacNeutron: DXMT_RENDER_SCALE (the launcher's MACNEUTRON_UPSCALE) makes the game render into a back buffer smaller
 # than its window; the MetalFX presenter upscales it. 0.5 halves the reported back buffer, whatever the window's size.
 rm -rf "$WORK/clear-scale"; export DXMT_DXIL_DUMP="$WORK/clear-scale" DXMT_RENDER_SCALE=0.5

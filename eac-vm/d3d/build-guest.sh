@@ -1,7 +1,7 @@
 #!/bin/sh
 # Direct3D forwarding's guest DLLs (M2 Task 11): mnd3d.dll (the proxies: guest/proxies.cpp and proxy.cpp; it reaches
 # the guest winemetal.so's slot MN_WM_D3D through winemetal.dll's WMTForward, DXMT 0079) and its stand-ins d3d12.dll,
-# dxgi.dll, d3d11.dll and d3d10core.dll (M4), which forward their exports to it: plain x86-64 PE DLLs, built on the Mac with MacNeutron's llvm-mingw
+# dxgi.dll, d3d11.dll and d3d10core.dll (M4), whose exports jump to its: plain x86-64 PE DLLs, built on the Mac with MacNeutron's llvm-mingw
 # against the headers DXMT's PE build takes (llvm-mingw's, as the native set copies them), into
 # build/eac-vm-work/d3d-guest/x86_64-windows, and the same for i686 into i386-windows (32-bit processes, M4b of the
 # 32-bit games' spec: the generated proxies as they are; guest/unix.c converts their data). Needs eac-vm/dxmt/build.sh
@@ -43,11 +43,13 @@ for a in "x86_64-windows x86_64-w64-mingw32 $W/dxmt-guest-build DllMain" "i386-w
   "$cc-clang" -O2 -Wall -Werror -I"$G" -c -o "$obj/ifaces.o" "$G/ifaces.c"
   # Stripped: the static CRT's and libc++'s debug info names this Mac's llvm-mingw build folder (release.sh refuses it)
   "$cc-clang++" -shared -static -s -o "$O/$dir/mnd3d.dll" "$obj"/*.o "$D3D/guest/mnd3d.def" "$WMLIB" \
-    -lgdi32 -luser32 -Wl,--no-insert-timestamp
+    -lgdi32 -luser32 -Wl,--no-insert-timestamp -Wl,--out-implib,"$obj/mnd3d.dll.a"
   echo 'int __stdcall DllMain(void *h, unsigned r, void *p) { (void)h, (void)r, (void)p; return 1; }' > "$O/forward.c"
+  # Each export is code, a jump through the import of mnd3d's, not a forwarder: NVIDIA Streamline's sl.interposer.dll
+  # reads dxgi.dll's export table itself and called a forwarder's string (3DMark's slinfo.exe died on it).
   for n in d3d12 dxgi d3d11 d3d10core; do
     "$cc-clang" -shared -nostdlib -s -Wl,--entry,"$entry" -o "$O/$dir/$n.dll" "$O/forward.c" "$D3D/guest/$n.def" \
-      -Wl,--no-insert-timestamp
+      "$obj/mnd3d.dll.a" -Wl,--no-insert-timestamp
   done
 done
 echo "d3d-guest: $O/x86_64-windows, $O/i386-windows"

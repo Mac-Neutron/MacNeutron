@@ -484,6 +484,18 @@ void mn_executor_notified(uint32_t ctx_id, uint64_t blob_id) {
 
 static void add_nwaiter(uint32_t ctx_id, uint64_t blob, uint64_t arg, uint32_t ring_idx, uint64_t fence_id) {
     pthread_mutex_lock(&nw_lock); /* the poster writes head, then takes the lock: one of us sees the other */
+    /* A queue has one consumer (notify.h): its new wait supersedes one it gave up on (its poll timed out). Kept, an
+     * idle queue's waits would pile up one a second, each holding virtio-gpu control-queue entries until the guest's
+     * queue fills and every process's next control message blocks (3DMark's idle UI stalled its workload). */
+    for (unsigned i = 0; i < nnwaiters;) {
+        struct nwaiter *w = &nwaiters[i];
+        if (w->ctx_id == ctx_id && w->blob == blob) {
+            mn_dxmt_fence_done(w->ctx_id, w->ring_idx, w->fence_id);
+            *w = nwaiters[--nnwaiters];
+        } else {
+            i++;
+        }
+    }
     if (queue_head(ctx_id, blob) > arg || nnwaiters == MAX_NWAITERS) {
         mn_dxmt_fence_done(ctx_id, ring_idx, fence_id); /* the guest rechecks and waits again */
     } else {

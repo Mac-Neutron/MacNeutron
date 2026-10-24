@@ -230,6 +230,99 @@ static const char *own_answers(ID3D12CommandQueue *queue) {
     return bad ? bad : "ok";
 }
 
+// A texture asked to be shared, as ANGLE's pbuffer (Chromium's GPU process) and D3D10's keyed mutex: made unshared,
+// its handle refused with the out value left alone, so ANGLE goes on without it (proxy.cpp's kSharedMisc).
+static const char *shared() {
+    ID3D11Device *dev = nullptr;
+    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &dev,
+                                 nullptr, nullptr)))
+        return "FAIL device";
+    D3D11_TEXTURE2D_DESC d = {};
+    d.Width = d.Height = 1, d.MipLevels = d.ArraySize = 1, d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    d.SampleDesc.Count = 1, d.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    d.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
+    ID3D11Texture2D *t = nullptr;
+    IDXGIResource *r = nullptr;
+    ID3D10Device *d10 = nullptr;
+    ID3D10Texture2D *t10 = nullptr;
+    HANDLE h = (HANDLE)1;
+    const char *bad = nullptr;
+    if (FAILED(dev->CreateTexture2D(&d, nullptr, &t))) bad = "FAIL create";
+    else if (FAILED(t->QueryInterface(__uuidof(IDXGIResource), (void **)&r))) bad = "FAIL IDXGIResource";
+    else if (SUCCEEDED(r->GetSharedHandle(&h)) || h != (HANDLE)1) bad = "FAIL GetSharedHandle";
+    D3D10_TEXTURE2D_DESC d10d = {};
+    d10d.Width = d10d.Height = 1, d10d.MipLevels = d10d.ArraySize = 1, d10d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    d10d.SampleDesc.Count = 1, d10d.BindFlags = D3D10_BIND_RENDER_TARGET;
+    d10d.MiscFlags = D3D10_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+    if (!bad && (FAILED(dev->QueryInterface(__uuidof(ID3D10Device), (void **)&d10)) ||
+                 FAILED(d10->CreateTexture2D(&d10d, nullptr, &t10))))
+        bad = "FAIL d3d10 keyed mutex";
+    if (t10) t10->Release();
+    if (d10) d10->Release();
+    if (r) r->Release();
+    if (t) t->Release();
+    dev->Release();
+    return bad ? bad : "ok";
+}
+
+// A D3D12 resource answers ID3D12Resource2 and its GetDesc1 (3DMark's Steel Nomad asks a swapchain's GetBuffer for it).
+static const char *resource2(ID3D12Device *device) {
+    D3D12_HEAP_PROPERTIES heap = {D3D12_HEAP_TYPE_DEFAULT};
+    D3D12_RESOURCE_DESC d = {};
+    d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER, d.Width = 4096, d.Height = 1, d.DepthOrArraySize = 1;
+    d.MipLevels = 1, d.SampleDesc.Count = 1, d.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    ID3D12Resource *r = nullptr;
+    ID3D12Resource2 *r2 = nullptr;
+    if (FAILED(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &d, D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                               __uuidof(ID3D12Resource), (void **)&r)))
+        return "FAIL resource";
+    HRESULT hr = r->QueryInterface(__uuidof(ID3D12Resource2), (void **)&r2);
+    r->Release();
+    if (FAILED(hr) || !r2) return "FAIL ID3D12Resource2";
+    D3D12_RESOURCE_DESC1 d1 = r2->GetDesc1();
+    r2->Release();
+    return d1.Width == 4096 && d1.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER ? "ok" : "FAIL GetDesc1";
+}
+
+// IDXGIFactory4::EnumWarpAdapter answers an adapter (the first, as DXVK's): 3DMark's Steel Nomad wraps it unchecked.
+static const char *warp() {
+    IDXGIFactory4 *f = nullptr;
+    IDXGIAdapter1 *a = nullptr;
+    if (FAILED(CreateDXGIFactory2(0, __uuidof(IDXGIFactory4), (void **)&f))) return "FAIL factory";
+    HRESULT hr = f->EnumWarpAdapter(__uuidof(IDXGIAdapter1), (void **)&a);
+    f->Release();
+    if (FAILED(hr) || !a) return "FAIL EnumWarpAdapter";
+    DXGI_ADAPTER_DESC1 d = {};
+    hr = a->GetDesc1(&d);
+    a->Release();
+    return SUCCEEDED(hr) ? "ok" : "FAIL GetDesc1";
+}
+
+// dxgi.dll's export read from its export table, as NVIDIA Streamline's sl.interposer.dll does: code, not a forwarder
+// (whose RVA is its string's, inside the export directory), and a factory when called.
+static const char *raw_export() {
+    HMODULE m = LoadLibraryA("dxgi.dll");
+    if (!m) return "FAIL dxgi.dll";
+    BYTE *b = (BYTE *)m;
+    auto nt = (IMAGE_NT_HEADERS *)(b + ((IMAGE_DOS_HEADER *)b)->e_lfanew);
+    IMAGE_DATA_DIRECTORY dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    auto ex = (IMAGE_EXPORT_DIRECTORY *)(b + dir.VirtualAddress);
+    auto names = (DWORD *)(b + ex->AddressOfNames);
+    auto ords = (WORD *)(b + ex->AddressOfNameOrdinals);
+    auto fns = (DWORD *)(b + ex->AddressOfFunctions);
+    for (DWORD i = 0; i < ex->NumberOfNames; i++) {
+        if (strcmp((char *)b + names[i], "CreateDXGIFactory1")) continue;
+        DWORD rva = fns[ords[i]];
+        if (rva >= dir.VirtualAddress && rva < dir.VirtualAddress + dir.Size) return "FAIL forwarded";
+        IDXGIFactory1 *f = nullptr;
+        auto create = (HRESULT(WINAPI *)(REFIID, void **))(b + rva);
+        if (FAILED(create(__uuidof(IDXGIFactory1), (void **)&f))) return "FAIL CreateDXGIFactory1";
+        f->Release();
+        return "ok";
+    }
+    return "FAIL no CreateDXGIFactory1";
+}
+
 static void minimised(ID3D12CommandQueue *queue) {
     HWND w;
     IDXGISwapChain1 *sc = swapchain(queue, &w);
@@ -516,12 +609,15 @@ int main(int argc, char **argv) {
         return printf("eventthread FAIL device\n"), 1;
     }
     printf("eventthread %s\n", event_thread(device, queue));
+    printf("resource2 %s\n", resource2(device));
     printf("eventreuse %s\n", event_reuse(device, queue));
     name(queue);
     minimised(queue);
     printf("latency %s\n", latency(device, queue));
     printf("d3d11latency %s\n", d3d11_latency());
-    if (forward) printf("swapchain %s\n", own_answers(queue));
+    printf("rawexport %s\n", raw_export());
+    printf("warp %s\n", warp());
+    if (forward) printf("swapchain %s\n", own_answers(queue)), printf("shared %s\n", shared());
     else printf("swapchain untested: guest DXMT aborts on these\n");
     wmsize(queue);
     conv(queue);

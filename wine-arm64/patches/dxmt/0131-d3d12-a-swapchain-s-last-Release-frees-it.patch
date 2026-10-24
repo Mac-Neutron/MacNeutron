@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sat, 24 Oct 2026 14:58:11 -0400
+Subject: [PATCH] d3d12: a swapchain's last Release frees it
+
+MTLD3D12SwapChain is a DXGI object (ComObjectWithInitialRef: it starts
+with one reference), but CreateSwapChain wrapped it in Com(new ...),
+which added another, so after the caller's last Release one reference
+was left: the swapchain, its back buffers and its metal view were never
+freed. In the game VM the view stayed over the window when its game
+ended (3DMark's Steel Nomad's last frame hid 3DMark's UI). Com::transfer
+adopts the initial reference instead.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/d3d12/d3d12_swapchain.cpp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/d3d12/d3d12_swapchain.cpp b/src/d3d12/d3d12_swapchain.cpp
+index 4170912..4ca8bc2 100644
+--- a/src/d3d12/d3d12_swapchain.cpp
++++ b/src/d3d12/d3d12_swapchain.cpp
+@@ -983,7 +983,10 @@ CreateSwapChain(
+     const DXGI_SWAP_CHAIN_DESC1 *pDesc, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC *pFullscreenDesc,
+     IDXGISwapChain1 **ppSwapChain
+ ) {
+-  auto swapchain = Com(new MTLD3D12SwapChain(pFactory, pDevice, pQueue, hWnd, pDesc, pFullscreenDesc));
++  // A DXGI object starts with its reference (ComObjectWithInitialRef): adopted, not added to, or the swapchain and its
++  // view outlive the last Release.
++  auto swapchain =
++      Com<MTLD3D12SwapChain>::transfer(new MTLD3D12SwapChain(pFactory, pDevice, pQueue, hWnd, pDesc, pFullscreenDesc));
+   HRESULT hr = swapchain->ResizeBuffers(0, pDesc->Width, pDesc->Height, DXGI_FORMAT_UNKNOWN, 0);
+   if (FAILED(hr))
+     return hr;
+-- 
+2.54.0 (Apple Git-157)
+

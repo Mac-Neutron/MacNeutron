@@ -6,7 +6,8 @@
  *   unrelated  a blob destroyed while another ring's op is blocked is unmapped at once, not after that op
  *   hooks      progress runs before a consumer parks; ring_end for each ring that stops, then context_end
  *   notify     an MN_CTRL_NOTIFY_WAIT fence completes once the queue's head passes arg: at once if it already has,
- *              else when mn_executor_notified says the queue moved
+ *              else when mn_executor_notified says the queue moved; a second wait on an idle queue completes the
+ *              first (one consumer: it gave up on it)
  *   spin       MN_EXECUTOR_SPIN_US (2000 here, set before the start): a consumer spins across records 0.5 ms apart
  *              (a few parks for 10 of them; the default 200 us would park after each); the parse keeps the default for
  *              a value outside 0-2000
@@ -267,6 +268,20 @@ int main(void) {
     ops->submit(ops->ctx, 1, &w, sizeof w); /* already past: at once */
     ops->fence(ops->ctx, 1, 3, 78);
     assert(fences_done == before + 2 && last_fence == 78);
+    /* An idle queue: its consumer's next wait (its poll timed out) completes the one it gave up on, so the queue holds
+     * one fence, not one more each second (3DMark's idle UI filled the guest's virtio-gpu control queue). */
+    struct mn_ctrl idle = {MN_CTRL_NOTIFY_WAIT, 0, 30, 1};
+    ops->submit(ops->ctx, 1, &idle, sizeof idle);
+    ops->fence(ops->ctx, 1, 3, 79);
+    assert(fences_done == before + 2);
+    ops->submit(ops->ctx, 1, &idle, sizeof idle);
+    ops->fence(ops->ctx, 1, 3, 80);
+    printf("%s notify superseded (fence %llu done, %d)\n", fences_done == before + 3 && last_fence == 79 ? "ok  " : "FAIL",
+           (unsigned long long)last_fence, fences_done - before);
+    assert(fences_done == before + 3 && last_fence == 79);
+    *head = 2;
+    mn_executor_notified(1, 30);
+    assert(fences_done == before + 4 && last_fence == 80);
     puts("notify ok");
 
     ops->context_destroy(ops->ctx, 1);

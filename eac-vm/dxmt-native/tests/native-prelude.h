@@ -4,3 +4,6 @@
 #pragma once
 #include <windows.h>
 #include <win32_native.h>
+#ifndef GENERIC_ALL
+#define GENERIC_ALL 0x10000000u // winnt.h's, which win32_native.h's GENERIC_READ and GENERIC_WRITE stand beside
+#endif

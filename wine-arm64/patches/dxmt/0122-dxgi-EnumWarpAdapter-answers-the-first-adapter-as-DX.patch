@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Fri, 23 Oct 2026 22:33:53 -0400
+Subject: [PATCH] dxgi: EnumWarpAdapter answers the first adapter, as DXVK's
+
+There is no WARP on Metal, and DXGI_ERROR_NOT_FOUND left a null adapter that 3DMark's Steel Nomad wraps unchecked:
+its workload read through it (GetDesc1) and crashed at its start.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/dxgi/dxgi_factory.cpp | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/src/dxgi/dxgi_factory.cpp b/src/dxgi/dxgi_factory.cpp
+index 18956a5..13ec956 100644
+--- a/src/dxgi/dxgi_factory.cpp
++++ b/src/dxgi/dxgi_factory.cpp
+@@ -281,8 +281,15 @@ public:
+ 
+   HRESULT STDMETHODCALLTYPE EnumWarpAdapter(REFIID iid,
+                                             void **adapter) override {
+-    ERR("DXGIFactory::EnumWrapAdapter: not implemented");
+-    return DXGI_ERROR_NOT_FOUND;
++    // No WARP on Metal: the first adapter, as DXVK answers. 3DMark's Steel Nomad wraps what this returns unchecked and
++    // crashed on a null one.
++    InitReturnPtr(adapter);
++    Com<IDXGIAdapter1> first;
++    HRESULT hr = this->EnumAdapters1(0, &first);
++    if (FAILED(hr))
++      return hr;
++    WARN("DXGIFactory::EnumWarpAdapter: no WARP, returning the first adapter");
++    return first->QueryInterface(iid, adapter);
+   };
+ 
+   HRESULT STDMETHODCALLTYPE
+-- 
+2.54.0 (Apple Git-157)
+

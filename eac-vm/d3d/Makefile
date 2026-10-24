@@ -67,6 +67,13 @@ dispatch-test: $(GEN)/dispatch-test
 	DXMT_LOG_PATH=none $(GEN)/dispatch-test $(W)/metal-host $(NATIVE_LIB)
 .PHONY: dispatch-test
 
-test: layout roundtrip
+# Enhanced barriers as legacy ones (DXMT's d3d12_barrier_legacy.hpp, which the guest's Barrier uses too), natively.
+barrier-test:
+	clang++ -std=c++17 -O1 -g -Wall -Werror -Wno-extern-c-compat -fsanitize=address,undefined -include $(NT)/native-prelude.h \
+	  -I$(NT)/include -I$(I)/d3d12 -I$(I)/windows -I$(I)/directx -I$(I) -I$(DXMT)/d3d12 -o $(GEN)/barrier-test tests/barrier-test.cpp
+	$(GEN)/barrier-test
+.PHONY: barrier-test
+
+test: layout roundtrip barrier-test
 	python3 -W error::ResourceWarning -m unittest discover -s tests -p 'test_*.py'
 .PHONY: test

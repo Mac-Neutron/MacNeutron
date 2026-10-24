@@ -34,6 +34,8 @@ DXMT_GUEST=${DXMT_GUEST:-$HOME/mn-dxmt-guest}
 # Direct3D forwarding's guest DLLs and prefix.sh (guest-stages.sh d3d), in /opt/mn-wine/lib/wine/mn-d3d: off unless a
 # run asks (MACNEUTRON_VM_D3D=forward); D3D_GUEST=none leaves them out.
 D3D_GUEST=${D3D_GUEST:-$HOME/mn-d3d-guest}
+# Proton's Windows-named fonts (guest-stages.sh fonts), in /opt/mn-wine/share/fonts.
+FONTS=${FONTS:-$HOME/mn-fonts-out}
 # The empty state disk each game's starts from (run-guest.sh); `build.sh wine` makes it too.
 state_template() {
   [ -e "$OUT/state-template.img" ] && return 0
@@ -90,6 +92,11 @@ wine_image() {
     sudo ln -sf "$(basename "$(ls "$M32"/usr/lib/libasound.so.2.*.* | head -1)")" "$WORK/wine/lib/mn-i386/libasound.so.2"
     sudo cp "$M32"/usr/share/licenses/alsa-lib/COPYING "$WORK/wine/lib/mn-i386/COPYING.alsa-lib"
   fi
+  # Proton's Windows-named fonts (eac-vm/fonts/build.sh, guest-stages.sh fonts) where Proton keeps them, share/fonts,
+  # with their licence (SIL OFL 1.1): run-game.sh links and registers them in each prefix.
+  [ -f "$FONTS/arial.ttf" ] && [ -f "$FONTS/LICENSE" ] || { echo "no fonts at $FONTS: guest-stages.sh fonts" >&2; exit 1; }
+  sudo mkdir -p "$WORK/wine/share/fonts"
+  sudo install -m644 "$FONTS"/*.ttf "$FONTS/LICENSE" "$WORK/wine/share/fonts/"
   # What the forwarder and DXMT were built from, beside the Wine stage's own (guest-stages.sh; release.sh checks them).
   [ ! -f "$(dirname "$STEAM_FORWARDER")/.mn-source" ] \
     || sudo install -m644 "$(dirname "$STEAM_FORWARDER")/.mn-source" "$WORK/wine/.mn-source-forwarder"

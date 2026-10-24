@@ -260,12 +260,33 @@ public struct Launcher: Sendable {
             environment["MN_MAC_HOME"] = home  // run-game.sh's XDG folders: the Mac's, as the profile's links name them
             let share = vm.share(appID: context.appID)
             try FileManager.default.createDirectory(at: share, withIntermediateDirectories: true)
+            // Where the game ran from: the app deletes the drive of a game Steam uninstalled only while Steam still lists
+            // this library (UninstalledDrives), not when Steam's list was reset.
+            try ((library as NSString).deletingLastPathComponent)
+                .write(to: share.appending(path: "library"), atomically: true, encoding: .utf8)
             try MicroVM.mountsFile(shares).write(to: share.appending(path: "mounts"), atomically: true, encoding: .utf8)
             let mountsFailed = share.appending(path: "traces/mounts.failed")
             try? FileManager.default.removeItem(at: mountsFailed)  // an earlier run's
+            // Steam's install scripts for the game (spec 2026-10-24-macneutron-install-scripts-design): Mac Steam never
+            // runs them, so run-game.sh does, in the game's prefix before the game, and says how each step went.
+            let installScripts = request.verb == .waitforexitandrun
+                ? InstallScripts.plan(steamapps: URL(filePath: library, directoryHint: .isDirectory).deletingLastPathComponent(),
+                                      appID: context.appID,
+                                      gameFolder: MicroVM.gameFolder(guest))
+                : InstallScripts()
+            for note in installScripts.notes { log.append("install script \(context.appID): \(note)") }
+            // Their Registry entries, which run-game.sh imports when they changed: none from an earlier run.
+            let registry = share.appending(path: "installscript.reg")
+            if installScripts.registry.isEmpty {
+                try? FileManager.default.removeItem(at: registry)
+            } else {
+                try installScripts.registryFile.write(to: registry)
+            }
+            let installResults = share.appending(path: "traces/installscript.log")
+            try? FileManager.default.removeItem(at: installResults)  // an earlier run's
             let script = try vm.script(verb: request.verb, appID: context.appID, guest: guest,
                                        arguments: request.arguments, environment: environment,
-                                       performance: layout.isPerformanceBuild)
+                                       performance: layout.isPerformanceBuild, installScript: installScripts.shell)
             let file = FileManager.default.temporaryDirectory
                 .appending(path: "macneutron-vm-\(context.appID)-\(UUID().uuidString).sh")
             try script.write(to: file, atomically: true, encoding: .utf8)
@@ -323,6 +344,17 @@ public struct Launcher: Sendable {
                                         environment: env, output: gameLog, started: vmRun.started)
             log.summary("verb=\(request.verb.rawValue) appid=\(context.appID) backend=vm vm=\(vm.root.path(percentEncoded: false))"
                        + " exit=\(status)")
+            // A step that failed is retried at the next launch, as Steam retries it: a performance build keeps its line.
+            for line in ((try? String(contentsOf: installResults, encoding: .utf8)) ?? "").split(separator: "\n") {
+                let entry = "install script \(context.appID): \(line)"
+                if line.hasSuffix(" exit 0") { log.append(entry) } else { log.summary(entry) }
+                // Timed out (run-game.sh's MN_INSTALL_TIMEOUT): likely waiting for a click, and it will again.
+                if line.hasSuffix(" exit 124") {
+                    notifier.post(title: "MacNeutron", message: "\(Self.gameName(request.target))'s install step "
+                                  + "\"\(line.dropLast(" exit 124".count))\" was stopped after waiting too long, maybe for a "
+                                  + "click in a window the game VM can't show. It runs again at the next launch.")
+                }
+            }
             if let reason = try? String(contentsOf: mountsFailed, encoding: .utf8) {
                 let message = "MacNeutron couldn't share this game's saves with the game VM: "
                     + (reason.split(separator: "\n").first.map(String.init) ?? "")

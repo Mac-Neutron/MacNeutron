@@ -10,7 +10,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 OUT=${BUILD_DIR:-$ROOT/build}/d3d-loopback
 LIB=$(sh "$ROOT/eac-vm/d3d/build-loopback.sh")
 ROWS=${MN_DXMT_ONLY:-"d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_copy d3d12_depth d3d12_dxil d3d12_dxil_exec
-  d3d12_hazards d3d12_indirect d3d12_layered d3d12_lod d3d12_null d3d12_query d3d12_timestamp d3d12_triangle
+  d3d12_hazards d3d12_indirect d3d12_layered d3d12_list7 d3d12_lod d3d12_null d3d12_query d3d12_timestamp d3d12_triangle
   d3d12_upscale d3d12_volume d3d12_vsread d3d11_api d3d11_compute d3d11_deferred d3d11_dynamic d3d11_getters
   d3d11_pipeline d3d11_query d3d11_render d3d11_transfer d3d11_vsia d3d10_core"}
 ROWS=$(echo $ROWS)

@@ -68,7 +68,7 @@ public struct MicroVM: Sendable {
     static let passed = ["MACNEUTRON_DLSS", "MACNEUTRON_XESS", "DXMT_ENABLE_NVEXT", "MACNEUTRON_LOG", "MN_SCREEN",
                          "MACNEUTRON_VM_PROFILE", "DXMT_STATS", "MACNEUTRON_VM_D3D", "MACNEUTRON_VM_D3D32",
                          "MACNEUTRON_VM_D3D_TRACE", "DXMT_LOG_LEVEL", "MACNEUTRON_VM_WOW64", "PROTON_USE_WOW64",
-                         "MTLD3D_CONFIG", "WINEDEBUG", "MN_MAC_HOME"]
+                         "MTLD3D_CONFIG", "WINEDEBUG", "MN_MAC_HOME", "MN_INSTALL_TIMEOUT"]
     /// What a performance build's guest doesn't get: its stats and profiler are compiled out or off.
     static let notPassedToPerformance: Set = ["MACNEUTRON_VM_PROFILE", "DXMT_STATS"]
 
@@ -88,20 +88,25 @@ public struct MicroVM: Sendable {
         }
     }
 
-    /// The guest's script for one launch: its facts as shell assignments, then run-game.sh. A performance build's
-    /// (X.Y.Zp) says MACNEUTRON_PROFILE=p, which keeps run-game.sh quiet unless MACNEUTRON_LOG is set.
+    /// The guest's script for one launch: its facts as shell assignments, the game's install scripts
+    /// (InstallScripts.shell), then run-game.sh. A performance build's (X.Y.Zp) says MACNEUTRON_PROFILE=p, which keeps
+    /// run-game.sh quiet unless MACNEUTRON_LOG is set.
     func script(verb: Verb, appID: String, guest: String, arguments: [String],
-                environment: [String: String], performance: Bool = false) throws -> String {
+                environment: [String: String], performance: Bool = false, installScript: String = "") throws -> String {
         let folder = (guest as NSString).deletingLastPathComponent
         var lines = ["VERB=\(Self.quoted(verb.rawValue))", "APPID=\(Self.quoted(appID))",
                      "GAME_DIR=\(Self.quoted(folder))",
                      "EXE=\(Self.quoted("Z:" + guest.replacingOccurrences(of: "/", with: "\\")))",
                      (["set --"] + arguments.map(Self.quoted)).joined(separator: " ")]
         if performance { lines.append("MACNEUTRON_PROFILE=\(Self.quoted("p"))") }
+        var set: [String] = []
         for key in Self.passed where !(performance && Self.notPassedToPerformance.contains(key)) {
-            if let value = environment[key] { lines.append("\(key)=\(Self.quoted(value))") }
+            if let value = environment[key] { lines.append("\(key)=\(Self.quoted(value))"); set.append(key) }
         }
-        return lines.joined(separator: "\n") + "\n" + (try String(contentsOf: gameScript, encoding: .utf8))
+        // The game's environment too, as a launch option is under Proton: guest DXMT and the forwarder read some
+        // (DXMT_LOG_LEVEL, DXMT_ENABLE_NVEXT, MACNEUTRON_VM_D3D_TRACE), which run-game.sh doesn't export itself.
+        if !set.isEmpty { lines.append("export " + set.joined(separator: " ")) }
+        return lines.joined(separator: "\n") + "\n" + installScript + (try String(contentsOf: gameScript, encoding: .utf8))
     }
 }
 
@@ -147,11 +152,17 @@ extension MicroVM {
         do { _ = try fm.contentsOfDirectory(atPath: documents) } catch { throw UserShareError.documentsUnreadable(documents) }
         var shares = [UserShare(tag: "profile", host: profile, guest: guestProfile),
                       UserShare(tag: "documents", host: documents, guest: documents)]
-        let inGames = guest.hasPrefix("/mnt/games/") ? guest.dropFirst("/mnt/games/".count) : ""
-        if inGames.contains("/"), let folder = inGames.split(separator: "/").first {
+        if let folder = gameFolder(guest) {
             shares.append(UserShare(tag: "game", host: library + "/" + folder, guest: "/mnt/games/" + folder))
         }
         return shares
+    }
+
+    /// The game's own folder in its library (its writable share), from its path in the guest; nil for a file at the
+    /// library's top.
+    static func gameFolder(_ guest: String) -> String? {
+        let inGames = guest.hasPrefix("/mnt/games/") ? guest.dropFirst("/mnt/games/".count) : ""
+        return inGames.contains("/") ? inGames.split(separator: "/").first.map(String.init) : nil
     }
 
     /// The run share's `mounts`: a `<tag> <guest path>` line per share, read by mn-runner.
