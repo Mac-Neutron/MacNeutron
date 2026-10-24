@@ -73,6 +73,8 @@ final class AppModel {
     /// The VM folder: nil unless the caller names it (the app passes `MicroVM.standardRoot` where it ships the VM's
     /// tools), so a test never reaches the real one.
     let vmRoot: URL?
+    /// launcher.log: a game Steam uninstalled whose VM drive went (UninstalledDrives).
+    let log: LauncherLog
     private let vmInstaller: @Sendable (URL, URL) throws -> VMToolsInstallOutcome
     /// A VM ran from the folder at the last tools install: the poll retries it.
     private(set) var vmToolsDeferred = false
@@ -152,7 +154,7 @@ final class AppModel {
          },
          vmManifest: URL? = AppModel.bundledVMManifest, vmHelper: URL? = nil,
          vmSetupLog: URL = LauncherLog.standard.directory.appending(path: "vm-setup.log"),
-         notifications: NotificationCenter = .default, vmRetryInterval: TimeInterval = 30) {
+         notifications: NotificationCenter = .default, vmRetryInterval: TimeInterval = 30, log: LauncherLog = .standard) {
         self.steam = steam
         self.layout = layout
         self.mode = mode
@@ -171,6 +173,7 @@ final class AppModel {
         self.vmManifest = vmManifest
         self.vmHelper = vmHelper
         self.vmSetupLog = vmSetupLog
+        self.log = log
         valveVersion = ValveClient.installed(in: self.valveClient.cache)?.version
         // Read now, not in the first refresh: the scene decides at launch whether to open the setup window.
         runtime = InstalledRuntime.read(layout, identity: identity)
@@ -230,6 +233,13 @@ final class AppModel {
             Self.loadSnapshot(steam: steam, layout: layout, store: store, mode: mode, fallbackApps: fallback, identity: identity)
         }.value
         apply(snapshot, generation: mine)
+        // A game Steam uninstalled loses its VM drive, as Linux Steam deletes its Proton prefix (spec
+        // 2026-10-24-macneutron-install-scripts-design §4.9): the launcher only runs during launches, the app all along.
+        if let root = vmRoot {
+            for line in await Task.detached(operation: { UninstalledDrives.remove(vm: root, steam: steam) }).value {
+                log.summary(line)
+            }
+        }
     }
 
     /// Drops a snapshot read before a settings change or cleanup: it would put the old state back.

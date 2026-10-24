@@ -351,6 +351,9 @@ Test tools available without Steam:
 - **Dependencies:** P0-1, for the DLL.
 
 **P1-4 Install scripts and redistributables: find out first, then the cheap parts**
+- **Status (2026-10-24):** done by spec `2026-10-24-macneutron-install-scripts-design.md`, for games in the VM.
+  Steps 1 (the probe) and 3 (Valve's evaluator) are replaced by MacNeutron's own evaluator in run-game.sh. Step 2 is
+  its §4.6: Proton's CommonRedist marks in the VM prefix. Step 4 is dropped, because macOS runs no scripts.
 - **Proton:** proton.py has no install-script code. Linux Steam runs `<tool> run <client>/legacycompat/iscriptevaluator.exe legacycompat\evaluatorscript_<appid>.vdf`, and Proton's `run` is generic (proton.py:2160-2164). Mac `steamclient.dylib` has the same job (`CRunWindowsCompatInstallScriptJob` and the format strings). Valve's wine.inf marks .NET 3.5 to 4.8 and XNA 4.0 as installed, so their installers are skipped (VW wine.inf.in:1497-1505).
 - **Ours:**
   - Mac Steam has no `legacycompat`. `RunningInstallScript` ends within a second with no process (console_log.txt), and launcher.log has 0 `run` verbs.

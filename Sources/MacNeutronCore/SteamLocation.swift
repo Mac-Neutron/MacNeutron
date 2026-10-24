@@ -58,6 +58,16 @@ public struct SteamLocation: Equatable, Sendable {
         return ids
     }
 
+    /// The app IDs in every library's `apps` list in steamapps/libraryfolders.vdf, a library on a disconnected drive
+    /// included (its manifests can't be read, its list still names its games). Nil when the file can't be read or
+    /// parsed (Steam rewriting it).
+    public func listedAppIDs() -> Set<UInt32>? {
+        let file = root.appending(path: "steamapps/libraryfolders.vdf")
+        guard let text = try? String(contentsOf: file, encoding: .utf8),
+              let folders = (try? KeyValues.parse(text))?.node(at: ["libraryfolders"]) else { return nil }
+        return Set(folders.children.flatMap { $0.children.node(at: ["apps"])?.children ?? [] }.compactMap { UInt32($0.key) })
+    }
+
     /// Steam's UI language ("english"), which the Windows client keeps in HKCU\Software\Valve\Steam\language.
     public func uiLanguage() -> String? {
         guard let text = try? String(contentsOf: registryVDF, encoding: .utf8),

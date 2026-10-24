@@ -37,7 +37,8 @@ final class Scripts: @unchecked Sendable {
 
 private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts: Scripts = Scripts(),
                            display: (width: Int, height: Int)? = nil, version: String? = nil,
-                           console: String? = nil, mountsFailed: String? = nil) throws -> VMFixture {
+                           console: String? = nil, mountsFailed: String? = nil,
+                           installLog: String? = nil) throws -> VMFixture {
     let vm = try makeVMFolder()
     let layout = try makeToolLayout()
     if let version { try setRuntimeVersion(version, of: layout) }
@@ -52,6 +53,11 @@ private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts:
         if let mountsFailed, let share = call.environment["MN_SHARE"] {
             try? FileManager.default.createDirectory(atPath: share + "/traces", withIntermediateDirectories: true)
             try? mountsFailed.write(toFile: share + "/traces/mounts.failed", atomically: true, encoding: .utf8)
+        }
+        // run-game.sh's word on the install-script steps it ran
+        if let installLog, let share = call.environment["MN_SHARE"] {
+            try? FileManager.default.createDirectory(atPath: share + "/traces", withIntermediateDirectories: true)
+            try? installLog.write(toFile: share + "/traces/installscript.log", atomically: true, encoding: .utf8)
         }
         return status
     }
@@ -574,4 +580,94 @@ final class Status: @unchecked Sendable {
     _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
     let log = try String(contentsOf: f.launcher.log.directory.appending(path: "steam-2437170.log"), encoding: .utf8)
     #expect(log.hasSuffix("--- the VM's console ---\n[    0.1] Linux version\n"))
+}
+
+// Steam's install scripts (spec 2026-10-24-macneutron-install-scripts-design): the launcher reads them from the
+// game's app manifest and puts them in front of run-game.sh, which runs them and says how each step went.
+
+/// A game in a temp library (the fixture's app 2437170) whose app manifest lists `script`.
+private func gameWithInstallScript(_ script: String) throws -> String {
+    let steamapps = try makeTempDir().appending(path: "steamapps", directoryHint: .isDirectory)
+    try write("\"AppState\"\n{\n\"installdir\" \"Game\"\n\"InstallScripts\"\n{\n\"2437171\" \"installscript.vdf\"\n}\n}\n",
+              to: steamapps.appending(path: "appmanifest_2437170.acf"))
+    try write(script, to: steamapps.appending(path: "common/Game/installscript.vdf"))
+    return steamapps.appending(path: "common/Game/game.exe").path(percentEncoded: false)
+}
+
+@Test func aGamesInstallScriptsReachTheGuest() throws {
+    let scripts = Scripts()
+    let f = try makeVMFixture(scripts: scripts)
+    let exe = try gameWithInstallScript(#"""
+        "InstallScript"
+        {
+            "Registry" { "HKEY_CURRENT_USER\\Software\\Game" { "string" { "v" "1" } } }
+            "Run Process" { "setup" { "HasRunKey" "HKEY_CURRENT_USER\\Software\\Game" "process 1" "%INSTALLDIR%\\setup.exe" } }
+        }
+        """#)
+    let registry = f.vm.appending(path: "runs/2437170/installscript.reg")
+    _ = f.launcher.launch(["waitforexitandrun", exe], environment: f.env)
+    // The Registry entries go as a UTF-16 file in the run share (run-game.sh imports it when it changed).
+    let data = try Data(contentsOf: registry)
+    #expect(data.prefix(2) == Data([0xFF, 0xFE]))
+    #expect(String(data: data.dropFirst(2), encoding: .utf16LittleEndian)?.contains(#""v"="1""#) == true)
+    _ = f.launcher.launch(["run", exe], environment: f.env)
+    #expect(scripts.all.count == 2)
+    let game = try #require(scripts.all.first), run = try #require(scripts.all.last)
+    let body = try #require(game.range(of: "# run-game.sh"))
+    #expect(game.range(of: "mn_install_script() {\n").map { $0.lowerBound < body.lowerBound } == true)
+    #expect(game.contains(#"  mn_run 'HKEY_CURRENT_USER\Software\Game' 'setup' '1' 'user.reg' 'Software\\Game' '"setup"' '/mnt/games/Game' 'Z:\mnt\games\Game\setup.exe'"#
+                          + "\n"))
+    // Mac Steam never sends an install script's `run`: Proton's generic verb gets none, and no earlier registry file.
+    #expect(!run.contains("mn_install_script"))
+    #expect(!FileManager.default.fileExists(atPath: registry.path(percentEncoded: false)))
+}
+
+@Test func installScriptResultsReachLauncherLog() throws {
+    let f = try makeVMFixture(installLog: "x86 Update 4 exit 0\nFmSysInfo exit 1\n")
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(f.launcherLog.contains("install script 2437170: x86 Update 4 exit 0\n"))
+    #expect(f.launcherLog.contains("install script 2437170: FmSysInfo exit 1\n"))
+}
+
+@Test func aPerformanceRuntimeLogsOnlyTheInstallScriptsThatFailed() throws {
+    let f = try makeVMFixture(version: "0.7.1p", installLog: "x86 Update 4 exit 0\nFmSysInfo exit 1\n")
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(!f.launcherLog.contains("x86 Update 4"))
+    #expect(f.launcherLog.contains("install script 2437170: FmSysInfo exit 1\n"))
+}
+
+@Test func anEarlierRunsInstallScriptResultsAreNotReported() throws {
+    let f = try makeVMFixture()
+    try write("FmSysInfo exit 1\n", to: f.vm.appending(path: "runs/2437170/traces/installscript.log"))
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(!f.launcherLog.contains("install script"))
+}
+
+@Test func installScriptNotesReachLauncherLog() throws {
+    let f = try makeVMFixture()
+    let exe = try gameWithInstallScript(#""InstallScript" { "Firewall" { "Game" "%INSTALLDIR%\\game.exe" } }"#)
+    _ = f.launcher.launch(["waitforexitandrun", exe], environment: f.env)
+    #expect(f.launcherLog.split(separator: "\n").contains { $0.contains("install script 2437170: ") && $0.contains("Firewall") })
+}
+
+// Where a game ran from, for the app's cleanup of uninstalled games' drives (UninstalledDrives): a drive whose library
+// Steam's list no longer names is kept.
+@Test func aVMRunRecordsItsLibrary() throws {
+    let f = try makeVMFixture()
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(try String(contentsOf: f.vm.appending(path: "runs/2437170/library"), encoding: .utf8)
+            == "/Users/someone/Library/Application Support/Steam/steamapps")
+}
+
+// An installer that waited for a click nobody could give costs the timeout at every launch: the player hears of it,
+// and a launch option sets the timeout.
+@Test func aTimedOutInstallScriptIsToldToThePlayer() throws {
+    let scripts = Scripts()
+    let f = try makeVMFixture(scripts: scripts, installLog: "x86 Update 4 exit 0\nUE4 Prerequisites exit 124\n")
+    var env = f.env
+    env["MN_INSTALL_TIMEOUT"] = "120"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    #expect(f.notifier.posted == ["SMITE 2's install step \"UE4 Prerequisites\" was stopped after waiting too long, maybe "
+                                  + "for a click in a window the game VM can't show. It runs again at the next launch."])
+    #expect(scripts.all.first?.contains("MN_INSTALL_TIMEOUT='120'\n") == true)
 }
