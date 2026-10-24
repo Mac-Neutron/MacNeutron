@@ -77,6 +77,16 @@ if ! grep -q '^"EmulateModeset"="Y"' "$WINEPREFIX/user.reg" 2>/dev/null ||
 fi
 # MACNEUTRON_VM_D3D=forward (the launcher's): the game's Direct3D through mnd3d.dll to the host's native DXMT.
 [ -f /opt/mn-wine/lib/wine/mn-d3d/prefix.sh ] && . /opt/mn-wine/lib/wine/mn-d3d/prefix.sh
+# Wine's TrueType fonts in the prefix's Windows\Fonts, as Proton links them (proton's create_fonts_symlinks), a font of
+# the game's own left alone: Wine registers them by their /opt path only, and a program that loads fonts by file from
+# there found none. Chromium 49's page process (3DMark's UI) then had no font at all and died at its first text.
+for F in "$W"/[Ff]onts; do break; done
+[ -d "$F" ] || F=$W/Fonts
+mkdir -p "$F"
+for f in /opt/mn-wine/share/wine/fonts/*.tt[fc]; do
+  [ -f "$f" ] || continue
+  [ -e "$F/${f##*/}" ] && [ ! -L "$F/${f##*/}" ] || ln -sf "$f" "$F/${f##*/}"
+done
 STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
