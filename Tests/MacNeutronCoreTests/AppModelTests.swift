@@ -393,7 +393,8 @@ private func makeVMTools() throws -> URL {
 /// One app start whose runtime is already installed, with the app's VM tools and a VM folder of the test's own.
 @MainActor
 private func makeVMModel(vmRoot: URL, layout: ToolLayout? = nil, cdn: FakeValveCDN? = nil,
-                         vmInstaller: (@Sendable (URL, URL) throws -> VMToolsInstallOutcome)? = nil) async throws -> AppModel {
+                         vmInstaller: (@Sendable (URL, URL) throws -> VMToolsInstallOutcome)? = nil,
+                         log: LauncherLog? = nil) async throws -> AppModel {
     let (mode, _) = try makeMode()
     let layout = try layout ?? makeToolLayout()
     let model = AppModel(steam: mode.steam, layout: layout, mode: mode, store: GameSettingsStore(directory: try makeTempDir()),
@@ -403,10 +404,26 @@ private func makeVMModel(vmRoot: URL, layout: ToolLayout? = nil, cdn: FakeValveC
                          valveClient: try cdn.map { ValveClient(cache: layout.valveCache, fetch: $0.fetch) }
                              ?? ValveClient(cache: try makeTempDir()),
                          vmTools: try makeVMTools(), vmRoot: vmRoot,
-                         vmInstaller: vmInstaller ?? { try VMToolsInstaller.install(from: $0, into: $1, runningExecutables: { [] }) })
+                         vmInstaller: vmInstaller ?? { try VMToolsInstaller.install(from: $0, into: $1, runningExecutables: { [] }) },
+                         log: try log ?? LauncherLog(directory: makeTempDir().appending(path: "Logs")))
     await model.installTask?.value
     await model.valveTask?.value
     return model
+}
+
+// Spec 2026-10-24-macneutron-install-scripts-design §4.9: a game Steam uninstalled loses its VM drive at a refresh.
+@MainActor @Test func aRefreshDeletesAnUninstalledGamesDrive() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    let log = LauncherLog(directory: try makeTempDir().appending(path: "Logs"))
+    let model = try await makeVMModel(vmRoot: vmRoot, log: log)
+    try write("\"libraryfolders\"\n{\n\"0\"\n{\n\"path\" \"\(model.steam.root.path(percentEncoded: false))\"\n\"apps\"\n{\n}\n}\n}\n",
+              to: model.steam.root.appending(path: "steamapps/libraryfolders.vdf"))
+    let drive = vmRoot.appending(path: "state/999.img")
+    try write("disk", to: drive)
+    await model.refresh()
+    #expect(!FileManager.default.fileExists(atPath: drive.path(percentEncoded: false)))
+    let text = (try? String(contentsOf: log.launcherLog, encoding: .utf8)) ?? ""
+    #expect(text.contains("deleted the game VM drive of app 999: Steam uninstalled it ("))
 }
 
 @MainActor @Test func theVMFolderIsNeverTheRealOneUnlessNamed() async throws {
