@@ -223,6 +223,10 @@ These follow Steam's rules:
   Launcher.swift already exits 0 for a skipped installer for the same reason: a failed install script must not block
   the game.
 - Steam's Stop during an installer ends the VM. The step is left unmarked, so the next launch runs it again.
+- An installer that waits for a click would wait on the guest's screen (Xvfb), which nothing presents on the Mac. So
+  each step gets `${MN_INSTALL_TIMEOUT:-900}` seconds. A timeout (status 124) is a failure: it's logged, nothing is
+  marked, and the step is retried at the next launch. `wineserver -k` ends what the installer left running, and the
+  game starts. This was added in the plan, and the maintainer approved it with the plan (2026-10-24).
 - After the run, the launcher copies `traces/installscript.log` into launcher.log. A step that failed goes in as a
   summary line, so performance builds keep it. Successes go in as ordinary lines.
 - No notification: Steam itself only retries.

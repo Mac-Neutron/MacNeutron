@@ -72,18 +72,26 @@ WINEDLLOVERRIDES="mscoree,mshtml=" wineboot $up >/dev/null 2>&1
 # And the fonts linked below are registered by their names in Windows\Fonts, Proton's default prefix's values: Wine
 # registers its own by their /opt path only, which Chromium 49 (3DMark's UI) skips, being outside Windows\Fonts; its
 # page process found no font at all (Blink asks for Times New Roman, Arial, Microsoft Sans Serif...) and died.
+# And Proton's [ProtonOverrides] (its wine.inf): .NET and XNA marked as run in Steam's 32-bit view, so the games' install
+# scripts skip their installers (Wine Mono stands in). The server is waited for: mn_hasrun below reads the files.
 if ! grep -q '^"EmulateModeset"="Y"' "$WINEPREFIX/user.reg" 2>/dev/null ||
    ! grep -q '^"ShowCrashDialog"=dword:00000000' "$WINEPREFIX/user.reg" 2>/dev/null ||
-   ! grep -q '^"Arial (TrueType)"="arial.ttf"' "$WINEPREFIX/system.reg" 2>/dev/null; then
+   ! grep -q '^"Arial (TrueType)"="arial.ttf"' "$WINEPREFIX/system.reg" 2>/dev/null ||
+   ! grep -qF 'CommonRedist\\XNA\\4.0]' "$WINEPREFIX/system.reg" 2>/dev/null; then
   wine reg add 'HKCU\Software\Wine\X11 Driver' /v EmulateModeset /d Y /f >/dev/null 2>&1
   wine reg add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f >/dev/null 2>&1
   { printf 'REGEDIT4\n\n[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts]\n'
     for e in Arial:arial Arial\ Bold:arialbd Courier\ New:cour Courier\ New\ Bold:courbd Times\ New\ Roman:times \
              Tahoma:tahoma Tahoma\ Bold:tahomabd Marlett:marlett Symbol:symbol Webdings:webdings Wingdings:wingding; do
       printf '"%s (TrueType)"="%s.ttf"\n' "${e%:*}" "${e#*:}"
+    done
+    for n in 4.8 4.7.2 4.6.2 4.5.2 4.0 '4.0 Client Profile' 3.5 '3.5 Client Profile' XNA; do
+      k=.NET\\$n v=$n
+      [ "$n" != XNA ] || k=XNA\\4.0 v=4.0
+      printf '\n[HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Valve\\Steam\\Apps\\CommonRedist\\%s]\n"%s"=dword:00000001\n' "$k" "$v"
     done; } > /tmp/mn-fonts.reg
   wine reg import 'Z:\tmp\mn-fonts.reg' >/dev/null 2>&1
-  wineserver -k
+  wineserver -k; wineserver -w
 fi
 # MACNEUTRON_VM_D3D=forward (the launcher's): the game's Direct3D through mnd3d.dll to the host's native DXMT.
 [ -f /opt/mn-wine/lib/wine/mn-d3d/prefix.sh ] && . /opt/mn-wine/lib/wine/mn-d3d/prefix.sh
@@ -106,6 +114,49 @@ cp /mnt/share/bin/steam.exe "$W/system32/steam.exe"  # the one Proton runs (prot
 # Proton puts Valve's signed 32-bit steamclient.dll there and redirects its exports, which Wine patch 0036 does for the
 # 64-bit one only, so a SteamStub-protected 32-bit game stops at its error 3 until 0036 covers i386.
 cp /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll "$STEAM/steamclient.dll"
+# Steam's install scripts (spec 2026-10-24-macneutron-install-scripts-design), which Mac Steam never runs: the launcher's
+# MN_INSTALL_REG (their Registry entries) and mn_install_script (their Run Process steps, InstallScripts.shell). As
+# Steam runs a step: unless its HasRunKey DWORD, named after it, in the prefix's own registry (HKLM\Software in the
+# 32-bit view, as Steam and Proton's marks above have it) is at least its minimum; exit 0 writes the minimum, anything
+# else is retried at the next launch. The registry files are current here: earlier boots' servers saved them as they
+# ended, and the block above waits for its own. The guest has no awk: fixed strings only.
+mn_hasrun() {  # <key> <name>: the DWORD's hex digits, or nothing
+  local f k n l
+  case $1 in HKEY_LOCAL_MACHINE\\*) f=$WINEPREFIX/system.reg;; *) f=$WINEPREFIX/user.reg;; esac
+  k=$(printf '%s' "${1#*\\}" | sed 's/\\/\\\\/g')
+  n=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  l=$(grep -n -i -F "[$k] " "$f" 2>/dev/null | grep '^[0-9]*:\[' | head -1 | cut -d: -f1)
+  [ -n "$l" ] && tail -n "+$((l + 1))" "$f" | sed '/^\[/q' | grep -i -F "\"$n\"=dword:" | head -1 | sed 's/.*=dword://'
+}
+mn_run() {  # <key> <name> <minimum> <folder> <process> <args...>, the step run in its folder
+  local key=$1 name=$2 min=$3 dir=$4 v s=0
+  shift 4
+  v=$(mn_hasrun "$key" "$name")
+  [ "$((0x${v:-0}))" -lt "$min" ] || return 0
+  case $(printf '%s' "$1" | tr '[:upper:]' '[:lower:]') in
+    *.cmd|*.bat) set -- cmd /c "$@";;
+    *.msi) set -- msiexec /i "$@";;
+  esac
+  # An installer waiting for a click on the screen nobody sees (Xvfb) mustn't hold the game forever: a timeout is a
+  # failure, and what it left running goes. ponytail: Wine's status is the code mod 256 (a failure ending 0x00 passes).
+  (cd "$dir" && timeout "${MN_INSTALL_TIMEOUT:-900}" wine "$@") >/dev/null 2>&1 || s=$?
+  [ "$s" != 124 ] || wineserver -k
+  echo "$name exit $s" >> /mnt/share/traces/installscript.log
+  [ "$s" != 0 ] || wine reg add "$key" /v "$name" /t REG_DWORD /d "$min" /f >/dev/null 2>&1
+}
+if [ -n "${MN_INSTALL_REG:-}" ] || command -v mn_install_script >/dev/null; then
+  mkdir -p "$WINEPREFIX/drive_c/users/steamuser/AppData/Local/Temp"  # msiexec's; a profile made empty has none
+  if [ -n "${MN_INSTALL_REG:-}" ]; then
+    # Imported when the text changed (compared in the shell: the image has no cmp). ponytail: reg import reads it in
+    # the ANSI code page, so a non-ASCII value needs a UTF-8 guest locale.
+    if [ "$(cat "$WINEPREFIX/.mn-installscript.reg" 2>/dev/null)" != "$(printf '%s' "$MN_INSTALL_REG")" ]; then
+      printf '%s' "$MN_INSTALL_REG" > /tmp/mn-installscript.reg
+      wine reg import 'Z:\tmp\mn-installscript.reg' >/dev/null 2>&1 &&
+        cp /tmp/mn-installscript.reg "$WINEPREFIX/.mn-installscript.reg"
+    fi
+  fi
+  ! command -v mn_install_script >/dev/null || mn_install_script
+fi
 : > /mnt/share/traces/ready  # the prefix is done: the launcher's toast goes (traces/: the share is root's)
 cd "$GAME_DIR" || exit 1
 if [ "$VERB" = waitforexitandrun ]; then
