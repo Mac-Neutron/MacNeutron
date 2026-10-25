@@ -1,6 +1,6 @@
-/* The 11 Wine symbols MacNeutron's macOS lsteamclient Unix half imports from ntdll.so, for running it in mn-steam-host
- * outside Wine (spec §5.9). Built as ntdll.so next to a copy of lsteamclient.so, which finds it through
- * `@loader_path/`.
+/* The 12 Wine symbols MacNeutron's macOS lsteamclient Unix half imports from ntdll.so (the Makefile checks the list), for
+ * running it in mn-steam-host outside Wine (spec §5.9). Built as ntdll.so next to a copy of lsteamclient.so, which finds
+ * it through `@loader_path/`.
  * - Paths go through one mapping: a host path under the shared library folder becomes the guest's path in Wine's DOS
  *   form (Z: is the guest's /), and back; anything else is refused, so no Mac path reaches the guest.
  * - Registry writes are recorded into the calling thread's log, which mn-steam-host sends to the guest to replay in its
@@ -76,6 +76,18 @@ int ntdll_wcstoumbs(const WCHAR *src, DWORD srclen, char *dst, DWORD dstlen, BOO
         memcpy(dst + n, b, k); n += k;
     }
     return (int)n;
+}
+
+/* Lengths in bytes, as ntdll's; a NULL dst asks for the length. ponytail: a full dst truncates without saying so (ntdll
+ * returns STATUS_BUFFER_TOO_SMALL); lsteamclient's one caller sizes dst to fit. */
+NTSTATUS WINAPI RtlUTF8ToUnicodeN(WCHAR *dst, DWORD dstlen, DWORD *reslen, const char *src, DWORD srclen) {
+    if (!src) return STATUS_INVALID_PARAMETER_4;
+    WCHAR *out = dst ? dst : malloc(srclen * sizeof(WCHAR) + 1);  /* never more UTF-16 units than UTF-8 bytes */
+    if (!out) return STATUS_NO_MEMORY;
+    DWORD n = ntdll_umbstowcs(src, srclen, out, dst ? dstlen / sizeof(WCHAR) : srclen);
+    if (!dst) free(out);
+    if (reslen) *reslen = n * sizeof(WCHAR);
+    return STATUS_SUCCESS;
 }
 
 static size_t wlen(const WCHAR *s) { size_t n = 0; while (s[n]) n++; return n; }

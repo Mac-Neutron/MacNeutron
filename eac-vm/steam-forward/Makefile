@@ -53,6 +53,12 @@ FORCE:
 .PHONY: FORCE
 $(HOST_APP): $(OUT)/host/mn-steam-host $(OUT)/host/ntdll.so $(OUT)/host/lsteamclient.so host-Info.plist $(HOST_ENT) \
              $(HOST_SIGN)
+	@# Every symbol the Mac Unix half takes from ntdll.so is the stand-in's: mn-steam-host loads it with RTLD_NOW, and
+	@# one missing (0.9.0's RtlUTF8ToUnicodeN) stopped every VM game's Steam.
+	@nm -um $(OUT)/host/lsteamclient.so | sed -n 's/.* external _\([^ ]*\) (from @rpath\/ntdll.so)$$/\1/p' | sort > $(OUT)/host/.ntdll-wanted
+	@nm -gU $(OUT)/host/ntdll.so | sed -n 's/.* _\([^ ]*\)$$/\1/p' | sort > $(OUT)/host/.ntdll-has
+	@m=$$(comm -23 $(OUT)/host/.ntdll-wanted $(OUT)/host/.ntdll-has); \
+	  [ -z "$$m" ] || { echo "mn-steam-host: host_wine.c lacks what lsteamclient.so takes from ntdll.so:" $$m >&2; exit 1; }
 	rm -rf $@ && mkdir -p $@/Contents/MacOS
 	cp host-Info.plist $@/Contents/Info.plist
 	cp $(OUT)/host/mn-steam-host $(OUT)/host/ntdll.so $(OUT)/host/lsteamclient.so $@/Contents/MacOS/

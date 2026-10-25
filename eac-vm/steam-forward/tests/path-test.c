@@ -41,6 +41,13 @@ int main(void) {
     unx("C:\\windows\\system32", "(refused)");
     unx("Z:\\mnt\\gamesX\\a", "(refused)");
     unx("Z:\\etc\\passwd", "(refused)");
+    /* lsteamclient's unescaped URLs: UTF-8 in, UTF-16 out, lengths in bytes (a NULL dst asks for the length). */
+    WCHAR w[8] = {0}; DWORD bytes = 0, need = 0;
+    RtlUTF8ToUnicodeN(w, sizeof w, &bytes, "a\xc3\xa9", 4);
+    RtlUTF8ToUnicodeN(NULL, 0, &need, "a\xc3\xa9", 4);
+    if (w[0] != 'a' || w[1] != 0xe9 || w[2] != 0 || bytes != 6 || need != 6) {
+        printf("FAIL RtlUTF8ToUnicodeN: %x %x %x, %u and %u bytes\n", w[0], w[1], w[2], bytes, need); failures++;
+    }
     printf(failures ? "path-test: %d failure(s)\n" : "path-test: all passed\n", failures);
     return failures != 0;
 }
