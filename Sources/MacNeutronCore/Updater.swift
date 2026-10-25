@@ -8,10 +8,20 @@ public struct Release: Equatable, Sendable {
     public let page: URL
     public let zip: URL
     public let sums: URL
+    /// `MacNeutron-<V>-Installer.zip` (spec 2026-10-25-macneutron-installer-design §3.3); nil for a release without one.
+    public var installer: URL? = nil
+}
+
+/// What `Updater.update` did: swapped the new app in (its work folder holds the old app until `relaunch`), or downloaded
+/// and verified the release's installer, which the caller opens with --from-app.
+public enum UpdateOutcome: Equatable, Sendable {
+    case swapped(work: URL)
+    case installer(URL)
 }
 
 public enum UpdateError: Error, Equatable, CustomStringConvertible {
-    case cantReplace
+    /// The folder the app runs from.
+    case cantReplace(String)
     case checksum
     case signature(String)
     case version(String)
@@ -19,7 +29,9 @@ public enum UpdateError: Error, Equatable, CustomStringConvertible {
 
     public var description: String {
         switch self {
-        case .cantReplace: "Move MacNeutron to Applications to update it."
+        case .cantReplace(let folder):
+            "MacNeutron is running from \(folder), which it can't replace. Download Install MacNeutron from the release page, "
+                + "or move MacNeutron to Applications."
         case .checksum: "The download doesn't match the release's SHA256SUMS."
         case .signature(let detail): "The download isn't signed by MacNeutron's developer: \(detail)"
         case .version(let version): "The download is version \(version), not the release's."
@@ -52,8 +64,12 @@ public enum Updater {
                   // The reply's links are opened and downloaded: https only (a file: or http: one is skipped).
                   [entry.html_url, zip.browser_download_url, sums.browser_download_url].allSatisfy({ $0.scheme == "https" })
             else { continue }
+            // The installer is optional, and https only like the rest (spec 2026-10-25-macneutron-installer-design §3.3).
+            let installer = entry.assets.first(where: { $0.name == "MacNeutron-\(name)-Installer.zip" })?
+                .browser_download_url
             best = (found.numbers, Release(version: name, page: entry.html_url, zip: zip.browser_download_url,
-                                           sums: sums.browser_download_url))
+                                           sums: sums.browser_download_url,
+                                           installer: installer?.scheme == "https" ? installer : nil))
         }
         return best?.release
     }
@@ -69,28 +85,15 @@ public enum Updater {
     /// swap leaves `app` as it was. `fetch` nil: `VMDownloads.download`.
     public static func install(_ release: Release, over app: URL, team: String,
                                fetch: ValveClient.Fetch? = nil) async throws -> URL {
-        guard canReplace(app) else { throw UpdateError.cantReplace }
+        guard canReplace(app) else {
+            let folder = app.deletingLastPathComponent().path(percentEncoded: false)
+            throw UpdateError.cantReplace(folder.hasSuffix("/") ? String(folder.dropLast()) : folder)
+        }
         let fm = FileManager.default
         // On the app's volume, so the swap is two renames.
         let work = try fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: app, create: true)
         do {
-            let fetch = fetch ?? VMDownloads.download
-            let zip = try await fetch(release.zip)
-            defer { try? fm.removeItem(at: zip) }
-            let sums = try await fetch(release.sums)
-            defer { try? fm.removeItem(at: sums) }
-            let name = release.zip.lastPathComponent
-            let line = try String(contentsOf: sums, encoding: .utf8).split(separator: "\n")
-                .map { $0.split(whereSeparator: \.isWhitespace) }
-                .first { $0.count == 2 && $0[1] == name }
-            let size = (try? fm.attributesOfItem(atPath: zip.path(percentEncoded: false))[.size] as? NSNumber)?.int64Value
-            guard let line, let size, VMDownloads.matches(zip, size: size, sha256: String(line[0])) else {
-                throw UpdateError.checksum
-            }
-            let unpacked = work.appending(path: "new", directoryHint: .isDirectory)
-            _ = try SystemProcessRunner().run(URL(filePath: "/usr/bin/ditto"),
-                                              ["-x", "-k", zip.path(percentEncoded: false), unpacked.path(percentEncoded: false)],
-                                              environment: [:], output: work.appending(path: "ditto.txt"))
+            let unpacked = try await unpack(release.zip, sums: release.sums, into: work, fetch: fetch ?? VMDownloads.download)
             let new = unpacked.appending(path: "MacNeutron.app", directoryHint: .isDirectory)
             try verify(new, team: team, version: release.version, log: work.appending(path: "spctl.txt"))
             try swap(new, into: app, aside: work.appending(path: "old.app", directoryHint: .isDirectory))
@@ -99,6 +102,60 @@ public enum Updater {
             throw error
         }
         return work
+    }
+
+    /// The release's installer (spec 2026-10-25-macneutron-installer-design §3.3), downloaded, checked against
+    /// SHA256SUMS, unpacked into a new temporary folder and verified: its `Install MacNeutron.app`, which the caller opens
+    /// with --from-app. A failure removes the folder.
+    public static func installer(_ release: Release, team: String, fetch: ValveClient.Fetch? = nil) async throws -> URL {
+        guard let asset = release.installer else { throw URLError(.fileDoesNotExist) }
+        let fm = FileManager.default
+        let work = fm.temporaryDirectory.appending(path: "MacNeutron-installer-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try fm.createDirectory(at: work, withIntermediateDirectories: true)
+        do {
+            let unpacked = try await unpack(asset, sums: release.sums, into: work, fetch: fetch ?? VMDownloads.download)
+            let bundle = unpacked.appending(path: "Install MacNeutron.app", directoryHint: .isDirectory)
+            try verify(bundle, team: team, version: release.version, log: work.appending(path: "spctl.txt"),
+                       identifier: installerIdentifier)
+            return bundle
+        } catch {
+            try? fm.removeItem(at: work)
+            throw error
+        }
+    }
+
+    /// Settings' Install and relaunch: the release's installer when this copy can't be replaced (a translocated one, or
+    /// an unwritable folder) and the release has one; otherwise `install`, which refuses a copy it can't replace.
+    public static func update(_ release: Release, app: URL, team: String,
+                              fetch: ValveClient.Fetch? = nil) async throws -> UpdateOutcome {
+        if !canReplace(app), release.installer != nil {
+            return .installer(try await installer(release, team: team, fetch: fetch))
+        }
+        return .swapped(work: try await install(release, over: app, team: team, fetch: fetch))
+    }
+
+    /// `asset` and `sums` downloaded, the asset checked against its line in SHA256SUMS and unpacked with ditto into
+    /// `<work>/new`, which is returned.
+    private static func unpack(_ asset: URL, sums sumsURL: URL, into work: URL,
+                               fetch: ValveClient.Fetch) async throws -> URL {
+        let fm = FileManager.default
+        let zip = try await fetch(asset)
+        defer { try? fm.removeItem(at: zip) }
+        let sums = try await fetch(sumsURL)
+        defer { try? fm.removeItem(at: sums) }
+        let name = asset.lastPathComponent
+        let line = try String(contentsOf: sums, encoding: .utf8).split(separator: "\n")
+            .map { $0.split(whereSeparator: \.isWhitespace) }
+            .first { $0.count == 2 && $0[1] == name }
+        let size = (try? fm.attributesOfItem(atPath: zip.path(percentEncoded: false))[.size] as? NSNumber)?.int64Value
+        guard let line, let size, VMDownloads.matches(zip, size: size, sha256: String(line[0])) else {
+            throw UpdateError.checksum
+        }
+        let unpacked = work.appending(path: "new", directoryHint: .isDirectory)
+        _ = try SystemProcessRunner().run(URL(filePath: "/usr/bin/ditto"),
+                                          ["-x", "-k", zip.path(percentEncoded: false), unpacked.path(percentEncoded: false)],
+                                          environment: [:], output: work.appending(path: "ditto.txt"))
+        return unpacked
     }
 
     /// Removes the work folder, unless the app's own path is empty: then the folder holds the only copy of the app (a

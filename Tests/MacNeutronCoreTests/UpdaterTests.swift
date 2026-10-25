@@ -104,3 +104,75 @@ func releasesJSON(_ entries: [(tag: String, draft: Bool, prerelease: Bool, asset
     #expect(detail != "the download holds no MacNeutron.app")  // unzipped, then refused by the signature check
     #expect(try String(contentsOf: app.appending(path: "v"), encoding: .utf8) == "old")
 }
+
+@Test func pickRecordsTheInstallerAsset() throws {
+    let with = [(tag: "v0.9.2", draft: false, prerelease: false,
+                 assets: ["MacNeutron-0.9.2.zip", "SHA256SUMS", "MacNeutron-0.9.2-Installer.zip"])]
+    let picked = try #require(Updater.pick(releasesJSON(with), current: "0.9.1"))
+    #expect(picked.installer?.lastPathComponent == "MacNeutron-0.9.2-Installer.zip")
+    let without = [(tag: "v0.9.2", draft: false, prerelease: false, assets: ["MacNeutron-0.9.2.zip", "SHA256SUMS"])]
+    #expect(try #require(Updater.pick(releasesJSON(without), current: "0.9.1")).installer == nil)
+    // The installer's link alone made http: the release is still offered, without it.
+    var list = try #require(try JSONSerialization.jsonObject(with: releasesJSON(with)) as? [[String: Any]])
+    var assets = try #require(list[0]["assets"] as? [[String: Any]])
+    assets[2]["browser_download_url"] = "http://example.invalid/v0.9.2/MacNeutron-0.9.2-Installer.zip"
+    list[0]["assets"] = assets
+    let http = try #require(Updater.pick(try JSONSerialization.data(withJSONObject: list), current: "0.9.1"))
+    #expect(http.installer == nil)
+}
+
+/// The URLs a fake fetch was asked for, in order.
+private final class Fetched: @unchecked Sendable {
+    private let lock = NSLock()
+    private var list: [URL] = []
+    var urls: [URL] { lock.withLock { list } }
+    func add(_ url: URL) { lock.withLock { list.append(url) } }
+}
+
+private let translocated = URL(filePath: "/private/var/folders/x/AppTranslocation/y/d/MacNeutron.app")
+
+private func release092(installer: Bool) -> Release {
+    var release = Release(version: "0.9.2", page: URL(string: "https://example.invalid/v0.9.2")!,
+                          zip: URL(string: "https://example.invalid/v0.9.2/MacNeutron-0.9.2.zip")!,
+                          sums: URL(string: "https://example.invalid/v0.9.2/SHA256SUMS")!)
+    if installer { release.installer = URL(string: "https://example.invalid/v0.9.2/MacNeutron-0.9.2-Installer.zip")! }
+    return release
+}
+
+@Test func updateFromATranslocatedAppTakesTheInstaller() async throws {
+    // The installer: an ad hoc signed bundle named as the release's, zipped as release.sh zips it.
+    let source = try makeTempDir()
+    let bundle = source.appending(path: "Install MacNeutron.app")
+    try FileManager.default.moveItem(at: try makeSignedWineApp(at: source, shortVersion: "0.9.2"), to: bundle)
+    let zip = source.appending(path: "MacNeutron-0.9.2-Installer.zip"), sums = source.appending(path: "SHA256SUMS")
+    #expect(try SystemProcessRunner().run(URL(filePath: "/usr/bin/ditto"),
+                                          ["-c", "-k", "--norsrc", "--keepParent", bundle.path(percentEncoded: false),
+                                           zip.path(percentEncoded: false)], environment: [:], output: nil) == 0)
+    let hash = SHA256.hash(data: try Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
+    try write("\(hash)  MacNeutron-0.9.2-Installer.zip\n", to: sums)
+    let release = release092(installer: true), fetched = Fetched()
+    let fetch: ValveClient.Fetch = { url in
+        fetched.add(url)
+        let copy = try makeTempDir().appending(path: url.lastPathComponent)
+        try FileManager.default.copyItem(at: url.lastPathComponent == "SHA256SUMS" ? sums : zip, to: copy)
+        return copy
+    }
+    let error = await #expect(throws: UpdateError.self) {
+        _ = try await Updater.update(release, app: translocated, team: "ABCDE12345", fetch: fetch)
+    }
+    guard case .signature(let detail)? = error else { Issue.record("expected a signature refusal, got \(String(describing: error))"); return }
+    #expect(detail != "the download holds no Install MacNeutron.app")  // unzipped, then refused by the signature check
+    #expect(fetched.urls == [release.installer, release.sums])
+}
+
+@Test func updateWithoutAnInstallerSaysWhereTheAppRuns() async throws {
+    let fetched = Fetched()
+    let fetch: ValveClient.Fetch = { url in fetched.add(url); throw URLError(.badURL) }
+    await #expect(throws: UpdateError.cantReplace("/private/var/folders/x/AppTranslocation/y/d")) {
+        _ = try await Updater.update(release092(installer: false), app: translocated, team: "ABCDE12345", fetch: fetch)
+    }
+    #expect(UpdateError.cantReplace("/private/var/folders/x/AppTranslocation/y/d").description
+            == "MacNeutron is running from /private/var/folders/x/AppTranslocation/y/d, which it can't replace. "
+            + "Download Install MacNeutron from the release page, or move MacNeutron to Applications.")
+    #expect(fetched.urls.isEmpty)
+}

@@ -90,14 +90,20 @@ final class UpdateModel {
         await check()
     }
 
-    /// Downloads, verifies and installs the available release over this app, then relaunches it.
+    /// Downloads, verifies and installs the available release over this app, then relaunches it; a copy it can't replace
+    /// (opened from Downloads) opens the release's installer instead, which quits it and installs into Applications.
     func install() async {
         guard let release = available, let team, !working else { return }
         working = true
         notice = "Downloading and checking MacNeutron \(release.version)…"
         do {
-            let work = try await Updater.install(release, over: app, team: team)
-            try Updater.relaunch(app, removing: work)
+            switch try await Updater.update(release, app: app, team: team) {
+            case .swapped(let work): try Updater.relaunch(app, removing: work)
+            case .installer(let bundle):
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.arguments = ["--from-app"]
+                try await NSWorkspace.shared.openApplication(at: bundle, configuration: configuration)
+            }
             NSApplication.shared.terminate(nil)
         } catch {
             notice = (error as? UpdateError)?.description ?? error.localizedDescription
