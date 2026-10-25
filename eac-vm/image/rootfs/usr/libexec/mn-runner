@@ -23,7 +23,7 @@ if [ -f /mnt/share/mounts ]; then
   for top in /Users /Volumes; do mount -t tmpfs -o mode=755 tmpfs "$top" || mounts_failed "no tmpfs at $top"; done
   while read -r tag path; do
     case $path in
-      /home/mn/pfx/drive_c/users/?*|/Users/?*|/Volumes/?*|/mnt/games/?*) ;;
+      /home/mn/pfx/drive_c/users/?*|/Users/?*|/Volumes/?*|/mnt/games/?*|/mnt/share/?*) ;;
       *) mounts_failed "$tag: $path isn't a share's place" ;;
     esac
     case $path/ in */../*) mounts_failed "$tag: $path has a .. in it" ;; esac

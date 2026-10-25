@@ -31,6 +31,24 @@ if [ "$SHARE" != "$W/share" ]; then
 fi
 rm -f "$SHARE/run.log" "$SHARE/run.status" "$SHARE/console.log" "$SHARE/traces/window" "$SHARE/traces/stage" "$SHARE/traces/mounts.failed"
 cp "$script" "$SHARE/run.sh"
+# The guest mounts each --ro-share tag at /mnt/share/<tag> (mn-runner); the EAC runtime is one.
+: > "$SHARE/mounts"
+prev=
+for a in "$@"; do
+  case "$prev" in
+    --user-share|--ro-share)
+      tag=${a%%=*}; dir=${a#*=}
+      case $tag in
+        profile) path=/home/mn/pfx/drive_c/users/steamuser ;;
+        documents) path=${MN_MAC_HOME:-/Users/$USER}/Documents ;;
+        game) path=/mnt/games/${dir##*/} ;;
+        eac-runtime) path=/mnt/share/eac-runtime ;;
+        *) path=/mnt/share/$tag ;;
+      esac
+      echo "$tag $path" >> "$SHARE/mounts" ;;
+  esac
+  prev=$a
+done
 STATE=${MN_STATE:-$W/state/default.img}
 # Before 2026-10-17 the default state disk, and its TPM, lived in images/: moved once.
 if [ -z "${MN_STATE:-}" ] && [ ! -e "$STATE" ] && [ -e "$W/images/state.img" ]; then
