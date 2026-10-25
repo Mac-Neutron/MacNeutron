@@ -31,9 +31,13 @@ export GALLIUM_OVERRIDE_CPU_CAPS=sse4.1
 # A 32-bit program's Unix side is a 32-bit Linux process (old WoW64, Proton's default) when the image has one; the
 # launch option MACNEUTRON_VM_WOW64=1, or Proton's PROTON_USE_WOW64=1, keeps it on the 64-bit one (new WoW64).
 if [ "${MACNEUTRON_VM_WOW64:-}" = 1 ] || [ "${PROTON_USE_WOW64:-}" = 1 ]; then export WINEARCH=wow64; fi
-# The Proton EasyAntiCheat Runtime (Steam app 1826330) when the share has it (eac-vm/tests/eac.sh puts it there): an EAC
-# game's process loads its easyanticheat_x64.so, or under old WoW64 a 32-bit one its lib32/easyanticheat_x86.so.
-[ ! -d /mnt/share/eac-runtime/v2 ] || export PROTON_EAC_RUNTIME=/mnt/share/eac-runtime
+# The Proton EasyAntiCheat Runtime (Steam app 1826330), as Linux Steam passes it to a game under Proton when it's
+# installed: the game's Steam library's (/mnt/games), or the share's (eac-vm/tests/eac.sh puts one there). An EAC game's
+# process loads its easyanticheat_x64.so, or under old WoW64 a 32-bit one its lib32/easyanticheat_x86.so.
+# ponytail: a runtime in another Steam library than the game's isn't shared; add a share when one turns up.
+for r in /mnt/share/eac-runtime "/mnt/games/Proton EasyAntiCheat Runtime"; do
+  [ ! -d "$r/v2" ] || { export PROTON_EAC_RUNTIME=$r; break; }
+done
 # The 32-bit Unix side's libraries FEX's RootFS lacks (i686 libasound); 64-bit processes skip them.
 export LD_LIBRARY_PATH="/opt/mn-wine/lib/mn-i386${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 # Direct3D 9's mtld3d logs into the share's traces/mtld3d, not beside the game's exe (as the launcher's on macOS); a
@@ -68,7 +72,9 @@ W=$WINEPREFIX/drive_c/windows
 mn_stage() { echo "$*" > /mnt/share/traces/stage; }
 if [ ! -f "$WINEPREFIX/system.reg" ]; then mn_stage "Preparing its Windows environment. The first launch takes a minute or two."
 elif [ "$up" = -u ]; then mn_stage "Updating its Windows environment"; fi
-WINEDLLOVERRIDES="mscoree,mshtml=" wineboot $up >/dev/null 2>&1
+# Not with PROTON_EAC_RUNTIME: a wineboot that sees it copies the runtime's easyanticheat*.dll into system32, which
+# Proton's prefixes (filled from its default prefix) don't have.
+env -u PROTON_EAC_RUNTIME WINEDLLOVERRIDES="mscoree,mshtml=" wineboot $up >/dev/null 2>&1
 # Xvfb has one mode and can't change it: Wine offers games its standard modes and takes their changes itself (the
 # drawable has the game's size; the host window scales it). Read when the desktop starts: once per prefix, a restart.
 # And a crashing game ends: winedbg --auto prints its report and exits instead of waiting behind its crash window on
