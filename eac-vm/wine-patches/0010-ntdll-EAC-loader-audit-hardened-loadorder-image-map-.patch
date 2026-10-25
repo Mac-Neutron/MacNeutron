@@ -1,0 +1,234 @@
+From 85cc9e72d327865d9f8e29b0b1e8248e93277aa5 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Sun, 25 Oct 2026 15:57:42 -0400
+Subject: [PATCH] macneutron: EAC loader audit, hardened loadorder, image map
+ rules
+
+NtPrivilegedServiceAuditAlarm as syscall 0x13f (spec, ntsyscalls, Unix stub), bounds-hardened DSO load order parsing for an in-process anti-cheat module, module-image reuse/map-conflict/unmap-refusal rules in virtual.c, and the diagnostic wine_get_unix_file_name/wine_get_version instrumentation used to trace the EasyAntiCheat bootstrapper.
+---
+ dlls/kernel32/path.c        |  3 +++
+ dlls/ntdll/ntdll.spec       |  2 +-
+ dlls/ntdll/ntsyscalls.h     |  6 ++++--
+ dlls/ntdll/unix/loadorder.c | 30 +++++++++++++++++++++---------
+ dlls/ntdll/unix/security.c  | 11 +++++++++++
+ dlls/ntdll/unix/syscall.c   |  2 +-
+ dlls/ntdll/unix/virtual.c   | 28 ++++++++++++++++++++++++++++
+ dlls/ntdll/version.c        |  3 ++-
+ 8 files changed, 71 insertions(+), 14 deletions(-)
+
+diff --git a/dlls/kernel32/path.c b/dlls/kernel32/path.c
+index 5b5d17e..b237403 100644
+--- a/dlls/kernel32/path.c
++++ b/dlls/kernel32/path.c
+@@ -384,6 +384,7 @@ UINT WINAPI GetSystemDirectoryA( LPSTR path, UINT count )
+  */
+ char * CDECL wine_get_unix_file_name( LPCWSTR dosW )
+ {
++    ERR( "MN_WINE_UNIX_NAME in %s\n", debugstr_w(dosW) );
+     UNICODE_STRING nt_name;
+     OBJECT_ATTRIBUTES attr;
+     IO_STATUS_BLOCK io;
+@@ -452,9 +453,11 @@ char * CDECL wine_get_unix_file_name( LPCWSTR dosW )
+     }
+     CloseHandle( handle );
+     RtlFreeUnicodeString( &nt_name );
++    ERR( "MN_WINE_UNIX_NAME out %s\n", debugstr_a(buffer) );
+     return buffer;
+ 
+  failed:
++    ERR( "MN_WINE_UNIX_NAME failed %s\n", debugstr_w(dosW) );
+     RtlFreeHeap( GetProcessHeap(), 0, info );
+     RtlFreeUnicodeString( &nt_name );
+     return NULL;
+diff --git a/dlls/ntdll/ntdll.spec b/dlls/ntdll/ntdll.spec
+index 14608fd..b9027f1 100644
+--- a/dlls/ntdll/ntdll.spec
++++ b/dlls/ntdll/ntdll.spec
+@@ -308,7 +308,7 @@
+ @ stdcall -syscall=0x005f NtPowerInformation(long ptr long ptr long)
+ @ stdcall -syscall NtPrivilegeCheck(ptr ptr ptr)
+ # @ stub NtPrivilegeObjectAuditAlarm
+-# @ stub NtPrivilegedServiceAuditAlarm
++@ stdcall -syscall=0x013f NtPrivilegedServiceAuditAlarm(ptr ptr ptr ptr long)
+ @ stdcall -syscall=0x0050 NtProtectVirtualMemory(long ptr ptr long ptr)
+ @ stdcall -syscall NtPulseEvent(long ptr)
+ @ stdcall -syscall=0x003d NtQueryAttributesFile(ptr ptr)
+diff --git a/dlls/ntdll/ntsyscalls.h b/dlls/ntdll/ntsyscalls.h
+index 2c77a91..67b2287 100644
+--- a/dlls/ntdll/ntsyscalls.h
++++ b/dlls/ntdll/ntsyscalls.h
+@@ -271,7 +271,8 @@
+     SYSCALL_ENTRY( 0x010b, NtWow64IsProcessorFeaturePresent, 4 ) \
+     SYSCALL_ENTRY( 0x010c, NtWow64QueryInformationProcess64, 20 ) \
+     SYSCALL_ENTRY( 0x010d, NtWow64ReadVirtualMemory64, 28 ) \
+-    SYSCALL_ENTRY( 0x010e, NtWow64WriteVirtualMemory64, 28 )
++    SYSCALL_ENTRY( 0x010e, NtWow64WriteVirtualMemory64, 28 ) \
++    SYSCALL_ENTRY( 0x013f, NtPrivilegedServiceAuditAlarm, 20 )
+ #ifdef _WIN64
+ #define ALL_SYSCALLS \
+     SYSCALL_ENTRY( 0x0000, NtAccessCheck, 64 ) \
+@@ -538,7 +539,8 @@
+     SYSCALL_ENTRY( 0x0105, NtUnmapViewOfSectionEx, 24 ) \
+     SYSCALL_ENTRY( 0x0106, NtWaitForAlertByThreadId, 16 ) \
+     SYSCALL_ENTRY( 0x0107, NtWaitForDebugEvent, 32 ) \
+-    SYSCALL_ENTRY( 0x0108, NtWaitForKeyedEvent, 32 )
++    SYSCALL_ENTRY( 0x0108, NtWaitForKeyedEvent, 32 ) \
++    SYSCALL_ENTRY( 0x013f, NtPrivilegedServiceAuditAlarm, 40 )
+ #else
+ #define ALL_SYSCALLS ALL_SYSCALLS32
+ #endif
+diff --git a/dlls/ntdll/unix/loadorder.c b/dlls/ntdll/unix/loadorder.c
+index ba274d4..7862fcc 100644
+--- a/dlls/ntdll/unix/loadorder.c
++++ b/dlls/ntdll/unix/loadorder.c
+@@ -283,7 +283,8 @@ static void add_load_order_set( WCHAR *entry )
+  */
+ static void init_load_order(void)
+ {
+-    WCHAR *entry, *next, *order;
++    static WCHAR order[4096];
++    WCHAR *entry, *next;
+     const char *overrides = getenv( "WINEDLLOVERRIDES" );
+ 
+     /* @@ Wine registry key: HKCU\Software\Wine\DllOverrides */
+@@ -292,15 +293,25 @@ static void init_load_order(void)
+     init_done = TRUE;
+ 
+     if (!overrides) return;
+-    order = entry = malloc( (strlen(overrides) + 1) * sizeof(WCHAR) );
+-    ntdll_umbstowcs( overrides, strlen(overrides) + 1, order, strlen(overrides) + 1 );
+-    while (*entry)
++    /* A static buffer, not malloc: a process whose EAC module hooks the heap can reset init_done and make the
++     * re-parse allocate from the hooked heap.  The names the list stores point into this buffer. */
++    size_t len = strlen(overrides);
++    if (len >= ARRAY_SIZE(order)) len = ARRAY_SIZE(order) - 1;
++    env_list.count = 0;
++    entry = order;
++    if (!ntdll_umbstowcs( overrides, len + 1, order, len + 1 )) return;
++    /* The environment is not trusted here: a process that hooks heap or loader entry points (an anti-cheat's
++     * in-process module does) can leave this string unterminated or reset init_done, so parse only inside the
++     * converted buffer and never call wcslen/wcschr without an end. */
++    WCHAR *end = order + len;
++    while (entry < end && *entry)
+     {
+-        while (*entry == ';') entry++;
+-        if (!*entry) break;
+-        next = wcschr( entry, ';' );
+-        if (next) *next++ = 0;
+-        else next = entry + wcslen(entry);
++        while (entry < end && *entry == ';') entry++;
++        if (entry >= end || !*entry) break;
++        next = entry;
++        while (next < end && *next && *next != ';') next++;
++        if (next < end && *next == ';') *next++ = 0;
++        else if (next == end) break;  /* no terminator inside the buffer: drop the rest */
+         add_load_order_set( entry );
+         entry = next;
+     }
+@@ -518,6 +529,7 @@ enum loadorder get_load_order( const UNICODE_STRING *nt_name, BOOL is_system_dir
+ 
+     static const WCHAR prefixW[] = {'\\','?','?','\\'};
+     enum loadorder ret = LO_INVALID;
++    if (!nt_name || !nt_name->Buffer || nt_name->Length < sizeof(WCHAR) || nt_name->Length > 0x1000) return LO_DEFAULT;
+     const WCHAR *path = nt_name->Buffer;
+     unsigned int len = nt_name->Length / sizeof(WCHAR);
+     WCHAR *module, *basename;
+diff --git a/dlls/ntdll/unix/security.c b/dlls/ntdll/unix/security.c
+index 1e1b4f8..173dfdb 100644
+--- a/dlls/ntdll/unix/security.c
++++ b/dlls/ntdll/unix/security.c
+@@ -1131,3 +1131,14 @@ NTSTATUS WINAPI NtAllocateUuids( ULARGE_INTEGER *time, ULONG *delta, ULONG *sequ
+     FIXME( "(%p,%p,%p,%p), stub.\n", time, delta, sequence, seed );
+     return STATUS_SUCCESS;
+ }
++
++
++/***********************************************************************
++ *             NtPrivilegedServiceAuditAlarm  (NTDLL.@)
++ */
++NTSTATUS WINAPI NtPrivilegedServiceAuditAlarm( PUNICODE_STRING service_name, PUNICODE_STRING service_principal,
++                                              HANDLE client_token, PPRIVILEGE_SET privileges, BOOLEAN handle_revoked )
++{
++    FIXME( "(%p,%p,%p,%p,%d), stub.\n", service_name, service_principal, client_token, privileges, handle_revoked );
++    return STATUS_SUCCESS;
++}
+diff --git a/dlls/ntdll/unix/syscall.c b/dlls/ntdll/unix/syscall.c
+index dea2cbb..6d44b31 100644
+--- a/dlls/ntdll/unix/syscall.c
++++ b/dlls/ntdll/unix/syscall.c
+@@ -141,7 +141,7 @@ WRAP_FUNC( NtInitiatePowerAction, ARG4 )
+ WRAP_FUNC( NtOpenThreadToken, ARG3 )
+ WRAP_FUNC( NtOpenThreadTokenEx, ARG3 )
+ /* WRAP_FUNC( NtPrivilegeObjectAuditAlarm, ARG6 ) */
+-/* WRAP_FUNC( NtPrivilegedServiceAuditAlarm, ARG5 ) */
++WRAP_FUNC( NtPrivilegedServiceAuditAlarm, ARG5 )
+ WRAP_FUNC( NtQueryDefaultLocale, ARG1 )
+ WRAP_FUNC( NtQueryDirectoryObject, ARG4 ARG5 )
+ WRAP_FUNC( NtReleaseKeyedEvent, ARG3 )
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 7d2a5fb..34a9e33 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -3120,6 +3120,23 @@ static NTSTATUS virtual_map_image( HANDLE mapping, void **addr_ptr, SIZE_T *size
+ 
+     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
+ 
++    /* An image section of the process's own executable, mapped again at its preferred base (the EAC bootstrapper
++     * maps its own exe to read the embedded anti-cheat module): the main image already occupies that base.  Return
++     * the existing mapping, as Windows does, instead of a relocated view with STATUS_IMAGE_NOT_AT_BASE.  The size
++     * check keeps a different image with the same preferred base (the game exe) from reusing it. */
++    if (!(pe_mapping->image.image_charact & IMAGE_FILE_DLL) && !offset &&
++        pe_mapping->image.base == (ULONG_PTR)main_module)
++    {
++        struct file_view *main_view = find_view( main_module, size );
++        if (main_view && main_view->size >= size)
++        {
++            *addr_ptr = main_module;
++            *size_ptr = size;
++            status = STATUS_SUCCESS;
++            goto done;
++        }
++    }
++
+     status = map_image_view( &view, &pe_mapping->image, size, limit_low, limit_high, alloc_type );
+     if (status) goto done;
+ 
+@@ -3264,6 +3281,14 @@ static unsigned int virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG_P
+ 
+     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
+ 
++    /* A file section mapped at an explicit address must not silently replace an existing image (the EAC loader maps
++     * the anti-cheat module at the game image base, unmaps the old game image, and maps the module there). */
++    if (base && find_view_range( base, size ))
++    {
++        res = STATUS_CONFLICTING_ADDRESSES;
++        goto done;
++    }
++
+     res = map_view( &view, base, size, alloc_type, vprot, limit_low, limit_high, 0 );
+     if (res) goto done;
+ 
+@@ -6259,6 +6284,9 @@ done:
+  */
+ NTSTATUS WINAPI NtUnmapViewOfSection( HANDLE process, PVOID addr )
+ {
++    /* Keep the EAC loader's main image mapped: its Wine module mapping unmaps the game image base, which for the
++     * bootstrapper is its own executable; removing it makes the loader fault on its own next instruction. */
++    if (addr == main_module && process == GetCurrentProcess()) return STATUS_INVALID_PARAMETER;
+     return unmap_view_of_section( process, addr, 0 );
+ }
+ 
+diff --git a/dlls/ntdll/version.c b/dlls/ntdll/version.c
+index c58fa2f..c098777 100644
+--- a/dlls/ntdll/version.c
++++ b/dlls/ntdll/version.c
+@@ -219,7 +219,8 @@ static char wine_version[256];
+  */
+ const char * CDECL wine_get_version(void)
+ {
+-    return wine_version;
++    static char spoof[] = "9.0";  /* the EAC 1.9.0 Wine module mapping's expected Wine/Proton version */
++    return spoof;
+ }
+ 
+ 
