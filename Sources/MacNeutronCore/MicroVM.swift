@@ -68,7 +68,7 @@ public struct MicroVM: Sendable {
     static let passed = ["MACNEUTRON_DLSS", "MACNEUTRON_XESS", "DXMT_ENABLE_NVEXT", "MACNEUTRON_LOG", "MN_SCREEN",
                          "MACNEUTRON_VM_PROFILE", "DXMT_STATS", "MACNEUTRON_VM_D3D", "MACNEUTRON_VM_D3D32",
                          "MACNEUTRON_VM_D3D_TRACE", "DXMT_LOG_LEVEL", "MACNEUTRON_VM_WOW64", "PROTON_USE_WOW64",
-                         "MTLD3D_CONFIG", "WINEDEBUG", "MN_MAC_HOME", "MN_INSTALL_TIMEOUT"]
+                         "MTLD3D_CONFIG", "WINEDEBUG", "MN_MAC_HOME", "MN_INSTALL_TIMEOUT", "PROTON_EAC_RUNTIME"]
     /// What a performance build's guest doesn't get: its stats and profiler are compiled out or off.
     static let notPassedToPerformance: Set = ["MACNEUTRON_VM_PROFILE", "DXMT_STATS"]
 
@@ -116,6 +116,8 @@ public struct UserShare: Equatable, Sendable {
     public let tag: String
     public let host: String
     public let guest: String
+    /// A tool's files the guest only reads (macneutron-vm's --ro-share), not the game's folders it writes.
+    public var readOnly = false
 }
 
 public enum UserShareError: Error, CustomStringConvertible {
@@ -163,6 +165,22 @@ extension MicroVM {
     static func gameFolder(_ guest: String) -> String? {
         let inGames = guest.hasPrefix("/mnt/games/") ? guest.dropFirst("/mnt/games/".count) : ""
         return inGames.contains("/") ? inGames.split(separator: "/").first.map(String.init) : nil
+    }
+
+    /// Where the guest mounts the Proton EasyAntiCheat Runtime (mn-runner allows /Volumes/...).
+    static let guestEACRuntime = "/Volumes/Proton EasyAntiCheat Runtime"
+
+    /// The Proton EasyAntiCheat Runtime (Steam app 1826330), which Linux Steam passes to every game under Proton: a
+    /// Steam library's, or the copy Steam's console downloads (`download_depot 1826330 1826331`: Mac Steam doesn't
+    /// install the Linux-only tool). A runtime is a folder with v2/.
+    static func eacRuntime(steam: SteamLocation) -> String? {
+        let depot = "steamapps/content/app_1826330/depot_1826331"
+        let places = steam.libraries().map { $0.appending(path: "common/Proton EasyAntiCheat Runtime") }
+            + [steam.root.appending(path: depot), steam.bundleMacOS.appending(path: depot)]
+        return places.map { $0.path(percentEncoded: false) }.first {
+            var directory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: $0 + "/v2", isDirectory: &directory) && directory.boolValue
+        }
     }
 
     /// The run share's `mounts`: a `<tag> <guest path>` line per share, read by mn-runner.

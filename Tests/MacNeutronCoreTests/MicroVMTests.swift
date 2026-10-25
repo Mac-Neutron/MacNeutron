@@ -38,7 +38,8 @@ final class Scripts: @unchecked Sendable {
 private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts: Scripts = Scripts(),
                            display: (width: Int, height: Int)? = nil, version: String? = nil,
                            console: String? = nil, mountsFailed: String? = nil,
-                           installLog: String? = nil, stages: [String] = []) throws -> VMFixture {
+                           installLog: String? = nil, stages: [String] = [],
+                           steam: SteamLocation? = nil) throws -> VMFixture {
     let vm = try makeVMFolder()
     let layout = try makeToolLayout()
     if let version { try setRuntimeVersion(version, of: layout) }
@@ -76,7 +77,7 @@ private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts:
                             log: LauncherLog(directory: try makeTempDir().appending(path: "Logs")),
                             notifier: notifier, preflight: testPreflight,
                             settings: GameSettingsStore(directory: try makeTempDir().appending(path: "games")),
-                            steam: try makeSteamLocation(),
+                            steam: try steam ?? makeSteamLocation(),
                             microVMRoot: vmInstalled ? vm : try makeTempDir().appending(path: "no-vm"),
                             display: { display }, home: String(home.path(percentEncoded: false).dropLast()))
     let dataPath = try makeTempDir().appending(path: "compatdata/2437170", directoryHint: .isDirectory)
@@ -338,6 +339,34 @@ private func i386GameInLibrary(named name: String = "Game.exe") throws -> String
     #expect(call.environment["MN_APP_NAME"] == "Some Game")
     let icon = try #require(call.environment["MN_APP_ICON"])
     #expect(try Data(contentsOf: URL(filePath: icon)) == PEImage.icon(of: exe))
+}
+
+@Test func theEACRuntimeIsMountedReadOnlyInTheGamesVM() throws {
+    // Linux Steam passes the Proton EasyAntiCheat Runtime to every game under Proton; Mac Steam leaves it in a library,
+    // or Steam's console downloads it (Mac Steam doesn't install the Linux-only tool).
+    let steamRoot = try makeTempDir().appending(path: "Steam", directoryHint: .isDirectory)
+    let places = ["steamapps/common/Proton EasyAntiCheat Runtime", "steamapps/content/app_1826330/depot_1826331",
+                  "Steam.AppBundle/Steam/Contents/MacOS/steamapps/content/app_1826330/depot_1826331"]
+    for place in places {
+        let f = try makeVMFixture(steam: SteamLocation(root: steamRoot))
+        let runtime = steamRoot.appending(path: place).path(percentEncoded: false)
+        try FileManager.default.createDirectory(atPath: runtime, withIntermediateDirectories: true)  // no v2/: not one
+        _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+        #expect(!(f.runner.calls.last?.arguments.contains("--ro-share") ?? true))
+        #expect(!(f.scripts.all.last ?? "").contains("PROTON_EAC_RUNTIME"))
+        try FileManager.default.createDirectory(atPath: runtime + "/v2", withIntermediateDirectories: true)
+        _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+        let call = try #require(f.runner.calls.last { $0.tool == "run-guest.sh" })
+        let at = try #require(call.arguments.firstIndex(of: "--ro-share"))
+        #expect(call.arguments[at + 1] == "eac-runtime=" + runtime)
+        let mounts = try String(contentsOf: f.vm.appending(path: "runs/2437170/mounts"), encoding: .utf8)
+        #expect(mounts.hasSuffix("eac-runtime /Volumes/Proton EasyAntiCheat Runtime\n"))
+        let script = f.scripts.all.last ?? ""
+        #expect(script.contains("PROTON_EAC_RUNTIME='/Volumes/Proton EasyAntiCheat Runtime'\n"))
+        let exported = script.split(separator: "\n").first { $0.hasPrefix("export ") } ?? ""
+        #expect(exported.split(separator: " ").contains("PROTON_EAC_RUNTIME"))  // Wine's processes get it
+        try FileManager.default.removeItem(atPath: runtime)
+    }
 }
 
 @Test func aTPMThatDoesNotStartIsToldToThePlayer() throws {

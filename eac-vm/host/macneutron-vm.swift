@@ -2,14 +2,15 @@
 // The guest's virtio-gpu has the dxmt context (spec §5.6), served by the Metal transport's executor in this process.
 //   macneutron-vm --images <dir> --share <dir> [--cpus N] [--ram-mib M] [--console <file>] [--timeout <s>]
 //                 [--steam-appid <id> [--steam-map <host dir>=<guest dir>]] [--state <file>] [--metal-test-ops]
-//                 [--user-share <tag>=<host dir>]...
+//                 [--user-share <tag>=<host dir>]... [--ro-share <tag>=<host dir>]...
 // --steam-appid starts mn-steam-host (steam-forward/host/ beside this binary) for the guest's Steam forwarding
 // (spec §5.9) and maps guest vsock port 5101 to it; the map defaults to the Mac Steam library's common folder as
 // /mnt/games. The map's host side is shared read-only (virtiofs tag `games`) whether or not Steam is forwarded. Port
 // 5102 is the guest's sound, played through CoreAudio (audio.c; MN_AUDIO_OUTPUT=none plays it into nothing).
 // Each --user-share is a writable virtiofs share in libkrun's simplified permissions (patch 0012): the folders Steam Cloud
 // syncs for the game (spec 2026-10-23-macneutron-vm-shared-saves), which the guest's mn-runner mounts from the share's
-// `mounts` file. The Mac's files keep their owner and gain no extended attributes.
+// `mounts` file. The Mac's files keep their owner and gain no extended attributes. Each --ro-share is a read-only one,
+// mounted the same way: a tool the game's processes load (the Proton EasyAntiCheat Runtime), left as Steam put it.
 // --tpm <dir> gives the guest a TPM 2.0 (tpm.c, libtpms), its state sealed in <dir> under a key in the login keychain.
 // <dir> holds eac-vm/image/build.sh's output, shared read-only by every game; --state is the game's own state disk
 // (/home in the guest; default <dir>/state.img). The share is virtiofs tag `share` (/mnt/share in the guest). The process
@@ -177,6 +178,13 @@ for i in stride(from: 1, to: argv.count - 1, by: 2) where argv[i] == "--user-sha
   let tag = String(share[..<eq]), dir = String(share[share.index(after: eq)...])
   if access(dir, R_OK | W_OK) != 0 { fail(2, "missing share: \(dir)") }
   add(krun_fs_device_new_simplified(kstr(tag), kstr(dir), &err), tag)
+}
+for i in stride(from: 1, to: argv.count - 1, by: 2) where argv[i] == "--ro-share" {
+  let share = argv[i + 1]
+  guard let eq = share.firstIndex(of: "=") else { fail(64, "--ro-share <tag>=<host dir>, not \(share)") }
+  let tag = String(share[..<eq]), dir = String(share[share.index(after: eq)...])
+  if access(dir, R_OK) != 0 { fail(2, "missing share: \(dir)") }
+  add(krun_fs_device_new_read_only(kstr(tag), kstr(dir), &err), tag)
 }
 add(krun_rng_device_new(&err), "rng")
 // Free page reporting gives the guest's freed memory back to macOS: Replace swaps reported pages for fresh memory, as

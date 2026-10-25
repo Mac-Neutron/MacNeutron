@@ -250,7 +250,15 @@ public struct Launcher: Sendable {
             // The folders Steam Cloud syncs, read-write in the guest (MicroVM.userShares): mn-runner mounts the run
             // share's `mounts` before the game, or leaves traces/mounts.failed and powers off without it; run-game.sh
             // leaves it too when the profile isn't mounted (images older than these tools).
-            let shares = try MicroVM.userShares(prefix: context.prefix, library: library, guest: guest, home: home)
+            var shares = try MicroVM.userShares(prefix: context.prefix, library: library, guest: guest, home: home)
+            // The Proton EasyAntiCheat Runtime, as Linux Steam passes it to every game under Proton: read-only in the
+            // game's own VM, wherever Steam put it (an EAC game's processes load its libraries).
+            if let runtime = MicroVM.eacRuntime(steam: steam) {
+                shares.append(UserShare(tag: "eac-runtime", host: runtime, guest: MicroVM.guestEACRuntime, readOnly: true))
+                environment["PROTON_EAC_RUNTIME"] = MicroVM.guestEACRuntime
+            } else {
+                environment["PROTON_EAC_RUNTIME"] = nil
+            }
             // Steam's Auto-Cloud roots are the profile's XP names (ProfileLinks): a game no macOS launch prepared has
             // none, so they're made here, under the prefix's lock as PrefixManager makes them, merging what Steam's
             // launch download put in real XP-name folders.
@@ -358,7 +366,8 @@ public struct Launcher: Sendable {
             env["MN_RUN_TIMEOUT"] = env["MN_RUN_TIMEOUT"] ?? "86400"
             let status = try runner.run(vm.runGuest, [file.path(percentEncoded: false), "--steam-appid", context.appID,
                                                       "--ram-mib", "16384", "--steam-map", "\(library)=/mnt/games"]
-                                                     + shares.flatMap { ["--user-share", "\($0.tag)=\($0.host)"] }
+                                                     + shares.flatMap { [$0.readOnly ? "--ro-share" : "--user-share",
+                                                                         "\($0.tag)=\($0.host)"] }
                                                      + (quiet ? ["--console", "/dev/null"] : []),
                                         environment: env, output: gameLog, started: vmRun.started)
             log.summary("verb=\(request.verb.rawValue) appid=\(context.appID) backend=vm vm=\(vm.root.path(percentEncoded: false))"

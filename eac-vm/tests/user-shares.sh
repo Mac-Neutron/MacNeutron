@@ -23,7 +23,7 @@ run() {  # run <mounts> <guest script> [profile]: an empty <mounts> is none
   rm -f "$T/share/traces/ran"
   MN_SHARE=$T/share MN_STATE=$STATE MN_TPM= MN_AUDIO_OUTPUT=none MN_RUN_TIMEOUT=600 \
     sh "$ROOT/eac-vm/run-guest.sh" "$2" --steam-map "$L=/mnt/games" --user-share "profile=${3:-$P}" \
-    --user-share "documents=$D" --user-share "game=$G" > "$T/run.txt" 2>&1 || true
+    --user-share "documents=$D" --user-share "game=$G" ${RO:+--ro-share "$RO"} > "$T/run.txt" 2>&1 || true
 }
 # The libkrun override xattr, or any other but the provenance macOS adds by itself: a share must leave Mac files plain.
 xattrs() { xattr "$1" 2> /dev/null | grep -v '^com.apple.provenance$' || true; }
@@ -109,6 +109,15 @@ documents /Volumes/Gate/Users/gate/Documents
 game /mnt/games/Gate's Game 2
 " "$T/volumes.sh"
 check volumes-home '[ -f "$D/v.txt" ] && [ -e "$T/share/traces/ran" ]'
+# A tool's read-only share (macneutron-vm --ro-share), as the launcher shares the Proton EasyAntiCheat Runtime: mounted
+# at its guest place, read, never written.
+R=$T/eac-runtime
+mkdir -p "$R/v2"; printf 'eac\n' > "$R/v2/marker"
+printf '%s\n' 'R="/Volumes/Proton EasyAntiCheat Runtime"' \
+  '[ "$(cat "$R/v2/marker")" = eac ] && ! touch "$R/v2/x" 2>/dev/null && : > /mnt/share/traces/ran' > "$T/ro.sh"
+RO="eac-runtime=$R" run "${MOUNTS}eac-runtime /Volumes/Proton EasyAntiCheat Runtime
+" "$T/ro.sh"
+check ro-share '[ -e "$T/share/traces/ran" ] && [ ! -e "$R/v2/x" ]'
 # A game can plant links on its state disk: a mount point reached through one is refused, never mounted where it leads.
 printf '%s\n' 'mkdir -p /home/mn/pfx/drive_c /home/mn/elsewhere' 'rm -rf /home/mn/pfx/drive_c/users' \
   'ln -s /home/mn/elsewhere /home/mn/pfx/drive_c/users' > "$T/plant.sh"
