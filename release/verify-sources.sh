@@ -8,7 +8,9 @@
 # - each *_SERIES recomputed from the archived pins and patches, with the archived lib.sh's tree_series;
 # - each submodule's tar against the gitlink its tree records at the tree's applied commit, and against SOURCE's
 #   FEX_SUBMODULE_* and DXMT_SUBMODULE_*, one for one;
-# - each tarball's SHA-256 against SOURCE's *_SHA256, and alsa-lib's source RPM against the archived
+# - each library built from its repository at SOURCE's *_COMMIT, which is also the archived deps.pins', and the
+#   submodules its bootstrap uses against the gitlinks it records;
+# - GMP's snapshot's SHA-256 against SOURCE's GMP_SHA256, and alsa-lib's source RPM against the archived
 #   eac-vm/image/alsa-lib.pin;
 # - LLVM_TAG and LLVM_MINGW_SHA256 cited only: present in SOURCE, equal to the archived dxmt/pins.
 # Read-only. BUILD_DIR replaces build/.
@@ -73,6 +75,17 @@ while read -r tree pinned applied n file; do
       [ "$np" = "$n" ] || bad "wine-linux has $np archived patches, not $n"
       c=$(git -C "${BUILD_DIR:-$ROOT/build}/eac-vm-work/wine-linux" rev-parse "$applied~$n" 2> /dev/null || true)
       case "$c" in "$b"*) ;; *) bad "wine-linux's $applied~$n is ${c:-missing}, not BASE $b" ;; esac ;;
+    libtasn1 | nettle | gnutls | freetype | ffmpeg)  # built from their repositories at wine-arm64/deps.pins' commits
+      K=$(echo "$tree" | tr '[:lower:]' '[:upper:]')
+      [ "$pinned" = "$(key "${K}_COMMIT")" ] && [ "$applied" = "$pinned" ] \
+        || bad "$tree is $applied, not SOURCE's ${K}_COMMIT"
+      [ "$pinned" = "$(pin wine-arm64/deps.pins "${K}_COMMIT")" ] || bad "$tree's $pinned isn't the archived deps.pins'" ;;
+    gnutls/* | freetype/*)  # the submodules their bootstraps use, at the commits the trees record
+      p=${tree%%/*}
+      g=$(git -C "$S/deps-git/$p" ls-tree "$(key "$(echo "$p" | tr '[:lower:]' '[:upper:]')_COMMIT")" -- "${tree#*/}" \
+        2> /dev/null | awk '$2 == "commit" { print $3 }')
+      [ -n "$g" ] && [ "$pinned" = "$g" ] && [ "$applied" = "$g" ] \
+        || bad "$tree is $applied, not the commit $p records (${g:-none})" ;;
     erofs-utils | lz4)  # the VM setup's mkfs.erofs and its lz4, at eac-vm/setup-tools/PIN
       p=$(awk -v n="$tree" '$1 == n { print $3 }' "$M/eac-vm/setup-tools/PIN")
       [ -n "$p" ] && [ "$pinned" = "$p" ] && [ "$applied" = "$p" ] \
@@ -80,7 +93,8 @@ while read -r tree pinned applied n file; do
     *) bad "an unknown tree $tree in SOURCES.txt" ;;
   esac
 done < "$D/SOURCES.txt"
-for t in MacNeutron wine fex dxmt lsteamclient wine-linux erofs-utils lz4; do
+for t in MacNeutron wine fex dxmt lsteamclient wine-linux erofs-utils lz4 libtasn1 nettle gnutls freetype ffmpeg \
+  gnutls/gnulib gnutls/cligen freetype/subprojects/dlg; do
   awk -v t="$t" '$1 == t { f = 1 } END { exit !f }' "$D/SOURCES.txt" || bad "SOURCES.txt has no $t"
 done
 want=$(LC_ALL=C /usr/bin/grep -E '^(FEX|DXMT)_SUBMODULE_' "$SRCF" | LC_ALL=C sort)
@@ -102,7 +116,7 @@ if [ -n "$a" ] && [ -f "$D/lsteamclient.tar" ]; then
     "gen_wrapper.py ($(count "$got") files, want $(count "$want"))"
 fi
 
-for t in FREETYPE GNUTLS NETTLE GMP FFMPEG; do
+for t in GMP; do
   u=$(key "${t}_URL") f=
   [ -n "$u" ] && f="$D/${u##*/}"
   if [ -z "$f" ] || [ ! -f "$f" ]; then bad "no $t tarball (${u:-no ${t}_URL in SOURCE})"; continue; fi

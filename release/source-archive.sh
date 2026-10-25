@@ -7,7 +7,9 @@
 #   SOURCE lists, each archived from the submodule into its place in the tree (git archive leaves submodules empty);
 # - lsteamclient.tar: the files of its clean sparse worktree (its blob-less clone can't be git archived offline):
 #   Proton's lsteamclient/ without the Steamworks SDK folders and gen_wrapper.py, exactly what the build used;
-# - the five pinned tarballs (FreeType, gnutls, nettle, GMP, FFmpeg) as downloaded;
+# - libtasn1.tar, nettle.tar, gnutls.tar, freetype.tar, ffmpeg.tar: git archive of each library build.sh builds from
+#   its repository (wine-arm64/deps.pins), at its commit, and gnutls-gnulib.tar, gnutls-cligen.tar and
+#   freetype-dlg.tar for the submodules their bootstraps use; GMP's pinned snapshot as downloaded;
 # - Fedora's alsa-lib source RPM (eac-vm/image/alsa-lib.pin): the source of the VM parts' i686 libasound;
 # - SOURCES.txt: tree, pin, applied commit, patch count, file. release/verify-sources.sh checks it all (R5).
 # release.sh calls it after its refusals: every tree applied, the repository clean. BUILD_DIR replaces build/.
@@ -89,9 +91,23 @@ while read -r name tag sha; do
   row "$name" "$sha" "$sha" 0 "$name.tar"
 done < "$ROOT/eac-vm/setup-tools/PIN"
 
-for u in "$FREETYPE_URL" "$GNUTLS_URL" "$NETTLE_URL" "$GMP_URL" "$FFMPEG_URL"; do
-  cp -c "$S/${u##*/}" "$W/" || die "no ${u##*/} in $S"
+# The libraries built from their repositories (wine-arm64/deps.pins), each at its commit, from deps-git; the submodules
+# their bootstraps use, from deps-src's checkouts, at the commits the trees record; GMP's snapshot as downloaded.
+for n in libtasn1 nettle gnutls freetype ffmpeg; do
+  eval "c=\$$(echo "$n" | tr '[:lower:]' '[:upper:]')_COMMIT"
+  [ "$(git -C "$S/deps-git/$n" rev-parse HEAD 2> /dev/null)" = "$c" ] || die "$S/deps-git/$n isn't at $c"
+  git -C "$S/deps-git/$n" archive --format=tar --prefix="$n/" -o "$W/$n.tar" HEAD
+  row "$n" "$c" "$c" 0 "$n.tar"
 done
+for t in gnutls/gnulib gnutls/cligen freetype/subprojects/dlg; do
+  p=${t%%/*} q=${t#*/}
+  g=$(git -C "$S/deps-git/$p" ls-tree HEAD -- "$q" | awk '$2 == "commit" { print $3 }')
+  [ -n "$g" ] || die "$p records no submodule $q"
+  f="$p-${q##*/}.tar"
+  git -C "$S/deps-src/$p/$q" archive --format=tar --prefix="$t/" -o "$W/$f" "$g" || die "can't archive $t at $g"
+  row "$t" "$g" "$g" 0 "$f"
+done
+cp -c "$S/${GMP_URL##*/}" "$W/" || die "no ${GMP_URL##*/} in $S"
 # The VM parts' i686 libasound is Fedora's binary (LGPL-2.1-or-later): its source RPM, one copy for both profiles.
 . "$ROOT/eac-vm/image/alsa-lib.pin"; . "$ROOT/dxmt/fetch.sh"
 mkdir -p "$ROOT/build/vm-sources"

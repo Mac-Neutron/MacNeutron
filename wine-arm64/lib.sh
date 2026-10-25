@@ -91,12 +91,12 @@ write_source() {  # write_source <out> <mac>
     echo "LLVM_MINGW_SHA256=$LLVM_MINGW_SHA256"
     echo "LSTEAMCLIENT_COMMIT=$LSTEAMCLIENT_COMMIT"
     echo "LSTEAMCLIENT_SERIES=$(series lsteamclient)"
-    deps_pins  # <NAME>_URL, <NAME>_SHA256
+    deps_pins  # <NAME>_REPO and <NAME>_COMMIT, GMP's <NAME>_URL and <NAME>_SHA256
   ) > "$1"
 }
 
-# The FreeType, gnutls, nettle, GMP and FFmpeg tarballs' pins (<NAME>_URL, <NAME>_SHA256): build.sh's deps input and
-# SOURCE's.
+# The FreeType, gnutls, libtasn1, nettle, GMP and FFmpeg pins (<NAME>_REPO and <NAME>_COMMIT; GMP's <NAME>_URL and
+# <NAME>_SHA256): build.sh's deps input and SOURCE's.
 # The p profile (spec 2026-10-19-macneutron-performance-build §5): the components built with its optimisation flags,
 # all by default; MACNEUTRON_P_FLAGS names fewer for the benches (empty: none). Compile-outs apply to every p build.
 P_FLAGS_DEFAULT="wine fex host krun dxmt"
@@ -129,7 +129,7 @@ pgo_cflags() {  # pgo_cflags <profile> [linux]
   esac
 }
 
-deps_pins() { LC_ALL=C /usr/bin/grep -E '^(FREETYPE|GNUTLS|NETTLE|GMP|FFMPEG)_' "$ROOT/wine-arm64/deps.pins"; }
+deps_pins() { LC_ALL=C /usr/bin/grep -E '^(FREETYPE|GNUTLS|LIBTASN1|NETTLE|GMP|FFMPEG)_' "$ROOT/wine-arm64/deps.pins"; }
 
 # A release ships no build path (arm64 release Ruling 20): the files under <dir> that contain, as bytes, the repository's
 # path, the build folder's (BUILD_DIR can move it outside the repository) or the home folder's. The first ten, relative

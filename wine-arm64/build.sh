@@ -36,6 +36,9 @@ LSC_PATCHES="$ROOT/wine-arm64/patches/lsteamclient"
 need_tool autoconf autoconf; need_tool bison bison keg; need_tool flex flex keg; need_tool cmake cmake
 need_tool ninja ninja; need_tool meson meson; need_tool pkg-config pkg-config
 need_tool msgfmt gettext  # without it Wine's configure only warns, and the bundle has no translations
+# The libraries built from their repositories (deps.pins) bootstrap with these (gnutls and libtasn1 through gnulib).
+need_tool automake automake; need_tool glibtoolize libtool; need_tool autopoint gettext; need_tool gtkdocize gtk-doc
+need_tool makeinfo texinfo; need_tool gperf gperf; need_tool wget wget
 # DXMT compiles its own Metal shaders; Xcode ships the compiler as a separate component.
 xcrun metal --version > /dev/null 2>&1 || missing="$missing, Metal Toolchain (xcodebuild -downloadComponent MetalToolchain)"
 # mtld3d (Direct3D 9) builds with rustup's MTLD3D_RUST toolchain (dxmt/pins), its llvm-tools, and a target for each
@@ -225,22 +228,40 @@ else
 fi
 
 # 3. FreeType and gnutls (ship-base spec §5), which Wine dlopens, and FFmpeg (video playback spec §6), which winedmo
-#    links, from the pinned tarballs into $DEPS: gmp and nettle static and folded into libgnutls.30.dylib, FreeType
-#    without PNG, HarfBuzz or Brotli, FFmpeg's five libraries LGPL and with only the components below. Nothing outside
-#    /usr/lib and /System gets in: pkg-config sees only $DEPS. Redone when the tarballs' pins, the configure options or
-#    the step's environment and commands change (their hash is deps/.complete); deps-src stays, bundle.sh copies the
-#    licence texts from it.
-DEPS_TARS="gmp:$GMP_URL nettle:$NETTLE_URL gnutls:$GNUTLS_URL freetype:$FREETYPE_URL ffmpeg:$FFMPEG_URL"  # build order
+#    links, from their development heads (deps.pins) into $DEPS: libtasn1, gmp and nettle static and folded into
+#    libgnutls.30.dylib, FreeType without PNG, HarfBuzz or Brotli, FFmpeg's five libraries LGPL and with only the
+#    components below. Nothing outside /usr/lib and /System gets in: pkg-config sees only $DEPS. Redone when the pins,
+#    the bootstraps, the configure options or the step's environment and commands change (their hash is
+#    deps/.complete). Each git source is cloned once into deps-git/<name> at its commit (release/source-archive.sh
+#    archives it from there) and copied into deps-src/<name> to be bootstrapped and built; GMP's snapshot is unpacked
+#    there. deps-src stays: bundle.sh copies the licence texts from it.
+DEPS_GIT="libtasn1 nettle gnutls freetype ffmpeg"
+DEPS_ORDER="libtasn1 gmp nettle gnutls freetype ffmpeg"  # build order
 fetch "$GMP_URL" "$SRC/${GMP_URL##*/}" "$GMP_SHA256"
-fetch "$NETTLE_URL" "$SRC/${NETTLE_URL##*/}" "$NETTLE_SHA256"
-fetch "$GNUTLS_URL" "$SRC/${GNUTLS_URL##*/}" "$GNUTLS_SHA256"
-fetch "$FREETYPE_URL" "$SRC/${FREETYPE_URL##*/}" "$FREETYPE_SHA256"
-fetch "$FFMPEG_URL" "$SRC/${FFMPEG_URL##*/}" "$FFMPEG_SHA256"
+# dep_clone <name>: <NAME>_REPO at <NAME>_COMMIT in deps-git/<name>, with every commit and tag but only that tree's
+# blobs (gnulib's git-version-gen describes the commit); kept while it is at that commit.
+dep_clone() {
+  _dc_N=$(echo "$1" | tr a-z A-Z); eval "_dc_r=\$${_dc_N}_REPO _dc_c=\$${_dc_N}_COMMIT"
+  _dc_g="$SRC/deps-git/$1"
+  [ "$(git -C "$_dc_g" rev-parse HEAD 2> /dev/null)" != "$_dc_c" ] || return 0
+  echo "wine-arm64: fetching $1 $_dc_c" >&2
+  rm -rf "$_dc_g"; mkdir -p "$SRC/deps-git"
+  git clone -q --filter=blob:none --no-checkout "$_dc_r" "$_dc_g" || die "can't clone $_dc_r"
+  git -C "$_dc_g" checkout -q "$_dc_c" || die "can't check out $_dc_c from $_dc_r"
+}
+for n in $DEPS_GIT; do dep_clone "$n"; done
+# Each git source's bootstrap, run in its deps-src copy (gnulib's bootstrap fetches the submodules it records).
+boot_libtasn1='./bootstrap --skip-po'
+boot_nettle='./.bootstrap'
+boot_gnutls='./bootstrap --skip-po'
+boot_freetype='git submodule -q update --init --depth 1 subprojects/dlg && ./autogen.sh'
+boot_ffmpeg=:
+conf_libtasn1="--enable-static --disable-shared --with-pic --disable-doc"
 conf_gmp="--enable-static --disable-shared --with-pic"
 conf_nettle="--enable-static --disable-shared --disable-documentation"  # PIC is nettle's default
-conf_gnutls="--enable-shared --disable-static --sysconfdir=/etc --with-included-libtasn1 --with-included-unistring
-  --without-p11-kit --without-idn --without-tpm --without-tpm2 --without-zlib --without-brotli --without-zstd
-  --without-leancrypto --disable-nls --disable-tools --disable-cxx --disable-doc --disable-tests --disable-libdane"
+conf_gnutls="--enable-shared --disable-static --sysconfdir=/etc --with-included-unistring --without-p11-kit
+  --without-idn --without-tpm --without-tpm2 --without-zlib --without-brotli --without-zstd --without-leancrypto
+  --disable-nls --disable-tools --disable-cxx --disable-doc --disable-tests --disable-full-test-suite --disable-libdane"
 conf_freetype="--enable-shared --disable-static --without-png --without-harfbuzz --without-brotli --with-zlib=yes
   --with-bzip2=yes"
 # FFmpeg's components (video playback spec §5): these, and the build fails unless config_components.h enables exactly
@@ -251,15 +272,17 @@ ffmpeg_decoder="aac_at h263 indeo5 mp1float mp2float mp3float mpeg1video pcm_f32
 ffmpeg_demuxer="asf avi mov mp3 mpegps mpegvideo wav"
 ffmpeg_parser="h264 mpegaudio mpegvideo"
 ffmpeg_bsf="aac_adtstoasc h264_mp4toannexb null"
-ffmpeg_libs="avutil.60 avcodec.62 avformat.62 swscale.9 swresample.6"  # lib<name>.<major>.dylib, what ships
+ffmpeg_libs="avutil.61 avcodec.63 avformat.63 swscale.10 swresample.7"  # lib<name>.<major>.dylib, what ships
 # shellcheck disable=SC2086  # a list in, a comma list out
 commas() { echo $* | tr ' ' ,; }
 # One option per word: the options are a list. Apple's clang by path (llvm-mingw's clang is first on PATH), @rpath
-# install names (libavformat links libavcodec by them too), no install-time strip (deps_post strips). No ARMv8 CRC
-# instructions: their code, libavutil/aarch64/crc.S, is GPL-2.0-or-later (av_crc keeps its table code).
+# install names (libavformat links libavcodec by them too), no install-time strip (deps_post strips). No ARMv8 CRC,
+# PMULL or EOR3 instructions: their only code, libavutil/aarch64/crc.S, is GPL-2.0-or-later (av_crc keeps its table
+# code).
 conf_ffmpeg="--arch=aarch64 --target-os=darwin --cc=/usr/bin/clang --enable-shared --disable-static --disable-programs
   --disable-doc --disable-network --disable-autodetect --disable-everything --disable-iconv --disable-videotoolbox
-  --disable-stripping --disable-avdevice --disable-avfilter --disable-arm-crc --enable-audiotoolbox --enable-swscale
+  --disable-stripping --disable-avdevice --disable-avfilter --disable-arm-crc --disable-pmull --disable-eor3
+  --enable-audiotoolbox --enable-swscale
   --enable-swresample
   --install-name-dir=@rpath --extra-cflags=-mmacosx-version-min=27.0 --extra-ldflags=-mmacosx-version-min=27.0
   --enable-decoder=$(commas $ffmpeg_decoder) --enable-demuxer=$(commas $ffmpeg_demuxer)
@@ -285,8 +308,9 @@ ffmpeg_make='./configure --prefix="$DEPS" "$@" &&
 # shellcheck disable=SC2016
 deps_post='strip -S "$f" && install_name_tool -id "@rpath/lib$l.dylib" "$f"'
 deps_in=$({ deps_pins; echo "MACOSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET"; echo "$deps_env"; echo "$deps_make"
-  echo "$deps_post"; echo "$conf_gmp"; echo "$conf_nettle"; echo "$conf_gnutls"; echo "$conf_freetype"
-  echo "$ffmpeg_make"; echo "$ffmpeg_libs"; echo "$conf_ffmpeg"; } | shasum -a 256 | cut -d ' ' -f 1)
+  echo "$deps_post"; for n in $DEPS_GIT; do eval "echo \"\$boot_$n\""; done; echo "$conf_libtasn1"; echo "$conf_gmp"
+  echo "$conf_nettle"; echo "$conf_gnutls"; echo "$conf_freetype"; echo "$ffmpeg_make"; echo "$ffmpeg_libs"
+  echo "$conf_ffmpeg"; } | shasum -a 256 | cut -d ' ' -f 1)
 # build_dep <name> <build text> <configure options...>: configure, make and install one library from deps-src/<name>.
 build_dep() {
   n=$1 m=$2; shift 2
@@ -308,25 +332,35 @@ ffmpeg_gpl_only() {
       fi
     done )
 }
-unpack() {  # unpack <name>:<url>: the tarball into deps-src/<name>, through <name>.tmp so a stop leaves none
-  rm -rf "$SRC/deps-src/${1%%:*}.tmp"
-  mkdir -p "$SRC/deps-src/${1%%:*}.tmp"
-  tar -xf "$SRC/${1##*/}" -C "$SRC/deps-src/${1%%:*}.tmp" --strip-components 1 || die "can't unpack ${1##*/}"
-  mv "$SRC/deps-src/${1%%:*}.tmp" "$SRC/deps-src/${1%%:*}"
+unpack() {  # unpack <name>: into deps-src/<name>, through <name>.tmp so a stop leaves none: GMP's snapshot, or a git
+  # source copied from deps-git and bootstrapped
+  _up_t="$SRC/deps-src/$1.tmp"
+  rm -rf "$_up_t"; mkdir -p "$SRC/deps-src"
+  if [ "$1" = gmp ]; then
+    mkdir "$_up_t" && tar -xf "$SRC/${GMP_URL##*/}" -C "$_up_t" --strip-components 1 || die "can't unpack ${GMP_URL##*/}"
+  else
+    cp -R "$SRC/deps-git/$1" "$_up_t" || die "can't copy deps-git/$1"
+    echo "wine-arm64: bootstrapping $1 (log: $SRC/deps-$1-bootstrap.log)" >&2
+    eval "_up_b=\$boot_$1"
+    ( cd "$_up_t" && eval "$_up_b" ) > "$SRC/deps-$1-bootstrap.log" 2>&1 \
+      || die "bootstrapping $1 failed; see $SRC/deps-$1-bootstrap.log"
+  fi
+  mv "$_up_t" "$SRC/deps-src/$1"
 }
 if [ "$(cat "$DEPS/.complete" 2> /dev/null)" = "$deps_in" ]; then
   echo "wine-arm64: FreeType, gnutls and FFmpeg are up to date" >&2
-  for t in $DEPS_TARS; do  # bundle.sh copies the licence texts from deps-src
-    [ -d "$SRC/deps-src/${t%%:*}" ] || { echo "wine-arm64: unpacking ${t##*/} again" >&2; unpack "$t"; }
+  for n in $DEPS_ORDER; do  # bundle.sh copies the licence texts from deps-src
+    [ -d "$SRC/deps-src/$n" ] || { echo "wine-arm64: unpacking $n again" >&2; unpack "$n"; }
   done
 else
   rm -rf "$DEPS" "$SRC/deps-src"
-  for t in $DEPS_TARS; do unpack "$t"; done
+  for n in $DEPS_ORDER; do unpack "$n"; done
   (
     eval "export $deps_env"
     unset PKG_CONFIG_PATH CPATH LIBRARY_PATH CFLAGS CXXFLAGS  # the compiler's own search paths stay the SDK's
     # shellcheck disable=SC2086  # the options are lists
-    { build_dep gmp "$deps_make" $conf_gmp; build_dep nettle "$deps_make" $conf_nettle
+    { build_dep libtasn1 "$deps_make" $conf_libtasn1; build_dep gmp "$deps_make" $conf_gmp
+      build_dep nettle "$deps_make" $conf_nettle
       build_dep gnutls "$deps_make" $conf_gnutls; build_dep freetype "$deps_make" $conf_freetype
       build_dep ffmpeg "$ffmpeg_make" $conf_ffmpeg; }
   )
@@ -336,7 +370,7 @@ else
   for l in freetype.6 gnutls.30 $ffmpeg_libs; do
     f="$DEPS/lib/lib$l.dylib" log="$SRC/deps-${l%.*}.log" ok='/usr/lib/|/System/'
     case " $ffmpeg_libs " in
-      *" $l "*) log="$SRC/deps-ffmpeg.log" ok="$ok|@rpath/lib(avutil\.60|avcodec\.62)\.dylib\$" ;;
+      *" $l "*) log="$SRC/deps-ffmpeg.log" ok="$ok|@rpath/lib(avutil\.61|avcodec\.63)\.dylib\$" ;;
     esac
     eval "$deps_post" || die "can't strip ${f##*/} or set its install name"
     out=$(otool -L "$f" | tail -n +3 | awk '{ print $1 }' | LC_ALL=C /usr/bin/grep -vE "^($ok)" || true)
@@ -344,8 +378,8 @@ else
     n=$(LC_ALL=C /usr/bin/grep -a -c -F "$B" "$f" || true)
     [ "$n" = 0 ] || die "${f##*/} names the build folder $B ($n lines; see $log)"
   done
-  out=$(otool -L "$DEPS/lib/libgnutls.30.dylib" | tail -n +3 | LC_ALL=C /usr/bin/grep -iE 'nettle|hogweed|gmp' || true)
-  [ -z "$out" ] || die "libgnutls.30.dylib links nettle or gmp as a library: $out (see $SRC/deps-gnutls.log)"
+  out=$(otool -L "$DEPS/lib/libgnutls.30.dylib" | tail -n +3 | LC_ALL=C /usr/bin/grep -iE 'nettle|hogweed|gmp|tasn1' || true)
+  [ -z "$out" ] || die "libgnutls.30.dylib links nettle, gmp or libtasn1 as a library: $out (see $SRC/deps-gnutls.log)"
   out=$(sed -n 's/^Requires.private: *//p' "$DEPS/lib/pkgconfig/freetype2.pc")
   [ -z "$out" ] || die "libfreetype.6.dylib's freetype2.pc requires $out (see $SRC/deps-freetype.log)"
   # FFmpeg as configured (video playback spec §5, §6): LGPL, with no GPL-only file built either, no VideoToolbox, none
@@ -353,7 +387,8 @@ else
   fc="$SRC/deps-src/ffmpeg"
   out=$(ffmpeg_gpl_only "$fc") || die "can't read FFmpeg's build in $fc"
   [ -z "$out" ] || die "FFmpeg built GPL-only code from $(echo "$out" | tr '\n' ' ')(see $SRC/deps-ffmpeg.log)"
-  for x in 'config.h:#define CONFIG_GPL 0' 'config.h:#define HAVE_ARM_CRC 0' 'config.h:#define CONFIG_VIDEOTOOLBOX 0' \
+  for x in 'config.h:#define CONFIG_GPL 0' 'config.h:#define HAVE_ARM_CRC 0' 'config.h:#define HAVE_PMULL 0' \
+    'config.h:#define HAVE_EOR3 0' 'config.h:#define CONFIG_VIDEOTOOLBOX 0' \
     'config_components.h:#define CONFIG_H264_DECODER 0' 'config_components.h:#define CONFIG_HEVC_DECODER 0' \
     'config_components.h:#define CONFIG_AAC_DECODER 0'; do
     LC_ALL=C /usr/bin/grep -qx "${x#*:}" "$fc/${x%%:*}" || die "FFmpeg's ${x%%:*} lacks the line '${x#*:}'"

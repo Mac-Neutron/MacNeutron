@@ -94,7 +94,7 @@ put "$MTLD3D/unix/target/aarch64-apple-darwin/production" mtld3d.so "$R/lib/wine
 U="$R/lib/wine/aarch64-unix"
 for l in libfreetype.6.dylib libgnutls.30.dylib; do put "$DEPS/lib" "$l" "$U/"; done
 # FFmpeg (video playback spec §6): beside winedmo.so, which links it and finds it through the same @loader_path/.
-for l in libavutil.60.dylib libavcodec.62.dylib libavformat.62.dylib libswscale.9.dylib libswresample.6.dylib; do
+for l in libavutil.61.dylib libavcodec.63.dylib libavformat.63.dylib libswscale.10.dylib libswresample.7.dylib; do
   put "$DEPS/lib" "$l" "$U/"
 done
 # The MetalFX presenter (arm64 release spec §5.3): winemetal.so loads it from its own folder (DXMT patch 0002), and it
@@ -130,10 +130,10 @@ put "$B/dxmt-src/llvm-project/llvm" lib/Support/COPYRIGHT.regex "$L/llvm/"
 MINGW_ROOT=$(dirname "$(sh "$ROOT/dxmt/toolchain.sh")")
 put "$MINGW_ROOT" LICENSE.TXT "$L/llvm-mingw/"
 put "$MINGW_ROOT" aarch64-w64-mingw32/share/mingw32/COPYING.MinGW-w64-runtime.txt "$L/llvm-mingw/"
-# From the unpacked tarballs. libgnutls.30.dylib holds nettle, gmp and gnutls's own copy of libunistring (LGPL-3+):
-# gnutls's tarball has no LGPLv3 text, so its folder gets nettle's (the same GNU texts).
+# From the sources build.sh built. libgnutls.30.dylib holds libtasn1, nettle, gmp and gnutls's own copy of libunistring
+# (LGPL-3+): gnutls has no LGPLv3 text, so its folder gets nettle's (the same GNU texts).
 DS="$S/deps-src"
-mkdir -p "$L/freetype" "$L/gnutls" "$L/nettle" "$L/gmp" "$L/ffmpeg"
+mkdir -p "$L/freetype" "$L/gnutls" "$L/libtasn1" "$L/nettle" "$L/gmp" "$L/ffmpeg"
 put "$DS/freetype" LICENSE.TXT "$L/freetype/"
 put "$DS/freetype" docs/FTL.TXT "$L/freetype/"
 # The BDF and PCF drivers' X11-style licence, which LICENSE.TXT points to.
@@ -143,6 +143,7 @@ put "$DS/gnutls" COPYING.LESSERv2 "$L/gnutls/"
 # The aarch64 CRYPTOGAMS routines' BSD licence (lib/accelerated/aarch64/README points to it) and inih's.
 put "$DS/gnutls" lib/accelerated/x86/license.txt "$L/gnutls/cryptogams-license.txt"
 put "$DS/gnutls" lib/inih/LICENSE.txt "$L/gnutls/inih-LICENSE.txt"
+put "$DS/libtasn1" COPYING.LESSERv2 "$L/libtasn1/"
 for f in COPYING.LESSERv3 COPYINGv3; do
   put "$DS/nettle" "$f" "$L/gnutls/"; put "$DS/nettle" "$f" "$L/nettle/"; put "$DS/gmp" "$f" "$L/gmp/"
 done

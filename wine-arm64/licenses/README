@@ -52,43 +52,47 @@ runtime)
   dxmt/pins' LLVM_MINGW_COMMIT, with the LLVM it pins (LLVM_MINGW_LLVM) and the repository's wine-arm64/patches/llvm
   on top; the mingw-w64 sources its scripts fetch are listed at https://github.com/mstorsjo/llvm-mingw.
 
-FreeType 2.14.3 (libfreetype.6.dylib: text rendering in win32u and dwrite)
+FreeType 2.15.0, development head (libfreetype.6.dylib: text rendering in win32u and dwrite)
   Licence: the FreeType License (FTL), elected from FreeType's FTL-or-GPL-2.0 choice. Texts: freetype/LICENSE.TXT,
   freetype/FTL.TXT. Built without PNG, HarfBuzz or Brotli; it links the system's zlib and bzip2. The BDF and PCF
   drivers (X11-style licence): freetype/bdf-README, freetype/pcf-README; its hashing code (MIT-style): NOTICES.md.
-  Source: https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz (SHA-256 FREETYPE_SHA256),
-  unmodified, pinned in the repository's wine-arm64/deps.pins and built by wine-arm64/build.sh.
+  Source: https://gitlab.freedesktop.org/freetype/freetype.git at FREETYPE_COMMIT, with its dlg submodule, unmodified,
+  pinned in the repository's wine-arm64/deps.pins and bootstrapped and built by wine-arm64/build.sh.
 
-gnutls 3.8.13 (libgnutls.30.dylib: TLS for secur32's schannel, PFX import and export for crypt32)
-  Licence: LGPL-2.1-or-later, gnutls/COPYING.LESSERv2, as is the libtasn1 it includes. The libunistring it includes is
-  LGPL-3.0-or-later: gnutls/COPYING.LESSERv3 and gnutls/COPYINGv3 (the GPL-3.0 text the LGPL-3.0 builds on). The
-  aarch64 CRYPTOGAMS routines (BSD-3-Clause), gnutls/cryptogams-license.txt; inih (BSD-3-Clause),
-  gnutls/inih-LICENSE.txt; randomart (BSD-2-Clause, OpenBSD): NOTICES.md.
-  Source: https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.13.tar.xz (SHA-256 GNUTLS_SHA256), unmodified,
-  pinned and built as FreeType is, with nettle and GMP linked in statically.
+gnutls 3.8.13-153-g0e7b36b5, development head (libgnutls.30.dylib: TLS for secur32's schannel, PFX import and export
+for crypt32)
+  Licence: LGPL-2.1-or-later, gnutls/COPYING.LESSERv2. The libunistring it includes is LGPL-3.0-or-later:
+  gnutls/COPYING.LESSERv3 and gnutls/COPYINGv3 (the GPL-3.0 text the LGPL-3.0 builds on). The aarch64 CRYPTOGAMS
+  routines (BSD-3-Clause), gnutls/cryptogams-license.txt; inih (BSD-3-Clause), gnutls/inih-LICENSE.txt; randomart
+  (BSD-2-Clause, OpenBSD): NOTICES.md.
+  Source: https://gitlab.com/gnutls/gnutls.git at GNUTLS_COMMIT, with the gnulib its bootstrap copies in, unmodified,
+  pinned and built as FreeType is, with libtasn1, nettle and GMP linked in statically.
 
-nettle 4.0 (linked statically into libgnutls.30.dylib)
+libtasn1 4.21.0-10-g2b20, development head (linked statically into libgnutls.30.dylib)
+  Licence: LGPL-2.1-or-later, libtasn1/COPYING.LESSERv2.
+  Source: https://gitlab.com/gnutls/libtasn1.git at LIBTASN1_COMMIT, unmodified, pinned and built as FreeType is.
+
+nettle 4.0, development head (linked statically into libgnutls.30.dylib)
   Licence: LGPL-3.0-or-later, elected from nettle's LGPL-3.0-or-later or GPL-2.0-or-later choice. Texts:
   nettle/COPYING.LESSERv3, nettle/COPYINGv3.
-  Source: https://ftp.gnu.org/gnu/nettle/nettle-4.0.tar.gz (SHA-256 NETTLE_SHA256), unmodified, pinned and built as
-  FreeType is.
+  Source: https://git.lysator.liu.se/nettle/nettle.git at NETTLE_COMMIT, unmodified, pinned and built as FreeType is.
 
-GMP 6.3.0 (linked statically into libgnutls.30.dylib)
+GMP 6.3.0, development trunk (gmp-next) snapshot 20260920180220 (linked statically into libgnutls.30.dylib)
   Licence: LGPL-3.0-or-later, elected from GMP's LGPL-3.0-or-later or GPL-2.0-or-later choice. Texts:
   gmp/COPYING.LESSERv3, gmp/COPYINGv3.
-  Source: https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz (SHA-256 GMP_SHA256), unmodified, pinned and built as FreeType
-  is.
+  Source: https://gmplib.org/download/snapshot/gmp-next/gmp-6.3.0-20260920180220.tar.zst (SHA-256 GMP_SHA256),
+  unmodified, pinned and built as FreeType is.
 
-FFmpeg 8.1.3 (libavutil.60.dylib, libavcodec.62.dylib, libavformat.62.dylib, libswscale.9.dylib,
-libswresample.6.dylib: winedmo's demuxers, and the audio and video decoders macOS doesn't provide)
+FFmpeg 8.0.git, development head (libavutil.61.dylib, libavcodec.63.dylib, libavformat.63.dylib, libswscale.10.dylib,
+libswresample.7.dylib: winedmo's demuxers, and the audio and video decoders macOS doesn't provide)
   Licence: LGPL-2.1-or-later, ffmpeg/COPYING.LGPLv2.1; ffmpeg/LICENSE.md names the files under other terms. Built with
   no GPL or nonfree part and without FFmpeg's own H.264, HEVC and AAC decoders. Its notice, the Independent JPEG
   Group's for libavcodec's DCTs, and those of faandct.c (ISC) and avsscanf.c (MIT): NOTICES.md. To use a modified
   FFmpeg, build it and put its dylibs in place of these (lib/wine/aarch64-unix), then sign each of them again: an ad
   hoc signature is enough (codesign -f -s - <dylib>). Leave the loader's signature (Contents/MacOS/wine) as it is: it
   loads libraries signed by anyone, and re-signing it, even ad hoc, drops the entitlement it needs to start.
-  Source: https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz (SHA-256 FFMPEG_SHA256), unmodified, pinned and built as
-  FreeType is, with the configure options in the repository's wine-arm64/build.sh.
+  Source: https://git.ffmpeg.org/ffmpeg.git at FFMPEG_COMMIT, unmodified, pinned and built as FreeType is, with the
+  configure options in the repository's wine-arm64/build.sh.
 
 lsteamclient (lsteamclient.dll and lsteamclient.so: the Steam bridge, from Windows games' Steam API to Mac Steam's
 steamclient.dylib)

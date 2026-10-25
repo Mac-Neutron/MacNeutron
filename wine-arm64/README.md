@@ -36,8 +36,10 @@ every game on it. A build needs the Developer ID setup below; there is no ad-hoc
   `-mtune=apple-*`, `-falign-loops`) crashes llvm-mingw's SEH unwind emitter, so never add it. Wine takes it as
   `aarch64_CFLAGS` and `arm64ec_CFLAGS`, not in `CROSSCFLAGS`: arm64ec brings in an x86_64 extra arch (ARM64EC
   modules' x64 sources), whose compiler `CROSSCFLAGS` reaches too.
-- The first build downloads the five tarballs of `deps.pins` (27 MB, checked by SHA-256) and a sparse checkout of
-  Proton's `lsteamclient/` folder from GitHub (18 MB of source, about 10 s here); later builds reuse them.
+- The first build clones the five libraries `deps.pins` pins by commit (each with its history's commits and tags, but
+  only that commit's files), downloads GMP's development snapshot (checked by SHA-256) and a sparse checkout of
+  Proton's `lsteamclient/` folder from GitHub (18 MB of source, about 10 s here); later builds reuse them. Bootstrapping
+  the libraries needs automake, GNU libtool, gtk-doc, texinfo, gperf and wget (Homebrew; `build.sh` names any missing).
 - **A Developer ID with the "Cross-architecture Compatibility Framework" capability** (`com.apple.developer.cross-architecture-support`)
   granted for the App ID `net.authspot.macneutron.wine` (team `49QMZXLR8S`), and a Developer ID provisioning profile for it.
   Without the entitlement the loader can't map the low 4 GB or get 4K pages, so there is no ad-hoc mode.
@@ -124,10 +126,11 @@ The batch's gated steps (`BATCH`), run last, after `g4-bench`:
 
 ### FreeType and gnutls
 
-`build.sh` builds FreeType 2.14.3 and gnutls 3.8.13, with nettle 4.0 and gmp 6.3.0 linked statically into it, from the
-tarballs pinned in `deps.pins` into `build/wine-arm64-src/deps` (about 3 min), with `/usr/bin/clang` and nothing from
-Homebrew (`PKG_CONFIG_LIBDIR` is the deps' own), then configures Wine against them with `--with-freetype --with-gnutls`.
-The step is redone only when the tarball pins or its own commands change (a hash in `deps/.complete`), and that
+`build.sh` builds FreeType and gnutls, with libtasn1, nettle and gmp linked statically into it, from each project's
+development head pinned in `deps.pins` (git commits, bootstrapped in `build/wine-arm64-src/deps-src`; GMP's gmp-next
+snapshot) into `build/wine-arm64-src/deps` (about 5 min), with `/usr/bin/clang` and nothing from Homebrew in what it
+links (`PKG_CONFIG_LIBDIR` is the deps' own), then configures Wine against them with `--with-freetype --with-gnutls`.
+The step is redone only when the pins or its own commands change (a hash in `deps/.complete`), and that
 reconfigures Wine (one full Wine rebuild). `bundle.sh` copies `libfreetype.6.dylib` and `libgnutls.30.dylib` into
 `lib/wine/aarch64-unix/`, beside the unix modules that load them by name, and checks: their `@rpath` install names;
 that every bundled Mach-O depends only on `/usr/lib`, `/System` and `@` paths and has no absolute rpath; that they
@@ -136,11 +139,11 @@ no arm64 code in the bundle names x18 (`ntdll.so` aside, which the `x18` step ch
 `ret` in gnutls's CRYPTOGAMS routines that `x18-allow.txt` lists. A gnutls update that moves those fails the build until the allowlist is checked again, by
 reading the routines.
 
-The same step builds FFmpeg 8.1.3 (video playback spec §6), LGPL, as five dylibs that `winedmo.so` links
+The same step builds FFmpeg's development head (video playback spec §6), LGPL, as five dylibs that `winedmo.so` links
 (`--with-ffmpeg --without-gstreamer`). It stops unless FFmpeg's generated `config.h` and `config_components.h` show no
 GPL part, no VideoToolbox, none of FFmpeg's own H.264, HEVC or AAC decoders, and exactly the decoders, demuxers,
 parsers and bitstream filters `build.sh` lists; it also stops if an object with code in it was built from a file whose
-licence is GPL-only (`--disable-arm-crc` keeps libavutil's GPL-2.0+ `aarch64/crc.S` out), or if the dylibs link
+licence is GPL-only (`--disable-arm-crc --disable-pmull --disable-eor3` keep libavutil's GPL-2.0+ `aarch64/crc.S` out), or if the dylibs link
 anything but each other by `@rpath` and the system's, or hold a build path. `bundle.sh` puts them beside `winedmo.so`.
 
 ### The Steam bridge
@@ -164,7 +167,7 @@ SteamID or the persona name; run it by hand the same way. The x18 hits in Valve'
 | Path | What |
 |---|---|
 | `pins` | Wine tag and commit, FEX commit, and the source of FEX's macOS unixlib |
-| `deps.pins` | The five tarballs (FreeType, gnutls, nettle, GMP, FFmpeg), and lsteamclient's repository and commit |
+| `deps.pins` | FreeType, gnutls, libtasn1, nettle and FFmpeg's repositories and commits, GMP's snapshot, and lsteamclient's repository and commit |
 | `patches/wine/`, `patches/fex/`, `patches/dxmt/`, `patches/lsteamclient/` | The patch series (`git format-patch` output, applied with `git am`): the source of truth |
 | `build.sh`, `bundle.sh` | Build, then assemble and sign `wine.app`, and check the result |
 | `wine.entitlements`, `Info.plist` | The loader's entitlements and the bundle's identity |
@@ -285,14 +288,15 @@ re-clone; that is why they wait for the rebase.
   - 0034 (the ARM64EC auxiliary IAT filled at load, and an entry put back when a page it was resolved through is made writable) is ours and stays local.
   - 0035 (msvcrt's memmove, strlen, strnlen, strchr, strrchr, strcmp and memchr on ARM64 and ARM64EC from Arm Optimized Routines v26.07, MIT: licenses/NOTICES.md) is ours and stays local.
   - 0036 (a genuine steamclient64.dll's exports jump to lsteamclient.dll, its DllMain and TLS callbacks skipped, its tier0_s64/vstdlib_s64 imports given ntdll stubs; adapted from Valve's Proton Wine, proton_11.0, LGPL-2.1 like Wine) is ours and stays local.
-- **FreeType** (2.14.3) is used under the FreeType License (FTL); the bundle carries its credit in
-  `licenses/README` and its texts in `licenses/freetype/`. **gnutls** (3.8.13, with its included libtasn1) is
-  LGPL-2.1+ and its included libunistring LGPL-3+; **nettle** (4.0) and **GMP** (6.3.0), linked into
-  `libgnutls.30.dylib`, are taken under LGPL-3+. Their texts come from the tarballs into `licenses/gnutls/`,
-  `licenses/nettle/` and `licenses/gmp/`; their sources are the pinned tarballs (`deps.pins`, unmodified).
-- **FFmpeg** (8.1.3) is LGPL-2.1+, built without its GPL and nonfree parts; its texts come from the tarball into
-  `licenses/ffmpeg/`, its notice and the Independent JPEG Group's credit are in `licenses/NOTICES.md`, and its source
-  is the pinned tarball (`deps.pins`, unmodified).
+- **FreeType** (development head) is used under the FreeType License (FTL); the bundle carries its credit in
+  `licenses/README` and its texts in `licenses/freetype/`. **gnutls** (development head) is LGPL-2.1+ and its included
+  libunistring LGPL-3+; **libtasn1** is LGPL-2.1+; **nettle** and **GMP** (gmp-next), linked into
+  `libgnutls.30.dylib`, are taken under LGPL-3+. Their texts come from their sources into `licenses/gnutls/`,
+  `licenses/libtasn1/`, `licenses/nettle/` and `licenses/gmp/`; their sources are the pinned commits and snapshot
+  (`deps.pins`, unmodified).
+- **FFmpeg** (development head) is LGPL-2.1+, built without its GPL and nonfree parts; its texts come from its source
+  into `licenses/ffmpeg/`, its notice and the Independent JPEG Group's credit are in `licenses/NOTICES.md`, and its
+  source is the pinned commit (`deps.pins`, unmodified).
 - **lsteamclient** is Steamworks-SDK-derived: Valve's Steamworks SDK licence (its `LICENSE`), except `cxx.h`, which is
   LGPL-2.1+ (CodeWeavers, from Wine); the bundle carries both in `licenses/lsteamclient/` (`LICENSE`, `NOTE`). Its
   patches are dappermint/winecx's three Mac fixes by millia ampora (`8d188ec0db`, `dada36ebab`, `6cfbd169a5`), each

@@ -309,9 +309,9 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ## FFmpeg (in FFmpeg: the `libavutil`, `libavcodec`, `libavformat`, `libswscale` and `libswresample` dylibs)
 
-FFmpeg 8.1.3, from `https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz` unmodified and built with no GPL or nonfree part,
-is under the GNU Lesser General Public License 2.1 or later, whose text is `ffmpeg/COPYING.LGPLv2.1`;
-`ffmpeg/LICENSE.md` names its files under other terms. The notice its files carry, from `libavcodec/avcodec.c`:
+FFmpeg's development head (8.0.git), from `https://git.ffmpeg.org/ffmpeg.git` at FFMPEG_COMMIT unmodified and built
+with no GPL or nonfree part, is under the GNU Lesser General Public License 2.1 or later, whose text is
+`ffmpeg/COPYING.LGPLv2.1`; `ffmpeg/LICENSE.md` names its files under other terms. The notice its files carry, from `libavcodec/avcodec.c`:
 
 ```
 This file is part of FFmpeg.
@@ -331,7 +331,7 @@ License along with FFmpeg; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 ```
 
-`libavcodec.62.dylib` contains FFmpeg's `libavcodec/jrevdct.c`, `jfdctfst.c` and `jfdctint_template.c`, DCTs built in
+`libavcodec.63.dylib` contains FFmpeg's `libavcodec/jrevdct.c`, `jfdctfst.c` and `jfdctint_template.c`, DCTs built in
 with the video decoders' shared DSP code, from the Independent JPEG Group's software (unmodified by us). This software
 is based in part on the work of the Independent JPEG Group. The notice of `jrevdct.c` (the other two carry the same
 one, copyright 1994-1996 and 1991-1996):
@@ -375,7 +375,7 @@ of commercial products, provided that all warranty or liability claims are
 assumed by the product vendor.
 ```
 
-`libavcodec.62.dylib` also contains `libavcodec/faandct.c`, a floating-point DCT, under this notice:
+`libavcodec.63.dylib` also contains `libavcodec/faandct.c`, a floating-point DCT, under this notice:
 
 ```
 Copyright (c) 2003 Michael Niedermayer <michaelni@gmx.at>
@@ -394,7 +394,7 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
-`libavutil.60.dylib` contains `libavutil/avsscanf.c` (`av_sscanf`, from musl), under the MIT licence below:
+`libavutil.61.dylib` contains `libavutil/avsscanf.c` (`av_sscanf`, from musl), under the MIT licence below:
 
 ```
 Copyright (c) 2005-2014 Rich Felker, et al.

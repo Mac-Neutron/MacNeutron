@@ -63,7 +63,7 @@ check() {  # check <wine.app> <build dir>
   done
 
   # 4. Sub-project 3's libraries, once they are in the bundle (a library present without its licence is a failure).
-  #    nettle and gmp are folded into libgnutls: their texts come with it.
+  #    libtasn1, nettle and gmp are folded into libgnutls: their texts come with it.
   if has 'libfreetype*'; then
     for f in LICENSE.TXT FTL.TXT bdf-README pcf-README; do [ -s "$L/freetype/$f" ] || miss "freetype/$f"; done
     g -qF "The FreeType Project" "$L/README" 2> /dev/null || miss "FreeType credit line in README"
@@ -71,12 +71,14 @@ check() {  # check <wine.app> <build dir>
   fi
   if has 'libgnutls*'; then
     for f in gnutls/COPYING.LESSERv2 gnutls/COPYING.LESSERv3 gnutls/COPYINGv3 nettle/COPYING.LESSERv3 nettle/COPYINGv3 \
-             gmp/COPYING.LESSERv3 gmp/COPYINGv3 gnutls/cryptogams-license.txt gnutls/inih-LICENSE.txt
+             gmp/COPYING.LESSERv3 gmp/COPYINGv3 gnutls/cryptogams-license.txt gnutls/inih-LICENSE.txt \
+             libtasn1/COPYING.LESSERv2
     do [ -s "$L/$f" ] || miss "$f"; done
     g -qF "Markus Friedl" "$L/NOTICES.md" 2> /dev/null || miss "NOTICES.md entry for Markus Friedl"
   fi
   if has 'libfreetype*' || has 'libgnutls*'; then
-    for n in FREETYPE GNUTLS NETTLE GMP; do key "${n}_URL"; key "${n}_SHA256"; done
+    for n in FREETYPE GNUTLS LIBTASN1 NETTLE; do key "${n}_REPO"; key "${n}_COMMIT"; done
+    key GMP_URL; key GMP_SHA256
   fi
   # FFmpeg (video playback spec §6): its own entries, matched by FFmpeg's name in them, not by any holder another
   # component shares.
@@ -86,8 +88,8 @@ check() {  # check <wine.app> <build dir>
     # Its files under notices of their own: faandct.c (ISC) and avsscanf.c (MIT; FEX's musl says 2005-2020).
     g -qF "Roman Shaposhnik" "$L/NOTICES.md" 2> /dev/null || miss "NOTICES.md entry for FFmpeg's faandct.c"
     g -qF "2005-2014 Rich Felker" "$L/NOTICES.md" 2> /dev/null || miss "NOTICES.md entry for FFmpeg's avsscanf.c"
-    g -q '^FFmpeg [0-9.]* (' "$L/README" 2> /dev/null || miss "FFmpeg entry in README"
-    key FFMPEG_URL; key FFMPEG_SHA256
+    g -q '^FFmpeg [^ ]* ' "$L/README" 2> /dev/null || miss "FFmpeg entry in README"
+    key FFMPEG_REPO; key FFMPEG_COMMIT
   fi
   if has lsteamclient.so; then
     for f in LICENSE NOTE; do [ -s "$L/lsteamclient/$f" ] || miss "lsteamclient/$f"; done
