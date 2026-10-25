@@ -1,12 +1,11 @@
-From 85cc9e72d327865d9f8e29b0b1e8248e93277aa5 Mon Sep 17 00:00:00 2001
+From b8f32c18405ce7d21c80163af600de45c2cf7482 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sun, 25 Oct 2026 15:57:42 -0400
 Subject: [PATCH] macneutron: EAC loader audit, hardened loadorder, image map
  rules
 
-NtPrivilegedServiceAuditAlarm as syscall 0x13f (spec, ntsyscalls, Unix stub), bounds-hardened DSO load order parsing for an in-process anti-cheat module, module-image reuse/map-conflict/unmap-refusal rules in virtual.c, and the diagnostic wine_get_unix_file_name/wine_get_version instrumentation used to trace the EasyAntiCheat bootstrapper.
+NtPrivilegedServiceAuditAlarm as syscall 0x13f (spec, ntsyscalls, Unix stub), bounds-hardened DSO load order parsing for an in-process anti-cheat module, module-image reuse/map-conflict/unmap-refusal rules in virtual.c, and wine_get_version answering 9.0 for the EasyAntiCheat bootstrapper.
 ---
- dlls/kernel32/path.c        |  3 +++
  dlls/ntdll/ntdll.spec       |  2 +-
  dlls/ntdll/ntsyscalls.h     |  6 ++++--
  dlls/ntdll/unix/loadorder.c | 30 +++++++++++++++++++++---------
@@ -14,32 +13,9 @@ NtPrivilegedServiceAuditAlarm as syscall 0x13f (spec, ntsyscalls, Unix stub), bo
  dlls/ntdll/unix/syscall.c   |  2 +-
  dlls/ntdll/unix/virtual.c   | 28 ++++++++++++++++++++++++++++
  dlls/ntdll/version.c        |  3 ++-
- 8 files changed, 71 insertions(+), 14 deletions(-)
+ dlls/wow64/security.c       | 15 +++++++++++++++
+ 8 files changed, 83 insertions(+), 14 deletions(-)
 
-diff --git a/dlls/kernel32/path.c b/dlls/kernel32/path.c
-index 5b5d17e..b237403 100644
---- a/dlls/kernel32/path.c
-+++ b/dlls/kernel32/path.c
-@@ -384,6 +384,7 @@ UINT WINAPI GetSystemDirectoryA( LPSTR path, UINT count )
-  */
- char * CDECL wine_get_unix_file_name( LPCWSTR dosW )
- {
-+    ERR( "MN_WINE_UNIX_NAME in %s\n", debugstr_w(dosW) );
-     UNICODE_STRING nt_name;
-     OBJECT_ATTRIBUTES attr;
-     IO_STATUS_BLOCK io;
-@@ -452,9 +453,11 @@ char * CDECL wine_get_unix_file_name( LPCWSTR dosW )
-     }
-     CloseHandle( handle );
-     RtlFreeUnicodeString( &nt_name );
-+    ERR( "MN_WINE_UNIX_NAME out %s\n", debugstr_a(buffer) );
-     return buffer;
- 
-  failed:
-+    ERR( "MN_WINE_UNIX_NAME failed %s\n", debugstr_w(dosW) );
-     RtlFreeHeap( GetProcessHeap(), 0, info );
-     RtlFreeUnicodeString( &nt_name );
-     return NULL;
 diff --git a/dlls/ntdll/ntdll.spec b/dlls/ntdll/ntdll.spec
 index 14608fd..b9027f1 100644
 --- a/dlls/ntdll/ntdll.spec
@@ -232,3 +208,29 @@ index c58fa2f..c098777 100644
  }
  
  
+diff --git a/dlls/wow64/security.c b/dlls/wow64/security.c
+index 331e297..9762da8 100644
+--- a/dlls/wow64/security.c
++++ b/dlls/wow64/security.c
+@@ -410,6 +410,21 @@ NTSTATUS WINAPI wow64_NtPrivilegeCheck( UINT *args )
+ }
+ 
+ 
++/**********************************************************************
++ *           wow64_NtPrivilegedServiceAuditAlarm
++ */
++NTSTATUS WINAPI wow64_NtPrivilegedServiceAuditAlarm( UINT *args )
++{
++    UNICODE_STRING *service = get_ptr( &args );
++    UNICODE_STRING *privilege = get_ptr( &args );
++    HANDLE client = get_handle( &args );
++    PRIVILEGE_SET *privileges = get_ptr( &args );
++    BOOLEAN success = get_ulong( &args );
++
++    return NtPrivilegedServiceAuditAlarm( service, privilege, client, privileges, success );
++}
++
++
+ /**********************************************************************
+  *           wow64_NtQueryInformationToken
+  */
