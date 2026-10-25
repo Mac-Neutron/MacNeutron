@@ -1,6 +1,6 @@
 #!/bin/sh
-# Builds MacNeutron's arm64 Wine (11.20 + wine-arm64/patches/wine) into build/wine-arm64-src/wine-build, against
-# FreeType, gnutls and FFmpeg built from wine-arm64/deps.pins' tarballs into deps, FEX (+ wine-arm64/patches/fex) into
+# Builds MacNeutron's arm64 Wine (pins' master commit + wine-arm64/patches/wine) into build/wine-arm64-src/wine-build,
+# against FreeType, gnutls and FFmpeg built from wine-arm64/deps.pins' tarballs into deps, FEX (+ wine-arm64/patches/fex) into
 # fex-ec and fex-unixlib, DXMT (dxmt/pins' commit + wine-arm64/patches/dxmt) for ARM64X into dxmt-install, and Proton's
 # lsteamclient (deps.pins' commit + wine-arm64/patches/lsteamclient) as one of Wine's DLLs, then stages the signed
 # build/wine-arm64/wine.app (native arm64 spec §5.4, §6.3; arm64 DXMT spec §4; ship-base spec §5, §7; video playback
@@ -108,13 +108,14 @@ patch_tree() {
   echo "$4" > "$SRC/$2.series"
   mv "$1" "$SRC/$2"
 }
+# Wine's master moves past the pin, so a shallow clone can't reach it: fetch the one commit, as FEX's.
 fetch_wine() {
-  echo "wine-arm64: fetching Wine $WINE_TAG" >&2
+  echo "wine-arm64: fetching Wine $WINE_COMMIT ($WINE_BRANCH)" >&2
   rm -rf "$W.tmp" "$SRC/wine-build"  # a new tree gets a new build folder
-  git clone -q -c advice.detachedHead=false --depth 1 --branch "$WINE_TAG" "$WINE_REPO" "$W.tmp" \
-    || die "can't clone $WINE_REPO at $WINE_TAG"
-  [ "$(git -C "$W.tmp" rev-parse HEAD)" = "$WINE_COMMIT" ] || die "$WINE_TAG is not $WINE_COMMIT in $WINE_REPO"
-  git -C "$W.tmp" checkout -q -b macneutron
+  git init -q "$W.tmp"
+  git -C "$W.tmp" remote add origin "$WINE_REPO"
+  git -C "$W.tmp" fetch -q --depth 1 origin "$WINE_COMMIT" || die "can't fetch $WINE_COMMIT from $WINE_REPO"
+  git -C "$W.tmp" checkout -q -b macneutron FETCH_HEAD
   patch_tree "$W.tmp" wine "$PATCHES" "$wine_series" "$WINE_COMMIT"
 }
 # FEX's main has moved past the pin, so a shallow clone can't reach it: fetch the one commit.

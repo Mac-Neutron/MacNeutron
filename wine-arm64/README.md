@@ -1,6 +1,6 @@
 # wine-arm64: native arm64 Wine and FEX
 
-`make wine-arm64` builds the first stage of MacNeutron's native arm64 stack: upstream Wine 11.20 (ARM64EC and arm64),
+`make wine-arm64` builds the first stage of MacNeutron's native arm64 stack: upstream Wine master (wine-arm64/pins; ARM64EC and arm64),
 with our patches, FEX, which runs x64 Windows code inside it, and our DXMT built for arm64 (Direct3D 11/12; D3D10's front end bundled, untested),
 staged as one signed, entitled `build/wine-arm64/wine.app`. Every Windows process runs natively on arm64 with 4K
 pages; only the game's x86-64 code is translated. It also carries FreeType and gnutls built from pinned source
