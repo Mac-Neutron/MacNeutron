@@ -32,6 +32,8 @@ public enum UpdateError: Error, Equatable, CustomStringConvertible {
 public enum Updater {
     public static let releases = URL(string: "https://api.github.com/repos/chadouming/MacNeutron/releases?per_page=30")!
     public static let identifier = "io.github.chadouming.MacNeutron"
+    /// Install MacNeutron's (spec 2026-10-25-macneutron-installer-design §3.1).
+    public static let installerIdentifier = "io.github.chadouming.MacNeutron.Installer"
 
     /// The newest release of the running build's channel (`X.Y.Z`, or `X.Y.Zp` for a performance build) above
     /// `current`, from GitHub's release list: drafts, prereleases, releases without `MacNeutron-<V>.zip` and
@@ -106,11 +108,12 @@ public enum Updater {
         try? FileManager.default.removeItem(at: work)
     }
 
-    /// The app's signature is valid (strict, every architecture, nested code), it is this app signed by `team`, it is
-    /// `version`, and Gatekeeper accepts it (Developer ID and notarization, as release.sh's R2 checks).
-    static func verify(_ bundle: URL, team: String, version: String, log: URL) throws {
+    /// The bundle's signature is valid (strict, every architecture, nested code), it is `identifier` signed by `team`,
+    /// it is `version`, and Gatekeeper accepts it (Developer ID and notarization, as release.sh's R2 checks).
+    public static func verify(_ bundle: URL, team: String, version: String, log: URL,
+                              identifier: String = Updater.identifier) throws {
         guard FileManager.default.fileExists(atPath: bundle.appending(path: "Contents/Info.plist").path(percentEncoded: false)) else {
-            throw UpdateError.signature("the download holds no MacNeutron.app")
+            throw UpdateError.signature("the download holds no \(bundle.lastPathComponent)")
         }
         var code: SecStaticCode?
         var requirement: SecRequirement?

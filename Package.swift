@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .executable(name: "macneutron", targets: ["macneutron"]),
         .executable(name: "MacNeutronApp", targets: ["MacNeutronApp"]),
+        .executable(name: "MacNeutronInstaller", targets: ["MacNeutronInstaller"]),
         .library(name: "MacNeutronCore", targets: ["MacNeutronCore"]),
     ],
     targets: [
@@ -16,6 +17,8 @@ let package = Package(
         .target(name: "MacNeutronCore", dependencies: ["CZstd"]),
         .executableTarget(name: "macneutron", dependencies: ["MacNeutronCore"]),
         .executableTarget(name: "MacNeutronApp", dependencies: ["MacNeutronCore"]),
+        // Install MacNeutron (spec 2026-10-25-macneutron-installer-design): AppInstaller's front, in its own bundle.
+        .executableTarget(name: "MacNeutronInstaller", dependencies: ["MacNeutronCore"]),
         .testTarget(name: "MacNeutronCoreTests", dependencies: ["MacNeutronCore", "MacNeutronApp"]),
     ]
 )
