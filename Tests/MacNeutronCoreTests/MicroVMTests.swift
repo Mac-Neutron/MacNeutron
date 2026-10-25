@@ -38,7 +38,7 @@ final class Scripts: @unchecked Sendable {
 private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts: Scripts = Scripts(),
                            display: (width: Int, height: Int)? = nil, version: String? = nil,
                            console: String? = nil, mountsFailed: String? = nil,
-                           installLog: String? = nil) throws -> VMFixture {
+                           installLog: String? = nil, stages: [String] = []) throws -> VMFixture {
     let vm = try makeVMFolder()
     let layout = try makeToolLayout()
     if let version { try setRuntimeVersion(version, of: layout) }
@@ -58,6 +58,14 @@ private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts:
         if let installLog, let share = call.environment["MN_SHARE"] {
             try? FileManager.default.createDirectory(atPath: share + "/traces", withIntermediateDirectories: true)
             try? installLog.write(toFile: share + "/traces/installscript.log", atomically: true, encoding: .utf8)
+        }
+        // run-game.sh's stages as it goes, each long enough for the launcher's poll to see it
+        if let share = call.environment["MN_SHARE"] {
+            for stage in stages {
+                try? FileManager.default.createDirectory(atPath: share + "/traces", withIntermediateDirectories: true)
+                try? stage.write(toFile: share + "/traces/stage", atomically: true, encoding: .utf8)
+                Thread.sleep(forTimeInterval: 1)
+            }
         }
         return status
     }
@@ -294,18 +302,42 @@ private func i386GameInLibrary(named name: String = "Game.exe") throws -> String
     #expect(script.hasSuffix("# run-game.sh\nwine steam.exe \"$EXE\" \"$@\"\n"))
 }
 
-@Test func aGamesFirstRunShowsAToastUntilTheGuestsPrefixIsReady() throws {
+@Test func everyLaunchShowsAToastUntilTheGamesWindowShows() throws {
     let f = try makeVMFixture()
-    let share = f.vm.appending(path: "runs/2437170/traces")
-    try FileManager.default.createDirectory(at: share, withIntermediateDirectories: true)
-    try write("", to: share.appending(path: "ready"))  // the last run's
+    let traces = f.vm.appending(path: "runs/2437170/traces")
+    try FileManager.default.createDirectory(at: traces, withIntermediateDirectories: true)
+    let window = traces.appending(path: "window").path(percentEncoded: false)
+    try write("", to: URL(filePath: window))  // the last run's
     _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
-    #expect(f.notifier.toasts == ["Setting up SMITE 2 until " + share.appending(path: "ready").path(percentEncoded: false)])
+    #expect(f.notifier.toasts == ["Setting up SMITE 2 until " + window])
     #expect(f.notifier.toastsClosed == 1)
-    #expect(!FileManager.default.fileExists(atPath: share.appending(path: "ready").path(percentEncoded: false)))
+    #expect(!FileManager.default.fileExists(atPath: window))
+    let call = try #require(f.runner.calls.first { $0.tool == "run-guest.sh" })
+    #expect(call.environment["MN_WINDOW_SHOWN"] == window)  // macneutron-vm's word
+    #expect(call.environment["MN_APP_NAME"] == "SMITE 2")
+    #expect(call.environment["MN_APP_ICON"] == nil)  // no such exe here
     try write("", to: f.vm.appending(path: "state/2437170.img"))  // run-guest.sh made it
     _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
-    #expect(f.notifier.toasts.count == 1)
+    #expect(f.notifier.toasts == ["Setting up SMITE 2 until " + window, "Starting SMITE 2 until " + window])
+    #expect(f.notifier.toastsClosed == 2)
+}
+
+@Test func theGuestsStagesAreTheToastsMessage() throws {
+    let f = try makeVMFixture(stages: ["Updating its Windows environment\n", "Loading the game\n"])
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: f.env)
+    #expect(f.notifier.toastUpdates == ["Updating its Windows environment", "Loading the game"])
+}
+
+@Test func theGamesExeIconGoesToTheVMsWindow() throws {
+    let f = try makeVMFixture()
+    let exe = try makeTempDir().appending(path: "steamapps/common/Some Game/Game.exe")
+    try FileManager.default.createDirectory(at: exe.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try peBytes(icons: [(0, 32, [0x89, 0x50, 0x4E, 0x47])]).write(to: exe)
+    _ = f.launcher.launch(["waitforexitandrun", exe.path(percentEncoded: false)], environment: f.env)
+    let call = try #require(f.runner.calls.first { $0.tool == "run-guest.sh" })
+    #expect(call.environment["MN_APP_NAME"] == "Some Game")
+    let icon = try #require(call.environment["MN_APP_ICON"])
+    #expect(try Data(contentsOf: URL(filePath: icon)) == PEImage.icon(of: exe))
 }
 
 @Test func aTPMThatDoesNotStartIsToldToThePlayer() throws {

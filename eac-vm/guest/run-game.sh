@@ -64,6 +64,10 @@ if [ -n "$(find "$WINEPREFIX/drive_c/windows" -name '*.dll' -size 0 -print -dele
 # update cut short may have written system32's alone; a prefix without syswow64 has no 32-bit side to mark).
 W=$WINEPREFIX/drive_c/windows
 [ -f "$W/system32/mtld3d.dll" ] && { [ ! -d "$W/syswow64" ] || [ -f "$W/syswow64/mtld3d.dll" ]; } || up=-u
+# The launcher's toast says what goes on until the game's window shows: traces/stage, which it polls.
+mn_stage() { echo "$*" > /mnt/share/traces/stage; }
+if [ ! -f "$WINEPREFIX/system.reg" ]; then mn_stage "Preparing its Windows environment. The first launch takes a minute or two."
+elif [ "$up" = -u ]; then mn_stage "Updating its Windows environment"; fi
 WINEDLLOVERRIDES="mscoree,mshtml=" wineboot $up >/dev/null 2>&1
 # Xvfb has one mode and can't change it: Wine offers games its standard modes and takes their changes itself (the
 # drawable has the game's size; the host window scales it). Read when the desktop starts: once per prefix, a restart.
@@ -132,6 +136,7 @@ mn_run() {  # <key> <name> <minimum> <file> <file's key> <file's name> <folder> 
   [ "$((0x${v:-0}))" -lt "$min" ] || return 0
   local dir=$7
   shift 7
+  mn_stage "Running Steam's install step \"$name\""
   case $(printf '%s' "$1" | tr '[:upper:]' '[:lower:]') in
     *.cmd|*.bat) set -- cmd /c "$@";;
     *.msi) set -- msiexec /i "$@";;
@@ -153,7 +158,7 @@ if [ -f /mnt/share/installscript.reg ] || command -v mn_install_script >/dev/nul
   fi
   ! command -v mn_install_script >/dev/null || mn_install_script
 fi
-: > /mnt/share/traces/ready  # the prefix is done: the launcher's toast goes (traces/: the share is root's)
+mn_stage "Loading the game"
 cd "$GAME_DIR" || exit 1
 if [ "$VERB" = waitforexitandrun ]; then
   # As Proton runs it: Wine's x86-64 loader through its preloader, never re-executed (WINELOADERNOEXEC). The `wine`

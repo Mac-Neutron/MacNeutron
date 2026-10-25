@@ -143,6 +143,38 @@ func peBytes(machine: UInt16, certificate: Bool = false) -> Data {
     return Data(bytes)
 }
 
+/// An amd64 image whose .rsrc (RVA 0x1000, file offset 0x400) holds `icons` as RT_ICON 1...n and one RT_GROUP_ICON
+/// listing them in order, each resource in language 0x409.
+func peBytes(icons: [(width: UInt8, bits: UInt16, data: [UInt8])]) -> Data {
+    let rva = 0x1000, raw = 0x400, sub = 0x8000_0000, n = icons.count
+    func le(_ value: Int, _ size: Int) -> [UInt8] { (0..<size).map { UInt8((value >> (8 * $0)) & 0xFF) } }
+    func dir(_ entries: [(id: Int, offset: Int)]) -> [UInt8] {
+        [UInt8](repeating: 0, count: 14) + le(entries.count, 2) + entries.flatMap { le($0.id, 4) + le($0.offset, 4) }
+    }
+    let iconNames = 32, iconLanguages = iconNames + 16 + 8 * n, groupNames = iconLanguages + 24 * n
+    let groupLanguage = groupNames + 24, leaves = groupLanguage + 24, group = leaves + 16 * (n + 1)
+    var rsrc = dir([(3, sub | iconNames), (14, sub | groupNames)])
+    rsrc += dir(icons.indices.map { ($0 + 1, sub | (iconLanguages + 24 * $0)) })
+    for i in icons.indices { rsrc += dir([(0x409, leaves + 16 * i)]) }
+    rsrc += dir([(1, sub | groupLanguage)]) + dir([(0x409, leaves + 16 * n)])
+    var image = group + 6 + 14 * n
+    for icon in icons { rsrc += le(rva + image, 4) + le(icon.data.count, 4) + le(0, 8); image += icon.data.count }
+    rsrc += le(rva + group, 4) + le(6 + 14 * n, 4) + le(0, 8)
+    rsrc += le(0, 2) + le(1, 2) + le(n, 2)
+    for (i, icon) in icons.enumerated() {
+        rsrc += [icon.width, icon.width, 0, 0] + le(1, 2) + le(Int(icon.bits), 2) + le(icon.data.count, 4) + le(i + 1, 2)
+    }
+    rsrc += icons.flatMap(\.data)
+
+    var bytes = [UInt8](peBytes(machine: PEImage.amd64))
+    let optional = 0x98
+    bytes[0x86] = 1  // NumberOfSections
+    bytes.replaceSubrange((optional + 128)..<(optional + 136), with: le(rva, 4) + le(rsrc.count, 4))  // directory 2
+    bytes += [UInt8](".rsrc".utf8) + [0, 0, 0] + le(rsrc.count, 4) + le(rva, 4) + le(rsrc.count, 4) + le(raw, 4)
+    bytes += [UInt8](repeating: 0, count: raw - bytes.count) + rsrc
+    return Data(bytes)
+}
+
 /// An ad-hoc-signed `dir/wine.app` whose `Contents/MacOS/wine` is a copy of `loader` (never run). Sign it last:
 /// anything written into the bundle afterwards breaks `codesign --verify`.
 @discardableResult

@@ -14,8 +14,10 @@
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 /* winemetal's struct macdrv_win_data: it reads client_cocoa_view only. */
 struct macdrv_win_data { void *hwnd, *cocoa_window, *cocoa_view, *client_cocoa_view; };
@@ -318,7 +320,8 @@ static NSWindow *the_window(void) {
                     backing:NSBackingStoreBuffered
                       defer:NO];
     window.releasedWhenClosed = NO;
-    window.title = @"MacNeutron VM";
+    const char *name = getenv("MN_APP_NAME"); /* the launcher's: the game's folder name */
+    window.title = name && *name ? @(name) : @"MacNeutron VM";
     if (shaped) window.contentAspectRatio = NSMakeSize(sw, sh);
     window.contentView = [[[MNInputView alloc] initWithFrame:NSMakeRect(0, 0, w, h)] autorelease];
     window.contentView.wantsLayer = YES;
@@ -328,8 +331,16 @@ static NSWindow *the_window(void) {
     [window center];
     if (!NSApp.delegate) NSApp.delegate = [[MNAppDelegate alloc] init]; /* the process's life: never released */
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+    /* The game's icon on the Dock tile (the launcher's MN_APP_ICON, read from its .exe), not a bare executable's. */
+    const char *icon = getenv("MN_APP_ICON");
+    NSImage *image = icon ? [[[NSImage alloc] initWithContentsOfFile:@(icon)] autorelease] : nil;
+    if (image) NSApp.applicationIconImage = image;
     [window makeKeyAndOrderFront:nil];
     [NSApp activate];
+    /* The game's window shows: the launcher's "Starting" toast goes (MN_WINDOW_SHOWN, the file it waits for). */
+    const char *shown = getenv("MN_WINDOW_SHOWN");
+    int fd = shown ? open(shown, O_WRONLY | O_CREAT, 0644) : -1;
+    if (fd >= 0) close(fd);
     return window;
 }
 

@@ -62,3 +62,17 @@ import Testing
     try peBytes(machine: PEImage.amd64, certificate: true).prefix(0x100).write(to: short)
     #expect(!PEImage.hasCertificateTable(short))
 }
+
+@Test func iconIsTheFirstGroupsLargestImageAsAnICO() throws {
+    let small = [UInt8](repeating: 0x11, count: 40), big: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 1, 2, 3]
+    let exe = try makeTempDir().appending(path: "Game.exe")
+    try peBytes(icons: [(32, 32, small), (0, 32, big), (48, 8, small)]).write(to: exe)
+    let ico: [UInt8] = [0, 0, 1, 0, 1, 0] + [0, 0, 0, 0, 1, 0, 32, 0] + [7, 0, 0, 0] + [22, 0, 0, 0] + big
+    #expect(PEImage.icon(of: exe).map([UInt8].init) == ico)
+}
+
+@Test func anImageWithoutResourcesHasNoIcon() throws {
+    let exe = try makeTempDir().appending(path: "Game.exe")
+    try peBytes(machine: PEImage.amd64).write(to: exe)
+    #expect(PEImage.icon(of: exe) == nil)
+}

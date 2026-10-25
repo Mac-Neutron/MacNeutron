@@ -291,17 +291,36 @@ public struct Launcher: Sendable {
                 .appending(path: "macneutron-vm-\(context.appID)-\(UUID().uuidString).sh")
             try script.write(to: file, atomically: true, encoding: .utf8)
             defer { try? FileManager.default.removeItem(at: file) }
-            // A game's first run makes its prefix in the guest, behind no window: a toast until run-game.sh says it's
-            // ready (the last run's word removed first).
-            var shown: @Sendable () -> Void = {}
-            if !FileManager.default.fileExists(atPath: vm.state(appID: context.appID).path(percentEncoded: false)) {
-                let ready = vm.share(appID: context.appID).appending(path: "traces/ready")
-                try? FileManager.default.removeItem(at: ready)
-                let setup = Self.setupToast(request.target)
-                shown = notifier.progress(title: setup.title, message: setup.message, until: ready).close
+            // The guest boots, prepares its prefix (a first run makes it) and loads the game behind no window: a toast
+            // until the game's window shows on the Mac (macneutron-vm's MN_WINDOW_SHOWN) or the run ends, run-game.sh's
+            // stages its message (the last run's word on both removed first).
+            let traces = share.appending(path: "traces")
+            let windowShown = traces.appending(path: "window"), stage = traces.appending(path: "stage")
+            for marker in [windowShown, stage] { try? FileManager.default.removeItem(at: marker) }
+            let stateDisk = vm.state(appID: context.appID).path(percentEncoded: false)
+            let start = !FileManager.default.fileExists(atPath: stateDisk) ? Self.setupToast(request.target)
+                : (title: "Starting \(Self.gameName(request.target))", message: "Starting its game VM.")
+            let toast = notifier.progress(title: start.title, message: start.message, until: windowShown)
+            let launched = StopFlag()
+            Thread.detachNewThread {  // the share is the guest's: polled
+                var last = ""
+                while !launched.isSet {
+                    let line = ((try? String(contentsOf: stage, encoding: .utf8)) ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !line.isEmpty, line != last { last = line; toast.update(line) }
+                    Thread.sleep(forTimeInterval: 0.5)
+                }
             }
-            defer { shown() }
+            defer { launched.set(); toast.close() }
             var env = environment
+            env["MN_WINDOW_SHOWN"] = windowShown.path(percentEncoded: false)
+            // The game's name on that window and its .exe's icon on the Dock tile (eac-vm/metal/wm/host/winemac.m), not
+            // a bare executable's.
+            env["MN_APP_NAME"] = Self.gameName(request.target)
+            let icon = share.appending(path: "icon.ico")
+            if let data = PEImage.icon(of: URL(filePath: request.target)), (try? data.write(to: icon)) != nil {
+                env["MN_APP_ICON"] = icon.path(percentEncoded: false)
+            }
             env["MN_VM_DIR"] = vm.root.path(percentEncoded: false)
             env["MN_STATE"] = vm.state(appID: context.appID).path(percentEncoded: false)
             env["MN_SHARE"] = vm.share(appID: context.appID).path(percentEncoded: false)
