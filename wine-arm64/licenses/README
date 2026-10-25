@@ -44,12 +44,13 @@ LLVM 15.0.7 (linked statically into winemetal.so)
   ConvertUTF (Unicode, Inc.) and the regex notice: NOTICES.md.
   Source: https://github.com/llvm/llvm-project.git at LLVM_TAG (llvmorg-15.0.7), unmodified.
 
-llvm-mingw 20260908 (the Windows-side toolchain: DXMT's DLLs, winemetal.dll and libarm64ecfex.dll link its runtime)
+llvm-mingw, development head (the Windows-side toolchain: DXMT's DLLs, winemetal.dll and libarm64ecfex.dll link its
+runtime)
   Licence: Apache-2.0 WITH LLVM-exception, llvm-mingw/LICENSE.TXT; the mingw-w64 runtime,
   llvm-mingw/COPYING.MinGW-w64-runtime.txt.
-  Source: https://github.com/mstorsjo/llvm-mingw/releases/download/20260908/llvm-mingw-20260908-ucrt-macos-universal.tar.xz
-  (SHA-256 LLVM_MINGW_SHA256, pinned in dxmt/pins); the sources it is built from are listed at
-  https://github.com/mstorsjo/llvm-mingw.
+  Source: MacNeutron's own build (the repository's dxmt/llvm-mingw.sh) of https://github.com/mstorsjo/llvm-mingw.git at
+  dxmt/pins' LLVM_MINGW_COMMIT, with the LLVM it pins (LLVM_MINGW_LLVM) and the repository's wine-arm64/patches/llvm
+  on top; the mingw-w64 sources its scripts fetch are listed at https://github.com/mstorsjo/llvm-mingw.
 
 FreeType 2.14.3 (libfreetype.6.dylib: text rendering in win32u and dwrite)
   Licence: the FreeType License (FTL), elected from FreeType's FTL-or-GPL-2.0 choice. Texts: freetype/LICENSE.TXT,

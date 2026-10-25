@@ -22,19 +22,22 @@ S="$B/llvm-mingw-src"
 T="$B/dxmt-src/llvm-mingw-own"
 CPU="${MACNEUTRON_CPU:-apple-m5}"
 [ "$CPU" != generic ] || CPU=apple-m1
-recipe=$( { cat "$0" "$ROOT"/wine-arm64/patches/llvm/*.patch; echo "$LLVM_MINGW_TAG $LLVM_MINGW_LLVM $CPU"; } \
+recipe=$( { cat "$0" "$ROOT"/wine-arm64/patches/llvm/*.patch; echo "$LLVM_MINGW_COMMIT $LLVM_MINGW_LLVM $CPU"; } \
   | shasum -a 256 | cut -d ' ' -f 1)
 if [ -x "$T/bin/aarch64-w64-mingw32-clang" ] && [ "$(cat "$T/.recipe" 2> /dev/null)" = "$recipe" ]; then
   echo "$T/bin"
   exit 0
 fi
-echo "dxmt: building MacNeutron's llvm-mingw ($LLVM_MINGW_TAG, $LLVM_MINGW_LLVM, $CPU; log: $S/build.log)" >&2
+echo "dxmt: building MacNeutron's llvm-mingw ($LLVM_MINGW_COMMIT, $LLVM_MINGW_LLVM, $CPU; log: $S/build.log)" >&2
 mkdir -p "$S"
 : > "$S/build.log"
 log() { "$@" >> "$S/build.log" 2>&1 || die "llvm-mingw: '$*' failed; see $S/build.log"; }
-if [ ! -d "$S/scripts/.git" ] || [ "$(git -C "$S/scripts" describe --tags 2> /dev/null)" != "$LLVM_MINGW_TAG" ]; then
-  rm -rf "$S/scripts"
-  log git clone -q -c advice.detachedHead=false --depth 1 --branch "$LLVM_MINGW_TAG" "$LLVM_MINGW_REPO" "$S/scripts"
+# The scripts at the pinned commit of llvm-mingw's master, fetched alone (a branch head moves); llvm-project, which
+# build-llvm.sh clones into it, stays.
+if [ "$(git -C "$S/scripts" rev-parse HEAD 2> /dev/null)" != "$LLVM_MINGW_COMMIT" ]; then
+  [ -d "$S/scripts/.git" ] || { log git init -q "$S/scripts"; log git -C "$S/scripts" remote add origin "$LLVM_MINGW_REPO"; }
+  log git -C "$S/scripts" fetch -q --depth 1 origin "$LLVM_MINGW_COMMIT"
+  log git -C "$S/scripts" checkout -q -f FETCH_HEAD
 fi
 cd "$S/scripts"
 git checkout -q -- .  # the runtime scripts' edits below are redone each time
@@ -49,7 +52,7 @@ done
 sed -i '' 's/        EXTRA_CFLAGS="\$ARM64X_FLAGS"/        EXTRA_CFLAGS="\$ARM64X_FLAGS -mcpu='"$CPU"'"/' build-libcxx.sh
 sed -i '' 's/        FLAGS="\$ARM64X_FLAGS"/        FLAGS="\$ARM64X_FLAGS -mcpu='"$CPU"'"/' build-compiler-rt.sh
 grep -q "mcpu=$CPU" build-libcxx.sh && grep -q "mcpu=$CPU" build-compiler-rt.sh \
-  || die "llvm-mingw $LLVM_MINGW_TAG's runtime scripts changed: no place for -mcpu=$CPU"
+  || die "llvm-mingw $LLVM_MINGW_COMMIT's runtime scripts changed: no place for -mcpu=$CPU"
 # No build path in the C++ runtime every Windows-side binary links: libc++abi's checks name their source files
 # (__FILE__), which named this tree's llvm-project folder in every DXMT DLL (a release refuses a build path).
 map="-ffile-prefix-map=$S/scripts/llvm-project=/llvm-project"
@@ -57,7 +60,7 @@ sed -i '' 's|-DCMAKE_C_FLAGS_INIT="$CFGUARD_CFLAGS $EXTRA_CFLAGS"|-DCMAKE_C_FLAG
   s|-DCMAKE_CXX_FLAGS_INIT="$CFGUARD_CFLAGS $EXTRA_CFLAGS"|-DCMAKE_CXX_FLAGS_INIT="$CFGUARD_CFLAGS $EXTRA_CFLAGS '"$map"'"|' \
   build-libcxx.sh
 [ "$(grep -cF -- "$map" build-libcxx.sh)" = 2 ] \
-  || die "llvm-mingw $LLVM_MINGW_TAG's build-libcxx.sh changed: no place for $map"
+  || die "llvm-mingw $LLVM_MINGW_COMMIT's build-libcxx.sh changed: no place for $map"
 export TOOLCHAIN_ARCHS="i686 x86_64 aarch64 arm64ec"
 rm -rf "$T.tmp"
 # The compilers themselves: -O3 (Release), ThinLTO, for this CPU. Only LLVM's own build sees these flags; the
