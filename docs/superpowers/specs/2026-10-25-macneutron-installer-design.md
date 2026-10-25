@@ -1,6 +1,7 @@
 # Install MacNeutron: an installer download that replaces the app in Applications
 
-Status: proposed 2026-10-25 (approach A, self-contained; quarantine stripped after verification).
+Status: approved 2026-10-25 (approach A, self-contained; quarantine stripped after verification). Plan:
+`docs/superpowers/plans/2026-10-25-macneutron-installer.md`.
 Amends: the in-app updater (`Sources/MacNeutronCore/Updater.swift`, `Sources/MacNeutronApp/UpdateModel.swift`) and the
 release (`release/release.sh`, arm64 release spec §6.3).
 
