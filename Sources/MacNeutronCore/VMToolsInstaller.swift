@@ -167,6 +167,18 @@ public enum VMToolsInstaller {
         return (try? FileManager.default.removeItem(atPath: linkPath(vm))) != nil
     }
 
+    /// The folder is a link (to anywhere, there or not).
+    public static func isLink(_ vm: URL) -> Bool {
+        (try? FileManager.default.destinationOfSymbolicLink(atPath: linkPath(vm))) != nil
+    }
+
+    /// Rebuild's way past a developer's folder linked here: only the link goes (the developer's folder is never touched),
+    /// so a setup makes a real folder there. True if it removed one; a developer's own folder (no link) stays.
+    public static func removeDeveloperLink(_ vm: URL) -> Bool {
+        guard isLink(vm), isDeveloperFolder(vm) else { return false }
+        return (try? FileManager.default.removeItem(atPath: linkPath(vm))) != nil
+    }
+
     /// The folder's path without its trailing "/", which would follow a link.
     private static func linkPath(_ vm: URL) -> String {
         let path = vm.path(percentEncoded: false)

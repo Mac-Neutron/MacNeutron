@@ -637,6 +637,42 @@ private func makeManifest() throws -> URL {
     #expect(model.vmReady)
 }
 
+@MainActor @Test func rebuildReplacesALinkToADevelopersFolder() async throws {
+    // A release app on the folder a developer linked to build/eac-vm-work: Rebuild makes a real folder, and the
+    // developer's folder keeps everything it had.
+    let dev = try makeTempDir().appending(path: "eac-vm-work", directoryHint: .isDirectory), manifest = try makeManifest()
+    try write("dev\n", to: dev.appending(path: "images/manifest.sha256"))
+    try write("game\n", to: dev.appending(path: "state/1.img"))
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
+    let link = String(vmRoot.path(percentEncoded: false).dropLast())
+    try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: String(dev.path(percentEncoded: false).dropLast()))
+    let fake = try fakeHelper("mkdir -p '\(link)/images'\necho \(VMSetup.manifestHash(manifest)!) > '\(link)/images/manifest.sha256'")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest)
+    #expect(calls(fake.calls).isEmpty)
+    #expect(!model.vmRebuildOff)
+    await model.rebuildVM()
+    #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: link)) == nil)
+    #expect(FileManager.default.fileExists(atPath: vmRoot.appending(path: "macneutron-vm").path))
+    #expect(calls(fake.calls).count == 1)
+    #expect(model.vmStatus == "Game VM: ready")
+    #expect(try FileManager.default.contentsOfDirectory(atPath: dev.path).sorted() == ["images", "state"])
+    #expect(try String(contentsOf: dev.appending(path: "images/manifest.sha256"), encoding: .utf8) == "dev\n")
+    #expect(try String(contentsOf: dev.appending(path: "state/1.img"), encoding: .utf8) == "game\n")
+}
+
+@MainActor @Test func aDevelopersOwnFolderTurnsRebuildOffAndSaysWhy() async throws {
+    let vmRoot = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()
+    try write("dev\n", to: vmRoot.appending(path: "images/manifest.sha256"))
+    let fake = try fakeHelper("exit 0")
+    let model = try await makeSetupModel(helper: fake.helper, vmRoot: vmRoot, manifest: manifest)
+    #expect(model.vmRebuildOff)
+    #expect(model.vmStatus == "Game VM: a developer's folder (its images are eac-vm's own build). MacNeutron never "
+            + "changes it, so Rebuild is off.")
+    await model.rebuildVM()
+    #expect(calls(fake.calls).isEmpty)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: vmRoot.path) == ["images"])
+}
+
 @MainActor @Test func aMissingFolderWaitsForItsDrive() async throws {
     // A player's VM on a drive that isn't connected: the app waits, and carries on once the drive is back.
     let drive = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory), manifest = try makeManifest()

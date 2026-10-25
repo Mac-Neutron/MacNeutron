@@ -400,11 +400,19 @@ final class AppModel {
     /// The folder is a link to a folder that isn't there (its drive disconnected): the link's target.
     var vmFolderMissing: String? { vmRoot.flatMap(VMToolsInstaller.missingTarget) }
 
-    /// The Game VM line Setup and Settings show: a missing folder's, else the setup's.
+    /// The folder is a developer's own, not a link to one (which Rebuild replaces): never written, so Rebuild is off.
+    var vmRebuildOff: Bool { vmRoot.map { VMToolsInstaller.isDeveloperFolder($0) && !VMToolsInstaller.isLink($0) } == true }
+
+    /// The Game VM line Setup and Settings show: a missing folder's, a developer's own folder's, else the setup's.
     var vmStatus: String? {
-        vmFolderMissing.map {
-            "Game VM: its folder \($0) is missing. Reconnect its drive, or Rebuild to start a new VM here."
-        } ?? vmNotice
+        if let missing = vmFolderMissing {
+            return "Game VM: its folder \(missing) is missing. Reconnect its drive, or Rebuild to start a new VM here."
+        }
+        if vmRebuildOff {
+            return "Game VM: a developer's folder (its images are eac-vm's own build). MacNeutron never changes it, so "
+                + "Rebuild is off."
+        }
+        return vmNotice
     }
 
     /// A game would run: the images are the manifest's and the launcher's own check (`MicroVM.isReady`) passes.
@@ -481,14 +489,16 @@ final class AppModel {
     /// Settings' Rebuild: the setup's downloads and any half-built set go, then a fresh set is built and swapped in (the
     /// setup waits while a game runs from the old one, then removes it). Games' disks, TPMs and runs are never touched.
     func rebuildVM() async {
-        guard vmManifest != nil, let vmRoot, !vmSetupRunning, !VMToolsInstaller.isDeveloperFolder(vmRoot) else { return }
-        // A link to a missing folder (a disconnected drive, a developer's deleted build/): a real folder with the app's
-        // tools takes its place, and their install starts the setup (the new folder has no images).
-        if VMToolsInstaller.removeDeadLink(vmRoot) {
+        guard vmManifest != nil, let vmRoot, !vmSetupRunning else { return }
+        // A link to a missing folder (a disconnected drive, a developer's deleted build/) or to a developer's folder: a
+        // real folder with the app's tools takes its place (the link's target is never touched), and their install starts
+        // the setup (the new folder has no images).
+        if VMToolsInstaller.removeDeadLink(vmRoot) || VMToolsInstaller.removeDeveloperLink(vmRoot) {
             await installVMTools()
             await vmSetupTask?.value
             return
         }
+        guard !vmRebuildOff else { return }
         try? FileManager.default.removeItem(at: vmRoot.appending(path: "setup", directoryHint: .isDirectory))
         await setUpVM()
     }

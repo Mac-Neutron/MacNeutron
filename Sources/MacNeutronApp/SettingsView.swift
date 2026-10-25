@@ -59,7 +59,7 @@ struct SettingsView: View {
                             Button("Retry") { Task { await model.setUpVM() } }
                         }
                         Button("Rebuild the game VM", role: .destructive) { confirmingRebuild = true }
-                            .disabled(model.vmSetupRunning)
+                            .disabled(model.vmSetupRunning || model.vmRebuildOff)
                     }
                 }
                 if let notice = model.vmStatus { Text(notice).foregroundStyle(.secondary).textSelection(.enabled) }
