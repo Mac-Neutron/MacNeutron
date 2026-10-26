@@ -437,6 +437,25 @@ self_test() {
     "release: vm-manifest.json names parts $ps ${ph%?}0, not the archive's $ps $ph" \
     check_vm_manifest "$T/vm-manifest.bad.json" "$T/parts.tar.xz"
 
+  # The installer's zip (spec 2026-10-25-macneutron-installer-design §3.4): its nested app changed after signing is
+  # refused, by name (checked before the installer, whose seal covers it).
+  mkapp() {  # mkapp <bundle> <identifier>: an app whose executable is a copy of true
+    mkdir -p "$1/Contents/MacOS"
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleExecutable</key><string>x</string><key>CFBundleIdentifier</key><string>%s</string></dict></plist>\n' "$2" \
+      > "$1/Contents/Info.plist"
+    cp /usr/bin/true "$1/Contents/MacOS/x"
+  }
+  IB="$T/izip/Install MacNeutron.app"
+  mkapp "$IB" t.installer
+  mkapp "$IB/Contents/Helpers/MacNeutron.app" t.app
+  codesign -f -s - "$IB/Contents/Helpers/MacNeutron.app" 2> /dev/null && codesign -f -s - "$IB" 2> /dev/null
+  printf ' ' >> "$IB/Contents/Helpers/MacNeutron.app/Contents/Info.plist"
+  ditto -c -k --norsrc --keepParent "$IB" "$T/installer.zip"
+  rehearsing() { mode=rehearse; "$@"; }  # no stapler validate
+  refused "an installer whose nested app fails to verify" \
+    "release: the unzipped Install MacNeutron.app/Contents/Helpers/MacNeutron.app fails codesign --verify --strict --deep" \
+    rehearsing check_zip "$T/installer.zip" "Install MacNeutron.app/Contents/Helpers/MacNeutron.app" "Install MacNeutron.app"
+
   # The notary profile (release mode checks it with the refusals) and stapling's retries, with a stand-in xcrun on
   # PATH that logs its arguments: the real notarytool is never run here. The stand-in sleep only logs too.
   mkdir -p "$T/shim" "$T/Some.app"
@@ -697,20 +716,43 @@ EOF
   echo "PASS R4"
 }
 
-# The zip unzipped with /usr/bin/unzip: MacNeutron.app and its wine.app pass codesign --verify --strict --deep and, in
-# a release, carry valid stapled tickets.
-check_zip() {
+# A zip unzipped with /usr/bin/unzip: each bundle, in the order given, passes codesign --verify --strict --deep (its
+# output on stderr) and, in a release, carries a valid stapled ticket.
+check_zip() {  # check_zip <zip> <bundle>...
+  z=$1; shift
   X=$(mktemp -d "${TMPDIR:-/tmp}/release-unzip.XXXXXX")
-  /usr/bin/unzip -q "$OUT/$ZIP" -d "$X" || { rm -rf "$X"; die "can't unzip $ZIP"; }
-  for b in MacNeutron.app MacNeutron.app/Contents/Helpers/wine.app; do
+  /usr/bin/unzip -q "$z" -d "$X" || { rm -rf "$X"; die "can't unzip $(basename "$z")"; }
+  for b; do
     out=$(codesign --verify --strict --deep "$X/$b" 2>&1) \
-      || { rm -rf "$X"; die "the unzipped $b fails codesign --verify --strict --deep: $out"; }
+      || { printf '%s\n' "$out" >&2; rm -rf "$X"; die "the unzipped $b fails codesign --verify --strict --deep"; }
     if [ $mode = release ]; then
       xcrun stapler validate "$X/$b" > /dev/null 2>&1 || { rm -rf "$X"; die "the unzipped $b fails stapler validate"; }
     fi
   done
   rm -rf "$X"
-  echo "PASS $ZIP unzips (unzip) to a MacNeutron.app and wine.app that verify"
+  echo "PASS $(basename "$z") unzips (unzip) to bundles that verify: $*"
+}
+
+# Install MacNeutron (spec 2026-10-25-macneutron-installer-design §3.1, §3.4): the stapled MacNeutron.app copied whole
+# into Contents/Helpers (its signature and ticket kept), the installer signed around it, never --deep.
+build_installer() {
+  INST="$OUT/Install MacNeutron.app"
+  rm -rf "$INST"
+  mkdir -p "$INST/Contents/MacOS" "$INST/Contents/Helpers"
+  cp "$ROOT/App/Installer-Info.plist" "$INST/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" -c "Set :CFBundleVersion $V" \
+    "$INST/Contents/Info.plist" || die "can't set the version in $INST/Contents/Info.plist"
+  m=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INST/Contents/Info.plist" 2> /dev/null || true)
+  [ "$m" = 27.0 ] || die "App/Installer-Info.plist's LSMinimumSystemVersion is '${m:-missing}', not 27.0"
+  f="$INST/Contents/MacOS/Install MacNeutron"
+  cp "$ROOT/.build/release/MacNeutronInstaller" "$f"
+  a=$(lipo -archs "$f")
+  [ "$a" = arm64 ] || die "the installer's binary is '$a', not arm64"
+  strip -S "$f" 2> /dev/null || die "can't strip the installer's binary"
+  ! LC_ALL=C /usr/bin/grep -aq /Users/ "$f" || die "the installer's binary still names a path under /Users/"
+  ditto "$A" "$INST/Contents/Helpers/MacNeutron.app"
+  codesign -f -s "$MACNEUTRON_SIGN_IDENTITY" --options runtime --timestamp "$INST" > /dev/null 2>&1 || die "can't sign $INST"
+  out=$(codesign --verify --strict --deep "$INST" 2>&1) || die "codesign --verify --strict --deep $INST: $out"
 }
 
 # The entry points: --self-test, --check-version, or a version (released or rehearsed). Any other arguments: usage.
@@ -767,7 +809,8 @@ check_dxmt "${BUILD_DIR:-$ROOT/build}/wine-arm64-src/dxmt" "$(. "$ROOT/dxmt/pins
 check_up_to_date || exit 1
 HEAD=$(git -C "$ROOT" rev-parse HEAD)
 CLI="$ROOT/.build/release/macneutron" STEAM_EXE="$ROOT/build/bridge/arm64/steam.exe"
-for f in "$CLI" "$ROOT/.build/release/MacNeutronApp" "$STEAM_EXE" "$ROOT/build/bridge/steamprobe.exe"; do
+for f in "$CLI" "$ROOT/.build/release/MacNeutronApp" "$ROOT/.build/release/MacNeutronInstaller" "$STEAM_EXE" \
+  "$ROOT/build/bridge/steamprobe.exe"; do
   [ -f "$f" ] || die "no $f: run make build bridge"
 done
 if [ $mode = release ]; then OUT="$ROOT/build/release/$V"; else OUT="$ROOT/build/release/rehearse-$V"; fi
@@ -866,7 +909,17 @@ fi
 # AppleDouble entries in the bundles as files and break both seals. Then what a terminal user gets is checked.
 ZIP="MacNeutron-$V.zip"
 ditto -c -k --norsrc --keepParent "$A" "$OUT/$ZIP"
-check_zip
+check_zip "$OUT/$ZIP" MacNeutron.app MacNeutron.app/Contents/Helpers/wine.app
+# 4b. Install MacNeutron around the stapled app, notarized on its own, and its zip as a player unzips it.
+build_installer
+if [ $mode = release ]; then
+  notarize_and_staple "$INST" "$OUT/notary-installer"
+  accepted "$INST" || die "R2: Gatekeeper rejects $INST: $(spctl -a -vvv -t exec "$INST" 2>&1 | head -n 2 | tr '\n' ' ')"
+  echo "PASS the installer accepted"
+fi
+IZIP="MacNeutron-$V-Installer.zip"
+ditto -c -k --norsrc --keepParent "$INST" "$OUT/$IZIP"
+check_zip "$OUT/$IZIP" "Install MacNeutron.app/Contents/Helpers/MacNeutron.app" "Install MacNeutron.app"
 
 # 5. The source archive (R5).
 TGZ="MacNeutron-$V-source.tar.gz"
@@ -880,15 +933,15 @@ printf '%s\n' "$out"
   "$NB/eac-vm-work/images/manifest.sha256" "$NB/eac-vm-work/images/base.erofs" || exit 1
 
 # 6. Checksums and sizes; the commands that publish it, for the maintainer.
-( cd "$OUT" && shasum -a 256 "$ZIP" "$TGZ" "$PARTS" > SHA256SUMS )
-for f in "$ZIP" "$TGZ" "$PARTS"; do echo "$f: $(stat -f %z "$OUT/$f") bytes"; done >> "$OUT/SIZES.txt"
+( cd "$OUT" && shasum -a 256 "$ZIP" "$TGZ" "$PARTS" "$IZIP" > SHA256SUMS )
+for f in "$ZIP" "$TGZ" "$PARTS" "$IZIP"; do echo "$f: $(stat -f %z "$OUT/$f") bytes"; done >> "$OUT/SIZES.txt"
 cat "$OUT/SIZES.txt" "$OUT/SHA256SUMS"
 if [ $mode = release ]; then
   c=$(awk '$1 == "MacNeutron" { print $3 }' "$OUT/SOURCES.txt")
   echo "release: MacNeutron $V is ready in $OUT. To publish it:"
   echo "  git tag v$V $c"
   latest=; [ $PROFILE = std ] || latest=" --latest=false"  # the normal release stays GitHub's Latest
-  echo "  gh release create v$V --target $c$latest --title 'MacNeutron $V' '$OUT/$ZIP' '$OUT/$TGZ' '$OUT/$PARTS' '$OUT/SHA256SUMS'"
+  echo "  gh release create v$V --target $c$latest --title 'MacNeutron $V' '$OUT/$ZIP' '$OUT/$TGZ' '$OUT/$PARTS' '$OUT/$IZIP' '$OUT/SHA256SUMS'"
 else
   echo "release: rehearsal of $V done in $OUT (not notarized: nothing to publish)"
 fi
