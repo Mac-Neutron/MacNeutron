@@ -1,4 +1,4 @@
-From b8f32c18405ce7d21c80163af600de45c2cf7482 Mon Sep 17 00:00:00 2001
+From 9a99c32a911549d6ba849778335f90afbf3754d0 Mon Sep 17 00:00:00 2001
 From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
 Date: Sun, 25 Oct 2026 15:57:42 -0400
 Subject: [PATCH] macneutron: EAC loader audit, hardened loadorder, image map
@@ -8,13 +8,13 @@ NtPrivilegedServiceAuditAlarm as syscall 0x13f (spec, ntsyscalls, Unix stub), bo
 ---
  dlls/ntdll/ntdll.spec       |  2 +-
  dlls/ntdll/ntsyscalls.h     |  6 ++++--
- dlls/ntdll/unix/loadorder.c | 30 +++++++++++++++++++++---------
+ dlls/ntdll/unix/loadorder.c | 32 +++++++++++++++++++++++---------
  dlls/ntdll/unix/security.c  | 11 +++++++++++
  dlls/ntdll/unix/syscall.c   |  2 +-
  dlls/ntdll/unix/virtual.c   | 28 ++++++++++++++++++++++++++++
  dlls/ntdll/version.c        |  3 ++-
  dlls/wow64/security.c       | 15 +++++++++++++++
- 8 files changed, 83 insertions(+), 14 deletions(-)
+ 8 files changed, 85 insertions(+), 14 deletions(-)
 
 diff --git a/dlls/ntdll/ntdll.spec b/dlls/ntdll/ntdll.spec
 index 14608fd..b9027f1 100644
@@ -54,7 +54,7 @@ index 2c77a91..67b2287 100644
  #define ALL_SYSCALLS ALL_SYSCALLS32
  #endif
 diff --git a/dlls/ntdll/unix/loadorder.c b/dlls/ntdll/unix/loadorder.c
-index ba274d4..7862fcc 100644
+index ba274d4..39a1bdb 100644
 --- a/dlls/ntdll/unix/loadorder.c
 +++ b/dlls/ntdll/unix/loadorder.c
 @@ -283,7 +283,8 @@ static void add_load_order_set( WCHAR *entry )
@@ -67,7 +67,7 @@ index ba274d4..7862fcc 100644
      const char *overrides = getenv( "WINEDLLOVERRIDES" );
  
      /* @@ Wine registry key: HKCU\Software\Wine\DllOverrides */
-@@ -292,15 +293,25 @@ static void init_load_order(void)
+@@ -292,15 +293,27 @@ static void init_load_order(void)
      init_done = TRUE;
  
      if (!overrides) return;
@@ -80,11 +80,14 @@ index ba274d4..7862fcc 100644
 +    if (len >= ARRAY_SIZE(order)) len = ARRAY_SIZE(order) - 1;
 +    env_list.count = 0;
 +    entry = order;
-+    if (!ntdll_umbstowcs( overrides, len + 1, order, len + 1 )) return;
 +    /* The environment is not trusted here: a process that hooks heap or loader entry points (an anti-cheat's
 +     * in-process module does) can leave this string unterminated or reset init_done, so parse only inside the
-+     * converted buffer and never call wcslen/wcschr without an end. */
-+    WCHAR *end = order + len;
++     * converted buffer and never call wcslen/wcschr without an end. The buffer ends at what was converted (fewer
++     * WCHARs than bytes for non-ASCII text), terminated there; the last entry runs up to that end. */
++    DWORD count = ntdll_umbstowcs( overrides, len, order, len );
++    if (!count) return;
++    order[count] = 0;
++    WCHAR *end = order + count;
 +    while (entry < end && *entry)
      {
 -        while (*entry == ';') entry++;
@@ -97,11 +100,10 @@ index ba274d4..7862fcc 100644
 +        next = entry;
 +        while (next < end && *next && *next != ';') next++;
 +        if (next < end && *next == ';') *next++ = 0;
-+        else if (next == end) break;  /* no terminator inside the buffer: drop the rest */
          add_load_order_set( entry );
          entry = next;
      }
-@@ -518,6 +529,7 @@ enum loadorder get_load_order( const UNICODE_STRING *nt_name, BOOL is_system_dir
+@@ -518,6 +531,7 @@ enum loadorder get_load_order( const UNICODE_STRING *nt_name, BOOL is_system_dir
  
      static const WCHAR prefixW[] = {'\\','?','?','\\'};
      enum loadorder ret = LO_INVALID;
@@ -234,3 +236,6 @@ index 331e297..9762da8 100644
  /**********************************************************************
   *           wow64_NtQueryInformationToken
   */
+-- 
+2.54.0 (Apple Git-157)
+
