@@ -172,7 +172,10 @@ private func release092(installer: Bool) -> Release {
         _ = try await Updater.update(release092(installer: false), app: translocated, team: "ABCDE12345", fetch: fetch)
     }
     #expect(UpdateError.cantReplace("/private/var/folders/x/AppTranslocation/y/d").description
-            == "MacNeutron is running from /private/var/folders/x/AppTranslocation/y/d, which it can't replace. "
+            == "MacNeutron is running from a temporary, read-only copy macOS made because it was opened from Downloads. "
+            + "Download Install MacNeutron from the release page, or move MacNeutron to Applications.")
+    #expect(UpdateError.cantReplace("/Volumes/Games").description
+            == "MacNeutron is running from /Volumes/Games, which it can't replace. "
             + "Download Install MacNeutron from the release page, or move MacNeutron to Applications.")
     #expect(fetched.urls.isEmpty)
 }

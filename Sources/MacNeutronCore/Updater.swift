@@ -30,8 +30,10 @@ public enum UpdateError: Error, Equatable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .cantReplace(let folder):
-            "MacNeutron is running from \(folder), which it can't replace. Download Install MacNeutron from the release page, "
-                + "or move MacNeutron to Applications."
+            (folder.contains("/AppTranslocation/")
+                ? "MacNeutron is running from a temporary, read-only copy macOS made because it was opened from Downloads. "
+                : "MacNeutron is running from \(folder), which it can't replace. ")
+                + "Download Install MacNeutron from the release page, or move MacNeutron to Applications."
         case .checksum: "The download doesn't match the release's SHA256SUMS."
         case .signature(let detail): "The download isn't signed by MacNeutron's developer: \(detail)"
         case .version(let version): "The download is version \(version), not the release's."

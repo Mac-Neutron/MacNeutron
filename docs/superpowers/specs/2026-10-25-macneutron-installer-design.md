@@ -77,7 +77,8 @@ The install logic (steps 2 to 5 with the running applications and the quit reque
   The installer waits for the app to be gone, so the order is safe.
 - False, and no installer (0.9.1 and older releases): `UpdateError.cantReplace` names where the app runs from: "MacNeutron
   is running from <folder>, which it can't replace. Download Install MacNeutron from the release page, or move
-  MacNeutron to Applications."
+  MacNeutron to Applications." A translocated copy is named for what it is, not by its path: "MacNeutron is running
+  from a temporary, read-only copy macOS made because it was opened from Downloads. Download Install MacNeutron…".
 
 ### 3.4 The release
 
