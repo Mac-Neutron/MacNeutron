@@ -1,0 +1,247 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: MacNeutron <macneutron@localhost>
+Date: Sun, 25 Oct 2026 19:32:53 -0400
+Subject: [PATCH] dxmt: the VM host's presenter prefetches its next drawable
+
+Metal's CAMetalLayer hands a drawable back at a display refresh, so
+nextDrawable on the presenting thread can wait up to a frame even when
+the guest's pacing left a drawable free: the host's Present then held
+the game's vCPU (d3d-smoke's slow-present rule, 69 of 120 GPU-bound
+frames in one run). The presenter now acquires the next drawable on a
+thread of its own; a present finds it ready, and the wait overlaps the
+frame's work instead of following it.
+
+Only the native build with WSI hooks (the VM host) prefetches. A layer
+property change drops a prefetched drawable, so a resize never presents
+into the old size. encodeCommands returns an owning WMT::Reference so
+the drawable lives through presentDrawable.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ src/d3d12/d3d12_command_queue.cpp |   2 +-
+ src/dxmt/dxmt_presenter.cpp       | 108 +++++++++++++++++++++++++++++-
+ src/dxmt/dxmt_presenter.hpp       |  21 +++++-
+ 3 files changed, 127 insertions(+), 4 deletions(-)
+
+diff --git a/src/d3d12/d3d12_command_queue.cpp b/src/d3d12/d3d12_command_queue.cpp
+index 00a42d2..36eb22c 100644
+--- a/src/d3d12/d3d12_command_queue.cpp
++++ b/src/d3d12/d3d12_command_queue.cpp
+@@ -2209,7 +2209,7 @@ public:
+         auto drawable = pair.presenter->encodeCommands(cmdbuf, fg.generated[slot], pair.metadata, none, none);
+         cmdbuf.presentDrawable(drawable);
+       }
+-      WMT::MetalDrawable drawable;
++      WMT::Reference<WMT::MetalDrawable> drawable;
+       {
+         DXMT_STAT_SCOPE("pacer.(real frame: drawable and blit)");
+         drawable = pair.presenter->encodeCommands(cmdbuf, fg.real[slot], pair.metadata, none, none);
+diff --git a/src/dxmt/dxmt_presenter.cpp b/src/dxmt/dxmt_presenter.cpp
+index 1f2c096..23e99a9 100644
+--- a/src/dxmt/dxmt_presenter.cpp
++++ b/src/dxmt/dxmt_presenter.cpp
+@@ -32,7 +32,98 @@ Presenter::Presenter(WMT::Device device, WMT::MetalLayer layer, InternalCommandL
+   texture_info.sample_count = 1;
+   texture_info.array_length = 1;
+   gamma_lut_texture_ = device.newTexture(texture_info);
++#ifdef DXMT_NATIVE
++  // Direct3D forwarding's VM host sets the WSI hooks before any device; the native build without them (a test, or
++  // macOS) keeps the synchronous acquire.
++  prefetch_drawable_ = WMTGetWsiHooks() != nullptr;
++  if (prefetch_drawable_) {
++    drawable_thread_ = dxmt::thread([this] { drawableWorker(); });
++    if (!drawable_thread_.joinable())
++      prefetch_drawable_ = false;
++  }
++#endif
++}
++
++Presenter::~Presenter() {
++#ifdef DXMT_NATIVE
++  if (drawable_thread_.joinable()) {
++    {
++      std::unique_lock<dxmt::mutex> lock(drawable_mutex_);
++      drawable_stop_ = true;
++    }
++    drawable_cv_.notify_all();
++    drawable_thread_.join();
++  }
++#endif
++}
++
++#ifdef DXMT_NATIVE
++// The drawable the layer hands out is autoreleased: retain it in the worker's pool (WMT::Reference does), and hand it
++// to the present that asked while the display's next refresh is still to come.
++void Presenter::drawableWorker() {
++  for (;;) {
++    std::unique_lock<dxmt::mutex> lock(drawable_mutex_);
++    drawable_cv_.wait(lock, [&] { return drawable_stop_ || drawable_wanted_; });
++    if (drawable_stop_)
++      return;
++    drawable_wanted_ = false;
++    drawable_busy_ = true;
++    uint64_t generation = drawable_generation_;
++    lock.unlock();
++    WMT::Reference<WMT::MetalDrawable> drawable;
++    {
++      auto pool = WMT::MakeAutoreleasePool();
++      drawable = WMT::Reference<WMT::MetalDrawable>(layer_.nextDrawable());
++    }
++    lock.lock();
++    if (!drawable) { // an occluded layer's timeout: not a spin for the worker to try again at once
++      lock.unlock();
++      std::this_thread::sleep_for(std::chrono::milliseconds(1));
++      lock.lock();
++    }
++    drawable_busy_ = false;
++    if (!drawable_stop_ && generation == drawable_generation_ && !prefetched_drawable_) {
++      prefetched_drawable_ = std::move(drawable);
++      prefetched_generation_ = generation;
++    }
++    drawable_cv_.notify_all();
++  }
++}
++
++// Under drawable_mutex_.
++void Presenter::requestDrawableLocked() {
++  if (drawable_stop_ || drawable_wanted_ || drawable_busy_ || prefetched_drawable_)
++    return;
++  drawable_wanted_ = true;
++  drawable_cv_.notify_all();
++}
++
++// A layer property change (size, format, color space) makes a prefetched drawable the old one: drop it, and the
++// worker's next stale result with it.
++void Presenter::invalidateDrawable() {
++  std::unique_lock<dxmt::mutex> lock(drawable_mutex_);
++  drawable_generation_++;
++  prefetched_drawable_ = nullptr;
++  drawable_cv_.notify_all();
++}
++
++WMT::Reference<WMT::MetalDrawable> Presenter::acquireDrawable() {
++  for (;;) {
++    std::unique_lock<dxmt::mutex> lock(drawable_mutex_);
++    if (drawable_stop_)
++      return {};
++    if (prefetched_drawable_ && prefetched_generation_ == drawable_generation_) {
++      WMT::Reference<WMT::MetalDrawable> drawable = std::move(prefetched_drawable_);
++      prefetched_drawable_ = nullptr;
++      requestDrawableLocked();
++      return drawable;
++    }
++    prefetched_drawable_ = nullptr;
++    requestDrawableLocked();
++    drawable_cv_.wait(lock, [&] { return prefetched_drawable_ || drawable_stop_; });
++  }
+ }
++#endif
+ 
+ bool
+ Presenter::changeLayerProperties(
+@@ -51,6 +142,9 @@ Presenter::changeLayerProperties(
+     pso_valid.clear(); // defer changes
+   else
+     layer_.setProps(layer_props_);
++#ifdef DXMT_NATIVE
++  invalidateDrawable();
++#endif
+   return should_invalidated;
+ }
+ 
+@@ -60,6 +154,9 @@ Presenter::changeLayerColorSpace(WMTColorSpace colorspace) {
+   colorspace_ = colorspace;
+   if (should_invalidated)
+     pso_valid.clear();
++#ifdef DXMT_NATIVE
++  invalidateDrawable();
++#endif
+   return should_invalidated;
+ }
+ 
+@@ -124,6 +221,9 @@ Presenter::synchronizeLayerProperties() {
+     buildRenderPipelineState(final_colorspace == WMTColorSpaceHDR_PQ, is_hdr && hdr_metadata != nullptr, sample_count_ > 1, gamma_version_ != 0);
+     layer_.setProps(layer_props_);
+     layer_.setColorSpace(final_colorspace);
++#ifdef DXMT_NATIVE
++    invalidateDrawable();
++#endif
+   }
+ 
+   DXMTPresentMetadata metadata;
+@@ -150,13 +250,17 @@ Presenter::synchronizeLayerProperties() {
+   return {metadata, ++frame_requested_, this};
+ }
+ 
+-WMT::MetalDrawable
++WMT::Reference<WMT::MetalDrawable>
+ Presenter::encodeCommands(
+     WMT::CommandBuffer cmdbuf, WMT::Texture backbuffer, DXMTPresentMetadata metadata,
+     std::function<void(WMT::RenderCommandEncoder)> &&wait_fences,
+     std::function<void(WMT::RenderCommandEncoder)> &&update_fences
+ ) {
+-  auto drawable = layer_.nextDrawable();
++#ifdef DXMT_NATIVE
++  auto drawable = prefetch_drawable_ ? acquireDrawable() : WMT::Reference<WMT::MetalDrawable>(layer_.nextDrawable());
++#else
++  WMT::Reference<WMT::MetalDrawable> drawable = layer_.nextDrawable();
++#endif
+ 
+   WMTRenderPassInfo info;
+   WMT::InitializeRenderPassInfo(info);
+diff --git a/src/dxmt/dxmt_presenter.hpp b/src/dxmt/dxmt_presenter.hpp
+index 77eb35c..6855720 100644
+--- a/src/dxmt/dxmt_presenter.hpp
++++ b/src/dxmt/dxmt_presenter.hpp
+@@ -2,6 +2,7 @@
+ #include "Metal.hpp"
+ #include "dxmt_command.hpp"
+ #include "rc/util_rc.hpp"
++#include "thread.hpp"
+ #include "util_cpu_fence.hpp"
+ #include "winemetal.h"
+ #include <atomic>
+@@ -28,6 +29,7 @@ public:
+   Presenter(
+       WMT::Device device, WMT::MetalLayer layer, InternalCommandLibrary &lib, float scale_factor, uint8_t sample_count
+   );
++  ~Presenter();
+ 
+   bool changeLayerProperties(
+       WMTPixelFormat format, WMTColorSpace colorspace, double width, double height, uint8_t sample_count
+@@ -65,7 +67,7 @@ public:
+ 
+   PresentState synchronizeLayerProperties();
+ 
+-  WMT::MetalDrawable encodeCommands(
++  WMT::Reference<WMT::MetalDrawable> encodeCommands(
+       WMT::CommandBuffer cmdbuf, WMT::Texture backbuffer, DXMTPresentMetadata metadata,
+       std::function<void(WMT::RenderCommandEncoder)> &&wait_fences,
+       std::function<void(WMT::RenderCommandEncoder)> &&update_fences
+@@ -73,6 +75,23 @@ public:
+ 
+ private:
+   void buildRenderPipelineState(bool is_pq, bool with_hdr_metadata, bool is_ms, bool gamma_enable);
++#ifdef DXMT_NATIVE
++  // MacNeutron (the VM host): DXMT's presenter fetches its next drawable on a thread of its own, as the display recycles
++  // drawables (Metal only hands one back at a refresh). The frame's present then finds one ready instead of waiting up
++  // to a display frame on the game's vCPU (docs/research/2026-10-15-vm-route/README.md, M3's "upgrade"). Native DXMT on
++  // macOS is not the VM host (it has no WSI hooks: winemac's window system), so this is off there.
++  void drawableWorker();
++  void requestDrawableLocked();
++  void invalidateDrawable();
++  WMT::Reference<WMT::MetalDrawable> acquireDrawable();
++  bool prefetch_drawable_ = false;
++  dxmt::thread drawable_thread_;
++  dxmt::mutex drawable_mutex_;
++  dxmt::condition_variable drawable_cv_;
++  bool drawable_stop_ = false, drawable_wanted_ = false, drawable_busy_ = false;
++  uint64_t drawable_generation_ = 0, prefetched_generation_ = 0;
++  WMT::Reference<WMT::MetalDrawable> prefetched_drawable_;
++#endif
+ 
+   WMT::Device device_;
+   WMT::MetalLayer layer_;
+-- 
+2.54.0 (Apple Git-157)
+

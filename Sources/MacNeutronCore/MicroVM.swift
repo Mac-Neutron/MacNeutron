@@ -68,7 +68,8 @@ public struct MicroVM: Sendable {
     static let passed = ["MACNEUTRON_DLSS", "MACNEUTRON_XESS", "DXMT_ENABLE_NVEXT", "MACNEUTRON_LOG", "MN_SCREEN",
                          "MACNEUTRON_VM_PROFILE", "DXMT_STATS", "MACNEUTRON_VM_D3D", "MACNEUTRON_VM_D3D32",
                          "MACNEUTRON_VM_D3D_TRACE", "DXMT_LOG_LEVEL", "MACNEUTRON_VM_WOW64", "PROTON_USE_WOW64",
-                         "MTLD3D_CONFIG", "WINEDEBUG", "MN_MAC_HOME", "MN_INSTALL_TIMEOUT", "PROTON_EAC_RUNTIME"]
+                         "MTLD3D_CONFIG", "WINEDEBUG", "MN_MAC_HOME", "MN_INSTALL_TIMEOUT", "PROTON_EAC_RUNTIME",
+                         "MN_CRASH_REPORTERS"]
     /// What a performance build's guest doesn't get: its stats and profiler are compiled out or off.
     static let notPassedToPerformance: Set = ["MACNEUTRON_VM_PROFILE", "DXMT_STATS"]
 

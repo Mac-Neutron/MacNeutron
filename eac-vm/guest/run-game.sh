@@ -162,6 +162,68 @@ if [ -f /mnt/share/installscript.reg ] || command -v mn_install_script >/dev/nul
   fi
   ! command -v mn_install_script >/dev/null || mn_install_script
 fi
+# A game's own crash reporter (Unreal's CrashReportClient, and the other engines' kin) opens on Xvfb, where nobody can
+# see or click it, and waits: steam.exe waits for it, so the VM never powers off and Steam's Stop was the only way out
+# (SMITE 2's crash held its VM). One that has been up for a moment has written its report: keep the report in the share,
+# then end every process in the prefix, and the run. The names are the reporters' comm prefixes (Linux's 15-character
+# process name), lower case; MN_CRASH_REPORTERS=<extended regex> adds one for a game whose reporter has another name.
+# MN_CRASH_GRACE (seconds, 10) is how long it gets to finish its report; MN_CRASH_POLL (1 s) how often to look.
+mn_crash_pid() {
+  # The guest has no awk: comm lower-cased, then the engines' names as prefixes (comm is Linux's 15 characters).
+  ps -eo pid=,comm= 2>/dev/null | while read -r pid name; do
+    n=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
+    case $n in
+      crashreport*|crashpad*|bugsplat*|werfault*|unitycrash*|breakpad*|sentry*|bugtrap*|exceptionhandler*)
+        printf '%s %s\n' "$pid" "$name"; break ;;
+    esac
+    if [ -n "${MN_CRASH_REPORTERS:-}" ] &&
+       printf '%s' "$n" | grep -Eq "$(printf '%s' "$MN_CRASH_REPORTERS" | tr '[:upper:]' '[:lower:]')"; then
+      printf '%s %s\n' "$pid" "$name"; break
+    fi
+  done
+}
+mn_crash_watch() {
+  while :; do
+    sleep "${MN_CRASH_POLL:-1}"
+    [ ! -e /mnt/share/traces/crash ] || return 0
+    hit=$(mn_crash_pid || true)
+    [ -n "$hit" ] || continue
+    pid=${hit%% *}
+    name=${hit#* }
+    d=/mnt/share/traces/crash-report
+    rm -rf "$d"
+    mkdir -p "$d/report"
+    tr '\0' ' ' < "/proc/$pid/cmdline" > "$d/command" 2>/dev/null || :
+    ps -eo pid=,ppid=,comm=,args= > "$d/ps.txt" 2>/dev/null || :
+    # Each engine's newest folder named Crashes, and its text: under the profile (which the Mac shares) and the game's
+    # folder (read-only here: the copy is what the Mac can open). The paths go to the Mac as the guest has them.
+    for base in "$WINEPREFIX/drive_c/users/steamuser" "$GAME_DIR"; do
+      find "$base" -maxdepth 8 -type d -name Crashes 2>/dev/null | while read -r c; do
+        n=$(ls -1t "$c" 2>/dev/null | head -1)
+        [ -n "$n" ] && [ -d "$c/$n" ] || continue
+        echo "$c/$n" >> "$d/reports"
+        cp -a "$c/$n/." "$d/report/" 2>/dev/null || :
+      done
+    done
+    {
+      echo "when=$(date -u +%FT%TZ 2>/dev/null || date)"
+      echo "reporter=$name"
+      echo "pid=$pid"
+      echo "command=$(cat "$d/command" 2>/dev/null)"
+      sed 's/^/report=/' "$d/reports" 2>/dev/null || :
+    } > /mnt/share/traces/.crash.tmp
+    mv /mnt/share/traces/.crash.tmp /mnt/share/traces/crash 2>/dev/null || :
+    mn_stage "The game crashed: its report is kept, ending the game" 2>/dev/null || :
+    sleep "${MN_CRASH_GRACE:-10}"
+    wineserver -k 2>/dev/null || :
+    return 0
+  done
+}
+# A previous run's word (a launcher removes it too): this run's own starts clean.
+rm -f /mnt/share/traces/crash
+rm -rf /mnt/share/traces/crash-report
+mn_crash_watch &
+mn_crash_watch_pid=$!
 mn_stage "Loading the game"
 cd "$GAME_DIR" || exit 1
 if [ "$VERB" = waitforexitandrun ]; then
@@ -174,5 +236,8 @@ else
   wine "$EXE" "$@"  # run: Steam's install scripts' redistributables
 fi
 status=$?
+kill "$mn_crash_watch_pid" 2>/dev/null || :
 wineserver -w
+# run-game.sh ended the prefix for a crash reporter: Steam sees a failed game, and the launcher says why.
+[ ! -e /mnt/share/traces/crash ] || [ "$status" != 0 ] || status=1
 exit $status

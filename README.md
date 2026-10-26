@@ -193,6 +193,13 @@ MacNeutron puts no account ID in the environment. The log still contains file pa
 Wine's `steamclient` lines in it (all of its calls with `MACNEUTRON_LOG=2`) can contain your SteamID or persona name:
 check before posting a log publicly.
 
+If a game crashes, its engine's own crash reporter (Unreal's `CrashReportClient`, BugSplat, Crashpad, Unity's, Sentry's
+or Windows Error Reporting) would open a window the VM can't show and wait there forever. MacNeutron recognizes it,
+gives it a few seconds to write its report, copies the game's `Crashes` folder and a process snapshot to
+`~/Library/Logs/MacNeutron/crashes/<appid>/`, ends the game VM, and says where the report is. A reporter with another
+name can be added with `/usr/bin/env MN_CRASH_REPORTERS=<regex> %command%` (matched against the process's 15-character
+name, lower case).
+
 ## Upscaling
 
 When a game renders below the size of its window, or below your display's pixel density (Retina screens),

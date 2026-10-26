@@ -275,6 +275,9 @@ public struct Launcher: Sendable {
             try MicroVM.mountsFile(shares).write(to: share.appending(path: "mounts"), atomically: true, encoding: .utf8)
             let mountsFailed = share.appending(path: "traces/mounts.failed")
             try? FileManager.default.removeItem(at: mountsFailed)  // an earlier run's
+            // A crash reporter's marker and report from an earlier run: this launch's own, if any, are the next.
+            try? FileManager.default.removeItem(at: share.appending(path: VMCrash.marker))
+            try? FileManager.default.removeItem(at: share.appending(path: VMCrash.details))
             // Steam's install scripts for the game (spec 2026-10-24-macneutron-install-scripts-design): Mac Steam never
             // runs them, so run-game.sh does, in the game's prefix before the game, and says how each step went.
             let installScripts = request.verb == .waitforexitandrun
@@ -364,12 +367,18 @@ public struct Launcher: Sendable {
                     .path(percentEncoded: false)
             }
             env["MN_RUN_TIMEOUT"] = env["MN_RUN_TIMEOUT"] ?? "86400"
-            let status = try runner.run(vm.runGuest, [file.path(percentEncoded: false), "--steam-appid", context.appID,
-                                                      "--ram-mib", "16384", "--steam-map", "\(library)=/mnt/games"]
-                                                     + shares.flatMap { [$0.readOnly ? "--ro-share" : "--user-share",
-                                                                         "\($0.tag)=\($0.host)"] }
-                                                     + (quiet ? ["--console", "/dev/null"] : []),
-                                        environment: env, output: gameLog, started: vmRun.started)
+            var status = try runner.run(vm.runGuest, [file.path(percentEncoded: false), "--steam-appid", context.appID,
+                                                       "--ram-mib", "16384", "--steam-map", "\(library)=/mnt/games"]
+                                                      + shares.flatMap { [$0.readOnly ? "--ro-share" : "--user-share",
+                                                                          "\($0.tag)=\($0.host)"] }
+                                                      + (quiet ? ["--console", "/dev/null"] : []),
+                                         environment: env, output: gameLog, started: vmRun.started)
+            // run-game.sh ended the VM because a game's crash reporter was waiting on the invisible Xvfb (Unreal's,
+            // and its kin): keep the report where the player can find it and say so. A crash is never a success.
+            if let crash = VMCrash.read(share: share, prefix: context.prefix, library: library) {
+                if status == 0 { status = 1 }
+                report(crash, appID: context.appID, game: request.target, gameLog: gameLog)
+            }
             log.summary("verb=\(request.verb.rawValue) appid=\(context.appID) backend=vm vm=\(vm.root.path(percentEncoded: false))"
                        + " exit=\(status)")
             // A step that failed is retried at the next launch, as Steam retries it: a performance build keeps its line.
@@ -448,6 +457,49 @@ public struct Launcher: Sendable {
         guard vmRun.stop() else { return false }
         stopRequested.set()  // before the boot: a shader replay stops, and nothing boots
         return true
+    }
+
+    /// A crash reporter's report beside the launcher's logs, and the player told where it is. Never throws: a report
+    /// that can't be copied must not lose the notification that the game crashed.
+    private func report(_ crash: VMCrash, appID: String, game: String, gameLog: URL?) {
+        let kept = keep(crash, appID: appID)
+        if let gameLog { append("--- the game's crash reporter ---\n" + crash.raw + "\n", to: gameLog) }
+        let name = Self.gameName(game)
+        var message = "\(name) crashed, so MacNeutron ended its game VM. "
+        if let kept {
+            message += "Its crash report is in \(kept.path(percentEncoded: false))."
+        } else if let first = crash.reports.first {
+            message += "Its crash report is in \(first)."
+        } else {
+            message += "No crash report was found; the game log may say more."
+        }
+        log.summary("crash: appid=\(appID) \(crash.summary) kept=\(kept?.path(percentEncoded: false) ?? "none")")
+        notifier.post(title: "MacNeutron", message: message)
+    }
+
+    /// Copies the share's `traces/crash-report` (the reporter's `ps`, command line and the game's report files) to
+    /// `~/Library/Logs/MacNeutron/crashes/<appid>/<time>`, a folder the player can open after the VM's share is gone.
+    private func keep(_ crash: VMCrash, appID: String) -> URL? {
+        let fm = FileManager.default
+        let source = crash.detailsURL
+        guard fm.fileExists(atPath: source.path(percentEncoded: false)) else { return nil }
+        let stamp = (crash.when.isEmpty ? Date().formatted(.iso8601) : crash.when)
+            .replacingOccurrences(of: ":", with: "-")
+        let root = log.directory.appending(path: "crashes/\(appID)", directoryHint: .isDirectory)
+        var folder = root.appending(path: stamp, directoryHint: .isDirectory)
+        var serial = 1
+        while fm.fileExists(atPath: folder.path(percentEncoded: false)), serial < 100 {
+            serial += 1
+            folder = root.appending(path: "\(stamp)-\(serial)", directoryHint: .isDirectory)
+        }
+        do {
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            try fm.copyItem(at: source, to: folder.appending(path: "report"))
+            return folder
+        } catch {
+            log.append("note: couldn't keep \(appID)'s crash report: \(error)")
+            return nil
+        }
     }
 
     private func runGame(_ request: LaunchRequest, _ env: [String: String], _ gameLog: URL?,

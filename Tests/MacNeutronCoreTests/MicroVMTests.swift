@@ -38,7 +38,7 @@ final class Scripts: @unchecked Sendable {
 private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts: Scripts = Scripts(),
                            display: (width: Int, height: Int)? = nil, version: String? = nil,
                            console: String? = nil, mountsFailed: String? = nil,
-                           installLog: String? = nil, stages: [String] = [],
+                           installLog: String? = nil, crash: String? = nil, stages: [String] = [],
                            steam: SteamLocation? = nil) throws -> VMFixture {
     let vm = try makeVMFolder()
     let layout = try makeToolLayout()
@@ -59,6 +59,14 @@ private func makeVMFixture(vmInstalled: Bool = true, status: Int32 = 0, scripts:
         if let installLog, let share = call.environment["MN_SHARE"] {
             try? FileManager.default.createDirectory(atPath: share + "/traces", withIntermediateDirectories: true)
             try? installLog.write(toFile: share + "/traces/installscript.log", atomically: true, encoding: .utf8)
+        }
+        // run-game.sh's crash reporter: its marker, the reporter's ps, and the copy of the game's report
+        if let crash, let share = call.environment["MN_SHARE"] {
+            let details = share + "/traces/crash-report"
+            try? FileManager.default.createDirectory(atPath: details + "/report/Crash", withIntermediateDirectories: true)
+            try? crash.write(toFile: share + "/traces/crash", atomically: true, encoding: .utf8)
+            try? "CrashReportClie 1234\n".write(toFile: details + "/ps.txt", atomically: true, encoding: .utf8)
+            try? "report\n".write(toFile: details + "/report/Crash/context.txt", atomically: true, encoding: .utf8)
         }
         // run-game.sh's stages as it goes, each long enough for the launcher's poll to see it
         if let share = call.environment["MN_SHARE"] {
@@ -108,6 +116,40 @@ private let game = "/Users/someone/Library/Application Support/Steam/steamapps/c
     #expect(call.environment["MN_TOAST"] == f.launcher.layout.launcherBinary.path(percentEncoded: false))
     #expect(f.launcherLog.contains("verb=waitforexitandrun appid=2437170 backend=vm"))
     #expect(f.launcherLog.contains("exit=3"))
+}
+
+@Test func aCrashedVMGameKeepsItsReportAndSaysWhereItIs() throws {
+    // run-game.sh ends a VM whose game left a crash reporter waiting on the invisible Xvfb. The launcher keeps the
+    // report beside its logs, says where, and Steam sees a failure even if the guest's status came back 0.
+    let marker = """
+        when=2026-10-25T21:00:00Z
+        reporter=CrashReportClie
+        command=C:\\Game\\CrashReportClient.exe
+        report=/mnt/games/SMITE 2/Saved/Crashes/ABC
+        """
+    let f = try makeVMFixture(status: 0, crash: marker)
+    #expect(f.launcher.launch(["waitforexitandrun", game], environment: f.env) == 1)
+    #expect(f.notifier.posted.count == 1)
+    let message = try #require(f.notifier.posted.first)
+    #expect(message.contains("SMITE 2 crashed"))
+    #expect(message.contains("crash report is in"))
+    let crashes = f.launcher.log.directory.appending(path: "crashes/2437170")
+    let folders = try FileManager.default.contentsOfDirectory(atPath: crashes.path(percentEncoded: false))
+    #expect(folders.count == 1)
+    let kept = crashes.appending(path: try #require(folders.first))
+    #expect(FileManager.default.fileExists(atPath: kept.appending(path: "report/ps.txt").path(percentEncoded: false)))
+    #expect(message.contains(kept.path(percentEncoded: false)))
+    #expect(f.launcherLog.contains("crash: appid=2437170 reporter=CrashReportClie"))
+    #expect(f.launcherLog.contains("reports=/Users/someone/Library/Application Support/Steam/steamapps/common/SMITE 2/Saved/Crashes/ABC"))
+}
+
+@Test func anEarlierRunsCrashMarkerIsNotReportedAgain() throws {
+    let f = try makeVMFixture()
+    let traces = f.vm.appending(path: "runs/2437170/traces")
+    try write("reporter=OldCrash\n", to: traces.appending(path: "crash"))
+    #expect(f.launcher.launch(["waitforexitandrun", game], environment: f.env) == 0)
+    #expect(f.notifier.posted.isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: traces.appending(path: "crash").path(percentEncoded: false)))
 }
 
 // A game in the VM uses the saves Steam Cloud syncs (spec 2026-10-23-macneutron-vm-shared-saves): its Mac prefix's
@@ -655,6 +697,18 @@ final class Status: @unchecked Sendable {
         _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
         #expect((scripts.all.first ?? "").contains("WINEDEBUG='\(want)'\n"), "MACNEUTRON_LOG=\(log ?? "-")")
     }
+}
+
+@Test func aCrashReporterOverrideReachesTheGuest() throws {
+    // A reporter with another name is a launch option, so the launcher's environment must reach run-game.sh.
+    let scripts = Scripts()
+    let f = try makeVMFixture(scripts: scripts)
+    var env = f.env
+    env["MN_CRASH_REPORTERS"] = "mygamecrash"
+    _ = f.launcher.launch(["waitforexitandrun", game], environment: env)
+    let script = try #require(scripts.all.first)
+    #expect(script.contains("MN_CRASH_REPORTERS='mygamecrash'"))
+    #expect(script.contains("export ") && script.contains(" MN_CRASH_REPORTERS"))
 }
 
 @Test func aLoggedVMGamesLogEndsWithTheGuestConsole() throws {

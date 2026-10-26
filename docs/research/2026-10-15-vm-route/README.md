@@ -1256,8 +1256,11 @@ Open:
   `imagehlp`); the next passed in full. Seen once, cause open.
 - The VM's display (Xvfb) reports no refresh rate, so neither native nor guest DXMT paces sync interval 1: vsync is
   off in the VM in both modes.
-- A SMITE 2 run whose game crashed still waits out its 180 s (Unreal's crash reporter holds the launcher), and a game
-  that dies before Steam initialises makes the row skip, not fail.
+- ~~A SMITE 2 run whose game crashed still waits out its 180 s (Unreal's crash reporter holds the launcher)~~, and a
+  game that dies before Steam initialises makes the row skip, not fail. Fixed 2026-10-25: run-game.sh recognizes the
+  engines' crash reporters (Unreal's CrashReportClient, BugSplat, Crashpad, WER, Unity, Breakpad, Sentry; plus
+  `MN_CRASH_REPORTERS`), keeps their `Crashes` folder and a `ps` snapshot in the run share, ends the prefix after a
+  grace period, and the launcher keeps the report in `~/Library/Logs/MacNeutron/crashes/<appid>` and says so.
 
 ## 21. Direct3D forwarding, M4: D3D11 and D3D10 (2026-10-18)
 
@@ -1479,4 +1482,7 @@ DXMT in the guest). `d3d-smoke.sh`'s slow-present rule still fails: 69, 2 and 6 
 runs on 2026-10-19 (the longest 11.5-14.3 ms), with the maintainer at the Mac, so not the idle display. They are
 GPU-bound frames (`latency`'s and `d3d11latency`'s): the host's `Present` sometimes waits up to a frame for its
 drawable although the guest's pacing left one free. Games don't show it (SMITE 2 forwarded at 99% of macOS); 0.7.0
-ships it as a known issue, and the fix (stricter pacing in the guest) needs a new frame-rate run.
+shipped it as a known issue. Fixed 2026-10-25 in DXMT (fork patch 0138): the VM host's presenter fetches its next
+`CAMetalLayer` drawable on a thread of its own while the frame is still being encoded, so the present finds one ready
+instead of waiting at the display's recycle; the guest's pacing is unchanged. `d3d-smoke`'s slow-present rule and the
+frame rate still want a run on the merged trees.
