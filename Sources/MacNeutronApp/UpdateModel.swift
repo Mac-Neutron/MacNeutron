@@ -113,6 +113,7 @@ final class UpdateModel {
             }
             NSApplication.shared.terminate(nil)
         } catch {
+            Updater.removeInstallerFolders()  // the installer downloaded, if it couldn't be opened
             notice = (error as? UpdateError)?.description ?? (error as? AppInstallerError)?.description
                 ?? error.localizedDescription
             working = false

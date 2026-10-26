@@ -112,7 +112,7 @@ public enum Updater {
     public static func installer(_ release: Release, team: String, fetch: ValveClient.Fetch? = nil) async throws -> URL {
         guard let asset = release.installer else { throw URLError(.fileDoesNotExist) }
         let fm = FileManager.default
-        let work = fm.temporaryDirectory.appending(path: "MacNeutron-installer-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let work = fm.temporaryDirectory.appending(path: installerFolder + UUID().uuidString, directoryHint: .isDirectory)
         try fm.createDirectory(at: work, withIntermediateDirectories: true)
         do {
             let unpacked = try await unpack(asset, sums: release.sums, into: work, fetch: fetch ?? VMDownloads.download)
@@ -125,6 +125,18 @@ public enum Updater {
             throw error
         }
     }
+
+    /// Every `installer` folder in `dir` removed. Install MacNeutron sweeps them once it's done (its own included, not
+    /// before: the app it copies is in it), and the app when opening one fails.
+    public static func removeInstallerFolders(in dir: URL = FileManager.default.temporaryDirectory) {
+        let fm = FileManager.default
+        for name in (try? fm.contentsOfDirectory(atPath: dir.path(percentEncoded: false))) ?? []
+        where name.hasPrefix(installerFolder) {
+            try? fm.removeItem(at: dir.appending(path: name, directoryHint: .isDirectory))
+        }
+    }
+
+    private static let installerFolder = "MacNeutron-installer-"
 
     /// Settings' Install and relaunch: the release's installer when this copy can't be replaced (a translocated one, or
     /// an unwritable folder) and the release has one; otherwise `install`, which refuses a copy it can't replace. The

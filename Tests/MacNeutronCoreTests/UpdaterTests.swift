@@ -199,3 +199,14 @@ private func writableTarget() throws -> URL {
     }
     #expect(fetched.urls.isEmpty)
 }
+
+@Test func installerFoldersAreRemovedAndNothingElse() throws {
+    let tmp = try makeTempDir()
+    try write("x", to: tmp.appending(path: "MacNeutron-installer-A/new/Install MacNeutron.app/Contents/v"))
+    try write("x", to: tmp.appending(path: "MacNeutron-installer-B/spctl.txt"))
+    try write("x", to: tmp.appending(path: "MacNeutron-other/v"))
+    try write("x", to: tmp.appending(path: "install-macneutron-spctl.txt"))
+    Updater.removeInstallerFolders(in: tmp)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: tmp.path(percentEncoded: false)).sorted()
+            == ["MacNeutron-other", "install-macneutron-spctl.txt"])
+}
