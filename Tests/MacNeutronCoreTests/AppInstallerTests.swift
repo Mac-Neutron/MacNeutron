@@ -160,3 +160,15 @@ private func setUp(old: String? = nil) throws -> (bundled: URL, apps: URL, targe
     #expect(AppInstallerError.leftover("/Applications/.MacNeutron.app.old").description
             == "/Applications/.MacNeutron.app.old couldn't be removed: move it to the Trash, then open Install MacNeutron again.")
 }
+
+@Test func aReadOnlyFileLosesItsQuarantineAndKeepsItsMode() throws {
+    let (bundled, _, target) = try setUp()
+    let file = bundled.appending(path: "Contents/read-only")
+    try write("x", to: file)
+    quarantine(file)
+    try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: path(file))
+    try AppInstaller.install(bundled, into: target, verify: { _ in }, quit: { true })
+    let installed = target.appending(path: "Contents/read-only")
+    #expect(!hasQuarantine(installed))
+    #expect(try FileManager.default.attributesOfItem(atPath: path(installed))[.posixPermissions] as? Int == 0o444)
+}

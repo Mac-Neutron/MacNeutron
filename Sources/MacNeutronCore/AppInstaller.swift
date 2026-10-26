@@ -59,14 +59,19 @@ public enum AppInstaller {
         }
     }
 
-    /// `com.apple.quarantine` off the bundle and everything in it; a file without it is fine.
+    /// `com.apple.quarantine` off the bundle and everything in it; a file without it is fine. A file without u+w
+    /// (EACCES) gets it for the removal, then its mode back.
     static func stripQuarantine(_ bundle: URL) throws {
         let root = path(bundle)
         let inside = (FileManager.default.enumerator(atPath: root)?.allObjects as? [String]) ?? []
         for file in [root] + inside.map({ root + "/" + $0 }) {
-            if removexattr(file, "com.apple.quarantine", XATTR_NOFOLLOW) != 0, errno != ENOATTR {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            var failed = removexattr(file, "com.apple.quarantine", XATTR_NOFOLLOW) != 0 ? errno : 0
+            var info = stat()
+            if failed == EACCES, lstat(file, &info) == 0, lchmod(file, info.st_mode | S_IWUSR) == 0 {
+                failed = removexattr(file, "com.apple.quarantine", XATTR_NOFOLLOW) != 0 ? errno : 0
+                lchmod(file, info.st_mode)
             }
+            if failed != 0, failed != ENOATTR { throw POSIXError(POSIXErrorCode(rawValue: failed) ?? .EIO) }
         }
     }
 
