@@ -125,10 +125,16 @@ public enum Updater {
     }
 
     /// Settings' Install and relaunch: the release's installer when this copy can't be replaced (a translocated one, or
-    /// an unwritable folder) and the release has one; otherwise `install`, which refuses a copy it can't replace.
-    public static func update(_ release: Release, app: URL, team: String,
+    /// an unwritable folder) and the release has one; otherwise `install`, which refuses a copy it can't replace. The
+    /// installer is taken only when it could write `target`'s folder: a standard account's MacNeutron isn't quit for an
+    /// install that would fail (AppInstaller checks the same).
+    public static func update(_ release: Release, app: URL, team: String, target: URL = AppInstaller.target,
                               fetch: ValveClient.Fetch? = nil) async throws -> UpdateOutcome {
         if !canReplace(app), release.installer != nil {
+            let folder = target.deletingLastPathComponent().path(percentEncoded: false)
+            guard FileManager.default.isWritableFile(atPath: folder) else {
+                throw AppInstallerError.notWritable(folder.hasSuffix("/") ? String(folder.dropLast()) : folder)
+            }
             return .installer(try await installer(release, team: team, fetch: fetch))
         }
         return .swapped(work: try await install(release, over: app, team: team, fetch: fetch))

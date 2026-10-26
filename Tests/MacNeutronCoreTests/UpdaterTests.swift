@@ -158,7 +158,7 @@ private func release092(installer: Bool) -> Release {
         return copy
     }
     let error = await #expect(throws: UpdateError.self) {
-        _ = try await Updater.update(release, app: translocated, team: "ABCDE12345", fetch: fetch)
+        _ = try await Updater.update(release, app: translocated, team: "ABCDE12345", target: try writableTarget(), fetch: fetch)
     }
     guard case .signature(let detail)? = error else { Issue.record("expected a signature refusal, got \(String(describing: error))"); return }
     #expect(detail != "the download holds no Install MacNeutron.app")  // unzipped, then refused by the signature check
@@ -174,5 +174,25 @@ private func release092(installer: Bool) -> Release {
     #expect(UpdateError.cantReplace("/private/var/folders/x/AppTranslocation/y/d").description
             == "MacNeutron is running from /private/var/folders/x/AppTranslocation/y/d, which it can't replace. "
             + "Download Install MacNeutron from the release page, or move MacNeutron to Applications.")
+    #expect(fetched.urls.isEmpty)
+}
+
+/// A target in a fresh, writable folder: tests never depend on /Applications.
+private func writableTarget() throws -> URL {
+    try makeTempDir().appending(path: "MacNeutron.app", directoryHint: .isDirectory)
+}
+
+@Test func updateRefusesTheInstallerWhenApplicationsIsntWritable() async throws {
+    // A standard account: the installer couldn't write there either, so nothing is downloaded and MacNeutron stays.
+    let apps = try makeTempDir()
+    let folder = String(apps.path(percentEncoded: false).dropLast())
+    try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder) }
+    let fetched = Fetched()
+    let fetch: ValveClient.Fetch = { url in fetched.add(url); throw URLError(.badURL) }
+    await #expect(throws: AppInstallerError.notWritable(folder)) {
+        _ = try await Updater.update(release092(installer: true), app: translocated, team: "ABCDE12345",
+                                     target: apps.appending(path: "MacNeutron.app"), fetch: fetch)
+    }
     #expect(fetched.urls.isEmpty)
 }

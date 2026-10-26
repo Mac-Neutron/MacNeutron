@@ -106,7 +106,8 @@ final class UpdateModel {
             }
             NSApplication.shared.terminate(nil)
         } catch {
-            notice = (error as? UpdateError)?.description ?? error.localizedDescription
+            notice = (error as? UpdateError)?.description ?? (error as? AppInstallerError)?.description
+                ?? error.localizedDescription
             working = false
         }
     }
