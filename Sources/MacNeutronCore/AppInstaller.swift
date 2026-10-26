@@ -34,6 +34,11 @@ public enum AppInstaller {
         guard quit() else { throw AppInstallerError.stillRunning }
         let staging = folder.appending(path: ".MacNeutron.app.installing", directoryHint: .isDirectory)
         let aside = folder.appending(path: ".MacNeutron.app.old", directoryHint: .isDirectory)
+        // A crash between Updater.swap's renames left the only app aside: it goes back first (Updater.discard keeps
+        // it too).
+        if !fm.fileExists(atPath: path(target)), fm.fileExists(atPath: path(aside)) {
+            try fm.moveItem(at: aside, to: target)
+        }
         for leftover in [staging, aside] { try? fm.removeItem(at: leftover) }  // an interrupted install's
         defer { try? fm.removeItem(at: staging) }
         let status = try SystemProcessRunner().run(URL(filePath: "/usr/bin/ditto"), [path(bundled), path(staging)],

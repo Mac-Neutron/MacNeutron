@@ -132,3 +132,15 @@ private func setUp(old: String? = nil) throws -> (bundled: URL, apps: URL, targe
     #expect(version(target) == "old")
     #expect(staged(apps).isEmpty)
 }
+
+@Test func anAppLeftAsideByACrashIsPutBack() throws {
+    // A crash between Updater.swap's renames: no target, the old app beside it. A failed copy must not lose it.
+    let (_, apps, target) = try setUp()
+    try write("old", to: apps.appending(path: ".MacNeutron.app.old/Contents/v"))
+    let missing = try makeTempDir().appending(path: "MacNeutron.app", directoryHint: .isDirectory)
+    #expect(throws: (any Error).self) {
+        try AppInstaller.install(missing, into: target, verify: { _ in }, quit: { true })
+    }
+    #expect(version(target) == "old")
+    #expect(staged(apps).isEmpty)
+}
