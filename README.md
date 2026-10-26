@@ -13,21 +13,24 @@ needs Xcode 27 (Swift 6) and the Developer ID setup in `wine-arm64/README.md` (t
 
 ## Download and set up
 
-1. Download `MacNeutron-<version>.zip` from the project's releases, unzip it, and move `MacNeutron.app` to
-   `/Applications` before opening it (macOS runs an app opened from Downloads from a temporary read-only copy, so the
-   first runtime install is a slow full copy instead of an instant clone). Upgrading from an older MacNeutron: quit
-   Steam before opening the new one, and start it again after setup. From a version before 0.1, each game's first
+1. Download `MacNeutron-<version>-Installer.zip` from the project's releases, unzip it and open `Install MacNeutron`: it
+   quits a running MacNeutron, puts the release's `MacNeutron.app` in `/Applications` (your account must be able to
+   write there) and opens it. Or download `MacNeutron-<version>.zip`, unzip it, and move `MacNeutron.app` to
+   `/Applications` yourself before opening it (macOS runs an app opened from Downloads from a temporary read-only copy,
+   so the first runtime install is a slow full copy instead of an instant clone). Upgrading from an older MacNeutron:
+   quit Steam before opening the new one, and start it again after setup. From a version before 0.1, each game's first
    launch gets a fresh Wine prefix that keeps the game's settings and local saves; the old prefix stays beside it as
    `pfx.rosetta`.
 2. Open MacNeutron. The setup window checks the requirements (Steam), installs the runtime automatically, and then
    turns on Steam Play mode. After that, MacNeutron lives in the menu bar (Shift-F9 opens that menu, so a fullscreen
    game does not need the mouse). It keeps Steam's mappings current so your Mac games stay native, and its Games
    window sets the graphics backend and options per game.
-3. Updates: a release build checks GitHub once a day (Settings, "Check automatically") and the menu offers
-   "Update to X.Y.Z…" when a newer release is out; Settings' "Install and relaunch" downloads it, checks that it is
-   signed by MacNeutron's developer and accepted by macOS, puts it in place of the app and starts it again. The app
-   must be in a folder you can write to, such as `/Applications`. A performance build (`X.Y.Zp`) gets the next
-   performance build.
+3. Updates: a release build checks GitHub once a day (Settings, "Check automatically") and the menu offers "Update to
+   X.Y.Z…" when a newer release is out; Settings' "Install and relaunch" downloads it, checks that it is signed by
+   MacNeutron's developer and accepted by macOS, puts it in place of the app and starts it again. The app must be in a
+   folder you can write to, such as `/Applications`; one opened from Downloads (macOS's temporary copy) opens the
+   release's Install MacNeutron instead, which quits it and installs into `/Applications`. A performance build
+   (`X.Y.Zp`) gets the next performance build.
 
 The Rosetta-era runtime downloads in `~/Library/Caches/MacNeutron/runtime-v*.tar.gz` are no longer used and can be
 deleted.

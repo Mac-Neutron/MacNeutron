@@ -46,18 +46,23 @@ Success:
 
 1. **Confirm**, unless launched with `--from-app`: "Install MacNeutron <V> in Applications? MacNeutron will quit."
    (Install, Cancel). Cancel quits with nothing changed.
-2. **Verify** the bundled app with `Updater.verify` (Developer ID team `49QMZXLR8S`, identifier
+2. **Verify** the bundled app with `Updater.verify` (the team of the installer's own signature, from
+   `CodeIdentity.team(of:)`, not a pinned team ID: an installer without one is an alert; identifier
    `io.github.chadouming.MacNeutron`, the installer's own version, Gatekeeper). A failure is an alert, nothing changed.
+   Then, still before MacNeutron quits: an old app aside (`.MacNeutron.app.old`) with none in place, from a crash
+   between the swap's renames, moves back; an interrupted install's leftovers (step 4's and step 5's names) are removed,
+   and one that can't be is an alert naming it, nothing else changed.
 3. **Quit MacNeutron**: every running application with the app's bundle identifier is asked to terminate
    (`NSRunningApplication.terminate`), then waited for, up to 30 s. One still running: an alert ("MacNeutron didn't
    quit…"), nothing changed. (MacNeutron has no quit handler: a request ends it at once; a running vm-setup is stopped
    and resumes at the next launch. Games run from the tool folder, not the app bundle, and aren't touched.)
-4. **Copy** the bundled app to `/Applications/.MacNeutron.app.installing` (same volume as the target; a leftover of an
-   interrupted install is removed first), then **remove its quarantine** (`com.apple.quarantine`, recursively): the
-   copy inherits it from the downloaded installer, and it was verified in step 2.
+4. **Copy** the bundled app to `/Applications/.MacNeutron.app.installing` (same volume as the target), then **remove
+   its quarantine** (`com.apple.quarantine`, recursively; a file without u+w gets it for the removal, then its mode
+   back): the copy inherits it from the downloaded installer, and it was verified in step 2.
 5. **Swap** it in with `Updater.swap` (the old app aside to `/Applications/.MacNeutron.app.old`, the new one in; a
    failed move puts the old one back). No old app: a plain move.
-6. **Remove** the old app, **open** `/Applications/MacNeutron.app`, quit.
+6. **Remove** the old app, **open** `/Applications/MacNeutron.app`, quit. On every exit it removes the app's update's
+   temporary folders (`MacNeutron-installer-*` in its temporary directory), its own included.
 
 `/Applications` not writable by the account: an alert ("Your account can't write to /Applications: drag MacNeutron.app
 there yourself, or use an administrator account"). No privilege escalation.
@@ -73,8 +78,9 @@ The install logic (steps 2 to 5 with the running applications and the quit reque
 - `Updater.canReplace(app)` true: unchanged (download the zip, verify, swap, relaunch).
 - False, and the release has an installer: download it and `SHA256SUMS`, check its line, unpack with ditto, verify
   `Install MacNeutron.app` (team, the installer's identifier, the release's version, Gatekeeper; `Updater.verify` takes
-  the identifier as a parameter), open it with `--from-app` (`NSWorkspace.openApplication` with arguments), and quit.
-  The installer waits for the app to be gone, so the order is safe.
+  the identifier as a parameter), open it with `--from-app` (`NSWorkspace.openApplication` with arguments, never an
+  Install MacNeutron already running: `allowsRunningApplicationSubstitution` off), and quit. If opening it fails, its
+  folder is removed. The installer waits for the app to be gone, so the order is safe.
 - False, and no installer (0.9.1 and older releases): `UpdateError.cantReplace` names where the app runs from: "MacNeutron
   is running from <folder>, which it can't replace. Download Install MacNeutron from the release page, or move
   MacNeutron to Applications." A translocated copy is named for what it is, not by its path: "MacNeutron is running
