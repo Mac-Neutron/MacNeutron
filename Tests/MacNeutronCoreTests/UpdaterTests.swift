@@ -172,7 +172,10 @@ private func release092(installer: Bool) -> Release {
         _ = try await Updater.update(release092(installer: false), app: translocated, team: "ABCDE12345", fetch: fetch)
     }
     #expect(UpdateError.cantReplace("/private/var/folders/x/AppTranslocation/y/d").description
-            == "MacNeutron is running from /private/var/folders/x/AppTranslocation/y/d, which it can't replace. "
+            == "MacNeutron is running from a temporary, read-only copy macOS made because it was opened from Downloads. "
+            + "Download Install MacNeutron from the release page, or move MacNeutron to Applications.")
+    #expect(UpdateError.cantReplace("/Volumes/Games").description
+            == "MacNeutron is running from /Volumes/Games, which it can't replace. "
             + "Download Install MacNeutron from the release page, or move MacNeutron to Applications.")
     #expect(fetched.urls.isEmpty)
 }
@@ -195,4 +198,15 @@ private func writableTarget() throws -> URL {
                                      target: apps.appending(path: "MacNeutron.app"), fetch: fetch)
     }
     #expect(fetched.urls.isEmpty)
+}
+
+@Test func installerFoldersAreRemovedAndNothingElse() throws {
+    let tmp = try makeTempDir()
+    try write("x", to: tmp.appending(path: "MacNeutron-installer-A/new/Install MacNeutron.app/Contents/v"))
+    try write("x", to: tmp.appending(path: "MacNeutron-installer-B/spctl.txt"))
+    try write("x", to: tmp.appending(path: "MacNeutron-other/v"))
+    try write("x", to: tmp.appending(path: "install-macneutron-spctl.txt"))
+    Updater.removeInstallerFolders(in: tmp)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: tmp.path(percentEncoded: false)).sorted()
+            == ["MacNeutron-other", "install-macneutron-spctl.txt"])
 }

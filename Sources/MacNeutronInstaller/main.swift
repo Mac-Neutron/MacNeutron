@@ -29,6 +29,7 @@ func alert(_ message: String, informative: String = "", buttons: [String] = ["OK
 
 @MainActor
 func run() -> Int32 {
+    defer { Updater.removeInstallerFolders() }  // the app's update unpacked this installer into one
     NSApplication.shared.setActivationPolicy(.regular)
     NSApplication.shared.activate()
     let me = Bundle.main.bundleURL

@@ -132,3 +132,43 @@ private func setUp(old: String? = nil) throws -> (bundled: URL, apps: URL, targe
     #expect(version(target) == "old")
     #expect(staged(apps).isEmpty)
 }
+
+@Test func anAppLeftAsideByACrashIsPutBack() throws {
+    // A crash between Updater.swap's renames: no target, the old app beside it. A failed copy must not lose it.
+    let (_, apps, target) = try setUp()
+    try write("old", to: apps.appending(path: ".MacNeutron.app.old/Contents/v"))
+    let missing = try makeTempDir().appending(path: "MacNeutron.app", directoryHint: .isDirectory)
+    #expect(throws: (any Error).self) {
+        try AppInstaller.install(missing, into: target, verify: { _ in }, quit: { true })
+    }
+    #expect(version(target) == "old")
+    #expect(staged(apps).isEmpty)
+}
+
+@Test func aLeftoverThatWontGoStopsBeforeQuitting() throws {
+    let (bundled, apps, target) = try setUp(old: "old")
+    let leftover = apps.appending(path: ".MacNeutron.app.old", directoryHint: .isDirectory)
+    try write("junk", to: leftover.appending(path: "junk"))
+    try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: path(leftover))
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path(leftover)) }
+    var quits = 0
+    #expect(throws: AppInstallerError.leftover(path(leftover))) {
+        try AppInstaller.install(bundled, into: target, verify: { _ in }, quit: { quits += 1; return true })
+    }
+    #expect(quits == 0)
+    #expect(version(target) == "old")
+    #expect(AppInstallerError.leftover("/Applications/.MacNeutron.app.old").description
+            == "/Applications/.MacNeutron.app.old couldn't be removed: move it to the Trash, then open Install MacNeutron again.")
+}
+
+@Test func aReadOnlyFileLosesItsQuarantineAndKeepsItsMode() throws {
+    let (bundled, _, target) = try setUp()
+    let file = bundled.appending(path: "Contents/read-only")
+    try write("x", to: file)
+    quarantine(file)
+    try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: path(file))
+    try AppInstaller.install(bundled, into: target, verify: { _ in }, quit: { true })
+    let installed = target.appending(path: "Contents/read-only")
+    #expect(!hasQuarantine(installed))
+    #expect(try FileManager.default.attributesOfItem(atPath: path(installed))[.posixPermissions] as? Int == 0o444)
+}

@@ -432,9 +432,10 @@ self_test() {
   ps=$(stat -f %z "$T/parts.tar.xz") ph=$(shasum -a 256 "$T/parts.tar.xz" | cut -d' ' -f1)
   printf '{"parts": {"url": "x", "size": %s, "sha256": "%s"}}\n' "$ps" "$ph" > "$T/vm-manifest.json"
   passes "a VM manifest naming the parts" check_vm_manifest "$T/vm-manifest.json" "$T/parts.tar.xz"
-  printf '{"parts": {"url": "x", "size": %s, "sha256": "%s"}}\n' "$ps" "${ph%?}0" > "$T/vm-manifest.bad.json"
+  bh=$(printf %s "$ph" | tr 0123456789abcdef 123456789abcdef0)  # every digit rotated: never the real hash
+  printf '{"parts": {"url": "x", "size": %s, "sha256": "%s"}}\n' "$ps" "$bh" > "$T/vm-manifest.bad.json"
   refused "a VM manifest naming other parts" \
-    "release: vm-manifest.json names parts $ps ${ph%?}0, not the archive's $ps $ph" \
+    "release: vm-manifest.json names parts $ps $bh, not the archive's $ps $ph" \
     check_vm_manifest "$T/vm-manifest.bad.json" "$T/parts.tar.xz"
 
   # The installer's zip (spec 2026-10-25-macneutron-installer-design §3.4): its nested app changed after signing is

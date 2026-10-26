@@ -90,6 +90,15 @@ final class UpdateModel {
         await check()
     }
 
+    /// How `install` opens the downloaded installer: with --from-app, as a new process, never an Install MacNeutron
+    /// already running (one the player opened, which would ask again and never get the argument).
+    static func installerConfiguration() -> NSWorkspace.OpenConfiguration {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.arguments = ["--from-app"]
+        configuration.allowsRunningApplicationSubstitution = false
+        return configuration
+    }
+
     /// Downloads, verifies and installs the available release over this app, then relaunches it; a copy it can't replace
     /// (opened from Downloads) opens the release's installer instead, which quits it and installs into Applications.
     func install() async {
@@ -100,12 +109,11 @@ final class UpdateModel {
             switch try await Updater.update(release, app: app, team: team) {
             case .swapped(let work): try Updater.relaunch(app, removing: work)
             case .installer(let bundle):
-                let configuration = NSWorkspace.OpenConfiguration()
-                configuration.arguments = ["--from-app"]
-                try await NSWorkspace.shared.openApplication(at: bundle, configuration: configuration)
+                try await NSWorkspace.shared.openApplication(at: bundle, configuration: Self.installerConfiguration())
             }
             NSApplication.shared.terminate(nil)
         } catch {
+            Updater.removeInstallerFolders()  // the installer downloaded, if it couldn't be opened
             notice = (error as? UpdateError)?.description ?? (error as? AppInstallerError)?.description
                 ?? error.localizedDescription
             working = false

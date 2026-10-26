@@ -96,7 +96,10 @@ the release bundle) is Task 14's.
     unzips it with `/usr/bin/unzip` into a temporary folder and `codesign --verify --strict --deep` passes on the
     extracted `MacNeutron.app` and its `wine.app` (`PASS MacNeutron-0.0.0.zip unzips (unzip) to a MacNeutron.app and
     wine.app that verify`; in release mode also `stapler validate` on both). The embedded provisioning profile carries
-    no download metadata (`kMDItemWhereFroms`) or quarantine.
+    no download metadata (`kMDItemWhereFroms`) or quarantine. Since Install MacNeutron (0.9.2), `check_zip` checks
+    both zips and names each bundle it verified: `PASS MacNeutron-<V>.zip unzips (unzip) to bundles that verify:
+    MacNeutron.app MacNeutron.app/Contents/Helpers/wine.app` and `PASS MacNeutron-<V>-Installer.zip unzips (unzip) to
+    bundles that verify: Install MacNeutron.app/Contents/Helpers/MacNeutron.app Install MacNeutron.app`.
   - R5: `PASS sources`. `verify-sources.sh` was also red, by hand, on a wrong `WINE_SERIES`, `FEX_SUBMODULE_fmt`,
     `GMP_SHA256`, `MACNEUTRON_COMMIT` and `LLVM_TAG`, a missing `dxmt-nvapi.tar`, an edited lsteamclient file, an SDK
     file added to `lsteamclient.tar`, a wrong Wine patch count, and a submodule row that names another submodule's

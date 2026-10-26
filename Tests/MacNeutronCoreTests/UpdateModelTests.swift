@@ -70,3 +70,10 @@ private final class FakeGitHub: @unchecked Sendable {
     await model.checkAtLaunch()
     #expect(github.calls == 2)
 }
+
+@MainActor @Test func theInstallerOpensAsANewCopyFromTheApp() {
+    // A running Install MacNeutron (one the player opened) mustn't be brought forward in its place, without --from-app.
+    let configuration = UpdateModel.installerConfiguration()
+    #expect(configuration.arguments == ["--from-app"])
+    #expect(!configuration.allowsRunningApplicationSubstitution)
+}
