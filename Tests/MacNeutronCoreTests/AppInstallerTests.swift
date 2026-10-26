@@ -144,3 +144,19 @@ private func setUp(old: String? = nil) throws -> (bundled: URL, apps: URL, targe
     #expect(version(target) == "old")
     #expect(staged(apps).isEmpty)
 }
+
+@Test func aLeftoverThatWontGoStopsBeforeQuitting() throws {
+    let (bundled, apps, target) = try setUp(old: "old")
+    let leftover = apps.appending(path: ".MacNeutron.app.old", directoryHint: .isDirectory)
+    try write("junk", to: leftover.appending(path: "junk"))
+    try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: path(leftover))
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path(leftover)) }
+    var quits = 0
+    #expect(throws: AppInstallerError.leftover(path(leftover))) {
+        try AppInstaller.install(bundled, into: target, verify: { _ in }, quit: { quits += 1; return true })
+    }
+    #expect(quits == 0)
+    #expect(version(target) == "old")
+    #expect(AppInstallerError.leftover("/Applications/.MacNeutron.app.old").description
+            == "/Applications/.MacNeutron.app.old couldn't be removed: move it to the Trash, then open Install MacNeutron again.")
+}

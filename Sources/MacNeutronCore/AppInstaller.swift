@@ -7,6 +7,8 @@ public enum AppInstallerError: Error, Equatable, CustomStringConvertible {
     case stillRunning
     /// ditto's exit status.
     case copyFailed(Int32)
+    /// An interrupted install's staging copy that couldn't be removed.
+    case leftover(String)
 
     public var description: String {
         switch self {
@@ -14,6 +16,7 @@ public enum AppInstallerError: Error, Equatable, CustomStringConvertible {
             "Your account can't write to \(folder): drag MacNeutron.app there yourself, or use an administrator account."
         case .stillRunning: "MacNeutron didn't quit within 30 seconds: quit it, then open Install MacNeutron again."
         case .copyFailed(let status): "MacNeutron.app couldn't be copied into Applications (ditto exited \(status))."
+        case .leftover(let path): "\(path) couldn't be removed: move it to the Trash, then open Install MacNeutron again."
         }
     }
 }
@@ -31,7 +34,6 @@ public enum AppInstaller {
         let fm = FileManager.default
         let folder = target.deletingLastPathComponent()
         guard fm.isWritableFile(atPath: path(folder)) else { throw AppInstallerError.notWritable(path(folder)) }
-        guard quit() else { throw AppInstallerError.stillRunning }
         let staging = folder.appending(path: ".MacNeutron.app.installing", directoryHint: .isDirectory)
         let aside = folder.appending(path: ".MacNeutron.app.old", directoryHint: .isDirectory)
         // A crash between Updater.swap's renames left the only app aside: it goes back first (Updater.discard keeps
@@ -39,7 +41,11 @@ public enum AppInstaller {
         if !fm.fileExists(atPath: path(target)), fm.fileExists(atPath: path(aside)) {
             try fm.moveItem(at: aside, to: target)
         }
-        for leftover in [staging, aside] { try? fm.removeItem(at: leftover) }  // an interrupted install's
+        // An interrupted install's, cleared before MacNeutron quits: one left would fail the swap.
+        for leftover in [staging, aside] where fm.fileExists(atPath: path(leftover)) {
+            do { try fm.removeItem(at: leftover) } catch { throw AppInstallerError.leftover(path(leftover)) }
+        }
+        guard quit() else { throw AppInstallerError.stillRunning }
         defer { try? fm.removeItem(at: staging) }
         let status = try SystemProcessRunner().run(URL(filePath: "/usr/bin/ditto"), [path(bundled), path(staging)],
                                                    environment: [:], output: nil)
