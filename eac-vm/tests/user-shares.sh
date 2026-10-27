@@ -21,7 +21,7 @@ fail=
 run() {  # run <mounts> <guest script> [profile]: an empty <mounts> is none
   if [ -n "$1" ]; then printf '%s' "$1" > "$T/share/mounts"; else rm -f "$T/share/mounts"; fi
   rm -f "$T/share/traces/ran"
-  MN_SHARE=$T/share MN_STATE=$STATE MN_TPM= MN_AUDIO_OUTPUT=none MN_RUN_TIMEOUT=600 \
+  MN_MOUNTS=keep MN_SHARE=$T/share MN_STATE=$STATE MN_TPM= MN_AUDIO_OUTPUT=none MN_RUN_TIMEOUT=600 \
     sh "$ROOT/eac-vm/run-guest.sh" "$2" --steam-map "$L=/mnt/games" --user-share "profile=${3:-$P}" \
     --user-share "documents=$D" --user-share "game=$G" ${RO:+--ro-share "$RO"} > "$T/run.txt" 2>&1 || true
 }
