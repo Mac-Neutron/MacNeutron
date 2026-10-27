@@ -1,0 +1,44 @@
+From cf41b8d00108e4a7ae24354049eb00ea92ef31e0 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Tue, 27 Oct 2026 08:38:38 -0400
+Subject: [PATCH] virtio/fs: a simplified share caches attributes
+
+FsDevice::new_simplified kept LinuxSimplified's attribute timeout of 0, so
+every stat, and the guest's size check before each read, was a round trip to
+the host: a game's folder through such a share stat'ed 19 times slower than
+through a read-only share and read 8 times slower (Age of Empires II DE took
+390 s to its menu instead of 150 s). The uid/gid the semantics report are the
+asking process's, but MacNeutron's guest asks these shares as one user, so a
+cached answer can't be another user's: cache them for virtio-fs's default 5 s.
+
+Assisted-by: Claude Code: claude-opus-5-5
+Signed-off-by: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+---
+ src/devices/src/virtio/fs/device.rs | 11 ++++-------
+ 1 file changed, 4 insertions(+), 7 deletions(-)
+
+diff --git a/src/devices/src/virtio/fs/device.rs b/src/devices/src/virtio/fs/device.rs
+index c29f3d0e..40212085 100644
+--- a/src/devices/src/virtio/fs/device.rs
++++ b/src/devices/src/virtio/fs/device.rs
+@@ -77,13 +77,10 @@ impl Fs {
+         config.tag[..tag.len()].copy_from_slice(tag.as_slice());
+         config.num_request_queues = 1;
+ 
+-        let attr_timeout = if matches!(semantics, PermissionSemantics::LinuxSimplified) {
+-            // As uid/gid are context-dependent, attributes can't be cached.
+-            Duration::from_secs(0)
+-        } else {
+-            // The value defined as default in virtio-fs.
+-            Duration::from_secs(5)
+-        };
++        // The value defined as default in virtio-fs, for a simplified share too: its uid/gid are the asking process's,
++        // which MacNeutron's guest makes one user (mn), and uncached each stat and each read's size check were a round
++        // trip to the host.
++        let attr_timeout = Duration::from_secs(5);
+ 
+         let fs_cfg = shared_dir.map(|root_dir| passthrough::Config {
+             root_dir,
+-- 
+2.54.0 (Apple Git-157)
+
