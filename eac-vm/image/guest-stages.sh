@@ -20,7 +20,12 @@ for stage in ${*:-wine forwarder dxmt d3d fonts fex}; do
     wine)  # eac-vm/wine/build.sh in the builder, from eac-vm/wine/sync.sh's copies: the x86-64 build, the 32-bit one
       # (old WoW64's Unix side), and the stage with both (WINE32=0: the 64-bit build's alone)
       sh "$ROOT/eac-vm/wine/sync.sh"
-      $B ssh "set -e; [ -x wine-tools/tools/winebuild/winebuild ] || sh mn-wine-build/build.sh tools
+      # The tools (makedep, winebuild, widl) are the Wine tree's own: built again from scratch when the tree is another
+      # commit, or its makefiles and syscall tables come from the old ones (2026-10-27, an upstream merge: no rule for a
+      # data-only DLL's spec, an undefined wow64 syscall).
+      tools=$(git -C "$S/wine" rev-parse HEAD)
+      $B ssh "set -e; [ -x wine-tools/tools/winebuild/winebuild ] && [ \"\$(cat wine-tools/.mn-wine 2> /dev/null)\" = $tools ] \
+          || { rm -rf wine-tools && sh mn-wine-build/build.sh tools && echo $tools > wine-tools/.mn-wine; }
         sh mn-wine-build/build.sh wine; sh mn-wine-build/build.sh wine32; WINE32=${WINE32:-} sh mn-wine-build/build.sh install
         echo '$(stamp wine)' > wine-stage/opt/mn-wine/.mn-source" ;;
     forwarder)  # lsteamclient's Unix half for the guest (eac-vm/steam-forward/build-guest.sh), on that Wine build and its
