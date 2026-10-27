@@ -1325,7 +1325,9 @@ def proxy_fill(model, c):
         elif stars(t) or t.startswith("PFN_") or base in HANDLE_TYPES:
             lines.append(f"    mn_p.{m} = (uintptr_t){m};")
         elif param_layout(model, p).ctype == "bytes":
-            lines.append(f"    std::memcpy(mn_p.{m}, &{m}, sizeof mn_p.{m});")
+            # The wire field is the 64-bit layout's size; a 32-bit process's struct may be smaller (a descriptor handle's
+            # SIZE_T): copy what it has into the zeroed field, never past it.
+            lines.append(f"    std::memcpy(mn_p.{m}, &{m}, sizeof {m} < sizeof mn_p.{m} ? sizeof {m} : sizeof mn_p.{m});")
         elif base in model.enums:
             lines.append(f"    mn_p.{m} = (uint32_t){m};")
         else:

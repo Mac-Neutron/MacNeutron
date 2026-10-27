@@ -1745,7 +1745,8 @@ static D3D12_CPU_DESCRIPTOR_HANDLE *STDMETHODCALLTYPE heap_start(mn_proxy *This,
         mn_d3d_p_##NAME p = {};                                                                                        \
         p.self = (uintptr_t)This;                                                                                      \
         FILL;                                                                                                          \
-        std::memcpy(p.descriptor, &descriptor, sizeof p.descriptor);                                                   \
+        const uint64_t ptr = descriptor.ptr; /* a 32-bit process's SIZE_T, widened: the field is 8 bytes */            \
+        std::memcpy(p.descriptor, &ptr, sizeof p.descriptor);                                                          \
         mn_d3d_call_with(MN_D3D_ID_##NAME, write_flags(descriptor.ptr, 1, TYPE), &p);                                  \
     }
 MN_VIEW(create_cbv, ID3D12Device_CreateConstantBufferView, MN_COMMA const D3D12_CONSTANT_BUFFER_VIEW_DESC *desc,
@@ -1788,8 +1789,9 @@ static void STDMETHODCALLTYPE copy_descriptors_simple(mn_proxy *This, UINT count
     const heap_span *d = span_of(dst.ptr, count, type), *s = span_of(src.ptr, count, type);
     mn_d3d_p_ID3D12Device_CopyDescriptorsSimple p = {};
     p.self = (uintptr_t)This, p.descriptor_count = count;
-    std::memcpy(p.dst_descriptor_range_offset, &dst, sizeof p.dst_descriptor_range_offset);
-    std::memcpy(p.src_descriptor_range_offset, &src, sizeof p.src_descriptor_range_offset);
+    const uint64_t dst_ptr = dst.ptr, src_ptr = src.ptr;  // a 32-bit process's SIZE_T, widened: the fields are 8 bytes
+    std::memcpy(p.dst_descriptor_range_offset, &dst_ptr, sizeof p.dst_descriptor_range_offset);
+    std::memcpy(p.src_descriptor_range_offset, &src_ptr, sizeof p.src_descriptor_range_offset);
     p.descriptor_heap_type = (uint32_t)type;
     mn_d3d_call_with(MN_D3D_ID_ID3D12Device_CopyDescriptorsSimple,
                      d && d->visible && s && !s->visible ? fast_flags() : MN_D3D_ARG_HANDOFF, &p);
