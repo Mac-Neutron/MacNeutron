@@ -9,7 +9,9 @@
 # otherwise serve by truncating the image; patch 0011 gives a read-only share no extended attributes; patch 0012 adds
 # krun_fs_device_new_simplified, a writable share whose files show as the guest user's, with no extended attributes
 # (macneutron-vm's --user-share); patch 0013 lets such a share cache attributes for 5 s as any share does (its one
-# guest user can't see another's answer; uncached, a game's folder read 8 times slower: tests/user-share-speed.sh). include/libkrun.h is generated: a patch that changes the C API runs libkrun's
+# guest user can't see another's answer; uncached, a game's folder read 8 times slower: tests/user-share-speed.sh);
+# patch 0014 answers a flush with ENOSYS, so the guest stops sending them (each close waited a round trip that only
+# duplicated and closed a host descriptor: the same test). include/libkrun.h is generated: a patch that changes the C API runs libkrun's
 # `make gen-libkrun-bindings` (ffier-gen-c-header at the ffier tag its Cargo.toml names) and commits the header and
 # bindings/ it writes, never a hand edit. The Makefile is skipped on purpose: on macOS it downloads a Debian sysroot for the guest init blob, which we don't use.
 set -eu

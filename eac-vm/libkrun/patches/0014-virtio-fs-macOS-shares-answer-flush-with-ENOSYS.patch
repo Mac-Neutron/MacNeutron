@@ -1,0 +1,66 @@
+From 9ec30a95a842fda1550ad6a403ba757c7bd89fb3 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Tue, 27 Oct 2026 11:07:30 -0400
+Subject: [PATCH] virtio/fs: macOS shares answer flush with ENOSYS
+
+The macOS passthrough answered every FUSE_FLUSH by duplicating the host
+descriptor and closing the duplicate, which releases a process's POSIX locks;
+but this file system takes no locks for the guest (getlk/setlk are ENOSYS and
+POSIX_LOCKS is never negotiated), so it did nothing, and every close in the
+guest waited a round trip for it (41,000 in Age of Empires II DE's start, about
+50 us each). Without the override the default ENOSYS tells the guest kernel to
+stop sending flushes; it still writes dirty pages back on close.
+
+Assisted-by: Claude Code: claude-opus-5-5
+Signed-off-by: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+---
+ .../src/virtio/fs/macos/passthrough.rs        | 33 -------------------
+ 1 file changed, 33 deletions(-)
+
+diff --git a/src/devices/src/virtio/fs/macos/passthrough.rs b/src/devices/src/virtio/fs/macos/passthrough.rs
+index b0c29079..c8df9875 100644
+--- a/src/devices/src/virtio/fs/macos/passthrough.rs
++++ b/src/devices/src/virtio/fs/macos/passthrough.rs
+@@ -2205,39 +2205,6 @@ impl FileSystem for PassthroughFs {
+         Ok(buf)
+     }
+ 
+-    fn flush(
+-        &self,
+-        _ctx: Context,
+-        inode: Inode,
+-        handle: Handle,
+-        _lock_owner: u64,
+-    ) -> io::Result<()> {
+-        let data = self
+-            .handles
+-            .read()
+-            .unwrap()
+-            .get(&handle)
+-            .filter(|hd| hd.inode == inode)
+-            .cloned()
+-            .ok_or_else(ebadf)?;
+-
+-        // Since this method is called whenever an fd is closed in the client, we can emulate that
+-        // behavior by doing the same thing (dup-ing the fd and then immediately closing it). Safe
+-        // because this doesn't modify any memory and we check the return values.
+-        unsafe {
+-            let newfd = libc::dup(data.file.write().unwrap().as_raw_fd());
+-            if newfd < 0 {
+-                return Err(linux_error(io::Error::last_os_error()));
+-            }
+-
+-            if libc::close(newfd) < 0 {
+-                Err(linux_error(io::Error::last_os_error()))
+-            } else {
+-                Ok(())
+-            }
+-        }
+-    }
+-
+     fn fsync(
+         &self,
+         _ctx: Context,
+-- 
+2.54.0 (Apple Git-157)
+
