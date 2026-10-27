@@ -4,7 +4,7 @@
 # owns it, via dxmt/toolchain.sh.
 WINE_REPO=https://github.com/Mac-Neutron/wine.git
 WINE_BRANCH=main
-WINE_COMMIT=7f66d44433bfa93846e7c4cf59ed710a018479c3
+WINE_COMMIT=5b6d842de50db311efde547f8844fc1432ce1cb9
 # FEX, which runs x86_64 code on the arm64 Wine and in the VM: this one commit of our fork's main and its submodules.
 FEX_REPO=https://github.com/Mac-Neutron/FEX.git
 FEX_COMMIT=1129152562c7e3e37591d2a60e832da76885ad44
