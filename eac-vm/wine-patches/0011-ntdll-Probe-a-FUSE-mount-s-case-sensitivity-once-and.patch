@@ -1,0 +1,129 @@
+From ca3237d6ac9d2a43d52f1271264c5c294863a636 Mon Sep 17 00:00:00 2001
+From: Chad Cormier Roussel <chadcormierroussel@gmail.com>
+Date: Tue, 27 Oct 2026 11:04:42 -0400
+Subject: [PATCH] ntdll: Probe a FUSE mount's case sensitivity once, and end a
+ lookup there when the name isn't found.
+
+A virtiofs share of a case-insensitive Mac folder answers a name in any case, so in it a name the exact lookup
+misses can only be one of our hashed short names (XXXX~YYY). Before, Linux treated every FUSE mount but ciopfs as
+case-sensitive and asked again for each miss: the directory opened, an ioctl the share doesn't have, statfs,
+.ciopfs, then a scan of the whole directory, twice (the second for a reparse point), about 17 requests to the host
+at 840 us a name, where the VM's own disk takes 45 us. The mount's answer is now probed once, by an entry's name in
+the other case, and kept by device; a case-sensitive share still scans.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ dlls/ntdll/unix/file.c | 82 ++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 80 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/ntdll/unix/file.c b/dlls/ntdll/unix/file.c
+index a4af371..82ba931 100644
+--- a/dlls/ntdll/unix/file.c
++++ b/dlls/ntdll/unix/file.c
+@@ -948,6 +948,81 @@ done:
+ }
+ #endif
+ 
++#ifdef __linux__
++/* FUSE mounts' case sensitivity by device; -1 for a device that isn't FUSE */
++static struct { dev_t dev; int sens; } fuse_case[32];
++static unsigned int fuse_case_count;
++static pthread_mutex_t fuse_case_mutex = PTHREAD_MUTEX_INITIALIZER;
++
++/***********************************************************************
++ *           get_fuse_case_sensitivity
++ *
++ * Checks if the FUSE mount containing the specified directory is case
++ * sensitive, once per mount: by looking up an entry in the other case,
++ * which a virtiofs share of a case-insensitive host folder answers with
++ * the same file. Returns -1 if the file system isn't FUSE, or if the
++ * directory has no name with letters to tell by (the next call probes again).
++ */
++static int get_fuse_case_sensitivity( int root_fd, const char *dir )
++{
++    struct stat st, st1, st2;
++    struct statfs stfs;
++    struct dirent *de;
++    char other[256];
++    unsigned int i;
++    int fd, sens = -1;
++    BOOL found = FALSE, letter;
++    DIR *d;
++
++    if (fstatat( root_fd, dir, &st, 0 )) return -1;
++    mutex_lock( &fuse_case_mutex );
++    for (i = 0; i < fuse_case_count && !found; i++)
++        if ((found = fuse_case[i].dev == st.st_dev)) sens = fuse_case[i].sens;
++    mutex_unlock( &fuse_case_mutex );
++    if (found) return sens;
++
++    if ((fd = openat( root_fd, dir, O_RDONLY | O_DIRECTORY )) == -1) return -1;
++    if (fstatfs( fd, &stfs ) == -1)
++    {
++        close( fd );
++        return -1;
++    }
++    if (stfs.f_type != 0x65735546 /* FUSE_SUPER_MAGIC */) close( fd );
++    else
++    {
++        if (!(d = fdopendir( fd )))
++        {
++            close( fd );
++            return -1;
++        }
++        while (sens == -1 && (de = readdir( d )))
++        {
++            for (i = 0, letter = FALSE; de->d_name[i] && i < sizeof(other) - 1; i++)
++            {
++                other[i] = de->d_name[i];
++                if (other[i] >= 'a' && other[i] <= 'z') other[i] += 'A' - 'a', letter = TRUE;
++                else if (other[i] >= 'A' && other[i] <= 'Z') other[i] += 'a' - 'A', letter = TRUE;
++            }
++            other[i] = 0;
++            if (!letter || de->d_name[i] || fstatat( fd, de->d_name, &st1, AT_SYMLINK_NOFOLLOW )) continue;
++            if (!fstatat( fd, other, &st2, AT_SYMLINK_NOFOLLOW )) sens = st1.st_ino != st2.st_ino;
++            else if (errno == ENOENT) sens = TRUE;
++        }
++        closedir( d );
++        if (sens == -1) return -1;
++    }
++
++    mutex_lock( &fuse_case_mutex );
++    if (fuse_case_count < ARRAY_SIZE( fuse_case ))
++    {
++        fuse_case[fuse_case_count].dev = st.st_dev;
++        fuse_case[fuse_case_count++].sens = sens;
++    }
++    mutex_unlock( &fuse_case_mutex );
++    return sens;
++}
++#endif
++
+ /***********************************************************************
+  *           get_dir_case_sensitivity_stat
+  *
+@@ -1009,8 +1084,9 @@ static BOOLEAN get_dir_case_sensitivity_stat( int root_fd, const char *dir )
+     BOOLEAN sens = TRUE;
+     struct statfs stfs;
+     struct stat st;
+-    int fd, flags;
++    int fd, flags, fuse_sens;
+ 
++    if ((fuse_sens = get_fuse_case_sensitivity( root_fd, dir )) != -1) return fuse_sens;
+     if ((fd = openat( root_fd, dir, O_RDONLY | O_NONBLOCK )) == -1)
+         return TRUE;
+ 
+@@ -2709,7 +2785,9 @@ static NTSTATUS find_file_in_dir( int root_fd, char *unix_name, int pos, const W
+     is_name_8_dot_3 = is_name_8_dot_3 && length >= 8 && name[4] == '~';
+ #endif
+ 
+-    if (!is_name_8_dot_3 && !get_dir_case_sensitivity( root_fd, unix_name )) goto not_found;
++    /* in a case-insensitive directory the scan can only find our own short names (XXXX~YYY) */
++    if ((!is_name_8_dot_3 || length < 8 || name[4] != '~') && !get_dir_case_sensitivity( root_fd, unix_name ))
++        goto not_found;
+ 
+     /* now look for it through the directory */
+ 
+-- 
+2.54.0 (Apple Git-157)
+

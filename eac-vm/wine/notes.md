@@ -34,3 +34,12 @@ and the `download-alt.easyanticheat.net` DNS hack. These are why the guest runs 
 
 **New WoW64** (0007, the 32-bit games' spec 2026-10-20 §5): the guest builds i386 and x86-64 PE code over the 64-bit
 Unix side; libxess and libxess_dx11 stay x86-64 only (XeSS ships x64 only, and their size asserts are x64's).
+
+**Lookups on the shares** (0011): a name the exact lookup misses on a FUSE mount ends there when the mount is
+case-insensitive (a virtiofs share of a Mac folder on a case-insensitive volume), unless it is one of our hashed short
+names (`XXXX~YYY`); the mount's case sensitivity is probed once, by an entry's name in the other case, and kept by
+device. Upstream Wine on Linux counts every FUSE mount but ciopfs as case-sensitive, so each miss was a probe and a
+directory scan, twice (the second for a reparse point): 840 µs a name instead of 93 µs (`eac-vm/tests/share-lookups.sh`),
+Age of Empires II DE 55 s to its menu instead of 65-70 s. A case-sensitive share still scans.
+One cost moves the other way: on such a share, FindFirstFile for an exact name reads the directory to report the name's
+real case, as Wine does on a Mac's own volume, where before it took one stat (and echoed the asked-for case).
