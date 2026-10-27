@@ -1,7 +1,7 @@
 # wine-arm64: native arm64 Wine and FEX
 
 `make wine-arm64` builds the first stage of MacNeutron's native arm64 stack: upstream Wine master (wine-arm64/pins; ARM64EC and arm64),
-with our patches, FEX, which runs x64 Windows code inside it, and our DXMT built for arm64 (Direct3D 11/12; D3D10's front end bundled, untested),
+with our commits, FEX, which runs x64 Windows code inside it, and our DXMT built for arm64 (Direct3D 11/12; D3D10's front end bundled, untested),
 staged as one signed, entitled `build/wine-arm64/wine.app`. Every Windows process runs natively on arm64 with 4K
 pages; only the game's x86-64 code is translated. It also carries FreeType and gnutls built from pinned source
 (Windows text, dialogs and TLS), msync (on wherever `WINEMSYNC=1` is set: `check.sh`, and the launcher unless `MACNEUTRON_NO_MSYNC=1`), the Steam bridge (Proton's `lsteamclient`, built for arm64),
@@ -148,8 +148,8 @@ anything but each other by `@rpath` and the system's, or hold a build path. `bun
 
 ### The Steam bridge
 
-`wine.app` carries the Steam bridge on arm64 (ship-base spec §7): Proton's `lsteamclient` (pinned in `deps.pins`, with
-`patches/lsteamclient/`), built by Wine's own build as an ARM64X `lsteamclient.dll` and an arm64 `lsteamclient.so`
+`wine.app` carries the Steam bridge on arm64 (ship-base spec §7): `lsteamclient` from our Proton fork (pinned in
+`deps.pins`), built by Wine's own build as an ARM64X `lsteamclient.dll` and an arm64 `lsteamclient.so`
 that loads the arm64 slice of Mac Steam's universal `steamclient.dylib`. `make bridge` also builds an aarch64
 `steam.exe` and its test helper into `build/bridge/arm64/` (one `steam.exe` per runtime, as spec §7 has it). The launcher
 copies the DLL into game prefixes.
@@ -166,66 +166,58 @@ SteamID or the persona name; run it by hand the same way. The x18 hits in Valve'
 
 | Path | What |
 |---|---|
-| `pins` | Wine tag and commit, FEX commit, and the source of FEX's macOS unixlib |
-| `deps.pins` | FreeType, gnutls, libtasn1, nettle and FFmpeg's repositories and commits, GMP's snapshot, and lsteamclient's repository and commit |
-| `patches/wine/`, `patches/fex/`, `patches/dxmt/`, `patches/lsteamclient/` | The patch series (`git format-patch` output, applied with `git am`): the source of truth |
+| `pins` | Our Wine and FEX forks' repositories and commits, and the source of FEX's macOS unixlib |
+| `deps.pins` | FreeType, gnutls, libtasn1, nettle and FFmpeg's repositories and commits, GMP's snapshot, and our Proton fork's repository and commit (lsteamclient) |
 | `build.sh`, `bundle.sh` | Build, then assemble and sign `wine.app`, and check the result |
 | `wine.entitlements`, `Info.plist` | The loader's entitlements and the bundle's identity |
 | `licenses/` | The bundle's `licenses/README` (component, licence, source) and `NOTICES.md` (notices found only in source headers); `bundle.sh` adds the licence texts and `SOURCE` |
 | `x18-allow.txt` | The only x18 hits `bundle.sh`'s scan accepts (file, routine, count) |
 | `check.sh`, `tests/`, `tools/` | The checks, the test programs (`x64-*`, `arm64*`), the licence test, and the helpers behind G3, G4, D2 (`winshot`) and the x18 scan (`x18scan.sh`) |
-| `export.sh` | Writes commits made in the source trees back to `patches/` |
 
 ## Development loop
 
-The patch files are applied to the pins in `build/wine-arm64-src/wine`, `fex` and `dxmt` (git trees on branch
-`macneutron`).
+Our changes are commits of our forks (github.com/Mac-Neutron: `wine`, `FEX`, `dxmt`, `Proton`, `llvm-project`,
+`libkrun`), each fork's `main` being upstream with our commits, upstream merged in from time to time. The pins name
+the commits a build uses; `build/wine-arm64-src/wine`, `fex` and `dxmt` are shallow checkouts of them (branch `main`).
+The VM's Wine and FEX are the same trees (`eac-vm/wine/sync.sh`, `eac-vm/image/guest-stages.sh fex`).
 
 1. Edit and commit in `build/wine-arm64-src/<wine, fex or dxmt>`. Any change there makes the next build a "development
-   build", which builds the tree as it is and skips the fetch, the patching and the up-to-date check. So does a stash,
-   a second branch or a second worktree in that tree. If your patch changes `configure.ac`, run `autoreconf` with
-   autoconf 2.73 and commit `configure` in the same patch (as Wine patch 0001 does): the build doesn't run it.
+   build", which builds the tree as it is and skips the fetch and the up-to-date check. So does a stash, a second
+   branch or a second worktree in that tree. If your commit changes `configure.ac`, run `autoreconf` with autoconf 2.73
+   and commit `configure` in the same commit: the build doesn't run it.
 2. `make wine-arm64`, and once (or after a change to a test program or the Swift sources) `make build wine-arm64-tests`.
 3. `sh wine-arm64/check.sh <steps>` while working; `make wine-arm64-check` before committing.
-4. `make wine-arm64-export` writes the commits back to `wine-arm64/patches/`.
-5. Commit the patches in this repo. A commit message says why the change exists, with the failure that made it necessary.
+4. Push the commits to the fork's `main` (the shallow tree pushes once the fork has its parent; otherwise rebase them in
+   a full clone of the fork), then put the new commit in the pin and commit that here. A commit message says why the
+   change exists, with the failure that made it necessary.
 
-DXMT works the same way. Its tree is `dxmt/pins`' `DXMT_COMMIT` (the frozen reference's DXMT is not rebuilt from it) plus `patches/dxmt/`, built for ARM64X with DXMT's own `build-arm64ec.txt` against
+DXMT works the same way. Its tree is our fork at `dxmt/pins`' `DXMT_COMMIT` (the frozen reference's DXMT is not rebuilt from it), built for ARM64X with DXMT's own `build-arm64ec.txt` against
 this Wine's build tree, with an arm64 LLVM 15 built once into `build/wine-arm64-src/llvm-arm64` by `dxmt/llvm.sh`.
 `make wine-arm64` also builds the arm64 `dxil-probe` and `dxil-translate` into `build/wine-arm64/`. A commit in
 `build/wine-arm64-src/dxmt` makes the build a development build, and DXMT's version token
-(`build/wine-arm64-src/dxmt-install/version`) ends in `+dev` instead of the series hash; `make wine-arm64-export`
-writes the commits to `patches/dxmt/`. DXMT's shader-translation cache and the launcher's replay stamp follow neither:
+(`build/wine-arm64-src/dxmt-install/version`) ends in `+dev` instead of the pin. DXMT's shader-translation cache and the launcher's replay stamp follow neither:
 both are keyed on the translator's key (`lib.sh`'s `translator_key`, in `dxmt-install/translator` and the bundle's
 `DXMT/translator`), a hash of what changes translated output as the tree has it, committed or not: `src/airconv`,
 `libs/DXBCParser`, `include`, DXMT's top-level meson files, d3d11's compile arguments (`src/d3d11/d3d11_shader.cpp`,
 whose cache entries key on the variant, not on the arguments), the airconv thunks (`src/winemetal/airconv_thunks.*`),
 the buildtype, the LLVM pin and recipe, Apple clang's and
-metal's versions. A re-fetch of the same patches or a change elsewhere in DXMT keeps players' translated shaders and
+metal's versions. A re-fetch of the same commit or a change elsewhere in DXMT keeps players' translated shaders and
 starts no replay; an edit to airconv, even uncommitted, gets new ones (`tests/translator_key_test.sh`). A DXMT
-patch's message names the arm64 failure it fixes. Folding the patches into the fork (and moving the pin) is a separate
-maintainer step.
+commit's message names the arm64 failure it fixes.
 
-The same tree also builds natively, as macOS dylibs (`eac-vm/dxmt-native/build.sh`, Direct3D forwarding M1): `d3d12`, `dxgi`, `d3d11`, `d3d10core` and `winemetal` in `build/dxmt-native/install/lib`. Its D3D12 headers, `include/native/d3d12` in the tree (patch 0073), are copies of the pinned llvm-mingw's: after a toolchain bump in `dxmt/pins`, copy them again, or the native and PE builds see different interfaces.
+The same tree also builds natively, as macOS dylibs (`eac-vm/dxmt-native/build.sh`, Direct3D forwarding M1): `d3d12`, `dxgi`, `d3d11`, `d3d10core` and `winemetal` in `build/dxmt-native/install/lib`. Its D3D12 headers, `include/native/d3d12` in the tree, are copies of the pinned llvm-mingw's: after a toolchain bump in `dxmt/pins`, copy them again, or the native and PE builds see different interfaces.
 
 lsteamclient works the same way. Its tree, `build/wine-arm64-src/lsteamclient`, is a sparse, blob-filtered checkout of
-Proton's `lsteamclient/` folder at `deps.pins`' `LSTEAMCLIENT_COMMIT` (without the Steamworks SDK folders), linked
-into the Wine tree as `dlls/lsteamclient` (ignored there, so the Wine tree stays applied; Wine patch 0016 registers
-it). Its series is `deps.pins`' `LSTEAMCLIENT_` lines and `patches/lsteamclient/`: a tarball pin doesn't re-fetch it.
-Its source is never committed here, only the patches.
+our Proton fork's `lsteamclient/` folder at `deps.pins`' `LSTEAMCLIENT_COMMIT` (without the Steamworks SDK folders),
+linked into the Wine tree as `dlls/lsteamclient` (ignored there, so the Wine tree stays applied; our Wine registers
+it). A tarball pin in `deps.pins` doesn't re-fetch it.
 
-Changing the pins or a patch file makes a tree with no work of its own (no change, commit, stash, other branch or
-worktree) start over from the series: it is deleted and fetched again.
+Moving a pin makes a tree with no work of its own (no change, commit, stash, other branch or worktree) start over: it
+is deleted and fetched again at the new commit.
 
-## Next Wine rebase
+## Next upstream merge
 
-Do these when the Wine pin next moves. The first two rewrite patch files and change the series hash, so the trees
-re-clone; that is why they wait for the rebase.
-- Fold patches 0017, 0018 and 0019 into 0004, so strict x18 is one patch again (0017 exists only because an in-place
-  rewrite of 0004 was refused during sub-project 3: `docs/testing/acceptance-arm64-ship-base.md`, "Pins and
-  patches"). Run `check.sh x18` on the result.
-- Add `--no-signature` to `export.sh`'s `git format-patch`. Every patch now ends with the exporting git's version
-  (`2.54.0 (Apple Git-157)`), so an export after a git upgrade rewrites every patch file.
+Do these when upstream Wine is next merged into our fork's `main`.
 - Re-check the x18 transitions in `signal_arm64.c` against upstream's changes there (ship-base spec §13).
 - Re-check the toggle layout that patch 0019 checks (`brk #1` at `os_set_custom_x18_abi_enabled` + 0x58 and + 0x78)
   on the macOS in use. When it doesn't match, the `ERR` line comes from `signal_init_process`, so it prints from every
@@ -244,7 +236,8 @@ re-clone; that is why they wait for the rebase.
 
 ## Licences
 
-- **Wine** is LGPL-2.1+; our patches to it are too.
+- **Wine** is LGPL-2.1+; our commits to it are too (numbered below as the patches they were before 2026-10-27, in
+  the order they sit on our fork's main).
   - 0006: citi94's `citi94/wine-macos-arm64` commit `4a50ce17c8` ("ntdll: Handle macOS Apple Silicon W^X ..."), applied
     with `git am`, author kept. Its message has no `Source:` line; this is where it comes from
     (`docs/research/2026-10-02-native-arm64/entitled-trial.md`).
@@ -302,7 +295,7 @@ re-clone; that is why they wait for the rebase.
   patches are dappermint/winecx's three Mac fixes by millia ampora (`8d188ec0db`, `dada36ebab`, `6cfbd169a5`), each
   naming its source commit, author kept. It ships in the release bundle by the maintainer's decision of 2026-10-04, under Valve's
   Steamworks SDK licence. This is not legal advice.
-- **FEX** is MIT, and so are our patches to it.
+- **FEX** is MIT, and so are our commits to it (numbered as the patches they were).
   - 0001: the macOS unixlib helpers, from dappermint's FEX fork, commit `4efc3abc8a`. MIT: the file it patches,
     `Source/Windows/UnixLib/FEXUnixLib.cpp`, keeps its `SPDX-License-Identifier: MIT` header, and the fork carries
     FEX's MIT `LICENSE` at that commit.
@@ -320,5 +313,5 @@ re-clone; that is why they wait for the rebase.
     the date before importing another. This is not legal advice.
 - Each patch taken or derived from another tree names its source in its message (Wine 0006's is given above, since its
   message doesn't). Patch files keep their original authors.
-- **DXMT** is LGPL-2.1+; our patches to it are too. 0001-0060 are ours.
+- **DXMT** is LGPL-2.1+; our commits to it are too (numbered as the patches they were). 0001-0060 are ours.
 - Upstream FEX and DXMT refuse AI-authored contributions: no patches go upstream (issue reports only).

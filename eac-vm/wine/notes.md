@@ -1,7 +1,7 @@
 # Our Wine on x86-64 Linux: what each macOS patch does
 
-The guest Wine is the same tree as the macOS one: Wine 11.20 plus our series (`build/wine-arm64-src/wine`,
-branch `macneutron`, 43 commits over wine-11.20, 7298a818) plus `eac-vm/wine-patches` (Proton 11's EAC changes). Built
+The guest Wine is the same tree as the macOS one: our fork's main at `wine-arm64/pins`' WINE_COMMIT
+(`build/wine-arm64-src/wine`: upstream master, our macOS commits and Proton 11's EAC changes). Built
 with `--enable-archs=x86_64` for `x86_64-linux-gnu`, so every patch falls in one of four groups.
 
 **Compiled out (`__APPLE__` or `__aarch64__`/ARM64EC only).** The loader and memory work: e7ca11cc (loader link
@@ -28,7 +28,7 @@ what SteamStub games need here too.
 `IMTLD3D12*` interfaces; on a D3D12 device that isn't DXMT's the query fails and XeSS reports an error, which games
 treat as XeSS unavailable.
 
-**Proton's EAC changes** (`eac-vm/wine-patches`, plan 3b Task 1): PROTON_EAC_RUNTIME for the bridge files, the bridge
+**Proton's EAC changes** (our Wine fork's commits, plan 3b Task 1): PROTON_EAC_RUNTIME for the bridge files, the bridge
 loaded only when its native `.so` sits next to the Windows library, the EAC launcher and EOS bootstrapper handling,
 and the `download-alt.easyanticheat.net` DNS hack. These are why the guest runs our Wine and not upstream's.
 

@@ -98,8 +98,9 @@ SPDX-FileCopyrightText: Copyright (c) 2018, Arm Limited.
 
 ## Madeira (in FEX: `libarm64ecfex.dll`; in Wine: `ntdll.dll`)
 
-FEX patches 0003 and 0004 come from Will Faust's Madeira commits (`willfaust/FEX`, branch `ios-port-2607`), and patch
-0005 is derived from Madeira's dual-map commits; all are dated before 2026-08-28 and are used under the MIT licence
+Two of our FEX fork's commits (the off-by-8 fix in ret_sp_misaligned for variadic ARM64EC entry thunks, and 128-bit
+CASPAL in the unaligned-atomic handler) come from Will Faust's Madeira commits (`willfaust/FEX`, branch
+`ios-port-2607`), and its commit that emits JIT code through a writable view is derived from Madeira's dual-map commits; all are dated before 2026-08-28 and are used under the MIT licence
 below. From
 `LICENSE-MADEIRA.md` in `https://github.com/willfaust/FEX.git` (as of commit `26859e184a`):
 
@@ -110,13 +111,14 @@ below. From
   copy keeps their MIT rights to it.
 ```
 
-Wine patch 0009 is adapted from Madeira's Wine commits on its LGPL branch `madeira-lgpl`; it is LGPL-2.1+ like the rest
+Our Wine fork's "ntdll: Bound ARM64EC code map lookups on the PE side" is adapted from Madeira's Wine commits on its LGPL branch `madeira-lgpl`; it is LGPL-2.1+ like the rest
 of Wine (`wine/LICENSE`).
 
 ## msync (in Wine: `ntdll.so`, `wineserver`)
 
-Wine patch 0015 is CodeWeavers' CrossOver 26.3 msync, as carried on `dappermint/winecx` branch `cx/wine1117` with
-millia ampora's msync commits there; it is LGPL-2.1+ like the rest of Wine (`wine/LICENSE`). From the patch's
+Our Wine fork's msync commit ("server: Add msync, CrossOver's in-process synchronization for macOS") is CodeWeavers'
+CrossOver 26.3 msync, as carried on `dappermint/winecx` branch `cx/wine1117` with
+millia ampora's msync commits there; it is LGPL-2.1+ like the rest of Wine (`wine/LICENSE`). From its
 `dlls/ntdll/unix/msync.c` (and its `msync.h`, `server/msync.c` and `server/msync.h`):
 
 ```
@@ -402,7 +404,7 @@ Copyright (c) 2005-2014 Rich Felker, et al.
 
 ## Intel XeSS headers (in Wine: `libxess.dll`)
 
-Wine patch 0024's `dlls/libxess/xess.h` copies the XeSS declarations the bridge implements from Intel's public headers
+Our Wine fork's `dlls/libxess/xess.h` copies the XeSS declarations the bridge implements from Intel's public headers
 `inc/xess/xess.h` and `inc/xess/xess_d3d12.h` (`https://github.com/intel/xess.git`, branch `main`, MIT since commit
 `de0fb9c`), with their notice, under the MIT licence below:
 
@@ -438,7 +440,7 @@ limitations under the License.
 
 ## Arm Optimized Routines (in Wine: msvcrt.dll, ucrtbase.dll, msvcr80.dll-msvcr120.dll)
 
-Wine patch 0035's `dlls/msvcrt/aor_string.h` carries the ARM64 and ARM64EC memmove (and so memcpy), strlen, strnlen,
+Our Wine fork's `dlls/msvcrt/aor_string.h` carries the ARM64 and ARM64EC memmove (and so memcpy), strlen, strnlen,
 strchr, strrchr, strcmp and memchr of Arm Optimized Routines (`https://github.com/ARM-software/optimized-routines.git`,
 tag `v26.07`, commit `4be260a5117480382690c6d8c300bc784e927d76`): `string/aarch64/memcpy-advsimd.S`, `strlen.S`,
 `strnlen.S`, `strchr-mte.S`, `strrchr-mte.S`, `strcmp.S` and `memchr.S`. We modified them: rewritten as inline assembly
@@ -453,6 +455,16 @@ Copyright (c) 2020-2022, Arm Limited.    (strlen.S, strnlen.S, strchr-mte.S)
 Copyright (c) 2020-2023, Arm Limited.    (strrchr-mte.S)
 Copyright (c) 2012-2022, Arm Limited.    (strcmp.S)
 Copyright (c) 2014-2022, Arm Limited.    (memchr.S)
+```
+
+## eac-arm64-emulation-poc (in FEX: `libarm64ecfex.dll`, and the VM's FEX)
+
+Our FEX fork's commits by StonkGuy (x86-64 ptrace emulation, the SMC page handling and code-range invalidation
+statistics, the per-thread cache walk) come from eac-arm64-emulation-poc's FEX (`StonkGuy/FEX`, tag `eac-2610.2`) and
+are used under the MIT licence below, with this copyright line:
+
+```
+Copyright (c) 2026 eac-arm64-emulation-poc contributors
 ```
 
 ## The MIT licence

@@ -55,8 +55,8 @@ for stage in ${*:-wine forwarder dxmt d3d fonts fex}; do
       cp "${BUILD_DIR:-$ROOT/build}/fonts-src/liberation-fonts-$LIBERATION_COMMIT.tar.gz" "$W/fonts-stage/"
       $B sync "$W/fonts-stage" mn-fonts > /dev/null
       $B ssh "set -e; sh mn-fonts/build.sh" ;;
-    fex)  # eac-vm/image/build-fex.sh in the builder, from fex-linux
-      $B sync "$W/fex-linux" fex-linux > /dev/null
+    fex)  # eac-vm/image/build-fex.sh in the builder, from the Mac build's FEX tree (one FEX for both)
+      $B sync "$S/fex" fex-linux > /dev/null
       $B sync "$ROOT/eac-vm/image" mn-image > /dev/null
       $B ssh "set -e; sh mn-image/build-fex.sh > /dev/null; echo '$(stamp fex)' > fex-linux/build/Bin/.mn-source" ;;
     *) echo "usage: guest-stages.sh [wine|forwarder|dxmt|d3d|fonts|fex]..." >&2; exit 2 ;;

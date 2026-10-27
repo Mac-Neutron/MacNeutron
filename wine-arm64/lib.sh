@@ -15,11 +15,10 @@ need_tool() {  # need_tool <command> <brew formula> [keg]
 }
 die_if_missing() { [ -z "$missing" ] || die "missing tools: ${missing#, }"; }
 
-# What a source tree is: pinned (no tree yet: fetch and patch it), applied (HEAD is the commit recorded in the
-# applied file, nothing else changed: the patches are the truth), development (anything else, including a stash, a
-# second branch or a second worktree: build it as it is) or, when a series file and the current series hash are given,
-# reapply (an applied tree that was patched with another series: it holds no work of its own, so build.sh deletes it
-# and starts over).
+# What a source tree is: pinned (no tree yet: fetch it), applied (HEAD is the commit recorded in the applied file,
+# nothing else changed: the fork commit is the truth), development (anything else, including a stash, a second branch
+# or a second worktree: build it as it is) or, when a series file and the current pin are given, reapply (an applied
+# tree fetched at another pin: it holds no work of its own, so build.sh deletes it and starts over).
 build_mode() {  # build_mode <src-dir> <applied-file> [<series-file> <series>]
   [ -d "$1" ] || { echo pinned; return 0; }
   if [ -n "$(git -C "$1" status --porcelain)" ] || [ "$(git -C "$1" rev-parse HEAD)" != "$(cat "$2" 2> /dev/null)" ] \
@@ -39,26 +38,15 @@ stamp_of() {  # stamp_of <file>...
   { cat "$@"; printf '%s' "${MACNEUTRON_SIGN_IDENTITY:-}"; } | shasum -a 256 | cut -d ' ' -f 1
 }
 
-# What a tree has to be patched with: the pins and the patches, whatever the signing identity.
-series_of() {  # series_of <file>...
-  ( MACNEUTRON_SIGN_IDENTITY=; stamp_of "$@" )
-}
-
-# lsteamclient's series (ship-base spec §7): deps.pins' LSTEAMCLIENT_ lines alone (a tarball pin is no input of that
-# tree) and its patches.
-lsteamclient_series() {  # lsteamclient_series <deps.pins> <patch>...
-  _lsc_pins=$1; shift
-  for _lsc_f in "$_lsc_pins" "$@"; do [ -f "$_lsc_f" ] || die "no such build input: $_lsc_f"; done
-  { LC_ALL=C /usr/bin/grep -E '^LSTEAMCLIENT_' "$_lsc_pins"; cat "$@"; } | shasum -a 256 | cut -d ' ' -f 1
-}
-
-# The series each tree is patched with, as build.sh patches it, and the tree's build_mode against it (build.sh,
-# bundle.sh --release and release.sh agree through these). The caller sets ROOT; BUILD_DIR replaces build/.
+# Each tree's series: the commit of our fork it is pinned to (the fork's main carries our changes), and the tree's
+# build_mode against it (build.sh, bundle.sh --release and release.sh agree through these). The caller sets ROOT;
+# BUILD_DIR replaces build/.
 tree_series() {  # tree_series <wine|fex|dxmt|lsteamclient>
   case $1 in
-    wine|fex) series_of "$ROOT/wine-arm64/pins" "$ROOT/wine-arm64/patches/$1"/*.patch ;;
-    dxmt) series_of "$ROOT/dxmt/pins" "$ROOT/wine-arm64/patches/dxmt"/*.patch ;;
-    lsteamclient) lsteamclient_series "$ROOT/wine-arm64/deps.pins" "$ROOT/wine-arm64/patches/lsteamclient"/*.patch ;;
+    wine) ( . "$ROOT/wine-arm64/pins"; echo "$WINE_COMMIT" ) ;;
+    fex) ( . "$ROOT/wine-arm64/pins"; echo "$FEX_COMMIT" ) ;;
+    dxmt) ( . "$ROOT/dxmt/pins"; echo "$DXMT_COMMIT" ) ;;
+    lsteamclient) ( . "$ROOT/wine-arm64/deps.pins"; echo "$LSTEAMCLIENT_COMMIT" ) ;;
     *) die "no tree $1" ;;
   esac
 }
@@ -68,7 +56,7 @@ tree_mode() {  # tree_mode <tree>
 }
 
 # A bundle's licenses/SOURCE (ship-base spec §4, arm64 release spec §14): the inputs it is built from, each tree's
-# series (dev unless the tree is applied), the submodules and tarballs. build.sh writes the development one, naming
+# series (its pin; dev unless the tree is applied), the submodules and tarballs. build.sh writes the development one, naming
 # <mac>; bundle.sh --release writes the release bundle's own, naming HEAD.
 write_source() {  # write_source <out> <mac>
   (

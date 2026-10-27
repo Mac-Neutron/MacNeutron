@@ -24,7 +24,7 @@ S=${BUILD_DIR:-$ROOT/build}
 for p in host guest; do
   [ -s "$ROOT/pgo/$p.profdata" ] || die "pgo/$p.profdata is empty: no raw profile of that toolchain"
   ! LC_ALL=C /usr/bin/grep -qaF "$HOME/" "$ROOT/pgo/$p.profdata" || die "pgo/$p.profdata names $HOME"
-  echo "$p $(git -C "$ROOT" rev-parse --short=12 HEAD) dxmt $(rev "$S/wine-arm64-src/dxmt") wine-linux $(rev "$S/eac-vm-work/wine-linux") fex-linux $(rev "$S/eac-vm-work/fex-linux")" \
+  echo "$p $(git -C "$ROOT" rev-parse --short=12 HEAD) dxmt $(rev "$S/wine-arm64-src/dxmt") wine $(rev "$S/wine-arm64-src/wine") fex $(rev "$S/wine-arm64-src/fex")" \
     > "$ROOT/pgo/$p.stamp"
 done
 ls -la "$ROOT/pgo"

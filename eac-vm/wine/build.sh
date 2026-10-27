@@ -1,12 +1,12 @@
 #!/bin/sh
-# Builds our Wine (eac-vm/wine-patches on build/wine-arm64-src/wine) for x86-64 Linux, in the Fedora builder:
+# Builds our Wine (build/wine-arm64-src/wine, the Mac build's tree) for x86-64 Linux, in the Fedora builder:
 #   build.sh tools     Wine's build tools (winebuild, widl, wrc, ...) for the builder itself
 #   build.sh wine      the x86-64 Linux build against eac-vm/sysroot with new WoW64 (i386 and x86-64 PE code over the
 #                      64-bit Unix side: no 32-bit Linux libraries), PE side with clang + lld
 #   build.sh wine32    the i386 Linux build (old WoW64's 32-bit Unix side) against the multilib sysroot, joined to it
 #   build.sh resume    make again in an existing build
 #   build.sh install   make install into $STAGE (prefix /opt/mn-wine), the 32-bit build too unless WINE32=0
-# Sources in $SRC (rsync of build/eac-vm-work/wine-linux without .git). Logs beside each build directory.
+# Sources in $SRC (rsync of build/wine-arm64-src/wine without .git). Logs beside each build directory.
 set -eu
 SRC=${SRC:-$HOME/wine-src}
 TOOLS=${TOOLS:-$HOME/wine-tools}

@@ -44,7 +44,7 @@ public enum UpdateError: Error, Equatable, CustomStringConvertible {
 
 /// The app's own updates, from GitHub Releases.
 public enum Updater {
-    public static let releases = URL(string: "https://api.github.com/repos/chadouming/MacNeutron/releases?per_page=30")!
+    public static let releases = URL(string: "https://api.github.com/repos/Mac-Neutron/MacNeutron/releases?per_page=30")!
     public static let identifier = "io.github.chadouming.MacNeutron"
     /// Install MacNeutron's (spec 2026-10-25-macneutron-installer-design §3.1).
     public static let installerIdentifier = "io.github.chadouming.MacNeutron.Installer"

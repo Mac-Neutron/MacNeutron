@@ -3,9 +3,9 @@
 # the source of exactly what the bundle's SOURCE names. Checks, one FAIL line per gap, then PASS sources:
 # - each tree's tar names its applied commit (git get-tar-commit-id; lsteamclient's, a worktree tar, file by file against
 #   that commit's blobs); the repository's is MACNEUTRON_COMMIT;
-# - in the build trees (build/wine-arm64-src), <applied>~<patch count> is SOURCE's *_COMMIT, which is also the archived
-#   pins'; the patch count is the archived patch folder's;
-# - each *_SERIES recomputed from the archived pins and patches, with the archived lib.sh's tree_series;
+# - in the build trees (build/wine-arm64-src), the applied commit is SOURCE's *_COMMIT, which is also the archived
+#   pins' (the patch count is 0: our changes are our forks' commits);
+# - each *_SERIES recomputed from the archived pins, with the archived lib.sh's tree_series;
 # - each submodule's tar against the gitlink its tree records at the tree's applied commit, and against SOURCE's
 #   FEX_SUBMODULE_* and DXMT_SUBMODULE_*, one for one;
 # - each library built from its repository at SOURCE's *_COMMIT, which is also the archived deps.pins', and the
@@ -53,11 +53,10 @@ while read -r tree pinned applied n file; do
       [ "$applied" = "$(cat "$S/$tree.applied" 2> /dev/null)" ] || bad "$tree's applied $applied isn't $S/$tree.applied"
       c=$(git -C "$S/$tree" rev-parse "$applied~$n" 2> /dev/null || true)
       [ "$c" = "$pinned" ] || bad "$applied~$n in $S/$tree is ${c:-missing}, not the pin $pinned"
-      np=$(find "$M/wine-arm64/patches/$tree" -name '*.patch' | wc -l | tr -d ' ')
-      [ "$np" = "$n" ] || bad "$tree has $np archived patches, not $n"
+      [ "$n" = 0 ] || bad "$tree has $n patches, not our fork's commit alone"
       s=$( (ROOT=$M; . "$M/wine-arm64/lib.sh"; tree_series "$tree") ) || s=
       [ -n "$s" ] && [ "$s" = "$(key "${K}_SERIES")" ] \
-        || bad "${K}_SERIES isn't the archived pins and patches' (${s:-none})"
+        || bad "${K}_SERIES isn't the archived pins' (${s:-none})"
       ;;
     fex/* | dxmt/*)
       p=${tree%%/*}
@@ -68,13 +67,6 @@ while read -r tree pinned applied n file; do
       K=$(echo "${tree%%/*}" | tr '[:lower:]' '[:upper:]')
       subs="$subs${K}_SUBMODULE_${tree##*/}=$applied
 " ;;
-    wine-linux)  # the VM's Wine: eac-vm/wine-patches on BASE
-      b=$(cut -d' ' -f1 "$M/eac-vm/wine-patches/BASE")
-      np=$(find "$M/eac-vm/wine-patches" -name '*.patch' | wc -l | tr -d ' ')
-      case "$pinned" in "$b"*) ;; *) bad "wine-linux's base $pinned isn't eac-vm/wine-patches/BASE's $b" ;; esac
-      [ "$np" = "$n" ] || bad "wine-linux has $np archived patches, not $n"
-      c=$(git -C "${BUILD_DIR:-$ROOT/build}/eac-vm-work/wine-linux" rev-parse "$applied~$n" 2> /dev/null || true)
-      case "$c" in "$b"*) ;; *) bad "wine-linux's $applied~$n is ${c:-missing}, not BASE $b" ;; esac ;;
     libtasn1 | nettle | gnutls | freetype | ffmpeg)  # built from their repositories at wine-arm64/deps.pins' commits
       K=$(echo "$tree" | tr '[:lower:]' '[:upper:]')
       [ "$pinned" = "$(key "${K}_COMMIT")" ] && [ "$applied" = "$pinned" ] \
@@ -93,7 +85,7 @@ while read -r tree pinned applied n file; do
     *) bad "an unknown tree $tree in SOURCES.txt" ;;
   esac
 done < "$D/SOURCES.txt"
-for t in MacNeutron wine fex dxmt lsteamclient wine-linux erofs-utils lz4 libtasn1 nettle gnutls freetype ffmpeg \
+for t in MacNeutron wine fex dxmt lsteamclient erofs-utils lz4 libtasn1 nettle gnutls freetype ffmpeg \
   gnutls/gnulib gnutls/cligen freetype/subprojects/dlg; do
   awk -v t="$t" '$1 == t { f = 1 } END { exit !f }' "$D/SOURCES.txt" || bad "SOURCES.txt has no $t"
 done

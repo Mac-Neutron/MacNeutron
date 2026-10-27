@@ -1,14 +1,14 @@
 #!/bin/sh
-# Builds MacNeutron's own llvm-mingw into build/dxmt-src/llvm-mingw-own, once per recipe (this script, dxmt/pins'
-# LLVM_MINGW_* and wine-arm64/patches/llvm; llvm-mingw-own/.recipe), and prints its bin folder. dxmt/toolchain.sh
+# Builds MacNeutron's own llvm-mingw into build/dxmt-src/llvm-mingw-own, once per recipe (this script and dxmt/pins'
+# LLVM_MINGW_*; llvm-mingw-own/.recipe), and prints its bin folder. dxmt/toolchain.sh
 # calls it unless MACNEUTRON_TOOLCHAIN=upstream. Messages go to stderr; a full build takes about 40 minutes.
 #
 # Why our own: the release's LLVM can't tune Windows-side code for Apple CPUs. Apple tuning aligns fusible CMP/CSEL
 # and FCMP/FCSEL pairs to 64 bytes inside functions (AArch64CodeLayoutOpt), which leaves a function's length unknown
 # when MC writes its ARM64 SEH unwind info ("Failed to evaluate function length in SEH unwind info");
-# patches/llvm/0001 keeps every tuning but that one on Windows. And lld can't link ARM64EC bitcode against static
-# ARM64EC libraries ("undefined symbol: ... (EC symbol)", libc++'s): patches/llvm/0002 loads them, so ARM64EC code
-# (FEX's DLL, DXMT's) gets ThinLTO too; patches/llvm/0003 lets LTO read back the hybrid_patchable attribute Wine's
+# our LLVM fork (LLVM_MINGW_LLVM_REPO) keeps every tuning but that one on Windows. And lld can't link ARM64EC bitcode
+# against static ARM64EC libraries ("undefined symbol: ... (EC symbol)", libc++'s): the fork loads them, so ARM64EC
+# code (FEX's DLL, DXMT's) gets ThinLTO too, and lets LTO read back the hybrid_patchable attribute Wine's
 # headers put on ARM64EC functions ("Unknown attribute kind (95)"). Built for this Mac's CPU (-mcpu=apple-m5, MACNEUTRON_CPU), -O3 (LLVM's Release) with ThinLTO, without
 # LLDB or clang-tools-extra; runtimes for aarch64, arm64ec (ARM64X with aarch64), x86_64 and i686 (Wine's ARM64EC
 # modules' x64 sources, the x64 test programs), without Control Flow Guard (nothing here asks for -mguard=cf), the
@@ -22,7 +22,7 @@ S="$B/llvm-mingw-src"
 T="$B/dxmt-src/llvm-mingw-own"
 CPU="${MACNEUTRON_CPU:-apple-m5}"
 [ "$CPU" != generic ] || CPU=apple-m1
-recipe=$( { cat "$0" "$ROOT"/wine-arm64/patches/llvm/*.patch; echo "$LLVM_MINGW_COMMIT $LLVM_MINGW_LLVM $CPU"; } \
+recipe=$( { cat "$0"; echo "$LLVM_MINGW_COMMIT $LLVM_MINGW_LLVM_REPO $LLVM_MINGW_LLVM $CPU"; } \
   | shasum -a 256 | cut -d ' ' -f 1)
 if [ -x "$T/bin/aarch64-w64-mingw32-clang" ] && [ "$(cat "$T/.recipe" 2> /dev/null)" = "$recipe" ]; then
   echo "$T/bin"
@@ -41,14 +41,13 @@ if [ "$(git -C "$S/scripts" rev-parse HEAD 2> /dev/null)" != "$LLVM_MINGW_COMMIT
 fi
 cd "$S/scripts"
 git checkout -q -- .  # the runtime scripts' edits below are redone each time
-# LLVM at the tag llvm-mingw pins, our patches on top (a fresh checkout drops older ones).
-log env LLVM_VERSION="$LLVM_MINGW_LLVM" CHECKOUT_ONLY=1 SYNC=1 ./build-llvm.sh "$T.tmp"
+# LLVM at our fork's pinned commit (a clone from before the fork fetches from it now).
+[ ! -d llvm-project/.git ] || git -C llvm-project remote set-url origin "$LLVM_MINGW_LLVM_REPO"
+log env LLVM_REPOSITORY="$LLVM_MINGW_LLVM_REPO" LLVM_VERSION="$LLVM_MINGW_LLVM" CHECKOUT_ONLY=1 SYNC=1 \
+  ./build-llvm.sh "$T.tmp"
 git -C llvm-project checkout -q -f "$LLVM_MINGW_LLVM"
-for p in "$ROOT"/wine-arm64/patches/llvm/*.patch; do
-  log git -C llvm-project -c user.name=MacNeutron -c user.email=macneutron@localhost am -q "$p"
-done
 # The arm64 runtimes (ARM64X: aarch64 with arm64ec) for the CPU: libc++ and compiler-rt take it beside their own
-# flags. The patched LLVM builds them Apple-tuned.
+# flags. Our LLVM builds them Apple-tuned.
 sed -i '' 's/        EXTRA_CFLAGS="\$ARM64X_FLAGS"/        EXTRA_CFLAGS="\$ARM64X_FLAGS -mcpu='"$CPU"'"/' build-libcxx.sh
 sed -i '' 's/        FLAGS="\$ARM64X_FLAGS"/        FLAGS="\$ARM64X_FLAGS -mcpu='"$CPU"'"/' build-compiler-rt.sh
 grep -q "mcpu=$CPU" build-libcxx.sh && grep -q "mcpu=$CPU" build-compiler-rt.sh \

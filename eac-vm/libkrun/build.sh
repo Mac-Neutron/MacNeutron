@@ -1,19 +1,19 @@
 #!/bin/sh
-# Builds MacNeutron's libkrun: upstream main at the pinned commit (PIN) plus patches/*.patch, as a dylib for the microVM host.
-# Output: build/eac-vm-work/libkrun/{libkrun.1.dylib,include/libkrun.h}. Source: build/eac-vm-work/libkrun-src, where
-# branch `macneutron` is reset to the pin and the patches are applied with `git am` (so new patches are made there).
-# ffi exports the v2 C API (include/libkrun.h); gpu is the virtio-gpu device on patch 0005's dxmt context; input is
-# virtio-input, fed by eac-vm/host/input.c (include/libkrun_input.h); patch 0007's TpmDevice is a TPM 2.0 over TIS MMIO, its
-# commands run by eac-vm/host/tpm.c (include/libkrun_tpm.h); patch 0009's trap blobs call the handler macneutron-vm sets
-# (include/libkrun_trap.h); patch 0010 keeps a disk's last 4 KiB out of discards and write-zeroes, which imago would
-# otherwise serve by truncating the image; patch 0011 gives a read-only share no extended attributes; patch 0012 adds
-# krun_fs_device_new_simplified, a writable share whose files show as the guest user's, with no extended attributes
-# (macneutron-vm's --user-share); patch 0013 lets such a share cache attributes for 5 s as any share does (its one
-# guest user can't see another's answer; uncached, a game's folder read 8 times slower: tests/user-share-speed.sh);
-# patch 0014 answers a flush with ENOSYS, so the guest stops sending them (each close waited a round trip that only
-# duplicated and closed a host descriptor: the same test). include/libkrun.h is generated: a patch that changes the C API runs libkrun's
-# `make gen-libkrun-bindings` (ffier-gen-c-header at the ffier tag its Cargo.toml names) and commits the header and
-# bindings/ it writes, never a hand edit. The Makefile is skipped on purpose: on macOS it downloads a Debian sysroot for the guest init blob, which we don't use.
+# Builds MacNeutron's libkrun: our fork's main (github.com/Mac-Neutron/libkrun: upstream main with our commits) at the
+# pinned commit (PIN), as a dylib for the microVM host. Output: build/eac-vm-work/libkrun/{libkrun.1.dylib,
+# include/libkrun.h}. Source: build/eac-vm-work/libkrun-src, checked out at the pin (a change is committed there, pushed
+# to the fork's main, and pinned). Our commits: ffi exports the v2 C API (include/libkrun.h); gpu is the virtio-gpu
+# device on a dxmt context; input is virtio-input, fed by eac-vm/host/input.c (include/libkrun_input.h); a TpmDevice is
+# a TPM 2.0 over TIS MMIO, its commands run by eac-vm/host/tpm.c (include/libkrun_tpm.h); trap blobs call the handler
+# macneutron-vm sets (include/libkrun_trap.h); a disk's last 4 KiB stays out of discards and write-zeroes, which imago
+# would otherwise serve by truncating the image; a read-only share has no extended attributes;
+# krun_fs_device_new_simplified is a writable share whose files show as the guest user's, with no extended attributes
+# (macneutron-vm's --user-share), caching attributes for 5 s as any share does (its one guest user can't see another's
+# answer; uncached, a game's folder read 8 times slower: tests/user-share-speed.sh); a flush is answered with ENOSYS, so
+# the guest stops sending them (each close waited a round trip that only duplicated and closed a host descriptor: the
+# same test). include/libkrun.h is generated: a commit that changes the C API runs libkrun's `make gen-libkrun-bindings`
+# (ffier-gen-c-header at the ffier tag its Cargo.toml names) and commits the header and bindings/ it writes, never a
+# hand edit. The Makefile is skipped on purpose: on macOS it downloads a Debian sysroot for the guest init blob, which we don't use.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 HERE=$ROOT/eac-vm/libkrun
@@ -22,13 +22,11 @@ OUT=${BUILD_DIR:-$ROOT/build}/eac-vm-work/libkrun
 set -- $(cat "$HERE/PIN"); TAG=$1; SHA=$2
 CARGO=${CARGO:-$(brew --prefix rustup)/bin/cargo}
 
-[ -d "$SRC/.git" ] || git clone -q --branch "$TAG" https://github.com/containers/libkrun.git "$SRC"
+REPO=https://github.com/Mac-Neutron/libkrun.git
+[ -d "$SRC/.git" ] || git clone -q --branch "$TAG" "$REPO" "$SRC"
+git -C "$SRC" remote set-url origin "$REPO"
 git -C "$SRC" cat-file -e "$SHA^{commit}" 2>/dev/null || git -C "$SRC" fetch -q origin "$TAG"
-git -C "$SRC" checkout -q -B macneutron "$SHA"
-for p in "$HERE"/patches/*.patch; do
-  [ -e "$p" ] || continue
-  git -C "$SRC" am -q --committer-date-is-author-date "$p" || { git -C "$SRC" am --abort; echo "patch failed: $p" >&2; exit 1; }
-done
+git -C "$SRC" checkout -q --detach "$SHA"
 # No build paths in the library (a release refuses them; panics name sources): Cargo's registry and this tree remapped.
 # CARGO_ENCODED_RUSTFLAGS (0x1f between flags): a path with spaces stays one flag.
 CARGO_ENCODED_RUSTFLAGS=$(printf '%s\037%s\037%s' "--remap-path-prefix=$HOME/.cargo=/cargo" \

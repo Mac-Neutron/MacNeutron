@@ -105,7 +105,7 @@ In Steam, start launch options with `/usr/bin/env`. macOS Steam runs them withou
 ## Graphics
 
 Games use DXMT by default, an open-source Direct3D → Metal translator. MacNeutron builds it from its own fork,
-[chadouming/dxmt](https://github.com/chadouming/dxmt), with Direct3D 12 enabled. DXMT is LGPL-2.1+: the licences ship
+[Mac-Neutron/dxmt](https://github.com/Mac-Neutron/dxmt), with Direct3D 12 enabled. DXMT is LGPL-2.1+: the licences ship
 in `wine.app/Contents/Resources/DXMT` (`COPYING.LIB`, `LICENSE`, `LICENSE.OLD`), and the fork commit is in its `version` file. The fork's
 changes are AI-assisted and never go to DXMT upstream, per its contribution policy.
 
@@ -123,7 +123,7 @@ pipeline. If a Direct3D 12 game that worked in 0.3 fails now,
 covers Direct3D 10-11 only.
 
 Direct3D 9 runs on [mtld3d](https://github.com/athei/mtld3d) 0.14.1 (zlib), a Direct3D 9 → Metal layer that
-`wine.app` ships as Wine's `d3d9.dll`, in the DXMT fork's `mtld3d/` (the patches in `wine-arm64/patches/dxmt`). It
+`wine.app` ships as Wine's `d3d9.dll`, in our DXMT fork's `mtld3d/`. It
 replaces Wine's own Direct3D 9 (wined3d) with either Graphics setting: there is no OpenGL fallback for a Direct3D 9
 game, and Wine's video renderers (EVR, VMR-9) draw through it too (EVR's frame grab, `GetCurrentImage`, fails on it
 for now). It writes its log to

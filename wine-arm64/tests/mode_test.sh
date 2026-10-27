@@ -1,5 +1,5 @@
 #!/bin/sh
-# lib.sh's build_mode, series_of, stamp_of and need_tool, against a scratch repo (native arm64 plan, Task 1). No network.
+# lib.sh's build_mode, tree_series, stamp_of and need_tool, against a scratch repo (native arm64 plan, Task 1). No network.
 set -eu
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 . "$ROOT/wine-arm64/lib.sh"
@@ -7,22 +7,20 @@ T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 g() { git -C "$T/r" -c user.name=t -c user.email=t@t "$@"; }
 
-# The series is the pins and the patches, whatever the signing identity.
-mkdir "$T/p"; echo pins > "$T/pins"; echo one > "$T/p/0001.patch"
-s=$(series_of "$T/pins" "$T/p"/*.patch)
-[ "$s" = "$(MACNEUTRON_SIGN_IDENTITY=other series_of "$T/pins" "$T/p"/*.patch)" ]
-echo two > "$T/p/0002.patch"; [ "$(series_of "$T/pins" "$T/p"/*.patch)" != "$s" ]  # a patch was added
-rm "$T/p/0002.patch";         [ "$(series_of "$T/pins" "$T/p"/*.patch)" = "$s" ]
-echo pins2 > "$T/pins";       [ "$(series_of "$T/pins" "$T/p"/*.patch)" != "$s" ]  # a pin moved
-echo pins > "$T/pins"
+# A tree's series is its pin: the fork commit its pins file names.
+mkdir -p "$T/root/wine-arm64" "$T/root/dxmt"
+printf 'WINE_COMMIT=w1\nFEX_COMMIT=f1\n' > "$T/root/wine-arm64/pins"; echo DXMT_COMMIT=d1 > "$T/root/dxmt/pins"
+echo LSTEAMCLIENT_COMMIT=l1 > "$T/root/wine-arm64/deps.pins"
+[ "$( (ROOT=$T/root; for t in wine fex dxmt lsteamclient; do tree_series $t; done) | tr '\n' ' ')" = "w1 f1 d1 l1 " ]
+s=w1
 
 git init -q "$T/r"; echo a > "$T/r/f"; g add f; g commit -qm init
 [ "$(build_mode "$T/missing" "$T/a")" = pinned ]
 git -C "$T/r" rev-parse HEAD > "$T/a"; [ "$(build_mode "$T/r" "$T/a")" = applied ]
 echo "$s" > "$T/s"
 [ "$(build_mode "$T/r" "$T/a" "$T/s" "$s")" = applied ]
-[ "$(build_mode "$T/r" "$T/a" "$T/s" other)" = reapply ]   # patched with another series
-[ "$(build_mode "$T/r" "$T/a" "$T/none" "$s")" = reapply ] # no series recorded
+[ "$(build_mode "$T/r" "$T/a" "$T/s" other)" = reapply ]   # fetched for another pin
+[ "$(build_mode "$T/r" "$T/a" "$T/none" "$s")" = reapply ] # no pin recorded
 # Work kept outside the checkout counts too: reapply would delete it with the tree.
 echo y >> "$T/r/f"; g stash -q;        [ "$(build_mode "$T/r" "$T/a" "$T/s" other)" = development ]  # a stash
 g stash drop -q;                       [ "$(build_mode "$T/r" "$T/a" "$T/s" other)" = reapply ]
@@ -31,7 +29,7 @@ g branch -qD other
 g worktree add -q --detach "$T/wt";    [ "$(build_mode "$T/r" "$T/a" "$T/s" other)" = development ]  # another worktree
 g worktree remove "$T/wt";             [ "$(build_mode "$T/r" "$T/a" "$T/s" other)" = reapply ]
 echo x >> "$T/r/f";                    [ "$(build_mode "$T/r" "$T/a")" = development ]  # dirty
-[ "$(build_mode "$T/r" "$T/a" "$T/s" other)" = development ]  # work in the tree wins over a changed series
+[ "$(build_mode "$T/r" "$T/a" "$T/s" other)" = development ]  # work in the tree wins over a moved pin
 g commit -qam e;                       [ "$(build_mode "$T/r" "$T/a")" = development ]  # ahead of .applied
 [ "$(build_mode "$T/r" "$T/a" "$T/s" other)" = development ]
 rm "$T/a";                             [ "$(build_mode "$T/r" "$T/a")" = development ]  # no .applied at all
@@ -48,7 +46,7 @@ out=$( (die_if_missing) 2>&1 ) && st=0 || st=$?
 
 # build.sh's stamp names every file of this repo that its build runs (build.sh, bundle.sh and the mtld3d scripts they
 # call): a change to one that the stamp misses builds as up to date.
-stamp=$(sed -n '/^stamp=\$(stamp_of/,/patches\/llvm\/\*\.patch)$/p' "$ROOT/wine-arm64/build.sh")
+stamp=$(sed -n '/^stamp=\$(stamp_of/,/mtld3d-layout32-check\.sh")$/p' "$ROOT/wine-arm64/build.sh")
 for f in wine-arm64/build.sh wine-arm64/bundle.sh dxmt/mtld3d-build.sh dxmt/mtld3d-tools.sh; do
   /usr/bin/grep -oE '\$ROOT/[A-Za-z0-9_./-]+\.(sh|py|swift|txt|plist|entitlements|m|mm|cpp|metal|md)\b|\$ROOT/[A-Za-z0-9_./-]*/pins\b' \
     "$ROOT/$f"

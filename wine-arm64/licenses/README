@@ -1,33 +1,33 @@
 Licences of the components in wine.app
 
 Each component, its licence, where its licence texts are in this bundle, and where its source is. SOURCE (beside this
-file) names the exact inputs this bundle was built from: upstream commits, the hash of the MacNeutron patch series
-applied to each tree ("dev" for a tree built with unexported work), and the source tarballs' URLs and SHA-256. The
-patches and pins are in the MacNeutron repository (https://github.com/chadouming/MacNeutron), at the commit SOURCE's
-MACNEUTRON_COMMIT names. NOTICES.md quotes the notices that live only in source headers. Not legal advice.
+file) names the exact inputs this bundle was built from: the commits of our forks (https://github.com/Mac-Neutron:
+upstream with MacNeutron's changes; each tree's *_SERIES is its pin, "dev" for a tree built with unpublished work),
+the other upstream commits, and the source tarballs' URLs and SHA-256. The pins are in the MacNeutron repository
+(https://github.com/Mac-Neutron/MacNeutron), at the commit SOURCE's MACNEUTRON_COMMIT names. NOTICES.md quotes the notices that live only in source headers. Not legal advice.
 
 Wine 11.20 (the loader, wineserver, Wine's libraries and programs)
   Licence: LGPL-2.1-or-later. Texts: wine/LICENSE, wine/COPYING.LIB, wine/AUTHORS; Wine's vendored libraries are
   listed in wine/NOTICES.md, and GSM (wine/gsm-COPYRIGHT) and FAudio (zlib licence, wine/faudio-LICENSE) carry their
-  own texts. msync (patch 0015) and its helpers adapted from Apple's xnu (APSL-2.0): NOTICES.md. libxess.dll's XeSS
+  own texts. msync (from CrossOver) and its helpers adapted from Apple's xnu (APSL-2.0): NOTICES.md. libxess.dll's XeSS
   declarations, copied from Intel's public headers (MIT): NOTICES.md.
   The ARM64 string routines in msvcrt.dll, ucrtbase.dll and msvcr80-120.dll come from Arm Optimized Routines (MIT): NOTICES.md.
-  Source: https://gitlab.winehq.org/wine/wine.git at WINE_COMMIT (tag wine-11.20), with the patches in the
-  repository's wine-arm64/patches/wine (pinned in wine-arm64/pins).
+  Source: https://github.com/Mac-Neutron/wine.git at WINE_COMMIT (pinned in wine-arm64/pins): Wine
+  (https://gitlab.winehq.org/wine/wine.git) with MacNeutron's changes.
 
 FEX (libarm64ecfex.dll and libarm64ecfex.so: runs x86_64 code)
-  Licence: MIT, fex/LICENSE; MacNeutron's patches to it are MIT too. Compiled-in externals, each with its text in
+  Licence: MIT, fex/LICENSE; MacNeutron's changes to it are MIT too. Compiled-in externals, each with its text in
   fex/: fmt (MIT), xxhash (BSD-2-Clause), tiny-json (MIT), unordered_dense (MIT), rpmalloc (0BSD), cephes (BSD),
   range-v3 (Boost Software Licence 1.0), cpp-optparse (MIT). SoftFloat-3e (BSD-3-Clause), the VIXL utilities
-  (BSD-3-Clause), musl and Arm's routines (MIT) and Madeira's patches (MIT grant): NOTICES.md.
-  Source: https://github.com/FEX-Emu/FEX.git at FEX_COMMIT with its submodules at the FEX_SUBMODULE_* commits, and
-  the patches in the repository's wine-arm64/patches/fex (pinned in wine-arm64/pins).
+  (BSD-3-Clause), musl and Arm's routines (MIT), Madeira's commits (MIT grant) and eac-arm64-emulation-poc's (MIT): NOTICES.md.
+  Source: https://github.com/Mac-Neutron/FEX.git at FEX_COMMIT (pinned in wine-arm64/pins): FEX
+  (https://github.com/FEX-Emu/FEX.git) with MacNeutron's changes, its submodules at the FEX_SUBMODULE_* commits.
 
 DXMT (the Direct3D to Metal DLLs in ../DXMT/aarch64-windows, winemetal.dll and winemetal.so)
   Licence: LGPL-2.1-or-later. Texts: ../DXMT/LICENSE, ../DXMT/COPYING.LIB, ../DXMT/LICENSE.OLD (MIT, for releases up
   to v0.80). DXBCParser (MIT, Microsoft) and the constexpr GUID parser (MIT): NOTICES.md.
-  Source: https://github.com/chadouming/dxmt.git at DXMT_COMMIT (../DXMT/version names it too) with its submodules
-  at the DXMT_SUBMODULE_* commits, and the patches in the repository's wine-arm64/patches/dxmt (pinned in dxmt/pins).
+  Source: https://github.com/Mac-Neutron/dxmt.git at DXMT_COMMIT (pinned in dxmt/pins; ../DXMT/version names it too):
+  DXMT (https://github.com/3Shain/dxmt.git) with MacNeutron's changes, its submodules at the DXMT_SUBMODULE_* commits.
 
 mtld3d 0.14.1 (Direct3D 9: d3d9.dll and mtld3d.dll in lib/wine/aarch64-windows, mtld3d.so in lib/wine/aarch64-unix)
   Licence: zlib, mtld3d/LICENSE. The crates its binaries link (snmalloc-sys among them, MIT, with MacNeutron's ARM64EC
@@ -35,8 +35,8 @@ mtld3d 0.14.1 (Direct3D 9: d3d9.dll and mtld3d.dll in lib/wine/aarch64-windows, 
   snmalloc's C++, which snmalloc-sys compiles in, MIT, Microsoft Corporation, mtld3d/crates/snmalloc-sys-*/
   LICENSE-snmalloc. Rust's standard library, which the binaries link: mtld3d/rust/COPYRIGHT-library.html and the texts
   it names in mtld3d/rust/licenses, from the Rust toolchain dxmt/pins names (MTLD3D_RUST).
-  Source: https://github.com/athei/mtld3d.git at release 0.14.1 (0c172127), in the DXMT fork's mtld3d/ with the
-  patches in the repository's wine-arm64/patches/dxmt; the crates from crates.io at the versions mtld3d's Cargo.lock
+  Source: https://github.com/athei/mtld3d.git at release 0.14.1 (0c172127), in our DXMT fork's mtld3d/ at
+  DXMT_COMMIT; the crates from crates.io at the versions mtld3d's Cargo.lock
   files pin.
 
 LLVM 15.0.7 (linked statically into winemetal.so)
@@ -49,8 +49,8 @@ runtime)
   Licence: Apache-2.0 WITH LLVM-exception, llvm-mingw/LICENSE.TXT; the mingw-w64 runtime,
   llvm-mingw/COPYING.MinGW-w64-runtime.txt.
   Source: MacNeutron's own build (the repository's dxmt/llvm-mingw.sh) of https://github.com/mstorsjo/llvm-mingw.git at
-  dxmt/pins' LLVM_MINGW_COMMIT, with the LLVM it pins (LLVM_MINGW_LLVM) and the repository's wine-arm64/patches/llvm
-  on top; the mingw-w64 sources its scripts fetch are listed at https://github.com/mstorsjo/llvm-mingw.
+  dxmt/pins' LLVM_MINGW_COMMIT, with LLVM from https://github.com/Mac-Neutron/llvm-project.git at dxmt/pins'
+  LLVM_MINGW_LLVM (LLVM with MacNeutron's changes); the mingw-w64 sources its scripts fetch are listed at https://github.com/mstorsjo/llvm-mingw.
 
 FreeType 2.15.0, development head (libfreetype.6.dylib: text rendering in win32u and dwrite)
   Licence: the FreeType License (FTL), elected from FreeType's FTL-or-GPL-2.0 choice. Texts: freetype/LICENSE.TXT,
@@ -99,15 +99,15 @@ steamclient.dylib)
   Licence: Valve's Steamworks SDK licence, lsteamclient/LICENSE (lsteamclient is Steamworks-SDK-derived); its cxx.h is
   LGPL-2.1-or-later (CodeWeavers, from Wine), lsteamclient/NOTE. It ships by the maintainer's decision of 2026-10-04
   under Valve's Steamworks SDK licence (lsteamclient/).
-  Source: https://github.com/ValveSoftware/Proton.git, its lsteamclient/ folder at LSTEAMCLIENT_COMMIT (pinned in
-  wine-arm64/deps.pins), with the patches in the repository's wine-arm64/patches/lsteamclient (dappermint/winecx's
-  three Mac fixes).
+  Source: https://github.com/Mac-Neutron/Proton.git, its lsteamclient/ folder at LSTEAMCLIENT_COMMIT (pinned in
+  wine-arm64/deps.pins): Proton (https://github.com/ValveSoftware/Proton.git) with dappermint/winecx's three Mac
+  fixes.
 
 MacNeutron (libmacneutron-present.dylib and libmacneutron-present.metallib, the MetalFX presenter)
   Licence: MIT, macneutron/LICENSE; its CMAA2 anti-aliasing shader (libmacneutron-present.metallib) is Apache-2.0
   (Intel), macneutron/CMAA2-LICENSE.txt and NOTICES.md.
-  Source: the repository at MACNEUTRON_COMMIT: presenter/present.m and presenter/cmaa2.metal. The patch files in
-  wine-arm64/patches keep the licence of the tree they patch (Wine and DXMT: LGPL-2.1-or-later; FEX: MIT;
-  lsteamclient: Valve's terms).
+  Source: the repository at MACNEUTRON_COMMIT: presenter/present.m and presenter/cmaa2.metal. MacNeutron's changes in
+  our forks keep the licence of the tree they change (Wine and DXMT: LGPL-2.1-or-later; FEX: MIT; lsteamclient:
+  Valve's terms).
 
 FreeType: Portions of this software are copyright © The FreeType Project (www.freetype.org). All rights reserved.

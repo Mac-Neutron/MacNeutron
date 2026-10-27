@@ -1,4 +1,4 @@
-// MacNeutron's MetalFX presenter, loaded by DXMT's winemetal.so (wine-arm64/patches/dxmt/0002) when the launcher sets
+// MacNeutron's MetalFX presenter, loaded by DXMT's winemetal.so (our DXMT fork) when the launcher sets
 // MACNEUTRON_PRESENT=1.
 // When a game's drawable is smaller than the pixels its layer covers (a lower in-game resolution, or Wine's
 // half-density rendering on a Retina screen), it upscales the frame with MetalFX into an overlay layer on top,

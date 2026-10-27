@@ -1,10 +1,10 @@
-.PHONY: build test smoke app release bridge bridge-check presenter presenter-check dxmt-tests dxmt-tests-arm64ec dxmt-check dxil-corpus wine-arm64 wine-arm64-export wine-arm64-tests wine-arm64-check media-check lanes-check wine-arm64-winetests
+.PHONY: build test smoke app release bridge bridge-check presenter presenter-check dxmt-tests dxmt-tests-arm64ec dxmt-check dxil-corpus wine-arm64 wine-arm64-tests wine-arm64-check media-check lanes-check wine-arm64-winetests
 
 APP = build/MacNeutron.app
 # Every Windows-side binary is built with MacNeutron's own llvm-mingw (Clang); dxmt/toolchain.sh builds it once.
 MINGW_BIN = $(shell sh dxmt/toolchain.sh)
 # The arm64 Windows side's CPU, wine-arm64/build.sh's MACNEUTRON_CPU (the M1 baseline for generic). -O3 and
-# ThinLTO throughout (ARM64EC's needs our llvm-mingw's lld, wine-arm64/patches/llvm/0002).
+# ThinLTO throughout (ARM64EC's needs our llvm-mingw's lld, from our LLVM fork).
 MACNEUTRON_CPU ?= apple-m5
 PE_MARCH = $(if $(filter generic,$(MACNEUTRON_CPU)),-march=armv8.5-a+fp16fml+aes+sha3,-mcpu=$(MACNEUTRON_CPU))
 MINGW = $(MINGW_BIN)/x86_64-w64-mingw32-clang -O3 -flto=thin -static -s
@@ -134,10 +134,6 @@ release:
 # First run: shallow clones of Wine, FEX and DXMT, an arm64 LLVM build and some compiling; see wine-arm64/build.sh.
 wine-arm64:
 	sh wine-arm64/build.sh
-
-# Commits made in build/wine-arm64-src/wine, fex and dxmt back into wine-arm64/patches/wine, fex and dxmt.
-wine-arm64-export:
-	sh wine-arm64/export.sh
 
 # Test programs for the arm64 stack, built in parallel. The file name's prefix picks the compiler (arm64-, arm64ec-,
 # x64-); a program that needs more flags sets WA_FLAGS_<name> (arm64ec-viewec: -lonecore), which comes last. x64-bench, a

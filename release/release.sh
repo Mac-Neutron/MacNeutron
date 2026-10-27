@@ -73,7 +73,7 @@ check_notary_profile() {  # check_notary_profile <profile>: notarytool signs in 
   xcrun notarytool history -p "$1" > /dev/null 2>&1 \
     || { echo "release: the notary profile $1 isn't usable (xcrun notarytool store-credentials $1)" >&2; return 1; }
 }
-check_trees() {  # check_trees: the four trees in build/wine-arm64-src are applied (the patches are the truth)
+check_trees() {  # check_trees: the four trees in build/wine-arm64-src are applied (the fork pins are the truth)
   r=0
   for t in wine fex dxmt lsteamclient; do
     m=$(tree_mode "$t")
@@ -81,9 +81,9 @@ check_trees() {  # check_trees: the four trees in build/wine-arm64-src are appli
   done
   return $r
 }
-check_dxmt() {  # check_dxmt <fork clone> <commit>: published on the fork's macneutron branch (LGPL)
+check_dxmt() {  # check_dxmt <fork clone> <commit>: published on the fork's main branch (LGPL)
   sh "$ROOT/dxmt/published.sh" "$1" "$2" \
-    || { echo "release: DXMT_COMMIT $2 is not on the fork's macneutron branch" >&2; return 1; }
+    || { echo "release: DXMT_COMMIT $2 is not on the fork's main branch" >&2; return 1; }
 }
 check_source() {  # check_source <SOURCE> <head>: the release bundle's SOURCE names applied trees and HEAD (§6.3 step 2)
   [ -f "$1" ] || { echo "release: no SOURCE at $1" >&2; return 1; }
@@ -377,16 +377,16 @@ self_test() {
   refused "a SOURCE from another commit" "release: SOURCE MACNEUTRON_COMMIT $h1 is not HEAD $h" \
     check_source "$T/SOURCE.old" "$h"
 
-  # DXMT_COMMIT on the fork's macneutron branch (LGPL), with a local bare repository as the fork.
+  # DXMT_COMMIT on the fork's main branch (LGPL), with a local bare repository as the fork.
   git init -q --bare "$T/fork.git"
   git clone -q "$T/fork.git" "$T/dxmt" 2> /dev/null
   commit "$T/dxmt" pushed
-  git -C "$T/dxmt" push -q origin HEAD:macneutron
+  git -C "$T/dxmt" push -q origin HEAD:main
   pushed=$(git -C "$T/dxmt" rev-parse HEAD)
   commit "$T/dxmt" local
   passes "a published DXMT commit" check_dxmt "$T/dxmt" "$pushed"
   refused "an unpublished DXMT commit" \
-    "release: DXMT_COMMIT $(git -C "$T/dxmt" rev-parse HEAD) is not on the fork's macneutron branch" \
+    "release: DXMT_COMMIT $(git -C "$T/dxmt" rev-parse HEAD) is not on the fork's main branch" \
     check_dxmt "$T/dxmt" "$(git -C "$T/dxmt" rev-parse HEAD)"
 
   # The VM's helpers: the hardened runtime, and the entitlements they need.
@@ -415,12 +415,12 @@ self_test() {
     -cJf "$T/rooted.tar.xz" .
   passes "an archive of root's entries" check_archive_owners "$T/rooted.tar.xz"
   passes "parts naming no path of this Mac" check_parts_paths "$T/parts"
-  passes "a stage built from these trees" check_stamp wine "wine-linux a" "wine-linux a"
+  passes "a stage built from these trees" check_stamp wine "wine a" "wine a"
   refused "a stage built from other trees" \
-    "release: the VM's wine was built from wine-linux b, not wine-linux a: rebuild it (eac-vm/image/guest-stages.sh wine)" \
-    check_stamp wine "wine-linux b" "wine-linux a"
+    "release: the VM's wine was built from wine b, not wine a: rebuild it (eac-vm/image/guest-stages.sh wine)" \
+    check_stamp wine "wine b" "wine a"
   refused "a stage with no stamp" "release: the VM's fex has no stamp: rebuild it (eac-vm/image/guest-stages.sh fex)" \
-    check_stamp fex "" "fex-linux a"
+    check_stamp fex "" "fex a"
   echo "$HOME/x" > "$T/parts/leak.dll"
   refused "parts naming this Mac's home folder" "release: the VM parts name a build or home path: leak.dll " \
     check_parts_paths "$T/parts"
@@ -883,7 +883,7 @@ rm -rf "$OUT/vm-parts"
 check_sparse_template "$OUT/$PARTS" || exit 1
 KVER=$(sed -n 's/^KVER=//p' "$ROOT/eac-vm/image/build.sh")
 python3 "$ROOT/eac-vm/setup/manifest.py" "$OUT/$PARTS" "$EW/images/setup/packages.json" "$KVER" \
-  "$EW/images/x86-64-rootfs.erofs" "https://github.com/chadouming/MacNeutron/releases/download/v$V/$PARTS" \
+  "$EW/images/x86-64-rootfs.erofs" "https://github.com/Mac-Neutron/MacNeutron/releases/download/v$V/$PARTS" \
   > "$OUT/vm-manifest.json" || die "manifest.py failed"
 check_vm_manifest "$OUT/vm-manifest.json" "$OUT/$PARTS" || exit 1
 # Every pinned package still downloads from Fedora (its mirrors, or Koji under its source package's name): the setup

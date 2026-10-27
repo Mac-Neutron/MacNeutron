@@ -12,10 +12,10 @@ dirty() { [ -z "$(git -C "$1" status --porcelain -- "${2:-.}")" ] || printf +dir
 rev() { printf '%s%s' "$(git -C "$1" rev-parse HEAD)" "$(dirty "$1")"; }
 here() { printf '%s%s' "$(git -C "$ROOT" rev-parse "HEAD:$1")" "$(dirty "$ROOT" "$1")"; }
 case ${1:-} in
-  wine) echo "wine-linux $(rev "$W/wine-linux") lsteamclient $(rev "$S/lsteamclient") build $(here eac-vm/wine)" ;;
+  wine) echo "wine $(rev "$S/wine") lsteamclient $(rev "$S/lsteamclient") build $(here eac-vm/wine)" ;;
   forwarder) echo "steam-forward $(here eac-vm/steam-forward) lsteamclient $(rev "$S/lsteamclient")" ;;
   dxmt) echo "dxmt $(rev "$S/dxmt") build $(here eac-vm/dxmt) metal $(here eac-vm/metal) d3d $(here eac-vm/d3d)" ;;
   d3d) echo "d3d $(here eac-vm/d3d) dxmt $(rev "$S/dxmt")" ;;
-  fex) echo "fex-linux $(rev "$W/fex-linux")" ;;
+  fex) echo "fex $(rev "$S/fex")" ;;
   *) echo "usage: stamps.sh wine|forwarder|dxmt|d3d|fex" >&2; exit 2 ;;
 esac

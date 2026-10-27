@@ -1,6 +1,6 @@
 # Third-party sources wine.app is built from beside Wine, FEX and DXMT (ship-base spec §5, §7), sourced by
-# wine-arm64/build.sh and export.sh. In the build stamp, not in the Wine, FEX or DXMT patch series: editing this file
-# never re-clones Wine or FEX.
+# wine-arm64/build.sh. In the build stamp, not in the Wine, FEX or DXMT pins: editing this file never re-clones Wine
+# or FEX.
 # FreeType (libfreetype.6.dylib), gnutls with libtasn1, nettle and gmp linked into it (libgnutls.30.dylib), and FFmpeg
 # (libavutil.61, libavcodec.63, libavformat.63, libswscale.10 and libswresample.7 .dylib; video playback spec §6): each
 # project's development head. A git source is <NAME>_REPO at <NAME>_COMMIT, its submodules at the commits it records,
@@ -19,8 +19,8 @@ GMP_URL=https://gmplib.org/download/snapshot/gmp-next/gmp-6.3.0-20260920180220.t
 GMP_SHA256=a625d1bdf36b096117fac26463ab9c6037b2e678d7e98b8711783c25a8894d16
 FFMPEG_REPO=https://git.ffmpeg.org/ffmpeg.git
 FFMPEG_COMMIT=3719f257cf76e4463adc8b5b77029c3594def120
-# lsteamclient, the Steam bridge (spec §7): Proton's lsteamclient/ folder at this commit of its bleeding-edge branch,
-# a sparse, blob-filtered checkout without the Steamworks SDK folders, with wine-arm64/patches/lsteamclient on top. Its
-# series is these LSTEAMCLIENT_ lines and those patches: a tarball pin never re-fetches it.
-LSTEAMCLIENT_REPO=https://github.com/ValveSoftware/Proton.git
-LSTEAMCLIENT_COMMIT=04fb77ea179b2a358cf36bb9d6736d734fdcddc1
+# lsteamclient, the Steam bridge (spec §7): the lsteamclient/ folder of our Proton fork's main (Proton's bleeding-edge
+# with our changes) at this commit, a sparse, blob-filtered checkout without the Steamworks SDK folders. Its pin is
+# LSTEAMCLIENT_COMMIT alone: a tarball pin never re-fetches it.
+LSTEAMCLIENT_REPO=https://github.com/Mac-Neutron/Proton.git
+LSTEAMCLIENT_COMMIT=59b9eee05e1d2bcf65fed128250f92b4ed3d5a02

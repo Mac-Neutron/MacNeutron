@@ -1,6 +1,6 @@
 #!/bin/sh
-# Builds our FEX for the guest (Linux arm64) in the builder: ~/fex-linux holds build/eac-vm-work/fex-linux (our FEX's
-# macneutron branch + eac-vm/fex-patches), synced without .git or the test binaries. The prefix is /usr, as the image
+# Builds our FEX for the guest (Linux arm64) in the builder: ~/fex-linux holds build/wine-arm64-src/fex (our FEX fork
+# at wine-arm64/pins' FEX_COMMIT, the Mac build's tree), synced without .git or the test binaries. The prefix is /usr, as the image
 # installs it: FEX reads its global config from <prefix>/share/fex-emu.
 set -eu
 SRC=${1:-$HOME/fex-linux}

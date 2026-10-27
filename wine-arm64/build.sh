@@ -1,8 +1,8 @@
 #!/bin/sh
-# Builds MacNeutron's arm64 Wine (pins' master commit + wine-arm64/patches/wine) into build/wine-arm64-src/wine-build,
-# against FreeType, gnutls and FFmpeg built from wine-arm64/deps.pins' tarballs into deps, FEX (+ wine-arm64/patches/fex) into
-# fex-ec and fex-unixlib, DXMT (dxmt/pins' commit + wine-arm64/patches/dxmt) for ARM64X into dxmt-install, and Proton's
-# lsteamclient (deps.pins' commit + wine-arm64/patches/lsteamclient) as one of Wine's DLLs, then stages the signed
+# Builds MacNeutron's arm64 Wine (pins' commit of our Wine fork) into build/wine-arm64-src/wine-build, against
+# FreeType, gnutls and FFmpeg built from wine-arm64/deps.pins' tarballs into deps, FEX (our fork, at pins' commit) into
+# fex-ec and fex-unixlib, DXMT (our fork, at dxmt/pins' commit) for ARM64X into dxmt-install, and lsteamclient (our
+# Proton fork, at deps.pins' commit) as one of Wine's DLLs, then stages the signed
 # build/wine-arm64/wine.app (native arm64 spec §5.4, §6.3; arm64 DXMT spec §4; ship-base spec §5, §7; video playback
 # spec §6). Never installs tools. Needs MACNEUTRON_SIGN_IDENTITY and MACNEUTRON_PROVISIONING_PROFILE.
 # BUILD_DIR replaces build/ (tests).
@@ -23,16 +23,11 @@ F="$SRC/fex"
 D="$SRC/dxmt"
 LSC="$SRC/lsteamclient"
 DEPS="$SRC/deps"
-# What each tree was patched to, kept outside it so they never count as changes: <repo>.applied, HEAD after the
-# patches went on, and <repo>.series, the hash of the series (pins and patches) that went on. A tree at that HEAD with
-# another series is started over.
-PATCHES="$ROOT/wine-arm64/patches/wine"
-FEX_PATCHES="$ROOT/wine-arm64/patches/fex"
-DXMT_PATCHES="$ROOT/wine-arm64/patches/dxmt"
-LSC_PATCHES="$ROOT/wine-arm64/patches/lsteamclient"
+# What each tree was fetched at, kept outside it so they never count as changes: <repo>.applied, HEAD after the
+# fetch, and <repo>.series, the pin it was fetched for. A tree at that HEAD with another pin is started over.
 
 # 1. Tools, all named at once. bison and flex are keg-only: Homebrew's go first on PATH. The build doesn't run autoconf;
-#    the development loop does, for a patch that changes configure.ac (README).
+#    the development loop does, for a commit that changes configure.ac (README).
 need_tool autoconf autoconf; need_tool bison bison keg; need_tool flex flex keg; need_tool cmake cmake
 need_tool ninja ninja; need_tool meson meson; need_tool pkg-config pkg-config
 need_tool msgfmt gettext  # without it Wine's configure only warns, and the bundle has no translations
@@ -73,7 +68,7 @@ export MACOSX_DEPLOYMENT_TARGET=27.0
 # hw.optional.arm features it may use, and the launcher refuses a Mac without them (Preflight) instead of crashing
 # on an illegal instruction. MACNEUTRON_CPU=generic builds the M1 baseline every macOS 27 Mac has (LSE atomics
 # instead of LL/SC loops). The PE side tunes for the CPU too with MacNeutron's own llvm-mingw (dxmt/llvm-mingw.sh,
-# patches/llvm/0001); the release's (MACNEUTRON_TOOLCHAIN=upstream) keeps generic tuning (-mtune=generic) with the
+# our LLVM fork); the release's (MACNEUTRON_TOOLCHAIN=upstream) keeps generic tuning (-mtune=generic) with the
 # CPU's instruction set, since Apple tuning crashes its SEH unwind emitter ("Failed to evaluate function length in SEH
 # unwind info", Wine's libs/winecrt0/debug.c).
 MACNEUTRON_CPU=${MACNEUTRON_CPU:-apple-m5}
@@ -90,7 +85,7 @@ fi
 # Link-time optimization (MACNEUTRON_LTO, on unless 0): ThinLTO for FEX (its ARM64EC DLL and its unixlib), DXMT (its
 # ARM64EC DLLs and its native side, winemetal.so with the shader translator and LLVM in it; step 7), the DXIL host
 # tools and the presenter. ARM64EC bitcode links against static ARM64EC libraries (libc++) only with our llvm-mingw's
-# lld (patches/llvm/0002; the release's says "undefined symbol: ... (EC symbol)"), so the upstream toolchain keeps
+# lld (our LLVM fork; the release's says "undefined symbol: ... (EC symbol)"), so the upstream toolchain keeps
 # FEX's DLL without it. Not Wine: with ThinLTO on its unix side, wineboot.exe spun forever in an exception loop
 # (ntdll.so's signal handlers and syscall dispatcher, which compare code addresses and run hand-written assembly); its
 # PE side's ARM64EC thunks and entry points rely on what each object file defines.
@@ -99,38 +94,35 @@ if [ "$MACNEUTRON_LTO" = 0 ]; then UNIX_LTO= LTO_ON=False; else UNIX_LTO=-flto=t
 EC_LTO=$UNIX_LTO EC_LTO_ON=$LTO_ON
 [ "${MACNEUTRON_TOOLCHAIN:-own}" != upstream ] || { EC_LTO=; EC_LTO_ON=False; }
 
-# 2. Fetch and patch, once per series. A tree with work in it is never touched; a clean one follows the patches.
-# patch_tree <tmp-tree> <repo> <patch-dir> <series> <base>: git am the series on branch macneutron, record it, and
-# move the tree into place. Recorded before the move: a stop in between leaves no tree, so it's redone.
-patch_tree() {
-  for p in "$3"/*.patch; do
-    # --keep-cr: a vendored file with CRLF line ends keeps them (0098, snmalloc-sys) as its commit has them.
-    git -C "$1" am -q --keep-cr "$p" || { git -C "$1" am --abort; die "patch $(basename "$p") does not apply to $5"; }
-  done
+# 2. Fetch, once per pin. A tree with work in it is never touched; a clean one follows the pins. Our changes are
+# commits of our forks (github.com/Mac-Neutron): one is made in a tree here, pushed to its fork's main, and pinned.
+# place_tree <tmp-tree> <repo> <pin>: record what the tree was fetched for and move it into place. Recorded before
+# the move: a stop in between leaves no tree, so it's redone.
+place_tree() {
   git -C "$1" rev-parse HEAD > "$SRC/$2.applied"
-  echo "$4" > "$SRC/$2.series"
+  echo "$3" > "$SRC/$2.series"
   mv "$1" "$SRC/$2"
 }
-# Wine's master moves past the pin, so a shallow clone can't reach it: fetch the one commit, as FEX's.
+# The fork's main moves past the pin, so a shallow clone can't reach it: fetch the one commit, as FEX's.
 fetch_wine() {
   echo "wine-arm64: fetching Wine $WINE_COMMIT ($WINE_BRANCH)" >&2
   rm -rf "$W.tmp" "$SRC/wine-build"  # a new tree gets a new build folder
   git init -q "$W.tmp"
   git -C "$W.tmp" remote add origin "$WINE_REPO"
   git -C "$W.tmp" fetch -q --depth 1 origin "$WINE_COMMIT" || die "can't fetch $WINE_COMMIT from $WINE_REPO"
-  git -C "$W.tmp" checkout -q -b macneutron FETCH_HEAD
-  patch_tree "$W.tmp" wine "$PATCHES" "$wine_series" "$WINE_COMMIT"
+  git -C "$W.tmp" checkout -q -b main FETCH_HEAD
+  place_tree "$W.tmp" wine "$wine_series"
 }
-# FEX's main has moved past the pin, so a shallow clone can't reach it: fetch the one commit.
+# FEX's main has moved past the pin too: fetch the one commit.
 fetch_fex() {
   echo "wine-arm64: fetching FEX $FEX_COMMIT" >&2
   rm -rf "$F.tmp" "$SRC/fex-ec" "$SRC/fex-unixlib"
   git init -q "$F.tmp"
   git -C "$F.tmp" remote add origin "$FEX_REPO"
   git -C "$F.tmp" fetch -q --depth 1 origin "$FEX_COMMIT" || die "can't fetch $FEX_COMMIT from $FEX_REPO"
-  git -C "$F.tmp" checkout -q -b macneutron FETCH_HEAD
+  git -C "$F.tmp" checkout -q -b main FETCH_HEAD
   git -C "$F.tmp" submodule update -q --init --recursive --depth 1 || die "can't fetch FEX's submodules"
-  patch_tree "$F.tmp" fex "$FEX_PATCHES" "$fex_series" "$FEX_COMMIT"
+  place_tree "$F.tmp" fex "$fex_series"
 }
 # DXMT's own clone (the Rosetta stack's build/dxmt-src/dxmt is never touched), fetched like FEX's.
 fetch_dxmt() {
@@ -139,12 +131,12 @@ fetch_dxmt() {
   git init -q "$D.tmp"
   git -C "$D.tmp" remote add origin "$DXMT_REPO"
   git -C "$D.tmp" fetch -q --depth 1 origin "$DXMT_COMMIT" || die "can't fetch $DXMT_COMMIT from $DXMT_REPO"
-  git -C "$D.tmp" checkout -q -b macneutron FETCH_HEAD
+  git -C "$D.tmp" checkout -q -b main FETCH_HEAD
   git -C "$D.tmp" submodule update -q --init --depth 1 || die "can't fetch DXMT's submodules"
-  patch_tree "$D.tmp" dxmt "$DXMT_PATCHES" "$dxmt_series" "$DXMT_COMMIT"
+  place_tree "$D.tmp" dxmt "$dxmt_series"
 }
-# Proton's lsteamclient/ alone (ship-base spec §7): the one commit, blob-filtered, checked out sparse without the
-# Steamworks SDK folders and the generator. Git fetches the blobs it checks out from Proton, so lazy fetching is on.
+# Our Proton fork's lsteamclient/ alone (ship-base spec §7): the one commit, blob-filtered, checked out sparse without the
+# Steamworks SDK folders and the generator. Git fetches the blobs it checks out from the fork, so lazy fetching is on.
 fetch_lsteamclient() {
   echo "wine-arm64: fetching lsteamclient $LSTEAMCLIENT_COMMIT" >&2
   unset GIT_NO_LAZY_FETCH
@@ -155,27 +147,26 @@ fetch_lsteamclient() {
     || die "can't fetch $LSTEAMCLIENT_COMMIT from $LSTEAMCLIENT_REPO"
   git -C "$LSC.tmp" sparse-checkout set --no-cone '/lsteamclient/' '!/lsteamclient/steamworks_sdk_*/' \
     '!/lsteamclient/gen_wrapper.py' || die "can't set lsteamclient's sparse checkout"
-  git -C "$LSC.tmp" checkout -q -b macneutron FETCH_HEAD || die "can't check out lsteamclient/ from $LSTEAMCLIENT_REPO"
-  patch_tree "$LSC.tmp" lsteamclient "$LSC_PATCHES" "$lsc_series" "$LSTEAMCLIENT_COMMIT"
+  git -C "$LSC.tmp" checkout -q -b main FETCH_HEAD || die "can't check out lsteamclient/ from $LSTEAMCLIENT_REPO"
+  place_tree "$LSC.tmp" lsteamclient "$lsc_series"
 }
 wine_series=$(tree_series wine)
 fex_series=$(tree_series fex)
 dxmt_series=$(tree_series dxmt)
 lsc_series=$(tree_series lsteamclient)
 # Every build input, once: the up-to-date check and the stamp written at the end must agree.
-stamp=$(stamp_of "$ROOT/wine-arm64/pins" "$PATCHES"/*.patch "$FEX_PATCHES"/*.patch "$ROOT/wine-arm64/build.sh" \
+stamp=$(stamp_of "$ROOT/wine-arm64/pins" "$ROOT/wine-arm64/build.sh" \
   "$ROOT/wine-arm64/lib.sh" "$ROOT/wine-arm64/bundle.sh" "$ROOT/wine-arm64/wine.entitlements" \
-  "$ROOT/wine-arm64/Info.plist" "$ROOT/dxmt/pins" "$DXMT_PATCHES"/*.patch "$ROOT/dxmt/llvm.sh" \
+  "$ROOT/wine-arm64/Info.plist" "$ROOT/dxmt/pins" "$ROOT/dxmt/llvm.sh" \
   "$ROOT/dxmt/tools/dxil-probe.cpp" "$ROOT/dxmt/tools/dxil-translate.mm" "$ROOT/wine-arm64/licenses/NOTICES.md" \
   "$ROOT/wine-arm64/licenses/README" "$ROOT/wine-arm64/tests/licences_test.sh" "$ROOT/wine-arm64/deps.pins" \
-  "$ROOT/dxmt/fetch.sh" "$ROOT/wine-arm64/x18-allow.txt" "$ROOT/wine-arm64/tools/x18scan.sh" "$LSC_PATCHES"/*.patch \
+  "$ROOT/dxmt/fetch.sh" "$ROOT/wine-arm64/x18-allow.txt" "$ROOT/wine-arm64/tools/x18scan.sh" \
   "$ROOT/presenter/present.m" "$ROOT/presenter/cmaa2.metal" "$ROOT/presenter/sharpen.metal" \
   "$ROOT/presenter/CMAA2-LICENSE.txt" "$ROOT/LICENSE" \
   "$ROOT/wine-arm64/tools/xcrun-metal.sh" "$ROOT/dxmt/toolchain.sh" "$ROOT/dxmt/llvm-mingw.sh" \
   "$ROOT/wine-arm64/tools/authenticode-sign.swift" "$ROOT/dxmt/mtld3d-build.sh" "$ROOT/dxmt/mtld3d-tools.sh" \
   "$ROOT/dxmt/mtld3d-mingw-cc.sh" "$ROOT/dxmt/mtld3d-notices.py" "$ROOT/dxmt/mtld3d-linux-cargo.sh" \
-  "$ROOT/dxmt/mtld3d-layout32-check.sh" \
-  "$ROOT"/wine-arm64/patches/llvm/*.patch)
+  "$ROOT/dxmt/mtld3d-layout32-check.sh")
 # Another CPU, LTO setting or toolchain is another build.
 stamp=$(printf '%s %s %s %s' "$stamp" "$MACNEUTRON_CPU" "$MACNEUTRON_LTO" "$TOOLCHAIN_BIN" | shasum -a 256 \
   | cut -d ' ' -f 1)
@@ -184,10 +175,10 @@ wine_mode=$(build_mode "$W" "$SRC/wine.applied" "$SRC/wine.series" "$wine_series
 fex_mode=$(build_mode "$F" "$SRC/fex.applied" "$SRC/fex.series" "$fex_series")
 dxmt_mode=$(build_mode "$D" "$SRC/dxmt.applied" "$SRC/dxmt.series" "$dxmt_series")
 lsteamclient_mode=$(build_mode "$LSC" "$SRC/lsteamclient.applied" "$SRC/lsteamclient.series" "$lsc_series")
-# prepare <repo> <mode>: a tree that isn't there yet, or was patched with another series, is fetched and patched.
+# prepare <repo> <mode>: a tree that isn't there yet, or was fetched for another pin, is fetched.
 prepare() {
   case "$2" in
-    reapply) echo "wine-arm64: $1's patch series changed, re-applying" >&2; rm -rf "${SRC:?}/$1" ;;
+    reapply) echo "wine-arm64: $1's pin moved, fetching it again" >&2; rm -rf "${SRC:?}/$1" ;;
     pinned) ;;
     *) return 0 ;;
   esac
@@ -198,9 +189,8 @@ prepare wine "$wine_mode"
 prepare fex "$fex_mode"
 prepare dxmt "$dxmt_mode"
 prepare lsteamclient "$lsteamclient_mode"
-# lsteamclient builds as one of Wine's DLLs (Wine patch 0016 registers it): its folder is linked in as
-# dlls/lsteamclient, which the Wine tree ignores, so that tree stays applied and lsteamclient's source never enters a
-# Wine patch. Every build: a fetched Wine tree has neither. The ignore goes first, so the link never shows as a change.
+# lsteamclient builds as one of Wine's DLLs (our Wine registers it): its folder is linked in as dlls/lsteamclient,
+# which the Wine tree ignores, so that tree stays applied and lsteamclient's source never enters a Wine commit. Every build: a fetched Wine tree has neither. The ignore goes first, so the link never shows as a change.
 LC_ALL=C /usr/bin/grep -qx /dlls/lsteamclient "$W/.git/info/exclude" 2> /dev/null \
   || echo /dlls/lsteamclient >> "$W/.git/info/exclude"
 ln -sfn ../../lsteamclient/lsteamclient "$W/dlls/lsteamclient"
@@ -405,7 +395,7 @@ else
   echo "$deps_in" > "$DEPS/.complete"
 fi
 
-# 4. Configure: out of tree, with the configure the patches carry (no autoreconf, spec §5.4: it would rewrite configure
+# 4. Configure: out of tree, with the configure our Wine commits carry (no autoreconf, spec §5.4: it would rewrite configure
 #    with whatever autoconf is installed, and the tree would no longer be the applied one), against $DEPS alone for
 #    FreeType, gnutls and FFmpeg (--with: missing is an error). FREETYPE_LIBS links only tools/sfnt2fon, which renders
 #    the bitmap fonts during the build and isn't installed: its rpath finds libfreetype's @rpath ID. FFmpeg's flags are
@@ -547,7 +537,7 @@ fi
 meson compile -C "$SRC/dxmt-build" >> "$SRC/dxmt.log" 2>&1 || die "building DXMT failed; see $SRC/dxmt.log"
 rm -rf "$SRC/dxmt-install"
 meson install -C "$SRC/dxmt-build" >> "$SRC/dxmt.log" 2>&1 || die "installing DXMT failed; see $SRC/dxmt.log"
-# The bundle's DXMT/version (spec §6): the pin and the series, or +dev for a tree with work of its own.
+# The bundle's DXMT/version (spec §6): the pin and its series (the pin again), or +dev for a tree with work of its own.
 if [ "$dxmt_mode" = development ]; then
   echo "$DXMT_COMMIT+dev" > "$SRC/dxmt-install/version"
 else
@@ -621,7 +611,7 @@ fi
 echo "wine-arm64: bundling (log: $OUT/install.log)" >&2
 sh "$ROOT/wine-arm64/bundle.sh"
 
-# 9. Stamp, last: only a finished build of the applied patches gets one.
+# 9. Stamp, last: only a finished build of the applied trees gets one.
 if [ -z "$dev" ]; then
   echo "$stamp" > "$OUT/version"
 fi

@@ -1,12 +1,12 @@
 # libkrun for the EAC microVM
 
-The microVM host links libkrun (Apache-2.0, github.com/containers/libkrun) at the `main` commit in `PIN`, plus the
-patches here; the fork's `macneutron` branch (github.com/Mac-Neutron/libkrun) carries the same commits. Stable releases
-come later. `build.sh` builds it into `build/eac-vm-work/libkrun/` with the `ffi` feature, which exports main's v2 C API
-(device manager, payload, VMM builder). Make a new patch in `build/eac-vm-work/libkrun-src` (branch `macneutron`), then
-`git format-patch --no-signature -o patches <pin>..macneutron`.
+The microVM host links libkrun (Apache-2.0, github.com/containers/libkrun) from our fork's `main`
+(github.com/Mac-Neutron/libkrun: upstream main with our commits) at the commit in `PIN`. Stable releases come later.
+`build.sh` builds it into `build/eac-vm-work/libkrun/` with the `ffi` feature, which exports main's v2 C API (device
+manager, payload, VMM builder). Make a change in `build/eac-vm-work/libkrun-src`: commit it, push it to the fork's
+`main`, and put that commit in `PIN`.
 
-Patches:
+Our commits, in the order they went on (numbered as the patches they were before 2026-10-27):
 - 0001: boot EFI zboot kernels (Fedora's vmlinuz has a zstd payload; the PE loader only scanned for gzip).
 - 0002: free the guest's reported pages for real on macOS: unmap the range from the VM, MADV_FREE, map it back
   (madvise alone frees nothing while the VM maps a page a vCPU wrote).

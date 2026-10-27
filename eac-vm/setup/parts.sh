@@ -38,8 +38,8 @@ Fedora's packages, which it downloads from Fedora to the Mac (MacNeutron ships n
   ca-certificates: Mozilla's root store, MPL-2.0). Those packages' sources are Fedora's, at the versions in
   packages.lock.
 - share/bin: MacNeutron's guest tools (MIT, macneutron/).
-The source is in the release's source archive (MacNeutron-<version>-source.tar.gz): wine-linux.tar is this Wine
-(eac-vm/wine-patches on its BASE), dxmt.tar is DXMT, lsteamclient.tar is lsteamclient, and MacNeutron.tar holds the
+The source is in the release's source archive (MacNeutron-<version>-source.tar.gz): wine.tar is this Wine (the
+Mac build's tree, our Wine fork), fex.tar is FEX, dxmt.tar is DXMT, lsteamclient.tar is lsteamclient, and MacNeutron.tar holds the
 rest; ${ALSA_LIB_SRPM_URL##*/} is Fedora's source of the i686 libasound.
 EOF
 echo "$D"

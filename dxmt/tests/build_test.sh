@@ -8,11 +8,11 @@ rm -rf "$T"; mkdir -p "$T"
 fail=0
 expect() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got [$2], want [$3]"; fail=1; fi; }
 
-# A release ships only a fork commit that's published on the fork's macneutron branch (LGPL).
+# A release ships only a fork commit that's published on the fork's main branch (LGPL).
 git init -q --bare "$T/origin.git"
 git clone -q "$T/origin.git" "$T/clone" 2> /dev/null
 git -C "$T/clone" -c user.name=t -c user.email=t@t commit -q --allow-empty -m pushed
-git -C "$T/clone" push -q origin HEAD:macneutron
+git -C "$T/clone" push -q origin HEAD:main
 pushed=$(git -C "$T/clone" rev-parse HEAD)
 git -C "$T/clone" -c user.name=t -c user.email=t@t commit -q --allow-empty -m local
 sh "$ROOT/dxmt/published.sh" "$T/clone" "$pushed" > /dev/null 2>&1 && st=0 || st=$?

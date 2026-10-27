@@ -2,16 +2,17 @@
 # source-archive.sh <X.Y.Z> <out-dir>: <out-dir>/MacNeutron-<X.Y.Z>-source.tar.gz and <out-dir>/SOURCES.txt, the source
 # of everything the release ships (arm64 release spec §7.2, §14). One uncompressed tar per tree, as built:
 # - MacNeutron.tar: the repository at HEAD (git archive --prefix=MacNeutron/);
-# - wine.tar, fex.tar, dxmt.tar: git archive of each applied tree in build/wine-arm64-src (its HEAD, the pin with our
-#   patches on top: git get-tar-commit-id names that commit), and fex-<name>.tar, dxmt-<name>.tar for the submodules
+# - wine.tar, fex.tar, dxmt.tar: git archive of each applied tree in build/wine-arm64-src (its HEAD, the pinned commit
+#   of our fork: git get-tar-commit-id names it), and fex-<name>.tar, dxmt-<name>.tar for the submodules
 #   SOURCE lists, each archived from the submodule into its place in the tree (git archive leaves submodules empty);
 # - lsteamclient.tar: the files of its clean sparse worktree (its blob-less clone can't be git archived offline):
-#   Proton's lsteamclient/ without the Steamworks SDK folders and gen_wrapper.py, exactly what the build used;
+#   our Proton fork's lsteamclient/ without the Steamworks SDK folders and gen_wrapper.py, exactly what the build used;
+# - wine.tar and fex.tar are also the source of the VM parts' Wine and FEX, built from the same trees;
 # - libtasn1.tar, nettle.tar, gnutls.tar, freetype.tar, ffmpeg.tar: git archive of each library build.sh builds from
 #   its repository (wine-arm64/deps.pins), at its commit, and gnutls-gnulib.tar, gnutls-cligen.tar and
 #   freetype-dlg.tar for the submodules their bootstraps use; GMP's pinned snapshot as downloaded;
 # - Fedora's alsa-lib source RPM (eac-vm/image/alsa-lib.pin): the source of the VM parts' i686 libasound;
-# - SOURCES.txt: tree, pin, applied commit, patch count, file. release/verify-sources.sh checks it all (R5).
+# - SOURCES.txt: tree, pin, applied commit, patch count (0: our changes are the forks' commits), file. release/verify-sources.sh checks it all (R5).
 # release.sh calls it after its refusals: every tree applied, the repository clean. BUILD_DIR replaces build/.
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,13 +34,13 @@ h=$(git -C "$ROOT" rev-parse HEAD)
 git -C "$ROOT" archive --format=tar --prefix=MacNeutron/ -o "$W/MacNeutron.tar" HEAD
 row MacNeutron "$h" "$h" 0 MacNeutron.tar
 
-# applied <tree> <pin>: the tree's HEAD, checked to be what build.sh applied, clean, and <pin> plus the patches.
+# applied <tree> <pin>: the tree's HEAD, checked to be what build.sh fetched, clean, and <pin>.
 applied() {
   a=$(cat "$S/$1.applied") || die "no $S/$1.applied"
   [ "$(git -C "$S/$1" rev-parse HEAD)" = "$a" ] || die "$S/$1 isn't at $1.applied"
   [ -z "$(git -C "$S/$1" status --porcelain)" ] || die "$S/$1 has changes"
-  n=$(find "$ROOT/wine-arm64/patches/$1" -name '*.patch' | wc -l | tr -d ' ')
-  [ "$(git -C "$S/$1" rev-parse "$a~$n")" = "$2" ] || die "$S/$1 isn't $2 with $n patches"
+  n=0
+  [ "$a" = "$2" ] || die "$S/$1 isn't its pin $2"
 }
 tree() {  # tree <name> <pin>
   applied "$1" "$2"
@@ -73,15 +74,6 @@ COPYFILE_DISABLE=1 tar -cf "$W/lsteamclient.tar" --no-mac-metadata --no-xattrs -
   || die "can't tar lsteamclient's worktree"
 rm "$W/lsteamclient.list"
 row lsteamclient "$LSTEAMCLIENT_COMMIT" "$a" "$n" lsteamclient.tar
-# The VM's Wine (LGPL-2.1-or-later, in the VM parts' wine.tar): eac-vm/wine-patches on its BASE, clean.
-WL="${BUILD_DIR:-$ROOT/build}/eac-vm-work/wine-linux"
-wb=$(cut -d' ' -f1 "$ROOT/eac-vm/wine-patches/BASE")
-wn=$(find "$ROOT/eac-vm/wine-patches" -name '*.patch' | wc -l | tr -d ' ')
-wh=$(git -C "$WL" rev-parse HEAD 2> /dev/null) || die "no $WL"
-[ -z "$(git -C "$WL" status --porcelain)" ] || die "$WL has changes"
-case "$(git -C "$WL" rev-parse "$wh~$wn")" in "$wb"*) ;; *) die "$WL isn't eac-vm/wine-patches' BASE $wb with $wn patches" ;; esac
-git -C "$WL" archive --format=tar --prefix=wine-linux/ -o "$W/wine-linux.tar" HEAD
-row wine-linux "$wb" "$wh" "$wn" wine-linux.tar
 # The VM setup's mkfs.erofs (GPL-2.0-or-later, Contents/Helpers/mkfs.erofs) and the lz4 compiled into it, at
 # eac-vm/setup-tools/PIN (eac-vm/setup-tools/build.sh, in MacNeutron.tar, builds it).
 VS="${BUILD_DIR:-$ROOT/build}/vm-setup-tools-src"
