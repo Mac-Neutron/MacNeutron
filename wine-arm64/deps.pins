@@ -23,4 +23,4 @@ FFMPEG_COMMIT=3719f257cf76e4463adc8b5b77029c3594def120
 # with our changes) at this commit, a sparse, blob-filtered checkout without the Steamworks SDK folders. Its pin is
 # LSTEAMCLIENT_COMMIT alone: a tarball pin never re-fetches it.
 LSTEAMCLIENT_REPO=https://github.com/Mac-Neutron/Proton.git
-LSTEAMCLIENT_COMMIT=59b9eee05e1d2bcf65fed128250f92b4ed3d5a02
+LSTEAMCLIENT_COMMIT=ef2428a807a79cae65a5e017b8f08d6b88977d6e

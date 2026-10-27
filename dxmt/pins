@@ -1,7 +1,7 @@
 # MacNeutron's DXMT build inputs (DXMT fork spec §5), sourced by dxmt/build.sh.
 # DXMT_COMMIT is a commit of our fork's main that MacNeutron ships; LGPL: its source is public there.
 DXMT_REPO=https://github.com/Mac-Neutron/dxmt.git
-DXMT_COMMIT=d89729b6d50243722c84a9200bbd88d19cd6d0d9
+DXMT_COMMIT=15899428afabaa16eb8dcf4d2a66a6a111166711
 LLVM_TAG=llvmorg-15.0.7
 # 3Shain's Wine 8.16 tree, which DXMT's CI builds against. SHA-256 recorded at first download, 2026-09-28.
 WINE_URL=https://github.com/3Shain/wine/releases/download/v8.16-3shain/wine.tar.gz
@@ -18,6 +18,6 @@ LLVM_MINGW_SHA256=e9c13e4ede38e715003ffc674d4d00a1088df8235439d1f0c16188ff0704c1
 LLVM_MINGW_REPO=https://github.com/mstorsjo/llvm-mingw.git
 LLVM_MINGW_COMMIT=14a17396dfc53d01e82f9125c4da86203aa40a9f
 LLVM_MINGW_LLVM_REPO=https://github.com/Mac-Neutron/llvm-project.git
-LLVM_MINGW_LLVM=6787f73979b400b4669b91cfd26bc7760b46deea
+LLVM_MINGW_LLVM=bff2c9ff19ac881e3402a5992c4d22950882c227
 # mtld3d (D3D9 spec): the Rust toolchain its CI pins (mtld3d/.github/workflows/ci.yml RUST_STABLE).
 MTLD3D_RUST=1.99.0
