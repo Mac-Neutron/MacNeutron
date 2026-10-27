@@ -9,7 +9,7 @@ import MacNeutronCore
 /// app's update quits it right after opening the installer).
 @MainActor
 func quitMacNeutron() -> Bool {
-    let apps = NSRunningApplication.runningApplications(withBundleIdentifier: Updater.identifier)
+    let apps = Updater.identifiers.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0) }
     apps.forEach { $0.terminate() }
     let deadline = Date().addingTimeInterval(30)
     while apps.contains(where: { !$0.isTerminated }), Date() < deadline {

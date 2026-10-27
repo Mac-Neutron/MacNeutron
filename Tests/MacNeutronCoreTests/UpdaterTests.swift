@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Security
 import Testing
 @testable import MacNeutronCore
 
@@ -209,4 +210,23 @@ private func writableTarget() throws -> URL {
     Updater.removeInstallerFolders(in: tmp)
     #expect(try FileManager.default.contentsOfDirectory(atPath: tmp.path(percentEncoded: false)).sorted()
             == ["MacNeutron-other", "install-macneutron-spctl.txt"])
+}
+
+// The bundle ID move (2026-10-27): the release after this one is io.github.mac-neutron.MacNeutron, its app published as
+// MacNeutron-<V>-macOS.zip, which 0.9.6 doesn't look for (so it takes this release first); this one installs it.
+@Test func pickTakesTheMacOSAssetName() throws {
+    let entry = [(tag: "v0.9.8", draft: false, prerelease: false, assets: ["MacNeutron-0.9.8-macOS.zip", "SHA256SUMS"])]
+    let picked = try #require(Updater.pick(releasesJSON(entry), current: "0.9.7"))
+    #expect(picked.zip.lastPathComponent == "MacNeutron-0.9.8-macOS.zip")
+}
+
+@Test func updatesMayCarryEitherBundleID() throws {
+    #expect(Updater.identifiers == ["io.github.chadouming.MacNeutron", "io.github.mac-neutron.MacNeutron"])
+    #expect(Updater.installerIdentifiers
+            == ["io.github.chadouming.MacNeutron.Installer", "io.github.mac-neutron.MacNeutron.Installer"])
+    let text = Updater.requirement(team: "ABCDE12345", identifiers: Updater.identifiers)
+    #expect(text == "anchor apple generic and (identifier \"io.github.chadouming.MacNeutron\" or identifier "
+            + "\"io.github.mac-neutron.MacNeutron\") and certificate leaf[subject.OU] = \"ABCDE12345\"")
+    var requirement: SecRequirement?
+    #expect(SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess)
 }

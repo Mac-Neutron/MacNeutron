@@ -48,6 +48,11 @@ public enum Updater {
     public static let identifier = "io.github.chadouming.MacNeutron"
     /// Install MacNeutron's (spec 2026-10-25-macneutron-installer-design §3.1).
     public static let installerIdentifier = "io.github.chadouming.MacNeutron.Installer"
+    /// What an update may be: this app, or the release after it, which moves to github.com/Mac-Neutron's identifiers
+    /// (2026-10-27) and publishes its app as MacNeutron-<V>-macOS.zip. 0.9.6 looks for neither, so it takes this
+    /// release first and this one installs that.
+    public static let identifiers = [identifier, "io.github.mac-neutron.MacNeutron"]
+    public static let installerIdentifiers = [installerIdentifier, "io.github.mac-neutron.MacNeutron.Installer"]
 
     /// The newest release of the running build's channel (`X.Y.Z`, or `X.Y.Zp` for a performance build) above
     /// `current`, from GitHub's release list: drafts, prereleases, releases without `MacNeutron-<V>.zip` and
@@ -61,7 +66,9 @@ public enum Updater {
             guard let found = version(name), found.performance == running.performance,
                   running.numbers.lexicographicallyPrecedes(found.numbers),
                   best.map({ $0.numbers.lexicographicallyPrecedes(found.numbers) }) ?? true,
-                  let zip = entry.assets.first(where: { $0.name == "MacNeutron-\(name).zip" }),
+                  let zip = entry.assets.first(where: { [
+                      "MacNeutron-\(name).zip", "MacNeutron-\(name)-macOS.zip",
+                  ].contains($0.name) }),
                   let sums = entry.assets.first(where: { $0.name == "SHA256SUMS" }),
                   // The reply's links are opened and downloaded: https only (a file: or http: one is skipped).
                   [entry.html_url, zip.browser_download_url, sums.browser_download_url].allSatisfy({ $0.scheme == "https" })
@@ -118,7 +125,7 @@ public enum Updater {
             let unpacked = try await unpack(asset, sums: release.sums, into: work, fetch: fetch ?? VMDownloads.download)
             let bundle = unpacked.appending(path: "Install MacNeutron.app", directoryHint: .isDirectory)
             try verify(bundle, team: team, version: release.version, log: work.appending(path: "spctl.txt"),
-                       identifier: installerIdentifier)
+                       identifiers: installerIdentifiers)
             return bundle
         } catch {
             try? fm.removeItem(at: work)
@@ -185,16 +192,22 @@ public enum Updater {
         try? FileManager.default.removeItem(at: work)
     }
 
-    /// The bundle's signature is valid (strict, every architecture, nested code), it is `identifier` signed by `team`,
-    /// it is `version`, and Gatekeeper accepts it (Developer ID and notarization, as release.sh's R2 checks).
+    /// The code requirement of a bundle that is one of `identifiers`, signed by `team` with a Developer ID.
+    static func requirement(team: String, identifiers: [String]) -> String {
+        let either = identifiers.map { "identifier \"\($0)\"" }.joined(separator: " or ")
+        return "anchor apple generic and (\(either)) and certificate leaf[subject.OU] = \"\(team)\""
+    }
+
+    /// The bundle's signature is valid (strict, every architecture, nested code), it is one of `identifiers` signed by
+    /// `team`, it is `version`, and Gatekeeper accepts it (Developer ID and notarization, as release.sh's R2 checks).
     public static func verify(_ bundle: URL, team: String, version: String, log: URL,
-                              identifier: String = Updater.identifier) throws {
+                              identifiers: [String] = Updater.identifiers) throws {
         guard FileManager.default.fileExists(atPath: bundle.appending(path: "Contents/Info.plist").path(percentEncoded: false)) else {
             throw UpdateError.signature("the download holds no \(bundle.lastPathComponent)")
         }
         var code: SecStaticCode?
         var requirement: SecRequirement?
-        let text = "anchor apple generic and identifier \"\(identifier)\" and certificate leaf[subject.OU] = \"\(team)\""
+        let text = Updater.requirement(team: team, identifiers: identifiers)
         guard SecStaticCodeCreateWithPath(bundle as CFURL, [], &code) == errSecSuccess, let code,
               SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess
         else { throw UpdateError.signature("its signature can't be read") }
