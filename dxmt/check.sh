@@ -1267,11 +1267,11 @@ run ours dlss-val dxmt "$TESTS/d3d12_dlss.exe" "$NGX" balanced inverted
 unset MTL_DEBUG_LAYER MTL_DEBUG_LAYER_ERROR_MODE MACNEUTRON_DLSS
 expect "Metal's validation rejects nothing in DLSS" \
   "$(invalid dlss-val):$(grep -cE '^dlss [a-z]+ .*ok' "$WORK/dlss-val.txt" || true)" "0:2"
-# Frame generation on MetalFX (MACNEUTRON_FRAMEGEN=1, with DLSS on MetalFX): each present after the first shows a frame
+# Frame generation on MetalFX (MACNEUTRON_FRAMEGEN=always, with DLSS on MetalFX): each present after the first shows a frame
 # MetalFX's frame interpolator made between it and the last (paired with the DLSS upscaler) before the real one; the
 # swap chain still presents every frame, Metal's validation rejects nothing, and without the variable nothing is generated.
 generated() { awk '/^  frames generated /{n += $3} END {print n + 0}' "$WORK/$1/stats.txt" 2> /dev/null || echo 0; }
-rm -rf "$WORK/dlss-fg"; export DXMT_DXIL_DUMP="$WORK/dlss-fg" DXMT_STATS=1 MACNEUTRON_DLSS=1 MACNEUTRON_FRAMEGEN=1 \
+rm -rf "$WORK/dlss-fg"; export DXMT_DXIL_DUMP="$WORK/dlss-fg" DXMT_STATS=1 MACNEUTRON_DLSS=1 MACNEUTRON_FRAMEGEN=always \
   MTL_DEBUG_LAYER=1 MTL_DEBUG_LAYER_ERROR_MODE=nslog
 run ours dlss-fg dxmt "$TESTS/d3d12_dlss.exe" "$NGX" framegen
 rm -rf "$WORK/dlss-nofg"; export DXMT_DXIL_DUMP="$WORK/dlss-nofg"; unset MACNEUTRON_FRAMEGEN MTL_DEBUG_LAYER MTL_DEBUG_LAYER_ERROR_MODE
@@ -1283,12 +1283,32 @@ expect "MetalFX generates a frame between each two presents, under Metal's valid
 expect "and none without MACNEUTRON_FRAMEGEN" \
   "$(grep -m1 '^dlss framegen' "$WORK/dlss-nofg.txt" || echo none):$(generated dlss-nofg)" "dlss framegen presented 120:0"
 # The soak: 1500 presents with frame generation, GPU memory flat from the 60th on (a resource per frame would show).
-export MACNEUTRON_DLSS=1 MACNEUTRON_FRAMEGEN=1
+export MACNEUTRON_DLSS=1 MACNEUTRON_FRAMEGEN=always
 run ours dlss-fgsoak dxmt "$TESTS/d3d12_dlss.exe" "$NGX" framegen-soak
 unset MACNEUTRON_DLSS MACNEUTRON_FRAMEGEN
 expect "and holds no more GPU memory after 1500 presents" \
   "$(grep -m1 '^dlss framegen presented' "$WORK/dlss-fgsoak.txt" || echo none):$(awk '/^dlss framegen growth/{print ($4 < 20) ? "flat" : $4 " MB"}' "$WORK/dlss-fgsoak.txt")" \
   "dlss framegen presented 1500:flat"
+# Adaptive frame generation (MACNEUTRON_FRAMEGEN=1): a game rendering as fast as it can is presented as rendered, at
+# most after a try that held it back (generating holds a game to one frame a pair of drawables); one at 25 frames a
+# second gets generated frames; one that then speeds up waits for the pacing thread, and generation turns off.
+for m in fgfast:framegen fgslow:framegen-slow fgphases:framegen-phases; do
+  rm -rf "$WORK/dlss-${m%%:*}"; export DXMT_DXIL_DUMP="$WORK/dlss-${m%%:*}" DXMT_STATS=1 MACNEUTRON_DLSS=1 MACNEUTRON_FRAMEGEN=1
+  run ours "dlss-${m%%:*}" dxmt "$TESTS/d3d12_dlss.exe" "$NGX" "${m#*:}"
+done
+unset DXMT_DXIL_DUMP DXMT_STATS MACNEUTRON_DLSS MACNEUTRON_FRAMEGEN
+switched() {  # switched <run>: its on/off lines in order, "none" when there are none
+  t=$(grep -oE 'macneutron-framegen: (on|off) at' "$WORK/$1.txt" | awk '{printf "%s ", $2}')
+  echo "${t:-none}"
+}
+expect "adaptive: a game rendering as fast as it can is presented as rendered (tried and turned off, if at all)" \
+  "$(grep -m1 '^dlss framegen presented' "$WORK/dlss-fgfast.txt" || echo none):$(generated dlss-fgfast | awk '{print ($1 <= 30) ? "few" : $1}'):$(switched dlss-fgfast | sed 's/^on off $/tried/')" \
+  "dlss framegen presented 120:few:$(switched dlss-fgfast | awk '/^on/ {print "tried"; next} {print}')"
+expect "a game held to 25 frames a second gets them" \
+  "$(grep -c 'macneutron-framegen: on at' "$WORK/dlss-fgslow.txt" || true):$(generated dlss-fgslow | awk '{print ($1 >= 20) ? "most" : $1}')" \
+  "1:most"
+expect "and one that speeds up has it turned off once it holds the game back" \
+  "$(switched dlss-fgphases)" "on off "
 run ours dlss-off dxmt "$TESTS/d3d12_dlss.exe" "$NGX" off vendor
 expect "without MACNEUTRON_DLSS, nvngx.dll doesn't load and the adapter is Apple's" \
   "$(dlssed dlss-off off):$(grep -m1 -oE '^dlss vendor [0-9a-f]+' "$WORK/dlss-off.txt" || echo none)" "yes:dlss vendor 106b"

@@ -20,8 +20,8 @@ public struct GameSettings: Codable, Equatable, Sendable {
     /// DLSS answered by MetalFX (MACNEUTRON_DLSS): the game sees an NVIDIA GPU, and its DLSS option upscales with
     /// MetalFX's temporal upscaler. nil/false: off.
     public var dlss: Bool?
-    /// Frame generation on MetalFX (MACNEUTRON_FRAMEGEN): a frame interpolated between each two the game renders, when
-    /// it runs DLSS on MetalFX. nil/false: off.
+    /// Frame generation on MetalFX (MACNEUTRON_FRAMEGEN=1, adaptive in DXMT): a frame interpolated between each two the
+    /// game renders, when it runs DLSS on MetalFX and generating doesn't hold it back. nil/false: off.
     public var frameGen: Bool?
     /// The Games window's launch options (`LaunchOptions.parse`): variables over the controls' and game arguments.
     /// Steam's own launch options still win over both. nil: none.

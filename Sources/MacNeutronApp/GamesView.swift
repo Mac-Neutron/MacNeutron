@@ -112,7 +112,7 @@ struct GamesView: View {
                 .help("Experimental: the game sees an NVIDIA GPU, and its DLSS option upscales with MetalFX's temporal upscaler (MACNEUTRON_DLSS=1). Direct3D 12 games on DXMT.")
             Toggle("Frame generation", isOn: binding(row, \.frameGen, default: false))
                 .disabled(row.settings.dlss != true)
-                .help("Experimental: MetalFX interpolates a frame between each two the game renders, while the game runs DLSS (MACNEUTRON_FRAMEGEN=1). More frames shown, a little more latency; the HUD may wobble in motion.")
+                .help("Experimental: MetalFX interpolates a frame between each two the game renders, while the game runs DLSS and is slow enough for it to help (MACNEUTRON_FRAMEGEN=1; it turns itself off when it would hold the game back). More frames shown, a little more latency; the HUD may wobble in motion.")
             Spacer()
         }
     }

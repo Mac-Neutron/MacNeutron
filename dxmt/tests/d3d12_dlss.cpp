@@ -22,7 +22,10 @@
 //       120 frames presented through a 1280x720 swap chain, each a DLSS upscale (640x360 to 1280x720) copied into the
 //       back buffer: with MACNEUTRON_FRAMEGEN=1 DXMT interpolates a frame between each two (DXMT_STATS counts them).
 //       "dlss framegen presented 120". framegen-soak: 1500 frames, then "dlss framegen growth <MB>" (GPU memory from frame
-//       60 to the end: what a leak per frame would show).
+//       60 to the end: what a leak per frame would show). framegen-slow: 2.4 s with a frame every 40 ms, a game well below
+//       half the display's refresh rate (adaptive frame generation turns on). framegen-phases: 2 s with a frame every
+//       40 ms, then 13 s as fast as it renders (it turns on, then off once generating holds the game back);
+//       both print the frames they presented the same way.
 //   cost
 //       The GPU time of one EvaluateFeature with Palworld's inputs (an R11G11B10 colour, a typeless D32S8 depth, an
 //       exposure texture, HDR and inverted depth flags, an RGBA16F UAV output at 2560x1440), from timestamps around 20
@@ -426,7 +429,8 @@ static double GpuMB() {
 
 static LRESULT CALLBACK WindowProc(HWND w, UINT m, WPARAM wp, LPARAM lp) { return DefWindowProcA(w, m, wp, lp); }
 
-static void FrameGen(UINT frames) {
+// frames: how many to present, or 0 to present for `fast_s` seconds after `slow_s` seconds with a frame every 40 ms.
+static void FrameGen(UINT frames, double slow_s = 0, double fast_s = 0) {
     const UINT w = 1280, h = 720, rw = 640, rh = 360;
     double settled = 0;
     WNDCLASSA wc = {};
@@ -459,7 +463,17 @@ static void FrameGen(UINT frames) {
     p->Set("Color", color); p->Set("Output", output); p->Set("Depth", depth); p->Set("MotionVectors", motion);
     p->Set("DLSS.Render.Subrect.Dimensions.Width", rw); p->Set("DLSS.Render.Subrect.Dimensions.Height", rh);
     UINT presented = 0;
-    for (UINT f = 0; f < frames; f++) {
+    LARGE_INTEGER freq, start, now;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&start);
+    for (UINT f = 0;; f++) {
+        QueryPerformanceCounter(&now);
+        double t = (double)(now.QuadPart - start.QuadPart) / freq.QuadPart;
+        if (frames ? f >= frames : t >= slow_s + fast_s) break;
+        if (t < slow_s) { // the next 40 ms boundary: a steady 25 frames a second, whatever Sleep's granularity
+            LONGLONG next = start.QuadPart + (LONGLONG)((double)(f + 1) * 0.040 * freq.QuadPart);
+            do { Sleep(1); QueryPerformanceCounter(&now); } while (now.QuadPart < next);
+        }
         MSG msg;
         while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
         p->Set("Reset", f == 0 ? 1 : 0);
@@ -542,6 +556,8 @@ int main(int argc, char **argv) {
         else if (mode == "cost") Cost();
         else if (mode == "framegen") FrameGen(120);
         else if (mode == "framegen-soak") FrameGen(1500);
+        else if (mode == "framegen-slow") FrameGen(0, 2.4, 0);
+        else if (mode == "framegen-phases") FrameGen(0, 2, 13);
         else { printf("unknown mode %s\n", mode.c_str()); return 2; }
     }
     if (gpu) N.Shutdown1(gpu->device);
