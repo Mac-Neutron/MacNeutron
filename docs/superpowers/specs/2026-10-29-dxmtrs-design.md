@@ -107,30 +107,36 @@ a native harness like the frame-generation one, each run once.
 
 - **E1 passes.** One Rust staticlib (`mtld3d/windows/dxmt-pe`, `mtld3d/unix/dxmt-unix`, built by DXMTRS's
   `tools/cargo-staticlib.sh` from meson) is linked into every DXMT binary of the Mac build, the VM host's native build
-  and the VM guest's x86_64 and i686 builds, and runs at load in every one; both `dxmt/check.sh` lanes pass (810 rows),
-  and a probe that fails on request stops a test program from starting. MacNeutron's Mac DLLs turned out ARM64EC alone,
+  and the VM guest's x86_64 and i686 builds. It runs on the Mac (both `dxmt/check.sh` lanes pass, 810 rows, and a probe
+  that fails on request stops a test program from starting) and in the native build (its test check passes); the guest
+  DLLs build and link but have not run, so their x86 shims below are unexercised: step 1's gates load one in the VM. MacNeutron's Mac DLLs turned out ARM64EC alone,
   not ARM64X (`wine-arm64/build.sh` replaces `-marm64x`, which doesn't combine with LTO). Rust's `-msvc` standard library
   needs ntdll on every PE target, and on x86 three things MSVC's runtime has and llvm-mingw's lacks (`__chkstk`,
   `__tls_array`, and on i686 Wine ntdll's undecorated `__aulldiv`): `src/util/rust_pe_rt.c`. `d3d12.dll` grows by
-  84 KiB. New guest imports: `ntdll.dll` and `api-ms-win-core-synch-l1-2-0.dll`, which Wine's API-set schema resolves.
+  84 KiB. New guest imports: `ntdll.dll` and `api-ms-win-core-synch-l1-2-0.dll` on every DLL, and
+  `api-ms-win-crt-private-l1-1-0.dll` on `winemetal.dll` (the other DLLs had it), which Wine's API-set schema resolves.
 - **E2: Metal refuses opaque-pointer AIR.** On DXMT's 64 test shaders (there was no game corpus; capturing one needs a
   SMITE 2 session of the maintainer's), airconv's AIR rewritten by LLVM 23.1.4 loads 0/64 ("Failed to upgrade function
   bitcode" for 41, and 22 crash Metal's compiler service on LLVM 23's newer records); rewritten by LLVM 15 with only its
-  pointers made opaque, 0/64; rewritten by LLVM 15 with typed pointers, 64/64. LLVM's own DirectX backend writes
+  pointers made opaque, 0/64; rewritten by LLVM 15 with typed pointers, 64/64. (That LLVM 23's crashes come from its
+  newer records is an inference from the difference between those two runs, not isolated.) LLVM's own DirectX backend writes
   typed-pointer bitcode from opaque IR (`DXILBitcodeWriter`, `PointerTypeAnalysis`, in LLVM's old 3.7 record format):
-  with four fixes to it (a pointer-valued load's type, the AIR triple and data layout kept, pointer selects and phis
-  typed from their result, nulls typed through their use) 35/64 loaded and built pipelines, so Metal accepts that record
-  format. The rest fail on what inference can't recover from opaque IR (argument-buffer arguments typed `i8*`, struct
+  with two writer fixes (a pointer-valued load's type, the AIR triple and data layout kept) and DXILPrepare's casts,
+  35/64 loaded and built pipelines; typing pointer selects and phis from their result and nulls through their use (the
+  committed spike) traded crashes for read errors, 27/64. Either way Metal accepts that record format. The rest fail on what inference can't recover from opaque IR (argument-buffer arguments typed `i8*`, struct
   fields losing their address space) and on what the old format can't say (`reassoc nsz arcp contract` widened to
   `fast`, which adds no-NaN and no-Inf; `afn` dropped; `poison` as `undef`). Spike code: DXMTRS branch `phase0`
   (`phase0/air-roundtrip`), our llvm-project fork's local branch `phase0-air-writer`. Every LLVM C++ API airconv uses
-  has an LLVM 23 C API equivalent except the bitcode writer (`phase0/llvm-c-api.md`).
-- **E3: AIR builds about 100 times faster than MSL.** 45 pipelines built both ways (DXC's SPIR-V and SPIRV-Cross's
-  MSL 3.2 of the 19 HLSL test shaders, against airconv's AIR of the same shaders); each MSL source salted so its
-  frontend compile is never a cache hit; two runs agree within 1%. AIR: library 2.5 ms, pipeline 3.0 ms (0.12 ms a
-  pipeline). MSL: library 661.9 ms, pipeline 3.5 ms (14.8 ms a pipeline, about 10 ms without the first compile's
-  compiler-service start). GPU time isn't compared here: the test shaders are functional tests, and binding airconv's
-  argument buffers outside DXMT would reimplement its binding model; §8's translator gate measures it on DXMT itself.
+  has an LLVM 23 C API equivalent except the bitcode writer (`phase0/llvm-c-api.md`); airconv's two custom passes and
+  `splitBasicBlock` have none either and are rewritten in Rust over the C API.
+- **E3: AIR builds 5 to 25 times faster than MSL, before the backend.** 45 pipelines built both ways (DXC's SPIR-V and
+  SPIRV-Cross's MSL 3.2 of the 19 HLSL test shaders, against airconv's AIR of the same shaders); each MSL source salted
+  so its frontend compile isn't a cache hit (two identical sources still shared one); two runs agree within 1%. Metal's
+  MSL frontend, which AIR skips, took a median 3.2 ms and a mean 15 ms a pipeline (the first, 230 ms, includes the
+  compiler service starting); airconv's whole path, translation included, takes 0.6 ms a shader (`dxil-translate`).
+  The backend compile, which both paths pay, was a cache hit in both and is not measured. GPU time is waived, not
+  moved: the test shaders are functional tests, binding airconv's argument buffers outside DXMT would reimplement its
+  binding model, and no MSL translator exists to compare at game scale (§8 compares LLVM 15's AIR with LLVM 23's).
 
 **Decided (maintainer, 2026-10-29).** The translator is Rust on LLVM 23 (the newest release; `llvm-sys` with
 `no-llvm-linking`), emitting AIR through **our own AIR writer** in Mac-Neutron/llvm-project: a typed-pointer bitcode
@@ -147,7 +153,8 @@ as its own commit. That rules out the chat design's "util first": `util` is most
 caller. Its functions with a plain interface (configuration, environment, logging) are ported early, behind their
 existing C++ signatures.
 
-1. `nvapi` and `nvngx`: whole DLLs with C exports.
+1. `nvapi` and `nvngx`: whole DLLs with C exports. Its gates include the VM guest loading a Rust-linked DLL (d3d-smoke):
+   the first run of E1's x86 shims.
 2. `winemetal`, Unix side: the `unix_call` handlers, onto mtld3d's `mtl` crate (objc2 bindings). Then the PE side: the
    thunks behind `winemetal.h`, onto mtld3d's PE-to-Unix transport. `winemetal.h` stays the boundary the C++ calls.
 3. `dxgi`, then `d3d10`: whole DLLs behind COM.
@@ -221,5 +228,5 @@ it. The first implementation plan covers §3 (DXMTRS created and pinned) and §4
 gets its own plan after the step before it has landed and Phase 0 has reported.
 
 Outward steps, each needing the maintainer's yes when it comes: creating DXMTRS on GitHub and pushing to it; switching
-MacNeutron's pin; fetching SPIRV-Cross or installing bindgen. DXMTRS starts from a dxmt `main` that includes 89558c1
-(adaptive frame generation), which is not pushed yet.
+MacNeutron's pin; fetching SPIRV-Cross or installing bindgen. DXMTRS started from dxmt `main` at 89558c1 (adaptive frame
+generation), pushed to both repositories on 2026-10-29.
