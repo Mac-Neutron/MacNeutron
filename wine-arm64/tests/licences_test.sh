@@ -43,6 +43,9 @@ check() {  # check <wine.app> <build dir>
   # DXMT's DLLs link Rust's standard library (DXMTRS: nvngx.dll): the README's DXMT entry names its texts, mtld3d's copy.
   awk '/^DXMT \(/ { p = 1 } p && /^$/ { exit } p' "$L/README" 2> /dev/null | g -qF 'mtld3d/rust/COPYRIGHT-library.html' \
     || miss "the README's DXMT entry naming Rust's standard library's texts (mtld3d/rust/COPYRIGHT-library.html)"
+  # Both Rust DLLs (nvngx.dll, nvapi64.dll) are named in that entry.
+  awk '/^DXMT \(/ { p = 1 } p && /^$/ { exit } p' "$L/README" 2> /dev/null | g -qF 'nvapi64.dll' \
+    || miss "the README's DXMT entry naming nvapi64.dll as Rust"
   # mtld3d's crates (dxmt/mtld3d-notices.py): a folder of licence files for each one its INDEX names.
   while read -r crate version _; do  # "<crate> <version>: <terms>"
     version=${version%:}
