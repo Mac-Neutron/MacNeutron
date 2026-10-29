@@ -110,7 +110,8 @@ a native harness like the frame-generation one, each run once.
   `tools/cargo-staticlib.sh` from meson) is linked into every DXMT binary of the Mac build, the VM host's native build
   and the VM guest's x86_64 and i686 builds. It runs on the Mac (both `dxmt/check.sh` lanes pass, 810 rows, and a probe
   that fails on request stops a test program from starting) and in the native build (its test check passes); the guest
-  DLLs build and link but did not run in Phase 0; step 1 ran the x86_64 shims, the i686 ones wait for step 3. MacNeutron's Mac DLLs turned out ARM64EC alone,
+  DLLs build and link but did not run in Phase 0; step 1 ran the guest's x86_64 nvngx, its shims still unexercised
+  (§5 step 1). MacNeutron's Mac DLLs turned out ARM64EC alone,
   not ARM64X (`wine-arm64/build.sh` replaces `-marm64x`, which doesn't combine with LTO). Rust's `-msvc` standard library
   needs ntdll on every PE target, and on x86 what MSVC's runtime has and llvm-mingw's lacks (`__chkstk`, `_fltused`,
   and on i686 `__tls_array` and Wine ntdll's undecorated `__aulldiv`): `src/util/rust_pe_rt.c`. `d3d12.dll` grows by
@@ -156,8 +157,10 @@ existing C++ signatures.
 
 1. `nvngx`, a whole DLL with C exports: done 2026-10-29 (plan `2026-10-29-dxmtrs-step1-nvngx.md`), its D3D11 path
    characterized first (`d3d11_dlss`). Its gates ran the VM guest's x86_64 `nvngx.dll` (`eac-vm/dxmt/gate.sh`'s DLSS
-   programs): the first run of the x86_64 shims (`__chkstk`, `_fltused`); the i686 ones (`__tls_array`, `__aulldiv`)
-   run first at step 3, whose `dxgi` and `d3d10core` have i386 builds. `nvapi` is its own plan (step 1b), which starts
+   programs), Rust's first run in the guest. Its `__chkstk` shim links but its callers there (writes to a console,
+   `io::Error`'s text, the panic printer) didn't run with stderr in a file, so the shim is still unexercised; `_fltused`
+   matters only at link time. The i686 shims (`__tls_array`, `__aulldiv`) wait for step 3, whose `dxgi` and `d3d10core`
+   have i386 builds. `nvapi` is its own plan (step 1b), which starts
    with a characterization harness: it answers 94 NVAPI functions, and one is tested today.
 2. `winemetal`, Unix side: the `unix_call` handlers, onto mtld3d's `mtl` crate (objc2 bindings). Then the PE side: the
    thunks behind `winemetal.h`, onto mtld3d's PE-to-Unix transport. `winemetal.h` stays the boundary the C++ calls.
