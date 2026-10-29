@@ -45,21 +45,22 @@ Assumption to confirm: "D3DMtl" is mtld3d (athei/mtld3d, already vendored at our
   MacNeutron's `dxmt/pins` switches `DXMT_REPO` to DXMTRS at its first commit, so every later step goes through
   MacNeutron's checks and can ship.
 - **Layout.** C and C++ stay under `src/` with meson while any is left. Rust lives in mtld3d's two Cargo workspaces,
-  which become DXMTRS's: `pe/` (Windows targets: today's `mtld3d/windows`) and `unix/` (macOS and Linux: today's
-  `mtld3d/unix`). Two workspaces, not one, because a workspace-wide build serves one target family; crates both sides
+  `mtld3d/windows` (Windows targets) and `mtld3d/unix` (macOS and Linux), which §7 renames DXMTRS's `pe/` and `unix/`. Two workspaces, not one, because a workspace-wide build serves one target family; crates both sides
   use (wire types, configuration) are path members of both, as `unix/shared` already is. One repository, one Rust
   toolchain pin (mtld3d's, 1.99.0 today), one dependency policy.
 - **Rust inside the C++ DLLs.** Ported code reaches the remaining C++ as a Rust `staticlib`, exactly one per final
   binary (two Rust staticlibs in one DLL would each carry the standard library), which re-exports that binary's ported
-  modules through `extern "C"` functions and COM vtables. PE targets use mtld3d's recipe: Rust's `*-pc-windows-msvc`
-  targets with llvm-mingw's C/C++ (`mtld3d-mingw-cc.sh`, `ARM64X_CXX_ABI=mingw`), linked by meson. When a binary has no
-  C++ left, its crate becomes a `cdylib` and meson stops building it; when none has, meson goes.
+  modules through `extern "C"` functions and COM vtables. PE targets use Rust's `*-pc-windows-msvc` targets, linked by
+  meson with llvm-mingw (DXMTRS's `tools/cargo-staticlib.sh`, and `rust_runtime_dep` for what MSVC's runtime has and
+  llvm-mingw's lacks). When a binary has no C++ left, meson links it from its crate's static library and a `.def` of
+  its exports (nvngx, step 1); when none has, meson goes.
 - **Build ownership.** DXMTRS carries the scripts that build it (today's MacNeutron `dxmt/mtld3d-build.sh`,
   `mtld3d-mingw-cc.sh`, `mtld3d-linux-cargo.sh`, `llvm.sh`, and the mingw parts of `toolchain.sh`), behind one entry
   point. MacNeutron's build scripts (`wine-arm64/build.sh` for the Mac, `eac-vm/dxmt/build.sh` for the VM guest,
   `eac-vm/dxmt-native/build.sh` for the VM host) keep fetching the pinned commit and toolchains and call that entry
-  point, so a port step is a DXMTRS change plus a pin bump, never a two-repository code change. The move happens in step
-  1's plan, the first that changes a build; Phase 0's Rust build already sits inside DXMTRS's meson (§4, E1).
+  point, so a port step is a DXMTRS change plus a pin bump, never a two-repository code change. The move happens at
+  §7, with the `pe/`/`unix/` rename: DXMT's Rust builds inside DXMTRS's meson (§4, E1), so steps 1 to 6 change no
+  MacNeutron script, and mtld3d's scripts first change at the merge (maintainer, 2026-10-29).
 - **Every build stays first-class at every step**: ARM64EC (Mac), x86_64 and i686 PE; the macOS Unix side; DXMT_NATIVE for the
   VM host; the x86_64 and i686 PE DLLs and mtld3d's Linux libraries the VM's guest stages make.
 
@@ -109,10 +110,10 @@ a native harness like the frame-generation one, each run once.
   `tools/cargo-staticlib.sh` from meson) is linked into every DXMT binary of the Mac build, the VM host's native build
   and the VM guest's x86_64 and i686 builds. It runs on the Mac (both `dxmt/check.sh` lanes pass, 810 rows, and a probe
   that fails on request stops a test program from starting) and in the native build (its test check passes); the guest
-  DLLs build and link but have not run, so their x86 shims below are unexercised: step 1's gates load one in the VM. MacNeutron's Mac DLLs turned out ARM64EC alone,
+  DLLs build and link but did not run in Phase 0; step 1 ran the x86_64 shims, the i686 ones wait for step 3. MacNeutron's Mac DLLs turned out ARM64EC alone,
   not ARM64X (`wine-arm64/build.sh` replaces `-marm64x`, which doesn't combine with LTO). Rust's `-msvc` standard library
-  needs ntdll on every PE target, and on x86 three things MSVC's runtime has and llvm-mingw's lacks (`__chkstk`,
-  `__tls_array`, and on i686 Wine ntdll's undecorated `__aulldiv`): `src/util/rust_pe_rt.c`. `d3d12.dll` grows by
+  needs ntdll on every PE target, and on x86 what MSVC's runtime has and llvm-mingw's lacks (`__chkstk`, `_fltused`,
+  and on i686 `__tls_array` and Wine ntdll's undecorated `__aulldiv`): `src/util/rust_pe_rt.c`. `d3d12.dll` grows by
   84 KiB. New guest imports: `ntdll.dll` and `api-ms-win-core-synch-l1-2-0.dll` on every DLL, and
   `api-ms-win-crt-private-l1-1-0.dll` on `winemetal.dll` (the other DLLs had it), which Wine's API-set schema resolves.
 - **E2: Metal refuses opaque-pointer AIR.** On DXMT's 64 test shaders (there was no game corpus; capturing one needs a
@@ -153,8 +154,11 @@ as its own commit. That rules out the chat design's "util first": `util` is most
 caller. Its functions with a plain interface (configuration, environment, logging) are ported early, behind their
 existing C++ signatures.
 
-1. `nvapi` and `nvngx`: whole DLLs with C exports. Its gates include the VM guest loading a Rust-linked DLL (d3d-smoke):
-   the first run of E1's x86 shims.
+1. `nvngx`, a whole DLL with C exports: done 2026-10-29 (plan `2026-10-29-dxmtrs-step1-nvngx.md`), its D3D11 path
+   characterized first (`d3d11_dlss`). Its gates ran the VM guest's x86_64 `nvngx.dll` (`eac-vm/dxmt/gate.sh`'s DLSS
+   programs): the first run of the x86_64 shims (`__chkstk`, `_fltused`); the i686 ones (`__tls_array`, `__aulldiv`)
+   run first at step 3, whose `dxgi` and `d3d10core` have i386 builds. `nvapi` is its own plan (step 1b), which starts
+   with a characterization harness: it answers 94 NVAPI functions, and one is tested today.
 2. `winemetal`, Unix side: the `unix_call` handlers, onto mtld3d's `mtl` crate (objc2 bindings). Then the PE side: the
    thunks behind `winemetal.h`, onto mtld3d's PE-to-Unix transport. `winemetal.h` stays the boundary the C++ calls.
 3. `dxgi`, then `d3d10`: whole DLLs behind COM.
