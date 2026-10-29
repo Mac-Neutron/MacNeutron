@@ -1271,7 +1271,7 @@ expect "D3D11 DLSS creates, releases and creates a feature again, then shuts dow
 # DXMT's nvapi64.dll through nvapi_QueryInterface (d3d11_nvapi.exe): every answer of its 46 functions (statuses, the bytes
 # written, the relations to DXGI and winemetal), compared with d3d11_nvapi.fixed, which the C++ produced. Log lines: the
 # 8 null-on-purpose IDs log nothing; a table name and an unknown number each log an err line. Without MACNEUTRON_DLSS
-# the adapter stays Apple's and NvAPI_Initialize answers NVAPI_NO_IMPLEMENTATION.
+# the adapter stays Apple's and NvAPI_Initialize answers -6, NVAPI_NVIDIA_DEVICE_NOT_FOUND.
 run ours nvapi dxmt "$TESTS/d3d11_nvapi.exe" 'C:\windows\system32\nvapi64.dll' fixed
 firstdiff=$(grep '^nv' "$WORK/nvapi.txt" | diff - "$ROOT/dxmt/tests/d3d11_nvapi.fixed" | sed -n 2p)
 expect "nvapi64 answers as DXMT's C++ did" "${firstdiff:-same}" same

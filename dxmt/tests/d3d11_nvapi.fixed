@@ -72,12 +72,13 @@ nvdisp GPU_GetConnectedDisplayIds(no room) -174
 nvdisp GPU_GetConnectedDisplayIds(wrong) -9
 nvdisp GPU_GetConnectedDisplayIds(v1) 0 count>=1 yes first active 1 connected 1 physical 1 type -1
 nvdisp GPU_GetConnectedDisplayIds(v2) 0 count>=1 yes first active 1 connected 1 physical 1 type -1
+nvdisp GPU_GetConnectedDisplayIds(null array) count-equals-v1 yes
 nvdisp DISP_GetDisplayIdByDisplayName(primary) 0 same-as-connected yes
 nvdisp DISP_GetDisplayIdByDisplayName(unknown) -6 id=untouched
 nvdisp DISP_GetGDIPrimaryDisplayId(null) -5
-nvdisp DISP_GetGDIPrimaryDisplayId 0 id=written
+nvdisp DISP_GetGDIPrimaryDisplayId 0 id=written same-as-connected yes
 nvdisp EnumNvidiaDisplayHandle(null) -5
-nvdisp EnumNvidiaDisplayHandle(0) 0 handle=written
+nvdisp EnumNvidiaDisplayHandle(0) 0 handle=written same-as-monitor-0 yes
 nvdisp EnumNvidiaDisplayHandle(99) -7
 nvdisp DISP_GetMonitorCapabilities(null) -5
 nvdisp DISP_GetMonitorCapabilities -104 tail=untouched

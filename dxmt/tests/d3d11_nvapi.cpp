@@ -357,6 +357,7 @@ static void Disp() {
         auto ids = (NV_GPU_DISPLAYIDS *)g_buf;
         printf("nvdisp GPU_GetConnectedDisplayIds(null count) %d\n", GPU_GetConnectedDisplayIds(g_gpu, ids, nullptr, 0));
         int s = GPU_GetConnectedDisplayIds(g_gpu, nullptr, &n, 0);
+        NvU32 nNull = n, nFirst = 0;
         printf("nvdisp GPU_GetConnectedDisplayIds(null array) %d count=%s\n", s, n == 0xa5a5a5a5 ? "untouched" : "written");
         n = 0;
         printf("nvdisp GPU_GetConnectedDisplayIds(no room) %d\n", GPU_GetConnectedDisplayIds(g_gpu, Fill<NV_GPU_DISPLAYIDS>(NV_GPU_DISPLAYIDS_VER2), &n, 0));
@@ -376,7 +377,11 @@ static void Disp() {
                    ids[0].isActive, ids[0].isConnected, ids[0].isPhysicallyConnected, ids[0].connectorType);
             Dump(call, s, 2 * sizeof(NV_GPU_DISPLAYIDS));
             g_primary = ids[0].displayId;
+            if (!nFirst) nFirst = n;
+            if (g_all) printf("nvdump %s count %u\n", call, (unsigned)n);
         }
+        printf("nvdisp GPU_GetConnectedDisplayIds(null array) count-equals-v1 %s\n", Yes(nNull == nFirst));
+        if (g_all) printf("nvdump GPU_GetConnectedDisplayIds(null array) count %u\n", (unsigned)nNull);
     }
     FN(DISP_GetDisplayIdByDisplayName, 0xae457190);
     HAVE("nvdisp", DISP_GetDisplayIdByDisplayName) {
@@ -393,14 +398,23 @@ static void Disp() {
         NvU32 id = 0xa5a5a5a5;
         printf("nvdisp DISP_GetGDIPrimaryDisplayId(null) %d\n", DISP_GetGDIPrimaryDisplayId(nullptr));
         int s = DISP_GetGDIPrimaryDisplayId(&id);
-        printf("nvdisp DISP_GetGDIPrimaryDisplayId %d id=%s\n", s, id == 0xa5a5a5a5 ? "untouched" : "written");
+        printf("nvdisp DISP_GetGDIPrimaryDisplayId %d id=%s same-as-connected %s\n", s, id == 0xa5a5a5a5 ? "untouched" : "written",
+               Yes(id == g_primary));
+        if (g_all) printf("nvdump DISP_GetGDIPrimaryDisplayId %d %#x\n", s, (unsigned)id);
     }
     FN(EnumNvidiaDisplayHandle, 0x9abdd40d);
     HAVE("nvdisp", EnumNvidiaDisplayHandle) {
         auto h = (NvDisplayHandle)0xa5a5a5a5;
         printf("nvdisp EnumNvidiaDisplayHandle(null) %d\n", EnumNvidiaDisplayHandle(0, nullptr));
         int s = EnumNvidiaDisplayHandle(0, &h);
-        printf("nvdisp EnumNvidiaDisplayHandle(0) %d handle=%s\n", s, h == (NvDisplayHandle)0xa5a5a5a5 ? "untouched" : "written");
+        std::vector<HMONITOR> mons;  // the C++ answers the index-th HMONITOR of EnumDisplayMonitors
+        EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR m, HDC, LPRECT, LPARAM v) -> BOOL {
+            ((std::vector<HMONITOR> *)v)->push_back(m);
+            return TRUE;
+        }, (LPARAM)&mons);
+        printf("nvdisp EnumNvidiaDisplayHandle(0) %d handle=%s same-as-monitor-0 %s\n", s,
+               h == (NvDisplayHandle)0xa5a5a5a5 ? "untouched" : "written", Yes(!mons.empty() && h == (NvDisplayHandle)mons[0]));
+        if (g_all) printf("nvdump EnumNvidiaDisplayHandle(0) %d %p monitors %zu\n", s, (void *)h, mons.size());
         printf("nvdisp EnumNvidiaDisplayHandle(99) %d\n", EnumNvidiaDisplayHandle(99, &h));
     }
     FN(DISP_GetMonitorCapabilities, 0x3b05c7e1);
