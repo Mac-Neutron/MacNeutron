@@ -18,7 +18,7 @@ generation) for every API.
 Done when:
 - DXMTRS has no C, C++ or Objective-C of DXMT's left (generated headers for outside users aside, §6), and cargo builds
   every binary MacNeutron ships: ARM64X (aarch64 + arm64ec), x86_64 and i686 PE DLLs, the macOS Unix side, the native
-  macOS build the VM host uses (DXMT_NATIVE), and the Linux guest builds.
+  macOS build the VM host uses (DXMT_NATIVE), and mtld3d's Linux builds for the VM guest.
 - D3D9 runs on the shared pieces of §7.
 - Every gate of §8 passes, and performance is at parity or better (§8).
 
@@ -55,10 +55,12 @@ Assumption to confirm: "D3DMtl" is mtld3d (athei/mtld3d, already vendored at our
   C++ left, its crate becomes a `cdylib` and meson stops building it; when none has, meson goes.
 - **Build ownership.** DXMTRS carries the scripts that build it (today's MacNeutron `dxmt/mtld3d-build.sh`,
   `mtld3d-mingw-cc.sh`, `mtld3d-linux-cargo.sh`, `llvm.sh`, and the mingw parts of `toolchain.sh`), behind one entry
-  point. MacNeutron's `dxmt/build.sh` keeps fetching the pinned commit and toolchains and calls that entry point, so a
-  port step is a DXMTRS change plus a pin bump, never a two-repository code change.
+  point. MacNeutron's build scripts (`wine-arm64/build.sh` for the Mac, `eac-vm/dxmt/build.sh` for the VM guest,
+  `eac-vm/dxmt-native/build.sh` for the VM host) keep fetching the pinned commit and toolchains and call that entry
+  point, so a port step is a DXMTRS change plus a pin bump, never a two-repository code change. The move happens in step
+  1's plan, the first that changes a build; Phase 0's Rust build already sits inside DXMTRS's meson (§4, E1).
 - **Every build stays first-class at every step**: ARM64X, x86_64 and i686 PE; the macOS Unix side; DXMT_NATIVE for the
-  VM host; the Linux guest builds the VM's guest stages make.
+  VM host; the x86_64 and i686 PE DLLs and mtld3d's Linux libraries the VM's guest stages make.
 
 ## 4. Phase 0: three experiments before any porting
 
@@ -71,7 +73,7 @@ Unix side and the DXMT_NATIVE build, for every target of §3, and called from th
 (ARM64X and i686 PE, Linux) for DXMT's DLL set.
 
 **E2, AIR from the latest LLVM.** The translator runs on the Unix side today (`winemetal/airconv_thunks.c` forwards to
-it), so only native LLVM builds are involved: macOS arm64 and the Linux guest. Apple's own compiler (metal 32023.921,
+it), and the VM guest's shaders are translated by the host's DXMT, so only one LLVM build is involved: macOS arm64. Apple's own compiler (metal 32023.921,
 `air64-apple-darwin27.2.0`) still writes typed pointers (`float addrspace(1)*`); LLVM 17 and later write only opaque
 pointers, and newer LLVMs also write newer attributes (for example `captures(none)` where older ones wrote `nocapture`).
 Whether Metal loads such AIR is unknown, so:
