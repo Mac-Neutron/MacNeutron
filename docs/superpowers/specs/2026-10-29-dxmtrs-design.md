@@ -1,7 +1,7 @@
 # DXMTRS: DXMT in Rust, then one project for D3D9 to D3D12
 
-Status: draft for the maintainer's review, 2026-10-29. Nothing is built or created yet; the first implementation plan
-covers Phase 0 and the repository (§4, §9).
+Status: approved 2026-10-29. Phase 0 ran the same day (plan `docs/superpowers/plans/2026-10-29-dxmtrs-phase0.md`):
+Mac-Neutron/DXMTRS exists and MacNeutron builds from it; the results and the translator decision are in §4.
 Related: `2026-09-28-macneutron-dxmt-fork-design.md` (our DXMT fork), `2026-09-29-macneutron-dxil-translator-design.md`
 (our DXIL translator), `2026-10-20-macneutron-d3d9-mtld3d-design.md` (D3D9 through mtld3d),
 `2026-10-17-macneutron-vm-d3d-forwarding-design.md` (the VM host's native DXMT), `2026-10-14-macneutron-framegen-metalfx-design.md`.
@@ -17,7 +17,8 @@ generation) for every API.
 
 Done when:
 - DXMTRS has no C, C++ or Objective-C of DXMT's left (generated headers for outside users aside, §6), and cargo builds
-  every binary MacNeutron ships: ARM64X (aarch64 + arm64ec), x86_64 and i686 PE DLLs, the macOS Unix side, the native
+  every binary MacNeutron ships: ARM64EC PE DLLs (MacNeutron's Mac build; DXMT's own cross file makes ARM64X), x86_64
+  and i686 PE DLLs, the macOS Unix side, the native
   macOS build the VM host uses (DXMT_NATIVE), and mtld3d's Linux builds for the VM guest.
 - D3D9 runs on the shared pieces of §7.
 - Every gate of §8 passes, and performance is at parity or better (§8).
@@ -30,7 +31,7 @@ encoding to the Unix side; new D3D features. Each would be its own decision.
 | Question | Decision |
 |---|---|
 | How to get there | One project, ported in steps: DXMT is replaced module by module behind its existing C and COM boundaries, adopting mtld3d's shared pieces as it goes; D3D10-12 keep DXMT's encoding design; checks green at every step. |
-| Shader translator | "Rust over LLVM if it's faster than MSL, but use the latest version of LLVM instead of 15." Decided by Phase 0's measurements (§4). |
+| Shader translator | "Rust over LLVM if it's faster than MSL, but use the latest version of LLVM instead of 15." After E2 showed Metal refuses opaque-pointer AIR, the maintainer chose (2026-10-29) LLVM 23 with our own AIR writer over LLVM 16 or 15 (§4). |
 | Upstream | Followed by hand: upstream DXMT and mtld3d changes are re-implemented in DXMTRS when they bring parity or better; the merge-upstream flow for DXMT ends. |
 | Home | A new repository, github.com/Mac-Neutron/DXMTRS. |
 | Design (chat, 2026-10-29) | Approved: this document writes it down, with the corrections of §5 and §4. |
@@ -59,7 +60,7 @@ Assumption to confirm: "D3DMtl" is mtld3d (athei/mtld3d, already vendored at our
   `eac-vm/dxmt-native/build.sh` for the VM host) keep fetching the pinned commit and toolchains and call that entry
   point, so a port step is a DXMTRS change plus a pin bump, never a two-repository code change. The move happens in step
   1's plan, the first that changes a build; Phase 0's Rust build already sits inside DXMTRS's meson (§4, E1).
-- **Every build stays first-class at every step**: ARM64X, x86_64 and i686 PE; the macOS Unix side; DXMT_NATIVE for the
+- **Every build stays first-class at every step**: ARM64EC (Mac), x86_64 and i686 PE; the macOS Unix side; DXMT_NATIVE for the
   VM host; the x86_64 and i686 PE DLLs and mtld3d's Linux libraries the VM's guest stages make.
 
 ## 4. Phase 0: three experiments before any porting
@@ -102,6 +103,42 @@ a native harness like the frame-generation one, each run once.
 | Metal refuses opaque pointers | Rust, on the newest LLVM that still writes typed pointers: LLVM 16 (opaque pointers switched off), confirmed in E2. |
 | MSL builds faster, or AIR's GPU time is worse | Back to the maintainer before the translator is ported. |
 
+**Results (2026-10-29).**
+
+- **E1 passes.** One Rust staticlib (`mtld3d/windows/dxmt-pe`, `mtld3d/unix/dxmt-unix`, built by DXMTRS's
+  `tools/cargo-staticlib.sh` from meson) is linked into every DXMT binary of the Mac build, the VM host's native build
+  and the VM guest's x86_64 and i686 builds, and runs at load in every one; both `dxmt/check.sh` lanes pass (810 rows),
+  and a probe that fails on request stops a test program from starting. MacNeutron's Mac DLLs turned out ARM64EC alone,
+  not ARM64X (`wine-arm64/build.sh` replaces `-marm64x`, which doesn't combine with LTO). Rust's `-msvc` standard library
+  needs ntdll on every PE target, and on x86 three things MSVC's runtime has and llvm-mingw's lacks (`__chkstk`,
+  `__tls_array`, and on i686 Wine ntdll's undecorated `__aulldiv`): `src/util/rust_pe_rt.c`. `d3d12.dll` grows by
+  84 KiB. New guest imports: `ntdll.dll` and `api-ms-win-core-synch-l1-2-0.dll`, which Wine's API-set schema resolves.
+- **E2: Metal refuses opaque-pointer AIR.** On DXMT's 64 test shaders (there was no game corpus; capturing one needs a
+  SMITE 2 session of the maintainer's), airconv's AIR rewritten by LLVM 23.1.4 loads 0/64 ("Failed to upgrade function
+  bitcode" for 41, and 22 crash Metal's compiler service on LLVM 23's newer records); rewritten by LLVM 15 with only its
+  pointers made opaque, 0/64; rewritten by LLVM 15 with typed pointers, 64/64. LLVM's own DirectX backend writes
+  typed-pointer bitcode from opaque IR (`DXILBitcodeWriter`, `PointerTypeAnalysis`, in LLVM's old 3.7 record format):
+  with four fixes to it (a pointer-valued load's type, the AIR triple and data layout kept, pointer selects and phis
+  typed from their result, nulls typed through their use) 35/64 loaded and built pipelines, so Metal accepts that record
+  format. The rest fail on what inference can't recover from opaque IR (argument-buffer arguments typed `i8*`, struct
+  fields losing their address space) and on what the old format can't say (`reassoc nsz arcp contract` widened to
+  `fast`, which adds no-NaN and no-Inf; `afn` dropped; `poison` as `undef`). Spike code: DXMTRS branch `phase0`
+  (`phase0/air-roundtrip`), our llvm-project fork's local branch `phase0-air-writer`. Every LLVM C++ API airconv uses
+  has an LLVM 23 C API equivalent except the bitcode writer (`phase0/llvm-c-api.md`).
+- **E3: AIR builds about 100 times faster than MSL.** 45 pipelines built both ways (DXC's SPIR-V and SPIRV-Cross's
+  MSL 3.2 of the 19 HLSL test shaders, against airconv's AIR of the same shaders); each MSL source salted so its
+  frontend compile is never a cache hit; two runs agree within 1%. AIR: library 2.5 ms, pipeline 3.0 ms (0.12 ms a
+  pipeline). MSL: library 661.9 ms, pipeline 3.5 ms (14.8 ms a pipeline, about 10 ms without the first compile's
+  compiler-service start). GPU time isn't compared here: the test shaders are functional tests, and binding airconv's
+  argument buffers outside DXMT would reimplement its binding model; §8's translator gate measures it on DXMT itself.
+
+**Decided (maintainer, 2026-10-29).** The translator is Rust on LLVM 23 (the newest release; `llvm-sys` with
+`no-llvm-linking`), emitting AIR through **our own AIR writer** in Mac-Neutron/llvm-project: a typed-pointer bitcode
+writer grown from LLVM's DXIL writer, to which the translator hands the pointee type of every pointer it creates (no
+inference), and which writes the newer records Metal reads (the full fast-math flags, `poison`). The writer is one C
+entry point the Rust translator calls. It gets its own plan before §5's step 4 moves the translator off LLVM 15, gated
+by 64/64 on the test shaders, then the corpus and the check suite on its output.
+
 ## 5. The order of the port
 
 Ported code replaces C++ only behind a boundary that is already a C or COM interface, or one first cut inside the C++
@@ -117,7 +154,8 @@ existing C++ signatures.
 4. The translator (`airconv`, the DXBC parser, our DXIL translator) behind `airconv_public.h`, once Phase 0 has decided
    it. Ported on the LLVM it uses today first, written against the explicit-type C API (`LLVMBuildLoad2`,
    `LLVMBuildGEP2`, `LLVMBuildCall2`) so that pointer types are made in one helper; gated by identical `llvm-dis`
-   output on the corpus. Then the LLVM move as its own step (§8's translator gate), with the shader-cache key bumped.
+   output on the corpus. Then the LLVM move as its own step (§8's translator gate), with the shader-cache key bumped:
+   LLVM 23 and our AIR writer (§4, Decided).
    Two steps rather than one because only the first can be checked byte for byte, which matters for 26k lines.
 5. The core (`src/dxmt`) with D3D12 and D3D11, subsystem by subsystem, each behind a seam cut in the C++ first:
    configuration, logging and statistics; the presenter, frame pacing, scaler and frame generation; allocators, staging
@@ -171,7 +209,8 @@ At every step:
   only where a few lines won't do, and only under permissive or dual licences (no Apache-2.0-only crate in an LGPL-2.1
   tree), checked from `cargo metadata` next to the notices `mtld3d-notices.py` writes.
 - **Translator**: identical `llvm-dis` output on the shader corpus until the LLVM move; at the move, every corpus
-  shader builds its pipelines on Metal, DXMT's shader checks render as before, and E3's harness shows no GPU-time loss.
+  shader builds its pipelines on Metal, DXMT's shader checks render as before, and the GPU time of the same passes,
+  measured on DXMT with DXMT_STATS on the milestone's benches, shows no loss (E3 timed only the build).
 - **Performance**, once per milestone (end of steps 2, 4 and 5, and after §7), each bench run once: SMITE 2's lobby,
   Palworld's title screen and a D3D11 title the maintainer picks in step 2's plan, at parity or better. Game benches need the maintainer's go-ahead each time.
 
