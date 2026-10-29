@@ -9,7 +9,9 @@
 // components its vertex functions output (vout=, position included: varyings at their signature's width, DXMT 0063)
 // and its divides that keep any fast-math flag (fdiv=<flagged>/<all>: dxmt/llvm.sh's CreateFDivFMF fix, DXMT 0064). A .dxbc
 // file in the folder is a DXBC (Shader Model 5) compute shader, translated as D3D11 does (Task FR: its sync lowering,
-// offline).
+// offline). --out <dir> writes each translated metallib to <dir>/<file>.metallib (a shader's later ones, a geometry
+// pipeline's, to <file>.<n>.metallib); --use <dir> hands Metal those files' bytes instead of the translator's where they
+// exist (DXMTRS Phase 0: AIR rewritten by another LLVM), and air= then hashes the bytes Metal got.
 #import <Metal/Metal.h>
 #define BOOL WIN_BOOL // airconv's Windows headers define BOOL as int; Objective-C's is signed char
 #include "airconv_public.h"
@@ -88,6 +90,9 @@ struct Result {
 };
 
 bool count_flags = false;
+std::filesystem::path out_dir, use_dir;
+std::string metallib_name; // the current shader's file name, and how many metallibs it has translated so far
+unsigned metallib_count = 0;
 
 // Counts the fast-math flags of a translated metallib's AIR (its bitcode starts at the wrapper magic).
 void CountFlags(const void *data, size_t size, Flags &flags) {
@@ -168,11 +173,23 @@ std::vector<SM50_IA_INPUT_ELEMENT> InputLayout(const EntryInfo &vs) {
 id<MTLLibrary> Library(id<MTLDevice> device, sm50_bitcode_t bitcode, Result &result) {
   SM50_COMPILED_BITCODE data;
   SM50GetCompiledBitcode(bitcode, &data);
+  auto file = metallib_name + (metallib_count ? "." + std::to_string(metallib_count) : "") + ".metallib";
+  metallib_count++;
+  if (!out_dir.empty())
+    std::ofstream(out_dir / file, std::ios::binary).write((const char *)data.Data, data.Size);
+  std::vector<char> used;
+  if (!use_dir.empty() && std::filesystem::exists(use_dir / file)) {
+    std::ifstream in(use_dir / file, std::ios::binary);
+    used.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    data.Data = (sm50_ptr64_t)used.data();
+    data.Size = used.size();
+  }
   if (count_flags)
     CountFlags(data.Data, data.Size, result.flags);
   for (size_t i = 0; i < data.Size; i++)
     result.air = (result.air ^ ((const uint8_t *)data.Data)[i]) * 0x100000001b3;
-  auto dispatch = dispatch_data_create(data.Data, data.Size, nullptr, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+  // Copied (the default destructor): the bytes may be `used`'s, which go with this function.
+  auto dispatch = dispatch_data_create((const void *)data.Data, data.Size, nullptr, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
   SM50DestroyBitcode(bitcode);
   NSError *err = nil;
   id<MTLLibrary> lib = [device newLibraryWithData:dispatch error:&err];
@@ -382,18 +399,34 @@ Result Translate(id<MTLDevice> device, const std::vector<char> &bytes, std::vect
 } // namespace
 
 int main(int argc, char **argv) {
-  count_flags = argc == 3 && std::string(argv[2]) == "--flags";
-  if (argc != 2 && !count_flags) {
-    fprintf(stderr, "usage: dxil-translate <folder> [--flags]\n");
+  const char *folder = nullptr;
+  bool usage = false;
+  for (int i = 1; i < argc; i++) {
+    std::string arg = argv[i];
+    if (arg == "--flags")
+      count_flags = true;
+    else if ((arg == "--out" || arg == "--use") && i + 1 < argc)
+      (arg == "--out" ? out_dir : use_dir) = argv[++i];
+    else if (arg.starts_with("-") || folder)
+      usage = true;
+    else
+      folder = argv[i];
+  }
+  if (usage || !folder) {
+    fprintf(stderr, "usage: dxil-translate <folder> [--flags] [--out <dir>] [--use <dir>]\n");
+    return 2;
+  }
+  std::error_code ec;
+  if (!out_dir.empty() && !std::filesystem::create_directories(out_dir, ec) && ec) {
+    fprintf(stderr, "dxil-translate: can't create %s: %s\n", out_dir.c_str(), ec.message().c_str());
     return 2;
   }
   std::vector<std::filesystem::path> files;
-  std::error_code ec;
-  for (auto &f : std::filesystem::directory_iterator(argv[1], ec))
+  for (auto &f : std::filesystem::directory_iterator(folder, ec))
     if (f.path().extension() == ".dxil" || f.path().extension() == ".dxbc")
       files.push_back(f.path());
   if (ec) {
-    fprintf(stderr, "dxil-translate: can't read %s: %s\n", argv[1], ec.message().c_str());
+    fprintf(stderr, "dxil-translate: can't read %s: %s\n", folder, ec.message().c_str());
     return 2;
   }
   std::sort(files.begin(), files.end());
@@ -407,6 +440,7 @@ int main(int argc, char **argv) {
     std::ifstream in(path, std::ios::binary);
     std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     auto name = path.filename().string();
+    metallib_name = name, metallib_count = 0;
     auto start = std::chrono::steady_clock::now();
     Result r;
     @autoreleasepool {
