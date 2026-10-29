@@ -160,8 +160,24 @@ existing C++ signatures.
    programs), Rust's first run in the guest. Its `__chkstk` shim links but its callers there (writes to a console,
    `io::Error`'s text, the panic printer) didn't run with stderr in a file, so the shim is still unexercised; `_fltused`
    matters only at link time. The i686 shims (`__tls_array`, `__aulldiv`) wait for step 3, whose `dxgi` and `d3d10core`
-   have i386 builds. `nvapi` is its own plan (step 1b), which starts
-   with a characterization harness: it answers 94 NVAPI functions, and one is tested today.
+   have i386 builds.
+   1b. `nvapi`, its own plan (`2026-10-29-dxmtrs-step1b-nvapi.md`): done 2026-10-29. It answers 46 functions behind 54
+   IDs, 8 of them null on purpose, and logs any other of `nvapi_interface.h`'s 511 IDs; the first draft's 94 was wrong.
+   Characterized first by `d3d11_nvapi` (a 152-line golden recorded from the C++ DLL), then ported with three
+   decisions:
+   - a null pointer the C++ would dereference gets `NVAPI_INVALID_ARGUMENT` (-5) instead of a crash (the error-message
+     string, the shader-extension out pointer and device, the display name and id, the resource handle, the HDR
+     structs); that is the only change. Three functions still write through a null output, as the C++ does
+     (`EnumNvidiaDisplayHandle`, `DISP_GetGDIPrimaryDisplayId`, `GPU_GetConnectedDisplayIds` with a null array);
+   - `dxmt-util` (`mtld3d/windows/dxmt-util`) holds what nvngx and nvapi share (logging, COM helpers, the NVEXT check),
+     and §7's merge folds it into the shared crates;
+   - the probe is the authority where a reading of the C++ and the probe disagree.
+
+   Gates: both Mac `check.sh` lanes 412 ok; the VM guest's x86_64 `nvapi64.dll` (195 KB, Rust; the C++ one is 1.3 MB)
+   passed `eac-vm/dxmt/gate.sh`'s seven programs, `d3d11_nvapi` 152 of 152 lines the same as macOS. Two findings: mtld3d's
+   `audit.sh` now runs from `mtld3d/` (it `cd`ed to the git toplevel, which inside DXMTRS is the repository root, and
+   died partway, so its later rules never ran); and DXMT's log files keep the C++'s CRLF line endings (a fix for the
+   Rust sink lands separately).
 2. `winemetal`, Unix side: the `unix_call` handlers, onto mtld3d's `mtl` crate (objc2 bindings). Then the PE side: the
    thunks behind `winemetal.h`, onto mtld3d's PE-to-Unix transport. `winemetal.h` stays the boundary the C++ calls.
 3. `dxgi`, then `d3d10`: whole DLLs behind COM.
