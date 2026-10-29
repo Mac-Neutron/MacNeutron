@@ -25,8 +25,9 @@ DXMT's private D3D11 interfaces.
    `GetErrorMessage`'s string, `D3D11_IsNvShaderExtnOpCodeSupported`'s out pointer, `D3D11_SetNvShaderExtnSlot`'s
    device, `DISP_GetDisplayIdByDisplayName`'s name and id, `D3D_GetObjectHandleForResource`'s handle,
    `Disp_GetHdrCapabilities`'s and `Disp_HdrColorControl`'s struct. That is the only behaviour change. Every other
-   quirk stays as it is: `EnumNvidiaDisplayHandle` and `DISP_GetGDIPrimaryDisplayId` return OK without writing,
-   `GPU_GetConnectedDisplayIds` never writes the count, `GetErrorMessage` writes an empty string.
+   quirk stays as it is: `GetErrorMessage` writes an empty string, and `EnumNvidiaDisplayHandle`,
+   `DISP_GetGDIPrimaryDisplayId` and `GPU_GetConnectedDisplayIds` (with a null array) write their output as Task 1's
+   probe records.
 3. **A shared crate before §7:** `dxmt-util` (`mtld3d/windows/dxmt-util`) holds what nvngx and nvapi both need, so
    nvapi doesn't copy it. §7's merge folds it into the shared crates.
 

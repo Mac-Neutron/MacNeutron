@@ -51,4 +51,5 @@ d3d12_dlss_performance|d3d12_dlss.exe|C:\windows\system32\nvngx.dll performance|
 d3d12_dlss_inverted|d3d12_dlss.exe|C:\windows\system32\nvngx.dll inverted|dlss
 d3d12_dlss_refuse|d3d12_dlss.exe|C:\windows\system32\nvngx.dll refuse|dlss
 d3d11_dlss|d3d11_dlss.exe|C:\windows\system32\nvngx.dll quality refuse cycle|dlss
+d3d11_nvapi|d3d11_nvapi.exe|C:\windows\system32\nvapi64.dll fixed|nvsys nvgpu nvdisp nvd3d nvquery
 d3d9_triangle|d3d9_triangle.exe||d3d9

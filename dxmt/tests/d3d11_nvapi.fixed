@@ -1,0 +1,151 @@
+nvsys Unload(before) -4
+nvsys Initialize(1) 0
+nvsys Initialize(2) 0
+nvsys Unload(1) 0
+nvsys Unload(2) 0
+nvsys Unload(past) -4
+nvsys Initialize(3) 0
+nvsys SYS_GetDriverAndBranchVersion 0 99999 r57218_000
+nvsys SYS_GetDriverAndBranchVersion(null version) -5
+nvsys SYS_GetDriverAndBranchVersion(null string) -5
+nvsys GetDisplayDriverVersion(null) -5
+nvsys GetDisplayDriverVersion(wrong) -9 tail=untouched
+nvsys GetDisplayDriverVersion 0 99999 0 r57218_000 NVIDIA GeForce RTX
+nvsys GetInterfaceVersionString 0 NVAPI Open Source Interface (DXMT-NVAPI)
+nvsys GetInterfaceVersionString(null) -5
+nvsys GetErrorMessage 0 "" tail=untouched
+nvsys Mosaic_GetDisplayViewportsByResolution -176
+nvsys Stereo_IsEnabled(null) -5
+nvsys Stereo_IsEnabled -140 165
+nvsys Stereo_SetDriverMode -140
+nvsys DRS_CreateSession(null) -5
+nvsys DRS_CreateSession -104 handle=untouched
+nvsys DRS_LoadSettings -104
+nvgpu EnumPhysicalGPUs(null array) -5
+nvgpu EnumPhysicalGPUs(null count) -5
+nvgpu EnumPhysicalGPUs 0 count>=1 yes
+nvgpu EnumLogicalGPUs(null array) -5
+nvgpu EnumLogicalGPUs(null count) -5
+nvgpu EnumLogicalGPUs 0 same-as-physical yes
+nvgpu GetPhysicalGPUsFromDisplay(null display) -5
+nvgpu GetPhysicalGPUsFromDisplay(null array) -5
+nvgpu GetPhysicalGPUsFromDisplay(null count) -5
+nvgpu GetPhysicalGPUsFromDisplay 0 same-as-physical yes
+nvgpu GPU_GetArchInfo(null handle) -5
+nvgpu GPU_GetArchInfo(null) -5
+nvgpu GPU_GetArchInfo(wrong) -9 tail=untouched
+nvgpu GPU_GetArchInfo(v1) 0 0x190 0x2 0xffffffff tail=untouched
+nvgpu GPU_GetArchInfo(v2) 0 0x190 0x2 0xffffffff tail=untouched
+nvgpu GPU_GetAllClockFrequencies(null handle) -104
+nvgpu GPU_GetAllClockFrequencies(null) -5
+nvgpu GPU_GetAllClockFrequencies -104 buffer=untouched
+nvgpu GPU_GetGpuCoreCount(null handle) -5
+nvgpu GPU_GetGpuCoreCount(null) -5
+nvgpu GPU_GetGpuCoreCount -104 buffer=untouched
+nvgpu GPU_GetBusId(null handle) -5
+nvgpu GPU_GetBusId(null) -5
+nvgpu GPU_GetBusId -104 buffer=untouched
+nvgpu GPU_GetBusType(null handle) -5
+nvgpu GPU_GetBusType(null) -5
+nvgpu GPU_GetBusType -104 buffer=untouched
+nvgpu GPU_GetMemoryInfo(null handle) -5
+nvgpu GPU_GetMemoryInfo(null) -5
+nvgpu GPU_GetMemoryInfo -104 buffer=untouched
+nvgpu GPU_GetMemoryInfoEx(null handle) -5
+nvgpu GPU_GetMemoryInfoEx(null) -5
+nvgpu GPU_GetMemoryInfoEx -104 buffer=untouched
+nvgpu GPU_GetPstates20(null handle) -5
+nvgpu GPU_GetPstates20(null) -5
+nvgpu GPU_GetPstates20 -3 buffer=untouched
+nvgpu GPU_GetFullName 0 NVIDIA GeForce RTX 4090
+nvgpu GPU_GetFullName(null) -5
+nvgpu GPU_GetAdapterIdFromPhysicalGpu(null) -5
+nvgpu GPU_GetAdapterIdFromPhysicalGpu(unknown handle) -5
+nvgpu GPU_GetAdapterIdFromPhysicalGpu 0 dxgi yes bswap yes
+nvgpu GPU_GetLogicalGpuInfo(null) -5
+nvgpu GPU_GetLogicalGpuInfo(unknown handle) -6
+nvgpu GPU_GetLogicalGpuInfo(wrong) -9 tail=untouched
+nvgpu GPU_GetLogicalGpuInfo 0 count 1 handle yes others-null yes dxgi yes reserved=untouched
+nvdisp GPU_GetConnectedDisplayIds(null count) -5
+nvdisp GPU_GetConnectedDisplayIds(null array) 0 count=written
+nvdisp GPU_GetConnectedDisplayIds(no room) -174
+nvdisp GPU_GetConnectedDisplayIds(wrong) -9
+nvdisp GPU_GetConnectedDisplayIds(v1) 0 count>=1 yes first active 1 connected 1 physical 1 type -1
+nvdisp GPU_GetConnectedDisplayIds(v2) 0 count>=1 yes first active 1 connected 1 physical 1 type -1
+nvdisp DISP_GetDisplayIdByDisplayName(primary) 0 same-as-connected yes
+nvdisp DISP_GetDisplayIdByDisplayName(unknown) -6 id=untouched
+nvdisp DISP_GetGDIPrimaryDisplayId(null) -5
+nvdisp DISP_GetGDIPrimaryDisplayId 0 id=written
+nvdisp EnumNvidiaDisplayHandle(null) -5
+nvdisp EnumNvidiaDisplayHandle(0) 0 handle=written
+nvdisp EnumNvidiaDisplayHandle(99) -7
+nvdisp DISP_GetMonitorCapabilities(null) -5
+nvdisp DISP_GetMonitorCapabilities -104 tail=untouched
+nvdisp Disp_GetHdrCapabilities(wrong) -9 tail=untouched
+nvdisp Disp_GetHdrCapabilities(v1) 0 version-kept yes min 1 tail=untouched
+nvdisp Disp_GetHdrCapabilities(v2) 0 version-kept yes min 1 tail=untouched
+nvdisp Disp_GetHdrCapabilities(v3) 0 version-kept yes min 1 tail=untouched
+nvdisp Disp_HdrColorControl(wrong) -9 tail=untouched
+nvdisp Disp_HdrColorControl(get v2 before) 0 mode 0 format 0 range 0 bpc 3
+nvdisp Disp_HdrColorControl(set v1 mode 2) 0 tail=untouched
+nvdisp Disp_HdrColorControl(get v1 uhda) 0 mode 2 35400 14600 8500 39850 6550 2300 15635 16450 1000 1 1000 400 tail=untouched
+nvdisp Disp_HdrColorControl(get v2 uhda) 0 mode 2 35400 14600 8500 39850 6550 2300 15635 16450 1000 1 1000 400 format 0 range 0 bpc 3
+nvdisp Disp_HdrColorControl(set v2 mode 2) 0 tail=untouched
+nvdisp Disp_HdrColorControl(get v1 uhda) 0 mode 2 35400 14600 8500 39850 6550 2300 15635 16450 1000 1 1000 400 tail=untouched
+nvdisp Disp_HdrColorControl(get v2 uhda) 0 mode 2 35400 14600 8500 39850 6550 2300 15635 16450 1000 1 1000 400 format 0 range 0 bpc 3
+nvdisp Disp_HdrColorControl(set v2 mode 5) 0 tail=untouched
+nvdisp Disp_HdrColorControl(get v2 passthrough) 0 mode 5 35400 14600 8500 39850 6550 2300 15635 16450 1000 1 1000 400 format 0 range 0 bpc 3
+nvdisp Disp_HdrColorControl(set v2 mode 0) 0 tail=untouched
+nvdisp Disp_HdrColorControl(get v2 off) 0 mode 0 format 0 range 0 bpc 3
+nvd3d D3D_GetCurrentSLIState(null device) -5
+nvd3d D3D_GetCurrentSLIState(null) -5
+nvd3d D3D_GetCurrentSLIState(wrong) -9 tail=untouched
+nvd3d D3D_GetCurrentSLIState(v1) 0 tail=untouched 1 1 0 0 0 0
+nvd3d D3D_GetCurrentSLIState(v2) 0 1 1 0 0 0 0 0
+nvd3d D3D_GetSleepStatus(null device) -5
+nvd3d D3D_GetSleepStatus(null) -5
+nvd3d D3D_GetSleepStatus(wrong) -9 tail=untouched
+nvd3d D3D_GetSleepStatus(v1) 0 0 0 0 0 0 rsvd=untouched
+nvd3d D3D_SetSleepMode(null device) -5
+nvd3d D3D_SetSleepMode(null) -5
+nvd3d D3D_SetSleepMode(wrong) -9 tail=untouched
+nvd3d D3D_SetSleepMode(v1) 0 body=untouched
+nvd3d D3D_SetLatencyMarker(null device) -5
+nvd3d D3D_SetLatencyMarker(null) -5
+nvd3d D3D_SetLatencyMarker(wrong) -9 tail=untouched
+nvd3d D3D_SetLatencyMarker(v1) 0 body=untouched
+nvd3d D3D_GetLatency(null device) -5
+nvd3d D3D_GetLatency(null) -5
+nvd3d D3D_GetLatency(wrong) -9 tail=untouched
+nvd3d D3D_GetLatency(v1) 0 frames-zeroed yes rsvd=untouched
+nvd3d D3D_Sleep(null) -5
+nvd3d D3D_Sleep 0
+nvd3d D3D_SetVerticalSyncMode(null) -5
+nvd3d D3D_SetVerticalSyncMode -3
+nvd3d D3D11_BeginUAVOverlap(null) -5
+nvd3d D3D11_EndUAVOverlap(null) -5
+nvd3d D3D11_UAVOverlap(fake context) 0 0 begins 1 ends 1 upscales 0 refs-balanced yes
+nvd3d D3D11_UAVOverlap(fake device) -5 -5
+nvd3d D3D11_UAVOverlap(device) 0 0
+nvd3d D3D11_UAVOverlap(context) 0 0
+nvd3d D3D11_SetNvShaderExtnSlot(fake device) 0 slot 7 refs-balanced yes
+nvd3d D3D11_SetNvShaderExtnSlot(fake context) -5
+nvd3d D3D11_SetNvShaderExtnSlot(device) 0
+nvd3d D3D11_SetDepthBoundsTest -104
+nvd3d D3D11_IsNvShaderExtnOpCodeSupported(1) 0 0
+nvd3d D3D11_IsNvShaderExtnOpCodeSupported(12) 0 0
+nvd3d D3D11_IsNvShaderExtnOpCodeSupported(20) 0 0
+nvd3d D3D11_IsNvShaderExtnOpCodeSupported(99) 0 0
+nvd3d D3D_GetObjectHandleForResource 0 handle-is-resource yes
+nvd3d D3D_SetResourceHint 0 value=untouched
+nvquery 0x33c7358c null
+nvquery 0x593e8644 null
+nvquery 0xad298d3f null
+nvquery 0xd7c61344 null
+nvquery 0xd44d3c4e null
+nvquery 0x6d67533c null
+nvquery 0xb7fbdbfa null
+nvquery 0xc99f4a67 null
+nvquery NvAPI_GPU_GetThermalSettings null
+nvquery 0x12345678 null
+nvsys done

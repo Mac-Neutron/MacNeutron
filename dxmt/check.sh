@@ -1268,6 +1268,23 @@ expect "D3D11 DLSS refuses frame generation and a call without motion vectors" \
   "$(grep -m1 '^dlss11 refuse' "$WORK/dlss11.txt" || echo none)" "dlss11 refuse bad00000,bad00005"
 expect "D3D11 DLSS creates, releases and creates a feature again, then shuts down" \
   "$(grep -m1 '^dlss11 cycle' "$WORK/dlss11.txt" || echo none)" "dlss11 cycle ok"
+# DXMT's nvapi64.dll through nvapi_QueryInterface (d3d11_nvapi.exe): every answer of its 46 functions (statuses, the bytes
+# written, the relations to DXGI and winemetal), compared with d3d11_nvapi.fixed, which the C++ produced. Log lines: the
+# 8 null-on-purpose IDs log nothing; a table name and an unknown number each log an err line. Without MACNEUTRON_DLSS
+# the adapter stays Apple's and NvAPI_Initialize answers NVAPI_NO_IMPLEMENTATION.
+run ours nvapi dxmt "$TESTS/d3d11_nvapi.exe" 'C:\windows\system32\nvapi64.dll' fixed
+firstdiff=$(grep '^nv' "$WORK/nvapi.txt" | diff - "$ROOT/dxmt/tests/d3d11_nvapi.fixed" | sed -n 2p)
+expect "nvapi64 answers as DXMT's C++ did" "${firstdiff:-same}" same
+expect "nvapi64 logs a table name and an unknown ID as not implemented, and nothing for its 8 null IDs" \
+  "$(grep -E '^err: +nvapi' "$WORK/nvapi.txt" | tr '\n' ';')" \
+  "err:   nvapi: function NvAPI_GPU_GetThermalSettings not implemented;err:   nvapi: function id 305419896 not implemented;"
+expect "nvapi64 warns once about an unsupported shader extension opcode" \
+  "$(grep -E '^warn: +nvapi' "$WORK/nvapi.txt")" "warn:  nvapi: unsupported shader extension opcode 99"
+unset MACNEUTRON_DLSS
+run ours nvapi-nonvext dxmt "$TESTS/d3d11_nvapi.exe" 'C:\windows\system32\nvapi64.dll' fixed
+export MACNEUTRON_DLSS=1
+expect "nvapi64 refuses to initialise without MACNEUTRON_DLSS" \
+  "$(grep -m1 '^nvsys Initialize(1)' "$WORK/nvapi-nonvext.txt" || echo none)" "nvsys Initialize(1) -6"
 # What one upscale holds the GPU queue for with Palworld's inputs, printed: MetalFX runs its network on the Neural
 # Engine between two GPU passes, and the GPU waits for it unless other work is ready.
 run ours dlss-cost dxmt "$TESTS/d3d12_dlss.exe" "$NGX" cost
