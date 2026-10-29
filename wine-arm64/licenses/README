@@ -26,7 +26,7 @@ FEX (libarm64ecfex.dll and libarm64ecfex.so: runs x86_64 code)
 DXMT (the Direct3D to Metal DLLs in ../DXMT/aarch64-windows, winemetal.dll and winemetal.so)
   Licence: LGPL-2.1-or-later. Texts: ../DXMT/LICENSE, ../DXMT/COPYING.LIB, ../DXMT/LICENSE.OLD (MIT, for releases up
   to v0.80). DXBCParser (MIT, Microsoft) and the constexpr GUID parser (MIT): NOTICES.md.
-  Source: https://github.com/Mac-Neutron/dxmt.git at DXMT_COMMIT (pinned in dxmt/pins; ../DXMT/version names it too):
+  Source: https://github.com/Mac-Neutron/DXMTRS.git at DXMT_COMMIT (pinned in dxmt/pins; ../DXMT/version names it too):
   DXMT (https://github.com/3Shain/dxmt.git) with MacNeutron's changes, its submodules at the DXMT_SUBMODULE_* commits.
 
 mtld3d 0.14.1 (Direct3D 9: d3d9.dll and mtld3d.dll in lib/wine/aarch64-windows, mtld3d.so in lib/wine/aarch64-unix)
@@ -35,7 +35,7 @@ mtld3d 0.14.1 (Direct3D 9: d3d9.dll and mtld3d.dll in lib/wine/aarch64-windows, 
   snmalloc's C++, which snmalloc-sys compiles in, MIT, Microsoft Corporation, mtld3d/crates/snmalloc-sys-*/
   LICENSE-snmalloc. Rust's standard library, which the binaries link: mtld3d/rust/COPYRIGHT-library.html and the texts
   it names in mtld3d/rust/licenses, from the Rust toolchain dxmt/pins names (MTLD3D_RUST).
-  Source: https://github.com/athei/mtld3d.git at release 0.14.1 (0c172127), in our DXMT fork's mtld3d/ at
+  Source: https://github.com/athei/mtld3d.git at release 0.14.1 (0c172127), in DXMTRS's mtld3d/ at
   DXMT_COMMIT; the crates from crates.io at the versions mtld3d's Cargo.lock
   files pin.
 

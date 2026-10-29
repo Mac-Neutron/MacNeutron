@@ -105,7 +105,7 @@ In Steam, start launch options with `/usr/bin/env`. macOS Steam runs them withou
 ## Graphics
 
 Games use DXMT by default, an open-source Direct3D → Metal translator. MacNeutron builds it from its own fork,
-[Mac-Neutron/dxmt](https://github.com/Mac-Neutron/dxmt), with Direct3D 12 enabled. DXMT is LGPL-2.1+: the licences ship
+[Mac-Neutron/DXMTRS](https://github.com/Mac-Neutron/DXMTRS) (being ported to Rust), with Direct3D 12 enabled. DXMT is LGPL-2.1+: the licences ship
 in `wine.app/Contents/Resources/DXMT` (`COPYING.LIB`, `LICENSE`, `LICENSE.OLD`), and the fork commit is in its `version` file. The fork's
 changes are AI-assisted and never go to DXMT upstream, per its contribution policy.
 
