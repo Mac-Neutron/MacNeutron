@@ -1258,6 +1258,16 @@ expect "DLSS with inverted depth and offset inputs" "$(dlssed dlss-inverted inve
 run ours dlss-refuse dxmt "$TESTS/d3d12_dlss.exe" "$NGX" refuse
 expect "DLSS refuses frame generation, a 4x feature and a call without motion vectors" \
   "$(grep -m1 '^dlss refuse' "$WORK/dlss-refuse.txt" || echo none)" "dlss refuse refused,refused,refused"
+# The same through NGX's Direct3D 11 entry points (d3d11_dlss.exe): the quality render size for 1280x720 and a gradient
+# upscaled into a UAV output, frame generation and a call without motion vectors refused (NGX's FAIL and
+# INVALID_PARAMETER), and a feature created, released and created again before Shutdown1.
+run ours dlss11 dxmt "$TESTS/d3d11_dlss.exe" "$NGX" quality refuse cycle
+expect "D3D11 DLSS renders at 854x480 and upscales on MetalFX" \
+  "$(grep -m1 -E '^dlss11 quality (render [0-9]+x[0-9]+ ok|FAIL)' "$WORK/dlss11.txt" || echo none)" "dlss11 quality render 854x480 ok"
+expect "D3D11 DLSS refuses frame generation and a call without motion vectors" \
+  "$(grep -m1 '^dlss11 refuse' "$WORK/dlss11.txt" || echo none)" "dlss11 refuse bad00000,bad00005"
+expect "D3D11 DLSS creates, releases and creates a feature again, then shuts down" \
+  "$(grep -m1 '^dlss11 cycle' "$WORK/dlss11.txt" || echo none)" "dlss11 cycle ok"
 # What one upscale holds the GPU queue for with Palworld's inputs, printed: MetalFX runs its network on the Neural
 # Engine between two GPU passes, and the GPU waits for it unless other work is ready.
 run ours dlss-cost dxmt "$TESTS/d3d12_dlss.exe" "$NGX" cost

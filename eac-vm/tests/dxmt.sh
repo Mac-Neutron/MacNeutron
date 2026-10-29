@@ -17,7 +17,7 @@ grep -v '^#' "$T/invocations" | while IFS='|' read -r name exe args prefixes; do
   args=$(printf '%s' "$args" | sed "s|@S|Z:$T/shaders|g; s|@T|Z:$T|g; s|@X|Z:$T|g")
   start=$(date +%s%N)
   # shellcheck disable=SC2086  # the arguments, one word each
-  case $name in d3d12_dlss*) nvext=1 ;; *) nvext= ;; esac  # the launcher's MACNEUTRON_DLSS=1
+  case $name in d3d1[12]_dlss*) nvext=1 ;; *) nvext= ;; esac  # the launcher's MACNEUTRON_DLSS=1
   DXMT_ENABLE_NVEXT=$nvext DXMT_SHADER_CACHE_PATH=/home/mn/dxmt-cache/$name timeout -k 10 "$TO" wine "$T/$exe" $args < /dev/null \
     > "$O/$name.raw" 2>&1
   rc=$?
