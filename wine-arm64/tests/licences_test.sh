@@ -40,6 +40,9 @@ check() {  # check <wine.app> <build dir>
   # snmalloc's C++, which snmalloc-sys compiles into mtld3d's binaries, is Microsoft's: its own MIT notice.
   g -qF "Microsoft Corporation" "$R"/licenses/mtld3d/crates/snmalloc-sys-*/LICENSE-snmalloc 2> /dev/null \
     || miss "licenses/mtld3d/crates/snmalloc-sys-*/LICENSE-snmalloc (Microsoft's MIT notice for snmalloc)"
+  # DXMT's DLLs link Rust's standard library (DXMTRS: nvngx.dll): the README's DXMT entry names its texts, mtld3d's copy.
+  awk '/^DXMT \(/ { p = 1 } p && /^$/ { exit } p' "$L/README" 2> /dev/null | g -qF 'mtld3d/rust/COPYRIGHT-library.html' \
+    || miss "the README's DXMT entry naming Rust's standard library's texts (mtld3d/rust/COPYRIGHT-library.html)"
   # mtld3d's crates (dxmt/mtld3d-notices.py): a folder of licence files for each one its INDEX names.
   while read -r crate version _; do  # "<crate> <version>: <terms>"
     version=${version%:}

@@ -21,12 +21,15 @@ mkdir -p "$L/dxmt"
 for d in wine fex lsteamclient macneutron; do cp -R "$APP/Contents/Resources/licenses/$d" "$L/"; done
 cp "$APP/Contents/Resources/DXMT/LICENSE" "$APP/Contents/Resources/DXMT/COPYING.LIB" "$APP/Contents/Resources/DXMT/LICENSE.OLD" \
   "$L/dxmt/"
+# DXMT's nvngx.dll is Rust (DXMTRS): Rust's standard library's texts, wine.app's copy of them.
+cp -R "$APP/Contents/Resources/licenses/mtld3d/rust" "$L/dxmt/rust"
+[ -s "$L/dxmt/rust/COPYRIGHT-library.html" ] || { echo "parts: no Rust standard library notice in $APP" >&2; exit 1; }
 . "$ROOT/eac-vm/image/alsa-lib.pin"
 cat > "$L/README" << EOF
 MacNeutron's VM parts: the game VM's own files. macneutron vm-setup builds the VM's images from them and from
 Fedora's packages, which it downloads from Fedora to the Mac (MacNeutron ships none of those but one library, below).
 - wine.tar: MacNeutron's Wine for x86-64 Linux (LGPL-2.1-or-later, wine/), with DXMT's Direct3D DLLs and its guest
-  winemetal.so (LGPL-2.1-or-later, dxmt/), and Proton's lsteamclient (BSD-3-Clause, lsteamclient/) with MacNeutron's
+  winemetal.so (LGPL-2.1-or-later, dxmt/; its nvngx.dll links Rust's standard library, dxmt/rust), and Proton's lsteamclient (BSD-3-Clause, lsteamclient/) with MacNeutron's
   Steam forwarder (MIT, macneutron/). Its lib/mn-i386 holds Fedora's alsa-lib for i686 ($ALSA_LIB_NVR:
   libasound.so.2, LGPL-2.1-or-later, COPYING.alsa-lib beside it), for 32-bit games' sound. Its share/fonts holds
   Proton's Windows-named fonts, built from the Liberation fonts (SIL OFL 1.1, LICENSE beside them; not Microsoft's

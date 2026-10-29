@@ -25,7 +25,9 @@ FEX (libarm64ecfex.dll and libarm64ecfex.so: runs x86_64 code)
 
 DXMT (the Direct3D to Metal DLLs in ../DXMT/aarch64-windows, winemetal.dll and winemetal.so)
   Licence: LGPL-2.1-or-later. Texts: ../DXMT/LICENSE, ../DXMT/COPYING.LIB, ../DXMT/LICENSE.OLD (MIT, for releases up
-  to v0.80). DXBCParser (MIT, Microsoft) and the constexpr GUID parser (MIT): NOTICES.md.
+  to v0.80). DXBCParser (MIT, Microsoft) and the constexpr GUID parser (MIT): NOTICES.md. nvngx.dll is Rust and links
+  Rust's standard library: mtld3d/rust/COPYRIGHT-library.html and the texts it names in mtld3d/rust/licenses (mtld3d's
+  copy, from the same toolchain).
   Source: https://github.com/Mac-Neutron/DXMTRS.git at DXMT_COMMIT (pinned in dxmt/pins; ../DXMT/version names it too):
   DXMT (https://github.com/3Shain/dxmt.git) with MacNeutron's changes, its submodules at the DXMT_SUBMODULE_* commits.
 
