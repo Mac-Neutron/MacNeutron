@@ -38,6 +38,9 @@ ln -sfn "$S/wine-build/tools/winebuild/winebuild" "$SDK/bin/winebuild"
 set -- "$B" "$S/dxmt" --cross-file "$S/dxmt/build-win64.txt" --buildtype release --strip --prefix "$W/dxmt-guest" \
   -Dguest_vm=true -Dwine_builtin_dll=true -Denable_d3d12=true -Denable_nvapi=true -Denable_nvngx=true \
   -Dwine_install_path="$SDK" -Dtranslator_key_file="$S/dxmt-translator-key"
+# DXMTRS's meson builds Rust static libraries (tools/cargo-staticlib.sh) with cargo, at the toolchain mtld3d pins.
+PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH"
+set -- "$@" -Dcargo_toolchain="$(. "$ROOT/dxmt/pins"; echo "$MTLD3D_RUST")"
 # The p profile: logging below warnings, stats and capture compiled out (DXMT_PERF_BUILD; its cross file sets no
 # c_args to replace); ThinLTO with "dxmt" in its flags.
 . "$ROOT/wine-arm64/lib.sh"
@@ -69,6 +72,7 @@ B32=$W/dxmt-guest-build32
 set -- "$B32" "$S/dxmt" --cross-file "$S/dxmt/build-win32.txt" --buildtype release --strip --prefix "$W/dxmt-guest" \
   -Dguest_vm=true -Dwine_builtin_dll=true -Denable_d3d12=true -Denable_nvapi=false -Denable_nvngx=false \
   -Dwine_install_path="$SDK" -Dtranslator_key_file="$S/dxmt-translator-key"
+set -- "$@" -Dcargo_toolchain="$(. "$ROOT/dxmt/pins"; echo "$MTLD3D_RUST")"
 [ "${MACNEUTRON_PROFILE:-std}" != p ] || set -- "$@" -Dc_args=-DDXMT_PERF_BUILD -Dcpp_args=-DDXMT_PERF_BUILD
 ! p_flag dxmt || set -- "$@" -Db_lto=true -Db_lto_mode=thin
 inputs=$(printf '%s\n' "$@"; cat "$S/dxmt/build-win32.txt"; git -C "$S/dxmt" rev-parse HEAD)

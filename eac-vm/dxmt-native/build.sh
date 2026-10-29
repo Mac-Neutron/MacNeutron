@@ -19,6 +19,9 @@ die() { echo "dxmt-native: $*" >&2; exit 1; }
 CPU=${MACNEUTRON_CPU:-apple-m5}
 set -- "$B" "$D" --buildtype release -Denable_d3d12=true -Denable_nvapi=false -Denable_nvngx=false \
   -Dwine_builtin_dll=false -Dnative_llvm_path="$SRC/llvm-arm64" -Dtranslator_key_file="$SRC/dxmt-translator-key"
+# DXMTRS's meson builds Rust static libraries (tools/cargo-staticlib.sh) with cargo, at the toolchain mtld3d pins.
+PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH"
+set -- "$@" -Dcargo_toolchain="$(. "$ROOT/dxmt/pins"; echo "$MTLD3D_RUST")"
 # The p profile's PGO (host.profdata, Apple clang's): instrumented with MACNEUTRON_PGO=generate, else that profile.
 CARGS=; [ "$CPU" = generic ] || CARGS="-mcpu=$CPU"
 [ "${MACNEUTRON_PROFILE:-std}" != p ] || CARGS="$CARGS${CARGS:+ }-DDXMT_PERF_BUILD"

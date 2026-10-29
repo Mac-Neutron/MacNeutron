@@ -526,6 +526,9 @@ set -- "$SRC/dxmt-build" "$D" --cross-file "$D/build-arm64ec.txt" --cross-file "
   -Denable_nvapi=true -Denable_nvngx=true \
   -Dnative_llvm_path="$SRC/llvm-arm64" -Dwine_build_path="$SRC/wine-build" \
   -Dtranslator_key_file="$SRC/dxmt-translator-key"
+# DXMTRS's meson builds Rust static libraries (tools/cargo-staticlib.sh) with cargo, at the toolchain mtld3d pins.
+PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH"
+set -- "$@" -Dcargo_toolchain="$(. "$ROOT/dxmt/pins"; echo "$MTLD3D_RUST")"
 inputs=$(printf '%s\n' "$@"; cat "$D/build-arm64ec.txt" "$SRC/dxmt-xcrun.txt" "$SRC/dxmt-cpu.txt" \
   "$ROOT/wine-arm64/tools/xcrun-metal.sh")
 if [ ! -f "$SRC/dxmt-build/build.ninja" ] || [ "$(cat "$SRC/dxmt-build/.setup-inputs" 2> /dev/null)" != "$inputs" ]; then
