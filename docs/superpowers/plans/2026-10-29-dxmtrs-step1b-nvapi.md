@@ -23,11 +23,12 @@ DXMT's private D3D11 interfaces.
    any other of `nvapi_interface.h`'s 511 IDs in its error log. Not 94.
 2. **Null pointers the C++ dereferences** get `NVAPI_INVALID_ARGUMENT` (-5) in Rust instead of a crash:
    `GetErrorMessage`'s string, `D3D11_IsNvShaderExtnOpCodeSupported`'s out pointer, `D3D11_SetNvShaderExtnSlot`'s
-   device, `DISP_GetDisplayIdByDisplayName`'s name and id, `D3D_GetObjectHandleForResource`'s handle,
-   `Disp_GetHdrCapabilities`'s and `Disp_HdrColorControl`'s struct. That is the only behaviour change. Every other
-   quirk stays as it is: `GetErrorMessage` writes an empty string, and `EnumNvidiaDisplayHandle`,
-   `DISP_GetGDIPrimaryDisplayId` and `GPU_GetConnectedDisplayIds` (with a null array) write their output as Task 1's
-   probe records.
+   device, `DISP_GetDisplayIdByDisplayName`'s name and its id (the id only after the name is found: an unknown name
+   still gets -6, as in the C++), `D3D_GetObjectHandleForResource`'s handle, `Disp_GetHdrCapabilities`'s and
+   `Disp_HdrColorControl`'s struct, and `GPU_GetLogicalGpuInfo`'s `pOSAdapterId`. Every other quirk stays as it is:
+   `GetErrorMessage` writes an empty string. `EnumNvidiaDisplayHandle`, `DISP_GetGDIPrimaryDisplayId` and
+   `GPU_GetConnectedDisplayIds` null-check their output in the C++ and so in the Rust: they write it for a non-null
+   pointer (Task 1's probe) and return -5 for a null one; none writes through null.
 3. **A shared crate before §7:** `dxmt-util` (`mtld3d/windows/dxmt-util`) holds what nvngx and nvapi both need, so
    nvapi doesn't copy it. §7's merge folds it into the shared crates.
 
