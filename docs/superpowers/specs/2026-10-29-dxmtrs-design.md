@@ -1,6 +1,8 @@
 # DXMTRS: DXMT in Rust, then one project for D3D9 to D3D12
 
-Status: approved 2026-10-29. Phase 0 ran the same day (plan `docs/superpowers/plans/2026-10-29-dxmtrs-phase0.md`):
+Status: approved 2026-10-29; revised 2026-10-30 (D3D9's place and full convergence: §1, §2, §3, §5 steps R and 3,
+§6, §7, §8, §9; pending the maintainer's approval of this revision). Phase 0 ran the same day (plan
+`docs/superpowers/plans/2026-10-29-dxmtrs-phase0.md`):
 Mac-Neutron/DXMTRS exists and MacNeutron builds from it; the results and the translator decision are in §4.
 Related: `2026-09-28-macneutron-dxmt-fork-design.md` (our DXMT fork), `2026-09-29-macneutron-dxil-translator-design.md`
 (our DXIL translator), `2026-10-20-macneutron-d3d9-mtld3d-design.md` (D3D9 through mtld3d),
@@ -9,22 +11,21 @@ Related: `2026-09-28-macneutron-dxmt-fork-design.md` (our DXMT fork), `2026-09-2
 ## 1. Goal
 
 DXMT (our fork, ~100k lines of C, C++ and Objective-C under `src/`) is rewritten in Rust, step by step, in a new
-repository, Mac-Neutron/DXMTRS, which also holds mtld3d (Rust, D3D9). The port adopts mtld3d's pieces as it reaches
-them, and once no C++ is left the merge is finished (§7), so that D3D9, D3D10, D3D11 and D3D12 come from one project
-with shared interfaces: one Metal binding layer, one PE/Unix bridge, one configuration,
-logging, statistics and shader-cache scheme, and one presenter (MetalFX upscaling, HDR, frame pacing and frame
-generation) for every API.
+repository, Mac-Neutron/DXMTRS, which also holds D3D9 (mtld3d's Rust, at `src/d3d9` since step R). D3D9, D3D10, D3D11
+and D3D12 end as one project built the same way: one layout and build, one Rust core, one PE/Unix bridge (winemetal),
+one shader translator (AIR), one configuration, logging, statistics and shader-cache scheme, and one presenter
+(MetalFX upscaling, HDR, frame pacing and frame generation) for every API (§7).
 
 Done when:
 - DXMTRS has no C, C++ or Objective-C of DXMT's left (generated headers for outside users aside, §6), and cargo builds
   every binary MacNeutron ships: ARM64EC PE DLLs (MacNeutron's Mac build; DXMT's own cross file makes ARM64X), x86_64
   and i686 PE DLLs, the macOS Unix side, the native
-  macOS build the VM host uses (DXMT_NATIVE), and mtld3d's Linux builds for the VM guest.
-- D3D9 runs on the shared pieces of §7.
+  macOS build the VM host uses (DXMT_NATIVE), and the VM guest's builds.
+- D3D9 runs on the shared core, bridge, translator and presenter (§7); `mtld3d.dll` and `mtld3d.so` are gone.
 - Every gate of §8 passes, and performance is at parity or better (§8).
 
-Not in this project: one shader path for D3D9 to D3D12 (D3D9 keeps MSL, D3D10-12 keep AIR); moving D3D10-12's command
-encoding to the Unix side; new D3D features. Each would be its own decision.
+Not in this project: moving D3D10-12's command encoding to the Unix side; forwarding D3D9 in the VM; new D3D features.
+Each would be its own decision. (D3D9's shaders join the shared translator: maintainer, 2026-10-30, §7.)
 
 ## 2. Decisions (maintainer, 2026-10-28 and 2026-10-29)
 
@@ -35,6 +36,8 @@ encoding to the Unix side; new D3D features. Each would be its own decision.
 | Upstream | Followed by hand: upstream DXMT and mtld3d changes are re-implemented in DXMTRS when they bring parity or better; the merge-upstream flow for DXMT ends. |
 | Home | A new repository, github.com/Mac-Neutron/DXMTRS. |
 | Design (chat, 2026-10-29) | Approved: this document writes it down, with the corrections of §5 and §4. |
+| D3D9's place (maintainer, 2026-10-30) | "mtld3d gets moved to src/d3d9 and implemented the same way the other versions of DirectX are implemented … as consistent as possible … not a subproject anymore but part of DXMTRS like the rest of the code." Asked how far, the maintainer chose full convergence: `d3d9.dll` on the same Rust core and winemetal bridge as D3D10-12, D3D9's shaders through the AIR translator via an SM1-3 front end (mtld3d's MSL path retires), and layout, build, configuration, logging and presenter shared. |
+| Timing of the move (controller's default, 2026-10-30) | The layout and build move (step R, §5) comes before step 3, so nothing moves twice. It replaces "mtld3d's scripts first change at the merge" (2026-10-29): MacNeutron's scripts change once, in step R's pin bump. The runtime and shader convergence follow steps 4 and 5 (§5, C2-C5). |
 
 Assumption to confirm: "D3DMtl" is mtld3d (athei/mtld3d, already vendored at our DXMT fork's `mtld3d/`).
 
@@ -44,23 +47,33 @@ Assumption to confirm: "D3DMtl" is mtld3d (athei/mtld3d, already vendored at our
   ships, mtld3d included. Our dxmt fork is then frozen (kept: it holds the LGPL source of every release so far).
   MacNeutron's `dxmt/pins` switches `DXMT_REPO` to DXMTRS at its first commit, so every later step goes through
   MacNeutron's checks and can ship.
-- **Layout.** C and C++ stay under `src/` with meson while any is left. Rust lives in mtld3d's two Cargo workspaces,
-  `mtld3d/windows` (Windows targets) and `mtld3d/unix` (macOS and Linux), which §7 renames DXMTRS's `pe/` and `unix/`. Two workspaces, not one, because a workspace-wide build serves one target family; crates both sides
-  use (wire types, configuration) are path members of both, as `unix/shared` already is. One repository, one Rust
-  toolchain pin (mtld3d's, 1.99.0 today), one dependency policy.
+- **Layout (step R, 2026-10-30).** Every component lives under `src/<component>/`: its `meson.build` while meson lives,
+  its `.def` and `.rc`, its C/C++ while any is left, and its Rust. The crate that becomes a component's PE binary has its
+  `Cargo.toml` at the component root (`src/nvngx`, `src/nvapi`, `src/winemetal`, `src/d3d9`; step 3's `src/dxgi` and
+  `src/d3d10`); its Unix library's crate sits in `unix/` beside the `meson.build` that links it (`src/winemetal/unix`,
+  `src/d3d9/unix`); its other crates in named subdirectories (`src/winemetal/wire`, `src/d3d9/{shim,core,types,shared,mtl}`).
+  Rust several components use lives with the component that owns the concept (`src/util`: `dxmt-util`) until §7 folds
+  it. D3D9 is `src/d3d9` like the others, with no build, documents or CI of its own: its test crates are `tests/d3d9/`
+  (beside DXMT's test programs), its documents `docs/d3d9/`, its conventions and audit the tree's (`docs/CONVENTIONS.md`,
+  `tools/audit.sh`). One Cargo workspace at the root (`Cargo.toml`, `Cargo.lock`, `.cargo/config.toml`, `rustfmt.toml`,
+  `vendor/`): every build names its package (`-p`) and target, so one workspace serves every target family. One Rust
+  toolchain pin (1.99.0, MacNeutron's `MTLD3D_RUST`), plus a pinned nightly for rustfmt only, one dependency policy.
 - **Rust inside the C++ DLLs.** Ported code reaches the remaining C++ as a Rust `staticlib`, exactly one per final
   binary (two Rust staticlibs in one DLL would each carry the standard library), which re-exports that binary's ported
   modules through `extern "C"` functions and COM vtables. PE targets use Rust's `*-pc-windows-msvc` targets, linked by
   meson with llvm-mingw (DXMTRS's `tools/cargo-staticlib.sh`, and `rust_runtime_dep` for what MSVC's runtime has and
   llvm-mingw's lacks). When a binary has no C++ left, meson links it from its crate's static library and a `.def` of
   its exports (nvngx, step 1); when none has, meson goes.
-- **Build ownership.** DXMTRS carries the scripts that build it (today's MacNeutron `dxmt/mtld3d-build.sh`,
-  `mtld3d-mingw-cc.sh`, `mtld3d-linux-cargo.sh`, `llvm.sh`, and the mingw parts of `toolchain.sh`), behind one entry
-  point. MacNeutron's build scripts (`wine-arm64/build.sh` for the Mac, `eac-vm/dxmt/build.sh` for the VM guest,
-  `eac-vm/dxmt-native/build.sh` for the VM host) keep fetching the pinned commit and toolchains and call that entry
-  point, so a port step is a DXMTRS change plus a pin bump, never a two-repository code change. The move happens at
-  §7, with the `pe/`/`unix/` rename: DXMT's Rust builds inside DXMTRS's meson (§4, E1), so steps 1 to 6 change no
-  MacNeutron script, and mtld3d's scripts first change at the merge (maintainer, 2026-10-29).
+- **Build ownership.** From step R, DXMTRS's meson builds every binary MacNeutron ships, D3D9's included: `d3d9.dll` and
+  `mtld3d.dll` (ARM64X Wine builtins on the Mac, linked by `tools/arm64x-link.sh` because MacNeutron's ARM64EC cross
+  file replaces `-marm64x`, which LTO refuses; x86_64 and i386 builtins in the VM guest, linked as `nvngx.dll` is), the
+  Mac `mtld3d.so` and the guest's x86_64 and i686 Linux `mtld3d.so` (cargo `cdylib`s; the guest's sysroot comes from the
+  environment). `tools/` holds what MacNeutron used to supply as scripts (the mingw compiler wrapper, the Linux cargo
+  setup, the ARM64X link) and the Rust gate (`tools/rust-check.sh`, §8). D3D9 is built in every cross build
+  (`src/meson.build`) with no new meson option, so the translator key does not move. MacNeutron's build scripts keep
+  fetching the pinned commit and toolchains, fetch the locked crates (`cargo fetch --locked`) and run meson; step R
+  changes them once, in its pin bump, and later steps are a DXMTRS change plus a pin bump. `llvm.sh` moves with step 4:
+  it is an input of the translator key.
 - **Every build stays first-class at every step**: ARM64EC (Mac), x86_64 and i686 PE; the macOS Unix side; DXMT_NATIVE for the
   VM host; the x86_64 and i686 PE DLLs and mtld3d's Linux libraries the VM's guest stages make.
 
@@ -233,18 +246,56 @@ existing C++ signatures.
    `present-gate`. `winemetal.dll` imports 38 more symbols, all from Rust's standard library and all present in Wine.
    The final review found one defect, fixed before the push: an empty archive path aborted slots 112 and 113 (objc2
    panics on a nil from an init declared non-null). It is now a nil URL, as in the C.
-3. `dxgi`, then `d3d10`: whole DLLs behind COM.
+R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so nothing moves twice). mtld3d becomes
+   `src/d3d9` (§3): every file moved with `git mv` (history kept), one root workspace, D3D9 built by meson for every
+   target, mtld3d's Makefile, CI, standalone bundle, release machinery and `INSTALL.md` retired (kept in history), its
+   check legs one script (`tools/rust-check.sh`, §8), its conventions and audit tree-wide, its documents under
+   `docs/d3d9/`. Nothing a player or MacNeutron's launcher sees changes: the same DLL and library names, exports,
+   builtin markers and ARM64X images, variables (`MTLD3D_CONFIG`, `DXMT_*`), configuration files, log locations, shader
+   caches (D3D9's emitter version is computed from path-independent names, so `mtld3d_shaders.bin` stays valid),
+   package names and crate versions; the translator key does not move. MacNeutron changes its build and test scripts in
+   the same pin bump. One deliberate change, its own commit: every production C/C++ is built with NDEBUG (the guest's
+   PE and Linux D3D9 binaries carried snmalloc's assertions). The guest's CPU baselines (`x86-64-v2`/`pentium4` for D3D9,
+   none for DXMT's C++) are kept at R and aligned later in their own measured commit. Plan:
+   `2026-10-30-dxmtrs-stepR-layout.md`.
+3. `d3d10core`, then `dxgi`: whole DLLs behind COM (`src/d3d10`, `src/dxgi`). Only `d3d10core.dll` is a D3D10 DLL: the
+   D3D10 object layer (17 classes) is compiled into `d3d11.dll` and lives inside its objects, so it moves with D3D11's
+   front end at step 5, and `d3d10_blob.cpp` (linked only into `d3d12.dll`) with D3D12 (corrected 2026-10-30; plan
+   `2026-10-30-dxmtrs-step3-d3d10core-dxgi.md`).
 4. The translator (`airconv`, the DXBC parser, our DXIL translator) behind `airconv_public.h`, once Phase 0 has decided
    it. Ported on the LLVM it uses today first, written against the explicit-type C API (`LLVMBuildLoad2`,
    `LLVMBuildGEP2`, `LLVMBuildCall2`) so that pointer types are made in one helper; gated by identical `llvm-dis`
    output on the corpus. Then the LLVM move as its own step (§8's translator gate), with the shader-cache key bumped:
    LLVM 23 and our AIR writer (§4, Decided).
    Two steps rather than one because only the first can be checked byte for byte, which matters for 26k lines.
+   Once the translator is Rust, the key also hashes its crate's resolved dependencies and the Rust toolchain. D3D9's
+   SM1-3 front end (C3) follows the LLVM move and ships in the same release, so players' caches turn over once.
 5. The core (`src/dxmt`) with D3D12 and D3D11, subsystem by subsystem, each behind a seam cut in the C++ first:
    configuration, logging and statistics; the presenter, frame pacing, scaler and frame generation; allocators, staging
    and residency; the shader cache; command encoding and the queue; then the D3D12 and D3D11 front ends (the COM
-   objects). The order inside this step is set by its own plan.
-6. `util`'s remaining templates, `replay` and the meson build go with their last users.
+   objects), with the D3D10 object layer inside D3D11's. The order inside this step is set by its own plan, which
+   includes what D3D9 needs from the core (C4); D3D9's front end joins it after D3D11's.
+6. `util`'s remaining templates, `replay` and the meson build go with their last users. With no C++ LTO left, the
+   ARM64X link of `tools/arm64x-link.sh` is open to every DLL.
+
+**D3D9's convergence (§7)**, in phases interleaved with the steps, each its own plan:
+- C2 (with step 5's configuration, logging and statistics, or earlier behind the C++ signatures): one configuration
+  reader for `dxmt.conf` and `mtld3d.conf` (`MTLD3D_CONFIG` an alias of `DXMT_CONFIG`), one logger and crash reporter,
+  one statistics format (DXMT_STATS's), one perf-build switch for all Rust. D3D9 honours `DXMT_LOG_LEVEL` from the start
+  of this phase.
+- C3 (after step 4's LLVM move, same release): D3D9's shaders through the translator by an SM1-3 front end (mtld3d's
+  DXSO parser, IR and linkage moved in; fixed function through the same builder), first with today's D3D9 runtime
+  (the translator already writes `[[stage_in]]` vertex inputs without an input layout, and top-level resource
+  arguments), reached without loading MacNeutron's presenter into D3D9 processes. Checked by a corpus of DXSO shaders
+  rendered both ways, the conformance suite and the D3D9 gates. The DXSO MSL emitters and `mtld3d_shaders.bin`'s MSL
+  records retire at parity (one cold D3D9 cache, expected less first-use stutter).
+- C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
+  gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
+  reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
+  (cursor overlay, view parking, client-surface present, EDR and occlusion observers) become winemetal slots; behind a
+  switch until parity, measured with a 32-bit D3D9 title in the VM's lanes separately.
+- C5 (after C4's parity): `mtld3d.dll`, `mtld3d.so`, mtld3d's transport and wire, the `mtl` facade (its wire mirrors
+  with it) and C3's interim pieces retire, and with them winemetal's MSL source-library slots for D3D9.
 
 Each step is one or more commits, each with its checks green (§8). Each step gets its own plan once the steps before it
 have landed.
@@ -258,44 +309,66 @@ have landed.
   step that touches one runs the forwarder's build and loopback gate.
 - **MacNeutron** relies on the DLL and Unix-library names, the environment variables (`DXMT_*`, `MACNEUTRON_*`,
   `MTLD3D_*`), the log and statistics formats its tools read, and the shader cache's location. Names and variables are
-  kept; a format change is made in both repositories in the same pin bump.
+  kept; a format change is made in both repositories in the same pin bump. D3D9's outside names are kept too:
+  `MTLD3D_CONFIG`, `mtld3d.conf` beside the game, `log.dir` and `~/Library/Logs/MacNeutron/mtld3d`, wine.app's
+  `licenses/mtld3d`, and `mtld3d_shaders.bin` until C3.
 - **The translator's C interface** (`airconv_public.h`, `AIRCONV_VERSION`) is internal to DXMTRS, but its cache key is
   what players' shader caches are stored under: it changes only at the LLVM move or a deliberate translator change.
 
-## 7. The merge with mtld3d
+## 7. One project: D3D9 on the shared pieces
 
-Started during the port wherever a ported module needs a piece mtld3d already has (step 2 puts winemetal on mtld3d's
-`mtl` crate and transport), finished once no C++ is left:
-- **Shared crates**: Metal bindings (`mtl`), the PE/Unix wire types and transport (`shared`), configuration and
-  environment variables, logging and crash reports, statistics (DXMT_STATS and mtld3d's performance lines become one
-  format), and shader caching and pre-caching.
-- **One presenter** for D3D9 to D3D12: MetalFX upscaling, HDR, frame pacing and frame generation.
-- **One bridge**: `winemetal.dll` and its Unix side absorb `mtld3d.dll` and `mtld3d.so`'s transport, keeping DXMT's names
-  (the ones MacNeutron, the VM forwarder and the Wine prefix already know); D3D9's runtime stays its own crate inside
-  the Unix side.
-- **What stays separate**: D3D9 keeps mtld3d's design (most work on the Unix side) and its MSL shaders; D3D10-12 keep
-  DXMT's encoding on the PE side and its AIR shaders.
+Full convergence (maintainer, 2026-10-30): D3D9 ends on the same Rust core, bridge, translator and presenter as
+D3D10-12, reached through §5's step R and phases C2-C5, and finished when `mtld3d.dll` and `mtld3d.so` are gone. Step 2
+kept winemetal on objc2 and its own slots (D1, D2); the merge goes the other way: D3D9 moves onto winemetal.
+- **One layout and build** (step R): `src/d3d9` like every component, built by DXMTRS's meson, one workspace, one gate.
+- **Shared crates**: Metal access through winemetal; configuration and environment (one reader for both sample files;
+  `MTLD3D_CONFIG`, `mtld3d.conf` and `log.dir` stay as aliases, §6); logging and crash reports for every API;
+  statistics (DXMT_STATS's `stats.txt`; mtld3d's performance lines map into it); shader caching and pre-caching (AIR in
+  DXMT's cache, keyed by the translator key; mtld3d's pipeline prewarm a core policy).
+- **One translator**: D3D9's shaders through the Rust translator via an SM1-3 front end (C3).
+- **One core**: `d3d9.dll` records into the core's command chunks as D3D11 does and encodes on the PE side (C4). If a
+  32-bit D3D9 title measures worse that way in the VM, the result goes back to the maintainer before C5.
+- **One bridge**: `d3d9.dll` calls `winemetal.dll` like the other front ends; mtld3d's macOS window features become
+  winemetal Unix slots on the Mac; `mtld3d.dll`, `mtld3d.so`, mtld3d's transport and the `mtl` facade retire (C5).
+- **One presenter** for D3D9 to D3D12: MetalFX upscaling, HDR, gamma, frame pacing, frame generation and the cursor.
+  D3D9's defaults (inverse tone mapping on EDR screens, `present.maxFps`) stay as presenter options.
+- **What stays per API**: each front end crate (COM objects, state and its defaults; for D3D9 state blocks, fixed-function
+  state, D3D9 formats and surfaces and its Win32 hooks). D3D9 is not forwarded in the VM (its own decision). `d3d9.dll`
+  stays a Wine builtin in wine.app (MacNeutron ships no other d3d9) and ARM64X on the Mac.
 - **COM definitions** follow mtld3d: hand-rolled `#[repr(C)]` vtables, no `windows` crate (the native macOS and Linux
-  builds need them too). D3D10-12's are generated once with `bindgen` from the C view of the headers the C++ builds
-  against (`include/native`, `CINTERFACE`), committed, with size and offset assertions; bindgen is a development tool
-  (installing it needs the maintainer's yes).
+  builds need them too), with size and offset assertions per target. D3D10-12's are written by hand from the headers the
+  C++ builds against, or generated with `bindgen` from their C view (`include/native`, `CINTERFACE`) where that saves
+  work; bindgen is a development tool.
 
 ## 8. Gates
 
 At every step:
-- **Functional**: `dxmt/check.sh` in both lanes, the wine-arm64 checks, mtld3d's conformance and end-to-end tests, and
-  the VM gates (d3d-smoke, the forwarder's loopback gate), with `MACNEUTRON_FRAMEGEN` modes as today.
-- **Rust**: mtld3d's `make check` legs (format, clippy `pedantic` and `nursery` with warnings denied, `scripts/audit.sh`,
-  `make doc`) over all Rust in DXMTRS, its CONVENTIONS.md adopted for the whole tree, with its "competing
-  implementation" list adjusted now that DXMT is this project.
-- **Licences**: DXMTRS is LGPL-2.1-or-later (a work derived from DXMT); mtld3d's files keep their zlib notices. New crates
-  only where a few lines won't do, and only under permissive or dual licences (no Apache-2.0-only crate in an LGPL-2.1
-  tree), checked from `cargo metadata` next to the notices `mtld3d-notices.py` writes.
+- **Functional**: `dxmt/check.sh` in both lanes (its `d3d9-check` item included), the wine-arm64 checks, D3D9's
+  conformance suite (MacNeutron `dxmt/mtld3d-conformance.sh`, against `dxmt/mtld3d-triaged.txt`), the facade test and
+  the loopback `d3d9-check` while the facade lives, and the VM gates (the DXMT gate, d3d-smoke, `d3d9-gate` in both
+  lanes, present-gate, the forwarder's loopback gate), with `MACNEUTRON_FRAMEGEN` modes as today. mtld3d's end-to-end
+  programs once they link with llvm-mingw (C3's plan) or xwin is approved.
+- **Rust**: `tools/rust-check.sh` over the root workspace: rustfmt (the pinned nightly: `rustfmt.toml`'s options are
+  unstable), clippy `pedantic` and `nursery` with warnings denied on `aarch64-apple-darwin` and every `-pc-windows-msvc`
+  target a crate ships on (1.99.0 has clippy since 2026-10-30), `cargo doc`, the host unit tests (with `cargo test`), and
+  `tools/audit.sh`, run under MacNeutron's environment (Wine archives, llvm-mingw and the guest sysroot named by
+  documented variables). `docs/CONVENTIONS.md` applies to the whole tree; DXMT is no longer on its list of competing
+  implementations.
+- **Licences**: DXMTRS is LGPL-2.1-or-later (a work derived from DXMT); mtld3d's files keep their zlib notice: an
+  unaltered `LICENSE` in `src/d3d9/`, `tests/d3d9/` and `docs/d3d9/`, `license = "Zlib"` in every mtld3d crate, and the
+  README's list of the zlib files elsewhere; `vendor/snmalloc-sys` carries its MIT text. New crates only where a few
+  lines won't do, and only under permissive or dual licences (no Apache-2.0-only crate in an LGPL-2.1 tree), checked from
+  `cargo metadata` next to the notices `mtld3d-notices.py` writes, for every target that ships (the VM guest's
+  included).
+- **Binary identity** (step R and any later move of a build): every shipped binary keeps its name, machine, exports,
+  imports (listed differences only), builtin marker and VERSIONINFO.
 - **Translator**: identical `llvm-dis` output on the shader corpus until the LLVM move; at the move, every corpus
   shader builds its pipelines on Metal, DXMT's shader checks render as before, and the GPU time of the same passes,
-  measured on DXMT with DXMT_STATS on the milestone's benches, shows no loss (E3 timed only the build).
-- **Performance**, once per milestone (end of steps 2, 4 and 5, and after §7), each bench run once: SMITE 2's lobby,
-  Palworld's title screen and a D3D11 title the maintainer picks, at parity or better. Game benches need the
+  measured on DXMT with DXMT_STATS on the milestone's benches, shows no loss (E3 timed only the build). At C3, every
+  shader of a DXSO corpus builds its pipelines and D3D9 renders as before.
+- **Performance**, once per milestone (end of steps 2, 4 and 5, after C3 and C4, and after §7), each bench run once:
+  SMITE 2's lobby, Palworld's title screen and a D3D11 title the maintainer picks, at parity or better; after C3 and C4
+  also the D3D9 titles the maintainer picks (a 32-bit one measured separately in the VM). Game benches need the
   maintainer's go-ahead each time; step 2's is parked for the maintainer (§5, D11).
 
 ## 9. Scale and plans
@@ -305,5 +378,8 @@ it. The first implementation plan covers §3 (DXMTRS created and pinned) and §4
 gets its own plan after the step before it has landed and Phase 0 has reported.
 
 Outward steps, each needing the maintainer's yes when it comes: creating DXMTRS on GitHub and pushing to it; switching
-MacNeutron's pin; fetching SPIRV-Cross or installing bindgen. DXMTRS started from dxmt `main` at 89558c1 (adaptive frame
+MacNeutron's pin; fetching SPIRV-Cross or installing bindgen; fetching xwin if mtld3d's end-to-end programs cannot link
+with llvm-mingw; the D3D9 game benches. Step R has its own plan (`2026-10-30-dxmtrs-stepR-layout.md`), and each of
+C2-C5 its own, after the steps it depends on have landed. Tools installed at the maintainer's word (2026-10-30): clippy
+and rustfmt for 1.99.0, a nightly with rustfmt. DXMTRS started from dxmt `main` at 89558c1 (adaptive frame
 generation), pushed to both repositories on 2026-10-29.
