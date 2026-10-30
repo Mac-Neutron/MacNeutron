@@ -1,0 +1,679 @@
+g2 18 buffer-shared msg@worker newBufferWithLength:options: newBufferWithLength=4096 options=1
+g2 18 buffer-shared 0 ret=h1 own=+1 pool=+0 length=4096 options=1 memory=contents gpu_address=gpuAddress storageMode=0 buffer.length=4096
+g2 18 buffer-private msg@worker newBufferWithLength:options: newBufferWithLength=65536 options=32
+g2 18 buffer-private 0 ret=h1 own=+1 pool=+0 length=65536 options=32 memory=0 gpu_address=gpuAddress storageMode=2 buffer.length=65536
+g2 18 buffer-nocopy 0 ret=h1 own=+1 pool=+0 length=32768 options=0 memory=page gpu_address=gpuAddress storageMode=0 buffer.length=32768 contents=page
+g2 19 sampler msg@worker newSamplerStateWithDescriptor: newSamplerStateWithDescriptor=MTLSamplerDescriptorInternal
+g2 19 sampler dump newSamplerStateWithDescriptor.borderColor=2
+g2 19 sampler dump newSamplerStateWithDescriptor.borderColorSPI=2
+g2 19 sampler dump newSamplerStateWithDescriptor.compareFunction=5
+g2 19 sampler dump newSamplerStateWithDescriptor.customBorderColorValue_0=0
+g2 19 sampler dump newSamplerStateWithDescriptor.customBorderColorValue_1=0
+g2 19 sampler dump newSamplerStateWithDescriptor.customBorderColorValue_2=0
+g2 19 sampler dump newSamplerStateWithDescriptor.customBorderColorValue_3=0
+g2 19 sampler dump newSamplerStateWithDescriptor.forceResourceIndex=0
+g2 19 sampler dump newSamplerStateWithDescriptor.forceSeamsOnCubemapFiltering=0
+g2 19 sampler dump newSamplerStateWithDescriptor.label=nil
+g2 19 sampler dump newSamplerStateWithDescriptor.lodAverage=0
+g2 19 sampler dump newSamplerStateWithDescriptor.lodBias=0x0p+0
+g2 19 sampler dump newSamplerStateWithDescriptor.lodMaxClamp=0x1.dp+2
+g2 19 sampler dump newSamplerStateWithDescriptor.lodMinClamp=0x1p-1
+g2 19 sampler dump newSamplerStateWithDescriptor.magFilter=0
+g2 19 sampler dump newSamplerStateWithDescriptor.maxAnisotropy=3
+g2 19 sampler dump newSamplerStateWithDescriptor.minFilter=1
+g2 19 sampler dump newSamplerStateWithDescriptor.mipFilter=2
+g2 19 sampler dump newSamplerStateWithDescriptor.normalizedCoordinates=1
+g2 19 sampler dump newSamplerStateWithDescriptor.pixelFormat=0
+g2 19 sampler dump newSamplerStateWithDescriptor.rAddressMode=1
+g2 19 sampler dump newSamplerStateWithDescriptor.reductionMode=0
+g2 19 sampler dump newSamplerStateWithDescriptor.resourceIndex=0
+g2 19 sampler dump newSamplerStateWithDescriptor.sAddressMode=2
+g2 19 sampler dump newSamplerStateWithDescriptor.supportArgumentBuffers=0
+g2 19 sampler dump newSamplerStateWithDescriptor.tAddressMode=3
+g2 19 sampler dump newSamplerStateWithDescriptor=MTLSamplerDescriptorInternal
+g2 19 sampler 0 ret=h1 own=+1 pool=+0 gpu_resource_id=0x0 info=0-22
+g2 19 sampler msg@worker newSamplerStateWithDescriptor: newSamplerStateWithDescriptor=MTLSamplerDescriptorInternal
+g2 19 sampler dump newSamplerStateWithDescriptor.borderColor=1
+g2 19 sampler dump newSamplerStateWithDescriptor.borderColorSPI=1
+g2 19 sampler dump newSamplerStateWithDescriptor.compareFunction=3
+g2 19 sampler dump newSamplerStateWithDescriptor.customBorderColorValue_0=0
+g2 19 sampler dump newSamplerStateWithDescriptor.customBorderColorValue_1=0
+g2 19 sampler dump newSamplerStateWithDescriptor.customBorderColorValue_2=0
+g2 19 sampler dump newSamplerStateWithDescriptor.customBorderColorValue_3=0
+g2 19 sampler dump newSamplerStateWithDescriptor.forceResourceIndex=0
+g2 19 sampler dump newSamplerStateWithDescriptor.forceSeamsOnCubemapFiltering=0
+g2 19 sampler dump newSamplerStateWithDescriptor.label=nil
+g2 19 sampler dump newSamplerStateWithDescriptor.lodAverage=1
+g2 19 sampler dump newSamplerStateWithDescriptor.lodBias=0x0p+0
+g2 19 sampler dump newSamplerStateWithDescriptor.lodMaxClamp=0x1p+1
+g2 19 sampler dump newSamplerStateWithDescriptor.lodMinClamp=0x1p+0
+g2 19 sampler dump newSamplerStateWithDescriptor.magFilter=1
+g2 19 sampler dump newSamplerStateWithDescriptor.maxAnisotropy=1
+g2 19 sampler dump newSamplerStateWithDescriptor.minFilter=0
+g2 19 sampler dump newSamplerStateWithDescriptor.mipFilter=1
+g2 19 sampler dump newSamplerStateWithDescriptor.normalizedCoordinates=1
+g2 19 sampler dump newSamplerStateWithDescriptor.pixelFormat=0
+g2 19 sampler dump newSamplerStateWithDescriptor.rAddressMode=5
+g2 19 sampler dump newSamplerStateWithDescriptor.reductionMode=0
+g2 19 sampler dump newSamplerStateWithDescriptor.resourceIndex=0
+g2 19 sampler dump newSamplerStateWithDescriptor.sAddressMode=4
+g2 19 sampler dump newSamplerStateWithDescriptor.supportArgumentBuffers=1
+g2 19 sampler dump newSamplerStateWithDescriptor.tAddressMode=0
+g2 19 sampler dump newSamplerStateWithDescriptor=MTLSamplerDescriptorInternal
+g2 19 sampler 0 ret=h2 own=+1 pool=+0 gpu_resource_id=gpuResourceID info=0-22
+g2 20 depth-stencil msg@worker newDepthStencilStateWithDescriptor: newDepthStencilStateWithDescriptor=MTLDepthStencilDescriptorInternal
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.depthFailureOperation=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.depthStencilPassOperation=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.readMask=4294967295
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.stencilCompareFunction=7
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.stencilFailureOperation=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.stencilPrivate=!
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.writeMask=4294967295
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil=MTLStencilDescriptorInternal
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.depthCompareFunction=3
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.depthStencilPrivate=!
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.depthWriteEnabled=1
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.depthFailureOperation=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.depthStencilPassOperation=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.readMask=4294967295
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.stencilCompareFunction=7
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.stencilFailureOperation=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.stencilPrivate=!
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.writeMask=4294967295
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil=MTLStencilDescriptorInternal
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.label=nil
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.resourceIndex=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor=MTLDepthStencilDescriptorInternal
+g2 20 depth-stencil 0 ret=h1 own=+2 pool=+0
+g2 20 depth-stencil msg@worker newDepthStencilStateWithDescriptor: newDepthStencilStateWithDescriptor=MTLDepthStencilDescriptorInternal
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.depthFailureOperation=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.depthStencilPassOperation=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.readMask=4294967295
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.stencilCompareFunction=7
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.stencilFailureOperation=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.stencilPrivate=!
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.writeMask=4294967295
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil=MTLStencilDescriptorInternal
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.depthCompareFunction=4
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.depthStencilPrivate=!
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.depthWriteEnabled=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.depthFailureOperation=6
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.depthStencilPassOperation=2
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.readMask=60
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.stencilCompareFunction=2
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.stencilFailureOperation=5
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.stencilPrivate=!
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.writeMask=90
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil=MTLStencilDescriptorInternal
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.label=nil
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.resourceIndex=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor=MTLDepthStencilDescriptorInternal
+g2 20 depth-stencil 0 ret=h2 own=+2 pool=+0
+g2 20 depth-stencil msg@worker newDepthStencilStateWithDescriptor: newDepthStencilStateWithDescriptor=MTLDepthStencilDescriptorInternal
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.depthFailureOperation=7
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.depthStencilPassOperation=4
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.readMask=240
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.stencilCompareFunction=6
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.stencilFailureOperation=1
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.stencilPrivate=!
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil.writeMask=15
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.backFaceStencil=MTLStencilDescriptorInternal
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.depthCompareFunction=3
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.depthStencilPrivate=!
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.depthWriteEnabled=1
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.depthFailureOperation=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.depthStencilPassOperation=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.readMask=4294967295
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.stencilCompareFunction=7
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.stencilFailureOperation=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.stencilPrivate=!
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil.writeMask=4294967295
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.frontFaceStencil=MTLStencilDescriptorInternal
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.label=nil
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor.resourceIndex=0
+g2 20 depth-stencil dump newDepthStencilStateWithDescriptor=MTLDepthStencilDescriptorInternal
+g2 20 depth-stencil 0 ret=h3 own=+2 pool=+0
+g2 21 texture-2d msg@worker newTextureWithDescriptor: newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 21 texture-2d dump newTextureWithDescriptor.allowGPUOptimizedContents=1
+g2 21 texture-2d dump newTextureWithDescriptor.arrayLength=1
+g2 21 texture-2d dump newTextureWithDescriptor.compressionMode=0
+g2 21 texture-2d dump newTextureWithDescriptor.compressionType=0
+g2 21 texture-2d dump newTextureWithDescriptor.cpuCacheMode=0
+g2 21 texture-2d dump newTextureWithDescriptor.depth=1
+g2 21 texture-2d dump newTextureWithDescriptor.forceResourceIndex=0
+g2 21 texture-2d dump newTextureWithDescriptor.hazardTrackingMode=0
+g2 21 texture-2d dump newTextureWithDescriptor.height=32
+g2 21 texture-2d dump newTextureWithDescriptor.mipmapLevelCount=3
+g2 21 texture-2d dump newTextureWithDescriptor.pixelFormat=80
+g2 21 texture-2d dump newTextureWithDescriptor.placementSparsePageSize=0
+g2 21 texture-2d dump newTextureWithDescriptor.resourceIndex=0
+g2 21 texture-2d dump newTextureWithDescriptor.resourceOptions=32
+g2 21 texture-2d dump newTextureWithDescriptor.sampleCount=1
+g2 21 texture-2d dump newTextureWithDescriptor.storageMode=2
+g2 21 texture-2d dump newTextureWithDescriptor.swizzle={02030405}
+g2 21 texture-2d dump newTextureWithDescriptor.textureType=2
+g2 21 texture-2d dump newTextureWithDescriptor.usage=5
+g2 21 texture-2d dump newTextureWithDescriptor.width=64
+g2 21 texture-2d dump newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 21 texture-2d 0 ret=h1 own=+1 pool=+0 gpu_resource_id=gpuResourceID mach_port=0x0 inputs=unchanged compressionType=0 textureType=2 sampleCount=1 usage=5 storageMode=2 hazardTrackingMode=2
+g2 39 texture-2d 0 pixelFormat=0x50
+g2 40 texture-2d 0 width=0x40
+g2 41 texture-2d 0 height=0x20
+g2 42 texture-2d 0 depth=0x1
+g2 43 texture-2d 0 arrayLength=0x1
+g2 44 texture-2d 0 mipmapLevelCount=0x3
+g2 21 texture-3d msg@worker newTextureWithDescriptor: newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 21 texture-3d dump newTextureWithDescriptor.allowGPUOptimizedContents=1
+g2 21 texture-3d dump newTextureWithDescriptor.arrayLength=1
+g2 21 texture-3d dump newTextureWithDescriptor.compressionMode=0
+g2 21 texture-3d dump newTextureWithDescriptor.compressionType=0
+g2 21 texture-3d dump newTextureWithDescriptor.cpuCacheMode=0
+g2 21 texture-3d dump newTextureWithDescriptor.depth=4
+g2 21 texture-3d dump newTextureWithDescriptor.forceResourceIndex=0
+g2 21 texture-3d dump newTextureWithDescriptor.hazardTrackingMode=0
+g2 21 texture-3d dump newTextureWithDescriptor.height=8
+g2 21 texture-3d dump newTextureWithDescriptor.mipmapLevelCount=2
+g2 21 texture-3d dump newTextureWithDescriptor.pixelFormat=115
+g2 21 texture-3d dump newTextureWithDescriptor.placementSparsePageSize=0
+g2 21 texture-3d dump newTextureWithDescriptor.resourceIndex=0
+g2 21 texture-3d dump newTextureWithDescriptor.resourceOptions=0
+g2 21 texture-3d dump newTextureWithDescriptor.sampleCount=1
+g2 21 texture-3d dump newTextureWithDescriptor.storageMode=0
+g2 21 texture-3d dump newTextureWithDescriptor.swizzle={02030405}
+g2 21 texture-3d dump newTextureWithDescriptor.textureType=7
+g2 21 texture-3d dump newTextureWithDescriptor.usage=3
+g2 21 texture-3d dump newTextureWithDescriptor.width=16
+g2 21 texture-3d dump newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 21 texture-3d 0 ret=h1 own=+1 pool=+0 gpu_resource_id=gpuResourceID mach_port=0x0 inputs=unchanged compressionType=0 textureType=7 sampleCount=1 usage=3 storageMode=0 hazardTrackingMode=2
+g2 39 texture-3d 0 pixelFormat=0x73
+g2 40 texture-3d 0 width=0x10
+g2 41 texture-3d 0 height=0x8
+g2 42 texture-3d 0 depth=0x4
+g2 43 texture-3d 0 arrayLength=0x1
+g2 44 texture-3d 0 mipmapLevelCount=0x2
+g2 21 texture-array msg@worker newTextureWithDescriptor: newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 21 texture-array dump newTextureWithDescriptor.allowGPUOptimizedContents=1
+g2 21 texture-array dump newTextureWithDescriptor.arrayLength=6
+g2 21 texture-array dump newTextureWithDescriptor.compressionMode=0
+g2 21 texture-array dump newTextureWithDescriptor.compressionType=0
+g2 21 texture-array dump newTextureWithDescriptor.cpuCacheMode=0
+g2 21 texture-array dump newTextureWithDescriptor.depth=1
+g2 21 texture-array dump newTextureWithDescriptor.forceResourceIndex=0
+g2 21 texture-array dump newTextureWithDescriptor.hazardTrackingMode=1
+g2 21 texture-array dump newTextureWithDescriptor.height=32
+g2 21 texture-array dump newTextureWithDescriptor.mipmapLevelCount=1
+g2 21 texture-array dump newTextureWithDescriptor.pixelFormat=55
+g2 21 texture-array dump newTextureWithDescriptor.placementSparsePageSize=0
+g2 21 texture-array dump newTextureWithDescriptor.resourceIndex=0
+g2 21 texture-array dump newTextureWithDescriptor.resourceOptions=288
+g2 21 texture-array dump newTextureWithDescriptor.sampleCount=1
+g2 21 texture-array dump newTextureWithDescriptor.storageMode=2
+g2 21 texture-array dump newTextureWithDescriptor.swizzle={02030405}
+g2 21 texture-array dump newTextureWithDescriptor.textureType=3
+g2 21 texture-array dump newTextureWithDescriptor.usage=1
+g2 21 texture-array dump newTextureWithDescriptor.width=32
+g2 21 texture-array dump newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 21 texture-array 0 ret=h1 own=+1 pool=+0 gpu_resource_id=gpuResourceID mach_port=0x0 inputs=unchanged compressionType=0 textureType=3 sampleCount=1 usage=1 storageMode=2 hazardTrackingMode=1
+g2 39 texture-array 0 pixelFormat=0x37
+g2 40 texture-array 0 width=0x20
+g2 41 texture-array 0 height=0x20
+g2 42 texture-array 0 depth=0x1
+g2 43 texture-array 0 arrayLength=0x6
+g2 44 texture-array 0 mipmapLevelCount=0x1
+g2 21 texture-msaa msg@worker newTextureWithDescriptor: newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 21 texture-msaa dump newTextureWithDescriptor.allowGPUOptimizedContents=1
+g2 21 texture-msaa dump newTextureWithDescriptor.arrayLength=1
+g2 21 texture-msaa dump newTextureWithDescriptor.compressionMode=0
+g2 21 texture-msaa dump newTextureWithDescriptor.compressionType=0
+g2 21 texture-msaa dump newTextureWithDescriptor.cpuCacheMode=0
+g2 21 texture-msaa dump newTextureWithDescriptor.depth=1
+g2 21 texture-msaa dump newTextureWithDescriptor.forceResourceIndex=0
+g2 21 texture-msaa dump newTextureWithDescriptor.hazardTrackingMode=0
+g2 21 texture-msaa dump newTextureWithDescriptor.height=32
+g2 21 texture-msaa dump newTextureWithDescriptor.mipmapLevelCount=1
+g2 21 texture-msaa dump newTextureWithDescriptor.pixelFormat=70
+g2 21 texture-msaa dump newTextureWithDescriptor.placementSparsePageSize=0
+g2 21 texture-msaa dump newTextureWithDescriptor.resourceIndex=0
+g2 21 texture-msaa dump newTextureWithDescriptor.resourceOptions=32
+g2 21 texture-msaa dump newTextureWithDescriptor.sampleCount=4
+g2 21 texture-msaa dump newTextureWithDescriptor.storageMode=2
+g2 21 texture-msaa dump newTextureWithDescriptor.swizzle={02030405}
+g2 21 texture-msaa dump newTextureWithDescriptor.textureType=4
+g2 21 texture-msaa dump newTextureWithDescriptor.usage=4
+g2 21 texture-msaa dump newTextureWithDescriptor.width=32
+g2 21 texture-msaa dump newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 21 texture-msaa 0 ret=h1 own=+1 pool=+0 gpu_resource_id=gpuResourceID mach_port=0x0 inputs=unchanged compressionType=0 textureType=4 sampleCount=4 usage=4 storageMode=2 hazardTrackingMode=2
+g2 39 texture-msaa 0 pixelFormat=0x46
+g2 40 texture-msaa 0 width=0x20
+g2 41 texture-msaa 0 height=0x20
+g2 42 texture-msaa 0 depth=0x1
+g2 43 texture-msaa 0 arrayLength=0x1
+g2 44 texture-msaa 0 mipmapLevelCount=0x1
+g2 21 texture-lossless msg@worker newTextureWithDescriptor: newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 21 texture-lossless dump newTextureWithDescriptor.allowGPUOptimizedContents=1
+g2 21 texture-lossless dump newTextureWithDescriptor.arrayLength=1
+g2 21 texture-lossless dump newTextureWithDescriptor.compressionMode=1
+g2 21 texture-lossless dump newTextureWithDescriptor.compressionType=0
+g2 21 texture-lossless dump newTextureWithDescriptor.cpuCacheMode=0
+g2 21 texture-lossless dump newTextureWithDescriptor.depth=1
+g2 21 texture-lossless dump newTextureWithDescriptor.forceResourceIndex=0
+g2 21 texture-lossless dump newTextureWithDescriptor.hazardTrackingMode=0
+g2 21 texture-lossless dump newTextureWithDescriptor.height=64
+g2 21 texture-lossless dump newTextureWithDescriptor.mipmapLevelCount=1
+g2 21 texture-lossless dump newTextureWithDescriptor.pixelFormat=70
+g2 21 texture-lossless dump newTextureWithDescriptor.placementSparsePageSize=0
+g2 21 texture-lossless dump newTextureWithDescriptor.resourceIndex=0
+g2 21 texture-lossless dump newTextureWithDescriptor.resourceOptions=32
+g2 21 texture-lossless dump newTextureWithDescriptor.sampleCount=1
+g2 21 texture-lossless dump newTextureWithDescriptor.storageMode=2
+g2 21 texture-lossless dump newTextureWithDescriptor.swizzle={02030405}
+g2 21 texture-lossless dump newTextureWithDescriptor.textureType=2
+g2 21 texture-lossless dump newTextureWithDescriptor.usage=21
+g2 21 texture-lossless dump newTextureWithDescriptor.width=64
+g2 21 texture-lossless dump newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 21 texture-lossless 0 ret=h1 own=+1 pool=+0 gpu_resource_id=gpuResourceID mach_port=0x0 inputs=unchanged compressionType=0 textureType=2 sampleCount=1 usage=21 storageMode=2 hazardTrackingMode=2
+g2 39 texture-lossless 0 pixelFormat=0x46
+g2 40 texture-lossless 0 width=0x40
+g2 41 texture-lossless 0 height=0x40
+g2 42 texture-lossless 0 depth=0x1
+g2 43 texture-lossless 0 arrayLength=0x1
+g2 44 texture-lossless 0 mipmapLevelCount=0x1
+g2 22 buffer-texture msg@worker newTextureWithDescriptor:offset:bytesPerRow: newTextureWithDescriptor=MTLTextureDescriptorInternal offset=1024 bytesPerRow=256
+g2 22 buffer-texture dump newTextureWithDescriptor.allowGPUOptimizedContents=1
+g2 22 buffer-texture dump newTextureWithDescriptor.arrayLength=1
+g2 22 buffer-texture dump newTextureWithDescriptor.compressionMode=0
+g2 22 buffer-texture dump newTextureWithDescriptor.compressionType=0
+g2 22 buffer-texture dump newTextureWithDescriptor.cpuCacheMode=0
+g2 22 buffer-texture dump newTextureWithDescriptor.depth=1
+g2 22 buffer-texture dump newTextureWithDescriptor.forceResourceIndex=0
+g2 22 buffer-texture dump newTextureWithDescriptor.hazardTrackingMode=0
+g2 22 buffer-texture dump newTextureWithDescriptor.height=16
+g2 22 buffer-texture dump newTextureWithDescriptor.mipmapLevelCount=1
+g2 22 buffer-texture dump newTextureWithDescriptor.pixelFormat=70
+g2 22 buffer-texture dump newTextureWithDescriptor.placementSparsePageSize=0
+g2 22 buffer-texture dump newTextureWithDescriptor.resourceIndex=0
+g2 22 buffer-texture dump newTextureWithDescriptor.resourceOptions=0
+g2 22 buffer-texture dump newTextureWithDescriptor.sampleCount=1
+g2 22 buffer-texture dump newTextureWithDescriptor.storageMode=0
+g2 22 buffer-texture dump newTextureWithDescriptor.swizzle={02030405}
+g2 22 buffer-texture dump newTextureWithDescriptor.textureType=2
+g2 22 buffer-texture dump newTextureWithDescriptor.usage=1
+g2 22 buffer-texture dump newTextureWithDescriptor.width=32
+g2 22 buffer-texture dump newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 22 buffer-texture 0 ret=h1 own=+1 pool=+0 gpu_resource_id=gpuResourceID mach_port=0x0 inputs=unchanged bufferOffset=1024 bufferBytesPerRow=256 offset=1024 bytes_per_row=256
+g2 23 view-swizzle msg@worker newTextureViewWithPixelFormat:textureType:levels:slices:swizzle: newTextureViewWithPixelFormat=80 textureType=3 levels=01000000000000000200000000000000 slices=01000000000000000300000000000000 swizzle=04030201
+g2 23 view-swizzle 0 ret=h1 own=+1 pool=+0 gpu_resource_id=gpuResourceID pixelFormat=80 swizzle=4,3,2,1 textureType=3 levels=1+2 slices=1+3
+g2 23 view-swizzle msg@worker newTextureViewWithPixelFormat:textureType:levels:slices:swizzle: newTextureViewWithPixelFormat=80 textureType=2 levels=02000000000000000100000000000000 slices=03000000000000000100000000000000 swizzle=05040302
+g2 23 view-swizzle 0 ret=h2 own=+1 pool=+0 gpu_resource_id=gpuResourceID pixelFormat=80 swizzle=5,4,3,2 textureType=2 levels=2+1 slices=3+1
+g2 23 view-swizzle msg@worker newTextureViewWithPixelFormat:textureType:levels:slices:swizzle: newTextureViewWithPixelFormat=260 textureType=2 levels=00000000000000000100000000000000 slices=00000000000000000100000000000000 swizzle=03020004
+g2 23 view-swizzle 0 ret=h3 own=+1 pool=+0 gpu_resource_id=gpuResourceID pixelFormat=260 swizzle=3,2,0,4 textureType=2 levels=0+1 slices=0+1
+g2 23 view-swizzle msg@worker newTextureViewWithPixelFormat:textureType:levels:slices:swizzle: newTextureViewWithPixelFormat=261 textureType=2 levels=00000000000000000100000000000000 slices=00000000000000000100000000000000 swizzle=00030102
+g2 23 view-swizzle 0 ret=h4 own=+1 pool=+0 gpu_resource_id=gpuResourceID pixelFormat=261 swizzle=0,3,1,2 textureType=2 levels=0+1 slices=0+1
+g2 23 view-swizzle msg@worker newTextureViewWithPixelFormat:textureType:levels:slices:swizzle: newTextureViewWithPixelFormat=42 textureType=2 levels=00000000000000000100000000000000 slices=00000000000000000100000000000000 swizzle=00020500
+g2 23 view-swizzle 0 ret=h5 own=+1 pool=+0 gpu_resource_id=gpuResourceID pixelFormat=42 swizzle=0,2,5,0 textureType=2 levels=0+1 slices=0+1
+g2 39 getters-nil 0 pixelFormat=0x0
+g2 40 getters-nil 0 width=0x0
+g2 41 getters-nil 0 height=0x0
+g2 42 getters-nil 0 depth=0x0
+g2 43 getters-nil 0 arrayLength=0x0
+g2 44 getters-nil 0 mipmapLevelCount=0x0
+g2 45 replace-getbytes msg@worker replaceRegion:mipmapLevel:slice:withBytes:bytesPerRow:bytesPerImage: replaceRegion=010000000000000002000000000000000000000000000000030000000000000002000000000000000100000000000000 mipmapLevel=1 slice=1 withBytes=nonnull bytesPerRow=12 bytesPerImage=24
+g2 45 replace-getbytes 0 level1=0000000000000000000000000000000000000000000000000000000000000000000000001112131415161718191a1b1c000000001d1e1f202122232425262728
+g2 145 replace-getbytes msg@worker getBytes:bytesPerRow:bytesPerImage:fromRegion:mipmapLevel:slice: getBytes=nonnull bytesPerRow=20 bytesPerImage=40 fromRegion=000000000000000002000000000000000000000000000000040000000000000002000000000000000100000000000000 mipmapLevel=1 slice=1
+g2 145 replace-getbytes 0 out=0-15,20-35 bytes=000000001112131415161718191a1b1ca5a5a5a5000000001d1e1f202122232425262728a5a5a5a5
+g2 46 did-modify-range msg@worker didModifyRange: didModifyRange=10000000000000003000000000000000
+g2 46 did-modify-range 0 arg=16 ret=48
+g2 107 update-contents msg@worker contents
+g2 107 update-contents msg@worker storageMode
+g2 107 update-contents 0 after=8-23 bytes=a5a5a5a5a5a5a5a54142434445464748494a4b4c4d4e4f50a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5
+g2 107 update-contents msg@worker contents
+g2 107 update-contents msg@worker storageMode
+g2 107 update-contents msg@worker didModifyRange: didModifyRange=08000000000000001000000000000000
+g2 107 update-contents 0 after=8-23 bytes=a5a5a5a5a5a5a5a54142434445464748494a4b4c4d4e4f50a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5
+g2 132 residency msg@worker newResidencySetWithDescriptor:error: newResidencySetWithDescriptor=MTLResidencySetDescriptor error=nonnull
+g2 132 residency dump newResidencySetWithDescriptor.initialCapacity=3
+g2 132 residency dump newResidencySetWithDescriptor.label=nil
+g2 132 residency dump newResidencySetWithDescriptor=MTLResidencySetDescriptor
+g2 132 residency 0 ret_set=h1 own=+1 pool=+0 ret_error=0 allocationCount=0
+g2 133 residency msg@worker addAllocations:count: addAllocations=[h2,h3] count=2
+g2 133 residency 0 in3=+1 in4=+1 allocationCount=2
+g2 134 residency msg@worker removeAllocations:count: removeAllocations=[h3] count=1
+g2 134 residency 0 in4=-1 allocationCount=1 contains=1,0
+g2 136 residency msg@worker commit
+g2 136 residency 0 allocatedSize=nonzero
+g2 135 residency msg@worker removeAllAllocations
+g2 135 residency 0 allocationCount=1
+g2 136 residency msg@worker commit
+g2 136 residency 0 in3=-1 allocatedSize=0
+g2 137 residency msg@worker addResidencySet: addResidencySet=h1
+g2 137 residency 0 in6=+2
+g2 132 residency-error msg@worker newResidencySetWithDescriptor:error: newResidencySetWithDescriptor=MTLResidencySetDescriptor error=nonnull
+g2 132 residency-error dump newResidencySetWithDescriptor.initialCapacity=0
+g2 132 residency-error dump newResidencySetWithDescriptor.label=nil
+g2 132 residency-error dump newResidencySetWithDescriptor=MTLResidencySetDescriptor
+g2 132 residency-error 0 ret_set=0 ret_error=h1 own=+1 pool=+1 domain=wm_probe code=132
+g2 133 residency-empty msg@worker addAllocations:count: addAllocations=null count=0
+g2 133 residency-empty 0 allocationCount=0
+g2 134 residency-empty msg@worker removeAllocations:count: removeAllocations=null count=0
+g2 134 residency-empty 0 allocationCount=0
+g2 138 heap msg@worker newHeapWithDescriptor: newHeapWithDescriptor=MTLHeapDescriptorInternal
+g2 138 heap dump newHeapWithDescriptor.cpuCacheMode=0
+g2 138 heap dump newHeapWithDescriptor.hazardTrackingMode=0
+g2 138 heap dump newHeapWithDescriptor.maxCompatiblePlacementSparsePageSize=0
+g2 138 heap dump newHeapWithDescriptor.resourceOptions=0
+g2 138 heap dump newHeapWithDescriptor.size=1048576
+g2 138 heap dump newHeapWithDescriptor.sparsePageAccessCountersEnabled=1
+g2 138 heap dump newHeapWithDescriptor.sparsePageSize=101
+g2 138 heap dump newHeapWithDescriptor.storageMode=0
+g2 138 heap dump newHeapWithDescriptor.type=0
+g2 138 heap dump newHeapWithDescriptor=MTLHeapDescriptorInternal
+g2 138 heap 0 ret=h1 own=+1 pool=+0 size=1048576 type=0 storageMode=0
+g2 138 heap msg@worker newHeapWithDescriptor: newHeapWithDescriptor=MTLHeapDescriptorInternal
+g2 138 heap dump newHeapWithDescriptor.cpuCacheMode=0
+g2 138 heap dump newHeapWithDescriptor.hazardTrackingMode=0
+g2 138 heap dump newHeapWithDescriptor.maxCompatiblePlacementSparsePageSize=0
+g2 138 heap dump newHeapWithDescriptor.resourceOptions=32
+g2 138 heap dump newHeapWithDescriptor.size=1048576
+g2 138 heap dump newHeapWithDescriptor.sparsePageAccessCountersEnabled=1
+g2 138 heap dump newHeapWithDescriptor.sparsePageSize=102
+g2 138 heap dump newHeapWithDescriptor.storageMode=2
+g2 138 heap dump newHeapWithDescriptor.type=1
+g2 138 heap dump newHeapWithDescriptor=MTLHeapDescriptorInternal
+g2 138 heap 0 ret=h2 own=+1 pool=+0 size=1048576 type=1 storageMode=2
+g2 139 heap msg@worker heapBufferSizeAndAlignWithLength:options: heapBufferSizeAndAlignWithLength=1000 options=32
+g2 139 heap 0 ret_size=size ret_align=align
+g2 140 heap msg@worker heapTextureSizeAndAlignWithDescriptor: heapTextureSizeAndAlignWithDescriptor=MTLTextureDescriptorInternal
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.allowGPUOptimizedContents=1
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.arrayLength=1
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.compressionMode=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.compressionType=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.cpuCacheMode=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.depth=1
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.forceResourceIndex=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.hazardTrackingMode=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.height=64
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.mipmapLevelCount=1
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.pixelFormat=70
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.placementSparsePageSize=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.resourceIndex=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.resourceOptions=32
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.sampleCount=1
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.storageMode=2
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.swizzle={02030405}
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.textureType=2
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.usage=1
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.width=64
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor=MTLTextureDescriptorInternal
+g2 140 heap 0 ret_size=size ret_align=align
+g2 141 heap msg@worker newBufferWithLength:options: newBufferWithLength=4096 options=0
+g2 141 heap msg@worker storageMode
+g2 141 heap 0 ret=h3 own=+1 pool=+0 memory=contents gpu_address=gpuAddress length=4096 heap=heap
+g2 141 heap msg@worker newBufferWithLength:options:offset: newBufferWithLength=4096 options=32 offset=65536
+g2 141 heap msg@worker storageMode
+g2 141 heap 0 ret=h4 own=+1 pool=+0 memory=0 gpu_address=gpuAddress length=4096 heapOffset=65536 heap=heap
+g2 142 heap msg@worker newTextureWithDescriptor: newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 142 heap dump newTextureWithDescriptor.allowGPUOptimizedContents=1
+g2 142 heap dump newTextureWithDescriptor.arrayLength=1
+g2 142 heap dump newTextureWithDescriptor.compressionMode=0
+g2 142 heap dump newTextureWithDescriptor.compressionType=0
+g2 142 heap dump newTextureWithDescriptor.cpuCacheMode=0
+g2 142 heap dump newTextureWithDescriptor.depth=1
+g2 142 heap dump newTextureWithDescriptor.forceResourceIndex=0
+g2 142 heap dump newTextureWithDescriptor.hazardTrackingMode=0
+g2 142 heap dump newTextureWithDescriptor.height=64
+g2 142 heap dump newTextureWithDescriptor.mipmapLevelCount=1
+g2 142 heap dump newTextureWithDescriptor.pixelFormat=70
+g2 142 heap dump newTextureWithDescriptor.placementSparsePageSize=0
+g2 142 heap dump newTextureWithDescriptor.resourceIndex=0
+g2 142 heap dump newTextureWithDescriptor.resourceOptions=0
+g2 142 heap dump newTextureWithDescriptor.sampleCount=1
+g2 142 heap dump newTextureWithDescriptor.storageMode=0
+g2 142 heap dump newTextureWithDescriptor.swizzle={02030405}
+g2 142 heap dump newTextureWithDescriptor.textureType=2
+g2 142 heap dump newTextureWithDescriptor.usage=1
+g2 142 heap dump newTextureWithDescriptor.width=64
+g2 142 heap dump newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 142 heap 0 ret=h5 own=+1 pool=+0 gpu_resource_id=gpuResourceID mach_port=0x0 inputs=unchanged heap=heap
+g2 142 heap msg@worker newTextureWithDescriptor:offset: newTextureWithDescriptor=MTLTextureDescriptorInternal offset=131072
+g2 142 heap dump newTextureWithDescriptor.allowGPUOptimizedContents=1
+g2 142 heap dump newTextureWithDescriptor.arrayLength=1
+g2 142 heap dump newTextureWithDescriptor.compressionMode=0
+g2 142 heap dump newTextureWithDescriptor.compressionType=0
+g2 142 heap dump newTextureWithDescriptor.cpuCacheMode=0
+g2 142 heap dump newTextureWithDescriptor.depth=1
+g2 142 heap dump newTextureWithDescriptor.forceResourceIndex=0
+g2 142 heap dump newTextureWithDescriptor.hazardTrackingMode=0
+g2 142 heap dump newTextureWithDescriptor.height=64
+g2 142 heap dump newTextureWithDescriptor.mipmapLevelCount=1
+g2 142 heap dump newTextureWithDescriptor.pixelFormat=70
+g2 142 heap dump newTextureWithDescriptor.placementSparsePageSize=0
+g2 142 heap dump newTextureWithDescriptor.resourceIndex=0
+g2 142 heap dump newTextureWithDescriptor.resourceOptions=32
+g2 142 heap dump newTextureWithDescriptor.sampleCount=1
+g2 142 heap dump newTextureWithDescriptor.storageMode=2
+g2 142 heap dump newTextureWithDescriptor.swizzle={02030405}
+g2 142 heap dump newTextureWithDescriptor.textureType=2
+g2 142 heap dump newTextureWithDescriptor.usage=1
+g2 142 heap dump newTextureWithDescriptor.width=64
+g2 142 heap dump newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 142 heap 0 ret=h6 own=+1 pool=+0 gpu_resource_id=gpuResourceID mach_port=0x0 inputs=unchanged heapOffset=131072 heap=heap
+g2 143 icb msg@worker newIndirectCommandBufferWithDescriptor:maxCommandCount:options: newIndirectCommandBufferWithDescriptor=MTLIndirectCommandBufferDescriptor maxCommandCount=16 options=0
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.allowOverrideRenderStates=0
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.commandTypes=3
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.inheritBlendColor=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.inheritBuffers=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.inheritCullMode=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.inheritDepthBias=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.inheritDepthClipMode=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.inheritDepthStencilState=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.inheritDepthTestBounds=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.inheritFrontFacingWinding=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.inheritPipelineState=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.inheritScissorRects=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.inheritStencilReferenceValues=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.inheritTriangleFillMode=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.inheritViewports=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.maxFragmentBufferBindCount=4
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.maxKernelBufferBindCount=5
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.maxKernelThreadgroupMemoryBindCount=2
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.maxMeshBufferBindCount=6
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.maxObjectBufferBindCount=7
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.maxObjectThreadgroupMemoryBindCount=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.maxScissorRectCount=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.maxToolsDispatchBindings=0
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.maxVertexBufferBindCount=3
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.maxViewportCount=1
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.resourceIndex=0
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.supportColorAttachmentMapping=0
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.supportDynamicAttributeStride=0
+g2 143 icb dump newIndirectCommandBufferWithDescriptor.supportRayTracing=0
+g2 143 icb dump newIndirectCommandBufferWithDescriptor=MTLIndirectCommandBufferDescriptor
+g2 143 icb 0 ret=h1 own=+1 pool=+0 size=16 gpu_resource_id=gpuResourceID storageMode=0
+g2 143 icb-flags msg@worker newIndirectCommandBufferWithDescriptor:maxCommandCount:options: newIndirectCommandBufferWithDescriptor=MTLIndirectCommandBufferDescriptor maxCommandCount=9 options=32
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.allowOverrideRenderStates=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.commandTypes=32
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritBlendColor=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritBuffers=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritCullMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthBias=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthClipMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthStencilState=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthTestBounds=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritFrontFacingWinding=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritPipelineState=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritScissorRects=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritStencilReferenceValues=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritTriangleFillMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritViewports=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxFragmentBufferBindCount=4
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxKernelBufferBindCount=5
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxKernelThreadgroupMemoryBindCount=2
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxMeshBufferBindCount=6
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxObjectBufferBindCount=7
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxObjectThreadgroupMemoryBindCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxScissorRectCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxToolsDispatchBindings=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxVertexBufferBindCount=3
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxViewportCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.resourceIndex=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportColorAttachmentMapping=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportDynamicAttributeStride=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportRayTracing=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor=MTLIndirectCommandBufferDescriptor
+g2 143 icb-flags 0 ret=0 gpu_resource_id=0x0
+g2 143 icb-flags msg@worker newIndirectCommandBufferWithDescriptor:maxCommandCount:options: newIndirectCommandBufferWithDescriptor=MTLIndirectCommandBufferDescriptor maxCommandCount=9 options=32
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.allowOverrideRenderStates=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.commandTypes=32
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritBlendColor=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritBuffers=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritCullMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthBias=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthClipMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthStencilState=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthTestBounds=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritFrontFacingWinding=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritPipelineState=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritScissorRects=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritStencilReferenceValues=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritTriangleFillMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritViewports=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxFragmentBufferBindCount=4
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxKernelBufferBindCount=5
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxKernelThreadgroupMemoryBindCount=2
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxMeshBufferBindCount=6
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxObjectBufferBindCount=7
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxObjectThreadgroupMemoryBindCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxScissorRectCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxToolsDispatchBindings=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxVertexBufferBindCount=3
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxViewportCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.resourceIndex=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportColorAttachmentMapping=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportDynamicAttributeStride=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportRayTracing=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor=MTLIndirectCommandBufferDescriptor
+g2 143 icb-flags 0 ret=0 gpu_resource_id=0x0
+g2 143 icb-flags msg@worker newIndirectCommandBufferWithDescriptor:maxCommandCount:options: newIndirectCommandBufferWithDescriptor=MTLIndirectCommandBufferDescriptor maxCommandCount=9 options=32
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.allowOverrideRenderStates=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.commandTypes=32
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritBlendColor=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritBuffers=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritCullMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthBias=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthClipMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthStencilState=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthTestBounds=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritFrontFacingWinding=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritPipelineState=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritScissorRects=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritStencilReferenceValues=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritTriangleFillMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritViewports=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxFragmentBufferBindCount=4
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxKernelBufferBindCount=5
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxKernelThreadgroupMemoryBindCount=2
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxMeshBufferBindCount=6
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxObjectBufferBindCount=7
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxObjectThreadgroupMemoryBindCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxScissorRectCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxToolsDispatchBindings=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxVertexBufferBindCount=3
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxViewportCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.resourceIndex=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportColorAttachmentMapping=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportDynamicAttributeStride=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportRayTracing=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor=MTLIndirectCommandBufferDescriptor
+g2 143 icb-flags 0 ret=0 gpu_resource_id=0x0
+g2 143 icb-flags msg@worker newIndirectCommandBufferWithDescriptor:maxCommandCount:options: newIndirectCommandBufferWithDescriptor=MTLIndirectCommandBufferDescriptor maxCommandCount=9 options=32
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.allowOverrideRenderStates=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.commandTypes=32
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritBlendColor=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritBuffers=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritCullMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthBias=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthClipMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthStencilState=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthTestBounds=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritFrontFacingWinding=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritPipelineState=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritScissorRects=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritStencilReferenceValues=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritTriangleFillMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritViewports=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxFragmentBufferBindCount=4
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxKernelBufferBindCount=5
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxKernelThreadgroupMemoryBindCount=2
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxMeshBufferBindCount=6
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxObjectBufferBindCount=7
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxObjectThreadgroupMemoryBindCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxScissorRectCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxToolsDispatchBindings=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxVertexBufferBindCount=3
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxViewportCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.resourceIndex=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportColorAttachmentMapping=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportDynamicAttributeStride=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportRayTracing=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor=MTLIndirectCommandBufferDescriptor
+g2 143 icb-flags 0 ret=0 gpu_resource_id=0x0
+g2 143 icb-flags msg@worker newIndirectCommandBufferWithDescriptor:maxCommandCount:options: newIndirectCommandBufferWithDescriptor=MTLIndirectCommandBufferDescriptor maxCommandCount=9 options=32
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.allowOverrideRenderStates=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.commandTypes=32
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritBlendColor=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritBuffers=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritCullMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthBias=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthClipMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthStencilState=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritDepthTestBounds=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritFrontFacingWinding=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritPipelineState=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritScissorRects=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritStencilReferenceValues=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritTriangleFillMode=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.inheritViewports=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxFragmentBufferBindCount=4
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxKernelBufferBindCount=5
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxKernelThreadgroupMemoryBindCount=2
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxMeshBufferBindCount=6
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxObjectBufferBindCount=7
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxObjectThreadgroupMemoryBindCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxScissorRectCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxToolsDispatchBindings=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxVertexBufferBindCount=3
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.maxViewportCount=1
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.resourceIndex=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportColorAttachmentMapping=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportDynamicAttributeStride=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor.supportRayTracing=0
+g2 143 icb-flags dump newIndirectCommandBufferWithDescriptor=MTLIndirectCommandBufferDescriptor
+g2 143 icb-flags 0 ret=0 gpu_resource_id=0x0
+g2 18 nil-args 0 params=0-23 info=0-31 ret=0x0 gpu_address=0x0
+g2 19 nil-args 0 ret=0x0 gpu_resource_id=0x0
+g2 20 nil-args 0 ret=0x0
+g2 21 nil-args 0 params=0-23 ret=0x0 gpu_resource_id=0x0 mach_port=0x0
+g2 22 nil-args 0 ret=0x0 gpu_resource_id=0x0 mach_port=0x0
+g2 23 nil-args 0 params=0-27,32-47 ret=0x0 gpu_resource_id=0x0
+g2 45 nil-args 0 data=none
+g2 145 nil-args 0 data=none
+g2 46 nil-args 0 ret=2
+g2 132 nil-args 0 ret_set=0x0 ret_error=0x0
+g2 133 nil-args msg@worker addAllocations:count: addAllocations=[nil,h1] count=2
+g2 133 nil-args 0
+g2 133 nil-args 0
+g2 134 nil-args msg@worker removeAllocations:count: removeAllocations=[nil,h1] count=2
+g2 134 nil-args 0
+g2 134 nil-args 0
+g2 135 nil-args 0
+g2 136 nil-args 0
+g2 137 nil-args msg@worker addResidencySet: addResidencySet=nil
+g2 137 nil-args 0
+g2 137 nil-args 0
+g2 138 nil-args 0 ret=0x0
+g2 139 nil-args 0 ret_size=0 ret_align=0
+g2 140 nil-args 0 ret_size=0 ret_align=0
+g2 141 nil-args 0 info=0-31 ret=0x0 memory=0x0 gpu_address=0x0
+g2 142 nil-args 0 ret=0x0 gpu_resource_id=0x0 mach_port=0x0
+g2 143 nil-args 0 ret=0x0 gpu_resource_id=0x0
+g2 39 x-pixelformat-on-buffer raised NSInvalidArgumentException params=0-7

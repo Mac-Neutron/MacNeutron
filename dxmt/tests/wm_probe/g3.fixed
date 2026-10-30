@@ -1,0 +1,747 @@
+g3 9 queue msg@worker newCommandQueueWithMaxCommandBufferCount: newCommandQueueWithMaxCommandBufferCount=5
+g3 9 queue 0 ret=h1 own=+1 pool=+0 arg=5
+g3 11 cmdbuf-lifecycle msg@worker commandBuffer
+g3 11 cmdbuf-lifecycle 0 ret=h1 own=+0 pool=+1
+g3 14 cmdbuf-lifecycle msg@worker status
+g3 14 cmdbuf-lifecycle 0 status=0
+g3 12 cmdbuf-lifecycle msg@worker commit
+g3 12 cmdbuf-lifecycle 0
+g3 13 cmdbuf-lifecycle msg@worker waitUntilCompleted
+g3 13 cmdbuf-lifecycle 0
+g3 14 cmdbuf-lifecycle msg@worker status
+g3 14 cmdbuf-lifecycle 0 status=4
+g3 17 signal-event msg@worker encodeSignalEvent:value: encodeSignalEvent=h1 value=7
+g3 17 signal-event 0 signaledValue=7
+g3 30 encoders msg@worker blitCommandEncoder
+g3 30 encoders 0 ret=h1 own=+0 pool=+1
+g3 33 encoders msg@worker endEncoding
+g3 33 encoders 0
+g3 31 encoders msg@worker computeCommandEncoderWithDispatchType: computeCommandEncoderWithDispatchType=0
+g3 31 encoders 0 ret=h2 own=+0 pool=+1 dispatchType=0
+g3 33 encoders msg@worker endEncoding
+g3 33 encoders 0
+g3 31 encoders msg@worker computeCommandEncoderWithDispatchType: computeCommandEncoderWithDispatchType=1
+g3 31 encoders 0 ret=h3 own=+0 pool=+1 dispatchType=1
+g3 33 encoders msg@worker endEncoding
+g3 33 encoders 0
+g3 31 encoders msg@worker computeCommandEncoderWithDispatchType: computeCommandEncoderWithDispatchType=1
+g3 31 encoders 0 dispatchType=1
+g3 33 encoders msg@worker endEncoding
+g3 33 encoders 0
+g3 32 encoders 0 ret=h4 own=+0 pool=+1
+g3 33 encoders msg@worker endEncoding
+g3 33 encoders 0
+g3 36 blit-Nop msg@worker updateFence: updateFence=h1
+g3 36 blit-Nop msg@worker waitForFence: waitForFence=h2
+g3 36 blit-Nop 0
+g3 36 blit-CopyFromBufferToBuffer msg@worker copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size: copyFromBuffer=h1 sourceOffset=4369 toBuffer=h2 destinationOffset=8738 size=13107
+g3 36 blit-CopyFromBufferToBuffer 0
+g3 36 blit-CopyFromBufferToTexture msg@worker copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin: copyFromBuffer=h1 sourceOffset=4112 sourceBytesPerRow=8224 sourceBytesPerImage=197379 sourceSize=050000000000000006000000000000000700000000000000 toTexture=h2 destinationSlice=8 destinationLevel=9 destinationOrigin=010000000000000002000000000000000300000000000000
+g3 36 blit-CopyFromBufferToTexture 0
+g3 36 blit-CopyFromTextureToBuffer msg@worker copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage: copyFromTexture=h1 sourceSlice=4 sourceLevel=5 sourceOrigin=060000000000000007000000000000000800000000000000 sourceSize=09000000000000000a000000000000000b00000000000000 toBuffer=h2 destinationOffset=16448 destinationBytesPerRow=20560 destinationBytesPerImage=394758
+g3 36 blit-CopyFromTextureToBuffer 0
+g3 36 blit-CopyFromTextureToTexture msg@worker copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin: copyFromTexture=h1 sourceSlice=1 sourceLevel=2 sourceOrigin=030000000000000004000000000000000500000000000000 sourceSize=060000000000000007000000000000000800000000000000 toTexture=h2 destinationSlice=9 destinationLevel=10 destinationOrigin=0b000000000000000c000000000000000d00000000000000
+g3 36 blit-CopyFromTextureToTexture 0
+g3 36 blit-GenerateMipmaps msg@worker generateMipmapsForTexture: generateMipmapsForTexture=h1
+g3 36 blit-GenerateMipmaps 0
+g3 36 blit-WaitForFence msg@worker waitForFence: waitForFence=h1
+g3 36 blit-WaitForFence 0
+g3 36 blit-UpdateFence msg@worker updateFence: updateFence=h1
+g3 36 blit-UpdateFence 0
+g3 36 blit-FillBuffer msg@worker fillBuffer:range:value: fillBuffer=h1 range=00070000000000000008000000000000 value=92
+g3 36 blit-FillBuffer 0
+g3 36 blit-ResolveCounters msg@worker resolveCounters:inRange:destinationBuffer:destinationOffset: resolveCounters=h1 inRange=03000000000000000500000000000000 destinationBuffer=h2 destinationOffset=2304
+g3 36 blit-ResolveCounters 0
+g3 36 blit-CopyFromBufferToTextureWithBlitOption msg@worker copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:options: copyFromBuffer=h1 sourceOffset=5140 sourceBytesPerRow=9252 sourceBytesPerImage=213827 sourceSize=0f0000000000000010000000000000001100000000000000 toTexture=h2 destinationSlice=11 destinationLevel=10 destinationOrigin=0c000000000000000d000000000000000e00000000000000 options=2
+g3 36 blit-CopyFromBufferToTextureWithBlitOption 0
+g3 36 blit-CopyFromTextureToBufferWithBlitOption msg@worker copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:options: copyFromTexture=h1 sourceSlice=24 sourceLevel=25 sourceOrigin=1a000000000000001b000000000000001c00000000000000 sourceSize=1d000000000000001e000000000000001f00000000000000 toBuffer=h2 destinationOffset=18504 destinationBytesPerRow=22616 destinationBytesPerImage=427654 options=1
+g3 36 blit-CopyFromTextureToBufferWithBlitOption 0
+g3 36 blit-ResetCommandsInBuffer msg@worker resetCommandsInBuffer:withRange: resetCommandsInBuffer=h1 withRange=07000000000000000900000000000000
+g3 36 blit-ResetCommandsInBuffer 0
+g3 36 blit-CopyTexture msg@worker copyFromTexture:toTexture: copyFromTexture=h1 toTexture=h2
+g3 36 blit-CopyTexture 0
+g3 36 blit-unknown-type msg@worker generateMipmapsForTexture: generateMipmapsForTexture=h1
+g3 36 blit-unknown-type msg@worker copyFromTexture:toTexture: copyFromTexture=h2 toTexture=h3
+g3 36 blit-unknown-type 0
+g3 36 blit-gpu 0 in1=+1 in2=+1 dst=8-23,32-39 bytes=a5a5a5a5a5a5a5a50405060708090a0b0c0d0e0f10111213a5a5a5a5a5a5a5a55c5c5c5c5c5c5c5ca5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5
+g3 37 compute-Nop msg@worker setBufferOffset:atIndex: setBufferOffset=96 atIndex=6
+g3 37 compute-Nop msg@worker memoryBarrierWithScope: memoryBarrierWithScope=2
+g3 37 compute-Nop 0
+g3 37 compute-Dispatch msg@worker dispatchThreadgroups:threadsPerThreadgroup: dispatchThreadgroups=020000000000000003000000000000000400000000000000 threadsPerThreadgroup=000000000000000000000000000000000000000000000000
+g3 37 compute-Dispatch 0
+g3 37 compute-DispatchIndirect msg@worker dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerThreadgroup: dispatchThreadgroupsWithIndirectBuffer=h1 indirectBufferOffset=291 threadsPerThreadgroup=000000000000000000000000000000000000000000000000
+g3 37 compute-DispatchIndirect 0
+g3 37 compute-SetPSO msg@worker setComputePipelineState: setComputePipelineState=h1
+g3 37 compute-SetPSO 0
+g3 37 compute-SetBuffer msg@worker setBuffer:offset:atIndex: setBuffer=h1 offset=64 atIndex=29
+g3 37 compute-SetBuffer 0
+g3 37 compute-SetBufferOffset msg@worker setBufferOffset:atIndex: setBufferOffset=128 atIndex=30
+g3 37 compute-SetBufferOffset 0
+g3 37 compute-UseResource msg@worker useResource:usage: useResource=h1 usage=3
+g3 37 compute-UseResource 0
+g3 37 compute-SetBytes msg@worker setBytes:length:atIndex: setBytes=0102030405060708090a0b0c length=12 atIndex=7
+g3 37 compute-SetBytes 0
+g3 37 compute-SetTexture msg@worker setTexture:atIndex: setTexture=h1 atIndex=17
+g3 37 compute-SetTexture 0
+g3 37 compute-DispatchThreads msg@worker dispatchThreads:threadsPerThreadgroup: dispatchThreads=400000000000000002000000000000000100000000000000 threadsPerThreadgroup=000000000000000000000000000000000000000000000000
+g3 37 compute-DispatchThreads 0
+g3 37 compute-WaitForFence msg@worker waitForFence: waitForFence=h1
+g3 37 compute-WaitForFence 0
+g3 37 compute-UpdateFence msg@worker updateFence: updateFence=h1
+g3 37 compute-UpdateFence 0
+g3 37 compute-MemoryBarrier msg@worker memoryBarrierWithScope: memoryBarrierWithScope=3
+g3 37 compute-MemoryBarrier 0
+g3 37 compute-ExecuteCommandsInBuffer msg@worker executeCommandsInBuffer:withRange: executeCommandsInBuffer=h1 withRange=02000000000000000600000000000000
+g3 37 compute-ExecuteCommandsInBuffer 0
+g3 37 compute-threadgroup msg@worker setComputePipelineState: setComputePipelineState=h1
+g3 37 compute-threadgroup msg@worker dispatchThreadgroups:threadsPerThreadgroup: dispatchThreadgroups=020000000000000002000000000000000200000000000000 threadsPerThreadgroup=080000000000000004000000000000000200000000000000
+g3 37 compute-threadgroup msg@worker setComputePipelineState: setComputePipelineState=h2
+g3 37 compute-threadgroup msg@worker dispatchThreads:threadsPerThreadgroup: dispatchThreads=400000000000000001000000000000000100000000000000 threadsPerThreadgroup=100000000000000001000000000000000100000000000000
+g3 37 compute-threadgroup 0
+g3 37 compute-threadgroup msg@worker dispatchThreadgroups:threadsPerThreadgroup: dispatchThreadgroups=030000000000000003000000000000000300000000000000 threadsPerThreadgroup=000000000000000000000000000000000000000000000000
+g3 37 compute-threadgroup 0
+g3 37 compute-unknown-type msg@worker setBufferOffset:atIndex: setBufferOffset=16 atIndex=1
+g3 37 compute-unknown-type msg@worker memoryBarrierWithScope: memoryBarrierWithScope=1
+g3 37 compute-unknown-type 0
+g3 37 compute-gpu 0 in1=+1 in2=+1 words=2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32
+g3 38 render-Nop msg@worker setStencilReferenceValue: setStencilReferenceValue=33
+g3 38 render-Nop msg@worker setVisibilityResultMode:offset: setVisibilityResultMode=1 offset=136
+g3 38 render-Nop 0
+g3 38 render-UseResource msg@worker useResource:usage:stages: useResource=h1 usage=4 stages=3
+g3 38 render-UseResource 0
+g3 38 render-SetVertexBuffer msg@worker setVertexBuffer:offset:atIndex: setVertexBuffer=h1 offset=256 atIndex=1
+g3 38 render-SetVertexBuffer 0
+g3 38 render-SetVertexBufferOffset msg@worker setVertexBufferOffset:atIndex: setVertexBufferOffset=512 atIndex=2
+g3 38 render-SetVertexBufferOffset 0
+g3 38 render-SetFragmentBuffer msg@worker setFragmentBuffer:offset:atIndex: setFragmentBuffer=h1 offset=768 atIndex=3
+g3 38 render-SetFragmentBuffer 0
+g3 38 render-SetFragmentBufferOffset msg@worker setFragmentBufferOffset:atIndex: setFragmentBufferOffset=1024 atIndex=4
+g3 38 render-SetFragmentBufferOffset 0
+g3 38 render-SetMeshBuffer msg@worker setMeshBuffer:offset:atIndex: setMeshBuffer=h1 offset=1280 atIndex=5
+g3 38 render-SetMeshBuffer 0
+g3 38 render-SetMeshBufferOffset msg@worker setMeshBufferOffset:atIndex: setMeshBufferOffset=1536 atIndex=6
+g3 38 render-SetMeshBufferOffset 0
+g3 38 render-SetObjectBuffer msg@worker setObjectBuffer:offset:atIndex: setObjectBuffer=h1 offset=1792 atIndex=7
+g3 38 render-SetObjectBuffer 0
+g3 38 render-SetObjectBufferOffset msg@worker setObjectBufferOffset:atIndex: setObjectBufferOffset=2048 atIndex=8
+g3 38 render-SetObjectBufferOffset 0
+g3 38 render-SetFragmentTexture msg@worker setFragmentTexture:atIndex: setFragmentTexture=h1 atIndex=9
+g3 38 render-SetFragmentTexture 0
+g3 38 render-SetFragmentBytes msg@worker setFragmentBytes:length:atIndex: setFragmentBytes=f1f2f3f4f5f6f7f8 length=8 atIndex=10
+g3 38 render-SetFragmentBytes 0
+g3 38 render-SetRasterizerState msg@worker setTriangleFillMode: setTriangleFillMode=1
+g3 38 render-SetRasterizerState msg@worker setCullMode: setCullMode=2
+g3 38 render-SetRasterizerState msg@worker setDepthClipMode: setDepthClipMode=1
+g3 38 render-SetRasterizerState msg@worker setDepthBias:slopeScale:clamp: setDepthBias=0x1p-1 slopeScale=0x1.8p+0 clamp=0x1.4p+1
+g3 38 render-SetRasterizerState msg@worker setFrontFacingWinding: setFrontFacingWinding=1
+g3 38 render-SetRasterizerState 0
+g3 38 render-SetViewports msg@worker setViewports:count: setViewports=000000000000f03f000000000000004000000000000008400000000000001040000000000000c03f000000000000ec3f000000000000144000000000000018400000000000001c400000000000002040000000000000d03f000000000000e83f count=2
+g3 38 render-SetViewports 0
+g3 38 render-SetScissorRects msg@worker setScissorRects:count: setScissorRects=01000000000000000200000000000000030000000000000004000000000000000500000000000000060000000000000007000000000000000800000000000000 count=2
+g3 38 render-SetScissorRects 0
+g3 38 render-SetPSO msg@worker setRenderPipelineState: setRenderPipelineState=h1
+g3 38 render-SetPSO 0
+g3 38 render-SetDSSO msg@worker setDepthStencilState: setDepthStencilState=h1
+g3 38 render-SetDSSO msg@worker setStencilReferenceValue: setStencilReferenceValue=126
+g3 38 render-SetDSSO 0
+g3 38 render-SetBlendFactorAndStencilRef msg@worker setBlendColorRed:green:blue:alpha: setBlendColorRed=0x1p-3 green=0x1p-2 blue=0x1p-1 alpha=0x1p+0
+g3 38 render-SetBlendFactorAndStencilRef msg@worker setStencilReferenceValue: setStencilReferenceValue=51
+g3 38 render-SetBlendFactorAndStencilRef 0
+g3 38 render-SetVisibilityMode msg@worker setVisibilityResultMode:offset: setVisibilityResultMode=2 offset=4096
+g3 38 render-SetVisibilityMode 0
+g3 38 render-Draw msg@worker drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance: drawPrimitives=4 vertexStart=11 vertexCount=12 instanceCount=13 baseInstance=14
+g3 38 render-Draw 0
+g3 38 render-DrawIndexed msg@worker drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:baseVertex:baseInstance: drawIndexedPrimitives=1 indexCount=15 indexType=1 indexBuffer=h1 indexBufferOffset=64 instanceCount=16 baseVertex=-3 baseInstance=17
+g3 38 render-DrawIndexed 0
+g3 38 render-DrawIndirect msg@worker drawPrimitives:indirectBuffer:indirectBufferOffset: drawPrimitives=2 indirectBuffer=h1 indirectBufferOffset=80
+g3 38 render-DrawIndirect 0
+g3 38 render-DrawIndexedIndirect msg@worker drawIndexedPrimitives:indexType:indexBuffer:indexBufferOffset:indirectBuffer:indirectBufferOffset: drawIndexedPrimitives=3 indexType=0 indexBuffer=h1 indexBufferOffset=96 indirectBuffer=h2 indirectBufferOffset=112
+g3 38 render-DrawIndexedIndirect 0
+g3 38 render-DrawMeshThreadgroups msg@worker drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup: drawMeshThreadgroups=010000000000000002000000000000000300000000000000 threadsPerObjectThreadgroup=040000000000000005000000000000000600000000000000 threadsPerMeshThreadgroup=070000000000000008000000000000000900000000000000
+g3 38 render-DrawMeshThreadgroups 0
+g3 38 render-DrawMeshThreadgroupsIndirect msg@worker drawMeshThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup: drawMeshThreadgroupsWithIndirectBuffer=h1 indirectBufferOffset=128 threadsPerObjectThreadgroup=0a000000000000000b000000000000000c00000000000000 threadsPerMeshThreadgroup=0d000000000000000e000000000000000f00000000000000
+g3 38 render-DrawMeshThreadgroupsIndirect 0
+g3 38 render-MemoryBarrier msg@worker memoryBarrierWithScope:afterStages:beforeStages: memoryBarrierWithScope=4 afterStages=1 beforeStages=2
+g3 38 render-MemoryBarrier 0
+g3 38 render-DXMTGeometryDraw msg@worker setObjectBufferOffset:atIndex: setObjectBufferOffset=144 atIndex=4
+g3 38 render-DXMTGeometryDraw msg@worker drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup: drawMeshThreadgroups=030000000000000004000000000000000100000000000000 threadsPerObjectThreadgroup=050000000000000001000000000000000100000000000000 threadsPerMeshThreadgroup=010000000000000001000000000000000100000000000000
+g3 38 render-DXMTGeometryDraw 0
+g3 38 render-DXMTGeometryDrawIndexed msg@worker setObjectBuffer:offset:atIndex: setObjectBuffer=h1 offset=160 atIndex=3
+g3 38 render-DXMTGeometryDrawIndexed msg@worker setObjectBufferOffset:atIndex: setObjectBufferOffset=152 atIndex=4
+g3 38 render-DXMTGeometryDrawIndexed msg@worker drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup: drawMeshThreadgroups=060000000000000007000000000000000100000000000000 threadsPerObjectThreadgroup=080000000000000001000000000000000100000000000000 threadsPerMeshThreadgroup=010000000000000001000000000000000100000000000000
+g3 38 render-DXMTGeometryDrawIndexed 0
+g3 38 render-DXMTGeometryDrawIndirect msg@worker setObjectBuffer:offset:atIndex: setObjectBuffer=h1 offset=176 atIndex=4
+g3 38 render-DXMTGeometryDrawIndirect msg@worker drawMeshThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup: drawMeshThreadgroupsWithIndirectBuffer=h2 indirectBufferOffset=192 threadsPerObjectThreadgroup=090000000000000001000000000000000100000000000000 threadsPerMeshThreadgroup=010000000000000001000000000000000100000000000000
+g3 38 render-DXMTGeometryDrawIndirect msg@worker setObjectBuffer:offset:atIndex: setObjectBuffer=h3 offset=0 atIndex=4
+g3 38 render-DXMTGeometryDrawIndirect 0
+g3 38 render-DXMTGeometryDrawIndexedIndirect msg@worker setObjectBuffer:offset:atIndex: setObjectBuffer=h1 offset=208 atIndex=3
+g3 38 render-DXMTGeometryDrawIndexedIndirect msg@worker setObjectBuffer:offset:atIndex: setObjectBuffer=h2 offset=224 atIndex=4
+g3 38 render-DXMTGeometryDrawIndexedIndirect msg@worker drawMeshThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup: drawMeshThreadgroupsWithIndirectBuffer=h3 indirectBufferOffset=240 threadsPerObjectThreadgroup=0a0000000000000001000000000000000100000000000000 threadsPerMeshThreadgroup=010000000000000001000000000000000100000000000000
+g3 38 render-DXMTGeometryDrawIndexedIndirect msg@worker setObjectBuffer:offset:atIndex: setObjectBuffer=h4 offset=0 atIndex=4
+g3 38 render-DXMTGeometryDrawIndexedIndirect 0
+g3 38 render-WaitForFence msg@worker waitForFence:beforeStages: waitForFence=h1 beforeStages=2
+g3 38 render-WaitForFence 0
+g3 38 render-UpdateFence msg@worker updateFence:afterStages: updateFence=h1 afterStages=9
+g3 38 render-UpdateFence 0
+g3 38 render-SetViewport msg@worker setViewport: setViewport=000000000000f83f000000000000044000000000000084400000000000007e40000000000000d03f000000000000e83f
+g3 38 render-SetViewport 0
+g3 38 render-SetScissorRect msg@worker setScissorRect: setScissorRect=09000000000000000a000000000000000b000000000000000c00000000000000
+g3 38 render-SetScissorRect 0
+g3 38 render-DXMTTessellationMeshDraw msg@worker setObjectBufferOffset:atIndex: setObjectBufferOffset=272 atIndex=4
+g3 38 render-DXMTTessellationMeshDraw msg@worker drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup: drawMeshThreadgroups=050000000000000002000000000000000100000000000000 threadsPerObjectThreadgroup=030000000000000004000000000000000100000000000000 threadsPerMeshThreadgroup=200000000000000001000000000000000100000000000000
+g3 38 render-DXMTTessellationMeshDraw 0
+g3 38 render-DXMTTessellationMeshDrawIndexed msg@worker setObjectBuffer:offset:atIndex: setObjectBuffer=h1 offset=288 atIndex=3
+g3 38 render-DXMTTessellationMeshDrawIndexed msg@worker setObjectBufferOffset:atIndex: setObjectBufferOffset=280 atIndex=4
+g3 38 render-DXMTTessellationMeshDrawIndexed msg@worker drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup: drawMeshThreadgroups=090000000000000006000000000000000100000000000000 threadsPerObjectThreadgroup=070000000000000008000000000000000100000000000000 threadsPerMeshThreadgroup=200000000000000001000000000000000100000000000000
+g3 38 render-DXMTTessellationMeshDrawIndexed 0
+g3 38 render-DXMTTessellationMeshDrawIndirect msg@worker setObjectBuffer:offset:atIndex: setObjectBuffer=h1 offset=304 atIndex=4
+g3 38 render-DXMTTessellationMeshDrawIndirect msg@worker drawMeshThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup: drawMeshThreadgroupsWithIndirectBuffer=h2 indirectBufferOffset=320 threadsPerObjectThreadgroup=0a000000000000000b000000000000000100000000000000 threadsPerMeshThreadgroup=200000000000000001000000000000000100000000000000
+g3 38 render-DXMTTessellationMeshDrawIndirect msg@worker setObjectBuffer:offset:atIndex: setObjectBuffer=h3 offset=0 atIndex=4
+g3 38 render-DXMTTessellationMeshDrawIndirect 0
+g3 38 render-DXMTTessellationMeshDrawIndexedIndirect msg@worker setObjectBuffer:offset:atIndex: setObjectBuffer=h1 offset=368 atIndex=3
+g3 38 render-DXMTTessellationMeshDrawIndexedIndirect msg@worker setObjectBuffer:offset:atIndex: setObjectBuffer=h2 offset=336 atIndex=4
+g3 38 render-DXMTTessellationMeshDrawIndexedIndirect msg@worker drawMeshThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup: drawMeshThreadgroupsWithIndirectBuffer=h3 indirectBufferOffset=352 threadsPerObjectThreadgroup=0c000000000000000d000000000000000100000000000000 threadsPerMeshThreadgroup=200000000000000001000000000000000100000000000000
+g3 38 render-DXMTTessellationMeshDrawIndexedIndirect msg@worker setObjectBuffer:offset:atIndex: setObjectBuffer=h4 offset=0 atIndex=4
+g3 38 render-DXMTTessellationMeshDrawIndexedIndirect 0
+g3 38 render-DispatchThreadsPerTile msg@worker dispatchThreadsPerTile: dispatchThreadsPerTile=100000000000000008000000000000000100000000000000
+g3 38 render-DispatchThreadsPerTile 0
+g3 38 render-ExecuteCommandsInBuffer msg@worker executeCommandsInBuffer:withRange: executeCommandsInBuffer=h1 withRange=03000000000000000400000000000000
+g3 38 render-ExecuteCommandsInBuffer 0
+g3 38 render-SetBlendFactor msg@worker setBlendColorRed:green:blue:alpha: setBlendColorRed=0x1.8p-1 green=0x1.4p-1 blue=0x1.8p-2 alpha=0x1p-4
+g3 38 render-SetBlendFactor 0
+g3 38 render-SetStencilRef msg@worker setStencilReferenceValue: setStencilReferenceValue=68
+g3 38 render-SetStencilRef 0
+g3 38 render-SetDepthStencilState msg@worker setDepthStencilState: setDepthStencilState=h1
+g3 38 render-SetDepthStencilState 0
+g3 38 render-SetVertexBytes msg@worker setVertexBytes:length:atIndex: setVertexBytes=f1f2f3f4f5f6f7f8 length=8 atIndex=11
+g3 38 render-SetVertexBytes 0
+g3 38 render-SetVertexTexture msg@worker setVertexTexture:atIndex: setVertexTexture=h1 atIndex=12
+g3 38 render-SetVertexTexture 0
+g3 38 render-SetVertexSamplerState msg@worker setVertexSamplerState:atIndex: setVertexSamplerState=h1 atIndex=13
+g3 38 render-SetVertexSamplerState 0
+g3 38 render-SetFragmentSamplerState msg@worker setFragmentSamplerState:atIndex: setFragmentSamplerState=h1 atIndex=14
+g3 38 render-SetFragmentSamplerState 0
+g3 38 render-unknown-type msg@worker setStencilReferenceValue: setStencilReferenceValue=18
+g3 38 render-unknown-type msg@worker dispatchThreadsPerTile: dispatchThreadsPerTile=040000000000000002000000000000000100000000000000
+g3 38 render-unknown-type 0
+g3 38 render-gpu 0 in1=+1 centre=4080bfff corner=4080bfff
+g3 32 renderpass msg@worker renderCommandEncoderWithDescriptor: renderCommandEncoderWithDescriptor=MTLRenderPassDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments=MTLRenderPassColorAttachmentDescriptorArrayInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].clearColor={000000000000c03f000000000000d03f000000000000e03f000000000000e83f}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].depthPlane=3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].level=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].loadAction=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].resolveDepthPlane=6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].resolveLevel=4
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].resolveSlice=5
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].slice=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].storeAction=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].texture=h1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].clearColor={000000000000f23f000000000000f43f000000000000f83f000000000000fc3f}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].depthPlane=4
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].level=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].loadAction=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].resolveDepthPlane=7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].resolveLevel=5
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].resolveSlice=6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].resolveTexture=h2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].slice=3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].storeAction=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].texture=h3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].clearColor={0000000000000140000000000000024000000000000004400000000000000640}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].depthPlane=5
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].level=3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].loadAction=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].resolveDepthPlane=8
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].resolveLevel=6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].resolveSlice=7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].slice=4
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].storeAction=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].texture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].clearColor={00000000000009400000000000000a400000000000000c400000000000000e40}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].depthPlane=6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].level=4
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].loadAction=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].resolveDepthPlane=9
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].resolveLevel=7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].resolveSlice=8
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].resolveTexture=h4
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].slice=5
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].storeAction=3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].texture=h5
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].clearColor={0000000000801040000000000000114000000000000012400000000000001340}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].depthPlane=7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].level=5
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].loadAction=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].resolveDepthPlane=10
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].resolveLevel=8
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].resolveSlice=9
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].slice=6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].storeAction=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].texture=h6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].clearColor={0000000000801440000000000000154000000000000016400000000000001740}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].depthPlane=8
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].level=6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].loadAction=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].resolveDepthPlane=11
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].resolveLevel=9
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].resolveSlice=10
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].resolveTexture=h7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].slice=7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].storeAction=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].texture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].clearColor={000000000080184000000000000019400000000000001a400000000000001b40}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].depthPlane=9
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].level=7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].loadAction=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].resolveDepthPlane=12
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].resolveLevel=10
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].resolveSlice=11
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].slice=8
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].storeAction=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].texture=h8
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].clearColor={0000000000801c400000000000001d400000000000001e400000000000001f40}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].depthPlane=10
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].level=8
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].loadAction=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].resolveDepthPlane=13
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].resolveLevel=11
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].resolveSlice=12
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].resolveTexture=h9
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].slice=9
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].storeAction=3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].texture=h10
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.defaultRasterSampleCount=4
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.clearDepth=0x1.8p-1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.depthPlane=4
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.depthResolveFilter=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.level=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.loadAction=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.resolveDepthPlane=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.resolveLevel=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.resolveSlice=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.slice=3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.storeAction=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.texture=h11
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment=MTLRenderPassDepthAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.imageblockSampleLength=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.rasterizationRateMap=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.renderTargetArrayLength=3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.renderTargetHeight=600
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.renderTargetWidth=800
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments=MTLRenderPassSampleBufferAttachmentDescriptorArrayInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[0].endOfFragmentSampleIndex=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[0].endOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[0].sampleBuffer=h12
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[0].startOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[0].startOfVertexSampleIndex=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[0]=MTLRenderPassSampleBufferAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[1].endOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[1].endOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[1].sampleBuffer=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[1].startOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[1].startOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[1]=MTLRenderPassSampleBufferAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[2].endOfFragmentSampleIndex=5
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[2].endOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[2].sampleBuffer=h13
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[2].startOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[2].startOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[2]=MTLRenderPassSampleBufferAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[3].endOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[3].endOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[3].sampleBuffer=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[3].startOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[3].startOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[3]=MTLRenderPassSampleBufferAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.clearStencil=90
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.depthPlane=7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.level=5
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.loadAction=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.resolveDepthPlane=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.resolveLevel=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.resolveSlice=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.slice=6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.stencilResolveFilter=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.storeAction=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.texture=h14
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment=MTLRenderPassStencilAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.supportColorAttachmentMapping=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.threadgroupMemoryLength=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.tileHeight=32
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.tileWidth=16
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.visibilityResultBuffer=h15
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.visibilityResultType=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor=MTLRenderPassDescriptorInternal
+g3 32 renderpass 0 ret=0
+g3 32 renderpass msg@worker renderCommandEncoderWithDescriptor: renderCommandEncoderWithDescriptor=MTLRenderPassDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments=MTLRenderPassColorAttachmentDescriptorArrayInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].clearColor={000000000000c03f000000000000d03f000000000000e03f000000000000e83f}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].depthPlane=3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].level=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].loadAction=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].resolveDepthPlane=6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].resolveLevel=4
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].resolveSlice=5
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].slice=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].storeAction=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0].texture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[0]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].clearColor={000000000000f23f000000000000f43f000000000000f83f000000000000fc3f}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].depthPlane=4
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].level=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].loadAction=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].resolveDepthPlane=7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].resolveLevel=5
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].resolveSlice=6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].slice=3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].storeAction=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1].texture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[1]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].clearColor={0000000000000140000000000000024000000000000004400000000000000640}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].depthPlane=5
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].level=3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].loadAction=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].resolveDepthPlane=8
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].resolveLevel=6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].resolveSlice=7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].slice=4
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].storeAction=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2].texture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[2]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].clearColor={00000000000009400000000000000a400000000000000c400000000000000e40}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].depthPlane=6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].level=4
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].loadAction=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].resolveDepthPlane=9
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].resolveLevel=7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].resolveSlice=8
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].slice=5
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].storeAction=3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3].texture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[3]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].clearColor={0000000000801040000000000000114000000000000012400000000000001340}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].depthPlane=7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].level=5
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].loadAction=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].resolveDepthPlane=10
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].resolveLevel=8
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].resolveSlice=9
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].slice=6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].storeAction=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4].texture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[4]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].clearColor={0000000000801440000000000000154000000000000016400000000000001740}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].depthPlane=8
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].level=6
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].loadAction=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].resolveDepthPlane=11
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].resolveLevel=9
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].resolveSlice=10
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].slice=7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].storeAction=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5].texture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[5]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].clearColor={000000000080184000000000000019400000000000001a400000000000001b40}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].depthPlane=9
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].level=7
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].loadAction=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].resolveDepthPlane=12
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].resolveLevel=10
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].resolveSlice=11
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].slice=8
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].storeAction=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6].texture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[6]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].clearColor={0000000000801c400000000000001d400000000000001e400000000000001f40}
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].depthPlane=10
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].level=8
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].loadAction=1
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].resolveDepthPlane=13
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].resolveLevel=11
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].resolveSlice=12
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].slice=9
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].storeAction=3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7].texture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.colorAttachments[7]=MTLRenderPassColorAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.defaultRasterSampleCount=4
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.clearDepth=0x1p+0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.depthPlane=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.depthResolveFilter=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.level=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.loadAction=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.resolveDepthPlane=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.resolveLevel=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.resolveSlice=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.slice=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.storeAction=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment.texture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.depthAttachment=MTLRenderPassDepthAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.imageblockSampleLength=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.rasterizationRateMap=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.renderTargetArrayLength=3
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.renderTargetHeight=600
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.renderTargetWidth=800
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments=MTLRenderPassSampleBufferAttachmentDescriptorArrayInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[0].endOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[0].endOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[0].sampleBuffer=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[0].startOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[0].startOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[0]=MTLRenderPassSampleBufferAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[1].endOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[1].endOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[1].sampleBuffer=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[1].startOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[1].startOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[1]=MTLRenderPassSampleBufferAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[2].endOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[2].endOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[2].sampleBuffer=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[2].startOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[2].startOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[2]=MTLRenderPassSampleBufferAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[3].endOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[3].endOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[3].sampleBuffer=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[3].startOfFragmentSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[3].startOfVertexSampleIndex=18446744073709551615
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.sampleBufferAttachments[3]=MTLRenderPassSampleBufferAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.clearStencil=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.depthPlane=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.level=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.loadAction=2
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.resolveDepthPlane=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.resolveLevel=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.resolveSlice=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.resolveTexture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.slice=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.stencilResolveFilter=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.storeAction=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.storeActionOptions=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment.texture=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.stencilAttachment=MTLRenderPassStencilAttachmentDescriptorInternal
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.supportColorAttachmentMapping=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.threadgroupMemoryLength=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.tileHeight=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.tileWidth=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.visibilityResultBuffer=nil
+g3 32 renderpass dump renderCommandEncoderWithDescriptor.visibilityResultType=0
+g3 32 renderpass dump renderCommandEncoderWithDescriptor=MTLRenderPassDescriptorInternal
+g3 32 renderpass 0 ret=0
+g3 47 present-selectors msg@worker presentDrawable: presentDrawable=h1
+g3 47 present-selectors 0
+g3 48 present-selectors msg@worker presentDrawable:afterMinimumDuration: presentDrawable=h1 afterMinimumDuration=0x1p-2
+g3 48 present-selectors 0
+g3 89 error-logs 0 ret=0
+g3 90 error-logs 0 ret=h1 own=n/a pool=n/a
+g3 89 error-logs msg@worker error
+g3 89 error-logs 0 ret=h2 own=+2 pool=+0 canned=error
+g3 90 error-logs msg@worker logs
+g3 90 error-logs 0 ret=h3 own=+2 pool=+0 canned=logs
+g3 91 enumerate 0 buffer[0]=h1 own=+3 pool=+0 buffer[1]=h2 own=+3 pool=+0 read=2 item0=a[1] item1=a[2] buffer=0-15
+g3 91 enumerate 0 buffer[0]=h3 own=+3 pool=+0 read=1 item0=a[4] buffer=0-7
+g3 91 enumerate-past-end 0 read=0 buffer=none
+g3 91 enumerate-past-end 0 read=0 buffer=none
+g3 102 wait-event msg@worker encodeWaitForEvent:value: encodeWaitForEvent=h1 value=4660
+g3 102 wait-event 0
+g3 127 timestamps msg@worker counterSets
+g3 127 timestamps msg@worker newCounterSampleBufferWithDescriptor:error: newCounterSampleBufferWithDescriptor=MTLCounterSampleBufferDescriptorInternal error=nonnull
+g3 127 timestamps dump newCounterSampleBufferWithDescriptor.counterSet.counters=[h1]
+g3 127 timestamps dump newCounterSampleBufferWithDescriptor.counterSet.name="timestamp"
+g3 127 timestamps dump newCounterSampleBufferWithDescriptor.counterSet=MTLCounterSetInternal
+g3 127 timestamps dump newCounterSampleBufferWithDescriptor.label=nil
+g3 127 timestamps dump newCounterSampleBufferWithDescriptor.sampleCount=2
+g3 127 timestamps dump newCounterSampleBufferWithDescriptor.storageMode=2
+g3 127 timestamps dump newCounterSampleBufferWithDescriptor=MTLCounterSampleBufferDescriptorInternal
+g3 127 timestamps 0 ret=h2 own=+1 pool=+0 sampleCount=2
+g3 127 timestamps 0 ret=h3 own=+1 pool=+0 sampleCount=4
+g3 129 timestamps msg@worker blitCommandEncoderWithDescriptor: blitCommandEncoderWithDescriptor=MTLBlitPassDescriptorInternal
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments=MTLBlitPassSampleBufferAttachmentDescriptorArrayInternal
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[0].endOfEncoderSampleIndex=1
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[0].sampleBuffer=h3
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[0].startOfEncoderSampleIndex=0
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[0]=MTLBlitPassSampleBufferAttachmentDescriptorInternal
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[1].endOfEncoderSampleIndex=18446744073709551615
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[1].sampleBuffer=nil
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[1].startOfEncoderSampleIndex=18446744073709551615
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[1]=MTLBlitPassSampleBufferAttachmentDescriptorInternal
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[2].endOfEncoderSampleIndex=18446744073709551615
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[2].sampleBuffer=nil
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[2].startOfEncoderSampleIndex=18446744073709551615
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[2]=MTLBlitPassSampleBufferAttachmentDescriptorInternal
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[3].endOfEncoderSampleIndex=18446744073709551615
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[3].sampleBuffer=nil
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[3].startOfEncoderSampleIndex=18446744073709551615
+g3 129 timestamps dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[3]=MTLBlitPassSampleBufferAttachmentDescriptorInternal
+g3 129 timestamps dump blitCommandEncoderWithDescriptor=MTLBlitPassDescriptorInternal
+g3 129 timestamps 0 ret=h4 own=+0 pool=+1
+g3 147 timestamps msg@worker computeCommandEncoderWithDescriptor: computeCommandEncoderWithDescriptor=MTLComputePassDescriptorInternal
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.allowCommandEncoderCoalescing=1
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.dispatchType=1
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments=MTLComputePassSampleBufferAttachmentDescriptorArrayInternal
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[0].endOfEncoderSampleIndex=3
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[0].sampleBuffer=h3
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[0].startOfEncoderSampleIndex=2
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[0]=MTLComputePassSampleBufferAttachmentDescriptorInternal
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[1].endOfEncoderSampleIndex=18446744073709551615
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[1].sampleBuffer=nil
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[1].startOfEncoderSampleIndex=18446744073709551615
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[1]=MTLComputePassSampleBufferAttachmentDescriptorInternal
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[2].endOfEncoderSampleIndex=18446744073709551615
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[2].sampleBuffer=nil
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[2].startOfEncoderSampleIndex=18446744073709551615
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[2]=MTLComputePassSampleBufferAttachmentDescriptorInternal
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[3].endOfEncoderSampleIndex=18446744073709551615
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[3].sampleBuffer=nil
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[3].startOfEncoderSampleIndex=18446744073709551615
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[3]=MTLComputePassSampleBufferAttachmentDescriptorInternal
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.substreamCount=0
+g3 147 timestamps dump computeCommandEncoderWithDescriptor.usedForRaytracingEmulation=0
+g3 147 timestamps dump computeCommandEncoderWithDescriptor=MTLComputePassDescriptorInternal
+g3 147 timestamps 0 ret=h5 own=+0 pool=+1 dispatchType=1
+g3 128 timestamps 0 words=4 samples=monotonic
+g3 128 timestamps 0 tail=untouched first=samples[1..]
+g3 128 timestamps 0
+g3 130 timestamps 0 kernelStartTime=kernelStartTime*1e9
+g3 130 timestamps 0 kernelEndTime=kernelEndTime*1e9
+g3 130 timestamps 0 GPUStartTime=GPUStartTime*1e9
+g3 130 timestamps 0 GPUEndTime=GPUEndTime*1e9
+g3 130 timestamps 0 unknown=0
+g3 9 nil-args 0 ret=0x0
+g3 11 nil-args 0 ret=0x0
+g3 30 nil-args 0 ret=0x0
+g3 12 nil-args 0
+g3 13 nil-args 0
+g3 14 nil-args 0 ret=0x0
+g3 17 nil-args 0
+g3 102 nil-args 0
+g3 31 nil-args 0 ret=0x0
+g3 32 nil-args 0 ret=0x0
+g3 33 nil-args 0
+g3 36 nil-args 0
+g3 37 nil-args 0
+g3 38 nil-args 0
+g3 47 nil-args 0
+g3 48 nil-args 0
+g3 89 nil-args 0 ret=0x0
+g3 90 nil-args 0 ret=0x0
+g3 91 nil-args 0 read=0 buffer=none
+g3 127 nil-args 0 ret=0x0
+g3 128 nil-args 0 data=none
+g3 129 nil-args 0 ret=0x0
+g3 130 nil-args 0 ret=0
+g3 147 nil-args 0 ret=0x0
+g3 17 nil-args msg@worker encodeSignalEvent:value: encodeSignalEvent=nil value=3
+g3 17 nil-args 0
+g3 102 nil-args msg@worker encodeWaitForEvent:value: encodeWaitForEvent=nil value=4
+g3 102 nil-args 0
+g3 47 nil-args msg@worker presentDrawable: presentDrawable=nil
+g3 47 nil-args 0
+g3 48 nil-args msg@worker presentDrawable:afterMinimumDuration: presentDrawable=nil afterMinimumDuration=0x1p-1
+g3 48 nil-args 0
+g3 129 nil-args msg@worker blitCommandEncoderWithDescriptor: blitCommandEncoderWithDescriptor=MTLBlitPassDescriptorInternal
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments=MTLBlitPassSampleBufferAttachmentDescriptorArrayInternal
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[0].endOfEncoderSampleIndex=6
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[0].sampleBuffer=nil
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[0].startOfEncoderSampleIndex=5
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[0]=MTLBlitPassSampleBufferAttachmentDescriptorInternal
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[1].endOfEncoderSampleIndex=18446744073709551615
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[1].sampleBuffer=nil
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[1].startOfEncoderSampleIndex=18446744073709551615
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[1]=MTLBlitPassSampleBufferAttachmentDescriptorInternal
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[2].endOfEncoderSampleIndex=18446744073709551615
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[2].sampleBuffer=nil
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[2].startOfEncoderSampleIndex=18446744073709551615
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[2]=MTLBlitPassSampleBufferAttachmentDescriptorInternal
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[3].endOfEncoderSampleIndex=18446744073709551615
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[3].sampleBuffer=nil
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[3].startOfEncoderSampleIndex=18446744073709551615
+g3 129 nil-args dump blitCommandEncoderWithDescriptor.sampleBufferAttachments[3]=MTLBlitPassSampleBufferAttachmentDescriptorInternal
+g3 129 nil-args dump blitCommandEncoderWithDescriptor=MTLBlitPassDescriptorInternal
+g3 129 nil-args 0
+g3 147 nil-args msg@worker computeCommandEncoderWithDescriptor: computeCommandEncoderWithDescriptor=MTLComputePassDescriptorInternal
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.allowCommandEncoderCoalescing=1
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.dispatchType=1
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments=MTLComputePassSampleBufferAttachmentDescriptorArrayInternal
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[0].endOfEncoderSampleIndex=6
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[0].sampleBuffer=nil
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[0].startOfEncoderSampleIndex=5
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[0]=MTLComputePassSampleBufferAttachmentDescriptorInternal
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[1].endOfEncoderSampleIndex=18446744073709551615
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[1].sampleBuffer=nil
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[1].startOfEncoderSampleIndex=18446744073709551615
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[1]=MTLComputePassSampleBufferAttachmentDescriptorInternal
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[2].endOfEncoderSampleIndex=18446744073709551615
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[2].sampleBuffer=nil
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[2].startOfEncoderSampleIndex=18446744073709551615
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[2]=MTLComputePassSampleBufferAttachmentDescriptorInternal
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[3].endOfEncoderSampleIndex=18446744073709551615
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[3].sampleBuffer=nil
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[3].startOfEncoderSampleIndex=18446744073709551615
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.sampleBufferAttachments[3]=MTLComputePassSampleBufferAttachmentDescriptorInternal
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.substreamCount=0
+g3 147 nil-args dump computeCommandEncoderWithDescriptor.usedForRaytracingEmulation=0
+g3 147 nil-args dump computeCommandEncoderWithDescriptor=MTLComputePassDescriptorInternal
+g3 147 nil-args 0
+g3 36 nil-args msg@worker updateFence: updateFence=nil
+g3 36 nil-args msg@worker waitForFence: waitForFence=nil
+g3 36 nil-args msg@worker resolveCounters:inRange:destinationBuffer:destinationOffset: resolveCounters=nil inRange=00000000000000000100000000000000 destinationBuffer=nil destinationOffset=0
+g3 36 nil-args msg@worker copyFromTexture:toTexture: copyFromTexture=nil toTexture=nil
+g3 36 nil-args 0
+g3 37 nil-args msg@worker setComputePipelineState: setComputePipelineState=nil
+g3 37 nil-args msg@worker setBuffer:offset:atIndex: setBuffer=nil offset=0 atIndex=0
+g3 37 nil-args msg@worker setTexture:atIndex: setTexture=nil atIndex=1
+g3 37 nil-args msg@worker updateFence: updateFence=nil
+g3 37 nil-args 0
+g3 38 nil-args msg@worker setRenderPipelineState: setRenderPipelineState=nil
+g3 38 nil-args msg@worker setVertexBuffer:offset:atIndex: setVertexBuffer=nil offset=0 atIndex=0
+g3 38 nil-args msg@worker setFragmentTexture:atIndex: setFragmentTexture=nil atIndex=0
+g3 38 nil-args msg@worker setFragmentSamplerState:atIndex: setFragmentSamplerState=nil atIndex=0
+g3 38 nil-args msg@worker setDepthStencilState: setDepthStencilState=nil
+g3 38 nil-args msg@worker setStencilReferenceValue: setStencilReferenceValue=0
+g3 38 nil-args msg@worker waitForFence:beforeStages: waitForFence=nil beforeStages=2
+g3 38 nil-args 0
+g3 36 x-blit-on-compute-encoder raised NSInvalidArgumentException
