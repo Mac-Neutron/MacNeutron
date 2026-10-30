@@ -188,8 +188,51 @@ existing C++ signatures.
    docs) were gated the same way: x64 412 ok, identical dumps and log files, no log file at `DXMT_LOG_LEVEL=none`,
    the guest's seven programs. Another finding: mtld3d's `audit.sh` now runs from `mtld3d/` (it `cd`ed to the git toplevel,
    which inside DXMTRS is the repository root, and died partway, so its later rules never ran).
-2. `winemetal`, Unix side: the `unix_call` handlers, onto mtld3d's `mtl` crate (objc2 bindings). Then the PE side: the
-   thunks behind `winemetal.h`, onto mtld3d's PE-to-Unix transport. `winemetal.h` stays the boundary the C++ calls.
+2. `winemetal`: done 2026-10-30 (plan `2026-10-29-dxmtrs-step2-winemetal.md`): DXMTRS main da6ed2d, which
+   MacNeutron pins. All 158 Unix handlers, the 158-entry Wine table and the 153-entry WoW64 table are Rust (crate
+   `winemetal`, `mtld3d/unix/winemetal`), and so are `winemetal.dll`'s thunks and `DllMain` (crate `winemetal-pe`);
+   `winemetal_unix.c`, `cache.c` and `main.c` are gone. `winemetal.h` stays the boundary the C++ calls. Characterized
+   first by `wm_probe`, which drives every slot and records, per field, outputs, ownership, the autorelease pool and
+   the thread, with goldens taken from the C. Corrections to the step as first written (the plan's D and P items):
+   - the Unix side stands on objc2 0.6.5 and objc2-metal, -metal-fx, -quartz-core and -foundation 0.3.2 directly, not
+     on mtld3d's `mtl` crate, which is a client of this table (D1); SQLite through raw FFI, files and lookups
+     byte-identical;
+   - "onto mtld3d's transport" means Wine's unix-call handshake and typed calls inside `winemetal.dll`, with
+     winemetal's own slots, layouts, module name and exports, not mtld3d's `Thunks` or `mtld3d.dll` (D2);
+   - one pure-data crate, `winemetal-wire`, holds the wire mirrors, layout asserts, slot numbers and macro encodings
+     for both sides (P1); `wmt.rs`'s mirrors stay in `mtld3d-mtl`, a duplicate listed for §7 (D16);
+   - the Mac WoW64 table keeps its 153 entries (D3); `thunk32_*` and the argument-chain converter moved verbatim into
+     `src/winemetal/unix/sm50_wow64.c` (Wine build only): nothing reaches them, and they go with the translator at
+     step 4 (P4);
+   - Objective-C exceptions behave as before (D4): the crate builds with `panic = "unwind"` (profile
+     `production-unwind`) and its handlers are `extern "C-unwind"`; each holds `AbortOnPanic`, so a Rust panic aborts
+     and never unwinds into the VM host's `catch (...)`, while a foreign Objective-C unwind passes (P11);
+   - code under OS gates below macOS 27 is not ported: slot 56's signal swap, the pre-27 HUD class and the
+     `@available` 14-26 branches (D6);
+   - slots 96, 97 and 101 read AppKit off the main thread as the C did, through `AnyThread` re-declarations under an
+     audit exception (D14);
+   - the native dylib keeps `winemetal_thunks.c` and its 12 `SM50*` exports until step 6 (D12). Both images link
+     `-weak_framework AppKit`, and the dylib links with `b_asneeded` false, because objc2 looks classes up by name
+     (P14);
+   - the Rust PE thunks zero every params struct, so slot 54's `startCapture`, which returned uninitialised stack,
+     now answers false (P5);
+   - the SharedEventListener's use-after-free is gone: its state lives beside its first word, and a notification
+     after destroy gives back its reference instead of spinning (D5, P12). A null input the C faulted on gets a null
+     check that writes nothing;
+   - `cfg(windows)` Rust gets rustc's `-Dwarnings`, not clippy: 1.99.0 has no clippy and stable no msvc standard
+     library. Clippy for 1.99.0 is a download that waits for the maintainer (P13);
+   - the translator key moved with step 1's pin (e1ac8f03 to 71a7e5f2), accepted; step 2 leaves it alone (D15);
+   - no game bench (D11): performance was C against Rust on `present_loop`, the DLSS cost row, `check.sh`'s timing
+     lines and the probe's call rate, each within 5%. One ARM64EC warm pipeline-creation reading was +24% in a single
+     run, while the same Unix path halved on x64. The game bench is parked for the maintainer.
+
+   Gates, once at the end of the step (maintainer, 2026-10-30): both Mac `check.sh` lanes 412 ok and 0 FAIL, the
+   wine-arm64 DXMT checks, the presenter and facade tests, the probe (fixed and full), the native gate and probe, the
+   VM host's metal, host and memory tests, the loopback gate, `d3d9-check`, the conformance suite (as the C), the
+   guest build, the VM DXMT gate (44 programs), `d3d-smoke` (the first i686 Rust to run), `d3d9-gate` and
+   `present-gate`. `winemetal.dll` imports 38 more symbols, all from Rust's standard library and all present in Wine.
+   The final review found one defect, fixed before the push: an empty archive path aborted slots 112 and 113 (objc2
+   panics on a nil from an init declared non-null). It is now a nil URL, as in the C.
 3. `dxgi`, then `d3d10`: whole DLLs behind COM.
 4. The translator (`airconv`, the DXBC parser, our DXIL translator) behind `airconv_public.h`, once Phase 0 has decided
    it. Ported on the LLVM it uses today first, written against the explicit-type C API (`LLVMBuildLoad2`,
@@ -252,7 +295,8 @@ At every step:
   shader builds its pipelines on Metal, DXMT's shader checks render as before, and the GPU time of the same passes,
   measured on DXMT with DXMT_STATS on the milestone's benches, shows no loss (E3 timed only the build).
 - **Performance**, once per milestone (end of steps 2, 4 and 5, and after §7), each bench run once: SMITE 2's lobby,
-  Palworld's title screen and a D3D11 title the maintainer picks in step 2's plan, at parity or better. Game benches need the maintainer's go-ahead each time.
+  Palworld's title screen and a D3D11 title the maintainer picks, at parity or better. Game benches need the
+  maintainer's go-ahead each time; step 2's is parked for the maintainer (§5, D11).
 
 ## 9. Scale and plans
 
