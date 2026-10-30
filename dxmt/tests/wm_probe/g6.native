@@ -1,0 +1,129 @@
+g6 62 hud-absent 0 class=absent ret=0
+g6 62 hud 0 ret=h1 own=+1 pool=+1 class=MTLHUDService
+g6 63 hud msg@worker insertMetric:after:name:unit:nameColor:valueColor:visualType:options: insertMetric="wm-probe-label" after="wm-probe-after" name="" unit="" nameColor=4294967295 valueColor=4294967295 visualType=1 options=0
+g6 63 hud 0 ret=0
+g6 64 hud msg@worker updateLabel:value: updateLabel="wm-probe-label" value="wm-probe-value"
+g6 64 hud 0
+g6 65 hud msg@worker remove: remove="wm-probe-label"
+g6 65 hud 0
+g6 63 hud msg@worker insertMetric:after:name:unit:nameColor:valueColor:visualType:options: insertMetric=nil after=nil name="" unit="" nameColor=4294967295 valueColor=4294967295 visualType=1 options=0
+g6 63 hud 0
+g6 64 hud msg@worker updateLabel:value: updateLabel=nil value=nil
+g6 64 hud 0
+g6 65 hud msg@worker remove: remove=nil
+g6 65 hud 0
+g6 70 layer-props msg@main setDevice: setDevice=h1
+g6 70 layer-props msg@main setOpaque: setOpaque=1
+g6 70 layer-props msg@main setFramebufferOnly: setFramebufferOnly=0
+g6 70 layer-props msg@main setContentsScale: setContentsScale=0x1p+1
+g6 70 layer-props msg@main setDisplaySyncEnabled: setDisplaySyncEnabled=0
+g6 70 layer-props msg@main setDrawableSize: setDrawableSize=00000000000084400000000000807640
+g6 70 layer-props msg@main setPixelFormat: setPixelFormat=81
+g6 70 layer-props 0
+g6 71 layer-props msg@worker device
+g6 71 layer-props msg@worker isOpaque
+g6 71 layer-props msg@worker framebufferOnly
+g6 71 layer-props msg@worker contentsScale
+g6 71 layer-props msg@worker displaySyncEnabled
+g6 71 layer-props msg@worker drawableSize
+g6 71 layer-props msg@worker drawableSize
+g6 71 layer-props msg@worker pixelFormat
+g6 71 layer-props 0 written-past-device=0-26,28-31 device=wm_device scale=0x1p+1 size=0x1.4p+9x0x1.68p+8 opaque=1 sync=0 fb_only=0 pixel_format=81
+g6 67 drawable msg@worker nextDrawable
+g6 67 drawable 0 ret=h1 own=+0 pool=+1
+g6 66 drawable 0 ret=h2 own=+3 pool=+0 texture=drawable's
+g6 66 drawable 0 ret=h2 own=+0 pool=+0 texture=drawable's
+g6 72 view-loose loose get_win_data hwnd=0x10
+g6 72 view-loose loose create_metal_view view=client_cocoa_view device=wm_device
+g6 72 view-loose loose get_metal_layer view=created
+g6 72 view-loose loose release_win_data data=given
+g6 72 view-loose 0 ret_view=h1 own=+1 pool=+0 ret_layer=h2 own=+2 pool=+0
+g6 72 view-loose loose get_win_data hwnd=0x1
+g6 72 view-loose 0 ret_view=0 ret_layer=fill
+g6 72 view-loose loose get_win_data hwnd=0x2
+g6 72 view-loose loose release_win_data data=given
+g6 72 view-loose 0 ret_view=0 ret_layer=fill
+g6 73 view-loose loose release_metal_view view=created
+g6 73 view-loose 0
+g6 73 view-loose loose release_metal_view view=0
+g6 73 view-loose 0
+g6 92 colorspace 0 cs=0 ret=1
+g6 92 colorspace 0 cs=0x1 ret=1
+g6 92 colorspace 0 cs=0x2 ret=1
+g6 92 colorspace 0 cs=0x3 ret=0
+g6 92 colorspace 0 cs=0x4 ret=1
+g6 92 colorspace 0 cs=0x5 ret=1
+g6 92 colorspace 0 cs=0x6 ret=0
+g6 92 colorspace 0 cs=0x7 ret=0
+g6 92 colorspace 0 cs=0x8 ret=0
+g6 92 colorspace 0 cs=0xffffffffffffffff ret=0
+g6 93 colorspace msg@main setColorspace: setColorspace=nonnull
+g6 93 colorspace msg@main setWantsExtendedDynamicRangeContent: setWantsExtendedDynamicRangeContent=0
+g6 93 colorspace 0 cs=0 ret=1 name=kCGColorSpaceSRGB wants_edr=0
+g6 93 colorspace msg@main setColorspace: setColorspace=nonnull
+g6 93 colorspace msg@main setWantsExtendedDynamicRangeContent: setWantsExtendedDynamicRangeContent=0
+g6 93 colorspace 0 cs=0x1 ret=1 name=kCGColorSpaceExtendedLinearSRGB wants_edr=0
+g6 93 colorspace msg@main setColorspace: setColorspace=nonnull
+g6 93 colorspace msg@main setWantsExtendedDynamicRangeContent: setWantsExtendedDynamicRangeContent=0
+g6 93 colorspace 0 cs=0x2 ret=1 name=kCGColorSpaceITUR_2020_sRGBGamma wants_edr=0
+g6 93 colorspace 0 cs=0x3 ret=0 name=none wants_edr=0
+g6 93 colorspace msg@main setColorspace: setColorspace=nonnull
+g6 93 colorspace msg@main setWantsExtendedDynamicRangeContent: setWantsExtendedDynamicRangeContent=1
+g6 93 colorspace 0 cs=0x4 ret=1 name=kCGColorSpaceITUR_2100_PQ wants_edr=1
+g6 93 colorspace msg@main setColorspace: setColorspace=nonnull
+g6 93 colorspace msg@main setWantsExtendedDynamicRangeContent: setWantsExtendedDynamicRangeContent=1
+g6 93 colorspace 0 cs=0x5 ret=1 name=kCGColorSpaceExtendedLinearSRGB wants_edr=1
+g6 93 colorspace 0 cs=0xffffffffffffffff ret=0 name=none wants_edr=0
+g6 94 displays 0 ret=CGMainDisplayID
+g6 95 displays 0 ret=first-other-online
+g6 96 display-description 0 written=0-43 red=0x1.4c021ep-1,0x1.52cafep-2 green=0x1.48e80cp-2,0x1.3218a8p-1 blue=0x1.3f408p-3,0x1.0e7e14p-4 white=0x1.40348ep-2,0x1.50e5ap-2 edr=0x1p+0,0x1p+0,0x0p+0
+g6 96 display-description 0 written=0-43 red=0x1.4c021ep-1,0x1.52cafep-2 green=0x1.48e80cp-2,0x1.3218a8p-1 blue=0x1.3f408p-3,0x1.0e7e14p-4 white=0x1.61fff2p-2,0x1.6f2476p-2 edr=0x1p+0,0x1p+0,0x0p+0
+g6 96 display-description 0 written=0-43 red=in-unit green=in-unit blue=in-unit white=in-unit max_edr=screen potential_edr=screen reference_edr=screen
+g6 96 display-description 0 written=0-43 red=in-unit green=in-unit blue=in-unit white=in-unit max_edr=screen potential_edr=screen reference_edr=screen
+g6 97 edr 0 value=0x1p+0,0x1p+0
+g6 97 edr 0 wants=1 max_edr=screen potential_edr=screen
+g6 97 edr 0 wants=0 max_edr=0x1p+0 potential_edr=screen
+g6 100 display-settings 0 after=0
+g6 100 display-settings 0 after=0
+g6 99 display-settings 0 ret=0 colorspace=fill metadata=none
+g6 100 display-settings 0 after=1
+g6 99 display-settings 0 ret=1 colorspace=set cs=4 metadata=same
+g6 99 display-settings 0 ret=0 colorspace=fill metadata=none
+g6 100 display-settings 0 after=1
+g6 99 display-settings 0 ret=1 colorspace=set cs=5 metadata=same
+g6 99 display-settings 0 ret=1 colorspace=set cs=5 metadata=same
+g6 99 display-settings 0 ret=1 colorspace=set cs=4 metadata=same
+g6 100 display-settings 0 after=0
+g6 99 display-settings 0 ret=0 colorspace=fill metadata=none
+g6 101 display-settings 0 version=0 colorspace=fill metadata=none edr=none
+g6 100 display-settings 0 after=1
+g6 101 display-settings 0 version=1 colorspace=set cs=window-screen's metadata=window-screen's max_edr=screen potential_edr=screen
+g6 101 display-settings 0 version=1 colorspace=set cs=window-screen's metadata=window-screen's max_edr=0x1p+0 potential_edr=screen
+g6 100 display-settings 0 after=0
+g6 100 display-settings 0 after=0
+g6 96 main-blocked 0 written=0-43
+g6 97 main-blocked 0 written=0-7
+g6 101 main-blocked 0 version=written
+g6 70 main-blocked-70 hang
+g6 70 main-blocked-70 0 size=0x1.4p+9x0x1.68p+8
+g6 - wsi-hooks initial=none
+g6 - wsi-hooks after-set=same
+g6 - wsi-hooks after-clear=none
+g6 63 nil-args 0 ret=0
+g6 64 nil-args 0
+g6 65 nil-args 0
+g6 66 nil-args 0 ret=0
+g6 67 nil-args 0 ret=0
+g6 70 nil-args 0
+g6 70 nil-args msg@main setDevice: setDevice=nil
+g6 70 nil-args msg@main setOpaque: setOpaque=1
+g6 70 nil-args msg@main setFramebufferOnly: setFramebufferOnly=0
+g6 70 nil-args msg@main setContentsScale: setContentsScale=0x1p+1
+g6 70 nil-args msg@main setDisplaySyncEnabled: setDisplaySyncEnabled=0
+g6 70 nil-args msg@main setDrawableSize: setDrawableSize=00000000000084400000000000807640
+g6 70 nil-args msg@main setPixelFormat: setPixelFormat=81
+g6 70 nil-args 0
+g6 71 nil-args 0 written=0-34,36-39 device=0 scale=0x0p+0 pixel_format=0
+g6 93 nil-args 0 ret=1
+g6 97 nil-args 0 value=0x1p+0,0x1p+0
+g6 101 nil-args 0 version=0 colorspace=fill metadata=none edr=none

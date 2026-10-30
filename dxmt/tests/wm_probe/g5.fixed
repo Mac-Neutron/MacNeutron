@@ -1,0 +1,943 @@
+g5 68 supports 0 ret=supportsDevice
+g5 69 supports 0 ret=supportsDevice
+g5 150 scale-range 0 written=0-7 min=supportedInputContentMinScale max=supportedInputContentMaxScale
+g5 56 temporal swz@worker newTemporalScalerWithDevice:
+g5 56 temporal dump desc.autoExposureEnabled=1
+g5 56 temporal dump desc.colorTextureFormat=115
+g5 56 temporal dump desc.depthTextureFormat=252
+g5 56 temporal dump desc.inputContentMaxScale=0x1p+1
+g5 56 temporal dump desc.inputContentMinScale=0x1p+0
+g5 56 temporal dump desc.inputContentPropertiesEnabled=1
+g5 56 temporal dump desc.inputHeight=360
+g5 56 temporal dump desc.inputWidth=640
+g5 56 temporal dump desc.jitteredMotionVectorsEnabled=1
+g5 56 temporal dump desc.motionTextureFormat=65
+g5 56 temporal dump desc.outputHeight=720
+g5 56 temporal dump desc.outputResolutionMotionVectorsEnabled=0
+g5 56 temporal dump desc.outputTextureFormat=115
+g5 56 temporal dump desc.outputWidth=1280
+g5 56 temporal dump desc.reactiveMaskTextureEnabled=1
+g5 56 temporal dump desc.reactiveMaskTextureFormat=10
+g5 56 temporal dump desc.requiresSynchronousInitialization=1
+g5 56 temporal dump desc.version=0
+g5 56 temporal dump desc=MTLFXTemporalScalerDescriptor
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=13
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=30
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=31
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=32
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=33
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=34
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=14
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=17
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=16
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=19
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=25
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=26
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=4b59063d type=3 atIndex=9
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=b400 type=41 atIndex=0
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=4001 type=41 atIndex=1
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=8180803b type=3 atIndex=4
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=95c9ac41 type=3 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=7
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=10
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=12
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=13
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=20
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=24
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=5a00 type=41 atIndex=0
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=a000 type=41 atIndex=1
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=b7a43d3d type=3 atIndex=4
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=d2122042 type=3 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=7
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=9
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2d00 type=41 atIndex=0
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=5000 type=41 atIndex=1
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=2
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=b8b4cc3c type=3 atIndex=4
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=fdbd1b42 type=3 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=7
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=9
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=1600 type=41 atIndex=0
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2800 type=41 atIndex=1
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=8000 type=41 atIndex=2
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2966d23c type=3 atIndex=4
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=c4515642 type=3 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=7
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=9
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=1600 type=41 atIndex=0
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2800 type=41 atIndex=1
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=2
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=8000 type=41 atIndex=3
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=afe4983c type=3 atIndex=4
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=7d198942 type=3 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=7
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=10
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=12
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=13
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=20
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=24
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2d00 type=41 atIndex=0
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=5000 type=41 atIndex=1
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=2
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=9946e03c type=3 atIndex=4
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=fc585542 type=3 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=3f026f3c type=3 atIndex=7
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2966d23c type=3 atIndex=9
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=10
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=12
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=13
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=20
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=24
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=25
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=26
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=27
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=6
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2d00 type=41 atIndex=0
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=5000 type=41 atIndex=1
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=f996993c type=3 atIndex=4
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=f56aa542 type=3 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=7
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=10
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=12
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=13
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=20
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=24
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=5a00 type=41 atIndex=0
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=a000 type=41 atIndex=1
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=a89ed53c type=3 atIndex=4
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=b7856a42 type=3 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=a417463c type=3 atIndex=7
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=b8b4cc3c type=3 atIndex=9
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=10
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=12
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=13
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=20
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000040 type=3 atIndex=24
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=25
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=26
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=27
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=6
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=5a00 type=41 atIndex=0
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=a000 type=41 atIndex=1
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=e9b88b3c type=3 atIndex=4
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=3e116c42 type=3 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=7
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=10
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=12
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=13
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=20
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=24
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=b400 type=41 atIndex=0
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=4001 type=41 atIndex=1
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=02383f3d type=3 atIndex=4
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=c615f641 type=3 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=cfce8a3c type=3 atIndex=7
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=b7a43d3d type=3 atIndex=9
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=10
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=12
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=13
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=20
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=24
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=25
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=26
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=27
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=6
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=b400 type=41 atIndex=0
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=4001 type=41 atIndex=1
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=3f28053d type=3 atIndex=4
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=ffff7e43 type=3 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=7
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=10
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=12
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=13
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=20
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=21
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=22
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=23
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=24
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=29
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=30
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=5a00 type=41 atIndex=0
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=a000 type=41 atIndex=1
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=98c84c3b type=3 atIndex=2
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=3
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=5
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=7
+g5 56 temporal swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal 0 ret=h1 own=+2 pool=+0 info-written=0-49
+g5 56 temporal dump scaler.colorContentOffsetX=0
+g5 56 temporal dump scaler.colorContentOffsetY=0
+g5 56 temporal dump scaler.colorTexture=nil
+g5 56 temporal dump scaler.colorTextureFormat=115
+g5 56 temporal dump scaler.colorTextureUsage=1
+g5 56 temporal dump scaler.currentViewToClipMatrix=!
+g5 56 temporal dump scaler.currentWorldToViewMatrix=!
+g5 56 temporal dump scaler.debugTexture=nil
+g5 56 temporal dump scaler.depthContentOffsetX=0
+g5 56 temporal dump scaler.depthContentOffsetY=0
+g5 56 temporal dump scaler.depthReversed=1
+g5 56 temporal dump scaler.depthTexture=nil
+g5 56 temporal dump scaler.depthTextureFormat=252
+g5 56 temporal dump scaler.depthTextureUsage=1
+g5 56 temporal dump scaler.dilatedMotionVectors=h2
+g5 56 temporal dump scaler.effectID=1
+g5 56 temporal dump scaler.executionMode=1
+g5 56 temporal dump scaler.exposureTexture=nil
+g5 56 temporal dump scaler.fence=nil
+g5 56 temporal dump scaler.inputContentHeight=360
+g5 56 temporal dump scaler.inputContentMaxScale=0x1p+1
+g5 56 temporal dump scaler.inputContentMinScale=0x1p+0
+g5 56 temporal dump scaler.inputContentWidth=640
+g5 56 temporal dump scaler.inputHeight=360
+g5 56 temporal dump scaler.inputWidth=640
+g5 56 temporal dump scaler.jitterOffset={00000000000000000000000000000000}
+g5 56 temporal dump scaler.jitterOffsetX=0x0p+0
+g5 56 temporal dump scaler.jitterOffsetY=0x0p+0
+g5 56 temporal dump scaler.motionContentOffsetX=0
+g5 56 temporal dump scaler.motionContentOffsetY=0
+g5 56 temporal dump scaler.motionTexture=nil
+g5 56 temporal dump scaler.motionTextureFormat=65
+g5 56 temporal dump scaler.motionTextureUsage=1
+g5 56 temporal dump scaler.motionVectorScale={00000000000084c000000000008076c0}
+g5 56 temporal dump scaler.motionVectorScaleX=-0x1.4p+9
+g5 56 temporal dump scaler.motionVectorScaleY=-0x1.68p+8
+g5 56 temporal dump scaler.outputHeight=720
+g5 56 temporal dump scaler.outputOffsetX=0
+g5 56 temporal dump scaler.outputOffsetY=0
+g5 56 temporal dump scaler.outputTexture=nil
+g5 56 temporal dump scaler.outputTextureFormat=115
+g5 56 temporal dump scaler.outputTextureUsage=7
+g5 56 temporal dump scaler.outputWidth=1280
+g5 56 temporal dump scaler.preExposure=0x1p+0
+g5 56 temporal dump scaler.previousJitterOffset={00000000000000000000000000000000}
+g5 56 temporal dump scaler.previousViewToClipMatrix=!
+g5 56 temporal dump scaler.previousWorldToViewMatrix=!
+g5 56 temporal dump scaler.reactiveMaskContentOffsetX=0
+g5 56 temporal dump scaler.reactiveMaskContentOffsetY=0
+g5 56 temporal dump scaler.reactiveMaskTexture=nil
+g5 56 temporal dump scaler.reactiveMaskTextureFormat=10
+g5 56 temporal dump scaler.reactiveMaskTextureUsage=1
+g5 56 temporal dump scaler.reactiveTextureUsage=1
+g5 56 temporal dump scaler.reset=1
+g5 56 temporal dump scaler.tracingDelegate=nil
+g5 56 temporal dump scaler=_MFXTemporalScalingEffectBBR
+g5 56 temporal-plain swz@worker newTemporalScalerWithDevice:
+g5 56 temporal-plain dump desc.autoExposureEnabled=0
+g5 56 temporal-plain dump desc.colorTextureFormat=115
+g5 56 temporal-plain dump desc.depthTextureFormat=252
+g5 56 temporal-plain dump desc.inputContentMaxScale=0x1p+1
+g5 56 temporal-plain dump desc.inputContentMinScale=0x1p+0
+g5 56 temporal-plain dump desc.inputContentPropertiesEnabled=0
+g5 56 temporal-plain dump desc.inputHeight=360
+g5 56 temporal-plain dump desc.inputWidth=640
+g5 56 temporal-plain dump desc.jitteredMotionVectorsEnabled=0
+g5 56 temporal-plain dump desc.motionTextureFormat=65
+g5 56 temporal-plain dump desc.outputHeight=720
+g5 56 temporal-plain dump desc.outputResolutionMotionVectorsEnabled=1
+g5 56 temporal-plain dump desc.outputTextureFormat=115
+g5 56 temporal-plain dump desc.outputWidth=1280
+g5 56 temporal-plain dump desc.reactiveMaskTextureEnabled=0
+g5 56 temporal-plain dump desc.reactiveMaskTextureFormat=0
+g5 56 temporal-plain dump desc.requiresSynchronousInitialization=0
+g5 56 temporal-plain dump desc.version=0
+g5 56 temporal-plain dump desc=MTLFXTemporalScalerDescriptor
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=13
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=30
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=31
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=32
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=33
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=34
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=14
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=17
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=16
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=19
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=25
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=26
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=4b59063d type=3 atIndex=9
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=b400 type=41 atIndex=0
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=4001 type=41 atIndex=1
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=8180803b type=3 atIndex=4
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=95c9ac41 type=3 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=7
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=10
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=12
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=13
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=20
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=24
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=5a00 type=41 atIndex=0
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=a000 type=41 atIndex=1
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=b7a43d3d type=3 atIndex=4
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=d2122042 type=3 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=7
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=9
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2d00 type=41 atIndex=0
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=5000 type=41 atIndex=1
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=2
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=b8b4cc3c type=3 atIndex=4
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=fdbd1b42 type=3 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=7
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=9
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=1600 type=41 atIndex=0
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2800 type=41 atIndex=1
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=8000 type=41 atIndex=2
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2966d23c type=3 atIndex=4
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=c4515642 type=3 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=7
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=9
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=1600 type=41 atIndex=0
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2800 type=41 atIndex=1
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=2
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=8000 type=41 atIndex=3
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=afe4983c type=3 atIndex=4
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=7d198942 type=3 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=7
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=10
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=12
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=13
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=20
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=24
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2d00 type=41 atIndex=0
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=5000 type=41 atIndex=1
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=2
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=9946e03c type=3 atIndex=4
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=fc585542 type=3 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=3f026f3c type=3 atIndex=7
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2966d23c type=3 atIndex=9
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=10
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=12
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=13
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=20
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=24
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=25
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=26
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=27
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=6
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2d00 type=41 atIndex=0
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=5000 type=41 atIndex=1
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=f996993c type=3 atIndex=4
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=f56aa542 type=3 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=7
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=10
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=12
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=13
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=20
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=24
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=5a00 type=41 atIndex=0
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=a000 type=41 atIndex=1
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=a89ed53c type=3 atIndex=4
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=b7856a42 type=3 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=a417463c type=3 atIndex=7
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=b8b4cc3c type=3 atIndex=9
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=10
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=12
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=13
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=20
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000040 type=3 atIndex=24
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=25
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=26
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=27
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=6
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=5a00 type=41 atIndex=0
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=a000 type=41 atIndex=1
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=e9b88b3c type=3 atIndex=4
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=3e116c42 type=3 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=7
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=10
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=12
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=13
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=20
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=24
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=b400 type=41 atIndex=0
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=4001 type=41 atIndex=1
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=02383f3d type=3 atIndex=4
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=c615f641 type=3 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=cfce8a3c type=3 atIndex=7
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=b7a43d3d type=3 atIndex=9
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=10
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=12
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=13
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=20
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=21
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=22
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=24
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=25
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=26
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00004040 type=3 atIndex=27
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=6
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=b400 type=41 atIndex=0
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=4001 type=41 atIndex=1
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=3f28053d type=3 atIndex=4
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=ffff7e43 type=3 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=7
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=10
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=12
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=13
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=20
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=21
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=22
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=23
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=24
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=28
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=29
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=30
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=5a00 type=41 atIndex=0
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=a000 type=41 atIndex=1
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=98c84c3b type=3 atIndex=2
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=3
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=5
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=7
+g5 56 temporal-plain swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 56 temporal-plain 0 ret=h1 own=+2 pool=+0 info-written=0-49
+g5 56 temporal-plain dump scaler.colorContentOffsetX=0
+g5 56 temporal-plain dump scaler.colorContentOffsetY=0
+g5 56 temporal-plain dump scaler.colorTexture=nil
+g5 56 temporal-plain dump scaler.colorTextureFormat=115
+g5 56 temporal-plain dump scaler.colorTextureUsage=1
+g5 56 temporal-plain dump scaler.currentViewToClipMatrix=!
+g5 56 temporal-plain dump scaler.currentWorldToViewMatrix=!
+g5 56 temporal-plain dump scaler.debugTexture=nil
+g5 56 temporal-plain dump scaler.depthContentOffsetX=0
+g5 56 temporal-plain dump scaler.depthContentOffsetY=0
+g5 56 temporal-plain dump scaler.depthReversed=1
+g5 56 temporal-plain dump scaler.depthTexture=nil
+g5 56 temporal-plain dump scaler.depthTextureFormat=252
+g5 56 temporal-plain dump scaler.depthTextureUsage=1
+g5 56 temporal-plain dump scaler.dilatedMotionVectors=h2
+g5 56 temporal-plain dump scaler.effectID=2
+g5 56 temporal-plain dump scaler.executionMode=1
+g5 56 temporal-plain dump scaler.exposureTexture=nil
+g5 56 temporal-plain dump scaler.fence=nil
+g5 56 temporal-plain dump scaler.inputContentHeight=360
+g5 56 temporal-plain dump scaler.inputContentMaxScale=0x1p+1
+g5 56 temporal-plain dump scaler.inputContentMinScale=0x1p+1
+g5 56 temporal-plain dump scaler.inputContentWidth=640
+g5 56 temporal-plain dump scaler.inputHeight=360
+g5 56 temporal-plain dump scaler.inputWidth=640
+g5 56 temporal-plain dump scaler.jitterOffset={00000000000000000000000000000000}
+g5 56 temporal-plain dump scaler.jitterOffsetX=0x0p+0
+g5 56 temporal-plain dump scaler.jitterOffsetY=0x0p+0
+g5 56 temporal-plain dump scaler.motionContentOffsetX=0
+g5 56 temporal-plain dump scaler.motionContentOffsetY=0
+g5 56 temporal-plain dump scaler.motionTexture=nil
+g5 56 temporal-plain dump scaler.motionTextureFormat=65
+g5 56 temporal-plain dump scaler.motionTextureUsage=1
+g5 56 temporal-plain dump scaler.motionVectorScale={00000000000084c000000000008076c0}
+g5 56 temporal-plain dump scaler.motionVectorScaleX=-0x1.4p+9
+g5 56 temporal-plain dump scaler.motionVectorScaleY=-0x1.68p+8
+g5 56 temporal-plain dump scaler.outputHeight=720
+g5 56 temporal-plain dump scaler.outputOffsetX=0
+g5 56 temporal-plain dump scaler.outputOffsetY=0
+g5 56 temporal-plain dump scaler.outputTexture=nil
+g5 56 temporal-plain dump scaler.outputTextureFormat=115
+g5 56 temporal-plain dump scaler.outputTextureUsage=7
+g5 56 temporal-plain dump scaler.outputWidth=1280
+g5 56 temporal-plain dump scaler.preExposure=0x1p+0
+g5 56 temporal-plain dump scaler.previousJitterOffset={00000000000000000000000000000000}
+g5 56 temporal-plain dump scaler.previousViewToClipMatrix=!
+g5 56 temporal-plain dump scaler.previousWorldToViewMatrix=!
+g5 56 temporal-plain dump scaler.reactiveMaskContentOffsetX=0
+g5 56 temporal-plain dump scaler.reactiveMaskContentOffsetY=0
+g5 56 temporal-plain dump scaler.reactiveMaskTexture=nil
+g5 56 temporal-plain dump scaler.reactiveMaskTextureFormat=0
+g5 56 temporal-plain dump scaler.reactiveMaskTextureUsage=1
+g5 56 temporal-plain dump scaler.reactiveTextureUsage=1
+g5 56 temporal-plain dump scaler.reset=1
+g5 56 temporal-plain dump scaler.tracingDelegate=nil
+g5 56 temporal-plain dump scaler=_MFXTemporalScalingEffectBBR
+g5 57 spatial swz@worker newSpatialScalerWithDevice:
+g5 57 spatial dump desc.colorProcessingMode=0
+g5 57 spatial dump desc.colorTextureFormat=115
+g5 57 spatial dump desc.inputHeight=360
+g5 57 spatial dump desc.inputWidth=640
+g5 57 spatial dump desc.outputHeight=720
+g5 57 spatial dump desc.outputTextureFormat=115
+g5 57 spatial dump desc.outputWidth=1280
+g5 57 spatial dump desc.version=0
+g5 57 spatial dump desc=MTLFXSpatialScalerDescriptor
+g5 57 spatial 0 ret=h1 own=+1 pool=+0
+g5 57 spatial dump scaler.colorProcessingMode=0
+g5 57 spatial dump scaler.colorTexture=nil
+g5 57 spatial dump scaler.colorTextureFormat=115
+g5 57 spatial dump scaler.colorTextureUsage=1
+g5 57 spatial dump scaler.debugTexture=nil
+g5 57 spatial dump scaler.effectID=3
+g5 57 spatial dump scaler.fence=nil
+g5 57 spatial dump scaler.inputContentHeight=360
+g5 57 spatial dump scaler.inputContentWidth=640
+g5 57 spatial dump scaler.inputHeight=360
+g5 57 spatial dump scaler.inputWidth=640
+g5 57 spatial dump scaler.outputHeight=720
+g5 57 spatial dump scaler.outputTexture=nil
+g5 57 spatial dump scaler.outputTextureFormat=115
+g5 57 spatial dump scaler.outputTextureUsage=5
+g5 57 spatial dump scaler.outputWidth=1280
+g5 57 spatial dump scaler.tracingDelegate=nil
+g5 57 spatial dump scaler=_MFXSpatialScalingEffectEFFECT_NAME_V1
+g5 - temporal-encode cmdbuf=h1 scaler=h2 color=h3 output=h4 depth=h5 motion=h6 exposure=h7 fence=h8 reactive=h9
+g5 58 temporal-encode msg@worker setColorTexture: setColorTexture=h3
+g5 58 temporal-encode msg@worker setOutputTexture: setOutputTexture=h4
+g5 58 temporal-encode msg@worker setDepthTexture: setDepthTexture=h5
+g5 58 temporal-encode msg@worker setMotionTexture: setMotionTexture=h6
+g5 58 temporal-encode msg@worker setExposureTexture: setExposureTexture=h7
+g5 58 temporal-encode msg@worker setFence: setFence=h8
+g5 58 temporal-encode msg@worker setInputContentWidth: setInputContentWidth=48
+g5 58 temporal-encode msg@worker setInputContentHeight: setInputContentHeight=40
+g5 58 temporal-encode msg@worker setReset: setReset=1
+g5 58 temporal-encode msg@worker setDepthReversed: setDepthReversed=1
+g5 58 temporal-encode msg@worker setMotionVectorScaleX: setMotionVectorScaleX=0x1.8p+5
+g5 58 temporal-encode msg@worker setMotionVectorScaleY: setMotionVectorScaleY=-0x1.4p+5
+g5 58 temporal-encode msg@worker setJitterOffsetX: setJitterOffsetX=0x1p-2
+g5 58 temporal-encode msg@worker setJitterOffsetY: setJitterOffsetY=-0x1.8p-2
+g5 58 temporal-encode msg@worker setPreExposure: setPreExposure=0x1.8p+0
+g5 58 temporal-encode msg@worker setReactiveMaskTexture: setReactiveMaskTexture=h9
+g5 58 temporal-encode msg@worker setColorContentOffsetX: setColorContentOffsetX=1
+g5 58 temporal-encode msg@worker setColorContentOffsetY: setColorContentOffsetY=2
+g5 58 temporal-encode msg@worker setDepthContentOffsetX: setDepthContentOffsetX=3
+g5 58 temporal-encode msg@worker setDepthContentOffsetY: setDepthContentOffsetY=4
+g5 58 temporal-encode msg@worker setMotionContentOffsetX: setMotionContentOffsetX=5
+g5 58 temporal-encode msg@worker setMotionContentOffsetY: setMotionContentOffsetY=6
+g5 58 temporal-encode msg@worker setReactiveMaskContentOffsetX: setReactiveMaskContentOffsetX=7
+g5 58 temporal-encode msg@worker setReactiveMaskContentOffsetY: setReactiveMaskContentOffsetY=8
+g5 58 temporal-encode msg@worker setOutputOffsetX: setOutputOffsetX=9
+g5 58 temporal-encode msg@worker setOutputOffsetY: setOutputOffsetY=10
+g5 58 temporal-encode msg@worker encodeToCommandBuffer: encodeToCommandBuffer=h1
+g5 58 temporal-encode 0 in1=+1 in2=+2 in3=+2 cb-status=4
+g5 - spatial-encode inputs cmdbuf=h1 scaler=h2 color=h3 output=h4 fence=h5
+g5 59 spatial-encode msg@worker setColorTexture: setColorTexture=h3
+g5 59 spatial-encode msg@worker setOutputTexture: setOutputTexture=h4
+g5 59 spatial-encode msg@worker setFence: setFence=h5
+g5 59 spatial-encode msg@worker encodeToCommandBuffer: encodeToCommandBuffer=h1
+g5 59 spatial-encode 0 in2=+2 in3=+2 cb-status=4
+g5 151 interpolator swz@worker newFrameInterpolatorWithDevice:
+g5 151 interpolator dump desc.colorTextureFormat=115
+g5 151 interpolator dump desc.depthInverted=0
+g5 151 interpolator dump desc.depthTextureFormat=252
+g5 151 interpolator dump desc.distortionTextureEnabled=0
+g5 151 interpolator dump desc.height=0
+g5 151 interpolator dump desc.inputHeight=720
+g5 151 interpolator dump desc.inputWidth=1280
+g5 151 interpolator dump desc.maskTextureFormat=0
+g5 151 interpolator dump desc.motionTextureFormat=65
+g5 151 interpolator dump desc.outputHeight=720
+g5 151 interpolator dump desc.outputTextureFormat=115
+g5 151 interpolator dump desc.outputWidth=1280
+g5 151 interpolator dump desc.requiresPrevColorTexture=0
+g5 151 interpolator dump desc.scaler=nil
+g5 151 interpolator dump desc.uiTextureFormat=0
+g5 151 interpolator dump desc.version=0
+g5 151 interpolator dump desc.width=0
+g5 151 interpolator dump desc=MTLFXFrameInterpolatorDescriptor
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=1
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=5
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=2
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=2
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=5
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=2
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=2
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=5
+g5 151 interpolator 0 ret=h1 own=+1 pool=+0
+g5 151 interpolator scaler=h2
+g5 151 interpolator swz@worker newFrameInterpolatorWithDevice:
+g5 151 interpolator dump desc.colorTextureFormat=115
+g5 151 interpolator dump desc.depthInverted=0
+g5 151 interpolator dump desc.depthTextureFormat=252
+g5 151 interpolator dump desc.distortionTextureEnabled=0
+g5 151 interpolator dump desc.height=0
+g5 151 interpolator dump desc.inputHeight=640
+g5 151 interpolator dump desc.inputWidth=640
+g5 151 interpolator dump desc.maskTextureFormat=0
+g5 151 interpolator dump desc.motionTextureFormat=65
+g5 151 interpolator dump desc.outputHeight=1280
+g5 151 interpolator dump desc.outputTextureFormat=115
+g5 151 interpolator dump desc.outputWidth=1280
+g5 151 interpolator dump desc.requiresPrevColorTexture=0
+g5 151 interpolator dump desc.scaler=h2
+g5 151 interpolator dump desc.uiTextureFormat=0
+g5 151 interpolator dump desc.version=0
+g5 151 interpolator dump desc.width=0
+g5 151 interpolator dump desc=MTLFXFrameInterpolatorDescriptor
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=1
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=5
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=2
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=2
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=5
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=2
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=2
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=3
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
+g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=5
+g5 151 interpolator 0 ret=h3 own=+1 pool=+0
+g5 - interpolate-encode inputs cmdbuf=h1 interpolator=h2 color=h3 prev=h4 depth=h5 motion=h6 output=h7 fence=h8
+g5 152 interpolate-encode msg@worker setColorTexture: setColorTexture=h3
+g5 152 interpolate-encode msg@worker setPrevColorTexture: setPrevColorTexture=h4
+g5 152 interpolate-encode msg@worker setDepthTexture: setDepthTexture=h5
+g5 152 interpolate-encode msg@worker setMotionTexture: setMotionTexture=h6
+g5 152 interpolate-encode msg@worker setOutputTexture: setOutputTexture=h7
+g5 152 interpolate-encode msg@worker setFence: setFence=h8
+g5 152 interpolate-encode msg@worker setMotionVectorScaleX: setMotionVectorScaleX=0x1p+7
+g5 152 interpolate-encode msg@worker setMotionVectorScaleY: setMotionVectorScaleY=-0x1p+7
+g5 152 interpolate-encode msg@worker setDeltaTime: setDeltaTime=0x1.0624dep-6
+g5 152 interpolate-encode msg@worker setNearPlane: setNearPlane=0x1.99999ap-4
+g5 152 interpolate-encode msg@worker setFarPlane: setFarPlane=0x1.f4p+9
+g5 152 interpolate-encode msg@worker setFieldOfView: setFieldOfView=0x1.ep+5
+g5 152 interpolate-encode msg@worker setAspectRatio: setAspectRatio=0x1p+0
+g5 152 interpolate-encode msg@worker setJitterOffsetX: setJitterOffsetX=0x1p-2
+g5 152 interpolate-encode msg@worker setJitterOffsetY: setJitterOffsetY=-0x1.8p-2
+g5 152 interpolate-encode msg@worker setShouldResetHistory: setShouldResetHistory=1
+g5 152 interpolate-encode msg@worker setDepthReversed: setDepthReversed=1
+g5 152 interpolate-encode msg@worker setIsUITextureComposited: setIsUITextureComposited=0
+g5 152 interpolate-encode msg@worker encodeToCommandBuffer: encodeToCommandBuffer=h1
+g5 152 interpolate-encode 0 in1=+1 in2=+2 in3=+2 cb-status=4
+g5 58 nil-args msg@worker setColorTexture: setColorTexture=nil
+g5 58 nil-args msg@worker setOutputTexture: setOutputTexture=nil
+g5 58 nil-args msg@worker setDepthTexture: setDepthTexture=nil
+g5 58 nil-args msg@worker setMotionTexture: setMotionTexture=nil
+g5 58 nil-args msg@worker setExposureTexture: setExposureTexture=nil
+g5 58 nil-args msg@worker setFence: setFence=nil
+g5 58 nil-args msg@worker setInputContentWidth: setInputContentWidth=64
+g5 58 nil-args msg@worker setInputContentHeight: setInputContentHeight=64
+g5 58 nil-args msg@worker setReset: setReset=0
+g5 58 nil-args msg@worker setDepthReversed: setDepthReversed=0
+g5 58 nil-args msg@worker setMotionVectorScaleX: setMotionVectorScaleX=-0x1.4b4b4ap-52
+g5 58 nil-args msg@worker setMotionVectorScaleY: setMotionVectorScaleY=-0x1.4b4b4ap-52
+g5 58 nil-args msg@worker setJitterOffsetX: setJitterOffsetX=-0x1.4b4b4ap-52
+g5 58 nil-args msg@worker setJitterOffsetY: setJitterOffsetY=-0x1.4b4b4ap-52
+g5 58 nil-args msg@worker setPreExposure: setPreExposure=-0x1.4b4b4ap-52
+g5 58 nil-args msg@worker setReactiveMaskTexture: setReactiveMaskTexture=nil
+g5 58 nil-args msg@worker setColorContentOffsetX: setColorContentOffsetX=2779096485
+g5 58 nil-args msg@worker setColorContentOffsetY: setColorContentOffsetY=2779096485
+g5 58 nil-args msg@worker setDepthContentOffsetX: setDepthContentOffsetX=2779096485
+g5 58 nil-args msg@worker setDepthContentOffsetY: setDepthContentOffsetY=2779096485
+g5 58 nil-args msg@worker setMotionContentOffsetX: setMotionContentOffsetX=2779096485
+g5 58 nil-args msg@worker setMotionContentOffsetY: setMotionContentOffsetY=2779096485
+g5 58 nil-args msg@worker setReactiveMaskContentOffsetX: setReactiveMaskContentOffsetX=2779096485
+g5 58 nil-args msg@worker setReactiveMaskContentOffsetY: setReactiveMaskContentOffsetY=2779096485
+g5 58 nil-args msg@worker setOutputOffsetX: setOutputOffsetX=2779096485
+g5 58 nil-args msg@worker setOutputOffsetY: setOutputOffsetY=2779096485
+g5 58 nil-args msg@worker encodeToCommandBuffer: encodeToCommandBuffer=nil
+g5 58 nil-args 0
+g5 59 nil-args msg@worker setColorTexture: setColorTexture=nil
+g5 59 nil-args msg@worker setOutputTexture: setOutputTexture=nil
+g5 59 nil-args msg@worker setFence: setFence=nil
+g5 59 nil-args msg@worker encodeToCommandBuffer: encodeToCommandBuffer=nil
+g5 59 nil-args 0
+g5 152 nil-args msg@worker setColorTexture: setColorTexture=nil
+g5 152 nil-args msg@worker setPrevColorTexture: setPrevColorTexture=nil
+g5 152 nil-args msg@worker setDepthTexture: setDepthTexture=nil
+g5 152 nil-args msg@worker setMotionTexture: setMotionTexture=nil
+g5 152 nil-args msg@worker setOutputTexture: setOutputTexture=nil
+g5 152 nil-args msg@worker setFence: setFence=nil
+g5 152 nil-args msg@worker setMotionVectorScaleX: setMotionVectorScaleX=-0x1.4b4b4ap-52
+g5 152 nil-args msg@worker setMotionVectorScaleY: setMotionVectorScaleY=-0x1.4b4b4ap-52
+g5 152 nil-args msg@worker setDeltaTime: setDeltaTime=-0x1.4b4b4ap-52
+g5 152 nil-args msg@worker setNearPlane: setNearPlane=-0x1.4b4b4ap-52
+g5 152 nil-args msg@worker setFarPlane: setFarPlane=-0x1.4b4b4ap-52
+g5 152 nil-args msg@worker setFieldOfView: setFieldOfView=-0x1.4b4b4ap-52
+g5 152 nil-args msg@worker setAspectRatio: setAspectRatio=-0x1.4b4b4ap-52
+g5 152 nil-args msg@worker setJitterOffsetX: setJitterOffsetX=-0x1.4b4b4ap-52
+g5 152 nil-args msg@worker setJitterOffsetY: setJitterOffsetY=-0x1.4b4b4ap-52
+g5 152 nil-args msg@worker setShouldResetHistory: setShouldResetHistory=0
+g5 152 nil-args msg@worker setDepthReversed: setDepthReversed=0
+g5 152 nil-args msg@worker setIsUITextureComposited: setIsUITextureComposited=0
+g5 152 nil-args msg@worker encodeToCommandBuffer: encodeToCommandBuffer=nil
+g5 152 nil-args 0
+g5 68 nil-args 0 ret=1
+g5 69 nil-args 0 ret=1
+g5 150 nil-args 0 min=0x1p+0 max=0x1p+1
+g5 57 nil-args raised NSInvalidArgumentException ret=fill
+g5 151 nil-args 0 ret=0
+g5 56 nil-device-temporal crashed (signal 11)
+g5 58 x-scaler-on-device raised NSInvalidArgumentException

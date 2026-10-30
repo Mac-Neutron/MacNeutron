@@ -1,0 +1,37 @@
+g7 15 shared-event 0 ret=h1 own=+1 pool=+0 shared=1
+g7 103 shared-event 0 signaled=7
+g7 16 shared-event 0 ret=7
+g7 105 fence-event 0 ret=h1 own=+1 pool=+0 fence=1
+g7 106 fence-event 0 ret=h2 own=+1 pool=+0 event="1 shared=0"
+g7 108 first-word 0 ret=h1 first-word=runloop(T)
+g7 109 first-word 0 after-destroy=1
+g7 110 first-word 0 thread=returned
+g7 126 wait 0 ret_timeout=1
+g7 126 wait 0 ret_timeout=0
+g7 121 bootstrap 0 registered=yes
+g7 122 bootstrap 0 mach_port=registered send-refs=3 reserved=fill
+g7 122 bootstrap c0000001 mach_port=0
+g7 121 bootstrap c0000001
+g7 123 mach-event 0 port=nonzero send-refs=2
+g7 124 mach-event 0 ret_event=h1 own=+1 pool=+0 send-refs=3 seen-there=3 seen-here=4
+g7 120 shared-texture 0 ret=h1 own=+1 pool=+0 written=mach_port,gpu_resource_id gpu_resource_id=gpuResourceID mach_port=nonzero send-refs=1
+g7 120 shared-texture 0 ret=h2 own=+1 pool=+0 written=pixel_format,width,height,depth,array_length,type,mipmap_level_count,sample_count,usage,options,flags,gpu_resource_id info=type=2,format=80,256x128x1,array=1,mips=1,samples=1,usage=5,options=544,flags=0 gpu_resource_id=gpuResourceID same-size-format=1 send-refs=1
+g7 108 win32-event-native 0 ret=h1 published=1
+g7 104 win32-event-native 0 held=+1 hook=given same-thread=1
+g7 109 win32-event-native 0 after-destroy=1
+g7 110 win32-event-native 0 thread=returned refs=+0
+g7 15 nil-args 0 ret=0
+g7 105 nil-args 0 ret=0
+g7 106 nil-args 0 ret=0
+g7 16 nil-args 0 ret=0
+g7 103 nil-args 0
+g7 108 nil-args 0 ret=h1
+g7 104 nil-args 0
+g7 146 nil-args 0
+g7 109 nil-args 0
+g7 110 nil-args 0
+g7 120 nil-args 0 ret=0 gpu_resource_id=0 mach_port=0
+g7 123 nil-args 0 ret_mach_port=0
+g7 124 nil-args 0 ret_event=0
+g7 126 nil-args 0 ret_timeout=0
+g7 103 x-signal-on-fence raised NSInvalidArgumentException
