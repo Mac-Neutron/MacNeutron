@@ -100,6 +100,14 @@ static void cmdbuf_lifecycle(void) {
     s.handle = (obj_handle_t)rcb;
     wm_call(14, &s);
     wm_val("status", "%llu", (unsigned long long)s.ret);
+    /* 11 straight on the probe's queue: the fresh command buffer has no owner but the handler's result (through the
+     * recorder above, the forwarding's own pool entry keeps it alive), so a handler that drops its only reference
+     * before returning hands back a freed object here (Review Focus 3). */
+    wm_fill(&q, sizeof q);
+    q.handle = (obj_handle_t)wm_queue;
+    wm_own("ret", &q.ret);
+    wm_call(11, &q);
+    need("ret", q.ret);
 }
 
 static void signal_event(void) {
@@ -450,6 +458,15 @@ static void compute_threadgroup(void) {
     CMD(wmtcmd_compute_dispatch, d3, WMTComputeCommandDispatch);
     d3.size = (struct WMTSize){3, 3, 3};
     encode_on(37, enc, &d3);
+    /* DispatchIndirect takes it too. */
+    CMD(wmtcmd_compute_setpso, c, WMTComputeCommandSetPSO);
+    c.pso = so();
+    c.threadgroup_size = (struct WMTSize){4, 2, 1};
+    CMD(wmtcmd_compute_dispatch_indirect, d4, WMTComputeCommandDispatchIndirect);
+    d4.indirect_args_buffer = so();
+    d4.indirect_args_offset = 0x40;
+    chain(&c, &d4);
+    encode_on(37, enc, &c);
 }
 
 /* ---- 38: render ---- */
@@ -1231,6 +1248,78 @@ static void timestamps(void) {
     }
 }
 
+/* 128 on a thread with no autorelease pool, as a queue's completion thread calls it (the C's comment): the image's own
+ * table entry (wm_call wraps every call in a probe pool), 64 calls a cycle on one long-lived thread, whose implicit
+ * pool drains only when it exits. The handler's own pool frees each NSData ("freed"); without it they pile up. */
+typedef unsigned (*raw_handler)(void *);
+static struct {
+    raw_handler fn;
+    id<MTLCounterSampleBuffer> sb;
+    dispatch_semaphore_t go, done;
+    bool quit;
+    unsigned words;
+} np;
+static uint64_t np_out[512];
+
+static void *no_pool_thread(void *arg) {
+    for (;;) {
+        dispatch_semaphore_wait(np.go, DISPATCH_TIME_FOREVER);
+        if (np.quit) return NULL;
+        for (unsigned i = 0; i < 64; i++) {
+            struct unixcall_mtlcountersamplebuffer_resolvecounterrange r;
+            memset(&r, WM_FILL, sizeof r);
+            memset(np_out, WM_FILL, sizeof np_out);
+            r.sample_buffer = (obj_handle_t)np.sb;
+            r.start = 0;
+            r.len = 512;
+            r.data_out.ptr = np_out;
+            r.data_length = sizeof np_out;
+            np.fn(&r);
+        }
+        np.words = 0;
+        for (unsigned k = 0; k < 512; k++) np.words += np_out[k] != WM_FILL64;
+        dispatch_semaphore_signal(np.done);
+    }
+}
+
+static void resolve_no_pool(void) {
+    id<MTLCounterSampleBuffer> sb = timestamp_buffer(wm_device, 512, 1);
+    /* Once through wm_call, so the lines name 128. */
+    struct unixcall_mtlcountersamplebuffer_resolvecounterrange r;
+    wm_fill(&r, sizeof r);
+    r.sample_buffer = (obj_handle_t)sb;
+    r.start = 0;
+    r.len = 512;
+    r.data_out.ptr = NULL;
+    r.data_length = sizeof np_out;
+    wm_call(128, &r);
+    raw_handler const *funcs = wm_sym("__wine_unix_call_funcs");
+    if (!funcs) {
+        wm_line("no-table");
+        return;
+    }
+    np.fn = funcs[128];
+    np.sb = sb;
+    np.go = dispatch_semaphore_create(0);
+    np.done = dispatch_semaphore_create(0);
+    np.quit = false;
+    pthread_t t;
+    if (pthread_create(&t, NULL, no_pool_thread, NULL)) {
+        wm_line("no-thread");
+        return;
+    }
+    wm_heap_growth(^{
+        dispatch_semaphore_signal(np.go);
+        dispatch_semaphore_wait(np.done, DISPATCH_TIME_FOREVER);
+    }, 8);
+    wm_val("words", "%u", np.words);
+    np.quit = true;
+    dispatch_semaphore_signal(np.go);
+    pthread_join(t, NULL);
+    dispatch_release(np.go);
+    dispatch_release(np.done);
+}
+
 /* ---- nil ---- */
 
 static void nil_args(void) {
@@ -1572,6 +1661,7 @@ const struct wm_case wm_cases_g3[] = {
     {"g3", 91, "enumerate-past-end", 0, enumerate_past_end},
     {"g3", 102, "wait-event", 0, wait_event},
     {"g3", 127, "timestamps", 0, timestamps},
+    {"g3", 128, "resolve-no-pool", 0, resolve_no_pool},
     {"g3", 9, "nil-args", 0, nil_args},
     {"g3", 36, "x-blit-on-compute-encoder", 0, x_blit_on_compute_encoder},
     {"g3", 47, "present-hook", WM_NATIVE, present_hook},

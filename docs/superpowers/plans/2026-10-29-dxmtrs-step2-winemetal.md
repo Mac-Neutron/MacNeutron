@@ -812,8 +812,9 @@ hook statics (`U:156-210`). The last two are exported from Rust by those names w
 - 18:
   - NoCopy over `info->memory.ptr` (the VM host's blob memory; no deallocator), else `newBufferWithLength:options:`;
   - writes `memory.ptr = contents` (null for Private) and `gpu_address`;
-  - natively, with hooks set and a non-Private, non-Memoryless buffer: 16 KiB pages from `memory_alloc` and a
-    deallocator calling `memory_free`;
+  - natively, with hooks set, no `info->memory.ptr` and a non-Private, non-Memoryless buffer: 16 KiB pages from
+    `memory_alloc` and a deallocator calling `memory_free` (a given `memory.ptr` goes to NoCopy even with hooks set:
+    DXMT passes its own memory natively);
   - the host calls it with a page-rounded length and a stack `WMTBufferInfo` (D19), so no pointer is kept after
     return but the blob.
 - 19 reads `FORCED_MAX_ANISOTROPY` and writes `gpu_resource_id` only with argument buffers.
@@ -851,7 +852,8 @@ hook statics (`U:156-210`). The last two are exported from Rust by those names w
 - `icb-flags` (143 through a recording device, once per flag set alone: the four flags the C reads, and one `#if 0`
   flag that must stay unread; the descriptor dump);
 - `nil-args` (each object argument of the group's sends as 0 where the C sends it on as nil);
-- `native-hooks` (`WM_NATIVE`: 18 with memory hooks set; the buffer's memory is the hook's, its free runs on release);
+- `native-hooks` (`WM_NATIVE`: 18 with memory hooks set; the buffer's memory is the hook's, its free runs on release;
+  with `memory.ptr` given, NoCopy over it and no hook alloc);
 - `x-pixelformat-on-buffer` (39 on a buffer handle: `raised`).
 
 **Integration (CP2):**

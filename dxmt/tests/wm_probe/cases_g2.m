@@ -220,6 +220,11 @@ static void texture_msaa(void) {
     new_texture(texture_info(WMTPixelFormatRGBA8Unorm, WMTTextureType2DMultisample, 32, 32, 1, 1, 1, 4,
                              WMTTextureUsageRenderTarget, WMTResourceStorageModePrivate, 0));
 }
+/* A custom-swizzle format: the descriptor gets ORIGINAL_FORMAT (BGRX8 -> BGRA8Unorm, 80), as DXMT's BGRX textures. */
+static void texture_bgrx(void) {
+    new_texture(texture_info(WMTPixelFormatBGRX8Unorm, WMTTextureType2D, 16, 16, 1, 1, 1, 1, WMTTextureUsageShaderRead,
+                             WMTResourceStorageModePrivate, 0));
+}
 static void texture_lossless(void) {
     new_texture(texture_info(WMTPixelFormatRGBA8Unorm, WMTTextureType2D, 64, 64, 1, 1, 1, 1,
                              WMTTextureUsageShaderRead | WMTTextureUsageRenderTarget | WMTTextureUsagePixelFormatView,
@@ -228,12 +233,9 @@ static void texture_lossless(void) {
 
 /* ---- 22 ---- */
 
-static void buffer_texture(void) {
-    id<MTLBuffer> b = make_buffer(65536, MTLResourceStorageModeShared);
-    id rb = wm_rec(b, @protocol(MTLBuffer));
-    wm_in(rb);
-    struct WMTTextureInfo info = texture_info(WMTPixelFormatRGBA8Unorm, WMTTextureType2D, 32, 16, 1, 1, 1, 1,
-                                              WMTTextureUsageShaderRead, WMTResourceStorageModeShared, 0);
+static void buffer_texture_as(id rb, enum WMTPixelFormat format) {
+    struct WMTTextureInfo info = texture_info(format, WMTTextureType2D, 32, 16, 1, 1, 1, 1, WMTTextureUsageShaderRead,
+                                              WMTResourceStorageModeShared, 0);
     struct WMTTextureInfo before = info;
     struct unixcall_mtlbuffer_newtexture p;
     wm_fill(&p, sizeof p);
@@ -249,6 +251,15 @@ static void buffer_texture(void) {
     wm_val("bufferBytesPerRow", "%lu", (unsigned long)t.bufferBytesPerRow);
     wm_val("offset", "%llu", (unsigned long long)p.offset);
     wm_val("bytes_per_row", "%llu", (unsigned long long)p.bytes_per_row);
+}
+
+/* Then a custom-swizzle format (ORIGINAL_FORMAT). */
+static void buffer_texture(void) {
+    id<MTLBuffer> b = make_buffer(65536, MTLResourceStorageModeShared);
+    id rb = wm_rec(b, @protocol(MTLBuffer));
+    wm_in(rb);
+    buffer_texture_as(rb, WMTPixelFormatRGBA8Unorm);
+    buffer_texture_as(rb, WMTPixelFormatBGRX8Unorm);
 }
 
 /* ---- 23 ---- */
@@ -539,10 +550,10 @@ static void heap_buffer(id<MTLHeap> heap, uint64_t length, uint64_t options, uin
     wm_eq("heap", (uint64_t)b.heap, (uint64_t)heap, "heap");
 }
 
-static void heap_texture(id<MTLHeap> heap, uint64_t options, uint64_t offset) {
+static void heap_texture(id<MTLHeap> heap, uint64_t options, uint64_t offset, enum WMTPixelFormat format) {
     id rh = wm_rec(heap, @protocol(MTLHeap));
     wm_in(rh);
-    struct WMTTextureInfo info = texture_info(WMTPixelFormatRGBA8Unorm, WMTTextureType2D, 64, 64, 1, 1, 1, 1,
+    struct WMTTextureInfo info = texture_info(format, WMTTextureType2D, 64, 64, 1, 1, 1, 1,
                                               WMTTextureUsageShaderRead, options, 0);
     struct WMTTextureInfo before = info;
     struct unixcall_mtlheap_newtexture p;
@@ -589,11 +600,21 @@ static void heap(void) {
     want = [wm_device heapTextureSizeAndAlignWithDescriptor:td];
     wm_eq("ret_size", t.ret_size, want.size, "size");
     wm_eq("ret_align", t.ret_align, want.align, "align");
+    ti.pixel_format = WMTPixelFormatBGRX8Unorm;
+    wm_fill(&t, sizeof t);
+    t.device = (obj_handle_t)dev;
+    t.info.ptr = &ti;
+    wm_call(140, &t);
+    td.pixelFormat = MTLPixelFormatBGRA8Unorm;
+    want = [wm_device heapTextureSizeAndAlignWithDescriptor:td];
+    wm_eq("ret_size", t.ret_size, want.size, "size");
+    wm_eq("ret_align", t.ret_align, want.align, "align");
 
     heap_buffer(automatic, 4096, WMTResourceStorageModeShared, ~0ull);
     heap_buffer(placement, 4096, WMTResourceStorageModePrivate, 65536);
-    heap_texture(automatic, WMTResourceStorageModeShared, ~0ull);
-    heap_texture(placement, WMTResourceStorageModePrivate, 131072);
+    heap_texture(automatic, WMTResourceStorageModeShared, ~0ull, WMTPixelFormatRGBA8Unorm);
+    heap_texture(placement, WMTResourceStorageModePrivate, 131072, WMTPixelFormatRGBA8Unorm);
+    heap_texture(automatic, WMTResourceStorageModeShared, ~0ull, WMTPixelFormatBGRX8Unorm);
 }
 
 /* ---- 143 ---- */
@@ -967,6 +988,23 @@ static void native_hooks(void) {
     need("ret", p.ret);
     wm_val("allocs", "%u", atomic_load(&hooks.allocs));
     wm_val("memory", "0x%llx", (unsigned long long)info.memory.ptr);
+    /* Shared with the caller's memory (DXMT passes its own natively): the hooks' condition starts with !memory.ptr, so
+     * NoCopy over the caller's page, no hook alloc. */
+    static uint8_t page[16384] __attribute__((aligned(16384)));
+    wm_fill(&info, sizeof info);
+    info.length = sizeof page;
+    info.options = WMTResourceStorageModeShared;
+    info.memory.ptr = page;
+    wm_fill(&p, sizeof p);
+    p.device = (obj_handle_t)dev;
+    p.info.ptr = &info;
+    wm_own("ret", &p.ret);
+    wm_call(18, &p);
+    id<MTLBuffer> g = need("ret", p.ret);
+    wm_val("allocs", "%u", atomic_load(&hooks.allocs));
+    wm_eq("memory", (uint64_t)info.memory.ptr, (uint64_t)page, "page");
+    wm_eq("contents", (uint64_t)g.contents, (uint64_t)page, "page");
+    wm_eq("gpu_address", info.gpu_address, g.gpuAddress, "gpuAddress");
     /* Shared, released here (no probe retain): the free hook gets the hook's memory back. */
     wm_fill(&info, sizeof info);
     info.length = 20000;
@@ -999,6 +1037,7 @@ const struct wm_case wm_cases_g2[] = {
     {"g2", 21, "texture-array", 0, texture_array},
     {"g2", 21, "texture-msaa", 0, texture_msaa},
     {"g2", 21, "texture-lossless", 0, texture_lossless},
+    {"g2", 21, "texture-bgrx", 0, texture_bgrx},
     {"g2", 22, "buffer-texture", 0, buffer_texture},
     {"g2", 23, "view-swizzle", 0, view_swizzle},
     {"g2", 39, "getters-nil", 0, getters_nil},

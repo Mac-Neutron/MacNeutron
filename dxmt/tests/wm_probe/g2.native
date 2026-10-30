@@ -278,6 +278,35 @@ g2 41 texture-lossless 0 height=0x40
 g2 42 texture-lossless 0 depth=0x1
 g2 43 texture-lossless 0 arrayLength=0x1
 g2 44 texture-lossless 0 mipmapLevelCount=0x1
+g2 21 texture-bgrx msg@worker newTextureWithDescriptor: newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 21 texture-bgrx dump newTextureWithDescriptor.allowGPUOptimizedContents=1
+g2 21 texture-bgrx dump newTextureWithDescriptor.arrayLength=1
+g2 21 texture-bgrx dump newTextureWithDescriptor.compressionMode=0
+g2 21 texture-bgrx dump newTextureWithDescriptor.compressionType=0
+g2 21 texture-bgrx dump newTextureWithDescriptor.cpuCacheMode=0
+g2 21 texture-bgrx dump newTextureWithDescriptor.depth=1
+g2 21 texture-bgrx dump newTextureWithDescriptor.forceResourceIndex=0
+g2 21 texture-bgrx dump newTextureWithDescriptor.hazardTrackingMode=0
+g2 21 texture-bgrx dump newTextureWithDescriptor.height=16
+g2 21 texture-bgrx dump newTextureWithDescriptor.mipmapLevelCount=1
+g2 21 texture-bgrx dump newTextureWithDescriptor.pixelFormat=80
+g2 21 texture-bgrx dump newTextureWithDescriptor.placementSparsePageSize=0
+g2 21 texture-bgrx dump newTextureWithDescriptor.resourceIndex=0
+g2 21 texture-bgrx dump newTextureWithDescriptor.resourceOptions=32
+g2 21 texture-bgrx dump newTextureWithDescriptor.sampleCount=1
+g2 21 texture-bgrx dump newTextureWithDescriptor.storageMode=2
+g2 21 texture-bgrx dump newTextureWithDescriptor.swizzle={02030405}
+g2 21 texture-bgrx dump newTextureWithDescriptor.textureType=2
+g2 21 texture-bgrx dump newTextureWithDescriptor.usage=1
+g2 21 texture-bgrx dump newTextureWithDescriptor.width=16
+g2 21 texture-bgrx dump newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 21 texture-bgrx 0 ret=h1 own=+1 pool=+0 gpu_resource_id=gpuResourceID mach_port=0x0 inputs=unchanged compressionType=0 textureType=2 sampleCount=1 usage=1 storageMode=2 hazardTrackingMode=2
+g2 39 texture-bgrx 0 pixelFormat=0x50
+g2 40 texture-bgrx 0 width=0x10
+g2 41 texture-bgrx 0 height=0x10
+g2 42 texture-bgrx 0 depth=0x1
+g2 43 texture-bgrx 0 arrayLength=0x1
+g2 44 texture-bgrx 0 mipmapLevelCount=0x1
 g2 22 buffer-texture msg@worker newTextureWithDescriptor:offset:bytesPerRow: newTextureWithDescriptor=MTLTextureDescriptorInternal offset=1024 bytesPerRow=256
 g2 22 buffer-texture dump newTextureWithDescriptor.allowGPUOptimizedContents=1
 g2 22 buffer-texture dump newTextureWithDescriptor.arrayLength=1
@@ -301,6 +330,29 @@ g2 22 buffer-texture dump newTextureWithDescriptor.usage=1
 g2 22 buffer-texture dump newTextureWithDescriptor.width=32
 g2 22 buffer-texture dump newTextureWithDescriptor=MTLTextureDescriptorInternal
 g2 22 buffer-texture 0 ret=h1 own=+1 pool=+0 gpu_resource_id=gpuResourceID mach_port=0x0 inputs=unchanged bufferOffset=1024 bufferBytesPerRow=256 offset=1024 bytes_per_row=256
+g2 22 buffer-texture msg@worker newTextureWithDescriptor:offset:bytesPerRow: newTextureWithDescriptor=MTLTextureDescriptorInternal offset=1024 bytesPerRow=256
+g2 22 buffer-texture dump newTextureWithDescriptor.allowGPUOptimizedContents=1
+g2 22 buffer-texture dump newTextureWithDescriptor.arrayLength=1
+g2 22 buffer-texture dump newTextureWithDescriptor.compressionMode=0
+g2 22 buffer-texture dump newTextureWithDescriptor.compressionType=0
+g2 22 buffer-texture dump newTextureWithDescriptor.cpuCacheMode=0
+g2 22 buffer-texture dump newTextureWithDescriptor.depth=1
+g2 22 buffer-texture dump newTextureWithDescriptor.forceResourceIndex=0
+g2 22 buffer-texture dump newTextureWithDescriptor.hazardTrackingMode=0
+g2 22 buffer-texture dump newTextureWithDescriptor.height=16
+g2 22 buffer-texture dump newTextureWithDescriptor.mipmapLevelCount=1
+g2 22 buffer-texture dump newTextureWithDescriptor.pixelFormat=80
+g2 22 buffer-texture dump newTextureWithDescriptor.placementSparsePageSize=0
+g2 22 buffer-texture dump newTextureWithDescriptor.resourceIndex=0
+g2 22 buffer-texture dump newTextureWithDescriptor.resourceOptions=0
+g2 22 buffer-texture dump newTextureWithDescriptor.sampleCount=1
+g2 22 buffer-texture dump newTextureWithDescriptor.storageMode=0
+g2 22 buffer-texture dump newTextureWithDescriptor.swizzle={02030405}
+g2 22 buffer-texture dump newTextureWithDescriptor.textureType=2
+g2 22 buffer-texture dump newTextureWithDescriptor.usage=1
+g2 22 buffer-texture dump newTextureWithDescriptor.width=32
+g2 22 buffer-texture dump newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 22 buffer-texture 0 ret=h2 own=+1 pool=+0 gpu_resource_id=gpuResourceID mach_port=0x0 inputs=unchanged bufferOffset=1024 bufferBytesPerRow=256 offset=1024 bytes_per_row=256
 g2 23 view-swizzle msg@worker newTextureViewWithPixelFormat:textureType:levels:slices:swizzle: newTextureViewWithPixelFormat=80 textureType=3 levels=01000000000000000200000000000000 slices=01000000000000000300000000000000 swizzle=04030201
 g2 23 view-swizzle 0 ret=h1 own=+1 pool=+0 gpu_resource_id=gpuResourceID pixelFormat=80 swizzle=4,3,2,1 textureType=3 levels=1+2 slices=1+3
 g2 23 view-swizzle msg@worker newTextureViewWithPixelFormat:textureType:levels:slices:swizzle: newTextureViewWithPixelFormat=80 textureType=2 levels=02000000000000000100000000000000 slices=03000000000000000100000000000000 swizzle=05040302
@@ -405,6 +457,29 @@ g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.usage=1
 g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.width=64
 g2 140 heap dump heapTextureSizeAndAlignWithDescriptor=MTLTextureDescriptorInternal
 g2 140 heap 0 ret_size=size ret_align=align
+g2 140 heap msg@worker heapTextureSizeAndAlignWithDescriptor: heapTextureSizeAndAlignWithDescriptor=MTLTextureDescriptorInternal
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.allowGPUOptimizedContents=1
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.arrayLength=1
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.compressionMode=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.compressionType=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.cpuCacheMode=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.depth=1
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.forceResourceIndex=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.hazardTrackingMode=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.height=64
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.mipmapLevelCount=1
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.pixelFormat=80
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.placementSparsePageSize=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.resourceIndex=0
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.resourceOptions=32
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.sampleCount=1
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.storageMode=2
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.swizzle={02030405}
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.textureType=2
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.usage=1
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor.width=64
+g2 140 heap dump heapTextureSizeAndAlignWithDescriptor=MTLTextureDescriptorInternal
+g2 140 heap 0 ret_size=size ret_align=align
 g2 141 heap msg@worker newBufferWithLength:options: newBufferWithLength=4096 options=0
 g2 141 heap msg@worker storageMode
 g2 141 heap 0 ret=h3 own=+1 pool=+0 memory=contents gpu_address=gpuAddress length=4096 heap=heap
@@ -457,6 +532,29 @@ g2 142 heap dump newTextureWithDescriptor.usage=1
 g2 142 heap dump newTextureWithDescriptor.width=64
 g2 142 heap dump newTextureWithDescriptor=MTLTextureDescriptorInternal
 g2 142 heap 0 ret=h6 own=+1 pool=+0 gpu_resource_id=gpuResourceID mach_port=0x0 inputs=unchanged heapOffset=131072 heap=heap
+g2 142 heap msg@worker newTextureWithDescriptor: newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 142 heap dump newTextureWithDescriptor.allowGPUOptimizedContents=1
+g2 142 heap dump newTextureWithDescriptor.arrayLength=1
+g2 142 heap dump newTextureWithDescriptor.compressionMode=0
+g2 142 heap dump newTextureWithDescriptor.compressionType=0
+g2 142 heap dump newTextureWithDescriptor.cpuCacheMode=0
+g2 142 heap dump newTextureWithDescriptor.depth=1
+g2 142 heap dump newTextureWithDescriptor.forceResourceIndex=0
+g2 142 heap dump newTextureWithDescriptor.hazardTrackingMode=0
+g2 142 heap dump newTextureWithDescriptor.height=64
+g2 142 heap dump newTextureWithDescriptor.mipmapLevelCount=1
+g2 142 heap dump newTextureWithDescriptor.pixelFormat=80
+g2 142 heap dump newTextureWithDescriptor.placementSparsePageSize=0
+g2 142 heap dump newTextureWithDescriptor.resourceIndex=0
+g2 142 heap dump newTextureWithDescriptor.resourceOptions=0
+g2 142 heap dump newTextureWithDescriptor.sampleCount=1
+g2 142 heap dump newTextureWithDescriptor.storageMode=0
+g2 142 heap dump newTextureWithDescriptor.swizzle={02030405}
+g2 142 heap dump newTextureWithDescriptor.textureType=2
+g2 142 heap dump newTextureWithDescriptor.usage=1
+g2 142 heap dump newTextureWithDescriptor.width=64
+g2 142 heap dump newTextureWithDescriptor=MTLTextureDescriptorInternal
+g2 142 heap 0 ret=h7 own=+1 pool=+0 gpu_resource_id=gpuResourceID mach_port=0x0 inputs=unchanged heap=heap
 g2 143 icb msg@worker newIndirectCommandBufferWithDescriptor:maxCommandCount:options: newIndirectCommandBufferWithDescriptor=MTLIndirectCommandBufferDescriptor maxCommandCount=16 options=0
 g2 143 icb dump newIndirectCommandBufferWithDescriptor.allowOverrideRenderStates=0
 g2 143 icb dump newIndirectCommandBufferWithDescriptor.commandTypes=3
@@ -682,5 +780,6 @@ g2 - native-hooks hooked=1
 g2 18 native-hooks 0 ret=h1 own=+1 pool=+0 allocs=1 alloc_length=16384 ctx=same memory=hook contents=hook gpu_address=gpuAddress buffer.length=16384
 g2 18 native-hooks msg@worker newBufferWithLength:options: newBufferWithLength=100 options=32
 g2 18 native-hooks 0 ret=h2 own=+1 pool=+0 allocs=1 memory=0x0
+g2 18 native-hooks 0 ret=h3 own=+1 pool=+0 allocs=1 memory=page contents=page gpu_address=gpuAddress
 g2 18 native-hooks 0 alloc_length=32768 freed=yes free_ptr=same
 g2 18 native-hooks hooked=0

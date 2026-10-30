@@ -10,6 +10,7 @@ g3 13 cmdbuf-lifecycle msg@worker waitUntilCompleted
 g3 13 cmdbuf-lifecycle 0
 g3 14 cmdbuf-lifecycle msg@worker status
 g3 14 cmdbuf-lifecycle 0 status=4
+g3 11 cmdbuf-lifecycle 0 ret=h2 own=+0 pool=+1
 g3 17 signal-event msg@worker encodeSignalEvent:value: encodeSignalEvent=h1 value=7
 g3 17 signal-event 0 signaledValue=7
 g3 30 encoders msg@worker blitCommandEncoder
@@ -99,6 +100,9 @@ g3 37 compute-threadgroup msg@worker setComputePipelineState: setComputePipeline
 g3 37 compute-threadgroup msg@worker dispatchThreads:threadsPerThreadgroup: dispatchThreads=400000000000000001000000000000000100000000000000 threadsPerThreadgroup=100000000000000001000000000000000100000000000000
 g3 37 compute-threadgroup 0
 g3 37 compute-threadgroup msg@worker dispatchThreadgroups:threadsPerThreadgroup: dispatchThreadgroups=030000000000000003000000000000000300000000000000 threadsPerThreadgroup=000000000000000000000000000000000000000000000000
+g3 37 compute-threadgroup 0
+g3 37 compute-threadgroup msg@worker setComputePipelineState: setComputePipelineState=h3
+g3 37 compute-threadgroup msg@worker dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerThreadgroup: dispatchThreadgroupsWithIndirectBuffer=h4 indirectBufferOffset=64 threadsPerThreadgroup=040000000000000002000000000000000100000000000000
 g3 37 compute-threadgroup 0
 g3 37 compute-unknown-type msg@worker setBufferOffset:atIndex: setBufferOffset=16 atIndex=1
 g3 37 compute-unknown-type msg@worker memoryBarrierWithScope: memoryBarrierWithScope=1
@@ -650,6 +654,10 @@ g3 130 timestamps 0 kernelEndTime=kernelEndTime*1e9
 g3 130 timestamps 0 GPUStartTime=GPUStartTime*1e9
 g3 130 timestamps 0 GPUEndTime=GPUEndTime*1e9
 g3 130 timestamps 0 unknown=0
+g3 127 resolve-no-pool 0 ret=h1 own=+1 pool=+0 sampleCount=512
+g3 128 resolve-no-pool 0
+g3 128 resolve-no-pool heap-growth=freed
+g3 128 resolve-no-pool words=512
 g3 9 nil-args 0 ret=0x0
 g3 11 nil-args 0 ret=0x0
 g3 30 nil-args 0 ret=0x0
