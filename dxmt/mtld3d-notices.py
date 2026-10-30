@@ -1,6 +1,7 @@
 """The licence files of the code mtld3d's shipped binaries link (D3D9 spec §4; wine.app carries every notice its
-binaries need, ship-base spec §4): d3d9.dll and mtld3d.dll (aarch64- and arm64ec-pc-windows-msvc) and mtld3d.so
-(aarch64-apple-darwin). Each crate's LICENSE*, LICENCE*, COPYING*, NOTICE* and UNLICENSE* files go to
+binaries need, ship-base spec §4): d3d9.dll, mtld3d.dll and DXMT's winemetal.dll (aarch64- and
+arm64ec-pc-windows-msvc), and mtld3d.so and DXMT's winemetal.so (aarch64-apple-darwin). Each crate's LICENSE*,
+LICENCE*, COPYING*, NOTICE* and UNLICENSE* files go to
 <out>/crates/<name>-<version>/, and <out>/crates/INDEX lists every crate with its licence expression. mtld3d's own
 crates are its zlib LICENSE (bundle.sh ships it); the snmalloc-sys it vendors is third-party code and is listed. A crate
 that ships no licence file (the objc2 family, MIT or a choice including MIT) gets MIT's text with its manifest's authors
@@ -16,8 +17,8 @@ import shutil
 import subprocess
 import sys
 
-LEGS = (("windows", ("d3d9", "mtld3d"), ("aarch64-pc-windows-msvc", "arm64ec-pc-windows-msvc")),
-        ("unix", ("mtld3d-unix",), ("aarch64-apple-darwin",)))
+LEGS = (("windows", ("d3d9", "mtld3d", "winemetal-pe"), ("aarch64-pc-windows-msvc", "arm64ec-pc-windows-msvc")),
+        ("unix", ("mtld3d-unix", "winemetal"), ("aarch64-apple-darwin",)))
 PREFIXES = ("license", "licence", "copying", "notice", "unlicense")
 MIT = """MIT License
 
