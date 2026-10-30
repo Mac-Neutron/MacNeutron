@@ -86,6 +86,23 @@ build/dxmt-tests-arm64ec/%.exe: dxmt/tests/%.cpp dxmt/tests/d3d12_common.hpp dxm
 build/dxmt-tests-arm64ec/present_loop.exe: presenter/tests/present_loop.c
 	$(MINGW_EC) -o $@ $< -ld3d11 -ldxgi -luser32 -lgdi32 -ldxguid -luuid
 
+# wm_probe (DXMTRS step 2): winemetal's unix-call slots driven natively against one winemetal.so beside the VM host's
+# stand-ins, or the native winemetal.dylib (dxmt/tests/wm_probe/probe.h; dxmt/wm-probe-check.sh runs it). WM_CASES:
+# the case tables compiled in. The presenter for the env cases (WM_PRESENTER overrides at run time) is the main
+# checkout's build, which a worktree has none of.
+DXMT_SRC ?= build/wine-arm64-src/dxmt/src
+WM_PRESENTER_DEFAULT = $(shell git rev-parse --path-format=absolute --git-common-dir | sed 's|/\.git$$||')/build/wine-arm64-src/presenter/libmacneutron-present.dylib
+WM_PROBE_OUT ?= build/wm-probe
+WM_CASES ?= $(wildcard dxmt/tests/wm_probe/cases_g*.m)
+wm-probe:
+	mkdir -p $(WM_PROBE_OUT)
+	/usr/bin/clang -fno-objc-arc -fobjc-exceptions -O1 -g -std=gnu2x -Wall -Wextra -Wno-unused-parameter \
+		-DWM_PROBE_SRC='"$(abspath dxmt/tests/wm_probe)"' -DWM_PRESENTER_DEFAULT='"$(WM_PRESENTER_DEFAULT)"' -I$(DXMT_SRC)/winemetal -I$(DXMT_SRC)/airconv \
+		-Idxmt/tests/wm_probe -Ieac-vm/metal/wm/host -o $(WM_PROBE_OUT)/wm_probe dxmt/tests/wm_probe/probe.m dxmt/tests/wm_probe/recorder.m \
+		dxmt/tests/wm_probe/swizzle.m $(WM_CASES) eac-vm/metal/wm/host/loader.c -framework Foundation -framework Metal \
+		-framework MetalFX -framework QuartzCore -framework AppKit -framework CoreGraphics -lsqlite3
+.PHONY: wm-probe
+
 # Translate a folder of captured DXIL shaders offline (DIR=~/dxil-smite2); never commit a game's shaders.
 dxil-corpus: wine-arm64
 	build/wine-arm64/dxil-translate "$(DIR)"
