@@ -161,8 +161,8 @@ existing C++ signatures.
    `io::Error`'s text, the panic printer) didn't run with stderr in a file, so the shim is still unexercised; `_fltused`
    matters only at link time. The i686 shims (`__tls_array`, `__aulldiv`) wait for step 3, whose `dxgi` and `d3d10core`
    have i386 builds.
-   1b. `nvapi`, its own plan (`2026-10-29-dxmtrs-step1b-nvapi.md`): complete on the local branches 2026-10-29,
-   pending the maintainer's push and pin. It answers 46 functions behind 54 IDs, 8 of them null on purpose, and logs any
+   1b. `nvapi`, its own plan (`2026-10-29-dxmtrs-step1b-nvapi.md`): done 2026-10-29: DXMTRS main a7df84b,
+   which MacNeutron pins. It answers 46 functions behind 54 IDs, 8 of them null on purpose, and logs any
    other of `nvapi_interface.h`'s 511 IDs; the first draft's 94 was wrong. Characterized first by `d3d11_nvapi` (a
    152-line golden recorded from the C++ DLL), then ported with three decisions:
    - a null pointer the C++ would dereference gets `NVAPI_INVALID_ARGUMENT` (-5) instead of a crash. The list:
@@ -170,8 +170,8 @@ existing C++ signatures.
      device, `DISP_GetDisplayIdByDisplayName`'s name and its id (the id only after the name is found: an unknown name
      still gets -6, as in the C++), `D3D_GetObjectHandleForResource`'s handle, `Disp_GetHdrCapabilities`'s and
      `Disp_HdrColorControl`'s struct, and `GPU_GetLogicalGpuInfo`'s `pOSAdapterId`. Every other quirk stays:
-     `GetErrorMessage` writes an empty string. `EnumNvidiaDisplayHandle`, `DISP_GetDisplayIdByDisplayName`'s sibling
-     `DISP_GetGDIPrimaryDisplayId` and `GPU_GetConnectedDisplayIds` null-check their output in the C++ and in the Rust:
+     `GetErrorMessage` writes an empty string. `EnumNvidiaDisplayHandle`, `DISP_GetGDIPrimaryDisplayId` and
+     `GPU_GetConnectedDisplayIds` null-check their output in the C++ and in the Rust:
      they write it when given a non-null pointer (as the first probe run recorded) and return -5 for a null one; none
      writes through null (the plan's first draft wrongly listed them as exceptions);
    - the count: 46 functions behind 54 IDs, not 94;
@@ -184,8 +184,9 @@ existing C++ signatures.
    Gates, on the CRLF tree (1befd21): both Mac `check.sh` lanes 412 ok and 0 FAIL (x64 re-run on 1befd21, arm64ec on
    e39014e); the C++ and Rust DLLs' `all` dumps and log files identical; the VM guest's x86_64 `nvapi64.dll` (195 KB,
    Rust; the C++ one is 1.3 MB) passed `eac-vm/dxmt/gate.sh`'s seven programs, `d3d11_nvapi` 152 of 152. The review's
-   final fixes (a7df84b: log file naming, creation only on a passing message, the name-lookup status order, docs) were
-   gated the same way. Another finding: mtld3d's `audit.sh` now runs from `mtld3d/` (it `cd`ed to the git toplevel,
+   final fixes (up to a7df84b: log file naming, creation only on a passing message, the name-lookup status order,
+   docs) were gated the same way: x64 412 ok, identical dumps and log files, no log file at `DXMT_LOG_LEVEL=none`,
+   the guest's seven programs. Another finding: mtld3d's `audit.sh` now runs from `mtld3d/` (it `cd`ed to the git toplevel,
    which inside DXMTRS is the repository root, and died partway, so its later rules never ran).
 2. `winemetal`, Unix side: the `unix_call` handlers, onto mtld3d's `mtl` crate (objc2 bindings). Then the PE side: the
    thunks behind `winemetal.h`, onto mtld3d's PE-to-Unix transport. `winemetal.h` stays the boundary the C++ calls.

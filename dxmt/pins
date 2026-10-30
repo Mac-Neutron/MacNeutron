@@ -2,7 +2,7 @@
 # DXMT_COMMIT is a commit of DXMTRS's main (our DXMT, being ported to Rust) that MacNeutron ships; LGPL: its source is
 # public there. Commits up to 89558c1 are on the frozen fork Mac-Neutron/dxmt too.
 DXMT_REPO=https://github.com/Mac-Neutron/DXMTRS.git
-DXMT_COMMIT=89558c1ad38f19121dddeb655b507dbe5c957ce7
+DXMT_COMMIT=a7df84bbfb909d8d3b7bc7dcee18aae25a3f2bed
 LLVM_TAG=llvmorg-15.0.7
 # 3Shain's Wine 8.16 tree, which DXMT's CI builds against. SHA-256 recorded at first download, 2026-09-28.
 WINE_URL=https://github.com/3Shain/wine/releases/download/v8.16-3shain/wine.tar.gz

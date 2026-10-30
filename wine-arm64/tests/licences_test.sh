@@ -44,8 +44,9 @@ check() {  # check <wine.app> <build dir>
   # entry names its texts, mtld3d's copy.
   awk '/^DXMT \(/ { p = 1 } p && /^$/ { exit } p' "$L/README" 2> /dev/null | g -qF 'mtld3d/rust/COPYRIGHT-library.html' \
     || miss "the README's DXMT entry naming Rust's standard library's texts (mtld3d/rust/COPYRIGHT-library.html)"
-  # Both Rust DLLs are named as Rust in that entry ("nvngx.dll and nvapi64.dll are" / "Rust").
-  awk '/^DXMT \(/ { p = 1 } p && /^$/ { exit } p' "$L/README" 2> /dev/null | g -qF 'nvapi64.dll are' \
+  # nvapi64.dll is named as Rust in that entry ("nvngx.dll and nvapi64.dll are Rust", read with its lines joined).
+  awk '/^DXMT \(/ { p = 1 } p && /^$/ { exit } p' "$L/README" 2> /dev/null | tr -s ' \n' '  ' \
+    | g -qF 'nvapi64.dll are Rust' \
     || miss "the README's DXMT entry naming nvapi64.dll as Rust"
   # mtld3d's crates (dxmt/mtld3d-notices.py): a folder of licence files for each one its INDEX names.
   while read -r crate version _; do  # "<crate> <version>: <terms>"
