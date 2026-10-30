@@ -20,6 +20,20 @@ g7 108 listener-notify-before-start 0 ret=h1
 g7 104 listener-notify-before-start 0 before-start=0 hook=given same-thread=1
 g7 109 listener-notify-before-start 0 after-destroy=1
 g7 110 listener-notify-before-start 0 thread=returned
+g7 108 listener-stop-race 0 ret=h1
+g7 109 listener-stop-race 0
+g7 110 listener-stop-race 0 thread=returned
+g7 110 listener-stop-race rounds=100
+g7 108 listener-late-notify 0 ret=h1 published=1
+g7 104 listener-late-notify 0
+g7 109 listener-late-notify 0 after-destroy=1
+g7 110 listener-late-notify 0 thread=returned hooks=0 cpu=no-spin
+g7 110 listener-late-notify returned
+g7 108 listener-destroy-first-notify 0 ret=h1
+g7 104 listener-destroy-first-notify 0
+g7 109 listener-destroy-first-notify 0 after-destroy=0
+g7 110 listener-destroy-first-notify 0 thread=returned hooks=0 cpu=no-spin
+g7 110 listener-destroy-first-notify returned
 g7 126 wait 0 ret_timeout=1
 g7 126 wait 0 ret_timeout=0
 g7 121 bootstrap 0 registered=yes
