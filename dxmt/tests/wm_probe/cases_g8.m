@@ -181,6 +181,11 @@ static void cross_read(void) {
     [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *db = [dir stringByAppendingPathComponent:@"cache.db"];
     [fixture writeToFile:db atomically:NO];
+    /* A read-only connection on a WAL database with no -wal beside it fails (the reader's flags are D18's seam: a
+     * read-write open would succeed and create the -wal). Before the -wal is written, so the order matters. */
+    uint64_t none = open_cache(115, db, 1, false);
+    if (none) [(id)none release];
+    wm_val("wal-created", "%s", yesno(exists([db stringByAppendingString:@"-wal"])));
     /* The writer leaves an empty -wal beside a WAL database (this SQLite keeps it); a read-only connection needs it. */
     [[NSData data] writeToFile:[db stringByAppendingString:@"-wal"] atomically:NO];
     uint64_t r = open_cache(115, db, 1, true);
@@ -483,6 +488,9 @@ static void try_cache_path(const char *label, NSString *path, NSString *created_
 static void metal_cache_path(void) {
     NSString *base = tmp("mcp");
     metal_path_before = [MTLGetShaderCachePath() copy];
+    /* The one form on this OS that answers 1: the path Metal's getter already returns (the Set itself is ignored here, so
+     * the comparison and the ret write are what this form pins). */
+    if (metal_path_before) try_cache_path("current", metal_path_before, metal_path_before);
     try_cache_path("new", [base stringByAppendingString:@"/new"], [base stringByAppendingString:@"/new"]);
     try_cache_path("deep", [base stringByAppendingString:@"/deep/a/b"], [base stringByAppendingString:@"/deep/a/b"]);
     try_cache_path("existing", [base stringByAppendingString:@"/new"], [base stringByAppendingString:@"/new"]);

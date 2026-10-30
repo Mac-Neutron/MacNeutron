@@ -8525,6 +8525,32 @@ g4 144 source dump options.sourceLanguage=0
 g4 144 source dump options.tracingEnabled=0
 g4 144 source dump options=MTLCompileOptionsInternal
 g4 144 source 0 ret_library=h6 own=+1 pool=+0 ret_error=0 error=0
+g4 144 source run=high-bytes-comment
+g4 144 source msg@worker newLibraryWithSource:options:error: newLibraryWithSource="#include <metal_stdlib>\nusing namespace metal;\n// ÿþ bytes\nkernel void sk(device uint *b [[buffer(0)]]) { b[0] = 1; }\n" options=MTLCompileOptionsInternal error=nonnull
+g4 144 source dump options.additionalCompilerArguments=nil
+g4 144 source dump options.allowReferencingUndefinedSymbols=0
+g4 144 source dump options.compileSymbolVisibility=0
+g4 144 source dump options.compileTimeStatisticsEnabled=0
+g4 144 source dump options.debuggingEnabled=0
+g4 144 source dump options.enableLogging=0
+g4 144 source dump options.fastMathEnabled=1
+g4 144 source dump options.floatingPointConversionRoundingMode=0
+g4 144 source dump options.framebufferReadEnabled=0
+g4 144 source dump options.installName=nil
+g4 144 source dump options.languageVersion=196609
+g4 144 source dump options.libraries=nil
+g4 144 source dump options.libraryType=0
+g4 144 source dump options.mathFloatingPointFunctions=0
+g4 144 source dump options.mathMode=2
+g4 144 source dump options.maxTotalThreadsPerThreadgroup=0
+g4 144 source dump options.optimizationLevel=0
+g4 144 source dump options.preprocessorMacros=nil
+g4 144 source dump options.preserveInvariance=0
+g4 144 source dump options.requiredThreadsPerThreadgroup={000000000000000000000000000000000000000000000000}
+g4 144 source dump options.sourceLanguage=0
+g4 144 source dump options.tracingEnabled=0
+g4 144 source dump options=MTLCompileOptionsInternal
+g4 144 source 0 ret_library=h7 own=+1 pool=+0 ret_error=0 error=0
 g4 - source-options run=default
 g4 157 source-options msg@worker newLibraryWithSource:options:error: newLibraryWithSource="#include <metal_stdlib>\nusing namespace metal;\nkernel void sk(device uint *b [[buffer(0)]]) { b[0] = 1; }\n" options=MTLCompileOptionsInternal error=nonnull
 g4 157 source-options dump options.additionalCompilerArguments=nil
@@ -8733,7 +8759,34 @@ g4 157 source-options dump options.sourceLanguage=0
 g4 157 source-options dump options.tracingEnabled=0
 g4 157 source-options dump options=MTLCompileOptionsInternal
 g4 157 source-options 0 ret_library=h8 own=+1 pool=+0 ret_error=0 error=0
+g4 157 source-options run=high-bytes-comment
+g4 157 source-options msg@worker newLibraryWithSource:options:error: newLibraryWithSource="#include <metal_stdlib>\nusing namespace metal;\n// ÿþ bytes\nkernel void sk(device uint *b [[buffer(0)]]) { b[0] = 1; }\n" options=MTLCompileOptionsInternal error=nonnull
+g4 157 source-options dump options.additionalCompilerArguments=nil
+g4 157 source-options dump options.allowReferencingUndefinedSymbols=0
+g4 157 source-options dump options.compileSymbolVisibility=0
+g4 157 source-options dump options.compileTimeStatisticsEnabled=0
+g4 157 source-options dump options.debuggingEnabled=0
+g4 157 source-options dump options.enableLogging=0
+g4 157 source-options dump options.fastMathEnabled=0
+g4 157 source-options dump options.floatingPointConversionRoundingMode=0
+g4 157 source-options dump options.framebufferReadEnabled=0
+g4 157 source-options dump options.installName=nil
+g4 157 source-options dump options.languageVersion=196609
+g4 157 source-options dump options.libraries=nil
+g4 157 source-options dump options.libraryType=0
+g4 157 source-options dump options.mathFloatingPointFunctions=0
+g4 157 source-options dump options.mathMode=0
+g4 157 source-options dump options.maxTotalThreadsPerThreadgroup=0
+g4 157 source-options dump options.optimizationLevel=0
+g4 157 source-options dump options.preprocessorMacros=nil
+g4 157 source-options dump options.preserveInvariance=0
+g4 157 source-options dump options.requiredThreadsPerThreadgroup={000000000000000000000000000000000000000000000000}
+g4 157 source-options dump options.sourceLanguage=0
+g4 157 source-options dump options.tracingEnabled=0
+g4 157 source-options dump options=MTLCompileOptionsInternal
+g4 157 source-options 0 ret_library=h9 own=+1 pool=+0 ret_error=0 error=0
 g4 25 nil-args 0 25.ret_library=0 25.ret_error=0
+g4 25 nil-args 0 25.live.ret_library=0 25.live.ret_error=MTLLibraryErrorDomain/1
 g4 26 nil-args 0 26.ret=0
 g4 29 nil-args 0 29.ret_pso=0 29.ret_error=0
 g4 34 nil-args 0 34.ret_pso=0 34.ret_error=0
@@ -8745,6 +8798,31 @@ g4 157 nil-args 0 157.ret_library=0 157.ret_error=0
 g4 112 nil-args 0 112.ret_archive=0 112.ret_error=0
 g4 113 nil-args 0 113.ret_error=0
 g4 98 nil-args 0 98.ret=0 98.ret_error=0
+g4 - lookup-nil-entry run=compute
+g4 29 lookup-nil-entry raised NSInvalidArgumentException ret_pso=none ret_error=none
+g4 29 lookup-nil-entry run=render
+g4 34 lookup-nil-entry raised NSInvalidArgumentException ret_pso=none ret_error=none
+g4 34 lookup-nil-entry run=vertex
+g4 156 lookup-nil-entry raised NSInvalidArgumentException ret_pso=none ret_error=none
+g4 156 lookup-nil-entry run=mesh
+g4 35 lookup-nil-entry raised NSInvalidArgumentException ret_pso=none ret_error=none
+g4 35 lookup-nil-entry run=tile
+g4 131 lookup-nil-entry raised NSInvalidArgumentException ret_pso=none ret_error=none
+g4 - nil-device-serialize run=compute
+g4 29 nil-device-serialize 0 ret_pso=0 ret_error=0
+g4 113 nil-device-serialize 0 serialize=0 file=written
+g4 113 nil-device-serialize run=render
+g4 34 nil-device-serialize 0 ret_pso=0 ret_error=0
+g4 113 nil-device-serialize 0 serialize=0 file=written
+g4 113 nil-device-serialize run=vertex
+g4 156 nil-device-serialize 0 ret_pso=0 ret_error=0
+g4 113 nil-device-serialize 0 serialize=0 file=written
+g4 113 nil-device-serialize run=mesh
+g4 35 nil-device-serialize 0 ret_pso=0 ret_error=0
+g4 113 nil-device-serialize 0 serialize=0 file=written
+g4 113 nil-device-serialize run=tile
+g4 131 nil-device-serialize 0 ret_pso=0 ret_error=0
+g4 113 nil-device-serialize 0 serialize=0 file=written
 g4 26 x-library-on-device raised NSInvalidArgumentException ret=none
 g4 112 x-library-on-device raised NSInvalidArgumentException ret_archive=none ret_error=none
 g4 29 heap-growth 0

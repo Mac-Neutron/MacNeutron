@@ -10,6 +10,7 @@ g8 116 writer-reader 0 ret_data=h5 own=+1 pool=+0 hit=bytes
 g8 116 writer-reader 0 ret_data=0 miss=miss
 g8 116 writer-reader 0 ret_data=0 short-key=miss
 g8 116 writer-reader 0 ret_data=0 long-key=miss
+g8 115 cross-read 0 ret=0 wal-created=no
 g8 115 cross-read 0 ret=h1 own=+1 pool=+0 class=CacheReader
 g8 116 cross-read 0 ret_data=h2 own=+1 pool=+0 hit=bytes
 g8 116 cross-read 0 ret_data=h3 own=+1 pool=+0 hit=bytes
@@ -206,7 +207,9 @@ g8 117 bad-path 0 ret=nonnull
 g8 117 bad-path form=read-only-other-version
 g8 115 bad-path 0 ret=0 exists-after-reader=yes
 g8 117 bad-path 0 ret=0 ro-tables=cache_1
-g8 - metal-cache-path form=new
+g8 - metal-cache-path form=current
+g8 119 metal-cache-path 0 ret=1 folder=yes metal-has=path
+g8 119 metal-cache-path form=new
 g8 119 metal-cache-path 0 ret=0 folder=yes metal-has=unchanged
 g8 119 metal-cache-path form=deep
 g8 119 metal-cache-path 0 ret=0 folder=yes metal-has=unchanged

@@ -826,6 +826,10 @@ static void source(void) {
     source_call(144, "length-0", rec, good, 0, NULL);
     const char *versioned = "#include <metal_stdlib>\nusing namespace metal;\nkernel void sk(device uint *b [[buffer(0)]]) { b[0] = __METAL_VERSION__; }\n";
     source_call(144, "version-31", rec, versioned, strlen(versioned), NULL);
+    /* The string is decoded as ASCII, which takes bytes of 0x80 and up: a UTF-8 decode of 0xff gets nil, and Metal aborts
+     * the process on a nil source. Last, so the rest of the case is printed before such an abort. */
+    const char *high = "#include <metal_stdlib>\nusing namespace metal;\n// \xff\xfe bytes\nkernel void sk(device uint *b [[buffer(0)]]) { b[0] = 1; }\n";
+    source_call(144, "high-bytes-comment", rec, high, strlen(high), NULL);
 }
 
 /* 157: the compile options dumped (language version 0 keeps Metal's default), each field, and a syntax error. */
@@ -856,6 +860,9 @@ static void source_options(void) {
     const char *bad = "kernel void broken( { }\n";
     source_call(157, "syntax-error", rec, bad, strlen(bad), &o);
     source_call(157, "short-length", rec, good, 24, &o);
+    /* As 144: the source is ASCII-decoded, so a byte of 0x80 and up in a comment is accepted. Last, as in 144. */
+    const char *high = "#include <metal_stdlib>\nusing namespace metal;\n// \xff\xfe bytes\nkernel void sk(device uint *b [[buffer(0)]]) { b[0] = 1; }\n";
+    source_call(157, "high-bytes-comment", rec, high, strlen(high), &o);
 }
 
 /* ---- nil ---- */
@@ -872,6 +879,14 @@ static void nil_args(void) {
     wm_call(25, &l);
     wm_val("25.ret_library", "%s", nz(l.ret_library));
     wm_val("25.ret_error", "%s", nz(l.ret_error));
+    /* A live device and data 0: the nil goes to Metal, which answers its error; nothing raises. */
+    struct unixcall_mtldevice_newlibrary ld;
+    wm_fill(&ld, sizeof ld);
+    ld.device = (uint64_t)wm_device;
+    ld.data = 0;
+    wm_call(25, &ld);
+    wm_val("25.live.ret_library", "%s", nz(ld.ret_library));
+    error_of("25.live.ret_error", ld.ret_error, false);
     struct unixcall_generic_obj_uint64_obj_ret f;
     wm_fill(&f, sizeof f);
     f.handle = 0;
@@ -967,6 +982,218 @@ static void nil_args(void) {
     wm_val("98.ret_error", "%s", nz(fc.ret_error));
 }
 
+/* A 0 entry among binary_archives_for_lookup: [NSArray arrayWithObjects:count:] raises NSInvalidArgumentException before
+ * the pipeline is asked for, and the handler writes nothing. A port that skips the nil entry (filter_map) answers a
+ * pipeline where the C refused. 29, 34, 156 (the shared descriptor), 35 and 131 (lines of their own). */
+static void lookup_nil_entry(void) {
+    id<MTLLibrary> lib = shared_lib(), mlib = wm_library(kMSLMesh), tlib = wm_library(kMSLTile);
+    id<MTLFunction> k = fn(lib, @"k"), vf = fn(lib, @"v"), ff = fn(lib, @"f"), vin = fn(lib, @"vin");
+    id<MTLFunction> mf = mlib ? fn(mlib, @"mshf") : nil, mff = mlib ? fn(mlib, @"mf") : nil, tf = tlib ? fn(tlib, @"tf") : nil;
+    id<MTLBinaryArchive> archive = [[wm_device newBinaryArchiveWithDescriptor:[[[MTLBinaryArchiveDescriptor alloc] init] autorelease] error:nil] autorelease];
+    obj_handle_t archives[2] = {(obj_handle_t)archive, 0};
+    {
+        struct WMTComputePipelineInfo info;
+        compute_info(&info, k);
+        info.binary_archives_for_lookup.ptr = archives;
+        info.num_binary_archives_for_lookup = 2;
+        struct unixcall_mtldevice_newcomputepso p;
+        wm_fill(&p, sizeof p);
+        p.device = (uint64_t)wm_device;
+        p.info.ptr = &info;
+        wm_line("run=compute");
+        wm_call(29, &p);
+        wm_bytes("ret_pso", &p.ret_pso, sizeof p.ret_pso);
+        wm_bytes("ret_error", &p.ret_error, sizeof p.ret_error);
+    }
+    static const unsigned render_slots[] = {34, 156};
+    for (unsigned i = 0; i < 2; i++) {
+        unsigned slot = render_slots[i];
+        struct WMTRenderPipelineInfo info;
+        render_info(&info, slot == 34 ? vf : vin, ff);
+        info.binary_archives_for_lookup.ptr = archives;
+        info.num_binary_archives_for_lookup = 2;
+        struct WMTVertexDescriptorInfo vd;
+        memset(&vd, 0, sizeof vd);
+        vd.attributes[0].format = MTLVertexFormatFloat4;
+        vd.attributes[1].format = MTLVertexFormatFloat2;
+        vd.attributes[1].offset = 16;
+        vd.layouts[0].stride = 24;
+        vd.layouts[0].step_function = MTLVertexStepFunctionPerVertex;
+        vd.layouts[0].step_rate = 1;
+        wm_line("run=%s", slot == 34 ? "render" : "vertex");
+        if (slot == 34) {
+            struct unixcall_mtldevice_newrenderpso p;
+            wm_fill(&p, sizeof p);
+            p.device = (uint64_t)wm_device;
+            p.info.ptr = &info;
+            wm_call(34, &p);
+            wm_bytes("ret_pso", &p.ret_pso, sizeof p.ret_pso);
+            wm_bytes("ret_error", &p.ret_error, sizeof p.ret_error);
+        } else {
+            struct unixcall_mtldevice_newrenderpso_vertex p;
+            wm_fill(&p, sizeof p);
+            p.device = (uint64_t)wm_device;
+            p.info.ptr = &info;
+            p.vertex.ptr = &vd;
+            wm_call(156, &p);
+            wm_bytes("ret_pso", &p.ret_pso, sizeof p.ret_pso);
+            wm_bytes("ret_error", &p.ret_error, sizeof p.ret_error);
+        }
+    }
+    if (mf) {
+        struct WMTMeshRenderPipelineInfo info;
+        memset(&info, 0, sizeof info);
+        info.colors[0].pixel_format = WMTPixelFormatBGRA8Unorm;
+        info.colors[0].write_mask = 15;
+        info.rasterization_enabled = true;
+        info.raster_sample_count = 1;
+        info.mesh_function = (obj_handle_t)mf;
+        info.fragment_function = (obj_handle_t)mff;
+        info.binary_archives_for_lookup.ptr = archives;
+        info.num_binary_archives_for_lookup = 2;
+        struct unixcall_mtldevice_newmeshrenderpso p;
+        wm_fill(&p, sizeof p);
+        p.device = (uint64_t)wm_device;
+        p.info.ptr = &info;
+        wm_line("run=mesh");
+        wm_call(35, &p);
+        wm_bytes("ret_pso", &p.ret_pso, sizeof p.ret_pso);
+        wm_bytes("ret_error", &p.ret_error, sizeof p.ret_error);
+    }
+    if (tf) {
+        struct WMTTileRenderPipelineInfo info;
+        memset(&info, 0, sizeof info);
+        info.tile_function = (obj_handle_t)tf;
+        info.color_formats[0] = WMTPixelFormatBGRA8Unorm;
+        info.raster_sample_count = 1;
+        info.binary_archives_for_lookup.ptr = archives;
+        info.num_binary_archives_for_lookup = 2;
+        struct unixcall_mtldevice_newrenderpso p;
+        wm_fill(&p, sizeof p);
+        p.device = (uint64_t)wm_device;
+        p.info.ptr = &info;
+        wm_line("run=tile");
+        wm_call(131, &p);
+        wm_bytes("ret_pso", &p.ret_pso, sizeof p.ret_pso);
+        wm_bytes("ret_error", &p.ret_error, sizeof p.ret_error);
+    }
+}
+
+/* 113 on an archive into a file of the case's folder: whether it wrote one. */
+static void serialize_file(uint64_t archive, const char *name) {
+    NSString *file = [NSString stringWithFormat:@"%s/nil-device-%s.bin", wm_tmpdir(), name];
+    struct unixcall_mtlbinaryarchive_serialize s;
+    wm_fill(&s, sizeof s);
+    s.archive = archive;
+    s.url.ptr = file.fileSystemRepresentation;
+    wm_call(113, &s);
+    error_of("serialize", s.ret_error, false);
+    struct stat st;
+    wm_val("file", "%s", !stat(file.fileSystemRepresentation, &st) && st.st_size > 0 ? "written" : "missing");
+}
+
+/* Device 0: the pipeline send answers nil and sets no error, so the handler still adds the functions to the
+ * serialization archive it was given, and 113 then writes a file. A port that returns early on a nil device writes none.
+ * 29, 34, 156, 35 and 131. */
+static void nil_device_serialize(void) {
+    id<MTLLibrary> lib = shared_lib(), mlib = wm_library(kMSLMesh), tlib = wm_library(kMSLTile);
+    id<MTLFunction> k = fn(lib, @"k"), vf = fn(lib, @"v"), ff = fn(lib, @"f"), vin = fn(lib, @"vin");
+    id<MTLFunction> mf = mlib ? fn(mlib, @"mshf") : nil, mff = mlib ? fn(mlib, @"mf") : nil, tf = tlib ? fn(tlib, @"tf") : nil;
+    id<MTLBinaryArchive> ac = [[wm_device newBinaryArchiveWithDescriptor:[[[MTLBinaryArchiveDescriptor alloc] init] autorelease] error:nil] autorelease];
+    id<MTLBinaryArchive> ar = [[wm_device newBinaryArchiveWithDescriptor:[[[MTLBinaryArchiveDescriptor alloc] init] autorelease] error:nil] autorelease];
+    id<MTLBinaryArchive> av = [[wm_device newBinaryArchiveWithDescriptor:[[[MTLBinaryArchiveDescriptor alloc] init] autorelease] error:nil] autorelease];
+    id<MTLBinaryArchive> am = [[wm_device newBinaryArchiveWithDescriptor:[[[MTLBinaryArchiveDescriptor alloc] init] autorelease] error:nil] autorelease];
+    id<MTLBinaryArchive> at = [[wm_device newBinaryArchiveWithDescriptor:[[[MTLBinaryArchiveDescriptor alloc] init] autorelease] error:nil] autorelease];
+    {
+        struct WMTComputePipelineInfo info;
+        compute_info(&info, k);
+        info.binary_archive_for_serialization = (obj_handle_t)ac;
+        struct unixcall_mtldevice_newcomputepso p;
+        wm_fill(&p, sizeof p);
+        p.device = 0;
+        p.info.ptr = &info;
+        wm_line("run=compute");
+        wm_call(29, &p);
+        wm_val("ret_pso", "%s", nz(p.ret_pso));
+        wm_val("ret_error", "%s", nz(p.ret_error));
+        serialize_file((uint64_t)ac, "compute");
+    }
+    {
+        struct WMTRenderPipelineInfo info;
+        render_info(&info, vf, ff);
+        info.binary_archive_for_serialization = (obj_handle_t)ar;
+        struct unixcall_mtldevice_newrenderpso p;
+        wm_fill(&p, sizeof p);
+        p.device = 0;
+        p.info.ptr = &info;
+        wm_line("run=render");
+        wm_call(34, &p);
+        wm_val("ret_pso", "%s", nz(p.ret_pso));
+        wm_val("ret_error", "%s", nz(p.ret_error));
+        serialize_file((uint64_t)ar, "render");
+    }
+    {
+        struct WMTRenderPipelineInfo info;
+        render_info(&info, vin, ff);
+        info.binary_archive_for_serialization = (obj_handle_t)av;
+        struct WMTVertexDescriptorInfo vd;
+        memset(&vd, 0, sizeof vd);
+        vd.attributes[0].format = MTLVertexFormatFloat4;
+        vd.attributes[1].format = MTLVertexFormatFloat2;
+        vd.attributes[1].offset = 16;
+        vd.layouts[0].stride = 24;
+        vd.layouts[0].step_function = MTLVertexStepFunctionPerVertex;
+        vd.layouts[0].step_rate = 1;
+        struct unixcall_mtldevice_newrenderpso_vertex p;
+        wm_fill(&p, sizeof p);
+        p.device = 0;
+        p.info.ptr = &info;
+        p.vertex.ptr = &vd;
+        wm_line("run=vertex");
+        wm_call(156, &p);
+        wm_val("ret_pso", "%s", nz(p.ret_pso));
+        wm_val("ret_error", "%s", nz(p.ret_error));
+        serialize_file((uint64_t)av, "vertex");
+    }
+    if (mf) {
+        struct WMTMeshRenderPipelineInfo info;
+        memset(&info, 0, sizeof info);
+        info.colors[0].pixel_format = WMTPixelFormatBGRA8Unorm;
+        info.colors[0].write_mask = 15;
+        info.rasterization_enabled = true;
+        info.raster_sample_count = 1;
+        info.mesh_function = (obj_handle_t)mf;
+        info.fragment_function = (obj_handle_t)mff;
+        info.binary_archive_for_serialization = (obj_handle_t)am;
+        struct unixcall_mtldevice_newmeshrenderpso p;
+        wm_fill(&p, sizeof p);
+        p.device = 0;
+        p.info.ptr = &info;
+        wm_line("run=mesh");
+        wm_call(35, &p);
+        wm_val("ret_pso", "%s", nz(p.ret_pso));
+        wm_val("ret_error", "%s", nz(p.ret_error));
+        serialize_file((uint64_t)am, "mesh");
+    }
+    if (tf) {
+        struct WMTTileRenderPipelineInfo info;
+        memset(&info, 0, sizeof info);
+        info.tile_function = (obj_handle_t)tf;
+        info.color_formats[0] = WMTPixelFormatBGRA8Unorm;
+        info.raster_sample_count = 1;
+        info.binary_archive_for_serialization = (obj_handle_t)at;
+        struct unixcall_mtldevice_newrenderpso p;
+        wm_fill(&p, sizeof p);
+        p.device = 0;
+        p.info.ptr = &info;
+        wm_line("run=tile");
+        wm_call(131, &p);
+        wm_val("ret_pso", "%s", nz(p.ret_pso));
+        wm_val("ret_error", "%s", nz(p.ret_error));
+        serialize_file((uint64_t)at, "tile");
+    }
+}
+
 /* ---- leaks ---- */
 
 /* Pipelines, functions, libraries and errors given back: nothing grows cycle after cycle. */
@@ -1016,6 +1243,8 @@ const struct wm_case wm_cases_g4[] = {
     {"g4", 144, "source", 0, source},
     {"g4", 157, "source-options", 0, source_options},
     {"g4", 25, "nil-args", 0, nil_args},
+    {"g4", 29, "lookup-nil-entry", 0, lookup_nil_entry},
+    {"g4", 29, "nil-device-serialize", 0, nil_device_serialize},
     {"g4", 26, "x-library-on-device", 0, x_library_on_device},
     {"g4", 29, "heap-growth", 0, heap_growth},
     {0},
