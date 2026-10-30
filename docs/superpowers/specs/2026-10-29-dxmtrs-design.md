@@ -297,8 +297,12 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
 - C5 (after C4's parity): `mtld3d.dll`, `mtld3d.so`, mtld3d's transport and wire, the `mtl` facade (its wire mirrors
   with it) and C3's interim pieces retire, and with them winemetal's MSL source-library slots for D3D9.
 
-Each step is one or more commits, each with its checks green (§8). Each step gets its own plan once the steps before it
-have landed.
+Each step is one or more commits, each with its checks green (§8). Pace (maintainer, 2026-10-30): a step's map and plan
+may be written ahead, while earlier steps run, and are rebased onto what has landed before the step starts; steps 4
+and 5 run at the same time in their own branches (they meet only at `airconv_public.h`), as may step 3 beside step R
+where their files are disjoint. Builds and gates stay serialized on the one Mac: every command that builds or installs
+MacNeutron's runtime, or checks out a branch in the build's DXMTRS checkout, holds one pipeline lock, and all editing
+happens in worktrees. Small steps (3, 6) get one adversarial plan reviewer, large ones (4, 5, §7's phases) three.
 
 ## 6. What outside code relies on
 
@@ -375,7 +379,7 @@ At every step:
 
 About 100k lines of C and C++ to port, over several months, landing as many small steps. This document covers all of
 it. The first implementation plan covers §3 (DXMTRS created and pinned) and §4 (Phase 0). Each step of §5, and §7,
-gets its own plan after the step before it has landed and Phase 0 has reported.
+gets its own plan, written ahead where §5's pace allows and rebased before it runs.
 
 Outward steps, each needing the maintainer's yes when it comes: creating DXMTRS on GitHub and pushing to it; switching
 MacNeutron's pin; fetching SPIRV-Cross or installing bindgen; fetching xwin if mtld3d's end-to-end programs cannot link
