@@ -4,7 +4,8 @@
 # permission, which is the user's to grant), and the VM host logs no error of its own. Builds nothing: first make
 # dxmt-tests and the presenter, eac-vm/host/build.sh, and the guest image (eac-vm/metal/build-guest.sh,
 # eac-vm/dxmt/stage.sh, image/build.sh wine in the builder). Prints a line a row, and both sides' frame times
-# (recorded, not graded). Exits 1 on any FAIL.
+# (recorded, not graded). Exits 1 on any FAIL. MN_REF_FROZEN=<folder>: that folder (a saved copy of this gate's own
+# present-ref, not the other gates' reference) is the macOS reference, and ref.sh is not run.
 # Last, with MN_GATE_GAMES=1 (the maintainer's go-ahead: it starts the game on their Steam account, and never while they
 # play), SMITE 2 (eac-vm/tests/smite2-render.sh) as Steam runs it, through the Mac's Steam (never started or quit here):
 # it skips, by name, without MN_GATE_GAMES=1, when Mac Steam isn't running, SMITE 2 isn't installed or Steam didn't
@@ -16,9 +17,10 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 MODE=${1:-guest}
 W=${BUILD_DIR:-$ROOT/build}/eac-vm-work
 D=$ROOT/eac-vm/dxmt
-REF=$W/share/present-ref G=$W/share/traces/present INV=$W/present-invocations
+REF=${MN_REF_FROZEN:-$W/share/present-ref} G=$W/share/traces/present INV=$W/present-invocations
 WINSHOT=$ROOT/build/wine-arm64-tests/winshot
 fail=0
+[ -z "${MN_REF_FROZEN:-}" ] || [ -d "$MN_REF_FROZEN" ] || { echo "present gate: MN_REF_FROZEN=$MN_REF_FROZEN is no folder"; exit 1; }
 ok() { echo "ok   $*"; }
 no() { echo "FAIL $*"; fail=1; }
 
@@ -45,8 +47,8 @@ python3 -I "$D/compare.py" self-test || fail=1
 sh "$D/share.sh" || exit 1
 printf '%s\n' 'd3d12_clear|d3d12_clear.exe|600|presented resize' \
   'present_loop|present_loop.exe|1280 720 0 0 600 0|frames' > "$INV"
-MN_REF_INVOCATIONS=$INV MN_REF_OUT=$REF MN_REF_RUNS=1 sh "$D/ref.sh" > "$W/present-ref.txt" 2>&1 \
-  || { tail "$W/present-ref.txt"; exit 1; }
+[ -n "${MN_REF_FROZEN:-}" ] || MN_REF_INVOCATIONS=$INV MN_REF_OUT=$REF MN_REF_RUNS=1 sh "$D/ref.sh" \
+  > "$W/present-ref.txt" 2>&1 || { tail "$W/present-ref.txt"; exit 1; }
 rm -rf "$G"
 
 # d3d12_clear, with winshot reading the window while it runs.

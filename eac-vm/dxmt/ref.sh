@@ -5,6 +5,8 @@
 # environment, a fresh shader cache per run, the share's timeout as a watchdog. Writes
 # build/eac-vm-work/share/dxmt-ref/<name>.<1|2>.txt, .status (the launcher's exit status, or "timeout") and .time.
 # The 4c gate (present-gate.sh) sets MN_REF_INVOCATIONS (its own programs), MN_REF_OUT and MN_REF_RUNS=1.
+# MN_REF_WINE_APP=<wine.app> runs that runtime instead of build/wine-arm64/wine.app (a saved one, to re-record a
+# reference after the C is replaced); the gates skip this script altogether with MN_REF_FROZEN=<folder>.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 WORK="${TMPDIR:-/tmp}/macneutron dxmt-guest-ref"
@@ -14,7 +16,8 @@ I=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share/dxmt-tests
 TO=$(cat "$I/timeout")
 now() { perl -MTime::HiRes=time -e 'printf "%.2f\n", time'; }
 rm -rf "$WORK" "$OUT"; mkdir -p "$WORK/compat" "$OUT"
-"$ROOT/.build/release/macneutron" install --tool-dir "$WORK/ours" --wine-app "${BUILD_DIR:-$ROOT/build}/wine-arm64/wine.app" > /dev/null
+WINE_APP=${MN_REF_WINE_APP:-${BUILD_DIR:-$ROOT/build}/wine-arm64/wine.app}
+"$ROOT/.build/release/macneutron" install --tool-dir "$WORK/ours" --wine-app "$WINE_APP" > /dev/null
 stop() {
   [ ! -d "$WORK/compat/pfx" ] || WINEPREFIX="$WORK/compat/pfx" WINEMSYNC=1 \
     "$WORK/ours/wine.app/Contents/Resources/bin/wineserver" -k > /dev/null 2>&1 || true

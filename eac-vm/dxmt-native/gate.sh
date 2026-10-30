@@ -2,7 +2,8 @@
 # The M1 gate (Direct3D forwarding spec §8): DXMT's headless D3D12 programs (and M4's D3D11 ones), built natively against native DXMT
 # (build.sh, build-tests.sh), print what they print on the macOS Wine runtime, by the 4b-2 gate's rule (compare.py).
 # MN_GATE_PROGRAMS, MN_GATE_RUNS and MN_GATE_NAME: another build of the programs (M2's loopback, loopback-gate.sh).
-# MN_DXMT_ONLY: those rows only.
+# MN_DXMT_ONLY: those rows only. MN_REF_FROZEN=<folder>: that folder (a saved ref.sh output) is the macOS reference,
+# and ref.sh is not run.
 # The macOS side is the 4b-2 gate's own reference (share.sh and ref.sh: one run each, through the runtime's launcher;
 # the maintainer's rule, 2026-10-17); the native side runs each program once as the guest gate does, with the share's timeout, a fresh shader cache and
 # ref.sh's DXMT settings, from the tests folder's paths (@S, @T). The XeSS and DLSS rows are M3's; d3d10_wine is Wine's
@@ -16,7 +17,7 @@ T=$ROOT/dxmt/tests
 P=${MN_GATE_PROGRAMS:-${BUILD_DIR:-$ROOT/build}/dxmt-native/tests}
 R=${MN_GATE_RUNS:-${BUILD_DIR:-$ROOT/build}/dxmt-native/runs}
 NAME=${MN_GATE_NAME:-dxmt-native gate}
-REF=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share/dxmt-ref
+REF=${MN_REF_FROZEN:-${BUILD_DIR:-$ROOT/build}/eac-vm-work/share/dxmt-ref}
 ROWS=${MN_DXMT_ONLY:-"d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_copy d3d12_depth d3d12_dxil
   d3d12_dxil_exec d3d12_hazards d3d12_indirect d3d12_layered d3d12_list7 d3d12_lod d3d12_null d3d12_query d3d12_timestamp
   d3d12_triangle d3d12_upscale d3d12_volume d3d12_vsread d3d11_api d3d11_compute d3d11_deferred d3d11_dynamic
@@ -24,6 +25,7 @@ ROWS=${MN_DXMT_ONLY:-"d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_co
 WANT=$(echo $ROWS | wc -w | tr -d ' ')
 now() { perl -MTime::HiRes=time -e 'printf "%.2f\n", time'; }
 fail=0
+[ -z "${MN_REF_FROZEN:-}" ] || [ -d "$MN_REF_FROZEN" ] || { echo "$NAME: MN_REF_FROZEN=$MN_REF_FROZEN is no folder"; exit 1; }
 python3 -I "$D/compare.py" self-test || fail=1
 # Its own programs built first, so a stale one never passes for today's DXMT (M1's deferred minors); another's
 # (MN_GATE_PROGRAMS: the loopback's) are its caller's to build.
@@ -33,7 +35,7 @@ for p in $ROWS; do [ -x "$P/$p" ] || { echo "$NAME: no $P/$p: run build-tests.sh
 # shellcheck disable=SC2086  # the names, one word each
 MN_DXMT_ONLY=$(echo $ROWS) sh "$D/share.sh" || exit 1
 mkdir -p "$R"
-MN_REF_RUNS=1 sh "$D/ref.sh" > "$R.ref.txt" 2>&1 || { tail "$R.ref.txt"; exit 1; }
+[ -n "${MN_REF_FROZEN:-}" ] || MN_REF_RUNS=1 sh "$D/ref.sh" > "$R.ref.txt" 2>&1 || { tail "$R.ref.txt"; exit 1; }
 TO=$(cat "${BUILD_DIR:-$ROOT/build}/eac-vm-work/share/dxmt-tests/timeout")
 rm -rf "$R"; mkdir -p "$R/cache"
 n=0
