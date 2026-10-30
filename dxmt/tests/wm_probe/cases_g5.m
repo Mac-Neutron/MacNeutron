@@ -292,7 +292,10 @@ static void nil_args(void) {
     struct unixcall_mtldevice_newfxframeinterpolator np = {.device = 0, .info = {.ptr = &fi}};
     wm_fill(&np.ret, sizeof np.ret);
     wm_own("ret", &np.ret);
+    /* supportsDevice:nil is NO: the C sends no newFrameInterpolatorWithDevice: (no swz@ line). */
+    wm_swizzles(true);
     wm_call(151, &np);
+    wm_swizzles(false);
 }
 
 /* 56 with no device: MetalFX's answer to newTemporalScalerWithDevice:nil. */

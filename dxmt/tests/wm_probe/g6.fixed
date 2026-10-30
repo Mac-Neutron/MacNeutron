@@ -85,15 +85,27 @@ g6 100 display-settings 0 after=0
 g6 99 display-settings 0 ret=0 colorspace=fill metadata=none
 g6 101 display-settings 0 version=0 colorspace=fill metadata=none edr=none
 g6 100 display-settings 0 after=1
-g6 101 display-settings 0 version=1 colorspace=set cs=window-screen's metadata=window-screen's max_edr=screen potential_edr=screen
-g6 101 display-settings 0 version=1 colorspace=set cs=window-screen's metadata=window-screen's max_edr=0x1p+0 potential_edr=screen
+g6 100 display-settings 0 after=1
+g6 101 display-settings 0 version=2 colorspace=set cs=window-screen's metadata=window-screen's max_edr=screen potential_edr=screen
+g6 101 display-settings 0 version=2 colorspace=set cs=window-screen's metadata=window-screen's max_edr=0x1p+0 potential_edr=screen
 g6 100 display-settings 0 after=0
 g6 100 display-settings 0 after=0
-g6 96 main-blocked 0 written=0-43
-g6 97 main-blocked 0 written=0-7
-g6 101 main-blocked 0 version=written
+g6 96 main-blocked 0 written=0-43 edr=0x1p+1,0x1p+2,0x1.8p+1
+g6 97 main-blocked 0 written=0-7 edr=0x1p+1,0x1p+2
+g6 101 main-blocked 0 version=written edr=0x1p+1,0x1p+2
 g6 70 main-blocked-70 hang
 g6 70 main-blocked-70 0 size=0x1.4p+9x0x1.68p+8
+g6 70 on-main msg@main setDevice: setDevice=h1
+g6 70 on-main msg@main setOpaque: setOpaque=1
+g6 70 on-main msg@main setFramebufferOnly: setFramebufferOnly=0
+g6 70 on-main msg@main setContentsScale: setContentsScale=0x1p+1
+g6 70 on-main msg@main setDisplaySyncEnabled: setDisplaySyncEnabled=0
+g6 70 on-main msg@main setDrawableSize: setDrawableSize=00000000000084400000000000807640
+g6 70 on-main msg@main setPixelFormat: setPixelFormat=81
+g6 70 on-main 0
+g6 93 on-main msg@main setColorspace: setColorspace=nonnull
+g6 93 on-main msg@main setWantsExtendedDynamicRangeContent: setWantsExtendedDynamicRangeContent=1
+g6 93 on-main 0 ret=1
 g6 63 nil-args 0 ret=0
 g6 64 nil-args 0
 g6 65 nil-args 0
@@ -112,3 +124,4 @@ g6 71 nil-args 0 written=0-34,36-39 device=0 scale=0x0p+0 pixel_format=0
 g6 93 nil-args 0 ret=1
 g6 97 nil-args 0 value=0x1p+0,0x1p+0
 g6 101 nil-args 0 version=0 colorspace=fill metadata=none edr=none
+g6 66 x-drawable-on-device raised NSInvalidArgumentException ret=fill

@@ -4,6 +4,8 @@ g10 74 compile 0 ret=0 error=0 refl=0-71 refl-sha=sha256:f4ec7f29ed4fbd6833ea95d
 g10 76 compile 0 ret=0 error=0 bitcode=h2
 g10 77 compile 0 bitcode=sha256:86488e433c015be97148a8a8cd15a55253526d2ca41e3ae0e5d4b2ac6ab0b691/3006
 g10 78 compile 0
+g10 76 compile 0 ret=1 error=nonnull
+g10 80 compile 0
 g10 75 compile 0
 g10 74 bitcode 0 ret=0 error=0 shader=h1
 g10 76 bitcode 0 ret=0 error=0 bitcode=h2
@@ -32,9 +34,13 @@ g10 74 geometry 0 ret=0 error=0 refl=0-71 refl-sha=sha256:1c858152f663cc93258aee
 g10 81 geometry 0 ret=0 error=0 bitcode=h3
 g10 77 geometry 0 bitcode=sha256:94ba04242b58ec805abdefe36127c196e9641970a7ecfd1f529d9bc480def024/4768
 g10 78 geometry 0
+g10 81 geometry 0 ret=1 error=nonnull
+g10 80 geometry 0
 g10 82 geometry 0 ret=0 error=0 bitcode=h4
 g10 77 geometry 0 bitcode=sha256:f487147195e2a8a4ad8d2c2ffb9dd61ac928a9e84fc41d6e24e2cc023d799d92/5374
 g10 78 geometry 0
+g10 82 geometry 0 ret=1 error=nonnull
+g10 80 geometry 0
 g10 75 geometry 0
 g10 75 geometry 0
 g10 74 tessellation 0 ret=0 error=0 shader=h1
@@ -43,9 +49,13 @@ g10 74 tessellation 0 ret=0 error=0 refl=0-19,28-59,64-71 refl-sha=sha256:d3ed0d
 g10 84 tessellation 0 ret=0 error=0 bitcode=h4
 g10 77 tessellation 0 bitcode=sha256:bb45926e0d72ca38055c27536d26dce77517a8c5ba96c8e7c11ece53230762cf/12176
 g10 78 tessellation 0
+g10 84 tessellation 0 ret=1 error=nonnull
+g10 80 tessellation 0
 g10 85 tessellation 0 ret=0 error=0 bitcode=h5
 g10 77 tessellation 0 bitcode=sha256:419a00d05bbb2d17c9d8980750049c058805ed2f0ed94be1622c549250063064/10254
 g10 78 tessellation 0
+g10 85 tessellation 0 ret=1 error=nonnull
+g10 80 tessellation 0
 g10 75 tessellation 0
 g10 75 tessellation 0
 g10 75 tessellation 0

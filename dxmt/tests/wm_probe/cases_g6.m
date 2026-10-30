@@ -50,6 +50,29 @@ static struct edr screen_edr(NSScreen *s) {
     return e;
 }
 
+/* NSScreen's three EDR getters answer 2, 4 and 3 while on (no screen here has EDR headroom: they answer the C's
+ * no-screen 1, 1, 0), so a handler that reads the screen (objc_msgSend, the C's and objc2's alike) differs from one
+ * that doesn't, and the three from each other. On for the case, off at its end. */
+static double edr_max(id self, SEL cmd) { return 2.0; }
+static double edr_potential(id self, SEL cmd) { return 4.0; }
+static double edr_reference(id self, SEL cmd) { return 3.0; }
+static void edr_swizzle(bool on) {
+    static IMP saved[3];
+    const SEL sels[3] = {@selector(maximumExtendedDynamicRangeColorComponentValue),
+                         @selector(maximumPotentialExtendedDynamicRangeColorComponentValue),
+                         @selector(maximumReferenceExtendedDynamicRangeColorComponentValue)};
+    const IMP imps[3] = {(IMP)edr_max, (IMP)edr_potential, (IMP)edr_reference};
+    for (unsigned i = 0; i < 3; i++) {
+        Method m = class_getInstanceMethod([NSScreen class], sels[i]);
+        if (!m) {
+            wm_line("no-method %s", sel_getName(sels[i]));
+            continue;
+        }
+        if (on) saved[i] = method_setImplementation(m, imps[i]);
+        else if (saved[i]) method_setImplementation(m, saved[i]);
+    }
+}
+
 static void set_wants_edr(CAMetalLayer *l, BOOL on) {
     wm_on_main(^{
       l.wantsExtendedDynamicRangeContent = on;
@@ -381,6 +404,7 @@ static void displays(void) {
  * the screen's), an invalid ID and 0 (no profile: the generic RGB profile's gamut; no screen: 1, 0, 1). */
 static void display_description(void) {
     const uint64_t ids[] = {INVALID_DISPLAY, 0, CGMainDisplayID(), secondary_display(NULL)};
+    edr_swizzle(true);
     for (unsigned i = 0; i < 4; i++) {
         if (i == 3 && !ids[i]) {
             wm_line("secondary=none");
@@ -414,6 +438,7 @@ static void display_description(void) {
         wm_rel("reference_edr", d.maximum_reference_edr_color_component_value == e.reference, "screen", "%a",
                d.maximum_reference_edr_color_component_value);
     }
+    edr_swizzle(false);
 }
 
 /* 97 on a layer without a view (1, 1), then on the probe window's layer, its EDR wish on and off. */
@@ -421,9 +446,10 @@ static void edr(void) {
     struct WMTEDRValue v;
     wm_fill(&v, sizeof v);
     struct unixcall_generic_obj_ptr_noret p = {.handle = (obj_handle_t)[CAMetalLayer layer], .arg = {.ptr = &v}};
+    struct wm_window w = wm_window();
+    edr_swizzle(true);
     wm_call(97, &p);
     wm_val("value", "%a,%a", v.maximum_edr_color_component_value, v.maximum_potential_edr_color_component_value);
-    struct wm_window w = wm_window();
     NSScreen *s = window_screen(w);
     for (int on = 1; on >= 0; on--) {
         set_wants_edr(w.layer, on);
@@ -438,6 +464,7 @@ static void edr(void) {
         wm_rel("potential_edr", v.maximum_potential_edr_color_component_value == e.potential, "screen", "%a",
                v.maximum_potential_edr_color_component_value);
     }
+    edr_swizzle(false);
 }
 
 /* 100 then 99 (main: entry 1; any other ID, invalid or 0: entry 0; no metadata clears); 101 on a windowless layer,
@@ -462,30 +489,41 @@ static void display_settings(void) {
     update(main_id, WMTColorSpaceHDR_PQ, &M1);
     /* The window is on NSScreen.mainScreen, the focused screen, not always the main display's: entry 1 or 0. */
     struct wm_window w = wm_window();
+    edr_swizzle(true);
     NSScreen *s = window_screen(w);
-    bool on_main = [s.deviceDescription[@"NSScreenNumber"] unsignedIntValue] == main_id;
+    uint64_t window_id = [s.deviceDescription[@"NSScreenNumber"] unsignedIntValue];
+    bool on_main = window_id == main_id;
+    /* The window's entry (set once above, either way) set again with the same values: version counts the sets, 2. */
+    update(window_id, on_main ? WMTColorSpaceHDR_PQ : WMTColorSpaceHDR_scRGB, on_main ? &M1 : &M2);
     for (int on = 1; on >= 0; on--) {
         set_wants_edr(w.layer, on);
         query_layer(w.layer, s, on, on_main ? &M1 : &M2, on_main ? WMTColorSpaceHDR_PQ : WMTColorSpaceHDR_scRGB);
     }
+    edr_swizzle(false);
     update(main_id, WMTColorSpaceSRGB, NULL);
     update(INVALID_DISPLAY, WMTColorSpaceSRGB, NULL);
 }
 
-/* With main blocked: 96, 97 and 101 on the window's layer read AppKit on the calling thread and return. */
+/* With main blocked: 96, 97 and 101 on the window's layer (EDR wished) read AppKit on the calling thread and return;
+ * the EDR values are edr_swizzle's (main can't read the screen's here). */
 static void main_blocked(void) {
     struct wm_window w = wm_window();
+    set_wants_edr(w.layer, YES);
+    edr_swizzle(true);
     wm_main_blocked(^{
       struct WMTDisplayDescription d;
       wm_fill(&d, sizeof d);
       struct unixcall_generic_obj_ptr_noret p = {.handle = CGMainDisplayID(), .arg = {.ptr = &d}};
       wm_call(96, &p);
       written32("written", &d, sizeof d);
+      wm_val("edr", "%a,%a,%a", d.maximum_edr_color_component_value, d.maximum_potential_edr_color_component_value,
+             d.maximum_reference_edr_color_component_value);
       struct WMTEDRValue v;
       wm_fill(&v, sizeof v);
       struct unixcall_generic_obj_ptr_noret e = {.handle = (obj_handle_t)w.layer, .arg = {.ptr = &v}};
       wm_call(97, &e);
       written32("written", &v, sizeof v);
+      wm_val("edr", "%a,%a", v.maximum_edr_color_component_value, v.maximum_potential_edr_color_component_value);
       struct WMTHDRMetadata m;
       wm_fill(&m, sizeof m);
       struct unixcall_query_display_setting_for_layer q;
@@ -493,7 +531,35 @@ static void main_blocked(void) {
       q.layer = (obj_handle_t)w.layer, q.hdr_metadata.ptr = &m;
       wm_call(101, &q);
       wm_val("version", "%s", q.version == WM_FILL64 ? "fill" : "written");
+      wm_val("edr", "%a,%a", q.edr_value.maximum_edr_color_component_value,
+             q.edr_value.maximum_potential_edr_color_component_value);
     });
+    edr_swizzle(false);
+}
+
+/* 70 and 93 called on main: the C runs their sets there at once (a dispatch_sync to main from main deadlocks: hang). */
+static void on_main(void) {
+    CAMetalLayer *layer = [CAMetalLayer layer];
+    id rec = wm_rec(layer, nil);
+    struct WMTLayerProps props = layer_props((obj_handle_t)wm_device);
+    wm_on_main(^{
+      struct unixcall_generic_obj_constptr_noret s = {.handle = (obj_handle_t)rec, .arg = {.ptr = &props}};
+      wm_call(70, &s);
+      struct unixcall_generic_obj_uint64_uint64_ret c;
+      wm_fill(&c, sizeof c);
+      c.handle = (obj_handle_t)rec, c.arg = WMTColorSpaceHDR_PQ;
+      wm_call(93, &c);
+      wm_val("ret", "%llu", (unsigned long long)c.ret);
+    });
+}
+
+/* 66 with a device as the drawable: the device has no -texture (unrecognized selector: raised). */
+static void x_drawable_on_device(void) {
+    struct unixcall_generic_obj_obj_ret p;
+    wm_fill(&p, sizeof p);
+    p.handle = (obj_handle_t)wm_device;
+    wm_call(66, &p);
+    wm_val("ret", "%s", p.ret == WM_FILL64 ? "fill" : "written");
 }
 
 /* With main blocked: 70's sets wait for main (hang), then run. */
@@ -586,7 +652,9 @@ const struct wm_case wm_cases_g6[] = {
     {"g6", 100, "display-settings", 0, display_settings},
     {"g6", 96, "main-blocked", WM_ISOLATE, main_blocked},
     {"g6", 70, "main-blocked-70", WM_ISOLATE, main_blocked_70},
+    {"g6", 70, "on-main", WM_ISOLATE, on_main},
     {"g6", 99, "wsi-hooks", WM_NATIVE, wsi_hooks},
     {"g6", 63, "nil-args", 0, nil_args},
+    {"g6", 66, "x-drawable-on-device", 0, x_drawable_on_device},
     {0},
 };

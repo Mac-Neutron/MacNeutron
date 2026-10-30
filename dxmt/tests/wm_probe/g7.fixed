@@ -7,11 +7,13 @@ g7 108 win32-event 0 ret=h1 published=1
 g7 104 win32-event 0 hook=given same-thread=1
 g7 109 win32-event 0 after-destroy=1
 g7 110 win32-event 0 thread=returned
-g7 108 first-word 0 ret=h1 first-word=runloop(T)
+g7 109 first-word 0
+g7 108 first-word 0 ret=h1 first-word=runloop(T) second-start=returned
 g7 109 first-word 0 after-destroy=1
 g7 110 first-word 0 thread=returned
 g7 108 win32-events 0 ret=h1 published=1
 g7 146 win32-events 0 after-one=0 hook=given same-thread=1 hooks=1
+g7 146 win32-events 0 hooks=1
 g7 109 win32-events 0 after-destroy=1
 g7 110 win32-events 0 thread=returned
 g7 108 listener-notify-before-start 0 ret=h1

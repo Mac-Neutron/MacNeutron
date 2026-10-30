@@ -181,13 +181,19 @@ static void win32_event(void) {
     destroy_and_join(&s);
 }
 
-/* After T's start published and before 110: the listener's first word is T's run loop. */
+/* After T's start published and before 110: the listener's first word is T's run loop. A second start on another
+ * thread then returns at once (D5: only the winning start runs; its line prints no field). */
 static void first_word(void) {
     obj_handle_t l = create();
     struct starter s;
     start(&s, l);
     uint64_t w = published(l);
     wm_rel("first-word", w && w == (uint64_t)s.loop, "runloop(T)", "0x%llx", (unsigned long long)w);
+    struct starter *again = malloc(sizeof *again); /* kept when stuck: its thread still writes it */
+    start_q(again, l, true);
+    bool back = finished(again);
+    wm_val("second-start", "%s", back ? "returned" : "stuck");
+    if (back) free(again);
     destroy_and_join(&s);
 }
 
@@ -213,6 +219,15 @@ static void win32_events(void) {
     wm_val("after-one", "%u", hook_calls);
     ev[1].signaledValue = 2;
     hooked(&s, 0x5678);
+    usleep(100000);
+    wm_val("hooks", "%u", hook_calls);
+    /* Count 2, needed 3, both signalled: never set (D7: the hold stays). */
+    id<MTLSharedEvent> more[2] = {shared_event(), shared_event()};
+    obj_handle_t mores[2] = {(obj_handle_t)more[0], (obj_handle_t)more[1]};
+    p.shared_events.ptr = mores, p.count = 2, p.needed = 3, p.event_handle = 0x5679;
+    wm_call(146, &p);
+    more[0].signaledValue = 1;
+    more[1].signaledValue = 2;
     usleep(100000);
     wm_val("hooks", "%u", hook_calls);
     destroy_and_join(&s);
@@ -452,7 +467,8 @@ static void shared_texture(void) {
     wm_send_refs(info.mach_port);
 }
 
-/* Natively: 104 holds the mn_win32 event (one more reference) until its set on T drops it. */
+/* Natively: 104 holds the mn_win32 event (one more reference) until its set on T drops it. 146 with count 0 (null
+ * arrays) holds it too and never sets it: that reference stays (D7). */
 static void win32_event_native(void) {
     hook_reset();
     void *e = mn_win32_relay_event(relay, NULL, (void *)0x6789);
@@ -460,6 +476,11 @@ static void win32_event_native(void) {
     struct starter s;
     start(&s, l);
     wm_val("published", "%d", published(l) != 0);
+    int refs0 = ((struct mn_win32_handle *)e)->refs;
+    struct unixcall_mtlsharedevent_seteventatvalues none = {
+        .shared_event_listener = l, .count = 0, .needed = 1, .event_handle = (obj_handle_t)e};
+    wm_call(146, &none);
+    wm_val("held", "%+d", ((struct mn_win32_handle *)e)->refs - refs0);
     id<MTLSharedEvent> ev = shared_event();
     int refs = ((struct mn_win32_handle *)e)->refs;
     set_event_at(ev, (obj_handle_t)e, l, 1);
@@ -468,6 +489,7 @@ static void win32_event_native(void) {
     hooked(&s, 0x6789);
     destroy_and_join(&s);
     wm_val("refs", "%+d", ((struct mn_win32_handle *)e)->refs - refs);
+    wm_val("count0-held", "%+d", ((struct mn_win32_handle *)e)->refs - refs0);
     mn_win32_unref(e);
 }
 

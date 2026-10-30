@@ -71,12 +71,21 @@ static sm50_bitcode_t compiled(int ret, sm50_bitcode_t bitcode, sm50_error_t err
     return bitcode;
 }
 
+/* A compile-shaped call with no bitcode out (ret filled before it): airconv answers 1 and an error ("ppBitcode can
+ * not be null"), which 80 frees. */
+static void failed(int ret, sm50_error_t error) {
+    wm_val("ret", "%d", ret);
+    wm_val("error", "%s", error == (sm50_error_t)WM_FILL64 ? "fill" : error ? "nonnull" : "0");
+    struct sm50_free_error_params f = {.error = error};
+    if (error && error != (sm50_error_t)WM_FILL64) wm_call(80, &f);
+}
+
 static void initialize(void) {
     sm50_shader_t s = init_shader("../shaders/triangle.vs.dxil", true);
     destroy_shader(s);
 }
 
-/* 76 on a pixel shader with PSO_PIXEL_SHADER -> COMMON: the bitcode's sha256 (77). */
+/* 76 on a pixel shader with PSO_PIXEL_SHADER -> COMMON: the bitcode's sha256 (77); then with no bitcode out. */
 static void compile(void) {
     sm50_shader_t s = init_shader("../shaders/triangle.ps.dxil", true);
     struct SM50_SHADER_COMMON_DATA c = common(NULL);
@@ -96,6 +105,10 @@ static void compile(void) {
     compiled(p.ret, bitcode, error);
     bitcode_sha(bitcode);
     destroy_bitcode(bitcode);
+    wm_fill(&p.ret, sizeof p.ret), wm_fill(&error, sizeof error);
+    p.bitcode = NULL;
+    wm_call(76, &p);
+    failed(p.ret, error);
     destroy_shader(s);
 }
 
@@ -186,7 +199,7 @@ static void error(void) {
     }, 100);
 }
 
-/* 81/82 on triangle2's vertex and geometry shaders: each pipeline stage's bitcode. */
+/* 81/82 on triangle2's vertex and geometry shaders: each pipeline stage's bitcode; then each with no bitcode out. */
 static void geometry(void) {
     sm50_shader_t vs = init_shader("../shaders/triangle2.vs.dxil", false);
     sm50_shader_t gs = init_shader("../shaders/triangle2.gs.dxil", true);
@@ -203,21 +216,31 @@ static void geometry(void) {
     wm_fill(&b, sizeof b), wm_fill(&error, sizeof error);
     struct sm50_compile_geometry_pipeline_vertex_params v = {
         .vertex = vs, .geometry = gs, .vertex_args = &geo, .func_name = "probe_vsgs", .bitcode = &b, .error = &error};
+    wm_fill(&v.ret, sizeof v.ret);
     wm_call(81, &v);
     bitcode_sha(compiled(v.ret, b, error));
     destroy_bitcode(b);
+    wm_fill(&v.ret, sizeof v.ret), wm_fill(&error, sizeof error);
+    v.bitcode = NULL;
+    wm_call(81, &v);
+    failed(v.ret, error);
     geo.next = &c;
     wm_fill(&b, sizeof b), wm_fill(&error, sizeof error);
     struct sm50_compile_geometry_pipeline_geometry_params g = {
         .vertex = vs, .geometry = gs, .geometry_args = &geo, .func_name = "probe_gs", .bitcode = &b, .error = &error};
+    wm_fill(&g.ret, sizeof g.ret);
     wm_call(82, &g);
     bitcode_sha(compiled(g.ret, b, error));
     destroy_bitcode(b);
+    wm_fill(&g.ret, sizeof g.ret), wm_fill(&error, sizeof error);
+    g.bitcode = NULL;
+    wm_call(82, &g);
+    failed(g.ret, error);
     destroy_shader(gs);
     destroy_shader(vs);
 }
 
-/* 84/85 on d3d11's patch shaders: the hull and domain stages' bitcode. */
+/* 84/85 on d3d11's patch shaders: the hull and domain stages' bitcode; then each with no bitcode out. */
 static void tessellation(void) {
     sm50_shader_t vs = init_shader("../shaders/d3d11/patch.vs.dxbc", false);
     sm50_shader_t hs = init_shader("../shaders/d3d11/patch.hs.dxbc", true);
@@ -235,18 +258,28 @@ static void tessellation(void) {
     wm_fill(&b, sizeof b), wm_fill(&error, sizeof error);
     struct sm50_compile_tessellation_pipeline_hull_params h = {
         .vertex = vs, .hull = hs, .hull_args = &ia, .func_name = "probe_vshs", .bitcode = &b, .error = &error};
+    wm_fill(&h.ret, sizeof h.ret);
     wm_call(84, &h);
     bitcode_sha(compiled(h.ret, b, error));
     destroy_bitcode(b);
+    wm_fill(&h.ret, sizeof h.ret), wm_fill(&error, sizeof error);
+    h.bitcode = NULL;
+    wm_call(84, &h);
+    failed(h.ret, error);
     struct SM50_SHADER_GS_PASS_THROUGH_DATA pass;
     wm_fill(&pass, sizeof pass);
     pass.next = &tess, pass.type = SM50_SHADER_GS_PASS_THROUGH, pass.DataEncoded = 0, pass.RasterizationDisabled = false;
     wm_fill(&b, sizeof b), wm_fill(&error, sizeof error);
     struct sm50_compile_tessellation_pipeline_domain_params d = {
         .hull = hs, .domain = ds, .domain_args = &pass, .func_name = "probe_ds", .bitcode = &b, .error = &error};
+    wm_fill(&d.ret, sizeof d.ret);
     wm_call(85, &d);
     bitcode_sha(compiled(d.ret, b, error));
     destroy_bitcode(b);
+    wm_fill(&d.ret, sizeof d.ret), wm_fill(&error, sizeof error);
+    d.bitcode = NULL;
+    wm_call(85, &d);
+    failed(d.ret, error);
     destroy_shader(ds);
     destroy_shader(hs);
     destroy_shader(vs);
