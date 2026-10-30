@@ -56,17 +56,41 @@ static wm_unix_fn table[NSLOTS];
 static char slot_group[NSLOTS][4];
 static pthread_t worker;
 
-/* The case running, its slot, its counts. */
+/* The case running, its counts. */
 static const struct wm_case *cur;
-static int cur_slot = -1;
 static unsigned counts[NSLOTS];
 static bool muted;
 
 /* ---- the line printer ---- */
 
 static pthread_mutex_t lock;
-static char *pending;
-static size_t pending_len, pending_cap;
+
+/* A thread's line and call: each thread has its own, so a call on a probe thread prints its own whole line while the
+ * worker goes on; wm_on_main lends the caller's to main for the block. */
+struct cstate {
+    int slot; /* the thread's call in progress or its last one; -1: none yet (its lines take last_slot) */
+    char *pending;
+    size_t pending_len, pending_cap;
+    struct {
+        const char *name;
+        const obj_handle_t *field;
+    } owns[8];
+    int nowns;
+};
+static __thread struct cstate *cs;
+static pthread_key_t cs_key;
+static struct cstate *wstate; /* the worker's */
+static int last_slot = -1;    /* the last call any thread started in the case (under lock) */
+
+static struct cstate *st(void) {
+    if (!cs) {
+        cs = calloc(1, sizeof *cs);
+        if (!cs) abort();
+        cs->slot = -1;
+        pthread_setspecific(cs_key, cs);
+    }
+    return cs;
+}
 
 /* One line: a newline inside a value prints as \n. */
 static void out_line(const char *s) {
@@ -78,60 +102,69 @@ static void out_line(const char *s) {
     fflush(stdout);
 }
 
-static void flush_pending(void) {
+static void flush_state(struct cstate *s) {
     pthread_mutex_lock(&lock);
-    if (pending_len) out_line(pending);
-    pending_len = 0;
+    if (s->pending_len) out_line(s->pending);
+    s->pending_len = 0;
     pthread_mutex_unlock(&lock);
 }
 
-static void vappend(const char *fmt, va_list ap) {
+static void flush_pending(void) { flush_state(st()); }
+
+/* A thread's last line is printed when it exits (Task 13's 109 thread returns right after its call). ponytail: the
+ * state itself stays allocated, a few hundred bytes a thread: another key's destructor may still print. */
+static void cs_exit(void *s) { flush_state(s); }
+
+static void vappend(struct cstate *s, const char *fmt, va_list ap) {
     va_list ap2;
     va_copy(ap2, ap);
     int n = vsnprintf(NULL, 0, fmt, ap2);
     va_end(ap2);
-    if (pending_len + (size_t)n + 2 > pending_cap) {
-        pending_cap = (pending_len + (size_t)n + 2) * 2;
-        pending = realloc(pending, pending_cap);
-        if (!pending) abort();
+    if (s->pending_len + (size_t)n + 2 > s->pending_cap) {
+        s->pending_cap = (s->pending_len + (size_t)n + 2) * 2;
+        s->pending = realloc(s->pending, s->pending_cap);
+        if (!s->pending) abort();
     }
-    vsnprintf(pending + pending_len, (size_t)n + 1, fmt, ap);
-    pending_len += (size_t)n;
+    vsnprintf(s->pending + s->pending_len, (size_t)n + 1, fmt, ap);
+    s->pending_len += (size_t)n;
 }
 
-static void append(const char *fmt, ...) {
+static void append(struct cstate *s, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    vappend(fmt, ap);
+    vappend(s, fmt, ap);
     va_end(ap);
 }
 
-static void start_line(void) {
-    if (cur_slot >= 0) append("%s %d %s", cur ? cur->group : "-", cur_slot, cur ? cur->name : "-");
-    else append("%s - %s", cur ? cur->group : "-", cur ? cur->name : "-");
+static void start_line(struct cstate *s) {
+    int slot = s->slot >= 0 ? s->slot : last_slot;
+    if (slot >= 0) append(s, "%s %d %s", cur ? cur->group : "-", slot, cur ? cur->name : "-");
+    else append(s, "%s - %s", cur ? cur->group : "-", cur ? cur->name : "-");
 }
 
 void wm_line(const char *fmt, ...) {
+    struct cstate *s = st();
     pthread_mutex_lock(&lock);
-    flush_pending();
-    start_line();
-    append(" ");
+    flush_state(s);
+    start_line(s);
+    append(s, " ");
     va_list ap;
     va_start(ap, fmt);
-    vappend(fmt, ap);
+    vappend(s, fmt, ap);
     va_end(ap);
-    flush_pending();
+    flush_state(s);
     pthread_mutex_unlock(&lock);
 }
 
 /* A field of the current line (a line of its own, "<prefix> k=v", when no call started one). */
 static void field(const char *fmt, ...) {
+    struct cstate *s = st();
     pthread_mutex_lock(&lock);
-    if (!pending_len) start_line();
-    append(" ");
+    if (!s->pending_len) start_line(s);
+    append(s, " ");
     va_list ap;
     va_start(ap, fmt);
-    vappend(fmt, ap);
+    vappend(s, fmt, ap);
     va_end(ap);
     pthread_mutex_unlock(&lock);
 }
@@ -184,28 +217,24 @@ void wm_h0(const char *name, uint64_t h) {
 
 /* ---- ownership ---- */
 
-static struct {
-    const char *name;
-    const obj_handle_t *field;
-} owns[8];
-static int nowns;
-static CFMutableDictionaryRef kept; /* object (one probe retain) -> its count after its last call */
+static CFMutableDictionaryRef kept; /* object (one probe retain) -> its count after its last call (under lock) */
 static struct {
     id obj;
     NSUInteger count;
-} ins[64];
+} ins[64]; /* the worker's (wm_in): only its calls (and main's, lent by wm_on_main) read them */
 static int nins;
 
 static bool tagged(uint64_t h) { return (int64_t)h < 0; }
 
 void wm_own(const char *name, const obj_handle_t *f) {
+    struct cstate *s = st();
     if (muted) return;
-    if (nowns == 8) {
+    if (s->nowns == 8) {
         wm_line("too-many-owns");
         stop();
     }
-    owns[nowns].name = name;
-    owns[nowns++].field = f;
+    s->owns[s->nowns].name = name;
+    s->owns[s->nowns++].field = f;
 }
 
 int wm_in(id obj) {
@@ -224,26 +253,34 @@ int wm_in(id obj) {
 static unsigned stub(void *params) { return 0; }
 
 unsigned wm_call(unsigned slot, void *params) {
+    struct cstate *s = st();
     flush_pending();
     if (slot >= NSLOTS) {
         wm_line("bad-slot %u", slot);
         stop();
     }
-    cur_slot = (int)slot;
+    s->slot = (int)slot;
+    pthread_mutex_lock(&lock);
+    last_slot = (int)slot;
     counts[slot]++;
+    pthread_mutex_unlock(&lock);
     if (cur && strcmp(slot_group[slot], cur->group)) wm_line("cross %u", slot);
     wm_unix_fn fn = table[slot];
     if (!fn) {
         field("null");
-        nowns = 0;
+        s->nowns = 0;
         return 0;
     }
-    for (int k = 0; k < nins; k++) ins[k].count = [ins[k].obj retainCount];
-    void *pool = objc_autoreleasePoolPush();
-    unsigned st = 0;
+    bool with_ins = s == wstate;
+    if (with_ins)
+        for (int k = 0; k < nins; k++) ins[k].count = [ins[k].obj retainCount];
+    /* No probe pool around 0, 1 and 10: slot 10's pool outlives its call until slot 1 releases it, and a probe pool
+     * pushed around either would be popped out of order. None of them answers a handle (10's pool has no own=). */
+    void *pool = slot == 0 || slot == 1 || slot == 10 ? NULL : objc_autoreleasePoolPush();
+    unsigned status = 0;
     const char *raised = NULL;
     @try {
-        st = fn(params);
+        status = fn(params);
     } @catch (NSException *e) {
         raised = strdup(e.name.UTF8String);
     } @catch (id e) {
@@ -252,8 +289,9 @@ unsigned wm_call(unsigned slot, void *params) {
     uint64_t v[8];
     NSUInteger before[8];
     bool first[8];
-    for (int i = 0; i < nowns; i++) {
-        v[i] = *owns[i].field;
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < s->nowns; i++) {
+        v[i] = *s->owns[i].field;
         if (!v[i] || v[i] == WM_FILL64 || tagged(v[i])) continue;
         id o = (id)v[i];
         first[i] = !CFDictionaryContainsKey(kept, o);
@@ -263,12 +301,14 @@ unsigned wm_call(unsigned slot, void *params) {
         }
         before[i] = [o retainCount];
     }
-    objc_autoreleasePoolPop(pool);
+    pthread_mutex_unlock(&lock);
+    if (pool) objc_autoreleasePoolPop(pool);
     if (raised) field("raised %s", raised);
-    else field("%x", st);
+    else field("%x", status);
     free((void *)raised);
-    for (int i = 0; i < nowns; i++) {
-        const char *n = owns[i].name;
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < s->nowns; i++) {
+        const char *n = s->owns[i].name;
         if (!v[i] || v[i] == WM_FILL64) {
             field("%s=%s", n, v[i] ? "fill" : "0");
             continue;
@@ -286,12 +326,14 @@ unsigned wm_call(unsigned slot, void *params) {
             field("%s=%s own=%+ld pool=%+ld", n, wm_hs(v[i]), first[i] ? (long)after - 1 : (long)after - (long)last,
                   (long)before[i] - (long)after);
     }
-    nowns = 0;
-    for (int k = 0; k < nins; k++) {
-        NSUInteger now = [ins[k].obj retainCount];
-        if (now != ins[k].count) field("in%d=%+ld", k + 1, (long)now - (long)ins[k].count);
-    }
-    return st;
+    pthread_mutex_unlock(&lock);
+    s->nowns = 0;
+    if (with_ins)
+        for (int k = 0; k < nins; k++) {
+            NSUInteger now = [ins[k].obj retainCount];
+            if (now != ins[k].count) field("in%d=%+ld", k + 1, (long)now - (long)ins[k].count);
+        }
+    return status;
 }
 
 /* ---- fields ---- */
@@ -477,7 +519,7 @@ static void spawn_case(const struct wm_case *c, const char *path, const char *co
     free(env);
     const struct wm_case *was = cur;
     cur = c;
-    cur_slot = (int)c->slot;
+    st()->slot = (int)c->slot;
     if (rc) {
         wm_line("spawn-failed %s", strerror(rc));
     } else {
@@ -498,7 +540,7 @@ static void spawn_case(const struct wm_case *c, const char *path, const char *co
         else if (WEXITSTATUS(st)) wm_line("exit %d", WEXITSTATUS(st));
     }
     cur = was;
-    cur_slot = -1;
+    st()->slot = -1;
 }
 
 /* The presenter beside a copy of the image's folder: the env case's "present" variant. */
@@ -534,7 +576,10 @@ NSMutableArray *wm__dump_keys(void) { return dump_keys_extra; }
 
 static void run_case(const struct wm_case *c) {
     cur = c;
-    cur_slot = -1;
+    st()->slot = -1;
+    pthread_mutex_lock(&lock);
+    last_slot = -1;
+    pthread_mutex_unlock(&lock);
     memset(counts, 0, sizeof counts);
     CFDictionaryRemoveAllValues(hnum);
     hnext = 0;
@@ -550,7 +595,7 @@ static void run_case(const struct wm_case *c) {
     }
     flush_pending();
     muted = false;
-    nowns = 0;
+    st()->nowns = 0;
     wm_swizzles(false);
     objc_autoreleasePoolPop(pool);
     CFIndex n = CFDictionaryGetCount(kept);
@@ -564,11 +609,11 @@ static void run_case(const struct wm_case *c) {
     if (counts_flag)
         for (unsigned s = 0; s < NSLOTS; s++)
             if (counts[s]) {
-                cur_slot = (int)s;
+                st()->slot = (int)s;
                 wm_line("calls %u", counts[s]);
             }
     cur = NULL;
-    cur_slot = -1;
+    st()->slot = -1;
 }
 
 static const char *case_flags(unsigned f) {
@@ -611,10 +656,10 @@ static void run_cases(void) {
                 if (copy) spawn_case(c, copy, extra, "present");
                 else {
                     cur = c;
-                    cur_slot = (int)c->slot;
+                    st()->slot = (int)c->slot;
                     wm_line("no-presenter (WM_PRESENTER)");
                     cur = NULL;
-                    cur_slot = -1;
+                    st()->slot = -1;
                 }
             } else if (c->flags & (WM_ISOLATE | WM_GMALLOC)) {
                 const char *extra[] = {"DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib", NULL};
@@ -628,9 +673,19 @@ static void run_cases(void) {
 
 /* ---- Metal helpers ---- */
 
+/* The caller waits, so main borrows its line and call state: fields after the block go on the block's last line. */
 void wm_on_main(void (^block)(void)) {
-    if (pthread_main_np()) block();
-    else dispatch_sync(dispatch_get_main_queue(), block);
+    if (pthread_main_np()) {
+        block();
+        return;
+    }
+    struct cstate *caller = st();
+    dispatch_sync(dispatch_get_main_queue(), ^{
+      struct cstate *was = cs;
+      cs = caller;
+      block();
+      cs = was;
+    });
 }
 
 bool wm_main_blocked(void (^block)(void)) {
@@ -973,6 +1028,7 @@ static void pair_mode(void) {
 static enum { RUN, TABLE, RATE, PAIR } mode;
 
 static void *worker_main(void *arg) {
+    wstate = st();
     @autoreleasepool {
         if (mode == RATE) rate_mode();
         else if (mode == PAIR) pair_mode();
@@ -1048,6 +1104,7 @@ int main(int argc, char **argv) {
     pthread_mutexattr_init(&ma);
     pthread_mutexattr_settype(&ma, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&lock, &ma);
+    pthread_key_create(&cs_key, cs_exit);
     hnum = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
     kept = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
     dump_keys_extra = [[NSMutableArray alloc] init];

@@ -37,7 +37,11 @@ static NSUInteger size_of(const char *t) {
 }
 
 static bool is_mtl(id o) { return o && ![o isProxy] && !strncmp(object_getClassName(o), "MTL", 3); }
-static bool is_descriptor(id o) { return is_mtl(o) && strstr(object_getClassName(o), "Descriptor"); }
+/* Descriptors and options objects (MTLCompileOptions): what winemetal builds and hands Metal. MTLFunctionConstantValues
+ * has no getters; the swizzle prints it. */
+static bool is_descriptor(id o) {
+    return is_mtl(o) && (strstr(object_getClassName(o), "Descriptor") || strstr(object_getClassName(o), "Options"));
+}
 
 /* An object as a value. A descriptor goes to dumps (path, object) when given, and prints as its class. */
 static NSString *fmt_obj(id o, NSString *path, NSMutableArray *dumps) {

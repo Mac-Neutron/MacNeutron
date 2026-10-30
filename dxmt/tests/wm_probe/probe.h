@@ -65,9 +65,15 @@ void wm_event_hook(void (*hook)(uint64_t nt_event)); /* the ntdll stand-in's NtS
 const char *wm_thread(void);         /* "main", "worker" (the cases' thread) or "other" */
 
 /* Calls. wm_call runs one slot through the probe-held table (WM_STUB=<slot>[,<slot>...] puts a stub that writes
- * nothing and returns 0 there) inside a probe autorelease pool, counts it (--counts), prints "cross <slot>" for a slot
- * outside the case's group, and starts the call's line: the status, or "raised <name>" when the handler raised, or
- * "null" for an empty table entry (not called). Fields then go on that line until the next line. */
+ * nothing and returns 0 there) inside a probe autorelease pool (not for 0, 1 and 10: slot 10's pool stays the
+ * thread's innermost until slot 1 releases it), counts it (--counts), prints "cross <slot>" for a slot outside the
+ * case's group, and starts the call's line: the status, or "raised <name>" when the handler raised, or "null" for an
+ * empty table entry (not called). Fields then go on that line until the next line.
+ * Threads: each thread has its own line, slot and wm_own registrations, so a call on a thread the case starts (109)
+ * prints its own whole line while the worker goes on; the thread's last line prints when it exits. A case joins such
+ * a thread before its next call (after 110), so the lines' order is fixed. A thread with no call of its own (main in
+ * wm_main_blocked, Metal's) names the last slot any thread called. wm_on_main lends the caller's line to main for the
+ * block. wm_in, and wm_h's stop, are the worker's (and main's under wm_on_main): a bad handle elsewhere aborts. */
 unsigned wm_call(unsigned slot, void *params);
 /* Before wm_call: the handle-out field at `field` gets "<name>=h<n> own=<delta> pool=+1|+0" after the call. own: for
  * an object first seen in the case, its count once the pool popped minus the probe's own retain (+1: the caller owns
@@ -110,7 +116,8 @@ void wm_dump_key(const char *key); /* one more private key, for the rest of the 
  * signatures (CAMetalLayer, MTLCaptureManager, the HUD's class). Arguments print as integers, %a doubles, struct bytes
  * in hex, pointers dereferenced by the selector's count:/length:/withRange: argument, objects by kind (NSString
  * quoted, NSURL by absoluteString, NSNumber by value, NSData by sha256, arrays and dictionaries recursively, MTL*
- * descriptors as their class with dump lines "<piece>.<key>=..." after, anything else by wm_hs). Autoreleased (the
+ * descriptors and options (a class name holding "Descriptor" or "Options") as their class with dump lines
+ * "<piece>.<key>=..." after, anything else by wm_hs). Autoreleased (the
  * case's pool). */
 id wm_rec(id target, Protocol *protocol);
 void wm_rec_ret(id recorder, SEL selector, id value); /* the canned return of one selector (an object) */
