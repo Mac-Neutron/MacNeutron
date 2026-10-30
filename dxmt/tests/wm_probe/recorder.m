@@ -110,7 +110,9 @@ static void dump_value(id v, NSString *path, bool vertex, int depth, NSMutableSe
     if ([v respondsToSelector:@selector(objectAtIndexedSubscript:)]) {
         [seen addObject:[NSValue valueWithNonretainedObject:v]];
         [lines addObject:[NSString stringWithFormat:@"%@=%s", path, object_getClassName(v)]];
-        for (unsigned i = 0; i < (vertex ? 31u : 8u); i++) {
+        /* Sample-buffer attachment arrays hold MTLMax*PassSampleBuffers (4): index 4 fails an assertion (abort). */
+        unsigned n = vertex ? 31u : strstr(object_getClassName(v), "SampleBufferAttachmentDescriptorArray") ? 4u : 8u;
+        for (unsigned i = 0; i < n; i++) {
             NSString *p = [NSString stringWithFormat:@"%@[%u]", path, i];
             id e;
             @try {
