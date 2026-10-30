@@ -6,6 +6,7 @@
 //   fail <file> <reason, or LLVM's error>
 // Exits 1 when any file fails.
 #include <llvm/Bitcode/BitcodeReader.h>
+#include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Metadata.h>
@@ -20,6 +21,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -56,9 +58,19 @@ static std::string probe(const std::vector<char> &blob, std::string &line) {
   if (size < 4 || start + size > end) return "bitcode lies outside the DXIL part";
 
   llvm::LLVMContext context;
+#if LLVM_VERSION_MAJOR < 17
   context.setOpaquePointers(false);  // airconv's contexts use typed pointers (AIR needs them)
+#endif
+  llvm::MemoryBufferRef buffer(llvm::StringRef(blob.data() + start, size), "dxil");
+#if LLVM_VERSION_MAJOR < 17
+  auto module = llvm::parseBitcodeFile(buffer, context);
+#else
+  // The newer reader refuses DXIL's data layout ("i8 must be 8-bit aligned"): hand it the default one instead.
   auto module = llvm::parseBitcodeFile(
-      llvm::MemoryBufferRef(llvm::StringRef(blob.data() + start, size), "dxil"), context);
+      buffer, context, llvm::ParserCallbacks([](llvm::StringRef, llvm::StringRef) -> std::optional<std::string> {
+        return std::string();
+      }));
+#endif
   if (!module) return "llvm: " + llvm::toString(module.takeError());
   if (print_ir) (*module)->print(llvm::outs(), nullptr);
 
@@ -70,7 +82,7 @@ static std::string probe(const std::vector<char> &blob, std::string &line) {
           entries += (entries.empty() ? "" : ",") + name->getString().str();
   std::map<std::string, int> calls;
   for (auto &function : **module)
-    if (function.getName().startswith("dx.op."))
+    if (function.getName().substr(0, 6) == "dx.op.")
       for (auto *user : function.users())
         if (llvm::isa<llvm::CallInst>(user)) calls[function.getName().str().substr(6)]++;
   std::vector<std::pair<std::string, int>> top(calls.begin(), calls.end());
@@ -88,6 +100,7 @@ static std::string probe(const std::vector<char> &blob, std::string &line) {
 }
 
 int main(int argc, char **argv) {
+  if (argc < 2) return fprintf(stderr, "usage: dxil-probe [-S] <file.dxil>...\n"), 1;
   int failures = 0, first = 1;
   if (argc > 1 && std::string(argv[1]) == "-S") print_ir = true, first = 2;
   for (int i = first; i < argc; i++) {
