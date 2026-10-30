@@ -1,7 +1,7 @@
 # DXMTRS: DXMT in Rust, then one project for D3D9 to D3D12
 
 Status: approved 2026-10-29; revised 2026-10-30 (D3D9's place and full convergence: §1, §2, §3, §5 steps R and 3,
-§6, §7, §8, §9; pending the maintainer's approval of this revision). Phase 0 ran the same day (plan
+§6, §7, §8, §9; approved by the maintainer 2026-10-30). Phase 0 ran the same day (plan
 `docs/superpowers/plans/2026-10-29-dxmtrs-phase0.md`):
 Mac-Neutron/DXMTRS exists and MacNeutron builds from it; the results and the translator decision are in §4.
 Related: `2026-09-28-macneutron-dxmt-fork-design.md` (our DXMT fork), `2026-09-29-macneutron-dxil-translator-design.md`
@@ -37,7 +37,7 @@ Each would be its own decision. (D3D9's shaders join the shared translator: main
 | Home | A new repository, github.com/Mac-Neutron/DXMTRS. |
 | Design (chat, 2026-10-29) | Approved: this document writes it down, with the corrections of §5 and §4. |
 | D3D9's place (maintainer, 2026-10-30) | "mtld3d gets moved to src/d3d9 and implemented the same way the other versions of DirectX are implemented … as consistent as possible … not a subproject anymore but part of DXMTRS like the rest of the code." Asked how far, the maintainer chose full convergence: `d3d9.dll` on the same Rust core and winemetal bridge as D3D10-12, D3D9's shaders through the AIR translator via an SM1-3 front end (mtld3d's MSL path retires), and layout, build, configuration, logging and presenter shared. |
-| Timing of the move (controller's default, 2026-10-30) | The layout and build move (step R, §5) comes before step 3, so nothing moves twice. It replaces "mtld3d's scripts first change at the merge" (2026-10-29): MacNeutron's scripts change once, in step R's pin bump. The runtime and shader convergence follow steps 4 and 5 (§5, C2-C5). |
+| Timing of the move (controller's default, approved with this revision 2026-10-30) | The layout and build move (step R, §5) comes before step 3, so nothing moves twice. It replaces "mtld3d's scripts first change at the merge" (2026-10-29): MacNeutron's scripts change once, in step R's pin bump. The runtime and shader convergence follow steps 4 and 5 (§5, C2-C5). |
 
 Assumption to confirm: "D3DMtl" is mtld3d (athei/mtld3d, already vendored at our DXMT fork's `mtld3d/`).
 
