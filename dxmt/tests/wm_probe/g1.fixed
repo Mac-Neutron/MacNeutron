@@ -1,0 +1,335 @@
+g1 0 retain-release 0 in1=+1
+g1 1 retain-release 0 in1=-1
+g1 0 retain-release 0 in2=+1
+g1 1 retain-release 0 in2=-1
+g1 0 retain-release 0 in3=+1
+g1 1 retain-release 0 in3=-1
+g1 0 retain-release 0 in4=+1
+g1 1 retain-release 0 in4=-1
+g1 0 retain-release 0 in5=+1
+g1 1 retain-release 0 in5=-1
+g1 0 retain-release 0 in6=+1
+g1 1 retain-release 0 in6=-1
+g1 1 retain-release 0 gone=yes
+g1 0 retain-release 0
+g1 1 retain-release 0
+g1 10 pool-drain 0 pool=h1 class=NSAutoreleasePool inner-before=alive
+g1 1 pool-drain 0 gone=yes outer-alive=yes
+g1 10 pool-nested 0 pool-a=h1
+g1 10 pool-nested 0 pool-b=h2
+g1 1 pool-nested 0 b-gone=yes a-alive=yes
+g1 1 pool-nested 0 a-gone=yes
+g1 4 devices 0 ret=h1 own=+1 pool=+0
+g1 3 devices 0 count=array-count count-some=>=1
+g1 2 devices 0 element=objectAtIndex system-default=default-device
+g1 2 array-object 0 ret=h1 own=+3 pool=+0 element=objectAtIndex
+g1 2 array-object 0 ret=h2 own=+3 pool=+0 element=objectAtIndex
+g1 2 array-object 0 ret=h3 own=+3 pool=+0 element=objectAtIndex
+g1 3 array-object 0 count=3
+g1 3 array-object 0 count-empty=0
+g1 2 x-array-past-end raised NSRangeException ret=none
+g1 2 x-array-past-end raised NSRangeException ret=none
+g1 2 x-array-past-end raised NSRangeException ret=none
+g1 2 x-array-past-end raised NSRangeException ret=none
+g1 2 x-array-past-end raised NSRangeException ret=none
+g1 2 x-array-past-end raised NSRangeException ret=none
+g1 3 x-wrong-class raised NSInvalidArgumentException ret=none
+g1 5 x-wrong-class raised NSInvalidArgumentException ret=none
+g1 27 x-wrong-class raised NSInvalidArgumentException ret=none
+g1 49 x-wrong-class raised NSInvalidArgumentException ret=none
+g1 5 device-sizes 0 recommended=recommendedMaxWorkingSetSize recommended-some=nonzero
+g1 6 device-sizes 0 allocated=between-reads
+g1 7 name 0 ret=h1 own=+0 pool=+1
+g1 7 name 0 ret=h2 own=+0 pool=+1 name=device-name
+g1 27 name 0 length=lengthOfBytes
+g1 8 name 0 ret=1 text=device-name
+g1 - getcstring run=ascii-exact max=26
+g1 8 getcstring 0 ret=1 written=0-25 text="ascii string of 25 chars!"
+g1 8 getcstring run=ascii-short-1 max=25
+g1 8 getcstring 0 ret=0 written=0-0 text=
+g1 8 getcstring run=ascii-short-5 max=21
+g1 8 getcstring 0 ret=0 written=0-0 text=
+g1 8 getcstring run=ascii-roomy max=35
+g1 8 getcstring 0 ret=1 written=0-25 text="ascii string of 25 chars!"
+g1 8 getcstring run=ascii-zero max=0
+g1 8 getcstring 0 ret=0 written=none text=(untouched)
+g1 8 getcstring run=utf8-exact max=23
+g1 8 getcstring 0 ret=1 written=0-22 text="héllo wörld ✓ text"
+g1 8 getcstring run=utf8-short-1 max=22
+g1 8 getcstring 0 ret=0 written=0-20 text=
+g1 8 getcstring run=utf8-as-ascii max=32
+g1 8 getcstring 0 ret=0 written=0-0 text=
+g1 8 getcstring run=ascii-as-ascii max=26
+g1 8 getcstring 0 ret=1 written=0-25 text="ascii string of 25 chars!"
+g1 8 getcstring run=utf8-as-latin1 max=10
+g1 8 getcstring 0 ret=0 written=0-8 text=
+g1 28 description 0 ret=h1 own=+0 pool=+1
+g1 8 description 0 text=description
+g1 28 description 0 ret=h2 own=+0 pool=+1
+g1 8 description 0 text=description
+g1 28 description 0 ret=h3 own=+0 pool=+1
+g1 8 description 0 text=description
+g1 28 description 0 ret=h4 own=n/a pool=n/a
+g1 8 description 0 text=description
+g1 - strings input=ascii
+g1 60 strings 0 ret=h1 own=+0 pool=+1
+g1 27 strings 0 length=lengthOfBytes
+g1 8 strings 0 text=input
+g1 8 strings input=ascii-enc
+g1 60 strings 0 ret=h2 own=+0 pool=+1
+g1 27 strings 0 length=lengthOfBytes
+g1 8 strings 0 text=input
+g1 8 strings input=utf8
+g1 60 strings 0 ret=h3 own=+0 pool=+1
+g1 27 strings 0 length=lengthOfBytes
+g1 8 strings 0 text=input
+g1 8 strings input=bad-utf8
+g1 60 strings 0 ret=0
+g1 60 strings input=non-ascii-as-ascii
+g1 60 strings 0 ret=h4 own=+0 pool=+1
+g1 27 strings 0 length=lengthOfBytes
+g1 8 strings 0 text=input
+g1 8 strings input=empty
+g1 60 strings 0 ret=h5 own=n/a pool=n/a
+g1 27 strings 0 length=lengthOfBytes
+g1 8 strings 0 text=input
+g1 8 strings input=ascii
+g1 61 strings 0 ret=h6 own=+1 pool=+0
+g1 27 strings 0 length=lengthOfBytes
+g1 8 strings 0 text=input
+g1 8 strings input=ascii-enc
+g1 61 strings 0 ret=h7 own=+1 pool=+0
+g1 27 strings 0 length=lengthOfBytes
+g1 8 strings 0 text=input
+g1 8 strings input=utf8
+g1 61 strings 0 ret=h8 own=+1 pool=+0
+g1 27 strings 0 length=lengthOfBytes
+g1 8 strings 0 text=input
+g1 8 strings input=bad-utf8
+g1 61 strings 0 ret=0
+g1 61 strings input=non-ascii-as-ascii
+g1 61 strings 0 ret=h9 own=+1 pool=+0
+g1 27 strings 0 length=lengthOfBytes
+g1 8 strings 0 text=input
+g1 8 strings input=empty
+g1 61 strings 0 ret=h5 own=n/a pool=n/a
+g1 27 strings 0 length=lengthOfBytes
+g1 8 strings 0 text=input
+g1 60 strings-null raised NSInvalidArgumentException ret=none
+g1 - min-align format=10 mod=plain
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=10 mod=alpha-is-one
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=10 mod=r001
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=10 mod=gbar
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=10 mod=all-bits
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=10 mod=high-bits
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=10 mod=high-and-swizzle
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=80 mod=plain
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=80 mod=alpha-is-one
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=80 mod=r001
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=80 mod=gbar
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=80 mod=all-bits
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=80 mod=high-bits
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=80 mod=high-and-swizzle
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=115 mod=plain
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=115 mod=alpha-is-one
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=115 mod=r001
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=115 mod=gbar
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=115 mod=all-bits
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=115 mod=high-bits
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=115 mod=high-and-swizzle
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=125 mod=plain
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=125 mod=alpha-is-one
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=125 mod=r001
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=125 mod=gbar
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=125 mod=all-bits
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=125 mod=high-bits
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 24 min-align format=125 mod=high-and-swizzle
+g1 24 min-align 0 ret=minimumLinearTextureAlignment
+g1 - supports family=1001
+g1 49 supports 0 ret=supported
+g1 49 supports family=1002
+g1 49 supports 0 ret=supported
+g1 49 supports family=1003
+g1 49 supports 0 ret=supported
+g1 49 supports family=1004
+g1 49 supports 0 ret=supported
+g1 49 supports family=1005
+g1 49 supports 0 ret=supported
+g1 49 supports family=1006
+g1 49 supports 0 ret=supported
+g1 49 supports family=1007
+g1 49 supports 0 ret=supported
+g1 49 supports family=1008
+g1 49 supports 0 ret=supported
+g1 49 supports family=1009
+g1 49 supports 0 ret=supported
+g1 49 supports family=2001
+g1 49 supports 0 ret=supported
+g1 49 supports family=2002
+g1 49 supports 0 ret=supported
+g1 49 supports family=3001
+g1 49 supports 0 ret=supported
+g1 49 supports family=3002
+g1 49 supports 0 ret=supported
+g1 49 supports family=3003
+g1 49 supports 0 ret=supported
+g1 49 supports family=4001
+g1 49 supports 0 ret=unsupported
+g1 49 supports family=4002
+g1 49 supports 0 ret=unsupported
+g1 49 supports family=5001
+g1 49 supports 0 ret=supported
+g1 49 supports family=1010
+g1 49 supports 0 ret=supported
+g1 49 supports family=5002
+g1 49 supports 0 ret=supported
+g1 49 supports family=9999
+g1 49 supports 0 ret=unsupported
+g1 49 supports family=0
+g1 49 supports 0 ret=unsupported
+g1 50 supports 0 bc=supportsBCTextureCompression
+g1 50 supports sample-count=1
+g1 51 supports 0 ret=supportsTextureSampleCount
+g1 51 supports sample-count=2
+g1 51 supports 0 ret=supportsTextureSampleCount
+g1 51 supports sample-count=3
+g1 51 supports 0 ret=supportsTextureSampleCount
+g1 51 supports sample-count=4
+g1 51 supports 0 ret=supportsTextureSampleCount
+g1 51 supports sample-count=8
+g1 51 supports 0 ret=supportsTextureSampleCount
+g1 51 supports sample-count=0
+g1 51 supports 0 ret=supportsTextureSampleCount
+g1 51 supports sample-count=16
+g1 51 supports 0 ret=supportsTextureSampleCount
+g1 51 supports sample-count=4294967300
+g1 51 supports 0 ret=supportsTextureSampleCount
+g1 52 supports 0 unified=hasUnifiedMemory
+g1 - label object=buffer
+g1 86 label 0 label="a buffer label with spaces"
+g1 86 label object=buffer
+g1 86 label 0 label="héllo ✓"
+g1 86 label object=buffer
+g1 86 label 0 label=
+g1 86 label object=queue
+g1 86 label 0 label="a buffer label with spaces"
+g1 86 label object=queue
+g1 86 label 0 label="héllo ✓"
+g1 86 label object=queue
+g1 86 label 0 label=
+g1 - max-concurrent arg=1
+g1 87 max-concurrent 0 maximize=1
+g1 87 max-concurrent arg=0
+g1 87 max-concurrent 0 maximize=0
+g1 87 max-concurrent arg=2
+g1 87 max-concurrent 0 maximize=1
+g1 87 max-concurrent arg=256
+g1 87 max-concurrent 0 maximize=1
+g1 87 max-concurrent arg=4294967296
+g1 87 max-concurrent 0 maximize=1
+g1 87 max-concurrent arg=1
+g1 87 max-concurrent 0 maximize=1
+g1 87 max-concurrent arg=0
+g1 87 max-concurrent 0 maximize=0
+g1 111 os-version 0 major=>=27 major-is=processinfo minor=processinfo patch=processinfo
+g1 114 dispatch-data 0 ret=h1 own=+1 pool=+0
+g1 114 dispatch-data capacity=40
+g1 149 dispatch-data 0 ret_size=40 written=0-39 copied=original
+g1 149 dispatch-data capacity=64
+g1 149 dispatch-data 0 ret_size=40 written=0-39 copied=original
+g1 149 dispatch-data capacity=16
+g1 149 dispatch-data 0 ret_size=40 written=0-15 copied=original
+g1 149 dispatch-data capacity=1
+g1 149 dispatch-data 0 ret_size=40 written=0-0 copied=original
+g1 149 dispatch-data capacity=0
+g1 149 dispatch-data 0 ret_size=40 written=none copied=original
+g1 114 dispatch-data-empty 0 ret=h1 own=n/a pool=n/a
+g1 149 dispatch-data-empty 0 ret_size=0 written=none
+g1 114 dispatch-data-empty 0 ret=h1 own=n/a pool=n/a
+g1 149 dispatch-data-empty 0 ret_size=0 written=none
+g1 - dispatch-data-regions regions=2
+g1 - dispatch-data-regions capacity=40
+g1 149 dispatch-data-regions 0 ret_size=40 written=0-39 copied=original
+g1 149 dispatch-data-regions capacity=41
+g1 149 dispatch-data-regions 0 ret_size=40 written=0-39 copied=original
+g1 149 dispatch-data-regions capacity=39
+g1 149 dispatch-data-regions 0 ret_size=40 written=0-38 copied=original
+g1 149 dispatch-data-regions capacity=16
+g1 149 dispatch-data-regions 0 ret_size=40 written=0-15 copied=original
+g1 149 dispatch-data-regions capacity=17
+g1 149 dispatch-data-regions 0 ret_size=40 written=0-16 copied=original
+g1 149 dispatch-data-regions capacity=15
+g1 149 dispatch-data-regions 0 ret_size=40 written=0-14 copied=original
+g1 149 dispatch-data-regions capacity=20
+g1 149 dispatch-data-regions 0 ret_size=40 written=0-19 copied=original
+g1 149 dispatch-data-regions capacity=8
+g1 149 dispatch-data-regions 0 ret_size=40 written=0-7 copied=original
+g1 149 dispatch-data-regions capacity=1
+g1 149 dispatch-data-regions 0 ret_size=40 written=0-0 copied=original
+g1 149 dispatch-data-regions capacity=0
+g1 149 dispatch-data-regions 0 ret_size=40 written=none copied=original
+g1 125 registry 0 ret=registryID nonzero=yes
+g1 148 timestamps 0 cpu=nonzero gpu=nonzero
+g1 148 timestamps 0 cpu2=>=first gpu2=>=first device=kept
+g1 0 nil 0
+g1 1 nil 0
+g1 2 nil 0 2.ret=0
+g1 3 nil 0 3.ret=0
+g1 5 nil 0 5.ret=0
+g1 6 nil 0 6.ret=0
+g1 50 nil 0 50.ret=0
+g1 52 nil 0 52.ret=0
+g1 125 nil 0 125.ret=0
+g1 24 nil 0 24.ret=0
+g1 27 nil 0 27.ret=0
+g1 49 nil 0 49.ret=0
+g1 51 nil 0 51.ret=0
+g1 7 nil 0 7.ret=0
+g1 28 nil 0 28.ret=0
+g1 8 nil 0 8.ret=0 8.buffer=none
+g1 148 nil 0 148.cpu=0 148.gpu=0
+g1 87 nil 0
+g1 - nil-args before="set before"
+g1 86 nil-args 0 label=nil
+g1 86 nil-args 0
+g1 86 nil-args 0
+g1 4 heap-growth 0
+g1 3 heap-growth 0
+g1 2 heap-growth 0
+g1 10 heap-growth 0
+g1 60 heap-growth 0
+g1 61 heap-growth 0
+g1 7 heap-growth 0
+g1 28 heap-growth 0
+g1 8 heap-growth 0
+g1 114 heap-growth 0
+g1 149 heap-growth 0
+g1 1 heap-growth 0
+g1 1 heap-growth heap-growth=freed

@@ -1,0 +1,25 @@
+g9 53 manager 0 ret=h1 own=+1 pool=+0 class=MTLCaptureManager
+g9 53 manager 0 ret=h1 own=+0 pool=+0 same=first
+g9 54 start-unsupported 0 ret=none
+g9 54 start-recorded msg@worker startCaptureWithDescriptor:error: startCaptureWithDescriptor=MTLCaptureDescriptor error=null
+g9 54 start-recorded dump startCaptureWithDescriptor.captureObject=h1
+g9 54 start-recorded dump startCaptureWithDescriptor.destination=1
+g9 54 start-recorded dump startCaptureWithDescriptor.outputURL="file:///wm-probe/capture.gputrace"
+g9 54 start-recorded dump startCaptureWithDescriptor=MTLCaptureDescriptor
+g9 54 start-recorded 0 ret=none
+g9 54 start-recorded msg@worker startCaptureWithDescriptor:error: startCaptureWithDescriptor=MTLCaptureDescriptor error=null
+g9 54 start-recorded dump startCaptureWithDescriptor.captureObject=h1
+g9 54 start-recorded dump startCaptureWithDescriptor.destination=2
+g9 54 start-recorded dump startCaptureWithDescriptor.outputURL="file:///wm-probe/with%20space/capture.gputrace"
+g9 54 start-recorded dump startCaptureWithDescriptor=MTLCaptureDescriptor
+g9 54 start-recorded 0 ret=none
+g9 54 start-recorded msg@worker startCaptureWithDescriptor:error: startCaptureWithDescriptor=MTLCaptureDescriptor error=null
+g9 54 start-recorded dump startCaptureWithDescriptor.captureObject=h1
+g9 54 start-recorded dump startCaptureWithDescriptor.destination=1
+g9 54 start-recorded dump startCaptureWithDescriptor.outputURL="file:///tmp/"
+g9 54 start-recorded dump startCaptureWithDescriptor=MTLCaptureDescriptor
+g9 54 start-recorded 0 ret=none
+g9 55 stop msg@worker stopCapture
+g9 55 stop 0
+g9 54 nil 0 ret=none
+g9 55 nil 0

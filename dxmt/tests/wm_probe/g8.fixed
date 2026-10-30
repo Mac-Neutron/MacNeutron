@@ -1,0 +1,241 @@
+g8 - writer-reader registered="reader=yes writer=yes native-reader=no native-writer=no"
+g8 117 writer-reader 0 ret=h1 own=+1 pool=+0 class=CacheWriter db=yes lock-file=yes
+g8 118 writer-reader 0
+g8 118 writer-reader 0
+g8 118 writer-reader 0 wal=yes
+g8 115 writer-reader 0 ret=h2 own=+1 pool=+0 class=CacheReader
+g8 116 writer-reader 0 ret_data=h3 own=+1 pool=+0 hit=bytes
+g8 116 writer-reader 0 ret_data=h4 own=+1 pool=+0 hit=bytes
+g8 116 writer-reader 0 ret_data=h5 own=+1 pool=+0 hit=bytes
+g8 116 writer-reader 0 ret_data=0 miss=miss
+g8 116 writer-reader 0 ret_data=0 short-key=miss
+g8 116 writer-reader 0 ret_data=0 long-key=miss
+g8 115 cross-read 0 ret=h1 own=+1 pool=+0 class=CacheReader
+g8 116 cross-read 0 ret_data=h2 own=+1 pool=+0 hit=bytes
+g8 116 cross-read 0 ret_data=h3 own=+1 pool=+0 hit=bytes
+g8 116 cross-read 0 ret_data=h4 own=+1 pool=+0 hit=bytes
+g8 116 cross-read 0 ret_data=0 miss=miss
+g8 117 replace 0 ret=nonnull
+g8 118 replace 0
+g8 118 replace 0
+g8 118 replace 0
+g8 115 replace 0 ret=nonnull
+g8 116 replace 0 ret_data=nonnull k1=bytes
+g8 116 replace 0 ret_data=nonnull k2=bytes rows=2
+g8 117 versions 0 ret=nonnull
+g8 117 versions 0 ret=nonnull
+g8 118 versions 0
+g8 118 versions 0
+g8 118 versions 0
+g8 115 versions 0 ret=nonnull
+g8 116 versions 0 ret_data=nonnull hit=bytes
+g8 116 versions 0 ret_data=nonnull hit=bytes
+g8 116 versions 0 ret_data=nonnull hit=bytes
+g8 115 versions 0 ret=0
+g8 117 versions 0 ret=nonnull
+g8 118 versions 0
+g8 115 versions 0 ret=nonnull
+g8 116 versions 0 ret_data=nonnull version-hit=bytes
+g8 117 versions 0 ret=nonnull
+g8 118 versions 0
+g8 115 versions 0 ret=nonnull
+g8 116 versions 0 ret_data=nonnull version-hit=bytes
+g8 117 versions 0 ret=nonnull
+g8 118 versions 0
+g8 115 versions 0 ret=nonnull
+g8 116 versions 0 ret_data=nonnull version-hit=bytes tables=cache_18446744073709551615
+g8 117 version-migrate 0 ret=nonnull
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0 tables-v1=cache_1 tables-before=Cache_upper,cache_1,cache_3,cache_9,cachefoo,other
+g8 117 version-migrate 0 ret=nonnull tables-after=Cache_upper,cache_2,cachefoo,other vacuumed=yes
+g8 115 version-migrate 0 ret=0 old-version=no
+g8 117 version-migrate 0 ret=nonnull
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 118 version-migrate 0
+g8 117 version-migrate 0 ret=nonnull freelist-kept=yes
+g8 - path-forms form=plain
+g8 117 path-forms 0 ret=nonnull
+g8 118 path-forms 0 db-at=yes
+g8 115 path-forms 0 ret=nonnull
+g8 116 path-forms 0 ret_data=nonnull hit=bytes
+g8 116 path-forms form=deep
+g8 117 path-forms 0 ret=nonnull
+g8 118 path-forms 0 db-at=yes
+g8 115 path-forms 0 ret=nonnull
+g8 116 path-forms 0 ret_data=nonnull hit=bytes
+g8 116 path-forms form=doubled
+g8 117 path-forms 0 ret=nonnull
+g8 118 path-forms 0 db-at=yes
+g8 115 path-forms 0 ret=nonnull
+g8 116 path-forms 0 ret_data=nonnull hit=bytes
+g8 116 path-forms form=trailing
+g8 117 path-forms 0 ret=0 db-at=no
+g8 115 path-forms 0 ret=0
+g8 115 path-forms form=trailing-dir-exists
+g8 117 path-forms 0 ret=0 db-at=no
+g8 115 path-forms 0 ret=0
+g8 115 path-forms form=dot
+g8 117 path-forms 0 ret=nonnull
+g8 118 path-forms 0 db-at=yes
+g8 115 path-forms 0 ret=nonnull
+g8 116 path-forms 0 ret_data=nonnull hit=bytes
+g8 - relative-path form=nested
+g8 117 relative-path 0 ret=nonnull
+g8 118 relative-path 0 db-at=yes
+g8 115 relative-path 0 ret=nonnull
+g8 116 relative-path 0 ret_data=nonnull hit=bytes
+g8 116 relative-path form=doubled
+g8 117 relative-path 0 ret=nonnull
+g8 118 relative-path 0 db-at=yes
+g8 115 relative-path 0 ret=nonnull
+g8 116 relative-path 0 ret_data=nonnull hit=bytes
+g8 116 relative-path form=trailing
+g8 117 relative-path 0 ret=nonnull
+g8 118 relative-path 0 db-at=yes
+g8 115 relative-path 0 ret=nonnull
+g8 116 relative-path 0 ret_data=nonnull hit=bytes
+g8 116 relative-path form=flat
+g8 117 relative-path 0 ret=nonnull
+g8 118 relative-path 0 db-at=yes
+g8 115 relative-path 0 ret=nonnull
+g8 116 relative-path 0 ret_data=nonnull hit=bytes cleaned=yes
+g8 117 lock-file 0 ret=nonnull
+g8 118 lock-file 0 lock-file=yes
+g8 117 lock-file 0 ret=nonnull writer-waited=yes lock-free-after=yes
+g8 115 lock-file 0 ret=nonnull reader-waited=no
+g8 116 lock-file 0 ret_data=nonnull hit=bytes
+g8 117 bad-path 0 ret=nonnull
+g8 118 bad-path 0
+g8 118 bad-path form=under-dev-null
+g8 115 bad-path 0 ret=0 exists-after-reader=no
+g8 117 bad-path 0 ret=0
+g8 117 bad-path form=under-root
+g8 115 bad-path 0 ret=0 exists-after-reader=no
+g8 117 bad-path 0 ret=0
+g8 117 bad-path form=missing-file
+g8 115 bad-path 0 ret=0 exists-after-reader=no
+g8 117 bad-path 0 ret=nonnull
+g8 117 bad-path form=not-a-database
+g8 115 bad-path 0 ret=0 exists-after-reader=yes
+g8 117 bad-path 0 ret=0
+g8 117 bad-path form=directory
+g8 115 bad-path 0 ret=0 exists-after-reader=yes
+g8 117 bad-path 0 ret=0
+g8 117 bad-path form=no-table
+g8 115 bad-path 0 ret=0 exists-after-reader=no
+g8 117 bad-path 0 ret=nonnull
+g8 117 bad-path form=read-only
+g8 115 bad-path 0 ret=nonnull exists-after-reader=yes
+g8 117 bad-path 0 ret=nonnull
+g8 117 bad-path form=read-only-other-version
+g8 115 bad-path 0 ret=0 exists-after-reader=yes
+g8 117 bad-path 0 ret=0 ro-tables=cache_1
+g8 - metal-cache-path form=new
+g8 119 metal-cache-path 0 ret=0 folder=yes metal-has=unchanged
+g8 119 metal-cache-path form=deep
+g8 119 metal-cache-path 0 ret=0 folder=yes metal-has=unchanged
+g8 119 metal-cache-path form=existing
+g8 119 metal-cache-path 0 ret=0 folder=yes metal-has=unchanged
+g8 119 metal-cache-path form=trailing
+g8 119 metal-cache-path 0 ret=0 folder=yes metal-has=unchanged
+g8 119 metal-cache-path form=doubled
+g8 119 metal-cache-path 0 ret=0 folder=yes metal-has=unchanged
+g8 119 metal-cache-path form=relative
+g8 119 metal-cache-path 0 ret=0 folder=yes metal-has=unchanged
+g8 119 metal-cache-path form=relative-trailing
+g8 119 metal-cache-path 0 ret=0 folder=yes metal-has=unchanged
+g8 117 edge-keys 0 ret=nonnull
+g8 118 edge-keys 0
+g8 118 edge-keys 0
+g8 118 edge-keys 0
+g8 118 edge-keys 0
+g8 118 edge-keys 0 rows=null/NULL/blob/32,blob/8/blob/40,blob/4096/blob/48,blob/8/blob/1572864
+g8 115 edge-keys 0 ret=nonnull
+g8 116 edge-keys 0 ret_data=0 hit=miss
+g8 116 edge-keys 0 ret_data=nonnull hit=bytes
+g8 116 edge-keys 0 ret_data=nonnull hit=bytes
+g8 116 edge-keys 0 ret_data=nonnull hit=bytes
+g8 116 edge-keys 0 ret_data=0 hit=miss
+g8 116 nil 0 ret_data=0
+g8 118 nil 0
+g8 117 heap-growth 0 ret=nonnull
+g8 118 heap-growth 0
+g8 115 heap-growth 0 ret=nonnull
+g8 116 heap-growth 0 ret_data=nonnull
+g8 116 heap-growth heap-growth=freed
