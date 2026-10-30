@@ -70,10 +70,13 @@ const char *wm_thread(void);         /* "main", "worker" (the cases' thread) or 
  * case's group, and starts the call's line: the status, or "raised <name>" when the handler raised, or "null" for an
  * empty table entry (not called). Fields then go on that line until the next line.
  * Threads: each thread has its own line, slot and wm_own registrations, so a call on a thread the case starts (109)
- * prints its own whole line while the worker goes on; the thread's last line prints when it exits. A case joins such
- * a thread before its next call (after 110), so the lines' order is fixed. A thread with no call of its own (main in
- * wm_main_blocked, Metal's) names the last slot any thread called. wm_on_main lends the caller's line to main for the
- * block. wm_in, and wm_h's stop, are the worker's (and main's under wm_on_main): a bad handle elsewhere aborts. */
+ * prints its own whole line while the worker goes on; the thread's last line prints when it exits, or at the case's
+ * end (a dispatch thread). A case joins such a thread before its next call (after 110), and waits for a hook's line
+ * before its own next line, so the lines' order is fixed. A thread with no call of its own in the case (main in
+ * wm_main_blocked, a completion handler) names the last slot any thread called, and each of its fields prints as a
+ * line at once. wm_on_main lends the caller's line to main for the block. wm_in, and wm_h's stop, are the worker's
+ * (and main's under wm_on_main): a bad handle elsewhere aborts. own= retains under the probe's lock: never on slot
+ * 10's pool (NSAutoreleasePool raises on retain, and every other thread would then wait on the lock). */
 unsigned wm_call(unsigned slot, void *params);
 /* Before wm_call: the handle-out field at `field` gets "<name>=h<n> own=<delta> pool=+1|+0" after the call. own: for
  * an object first seen in the case, its count once the pool popped minus the probe's own retain (+1: the caller owns

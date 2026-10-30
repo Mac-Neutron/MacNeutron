@@ -76,11 +76,13 @@ struct cstate {
         const obj_handle_t *field;
     } owns[8];
     int nowns;
+    struct cstate *next; /* every thread's, for the case's end (under lock) */
 };
 static __thread struct cstate *cs;
 static pthread_key_t cs_key;
 static struct cstate *wstate; /* the worker's */
-static int last_slot = -1;    /* the last call any thread started in the case (under lock) */
+static struct cstate *states;
+static int last_slot = -1; /* the last call any thread started in the case (under lock) */
 
 static struct cstate *st(void) {
     if (!cs) {
@@ -88,6 +90,10 @@ static struct cstate *st(void) {
         if (!cs) abort();
         cs->slot = -1;
         pthread_setspecific(cs_key, cs);
+        pthread_mutex_lock(&lock);
+        cs->next = states;
+        states = cs;
+        pthread_mutex_unlock(&lock);
     }
     return cs;
 }
@@ -110,6 +116,13 @@ static void flush_state(struct cstate *s) {
 }
 
 static void flush_pending(void) { flush_state(st()); }
+
+/* The case's end: a dispatch thread that called never exits, and its last line is the case's. */
+static void flush_all(void) {
+    pthread_mutex_lock(&lock);
+    for (struct cstate *s = states; s; s = s->next) flush_state(s);
+    pthread_mutex_unlock(&lock);
+}
 
 /* A thread's last line is printed when it exits (Task 13's 109 thread returns right after its call). ponytail: the
  * state itself stays allocated, a few hundred bytes a thread: another key's destructor may still print. */
@@ -156,7 +169,8 @@ void wm_line(const char *fmt, ...) {
     pthread_mutex_unlock(&lock);
 }
 
-/* A field of the current line (a line of its own, "<prefix> k=v", when no call started one). */
+/* A field of the current line (a line of its own, "<prefix> k=v", when no call started one). On a thread that has
+ * no call of its own and isn't the worker's (a completion handler), that line prints at once. */
 static void field(const char *fmt, ...) {
     struct cstate *s = st();
     pthread_mutex_lock(&lock);
@@ -166,6 +180,7 @@ static void field(const char *fmt, ...) {
     va_start(ap, fmt);
     vappend(s, fmt, ap);
     va_end(ap);
+    if (s->slot < 0 && s != wstate) flush_state(s);
     pthread_mutex_unlock(&lock);
 }
 
@@ -576,9 +591,10 @@ NSMutableArray *wm__dump_keys(void) { return dump_keys_extra; }
 
 static void run_case(const struct wm_case *c) {
     cur = c;
-    st()->slot = -1;
+    st();
     pthread_mutex_lock(&lock);
     last_slot = -1;
+    for (struct cstate *s = states; s; s = s->next) s->slot = -1; /* a dispatch thread's last call was another case's */
     pthread_mutex_unlock(&lock);
     memset(counts, 0, sizeof counts);
     CFDictionaryRemoveAllValues(hnum);
@@ -594,6 +610,7 @@ static void run_case(const struct wm_case *c) {
         }
     }
     flush_pending();
+    flush_all();
     muted = false;
     st()->nowns = 0;
     wm_swizzles(false);
