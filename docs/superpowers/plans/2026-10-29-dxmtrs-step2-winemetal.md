@@ -714,7 +714,7 @@ Steps, per group:
   - `$S/lane-so.sh $D $S/host-6` then `WM_PROBE=$S/probe/wm_probe sh dxmt/wm-probe-check.sh --goldens $S/goldens
     --dir $S/host-6`, `fixed` and `--full` for every group. Expected: 11 `ok` each.
   - g0's `aniso-env` and `presenter-env` lines are the C's: the constructors run from Rust.
-  - `strings -a $S/cargo-dxmt/aarch64-apple-darwin/production-unwind/libwinemetal.a | grep -c "$HOME"` = 0 (P9).
+  - P9 on the linked images (`winemetal.so` in the build folder before install's strip, and `winemetal.dylib`): `LC_ALL=C /usr/bin/grep -ac "$HOME" <image>` = 0 and `nm -ap <image> | /usr/bin/grep -c ' OSO '` = 0 (`strings -a` misses `__LINKEDIT`; the C images give 0 and 0).
 - [ ] **Step 5: Lint, docs, audit** for both crates and both feature sets. Expected: clean.
 - [ ] **Step 6: Integration (owner).**
   - `make wine-arm64`; the translator key; x64 check.sh 412/0.
@@ -1491,8 +1491,9 @@ for its WoW64 table) and add it to `src/winemetal/unix/meson.build`'s sources.
   - `make wine-arm64` re-fetches the pin from GitHub (the log says so).
   - Both check.sh lanes 412/0, `wm-probe-check.sh`, then the VM gates of Task 18 Step 7 and the native gate on the
     pinned build (`MN_REF_FROZEN` exported).
-  - P9 on what ships: `strings -a` of the pinned build's `winemetal.so` and of each `winemetal.dll` (aarch64-windows,
-    and the guest's x86_64 and i386) `| grep -c "$HOME"` = 0.
+  - P9 on what ships: `LC_ALL=C /usr/bin/grep -ac "$HOME"` = 0 on the pinned build's `winemetal.so` (before and after
+    install's strip), the VM's `winemetal.dylib` (Helpers/vm/dxmt, unstripped) and each `winemetal.dll` (aarch64-windows,
+    and the guest's x86_64 and i386); `nm -ap | /usr/bin/grep -c ' OSO '` = 0 on the `.so` and the `.dylib`.
   - Re-set the push URL: `git -C $D remote set-url --push origin git@github.com:Mac-Neutron/DXMTRS.git`.
 - [ ] **Step 6: MacNeutron main (standing authorization).** `git switch main && git merge --ff-only dxmtrs`,
   `git push --dry-run origin main` (a fast-forward), push. If the fast-forward fails (MacNeutron `main` moved), STOP
