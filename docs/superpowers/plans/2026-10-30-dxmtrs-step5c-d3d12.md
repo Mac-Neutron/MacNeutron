@@ -51,7 +51,7 @@ Binding (`build/step5/map/7-decisions.md`), short form:
   calls them directly, dropping S1's C ABI). 5b and 5c run in parallel after 5a's seams.
 - **5-D2** S5 dropped: D3D11's queue goes live with D3D11's switch (not this plan's).
 - **5-D3** P2 dropped (native dummy cbuffer: D3D11's, not touched here).
-- **5-D4** The D3D12 heaps' asserts become `debug_assert!`; a real check is the maintainer's own decision.
+- **5-D4** The D3D12 heaps get a real overflow check that logs and aborts (maintainer 2026-10-30, P15).
 - **5-D5** The drawable prefetch stays off.
 - **5-D6** D3D11's switch rides a key-moving pin; after step 4's Z the key hashes `airconv`'s resolved dependencies, not
   the root `Cargo.lock`; 5b/5c take the DXBC parser and root-signature deserializer from `airconv-ir`, never the C++.
@@ -188,10 +188,13 @@ Plan rulings (each: decision — why — cost if wrong):
   description hash is the Rust's own (FxHasher over the C++'s field list), as "stable within one build only" allows
   (`:33-35`): a C++-built blob loads, and each `Load*` answers `E_INVALIDARG` on the hash, as after any update. — libc++'s
   `std::hash` is not worth reproducing. — none.
-- **P15 5-D4 applied.** `AllocateCPUHeap`'s and `AllocateGPUHeap`'s asserts (`d3d12_command_allocator.hpp:274, 461-469`)
-  become `debug_assert!`; release keeps the C++'s arithmetic (a 4 MiB-or-larger CPU request loops, a GPU overflow writes
-  past the block), so the `unsafe` write's SAFETY line cites 5-D4 instead of an invariant (finding 3). — binding. —
-  the latent overflow stays.
+- **P15 A real overflow check (maintainer 2026-10-30, "Real check", superseding 5-D4's debug_assert).**
+  `AllocateCPUHeap`'s and `AllocateGPUHeap`'s asserts (`d3d12_command_allocator.hpp:274, 461-469`) become one compare
+  per allocation in release too: a CPU request of 4 MiB or more, or a GPU write past the block, logs one line
+  (`d3d12: command allocator <cpu|gpu> heap overflow: <size> > <limit>`) and aborts as `IMPLEMENT_ME` does (PE: the CRT
+  abort; natively the not-implemented flag and E_NOTIMPL per P7), so the `unsafe` write's SAFETY line states a real
+  invariant. A probe case pins the message on the native build (where it does not end the process). — cost: a game that
+  hits it crashes cleanly instead of hanging or corrupting memory; one compare per allocation.
 - **P16 Threads and knobs.** `dxmt-cmdbuf-waiting-thread` (`d3d12_command_queue.cpp:1363`), the pacing thread and the
   fence listener keep their names, the C++'s 1 MiB stacks (`util/thread.hpp:55`) and priorities. Each `DXMT_D3D12_*`,
   `DXMT_*` and `MACNEUTRON_FRAMEGEN` read happens where the C++ reads it: a function-local `static const` becomes a
@@ -205,9 +208,9 @@ Plan rulings (each: decision — why — cost if wrong):
 - **P18 Game data (4-D7).** Allowed and used read-only in place: 3DMark's D3D12 pipeline recording (a `DXMTPRC1`
   file; its path from 4a's ledger) and SMITE 2's capture's 150 `rs-*.bin`
   (`~/Library/Application Support/MacNeutron/vm.0.7.2/runs/2437170/traces/dxmt`); every output under `$S`, with
-  `DXMT_SHADER_CACHE_PATH` and `DXMT_DXIL_DUMP` pointed there; nothing copied or committed. SMITE 2's own
-  `game.pipelines` is not covered by 4-D7 and is not used (finding 2). — The only real pipelines and root signatures on
-  this Mac. — none.
+  `DXMT_SHADER_CACHE_PATH` and `DXMT_DXIL_DUMP` pointed there; nothing copied or committed. The maintainer extended
+  4-D7 to step 5 with the same rules (2026-10-30, "Yes, same rules": outputs under build/step5c). SMITE 2's own
+  `game.pipelines` is not used. — The only real pipelines and root signatures on this Mac. — none.
 - **P19 Performance without a game.** At the switch, on both Mac lanes, each row Rust against the C++ reference, each
   with one control run on the reference before a row above +5% counts (5a's form), printed `<row>: <rust> vs <ref>
   (+x.x%)`, passing at ≤ +5.0%: check.sh's pipeline-creation `timing` cold and warm (`check.sh:204`), `dlss cost`
