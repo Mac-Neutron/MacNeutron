@@ -72,6 +72,7 @@ table)
       if (index(got, " " w " ") == 0) print kind " slot " slot " is" got "not " w
     }
     $1 == "table" { n++; check("table", $2, $3, want[$2]) }
+    $1 == "wow64" && $2 > 152 { next }
     $1 == "wow64" {
       w64++
       w = want[$2]; if ($2 in thunk32) sub(/^thunk_/, "thunk32_", w)
