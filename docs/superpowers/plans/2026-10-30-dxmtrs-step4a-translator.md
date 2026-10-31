@@ -735,7 +735,7 @@ DXBCParser port).
   `$AIRCONV_XCRUN -sdk macosx metal -o $OUT_DIR/<n>.air -c <in> -std=metal3.1 --target=air64-apple-macos14.0` (that
   argument order is what `xcrun-metal.sh` recognises), run as `/bin/sh $AIRCONV_XCRUN …` when the file is not
   executable (`wine-arm64/tools/xcrun-metal.sh` is mode 0644: the machine files run it as `['/bin/sh', path]`,
-  `wine-arm64/build.sh:498`, and meson's `full_path()` gives the script, `mesonbuild/programs.py:115-123`, so a direct
+  `wine-arm64/build.sh:497`, and meson's `full_path()` gives the script, `mesonbuild/programs.py:115-123`, so a direct
   exec fails with EACCES in every lane, CK and image); prints `cargo:rerun-if-changed` for `build.rs`, `shim/`,
   `transforms/`, `shaders/` and `$AIRCONV_LLVM/.complete` (once a build script prints any `rerun-if`, cargo stops
   rerunning it on other file changes, and `cc` prints only `rerun-if-env-changed`, `cc-1.8.0/src/lib.rs:4858`: without
