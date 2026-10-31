@@ -1,5 +1,6 @@
-# LLVM 15 and the host tools linked against it, by architecture, for wine-arm64/build.sh (arm64) (sourced).
-# The caller defines die, ROOT and LLVM_TAG (dxmt/pins); this file sets no variables. Messages go to stderr.
+# LLVM 15, by architecture, for wine-arm64/build.sh (arm64) and `make llvm-nolto` (sourced); dxmt/tools.sh links the host
+# tools against it. The caller defines die, LLVM_TAG (dxmt/pins), UNIX_CPU and UNIX_LTO; this file sets no variables.
+# Messages go to stderr.
 
 # LLVM 15: static, with DXMT's CI flags but no assertions (they slowed every pipeline's translation, which Unreal does
 # thousands of times a launch), and fix_llvm's fix; -O3 (Release), for the caller's UNIX_CPU, as ThinLTO bitcode when
@@ -49,28 +50,4 @@ fix_llvm() {  # fix_llvm <llvm-project>
   grep -q 'MacNeutron: FMFSource' "$h" && return 0
   perl -0pi -e 's/(experimental_constrained_fdiv,\n\s+L, R, FMFSource, Name\);\n\n)(\s+)(if \(Value \*V = Folder\.FoldBinOpFMF\(Instruction::FDiv, L, R, FMF\)\))/$1$2FastMathFlags FMF = FMFSource->getFastMathFlags(); \/\/ MacNeutron: FMFSource\n$2$3/' "$h"
   grep -q 'MacNeutron: FMFSource' "$h" || die "can't fix CreateFDivFMF in $h"
-}
-
-# The DXIL probe (spec §6), against the same LLVM. -fno-rtti matches LLVM's own build.
-build_probe() {  # build_probe <arch> <llvm> <out-dir> <log-dir>
-  /usr/bin/clang++ -arch "$1" -std=c++17 -O3 $UNIX_CPU $UNIX_LTO -fno-rtti -I"$2/include" "$ROOT/dxmt/tools/dxil-probe.cpp" -o "$3/dxil-probe" \
-    -L"$2/lib" -lLLVMBitReader -lLLVMCore -lLLVMRemarks -lLLVMBitstreamReader -lLLVMBinaryFormat -lLLVMSupport \
-    -lLLVMDemangle -lz -lcurses > "$4/dxil-probe.log" 2>&1 || die "dxil-probe failed to build; see $4/dxil-probe.log"
-}
-
-# The offline corpus tool (DXIL translator plan, Task 5), against the fork's native airconv. The -lLLVM list is
-# src/airconv/meson.build's llvm_deps, in order.
-build_translate() {  # build_translate <arch> <llvm> <dxmt-src> <dxmt-build> <out-dir> <log-dir>
-  /usr/bin/clang++ -arch "$1" -std=c++20 -O3 $UNIX_CPU $UNIX_LTO -fno-rtti -fno-exceptions -fobjc-arc -I"$2/include" -I"$3/src/airconv" \
-    -I"$3/include" -I"$3/libs" -I"$3/include/native/windows" -I"$3/include/native/directx" \
-    "$ROOT/dxmt/tools/dxil-translate.mm" -o "$5/dxil-translate" \
-    "$4/src/airconv/darwin/libairconv.a" "$4/libs/DXBCParser/libDXBCParserNative.a" \
-    -L"$2/lib" -lLLVMPasses -lLLVMTarget -lLLVMObjCARCOpts -lLLVMCoroutines -lLLVMipo -lLLVMInstrumentation \
-    -lLLVMVectorize -lLLVMLinker -lLLVMIRReader -lLLVMAsmParser -lLLVMFrontendOpenMP -lLLVMScalarOpts \
-    -lLLVMInstCombine -lLLVMAggressiveInstCombine -lLLVMTransformUtils -lLLVMBitWriter -lLLVMAnalysis \
-    -lLLVMProfileData -lLLVMSymbolize -lLLVMDebugInfoPDB -lLLVMDebugInfoMSF -lLLVMDebugInfoDWARF -lLLVMObject \
-    -lLLVMTextAPI -lLLVMMCParser -lLLVMMC -lLLVMDebugInfoCodeView -lLLVMBitReader -lLLVMCore -lLLVMRemarks \
-    -lLLVMBitstreamReader -lLLVMBinaryFormat -lLLVMSupport -lLLVMDemangle -lm -lz -lcurses -lxml2 \
-    -framework Metal -framework Foundation > "$6/dxil-translate.log" 2>&1 \
-    || die "dxil-translate failed to build; see $6/dxil-translate.log"
 }

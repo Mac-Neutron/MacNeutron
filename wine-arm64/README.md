@@ -193,15 +193,19 @@ The VM's Wine and FEX are the same trees (`eac-vm/wine/sync.sh`, `eac-vm/image/g
 
 DXMT works the same way. Its tree is our fork at `dxmt/pins`' `DXMT_COMMIT` (the frozen reference's DXMT is not rebuilt from it), built for ARM64X with DXMT's own `build-arm64ec.txt` against
 this Wine's build tree, with an arm64 LLVM 15 built once into `build/wine-arm64-src/llvm-arm64` by `dxmt/llvm.sh`.
-`make wine-arm64` also builds the arm64 `dxil-probe` and `dxil-translate` into `build/wine-arm64/`. A commit in
+`make wine-arm64` also builds the arm64 `dxil-probe` and `dxil-translate` into `build/wine-arm64/` (`dxmt/tools.sh`;
+`dxil-translate` links the Rust translator's static library, built from the DXMT tree's workspace). `make llvm-nolto` builds the
+same LLVM without LTO into `build/wine-arm64-src/llvm-arm64-nolto`, the install DXMTRS's `tools/rust-check.sh` links its tests against. A commit in
 `build/wine-arm64-src/dxmt` makes the build a development build, and DXMT's version token
 (`build/wine-arm64-src/dxmt-install/version`) ends in `+dev` instead of the pin. DXMT's shader-translation cache and the launcher's replay stamp follow neither:
 both are keyed on the translator's key (`lib.sh`'s `translator_key`, in `dxmt-install/translator` and the bundle's
 `DXMT/translator`), a hash of what changes translated output as the tree has it, committed or not: `src/airconv`,
-`libs/DXBCParser`, `include`, DXMT's top-level meson files, d3d11's compile arguments (`src/d3d11/d3d11_shader.cpp`,
-whose cache entries key on the variant, not on the arguments), the airconv thunks (`src/winemetal/airconv_thunks.*`),
-the buildtype, the LLVM pin and recipe, Apple clang's and
-metal's versions. A re-fetch of the same commit or a change elsewhere in DXMT keeps players' translated shaders and
+d3d11's compile arguments (`src/d3d11/d3d11_shader.cpp`, whose cache entries key on the variant, not on the
+arguments), the airconv thunks (`src/winemetal/airconv_thunks.*`), the cargo settings that reach the translator
+(the release and production profiles, `.cargo/config.toml`'s `[build]`, `[env]` and host target), the Rust
+toolchain and the crates `cargo tree` resolves for airconv, the buildtype, the LLVM pin and recipe, Apple clang's and
+metal's versions. (A tree from before the Rust translator, with no `src/airconv/Cargo.toml`, is keyed as it was:
+`src/airconv`, `libs/DXBCParser`, `include` and DXMT's top-level meson files, and no Rust.) A re-fetch of the same commit or a change elsewhere in DXMT keeps players' translated shaders and
 starts no replay; an edit to airconv, even uncommitted, gets new ones (`tests/translator_key_test.sh`). A DXMT
 commit's message names the arm64 failure it fixes.
 

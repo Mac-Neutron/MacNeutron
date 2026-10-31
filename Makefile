@@ -1,4 +1,4 @@
-.PHONY: build test smoke app release bridge bridge-check presenter presenter-check dxmt-tests dxmt-tests-arm64ec dxmt-check dxil-corpus wine-arm64 wine-arm64-tests wine-arm64-check media-check lanes-check wine-arm64-winetests
+.PHONY: build test smoke app release bridge bridge-check presenter presenter-check dxmt-tests dxmt-tests-arm64ec dxmt-check dxil-corpus wine-arm64 llvm-nolto wine-arm64-tests wine-arm64-check media-check lanes-check wine-arm64-winetests
 
 APP = build/MacNeutron.app
 # Every Windows-side binary is built with MacNeutron's own llvm-mingw (Clang); dxmt/toolchain.sh builds it once.
@@ -163,6 +163,15 @@ release:
 # First run: shallow clones of Wine, FEX and DXMT, an arm64 LLVM build and some compiling; see wine-arm64/build.sh.
 wine-arm64:
 	sh wine-arm64/build.sh
+
+# LLVM 15 without LTO, build/wine-arm64-src/llvm-arm64-nolto: the install tools/rust-check.sh's AIRCONV_LLVM names (DXMTRS's
+# airconv tests link LLVM into every test binary, which ThinLTO archives would recompile each time). The shipped recipe
+# (dxmt/llvm.sh) for the CPU wine-arm64/build.sh uses; a no-op while its .complete matches. It reads the clone that
+# `make wine-arm64` makes (build/dxmt-src/llvm-project): run it where that build runs, inside the pipeline lock.
+llvm-nolto:
+	@set -eu; ROOT='$(CURDIR)'; B="$${BUILD_DIR:-$(CURDIR)/build}"; . dxmt/pins; . wine-arm64/lib.sh; . dxmt/llvm.sh; \
+	UNIX_CPU='$(if $(filter generic,$(MACNEUTRON_CPU)),,-mcpu=$(MACNEUTRON_CPU))' UNIX_LTO=; \
+	build_llvm arm64 "$$B/wine-arm64-src/llvm-arm64-nolto" "$$B/dxmt-src/llvm-project"
 
 # Test programs for the arm64 stack, built in parallel. The file name's prefix picks the compiler (arm64-, arm64ec-,
 # x64-); a program that needs more flags sets WA_FLAGS_<name> (arm64ec-viewec: -lonecore), which comes last. x64-bench, a

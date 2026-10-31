@@ -14,6 +14,8 @@ base=$1 new=${2:-macneutron}
 PATH="$(sh "$ROOT/dxmt/toolchain.sh"):$PATH"
 . "$ROOT/wine-arm64/lib.sh"
 . "$ROOT/dxmt/pins"
+PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH"  # rustup's cargo and rustc, which translator_key's cargo tree runs
+export MTLD3D_RUST
 rm -rf "$T"
 for side in base new; do
   mkdir -p "$T/$side"

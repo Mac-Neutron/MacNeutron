@@ -15,6 +15,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FETCH_TAG=wine-arm64
 . "$ROOT/dxmt/fetch.sh"
 . "$ROOT/dxmt/llvm.sh"
+. "$ROOT/dxmt/tools.sh"
 B="${BUILD_DIR:-$ROOT/build}"
 SRC="$B/wine-arm64-src"
 OUT="$B/wine-arm64"
@@ -158,7 +159,7 @@ lsc_series=$(tree_series lsteamclient)
 # Every build input, once: the up-to-date check and the stamp written at the end must agree.
 stamp=$(stamp_of "$ROOT/wine-arm64/pins" "$ROOT/wine-arm64/build.sh" \
   "$ROOT/wine-arm64/lib.sh" "$ROOT/wine-arm64/bundle.sh" "$ROOT/wine-arm64/wine.entitlements" \
-  "$ROOT/wine-arm64/Info.plist" "$ROOT/dxmt/pins" "$ROOT/dxmt/llvm.sh" \
+  "$ROOT/wine-arm64/Info.plist" "$ROOT/dxmt/pins" "$ROOT/dxmt/llvm.sh" "$ROOT/dxmt/tools.sh" \
   "$ROOT/dxmt/tools/dxil-probe.cpp" "$ROOT/dxmt/tools/dxil-translate.mm" "$ROOT/wine-arm64/licenses/NOTICES.md" \
   "$ROOT/wine-arm64/licenses/README" "$ROOT/wine-arm64/tests/licences_test.sh" "$ROOT/wine-arm64/deps.pins" \
   "$ROOT/dxmt/fetch.sh" "$ROOT/wine-arm64/x18-allow.txt" "$ROOT/wine-arm64/tools/x18scan.sh" \
@@ -514,6 +515,16 @@ P_DEF=; [ "${MACNEUTRON_PROFILE:-std}" != p ] || P_DEF=-DDXMT_PERF_BUILD
 } > "$SRC/dxmt-cpu.txt.new"
 if cmp -s "$SRC/dxmt-cpu.txt.new" "$SRC/dxmt-cpu.txt"; then rm "$SRC/dxmt-cpu.txt.new"
 else mv "$SRC/dxmt-cpu.txt.new" "$SRC/dxmt-cpu.txt"; fi
+# The translator's key hashes the crates cargo resolves for airconv (lib.sh's translator_key: cargo tree --locked
+# --offline), and that needs the Rust toolchain on PATH and the tree's crates in the cargo cache, which a fresh Mac or a
+# cleared cargo registry only has after the fetch: both come first. Meson's cargo runs offline too
+# (tools/cargo-staticlib.sh). The retired dxmt/mtld3d-build.sh left a cargo config above the tree (path remaps every
+# cargo run in it would still read).
+PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH"
+export MTLD3D_RUST
+rm -f "$SRC/.cargo/config.toml"
+(cd "$D" && cargo "+$MTLD3D_RUST" fetch --locked) >> "$SRC/dxmt.log" 2>&1 \
+  || die "fetching DXMT's Rust crates failed; see $SRC/dxmt.log"
 dxmt_buildtype=release
 translator=$(translator_key "$D" "$dxmt_buildtype")
 echo "$translator" > "$SRC/dxmt-translator-key.new"
@@ -528,7 +539,6 @@ set -- "$SRC/dxmt-build" "$D" --cross-file "$D/build-arm64ec.txt" --cross-file "
 # DXMTRS's meson builds Rust static libraries (tools/cargo-staticlib.sh) with cargo. No -Dcargo_toolchain: a tree
 # without the option (the pinned one, before the Rust plumbing lands on DXMTRS's main) would fail to configure, and
 # its default is mtld3d's toolchain (MTLD3D_RUST) already.
-PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH"
 inputs=$(printf '%s\n' "$@"; cat "$D/build-arm64ec.txt" "$SRC/dxmt-xcrun.txt" "$SRC/dxmt-cpu.txt" \
   "$ROOT/wine-arm64/tools/xcrun-metal.sh")
 if [ ! -f "$SRC/dxmt-build/build.ninja" ] || [ "$(cat "$SRC/dxmt-build/.setup-inputs" 2> /dev/null)" != "$inputs" ]; then
@@ -537,12 +547,6 @@ if [ ! -f "$SRC/dxmt-build/build.ninja" ] || [ "$(cat "$SRC/dxmt-build/.setup-in
     || { rm -rf "$SRC/dxmt-build"; die "configuring DXMT failed; see $SRC/dxmt.log"; }
   printf '%s\n' "$inputs" > "$SRC/dxmt-build/.setup-inputs"
 fi
-# Meson's cargo runs offline (tools/cargo-staticlib.sh): the crates the tree's Cargo.lock pins are fetched first, which
-# a fresh Mac or a cleared cargo registry needs. The retired dxmt/mtld3d-build.sh left a cargo config above the tree
-# (path remaps every cargo run in it would still read).
-rm -f "$SRC/.cargo/config.toml"
-(cd "$D" && cargo "+$MTLD3D_RUST" fetch --locked) >> "$SRC/dxmt.log" 2>&1 \
-  || die "fetching DXMT's Rust crates failed; see $SRC/dxmt.log"
 meson compile -C "$SRC/dxmt-build" >> "$SRC/dxmt.log" 2>&1 || die "building DXMT failed; see $SRC/dxmt.log"
 rm -rf "$SRC/dxmt-install"
 meson install -C "$SRC/dxmt-build" >> "$SRC/dxmt.log" 2>&1 || die "installing DXMT failed; see $SRC/dxmt.log"
@@ -566,7 +570,7 @@ fi
 # The DXIL host tools, arm64, next to wine.app (not in it).
 mkdir -p "$OUT"
 build_probe arm64 "$SRC/llvm-arm64" "$OUT" "$SRC"
-build_translate arm64 "$SRC/llvm-arm64" "$D" "$SRC/dxmt-build" "$OUT" "$SRC"
+build_translate arm64 "$SRC/llvm-arm64" "$D" "$SRC/airconv-cargo" "$OUT" "$SRC"
 # The MetalFX presenter (arm64 release spec §5.3), which winemetal.so loads from beside itself (DXMT patch 0002).
 # -ffast-math here alone: Wine's msvcrt and D3D, FEX's x87/SSE emulation and DXMT's shader translator must keep the
 # IEEE NaN, infinity and rounding behaviour games observe.

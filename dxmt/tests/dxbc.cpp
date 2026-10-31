@@ -3,6 +3,10 @@
 // folder (dxmt/tests/shaders/d3d11, the invocations' @S/d3d11; apart from the DXIL, whose count dxmt/check.sh checks),
 // committed, so the programs load bytecode and compile nothing when they run (native builds have no d3dcompiler).
 // Prints "dxbc <name> <bytes>" each, or the compiler's errors.
+//
+// `dxbc.exe --file <hlsl> <entry> <profile> <out> [--file ...]` compiles one entry point of an HLSL file per group to
+// <out> (DXMTRS step 4's DXBC corpus: dxmt/tests/dxbc-corpus/sources.txt has one such group per row), printing the same
+// lines, named by <out>'s file name. Wine's D3DCompile (vkd3d-shader) is not fxc: the bytecode is what Wine writes.
 #include <windows.h>
 #include <d3dcompiler.h>
 #include <cstdio>
@@ -95,26 +99,67 @@ struct C { float edges[3] : SV_TessFactor; float inside : SV_InsideTessFactor; }
 })"},
 };
 
-int main(int argc, char **argv) {
-    if (argc != 2) { printf("usage: dxbc.exe <folder>\n"); return 2; }
-    int failed = 0;
-    for (const Source &s : kShaders) {
-        ID3DBlob *code = nullptr, *errors = nullptr;
-        HRESULT hr = D3DCompile(s.hlsl, strlen(s.hlsl), s.name, nullptr, nullptr, "main", s.profile, 0, 0, &code, &errors);
-        if (FAILED(hr)) {
-            printf("dxbc %s failed 0x%08lx %s\n", s.name, (unsigned long)(unsigned)hr,
-                   errors ? (const char *)errors->GetBufferPointer() : "");
-            failed = 1;
-            continue;
-        }
-        std::string path = std::string(argv[1]) + "/" + s.name + ".dxbc";
-        FILE *f = fopen(path.c_str(), "wb");
-        if (!f || fwrite(code->GetBufferPointer(), 1, code->GetBufferSize(), f) != code->GetBufferSize() || fclose(f)) {
-            printf("dxbc %s can't write %s\n", s.name, path.c_str());
-            failed = 1;
-            continue;
-        }
-        printf("dxbc %s %zu\n", s.name, (size_t)code->GetBufferSize());
+// Compiles HLSL to `path`: prints "dxbc <name> <bytes>", or the compiler's errors; 0 when it wrote the file.
+static int compile(const char *name, const char *source, size_t size, const char *entry, const char *profile,
+                   const std::string &path) {
+    ID3DBlob *code = nullptr, *errors = nullptr;
+    HRESULT hr = D3DCompile(source, size, name, nullptr, nullptr, entry, profile, 0, 0, &code, &errors);
+    if (FAILED(hr)) {
+        printf("dxbc %s failed 0x%08lx %s\n", name, (unsigned long)(unsigned)hr,
+               errors ? (const char *)errors->GetBufferPointer() : "");
+        return 1;
     }
+    FILE *f = fopen(path.c_str(), "wb");
+    if (!f || fwrite(code->GetBufferPointer(), 1, code->GetBufferSize(), f) != code->GetBufferSize() || fclose(f)) {
+        printf("dxbc %s can't write %s\n", name, path.c_str());
+        return 1;
+    }
+    printf("dxbc %s %zu\n", name, (size_t)code->GetBufferSize());
+    return 0;
+}
+
+static const char *baseName(const char *path) {
+    const char *name = path;
+    for (const char *p = path; *p; ++p)
+        if (*p == '/' || *p == '\\') name = p + 1;
+    return name;
+}
+
+// One --file group: the HLSL file's bytes (no #include handler: the corpus files hold none), then compile().
+static int compileFile(const char *hlsl, const char *entry, const char *profile, const char *out) {
+    std::string source;
+    FILE *f = fopen(hlsl, "rb");
+    char chunk[4096];
+    size_t got;
+    while (f && (got = fread(chunk, 1, sizeof chunk, f)) > 0) source.append(chunk, got);
+    if (!f || ferror(f)) {
+        printf("dxbc %s can't read %s\n", baseName(out), hlsl);
+        if (f) fclose(f);
+        return 1;
+    }
+    fclose(f);
+    // <out>'s file name is the source name, as the folder mode's shader name is: D3DCompile keeps it for its messages.
+    return compile(baseName(out), source.c_str(), source.size(), entry, profile, out);
+}
+
+int main(int argc, char **argv) {
+    if (argc >= 6 && !strcmp(argv[1], "--file")) {
+        int failed = 0;
+        for (int i = 1; i < argc; i += 5) {
+            if (i + 4 >= argc || strcmp(argv[i], "--file")) {
+                printf("usage: dxbc.exe --file <hlsl> <entry> <profile> <out> [--file ...]\n");
+                return 2;
+            }
+            failed |= compileFile(argv[i + 1], argv[i + 2], argv[i + 3], argv[i + 4]);
+        }
+        return failed;
+    }
+    if (argc != 2) {
+        printf("usage: dxbc.exe <folder> | dxbc.exe --file <hlsl> <entry> <profile> <out> [--file ...]\n");
+        return 2;
+    }
+    int failed = 0;
+    for (const Source &s : kShaders)
+        failed |= compile(s.name, s.hlsl, strlen(s.hlsl), "main", s.profile, std::string(argv[1]) + "/" + s.name + ".dxbc");
     return failed;
 }

@@ -1,0 +1,39 @@
+# DXMTRS step 4's DXBC corpus (C6): one row per file, `<hlsl> <entry> <profile> <out>`, compiled by
+# `dxbc.exe --file <hlsl> <entry> <profile> <out>` (dxmt/tests/dxbc.cpp) under the macOS runtime's Wine, so the
+# bytecode is vkd3d-shader's, not fxc's. A path with a directory (tests/dx11/...) is relative to the DXMTRS tree, the
+# others and every <out> to this folder. Out names are <name>.<stage>.dxbc: dxil-translate groups <name>.{vs,hs,ds}
+# as a hull/domain pipeline and <name>.{vs,gs} as a geometry pipeline.
+tests/dx11/shader_animated.hlsl vs_main vs_5_0 animated.vs.dxbc
+tests/dx11/shader_animated.hlsl ps_main ps_5_0 animated.ps.dxbc
+tests/dx11/shader_bp.hlsl vs_main vs_5_0 bp.vs.dxbc
+tests/dx11/shader_bp.hlsl ps_main ps_5_0 bp.ps.dxbc
+tests/dx11/shader_camera.hlsl vs_main vs_5_0 camera.vs.dxbc
+tests/dx11/shader_camera.hlsl ps_main ps_5_0 camera.ps.dxbc
+tests/dx11/shader_cbuffer.hlsl vs_main vs_5_0 cbuffer.vs.dxbc
+tests/dx11/shader_cbuffer.hlsl ps_main ps_5_0 cbuffer.ps.dxbc
+tests/dx11/shader_cube.hlsl vs_main vs_5_0 cube.vs.dxbc
+tests/dx11/shader_cube.hlsl ps_main ps_5_0 cube.ps.dxbc
+tests/dx11/shader_lighting.hlsl vs_main vs_5_0 lighting.vs.dxbc
+tests/dx11/shader_lighting.hlsl ps_main ps_5_0 lighting.ps.dxbc
+tests/dx11/shader_obj.hlsl vs_main vs_5_0 obj.vs.dxbc
+tests/dx11/shader_obj.hlsl ps_main ps_5_0 obj.ps.dxbc
+tests/dx11/shaders.hlsl vs_main vs_5_0 shaders.vs.dxbc
+tests/dx11/shaders.hlsl ps_main ps_5_0 shaders.ps.dxbc
+tests/dx11/shader_hdr.hlsl vs_main vs_5_0 hdr.vs.dxbc
+tests/dx11/shader_hdr.hlsl ps_main_linear ps_5_0 hdrlinear.ps.dxbc
+tests/dx11/shader_hdr.hlsl ps_main_pq ps_5_0 hdrpq.ps.dxbc
+gs.hlsl vs_main vs_5_0 gs.vs.dxbc
+gs.hlsl gs_main gs_5_0 gs.gs.dxbc
+gspt.hlsl vs_main vs_5_0 gspt.vs.dxbc
+gspt.hlsl gs_main gs_5_0 gspt.gs.dxbc
+gsadj.hlsl vs_main vs_5_0 gsadj.vs.dxbc
+gsadj.hlsl gs_main gs_5_0 gsadj.gs.dxbc
+tess.hlsl vs_main vs_5_0 tessq.vs.dxbc
+tess.hlsl hs_quad hs_5_0 tessq.hs.dxbc
+tess.hlsl ds_quad ds_5_0 tessq.ds.dxbc
+tess.hlsl vs_main vs_5_0 tessl.vs.dxbc
+tess.hlsl hs_line hs_5_0 tessl.hs.dxbc
+tess.hlsl ds_line ds_5_0 tessl.ds.dxbc
+sysval.hlsl vs_main vs_5_0 sysval.vs.dxbc
+sysval.hlsl ps_main ps_5_0 sysval.ps.dxbc
+barrier.hlsl main cs_5_0 barrier.cs.dxbc
