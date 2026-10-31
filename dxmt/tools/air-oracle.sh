@@ -185,6 +185,22 @@ for m in re.finditer(r"^attributes #(\d+) = \{(.*)\}\s*$", text, re.M):
             attrs += 1
         elif kind == "memory" and not exact(rest.rstrip(")")):
             attrs += 1
+# Inline drop-list attributes (P8): LLVM 23's IPSCCP puts range(...) on a function's return (4a's tessellation corpora:
+# dxmt.get_domain_patch_index), printed on its define line. Deleted here; each distinct line head (the text up to the
+# function name) counts its tokens once, as the writer counts a group once (R3-1).
+# ponytail: define/declare return positions only, the one place any corpus has them; a drop-list attribute on a
+# parameter or a call site stays in the text and fails the row ("text differs"), and wants handling here then.
+DROPTOK = re.compile(r"(?<= )(?:(?:range|nofpclass|initializes)\((?:[^()]|\([^()]*\))*\)|"
+                     r"(?:writable|dead_on_unwind|dead_on_return|nocreateundeforpoison)\b) ?")
+heads = set()
+def ret_drop(m):
+    global attrs
+    found = DROPTOK.findall(m.group(1))
+    if found and m.group(1) not in heads:
+        heads.add(m.group(1))
+        attrs += len(found)
+    return DROPTOK.sub("", m.group(1)) + m.group(2)
+text = re.sub(r"^((?:define|declare) [^@\n]*)(@.*)$", ret_drop, text, flags=re.M)
 # Ruling D5: the writer writes each constant-index extractelement of `bitcast <N x iW> %v to <K x i1>` or of
 # `load <K x i1>` as LLVM 15's bit test (legalizeBitTests: the word's extractelement, and with the bit, icmp ne 0; the
 # load loads <K/32 x i32>; the bitcast goes). The same rewrite here, with the two new values unnamed as the writer
