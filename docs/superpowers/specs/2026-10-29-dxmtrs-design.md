@@ -100,8 +100,8 @@ Whether Metal loads such AIR is unknown, so:
    difference.
 Also in E2: list every LLVM C++ API airconv uses (IRBuilder, metadata, the new pass manager, bitcode reader and writer)
 against LLVM's C API, which `llvm-sys` binds. Whatever the C API lacks goes into a small C++ shim compiled by the
-translator crate's `build.rs`; `llvm-sys` is used with its `no-llvm-linking` feature, the build script linking the LLVM
-libraries `llvm.sh` builds.
+translator crate's `build.rs`; the C API is declared by hand in the crate, without `llvm-sys` (§5 step 4a, 4-D2), and
+the build links the LLVM libraries `llvm.sh` builds.
 
 **E3, AIR against MSL.** "Faster" is decided by shader build latency (bytecode to `MTLLibrary` to pipeline state, which
 is what players feel as stutter), provided the GPU time of the resulting shaders is at parity. Measured on shaders that
@@ -143,7 +143,7 @@ a native harness like the frame-generation one, each run once.
   `fast`, which adds no-NaN and no-Inf; `afn` dropped; `poison` as `undef`). Spike code: DXMTRS branch `phase0`
   (`phase0/air-roundtrip`), our llvm-project fork's local branch `phase0-air-writer`. Every LLVM C++ API airconv uses
   has an LLVM 23 C API equivalent except the bitcode writer (`phase0/llvm-c-api.md`); airconv's two custom passes and
-  `splitBasicBlock` have none either and are rewritten in Rust over the C API.
+  `splitBasicBlock` have none either: step 4a keeps them in its C++ shim, the passes through 4b (§5 step 4a, 4-D3).
 - **E3: AIR builds 5 to 25 times faster than MSL, before the backend.** 45 pipelines built both ways (DXC's SPIR-V and
   SPIRV-Cross's MSL 3.2 of the 19 HLSL test shaders, against airconv's AIR of the same shaders); each MSL source salted
   so its frontend compile isn't a cache hit (two identical sources still shared one); two runs agree within 1%. Metal's
@@ -153,12 +153,13 @@ a native harness like the frame-generation one, each run once.
   moved: the test shaders are functional tests, binding airconv's argument buffers outside DXMT would reimplement its
   binding model, and no MSL translator exists to compare at game scale (§8 compares LLVM 15's AIR with LLVM 23's).
 
-**Decided (maintainer, 2026-10-29).** The translator is Rust on LLVM 23 (the newest release; `llvm-sys` with
-`no-llvm-linking`), emitting AIR through **our own AIR writer** in Mac-Neutron/llvm-project: a typed-pointer bitcode
-writer grown from LLVM's DXIL writer, to which the translator hands the pointee type of every pointer it creates (no
-inference), and which writes the newer records Metal reads (the full fast-math flags, `poison`). The writer is one C
-entry point the Rust translator calls. It gets its own plan before §5's step 4 moves the translator off LLVM 15, gated
-by 64/64 on the test shaders, then the corpus and the check suite on its output.
+**Decided (maintainer, 2026-10-29).** The translator is Rust on LLVM 23 (the newest release; its C API declared by
+hand in the crate, no `llvm-sys`: §5 step 4a, 4-D2), emitting AIR through **our own AIR writer** in
+Mac-Neutron/llvm-project: a typed-pointer bitcode writer grown from LLVM's DXIL writer, to which the translator hands
+the pointee type of every pointer it creates (no inference), and which writes the newer records Metal reads (the full
+fast-math flags, `poison`). The writer is one C entry point the Rust translator calls. It gets its own plan before
+§5's step 4 moves the translator off LLVM 15, gated by 64/64 on the test shaders, then the corpus and the check suite
+on its output.
 
 ## 5. The order of the port
 
@@ -219,8 +220,8 @@ existing C++ signatures.
    - one pure-data crate, `winemetal-wire`, holds the wire mirrors, layout asserts, slot numbers and macro encodings
      for both sides (P1); `wmt.rs`'s mirrors stay in `mtld3d-mtl`, a duplicate listed for §7 (D16);
    - the Mac WoW64 table keeps its 153 entries (D3); `thunk32_*` and the argument-chain converter moved verbatim into
-     `src/winemetal/unix/sm50_wow64.c` (Wine build only): nothing reaches them, and they go with the translator at
-     step 4 (P4);
+     `src/winemetal/unix/sm50_wow64.c` (Wine build only): nothing reaches them, and they stay until step 6
+     (P4, corrected at step 4a: 4-D3);
    - Objective-C exceptions behave as before (D4): the crate builds with `panic = "unwind"` (profile
      `production-unwind`) and its handlers are `extern "C-unwind"`; each holds `AbortOnPanic`, so a Rust panic aborts
      and never unwinds into the VM host's `catch (...)`, while a foreign Objective-C unwind passes (P11);
@@ -351,6 +352,94 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
    Two steps rather than one because only the first can be checked byte for byte, which matters for 26k lines.
    Once the translator is Rust, the key also hashes its crate's resolved dependencies and the Rust toolchain. D3D9's
    SM1-3 front end (C3) follows the LLVM move and ships in the same release, so players' caches turn over once.
+   4a. The translator in Rust on LLVM 15: done 2026-10-31, DXMTRS main 265833e, which MacNeutron pins (plan
+   `2026-10-30-dxmtrs-step4a-translator.md`; the AIR writer has its own plan, 4W,
+   `2026-10-30-dxmtrs-step4w-air-writer.md`, and 4b is planned from its results, 4-D1). Everything behind
+   `airconv_public.h` is Rust, in two crates under `src/airconv`: `airconv-ir` (no LLVM: the DXBC container, token
+   parser, decode and control flow, root signatures, the signature handlers as data, reflection, the metallib
+   container and SHA-256; it builds for every target, for step 5's PE users) and `airconv` (LLVM 15's C API declared
+   by hand, one type handle, `Ty`, for every type the translator makes, the AIR layer, DXBC and DXIL lowering, the 14
+   C exports, `DXILGetEntry` new for the test tools), an rlib of `winemetal`, linked into `winemetal.so` and the
+   native `winemetal.dylib`. What LLVM 15's C API lacks, the pass pipeline among it, is a C++ shim of 19 functions
+   (`src/airconv/shim/shim.cpp`) that the crate's `build.rs` compiles. On every corpus module the output equals the
+   C++'s: `llvm-dis` text, metallib bytes, the 72 reflection bytes, tags and failure reasons, at Metal 3.1 and 3.2 and
+   with D3D11's shader flags, and two processes agree. The corpus: the repository's DXIL and DXBC test shaders,
+   `tests/dx11`'s HLSL compiled to DXBC with added geometry, tessellation, barrier and system-value shaders,
+   malformed containers, SMITE 2's capture and 3DMark's recording. The C++ it was compared with carries step 4a's
+   first three commits (`DXILGetEntry`, the barrier pass's own intrinsic declaration, the clip fix below). One switch
+   (Z) replaced `libairconv.a` in both images and deleted 46 C++ files; the translator key moved there once (71a7e5f2
+   to ad6adc5d), accepted. Corrections to the step as first written (the plan's 4-D and P items):
+   - no `llvm-sys`, which may need `llvm-config`, absent from the LLVM 15 install: the C API's 431 functions are
+     declared in the crate with its own signatures (checked against LLVM 15's headers), one file per LLVM version,
+     which 4b redoes for LLVM 23 (4-D2; §4's wording amended);
+   - C++ that stays: the pass pipeline and airconv's two passes (`src/airconv/transforms`) in the shim through 4b
+     (MemorySSA has no C API, and identity needed the same adaptor), and `sm50_wow64.c` until step 6. §1's end state,
+     no C, C++ or Objective-C of DXMT's left, is reached at step 6 (4-D3);
+   - the key (MacNeutron's `translator_key`; P7, with step 5's 5-D6): for a tree with `src/airconv/Cargo.toml` it
+     hashes `src/airconv` (Rust, shim, passes, helpers), `src/winemetal/airconv_thunks.[ch]`,
+     `src/d3d11/d3d11_shader.cpp` (until step 5b deletes it, riding the next pin that moves the key anyway), the root
+     `Cargo.toml`'s release, production and production-unwind profiles, `.cargo/config.toml`'s `[build]`, `[env]` and
+     aarch64-apple-darwin sections, `rustc -vV` and `cargo tree -p airconv` (registry crates by version, path crates
+     by name), besides what it hashed before: the build type, the LLVM tag, `dxmt/llvm.sh`, `xcrun-metal.sh` and the
+     C++ and Metal compilers' versions. `libs/DXBCParser`, `include/` and meson's files are no longer inputs, so step
+     5's meson edits, crates and dependencies leave players' caches alone. Each command's output is taken before the
+     hash, and the key dies rather than drop a line, on a path crate outside `src/airconv` and on a `cargo_toolchain`
+     default other than `MTLD3D_RUST`. Older pins keep the old composition, whose key still moves once at this pin:
+     `dxmt/llvm.sh` lost the tool builders to `dxmt/tools.sh` (P8). Known: airconv's tests are hashed (a test-only
+     commit moves the key; 4b may leave them out), and the shim's `cc` environment is not;
+   - the game corpora (4-D7, P1), read in place and read-only, nothing from them committed: SMITE 2's capture (10,271
+     DXIL shaders, 150 root signatures, 18,985 pipelines, 4 of them refused by both) was used. 3DMark's D3D12
+     recording gave 290 DXIL shaders and 114 compute pipelines under real 1.1 root signatures, and no DXBC: it holds
+     only pipelines whose creation succeeded, so no DXBC pipeline was created in the sessions it covers. SM5.1 DXBC
+     under real root signatures (tables, root constants and descriptors, static samplers) is therefore compared only
+     through synthetic single-slot root signatures built from each DXBC shader's reflection, a known gap (the plan's
+     critic 27). A D3D12 title with fxc's DXBC, or a recording of a DXBC-era 3DMark test, would close it (the
+     maintainer's call). No D3D11 capture (P12);
+   - errors added where the C++ crashed, read out of bounds or exited (P15); no valid shader of the corpus fails anew.
+     A read past a blob (a token walk, a container, a root signature) gives `Invalid DXBC bytecode: <what ran past>`,
+     and other values the C++ trusted get like texts; where the C++ checks, its text stays byte for byte. A name with
+     an interior NUL gives `Invalid DXBC bytecode: a name holds a NUL` (DXIL names too: `DXILGetEntry`'s view is built
+     at Initialize), a DXIL signature name that is not UTF-8 `DXIL: a signature element's name is not UTF-8`. An LLVM
+     error diagnostic (a helper that does not link, anything the C++ let `exit(1)`) gives `LLVM error:
+     <description>`, no `DXIL:` prefix, so D3D12 answers `E_FAIL`; a constant made with a type of another kind (a
+     `dx.op` declared with other overload types) gives `LLVM error: a constant of the wrong type` (the C++ made an
+     `i0` constant). An AIRBuilder null gives the C++'s `UnsupportedFeature` text naming the op; a DXIL shader handed
+     to the tessellation pipeline gives `not ported` (no caller sends one). `SM50GetErrorMessage` with size 0 writes
+     nothing and returns 0; an unknown domain's workload count is 0. Error texts are bytes, never re-encoded. LLVM's
+     own fatal errors (`report_fatal_error`) still end the process, as with the C++;
+   - a C++ crash fixed before the baselines (07439fd): a DXBC vertex shader writing `SV_ClipDistance`, compiled with
+     rasterization off (stream output, or the pass-through geometry shader), inserted into a null value. It now
+     translates, without the clip output, and ships with this translator;
+   - 4b's handoff: MacNeutron's `dxil-probe.cpp` and `dxil-translate.mm` move to LLVM 23's API in 4b's pin bump
+     (`setOpaquePointers(false)` and `startswith` are gone; critic 23); L4's untyped list (pointers whose pointee no
+     use gives: 511 in the baseline modules, also counted on SMITE 2 and 3DMark) is what 4b must type explicitly for
+     the writer; G5b's timing and coverage (67.5% of the C++'s lines; 235 functions no corpus reaches were ported by
+     reading alone); `make llvm-nolto` moves to LLVM 23 with the recipe; the handle types Z4 deferred (a value can
+     outlive its dropped module; readers take raw handles); 4W's open F-D5-1 (an all-equal FP vector constant, which
+     LLVM 23's C API makes, is written as a record Metal reads as undef). 4W's state: its writer and harness are
+     green on the repository corpora, SMITE 2 and 4a's DXBC corpora, Metal builds every pipeline, and its gate is
+     running. After Z nothing repeats the C++/Rust comparison (its tests skip without `AIRCONV_STEP4_BASE`); the
+     baselines stay in `build/step4` until 4b's plan says otherwise;
+   - no MacNeutron release is cut between this pin and 4b's unless the maintainer asks: caches turn over per release,
+     not per pin, so players' shader caches turn over once (P7). The milestone benches (§8) wait for the maintainer's
+     go-ahead (4-D9).
+
+   Gates, once at the end (Z3 on 26d3d8e; Z4's one commit re-ran the crate checks and the translator block): both
+   Mac `check.sh` lanes 417 ok and 0 FAIL, wine-arm64's DXMT checks with `dxmt-present`, the presenter (66 ok) and
+   facade tests, the probe (11 ok; g10's metallib hashes equal the C++'s), D3D9's checks both ways and the conformance
+   suite at step 3's figures, the native gate (31) and probe, the VM host's tests, the loopback gate (31), the guest
+   build, the VM DXMT gate (45), `d3d9-gate`, `present-gate` (12 ok), `make llvm-nolto` and `tools/rust-check.sh`
+   (6,547 tests, 816 files audited), and licences (`airconv` LGPL-2.1-or-later, `airconv-ir` also MIT for the
+   DXBCParser port; no new third-party crate). The translator block, 25 corpus runs of the shipped ThinLTO tool: no
+   difference in `llvm-dis` text or metallib bytes, two processes equal; translate-only times equal within noise
+   without a rustc `target-cpu` (P10), C1 0.1 ms a shader slower. Two rows failed, neither on the translator's path.
+   The probe's `--full` (it needs `--goldens build/step2/goldens`: the committed folder holds none) failed g10 on a
+   handle label (Rust's allocator reuses a freed bitcode's address; every content hash equal) and g6's colour space
+   (the C++ reads the same with the screen locked). d3d-smoke's `present-held-a-vcpu` failed all six runs of one lock
+   job, the Rust and the C++ at main alternating, on its rule of five slow presents (Rust 63-69, C++ 20 and 68), under
+   load with the screen locked, as in step 3. The two final reviews' Important findings were fixed or ruled in Z4:
+   erasing a lowered value is `unsafe` and constants check their kind (the raw-handle readers go to 4b), and C10 is
+   the gap above. Their Minors are deferred (ledger).
 5. The core (`src/dxmt`) with D3D12 and D3D11, subsystem by subsystem, each behind a seam cut in the C++ first:
    configuration, logging and statistics; the presenter, frame pacing, scaler and frame generation; allocators, staging
    and residency; the shader cache; command encoding and the queue; then the D3D12 and D3D11 front ends (the COM
@@ -436,9 +525,9 @@ At every step:
 - **Rust**: `tools/rust-check.sh` over the root workspace: rustfmt (the pinned nightly: `rustfmt.toml`'s options are
   unstable), clippy `pedantic` and `nursery` with warnings denied on `aarch64-apple-darwin` and every `-pc-windows-msvc`
   target a crate ships on (1.99.0 has clippy since 2026-10-30), `cargo doc`, the host unit tests (with `cargo test`), and
-  `tools/audit.sh`, run under MacNeutron's environment (Wine archives, llvm-mingw and the guest sysroot named by
-  documented variables). `docs/CONVENTIONS.md` applies to the whole tree; DXMT is no longer on its list of competing
-  implementations.
+  `tools/audit.sh`, run under MacNeutron's environment (Wine archives, llvm-mingw, the guest sysroot and, since step
+  4a, the LLVM of MacNeutron's `make llvm-nolto` and its `xcrun-metal.sh`, named by documented variables).
+  `docs/CONVENTIONS.md` applies to the whole tree; DXMT is no longer on its list of competing implementations.
 - **Licences**: DXMTRS is LGPL-2.1-or-later (a work derived from DXMT); mtld3d's files keep their zlib notice: an
   unaltered `LICENSE` in `src/d3d9/`, `tests/d3d9/` and `docs/d3d9/`, `license = "Zlib"` in every mtld3d crate, and the
   README's list of the zlib files elsewhere; `vendor/snmalloc-sys` carries its MIT text. New crates only where a few
