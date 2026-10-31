@@ -41,13 +41,18 @@ check() {  # check <wine.app> <build dir>
   g -qF "Microsoft Corporation" "$R"/licenses/mtld3d/crates/snmalloc-sys-*/LICENSE-snmalloc 2> /dev/null \
     || miss "licenses/mtld3d/crates/snmalloc-sys-*/LICENSE-snmalloc (Microsoft's MIT notice for snmalloc)"
   # DXMT's DLLs link Rust's standard library (DXMTRS: nvngx.dll, nvapi64.dll, dxgi.dll, d3d10core.dll, winemetal.dll,
-  # winemetal.so): the README's DXMT entry names its texts, mtld3d's copy.
+  # winemetal.so, and d3d11.dll and d3d12.dll through DXMT's core): the README's DXMT entry names its texts, mtld3d's
+  # copy.
   awk '/^DXMT \(/ { p = 1 } p && /^$/ { exit } p' "$L/README" 2> /dev/null | g -qF 'mtld3d/rust/COPYRIGHT-library.html' \
     || miss "the README's DXMT entry naming Rust's standard library's texts (mtld3d/rust/COPYRIGHT-library.html)"
   # All six are named as Rust in that entry (read with its lines joined).
   awk '/^DXMT \(/ { p = 1 } p && /^$/ { exit } p' "$L/README" 2> /dev/null | tr -s ' \n' '  ' \
     | g -qF 'nvngx.dll, nvapi64.dll, dxgi.dll, d3d10core.dll, winemetal.dll and winemetal.so are Rust' \
     || miss "the README's DXMT entry naming nvngx.dll, nvapi64.dll, dxgi.dll, d3d10core.dll, winemetal.dll and winemetal.so as Rust"
+  # And d3d11.dll and d3d12.dll as carrying Rust, DXMT's core (DXMTRS step 5a).
+  awk '/^DXMT \(/ { p = 1 } p && /^$/ { exit } p' "$L/README" 2> /dev/null | tr -s ' \n' '  ' \
+    | g -qF 'd3d11.dll and d3d12.dll carry Rust' \
+    || miss "the README's DXMT entry naming d3d11.dll and d3d12.dll as carrying Rust"
   # mtld3d's crates (dxmt/mtld3d-notices.py): a folder of licence files for each one its INDEX names.
   while read -r crate version _; do  # "<crate> <version>: <terms>"
     version=${version%:}

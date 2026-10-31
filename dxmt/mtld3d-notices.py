@@ -1,8 +1,9 @@
 """The licence files of the code DXMTRS's shipped Rust binaries link (D3D9 spec §4; wine.app carries every notice its
-binaries need, ship-base spec §4, and the VM parts take wine.app's): d3d9.dll, mtld3d.dll, winemetal.dll, nvngx.dll
-and nvapi64.dll (aarch64-, arm64ec- and x86_64-pc-windows-msvc; the first three for i686-pc-windows-msvc too),
-mtld3d.so and winemetal.so (aarch64-apple-darwin), and the VM guest's mtld3d.so (x86_64- and i686-unknown-linux-gnu),
-all from the tree's one Cargo workspace. Each crate's LICENSE*, LICENCE*, COPYING*, NOTICE* and UNLICENSE* files go to
+binaries need, ship-base spec §4, and the VM parts take wine.app's): d3d9.dll, mtld3d.dll, winemetal.dll, nvngx.dll,
+nvapi64.dll, d3d11.dll and d3d12.dll (aarch64-, arm64ec- and x86_64-pc-windows-msvc; all but nvngx.dll and nvapi64.dll
+for i686-pc-windows-msvc too), mtld3d.so, winemetal.so and the VM host's d3d11.dylib and d3d12.dylib
+(aarch64-apple-darwin), and the VM guest's mtld3d.so (x86_64- and i686-unknown-linux-gnu), all from the tree's one Cargo
+workspace. Each crate's LICENSE*, LICENCE*, COPYING*, NOTICE* and UNLICENSE* files go to
 <out>/crates/<name>-<version>/, and <out>/crates/INDEX lists every crate with its licence expression. The tree's own
 crates are under its zlib LICENSE (src/d3d9's, bundle.sh ships it) or DXMT's LGPL (DXMT's texts); the snmalloc-sys it
 vendors (vendor/) is third-party code and is listed. A crate that ships no licence file (the objc2 family, MIT or a
@@ -19,10 +20,10 @@ import shutil
 import subprocess
 import sys
 
-LEGS = ((("d3d9", "mtld3d", "winemetal-pe", "nvngx", "nvapi"),
+LEGS = ((("d3d9", "mtld3d", "winemetal-pe", "nvngx", "nvapi", "d3d11", "d3d12"),
          ("aarch64-pc-windows-msvc", "arm64ec-pc-windows-msvc", "x86_64-pc-windows-msvc")),
-        (("d3d9", "mtld3d", "winemetal-pe"), ("i686-pc-windows-msvc",)),
-        (("mtld3d-unix", "winemetal"), ("aarch64-apple-darwin",)),
+        (("d3d9", "mtld3d", "winemetal-pe", "d3d11", "d3d12"), ("i686-pc-windows-msvc",)),
+        (("mtld3d-unix", "winemetal", "d3d11", "d3d12"), ("aarch64-apple-darwin",)),
         (("mtld3d-unix",), ("x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu")))
 PREFIXES = ("license", "licence", "copying", "notice", "unlicense")
 MIT = """MIT License
