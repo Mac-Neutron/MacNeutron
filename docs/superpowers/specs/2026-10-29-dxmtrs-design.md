@@ -49,7 +49,7 @@ Assumption to confirm: "D3DMtl" is mtld3d (athei/mtld3d, already vendored at our
   MacNeutron's checks and can ship.
 - **Layout (step R, 2026-10-30).** Every component lives under `src/<component>/`: its `meson.build` while meson lives,
   its `.def` and `.rc`, its C/C++ while any is left, and its Rust. The crate that becomes a component's PE binary has its
-  `Cargo.toml` at the component root (`src/nvngx`, `src/nvapi`, `src/winemetal`, `src/d3d9`; step 3's `src/dxgi` and
+  `Cargo.toml` at the component root (`src/nvngx`, `src/nvapi`, `src/winemetal`, `src/d3d9`, `src/dxgi`,
   `src/d3d10`); its Unix library's crate sits in `unix/` beside the `meson.build` that links it (`src/winemetal/unix`,
   `src/d3d9/unix`); its other crates in named subdirectories (`src/winemetal/wire`, `src/d3d9/{shim,core,types,shared,mtl}`).
   Rust several components use lives with the component that owns the concept (`src/util`: `dxmt-util`) until §7 folds
@@ -123,8 +123,8 @@ a native harness like the frame-generation one, each run once.
   `tools/cargo-staticlib.sh` from meson) is linked into every DXMT binary of the Mac build, the VM host's native build
   and the VM guest's x86_64 and i686 builds. It runs on the Mac (both `dxmt/check.sh` lanes pass, 810 rows, and a probe
   that fails on request stops a test program from starting) and in the native build (its test check passes); the guest
-  DLLs build and link but did not run in Phase 0; step 1 ran the guest's x86_64 nvngx, its shims still unexercised
-  (§5 step 1). MacNeutron's Mac DLLs turned out ARM64EC alone,
+  DLLs build and link but did not run in Phase 0; step 1 ran the guest's x86_64 nvngx and step 3
+  its i686 dxgi and d3d10core, some shims unexercised (§5 step 1). MacNeutron's Mac DLLs turned out ARM64EC alone,
   not ARM64X (`wine-arm64/build.sh` replaces `-marm64x`, which doesn't combine with LTO). Rust's `-msvc` standard library
   needs ntdll on every PE target, and on x86 what MSVC's runtime has and llvm-mingw's lacks (`__chkstk`, `_fltused`,
   and on i686 `__tls_array` and Wine ntdll's undecorated `__aulldiv`): `src/util/rust_pe_rt.c`. `d3d12.dll` grows by
@@ -172,8 +172,12 @@ existing C++ signatures.
    characterized first (`d3d11_dlss`). Its gates ran the VM guest's x86_64 `nvngx.dll` (`eac-vm/dxmt/gate.sh`'s DLSS
    programs), Rust's first run in the guest. Its `__chkstk` shim links but its callers there (writes to a console,
    `io::Error`'s text, the panic printer) didn't run with stderr in a file, so the shim is still unexercised; `_fltused`
-   matters only at link time. The i686 shims (`__tls_array`, `__aulldiv`) wait for step 3, whose `dxgi` and `d3d10core`
-   have i386 builds.
+   matters only at link time. Step 3 closed the i686 `__aulldiv`: the i386 `dxgi.dll` imports Wine
+   ntdll's `_aulldiv`, which its mode filter and two of its sorts call. `dxgi-guest.sh i386` passed, and so did
+   d3d-smoke's `32: wmsize` (a window through full screen and `ResizeTarget`) in both WoW64 modes. `__tls_array`
+   resolves (the DLLs read `%fs:0x2c`) but is still unexercised: the i386 `dxgi.dll` and `d3d10core.dll` read it only
+   in Rust's stderr write, which their logger uses only where ntdll has no `__wine_dbg_output` (outside Wine), and on a
+   panic.
    1b. `nvapi`, its own plan (`2026-10-29-dxmtrs-step1b-nvapi.md`): done 2026-10-29: DXMTRS main a7df84b,
    which MacNeutron pins. It answers 46 functions behind 54 IDs, 8 of them null on purpose, and logs any
    other of `nvapi_interface.h`'s 511 IDs; the first draft's 94 was wrong. Characterized first by `d3d11_nvapi` (a
@@ -270,7 +274,75 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
 3. `d3d10core`, then `dxgi`: whole DLLs behind COM (`src/d3d10`, `src/dxgi`). Only `d3d10core.dll` is a D3D10 DLL: the
    D3D10 object layer (17 classes) is compiled into `d3d11.dll` and lives inside its objects, so it moves with D3D11's
    front end at step 5, and `d3d10_blob.cpp` (linked only into `d3d12.dll`) with D3D12 (corrected 2026-10-30; plan
-   `2026-10-30-dxmtrs-step3-d3d10core-dxgi.md`).
+   `2026-10-30-dxmtrs-step3-d3d10core-dxgi.md`). Done 2026-10-31, DXMTRS main 58b99d7, which MacNeutron's `dxmtrs`
+   pins (its `main` waits for three rows, below). Both DLLs and their native dylibs are Rust: crate `d3d10core` (its
+   two exports over d3d11's `D3D11CoreCreateDevice`) and crate `dxgi` (the five exports, `DllMain` and NVEXT, the
+   factory, the adapter with D3DKMT, the output and its modes, the Win32 window system on PE and winemetal's WSI hooks
+   natively, private data, the configuration reader), on what they share in `dxmt-util`, whose LUID rule nvapi now
+   uses too. `d3d10core.cpp` and dxgi's C++ are gone; `dxgi_interfaces.h`, `dxgi_object.hpp` and `dxgi_resource.hpp`
+   stay for d3d11 and d3d12. Two C++ cuts came first (D2, D3). Characterized first by `d3d11_dxgi` (MacNeutron
+   `dxmt/tests`, 202 cases over every slot of the factory, adapter and output and the seven exports), with goldens
+   from the C++ after the cuts: `.fixed` (both Mac lanes), `.native` (fake displays) and `.i386` and `.guest64` (the
+   VM guest). The 22 cases that crashed the C++ (23 natively) were added from the Rust. Corrections to the step as
+   first written (the plan's D and P items):
+   - the native `dxgi.dylib` exports only its five entry points (it exported 125, and d3d11, d3d12 and d3d10core bound
+     50, 49 and 3 names from it), and `d3d10core` links util and d3d11 itself. Natively each dylib now has its own log
+     file (`_dxgi.log`, `_d3d11.log`, `_d3d12.log`, `_d3d10core.log`) and configuration, accepted (D2);
+   - d3d11's swap chain reads the output's gamma ramp through a private COM interface, `IMTLDXGIOutput`
+     (`IDXGIOutput6` plus `GetGammaRamp`, IID `4c1128cd-b437-4d44-9958-5d765bb85a76`), queried once where its target
+     is set. It replaces a `static_cast` to the C++ output, so a foreign output gets no gamma read and its presents go
+     on (D3, P8). The fullscreen-gamma rows grade the presents alone: `winshot` looks at window layer 0 and a fullscreen
+     window sits at 21, so P7's screen check fell back. The ramp's effect was checked once, with a scratch `winshot`
+     that takes any layer (P7);
+   - no C++ cut for `GetMTLDevice`: adapter slot 19 is a Rust function that returns the device as a `u64` (D4);
+   - dxgi has its own configuration reader, drift-tested against `config.cpp`, which d3d11 and d3d12 keep until step 5
+     (a duplicate listed for §7). The C++ now logs a matched profile's lines in key order, and so does the Rust (D5);
+   - every observable C++ quirk stays (D7). What crashed the C++ now has a defined result, each a probe case recorded
+     from the Rust. A null `riid` gives `E_POINTER` for QI-shaped calls and `E_INVALIDARG` for private data and
+     `CheckInterfaceSupport`. `EnumAdapters1(i, NULL)` gives `DXGI_ERROR_INVALID_CALL`, and adapter slot 12 gives
+     `E_NOTIMPL` with an error line. Slot 16's null cookie, `CheckFeatureSupport`'s null data and
+     `D3D10CoreCreateDevice`'s null adapter give `E_INVALIDARG`. A native mode with a zero refresh denominator sorts
+     last. A request with a rate never matches it (the size filter keeps it, the rate filter drops it), but one without
+     a rate still can, since a headless or VM display may report every mode at 0/0 (P20);
+   - the `.def`s, exports and both `version.rc`s are kept, the guest DLLs are Wine builtins and i686 links with
+     `--kill-at`. Every i686 Rust vtable function and export pops the bytes the C++'s did (`i686-ret.sh`). On the Mac,
+     `dxgi.dll` and `d3d10core.dll` import 34 and 30 more symbols, all from Rust's standard library, and 137 and 120
+     fewer. New DLLs: ntdll, `api-ms-win-core-synch-l1-2-0` and, for one symbol, `api-ms-win-crt-private-l1-1-0`,
+     all in Wine. The i386 imports were checked: `d3d10core.dll`'s `D3D11.DLL: D3D11CoreCreateDevice` and
+     `dxgi.dll`'s `ntdll.dll: _aulldiv` (D11; step 1's i686 shims);
+   - natively the same crates build for `aarch64-apple-darwin`. Each dylib exports exactly its names (`nm -gU`) through
+     `-Wl,-u` and `-Wl,-exported_symbol` for each export, plus `-Wl,-S` outside debug builds, and no Rust symbol is
+     bound across dylibs (D12, P9). D12's fallback, keeping the C++ natively, wasn't needed;
+   - `panic = "abort"`, and d3d11's `IMTLSwapChainFactory::CreateSwapChain` is called as `extern "system-unwind"`.
+     `DllMain` acts on `DLL_PROCESS_ATTACH` only: `DisableThreadLibraryCalls`, the shader cache path, then NVEXT (all
+     three HKLM keys, or NVEXT off; i386 skips it). Rust's TLS makes `DisableThreadLibraryCalls` fail, so `DllMain`
+     runs on every thread, as in `winemetal.dll` and `nvapi64.dll`. The configuration is first read at `EnumAdapters1`,
+     never under the loader lock (D13, P10);
+   - `d3d10core` is checked with `D3D10_CREATE_DEVICE_BGRA_SUPPORT` alone; no d2d1 row (D17);
+   - the tools installed on 2026-10-30 run as legs of step R's `tools/rust-check.sh`. Its lists now name `dxgi` and
+     `d3d10core` on every target they ship on, i686 included, and `dxmt-util` on i686. Step R's format commit and
+     clippy fixes took the place of the plan's format task (D20, D24, P14);
+   - no game bench (D22): C++ against Rust once, each within 5% but one reading, below. `present_loop` took 8.286 ms
+     against 8.285. On a busy machine the ARM64EC call rates were over their recorded baseline, so the C++ ran again
+     in the same session: the Rust was at or below it (-7%, -8%, -1%). Natively `GetDesc1` was +1.3% and
+     `QueryVideoMemoryInfo` +1.6%. `GetMTLDevice` read 0.8 ns against 0.7, one clock tick, and both bodies are the
+     same two instructions, so this is within the measurement's resolution (reported to the maintainer);
+   - Tasks 1-4 (the cuts, the probe and its goldens) ran beside step R and were then rebased onto it. The C++
+     references taken after the cuts stayed valid, because R changed none of DXMT's C++ (P17). MacNeutron's probe
+     commits land with the pin as one commit (P22).
+
+   Gates, once at the end (on 58b99d7): both Mac `check.sh` lanes 417 ok and 0 FAIL (412 plus five new rows: `dxgi`,
+   `d3d10-core`, `d3d10-wine` and the two fullscreen-gamma rows), wine-arm64's DXMT and release checks, and the
+   presenter (66 ok) and facade tests. The probe's `full` C++/Rust diff showed no unmasked difference on either lane or
+   natively. Also passed: the native gate (31 programs), the VM host's tests, the loopback gate (31), `d3d9-check`
+   both ways, the conformance suite (step R's figures), the guest build, the VM DXMT gate (45 programs),
+   `dxgi-guest.sh` on i386 (the first i386 Rust dxgi) and x86_64, the forwarder gate (41), `d3d9-gate` and
+   `tools/rust-check.sh` (721 files audited). The translator key did not move. Three rows failed with the screen
+   locked: wine-arm64's `dxmt-present` and present-gate's `winshot` captures, and d3d-smoke's `present-held-a-vcpu`.
+   Every other d3d-smoke row passed, both `32:` blocks included. The cause is the environment: `winshot` can't capture
+   a locked screen, and the S0 C++ failed the smoke row the same way in a control run. MacNeutron `main` waits until
+   the three pass on an unlocked screen. The final review found no Critical or Important defect; seven Minors are
+   deferred (ledger).
 4. The translator (`airconv`, the DXBC parser, our DXIL translator) behind `airconv_public.h`, once Phase 0 has decided
    it. Ported on the LLVM it uses today first, written against the explicit-type C API (`LLVMBuildLoad2`,
    `LLVMBuildGEP2`, `LLVMBuildCall2`) so that pointer types are made in one helper; gated by identical `llvm-dis`
