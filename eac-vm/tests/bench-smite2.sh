@@ -1,9 +1,10 @@
 #!/bin/sh
 # SMITE 2's lobby in the dev VM, measured (Direct3D forwarding M5): smite2-render.sh with the guest profiler, the host
 # counting frames (MN_PRESENT_STATS), then perf-compare.sh vm over [seconds] (default 60) once the lobby is up (two
-# 5 s windows of 30 fps or more). Every MN_* variable in its environment (MN_VM_CPUS, MN_EXECUTOR_SPIN_US, ...) reaches
-# macneutron-vm, for A/B runs. It starts SMITE 2 on the maintainer's Steam account: only with their go-ahead, never
-# while they play. Sound goes nowhere (MN_AUDIO_OUTPUT=none); the guest still streams it to the host.
+# 5 s windows of 30 fps or more); BENCH_GAME=palworld or aoe2 benches another game the same way (below). Every MN_*
+# variable in its environment (MN_VM_CPUS, MN_EXECUTOR_SPIN_US, ...) reaches macneutron-vm, for A/B runs. It starts the
+# game on the maintainer's Steam account: only with their go-ahead, never while they play. Sound goes nowhere
+# (MN_AUDIO_OUTPUT=none); the guest still streams it to the host.
 # MACNEUTRON_VM_D3D=forward and MACNEUTRON_DLSS=1 in its environment run the game as those launch options do;
 # MN_D3D_DESCRIPTORS (sync, async, submit: guest/proxy.cpp) and MACNEUTRON_VM_D3D_TRACE reach the guest too.
 # Writes build/perf/bench-<label>-<time>.json (and .sample.txt, .vm.txt, .gpu.txt).
@@ -11,12 +12,17 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=${BUILD_DIR:-$ROOT/build}/eac-vm-work SHARE=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share
-LABEL=${1:?usage: [BENCH_GAME=smite2|palworld] bench-smite2.sh <label> [seconds]} SECS=${2:-60}
+LABEL=${1:?usage: [BENCH_GAME=smite2|palworld|aoe2] bench-smite2.sh <label> [seconds]} SECS=${2:-60}
 # BENCH_GAME=palworld: Palworld's title screen instead (palworld-render.sh), for the performance build's second game.
+# BENCH_GAME=aoe2: Age of Empires II DE's main menu (aoe2-render.sh), the D3D11 milestone's game (maintainer,
+# 2026-10-31), forwarded unless MACNEUTRON_VM_D3D says otherwise: the launcher runs it so, and on guest DXMT it drew
+# nothing (2026-10-23). EXTRA: how long the game runs past the measured window.
 case ${BENCH_GAME:-smite2} in
-  smite2) APPID=2437170 GUEST=smite2-render.sh RUNVAR=SMITE2_RUN_SECONDS ;;
-  palworld) APPID=1623730 GUEST=palworld-render.sh RUNVAR=PALWORLD_RUN_SECONDS ;;
-  *) echo "bench-smite2: BENCH_GAME is smite2 or palworld" >&2; exit 2 ;;
+  smite2) APPID=2437170 GUEST=smite2-render.sh RUNVAR=SMITE2_RUN_SECONDS EXTRA=60 ;;
+  palworld) APPID=1623730 GUEST=palworld-render.sh RUNVAR=PALWORLD_RUN_SECONDS EXTRA=60 ;;
+  aoe2) APPID=813780 GUEST=aoe2-render.sh RUNVAR=AOE2_RUN_SECONDS EXTRA=120
+        MACNEUTRON_VM_D3D=${MACNEUTRON_VM_D3D:-forward} ;;
+  *) echo "bench-smite2: BENCH_GAME is smite2, palworld or aoe2" >&2; exit 2 ;;
 esac
 pgrep -x steam_osx > /dev/null || { echo "bench-smite2: Mac Steam isn't running" >&2; exit 1; }
 ! pgrep -x macneutron-vm > /dev/null || { echo "bench-smite2: a VM is running (a game being played?)" >&2; exit 1; }
@@ -42,8 +48,8 @@ trap 'exit 130' INT TERM HUP
 rm -f "$SHARE/traces/frames.txt" "$SHARE/traces/profile.txt"
 mkdir -p "$SHARE/traces"
 # The game runs 60 s past the measured window (the lobby comes up in about 25 s): 2 minutes a run (maintainer,
-# 2026-10-18; it was 5).
-{ echo "$RUNVAR=$((SECS + 60)) MACNEUTRON_VM_PROFILE=1"
+# 2026-10-18; it was 5). AoE2 120 s: its menu takes about a minute.
+{ echo "$RUNVAR=$((SECS + EXTRA)) MACNEUTRON_VM_PROFILE=1"
   echo "export MACNEUTRON_VM_D3D=${MACNEUTRON_VM_D3D:-guest}${MACNEUTRON_DLSS:+ MACNEUTRON_DLSS=$MACNEUTRON_DLSS}${MN_D3D_DESCRIPTORS:+ MN_D3D_DESCRIPTORS=$MN_D3D_DESCRIPTORS}${MACNEUTRON_VM_D3D_TRACE:+ MACNEUTRON_VM_D3D_TRACE=1}"
   [ -z "${BENCH_GUEST_ENV:-}" ] || echo "export $BENCH_GUEST_ENV"  # FEX_* settings, a training run's LLVM_PROFILE_FILE
   cat "$ROOT/eac-vm/tests/$GUEST"; } \
