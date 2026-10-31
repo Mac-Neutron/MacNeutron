@@ -249,9 +249,9 @@ existing C++ signatures.
    matters only at link time. Step 3 closed the i686 `__aulldiv`: the i386 `dxgi.dll` imports Wine
    ntdll's `_aulldiv`, which its mode filter and two of its sorts call. `dxgi-guest.sh i386` passed, and so did
    d3d-smoke's `32: wmsize` (a window through full screen and `ResizeTarget`) in both WoW64 modes. `__tls_array`
-   resolves (the DLLs read `%fs:0x2c`) but is still unexercised: the i386 `dxgi.dll` and `d3d10core.dll` read it only
-   in Rust's stderr write, which their logger uses only where ntdll has no `__wine_dbg_output` (outside Wine), and on a
-   panic.
+   resolves (the DLLs read `%fs:0x2c`) but stayed unexercised until step 5a: the i386 `dxgi.dll` and `d3d10core.dll`
+   read it only in Rust's stderr write, which their logger uses only where ntdll has no `__wine_dbg_output` (outside
+   Wine), and on a panic; step 5a's i386 `d3d12.dll` keeps its statistics in a `thread_local!`, which ran in the VM.
    1b. `nvapi`, its own plan (`2026-10-29-dxmtrs-step1b-nvapi.md`): done 2026-10-29: DXMTRS main a7df84b,
    which MacNeutron pins. It answers 46 functions behind 54 IDs, 8 of them null on purpose, and logs any
    other of `nvapi_interface.h`'s 511 IDs; the first draft's 94 was wrong. Characterized first by `d3d11_nvapi` (a
@@ -558,11 +558,98 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
    table), and F-D5-1, which blocks 4b (an all-equal FP vector constant, which LLVM 23 builds as a vector `ConstantFP`,
    is written as one record LLVM 15's reader reads as undef; the bitcode reader makes `ConstantDataVector` instead, and
    scans of SMITE 2's and 4a's DXBC corpora's opt23 outputs found no FP-vector undef, but 4b's C API makes them).
-5. The core (`src/dxmt`) with D3D12 and D3D11, subsystem by subsystem, each behind a seam cut in the C++ first:
-   configuration, logging and statistics; the presenter, frame pacing, scaler and frame generation; allocators, staging
-   and residency; the shader cache; command encoding and the queue; then the D3D12 and D3D11 front ends (the COM
-   objects), with the D3D10 object layer inside D3D11's. The order inside this step is set by its own plan, which
-   includes what D3D9 needs from the core (C4); D3D9's front end joins it after D3D11's.
+5. The core (`src/dxmt`, crate `dxmt-core`) with D3D12 and D3D11, in three plans (5-D1; step 5's decisions are in
+   `build/step5/map/7-decisions.md`): 5a gives the core its crates, links them into `d3d11.dll` and `d3d12.dll` and
+   moves the shared seams to Rust behind the unchanged C++ classes; then 5b (the D3D11 track: the D3D11 front end with
+   the D3D10 object layer inside it, one switch of `d3d11.dll`) and 5c (the D3D12 track, one switch of `d3d12.dll`)
+   run in parallel. The order as decided:
+   - live in 5a, each behind a C ABI cut in the C++ header the seam owns: statistics with the dump folder, the
+     presenter with its scalers, formats, the shader cache;
+   - S5 dropped (5-D2): the queue and the encoding context go live with D3D11's switch, not alone (a foreign call per
+     recorded command otherwise), so the queue's port is not checked apart from it;
+   - allocators, staging and residency have no live seam and go live inside each DLL at its switch, as do the
+     configuration reader (`config.cpp` serves the C++ until then) and the core's logging, which each front end routes
+     to its own log file;
+   - frame generation and pacing stay D3D12's until its switch, where frame generation moves into the core and 5c's
+     Rust calls the statistics directly, dropping 5a's C ABI for them;
+   - 5b and 5c take the DXBC parser and the root-signature deserializer from 4a's `airconv-ir`, never the C++ copies
+     (5-D6).
+   The core's Rust API is shaped for D3D11, D3D12 and D3D9 (C4; 5-D13, `build/step5/map/5-d3d9-needs.md`); D3D9's
+   binding fork is decided before C3, and its front end joins after D3D11's.
+   The key after step 4's switch (5-D6, 4-D4; 4a's composition, above): it hashes airconv's resolved dependencies and
+   the Rust toolchain, not the root `Cargo.lock`, so step 5's crates, dependencies and meson edits never turn players'
+   caches over. D3D11's switch deletes `src/d3d11/d3d11_shader.cpp`, a key input, and rides the next pin that moves the
+   key anyway (4b's, since 4a has pinned), never a key move of its own.
+   5a. The core's crates and the shared seams: done 2026-10-31, DXMTRS 54b71f6 (`step5a` rebased onto 4a's main
+   265833e, the controller's ruling, below), which MacNeutron pins (plan `2026-10-30-dxmtrs-step5a-core-seams.md`).
+   Phase P made two commits: D3D12's encoder types in their own namespace, and `DXMT_WMTCMD_HISTOGRAM`, a winemetal
+   development knob that counts encoded records per command buffer. S0 laid down every crate and module of step 5:
+   `dxmt-core`, the `d3d11` and `d3d12` staticlibs (one in each DLL and native dylib, on every target) and
+   `winemetal-sys` (`src/winemetal/sys`: winemetal's C API for Rust callers, generated by `tools/winemetal-layouts.sh`,
+   with `Obj` and `Pool` beside it); what every front end shares moved into `dxmt-util` (step 3's configuration reader,
+   the gamma ramp, the private interfaces). S1-S4 made four seams Rust behind the unchanged C++ classes: statistics with
+   the dump folder, the presenter with its scalers, the format table and the shader cache's store. Each seam's `extern
+   "C"` declarations sit in the C++ header it already owns, between `dxmt-abi` lines, and a generated `abi.rs` pins
+   every Rust export to them on all five targets. Characterized first by goldens recorded twice from the C++: the
+   statistics' counters and timed-line shapes, record histograms, the presenter's calls over 37 scenarios, the spatial
+   scaler's run, the format tables per GPU family and the shader cache's paths over an environment matrix. Corrections
+   to the step as first written (the plan's 5-D and P items and the ledger's rulings):
+   - three plans and no S5 (5-D1, 5-D2: the order above). The rest of the core is written ahead, host-tested and not
+     linked (P1, P14): resources, rings, staging, dynamic pools and residency, samplers, the internal library, capture,
+     HUD and version text (lanes R1-R3); the queue and its chunk arena, binding and access tracking, passes, flush and
+     the optimizer, queries, the resource initializer, UAV counters and emulated clears (E1-E4); D3D12's legacy
+     barriers, root-signature serialization, resource math, feature answers, samplers and pipeline-stream parsing
+     (D1-D4). D1-D4 are on DXMTRS `step5w` (92eba01), which never reaches `main` in 5a; R1-R3 and E1-E4 are committed
+     on their lane branches and wait, R1-R3 for `step5w`, E1-E4 for `step5w-e`, cut from it once R1 is on it.
+     `step5w` is rebased onto 5a's main and, once its last W lane has merged, is 5b's and 5c's base;
+   - each seam's C ABI was cut in the same commit as its Rust, not first in a commit of its own (this section's opening
+     rule): the C++ class stays the boundary, unchanged for its callers, as a thin forward (P2). Phase P's cut, the
+     encoder types' namespace, was its own commit;
+   - natively `winemetal.dylib` exports seven more Win32 calls (`wmt_native_*`: events, semaphores, handle duplication
+     and closing, waits, `OpenThread`), because 5b's and 5c's front ends need them in parallel (5-D8). They wrap
+     `win32_native.h` in a new `src/nativemetal/win32_native.cpp`, not in `win32_event.c`: C cannot wrap that header;
+   - the native `d3d11.dylib` and `d3d12.dylib` export only their `.def` names (and `MTLD3D11WaitIdle`), not every
+     global, as step 3 did for dxgi, with OSO stabs and `$HOME` 0 (`-Wl,-S` outside debug builds); the PE DLLs gain
+     only the imports of Rust's standard library (P16);
+   - natively the seam exports are `extern "C-unwind"` under an abort-on-panic guard and the staticlibs build with
+     `production-unwind`, so an Objective-C exception still reaches the VM host's `catch (...)` (P19, step 2's D4);
+     PE is unchanged;
+   - the core logs through `dxmt_log`, which each front end defines at its switch; no seam logs, so 5a defines it
+     nowhere (P5). `config.cpp` stays the C++'s reader until each switch, drift-tested against `dxmt_util::config`
+     (P6), and `ShaderCacheVersion()` stays C++ until 5c (P7);
+   - the drawable prefetch stays off (5-D5); its `DXMT_NATIVE` block, never compiled, went with the C++ presenter (P8);
+   - the i386 `d3d12.dll`'s Rust statistics ran in the VM: the first run of a `thread_local!` through `__tls_array`
+     (step 1);
+   - the fix pass: COM's HRESULT codes have one home, `dxmt_util::com`, and `tools/rust-check.sh` gains a `gen` leg
+     that regenerates winemetal's generated bindings and the seams' and fails on any difference (airconv's
+     `layouts.rs`, 4a's, is not yet in it);
+   - the key: nothing in 5a moves it (5-D6, 4-D4). 5a touches no input of 4a's composition, so 54b71f6's key is
+     265833e's, ad6adc5d; before the rebase it stayed 71a7e5f2 (Task 0's, under the MacNeutron scripts 5a was built
+     with), before and after every commit;
+   - the rebase: `step5a` was cut from 58b99d7 and `main` had moved to 265833e (4a), so it could not fast-forward; the
+     controller had it rebased (13 commits). Ten apply unchanged; three differ only where 4a's lines meet 5a's (the
+     workspace and `rustfmt.toml` lists, `tools/rust-check.sh`, `tools/winemetal-layouts.sh`'s `--airconv` mode inside
+     5a's parser, `docs/DEVELOPMENT.md`). MacNeutron's side, the notices of `d3d11.dll`'s and `d3d12.dll`'s Rust,
+     lands with the pin as one squashed commit;
+   - no game bench (5-D12); the D3D11 title §8 asks for is Age of Empires II DE (maintainer, 2026-10-31), asked for
+     before 5b's switch gates.
+
+   Gates, once at the end (Task 20 on db50eb6; the fix pass left the identity tables of every Mac and native binary
+   equal, so no lock gate re-ran): both Mac `check.sh` lanes 417 ok and 0 FAIL, wine-arm64's DXMT, present and release
+   checks, the presenter (66 ok) and facade tests, the probe (11 ok), D3D9's checks both ways and the conformance suite
+   at step R's figures, the native gate (31) and probe, the VM host's tests, the loopback gate (31), the forwarder's
+   checks, the guest build, the VM DXMT gate (45), the d3d gate (41), `dxgi-guest.sh` on both widths, `d3d9-gate`,
+   `present-gate` (12 ok; forwarded, 17), the VM statistics row, the p profile (no statistics or dump code left), the
+   goldens' rows (statistics, histograms and the spatial run equal to the C++'s) and `tools/rust-check.sh` (on the
+   fixed tree: 6,454 tests, 792 files audited). Identity is P16's delta once ED10 reads Rust's pooled string literals
+   (a comparator gap, fixed); dxgi and the native winemetal differ by S0's intended changes. C++ against Rust once:
+   within 5% (`present_loop` +2%; two ARM64EC DLSS rows read +32% and +43%, load, gone in a same-session control). Two
+   rows fail and fail their C++ controls too, so they go to the maintainer as older than 5a: d3d-smoke's
+   `present-held-a-vcpu` in both WoW64 modes (with the C++ native dylibs in the VM host as well; every other row
+   passed) and the probe's `--full` g6 colour space (`ref-wine.app`'s `winemetal.so` reads the same). Re-verified on
+   54b71f6 after the rebase: `tools/rust-check.sh` (6,613 tests, 887 files audited), the key, the Mac build,
+   `check.sh` ARM64EC 417 ok and x64 415 ok twice (each of its four failing rows, `atomic64typed`, `bg-leave` and
+   `ts-many`'s two, passed in the other run), the native gate (31), the VM DXMT gate (45) and the d3d gate (41).
 6. `util`'s remaining templates, `replay` and the meson build go with their last users. With no C++ LTO left, the
    ARM64X link of `tools/arm64x-link.sh` is open to every DLL.
 
@@ -587,18 +674,26 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
 
 Each step is one or more commits, each with its checks green (§8). Pace (maintainer, 2026-10-30): a step's map and plan
 may be written ahead, while earlier steps run, and are rebased onto what has landed before the step starts; steps 4
-and 5 run at the same time in their own branches (they meet only at `airconv_public.h`), as may step 3 beside step R
-where their files are disjoint. Builds and gates stay serialized on the one Mac: every command that builds or installs
-MacNeutron's runtime, or checks out a branch in the build's DXMTRS checkout, holds one pipeline lock, and all editing
-happens in worktrees. Small steps (3, 6) get one adversarial plan reviewer, large ones (4, 5, §7's phases) three.
+and 5 run at the same time in their own branches (their code meets only at `airconv_public.h`; the workspace's and the
+tools' lists merge by hand, as at 5a's rebase), as may step 3 beside step R where their files are disjoint. Builds and
+gates stay serialized on the one Mac: every command that builds or installs MacNeutron's runtime, or checks out a
+branch in the build's DXMTRS checkout, holds one pipeline lock, and all editing happens in worktrees. Small steps
+(3, 6) get one adversarial plan reviewer, large ones (4, 5, §7's phases) three.
 
 ## 6. What outside code relies on
 
-- **The VM forwarder** (MacNeutron `eac-vm/d3d`) compiles against DXMT's private headers: `d3d12_interfaces.hpp` and
-  `d3d11_interfaces.hpp` (private interfaces such as `IMTLD3D11ContextExt2`, in `host/stubs.h`),
-  `d3d12_barrier_legacy.hpp` (enhanced barriers as legacy ones, in `guest/proxy.cpp`) and `d3d12_common.hpp` (its tests).
-  DXMTRS keeps publishing headers that describe the same interfaces, layouts and conversion, under `include/`; a port
-  step that touches one runs the forwarder's build and loopback gate.
+- **The VM forwarder** (MacNeutron `eac-vm/d3d`) compiles against DXMT's private headers where they sit in `src/`:
+  `src/d3d12/d3d12_interfaces.hpp` and `src/d3d11/d3d11_interfaces.hpp` (private interfaces such as
+  `IMTLD3D11ContextExt2`, in `host/stubs.h`; both include `src/util/com/com_guid.hpp`),
+  `src/d3d12/d3d12_barrier_legacy.hpp` (enhanced barriers as legacy ones) and `d3d12_shared_fence.hpp` (a fence's
+  shared handles), both in `guest/proxy.cpp`, and `src/util/win32_native_event.h` (in `host/events.c` and
+  `guest/unix.c`; `win32_native.h` comes with the fence header). The guest's `mnd3d.dll` also builds DXMT's Win32
+  window code: `src/util/wsi_window.hpp`, `wsi_monitor.hpp`, `wsi_platform_win32.hpp` and `util_d3dkmt.h`, and copies
+  of `wsi_window_win32.cpp` and `wsi_monitor_win32.cpp`. DXMTRS keeps publishing headers that describe the same
+  interfaces, layouts and conversion, at these paths, not under `include/` as first planned (5-D7,
+  `build/step5/map/7-decisions.md`); `d3d12_common.hpp`, once listed here, is MacNeutron's (`dxmt/tests`). A port step
+  that touches one runs the forwarder's build and loopback gate, and one that replaces one (the window code included)
+  changes the forwarder in the same pin bump.
 - **MacNeutron** relies on the DLL and Unix-library names, the environment variables (`DXMT_*`, `MACNEUTRON_*`,
   `MTLD3D_*`), the log and statistics formats its tools read, and the shader cache's location. Names and variables are
   kept; a format change is made in both repositories in the same pin bump. D3D9's outside names are kept too:
@@ -606,6 +701,7 @@ happens in worktrees. Small steps (3, 6) get one adversarial plan reviewer, larg
   `licenses/mtld3d`, and `mtld3d_shaders.bin` until C3.
 - **The translator's C interface** (`airconv_public.h`, `AIRCONV_VERSION`) is internal to DXMTRS, but its cache key is
   what players' shader caches are stored under: it changes only at the LLVM move or a deliberate translator change.
+  D3D11's switch, which deletes one of its inputs, rides such a move (§5 step 5, 5-D6).
 
 ## 7. One project: D3D9 on the shared pieces
 
@@ -642,9 +738,10 @@ At every step:
   programs once they link with llvm-mingw (C3's plan) or xwin is approved.
 - **Rust**: `tools/rust-check.sh` over the root workspace: rustfmt (the pinned nightly: `rustfmt.toml`'s options are
   unstable), clippy `pedantic` and `nursery` with warnings denied on `aarch64-apple-darwin` and every `-pc-windows-msvc`
-  target a crate ships on (1.99.0 has clippy since 2026-10-30), `cargo doc`, the host unit tests (with `cargo test`), and
-  `tools/audit.sh`, run under MacNeutron's environment (Wine archives, llvm-mingw, the guest sysroot and, since step
-  4a, the LLVM of MacNeutron's `make llvm-nolto` and its `xcrun-metal.sh`, named by documented variables).
+  target a crate ships on (1.99.0 has clippy since 2026-10-30), `cargo doc`, the host unit tests (with `cargo test`),
+  the generated bindings regenerated and compared (winemetal's and the seams', since step 5a), and `tools/audit.sh`,
+  run under MacNeutron's environment (Wine archives, llvm-mingw, the guest sysroot and, since step 4a, the LLVM of
+  MacNeutron's `make llvm-nolto` and its `xcrun-metal.sh`, named by documented variables).
   `docs/CONVENTIONS.md` applies to the whole tree; DXMT is no longer on its list of competing implementations.
 - **Licences**: DXMTRS is LGPL-2.1-or-later (a work derived from DXMT); mtld3d's files keep their zlib notice: an
   unaltered `LICENSE` in `src/d3d9/`, `tests/d3d9/` and `docs/d3d9/`, `license = "Zlib"` in every mtld3d crate, and the
