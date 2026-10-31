@@ -44,7 +44,8 @@
 #             deleted from the input side; the deleted tokens number flags-dropped, and attrs-dropped equals the
 #             drop-list entries in the input's `attributes #` lines (norm_py below holds the lists).  defs, opt23
 #             The writer's llvm.scmp/ucmp lowering (ruling D4) is folded back on the output side, and their
-#             declarations deleted from the input side (post_py below).
+#             declarations deleted from the input side (post_py below). The writer's bit-test rewrite (ruling D5) is
+#             applied to the input side too (norm_py).
 #   verify    air15 verify (LLVM 15 typed parse, verifier, the atomics and llvm.* checks) says ok.
 #   inv       air-bcinv.py (P9b) says ok.
 #   wrapper   magic, version, offset and CPU type of the Darwin wrapper equal the reference's. (helpers: informational)
@@ -179,6 +180,67 @@ for m in re.finditer(r"^attributes #(\d+) = \{(.*)\}\s*$", text, re.M):
             attrs += 1
         elif kind == "memory" and not exact(rest.rstrip(")")):
             attrs += 1
+# Ruling D5: the writer writes each constant-index extractelement of `bitcast <N x iW> %v to <K x i1>` or of
+# `load <K x i1>` as LLVM 15's bit test (legalizeBitTests: the word's extractelement, and with the bit, icmp ne 0; the
+# load loads <K/32 x i32>; the bitcast goes). The same rewrite here, with the two new values unnamed as the writer
+# leaves them: the function's numbered values are scaled by 1000 to make room (LLParser takes increasing numbers with
+# gaps, and opt prints them renumbered). A module with numbered types is left alone (its %N could be a type).
+NAME = r'%(?:[-\w.$]+|"[^"]*")'
+LOAD = re.compile(r'^  (%s) = load <(\d+) x i1>, (.*)$' % NAME)
+CAST = re.compile(r'^  (%s) = bitcast <(\d+) x i(\d+)> (%s) to <\d+ x i1>$' % (NAME, NAME))
+EXTRACT = re.compile(r'^  (%s) = extractelement <\d+ x i1> (%s), (i\d+) (\d+)$' % (NAME, NAME))
+NUM = re.compile(r'%(\d+)(?![-\w.$])')
+DEF = re.compile(r'^(?:  %(\d+) = |(\d+):)')
+def bit_tests(body):
+    words = {}
+    for l in body:
+        m = LOAD.match(l)
+        if m and int(m.group(2)) % 32 == 0:
+            words[m.group(1)] = (int(m.group(2)) // 32, 32, m.group(1))
+        m = CAST.match(l)
+        if m:
+            words[m.group(1)] = (int(m.group(2)), int(m.group(3)), m.group(4))
+    if not words:
+        return body
+    defs = {int(m.group(1) or m.group(2)) for m in map(DEF.match, body[1:]) if m}
+    scale = lambda t: NUM.sub(lambda m: "%%%d" % (int(m.group(1)) * 1000) if int(m.group(1)) in defs else m.group(0), t)
+    args = [int(n) for n in NUM.findall(body[0])]
+    last = max(args, default=-1) + (0 if re.match(r'^\S+:', body[1]) else 1)
+    out = [body[0]]
+    for l in body[1:]:
+        m = LOAD.match(l)
+        if m and m.group(1) in words:
+            l = l.replace("load <%s x i1>," % m.group(2), "load <%d x i32>," % words[m.group(1)][0], 1)
+        if CAST.match(l) and CAST.match(l).group(1) in words:
+            continue
+        m = EXTRACT.match(l)
+        if m and m.group(2) in words:
+            n, w, v = words[m.group(2)]
+            k = int(m.group(4))
+            bit = 1 << (k % w)
+            bit -= (1 << w) if bit >> (w - 1) else 0
+            out.append("  %%%d = extractelement <%d x i%d> %s, %s %d" % (last + 1, n, w, scale(v), m.group(3), k // w))
+            out.append("  %%%d = and i%d %%%d, %d" % (last + 2, w, last + 1, bit))
+            last += 2
+            l = "  %s = icmp ne i%d %%%d, 0" % (m.group(1), w, last)
+        d = DEF.match(l)
+        if d:
+            last = int(d.group(1) or d.group(2)) * 1000
+            if d.group(2):
+                l = "%d:%s" % (last, l[d.end():])
+        out.append(scale(l))
+    return out
+if not re.search(r'^%\d+ = type ', text, re.M):
+    lines, done, i = text.split("\n"), [], 0
+    while i < len(lines):
+        if lines[i].startswith("define ") and lines[i].endswith("{"):
+            j = lines.index("}", i)
+            done += bit_tests(lines[i:j + 1])
+            i = j + 1
+        else:
+            done.append(lines[i])
+            i += 1
+    text = "\n".join(done)
 open(sys.argv[2], "w").write(text)
 print("flags=%d attrs=%d" % (flags, attrs))
 PY
