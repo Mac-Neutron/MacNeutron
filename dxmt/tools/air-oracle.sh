@@ -3,6 +3,7 @@
 # air-oracle.sh check <out-dir> <corpus>
 # air-oracle.sh det-compare <dir-a> <dir-b>     (det's comparison alone, for two folders)
 # air-oracle.sh norm <in.ll> <out.ll>            (text23n's input-side token deletion alone; prints flags= attrs=)
+# air-oracle.sh text23n <pre.ll> <out.bc> <work-stem> <flags-dropped> <attrs-dropped>   (the text23n row alone)
 #
 # DXMTRS step 4W's oracle harness: the C++ translator's LLVM 15 metallibs are the reference. Each is dumped to typed
 # text and a type table by air15, read with LLVM 23, written again by llvm-air-write (the fork's tool, which calls
@@ -11,7 +12,8 @@
 #   prep    air15 extract, dis (.ll15) and types (.types); LLVM 23's llvm-dis of the .bc, line 1 dropped (.ll23).
 #           Into $W/t/<corpus>/. Every other leg runs it first for the modules that lack it (or whose input is newer).
 #   full    the whole table (llvm-air-write --types --emit-ll), air15 pack, then the rows below. text15 and text23 must
-#           be identical to the reference's, up to the modules whose `c` count did not match (posmis).
+#           be identical to the reference's, up to the modules whose `c` count did not match (posmis), which the defs
+#           leg grades instead (ruling D2, below).
 #   defs    only the type-level table 4b's translator can supply: --named-only, --ref on the helper bitcode, and the
 #           f, g and s lines of every name the helpers define or declare removed from the .types copy, so the refs
 #           alone type them. A second writer run with the full f/g/s lines and the refs, output discarded, must
@@ -31,15 +33,24 @@
 #             drops applied), line 1 dropped on both, block labels' "; preds =" comments (use-list order) left out.
 #             Every leg.
 #   text15    air15 dis of the output equals the reference's.            full
+#             Ruling D1: a module equal only once every zero index of a constant getelementptr reads i64 0 counts, and
+#             is listed in $O/gep0.txt (LLVM 23 folds the C++'s getelementptr inbounds (T, T* @g, i64 0, i64 0) to @g,
+#             the writer's cast of @g to its first element's pointer is a CE bitcast, and LLVM 15's reader folds that
+#             back into a GEP with i32 0 indices; a path 4b never takes). Metal must still build such a module (the
+#             Metal row).
 #   text23    llvm-dis (23) of both, line 1 dropped, equal.                full
 #   text23n   the output and the writer's input (.pre.ll) both through `opt -passes=instsimplify` (-mtriple override,
 #             used for this comparison only), attribute references stripped, equal once the drop-list tokens are
 #             deleted from the input side; the deleted tokens number flags-dropped, and attrs-dropped equals the
 #             drop-list entries in the input's `attributes #` lines (norm_py below holds the lists).  defs, opt23
+#             The writer's llvm.scmp/ucmp lowering (ruling D4) is folded back on the output side, and their
+#             declarations deleted from the input side (post_py below).
 #   verify    air15 verify (LLVM 15 typed parse, verifier, the atomics and llvm.* checks) says ok.
 #   inv       air-bcinv.py (P9b) says ok.
 #   wrapper   magic, version, offset and CPU type of the Darwin wrapper equal the reference's. (helpers: informational)
-#   posmis    modules whose tool run printed `positional mismatch`.
+#   posmis    modules whose tool run printed `positional mismatch`: LLVM 23's reader changed the instruction count
+#             (it turns constant expressions LLVM 23 no longer has into instructions). Ruling D2: each is graded by a
+#             sliced defs run instead (ONLY=$O/posmis.names, into $O/posmis), its result per module in $O/posmis.txt.
 # After the modules, the Metal row (not for helpers; not for a sliced run):
 #   dxil-translate <SRC> <args> --use <folder of our metallibs> is run once. Before it, the number of metallibs in the
 #   folder must equal the input's (it substitutes a file only where one exists, so a missing one would pass on the
@@ -57,7 +68,7 @@
 # stale are the tool's stats summed.) Details go to stderr and to $O/failures.txt, one line per module and row; the
 # `stale <name>` lines of opt23 to $O/stale.txt. Exit 0 only when, for the rows the leg grades (ROWS):
 #   writer = self = verify = inv = wrapper = n; used = s (and the Metal row ran); newfail = 0; reasons = eq;
-#   posmis = 0 (except smite2); full: text15 = text23 = n - posmis; defs and opt23: text23n = n.
+#   every posmis module passes its defs run (D2); full: text15 = text23 = n - posmis; defs and opt23: text23n = n.
 #
 # Environment (dev-only; none is read by the library or the tool):
 #   BUILD_DIR   the build folder (default: the main checkout's, found through git)
@@ -150,9 +161,17 @@ def exact(args):
     if a == i == o:
         return True
     return o == "none" and (a == "none" or i == "none" or a == i)
+# Groups referenced outside the llvm.scmp/ucmp lines, which the writer removes (ruling D4). LLVM prints only groups
+# something references, so for any other module this counts every group.
+used = set()
+for line in text.split("\n"):
+    if not line.startswith("attributes #") and not re.search(r"@llvm\.[su]cmp\.", line):
+        used.update(re.findall(r"#(\d+)\b", line))
 attrs = 0
-for m in re.finditer(r"^attributes #\d+ = \{(.*)\}\s*$", text, re.M):
-    for tok in re.findall(r'"[^"]*"(?:="[^"]*")?|[A-Za-z_][\w.-]*(?:\((?:[^()]|\([^()]*\))*\))?', m.group(1)):
+for m in re.finditer(r"^attributes #(\d+) = \{(.*)\}\s*$", text, re.M):
+    if m.group(1) not in used:
+        continue
+    for tok in re.findall(r'"[^"]*"(?:="[^"]*")?|[A-Za-z_][\w.-]*(?:\((?:[^()]|\([^()]*\))*\))?', m.group(2)):
         kind, _, rest = tok.partition("(")
         if kind in DROP23:
             attrs += 1
@@ -162,6 +181,29 @@ for m in re.finditer(r"^attributes #\d+ = \{(.*)\}\s*$", text, re.M):
             attrs += 1
 open(sys.argv[2], "w").write(text)
 print("flags=%d attrs=%d" % (flags, attrs))
+PY
+}
+
+# post_py <opt.ll> <out.txt> <in|out>: text23n's last step on each side: line 1, the attribute groups and references
+# dropped. The writer lowers llvm.scmp/ucmp to icmp and select (ruling D4: LLVM 15 has neither), so the output side
+# folds its four lines (lt, gt, select gt 1 0, select lt -1 that) back into the call, and the input side loses the
+# declarations; scalar forms only (a vector's would stay unfolded and differ).
+post_py() {
+  python3 -I - "$@" << 'PY'
+import re, sys
+t = open(sys.argv[1]).read().split("\n", 1)[1]
+t = re.sub(r"^attributes #\d+ = .*\n", "", t, flags=re.M)
+t = re.sub(r" #\d+( |,|$)", r"\1", t, flags=re.M)
+if sys.argv[3] == "out":
+    lowered = re.compile(r"^  (?P<lt>%\S+) = icmp (?P<k>[su])lt (?P<ty>i\d+) (?P<a>\S+), (?P<b>\S+)\n"
+                         r"  (?P<gt>%\S+) = icmp (?P=k)gt (?P=ty) (?P=a), (?P=b)\n"
+                         r"  (?P<sel>%\S+) = select i1 (?P=gt), (?P<rt>i\d+) 1, (?P=rt) 0\n"
+                         r"  (?P<r>%\S+) = select i1 (?P=lt), (?P=rt) -1, (?P=rt) (?P=sel)$", re.M)
+    t = lowered.sub(lambda m: "  %s = call %s @llvm.%scmp.%s.%s(%s %s, %s %s)" % (
+        m["r"], m["rt"], m["k"], m["rt"], m["ty"], m["ty"], m["a"], m["ty"], m["b"]), t)
+else:
+    t = re.sub(r"\n(?:; Function Attrs: [^\n]*\n)?declare [^\n]*@llvm\.[su]cmp\.[^\n]*\n", "", t)
+open(sys.argv[2], "w").write(t)
 PY
 }
 
@@ -287,7 +329,7 @@ text23n() {
     return
   fi
   for side in in out; do
-    sed -E -e '1d' -e '/^attributes #[0-9]+ = /d' -e 's/ #[0-9]+( |,|$)/\1/g' "$3.nrm-$side" > "$3.nrm-$side.txt"
+    post_py "$3.nrm-$side" "$3.nrm-$side.txt" $side
   done
   want_flags=${cnt#flags=}
   want_flags=${want_flags%% *}
@@ -299,6 +341,18 @@ text23n() {
   [ "$want_flags" = "$4" ] || { echo "flags-dropped=$4 but $want_flags drop-list tokens in the input"; return; }
   [ "$want_attrs" = "$5" ] || { echo "attrs-dropped=$5 but $want_attrs drop-list entries in the input's attribute groups"; return; }
   echo ok
+}
+
+# gep0_eq <ours.ll15> <ref.ll15>: equal once every zero index of a constant getelementptr (one level of nested
+# parentheses inside it at most; deeper ones stay as they are) reads i64 0. Ruling D1, the cause in the header's text15.
+gep0_eq() {
+  python3 -I - "$1" "$2" << 'PY'
+import re, sys
+gep = re.compile(r"getelementptr (?:inbounds )?\((?:[^()]|\([^()]*\))*\)")
+def norm(path):
+    return gep.sub(lambda m: re.sub(r", i(?:32|64) 0(?=[,)])", ", i64 0", m.group(0)), open(path).read())
+sys.exit(0 if norm(sys.argv[1]) == norm(sys.argv[2]) else 1)
+PY
 }
 
 # self_eq <post.ll> <ours.ll23>: equal, line 1 of the .post.ll dropped. A block label's "; preds =" comment lists the
@@ -403,7 +457,14 @@ grade() { # <stem>
   if [ $posmis = 0 ]; then
     case " $ROWS " in
       *" text15 "*)
-        if [ -s "$o.ll15" ] && cmp -s "$o.ll15" "$t.ll15"; then text15=1; else fail text15 "typed text differs ($(diff "$t.ll15" "$o.ll15" 2> /dev/null | head -n 3 | tr '\n' '|'))"; fi
+        if [ -s "$o.ll15" ] && cmp -s "$o.ll15" "$t.ll15"; then
+          text15=1
+        elif [ -s "$o.ll15" ] && gep0_eq "$o.ll15" "$t.ll15"; then
+          text15=1
+          echo "$stem" >> "$O/gep0.txt"
+        else
+          fail text15 "typed text differs ($(diff "$t.ll15" "$o.ll15" 2> /dev/null | head -n 3 | tr '\n' '|'))"
+        fi
         ;;
     esac
     case " $ROWS " in
@@ -496,6 +557,7 @@ leg_setup() { # <leg> <corpus>
   : > "$O/results.txt"
   : > "$O/failures.txt"
   : > "$O/stale.txt"
+  : > "$O/gep0.txt"
   REFARGS= PASSARGS= HELPNAMES=
   case $LEG in
     full) ROWS="writer self text15 text23 verify inv wrapper" ;;
@@ -590,7 +652,17 @@ summarize() { # after the modules: the Metal row, the summary line, the first fa
     *" text23 "*) need text23 "$t23" $((n - pm)) ;;
   esac
   case " $ROWS " in *" text23n "*) need text23n "$t23n" "$n" ;; esac
-  if [ "$corpus" != smite2 ]; then need posmis "$pm" 0; fi
+  if [ "$pm" -gt 0 ]; then
+    # Ruling D2: LLVM 23's reader changed these modules' instruction counts; a sliced defs run grades them instead.
+    awk '/ posmis=1 / { print $1 }' "$O/results.txt" | sed "s/\$/.$EXT/" > "$O/posmis.names"
+    ROWS= ONLY=$O/posmis.names OUT_ROOT=$O/posmis NOMETAL=1 sh "$self" defs "$corpus" > "$O/posmis.summary" 2> "$O/posmis.err"
+    awk '{ ok = 1; for (i = 2; i <= NF; i++) { split($i, kv, "="); if (kv[1] ~ /^(writer|self|text23n|verify|inv|wrapper)$/ && kv[2] != "-" && kv[2] != 1) ok = 0 }
+      print $1 ": defs " (ok ? "ok" : "fail") " (" $0 ")" }' "$O/posmis/defs/$corpus.only/results.txt" > "$O/posmis.txt" 2> /dev/null
+    pmok=$(/usr/bin/grep -c ': defs ok ' "$O/posmis.txt")
+    echo "air-oracle: posmis graded by defs (ruling D2): $pmok/$pm ok, in $O/posmis.txt" >&2
+    need posmis-defs "$pmok" "$pm"
+  fi
+  [ ! -s "$O/gep0.txt" ] || echo "air-oracle: text15 equal only up to constant GEP zero index types (ruling D1): $(wc -l < "$O/gep0.txt" | tr -d ' ') modules, in $O/gep0.txt" >&2
   if [ -z "${ONLY:-}" ] && [ "${NOMETAL:-}" != 1 ] && [ "$EXT" = metallib ]; then
     if [ "$MET_RAN" = 1 ]; then
       need used "$MET_USED" "${MET_USED#*/}/${MET_USED#*/}"
@@ -783,6 +855,12 @@ case $cmd in
   norm)
     [ $# -eq 3 ] || die "usage: air-oracle.sh norm <in.ll> <out.ll>"
     norm_py "$2" "$3"
+    ;;
+  text23n)
+    [ $# -eq 6 ] || die "usage: air-oracle.sh text23n <pre.ll> <out.bc> <work-stem> <flags-dropped> <attrs-dropped>"
+    r=$(text23n "$2" "$3" "$4" "$5" "$6")
+    echo "$r"
+    [ "$r" = ok ]
     ;;
   check)
     [ $# -eq 3 ] || die "usage: air-oracle.sh check <out-dir> <corpus>"
