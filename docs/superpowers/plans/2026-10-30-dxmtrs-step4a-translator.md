@@ -27,8 +27,12 @@ DXBCParser/root-signature edge). Format and command forms: `2026-10-30-dxmtrs-st
 
 **Written ahead (spec §5 Pace).** Paths are step R's layout (`src/winemetal/unix` = crate `winemetal`,
 `src/winemetal/wire`, `tools/{audit,rust-check,winemetal-layouts,cargo-staticlib}.sh`, `docs/CONVENTIONS.md`, one root
-workspace). Step R is running (`stepR-layout`, c0e74b8 = R1 only on 2026-10-30). Task 0 rebases this plan onto R's
-landed head: every path and line cited here is re-checked there, and a difference is ledgered.
+workspace). Step R landed (DXMTRS `main` 1ccec40, which MacNeutron `dxmtrs` c36dab4 pins); Task 0 re-checked every
+path and line cited here against those two trees and ledgered each correction. DXMTRS line numbers are 1ccec40's (in
+`src/airconv`, `libs`, `src/d3d11` and `src/d3d12` equal to da6ed2d's: R did not touch them); G1's commits on
+`step4a-translator` shift `A/dxbc_converter.cpp` (+1 after `:801`, +2 after `:1024`, +3 after `:1328`),
+`A/dxbc_converter.hpp` (+2 after `:463`) and `A/dxil/dxil_types.hpp` (+3 after `:146`). MacNeutron line numbers are
+`dxmtrs`'s (c36dab4): `dxil-translate.mm`'s are the tool before G2 and G3 changed it on `step4-mn`.
 
 Paths: `<M>` = `~/Documents/MacProton`, `$B` = `<M>/build`, `$D` = `$B/wine-arm64-src/dxmt` (the pipeline's
 DXMTRS checkout), `$SRC` = `$B/wine-arm64-src`, `$W` = `$B/eac-vm-work`, `$S` = `$B/step4`, `$R` =
@@ -80,15 +84,17 @@ Plan rulings (new here; each: decision — why — cost if wrong):
   read-only; nothing from them is committed. — C8 is the only DXIL under real root
   signatures (1.1 flags, static samplers, root constants and descriptors, heap flags) and real RTV formats; C10 is the
   only SM5.1 DXBC under real root signatures (critic 27). — none.
-- **P2 One LLVM for baseline and lanes.** `$S/llvm15` = the shipped recipe without LTO: `cp -cR
-  $B/dxmt-src/llvm-project $S/llvm-project` inside the lock (rule 1: `make wine-arm64` owns that clone; `fix_llvm`
-  already applied), then, outside it, `build_llvm arm64 $S/llvm15 $S/llvm-project` with `UNIX_CPU=-mcpu=apple-m5`
-  and `UNIX_LTO` unset (`dxmt/llvm.sh:9-37`: Release, assertions off, so InstCombine's NDEBUG default holds) →
-  `.complete` = `llvmorg-15.0.7+fdivfmf+-mcpu=apple-m5+nolto`. The C++ baseline is recorded on it and, once, on the
-  shipped ThinLTO install; the two manifests must be equal (G5b). At Z the same recipe becomes a MacNeutron product,
-  `$SRC/llvm-arm64-nolto` (`make llvm-nolto`, Z2), which `tools/rust-check.sh`'s `AIRCONV_LLVM` names from then on, so
-  no later step depends on scratch. — Lanes link LLVM in every `cargo test`; ThinLTO archives redo LLVM's codegen per
-  link (critic 22). — If LTO changed output, G5b says so before any port.
+- **P2 One LLVM for baseline and lanes.** `$S/llvm15` = the shipped recipe without LTO: `[ -f $S/llvm15/.complete ] || [
+  -d $S/llvm-project/llvm ] || cp -cR $B/dxmt-src/llvm-project $S/llvm-project` inside the pipeline lock (rule 1: `make
+  wine-arm64` owns that clone; `fix_llvm` already applied), then, outside it but inside `/usr/bin/lockf -k
+  $S/llvm15.lock` with the stamp check (4W's contract: whichever plan runs first copies and builds once; `build_llvm`
+  shares one `$S/llvm15-build` and deletes it on a stamp mismatch), `build_llvm arm64 $S/llvm15 $S/llvm-project` with
+  `UNIX_CPU=-mcpu=apple-m5` and `UNIX_LTO` empty (`dxmt/llvm.sh:4-42`: Release, assertions off, so InstCombine's NDEBUG
+  default holds) → `.complete` = `llvmorg-15.0.7+fdivfmf+-mcpu=apple-m5+nolto`. The C++ baseline is recorded on it and,
+  once, on the shipped ThinLTO install; the two manifests must be equal (G5b). At Z the same recipe becomes a MacNeutron
+  product, `$SRC/llvm-arm64-nolto` (`make llvm-nolto`, Z2), which `tools/rust-check.sh`'s `AIRCONV_LLVM` names from then
+  on, so no later step depends on scratch. — Lanes link LLVM in every `cargo test`; ThinLTO archives redo LLVM's codegen
+  per link (critic 22). — If LTO changed output, G5b says so before any port.
 - **P3 Lane tool builds use cargo's `release` profile** (`debug-assertions`, `overflow-checks` on) with feature
   `oracle`; Z's images use `production-unwind` through meson. — An overflow where the C++ wraps aborts a lane run
   instead of hiding; the port writes `wrapping_*` where the C++ wraps. — none.
@@ -125,8 +131,8 @@ Plan rulings (new here; each: decision — why — cost if wrong):
   - the cargo settings that do reach it: the root `Cargo.toml`'s `[profile.release]`, `[profile.production]` and
     `[profile.production-unwind]` sections (the inherits chain the images build with: `lto`, `panic`,
     `overflow-checks`) and `.cargo/config.toml`'s `[build]`, `[env]` and `[target.aarch64-apple-darwin]` sections
-    (the last absent today: only `x86_64-apple-darwin` has rustflags, and they never reach this build), printed by one
-    `awk`;
+    (`[build]` and the last absent at 1ccec40: only `x86_64-apple-darwin` has rustflags, and they never reach this
+    build), printed by one `awk`;
   - `rustc +$MTLD3D_RUST -vV`, and `cargo +$MTLD3D_RUST tree --locked --offline --no-dedupe -p airconv -e normal,build
     --target aarch64-apple-darwin --prefix none --format '{p}'` with each ` (/abs/path)` and each path crate's version
     removed, `LC_ALL=C sort -u` (path crates are hashed by content through `src/airconv`; a workspace version bump must
@@ -181,7 +187,7 @@ Plan rulings (new here; each: decision — why — cost if wrong):
   `exit(1)`) → `LLVM error: <description>` (P5); `SM50GetErrorMessage` with size 0 writes nothing and returns 0; an
   AIRBuilder null → `UnsupportedFeature`'s text naming the op; `get_max_potential_workload_count` on an unknown domain
   → 0 (critic 10). Error texts are bytes (`Vec<u8>`), never `String`: guest names (`"DXIL: static (non-const) global
-  " + name`, `A/dxil/dxil_converter.cpp:101`), the verifier's text and `toString(err)` need not be UTF-8, and a lossy
+  " + name`, `A/dxil/dxil_converter.cpp:103`), the verifier's text and `toString(err)` need not be UTF-8, and a lossy
   conversion would change the bytes and the length `SM50GetErrorMessage` returns. Kept as the C++: the unhandled-opcode
   `InstNop` and its stdout line, written `let _ = writeln!(io::stdout().lock(), …)` (critic 11), a null `pRefl`
   (skips the hull write-back, `dxbc_converter.cpp:1250-1291`). — Valid shaders are unaffected (0 new failures on the
@@ -426,8 +432,12 @@ checks. Reviews on Opus.
 
 ### Task G1: the getter and the barrier declaration (DXMTRS C++, lane `g`)
 
-**Files:** Modify `A/dxil/dxil_public.h` (declarations only appended), `A/dxil/dxil_passthrough.cpp` (or a new
-`A/dxil/dxil_entry.cpp` added to `A/meson.build`'s `airconv_src`), `A/transforms/simdgroup_implicit_membarrier.cpp`.
+**Files** (as landed, `step4a-translator` 1d0e42e and 1b44a84): create `A/dxil/dxil_entry.cpp` (the getter, in
+`A/meson.build`'s `airconv_src`); modify `A/dxil/dxil_public.h` (declarations only appended), `A/meson.build`,
+`A/dxbc_converter.hpp` (the handle's `entry_view`), `A/dxbc_converter.cpp` (`SM50Initialize` builds it, DXIL and
+DXBC), `A/dxil/dxil.hpp` (`BuildEntryView`), `A/dxil/dxil_types.hpp` (`EntryView` declared),
+`A/transforms/simdgroup_implicit_membarrier.{cpp,hpp}` (`declareSimdgroupBarrier`). The controller's clip-distance fix
+(0439fa9, `A/dxbc_converter.cpp`: no clip insert into a void vertex function) rides on this lane before G5b.
 
 **Interfaces:**
 - Produces (C, `dxil_public.h`), pointers owned by the shader handle until `SM50Destroy`:
@@ -568,9 +578,13 @@ unexercised (C5 has one tri/integer HS/DS pair and no GS; 1,056 lines of `A/dxbc
 
 **Files (scratch, uncommitted):** `$S/llvm-project`, `$S/llvm15`.
 
-- [ ] **Step 1: The clone** (lock job): `cp -cR $B/dxmt-src/llvm-project $S/llvm-project`. Then, host-only,
-  `build_llvm` as P2 says. Expected: `$S/llvm15/.complete` = `llvmorg-15.0.7+fdivfmf+-mcpu=apple-m5+nolto`; `grep -c
-  'MacNeutron: FMFSource' $S/llvm-project/llvm/include/llvm/IR/IRBuilder.h` = 1. T1's link proof and L2 start then.
+- [ ] **Step 1: The clone** (pipeline lock job): `[ -f $S/llvm15/.complete ] || [ -d $S/llvm-project/llvm ] || cp
+  -cR $B/dxmt-src/llvm-project $S/llvm-project`. Then, host-only, `/usr/bin/lockf -k $S/llvm15.lock sh -c 'ROOT=<M>;
+  die(){ echo "$*" >&2; exit 1; }; . <M>/dxmt/pins; . <M>/dxmt/llvm.sh; [ "$(cat $S/llvm15/.complete 2>/dev/null)" =
+  "llvmorg-15.0.7+fdivfmf+-mcpu=apple-m5+nolto" ] || UNIX_CPU=-mcpu=apple-m5 UNIX_LTO= build_llvm arm64 $S/llvm15
+  $S/llvm-project'` (P2; the same call 4W's Task 0 Step 3 runs under the same lock, which built it on 2026-10-30).
+  Expected: `$S/llvm15/.complete` = `llvmorg-15.0.7+fdivfmf+-mcpu=apple-m5+nolto`; `grep -c 'MacNeutron: FMFSource'
+  $S/llvm-project/llvm/include/llvm/IR/IRBuilder.h` = 1. T1's link proof and L2 start then.
 
 ### Task G5b: C7, the snapshots, the baselines, coverage, the lane kit (owner)
 
@@ -709,7 +723,8 @@ MacNeutron path, so the tree-wide audit and Z5's privacy scan see no `/Users/` p
 is); modify root `Cargo.toml` (members `src/airconv`, `src/airconv/ir`; `airconv-ir` in `default-members`, `airconv`
 not; both in `[workspace.dependencies]`), `Cargo.lock`, `tools/winemetal-layouts.sh` (emits `A/src/abi/layouts.rs`,
 `dxil_public.h`'s `DXIL_ENTRY_*` structs included), `tools/rust-check.sh` (inputs `AIRCONV_LLVM`, `AIRCONV_XCRUN` as
-`${X:?…}`; both crates in the darwin CM, UT and Doc lists; `airconv-ir` in the four msvc CM rows), `docs/CONVENTIONS.md`
+`${X:?…}`; both crates in `HOST_P` (the host clippy and doc lines) and in `leg_test`'s host `tst` line; `airconv-ir`
+in the four msvc clippy rows, `PE_P`'s i686 and `PE64_P`'s x86_64, aarch64 and arm64ec), `docs/CONVENTIONS.md`
 and `tools/audit.sh` (`float_cast.rs` exception and `ALLOW_SITES` entry), `README.md` (licence list: P4m's files, the
 DXBCParser port).
 
@@ -880,7 +895,7 @@ Every read bounds-checked (P15); no `unsafe`.
   `root_signature_matches_the_cxx_dump` (below), `raw_layout_sizes`, `dxil_part_*` (the three texts).
   The root signature: G6's dumper (`$S/rsdump`, ~60 lines of host C++ over `dxbc_root_signature.hpp`) prints a
   canonical field list of `v1_0` and `v1_1` per blob; the Rust test prints the same list and compares, over the
-  synthetic RTS0 (`dxil-translate.mm:50-77`'s bytes for two ranges) and committed 1.1 fixtures in
+  synthetic RTS0 (`dxil-translate.mm:53-79`'s bytes for two ranges) and committed 1.1 fixtures in
   `A/ir/tests/data/rs/` (root constants, a root CBV, a static sampler, range flags; each with the dumper's output
   beside it), and over every real root signature listed in `$AIRCONV_STEP4_BASE/rsdump/list.txt` (C8's 150 `rs-*.bin`
   read in place, C10's and C11's; G6 and G7 write the list and the dumps).
@@ -1079,8 +1094,9 @@ parented block; `StripFastMath`; the verifier).
 `src/winemetal/unix/meson.build` and `src/nativemetal/meson.build` (custom targets get `env: {'AIRCONV_LLVM':
 native_llvm_path, 'AIRCONV_XCRUN': xcrun.full_path()}`; `airconv_dep_darwin` keeps only the LLVM link arguments),
 `A/meson.build` and `A/darwin/meson.build` (no `libairconv`, no CLI, no `build_airconv_for_windows`), `meson.options`
-(that option gone), `Cargo.lock`, `tools/rust-check.sh` (its `${AIRCONV_LLVM:?…}` message names MacNeutron's `make
-llvm-nolto` install, `build/wine-arm64-src/llvm-arm64-nolto`, P2); delete `A/*.cpp`, `A/*.hpp` but `dxbc_root_signature.hpp`, `A/nt/`, `A/dxil/*.cpp|hpp`
+(that option gone), `.github/workflows/ci.yml` (`:423` passes `-Dbuild_airconv_for_windows=true`), `Cargo.lock`,
+`tools/rust-check.sh` (its `${AIRCONV_LLVM:?…}` message names MacNeutron's `make llvm-nolto` install,
+`build/wine-arm64-src/llvm-arm64-nolto`, P2); delete `A/*.cpp`, `A/*.hpp` but `dxbc_root_signature.hpp`, `A/nt/`, `A/dxil/*.cpp|hpp`
 but `dxil_public.h`, `A/airconv_cli.cpp`, `A/monad.hpp`, `A/packed_variant_list.hpp`, `A/sha256.hpp`,
 `A/metallib_writer.*`; keep `A/airconv_public.h`, `A/dxil/dxil_public.h`, `A/dxbc_root_signature.hpp`,
 `A/transforms/*.{cpp,hpp}`, `A/shaders/*.metal`, `A/shim/shim.cpp`, `A/darwin/meson.build`. (Checked 2026-10-30:
@@ -1100,14 +1116,15 @@ Step 1 re-runs that `grep '#include'` and keeps whatever they name.)
 
 **Files:** Modify `wine-arm64/lib.sh` (P7, both compositions), `wine-arm64/tests/translator_key_test.sh` (a scratch
 workspace with `src/airconv/Cargo.toml` and `src/airconv/ir`; rows below), every `translator_key` caller's `PATH`
-gains `$(sh dxmt/mtld3d-tools.sh)` and exports `MTLD3D_RUST` (`wine-arm64/build.sh`, after R-D8's fetch line;
-`eac-vm/dxmt/build.sh`; `eac-vm/dxmt-native/build.sh`; `eac-vm/dxmt/inert.sh`); create `dxmt/tools.sh` (P8:
+gains `$(sh dxmt/mtld3d-tools.sh)` and exports `MTLD3D_RUST` (the two callers: `wine-arm64/build.sh:518` and
+`eac-vm/dxmt/inert.sh:24`; `eac-vm/dxmt/build.sh` and `eac-vm/dxmt-native/build.sh` call none, they pass the file
+`wine-arm64/build.sh` writes as `-Dtranslator_key_file`); create `dxmt/tools.sh` (P8:
 `build_probe`, `build_translate` linking `cargo rustc -p airconv --profile production --crate-type staticlib`,
-`CARGO_TARGET_DIR=$SRC/airconv-cargo`); modify `dxmt/llvm.sh` (tool builders gone), `wine-arm64/build.sh` (`:161`
-stamp and `:563-564` sources; and an order change: the `PATH=…mtld3d-tools.sh` line and R-D8's `cargo fetch --locked`
-move ahead of `translator=$(translator_key …)` at `:519`, because P7's `cargo tree --locked --offline` needs the
-dependencies' manifests in the cache on a fresh `CARGO_HOME`; the same order in `eac-vm/dxmt/build.sh` and
-`eac-vm/dxmt-native/build.sh`, and `inert.sh` gains the `PATH` line; line numbers as of cec2527 re-read after R),
+`CARGO_TARGET_DIR=$SRC/airconv-cargo`); modify `dxmt/llvm.sh` (tool builders gone), `wine-arm64/build.sh` (`:159-168`
+stamp, `dxmt/llvm.sh` and the tools' sources at `:161-162`, and `:568-569` the tool builds; and an order change: the
+`PATH=…mtld3d-tools.sh` line (`:531`) and R-D8's `cargo fetch --locked` (`:544`) move ahead of
+`translator=$(translator_key …)` at `:518`, because P7's `cargo tree --locked --offline` needs the dependencies'
+manifests in the cache on a fresh `CARGO_HOME`; `inert.sh` gains the `PATH` line; line numbers as of c36dab4),
 `Makefile` (target `llvm-nolto`: `build_llvm arm64 $SRC/llvm-arm64-nolto $B/dxmt-src/llvm-project` with the CPU
 `wine-arm64/build.sh` uses and `UNIX_LTO` unset, P2's recipe; a no-op while its `.complete` matches; run in the
 lock, since it reads `make wine-arm64`'s clone), `tools/rust-check.sh`'s documented input list in the ledger's gate
@@ -1129,12 +1146,12 @@ AIRCONV_XCRUN=$PWD/wine-arm64/tools/xcrun-metal.sh`, and the program ledger tell
 
 - [ ] **Step 1: RED**: `translator_key_test.sh` with only the new rows written → fails on the old `lib.sh` (the die
   rows print a key there).
-- [ ] **Step 2: Implement**; `sh wine-arm64/tests/translator_key_test.sh` → ok. The order, checked statically (no
-  build: a `wine-arm64/build.sh` run is a pipeline build, needs the signing variables and, on an empty `CARGO_HOME`,
-  the network): `sh -n` on the four scripts; in each of the three build scripts the line numbers of the
-  `mtld3d-tools.sh` `PATH` line, of `cargo fetch --locked` and of `translator=` increase in that order (`awk`); Z3's
-  `make wine-arm64`, in the lock, is the proof. Commit on `step4-mn` `DXMT: the translator key covers the Rust
-  translator; tool builders in dxmt/tools.sh; make llvm-nolto`.
+- [ ] **Step 2: Implement**; `sh wine-arm64/tests/translator_key_test.sh` → ok. The order, checked statically (no build:
+  a `wine-arm64/build.sh` run is a pipeline build, needs the signing variables and, on an empty `CARGO_HOME`, the
+  network): `sh -n` on every script Z2 edits; in `wine-arm64/build.sh` (the one build script that calls
+  `translator_key`) the line numbers of the `mtld3d-tools.sh` `PATH` line, of `cargo fetch --locked` and of
+  `translator=` increase in that order (`awk`); Z3's `make wine-arm64`, in the lock, is the proof. Commit on `step4-mn`
+  `DXMT: the translator key covers the Rust translator; tool builders in dxmt/tools.sh; make llvm-nolto`.
 
 ### Task Z3: the gates, once (owner)
 
