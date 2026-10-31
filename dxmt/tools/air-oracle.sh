@@ -52,6 +52,10 @@
 #   posmis    modules whose tool run printed `positional mismatch`: LLVM 23's reader changed the instruction count
 #             (it turns constant expressions LLVM 23 no longer has into instructions). Ruling D2: each is graded by a
 #             sliced defs run instead (ONLY=$O/posmis.names, into $O/posmis), its result per module in $O/posmis.txt.
+#   upgraded  ruling D6: modules whose llvm.* declaration names differ between the reference's typed text (.ll15) and
+#             LLVM 23's reading of it (.ll23): LLVM 23's reader upgraded their intrinsics on the way in (buffers.dxil's
+#             llvm.lifetime.*.p0i8: declarations moved, call-site attributes dropped, a dead cast left). Their full
+#             text rows and opt23 text23n are not graded; they join D2's sliced defs run, listed in $O/upgraded.txt.
 # After the modules, the Metal row (not for helpers; not for a sliced run):
 #   dxil-translate <SRC> <args> --use <folder of our metallibs> is run once. Before it, the number of metallibs in the
 #   folder must equal the input's (it substitutes a file only where one exists, so a missing one would pass on the
@@ -69,7 +73,8 @@
 # stale are the tool's stats summed.) Details go to stderr and to $O/failures.txt, one line per module and row; the
 # `stale <name>` lines of opt23 to $O/stale.txt. Exit 0 only when, for the rows the leg grades (ROWS):
 #   writer = self = verify = inv = wrapper = n; used = s (and the Metal row ran); newfail = 0; reasons = eq;
-#   every posmis module passes its defs run (D2); full: text15 = text23 = n - posmis; defs and opt23: text23n = n.
+#   every posmis and upgraded module passes its defs run (D2, D6); full: text15 = text23 = n - (posmis or upgraded);
+#   defs: text23n = n; opt23: text23n = n - upgraded.
 #
 # Environment (dev-only; none is read by the library or the tool):
 #   BUILD_DIR   the build folder (default: the main checkout's, found through git)
@@ -442,6 +447,9 @@ wrapper_ok() {
   [ $# -eq 5 ] && [ "$wa" = "$1 $2 $3 $5" ]
 }
 
+# The llvm.* declaration names of a typed or opaque text, sorted (ruling D6).
+llvm_decls() { /usr/bin/grep -o '^declare [^@]*@llvm\.[A-Za-z0-9_.]*' "$1" | sed 's/.*@//' | LC_ALL=C sort; }
+
 # One module, after its prep: writes (or takes) the output, then every row. Sets the row variables.
 grade() { # <stem>
   stem=$1
@@ -490,6 +498,7 @@ grade() { # <stem>
       rm -f "$o.conflict.bc"
     fi
     /usr/bin/grep -q '^positional mismatch' "$o.log" && posmis=1
+    case $LEG in full | opt23) [ "$(llvm_decls "$t.ll15")" = "$(llvm_decls "$t.ll23")" ] || upg=1 ;; esac
     /usr/bin/grep '^stale ' "$o.log" | sed "s/^/$stem /" >> "$O/stale.txt"
     if [ $writer = 1 ]; then
       if [ "$EXT" = metallib ]; then
@@ -516,7 +525,7 @@ grade() { # <stem>
       if [ -s "$o.post.ll" ] && [ -s "$o.ll23" ] && self_eq "$o.post.ll" "$o.ll23"; then self=1; else fail self "llvm-dis of the output differs from the writer's .post.ll"; fi
       ;;
   esac
-  if [ $posmis = 0 ]; then
+  if [ $posmis = 0 ] && [ $upg = 0 ]; then
     case " $ROWS " in
       *" text15 "*)
         if [ -s "$o.ll15" ] && cmp -s "$o.ll15" "$t.ll15"; then
@@ -558,7 +567,7 @@ grade() { # <stem>
   esac
   case " $ROWS " in
     *" text23n "*)
-      if [ -s "$o.pre.ll" ]; then
+      if [ -s "$o.pre.ll" ] && [ $upg = 0 ]; then
         r=$(text23n "$o.pre.ll" "$o.bc" "$o" "$fd" "$ad")
         if [ "$r" = ok ]; then text23n=1; else fail text23n "$r"; fi
       fi
@@ -567,7 +576,7 @@ grade() { # <stem>
 }
 
 worker() { # <stem>
-  writer=0 self=0 text15=0 text23=0 text23n=0 posmis=0 verify=0 inv=0 wrapper=0
+  writer=0 self=0 text15=0 text23=0 text23n=0 posmis=0 upg=0 verify=0 inv=0 wrapper=0
   ic=0 cc=0 ut=0 ad=0 fd=0 rf=0 st=0
   if prep_mod "$1"; then
     grade "$1"
@@ -581,7 +590,7 @@ worker() { # <stem>
       *) line="$line $row=-" ;;
     esac
   done
-  printf '%s posmis=%s ic=%s cc=%s ut=%s ad=%s fd=%s rf=%s st=%s\n' "$line" "$posmis" "$ic" "$cc" "$ut" "$ad" "$fd" "$rf" "$st" >> "$O/results.txt"
+  printf '%s posmis=%s upg=%s ic=%s cc=%s ut=%s ad=%s fd=%s rf=%s st=%s\n' "$line" "$posmis" "$upg" "$ic" "$cc" "$ut" "$ad" "$fd" "$rf" "$st" >> "$O/results.txt"
 }
 
 # ---------------------------------------------------------------- legs
@@ -680,7 +689,7 @@ summarize() { # after the modules: the Metal row, the summary line, the first fa
   agg=$(awk '
     { for (i = 2; i <= NF; i++) { split($i, kv, "="); k = kv[1]; v = kv[2]
         if (v == "-") { if (!(k in ok)) ok[k] = -1 }
-        else if (k == "posmis" || k ~ /^(ic|cc|ut|ad|fd|rf|st)$/) sum[k] += v
+        else if (k == "posmis" || k == "upg" || k ~ /^(ic|cc|ut|ad|fd|rf|st)$/) sum[k] += v
         else { if (ok[k] < 0) ok[k] = 0; ok[k] += v } } }
     END { for (k in ok) printf "%s=%s ", k, (ok[k] < 0 ? "-" : ok[k]); for (k in sum) printf "%s=%s ", k, sum[k] }' "$O/results.txt")
   get() { # <key> <default>
@@ -707,22 +716,26 @@ summarize() { # after the modules: the Metal row, the summary line, the first fa
   for row in writer self verify inv wrapper; do
     case " $ROWS " in *" $row "*) need "$row" "$(get $row 0)" "$n" ;; esac
   done
+  ug=$(get upg 0)
+  bd=$(/usr/bin/grep -cE ' (posmis|upg)=1 ' "$O/results.txt")
   case " $ROWS " in
-    *" text15 "*) need text15 "$t15" $((n - pm)) ;;
+    *" text15 "*) need text15 "$t15" $((n - bd)) ;;
   esac
   case " $ROWS " in
-    *" text23 "*) need text23 "$t23" $((n - pm)) ;;
+    *" text23 "*) need text23 "$t23" $((n - bd)) ;;
   esac
-  case " $ROWS " in *" text23n "*) need text23n "$t23n" "$n" ;; esac
-  if [ "$pm" -gt 0 ]; then
-    # Ruling D2: LLVM 23's reader changed these modules' instruction counts; a sliced defs run grades them instead.
-    awk '/ posmis=1 / { print $1 }' "$O/results.txt" | sed "s/\$/.$EXT/" > "$O/posmis.names"
+  case " $ROWS " in *" text23n "*) need text23n "$t23n" $((n - ug)) ;; esac
+  if [ "$bd" -gt 0 ]; then
+    # Ruling D2: LLVM 23's reader changed these modules' instruction counts; ruling D6: it upgraded their intrinsics.
+    # A sliced defs run grades them instead.
+    /usr/bin/grep -E ' (posmis|upg)=1 ' "$O/results.txt" | awk '{ print $1 }' | sed "s/\$/.$EXT/" > "$O/posmis.names"
+    awk '/ upg=1 / { print $1 }' "$O/results.txt" > "$O/upgraded.txt"
     ROWS= ONLY=$O/posmis.names OUT_ROOT=$O/posmis NOMETAL=1 sh "$self" defs "$corpus" > "$O/posmis.summary" 2> "$O/posmis.err"
     awk '{ ok = 1; for (i = 2; i <= NF; i++) { split($i, kv, "="); if (kv[1] ~ /^(writer|self|text23n|verify|inv|wrapper)$/ && kv[2] != "-" && kv[2] != 1) ok = 0 }
       print $1 ": defs " (ok ? "ok" : "fail") " (" $0 ")" }' "$O/posmis/defs/$corpus.only/results.txt" > "$O/posmis.txt" 2> /dev/null
     pmok=$(/usr/bin/grep -c ': defs ok ' "$O/posmis.txt")
-    echo "air-oracle: posmis graded by defs (ruling D2): $pmok/$pm ok, in $O/posmis.txt" >&2
-    need posmis-defs "$pmok" "$pm"
+    echo "air-oracle: posmis $pm (ruling D2) and upgraded intrinsics $ug (ruling D6, $O/upgraded.txt) graded by defs: $pmok/$bd ok, in $O/posmis.txt" >&2
+    need posmis-defs "$pmok" "$bd"
   fi
   [ ! -s "$O/gep0.txt" ] || echo "air-oracle: text15 equal only up to constant GEP zero index types (ruling D1): $(wc -l < "$O/gep0.txt" | tr -d ' ') modules, in $O/gep0.txt" >&2
   if [ -z "${ONLY:-}" ] && [ "${NOMETAL:-}" != 1 ] && [ "$EXT" = metallib ]; then
