@@ -13,6 +13,7 @@ H="$B/mtld3d-facade-host"
 make -s -C "$ROOT/eac-vm/metal/wm" metal-host HOST="$H" WINEMETAL="$WM" > /dev/null
 cp "$WM" "$H/winemetal.so"
 TOOLS=$(sh "$ROOT/dxmt/mtld3d-tools.sh")
-cd "$B/wine-arm64-src/dxmt/mtld3d/unix"
-PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 MTLD3D_WINEMETAL="$H/winemetal.so" CARGO_TARGET_DIR=target-wm \
-  cargo "+$MTLD3D_RUST" test -p mtld3d-mtl --target aarch64-apple-darwin --lib --tests "$@"
+cd "$B/wine-arm64-src/dxmt"
+PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 MTLD3D_WINEMETAL="$H/winemetal.so" \
+  CARGO_TARGET_DIR="$B/d3d9-cargo/wm" cargo "+$MTLD3D_RUST" test -p mtld3d-mtl --target aarch64-apple-darwin --lib \
+  --tests "$@"

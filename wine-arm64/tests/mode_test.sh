@@ -44,10 +44,10 @@ out=$( (die_if_missing) 2>&1 ) && st=0 || st=$?
 [ "$st" = 1 ]
 [ "$out" = "wine-arm64: missing tools: no-such-tool-a (brew install formula-a), no-such-tool-b (brew install formula-b), sh (brew install no-such-formula)" ]
 
-# build.sh's stamp names every file of this repo that its build runs (build.sh, bundle.sh and the mtld3d scripts they
+# build.sh's stamp names every file of this repo that its build runs (build.sh, bundle.sh and the D3D9 scripts they
 # call): a change to one that the stamp misses builds as up to date.
-stamp=$(sed -n '/^stamp=\$(stamp_of/,/mtld3d-layout32-check\.sh")$/p' "$ROOT/wine-arm64/build.sh")
-for f in wine-arm64/build.sh wine-arm64/bundle.sh dxmt/mtld3d-build.sh dxmt/mtld3d-tools.sh; do
+stamp=$(sed -n '/^stamp=\$(stamp_of/,/mtld3d-notices\.py")$/p' "$ROOT/wine-arm64/build.sh")
+for f in wine-arm64/build.sh wine-arm64/bundle.sh dxmt/mtld3d-tools.sh; do
   /usr/bin/grep -oE '\$ROOT/[A-Za-z0-9_./-]+\.(sh|py|swift|txt|plist|entitlements|m|mm|cpp|metal|md)\b|\$ROOT/[A-Za-z0-9_./-]*/pins\b' \
     "$ROOT/$f"
 done | sort -u | while read -r p; do

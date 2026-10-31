@@ -14,7 +14,8 @@ here() { printf '%s%s' "$(git -C "$ROOT" rev-parse "HEAD:$1")" "$(dirty "$ROOT" 
 case ${1:-} in
   wine) echo "wine $(rev "$S/wine") lsteamclient $(rev "$S/lsteamclient") build $(here eac-vm/wine)" ;;
   forwarder) echo "steam-forward $(here eac-vm/steam-forward) lsteamclient $(rev "$S/lsteamclient")" ;;
-  dxmt) echo "dxmt $(rev "$S/dxmt") build $(here eac-vm/dxmt) metal $(here eac-vm/metal) d3d $(here eac-vm/d3d)" ;;
+  dxmt) echo "dxmt $(rev "$S/dxmt") build $(here eac-vm/dxmt) metal $(here eac-vm/metal) d3d $(here eac-vm/d3d)" \
+    "scripts $(here dxmt) sysroot $(here eac-vm/sysroot)" ;;
   d3d) echo "d3d $(here eac-vm/d3d) dxmt $(rev "$S/dxmt")" ;;
   fex) echo "fex $(rev "$S/fex")" ;;
   *) echo "usage: stamps.sh wine|forwarder|dxmt|d3d|fex" >&2; exit 2 ;;

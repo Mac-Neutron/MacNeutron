@@ -1,9 +1,9 @@
 #!/bin/sh
-# fetch.sh: the builder's x86-64 sysroot (build.sh) on the Mac, for guest code the Mac builds (mtld3d's Linux build,
-# D3D9 M2b: dxmt/mtld3d-mingw-cc.sh's linux-cc): its headers, glibc's and GCC's runtime and libstdc++, in
-# build/eac-vm-work/sysroot-x86_64; or with i686, the i686 half of its multilib one (build.sh MULTILIB=1, old WoW64's
-# 32-bit Unix side) in sysroot-i686. Fetched again when the builder's packages differ from the copy's (its .lock); the
-# copy is used as is when the builder is off or has none. Prints the folder.
+# fetch.sh: the builder's x86-64 sysroot (build.sh) on the Mac, for guest code the Mac builds (Direct3D 9's Linux
+# mtld3d.so, D3D9 M2b: DXMTRS's tools/mingw-cc.sh's linux-cc, MTLD3D_SYSROOT): its headers, glibc's and GCC's runtime
+# and libstdc++, in build/eac-vm-work/sysroot-x86_64; or with i686, the i686 half of its multilib one (build.sh
+# MULTILIB=1, old WoW64's 32-bit Unix side) in sysroot-i686. Fetched again when the builder's packages differ from the
+# copy's (its .lock); the copy is used as is when the builder is off or has none. Prints the folder.
 #   fetch.sh [x86_64|i686]
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)

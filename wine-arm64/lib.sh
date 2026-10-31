@@ -253,3 +253,28 @@ prefer_native_check() {  # prefer_native_check <aarch64-windows dir> <Wine sourc
   LC_ALL=C /usr/bin/grep -qF "{'M','i','c','r','o','s','o','f','t',0}, LO_DEFAULT }" "$2/dlls/ntdll/unix/loadorder.c" \
     || die "loadorder.c's version_heuristics no longer sends Microsoft DLLs to LO_DEFAULT"
 }
+
+# D3D9's binaries carry no assertion code (DXMTRS docs/CONVENTIONS.md, "Production carries no debug assertions"). A C or
+# C++ object built without NDEBUG leaves an import of the C library's handler: `_assert` or `_wassert` in a PE,
+# `__assert_rtn` in a Mach-O, glibc's `__assert_fail` in an ELF. snmalloc's own checks do not go through the handler and
+# leave their message format instead, which is looked for in every file. A tool that fails fails the check.
+production_asserts() {  # production_asserts <file>...
+  _pa_tools=$(sh "$ROOT/dxmt/toolchain.sh") || die "production_asserts: no llvm-mingw toolchain"
+  for _pa_f in "$@"; do
+    [ -f "$_pa_f" ] || die "production_asserts: no such file: $_pa_f"
+    case $_pa_f in
+      *.dll)
+        _pa_imports=$("$_pa_tools/llvm-readobj" --coff-imports "$_pa_f") \
+          || die "production_asserts: cannot read the imports of $_pa_f"
+        _pa_hits=$(printf '%s\n' "$_pa_imports" | sed -n 's/^ *Symbol: \(_w\{0,1\}assert\) (.*/\1/p') ;;
+      *)
+        _pa_imports=$("$_pa_tools/llvm-nm" -u -j "$_pa_f") \
+          || die "production_asserts: cannot read the imports of $_pa_f"
+        _pa_hits=$(printf '%s\n' "$_pa_imports" | sed -n -E 's/^(_+assert_(rtn|fail))(@.*)?$/\1/p') ;;
+    esac
+    [ -z "$_pa_hits" ] \
+      || die "production_asserts: $_pa_f imports the C assertion handler $_pa_hits: a C or C++ object was built without NDEBUG"
+    ! LC_ALL=C /usr/bin/grep -a -q -F 'assert fail: {} in {} on {} ' "$_pa_f" \
+      || die "production_asserts: $_pa_f carries snmalloc's assertion message: snmalloc was built without NDEBUG"
+  done
+}

@@ -1,8 +1,8 @@
 #!/bin/sh
 # Builds MacNeutron's arm64 Wine (pins' commit of our Wine fork) into build/wine-arm64-src/wine-build, against
 # FreeType, gnutls and FFmpeg built from wine-arm64/deps.pins' tarballs into deps, FEX (our fork, at pins' commit) into
-# fex-ec and fex-unixlib, DXMT (our fork, at dxmt/pins' commit) for ARM64X into dxmt-install, and lsteamclient (our
-# Proton fork, at deps.pins' commit) as one of Wine's DLLs, then stages the signed
+# fex-ec and fex-unixlib, DXMT (our fork, at dxmt/pins' commit: ARM64EC, its Direct3D 9 pair ARM64X) into
+# dxmt-install, and lsteamclient (our Proton fork, at deps.pins' commit) as one of Wine's DLLs, then stages the signed
 # build/wine-arm64/wine.app (native arm64 spec §5.4, §6.3; arm64 DXMT spec §4; ship-base spec §5, §7; video playback
 # spec §6). Never installs tools. Needs MACNEUTRON_SIGN_IDENTITY and MACNEUTRON_PROVISIONING_PROFILE.
 # BUILD_DIR replaces build/ (tests).
@@ -36,8 +36,9 @@ need_tool automake automake; need_tool glibtoolize libtool; need_tool autopoint 
 need_tool makeinfo texinfo; need_tool gperf gperf; need_tool wget wget
 # DXMT compiles its own Metal shaders; Xcode ships the compiler as a separate component.
 xcrun metal --version > /dev/null 2>&1 || missing="$missing, Metal Toolchain (xcodebuild -downloadComponent MetalToolchain)"
-# mtld3d (Direct3D 9) builds with rustup's MTLD3D_RUST toolchain (dxmt/pins), its llvm-tools, and a target for each
-# of its builds: the ARM64X halves and mtld3d.so here, the VM guest's x86 pairs and Linux mtld3d.so (eac-vm).
+# DXMT's Rust (DXMTRS: Direct3D 9 and its other crates) builds with rustup's MTLD3D_RUST toolchain (dxmt/pins), its
+# llvm-tools, and a target for each of its builds: the ARM64X halves and mtld3d.so here, the VM guest's x86 pairs and
+# its x86_64 and i686 Linux mtld3d.so (eac-vm).
 need_tool rustup rustup
 if command -v rustup > /dev/null 2>&1; then
   . "$ROOT/dxmt/pins"
@@ -46,7 +47,7 @@ if command -v rustup > /dev/null 2>&1; then
   else
     installed=$(rustup target list --installed --toolchain "$MTLD3D_RUST" 2> /dev/null)
     for t in aarch64-pc-windows-msvc arm64ec-pc-windows-msvc aarch64-apple-darwin x86_64-pc-windows-msvc \
-      i686-pc-windows-msvc x86_64-unknown-linux-gnu; do
+      i686-pc-windows-msvc x86_64-unknown-linux-gnu i686-unknown-linux-gnu; do
       printf '%s\n' "$installed" | /usr/bin/grep -qx "$t" \
         || missing="$missing, Rust target $t (rustup target add --toolchain $MTLD3D_RUST $t)"
     done
@@ -164,9 +165,7 @@ stamp=$(stamp_of "$ROOT/wine-arm64/pins" "$ROOT/wine-arm64/build.sh" \
   "$ROOT/presenter/present.m" "$ROOT/presenter/cmaa2.metal" "$ROOT/presenter/sharpen.metal" \
   "$ROOT/presenter/CMAA2-LICENSE.txt" "$ROOT/LICENSE" \
   "$ROOT/wine-arm64/tools/xcrun-metal.sh" "$ROOT/dxmt/toolchain.sh" "$ROOT/dxmt/llvm-mingw.sh" \
-  "$ROOT/wine-arm64/tools/authenticode-sign.swift" "$ROOT/dxmt/mtld3d-build.sh" "$ROOT/dxmt/mtld3d-tools.sh" \
-  "$ROOT/dxmt/mtld3d-mingw-cc.sh" "$ROOT/dxmt/mtld3d-notices.py" "$ROOT/dxmt/mtld3d-linux-cargo.sh" \
-  "$ROOT/dxmt/mtld3d-layout32-check.sh")
+  "$ROOT/wine-arm64/tools/authenticode-sign.swift" "$ROOT/dxmt/mtld3d-tools.sh" "$ROOT/dxmt/mtld3d-notices.py")
 # Another CPU, LTO setting or toolchain is another build.
 stamp=$(printf '%s %s %s %s' "$stamp" "$MACNEUTRON_CPU" "$MACNEUTRON_LTO" "$TOOLCHAIN_BIN" | shasum -a 256 \
   | cut -d ' ' -f 1)
@@ -538,6 +537,12 @@ if [ ! -f "$SRC/dxmt-build/build.ninja" ] || [ "$(cat "$SRC/dxmt-build/.setup-in
     || { rm -rf "$SRC/dxmt-build"; die "configuring DXMT failed; see $SRC/dxmt.log"; }
   printf '%s\n' "$inputs" > "$SRC/dxmt-build/.setup-inputs"
 fi
+# Meson's cargo runs offline (tools/cargo-staticlib.sh): the crates the tree's Cargo.lock pins are fetched first, which
+# a fresh Mac or a cleared cargo registry needs. The retired dxmt/mtld3d-build.sh left a cargo config above the tree
+# (path remaps every cargo run in it would still read).
+rm -f "$SRC/.cargo/config.toml"
+(cd "$D" && cargo "+$MTLD3D_RUST" fetch --locked) >> "$SRC/dxmt.log" 2>&1 \
+  || die "fetching DXMT's Rust crates failed; see $SRC/dxmt.log"
 meson compile -C "$SRC/dxmt-build" >> "$SRC/dxmt.log" 2>&1 || die "building DXMT failed; see $SRC/dxmt.log"
 rm -rf "$SRC/dxmt-install"
 meson install -C "$SRC/dxmt-build" >> "$SRC/dxmt.log" 2>&1 || die "installing DXMT failed; see $SRC/dxmt.log"
@@ -580,18 +585,12 @@ sh "$ROOT/wine-arm64/tools/xcrun-metal.sh" -sdk macosx metal -o "$SRC/presenter/
      "$SRC/presenter/cmaa2.air" "$SRC/presenter/sharpen.air" \
   >> "$SRC/presenter.log" 2>&1 || die "building the presenter's shaders failed; see $SRC/presenter.log"
 
-# 7b. mtld3d (D3D9 spec §4), Direct3D 9: its ARM64X d3d9.dll and mtld3d.dll and its mtld3d.so, by its own Makefile in
-#     the DXMT tree's mtld3d/ (dxmt/mtld3d-build.sh), against an installed copy of this Wine (bin/winebuild and
-#     lib/wine's aarch64 archives); bundle.sh puts them in wine.app.
-rm -rf "$SRC/wine-sdk"
-make -C "$SRC/wine-build" install DESTDIR="$SRC/wine-sdk" > "$SRC/wine-sdk.log" 2>&1 \
-  || die "installing Wine for mtld3d's build failed; see $SRC/wine-sdk.log"
-echo "wine-arm64: building mtld3d (log: $SRC/mtld3d.log)" >&2
-BUILD_DIR="$B" sh "$ROOT/dxmt/mtld3d-build.sh" "$SRC/wine-sdk/usr/local" > /dev/null 2> "$SRC/mtld3d.log" \
-  || die "building mtld3d failed; see $SRC/mtld3d.log"
-# The crates its binaries link, their licence files (bundle.sh: licenses/mtld3d/crates).
-PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH" python3 -I "$ROOT/dxmt/mtld3d-notices.py" "$D/mtld3d" \
-  "$SRC/mtld3d-notices" "cargo +$MTLD3D_RUST" 2>> "$SRC/mtld3d.log" || die "collecting mtld3d's crate licences failed; see $SRC/mtld3d.log"
+# 7b. Direct3D 9 (D3D9 spec §4, DXMTRS's src/d3d9): step 7's meson build made its ARM64X d3d9.dll and mtld3d.dll and
+#     its mtld3d.so in dxmt-install (bundle.sh puts them in wine.app). The crates the tree's shipped Rust links, their
+#     licence files (bundle.sh: licenses/mtld3d/crates).
+PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH" python3 -I "$ROOT/dxmt/mtld3d-notices.py" "$D" \
+  "$SRC/mtld3d-notices" "cargo +$MTLD3D_RUST" 2> "$SRC/mtld3d.log" \
+  || die "collecting D3D9's crate licences failed; see $SRC/mtld3d.log"
 
 # 8. Bundle and sign (make install into wine.app, the loader's entitlements, every check on the result). First the
 #    bundle's licenses/SOURCE (ship-base spec §4): the inputs it is built from, each tree's series or dev.

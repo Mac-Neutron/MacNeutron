@@ -55,10 +55,11 @@ presenter:
 presenter-check: build wine-arm64 presenter
 	sh presenter/check.sh
 
-# D3D12, D3D11 and D3D10 test programs for our DXMT, and D3D9's for mtld3d, built in parallel (one compiler per core), and dxbc.exe, which
-# compiles the D3D11 and D3D10 ones' shaders into dxmt/tests/shaders/d3d11 (run on the macOS runtime: dxmt/tests/dxbc.cpp).
+# D3D12, D3D11, D3D10 and D3D9 test programs for our DXMT, built in parallel (one compiler per core), dxbc.exe, which
+# compiles the D3D11 and D3D10 ones' shaders into dxmt/tests/shaders/d3d11 (run on the macOS runtime:
+# dxmt/tests/dxbc.cpp), and d3d9_triangle for arm64 (dxmt/d3d9-check.sh's arm64 rows).
 DXMT_TESTS = $(patsubst dxmt/tests/%.cpp,build/dxmt-tests/%.exe,$(wildcard dxmt/tests/d3d1[012]_*.cpp dxmt/tests/d3d9_*.cpp)) \
-	build/dxmt-tests/dxbc.exe
+	build/dxmt-tests/dxbc.exe build/dxmt-tests-arm64/d3d9_triangle.exe
 dxmt-tests:
 	mkdir -p build/dxmt-tests
 	$(MAKE) -s -j$(shell sysctl -n hw.ncpu) $(DXMT_TESTS)
@@ -68,10 +69,16 @@ build/dxmt-tests/%.exe: dxmt/tests/%.cpp dxmt/tests/d3d12_common.hpp dxmt/tests/
 # d3d11_nvapi builds against NVIDIA's own nvapi.h, from DXMT's tree (make wine-arm64 fetches it).
 build/dxmt-tests/d3d11_nvapi.exe build/dxmt-tests-arm64ec/d3d11_nvapi.exe: NVAPI_INC = -Ibuild/wine-arm64-src/dxmt/external/nvapi
 
-# D3D9's for i386 too, the VM guest's 32-bit lane (D3D9 M2b: mtld3d's i386 pair under the guest's new WoW64).
+# D3D9's for i386 too, the VM guest's 32-bit lane (D3D9 M2b: D3D9's i386 pair under the guest's new WoW64).
 build/dxmt-tests-i386/%.exe: dxmt/tests/%.cpp
 	mkdir -p build/dxmt-tests-i386
 	$(MINGW_BIN)/i686-w64-mingw32-clang++ -O2 -static -s -std=c++17 -Wl,--large-address-aware -o $@ $< -ld3d9 -luser32
+
+# And for arm64: a native arm64 process loads the ARM64X d3d9.dll's native half, which no x64 or ARM64EC program
+# reaches.
+build/dxmt-tests-arm64/%.exe: dxmt/tests/%.cpp
+	mkdir -p build/dxmt-tests-arm64
+	$(MINGW_BIN)/aarch64-w64-mingw32-clang++ -O2 -static -s -std=c++17 -o $@ $< -ld3d9 -luser32
 
 # The same programs and present_loop for ARM64EC, for the arm64 runtime (arm64 DXMT spec §7), built in parallel.
 MINGW_EC = $(MINGW_BIN)/arm64ec-w64-mingw32-clang -O3 -flto=thin -static -s $(PE_MARCH)

@@ -1,16 +1,20 @@
 #!/bin/sh
-# check-build.sh: DXMT's guest build (build.sh) is what the VM's Wine loads. Its five DLLs are x86-64 Wine builtins, and
-# i386 ones (32-bit games), winemetal.dll exports WMTMemoryAlloc and WMTMemoryFree, d3d12.dll imports winemetal.dll, and nothing macOS (no
-# Mach-O, no *-unix folder) came with them; mtld3d's guest build (dxmt/tests/mtld3d_guest_test.sh); and the guest
+# check-build.sh: DXMT's guest build (build.sh) is what the VM's Wine loads. Its seven DLLs (Direct3D 9's d3d9 and
+# mtld3d among them) are x86-64 Wine builtins, and i386 ones (32-bit games), winemetal.dll exports WMTMemoryAlloc and
+# WMTMemoryFree, d3d12.dll imports winemetal.dll, and nothing macOS (no Mach-O) came with them, and of Linux exactly
+# Direct3D 9's x86_64-unix/mtld3d.so and i386-unix/mtld3d.so; no assertion code in Direct3D 9's binaries (NDEBUG,
+# wine-arm64/lib.sh's production_asserts); Direct3D 9's guest build (dxmt/tests/mtld3d_guest_test.sh); and the guest
 # winemetal.so's tables hold every slot. Exits 1 at the first failure.
+#   check-build.sh [<guest folder>]   (default build/eac-vm-work/dxmt-guest)
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+. "$ROOT/wine-arm64/lib.sh"
 D=${1:-${BUILD_DIR:-$ROOT/build}/eac-vm-work/dxmt-guest}
 PATH="$(sh "$ROOT/dxmt/toolchain.sh"):$PATH"
 fail() { echo "check-build: FAIL: $*"; exit 1; }
 for a in "x86_64-windows PE32+*x86-64*" "i386-windows PE32\ executable*80386*"; do
   dir=${a%% *} want=${a#* }
-  for n in d3d10core d3d11 d3d12 dxgi winemetal; do
+  for n in d3d10core d3d11 d3d12 dxgi winemetal d3d9 mtld3d; do
     f=$D/$dir/$n.dll
     [ -f "$f" ] || fail "no $n.dll in $D/$dir"
     case $(file -b "$f") in $want) ;; *) fail "$dir/$n.dll is $(file -b "$f")" ;; esac
@@ -23,11 +27,18 @@ for a in "x86_64-windows PE32+*x86-64*" "i386-windows PE32\ executable*80386*"; 
   llvm-objdump -p "$D/$dir/d3d12.dll" | /usr/bin/grep -q 'DLL Name: winemetal.dll' \
     || fail "$dir/d3d12.dll doesn't import winemetal.dll"
 done
-[ -z "$(find "$D" -name '*-unix')" ] || fail "a *-unix folder: $(find "$D" -name '*-unix' | head -1)"
+unix=$(cd "$D" && find . -name '*-unix' -o -path '*-unix/*' | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')
+[ "$unix" = "i386-unix i386-unix/mtld3d.so x86_64-unix x86_64-unix/mtld3d.so " ] \
+  || fail "Linux files other than D3D9's two mtld3d.so, or not both: $unix"
+# The C and C++ side of the guest is built with -DNDEBUG (tools/mingw-cc.sh env): no import of the C library's
+# assertion handler and no snmalloc assertion message in D3D9's six binaries.
+msg=$(production_asserts "$D/x86_64-unix/mtld3d.so" "$D/i386-unix/mtld3d.so" \
+  "$D/x86_64-windows/d3d9.dll" "$D/x86_64-windows/mtld3d.dll" "$D/i386-windows/d3d9.dll" "$D/i386-windows/mtld3d.dll" \
+  2>&1) || fail "${msg#wine-arm64: }"
 macho=$(find "$D" -type f -exec file {} + | /usr/bin/grep Mach-O || true)
 [ -z "$macho" ] || fail "Mach-O: $macho"
-sh "$ROOT/dxmt/tests/mtld3d_guest_test.sh" "${BUILD_DIR:-$ROOT/build}/mtld3d-guest" > /dev/null \
-  || fail "mtld3d's guest build: dxmt/tests/mtld3d_guest_test.sh"
+sh "$ROOT/dxmt/tests/mtld3d_guest_test.sh" "$D" > /dev/null \
+  || fail "Direct3D 9's guest build: dxmt/tests/mtld3d_guest_test.sh"
 # Each guest winemetal.so stage.sh takes holds every slot DXMT and mtld3d index (calls.h's MN_WM_SLOTS): a table from
 # an older build would be read past its end.
 slots=$(sed -n 's/^#define MN_WM_SLOTS \([0-9]*\).*/\1/p' "$ROOT/eac-vm/metal/wm/calls.h")

@@ -1,8 +1,10 @@
 #!/bin/sh
 # build.sh: our DXMT (build/wine-arm64-src/dxmt, the series with 0071) for the EAC microVM's x86-64 guest, built on the
 # Mac with MacNeutron's llvm-mingw and installed into build/eac-vm-work/dxmt-guest/x86_64-windows, and for i386 into
-# i386-windows (32-bit games under the guest Wine's new WoW64; no NVIDIA DLLs: NGX has no 32-bit runtime); then the
-# tree's mtld3d (Direct3D 9) into build/mtld3d-guest (dxmt/mtld3d-build.sh --guest). It links against the
+# i386-windows (32-bit games under the guest Wine's new WoW64; no NVIDIA DLLs: NGX has no 32-bit runtime). Its
+# Direct3D 9 (src/d3d9) comes with each: d3d9.dll and mtld3d.dll there, and its Linux mtld3d.so in x86_64-unix and
+# i386-unix (the i686 one old WoW64's), built on the builder's sysroot of that arch (eac-vm/sysroot/fetch.sh,
+# MTLD3D_SYSROOT); dxmt/mtld3d-layout32-check.sh then compares the two's boundary structs. It links against the
 # guest Wine's import libraries, from the builder into guest-wine-sdk (a library is replaced only when the builder's
 # differs, and the copies already there are used if the builder is off); winebuild is the Mac's own (it only marks the
 # DLLs as builtins). Set up again in a new build folder when the options or the cross file change (.setup-inputs).
@@ -57,6 +59,10 @@ if [ ! -f "$B/build.ninja" ] || [ "$(cat "$B/.setup-inputs" 2> /dev/null)" != "$
     || { rm -rf "$B"; echo "dxmt-guest: meson setup failed; see $W/dxmt-guest.log" >&2; exit 1; }
   printf '%s\n' "$inputs" > "$B/.setup-inputs"
 fi
+# Meson's cargo runs offline (tools/cargo-staticlib.sh): the crates the tree's Cargo.lock pins are fetched first.
+( . "$ROOT/dxmt/pins"; cd "$S/dxmt" && cargo "+$MTLD3D_RUST" fetch --locked ) >> "$W/dxmt-guest.log" 2>&1 \
+  || { echo "dxmt-guest: fetching DXMT's Rust crates failed; see $W/dxmt-guest.log" >&2; exit 1; }
+MTLD3D_SYSROOT=$(sh "$ROOT/eac-vm/sysroot/fetch.sh" x86_64); export MTLD3D_SYSROOT
 meson compile -C "$B" >> "$W/dxmt-guest.log" 2>&1 || { echo "dxmt-guest: build failed; see $W/dxmt-guest.log" >&2; exit 1; }
 rm -rf "$W/dxmt-guest"
 meson install -C "$B" >> "$W/dxmt-guest.log" 2>&1 || { echo "dxmt-guest: install failed; see $W/dxmt-guest.log" >&2; exit 1; }
@@ -82,11 +88,10 @@ if [ ! -f "$B32/build.ninja" ] || [ "$(cat "$B32/.setup-inputs" 2> /dev/null)" !
     || { rm -rf "$B32"; echo "dxmt-guest: meson setup (i386) failed; see $W/dxmt-guest.log" >&2; exit 1; }
   printf '%s\n' "$inputs" > "$B32/.setup-inputs"
 fi
+MTLD3D_SYSROOT=$(sh "$ROOT/eac-vm/sysroot/fetch.sh" i686); export MTLD3D_SYSROOT
 meson compile -C "$B32" >> "$W/dxmt-guest.log" 2>&1 || { echo "dxmt-guest: i386 build failed; see $W/dxmt-guest.log" >&2; exit 1; }
 meson install -C "$B32" >> "$W/dxmt-guest.log" 2>&1 || { echo "dxmt-guest: i386 install failed; see $W/dxmt-guest.log" >&2; exit 1; }
-# mtld3d (Direct3D 9, D3D9 M2b), from the same tree: its x86_64 and i386 pairs and its x86_64 and i686 Linux
-# mtld3d.so (the i686 one old WoW64's), on the same import libraries, in build/mtld3d-guest (stage.sh takes them from
-# there).
-sh "$ROOT/dxmt/mtld3d-build.sh" --guest "$SDK" >> "$W/dxmt-guest.log" 2>&1 \
-  || { echo "dxmt-guest: mtld3d's guest build failed; see $W/dxmt-guest.log" >&2; exit 1; }
+# The i686 mtld3d.so's boundary structs equal the x86_64 one's (old WoW64's 32-bit Unix side).
+sh "$ROOT/dxmt/mtld3d-layout32-check.sh" >> "$W/dxmt-guest.log" 2>&1 \
+  || { echo "dxmt-guest: D3D9's i686 layout check failed; see $W/dxmt-guest.log" >&2; exit 1; }
 echo "dxmt-guest: installed $W/dxmt-guest"

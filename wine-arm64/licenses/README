@@ -37,10 +37,11 @@ mtld3d 0.14.1 (Direct3D 9: d3d9.dll and mtld3d.dll in lib/wine/aarch64-windows, 
   change): mtld3d/crates, each crate's own licence files, and mtld3d/crates/INDEX naming every crate and its terms;
   snmalloc's C++, which snmalloc-sys compiles in, MIT, Microsoft Corporation, mtld3d/crates/snmalloc-sys-*/
   LICENSE-snmalloc. Rust's standard library, which the binaries link: mtld3d/rust/COPYRIGHT-library.html and the texts
-  it names in mtld3d/rust/licenses, from the Rust toolchain dxmt/pins names (MTLD3D_RUST).
-  Source: https://github.com/athei/mtld3d.git at release 0.14.1 (0c172127), in DXMTRS's mtld3d/ at
-  DXMT_COMMIT; the crates from crates.io at the versions mtld3d's Cargo.lock
-  files pin.
+  it names in mtld3d/rust/licenses, from the Rust toolchain dxmt/pins names (MTLD3D_RUST). In the game VM, the x86-64
+  and i386 d3d9.dll and mtld3d.dll also link DXMT's rust_pe_rt.c (LGPL-2.1-or-later, ../DXMT/LICENSE); the Mac's don't.
+  Source: DXMTRS's src/d3d9 (https://github.com/Mac-Neutron/DXMTRS.git at DXMT_COMMIT, snmalloc-sys in its
+  vendor/snmalloc-sys), altered from https://github.com/athei/mtld3d.git release 0.14.1 (0c172127); the crates from
+  crates.io at the versions DXMTRS's Cargo.lock pins.
 
 LLVM 15.0.7 (linked statically into winemetal.so)
   Licence: Apache-2.0 WITH LLVM-exception, llvm/LICENSE.TXT; its regular-expression code, llvm/COPYRIGHT.regex;

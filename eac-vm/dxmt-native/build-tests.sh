@@ -57,9 +57,10 @@ if [ -x "$OUT/d3d12_list7" ]; then
   [ "$valid" = "resolveregion ok" ] || { echo "tests: FAIL resolveregion under Metal's validation: ${valid:-it ended}"; exit 1; }
 fi
 [ -z "${MN_D3D_PROGRAMS_LIB:-}" ] || { echo "tests: ok (built against $MN_D3D_PROGRAMS_LIB)"; exit 0; }
-# The check: d3d12_null, natively and in a fresh macOS run (one row of the gate's invocations).
-W=${BUILD_DIR:-$ROOT/build}/eac-vm-work/share
-[ -f "$W/dxmt-tests/timeout" ] || sh "$ROOT/eac-vm/dxmt/share.sh"
+# The check: d3d12_null, natively and in a fresh macOS run (one row of the gate's invocations). The share is this tree's
+# programs every time: share.sh run from another worktree copies that worktree's build/dxmt-tests, which may hold a few
+# programs and no d3d12_null.exe.
+MN_DXMT_ONLY=d3d12_null sh "$ROOT/eac-vm/dxmt/share.sh" > /dev/null
 /usr/bin/grep '^d3d12_null|' "$ROOT/eac-vm/dxmt/invocations" > "$OUT/check.invocations"
 MN_REF_INVOCATIONS="$OUT/check.invocations" MN_REF_OUT="$OUT/check-ref" MN_REF_RUNS=1 sh "$ROOT/eac-vm/dxmt/ref.sh" \
   > "$OUT/check-ref.txt" 2>&1 || { tail -3 "$OUT/check-ref.txt"; echo "tests: FAIL the macOS run"; exit 1; }

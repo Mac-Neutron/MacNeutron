@@ -48,7 +48,11 @@ if [ ! -f "$B/build.ninja" ] || [ "$(cat "$B/.setup-inputs" 2> /dev/null)" != "$
   printf '%s\n' "$inputs" > "$B/.setup-inputs"
 fi
 rm -rf "$I"  # first: a failed build leaves no dylibs from the last one
-meson compile -C "$B" > "$OUT/build.log" 2>&1 || die "building failed; see $OUT/build.log"
+# Meson's cargo runs offline (tools/cargo-staticlib.sh): the crates the tree's Cargo.lock pins are fetched first, which
+# a fresh Mac or a cleared cargo registry needs.
+( . "$ROOT/dxmt/pins"; cd "$D" && cargo "+$MTLD3D_RUST" fetch --locked ) > "$OUT/build.log" 2>&1 \
+  || die "fetching DXMT's Rust crates failed; see $OUT/build.log"
+meson compile -C "$B" >> "$OUT/build.log" 2>&1 || die "building failed; see $OUT/build.log"
 mkdir -p "$I/lib" "$I/include-native"
 # One folder: each finds the others beside it, its rpath @loader_path alone (the build's name its own folders: M1's
 # deferred minors), signed again ad hoc as arm64 needs after install_name_tool.

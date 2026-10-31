@@ -4,7 +4,7 @@
 # run-game.sh's update then fixes; and Wine's d3d9 tests through mtld3d's runner, the x64 lane held to the macOS
 # product's figures at most (D3D9 spec §5.1's loopback run: stateblock 0, visual 31, device 739, d3d9ex 74, no crash,
 # no untriaged new site) and the i386 lane to its baseline's failures and crashes at most, no untriaged new site.
-# Builds the Linux test binaries and the runner (dxmt/mtld3d-linux-cargo.sh); needs the image with mtld3d
+# Builds the Linux test binaries and the runner (DXMTRS's tools/linux-cargo.sh); needs the image with mtld3d
 # (guest-stages.sh dxmt, image/build.sh wine), the VM host (host/build.sh), make build/dxmt-tests/d3d9_triangle.exe
 # build/dxmt-tests-i386/d3d9_triangle.exe, and make wine-arm64-winetests (the x64 and x86 d3d9_test.exe). One VM run.
 # Prints a line a check; exits 1 on a FAIL. The 32-bit rows run under old WoW64, the image's default, or with
@@ -13,7 +13,7 @@ set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
 W=$B/eac-vm-work
-M=$B/wine-arm64-src/dxmt/mtld3d
+T=$B/wine-arm64-src/dxmt
 S=$W/share/d3d9 G=$W/share/traces/d3d9
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', want '$3'"; fail=1; fi; }
@@ -25,22 +25,32 @@ else
   rm -rf "$S"; mkdir -p "$S/unit" "$S/unit32" "$S/winetests/x64" "$S/winetests/x86"
   echo "${MN_WOW64:-old}" > "$S/wow64"
   # The Linux unit tests (release profile, as their macOS runs), x86_64 and i686 (old WoW64's, on the i686
-  # winemetal.so), and the runner; each test binary under its crate's name.
+  # winemetal.so), and the runner; each test binary under its crate's name. DXMTRS's tools/linux-cargo.sh, on the
+  # builder's sysroot of each arch (eac-vm/sysroot/fetch.sh), into build/d3d9-cargo/gate-<arch>.
+  . "$ROOT/dxmt/pins"
+  LM=$(dirname "$(sh "$ROOT/dxmt/toolchain.sh")")
+  PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH"  # cargo +$MTLD3D_RUST
+  export PATH MTLD3D_RUST MTLD3D_LLVM_MINGW="$LM"
   for a in x86_64 i686; do
     case $a in x86_64) u=$S/unit ;; *) u=$S/unit32 ;; esac
-    MTLD3D_LINUX=$a sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" test --release --no-run --message-format=json -p mtld3d-shared \
-      -p mtld3d-unix -p mtld3d-mtl 2>> "$W/d3d9-gate-build.log" | python3 -I -c '
+    MTLD3D_SYSROOT=$(sh "$ROOT/eac-vm/sysroot/fetch.sh" $a 2>> "$W/d3d9-gate-build.log") \
+      || { echo "FAIL the $a sysroot: see $W/d3d9-gate-build.log"; exit 1; }
+    export MTLD3D_SYSROOT
+    CARGO_TARGET_DIR=$B/d3d9-cargo/gate-$a MTLD3D_LINUX=$a sh "$T/tools/linux-cargo.sh" test --release --no-run \
+      --message-format=json -p mtld3d-shared -p mtld3d-unix -p mtld3d-mtl 2>> "$W/d3d9-gate-build.log" | python3 -I -c '
 import json, shutil, sys
 for line in sys.stdin:
     m = json.loads(line)
     if m.get("reason") == "compiler-artifact" and m.get("executable") and m["profile"]["test"]:
         shutil.copy(m["executable"], sys.argv[1] + "/" + m["target"]["name"])' "$u" \
       || { echo "FAIL the $a Linux test binaries: see $W/d3d9-gate-build.log"; exit 1; }
+    [ $a != x86_64 ] || CARGO_TARGET_DIR=$B/d3d9-cargo/gate-$a MTLD3D_LINUX=$a sh "$T/tools/linux-cargo.sh" build \
+      --release -p mtld3d-conformance 2>> "$W/d3d9-gate-build.log" \
+      || { echo "FAIL the Linux runner: see $W/d3d9-gate-build.log"; exit 1; }
   done
-  sh "$ROOT/dxmt/mtld3d-linux-cargo.sh" build --release -p mtld3d-conformance 2>> "$W/d3d9-gate-build.log" \
-    || { echo "FAIL the Linux runner: see $W/d3d9-gate-build.log"; exit 1; }
-  cp "$M/unix/target-linux/x86_64-unknown-linux-gnu/release/mtld3d-conformance" "$S/"
-  mkdir -p "$S/conformance" && cp "$M/unix/conformance/baseline.txt" "$M/unix/conformance/CONFORMANCE.md" "$S/conformance/"
+  cp "$B/d3d9-cargo/gate-x86_64/x86_64-unknown-linux-gnu/release/mtld3d-conformance" "$S/"
+  mkdir -p "$S/conformance" \
+    && cp "$T/tests/d3d9/conformance/baseline.txt" "$T/tests/d3d9/conformance/CONFORMANCE.md" "$S/conformance/"
   cp "$B/dxmt-tests/d3d9_triangle.exe" "$S/" && cp "$B/dxmt-tests-i386/d3d9_triangle.exe" "$S/d3d9_triangle32.exe" \
     || { echo "FAIL no d3d9_triangle.exe: make build/dxmt-tests/d3d9_triangle.exe build/dxmt-tests-i386/d3d9_triangle.exe"; exit 1; }
   for l in x64 x86; do

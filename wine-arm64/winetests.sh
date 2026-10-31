@@ -1,8 +1,9 @@
 #!/bin/sh
 # Builds Wine's own conformance tests for check.sh's winetests step (batch Task 8): the ntdll, kernel32, atl, atl100,
 # msvcirt and (batch Task 6) msvcrt test programs of each lane, in build/wine-arm64-tests/winetests/<lane>/ (arm64,
-# arm64ec, x64), and d3d9's, whose x64 build dxmt/mtld3d-conformance.sh runs (D3D9 spec §6), and whose i386 build
-# (lane x86, a third tree, d3d9's alone) the VM guest's 32-bit lane runs (D3D9 M2b, eac-vm/dxmt/d3d9-gate.sh).
+# arm64ec, x64), and d3d9's, whose x64 build dxmt/mtld3d-conformance.sh runs through DXMTRS's tests/d3d9/conformance
+# runner (D3D9 spec §6), and whose i386 build (lane x86, a third tree, d3d9's alone) the VM guest's 32-bit lane runs
+# (D3D9 M2b, eac-vm/dxmt/d3d9-gate.sh).
 # Why two more trees: wine-build is configured --disable-tests (build.sh), and an ARM64X tree links each test as one
 # ARM64X exe, which runs only its ARM64 view (tools/makedep.c: get_link_arch and the ARM64X setup). So the tests come
 # from two test-only trees on wine-build's tools, neither staged into wine.app: wine-tests-arm64 (aarch64) and

@@ -83,7 +83,7 @@ In Steam, start launch options with `/usr/bin/env`. macOS Steam runs them withou
 
 | Launch options | Effect |
 |---|---|
-| `/usr/bin/env MACNEUTRON_GRAPHICS=dxmt\|wined3d %command%` | Pick the Direct3D backend (default `dxmt`; `wined3d` is Wine's own, Direct3D 10-11 only; Direct3D 9 is mtld3d's with either) |
+| `/usr/bin/env MACNEUTRON_GRAPHICS=dxmt\|wined3d %command%` | Pick the Direct3D backend (default `dxmt`; `wined3d` is Wine's own, Direct3D 10-11 only; Direct3D 9 is DXMT's own with either) |
 | `/usr/bin/env MACNEUTRON_LOG=1 %command%` | Wine log in `~/Library/Logs/MacNeutron/steam-<appid>.log` (Wine's warnings, without exception handling's); `MACNEUTRON_LOG=2` logs those too, and every Steam API call. Past 50 MB the log moves to `steam-<appid>.log.1` at the next launch |
 | `/usr/bin/env MACNEUTRON_NO_MSYNC=1 %command%` | Turn off msync |
 | `/usr/bin/env MACNEUTRON_NO_STEAM_BRIDGE=1 %command%` | Start the game without the Steam bridge: no Steam API connection. `steam.exe` stays in the prefix, so the game's `steam://` links still open Mac Steam once a launch with the bridge has registered them; a game's link to restart itself does nothing |
@@ -122,14 +122,14 @@ pipeline. If a Direct3D 12 game that worked in 0.3 fails now,
 **Graphics: wined3d** for it in the Games window (or use `/usr/bin/env MACNEUTRON_GRAPHICS=wined3d %command%`); it
 covers Direct3D 10-11 only.
 
-Direct3D 9 runs on [mtld3d](https://github.com/athei/mtld3d) 0.14.1 (zlib), a Direct3D 9 → Metal layer that
-`wine.app` ships as Wine's `d3d9.dll`, in our DXMT fork's `mtld3d/`. It
+Direct3D 9 runs on DXMT's own Direct3D 9 → Metal layer, `src/d3d9` in our DXMT fork (zlib), altered from
+[mtld3d](https://github.com/athei/mtld3d) 0.14.1, which `wine.app` ships as Wine's `d3d9.dll`. It
 replaces Wine's own Direct3D 9 (wined3d) with either Graphics setting: there is no OpenGL fallback for a Direct3D 9
 game, and Wine's video renderers (EVR, VMR-9) draw through it too (EVR's frame grab, `GetCurrentImage`, fails on it
 for now). It writes its log to
 `~/Library/Logs/MacNeutron/mtld3d` and its shader cache, `mtld3d_shaders.bin`, beside the game's `.exe`; its
-switches (`mtld3d.conf`, in its source) go in `/usr/bin/env MTLD3D_CONFIG='key=value;…' %command%`. mtld3d runs on
-macOS; a game that runs in the game VM keeps Wine's own Direct3D 9 there.
+switches (`mtld3d.conf`, in its source) go in `/usr/bin/env MTLD3D_CONFIG='key=value;…' %command%`. It runs on
+macOS and in the game VM, where it draws through the Mac's Metal as DXMT's other front ends do.
 
 **Shader pre-caching**, as Steam does for Vulkan games. DXMT keeps every shader it translates in a cache, so a
 Direct3D 12 game translates each shader once. MacNeutron also records every pipeline the game creates, in

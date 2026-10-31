@@ -1,10 +1,10 @@
 #!/bin/sh
-# Prints the folder mtld3d's build takes first in PATH (D3D9 spec §4): rustup's `cargo` and `rustc` proxies (its Makefile
-# calls `cargo +<toolchain>`; Homebrew's rustup keeps them beside its own binary, off PATH), and `lld-link` and
-# `llvm-lib`, the names its windows/.cargo/config.toml calls with no path, linked onto the Rust toolchain's rust-lld and
-# llvm-ar (LLD and llvm-ar choose their mode from the name they run under), as its `make setup-rust` links them, but
-# under build/ rather than ~/.cargo/bin; and mingw-cc and mingw-c++, dxmt/mtld3d-mingw-cc.sh, the C and C++ compiler of
-# its two ARM64X targets and its x86 PE pairs, and linux-cc and linux-c++, the same script for its Linux build. Needs rustup's MTLD3D_RUST toolchain with llvm-tools (dxmt/pins). Messages go to stderr.
+# Prints the folder DXMTRS's Rust builds take first in PATH (D3D9 spec §4): rustup's `cargo` and `rustc` proxies
+# (`cargo +<toolchain>`; Homebrew's rustup keeps them beside its own binary, off PATH), and `lld-link` and `llvm-lib`,
+# the names its .cargo/config.toml calls with no path, linked onto the Rust toolchain's rust-lld and llvm-ar (LLD and
+# llvm-ar choose their mode from the name they run under), under build/ rather than ~/.cargo/bin. The C and C++
+# compilers of its PE and Linux targets are DXMTRS's own (tools/mingw-cc.sh). Needs rustup's MTLD3D_RUST toolchain
+# with llvm-tools (dxmt/pins). Messages go to stderr.
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/dxmt/pins"
@@ -21,8 +21,4 @@ ln -sf "$proxies/cargo" "$T/cargo"
 ln -sf "$proxies/rustc" "$T/rustc"
 ln -sf "$bin/rust-lld" "$T/lld-link"
 ln -sf "$bin/llvm-ar" "$T/llvm-lib"
-ln -sf "$ROOT/dxmt/mtld3d-mingw-cc.sh" "$T/mingw-cc"
-ln -sf "$ROOT/dxmt/mtld3d-mingw-cc.sh" "$T/mingw-c++"
-ln -sf "$ROOT/dxmt/mtld3d-mingw-cc.sh" "$T/linux-cc"
-ln -sf "$ROOT/dxmt/mtld3d-mingw-cc.sh" "$T/linux-c++"
 echo "$T"

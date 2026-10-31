@@ -1,11 +1,11 @@
 #!/bin/sh
-# mtld3d's Direct3D 9 conformance on our Wine (D3D9 spec §6, M1): Wine's d3d9 tests (the x64 d3d9_test.exe of
-# `make wine-arm64-winetests`) run by mtld3d's conformance runner as its arm64x leg, under <wine.app>'s own Wine and the
-# mtld3d it ships (default build/wine-arm64/wine.app), in a prefix of its own (build/mtld3d-conformance/prefix). The
-# runner diffs each site's failure count against mtld3d's baseline.txt and exits non-zero on a regression. Not through
-# mtld3d's `make conformance-arm64x`: its install step writes the layer into WINE_SDK, which would break wine.app's
-# signature. The environment is the one that Makefile exports to its test runs. MTLD3D_SO=<mtld3d.so> runs that build
-# of mtld3d's Unix side instead (the loopback build of D3D9 spec §5.1), in an APFS clone of wine.app beside the prefix.
+# Direct3D 9's conformance on our Wine (D3D9 spec §6, M1): Wine's d3d9 tests (the x64 d3d9_test.exe of
+# `make wine-arm64-winetests`) run by D3D9's conformance runner (DXMTRS's tests/d3d9/conformance) as its arm64x leg,
+# under <wine.app>'s own Wine and the D3D9 it ships (default build/wine-arm64/wine.app), in a prefix of its own
+# (build/mtld3d-conformance/prefix). The runner diffs each site's failure count against its baseline.txt and exits
+# non-zero on a regression; --update-baseline (a runner argument) rewrites it. The environment and the prefix's
+# configuration are the ones mtld3d's Makefile gave its test runs. MTLD3D_SO=<mtld3d.so> runs that build of D3D9's Unix
+# side instead (the loopback build of D3D9 spec §5.1), in an APFS clone of wine.app beside the prefix.
 # A run whose only new failing sites are dxmt/mtld3d-triaged.txt's, with no new crash, passes ("only triaged sites").
 #   mtld3d-conformance.sh [<wine.app>] [runner args, e.g. --only device]
 set -eu
@@ -23,25 +23,39 @@ if [ -n "${MTLD3D_SO:-}" ]; then
   APP=$C
 fi
 R="$(cd "$APP/Contents/Resources" && pwd)"
-M="$B/wine-arm64-src/dxmt/mtld3d"
+T="$B/wine-arm64-src/dxmt"
 EXE="$B/wine-arm64-tests/winetests/x64/d3d9_test.exe"
-[ -f "$M/Makefile" ] || { echo "mtld3d-conformance: no mtld3d in $M: run make wine-arm64" >&2; exit 2; }
+[ -f "$T/tests/d3d9/conformance/baseline.txt" ] \
+  || { echo "mtld3d-conformance: no D3D9 conformance suite in $T: run make wine-arm64" >&2; exit 2; }
 [ -f "$EXE" ] || { echo "mtld3d-conformance: no $EXE: run make wine-arm64-winetests" >&2; exit 2; }
 TOOLS=$(sh "$ROOT/dxmt/mtld3d-tools.sh")
 export WINEPREFIX="$B/mtld3d-conformance/prefix"
 export MTL_HUD_ENABLED=0 MTL_DEBUG_LAYER=1 MTC_CRASH_ON_REPORT=1 WINEDLLOVERRIDES="mscoree,mshtml=" WINEDEBUG=+msync \
   WINEMSYNC=1
 # The prefix's three keys (no crash dialog, virtual mode changes, Retina geometry) and its persistent wineserver, as
-# mtld3d's test legs have them; this target only reads WINE_SDK's bin/wine and bin/wineserver.
-make -C "$M" configure-test-prefix WINE_SDK="$R" WINEPREFIX="$WINEPREFIX" > /dev/null
+# mtld3d's test legs had them, under a lock on the prefix (configuring ends its wineserver). The session the first
+# `reg add` boots enumerates the display before RetinaMode is written: it ends (-k, then -w for one that had to be
+# killed) so the next session enumerates with the keys in place; then the persistent server and wineboot, their stdio
+# detached (the residents would hold a pipe open).
+mkdir -p "$WINEPREFIX"
+/usr/bin/lockf -k "$WINEPREFIX/.mtld3d-configure.lock" sh -c '
+  "$1/bin/wine" reg add "HKCU\\Software\\Wine\\WineDbg" /v ShowCrashDialog /t REG_DWORD /d 0 /f &&
+  "$1/bin/wine" reg add "HKCU\\Software\\Wine\\X11 Driver" /v EmulateModeset /t REG_SZ /d Y /f &&
+  "$1/bin/wine" reg add "HKCU\\Software\\Wine\\Mac Driver" /v RetinaMode /t REG_SZ /d Y /f || exit 1
+  "$1/bin/wineserver" -k; "$1/bin/wineserver" -w
+  "$1/bin/wineserver" -p > /dev/null 2>&1; "$1/bin/wine" wineboot > /dev/null 2>&1
+  exit 0' sh "$R" > "$B/mtld3d-conformance/configure.log" 2>&1 < /dev/null \
+  || { cat "$B/mtld3d-conformance/configure.log" >&2; echo "mtld3d-conformance: could not configure $WINEPREFIX" >&2
+    exit 1; }
 # The test is x64 code, which runs on FEX as the launcher registers it in every prefix (PrefixManager.prepareNew), not
 # on Wine's stub xtajit64.
 "$R/bin/wine" reg add 'HKLM\Software\Microsoft\Wow64\amd64' /ve /d libarm64ecfex.dll /f > /dev/null 2>&1 \
   || { echo "mtld3d-conformance: could not register FEX in $WINEPREFIX" >&2; exit 1; }
 status=0
 OUT="$B/mtld3d-conformance/run.txt"
-( cd "$M/unix" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 cargo "+$MTLD3D_RUST" run -q --release \
-  -p mtld3d-conformance -- --wine "$R/bin/wine" --wineserver "$R/bin/wineserver" --assets "$M/unix/conformance" \
+( cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/conformance" \
+  cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-conformance -- --wine "$R/bin/wine" \
+  --wineserver "$R/bin/wineserver" --assets "$T/tests/d3d9/conformance" \
   --tests-wine-version "$("$R/bin/wine" --version)" --arch arm64x --exe "$EXE" "$@" ) > "$OUT" 2>&1 || status=$?
 "$R/bin/wineserver" -k > /dev/null 2>&1 || true
 cat "$OUT"

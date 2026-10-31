@@ -1,14 +1,16 @@
-"""The licence files of the code mtld3d's shipped binaries link (D3D9 spec §4; wine.app carries every notice its
-binaries need, ship-base spec §4): d3d9.dll, mtld3d.dll and DXMT's winemetal.dll (aarch64- and
-arm64ec-pc-windows-msvc), and mtld3d.so and DXMT's winemetal.so (aarch64-apple-darwin). Each crate's LICENSE*,
-LICENCE*, COPYING*, NOTICE* and UNLICENSE* files go to
-<out>/crates/<name>-<version>/, and <out>/crates/INDEX lists every crate with its licence expression. mtld3d's own
-crates are its zlib LICENSE (bundle.sh ships it); the snmalloc-sys it vendors is third-party code and is listed. A crate
-that ships no licence file (the objc2 family, MIT or a choice including MIT) gets MIT's text with its manifest's authors
-as the copyright line; one with no file and no MIT among its terms stops the run, to be handled by hand. A crate that
-compiles another project's code in gets that project's notice too (EMBEDDED). Rust's standard library, which every
-binary links, has its notices in the toolchain: its COPYRIGHT-library.html and licenses/ go to <out>/rust/.
-    python3 -I mtld3d-notices.py <mtld3d tree> <out> <cargo>   (cargo: the toolchain's, with `+<toolchain>` as needed;
+"""The licence files of the code DXMTRS's shipped Rust binaries link (D3D9 spec §4; wine.app carries every notice its
+binaries need, ship-base spec §4, and the VM parts take wine.app's): d3d9.dll, mtld3d.dll, winemetal.dll, nvngx.dll
+and nvapi64.dll (aarch64-, arm64ec- and x86_64-pc-windows-msvc; the first three for i686-pc-windows-msvc too),
+mtld3d.so and winemetal.so (aarch64-apple-darwin), and the VM guest's mtld3d.so (x86_64- and i686-unknown-linux-gnu),
+all from the tree's one Cargo workspace. Each crate's LICENSE*, LICENCE*, COPYING*, NOTICE* and UNLICENSE* files go to
+<out>/crates/<name>-<version>/, and <out>/crates/INDEX lists every crate with its licence expression. The tree's own
+crates are under its zlib LICENSE (src/d3d9's, bundle.sh ships it) or DXMT's LGPL (DXMT's texts); the snmalloc-sys it
+vendors (vendor/) is third-party code and is listed. A crate that ships no licence file (the objc2 family, MIT or a
+choice including MIT) gets MIT's text with its manifest's authors as the copyright line; one with no file and no MIT
+among its terms stops the run, to be handled by hand. A crate that compiles another project's code in gets that
+project's notice too (EMBEDDED). Rust's standard library, which every binary links, has its notices in the toolchain:
+its COPYRIGHT-library.html and licenses/ go to <out>/rust/.
+    python3 -I mtld3d-notices.py <DXMTRS tree> <out> <cargo>   (cargo: the toolchain's, with `+<toolchain>` as needed;
     its rustc is the one beside it)
 """
 import json
@@ -17,8 +19,11 @@ import shutil
 import subprocess
 import sys
 
-LEGS = (("windows", ("d3d9", "mtld3d", "winemetal-pe"), ("aarch64-pc-windows-msvc", "arm64ec-pc-windows-msvc")),
-        ("unix", ("mtld3d-unix", "winemetal"), ("aarch64-apple-darwin",)))
+LEGS = ((("d3d9", "mtld3d", "winemetal-pe", "nvngx", "nvapi"),
+         ("aarch64-pc-windows-msvc", "arm64ec-pc-windows-msvc", "x86_64-pc-windows-msvc")),
+        (("d3d9", "mtld3d", "winemetal-pe"), ("i686-pc-windows-msvc",)),
+        (("mtld3d-unix", "winemetal"), ("aarch64-apple-darwin",)),
+        (("mtld3d-unix",), ("x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu")))
 PREFIXES = ("license", "licence", "copying", "notice", "unlicense")
 MIT = """MIT License
 
@@ -46,16 +51,15 @@ def main(tree, out, cargo):
     cargo = cargo.split()
     tree = os.path.abspath(tree)
     crates = {}  # (name, version) -> (directory, licence expression, authors)
-    for workspace, packages, targets in LEGS:
-        cwd = os.path.join(tree, workspace)
-        meta = json.loads(subprocess.run(cargo + ["metadata", "--format-version", "1", "--locked"], cwd=cwd,
-                                         check=True, capture_output=True, text=True).stdout)
-        by_name = {(p["name"], p["version"]): p for p in meta["packages"]}
+    meta = json.loads(subprocess.run(cargo + ["metadata", "--format-version", "1", "--locked"], cwd=tree,
+                                     check=True, capture_output=True, text=True).stdout)
+    by_name = {(p["name"], p["version"]): p for p in meta["packages"]}
+    for packages, targets in LEGS:
         for target in targets:
             args = ["tree", "--locked", "-e", "normal", "--prefix", "none", "--format", "{p}", "--target", target]
             for package in packages:
                 args += ["-p", package]
-            listing = subprocess.run(cargo + args, cwd=cwd, check=True, capture_output=True, text=True).stdout
+            listing = subprocess.run(cargo + args, cwd=tree, check=True, capture_output=True, text=True).stdout
             for line in listing.splitlines():
                 words = line.split()
                 if len(words) < 2 or not words[1].startswith("v"):
@@ -103,5 +107,5 @@ def main(tree, out, cargo):
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
-        sys.exit("usage: mtld3d-notices.py <mtld3d tree> <out> <cargo>")
+        sys.exit("usage: mtld3d-notices.py <DXMTRS tree> <out> <cargo>")
     main(*sys.argv[1:])
