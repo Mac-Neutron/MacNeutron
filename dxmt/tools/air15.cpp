@@ -8,7 +8,8 @@
 // metallib (no "MTLB" magic) is taken as bare bitcode, Darwin wrapper or not.
 //
 // The types file lists the typed types that opaque pointers lose. Types are LLVM 15's Type::print (an identified struct
-// as %name), names are Module::print's identifier forms (@x, @"…\XX…", %x). One line each, in this order:
+// as %name; an unnamed one as Module::print numbers it, %0, %1, …), names are Module::print's identifier forms (@x,
+// @"…\XX…", %x). One line each, in this order:
 //   s <%struct> <typed literal body>   every identified struct with a pointer inside
 //   g <@global> <typed value type>     every global whose value type has a pointer
 //   f <@function> <typed function type>   every function whose type has a pointer
@@ -25,6 +26,7 @@
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/TypeFinder.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/MemoryBuffer.h>
@@ -172,6 +174,22 @@ std::string typesFile(Module &m) {
         if (hasPointer(i.getType())) out += "i " + name + " " + std::to_string(k) + " " + typeText(i.getType()) + "\n";
         k++;
       }
+  }
+  // Type::print without the module prints an unnamed identified struct as %"type 0x<address>"; Module::print numbers
+  // them in TypeFinder order (AsmWriter's TypePrinting::incorporateTypes), and the types file takes that name.
+  TypeFinder found;
+  found.run(m, false);
+  unsigned number = 0;
+  for (StructType *s : found) {
+    if (s->isLiteral() || s->hasName()) continue;
+    std::string addr;
+    {
+      raw_string_ostream os(addr);
+      os << "%\"type " << s << '"';
+    }
+    std::string num = "%" + std::to_string(number++);
+    for (size_t at = out.find(addr); at != std::string::npos; at = out.find(addr, at + num.size()))
+      out.replace(at, addr.size(), num);
   }
   return out;
 }
