@@ -187,7 +187,9 @@ for m in re.finditer(r"^attributes #(\d+) = \{(.*)\}\s*$", text, re.M):
             attrs += 1
 # Inline drop-list attributes (P8): LLVM 23's IPSCCP puts range(...) on a function's return (4a's tessellation corpora:
 # dxmt.get_domain_patch_index), printed on its define line. Deleted here; each distinct line head (the text up to the
-# function name) counts its tokens once, as the writer counts a group once (R3-1).
+# function name) counts its tokens once, as the writer counts a group once (R3-1). An intrinsic declaration's are
+# counted and kept: LLVM 23's reader sets them again from its table (R3-2); llvm.[su]cmp's declaration is skipped, the
+# writer removes it before it counts (ruling D4, R7-6).
 # ponytail: define/declare return positions only, the one place any corpus has them; a drop-list attribute on a
 # parameter or a call site stays in the text and fails the row ("text differs"), and wants handling here then.
 DROPTOK = re.compile(r"(?<= )(?:(?:range|nofpclass|initializes)\((?:[^()]|\([^()]*\))*\)|"
@@ -195,11 +197,13 @@ DROPTOK = re.compile(r"(?<= )(?:(?:range|nofpclass|initializes)\((?:[^()]|\([^()
 heads = set()
 def ret_drop(m):
     global attrs
+    if m.group(2).startswith(("@llvm.scmp.", "@llvm.ucmp.")):
+        return m.group(0)
     found = DROPTOK.findall(m.group(1))
     if found and m.group(1) not in heads:
         heads.add(m.group(1))
         attrs += len(found)
-    return DROPTOK.sub("", m.group(1)) + m.group(2)
+    return m.group(0) if m.group(2).startswith("@llvm.") else DROPTOK.sub("", m.group(1)) + m.group(2)
 text = re.sub(r"^((?:define|declare) [^@\n]*)(@.*)$", ret_drop, text, flags=re.M)
 # Ruling D5: the writer writes each constant-index extractelement of `bitcast <N x iW> %v to <K x i1>` or of
 # `load <K x i1>` as LLVM 15's bit test (legalizeBitTests: the word's extractelement, and with the bit, icmp ne 0; the
