@@ -14,6 +14,11 @@ d3d10_wine|d3d10_wine.exe|@S/d3d11|wine
 d3d11_api|d3d11_api.exe|@S/d3d11|api
 d3d11_compute|d3d11_compute.exe|@S/d3d11|compute
 d3d11_deferred|d3d11_deferred.exe|@S/d3d11|deferred
+# d3d11_dxgi (DXMTRS step 3): the probe's families dxgif and d3d10c print the same lines in the guest as on macOS. dxgia, dxgio
+# and dxgil do not (the guest's display lists no current mode in its mode lists, its adapters differ from the output's,
+# FindClosestMatchingMode answers from its member, and each profile child logs "Failed to set Metal cache path"): those
+# are pinned by dxmt/tests/d3d11_dxgi.i386 and .guest64 (eac-vm/tests/dxgi-guest.sh), not by this row.
+d3d11_dxgi|d3d11_dxgi.exe|fixed|dxgif d3d10c
 d3d11_dynamic|d3d11_dynamic.exe|@S/d3d11|dynamic
 d3d11_getters|d3d11_getters.exe|@S/d3d11|getters
 d3d11_pipeline|d3d11_pipeline.exe|@S/d3d11|pipeline

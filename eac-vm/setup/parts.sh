@@ -33,7 +33,8 @@ cat > "$L/README" << EOF
 MacNeutron's VM parts: the game VM's own files. macneutron vm-setup builds the VM's images from them and from
 Fedora's packages, which it downloads from Fedora to the Mac (MacNeutron ships none of those but one library, below).
 - wine.tar: MacNeutron's Wine for x86-64 Linux (LGPL-2.1-or-later, wine/), with DXMT's Direct3D DLLs and its guest
-  winemetal.so (LGPL-2.1-or-later, dxmt/; its nvngx.dll and winemetal.dll link Rust's standard library, dxmt/rust),
+  winemetal.so (LGPL-2.1-or-later, dxmt/; its nvngx.dll, nvapi64.dll, dxgi.dll, d3d10core.dll and winemetal.dll link
+  Rust's standard library, dxmt/rust),
   DXMT's Direct3D 9 (d3d9.dll and mtld3d.dll of both widths, mtld3d.so in x86_64-unix and i386-unix: zlib, d3d9/LICENSE,
   altered from mtld3d 0.14.1; the crates they link, snmalloc's C++ among them, in d3d9/crates, listed in
   d3d9/crates/INDEX; d3d9.dll and mtld3d.dll also link DXMT's rust_pe_rt.c, LGPL-2.1-or-later, dxmt/, and Rust's

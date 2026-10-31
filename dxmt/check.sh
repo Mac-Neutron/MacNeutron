@@ -1294,6 +1294,25 @@ run ours dlss-val dxmt "$TESTS/d3d12_dlss.exe" "$NGX" balanced inverted
 unset MTL_DEBUG_LAYER MTL_DEBUG_LAYER_ERROR_MODE MACNEUTRON_DLSS
 expect "Metal's validation rejects nothing in DLSS" \
   "$(invalid dlss-val):$(grep -cE '^dlss [a-z]+ .*ok' "$WORK/dlss-val.txt" || true)" "0:2"
+# DXMTRS step 3: dxgi.dll and d3d10core.dll through their exports and the factory, adapter and output vtables
+# (d3d11_dxgi.exe, in child processes of their own: dxgif, dxgia, dxgio, d3d10c and each child's log, dxgil), compared
+# with d3d11_dxgi.fixed, which DXMT's C++ produced (relations where a machine or lane differs, exact values elsewhere),
+# plus --ported's cases, where the C++ crashed and the Rust answers with defined results (its last 44 lines).
+# The probe is statically linked to dxgi.dll, which reads DXMT_ENABLE_NVEXT (the launcher's MACNEUTRON_DLSS=1) at attach:
+# these rows run after the unset above, with it off.
+run ours dxgi dxmt "$TESTS/d3d11_dxgi.exe" fixed --ported
+firstdiff=$(grep -E '^(dxgif|dxgia|dxgio|d3d10c|dxgil) ' "$WORK/dxgi.txt" | diff - "$ROOT/dxmt/tests/d3d11_dxgi.fixed" | sed -n 2p)
+expect "dxgi and d3d10core answer as DXMT's C++ did" "${firstdiff:-same}" same
+# d3d10core's D3D10 device on the D3D11 one (init, a map, a query, a draw) and Wine's own d3d10.dll on it (a device, a
+# state block, a draw).
+run ours d3d10-core dxmt "$TESTS/d3d10_core.exe" "Z:$S/d3d11"
+expect "D3D10 through d3d10core.dll: a device, a map, a query and a draw" \
+  "$(grep '^d3d10 ' "$WORK/d3d10-core.txt" | tr '\n' ';')" \
+  "d3d10 init 0 0;d3d10 map 0;d3d10 query 00000000 256;d3d10 draw 179456;"
+run ours d3d10-wine dxmt "$TESTS/d3d10_wine.exe" "Z:$S/d3d11"
+expect "Wine's d3d10.dll on DXMT's: a device, a state block and a draw" \
+  "$(grep '^wine ' "$WORK/d3d10-wine.txt" | tr '\n' ';')" \
+  "wine device 00000000;wine stateblock 2 0 0 16 16 1 1 1 1;wine draw 179456;"
 # Frame generation on MetalFX (MACNEUTRON_FRAMEGEN=always, with DLSS on MetalFX): each present after the first shows a frame
 # MetalFX's frame interpolator made between it and the last (paired with the DLSS upscaler) before the real one; the
 # swap chain still presents every frame, Metal's validation rejects nothing, and without the variable nothing is generated.
@@ -1401,6 +1420,18 @@ expect "and count as frames in DXMT_STATS (31 and the restored one)" \
   "$(grep -oE '^# .* [0-9]+ frames' "$WORK/fs-d3d12/stats.txt" 2> /dev/null | awk '{ n += $(NF - 1) } END { print n + 0 }')" 32
 expect "and the restored window presents again" "$(grep '^restored present' "$WORK/fs-d3d12.txt" || echo none)" \
   "restored present 0x0"
+# DXMTRS step 3 (S0b): D3D11 fullscreen presents with the output's gamma ramp set, which they read through
+# IMTLDXGIOutput: an identity ramp, then an all-1.0 one (titles "d3d12_fullscreen gamma1", "gamma2"), 600 frames each.
+# Graded on the presents alone: winshot looks at layer 0, and a fullscreen window sits at layer 21, so what the ramp
+# does on the screen is not checked here (step 3 plan, P7). Alone, as the fullscreen rows above.
+run ours fs-gamma dxmt "$TESTS/d3d12_fullscreen.exe" gamma
+expect "d3d11: fullscreen presents with the output's gamma ramp set all succeed" \
+  "$(grep '^gamma presents' "$WORK/fs-gamma.txt" || echo none)" "gamma presents 1200/1200 00000000"
+# A foreign output (it answers QueryInterface itself, so the swap chain keeps it as its target) has no IMTLDXGIOutput:
+# no ramp read, presents go on.
+run ours fs-gamma-foreign dxmt "$TESTS/d3d12_fullscreen.exe" gamma-foreign
+expect "d3d11: a foreign output's swap chain presents without its gamma ramp" \
+  "$(grep '^gamma foreign presents' "$WORK/fs-gamma-foreign.txt" || echo none)" "gamma foreign presents 60/60 00000000"
 # 10. The launcher (spec §3.7; gate L1): recordings land in the compat folder and the first session stamps the builds;
 #     with another build in the stamp, the next launch replays every recording before the game, which then only hits.
 #     (d3d12_cache's recording there holds every mode section 7 ran: a, rt, layout and root.)

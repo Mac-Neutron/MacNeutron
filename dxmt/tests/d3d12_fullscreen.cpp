@@ -1,5 +1,5 @@
 // Exclusive fullscreen and leaving it (Task FS, Rulings 36-37), on Wine's emulated modes only:
-//   d3d12_fullscreen.exe [d3d11|guard]
+//   d3d12_fullscreen.exe [d3d11|guard|gamma|gamma-foreign]
 // Refuses to run ("not emulated") unless EmulateModeset is on for it, as Wine reads it: HKCU\Software\Wine\AppDefaults\
 // d3d12_fullscreen.exe\X11 Driver first, then HKCU\Software\Wine\X11 Driver; so a fullscreen mode change is Wine's
 // virtual one and never the Mac's display. "guard" turns it off for this program in AppDefaults, prints "guard
@@ -15,6 +15,12 @@
 //   timeouts> <present count advance> <fast|slow>": 31 frames, each waited for on the frame latency object, presented
 //   and fenced, return S_OK, count as presents and take under 100 ms each; then "restored present <hr>" once the
 //   window is restored. Whether a present reached Metal is DXMT_STATS's count of presents skipped.
+// "gamma" (DXMTRS step 3, S0b): D3D11 fullscreen presents through the output's gamma ramp: an identity ramp (title
+// "d3d12_fullscreen gamma1": the frames stay green), then every point 1.0 ("d3d12_fullscreen gamma2": they turn
+// white), 600 green frames each; prints "gamma presents <S_OK>/<n> <first other hr>". The titles name the phases for
+// a screen capture (the fullscreen window sits at layer 21, which winshot doesn't look at). "gamma-foreign":
+// fullscreen on a foreign IDXGIOutput1 that answers QueryInterface itself (so the swap chain keeps it as its target),
+// 60 frames; prints "gamma foreign presents <S_OK>/<n> <first other hr>".
 #define WIDL_EXPLICIT_AGGREGATE_RETURNS  // D3D12 methods that return structs: the MSVC ABI under mingw
 #include <windows.h>
 #include <d3d11.h>
@@ -51,6 +57,114 @@ static bool emulated() {  // the app's own value wins, as in win32u's get_config
     return false;
 }
 
+// Another vendor's output: IDXGIOutput1's 23 slots, QueryInterface answered here, everything else the real output's.
+struct ForeignOutput : IDXGIOutput1 {
+    IDXGIOutput1 *real;
+    LONG refs = 1;
+    explicit ForeignOutput(IDXGIOutput1 *r) : real(r) {}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **out) override {
+        if (riid == __uuidof(IUnknown) || riid == __uuidof(IDXGIObject) || riid == __uuidof(IDXGIOutput) ||
+            riid == __uuidof(IDXGIOutput1)) {
+            AddRef();
+            *out = this;
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs); }
+    ULONG STDMETHODCALLTYPE Release() override { return InterlockedDecrement(&refs); }  // lives to the exit
+    HRESULT STDMETHODCALLTYPE SetPrivateData(REFGUID g, UINT n, const void *d) override { return real->SetPrivateData(g, n, d); }
+    HRESULT STDMETHODCALLTYPE SetPrivateDataInterface(REFGUID g, const IUnknown *u) override {
+        return real->SetPrivateDataInterface(g, u);
+    }
+    HRESULT STDMETHODCALLTYPE GetPrivateData(REFGUID g, UINT *n, void *d) override { return real->GetPrivateData(g, n, d); }
+    HRESULT STDMETHODCALLTYPE GetParent(REFIID riid, void **out) override { return real->GetParent(riid, out); }
+    HRESULT STDMETHODCALLTYPE GetDesc(DXGI_OUTPUT_DESC *d) override { return real->GetDesc(d); }
+    HRESULT STDMETHODCALLTYPE GetDisplayModeList(DXGI_FORMAT f, UINT fl, UINT *n, DXGI_MODE_DESC *d) override {
+        return real->GetDisplayModeList(f, fl, n, d);
+    }
+    HRESULT STDMETHODCALLTYPE FindClosestMatchingMode(const DXGI_MODE_DESC *m, DXGI_MODE_DESC *c, IUnknown *dev) override {
+        return real->FindClosestMatchingMode(m, c, dev);
+    }
+    HRESULT STDMETHODCALLTYPE WaitForVBlank() override { return real->WaitForVBlank(); }
+    HRESULT STDMETHODCALLTYPE TakeOwnership(IUnknown *dev, WINBOOL x) override { return real->TakeOwnership(dev, x); }
+    void STDMETHODCALLTYPE ReleaseOwnership() override { real->ReleaseOwnership(); }
+    HRESULT STDMETHODCALLTYPE GetGammaControlCapabilities(DXGI_GAMMA_CONTROL_CAPABILITIES *c) override {
+        return real->GetGammaControlCapabilities(c);
+    }
+    HRESULT STDMETHODCALLTYPE SetGammaControl(const DXGI_GAMMA_CONTROL *g) override { return real->SetGammaControl(g); }
+    HRESULT STDMETHODCALLTYPE GetGammaControl(DXGI_GAMMA_CONTROL *g) override { return real->GetGammaControl(g); }
+    HRESULT STDMETHODCALLTYPE SetDisplaySurface(IDXGISurface *s) override { return real->SetDisplaySurface(s); }
+    HRESULT STDMETHODCALLTYPE GetDisplaySurfaceData(IDXGISurface *s) override { return real->GetDisplaySurfaceData(s); }
+    HRESULT STDMETHODCALLTYPE GetFrameStatistics(DXGI_FRAME_STATISTICS *s) override { return real->GetFrameStatistics(s); }
+    HRESULT STDMETHODCALLTYPE GetDisplayModeList1(DXGI_FORMAT f, UINT fl, UINT *n, DXGI_MODE_DESC1 *d) override {
+        return real->GetDisplayModeList1(f, fl, n, d);
+    }
+    HRESULT STDMETHODCALLTYPE FindClosestMatchingMode1(const DXGI_MODE_DESC1 *m, DXGI_MODE_DESC1 *c, IUnknown *dev) override {
+        return real->FindClosestMatchingMode1(m, c, dev);
+    }
+    HRESULT STDMETHODCALLTYPE GetDisplaySurfaceData1(IDXGIResource *r) override { return real->GetDisplaySurfaceData1(r); }
+    HRESULT STDMETHODCALLTYPE DuplicateOutput(IUnknown *dev, IDXGIOutputDuplication **o) override {
+        return real->DuplicateOutput(dev, o);
+    }
+};
+
+// The gamma modes, on the d3d11 mode's device and swap chain.
+static int gamma_modes(ID3D11Device *device, IDXGISwapChain1 *swap, bool foreign) {
+    ID3D11DeviceContext *ctx;
+    device->GetImmediateContext(&ctx);
+    ID3D11Texture2D *buffer;
+    ID3D11RenderTargetView *rtv;
+    CHECK(swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void **)&buffer));
+    CHECK(device->CreateRenderTargetView(buffer, nullptr, &rtv));
+    UINT ok = 0, n = 0;
+    HRESULT first = S_OK;
+    auto frames = [&](int count) {
+        const float green[4] = {0, 0.3f, 0, 1};
+        for (int i = 0; i < count; i++) {
+            ctx->OMSetRenderTargets(1, &rtv, nullptr);
+            ctx->ClearRenderTargetView(rtv, green);
+            HRESULT hr = swap->Present(1, 0);
+            n++;
+            if (hr == S_OK) ok++;
+            else if (first == S_OK) first = hr;
+            MSG msg;
+            while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
+        }
+    };
+    SetForegroundWindow(game);
+    pump(300);
+    if (foreign) {
+        IDXGIOutput *output;
+        IDXGIOutput1 *real;
+        CHECK(swap->GetContainingOutput(&output));
+        CHECK(output->QueryInterface(__uuidof(IDXGIOutput1), (void **)&real));
+        CHECK(swap->SetFullscreenState(TRUE, new ForeignOutput(real)));
+        pump(300);
+        frames(60);
+        CHECK(swap->SetFullscreenState(FALSE, nullptr));
+        printf("gamma foreign presents %u/%u %08lx\n", ok, n, (unsigned long)(unsigned)first);
+        return 0;
+    }
+    CHECK(swap->SetFullscreenState(TRUE, nullptr));
+    pump(300);
+    IDXGIOutput *output;
+    CHECK(swap->GetContainingOutput(&output));
+    static DXGI_GAMMA_CONTROL ramp;  // 1025 points
+    for (int i = 0; i < 1025; i++) ramp.GammaCurve[i].Red = ramp.GammaCurve[i].Green = ramp.GammaCurve[i].Blue = i / 1024.0f;
+    CHECK(output->SetGammaControl(&ramp));
+    SetWindowTextA(game, "d3d12_fullscreen gamma1");
+    frames(600);
+    for (int i = 0; i < 1025; i++) ramp.GammaCurve[i].Red = ramp.GammaCurve[i].Green = ramp.GammaCurve[i].Blue = 1.0f;
+    CHECK(output->SetGammaControl(&ramp));
+    SetWindowTextA(game, "d3d12_fullscreen gamma2");
+    frames(600);
+    CHECK(swap->SetFullscreenState(FALSE, nullptr));
+    printf("gamma presents %u/%u %08lx\n", ok, n, (unsigned long)(unsigned)first);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc > 2 && !strcmp(argv[1], "front")) {  // another process's window, in front until the event is set
         HWND w = CreateWindowA("STATIC", "front", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 200, 200, 320, 180, nullptr,
@@ -69,7 +183,8 @@ int main(int argc, char **argv) {
         RegDeleteKeyValueA(HKEY_CURRENT_USER, app_key, "EmulateModeset");
         return 0;
     }
-    const bool d3d11 = argc > 1 && !strcmp(argv[1], "d3d11");
+    const bool gamma_mode = argc > 1 && !strncmp(argv[1], "gamma", 5);
+    const bool d3d11 = gamma_mode || (argc > 1 && !strcmp(argv[1], "d3d11"));
     if (!emulated()) { printf("not emulated\n"); return 1; }
     const UINT width = 640, height = 360, count = 2;
     WNDCLASSA wc = {};
@@ -88,8 +203,8 @@ int main(int argc, char **argv) {
     sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;  // fullscreen at the swapchain's size, not the desktop's
     IDXGISwapChain1 *swap1;
     ID3D12Device *device = nullptr; ID3D12CommandQueue *queue = nullptr;
+    ID3D11Device *device11 = nullptr;
     if (d3d11) {
-        ID3D11Device *device11;
         CHECK(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &device11,
                                 nullptr, nullptr));
         CHECK(factory->CreateSwapChainForHwnd(device11, game, &sd, nullptr, nullptr, &swap1));
@@ -101,6 +216,7 @@ int main(int argc, char **argv) {
         CHECK(factory->CreateSwapChainForHwnd(queue, game, &sd, nullptr, nullptr, &swap1));
     }
 
+    if (gamma_mode) return gamma_modes(device11, swap1, !strcmp(argv[1], "gamma-foreign"));
     SetForegroundWindow(game);
     pump(300);
     RECT windowed, now;

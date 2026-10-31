@@ -68,6 +68,8 @@ build/dxmt-tests/%.exe: dxmt/tests/%.cpp dxmt/tests/d3d12_common.hpp dxmt/tests/
 
 # d3d11_nvapi builds against NVIDIA's own nvapi.h, from DXMT's tree (make wine-arm64 fetches it).
 build/dxmt-tests/d3d11_nvapi.exe build/dxmt-tests-arm64ec/d3d11_nvapi.exe: NVAPI_INC = -Ibuild/wine-arm64-src/dxmt/external/nvapi
+# d3d11_dxgi's cases live in one file per family, which the pattern rules don't track.
+build/dxmt-tests/d3d11_dxgi.exe build/dxmt-tests-arm64ec/d3d11_dxgi.exe: $(wildcard dxmt/tests/d3d11_dxgi/*.inc)
 
 # D3D9's for i386 too, the VM guest's 32-bit lane (D3D9 M2b: D3D9's i386 pair under the guest's new WoW64).
 build/dxmt-tests-i386/%.exe: dxmt/tests/%.cpp

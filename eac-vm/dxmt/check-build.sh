@@ -26,6 +26,15 @@ for a in "x86_64-windows PE32+*x86-64*" "i386-windows PE32\ executable*80386*"; 
   done
   llvm-objdump -p "$D/$dir/d3d12.dll" | /usr/bin/grep -q 'DLL Name: winemetal.dll' \
     || fail "$dir/d3d12.dll doesn't import winemetal.dll"
+  # DXMTRS step 3: dxgi.dll's five named exports at their .def ordinals and d3d10core.dll's two (the Rust DLLs keep
+  # them), and d3d10core.dll's one DXMT import, d3d11.dll's D3D11CoreCreateDevice.
+  named() { llvm-readobj --coff-exports "$1" | awk '/Ordinal:/ {o=$2} /Name:/ && NF == 2 {printf "%s%s %s", s, o, $2; s=";"}'; }
+  [ "$(named "$D/$dir/dxgi.dll")" = "9 CreateDXGIFactory;10 CreateDXGIFactory1;11 CreateDXGIFactory2;16 DXGIDeclareAdapterRemovalSupport;17 DXGIGetDebugInterface1" ] \
+    || fail "$dir/dxgi.dll's named exports: $(named "$D/$dir/dxgi.dll")"
+  [ "$(named "$D/$dir/d3d10core.dll")" = "1 D3D10CoreCreateDevice;2 D3D10CoreRegisterLayers" ] \
+    || fail "$dir/d3d10core.dll's named exports: $(named "$D/$dir/d3d10core.dll")"
+  [ "$(llvm-readobj --coff-imports "$D/$dir/d3d10core.dll" | awk '/^Import \{/ {s = 0} /Name:/ && !s {n = $2; s = 1} /Symbol:/ && n ~ /^D3D11.DLL$/ {print n ": " $2}')" = "D3D11.DLL: D3D11CoreCreateDevice" ] \
+    || fail "$dir/d3d10core.dll's D3D11.DLL imports"
 done
 unix=$(cd "$D" && find . -name '*-unix' -o -path '*-unix/*' | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')
 [ "$unix" = "i386-unix i386-unix/mtld3d.so x86_64-unix x86_64-unix/mtld3d.so " ] \

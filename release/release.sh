@@ -670,8 +670,9 @@ The microVM games run in (Contents/Helpers/vm and Contents/Resources/vm), and th
 this Mac (Contents/Helpers/mkfs.erofs, and Contents/Helpers/macneutron's vm-setup):
 - macneutron-vm, the Steam forwarder's host and the two scripts are MacNeutron's own (MIT, ../LICENSE). The Metal
   host's winemetal.so and native DXMT (dxmt/, Direct3D forwarding) are DXMT's (LGPL-2.1-or-later): wine.app's
-  licences, the source archive's dxmt.tar. Their winemetal.so and winemetal.dylib are Rust and link Rust's standard
-  library and the crates wine.app's licences/mtld3d holds (rust/, crates/: DXMTRS's one workspace's notices).
+  licences, the source archive's dxmt.tar. Their winemetal.so, winemetal.dylib, dxgi.dylib and d3d10core.dylib are
+  Rust and link Rust's standard library and the crates wine.app's licences/mtld3d holds (rust/, crates/: DXMTRS's one
+  workspace's notices).
   macneutron-vm links libtpms (BSD-3-Clause, libtpms-LICENSE) and OpenSSL's libcrypto (Apache-2.0,
   openssl-LICENSE.txt). The forwarder loads Proton's lsteamclient (BSD-3-Clause; wine.app's licences).
 - libkrun (Apache-2.0), with MacNeutron's patches, and every crate it links: libkrun/, one folder each, listed in

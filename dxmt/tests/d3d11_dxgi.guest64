@@ -1,0 +1,449 @@
+dxgif dxgi::CreateDXGIFactory iids:IUnknown 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory iids:IDXGIObject 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory iids:IDXGIFactory 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory iids:IDXGIFactory1 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory iids:IDXGIFactory2 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory iids:IDXGIFactory3 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory iids:IDXGIFactory4 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory iids:IDXGIFactory5 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory iids:IDXGIFactory6 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory iids:IDXGIFactory7 80004002 out=null
+dxgif dxgi::CreateDXGIFactory null-out 80004003
+dxgif dxgi::CreateDXGIFactory1 iids:IUnknown 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory1 iids:IDXGIObject 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory1 iids:IDXGIFactory 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory1 iids:IDXGIFactory1 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory1 iids:IDXGIFactory2 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory1 iids:IDXGIFactory3 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory1 iids:IDXGIFactory4 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory1 iids:IDXGIFactory5 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory1 iids:IDXGIFactory6 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory1 iids:IDXGIFactory7 80004002 out=null
+dxgif dxgi::CreateDXGIFactory1 null-out 80004003
+dxgif dxgi::CreateDXGIFactory2 iids:IUnknown 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory2 iids:IDXGIObject 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory2 iids:IDXGIFactory 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory2 iids:IDXGIFactory1 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory2 iids:IDXGIFactory2 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory2 iids:IDXGIFactory3 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory2 iids:IDXGIFactory4 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory2 iids:IDXGIFactory5 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory2 iids:IDXGIFactory6 00000000 out=set same=1 ref=1 last=0
+dxgif dxgi::CreateDXGIFactory2 iids:IDXGIFactory7 80004002 out=null
+dxgif dxgi::CreateDXGIFactory2 null-out 80004003
+dxgif dxgi::CreateDXGIFactory2 count 00000000 addref=2 release=1 last=0
+dxgif dxgi::CreateDXGIFactory2 flags:0 00000000 creation-flags=0
+dxgif dxgi::CreateDXGIFactory2 flags:1 00000000 creation-flags=1
+dxgif dxgi::DXGIDeclareAdapterRemovalSupport twice 00000000 second=887a0036
+dxgif dxgi::DXGIGetDebugInterface1 nvext 80004002 out=untouched
+dxgif dxgi::DXGIGetDebugInterface1 foreign 80004002 out=untouched
+dxgif dxgi::DllMain registry 00000000 global=absent nvlddmkm=absent ngxcore=absent
+dxgif dxgi::DllMain threads 00000000 threads=8 ok
+dxgif IUnknown::QueryInterface qi:IUnknown 00000000 out=set same=1 ref=2
+dxgif IUnknown::QueryInterface qi:IDXGIObject 00000000 out=set same=1 ref=2
+dxgif IUnknown::QueryInterface qi:IDXGIFactory 00000000 out=set same=1 ref=2
+dxgif IUnknown::QueryInterface qi:IDXGIFactory1 00000000 out=set same=1 ref=2
+dxgif IUnknown::QueryInterface qi:IDXGIFactory2 00000000 out=set same=1 ref=2
+dxgif IUnknown::QueryInterface qi:IDXGIFactory3 00000000 out=set same=1 ref=2
+dxgif IUnknown::QueryInterface qi:IDXGIFactory4 00000000 out=set same=1 ref=2
+dxgif IUnknown::QueryInterface qi:IDXGIFactory5 00000000 out=set same=1 ref=2
+dxgif IUnknown::QueryInterface qi:IDXGIFactory6 00000000 out=set same=1 ref=2
+dxgif IUnknown::QueryInterface qi:IDXGIFactory7 80004002 out=null
+dxgif IUnknown::QueryInterface qi-unknown 80004002 out=null again=80004002 out2=null ref=1
+dxgif IUnknown::QueryInterface qi-null-out 80004003 ref=1
+dxgif IUnknown::QueryInterface qi-misaligned 00000000 out=set same=1
+dxgif IUnknown::AddRef addref 00000000 addref=2,3
+dxgif IUnknown::Release release 00000000 release=1,0
+dxgif IDXGIObject::SetPrivateData pdata-set-get 00000000 set=00000000 size=12 same=1 tail=untouched
+dxgif IDXGIObject::GetPrivateData pdata-short 887a0003 size=12 buffer=untouched
+dxgif IDXGIObject::GetPrivateData pdata-big 00000000 size=12 same=1 tail=untouched
+dxgif IDXGIObject::GetPrivateData pdata-nullsize 80070057 buffer=untouched
+dxgif IDXGIObject::GetPrivateData pdata-missing 887a0002 size=0 buffer=untouched
+dxgif IDXGIObject::SetPrivateData pdata-erase 00000000 again=00000001 get=887a0002 size=0
+dxgif IDXGIObject::SetPrivateDataInterface pdata-iface 00000000 set=x+2 get=00000000 size=8 same=1 tail=untouched getref=x+3 replace=00000000 replaceref=y+2,x-1 dies=y-1 x=1 y=1
+dxgif IDXGIObject::SetPrivateData pdata-iface-erase 00000000 events=x-1 x=1
+dxgif IDXGIObject::SetPrivateDataInterface pdata-iface-dies 00000000 events=x-1 balance=0
+dxgif IDXGIObject::SetPrivateDataInterface pdata-retype 00000000 back=00000000 events=x+2,x-1 get=00000000 size=12 same=1
+dxgif IDXGIObject::SetPrivateDataInterface pdata-null-iface 00000000 get=00000000 size=pointer value=null tail=untouched
+dxgif IDXGIObject::GetPrivateData pdata-null-data 00000000 size=12 iface=00000000 isize=pointer x=2
+dxgif IDXGIObject::GetPrivateData pdata-misaligned 00000000 size=12 same=1
+dxgif IDXGIObject::GetParent getparent 80004002 out=null
+dxgif IDXGIObject::GetParent getparent-null-out 80004002
+dxgif IDXGIFactory::EnumAdapters enum0 00000000 new=1 ref=1 factoryref=3 back=1
+dxgif IDXGIFactory::EnumAdapters past-last 887a0002 notfound-at=1 out=null
+dxgif IDXGIFactory::EnumAdapters null-out 887a0001
+dxgif IDXGIFactory1::EnumAdapters1 enum0 00000000 new=1 ref=1 factoryref=3 back=1
+dxgif IDXGIFactory1::EnumAdapters1 past-last 887a0002 notfound-at=1 out=null
+dxgif IDXGIFactory1::EnumAdapters1 null-out-past 887a0002
+dxgif IDXGIFactory4::EnumAdapterByLuid own 00000000 out=set new=1 luid=same ref=1
+dxgif IDXGIFactory4::EnumAdapterByLuid wrong 00000000 out=set luid=adapter0
+dxgif IDXGIFactory4::EnumAdapterByLuid unknown-iid 80004002 out=null factoryref=2
+dxgif IDXGIFactory4::EnumWarpAdapter warp 00000000 out=set luid=adapter0 ref=1
+dxgif IDXGIFactory4::EnumWarpAdapter unknown-iid 80004002 out=null
+dxgif IDXGIFactory6::EnumAdapterByGpuPreference preference:0 00000000 out=set luid=adapter0
+dxgif IDXGIFactory6::EnumAdapterByGpuPreference preference:1 00000000 out=set luid=adapter0
+dxgif IDXGIFactory6::EnumAdapterByGpuPreference preference:2 00000000 out=set luid=adapter0
+dxgif IDXGIFactory6::EnumAdapterByGpuPreference unknown-iid 80004002 out=null
+dxgif IDXGIFactory6::EnumAdapterByGpuPreference past-last 887a0002 out=untouched
+dxgif IDXGIFactory::MakeWindowAssociation round-trip 00000000 before=00000000/null get=00000000 same=1 clear=00000000 after=null
+dxgif IDXGIFactory::MakeWindowAssociation flags 00000000 same=1
+dxgif IDXGIFactory::GetWindowAssociation null-out 887a0001
+dxgif IDXGIFactory::CreateSoftwareAdapter software 887a0004 out=null
+dxgif IDXGIFactory::CreateSoftwareAdapter null-out 887a0001
+dxgif IDXGIFactory1::IsCurrent is-current 00000001
+dxgif IDXGIFactory2::IsWindowedStereoEnabled stereo 00000000
+dxgif IDXGIFactory3::GetCreationFlags creation-flags:0 00000000
+dxgif IDXGIFactory3::GetCreationFlags creation-flags:1 00000001
+dxgif IDXGIFactory2::CreateSwapChainForHwnd fake 00000000 calls=1 asked=IMTLSwapChainFactory size=client desc=87,0,1/0,20,2,1,4,1,800 fs=default factory=self hwnd=same devref=+0 out=fake restrict=none
+dxgif IDXGIFactory2::CreateSwapChainForHwnd fs-desc 00000000 calls=1 asked=IMTLSwapChainFactory size=320x200 desc=87,0,1/0,20,2,1,4,1,800 fs=50/1,1,1,0 factory=self hwnd=same devref=+0 out=fake
+dxgif IDXGIFactory2::CreateSwapChainForHwnd misaligned 00000000 calls=1 asked=IMTLSwapChainFactory size=320x200 desc=87,0,1/0,20,2,1,4,1,800 fs=default factory=self hwnd=same devref=+0 out=fake
+dxgif IDXGIFactory2::CreateSwapChainForHwnd refused 887a0004 calls=0 asked=IMTLSwapChainFactory devref=+0 out=null
+dxgif IDXGIFactory2::CreateSwapChainForHwnd null-args:device 887a0001 calls=0 out=null
+dxgif IDXGIFactory2::CreateSwapChainForHwnd null-args:hwnd 887a0001 calls=0 out=null
+dxgif IDXGIFactory2::CreateSwapChainForHwnd null-args:desc 887a0001 calls=0 out=null
+dxgif IDXGIFactory2::CreateSwapChainForHwnd null-args:out 887a0001 calls=0 out=-
+dxgif IDXGIFactory::CreateSwapChain translate 00000000 calls=1 asked=IMTLSwapChainFactory size=320x200 desc=24,0,1/0,30,3,0,3,3,2 fs=50/1,1,1,0 factory=self hwnd=same devref=+0 out=fake
+dxgif IDXGIFactory::CreateSwapChain refused 887a0004 calls=0 asked=IMTLSwapChainFactory devref=+0 out=null
+dxgif IDXGIFactory::CreateSwapChain null-args:device 887a0001 calls=0 out=untouched
+dxgif IDXGIFactory::CreateSwapChain null-args:desc 887a0001 calls=0 out=untouched
+dxgif IDXGIFactory::CreateSwapChain null-args:out 887a0001 calls=0 out=-
+dxgif IDXGIFactory2::CreateSwapChainForCoreWindow core-window 80004001 calls=0 out=null window=none
+dxgif IDXGIFactory2::CreateSwapChainForComposition composition 80004001 calls=0 out=null
+dxgif IDXGIFactory2::GetSharedResourceAdapterLuid luid 80004001 luid=untouched
+dxgif IDXGIFactory2::RegisterStereoStatusWindow stereo-window 80004001 cookie=untouched
+dxgif IDXGIFactory2::RegisterStereoStatusEvent stereo-event 80004001 cookie=untouched
+dxgif IDXGIFactory2::UnregisterStereoStatus unregister-stereo void
+dxgif IDXGIFactory2::RegisterOcclusionStatusWindow occlusion-window 80004001 cookie=untouched
+dxgif IDXGIFactory2::RegisterOcclusionStatusEvent occlusion-event 80004001 cookie=untouched
+dxgif IDXGIFactory2::UnregisterOcclusionStatus unregister-occlusion void
+dxgif IDXGIFactory5::CheckFeatureSupport tearing 00000000 value=1 tail=untouched
+dxgif IDXGIFactory5::CheckFeatureSupport size8 80070057 buffer=untouched
+dxgif IDXGIFactory5::CheckFeatureSupport feature99 80070057 buffer=untouched
+dxgia IUnknown::QueryInterface qi:IUnknown 00000000 out=set same=1 ref=2
+dxgia IUnknown::QueryInterface qi:IDXGIObject 00000000 out=set same=1 ref=2
+dxgia IUnknown::QueryInterface qi:IDXGIAdapter 00000000 out=set same=1 ref=2
+dxgia IUnknown::QueryInterface qi:IDXGIAdapter1 00000000 out=set same=1 ref=2
+dxgia IUnknown::QueryInterface qi:IDXGIAdapter2 00000000 out=set same=1 ref=2
+dxgia IUnknown::QueryInterface qi:IDXGIAdapter3 00000000 out=set same=1 ref=2
+dxgia IUnknown::QueryInterface qi:IDXGIAdapter4 00000000 out=set same=1 ref=2
+dxgia IUnknown::QueryInterface qi:IMTLDXGIAdapter 00000000 out=set same=1 ref=2
+dxgia IUnknown::QueryInterface qi:wine 80004002 out=null
+dxgia IUnknown::QueryInterface qi-unknown 80004002 out=null again=80004002 out2=null
+dxgia IUnknown::QueryInterface qi-null-out 80004003
+dxgia IUnknown::AddRef refs 00000000 addref=2 release=1 last=0 factoryref=2 back=1
+dxgia IUnknown::Release release 00000000 release=1,0
+dxgia IDXGIObject::SetPrivateData pdata-set-get 00000000 set=00000000 size=12 same=1 tail=untouched
+dxgia IDXGIObject::GetPrivateData pdata-short 887a0003 size=12 buffer=untouched
+dxgia IDXGIObject::GetPrivateData pdata-big 00000000 size=12 same=1 tail=untouched
+dxgia IDXGIObject::GetPrivateData pdata-nullsize 80070057 buffer=untouched
+dxgia IDXGIObject::GetPrivateData pdata-missing 887a0002 size=0 buffer=untouched
+dxgia IDXGIObject::SetPrivateData pdata-erase 00000000 again=00000001 get=887a0002 size=0
+dxgia IDXGIObject::SetPrivateDataInterface pdata-iface 00000000 set=x+2 get=00000000 size=8 same=1 tail=untouched getref=x+3 replace=00000000 replaceref=y+2,x-1 dies=y-1 x=1 y=1
+dxgia IDXGIObject::SetPrivateData pdata-iface-erase 00000000 events=x-1 x=1
+dxgia IDXGIObject::SetPrivateDataInterface pdata-iface-dies 00000000 events=x-1 balance=0
+dxgia IDXGIObject::SetPrivateDataInterface pdata-retype 00000000 back=00000000 events=x+2,x-1 get=00000000 size=12 same=1
+dxgia IDXGIObject::SetPrivateDataInterface pdata-null-iface 00000000 get=00000000 size=pointer value=null tail=untouched
+dxgia IDXGIObject::GetPrivateData pdata-null-data 00000000 size=12 iface=00000000 isize=pointer x=2
+dxgia IDXGIObject::GetParent getparent 00000000 out=set same=1 factoryref=+1
+dxgia IDXGIObject::GetParent getparent-unknown 80004002 out=null
+dxgia IDXGIObject::GetParent getparent-null-out 80004003
+dxgia IDXGIAdapter::GetDesc desc 00000000 desc=device-name nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-303 untouched=none
+dxgia IDXGIAdapter1::GetDesc1 desc 00000000 desc=device-name nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-307 untouched=308-311
+dxgia IDXGIAdapter2::GetDesc2 desc 00000000 desc=device-name nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgia IDXGIAdapter4::GetDesc3 desc 00000000 desc=device-name nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgia IDXGIAdapter1::GetDesc1 misaligned 00000000 desc=device-name nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-307 untouched=308-311
+dxgia IDXGIAdapter4::GetDesc3 same-all 00000000 desc=same-all luid=same-all adapters=same-luid
+dxgia IDXGIAdapter::GetDesc null 80070057 desc1=80070057 desc2=80070057 desc3=80070057
+dxgia IDXGIAdapter::CheckInterfaceSupport check:IDXGIDevice 00000000 umd=ffffffffffffffff
+dxgia IDXGIAdapter::CheckInterfaceSupport check:ID3D10Device 00000000 umd=ffffffffffffffff
+dxgia IDXGIAdapter::CheckInterfaceSupport check:ID3D10Device1 00000000 umd=ffffffffffffffff
+dxgia IDXGIAdapter::CheckInterfaceSupport check:ID3D11Device 887a0004 umd=untouched
+dxgia IDXGIAdapter::CheckInterfaceSupport null-umd 00000000
+dxgia IDXGIAdapter::EnumOutputs enum 887a0002 count=monitors out=null
+dxgia IDXGIAdapter::EnumOutputs objects 00000000 new=1 ref=1 adapterref=+2 back=+0
+dxgia IDXGIAdapter::EnumOutputs null 80070057
+dxgia IDXGIAdapter3::UnregisterHardwareContentProtectionTeardownStatus teardown-unregister void
+dxgia IDXGIAdapter3::QueryVideoMemoryInfo query:local 00000000 budget>0=1 avail=0 reservation=0 written=0-31 untouched=none
+dxgia IDXGIAdapter3::QueryVideoMemoryInfo query:non-local 00000000 budget>0=1 avail=0 reservation=0 written=0-31 untouched=none
+dxgia IDXGIAdapter3::QueryVideoMemoryInfo bad 80070057 group7=80070057 null=80070057 buffer=untouched
+dxgia IDXGIAdapter3::QueryVideoMemoryInfo misaligned 00000000 budget>0=1 avail=0 reservation=0 written=0-31 untouched=none
+dxgia IDXGIAdapter3::SetVideoMemoryReservation reserve:local 00000000 read=0000000180001000 other=0000000000000000
+dxgia IDXGIAdapter3::SetVideoMemoryReservation reserve:non-local 00000000 read=0000000200002000 other=0000000180001000
+dxgia IDXGIAdapter3::SetVideoMemoryReservation bad 80070057 group7=80070057 local=0
+dxgia IDXGIAdapter3::RegisterVideoMemoryBudgetChangeNotificationEvent cookie 00000000 cookie=0
+dxgia IDXGIAdapter3::UnregisterVideoMemoryBudgetChangeNotification unregister void
+dxgia IMTLDXGIAdapter::GetMTLDevice device 00000000 nonzero=1 stable=1 adapters=differ
+dxgia IMTLDXGIAdapter::GetLocalD3DKMT kmt 00000000 kmt=valid opens=1
+dxgia IDXGIAdapter3::QueryVideoMemoryInfo threads 00000000 count=unchanged failed=0
+dxgio IUnknown::QueryInterface qi:IUnknown 00000000 out=set same=1 ref=2
+dxgio IUnknown::QueryInterface qi:IDXGIObject 00000000 out=set same=1 ref=2
+dxgio IUnknown::QueryInterface qi:IDXGIOutput 00000000 out=set same=1 ref=2
+dxgio IUnknown::QueryInterface qi:IDXGIOutput1 00000000 out=set same=1 ref=2
+dxgio IUnknown::QueryInterface qi:IDXGIOutput2 00000000 out=set same=1 ref=2
+dxgio IUnknown::QueryInterface qi:IDXGIOutput3 00000000 out=set same=1 ref=2
+dxgio IUnknown::QueryInterface qi:IDXGIOutput4 00000000 out=set same=1 ref=2
+dxgio IUnknown::QueryInterface qi:IDXGIOutput5 00000000 out=set same=1 ref=2
+dxgio IUnknown::QueryInterface qi:IDXGIOutput6 00000000 out=set same=1 ref=2
+dxgio IUnknown::QueryInterface qi:IMTLDXGIOutput 00000000 out=set same=1 ref=2
+dxgio IUnknown::QueryInterface qi-unknown 80004002 out=null again=80004002 out2=null
+dxgio IUnknown::QueryInterface qi-null-out 80004003
+dxgio IUnknown::AddRef refs 00000000 addref=2 release=1 last=0 adapterref=2 back=1
+dxgio IUnknown::Release release 00000000 release=1,0
+dxgio IDXGIObject::SetPrivateData pdata-set-get 00000000 set=00000000 size=12 same=1 tail=untouched
+dxgio IDXGIObject::GetPrivateData pdata-short 887a0003 size=12 buffer=untouched
+dxgio IDXGIObject::GetPrivateData pdata-big 00000000 size=12 same=1 tail=untouched
+dxgio IDXGIObject::GetPrivateData pdata-nullsize 80070057 buffer=untouched
+dxgio IDXGIObject::GetPrivateData pdata-missing 887a0002 size=0 buffer=untouched
+dxgio IDXGIObject::SetPrivateData pdata-erase 00000000 again=00000001 get=887a0002 size=0
+dxgio IDXGIObject::SetPrivateDataInterface pdata-iface 00000000 set=x+2 get=00000000 size=8 same=1 tail=untouched getref=x+3 replace=00000000 replaceref=y+2,x-1 dies=y-1 x=1 y=1
+dxgio IDXGIObject::SetPrivateData pdata-iface-erase 00000000 events=x-1 x=1
+dxgio IDXGIObject::SetPrivateDataInterface pdata-iface-dies 00000000 events=x-1 balance=0
+dxgio IDXGIObject::SetPrivateDataInterface pdata-retype 00000000 back=00000000 events=x+2,x-1 get=00000000 size=12 same=1
+dxgio IDXGIObject::SetPrivateDataInterface pdata-null-iface 00000000 get=00000000 size=pointer value=null tail=untouched
+dxgio IDXGIObject::GetPrivateData pdata-null-data 00000000 size=12 iface=00000000 isize=pointer x=2
+dxgio IDXGIObject::GetParent getparent 00000000 out=set same=1 adapterref=+1
+dxgio IDXGIObject::GetParent getparent-unknown 80004002 out=null
+dxgio IDXGIObject::GetParent getparent-null-out 80004003
+dxgio IDXGIOutput::GetDesc desc 00000000 name=monitorinfo rect=monitorinfo monitor=enum attached=1 rotation=0 written=0-95 untouched=none
+dxgio IDXGIOutput::GetDesc null 887a0001
+dxgio IDXGIOutput6::GetDesc1 desc1 00000000 name=monitorinfo rect=monitorinfo monitor=enum attached=1 rotation=0 hdr=consistent primaries=unit min=0 fullframe=max written=0-147 untouched=148-151
+dxgio IDXGIOutput6::GetDesc1 null 887a0001
+dxgio IDXGIOutput::GetDisplayModeList list:R8G8B8A8_UNORM.0 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput::GetDisplayModeList list:R8G8B8A8_UNORM.1 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput::GetDisplayModeList list:R8G8B8A8_UNORM.2 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput::GetDisplayModeList list:B8G8R8A8_UNORM.0 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput::GetDisplayModeList list:B8G8R8A8_UNORM.1 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput::GetDisplayModeList list:B8G8R8A8_UNORM.2 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput::GetDisplayModeList list:B8G8R8A8_UNORM_SRGB.0 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput::GetDisplayModeList list:B8G8R8A8_UNORM_SRGB.1 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput::GetDisplayModeList list:B8G8R8A8_UNORM_SRGB.2 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput::GetDisplayModeList list:R10G10B10A2_UNORM.0 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput::GetDisplayModeList list:R10G10B10A2_UNORM.1 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput::GetDisplayModeList list:R10G10B10A2_UNORM.2 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput::GetDisplayModeList list:R16G16B16A16_FLOAT.0 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput::GetDisplayModeList list:R16G16B16A16_FLOAT.1 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput::GetDisplayModeList list:R16G16B16A16_FLOAT.2 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput::GetDisplayModeList list:UNKNOWN.0 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput::GetDisplayModeList list:UNKNOWN.1 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput::GetDisplayModeList list:UNKNOWN.2 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput::GetDisplayModeList list:BC1_UNORM.0 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput::GetDisplayModeList list:BC1_UNORM.1 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput::GetDisplayModeList list:BC1_UNORM.2 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:R8G8B8A8_UNORM.0 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:R8G8B8A8_UNORM.1 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:R8G8B8A8_UNORM.2 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:B8G8R8A8_UNORM.0 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:B8G8R8A8_UNORM.1 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:B8G8R8A8_UNORM.2 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:B8G8R8A8_UNORM_SRGB.0 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:B8G8R8A8_UNORM_SRGB.1 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:B8G8R8A8_UNORM_SRGB.2 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:R10G10B10A2_UNORM.0 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:R10G10B10A2_UNORM.1 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:R10G10B10A2_UNORM.2 00000000 count-call=00000000 same-count=1 count=enum sorted=1 format=asked has-current=1 den=1000 scan=progressive scaling-stereo=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:R16G16B16A16_FLOAT.0 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:R16G16B16A16_FLOAT.1 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:R16G16B16A16_FLOAT.2 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:UNKNOWN.0 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:UNKNOWN.1 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:UNKNOWN.2 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:BC1_UNORM.0 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:BC1_UNORM.1 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput1::GetDisplayModeList1 list:BC1_UNORM.2 00000000 count-call=00000000 same-count=1 count=0
+dxgio IDXGIOutput::GetDisplayModeList sized:short 887a0003 count=n-1 written=n-1 through=n-1
+dxgio IDXGIOutput::GetDisplayModeList sized:zero 887a0003 count=n-1 written=n-1 through=n-1
+dxgio IDXGIOutput::GetDisplayModeList sized:big 00000000 count=n written=n through=n room=n+3
+dxgio IDXGIOutput::GetDisplayModeList sized:null-count 887a0001
+dxgio IDXGIOutput1::GetDisplayModeList1 sized:short 887a0003 count=n-1 written=n-1 through=n-1
+dxgio IDXGIOutput1::GetDisplayModeList1 sized:zero 887a0003 count=n-1 written=n-1 through=n-1
+dxgio IDXGIOutput1::GetDisplayModeList1 sized:big 00000000 count=n written=n through=n room=n+3
+dxgio IDXGIOutput1::GetDisplayModeList1 sized:null-count 887a0001
+dxgio IDXGIOutput1::GetDisplayModeList1 misaligned 00000000 all=1
+dxgio IDXGIOutput1::FindClosestMatchingMode1 closest:member 00000000 mode=target size=current format=28 scan=1 scaling=0 stereo=0 device=none
+dxgio IDXGIOutput1::FindClosestMatchingMode1 closest:format-unknown 00000000 mode=current size=current format=29 scan=1 scaling=0 stereo=0 device=none
+dxgio IDXGIOutput1::FindClosestMatchingMode1 closest:format-unknown-no-device 887a0001 out=untouched device=none
+dxgio IDXGIOutput1::FindClosestMatchingMode1 closest:width-only 887a0001 out=untouched device=none
+dxgio IDXGIOutput1::FindClosestMatchingMode1 closest:null-mode 887a0001 out=untouched device=none
+dxgio IDXGIOutput1::FindClosestMatchingMode1 closest:null-out 887a0001
+dxgio IDXGIOutput1::FindClosestMatchingMode1 closest:stereo 887a0002 out=untouched device=none
+dxgio IDXGIOutput1::FindClosestMatchingMode1 closest:no-modes 887a0002 out=untouched device=none
+dxgio IDXGIOutput1::FindClosestMatchingMode1 closest:zero 00000000 mode=current size=current format=28 scan=1 scaling=0 stereo=0 device=none
+dxgio IDXGIOutput1::FindClosestMatchingMode1 closest:zero-61 00000000 mode=listed size=current rate=nearest format=28 scan=1 scaling=0 stereo=0 device=none
+dxgio IDXGIOutput1::FindClosestMatchingMode1 closest:rate-61 00000000 mode=listed size=current rate=nearest format=28 scan=1 scaling=0 stereo=0 device=none
+dxgio IDXGIOutput1::FindClosestMatchingMode1 closest:progressive 00000000 mode=current size=current format=28 scan=1 scaling=0 stereo=0 device=none
+dxgio IDXGIOutput::FindClosestMatchingMode closest:member 00000000 mode=target size=current format=28 scan=1 scaling=0 stereo=0
+dxgio IDXGIOutput::FindClosestMatchingMode closest:null-mode 887a0001 out=untouched
+dxgio IDXGIOutput::FindClosestMatchingMode closest:null-out 887a0001
+dxgio IDXGIOutput::WaitForVBlank vblank 00000000
+dxgio IDXGIOutput::TakeOwnership take 00000000 device=none
+dxgio IDXGIOutput::ReleaseOwnership release void
+dxgio IDXGIOutput::SetDisplaySurface set-surface 80004001
+dxgio IDXGIOutput::GetDisplaySurfaceData surface-data 80004001
+dxgio IDXGIOutput::GetFrameStatistics statistics 80004001 stats=untouched
+dxgio IDXGIOutput1::GetDisplaySurfaceData1 surface-data1 80004001
+dxgio IDXGIOutput1::DuplicateOutput duplicate:null-device 80070057 out=null
+dxgio IDXGIOutput1::DuplicateOutput duplicate:device 887a0004 out=null device=none
+dxgio IDXGIOutput5::DuplicateOutput1 duplicate1:null-device 80070057 out=null
+dxgio IDXGIOutput5::DuplicateOutput1 duplicate1:device 887a0004 out=null device=none
+dxgio IDXGIOutput2::SupportsOverlays overlays 00000000
+dxgio IDXGIOutput3::CheckOverlaySupport flags 00000000 flags=0 null=00000000 device=none
+dxgio IDXGIOutput4::CheckOverlayColorSpaceSupport flags 00000000 flags=0 null=00000000 device=none
+dxgio IDXGIOutput6::CheckHardwareCompositionSupport flags 00000000 flags=0 null=00000000
+dxgio IDXGIOutput::GetGammaControlCapabilities caps 00000000 scale-offset=0 max=1 min=0 points=1024 positions=i/1023 p1024=untouched
+dxgio IDXGIOutput::GetGammaControlCapabilities null 887a0001
+dxgio IDXGIOutput::GetGammaControl identity 00000000 curve=identity p1024=untouched scale=1,1,1 offset=0,0,0
+dxgio IDXGIOutput::SetGammaControl round-trip 00000000 get=00000000 curve=set p1024=untouched scale=1,1,1 offset=0,0,0
+dxgio IDXGIOutput::GetGammaControl per-object 00000000 curve=identity p1024=untouched scale=1,1,1 offset=0,0,0
+dxgio IDXGIOutput::SetGammaControl null 887a0001 get-null=887a0001
+dxgio IDXGIOutput::SetGammaControl misaligned 00000000 get=00000000 curve=set p1024=untouched scale=1,1,1 offset=0,0,0
+dxgio IMTLDXGIOutput::GetGammaRamp ramp 00000000 before=0/0/0,0.499511242/0.499511242/0.499511242,1/1/1 version=0 set=0/1/0.25,0.24963361/0.500488758/0.25,0.49975574/0/0.25 version=1 again=2 same-pointer=1
+d3d10c d3d10core::D3D10CoreCreateDevice flags0 00000000 d3d10.1=00000000 d3d11=00000000 iunknown=same flags=0 mt=1 fl=asked ref=1
+d3d10c d3d10core::D3D10CoreCreateDevice singlethreaded 00000000 d3d10.1=00000000 d3d11=00000000 iunknown=same flags=1 mt=0 fl=asked ref=1
+d3d10c d3d10core::D3D10CoreCreateDevice bgra 00000000 d3d10.1=00000000 d3d11=00000000 iunknown=same flags=20 mt=1 fl=asked ref=1
+d3d10c d3d10core::D3D10CoreCreateDevice fl10_1 00000000 d3d10.1=00000000 d3d11=00000000 iunknown=same flags=0 mt=1 fl=asked ref=1
+d3d10c d3d10core::D3D10CoreCreateDevice fake-adapter 887a0004 asked=ID3D10Device umd=null out=null adapterref=+0
+d3d10c d3d10core::D3D10CoreCreateDevice null-out 80004003 adapterref=+0
+d3d10c d3d10core::D3D10CoreRegisterLayers stub 80004001
+dxgil default d3d11_dxgi_d3d10core.log err:   D3D10CoreRegisterLayers: stub<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIFactory: Unknown interface query a4966eed-76db-44da-84c1-ee9a7afb20a8<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIDeclareAdapterRemovalSupport: stub<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIFactory: Unknown interface query 0badc0de-1234-0001-0102-030405060708<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIFactory::GetParent: Unknown interface query 7b7166ec-21c7-44ae-b21a-c9ae321ae369<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIFactory::GetParent: Unknown interface query 00000000-0000-0000-c000-000000000046<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  EnumAdapterByLuid: returning an adapter with mismatched luid<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIAdapter: Unknown interface query 0badc0de-1234-0002-0102-030405060708<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIFactory::EnumWarpAdapter: no WARP, returning the first adapter<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIFactory::EnumWarpAdapter: no WARP, returning the first adapter<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIAdapter: Unknown interface query 0badc0de-1234-0003-0102-030405060708<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIAdapter: Unknown interface query 0badc0de-1234-0004-0102-030405060708<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  MakeWindowAssociation: Ignoring flags 1<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Software adapters not supported<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Unsupported device type<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Unsupported device type<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   DXGIFactory::CheckFeatureSupport: unknown feature 99<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIAdapter: Unknown interface query 0badc0de-1234-000a-0102-030405060708<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIFactory: Unknown interface query 0badc0de-1234-000b-0102-030405060708<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   DXGI: CheckInterfaceSupport: Unsupported interface<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   db6f6ddb-ac77-4e88-8253-819df9bbf140<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIOutput: Unknown interface query 0badc0de-1234-0014-0102-030405060708<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  DXGIAdapter: Unknown interface query 0badc0de-1234-0015-0102-030405060708<CR>
+dxgil default d3d11_dxgi_dxgi.log debug: DXGI: For mode <target> found closest mode <result><CR>
+dxgil default d3d11_dxgi_dxgi.log debug: DXGI: For mode <target> found closest mode <result><CR>
+dxgil default d3d11_dxgi_dxgi.log err:   No modes found<CR>
+dxgil default d3d11_dxgi_dxgi.log debug: DXGI: For mode <target> found closest mode <result><CR>
+dxgil default d3d11_dxgi_dxgi.log debug: DXGI: For mode <target> found closest mode <result><CR>
+dxgil default d3d11_dxgi_dxgi.log debug: DXGI: For mode <target> found closest mode <result><CR>
+dxgil default d3d11_dxgi_dxgi.log debug: DXGI: For mode <target> found closest mode <result><CR>
+dxgil default d3d11_dxgi_dxgi.log debug: DXGI: For mode <target> found closest mode <result><CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  TakeOwnership: Stub<CR>
+dxgil default d3d11_dxgi_dxgi.log warn:  ReleaseOwnership: Stub<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgil default d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgia IDXGIAdapter::GetDesc desc@config 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVW nul<128=1 vendor=beef device=1234 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-303 untouched=none
+dxgia IDXGIAdapter1::GetDesc1 desc@config 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVW nul<128=1 vendor=beef device=1234 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-307 untouched=308-311
+dxgia IDXGIAdapter2::GetDesc2 desc@config 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVW nul<128=1 vendor=beef device=1234 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgia IDXGIAdapter4::GetDesc3 desc@config 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVW nul<128=1 vendor=beef device=1234 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgio IDXGIOutput6::GetDesc1 desc1@config 00000000 name=monitorinfo rect=monitorinfo monitor=enum attached=1 rotation=0 hdr=consistent primaries=unit min=0 fullframe=max bpc=8 colorspace=0 written=0-147 untouched=148-151
+dxgil config d3d11_dxgi_dxgi.log info:  Found config env: dxgi.customVendorId=beef;dxgi.customDeviceId=1234;dxgi.customDeviceDesc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQR;dxgi.forceSDR=True<CR>
+dxgia IDXGIAdapter::GetDesc desc@configu 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTU\xe9Z nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-303 untouched=none
+dxgia IDXGIAdapter1::GetDesc1 desc@configu 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTU\xe9Z nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-307 untouched=308-311
+dxgia IDXGIAdapter2::GetDesc2 desc@configu 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTU\xe9Z nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgia IDXGIAdapter4::GetDesc3 desc@configu 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTU\xe9Z nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgil configu d3d11_dxgi_dxgi.log info:  Found config env: dxgi.customDeviceDesc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUéZ<NUL><NUL><NUL><NUL><CR>
+dxgia IDXGIAdapter::GetDesc desc@confbad 00000000 desc=ab?cd? nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-303 untouched=none
+dxgia IDXGIAdapter1::GetDesc1 desc@confbad 00000000 desc=ab?cd? nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-307 untouched=308-311
+dxgia IDXGIAdapter2::GetDesc2 desc@confbad 00000000 desc=ab?cd? nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgia IDXGIAdapter4::GetDesc3 desc@confbad 00000000 desc=ab?cd? nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgil confbad d3d11_dxgi_dxgi.log info:  Found config file: dxmt.conf<CR>
+dxgif dxgi::DXGIGetDebugInterface1 nvext@nvext 00000000 out=untouched
+dxgif dxgi::DllMain registry@nvext 00000000 global=4/4/01000000 nvlddmkm=4/4/01000000 ngxcore=1/40/43003a005c00570069006e0064006f00770073005c00530079007300740065006d00330032000000
+dxgia IDXGIAdapter::GetDesc desc@nvext 00000000 desc=device-name nul<128=1 vendor=10de device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-303 untouched=none
+dxgia IDXGIAdapter1::GetDesc1 desc@nvext 00000000 desc=device-name nul<128=1 vendor=10de device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-307 untouched=308-311
+dxgia IDXGIAdapter2::GetDesc2 desc@nvext 00000000 desc=device-name nul<128=1 vendor=10de device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgia IDXGIAdapter4::GetDesc3 desc@nvext 00000000 desc=device-name nul<128=1 vendor=10de device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgil nvext d3d11_dxgi_dxgi.log info:  Vendor extension enabled: NVEXT<CR>
+dxgia IDXGIAdapter::GetDesc desc@conffile 00000000 desc=device-name nul<128=1 vendor=4321 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-303 untouched=none
+dxgia IDXGIAdapter1::GetDesc1 desc@conffile 00000000 desc=device-name nul<128=1 vendor=4321 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-307 untouched=308-311
+dxgia IDXGIAdapter2::GetDesc2 desc@conffile 00000000 desc=device-name nul<128=1 vendor=4321 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgia IDXGIAdapter4::GetDesc3 desc@conffile 00000000 desc=device-name nul<128=1 vendor=4321 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgil conffile d3d11_dxgi_dxgi.log info:  Found config file: dxmt.conf<CR>
+dxgil conffile d3d11_dxgi_dxgi.log info:  Found config env: dxgi.customDeviceId=5678<CR>
+dxgia IDXGIAdapter::GetDesc desc@conffile2 00000000 desc=device-name nul<128=1 vendor=2468 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-303 untouched=none
+dxgia IDXGIAdapter1::GetDesc1 desc@conffile2 00000000 desc=device-name nul<128=1 vendor=2468 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-307 untouched=308-311
+dxgia IDXGIAdapter2::GetDesc2 desc@conffile2 00000000 desc=device-name nul<128=1 vendor=2468 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgia IDXGIAdapter4::GetDesc3 desc@conffile2 00000000 desc=device-name nul<128=1 vendor=2468 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgil conffile2 d3d11_dxgi_dxgi.log info:  Found config file: other.conf<CR>
+dxgia IDXGIAdapter::GetDesc desc@omori 00000000 desc=device-name nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-303 untouched=none
+dxgia IDXGIAdapter1::GetDesc1 desc@omori 00000000 desc=device-name nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-307 untouched=308-311
+dxgia IDXGIAdapter2::GetDesc2 desc@omori 00000000 desc=device-name nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgia IDXGIAdapter4::GetDesc3 desc@omori 00000000 desc=device-name nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgio IDXGIOutput6::GetDesc1 desc1@omori 00000000 name=monitorinfo rect=monitorinfo monitor=enum attached=1 rotation=0 hdr=consistent primaries=unit min=0 fullframe=max bpc=8 colorspace=0 written=0-147 untouched=148-151
+dxgil omori OMORI_dxgi.log info:  Failed to set Metal cache path, fallback to system default<CR>
+dxgil omori OMORI_dxgi.log info:  Found built-in config:<CR>
+dxgil omori OMORI_dxgi.log info:    dxgi.forceSDR = True<CR>
+dxgia IDXGIAdapter::GetDesc desc@genshin 00000000 desc=AMD\x20Radeon\x20Pro\x205300M nul<128=1 vendor=1002 device=7340 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-303 untouched=none
+dxgia IDXGIAdapter1::GetDesc1 desc@genshin 00000000 desc=AMD\x20Radeon\x20Pro\x205300M nul<128=1 vendor=1002 device=7340 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-307 untouched=308-311
+dxgia IDXGIAdapter2::GetDesc2 desc@genshin 00000000 desc=AMD\x20Radeon\x20Pro\x205300M nul<128=1 vendor=1002 device=7340 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgia IDXGIAdapter4::GetDesc3 desc@genshin 00000000 desc=AMD\x20Radeon\x20Pro\x205300M nul<128=1 vendor=1002 device=7340 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-315 untouched=316-319
+dxgil genshin GenshinImpact_dxgi.log info:  Failed to set Metal cache path, fallback to system default<CR>
+dxgil genshin GenshinImpact_dxgi.log info:  Found built-in config:<CR>
+dxgil genshin GenshinImpact_dxgi.log info:    dxgi.customDeviceDesc = AMD Radeon Pro 5300M<CR>
+dxgil genshin GenshinImpact_dxgi.log info:    dxgi.customDeviceId = 7340<CR>
+dxgil genshin GenshinImpact_dxgi.log info:    dxgi.customVendorId = 1002<CR>
+dxgif dxgi::CreateDXGIFactory null-riid 80004003 out=null
+dxgil isolate-dxgif.CreateDXGIFactory.null-riid none
+dxgif dxgi::CreateDXGIFactory1 null-riid 80004003 out=null
+dxgil isolate-dxgif.CreateDXGIFactory1.null-riid none
+dxgif dxgi::CreateDXGIFactory2 null-riid 80004003 out=null
+dxgil isolate-dxgif.CreateDXGIFactory2.null-riid none
+dxgif dxgi::DXGIGetDebugInterface1 null-riid 80004003 out=untouched
+dxgil isolate-dxgif.DXGIGetDebugInterface1.null-riid none
+dxgif IUnknown::QueryInterface qi-null-riid 80004003 out=null
+dxgil isolate-dxgif.QueryInterface.qi-null-riid none
+dxgif IDXGIObject::GetPrivateData pdata-null-guid 80070057 size=16
+dxgil isolate-dxgif.GetPrivateData.pdata-null-guid none
+dxgif IDXGIObject::SetPrivateData pdata-null-guid 80070057
+dxgil isolate-dxgif.SetPrivateData.pdata-null-guid none
+dxgif IDXGIObject::SetPrivateDataInterface pdata-null-guid 80070057 x=1
+dxgil isolate-dxgif.SetPrivateDataInterface.pdata-null-guid none
+dxgif IDXGIObject::GetParent getparent-null-riid 80004003 out=null
+dxgil isolate-dxgif.GetParent.getparent-null-riid none
+dxgif IDXGIFactory1::EnumAdapters1 null-out 887a0001 factoryref=1
+dxgil isolate-dxgif.EnumAdapters1.null-out none
+dxgif IDXGIFactory4::EnumAdapterByLuid null-riid 80004003 out=null
+dxgil isolate-dxgif.EnumAdapterByLuid.null-riid none
+dxgif IDXGIFactory4::EnumWarpAdapter null-riid 80004003 out=null
+dxgil isolate-dxgif.EnumWarpAdapter.null-riid d3d11_dxgi_dxgi.log warn:  DXGIFactory::EnumWarpAdapter: no WARP, returning the first adapter<CR>
+dxgif IDXGIFactory6::EnumAdapterByGpuPreference null-riid 80004003 out=untouched
+dxgil isolate-dxgif.EnumAdapterByGpuPreference.null-riid none
+dxgif IDXGIFactory5::CheckFeatureSupport null-data 80070057
+dxgil isolate-dxgif.CheckFeatureSupport.null-data none
+dxgia IUnknown::QueryInterface qi-null-riid 80004003 out=null
+dxgil isolate-dxgia.QueryInterface.qi-null-riid none
+dxgia IDXGIObject::GetParent getparent-null-riid 80004003 out=null
+dxgil isolate-dxgia.GetParent.getparent-null-riid none
+dxgia IDXGIAdapter::CheckInterfaceSupport null-iid 80070057 umd=untouched
+dxgil isolate-dxgia.CheckInterfaceSupport.null-iid none
+dxgia IDXGIAdapter3::RegisterHardwareContentProtectionTeardownStatusEvent teardown-event 80004001 cookie=untouched
+dxgil isolate-dxgia.RegisterHardwareContentProtectionTeardownStatusEvent.teardown-event d3d11_dxgi_dxgi.log err:   Not implemented<CR>
+dxgia IDXGIAdapter3::RegisterVideoMemoryBudgetChangeNotificationEvent null-cookie 80070057
+dxgil isolate-dxgia.RegisterVideoMemoryBudgetChangeNotificationEvent.null-cookie none
+dxgio IUnknown::QueryInterface qi-null-riid 80004003 out=null
+dxgil isolate-dxgio.QueryInterface.qi-null-riid none
+dxgio IDXGIObject::GetParent getparent-null-riid 80004003 out=null
+dxgil isolate-dxgio.GetParent.getparent-null-riid none
+d3d10c d3d10core::D3D10CoreCreateDevice null-adapter 80070057 out=null
+dxgil isolate-d3d10c.D3D10CoreCreateDevice.null-adapter none

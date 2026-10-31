@@ -204,7 +204,8 @@ if !wmLoaded {
 }
 // Direct3D forwarding (M2): native DXMT beside macneutron-vm, loaded by the first Direct3D record (eac-vm/d3d).
 mn_d3d_set_dir(URL(fileURLWithPath: metalHost).deletingLastPathComponent().appendingPathComponent("dxmt").path)
-// Its logs in the run's traces, not the folder macneutron-vm runs from (natively DXMT's program name is empty: _dxgi.log).
+// Its logs in the run's traces, not the folder macneutron-vm runs from (natively DXMT's program name is empty, and each
+// dylib has its own log: _dxgi.log, _d3d11.log, _d3d12.log, _d3d10core.log).
 try? FileManager.default.createDirectory(atPath: share + "/traces", withIntermediateDirectories: true)
 // DXMT_LOG_LEVEL=none (a performance build without MACNEUTRON_LOG, the launcher's): no log path, so no log files.
 if ProcessInfo.processInfo.environment["DXMT_LOG_LEVEL"] != "none" { setenv("DXMT_LOG_PATH", share + "/traces", 0) }

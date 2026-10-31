@@ -1087,7 +1087,8 @@ pointers, passed through as the spec says), can crash or corrupt `macneutron-vm`
 boundary against its own game decides whether every record's objects get checked against what they answer.
 
 Also from M2: the VM host's native DXMT wrote an empty `_dxgi.log` into the folder `macneutron-vm` ran from; its logs
-go to the run's `traces/` now.
+go to the run's `traces/` now. From DXMTRS step 3 on, each native dylib has its own log there: `_dxgi.log`,
+`_d3d11.log`, `_d3d12.log`, `_d3d10core.log`.
 
 The review's deferred minors, fixed after it (2026-10-18), each with a test that failed first where one could:
 - `SetName` is the guest's own `SetPrivateData(WKPDID_D3DDebugObjectNameW)`, so `GetPrivateData` hands back the
@@ -1111,7 +1112,7 @@ The review's deferred minors, fixed after it (2026-10-18), each with a test that
   milliseconds, the window microseconds).
 - `memory.c` says what the review found (a creation's own DXMT buffers, such as a shader-visible heap's argument
   buffer, come from the arenas too, as guest DXMT's come from guest memory), and `build-tests.sh` leaves no
-  `_dxgi.log` where it runs.
+  per-dylib log (`_dxgi.log`, `_d3d11.log`, `_d3d12.log`, `_d3d10core.log`) where it runs.
 
 Left for M3: presentation (swapchains on the VM window's layer, `Present`, the frame-latency object: the swapchain
 methods are forwarded as generated but untested, and a guest window's handle means nothing natively), XeSS and DLSS
