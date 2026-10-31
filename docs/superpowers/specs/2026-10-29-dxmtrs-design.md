@@ -246,7 +246,8 @@ existing C++ signatures.
    `present-gate`. `winemetal.dll` imports 38 more symbols, all from Rust's standard library and all present in Wine.
    The final review found one defect, fixed before the push: an empty archive path aborted slots 112 and 113 (objc2
    panics on a nil from an init declared non-null). It is now a nil URL, as in the C.
-R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so nothing moves twice). mtld3d becomes
+R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so nothing moves twice): done 2026-10-30,
+   DXMTRS main 1ccec40, which MacNeutron pins. mtld3d becomes
    `src/d3d9` (§3): every file moved with `git mv` (history kept), one root workspace, D3D9 built by meson for every
    target, mtld3d's Makefile, CI, standalone bundle, release machinery and `INSTALL.md` retired (kept in history), its
    check legs one script (`tools/rust-check.sh`, §8), its conventions and audit tree-wide, its documents under
@@ -255,9 +256,17 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
    caches (D3D9's emitter version is computed from path-independent names, so `mtld3d_shaders.bin` stays valid),
    package names and crate versions; the translator key does not move. MacNeutron changes its build and test scripts in
    the same pin bump. One deliberate change, its own commit: every production C/C++ is built with NDEBUG (the guest's
-   PE and Linux D3D9 binaries carried snmalloc's assertions). The guest's CPU baselines (`x86-64-v2`/`pentium4` for D3D9,
+   Linux `mtld3d.so` carried 8 of snmalloc's assertion messages, now 0; its PE DLLs had none). The guest's CPU baselines (`x86-64-v2`/`pentium4` for D3D9,
    none for DXMT's C++) are kept at R and aligned later in their own measured commit. Plan:
-   `2026-10-30-dxmtrs-stepR-layout.md`.
+   `2026-10-30-dxmtrs-stepR-layout.md`. Corrections found while doing it: the 11 files D3D9's emitter version hashes
+   stay byte-identical through R (three stale comments in them wait for C3, which retires the emitters); the rustfmt
+   nightly is pinned as `nightly-2026-10-30` (`MTLD3D_RUST_NIGHTLY` in MacNeutron's `dxmt/pins`); `tools/rust-check.sh`
+   has no Linux leg, so Linux-only Rust stays unlinted as before; the guest's `d3d9.dll` resource is compiled by
+   llvm-windres instead of llvm-rc, with equal VERSIONINFO; `vendor/snmalloc-sys` carries the crate's own MIT notice and
+   Microsoft's notice for its C++ (`vendor/snmalloc-sys/upstream/LICENSE`); meson's guest DLLs differ from the old
+   hand-linked ones only in fields no loader reads (subsystem, file alignment, a `.buildid` section), accepted. Every
+   shipped binary's identity table matched the one saved before the move, the translator key and D3D9's emitter
+   version did not move, and every gate of step 2 passed (each flaky row on its one re-run).
 3. `d3d10core`, then `dxgi`: whole DLLs behind COM (`src/d3d10`, `src/dxgi`). Only `d3d10core.dll` is a D3D10 DLL: the
    D3D10 object layer (17 classes) is compiled into `d3d11.dll` and lives inside its objects, so it moves with D3D11's
    front end at step 5, and `d3d10_blob.cpp` (linked only into `d3d12.dll`) with D3D12 (corrected 2026-10-30; plan
