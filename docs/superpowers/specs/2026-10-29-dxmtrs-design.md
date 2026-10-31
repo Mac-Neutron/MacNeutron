@@ -137,13 +137,17 @@ a native harness like the frame-generation one, each run once.
   newer records is an inference from the difference between those two runs, not isolated.) LLVM's own DirectX backend writes
   typed-pointer bitcode from opaque IR (`DXILBitcodeWriter`, `PointerTypeAnalysis`, in LLVM's old 3.7 record format):
   with two writer fixes (a pointer-valued load's type, the AIR triple and data layout kept) and DXILPrepare's casts,
-  35/64 loaded and built pipelines; typing pointer selects and phis from their result and nulls through their use (the
-  committed spike) traded crashes for read errors, 27/64. Either way Metal accepts that record format. The rest fail on what inference can't recover from opaque IR (argument-buffer arguments typed `i8*`, struct
-  fields losing their address space) and on what the old format can't say (`reassoc nsz arcp contract` widened to
-  `fast`, which adds no-NaN and no-Inf; `afn` dropped; `poison` as `undef`). Spike code: DXMTRS branch `phase0`
-  (`phase0/air-roundtrip`), our llvm-project fork's local branch `phase0-air-writer`. Every LLVM C++ API airconv uses
-  has an LLVM 23 C API equivalent except the bitcode writer (`phase0/llvm-c-api.md`); airconv's two custom passes and
-  `splitBasicBlock` have none either: step 4a keeps them in its C++ shim, the passes through 4b (§5 step 4a, 4-D3).
+  35/64 loaded and built pipelines (no result file of that run is on disk; unreproduced, K18);
+  typing pointer selects and phis from their result and nulls through their use (the committed spike) traded crashes
+  for read errors, 27/64 (`build/phase0/e2/use-23t.txt`, the spike's result on disk). Either way Metal accepts that
+  record format. The rest fail on what inference can't recover from opaque IR (argument-buffer arguments typed `i8*`,
+  struct fields losing their address space) and on what the old format can't say (`reassoc nsz arcp contract` widened
+  to `fast`, which adds no-NaN and no-Inf; `afn` dropped; `poison` as `undef`). Spike code: DXMTRS branch `phase0`
+  (d2e6d75, `phase0/air-roundtrip`), our llvm-project fork's branch `phase0-air-writer` (02e8d34). Another result on
+  disk, `build/phase0/e2/use-15dx.txt` (0/64), comes from a tool, `air-roundtrip-15dx`, built against an unknown tree
+  and is not evidence (K18). Every LLVM C++ API airconv uses has an LLVM 23 C API equivalent except the bitcode writer
+  (`phase0/llvm-c-api.md`); airconv's two custom passes and `splitBasicBlock` have none either: step 4a keeps them in
+  its C++ shim, the passes through 4b (§5 step 4a, 4-D3).
 - **E3: AIR builds 5 to 25 times faster than MSL, before the backend.** 45 pipelines built both ways (DXC's SPIR-V and
   SPIRV-Cross's MSL 3.2 of the 19 HLSL test shaders, against airconv's AIR of the same shaders); each MSL source salted
   so its frontend compile isn't a cache hit (two identical sources still shared one); two runs agree within 1%. Metal's
@@ -153,13 +157,82 @@ a native harness like the frame-generation one, each run once.
   moved: the test shaders are functional tests, binding airconv's argument buffers outside DXMT would reimplement its
   binding model, and no MSL translator exists to compare at game scale (§8 compares LLVM 15's AIR with LLVM 23's).
 
-**Decided (maintainer, 2026-10-29).** The translator is Rust on LLVM 23 (the newest release; its C API declared by
-hand in the crate, no `llvm-sys`: §5 step 4a, 4-D2), emitting AIR through **our own AIR writer** in
-Mac-Neutron/llvm-project: a typed-pointer bitcode writer grown from LLVM's DXIL writer, to which the translator hands
-the pointee type of every pointer it creates (no inference), and which writes the newer records Metal reads (the full
-fast-math flags, `poison`). The writer is one C entry point the Rust translator calls. It gets its own plan before
-§5's step 4 moves the translator off LLVM 15, gated by 64/64 on the test shaders, then the corpus and the check suite
-on its output.
+**Decided (maintainer, 2026-10-29).** The translator is Rust on LLVM 23 (the newest release; its C API declared by hand
+in the crate, no `llvm-sys`: §5 step 4a, 4-D2), emitting AIR through **our own AIR writer** in Mac-Neutron/llvm-project:
+a typed-pointer bitcode writer grown from LLVM's DXIL writer, to which the translator hands the pointee types of its
+functions, globals and structs, the writer deriving the rest from definitions and uses with no constrained pointer
+defaulting to `i8*` (amended at step 4W: F1, P4, P5), and which writes the newer records Metal reads (the full fast-math
+flags, `poison`). The writer is one writing entry point and one type constructor the Rust translator calls (amended at
+step 4W: P3). It got its own plan, 4W, before §5's step 4 moves the translator off LLVM 15, gated by 64/64 on the test
+shaders, then the corpus and the check suite on its output: done 2026-10-31 (§5 step 4W). As built (the 4W plan's P
+items and findings F1-F3):
+- **Branch.** `air-23` in Mac-Neutron/llvm-project, from `llvmorg-23.1.4` (7a941df), not from the fork's `main`, which
+  is trunk with our lld commit and pinned by llvm-mingw; the writer is forward-ported when the translator's LLVM moves,
+  and `phase0-air-writer` stays as the record (P1). At da8441e28e (pushed): a component of its own, `LLVMAIRBitWriter`
+  (`llvm/lib/Bitcode/AIRWriter`), its writer and enumerator copied from the DirectX target's at 7a941df with the
+  spike's two fixes, about 4.2k lines that inherit no upstream DXIL fixes; DirectX untouched, and it builds with
+  `LLVM_TARGETS_TO_BUILD=""` (P2); the tool `llvm-air-write`; 46 lit tests in `llvm/test/Bitcode/AIRWriter`.
+- **Interface** (P3, 4-D2). `llvm-c/AIRWriter.h`: `LLVMWriteAIRBitcode` writes a module as typed-pointer AIR, Darwin
+  wrapper included, and `LLVMAIRTypedPointerType` makes the typed pointers (LLVM 23's `TypedPointerType`) the C API
+  cannot; four structs (`LLVMAIRValueType`, `LLVMAIRStructBody`, `LLVMAIRTypes` with the helpers' typed bitcode as
+  `TypedRefs`, and `LLVMAIRWriteStats`'s six counters, `RefsFilled` among them), which 4b declares by hand with size
+  and offset asserts. The module is verified first, then modified (casts, drops) and must not be written again. Errors
+  come back as text and nothing aborts, with assertions off as on (P17, 4-D5); the library holds no mutable static, so
+  compiles run concurrently.
+- **A type-level contract** (P4; finding F1 against "the pointee type of every pointer it creates", which cannot hold
+  after the pass pipeline: SROA, InstCombine, GlobalOpt and `deadargelim` replace values, functions and globals between
+  their creation and the write, so a handle kept from creation dangles). At write time the translator hands a typed type
+  for every function, global and identified struct that holds a pointer, and the helper bitcode it links as typed refs,
+  built after the passes by walking the module. An entry whose value the passes deleted, or whose erasure no longer
+  matches, is left out by the translator and counted, and P5 derives it (`llvm-air-write --passes` leaves out and counts
+  such entries as `stale`, P15); the writer's erasure check stays an error (Task 10's hand-off). Per-value entries are
+  accepted while their values are alive.
+- **Derivation and casts** (P5, P6). A pointee type comes from the table, then the refs by name, then the definition
+  facts opaque IR keeps (alloca, global and GEP source types, loads, the call's typed function type, arguments, casts,
+  aggregates), then one worklist fixpoint over use edges anchored in those seeds, a handle winning ties. A pointer no
+  seed reaches is typed `i8` in its address space and counted (`UseTyped`); no constrained pointer defaults to `i8*`.
+  Where a use needs another pointee type the writer inserts a same-address-space `bitcast`, and a constant gets a
+  typed instance per type, each under its own `SETTYPE`; it never invents an addrspacecast. `UseTyped` is 0 on every
+  corpus in every leg, SMITE 2's included: the ceiling 4b may not exceed.
+- **Records and attributes** (P7, P8; K8 widened, finding F2). The DXIL writer's 3.7 layout stays (Metal reads it, E2),
+  with LLVM 15's encodings where 3.7 loses meaning: the fast-math flags as LLVM 15 splits them (`afn` kept),
+  `local_unnamed_addr`, `poison`, `freeze`, `fneg`, `atomicrmw`'s value type, `source_filename`, the hash, the Darwin
+  wrapper and an identification block naming `LLVM15.0.7`, the only one Metal has accepted. Attributes use LLVM 15's
+  whole kind table (codes up to 84), not the map's six (the corpus also holds `speculatable`, `nocallback` and
+  `convergent`): `memory(...)` becomes LLVM 15's forms, exact or the strongest sound weaker set, counted;
+  `captures(none)` becomes `nocapture`, and any other `captures(...)` is dropped and counted; LLVM 23-only kinds that
+  only add guarantees (`nofpclass`, `range`, `writable`, `dead_on_unwind`, `initializes`, `dead_on_return`,
+  `nocreateundeforpoison`) and LLVM 23-only flags (`nneg`, `disjoint`, `samesign`, trunc `nuw`/`nsw`, GEP
+  `nusw`/`nuw`/`inrange`, fast-math flags on casts and on phi, select and call of a literal struct of one FP type) are
+  dropped and counted; any other kind is an error. Every drop is applied to the module before the write, and the module
+  left is what LLVM 23 reads back from the bytes (intrinsic declarations end with LLVM 23's table attributes and
+  lifetime markers in LLVM 23's form, as its reader upgrades them: R3-2, D3). The lists are re-checked at every LLVM
+  bump.
+- **What LLVM 15 cannot say** (P13, P17, rulings D3-D5). Every `llvm.*` declaration must be on a closed list of
+  intrinsics whose LLVM 23 signature equals LLVM 15's (the lifetime markers excepted, written in LLVM 15's form, D3);
+  each new name needs a ruling. LLVM 23's sizeless lifetime markers are written as LLVM 15's, the size taken from the
+  alloca; `llvm.scmp` and `llvm.ucmp` become `icmp` and `select`. InstCombine's `<128 x i1>` bit tests (`bitcast` or
+  `load`, then `extractelement`), which crash Metal's compiler service, are written as LLVM 15's word extract, `and` and
+  `icmp ne`; any other i1-vector bitcast or load is an error. Scalable vectors, `callbr`, EH pads, `ptrtoaddr`, operand
+  bundles and debug info are errors.
+- **The oracle and the gate** (P9, P18; finding F3). No Rust: the C++ translator's LLVM 15 metallibs are dumped to
+  typed text and a type table (`air15`, MacNeutron `dxmt/tools`), read with LLVM 23, written by `llvm-air-write` and
+  read back with LLVM 15 (`air-oracle.sh`). Three legs: full (the whole table, identical typed text), defs (only the
+  type-level table 4b can supply, the helpers typed by their refs) and opt23 (LLVM 23's passes first, as 4b runs them:
+  a harness that only round-trips LLVM 15-optimized AIR never sees LLVM 23's `i8` GEPs or its new flags, F3). Every
+  leg checks that the bytes read back as the module the writer left, LLVM 15's verifier, the record inventory, the
+  wrapper, and Metal building every pipeline from our bytes alone; defs and opt23 also compare the writer's input with
+  its output up to the inserted casts and the counted drops. The gate (2026-10-31, the release build, assertions off):
+  45 of 45 legs exit 0 on the test shaders (96 metallibs, Metal 64/64), the DXIL tests (33), 4a's DXBC corpora at
+  Metal 3.1 and 3.2 (4, 243 and 570 metallibs), the helpers, and SMITE 2's capture (16,092 metallibs of 10,271
+  shaders, Metal 10,271/10,271 in every leg); typed text is identical in the full leg up to §5 step 4W's rulings, two
+  processes and a threaded batch agree, and every comparator's mutation fires. The check suite on our AIR (P18):
+  `d3d12_dxil_exec`'s six rows ran cold with the C++ AIR, then warm with our AIR rewritten in place into the shader
+  cache (34 of 34 metallibs). All 38 `expect` lines pass both times, the warm run hit every stored metallib (two refused
+  pipelines miss in both runs) and left the cache unchanged, and its output equals the cold run's under ruling R9-1:
+  per-run lines normalized, the cache counters compared as lookup totals, the contended 64-bit atomics' returned old
+  values (slots 8-12 of `exec-a64`'s `atomic64`, `atomic64typed` and `gsatomic64`), which two C++ runs also differ in,
+  graded per run by `expect.py` and not compared across runs, and every other line and word compared exactly.
 
 ## 5. The order of the port
 
@@ -411,15 +484,18 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
      rasterization off (stream output, or the pass-through geometry shader), inserted into a null value. It now
      translates, without the clip output, and ships with this translator;
    - 4b's handoff: MacNeutron's `dxil-probe.cpp` and `dxil-translate.mm` move to LLVM 23's API in 4b's pin bump
-     (`setOpaquePointers(false)` and `startswith` are gone; critic 23); L4's untyped list (pointers whose pointee no
-     use gives: 511 in the baseline modules, also counted on SMITE 2 and 3DMark) is what 4b must type explicitly for
-     the writer; G5b's timing and coverage (67.5% of the C++'s lines; 235 functions no corpus reaches were ported by
-     reading alone); `make llvm-nolto` moves to LLVM 23 with the recipe; the handle types Z4 deferred (a value can
-     outlive its dropped module; readers take raw handles); 4W's open F-D5-1 (an all-equal FP vector constant, which
-     LLVM 23's C API makes, is written as a record Metal reads as undef). 4W's state: its writer and harness are
-     green on the repository corpora, SMITE 2 and 4a's DXBC corpora, Metal builds every pipeline, and its gate is
-     running. After Z nothing repeats the C++/Rust comparison (its tests skip without `AIRCONV_STEP4_BASE`); the
-     baselines stay in `build/step4` until 4b's plan says otherwise;
+     (`setOpaquePointers(false)` and `startswith` are gone; critic 23; `dxil-probe.cpp` already did at step 4W, with
+     DXIL's data layout overridden: 4W below); L4's untyped list (pointers whose pointee no use gives: 511 in the
+     baseline modules, also counted on SMITE 2 and 3DMark) is what 4b must type explicitly for the writer (under 4W's P4
+     the translator hands only functions, globals and structs, and the writer derived every other pointer with
+     `UseTyped` 0; 4b's plan says whether L4's list is still needed); G5b's timing and coverage (67.5% of the C++'s
+     lines; 235 functions no corpus reaches were ported by reading alone); `make llvm-nolto` moves to LLVM 23 with the
+     recipe; the handle types Z4 deferred (a value can outlive its dropped module; readers take raw handles); 4W's open
+     F-D5-1 (an all-equal FP vector constant, which LLVM 23's C API makes, is written as a record Metal reads as undef).
+     4W's state: its writer and harness are green on the repository corpora, SMITE 2 and 4a's DXBC corpora, Metal builds
+     every pipeline, and its gate is running (it passed the same day: 4W below). After Z nothing repeats the C++/Rust
+     comparison (its tests skip without `AIRCONV_STEP4_BASE`); the baselines stay in `build/step4` until 4b's plan says
+     otherwise;
    - no MacNeutron release is cut between this pin and 4b's unless the maintainer asks: caches turn over per release,
      not per pin, so players' shader caches turn over once (P7). The milestone benches (§8) wait for the maintainer's
      go-ahead (4-D9).
@@ -440,6 +516,48 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
    load with the screen locked, as in step 3. The two final reviews' Important findings were fixed or ruled in Z4:
    erasing a lowered value is `unsafe` and constants check their kind (the raw-handle readers go to 4b), and C10 is
    the gap above. Their Minors are deferred (ledger).
+   4W. Our AIR writer for LLVM 23: W done (2026-10-31, air-23 da8441e28e; MacNeutron db02b94), plan
+   `2026-10-30-dxmtrs-step4w-air-writer.md`. The writer and its gate are §4's Decided; 4b, the LLVM move, is planned
+   from it, with the hand-off in `build/step4/map/7-decisions.md`. Nothing reaches players: W edits neither
+   `dxmt/llvm.sh` nor any other translator-key input, so no pin moves and the key stays (4-D4). MacNeutron gains host
+   tools only, cherry-picked onto `dxmtrs` (`build/pipeline.md` rule 8): `dxmt/tools/air15.cpp` (LLVM 15's typed
+   extract, disassembly, type table, verifier and metallib repack), `air-tools.sh`, `air-oracle.sh`, `air-bcinv.py`,
+   and `dxil-probe` building on LLVM 15 and 23 (LLVM 23's reader needs DXIL's data layout overridden). Corrections to
+   the step as first written (the plan's P items and the ledger's rulings):
+   - the full leg's typed text treats a constant GEP's zero indices, `i32 0` or `i64 0`, as equal: LLVM 23's reading of
+     the C++'s LLVM 15 output makes the difference, a path 4b never takes, and Metal still builds each such module
+     (D1: 141 SMITE 2 modules, one DXIL test);
+   - a module whose instruction count LLVM 23's reader changes (constant expressions expanded; D2: two DXIL tests)
+     leaves the full leg's positional and text rows, and one whose intrinsics it upgrades (LLVM 15's lifetime markers;
+     D6: one DXIL test) the full leg's text rows and opt23's normalized text; each is graded by a sliced defs run
+     instead, automatically and listed per module. This replaces the plan's "posmis = 0, on every corpus except
+     `smite2`", so the plan's posmis mutation flips its row without failing the leg, while D2's own mutation (the sliced
+     run's refs removed) fails it;
+   - the self row leaves out `; preds =` comments, which follow a use-list order the bitcode does not carry and the
+     passes reorder (R7-4, amending P9's "no normalizer"). The normalized-text row mirrors the writer's scalar
+     `scmp`/`ucmp` lowering (a vector form fails the row) and its bit-test rewrite (R7-6, D5) and deletes drop-list
+     attributes on a define's return, keeping them on intrinsic declarations, whose attributes the reader sets;
+     parameters and call sites it leaves alone, a ceiling that fails the row rather than passing it;
+   - the type table names an unnamed identified struct `%N`, as `Module::print` numbers the module before the passes
+     (the tessellation helpers' domain-location struct);
+   - opt23 runs P15's pipeline with `instcombine<no-verify-fixpoint>`: a textual `instcombine` verifies its fixpoint
+     and ended the tool on 21 SMITE 2 modules, while the shim's `InstCombinePass()` does not verify (R7-5);
+   - SMITE 2 is graded on W's own plain-mode translation of the capture, not on a G6 baseline: G6's `--pipelines`
+     prints hashes only, the plain-mode metallibs' `air=` equals G5's tool's on all 10,271 shaders, and the
+     root-signature path stays graded by 4a's hash baseline, C8 (option A). 4a's corpora are graded with G5's tool,
+     `base-0439fa9`, on its frozen snapshots (R7-7);
+   - the DXBC tests are 4 metallibs (2 shaders and their `.1` variants), not the plan's 2;
+   - the first 14 names added to P13's list, eight from the C++ AIR and six made by LLVM 23's passes, were ruled in once
+     their LLVM 15 and 23 signatures were compared (R7-2);
+   - the identity stand-in writer's own control reads text23n 94/96 once attribute drops are counted (it reports none
+     for the two modules that have them), so it serves only the comparator-only mutations;
+   - P18 ran under ruling R9-1 (§4), and a second two-minute lock job, beyond the two the plan allowed, ran the C++
+     cold-against-cold control the rule rests on (R8-1).
+
+   Open for 4b: P5's option (airconv's three literal descriptor types made identified structs, so that they enter the
+   table), and F-D5-1, which blocks 4b (an all-equal FP vector constant, which LLVM 23 builds as a vector `ConstantFP`,
+   is written as one record LLVM 15's reader reads as undef; the bitcode reader makes `ConstantDataVector` instead, and
+   scans of SMITE 2's and 4a's DXBC corpora's opt23 outputs found no FP-vector undef, but 4b's C API makes them).
 5. The core (`src/dxmt`) with D3D12 and D3D11, subsystem by subsystem, each behind a seam cut in the C++ first:
    configuration, logging and statistics; the presenter, frame pacing, scaler and frame generation; allocators, staging
    and residency; the shader cache; command encoding and the queue; then the D3D12 and D3D11 front ends (the COM
