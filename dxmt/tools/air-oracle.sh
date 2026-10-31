@@ -28,7 +28,8 @@
 # Rows (a module counts when the row holds for it; "-" in the summary: the leg does not grade it):
 #   writer    the tool exited 0 (check: the producer's file exists)
 #   self      llvm-dis (23) of the output equals the tool's .post.ll (the module as the writer left it: casts inserted,
-#             drops applied), line 1 dropped on both. Every leg.
+#             drops applied), line 1 dropped on both, block labels' "; preds =" comments (use-list order) left out.
+#             Every leg.
 #   text15    air15 dis of the output equals the reference's.            full
 #   text23    llvm-dis (23) of both, line 1 dropped, equal.                full
 #   text23n   the output and the writer's input (.pre.ll) both through `opt -passes=instsimplify` (-mtriple override,
@@ -96,17 +97,21 @@ die() {
   exit 2
 }
 
-# P15, from A/airconv_context.cpp:110-151 minus the two custom passes.
-P15='annotation2metadata,forceattrs,inferattrs,function<eager-inv>(lower-expect,simplifycfg,sroa<modify-cfg>,early-cse),always-inline,ipsccp,globalopt,function(mem2reg),deadargelim,function<eager-inv>(instcombine,simplifycfg<switch-range-to-icmp>)'
+# P15, from A/airconv_context.cpp:110-151 minus the two custom passes. The shim builds InstCombinePass() (no fixpoint
+# verification, L23/include/llvm/Transforms/InstCombine/InstCombine.h:33), while a textual `instcombine` verifies the
+# fixpoint and aborts the process when one more iteration would change the function (L23/lib/Passes/PassBuilder.cpp,
+# parseInstCombineOptions), hence `instcombine<no-verify-fixpoint>` (ruling R7-5).
+P15='annotation2metadata,forceattrs,inferattrs,function<eager-inv>(lower-expect,simplifycfg,sroa<modify-cfg>,early-cse),always-inline,ipsccp,globalopt,function(mem2reg),deadargelim,function<eager-inv>(instcombine<no-verify-fixpoint>,simplifycfg<switch-range-to-icmp>)'
 
 # text23n's input side: delete the drop-list tokens (Task 3's flag rows) and count them, count the drop-list attribute
 # entries in the `attributes #` lines (P8). Usage: norm_py <in.ll> <out.ll>; prints "flags=<n> attrs=<n>".
-#   DROP23: LLVM 23-only attribute kinds Task 3 drops (guarantee-only hints). Any other 23-only kind is a writer error.
+#   DROP23: LLVM 23-only attribute kinds Task 3 drops (guarantee-only hints: its ruling R3-3, the writer's
+#   GuaranteeOnly). Any other 23-only kind is a writer error.
 #   captures(...) other than none, and memory(...) with no exact LLVM 15 form, are dropped or weakened and counted.
 norm_py() {
   python3 -I - "$@" << 'PY'
 import re, sys
-DROP23 = {"range", "nofpclass", "initializes", "dead_on_unwind", "writable"}
+DROP23 = {"nofpclass", "range", "writable", "dead_on_unwind", "initializes", "dead_on_return", "nocreateundeforpoison"}
 text = open(sys.argv[1]).read()
 flags = 0
 def strip(pattern, drop):
@@ -118,6 +123,10 @@ def strip(pattern, drop):
     text = re.sub(pattern, sub, text)
 strip(r"(\btrunc)((?: nuw| nsw)+)", r" (?:nuw|nsw)")
 strip(r"(\bgetelementptr)((?: inbounds| nusw| nuw| inrange\([^)]*\))+)", r" (?:nusw|nuw|inrange\([^)]*\))")
+# FMF on a cast (LLVM 23 prints them before nneg): LLVM 15's CAST record has none (Task 3's ruling R3-4). "fast" is one
+# token, as the writer counts it (R3-1).
+strip(r"(= (?:fptrunc|fpext|uitofp|sitofp))((?: (?:fast|nnan|ninf|nsz|arcp|contract|afn|reassoc))+)",
+      r" (?:fast|nnan|ninf|nsz|arcp|contract|afn|reassoc)")
 strip(r"(\b(?:zext|uitofp))( nneg)", r" nneg")
 strip(r"(= or)( disjoint)", r" disjoint")
 strip(r"(\bicmp)( samesign)", r" samesign")
@@ -292,6 +301,20 @@ text23n() {
   echo ok
 }
 
+# self_eq <post.ll> <ours.ll23>: equal, line 1 of the .post.ll dropped. A block label's "; preds =" comment lists the
+# block's users in use-list order, which the bitcode does not carry (the writer writes no use lists, R2-6, and P15's
+# passes reorder them; finding F-T4-2), so that comment is left out of the comparison (ruling R7-4); the terminators it
+# summarizes are compared.
+self_eq() {
+  tail -n +2 "$1" | cmp -s - "$2" && return 0
+  tail -n +2 "$1" | sed -E 's/[[:space:]]*; preds = .*$//' > "$2.np1"
+  sed -E 's/[[:space:]]*; preds = .*$//' "$2" > "$2.np2"
+  cmp -s "$2.np1" "$2.np2"
+  r=$?
+  rm -f "$2.np1" "$2.np2"
+  return $r
+}
+
 # wrapper_ok <ours.bc> <ref.bc>: magic, version, offset and CPU type (words 0, 1, 2 and 4) equal.
 wrapper_ok() {
   wa=$(od -An -tx4 -N20 "$1" 2> /dev/null | tr -s ' \n' '  ')
@@ -374,7 +397,7 @@ grade() { # <stem>
   esac
   case " $ROWS " in
     *" self "*)
-      if [ -s "$o.post.ll" ] && [ -s "$o.ll23" ] && tail -n +2 "$o.post.ll" | cmp -s - "$o.ll23"; then self=1; else fail self "llvm-dis of the output differs from the writer's .post.ll"; fi
+      if [ -s "$o.post.ll" ] && [ -s "$o.ll23" ] && self_eq "$o.post.ll" "$o.ll23"; then self=1; else fail self "llvm-dis of the output differs from the writer's .post.ll"; fi
       ;;
   esac
   if [ $posmis = 0 ]; then

@@ -8,13 +8,14 @@ P9b). Reads both files' bitstreams (an optional Darwin wrapper is skipped) and f
   - there is an OPAQUE_POINTER record (TYPE_BLOCK_ID_NEW code 25).
 Prints "ok" and exits 0, or one "inv: <cause>" line per failure and exits 1 (2 on a file it cannot parse).
 
-The allowlist is written once, below, as "<block> <code> <name>" lines: the pairs L15/include/llvm/Bitcode/LLVMBitCodes.h
-defines, intersected with what the writer emits (every bitc:: record code in AIRBitcodeWriter.cpp and
-AIRValueEnumerator.cpp, plus Task 3's rows: the identification block, MODULE_CODE_SOURCE_FILENAME and _HASH,
-CST_CODE_POISON, FUNC_CODE_INST_FREEZE and _UNOP). LLVM 15's reader skips unknown module-level records silently and
-LLVM 23's passes add records the C++ output lacks, so the reference module is not the list. A writer change that emits
-a new code fails here, naming it, until the line is added. --allow FILE reads the list from FILE instead (the
---dump-allow format), for the harness's mutation checks."""
+The allowlist is written once, below, as "<block> <code> <name>" lines: the pairs
+L15/include/llvm/Bitcode/LLVMBitCodes.h defines, intersected with what the writer emits (every bitc:: record code in
+AIRBitcodeWriter.cpp and AIRValueEnumerator.cpp, plus Task 3's rows: the identification block,
+MODULE_CODE_SOURCE_FILENAME and _HASH, CST_CODE_POISON, FUNC_CODE_INST_FREEZE and _UNOP, the sync scope names block's
+SYNC_SCOPE_NAME). LLVM 15's reader skips unknown module-level records silently and LLVM 23's passes add records the C++
+output lacks, so the reference module is not the list. A writer change that emits a new code fails here, naming it,
+until the line is added. --allow FILE reads the list from FILE instead (the --dump-allow format), for the harness's
+mutation checks."""
 import sys
 
 ALLOW = """
@@ -43,6 +44,7 @@ ALLOW = """
 11 9 CST_CODE_CSTRING
 11 10 CST_CODE_CE_BINOP
 11 11 CST_CODE_CE_CAST
+11 12 CST_CODE_CE_GEP
 11 13 CST_CODE_CE_SELECT
 11 14 CST_CODE_CE_EXTRACTELT
 11 15 CST_CODE_CE_INSERTELT
@@ -116,6 +118,7 @@ ALLOW = """
 17 19 TYPE_CODE_STRUCT_NAME
 17 20 TYPE_CODE_STRUCT_NAMED
 17 21 TYPE_CODE_FUNCTION
+26 1 SYNC_SCOPE_NAME
 """
 
 BLOCKS = {0: "BLOCKINFO", 8: "MODULE", 9: "PARAMATTR", 10: "PARAMATTR_GROUP", 11: "CONSTANTS", 12: "FUNCTION",
