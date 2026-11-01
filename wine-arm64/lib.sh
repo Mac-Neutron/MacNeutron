@@ -60,8 +60,8 @@ tree_mode() {  # tree_mode <tree>
 # <mac>; bundle.sh --release writes the release bundle's own, naming HEAD.
 write_source() {  # write_source <out> <mac>
   (
-    . "$ROOT/wine-arm64/pins"; . "$ROOT/dxmt/pins"; . "$ROOT/wine-arm64/deps.pins"
     S="${BUILD_DIR:-$ROOT/build}/wine-arm64-src"
+    . "$ROOT/wine-arm64/pins"; . "$ROOT/dxmt/pins"; . "$ROOT/wine-arm64/deps.pins"; . "$S/dxmt/tools/llvm.sh"
     series() { if [ "$(tree_mode "$1")" = applied ]; then tree_series "$1"; else echo dev; fi; }
     echo "MACNEUTRON_COMMIT=$2"
     echo "WINE_COMMIT=$WINE_COMMIT"
@@ -75,7 +75,8 @@ write_source() {  # write_source <out> <mac>
     echo "DXMT_SERIES=$(series dxmt)"
     git -C "$S/dxmt" submodule status | awk '{ c = $1; sub(/^[-+U]/, "", c); n = $2; sub(/.*\//, "", n)
       print "DXMT_SUBMODULE_" n "=" c }'  # external/nvapi, include/native/directx
-    echo "LLVM_TAG=$LLVM_TAG"
+    echo "LLVM_REPO=$LLVM_AIR_REPO"
+    echo "LLVM_COMMIT=$LLVM_AIR_COMMIT"
     echo "LLVM_MINGW_SHA256=$LLVM_MINGW_SHA256"
     echo "LSTEAMCLIENT_COMMIT=$LSTEAMCLIENT_COMMIT"
     echo "LSTEAMCLIENT_SERIES=$(series lsteamclient)"
@@ -161,88 +162,91 @@ check_signing() {
 }
 
 # The named sections of a TOML file, without comment lines and blank ones: the cargo settings translator_key hashes.
+# Exits 1 on a [profile.*.package.*] section naming airconv, airconv-ir or "*", or a [target.'cfg(...)] section.
 toml_sections() {  # toml_sections <file> <[section]>...
   _ts_f=$1; shift
   awk -v want="$*" '
-    /^[[:space:]]*\[/ { s = $0; sub(/[[:space:]]*(#.*)?$/, "", s); sub(/^[[:space:]]*/, "", s); on = index(" " want " ", " " s " ") > 0 }
+    /^[[:space:]]*\[/ {
+      s = $0; sub(/[[:space:]]*(#.*)?$/, "", s); sub(/^[[:space:]]*/, "", s)
+      t = s; gsub(/[[:space:]\042\047]/, "", t)
+      if (t ~ /^\[profile\.[^]]*\.package\.(airconv|airconv-ir|\*)(\]|\.)/ || t ~ /^\[target\.cfg\(/) exit 1
+      on = index(" " want " ", " " s " ") > 0
+    }
     on && !/^[[:space:]]*(#|$)/ { print }
   ' "$_ts_f"
 }
 
-# The key of DXMT's shader translator (arm64 release Ruling 46): DXMT's translation cache (ShaderCacheVersion, DXMT
-# patch 0003) and the launcher's replay stamp (DXMT/translator) follow it, not DXMT's git version, which every re-fetch
-# changes (git am makes new commits) and an uncommitted edit doesn't. It hashes what changes translated output, as the
-# working tree has it (patched, committed or not, untracked files too), the buildtype, LLVM (the pin and dxmt/llvm.sh's
-# recipe) and the compilers (Apple clang, metal through tools/xcrun-metal.sh). Relative paths only: the same tree
-# anywhere has the same key. The caller sets ROOT and LLVM_TAG (dxmt/pins) and, for a tree with the Rust translator,
-# MTLD3D_RUST (dxmt/pins) with rustup's cargo and rustc on PATH (dxmt/mtld3d-tools.sh).
-#  - A tree with src/airconv/Cargo.toml (translator 2, DXMTRS step 4a): airconv (src/airconv, its shim, passes and .metal
-#    helpers), d3d11's compile arguments (src/d3d11/d3d11_shader.cpp: its cache entries key on the variant's fields, not on
-#    the argument chain built from them, unlike d3d12's) and the PE side of the airconv calls
-#    (src/winemetal/airconv_thunks.[ch]; the unix side's 64-bit thunks pass the pointers through), the cargo settings that
-#    reach the build (the root Cargo.toml's release and production profiles, .cargo/config.toml's [build], [env] and
-#    host target: no comment, no other section), the Rust toolchain (rustc -vV), and the crates cargo resolves for
-#    airconv (cargo tree: a path crate by name, since src/airconv's files are hashed; the others by name and version).
-#    Not the DXBC parser, the headers or the top-level meson files: cargo builds the translator, and its build script
-#    sees only the LLVM headers. The images build with meson.options' cargo_toolchain default, which has to be MTLD3D_RUST.
-#  - Any other tree (an older pin): translator 1, as before: src/airconv, libs/DXBCParser, include, meson.build,
-#    meson.options, d3d11's compile arguments and the thunks.
+# The key of DXMT's shader translator (arm64 release Ruling 46, composition 3: DXMTRS step 4b): DXMT's translation
+# cache (ShaderCacheVersion, DXMT patch 0003) and the launcher's replay stamp (DXMT/translator) follow it, not DXMT's
+# git version, which every re-fetch changes (git am makes new commits) and an uncommitted edit doesn't. It hashes what
+# changes translated output, as the working tree has it (patched, committed or not, untracked files too):
+#  - airconv (src/airconv, its shim, passes and .metal helpers, without tests.rs files and tests/ folders), d3d11's
+#    compile arguments (src/d3d11/d3d11_shader.cpp when it exists, else src/d3d11/src/shader/args.rs: its cache entries
+#    key on the variant's fields, not on the argument chain built from them, unlike d3d12's), the PE side of the
+#    airconv calls (src/winemetal/airconv_thunks.[ch]; the unix side's 64-bit thunks pass the pointers through) and
+#    tools/llvm.sh (the LLVM commit and recipe);
+#  - the cargo settings that reach the build (the root Cargo.toml's release and production profiles, .cargo/config.toml's
+#    [build], [env] and host target: no comment, no other section; a [profile.*.package.*] section for airconv,
+#    airconv-ir or "*" or a [target.'cfg(...)] section is refused), the Rust toolchain (rustc -vV), and the crates
+#    cargo resolves for airconv (cargo tree: a path crate by name, since src/airconv's files are hashed; the others by
+#    name and version);
+#  - the buildtype, tools/xcrun-metal.sh, and the compilers (Apple clang, metal).
+# Relative paths only: the same tree anywhere has the same key. The caller sets ROOT and MTLD3D_RUST (dxmt/pins) with
+# rustup's cargo and rustc on PATH (dxmt/mtld3d-tools.sh); the images build with meson.options' cargo_toolchain
+# default, which has to be MTLD3D_RUST. A tree without tools/llvm.sh (an older pin) dies naming the reason.
 # No command is computed inside the hashed pipeline: sh has no pipefail, so a failing one there would leave a well-formed
 # key without its lines. Each is taken first and only echoed in the group; the key dies, printing nothing, when one fails.
 translator_key() {  # translator_key <dxmt-tree> <buildtype>
-  if [ -f "$1/src/airconv/Cargo.toml" ]; then
-    _tk_v=2 _tk_l="src/airconv src/d3d11/d3d11_shader.cpp src/winemetal/airconv_thunks.c src/winemetal/airconv_thunks.h"
+  [ -f "$1/tools/llvm.sh" ] || die "built with the MacNeutron commit that pinned it"
+  if [ -f "$1/src/d3d11/d3d11_shader.cpp" ]; then
+    _tk_d11=src/d3d11/d3d11_shader.cpp
+  elif [ -f "$1/src/d3d11/src/shader/args.rs" ]; then
+    _tk_d11=src/d3d11/src/shader/args.rs
   else
-    _tk_v=1 _tk_l="src/airconv libs/DXBCParser include meson.build meson.options src/d3d11/d3d11_shader.cpp
-      src/winemetal/airconv_thunks.c src/winemetal/airconv_thunks.h"
+    die "no src/d3d11/d3d11_shader.cpp or src/d3d11/src/shader/args.rs in $1"
   fi
-  for _tk_p in $_tk_l; do
+  _tk_l="src/airconv $_tk_d11 src/winemetal/airconv_thunks.c src/winemetal/airconv_thunks.h tools/llvm.sh"
+  for _tk_p in $_tk_l src/airconv/Cargo.toml; do
     [ -e "$1/$_tk_p" ] || die "no $_tk_p in $1"
   done
-  [ -r "$ROOT/dxmt/llvm.sh" ] && [ -r "$ROOT/wine-arm64/tools/xcrun-metal.sh" ] \
-    || die "no dxmt/llvm.sh or wine-arm64/tools/xcrun-metal.sh in $ROOT"
-  _tk_f=$(cd "$1" && find $_tk_l -name .git -prune -o -type f ! -name .DS_Store -print0 | LC_ALL=C sort -z \
-    | xargs -0 shasum -a 256) || die "can't hash the translator's files in $1"
-  _tk_c=$(c++ --version) && [ -n "$_tk_c" ] || die "c++ --version failed"
-  _tk_m=$(xcrun -sdk macosx metal --version) && [ -n "$_tk_m" ] || die "metal --version failed"  # the rest names the toolchain's mount point
-  if [ "$_tk_v" = 2 ]; then
-    [ -n "${MTLD3D_RUST:-}" ] || die "MTLD3D_RUST is not set (dxmt/pins)"
-    _tk_t=$(sed -n "s/^option('cargo_toolchain'.*value *: *'\([^']*\)'.*/\1/p" "$1/meson.options") \
-      || die "can't read $1/meson.options"
-    [ "$_tk_t" = "$MTLD3D_RUST" ] \
-      || die "meson.options' cargo_toolchain default is '$_tk_t', not MTLD3D_RUST '$MTLD3D_RUST': the images build with the default"
-    _tk_r=$(rustc "+$MTLD3D_RUST" -vV) || die "rustc +$MTLD3D_RUST -vV failed (is the toolchain installed?)"
-    _tk_cp=$(toml_sections "$1/Cargo.toml" "[profile.release]" "[profile.production]" "[profile.production-unwind]") \
-      || die "can't read $1/Cargo.toml"
-    _tk_cc=
-    if [ -f "$1/.cargo/config.toml" ]; then
-      _tk_cc=$(toml_sections "$1/.cargo/config.toml" "[build]" "[env]" "[target.aarch64-apple-darwin]") \
-        || die "can't read $1/.cargo/config.toml"
-    fi
-    _tk_dep=$(cd "$1" && cargo "+$MTLD3D_RUST" tree --locked --offline --no-dedupe -p airconv -e normal,build \
-      --target aarch64-apple-darwin --prefix none --format '{p}') \
-      || die "cargo tree -p airconv failed in $1 (a Cargo.lock out of step with a manifest, or crates not fetched: cargo fetch --locked)"
-    [ -n "$_tk_dep" ] || die "cargo tree -p airconv printed nothing in $1"
-    # Path crates are hashed by content through src/airconv, so one anywhere else would be in neither list.
-    _tk_air=$(cd "$1/src/airconv" && pwd -P) || die "no src/airconv in $1"
-    _tk_bad=$(printf '%s\n' "$_tk_dep" | sed -n 's/^.* (\(\/[^)]*\))$/\1/p' \
-      | awk -v r="$_tk_air" '$0 != r && index($0, r "/") != 1')
-    [ -z "$_tk_bad" ] || die "a path crate outside src/airconv in airconv's dependencies: $_tk_bad"
-    # A path crate's name only (no version, no location: a workspace version bump or a move must not change the key).
-    _tk_dep=$(printf '%s\n' "$_tk_dep" | sed -e 's/ v[^ ]* (\/[^)]*)$//' -e 's/ (\/[^)]*)$//' | LC_ALL=C sort -u) \
-      || die "can't list airconv's dependencies"
+  _tk_xm=$(cat "$ROOT/wine-arm64/tools/xcrun-metal.sh") && [ -n "$_tk_xm" ] \
+    || die "no wine-arm64/tools/xcrun-metal.sh in $ROOT"
+  _tk_fl=$(cd "$1" && find $_tk_l -name .git -prune -o -type f ! -name .DS_Store ! -name tests.rs ! -path '*/tests/*' -print) \
+    && [ -n "$_tk_fl" ] || die "can't list the translator's files in $1"
+  _tk_fl=$(printf '%s\n' "$_tk_fl" | LC_ALL=C sort) || die "can't sort the translator's files in $1"
+  _tk_f=$(cd "$1" && printf '%s\n' "$_tk_fl" | tr '\n' '\0' | xargs -0 shasum -a 256) && [ -n "$_tk_f" ] \
+    || die "can't hash the translator's files in $1"
+  _tk_c=$(c++ --version) && _tk_c=$(printf '%s\n' "$_tk_c" | head -n 1) && [ -n "$_tk_c" ] || die "c++ --version failed"
+  _tk_m=$(xcrun -sdk macosx metal --version) && _tk_m=$(printf '%s\n' "$_tk_m" | head -n 1) && [ -n "$_tk_m" ] \
+    || die "metal --version failed"  # the rest names the toolchain's mount point
+  [ -n "${MTLD3D_RUST:-}" ] || die "MTLD3D_RUST is not set (dxmt/pins)"
+  _tk_t=$(sed -n "s/^option('cargo_toolchain'.*value *: *'\([^']*\)'.*/\1/p" "$1/meson.options") \
+    || die "can't read $1/meson.options"
+  [ "$_tk_t" = "$MTLD3D_RUST" ] \
+    || die "meson.options' cargo_toolchain default is '$_tk_t', not MTLD3D_RUST '$MTLD3D_RUST': the images build with the default"
+  _tk_r=$(rustc "+$MTLD3D_RUST" -vV) || die "rustc +$MTLD3D_RUST -vV failed (is the toolchain installed?)"
+  _tk_cp=$(toml_sections "$1/Cargo.toml" "[profile.release]" "[profile.production]" "[profile.production-unwind]") \
+    || die "can't read $1/Cargo.toml (or it has an unhashed profile.package section)"
+  _tk_cc=
+  if [ -f "$1/.cargo/config.toml" ]; then
+    _tk_cc=$(toml_sections "$1/.cargo/config.toml" "[build]" "[env]" "[target.aarch64-apple-darwin]") \
+      || die "can't read $1/.cargo/config.toml (or it has an unhashed target.cfg or profile.package section)"
   fi
-  {
-    echo "macneutron translator $_tk_v"
-    printf '%s\n' "$_tk_f"
-    if [ "$_tk_v" = 2 ]; then
-      printf '%s\n' "cargo Cargo.toml" "$_tk_cp" "cargo .cargo/config.toml" "$_tk_cc" "$_tk_r" "$_tk_dep"
-    fi
-    echo "buildtype $2"
-    echo "llvm $LLVM_TAG"; cat "$ROOT/dxmt/llvm.sh" "$ROOT/wine-arm64/tools/xcrun-metal.sh"
-    printf '%s\n' "$_tk_c" | head -n 1
-    printf '%s\n' "$_tk_m" | head -n 1
-  } | shasum -a 256 | cut -d ' ' -f 1
+  _tk_dep=$(cd "$1" && cargo "+$MTLD3D_RUST" tree --locked --offline --no-dedupe -p airconv -e normal,build \
+    --target aarch64-apple-darwin --prefix none --format '{p}') \
+    || die "cargo tree -p airconv failed in $1 (a Cargo.lock out of step with a manifest, or crates not fetched: cargo fetch --locked)"
+  [ -n "$_tk_dep" ] || die "cargo tree -p airconv printed nothing in $1"
+  # Path crates are hashed by content through src/airconv, so one anywhere else would be in neither list.
+  _tk_air=$(cd "$1/src/airconv" && pwd -P) || die "no src/airconv in $1"
+  _tk_bad=$(printf '%s\n' "$_tk_dep" | sed -n 's/^.* (\(\/[^)]*\))$/\1/p' \
+    | awk -v r="$_tk_air" '$0 != r && index($0, r "/") != 1')
+  [ -z "$_tk_bad" ] || die "a path crate outside src/airconv in airconv's dependencies: $_tk_bad"
+  # A path crate's name only (no version, no location: a workspace version bump or a move must not change the key).
+  _tk_dep=$(printf '%s\n' "$_tk_dep" | sed -e 's/ v[^ ]* (\/[^)]*)$//' -e 's/ (\/[^)]*)$//' | LC_ALL=C sort -u) \
+    || die "can't list airconv's dependencies"
+  printf '%s\n' "macneutron translator 3" "$_tk_f" \
+    "cargo Cargo.toml" "$_tk_cp" "cargo .cargo/config.toml" "$_tk_cc" "$_tk_r" "$_tk_dep" \
+    "buildtype $2" "$_tk_xm" "$_tk_c" "$_tk_m" | shasum -a 256 | cut -d ' ' -f 1
 }
 
 # The PE side's instruction set (Apple M1, build.sh's PE_MARCH), checked on what Wine's make built: ARM64EC's

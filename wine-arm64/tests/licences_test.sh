@@ -6,7 +6,7 @@
 # into wine.app and naming Valve's notice), then the check above on its Contents/Helpers/wine.app.
 # --self-test proves it red on copies in $TMPDIR: a licence file deleted (FEX's, MacNeutron's, CMAA2's), NOTICES.md
 # without its FFmpeg section (the bundle has to ship FFmpeg) or its section for Wine's Arm Optimized Routines (Wine
-# patch 0035's msvcrt string routines), an extra FEX external.
+# patch 0035's msvcrt string routines), SOURCE without LLVM_COMMIT, an extra FEX external.
 # ponytail: a flat path list, no manifest format; add one when a second bundle needs the same list.
 set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -111,10 +111,13 @@ check() {  # check <wine.app> <build dir>
       || miss "lsteamclient entry in README with the maintainer's decision of 2026-10-04"
   fi
 
-  # 5. Source correspondence: SOURCE names the exact inputs.
+  # 5. Source correspondence: SOURCE names the exact inputs, and README cites our LLVM 23.1.4 fork at LLVM_COMMIT.
+  awk '/^LLVM 23\.1\.4 \(/ { p = 1 } p && /^$/ { exit } p' "$L/README" 2> /dev/null | tr -s ' \n' '  ' \
+    | g -qF "https://github.com/Mac-Neutron/llvm-project.git at LLVM_COMMIT" \
+    || miss "the README's LLVM 23.1.4 entry naming https://github.com/Mac-Neutron/llvm-project.git at LLVM_COMMIT"
   for k in MACNEUTRON_COMMIT WINE_COMMIT WINE_SERIES FEX_COMMIT FEX_SERIES FEX_SUBMODULE_fmt FEX_SUBMODULE_range-v3 \
            FEX_SUBMODULE_rpmalloc FEX_SUBMODULE_unordered_dense FEX_SUBMODULE_xxhash FEX_SUBMODULE_cpp-optparse \
-           DXMT_COMMIT DXMT_SERIES DXMT_SUBMODULE_nvapi DXMT_SUBMODULE_directx LLVM_TAG LLVM_MINGW_SHA256
+           DXMT_COMMIT DXMT_SERIES DXMT_SUBMODULE_nvapi DXMT_SUBMODULE_directx LLVM_REPO LLVM_COMMIT LLVM_MINGW_SHA256
   do key "$k"; done
 
   if [ $bad = 0 ]; then echo "PASS licences_test"; else echo "FAIL licences_test"; return 1; fi
@@ -179,6 +182,10 @@ cp -c "$APP/Contents/Resources/licenses/NOTICES.md" "$N"
 sed -i '' 's/^## Arm Optimized Routines (in Wine/## Arm Optimized Routines-less (in Wine/' "$N"
 red "a NOTICES.md without Wine's Arm Optimized Routines section" "NOTICES.md section for Wine's Arm Optimized Routines"
 cp -c "$APP/Contents/Resources/licenses/NOTICES.md" "$N"
+S="$T/wine.app/Contents/Resources/licenses/SOURCE"
+sed -i '' '/^LLVM_COMMIT=/d' "$S"
+red "a SOURCE without LLVM_COMMIT" "SOURCE line LLVM_COMMIT="
+cp -c "$APP/Contents/Resources/licenses/SOURCE" "$S"
 mkdir "$T/b/wine-arm64-src/fex-ec/External/vixl"
 red "an extra External/vixl" "a licence decision for FEX External/vixl"
 echo "PASS licences_test self-test"

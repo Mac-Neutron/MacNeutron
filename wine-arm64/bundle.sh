@@ -122,8 +122,8 @@ for e in fmt xxhash tiny-json unordered_dense rpmalloc cephes; do
 done
 put "$S/fex" External/range-v3/LICENSE.txt "$L/fex/range-v3-LICENSE.txt"
 put "$S/fex" Source/Common/cpp-optparse/LICENSE "$L/fex/cpp-optparse-LICENSE"
-put "$B/dxmt-src/llvm-project/llvm" LICENSE.TXT "$L/llvm/"
-put "$B/dxmt-src/llvm-project/llvm" lib/Support/COPYRIGHT.regex "$L/llvm/"
+put "$B/dxmt-src/llvm-air/llvm" LICENSE.TXT "$L/llvm/"
+put "$B/dxmt-src/llvm-air/llvm" lib/Support/COPYRIGHT.regex "$L/llvm/"
 # The llvm-mingw that built the Windows side (dxmt/toolchain.sh: ours, or the pinned release).
 MINGW_ROOT=$(dirname "$(sh "$ROOT/dxmt/toolchain.sh")")
 put "$MINGW_ROOT" LICENSE.TXT "$L/llvm-mingw/"

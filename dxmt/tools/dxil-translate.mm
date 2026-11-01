@@ -7,7 +7,7 @@
 // fences (each air.atomic.fence's flags:scope, in order), its air.wg.barrier count and its gradient samples (grad=
 // <scaled>/<all>; scaled: an operand is an fmul, as the sampler's LOD bias scaling makes the derivatives), and the
 // components its vertex functions output (vout=, position included: varyings at their signature's width, DXMT 0063)
-// and its divides that keep any fast-math flag (fdiv=<flagged>/<all>: dxmt/llvm.sh's CreateFDivFMF fix, DXMT 0064). A .dxbc
+// and its divides that keep any fast-math flag (fdiv=<flagged>/<all>: CreateFDivFMF's fast-math flags, DXMT 0064). A .dxbc
 // file in the folder is a DXBC (Shader Model 5) compute shader, translated as D3D11 does (Task FR: its sync lowering,
 // offline). --out <dir> writes each translated metallib to <dir>/<file>.metallib (a shader's later ones, a geometry
 // pipeline's, to <file>.<n>.metallib); --use <dir> hands Metal those files' bytes instead of the translator's where they
@@ -16,7 +16,7 @@
 // DXMTRS step 4 (the translator's identity checks): --no-metal translates only (no device, no pipelines; ok means every
 // compile returned 0) and prints "ok <file> <stage> <ms> air= dis= refl= tags=" or "fail <file> <stage>|- refl=<h>|- <reason>"
 // (- when Initialize failed); --initialize-only runs SM50Initialize alone ("init <file> <stage> refl=" or "fail <file> -
-// refl=- <reason>"). dis= is the sha256 of the metallibs' AIR as LLVM 15's typed reader prints it, in translation order
+// refl=- <reason>"). dis= is the sha256 of the metallibs' AIR as LLVM 23's reader prints it, in translation order
 // (--dis <dir> writes each as <file>[.<n>].ll); refl= of the 72 reflection bytes, filled with 0xA5 first so a write
 // outside the stage's fields shows, and SM50GetArgumentsInfo's two arrays; tags= of each MTLB function's NAME, TYPE,
 // VERS, TESS, VATT and VATY tags. --metal 310|320 and --shader-flags <n> set SM50_SHADER_COMMON_DATA (default 310, 0).
@@ -66,6 +66,12 @@
 #include <vector>
 
 static_assert(sizeof(MTL_SHADER_REFLECTION) == 72, "refl= hashes the 72 reflection bytes");
+
+// Metal's own shader cache folder (private API, as src/winemetal/unix/src/g8.rs declares it).
+extern "C" {
+void MTLSetShaderCachePath(NSString *path);
+NSString *MTLGetShaderCachePath(void);
+}
 
 namespace {
 
@@ -144,7 +150,7 @@ struct Result {
 };
 
 bool count_flags = false, no_metal = false, init_only = false;
-std::filesystem::path out_dir, use_dir, dis_dir;
+std::filesystem::path out_dir, use_dir, dis_dir, metal_cache_dir;
 const char *folder = nullptr, *pipelines_file = nullptr;
 uint32_t only_line = 0; // --pipelines --line <n>
 SM50_SHADER_METAL_VERSION metal_version = SM50_SHADER_METAL_310;
@@ -157,14 +163,13 @@ SM50_SHADER_COMMON_DATA Common() {
   return {nullptr, SM50_SHADER_COMMON, metal_version, (SM50_SHADER_FLAG)shader_flags};
 }
 
-// A translated metallib's AIR, read by LLVM 15's typed reader (its bitcode starts at the wrapper magic), with an empty
+// A translated metallib's AIR, read by LLVM 23's reader (its bitcode starts at the wrapper magic), with an empty
 // module identifier.
 llvm::Expected<std::unique_ptr<llvm::Module>> ParseAIR(const void *data, size_t size, llvm::LLVMContext &context) {
   std::string_view bytes((const char *)data, size);
   auto at = bytes.find(std::string_view("\xde\xc0\x17\x0b", 4));
   if (at == std::string_view::npos)
     return llvm::createStringError(llvm::inconvertibleErrorCode(), "no bitcode in the metallib");
-  context.setOpaquePointers(false);
   return llvm::parseBitcodeFile(llvm::MemoryBufferRef(llvm::StringRef(bytes.data() + at, size - at), ""), context);
 }
 
@@ -188,7 +193,7 @@ void CountFlags(const void *data, size_t size, Flags &flags) {
           if (name == "air.atomic.fence")
             flags.fences += (flags.fences.empty() ? "" : ",") + arg(0) + ":" + arg(2);
           flags.barriers += name == "air.wg.barrier";
-          if (name.startswith("air.sample_texture") && name.contains("_grad")) {
+          if (name.starts_with("air.sample_texture") && name.contains("_grad")) {
             flags.grads++;
             flags.scaled_grads += std::any_of(call->arg_begin(), call->arg_end(), [](auto &a) {
               auto op = llvm::dyn_cast<llvm::BinaryOperator>(a.get());
@@ -268,7 +273,7 @@ void Tags(const uint8_t *p, size_t size, Sha256 &h) {
     h.Add("malformed", 9);
 }
 
-// dis= and --dis: the AIR's text, as LLVM 15's typed reader prints it; tags=.
+// dis= and --dis: the AIR's text, as LLVM 23's reader prints it; tags=.
 void Describe(const void *data, size_t size, const std::string &file, Result &result) {
   auto start = std::chrono::steady_clock::now();
   std::string text;
@@ -1394,6 +1399,8 @@ int Run() {
     return 2;
   }
   std::sort(files.begin(), files.end());
+  if (!no_metal && !init_only && !metal_cache_dir.empty())
+    MTLSetShaderCachePath([NSString stringWithUTF8String:std::filesystem::absolute(metal_cache_dir).c_str()]);
   id<MTLDevice> device = no_metal || init_only ? nil : MTLCreateSystemDefaultDevice();
   uint32_t ok = 0, units = 0; // a DXBC pipeline group is one unit; --initialize-only lists every file
   double total_ms = 0, slowest_ms = 0;
@@ -1492,8 +1499,8 @@ int main(int argc, char **argv) {
       no_metal = true;
     else if (arg == "--initialize-only")
       init_only = true;
-    else if ((arg == "--out" || arg == "--use" || arg == "--dis") && i + 1 < argc)
-      (arg == "--out" ? out_dir : arg == "--use" ? use_dir : dis_dir) = argv[++i];
+    else if ((arg == "--out" || arg == "--use" || arg == "--dis" || arg == "--metal-cache") && i + 1 < argc)
+      (arg == "--out" ? out_dir : arg == "--use" ? use_dir : arg == "--dis" ? dis_dir : metal_cache_dir) = argv[++i];
     else if (arg == "--metal" && i + 1 < argc) {
       std::string version = argv[++i];
       usage |= version != "310" && version != "320";
@@ -1519,14 +1526,14 @@ int main(int argc, char **argv) {
   }
   usage |= only_line && !pipelines_file;
   if (usage || !folder) {
-    fprintf(stderr, "usage: dxil-translate <folder> [--flags] [--out <dir>] [--use <dir>] [--dis <dir>] [--no-metal | "
-                    "--initialize-only] [--metal 310|320] [--shader-flags <n>]\n"
+    fprintf(stderr, "usage: dxil-translate <folder> [--flags] [--out <dir>] [--use <dir>] [--dis <dir>] "
+                    "[--metal-cache <dir>] [--no-metal | --initialize-only] [--metal 310|320] [--shader-flags <n>]\n"
                     "       dxil-translate --pipelines <pipelines.txt> --no-metal [--line <n>] [--dis <dir>] [--out <dir>] "
                     "[--metal 310|320] [--shader-flags <n>]\n");
     return 2;
   }
   std::error_code ec;
-  for (auto *dir : {&out_dir, &dis_dir})
+  for (auto *dir : {&out_dir, &dis_dir, &metal_cache_dir})
     if (!dir->empty() && !std::filesystem::create_directories(*dir, ec) && ec) {
       fprintf(stderr, "dxil-translate: can't create %s: %s\n", dir->c_str(), ec.message().c_str());
       return 2;

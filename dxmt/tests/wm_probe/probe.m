@@ -722,22 +722,43 @@ bool wm_main_blocked(void (^block)(void)) {
     return hung;
 }
 
+/* macOS 26's xzone malloc counts whole 16 KiB tiny slices in malloc_zone_statistics(NULL)->size_in_use even when
+ * every block in a slice has been freed; walking MALLOC_PTR_IN_USE_RANGE_TYPE sums the live blocks themselves. */
+static void zone_range(task_t task, void *ctx, unsigned type, vm_range_t *ranges, unsigned count) {
+    (void)task;
+    (void)type;
+    size_t *sum = ctx;
+    for (unsigned i = 0; i < count; i++) *sum += ranges[i].size;
+}
+
+static size_t live_heap_bytes(void) {
+    vm_address_t *zones = NULL;
+    unsigned n = 0;
+    size_t sum = 0;
+    if (malloc_get_all_zones(0, NULL, &zones, &n) == KERN_SUCCESS)
+        for (unsigned i = 0; i < n; i++) {
+            malloc_zone_t *z = (malloc_zone_t *)zones[i];
+            if (z && z->introspect && z->introspect->enumerator)
+                z->introspect->enumerator(0, &sum, MALLOC_PTR_IN_USE_RANGE_TYPE, (vm_address_t)z, NULL, zone_range);
+        }
+    return sum;
+}
+
 void wm_heap_growth(void (^block)(void), unsigned cycles) {
     block();
     flush_pending();
     if (!cycles) cycles = 1;
-    malloc_statistics_t a, b;
     muted = true;
-    malloc_zone_statistics(NULL, &a);
+    size_t a = live_heap_bytes();
     for (unsigned i = 0; i < cycles; i++) {
         void *pool = objc_autoreleasePoolPush();
         block();
         flush_pending();
         objc_autoreleasePoolPop(pool);
     }
-    malloc_zone_statistics(NULL, &b);
+    size_t b = live_heap_bytes();
     muted = false;
-    long per = ((long)b.size_in_use - (long)a.size_in_use) / (long)cycles;
+    long per = ((long)b - (long)a) / (long)cycles;
     if (full_mode) wm_line("heap-growth=%ld", per);
     else wm_line("heap-growth=%s", per > 64 ? "leaked" : "freed");
 }

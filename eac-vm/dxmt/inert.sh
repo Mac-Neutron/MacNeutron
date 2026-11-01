@@ -23,7 +23,8 @@ for side in base new; do
   cp -cR "$S/dxmt-build" "$T/$side/dxmt-build"
   git -C "$T/$side/dxmt" checkout -q --detach "$(eval echo \$$side)"
 done
-kb=$(translator_key "$T/base/dxmt" release) kn=$(translator_key "$T/new/dxmt" release)
+kb=$(translator_key "$T/base/dxmt" release 2> "$T/err") || { reason=$(sed 's/^wine-arm64: //' "$T/err"); kb="none ($reason)"; }
+kn=$(translator_key "$T/new/dxmt" release 2> "$T/err") || { reason=$(sed 's/^wine-arm64: //' "$T/err"); kn="none ($reason)"; }
 if [ "$kb" = "$kn" ]; then echo "inert: translator key the same"
 else echo "inert: translator key differs (the product's shader caches are rebuilt once): $kb -> $kn"; fi
 python3 - "$T" "$S/dxmt-build/compile_commands.json" <<'EOF'

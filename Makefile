@@ -164,14 +164,16 @@ release:
 wine-arm64:
 	sh wine-arm64/build.sh
 
-# LLVM 15 without LTO, build/wine-arm64-src/llvm-arm64-nolto: the install tools/rust-check.sh's AIRCONV_LLVM names (DXMTRS's
+# LLVM 23 without LTO, build/wine-arm64-src/llvm23-arm64-nolto: the install tools/rust-check.sh's AIRCONV_LLVM names (DXMTRS's
 # airconv tests link LLVM into every test binary, which ThinLTO archives would recompile each time). The shipped recipe
-# (dxmt/llvm.sh) for the CPU wine-arm64/build.sh uses; a no-op while its .complete matches. It reads the clone that
-# `make wine-arm64` makes (build/dxmt-src/llvm-project): run it where that build runs, inside the pipeline lock.
+# (DXMT's tools/llvm.sh) for the CPU wine-arm64/build.sh uses; a no-op while its .complete matches. It reads the clone
+# that `make wine-arm64` makes (build/dxmt-src/llvm-air): run it where that build runs, inside the pipeline lock.
 llvm-nolto:
-	@set -eu; ROOT='$(CURDIR)'; B="$${BUILD_DIR:-$(CURDIR)/build}"; . dxmt/pins; . wine-arm64/lib.sh; . dxmt/llvm.sh; \
+	@set -eu; ROOT='$(CURDIR)'; B="$${BUILD_DIR:-$(CURDIR)/build}"; . dxmt/pins; . wine-arm64/lib.sh; \
+	[ -f "$$B/wine-arm64-src/dxmt/tools/llvm.sh" ] || die "built with the MacNeutron commit that pinned it"; \
+	. "$$B/wine-arm64-src/dxmt/tools/llvm.sh"; \
 	UNIX_CPU='$(if $(filter generic,$(MACNEUTRON_CPU)),,-mcpu=$(MACNEUTRON_CPU))' UNIX_LTO=; \
-	build_llvm arm64 "$$B/wine-arm64-src/llvm-arm64-nolto" "$$B/dxmt-src/llvm-project"
+	build_llvm arm64 "$$B/wine-arm64-src/llvm23-arm64-nolto" "$$B/dxmt-src/llvm-air"
 
 # Test programs for the arm64 stack, built in parallel. The file name's prefix picks the compiler (arm64-, arm64ec-,
 # x64-); a program that needs more flags sets WA_FLAGS_<name> (arm64ec-viewec: -lonecore), which comes last. x64-bench, a

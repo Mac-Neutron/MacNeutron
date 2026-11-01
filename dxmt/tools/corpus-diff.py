@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""corpus-diff.py <before> <after> [--stages vs,ps,cs,hs,ds,gs]: compares two dxil-translate outputs shader by shader
-(DXIL SM 6.8 plan, P-corpus; DXMTRS step 4: dis=, refl=, tags=, --initialize-only's init lines). Prints
+"""corpus-diff.py <before> <after> [--stages vs,ps,cs,hs,ds,gs] [--no-dis]: compares two dxil-translate outputs shader
+by shader (DXIL SM 6.8 plan, P-corpus; DXMTRS step 4: dis=, refl=, tags=, --initialize-only's init lines). Prints
   corpus-diff: <ok>/<total> ok, <n> new failures, <n> fixed, <n> changed, <n> extra, <n> unchanged
 (<ok>/<total> from <after>'s summary line), then a "new-fail <file> <reason>", "fixed <file>", "changed <file>",
-"extra <file>" or "missing <file>" line per shader concerned, and "air-only <file>" for one whose metallib bytes alone
-differ (air=: information, never a failure). Exit 1 on a status change either way (ok or init to fail is a new
-failure, fail to ok a fix: an identity port accepts no shader the original refuses), a dis=, refl= or tags= difference,
-a reason or refl= difference between two fail lines, a shader missing from <after> or extra in it, zero shaders
-compared, an ok line without air= (a run with --flags, or a tool without the hash; init lines carry none), or a file
-without a summary line (a run that stopped early). --stages keeps a shader by the stage on its <before> line (an extra
-one by its <after> line); a "-" stage (Initialize failed) or a plain fail line (no stage) passes every filter."""
+"extra <file>" or "missing <file>" line per shader concerned, "dis-only <file>" under --no-dis when dis= differs on an
+unchanged shader, and "air-only <file>" when metallib bytes differ (air=, and dis= under --no-dis: information, never a
+failure). Exit 1 on a status change either way (ok or init to fail is a new failure, fail to ok a fix: an identity port
+accepts no shader the original refuses), a dis= (unless --no-dis), refl= or tags= difference, a reason or refl=
+difference between two fail lines, a shader missing from <after> or extra in it, zero shaders compared, an ok line
+without air= (a run with --flags, or a tool without the hash; init lines carry none), or a file without a summary line
+(a run that stopped early). --stages keeps a shader by the stage on its <before> line (an extra one by its <after>
+line); a "-" stage (Initialize failed) or a plain fail line (no stage) passes every filter."""
 import sys
 
 errors = []
@@ -37,20 +38,23 @@ def read(path):
     return results, summary
 
 
-args, stages = sys.argv[1:], None
+args, stages, no_dis = sys.argv[1:], None, "--no-dis" in sys.argv[1:]
+if no_dis:
+    args.remove("--no-dis")
 if "--stages" in args:
     i = args.index("--stages")
     stages = set(args[i + 1].split(",")) if i + 1 < len(args) else set()
     del args[i:i + 2]
 if len(args) != 2:
-    sys.exit("usage: corpus-diff.py <before> <after> [--stages vs,ps,cs,hs,ds,gs]")
+    sys.exit("usage: corpus-diff.py <before> <after> [--stages vs,ps,cs,hs,ds,gs] [--no-dis]")
 (before, _), (after, after_summary) = read(args[0]), read(args[1])
 def kept(r):
     return stages is None or r[1] == "-" or r[1] in stages
 
 
+keys = ("refl", "tags", "reason") if no_dis else ("dis", "refl", "tags", "reason")
 names = sorted(n for n in set(before) | set(after) if kept(before.get(n) or after[n]))
-new_fail, fixed, changed, extra, missing, air_only, unchanged = [], [], [], [], [], [], 0
+new_fail, fixed, changed, extra, missing, dis_only, air_only, unchanged = [], [], [], [], [], [], [], 0
 for name in names:
     old, new = before.get(name), after.get(name)
     if old is None:
@@ -61,10 +65,12 @@ for name in names:
         new_fail.append(f"{name} {new[2]['reason']}")
     elif old[0] == "fail" and new[0] == "ok":
         fixed.append(name)
-    elif any(old[2].get(k) != new[2].get(k) for k in ("dis", "refl", "tags", "reason")):
+    elif any(old[2].get(k) != new[2].get(k) for k in keys):
         changed.append(name)
     else:
         unchanged += 1
+        if no_dis and old[2].get("dis") != new[2].get("dis"):
+            dis_only.append(name)
         if old[2].get("air") != new[2].get("air"):
             air_only.append(name)
 if not any(n in before for n in names):
@@ -72,7 +78,7 @@ if not any(n in before for n in names):
 print(f"corpus-diff: {after_summary or '?'} ok, {len(new_fail)} new failures, {len(fixed)} fixed, {len(changed)} changed, "
       f"{len(extra)} extra, {unchanged} unchanged")
 for kind, items in (("new-fail", new_fail), ("fixed", fixed), ("changed", changed), ("extra", extra),
-                    ("missing", missing), ("air-only", air_only)):
+                    ("missing", missing), ("dis-only", dis_only), ("air-only", air_only)):
     for item in items:
         print(f"{kind} {item}")
 for e in errors:

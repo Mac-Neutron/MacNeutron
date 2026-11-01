@@ -9,12 +9,11 @@
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/wine-arm64/pins"
-. "$ROOT/dxmt/pins"  # DXMT_REPO, DXMT_COMMIT, LLVM_TAG: the Rosetta stack's pin, shared
+. "$ROOT/dxmt/pins"  # DXMT_REPO, DXMT_COMMIT: the Rosetta stack's pin, shared
 . "$ROOT/wine-arm64/deps.pins"
 . "$ROOT/wine-arm64/lib.sh"
 FETCH_TAG=wine-arm64
 . "$ROOT/dxmt/fetch.sh"
-. "$ROOT/dxmt/llvm.sh"
 . "$ROOT/dxmt/tools.sh"
 B="${BUILD_DIR:-$ROOT/build}"
 SRC="$B/wine-arm64-src"
@@ -159,7 +158,7 @@ lsc_series=$(tree_series lsteamclient)
 # Every build input, once: the up-to-date check and the stamp written at the end must agree.
 stamp=$(stamp_of "$ROOT/wine-arm64/pins" "$ROOT/wine-arm64/build.sh" \
   "$ROOT/wine-arm64/lib.sh" "$ROOT/wine-arm64/bundle.sh" "$ROOT/wine-arm64/wine.entitlements" \
-  "$ROOT/wine-arm64/Info.plist" "$ROOT/dxmt/pins" "$ROOT/dxmt/llvm.sh" "$ROOT/dxmt/tools.sh" \
+  "$ROOT/wine-arm64/Info.plist" "$ROOT/dxmt/pins" "$ROOT/dxmt/tools.sh" \
   "$ROOT/dxmt/tools/dxil-probe.cpp" "$ROOT/dxmt/tools/dxil-translate.mm" "$ROOT/wine-arm64/licenses/NOTICES.md" \
   "$ROOT/wine-arm64/licenses/README" "$ROOT/wine-arm64/tests/licences_test.sh" "$ROOT/wine-arm64/deps.pins" \
   "$ROOT/dxmt/fetch.sh" "$ROOT/wine-arm64/x18-allow.txt" "$ROOT/wine-arm64/tools/x18scan.sh" \
@@ -484,14 +483,16 @@ fi
 [ "$(grep -c 'Wine builtin DLL' "$dll")" = 1 ] || die "libarm64ecfex.dll lacks Wine's builtin marker"
 
 # 7. DXMT (arm64 DXMT spec §4): ARM64EC front ends and winemetal.dll from DXMT's own cross file, linked against this
-#    Wine's build tree, and an aarch64 winemetal.so against an arm64 LLVM 15 (dxmt/llvm.sh, built once). Its .metal
+#    Wine's build tree, and an aarch64 winemetal.so against an arm64 LLVM 23 (DXMT's tools/llvm.sh, built once). Its .metal
 #    files compile through tools/xcrun-metal.sh (a second cross file names it as xcrun), so the AIR modules embedded in
 #    winemetal.so name no build path. Set up again in a new build folder when the options, a cross file or the wrapper
 #    change (dxmt-build/.setup-inputs); fetch_dxmt removes it too. dxmt-install is redone every build. The translator's
 #    key (lib.sh's translator_key, arm64 release Ruling 46) keys DXMT's shader cache: DXMT reads it from
 #    dxmt-translator-key (patch 0003), rewritten only when it changes, which makes meson regenerate rather than set up
 #    again.
-build_llvm arm64 "$SRC/llvm-arm64" "$B/dxmt-src/llvm-project"
+[ -f "$D/tools/llvm.sh" ] || die "built with the MacNeutron commit that pinned it"
+. "$D/tools/llvm.sh"
+build_llvm arm64 "$SRC/llvm23-arm64" "$B/dxmt-src/llvm-air"
 echo "wine-arm64: building DXMT (log: $SRC/dxmt.log)" >&2
 : > "$SRC/dxmt.log"
 # Rewritten only when its text changes: a newer cross file makes meson regenerate the build.
@@ -534,7 +535,7 @@ set -- "$SRC/dxmt-build" "$D" --cross-file "$D/build-arm64ec.txt" --cross-file "
   --cross-file "$SRC/dxmt-cpu.txt" \
   --buildtype "$dxmt_buildtype" --strip --prefix "$SRC/dxmt-install" -Dwine_builtin_dll=false -Denable_d3d12=true \
   -Denable_nvapi=true -Denable_nvngx=true \
-  -Dnative_llvm_path="$SRC/llvm-arm64" -Dwine_build_path="$SRC/wine-build" \
+  -Dnative_llvm_path="$SRC/llvm23-arm64" -Dwine_build_path="$SRC/wine-build" \
   -Dtranslator_key_file="$SRC/dxmt-translator-key"
 # DXMTRS's meson builds Rust static libraries (tools/cargo-staticlib.sh) with cargo. No -Dcargo_toolchain: a tree
 # without the option (the pinned one, before the Rust plumbing lands on DXMTRS's main) would fail to configure, and
@@ -569,8 +570,8 @@ fi
   || die "Authenticode-signing DXMT's NVIDIA DLLs failed; see $SRC/authenticode.log"
 # The DXIL host tools, arm64, next to wine.app (not in it).
 mkdir -p "$OUT"
-build_probe arm64 "$SRC/llvm-arm64" "$OUT" "$SRC"
-build_translate arm64 "$SRC/llvm-arm64" "$D" "$SRC/airconv-cargo" "$OUT" "$SRC"
+build_probe arm64 "$SRC/llvm23-arm64" "$OUT" "$SRC"
+build_translate arm64 "$SRC/llvm23-arm64" "$D" "$SRC/airconv-cargo" "$OUT" "$SRC"
 # The MetalFX presenter (arm64 release spec §5.3), which winemetal.so loads from beside itself (DXMT patch 0002).
 # -ffast-math here alone: Wine's msvcrt and D3D, FEX's x87/SSE emulation and DXMT's shader translator must keep the
 # IEEE NaN, infinity and rounding behaviour games observe.

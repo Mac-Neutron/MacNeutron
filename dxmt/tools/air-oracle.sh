@@ -24,14 +24,17 @@
 #   det     full, defs and opt23 twice in separate processes, and the tool's --batch -j 8 against -j 1; compares only
 #           *.bc, *.metallib, *.ll15, *.ll23 and the stats lines (no times). smite2 runs its first 500 sorted names.
 #   check   grades metallibs another producer wrote under the corpus's names (4b's translator): verify, inventory
-#           (the baseline's module of the same name is the reference), wrapper, and the Metal rows. The writer's stats
-#           are read from a `stats ...` line in <out-dir>/<stem>.log if the producer keeps one (informational), else 0.
+#           (the baseline's module of the same name is the reference), wrapper, and the Metal rows, plus self, dual and
+#           stats when requested in ROWS_USER/ROWS. The writer's stats and post-write IR are read from <out-dir>/<stem>.log
+#           (`stats ...`) and <out-dir>/<stem>.post.ll if the producer keeps them.
 #
 # Rows (a module counts when the row holds for it; "-" in the summary: the leg does not grade it):
 #   writer    the tool exited 0 (check: the producer's file exists)
 #   self      llvm-dis (23) of the output equals the tool's .post.ll (the module as the writer left it: casts inserted,
 #             drops applied), line 1 dropped on both, block labels' "; preds =" comments (use-list order) left out.
-#             Every leg.
+#   dual      air15 dis and llvm-dis (23) of the extracted bitcode count the same undef, poison and zeroinitializer
+#             operands (ignoring shufflevector masks, where LLVM 15 prints -1 as i32 undef and LLVM 23 as i32 poison).
+#   stats     <stem>.log holds a `stats ...` line with use-typed=0.
 #   text15    air15 dis of the output equals the reference's.            full
 #             Ruling D1: a module equal only once every zero index of a constant getelementptr reads i64 0 counts, and
 #             is listed in $O/gep0.txt (LLVM 23 folds the C++'s getelementptr inbounds (T, T* @g, i64 0, i64 0) to @g,
@@ -66,40 +69,46 @@
 #   `XLATE <SRC> <args> --use <input folder>`. At the gate remove it so XLATE (G's base tool) makes it again.
 #
 # Summary line (stdout):
-#   air-oracle <leg> <corpus>: n=<n> writer=<ok> self=<ok> text15=<eq|-> text23=<eq|-> text23n=<ok|-> posmis=<p>
-#   verify=<ok> inv=<ok> wrapper=<ok> used=<k>/<s> metal=<ok>/<total> base=<ok>/<total> newfail=<k> reasons=<eq|ne>
-#   casts=<i>/<c> usetyped=<u> dropped=<a>/<f> refs=<r> stale=<t>
+#   air-oracle <leg> <corpus>: n=<n> writer=<ok> self=<ok> dual=<ok|-> stats=<ok|-> text15=<eq|-> text23=<eq|->
+#   text23n=<ok|-> posmis=<p> verify=<ok> inv=<ok> wrapper=<ok> used=<k>/<s> metal=<ok>/<total> base=<ok>/<total>
+#   newfail=<k> reasons=<eq|ne> casts=<i>/<c> usetyped=<u> dropped=<a>/<f> refs=<r> stale=<t>
 # (every count is a number of modules, "-" when the leg does not grade the row; casts, usetyped, dropped, refs and
 # stale are the tool's stats summed.) Details go to stderr and to $O/failures.txt, one line per module and row; the
 # `stale <name>` lines of opt23 to $O/stale.txt. Exit 0 only when, for the rows the leg grades (ROWS):
-#   writer = self = verify = inv = wrapper = n; used = s (and the Metal row ran); newfail = 0; reasons = eq;
-#   every posmis and upgraded module passes its defs run (D2, D6); full: text15 = text23 = n - (posmis or upgraded);
-#   defs: text23n = n; opt23: text23n = n - upgraded.
+#   writer = self = dual = stats = verify = inv = wrapper = n; used = s (and the Metal row ran); newfail = 0;
+#   reasons = eq; every posmis and upgraded module passes its defs run (D2, D6); full: text15 = text23 = n - (posmis or
+#   upgraded); defs: text23n = n; opt23: text23n = n - upgraded.
 #
 # Environment (dev-only; none is read by the library or the tool):
 #   BUILD_DIR   the build folder (default: the main checkout's, found through git)
-#   W           $BUILD_DIR/step4/w        S   $BUILD_DIR/step4
+#   W           $BUILD_DIR/step4/w        S   $BUILD_DIR/step4        B4  $S/b
 #   AIRW        $W/llvm23-build/bin/llvm-air-write, the integration build of P12
 #   BIN23       the LLVM 23 bin folder (default $I23/bin; $I23 itself, default $BUILD_DIR/phase0/llvm-23, is the prefix)
 #   XLATE       $W/tools/dxil-translate     A15   $W/bin/air15 (dxil-probe-15 and -23 sit beside it)
 #   SRC_<corpus>  the shader folder, for --use (a '-' in the corpus name is '_' here); defaults in the table
 #   Dev knobs: GATE=1 (inputs from $S/base/<C>.out; smite2 also gets --pipelines), JOBS (parallel modules, default 4),
-#   ONLY=<file listing input file names> (a slice: no Metal row, output in <leg>/<corpus>.only), ROWS (override the
-#   leg's graded rows), REFS (typed-ref bitcode for defs and opt23; default $W/in/helpers/*.air; empty: none),
-#   OUT_ROOT ($W/out), NOMETAL=1 (skip the Metal row).
+#   ONLY=<file listing input file names> (a slice: no Metal row, output in <leg>/<corpus>.only), ROWS / ROWS_USER
+#   (override the leg's graded rows), REFS (typed-ref bitcode for defs and opt23; default $W/in/helpers/*.air; empty:
+#   none), OUT_ROOT ($W/out), NOMETAL=1 (skip the Metal row).
 #
-# Corpora (4a's ids and Corpora table):
-#   name        4a id    input, development / gate                        XLATE arguments
-#   shaders     C1       $W/in/shaders / $S/base/C1.out                   -
-#   dxil        C2       $W/in/dxil / $S/base/C2.out                      -
-#   dxbc        C4       $W/in/dxbc (310 only) / $S/base/C4.out           -
-#   dxbc-320    C4-320   - / $S/base/C4-320.out                           --metal 320
-#   d3d11       C5       - / $S/base/C5.out (G3)                          -
-#   d3d11-320   C5-320   - / $S/base/C5-320.out                           --metal 320
-#   dx11        C6       - / $S/base/C6.out (G4's dxmt/tests/dxbc-corpus)  -
-#   dx11-320    C6-320   - / $S/base/C6-320.out                           --metal 320
-#   smite2      C8       $W/in/smite2 (plain --out) / $S/base/C8.out (G6)  gate: --pipelines <capture>/pipelines.txt
-#   helpers     -        $W/in/helpers (bare .air: no pack, no Metal row)  -
+# Corpora (4a's ids and Corpora table, plus 4b's -320f, c11 and -pl rows):
+#   name        4a id     input, development / gate                        XLATE arguments
+#   shaders     C1        $W/in/shaders / $S/base/C1.out                   -
+#   dxil        C2        $W/in/dxil / $S/base/C2.out                      -
+#   dxbc        C4        $W/in/dxbc (310 only) / $S/base/C4.out           -
+#   dxbc-320    C4-320    - / $S/base/C4-320.out                           --metal 320
+#   dxbc-320f   C4-320f   - / $S/base/C4-320f.out                          --metal 320 --shader-flags 3
+#   d3d11       C5        - / $S/base/C5.out (G3)                          -
+#   d3d11-320   C5-320    - / $S/base/C5-320.out                           --metal 320
+#   d3d11-320f  C5-320f   - / $S/base/C5-320f.out                          --metal 320 --shader-flags 3
+#   dx11        C6        - / $S/base/C6.out (G4's dxmt/tests/dxbc-corpus)  -
+#   dx11-320    C6-320    - / $S/base/C6-320.out                           --metal 320
+#   dx11-320f   C6-320f   - / $S/base/C6-320f.out                          --metal 320 --shader-flags 3
+#   smite2      C8        $W/in/smite2 (plain --out) / $S/base/C8.out (G6)  gate: --pipelines <capture>/pipelines.txt
+#   smite2-pl   C8p       - / $B4/base/C8p.out                             (NOMETAL=1; XLATE=base-0439fa9-g6)
+#   c11         C11       - / $B4/base/C11.out                             -
+#   c11-pl      C11p      - / $B4/base/C11p.out                            (NOMETAL=1; XLATE=base-0439fa9-g6)
+#   helpers     -         $W/in/helpers (bare .air: no pack, no Metal row)  -
 # C3 and C7 make no metallibs. SRC defaults: dxmt/tests/{shaders,dxil,dxbc,dxbc-corpus} beside this script, and for
 # smite2 the maintainer-allowed capture, ~/Library/Application Support/MacNeutron/vm.0.7.2/runs/2437170/traces/dxmt,
 # read in place and read-only (4-D7). SRC_d3d11 has no default.
@@ -329,6 +338,7 @@ config() {
   fi
   W=${W:-$BUILD_DIR/step4/w}
   S=${S:-$BUILD_DIR/step4}
+  B4=${B4:-$S/b}
   I23=${I23:-$BUILD_DIR/phase0/llvm-23}
   BIN23=${BIN23:-$I23/bin}
   AIRW=${AIRW:-$W/llvm23-build/bin/llvm-air-write}
@@ -336,8 +346,8 @@ config() {
   A15=${A15:-$W/bin/air15}
   JOBS=${JOBS:-4}
   OUT_ROOT=${OUT_ROOT:-$W/out}
-  ROWS_USER=${ROWS:-}
-  export BUILD_DIR W S I23 BIN23 AIRW XLATE A15 JOBS OUT_ROOT
+  ROWS_USER=${ROWS_USER:-${ROWS:-}}
+  export BUILD_DIR W S B4 I23 BIN23 AIRW XLATE A15 JOBS OUT_ROOT
 }
 
 corpus_setup() {
@@ -353,16 +363,25 @@ corpus_setup() {
     dxil) CID=C2 DEVIN=$W/in/dxil GATEIN=$S/base/C2.out SRCDEF=$here/../tests/dxil ;;
     dxbc) CID=C4 DEVIN=$W/in/dxbc GATEIN=$S/base/C4.out SRCDEF=$here/../tests/dxbc ;;
     dxbc-320) CID=C4-320 GATEIN=$S/base/C4-320.out SRCDEF=$here/../tests/dxbc ARGS="--metal 320" ;;
+    dxbc-320f) CID=C4-320f GATEIN=$S/base/C4-320f.out SRCDEF=$here/../tests/dxbc ARGS="--metal 320 --shader-flags 3" ;;
     d3d11) CID=C5 GATEIN=$S/base/C5.out ;;
     d3d11-320) CID=C5-320 GATEIN=$S/base/C5-320.out ARGS="--metal 320" ;;
+    d3d11-320f) CID=C5-320f GATEIN=$S/base/C5-320f.out ARGS="--metal 320 --shader-flags 3" ;;
     dx11) CID=C6 GATEIN=$S/base/C6.out SRCDEF=$here/../tests/dxbc-corpus ;;
     dx11-320) CID=C6-320 GATEIN=$S/base/C6-320.out SRCDEF=$here/../tests/dxbc-corpus ARGS="--metal 320" ;;
+    dx11-320f) CID=C6-320f GATEIN=$S/base/C6-320f.out SRCDEF=$here/../tests/dxbc-corpus ARGS="--metal 320 --shader-flags 3" ;;
     smite2)
       CID=C8 DEVIN=$W/in/smite2 GATEIN=$S/base/C8.out
       SRCDEF="$HOME/Library/Application Support/MacNeutron/vm.0.7.2/runs/2437170/traces/dxmt"
       ;;
+    smite2-pl)
+      CID=C8p GATEIN=$B4/base/C8p.out XLATE=$S/bin/base-0439fa9-g6/dxil-translate
+      SRCDEF="$HOME/Library/Application Support/MacNeutron/vm.0.7.2/runs/2437170/traces/dxmt"
+      ;;
+    c11) CID=C11 GATEIN=$B4/base/C11.out SRCDEF=$S/corpus/C11 ;;
+    c11-pl) CID=C11p GATEIN=$B4/base/C11p.out SRCDEF=$S/corpus/C11 XLATE=$S/bin/base-0439fa9-g6/dxil-translate ;;
     helpers) DEVIN=$W/in/helpers EXT=air ;;
-    *) die "unknown corpus '$corpus' (shaders dxil dxbc dxbc-320 d3d11 d3d11-320 dx11 dx11-320 smite2 helpers)" ;;
+    *) die "unknown corpus '$corpus' (shaders dxil dxbc dxbc-320 dxbc-320f d3d11 d3d11-320 d3d11-320f dx11 dx11-320 dx11-320f smite2 smite2-pl c11 c11-pl helpers)" ;;
   esac
   if [ "${GATE:-}" = 1 ] && [ -n "$GATEIN" ]; then
     INDIR=$GATEIN
@@ -373,11 +392,12 @@ corpus_setup() {
   fi
   [ -n "$INDIR" ] && [ -d "$INDIR" ] || die "no input folder for corpus $corpus (looked for '$DEVIN' and '$GATEIN')"
   eval "srcvar=\${SRC_$(echo "$corpus" | tr - _):-}"
+  [ -n "$srcvar" ] || eval "srcvar=\${SRC_${corpus%%-*}:-}"
   SRC=${srcvar:-$SRCDEF}
   if [ "${GATE:-}" = 1 ] && [ "$corpus" = smite2 ]; then ARGS="--pipelines $SRC/pipelines.txt"; fi
   T=$W/t/$corpus
   BASE=$W/in/$corpus.txt
-  export corpus CID INDIR EXT SRC ARGS T BASE
+  export corpus CID INDIR EXT SRC ARGS T BASE XLATE
 }
 
 # The input file names of the corpus (ONLY: a slice), one per line, sorted.
@@ -399,6 +419,16 @@ dis23() { # <in.bc> <out.ll>: LLVM 23's text, line 1 (ModuleID) dropped. Read fr
 prep_mod() { # <stem>
   in=$INDIR/$1.$EXT
   t=$T/$1
+  if [ "${LEG:-}" = check ]; then
+    case " ${ROWS:-} " in
+      *" text15 "* | *" text23 "*) ;;
+      *)
+        if [ -s "$t.bc" ] && [ ! "$in" -nt "$t.bc" ]; then return 0; fi
+        if [ "$EXT" = air ]; then cp "$in" "$t.bc"; else "$A15" extract "$in" "$t.bc"; fi
+        return $?
+        ;;
+    esac
+  fi
   if [ -s "$t.ll23" ] && [ -s "$t.types" ] && [ ! "$in" -nt "$t.ll23" ]; then return 0; fi
   if [ "$EXT" = air ]; then cp "$in" "$t.bc"; else "$A15" extract "$in" "$t.bc"; fi || return 1
   "$A15" dis "$t.bc" "$t.ll15" && "$A15" types "$t.bc" "$t.types" && dis23 "$t.bc" "$t.ll23"
@@ -456,8 +486,29 @@ self_eq() {
   return $r
 }
 
+# dual_py <ours.ll15> <ours.ll23>: prints "ok" when both texts count the same undef, poison and zeroinitializer
+# operands (ignoring shufflevector masks, where LLVM 15 prints -1 as i32 undef and LLVM 23 prints it as i32 poison),
+# else both counts.
+dual_py() {
+  python3 -I - "$1" "$2" << 'PY'
+import re, sys
+KEYS = ("undef", "poison", "zeroinitializer")
+def counts(path):
+    t = re.sub(r"(shufflevector [^\n]*), <\d+ x i32> <[^>]*>", r"\1", open(path).read())
+    return [len(re.findall(rf"\b{k}\b", t)) for k in KEYS]
+c15, c23 = counts(sys.argv[1]), counts(sys.argv[2])
+if c15 == c23:
+    print("ok")
+else:
+    s15 = " ".join(f"{k}={v}" for k, v in zip(KEYS, c15))
+    s23 = " ".join(f"{k}={v}" for k, v in zip(KEYS, c23))
+    print(f"air15({s15}) != llvm-dis23({s23})")
+PY
+}
+
 # wrapper_ok <ours.bc> <ref.bc>: magic, version, offset and CPU type (words 0, 1, 2 and 4) equal.
 wrapper_ok() {
+  cmp -s "$1" "$2" && return 0
   wa=$(od -An -tx4 -N20 "$1" 2> /dev/null | tr -s ' \n' '  ')
   wb=$(od -An -tx4 -N20 "$2" 2> /dev/null | tr -s ' \n' '  ')
   set -- $wa
@@ -479,8 +530,9 @@ grade() { # <stem>
   fail() { echo "$stem $1: $2" >> "$O/failures.txt"; }
   if [ "$LEG" = check ]; then
     P=$CHECKDIR/$name
-    # the producer's own log, if it keeps one next to its metallibs, may carry the writer's stats line (informational)
+    # the producer's own log and .post.ll, if it keeps them next to its metallibs, carry the writer's stats line and post-write IR
     cp "$CHECKDIR/$stem.log" "$o.log" 2> /dev/null || : > "$o.log"
+    cp "$CHECKDIR/$stem.post.ll" "$o.post.ll" 2> /dev/null || :
     if [ -f "$P" ]; then
       writer=1
       "$A15" extract "$P" "$o.bc" 2> "$o.extract.log" || { writer=0; fail writer "extract: $(head -n 1 "$o.extract.log")"; }
@@ -529,20 +581,51 @@ grade() { # <stem>
       fi
     fi
   fi
-  if /usr/bin/grep -q '^stats ' "$o.log" 2> /dev/null; then
+  has_stats=0
+  if /usr/bin/grep -qE '^stats inst-casts=[0-9]+ const-casts=[0-9]+ use-typed=[0-9]+ attrs-dropped=[0-9]+ flags-dropped=[0-9]+ refs=[0-9]+ stale=[0-9]+' "$o.log" 2> /dev/null; then
+    has_stats=1
     eval "$(/usr/bin/grep '^stats ' "$o.log" | tail -n 1 | sed -E 's/stats inst-casts=([0-9]+) const-casts=([0-9]+) use-typed=([0-9]+) attrs-dropped=([0-9]+) flags-dropped=([0-9]+) refs=([0-9]+) stale=([0-9]+).*/ic=\1 cc=\2 ut=\3 ad=\4 fd=\5 rf=\6 st=\7/')"
   fi
   [ $writer = 1 ] || return 0
 
   case " $ROWS " in
-    *" text15 "*) "$A15" dis "$P" "$o.ll15" 2> "$o.dis.log" || fail text15 "air15 dis: $(head -n 1 "$o.dis.log")" ;;
+    *" stats "*)
+      if [ $has_stats = 1 ] && [ "$ut" = 0 ]; then
+        stats=1
+      elif [ $has_stats = 1 ]; then
+        fail stats "use-typed=$ut (want 0)"
+      else
+        fail stats "no stats line in $stem.log"
+      fi
+      ;;
   esac
   case " $ROWS " in
-    *" self "* | *" text23 "*) dis23 "$o.bc" "$o.ll23" 2> "$o.dis23.log" || fail text23 "llvm-dis 23: $(head -n 1 "$o.dis23.log")" ;;
+    *" text15 "* | *" dual "*)
+      if ! "$A15" dis "$P" "$o.ll15" 2> "$o.dis.log"; then
+        case " $ROWS " in *" text15 "*) fail text15 "air15 dis: $(head -n 1 "$o.dis.log")" ;; esac
+      fi
+      ;;
+  esac
+  case " $ROWS " in
+    *" self "* | *" text23 "* | *" dual "*)
+      if ! dis23 "$o.bc" "$o.ll23" 2> "$o.dis23.log"; then
+        case " $ROWS " in *" text23 "*) fail text23 "llvm-dis 23: $(head -n 1 "$o.dis23.log")" ;; esac
+      fi
+      ;;
   esac
   case " $ROWS " in
     *" self "*)
       if [ -s "$o.post.ll" ] && [ -s "$o.ll23" ] && self_eq "$o.post.ll" "$o.ll23"; then self=1; else fail self "llvm-dis of the output differs from the writer's .post.ll"; fi
+      ;;
+  esac
+  case " $ROWS " in
+    *" dual "*)
+      if [ -s "$o.ll15" ] && [ -s "$o.ll23" ]; then
+        d=$(dual_py "$o.ll15" "$o.ll23")
+        if [ "$d" = ok ]; then dual=1; else fail dual "$d"; fi
+      else
+        fail dual "missing disassembly"
+      fi
       ;;
   esac
   if [ $posmis = 0 ] && [ $upg = 0 ]; then
@@ -572,8 +655,12 @@ grade() { # <stem>
   esac
   case " $ROWS " in
     *" inv "*)
-      iv=$(python3 -I "$here/air-bcinv.py" "$o.bc" "$t.bc" 2>&1)
-      if [ "$iv" = ok ]; then inv=1; else fail inv "$(echo "$iv" | tr '\n' ';')"; fi
+      if cmp -s "$o.bc" "$t.bc"; then
+        inv=1
+      else
+        iv=$(python3 -I "$here/air-bcinv.py" "$o.bc" "$t.bc" 2>&1)
+        if [ "$iv" = ok ]; then inv=1; else fail inv "$(echo "$iv" | tr '\n' ';')"; fi
+      fi
       ;;
   esac
   case " $ROWS " in
@@ -596,7 +683,7 @@ grade() { # <stem>
 }
 
 worker() { # <stem>
-  writer=0 self=0 text15=0 text23=0 text23n=0 posmis=0 upg=0 verify=0 inv=0 wrapper=0
+  writer=0 self=0 dual=0 stats=0 text15=0 text23=0 text23n=0 posmis=0 upg=0 verify=0 inv=0 wrapper=0
   ic=0 cc=0 ut=0 ad=0 fd=0 rf=0 st=0
   if prep_mod "$1"; then
     grade "$1"
@@ -604,7 +691,7 @@ worker() { # <stem>
     echo "$1 prep: failed" >> "$O/failures.txt"
   fi
   line="$1"
-  for row in writer self text15 text23 text23n verify inv wrapper; do
+  for row in writer self dual stats text15 text23 text23n verify inv wrapper; do
     case " $ROWS " in
       *" $row "*) eval "line=\"\$line $row=\$$row\"" ;;
       *) line="$line $row=-" ;;
@@ -718,7 +805,7 @@ summarize() { # after the modules: the Metal row, the summary line, the first fa
   }
   metal_row
   t15=$(get text15 -) t23=$(get text23 -) t23n=$(get text23n -) pm=$(get posmis 0)
-  line="air-oracle $LEG $corpus: n=$n writer=$(get writer -) self=$(get self -) text15=$t15 text23=$t23 text23n=$t23n posmis=$pm"
+  line="air-oracle $LEG $corpus: n=$n writer=$(get writer -) self=$(get self -) dual=$(get dual -) stats=$(get stats -) text15=$t15 text23=$t23 text23n=$t23n posmis=$pm"
   line="$line verify=$(get verify -) inv=$(get inv -) wrapper=$(get wrapper -)"
   line="$line used=$MET_USED metal=$MET_OK base=$MET_BASE newfail=$MET_NEWFAIL reasons=$MET_REASONS"
   line="$line casts=$(get ic 0)/$(get cc 0) usetyped=$(get ut 0) dropped=$(get ad 0)/$(get fd 0) refs=$(get rf 0) stale=$(get st 0)"
@@ -733,7 +820,7 @@ summarize() { # after the modules: the Metal row, the summary line, the first fa
     [ "$2" = "$3" ] || { echo "air-oracle: unmet: $1=$2 (want $3)" >&2; rc=1; }
   }
   [ "$n" -gt 0 ] || { echo "air-oracle: no input modules" >&2; rc=1; }
-  for row in writer self verify inv wrapper; do
+  for row in writer self dual stats verify inv wrapper; do
     case " $ROWS " in *" $row "*) need "$row" "$(get $row 0)" "$n" ;; esac
   done
   ug=$(get upg 0)
@@ -750,7 +837,7 @@ summarize() { # after the modules: the Metal row, the summary line, the first fa
     # A sliced defs run grades them instead.
     /usr/bin/grep -E ' (posmis|upg)=1 ' "$O/results.txt" | awk '{ print $1 }' | sed "s/\$/.$EXT/" > "$O/posmis.names"
     awk '/ upg=1 / { print $1 }' "$O/results.txt" > "$O/upgraded.txt"
-    ROWS= ONLY=$O/posmis.names OUT_ROOT=$O/posmis NOMETAL=1 sh "$self" defs "$corpus" > "$O/posmis.summary" 2> "$O/posmis.err"
+    ROWS= ROWS_USER= ONLY=$O/posmis.names OUT_ROOT=$O/posmis NOMETAL=1 sh "$self" defs "$corpus" > "$O/posmis.summary" 2> "$O/posmis.err"
     awk '{ ok = 1; for (i = 2; i <= NF; i++) { split($i, kv, "="); if (kv[1] ~ /^(writer|self|text23n|verify|inv|wrapper)$/ && kv[2] != "-" && kv[2] != 1) ok = 0 }
       print $1 ": defs " (ok ? "ok" : "fail") " (" $0 ")" }' "$O/posmis/defs/$corpus.only/results.txt" > "$O/posmis.txt" 2> /dev/null
     pmok=$(/usr/bin/grep -c ': defs ok ' "$O/posmis.txt")

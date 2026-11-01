@@ -192,10 +192,10 @@ The VM's Wine and FEX are the same trees (`eac-vm/wine/sync.sh`, `eac-vm/image/g
    change exists, with the failure that made it necessary.
 
 DXMT works the same way. Its tree is our fork at `dxmt/pins`' `DXMT_COMMIT` (the frozen reference's DXMT is not rebuilt from it), built for ARM64X with DXMT's own `build-arm64ec.txt` against
-this Wine's build tree, with an arm64 LLVM 15 built once into `build/wine-arm64-src/llvm-arm64` by `dxmt/llvm.sh`.
+this Wine's build tree, with an arm64 LLVM 23 built once into `build/wine-arm64-src/llvm23-arm64` by DXMTRS's `tools/llvm.sh`.
 `make wine-arm64` also builds the arm64 `dxil-probe` and `dxil-translate` into `build/wine-arm64/` (`dxmt/tools.sh`;
 `dxil-translate` links the Rust translator's static library, built from the DXMT tree's workspace). `make llvm-nolto` builds the
-same LLVM without LTO into `build/wine-arm64-src/llvm-arm64-nolto`, the install DXMTRS's `tools/rust-check.sh` links its tests against. A commit in
+same LLVM without LTO into `build/wine-arm64-src/llvm23-arm64-nolto`, the install DXMTRS's `tools/rust-check.sh` links its tests against. A commit in
 `build/wine-arm64-src/dxmt` makes the build a development build, and DXMT's version token
 (`build/wine-arm64-src/dxmt-install/version`) ends in `+dev` instead of the pin. DXMT's shader-translation cache and the launcher's replay stamp follow neither:
 both are keyed on the translator's key (`lib.sh`'s `translator_key`, in `dxmt-install/translator` and the bundle's

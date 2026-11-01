@@ -12,7 +12,7 @@
 #   submodules its bootstrap uses against the gitlinks it records;
 # - GMP's snapshot's SHA-256 against SOURCE's GMP_SHA256, and alsa-lib's source RPM against the archived
 #   eac-vm/image/alsa-lib.pin;
-# - LLVM_TAG and LLVM_MINGW_SHA256 cited only: present in SOURCE, equal to the archived dxmt/pins.
+# - LLVM_COMMIT and LLVM_MINGW_SHA256 cited only: present in SOURCE, equal to the archived dxmt/tools/llvm.sh and dxmt/pins.
 # Read-only. BUILD_DIR replaces build/.
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -120,9 +120,10 @@ else
   [ "$(shasum -a 256 "$D/${u##*/}" | cut -d ' ' -f 1)" = "$(pin eac-vm/image/alsa-lib.pin ALSA_LIB_SRPM_SHA256)" ] \
     || bad "${u##*/} doesn't match eac-vm/image/alsa-lib.pin"
 fi
-for k in LLVM_TAG LLVM_MINGW_SHA256; do
-  v=$(key "$k")
-  [ -n "$v" ] && [ "$v" = "$(pin dxmt/pins "$k")" ] || bad "SOURCE's $k (${v:-none}) isn't the archived dxmt/pins'"
-done
+v=$(key LLVM_COMMIT)
+lc=$(tar -xf "$D/dxmt.tar" -C "$X" dxmt/tools/llvm.sh 2> /dev/null && . "$X/dxmt/tools/llvm.sh" && echo "$LLVM_AIR_COMMIT" || true)
+[ -n "$v" ] && [ "$v" = "$lc" ] || bad "SOURCE's LLVM_COMMIT (${v:-none}) isn't the archived dxmt/tools/llvm.sh's (${lc:-none})"
+v=$(key LLVM_MINGW_SHA256)
+[ -n "$v" ] && [ "$v" = "$(pin dxmt/pins LLVM_MINGW_SHA256)" ] || bad "SOURCE's LLVM_MINGW_SHA256 (${v:-none}) isn't the archived dxmt/pins'"
 
 if [ $fail = 0 ]; then echo "PASS sources"; else echo "FAIL sources"; exit 1; fi

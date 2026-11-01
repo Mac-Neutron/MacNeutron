@@ -2,7 +2,7 @@
 # Native DXMT (Direct3D forwarding M1, spec §4.1): our fork (build/wine-arm64-src/dxmt) built through DXMT's own native
 # meson path as arm64 macOS dylibs, d3d12, dxgi, d3d11, d3d10core and winemetal (airconv linked in), for the CPU the
 # runtime is built for (MACNEUTRON_CPU, default apple-m5; generic: none), against the runtime's LLVM
-# (build/wine-arm64-src/llvm-arm64; make wine-arm64 builds it). The macOS runtime's PE build is untouched.
+# (build/wine-arm64-src/llvm23-arm64; make wine-arm64 builds it). The macOS runtime's PE build is untouched.
 # Writes build/dxmt-native/install/lib (the dylibs) and install/include-native (the fork's native headers and
 # win32_native.h, for programs built against them). Set up again when its options change (build/.setup-inputs).
 set -eu
@@ -15,10 +15,10 @@ I=$OUT/install
 . "$ROOT/wine-arm64/lib.sh"  # p_flag; its die is replaced just below
 die() { echo "dxmt-native: $*" >&2; exit 1; }
 [ -d "$D/.git" ] || die "no DXMT tree at $D: run make wine-arm64 first"
-[ -f "$SRC/llvm-arm64/.complete" ] || die "no LLVM at $SRC/llvm-arm64: run make wine-arm64 first"
+[ -f "$SRC/llvm23-arm64/.complete" ] || die "no LLVM at $SRC/llvm23-arm64: run make wine-arm64 first"
 CPU=${MACNEUTRON_CPU:-apple-m5}
 set -- "$B" "$D" --buildtype release -Denable_d3d12=true -Denable_nvapi=false -Denable_nvngx=false \
-  -Dwine_builtin_dll=false -Dnative_llvm_path="$SRC/llvm-arm64" -Dtranslator_key_file="$SRC/dxmt-translator-key"
+  -Dwine_builtin_dll=false -Dnative_llvm_path="$SRC/llvm23-arm64" -Dtranslator_key_file="$SRC/dxmt-translator-key"
 # DXMTRS's meson builds Rust static libraries (tools/cargo-staticlib.sh) with cargo. No -Dcargo_toolchain: a tree
 # without the option (the pinned one, before the Rust plumbing lands on DXMTRS's main) would fail to configure, and
 # its default is mtld3d's toolchain (MTLD3D_RUST) already.

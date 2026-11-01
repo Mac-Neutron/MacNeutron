@@ -150,8 +150,8 @@ void wm_on_main(void (^block)(void));           /* dispatch_sync to main (the pr
 /* block runs on the worker while main waits on a semaphore: true and "hang" when the block doesn't finish within
  * 5 s (main then goes on, so a block waiting on main finishes after). */
 bool wm_main_blocked(void (^block)(void));
-/* Runs block once (printed), then `cycles` times with output off, between malloc_zone_statistics(NULL)'s
- * size_in_use: "heap-growth=<bytes per cycle>" in full, "freed" or "leaked" (more than 64 bytes a cycle) in fixed,
+/* Runs block once (printed), then `cycles` times with output off, between live in-use heap byte counts across all
+ * malloc zones: "heap-growth=<bytes per cycle>" in full, "freed" or "leaked" (more than 64 bytes a cycle) in fixed,
  * on a line naming the block's last slot. */
 void wm_heap_growth(void (^block)(void), unsigned cycles);
 

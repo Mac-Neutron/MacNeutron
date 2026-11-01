@@ -1075,19 +1075,22 @@ expect "dxil-translate accepts the test shaders" "$(tail -1 "$WORK/translate-sha
 # its own: a depth prepass and a base pass then compute the same positions, and their depth EQUAL test holds (grass
 # flickered in SMITE 2 without it). The row checks those flags only: since Task F2 a non-precise mad is an explicit
 # air.fma (a call with no flags, the same in every shader lowered from the same DXIL; DXC's -Gis marks every mad
-# precise, so no fma there).
+# precise, so no fma there). LLVM 23's InstCombine (SimplifyDemandedFPClass's inferFastMathValueFlags) stamps nnan on
+# fadd/fmul/select whose operands KnownFPClass proves cannot be NaN (uitofp/sitofp of integers or finite constants, in
+# 14 of the 64 shaders); strip_fast_math still clears DXIL's nnan, ninf and fast-compare flags before optimization, so
+# ninf=0 and cmp=0 hold on all 64 and nnan=0 on the other 50.
 "$TOOLS/dxil-translate" "$S" --flags > "$WORK/translate-flags.txt" 2>&1 || true
 expect "no translated shader assumes NaN or infinity away" \
-  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "64:64"
+  "$(grep -c '^ok ' "$WORK/translate-flags.txt" || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' ninf=0 cmp=0 ' || true):$(grep '^ok ' "$WORK/translate-flags.txt" | grep -c ' nnan=0 ninf=0 cmp=0 ' || true)" "64:64:50"
 # Varyings at their signature's width (DXMT 0063, as Metal Shader Converter declares them): position 4, then
 # float3 + uint + float2, float4 + float2, and float2 + float2 (one register in DXIL) are 10, 10 and 8 components per
 # vertex, not a float4 each (16, 12 and 12). SMITE 2's base-pass vertex shaders store 20-36 such components per vertex.
 expect "vertex shaders output their varyings at the signature's width" \
   "$(for v in vsnarrow vswide vspacked; do grep "^ok varyings\.$v\.dxil " "$WORK/translate-flags.txt" | grep -oE 'vout=[0-9]+' || echo none; done | tr '\n' ' ')" \
   "vout=10 vout=10 vout=8 "
-# A fast divide stays fast through InstCombine's (-X/Y)+Z fold, which rebuilds it (LLVM 15's CreateFDivFMF dropped the
-# flags: dxmt/llvm.sh fixes it; 2-3% of SMITE 2's TAA kernel), and so does the pixel shader's 1/w of SV_Position (DXMT
-# 0064, as Metal Shader Converter emits it); a precise divide stays precise.
+# A fast divide stays fast through InstCombine's (-X/Y)+Z fold, which rebuilds it (2-3% of SMITE 2's TAA kernel), and
+# so does the pixel shader's 1/w of SV_Position (DXMT 0064, as Metal Shader Converter emits it); a precise divide stays
+# precise.
 expect "fast divides keep their flags through InstCombine and 1/w, a precise one stays precise" \
   "$(for p in psfold pspos psprecise; do grep "^ok fdiv\.$p\.dxil " "$WORK/translate-flags.txt" | grep -oE 'fdiv=[0-9]+/[0-9]+' || echo none; done | tr '\n' ' ')" \
   "fdiv=1/1 fdiv=1/1 fdiv=0/1 "
