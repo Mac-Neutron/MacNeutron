@@ -168,10 +168,12 @@ shaders, then the corpus and the check suite on its output: done 2026-10-31 (§5
 items and findings F1-F3):
 - **Branch.** `air-23` in Mac-Neutron/llvm-project, from `llvmorg-23.1.4` (7a941df), not from the fork's `main`, which
   is trunk with our lld commit and pinned by llvm-mingw; the writer is forward-ported when the translator's LLVM moves,
-  and `phase0-air-writer` stays as the record (P1). At da8441e28e (pushed): a component of its own, `LLVMAIRBitWriter`
+  and `phase0-air-writer` stays as the record (P1). At da8441e28e (4W) and edc723f40d (4b, pushed: f8ae77ad29 writes
+  vector `ConstantFP` splats as LLVM 15's `CST_CODE_DATA` records, fixing F-D5-1; edc723f40d adds `llvm.fabs.v2f32` to
+  P13's list for `dxbc-320f`'s `grad.dxbc`): a component of its own, `LLVMAIRBitWriter`
   (`llvm/lib/Bitcode/AIRWriter`), its writer and enumerator copied from the DirectX target's at 7a941df with the
   spike's two fixes, about 4.2k lines that inherit no upstream DXIL fixes; DirectX untouched, and it builds with
-  `LLVM_TARGETS_TO_BUILD=""` (P2); the tool `llvm-air-write`; 46 lit tests in `llvm/test/Bitcode/AIRWriter`.
+  `LLVM_TARGETS_TO_BUILD=""` (P2); the tool `llvm-air-write`; 47 lit tests in `llvm/test/Bitcode/AIRWriter`.
 - **Interface** (P3, 4-D2). `llvm-c/AIRWriter.h`: `LLVMWriteAIRBitcode` writes a module as typed-pointer AIR, Darwin
   wrapper included, and `LLVMAIRTypedPointerType` makes the typed pointers (LLVM 23's `TypedPointerType`) the C API
   cannot; four structs (`LLVMAIRValueType`, `LLVMAIRStructBody`, `LLVMAIRTypes` with the helpers' typed bitcode as
@@ -193,11 +195,17 @@ items and findings F1-F3):
   seed reaches is typed `i8` in its address space and counted (`UseTyped`); no constrained pointer defaults to `i8*`.
   Where a use needs another pointee type the writer inserts a same-address-space `bitcast`, and a constant gets a
   typed instance per type, each under its own `SETTYPE`; it never invents an addrspacecast. `UseTyped` is 0 on every
-  corpus in every leg, SMITE 2's included: the ceiling 4b may not exceed.
-- **Records and attributes** (P7, P8; K8 widened, finding F2). The DXIL writer's 3.7 layout stays (Metal reads it, E2),
+  corpus in every leg, SMITE 2's included: the ceiling 4b may not exceed (at 4b: P5's literal-to-identified struct option
+  was not taken, 4b P2, and L4's untyped list was reconciled at `UseTyped` 0 on every corpus without per-value entries,
+  4b P3).
+- **Records and attributes** (P7, P8; K8 widened, finding F2; 4b P20). The DXIL writer's 3.7 layout stays (Metal reads it, E2),
   with LLVM 15's encodings where 3.7 loses meaning: the fast-math flags as LLVM 15 splits them (`afn` kept),
   `local_unnamed_addr`, `poison`, `freeze`, `fneg`, `atomicrmw`'s value type, `source_filename`, the hash, the Darwin
-  wrapper and an identification block naming `LLVM15.0.7`, the only one Metal has accepted. Attributes use LLVM 15's
+  wrapper and an identification block naming `LLVM15.0.7`, the only one Metal has accepted. On the translator side (4b
+  P20), `Context::attributes15` inside `get_or_insert_function` maps the six LLVM 15 memory attribute names the AIR
+  tables carry (`argmemonly`, `inaccessiblememonly`, `inaccessiblemem_or_argmemonly`, `readnone`, `readonly`,
+  `writeonly`) to LLVM 23's `memory(...)` attributes, which the writer maps back to the same LLVM 15 attribute groups.
+  Attributes use LLVM 15's
   whole kind table (codes up to 84), not the map's six (the corpus also holds `speculatable`, `nocallback` and
   `convergent`): `memory(...)` becomes LLVM 15's forms, exact or the strongest sound weaker set, counted;
   `captures(none)` becomes `nocapture`, and any other `captures(...)` is dropped and counted; LLVM 23-only kinds that
@@ -558,6 +566,56 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
    table), and F-D5-1, which blocks 4b (an all-equal FP vector constant, which LLVM 23 builds as a vector `ConstantFP`,
    is written as one record LLVM 15's reader reads as undef; the bitcode reader makes `ConstantDataVector` instead, and
    scans of SMITE 2's and 4a's DXBC corpora's opt23 outputs found no FP-vector undef, but 4b's C API makes them).
+   4b. The translator on LLVM 23 with our AIR writer: done 2026-11-01, DXMTRS main 8abbdf8
+   (8abbdf83768c95e2ca999d195d616b76f772d1bc) and Mac-Neutron/llvm-project `air-23` edc723f40d
+   (edc723f40de7c461a3e8473d174d88a9027dcc54), which MacNeutron pins (plan `2026-10-31-dxmtrs-step4b-llvm23.md`). The
+   translator key moves once, as planned: `ad6adc5daa8e8a5860fb5c666d8b661e55642b50d8fbf79de3ded217cf5eaf67` to
+   `3e3474d503541d410b2c659fa36653ea2c03f52302353b125b93f1e5b15780f6`. Decisions and corrections (the plan's P items):
+   - `TyCx::lower` creates opaque pointers (`LLVMPointerTypeInContext(cx, space)`) while `Ty` keeps the full pointee
+     algebra, and `TyCx::typed` builds `LLVMAIRTypedPointerType` handles only at write time (`writer::write`) for the
+     module's surviving functions, globals and identified structs (`type_table`), plus the helper bitcode as `TypedRefs`;
+     `TyCx::lift` recovers `Ty` from a parsed LLVM 23 `LLVMTypeRef` (`TyKind::Unknown` for opaque pointers and foreign
+     types) (P4, P5);
+   - DXIL 3.7 bitcode is parsed directly by LLVM 23's reader (which auto-upgrades typed pointers to opaque), with the
+     target triple and DXIL's 32-bit data layout restored before the helper link (`module::parse` `Layout::Dxil`);
+     groupshared 64-bit atomics match globals in `addrspace(3)` by value type rather than pointer element type; no-op
+     pointer-to-pointer bitcasts (`.hca`) folded by LLVM 23's `IRBuilder` are retargeted and erased without rebuilding a
+     placeholder, and `is_lifetime_marker` is gone (LLVM 23's reader upgrades lifetime markers to one pointer argument)
+     (P6, P7, critic 2);
+   - the LLVM 23 build recipe lives in DXMTRS's `tools/llvm.sh` (`build_llvm`, `LLVM_AIR_COMMIT`), sourced by
+     `wine-arm64/build.sh`, `eac-vm/dxmt-native/build.sh` and `make llvm-nolto`, with `-DLLVM_ENABLE_TERMINFO=Off`,
+     `-DLLVM_ENABLE_ZSTD=Off`, `-DLLVM_TARGETS_TO_BUILD=""` and `-DLLVM_BUILD_TOOLS=Off` (removing `libncurses.5.4.dylib`
+     from `winemetal.so` and `winemetal.dylib`); the 53 `-lLLVM*` libraries live in one list in `src/airconv/meson.build`
+     read by `src/airconv/build.rs` and `dxmt/tools.sh` (P8, P10, P11, P12);
+   - the translator key moves to composition 3 (`macneutron translator 3`, P9, P16): it hashes `tools/llvm.sh` instead
+     of `LLVM_TAG` and `dxmt/llvm.sh` (dying if absent), hashes `src/d3d11/d3d11_shader.cpp` when present else
+     `src/d3d11/src/shader/args.rs` (5b's P3 rule, dying if neither exists), excludes `tests.rs` and `tests/` under
+     `src/airconv`, refuses `[profile.*.package.*]` overrides for `airconv`, `airconv-ir` or `"*"` and `[target.'cfg(...)]`
+     sections, and captures every command's output and exit status before hashing;
+   - P13's C++ LLVM 15 bitcode-identity tests and `oracle::derive` are deleted, replaced by `writer::tests` on our AIR
+     writer and `air-oracle.sh check` with `self`, `dual` and `stats` (`use-typed=0`) rows; P15's residual risk is
+     accepted (value-level equality with the C++ is proven for what the check suite executes and renders, plus the
+     milestone benches);
+   - P16's release hold: 4a's no-release rule ends at 4b's pin, and a release cut before 5b's switch (and C3) lands
+     costs one more cache turnover.
+   Gates, once at the end (on 8abbdf8 + 175af58): all 15 `air-oracle.sh check` rows (`shaders`, `dxil`, `dxbc*`,
+   `d3d11*`, `dx11*`, `smite2` 16,092 metallibs, `c11` 426, `smite2-pl` 34,238, `c11-pl` 114) pass with `usetyped=0`,
+   `newfail=0`, `reasons=eq`, `self=n`, `dual=n` and `stats=n`; `b23` (ThinLTO) equals `lr` (oracle-on, no-LTO) and two
+   `b23` runs are `cmp`-equal on C1 (96/96), C2 (33/33) and SMITE 2's first 500 shaders (500/500); cold Metal build time
+   on SMITE 2's 500 shaders is 27.78 ms mean vs ref15's 27.27 ms (+1.9%, 0/500 shaders >10% slower beyond round spread);
+   R9-1 `check-exec.sh` + `step5-cmp.py` 6/6 rows equal (38/38 ok on both ref15 and b23); `tools/rust-check.sh` passes
+   (6,624 unit tests, 888 files audited, 0 new crates); both Mac `check.sh` lanes pass 417 ok and 0 FAIL (the fast-math
+   flags row re-recorded as `64:64:50` for LLVM 23 InstCombine's `SimplifyDemandedFPClass` stamping `nnan` on
+   `uitofp`/`sitofp` and finite-constant arithmetic in 14 shaders while `ninf=0 cmp=0` holds on all 64); `wm-probe-check`
+   passes 11/11 ok in both standard and `--native` modes (g10's 5 bitcode hashes updated for K4; `wm_heap_growth`
+   updated to sum live `MALLOC_PTR_IN_USE_RANGE_TYPE` ranges across zones instead of macOS 26 `xzone`'s 16 KiB slice
+   counter); the native gate (31/31), loopback gate (31/31), VM DXMT gate (45/45), `d3d-smoke` in both WoW64 modes,
+   `d3d9-gate` (45/45), `present-gate` (11/11), `d3d/gate.sh` (41/41, 73 ok) and the `p` profile checks (key equality,
+   `.complete`, byte-equal `libairconv_shim.a` objects across all 4 builds) all pass. Milestone benches (P17, forwarded,
+   cold cache on cloned state disks, `4b` vs `ref15`, window uncovered throughout): SMITE 2 lobby 59.8 vs 58.4 fps
+   (+2.4%), 42.8% vs 41.8% GPU busy, 7.15 vs 7.16 ms GPU/frame (-0.1%); Palworld title screen 117.0 vs 116.8 fps
+   (+0.2%), 63.5% vs 63.9% GPU busy, 5.43 vs 5.47 ms GPU/frame (-0.7%); Age of Empires II DE menu 118.3 vs 117.5 fps
+   (+0.7%), 60.0% vs 59.4% GPU busy, 5.07 vs 5.06 ms GPU/frame (+0.2%).
 5. The core (`src/dxmt`, crate `dxmt-core`) with D3D12 and D3D11, in three plans (5-D1; step 5's decisions are in
    `build/step5/map/7-decisions.md`): 5a gives the core its crates, links them into `d3d11.dll` and `d3d12.dll` and
    moves the shared seams to Rust behind the unchanged C++ classes; then 5b (the D3D11 track: the D3D11 front end with
@@ -701,7 +759,14 @@ branch in the build's DXMTRS checkout, holds one pipeline lock, and all editing 
   `licenses/mtld3d`, and `mtld3d_shaders.bin` until C3.
 - **The translator's C interface** (`airconv_public.h`, `AIRCONV_VERSION`) is internal to DXMTRS, but its cache key is
   what players' shader caches are stored under: it changes only at the LLVM move or a deliberate translator change.
-  D3D11's switch, which deletes one of its inputs, rides such a move (§5 step 5, 5-D6).
+  At step 4b (`macneutron translator 3`, §5 step 4b P9), the key hashes `tools/llvm.sh` in the DXMTRS tree (replacing
+  `LLVM_TAG` and `dxmt/llvm.sh`), `src/airconv` with `tests.rs` and `tests/` excluded, `src/winemetal/airconv_thunks.[ch]`,
+  `src/d3d11/d3d11_shader.cpp` when present else `src/d3d11/src/shader/args.rs` (step 5b's P3 rule, dying if neither
+  exists), the root `Cargo.toml` and `.cargo/config.toml` sections (refusing `[profile.*.package.*]` overrides for
+  `airconv`, `airconv-ir` or `"*"` and `[target.'cfg(...)]` sections), `rustc -vV`, `cargo tree -p airconv`,
+  `xcrun-metal.sh`, and the C++ and Metal compilers' versions, taking and checking every command's output before
+  hashing. D3D11's switch, which deletes `src/d3d11/d3d11_shader.cpp`, moves the key once more when it lands (§5 step
+  4b P16, step 5 5-D6).
 
 ## 7. One project: D3D9 on the shared pieces
 
@@ -751,9 +816,14 @@ At every step:
   included).
 - **Binary identity** (step R and any later move of a build): every shipped binary keeps its name, machine, exports,
   imports (listed differences only), builtin marker and VERSIONINFO.
-- **Translator**: identical `llvm-dis` output on the shader corpus until the LLVM move; at the move, every corpus
-  shader builds its pipelines on Metal, DXMT's shader checks render as before, and the GPU time of the same passes,
-  measured on DXMT with DXMT_STATS on the milestone's benches, shows no loss (E3 timed only the build). At C3, every
+- **Translator**: identical `llvm-dis` output on the shader corpus until the LLVM move; at the move (step 4b P15),
+  `air-oracle.sh check` on every corpus (`self` through `<stem>.post.ll`, `dual` comparing `air15 dis` and LLVM 23
+  `llvm-dis` undef/poison/zeroinitializer counts, and `stats` verifying `use-typed=0`, plus `verify`, `inv`, `wrapper`,
+  `corpus-diff.py --no-dis` for status, reasons, `refl=` and `tags=`, and Metal building every shader and pipeline on the
+  user corpora), DXMT's shader checks rendering and executing as before (`check.sh` in both lanes and R9-1's
+  `check-exec.sh` + `step5-cmp.py`), cold Metal build latency on SMITE 2's 500-shader sample within 10% of ref15, and the
+  milestone benches (SMITE 2, Palworld, Age of Empires II DE) showing no GPU-time or frame-rate loss beyond 5% (residual
+  risk: value-level equality with the C++ is proven only for what the check suite executes and renders). At C3, every
   shader of a DXSO corpus builds its pipelines and D3D9 renders as before.
 - **Performance**, once per milestone (end of steps 2, 4 and 5, after C3 and C4, and after §7), each bench run once:
   SMITE 2's lobby, Palworld's title screen and a D3D11 title the maintainer picks, at parity or better; after C3 and C4
