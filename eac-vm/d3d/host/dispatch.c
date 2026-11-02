@@ -3,6 +3,7 @@
 #include <dlfcn.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,6 +66,7 @@ static void release(void *obj), present(void *cmdbuf, void *drawable);
  * per native swapchain if that ever matters. */
 static _Atomic uint32_t presenter;
 static int (*d3d11_wait_idle)(void); /* DXMT 0090's MTLD3D11WaitIdle: 1 once D3D11's compiles are all done */
+bool (*mn_not_impl)(void); /* winemetal's MTLD3DNotImplemented: Rust front ends' IMPLEMENT_ME flag */
 static _Thread_local int hooked;
 static unsigned present_ids[2]; /* IDXGISwapChain::Present's and IDXGISwapChain1::Present1's */
 
@@ -161,6 +163,7 @@ int mn_d3d_load(const char *d) {
         else if (mn_d3d_calls[i].name && !strcmp(mn_d3d_calls[i].name, "IDXGISwapChain1::Present1")) present_ids[1] = i;
     /* DXMT 0090: a guest process's end waits for D3D11's compiles before its objects go (none: an older DXMT) */
     d3d11_wait_idle = (int (*)(void))dlsym(libs[3], "MTLD3D11WaitIdle");
+    mn_not_impl = (bool (*)(void))dlsym(libs[2], "MTLD3DNotImplemented");
     void (*wsi)(const void *) = (void (*)(const void *))dlsym(libs[2], "WMTSetWsiHooks");
     if (!wsi) {
         fprintf(stderr, "mn-d3d: error: native DXMT: %s\n", dlerror());

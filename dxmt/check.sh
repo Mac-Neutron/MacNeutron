@@ -1306,6 +1306,12 @@ expect "Metal's validation rejects nothing in DLSS" \
 run ours dxgi dxmt "$TESTS/d3d11_dxgi.exe" fixed --ported
 firstdiff=$(grep -E '^(dxgif|dxgia|dxgio|d3d10c|dxgil) ' "$WORK/dxgi.txt" | diff - "$ROOT/dxmt/tests/d3d11_dxgi.fixed" | sed -n 2p)
 expect "dxgi and d3d10core answer as DXMT's C++ did" "${firstdiff:-same}" same
+# DXMTRS step 5c: d3d12.dll through its exports and the device, queue, list, resource, heap, fence, root-signature,
+# pipeline, library, command-signature, query-heap and swap-chain vtables (d3d12_probe.exe, in child processes of their
+# own: d12e..d12l), compared with d3d12_probe.fixed, which DXMT's C++ produced.
+run ours d3d12-probe dxmt "$TESTS/d3d12_probe.exe" fixed
+firstdiff=$(grep -E '^d12[xdohplsc] ' "$WORK/d3d12-probe.txt" | diff - "$ROOT/dxmt/tests/d3d12_probe.fixed" | sed -n 2p)
+expect "d3d12 answers as DXMT's C++ did" "${firstdiff:-same}" same
 # d3d10core's D3D10 device on the D3D11 one (init, a map, a query, a draw) and Wine's own d3d10.dll on it (a device, a
 # state block, a draw).
 run ours d3d10-core dxmt "$TESTS/d3d10_core.exe" "Z:$S/d3d11"

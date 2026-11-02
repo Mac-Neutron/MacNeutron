@@ -194,6 +194,10 @@ extern "C" NTSTATUS_T mn_d3d_flush1_stub(void *params) {
     void *relay = a->event ? mn_d3d_event_relay(mn_d3d_current_ctx(), a->event) : nullptr;
     try {
         ((ID3D11DeviceContext3 *)(uintptr_t)a->self)->Flush1((D3D11_CONTEXT_TYPE)a->type, relay);
+        if (mn_not_impl && mn_not_impl()) {
+            if (relay) mn_d3d_relay_done(relay);
+            return mn_d3d_not_in_dxmt(MN_D3D_ID_ID3D11DeviceContext3_Flush1, nullptr);
+        }
     } catch (...) {
         if (relay) mn_d3d_relay_done(relay);
         return mn_d3d_not_in_dxmt(MN_D3D_ID_ID3D11DeviceContext3_Flush1, nullptr);
@@ -355,6 +359,7 @@ static bool host_res(ID3D10Resource *res, mn_res &r) {
         try {                                                                                                          \
             HRESULT r = ((Iface *)(uintptr_t)a->self)                                                                  \
                             ->method(&d, a->INIT ? (const Data *)subs.data() : nullptr, (T **)&a->OUT);                \
+            if (mn_not_impl && mn_not_impl()) return mn_d3d_not_in_dxmt(MN_D3D_ID_##NAME, &a->ret);                    \
             if (SUCCEEDED(r) && a->OUT) mn_d3d_answers((void *)(uintptr_t)a->OUT, iface_of<T>(), a->OUT##_ifaces); \
             a->aux[1] = mn_d3d_memory_largest(); /* its allocation: what a map's rename makes (Task 7) */             \
             RESULT(a, r);                                                                                              \
@@ -403,6 +408,7 @@ CREATE_STUB(mn_d3d_create_tex3d10_stub, ID3D10Device_CreateTexture3D, ID3D10Devi
             ((Iface *)(uintptr_t)a->self)                                                                              \
                 ->method(res, a->DstSubresource, a->pDstBox ? &box : nullptr, (const void *)(uintptr_t)a->pSrcData,   \
                          a->SrcRowPitch, a->SrcDepthPitch EXTRA);                                                      \
+            if (mn_not_impl && mn_not_impl()) return mn_d3d_not_in_dxmt(MN_D3D_ID_##NAME, nullptr);                    \
         } catch (...) {                                                                                                \
             return mn_d3d_not_in_dxmt(MN_D3D_ID_##NAME, nullptr);                                                      \
         }                                                                                                              \
@@ -447,6 +453,7 @@ extern "C" NTSTATUS_T mn_d3d_map11_stub(void *params) {
     if (!room_for(a->aux[0])) return 0;
     try {
         HRESULT r = ctx->Map(res, a->Subresource, (D3D11_MAP)a->MapType, a->MapFlags, a->pMappedResource ? &m : nullptr);
+        if (mn_not_impl && mn_not_impl()) return mn_d3d_not_in_dxmt(MN_D3D_ID_ID3D11DeviceContext_Map, &a->ret);
         if (SUCCEEDED(r) && a->pMappedResource) {
             if (!located(m.pData, a->aux)) {
                 ctx->Unmap(res, a->Subresource);
@@ -470,6 +477,7 @@ extern "C" NTSTATUS_T mn_d3d_map11_stub(void *params) {
         if (!room_for(a->aux[0])) return 0;                                                                            \
         try {                                                                                                          \
             HRESULT r = self->Map(SUB(D3D10_MAP)a->MapType, a->MapFlags, a->OUT ? &m : nullptr);                      \
+            if (mn_not_impl && mn_not_impl()) return mn_d3d_not_in_dxmt(MN_D3D_ID_##NAME, &a->ret);                    \
             if (SUCCEEDED(r) && a->OUT) {                                                                              \
                 if (!located(*(void **)&m, a->aux)) {                                                                  \
                     self->Unmap(UNMAP);                                                                                \
@@ -513,6 +521,7 @@ extern "C" NTSTATUS_T mn_d3d_get_pieces_stub(void *params) {
     try {
         HRESULT r = ((IMTLD3D11ContextExt2 *)(uintptr_t)a->self)
                         ->GetPieces((ID3D11Resource *)(uintptr_t)a->resource, a->subresource, a->count, p.data());
+        if (mn_not_impl && mn_not_impl()) return mn_d3d_not_in_dxmt(MN_D3D_ID_IMTLD3D11ContextExt2_GetPieces, &a->ret);
         for (uint32_t i = 0; SUCCEEDED(r) && i < n; i++) {
             uint64_t at[2] = {0, 0};
             if (!located(p[i].cpu, at)) at[0] = at[1] = 0;

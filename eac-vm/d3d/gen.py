@@ -1254,11 +1254,14 @@ def emit_stubs(model, rules, calls):
                 m, n = rename[f.param], rename[f.count]
                 body.append(f"    if (a->{n} > MN_D3D_MAX_OBJECTS) return 0; // past any slot range: nothing")
                 body.append(f"    void *mn_o_{m}[MN_D3D_MAX_OBJECTS] = {{}};")
-        body.append("    try {")  # natively, DXMT's IMPLEMENT_ME throws (fork 0084): the call fails, the VM host goes on
+        ret = "&a->ret" if c.ret == "HRESULT" else "nullptr"
+        body.append("    try {")  # natively, DXMT's IMPLEMENT_ME throws (fork 0084) or sets MTLD3DNotImplemented: the call fails, the VM host goes on
         if c.ret == "void":
             body.append(f"    {call};")
+            body.append(f"    if (mn_not_impl && mn_not_impl()) return mn_d3d_not_in_dxmt({mid}, {ret});")
         else:
             body.append(f"    auto r = {call};")
+            body.append(f"    if (mn_not_impl && mn_not_impl()) return mn_d3d_not_in_dxmt({mid}, {ret});")
             body.append("    static_assert(sizeof r <= 8);")
             body.append("    std::memcpy(&a->ret, &r, sizeof r);")
         made = [f for f in c.fields if f.kind == "WMF_HANDLE_OUT"]
@@ -1277,7 +1280,6 @@ def emit_stubs(model, rules, calls):
                             f"(uint64_t *)(uintptr_t)a->{rename[f.param]});")
         if c.ret == "HRESULT":
             body.append("    mn_d3d_result(r);")
-        ret = "&a->ret" if c.ret == "HRESULT" else "nullptr"
         body += [f"    }} catch (...) {{ return mn_d3d_not_in_dxmt({mid}, {ret}); }}", "    return 0;", "}"]
         out += body
         ids[mid] = True

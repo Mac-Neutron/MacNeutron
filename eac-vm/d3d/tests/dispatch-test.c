@@ -362,10 +362,11 @@ int main(int argc, char **argv) {
     struct { uint64_t self, ret, desc, aux[2]; } nod = {0, 0, (uintptr_t)od, {0}};
     CHECK(call(odesc, &nod) == (int32_t)MN_STATUS_INVALID_HANDLE);
 
-    /* notimpl: a call DXMT has no code for (a render target view of a buffer: its IMPLEMENT_ME) fails, logged; the
-     * host goes on */
+    /* notimpl: one IMPLEMENT_ME call per return kind (void, HRESULT, value) through the generated stubs: each logs
+     * "mn-d3d: error: <Interface>::<Method>: not in DXMT" once, HRESULT answers E_NOTIMPL, and the host goes on */
     unsigned heapc = id_of("ID3D12Device::CreateDescriptorHeap"), rtv = id_of("ID3D12Device::CreateRenderTargetView"),
-             start = id_of("ID3D12DescriptorHeap::GetCPUDescriptorHandleForHeapStart");
+             start = id_of("ID3D12DescriptorHeap::GetCPUDescriptorHandleForHeapStart"),
+             reason = id_of("ID3D12Device::GetDeviceRemovedReason"), nodes = id_of("ID3D12Device::GetNodeCount");
     struct { uint32_t type, count, flags, node; } hd = {2 /* D3D12_DESCRIPTOR_HEAP_TYPE_RTV */, 1, 0, 0};
     struct { uint64_t self, ret, desc, riid, heap, ifaces[9]; } ch = {device, 0, (uintptr_t)&hd, 0, 0, {0}};
     ch.riid = (uintptr_t)iid("ID3D12DescriptorHeap");
@@ -373,12 +374,45 @@ int main(int argc, char **argv) {
     uint64_t cpu = 0; /* the struct the guest's caller returns, at __ret */
     struct { uint64_t self, ret, h; } hs = {ch.heap, 0, (uintptr_t)&cpu};
     CHECK(mn_d3d_calls[start].params_size == sizeof hs && call(start, &hs) == 0 && cpu);
-    struct { uint32_t type, cpu_page, pool, creation_node, visible_node; } gpu_heap = {1}; /* D3D12_HEAP_TYPE_DEFAULT */
+    struct { uint32_t type, cpu_page, pool, creation_node, visible_node; } gpu_heap = {1, 0, 0, 0, 0}; /* D3D12_HEAP_TYPE_DEFAULT */
     struct res_params bp = rp;
     bp.heap_properties = (uintptr_t)&gpu_heap, bp.state = 0, bp.resource = 0;
     CHECK(call(committed, &bp) == 0 && (uint32_t)bp.ret == 0 && bp.resource);
+    int dev_ok = 0;
+    const void *const **dev_obj = mn_ht_get(mn_wm_context(1, ring_state)->ht, device, MN_HK_D3D, &dev_ok);
+    CHECK(dev_ok && dev_obj);
+    const void *const *orig_vt = *dev_obj, *vt[44];
+    memcpy(vt, orig_vt, sizeof vt);
+    vt[7] = vt[37] = orig_vt[42]; /* GetNodeCount (value) and GetDeviceRemovedReason (HRESULT) -> GetResourceTiling */
+    *dev_obj = vt;
+    fflush(stderr);
+    int saved_err = dup(2);
+    FILE *ef = tmpfile();
+    CHECK(saved_err >= 0 && ef && dup2(fileno(ef), 2) == 2);
     struct { uint64_t self, ret, resource, desc; uint64_t descriptor; } cr = {device, 0, bp.resource, 0, cpu};
-    CHECK(mn_d3d_calls[rtv].params_size == sizeof cr && call(rtv, &cr) == 0);
+    CHECK(mn_d3d_calls[rtv].params_size == sizeof cr && call(rtv, &cr) == 0 && call(rtv, &cr) == 0);
+    struct { uint64_t self, ret; } rr = {device, 0}, nc = {device, 0};
+    CHECK(mn_d3d_calls[reason].params_size == sizeof rr && call(reason, &rr) == 0 && (uint32_t)rr.ret == 0x80004001u);
+    rr.ret = 0;
+    CHECK(call(reason, &rr) == 0 && (uint32_t)rr.ret == 0x80004001u);
+    CHECK(mn_d3d_calls[nodes].params_size == sizeof nc && call(nodes, &nc) == 0 && call(nodes, &nc) == 0);
+    fflush(stderr);
+    dup2(saved_err, 2);
+    close(saved_err);
+    *dev_obj = orig_vt;
+    char ebuf[1024] = {0};
+    rewind(ef);
+    fread(ebuf, 1, sizeof ebuf - 1, ef);
+    fclose(ef);
+    static const char *const notimpl_lines[3] = {
+        "mn-d3d: error: ID3D12Device::CreateRenderTargetView: not in DXMT\n",
+        "mn-d3d: error: ID3D12Device::GetDeviceRemovedReason: not in DXMT\n",
+        "mn-d3d: error: ID3D12Device::GetNodeCount: not in DXMT\n",
+    };
+    for (int i = 0; i < 3; i++) {
+        const char *hit = strstr(ebuf, notimpl_lines[i]);
+        CHECK(hit && !strstr(hit + 1, notimpl_lines[i]));
+    }
     puts("dispatch-test: notimpl: went on");
 
     /* d3d11device */

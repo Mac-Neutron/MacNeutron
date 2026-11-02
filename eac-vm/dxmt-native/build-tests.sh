@@ -17,7 +17,7 @@ H=$ROOT/eac-vm/dxmt-native/tests
 PROGRAMS=${MN_D3D_PROGRAMS:-"d3d12_api d3d12_bounds d3d12_cache d3d12_compress d3d12_copy d3d12_depth d3d12_dxil d3d12_dxil_exec
   d3d12_hazards d3d12_indirect d3d12_layered d3d12_list7 d3d12_lod d3d12_null d3d12_query d3d12_timestamp d3d12_triangle
   d3d12_upscale d3d12_volume d3d12_vsread d3d11_api d3d11_compute d3d11_deferred d3d11_dynamic d3d11_getters
-  d3d11_pipeline d3d11_query d3d11_render d3d11_transfer d3d11_vsia d3d10_core d3d11_dxgi"}
+  d3d11_pipeline d3d11_query d3d11_render d3d11_transfer d3d11_vsia d3d10_core d3d11_dxgi d3d12_probe"}
 [ -f "$I/lib/d3d12.dylib" ] || { echo "tests: FAIL no native DXMT: run eac-vm/dxmt-native/build.sh first"; exit 1; }
 mkdir -p "$OUT"
 for p in $PROGRAMS; do rm -f "$OUT/$p"; done  # a failed build must not leave the last one in its place
@@ -69,6 +69,16 @@ if [ -x "$OUT/d3d11_dxgi" ]; then
   rm -rf "$X"
   first=$(diff "$OUT/check-dxgi.txt" "$T/d3d11_dxgi.native" | sed -n 2p)
   [ -z "$first" ] || { echo "tests: FAIL d3d11_dxgi differs from d3d11_dxgi.native: $first"; exit 1; }
+fi
+if [ -x "$OUT/d3d12_probe" ]; then
+  [ -s "$T/d3d12_probe.native" ] || { echo "tests: FAIL no $T/d3d12_probe.native"; exit 1; }
+  X=$(mktemp -d "${TMPDIR:-/tmp}/dxmt-native-d12.XXXXXX")
+  # shellcheck disable=SC2086
+  DXMT_LOG_PATH=none DXMT_SHADER_CACHE_PATH="$X/cache" "$OUT/d3d12_probe" fixed ${MN_PROBE_PORTED:-} < /dev/null 2> /dev/null \
+    | /usr/bin/grep -E '^(d12x|d12d|d12o|d12h|d12p|d12l|d12s|d12c|d12n|d12r) ' > "$OUT/check-d12.txt" || true
+  rm -rf "$X"
+  first=$(diff "$OUT/check-d12.txt" "$T/d3d12_probe.native" | sed -n 2p)
+  [ -z "$first" ] || { echo "tests: FAIL d3d12_probe differs from d3d12_probe.native: $first"; exit 1; }
 fi
 # The check: d3d12_null, natively and in a fresh macOS run (one row of the gate's invocations). The share is this tree's
 # programs every time: share.sh run from another worktree copies that worktree's build/dxmt-tests, which may hold a few

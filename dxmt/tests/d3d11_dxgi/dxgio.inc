@@ -122,14 +122,16 @@ template <class T> static std::string OutputDescKv(const Op &x, const Two &t) {
     std::string raw = F("name=%s rect=%ld,%ld,%ld,%ld", W(d.DeviceName, 32).c_str(), (long)d.DesktopCoordinates.left,
                         (long)d.DesktopCoordinates.top, (long)d.DesktopCoordinates.right, (long)d.DesktopCoordinates.bottom);
     if constexpr (std::is_same_v<T, DXGI_OUTPUT_DESC1>) {
+        bool forced_sdr = InChild("config") || InChild("omori");
         bool hdr = (d.BitsPerColor == 10) == (d.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) &&
-                   (d.BitsPerColor == 10) == (d.MaxLuminance > 100.0f) && (d.BitsPerColor == 8 || d.BitsPerColor == 10);
+                   (forced_sdr ? d.MaxLuminance >= 100.0f : (d.BitsPerColor == 10) == (d.MaxLuminance > 100.0f)) &&
+                   (d.BitsPerColor == 8 || d.BitsPerColor == 10);
         bool unit = true;
         const float *prim[] = {d.RedPrimary, d.GreenPrimary, d.BluePrimary, d.WhitePoint};
         for (const float *p : prim) unit &= p[0] >= 0 && p[0] <= 1 && p[1] >= 0 && p[1] <= 1;
         kv += F("hdr=%s primaries=%s min=%g fullframe=%s ", hdr ? "consistent" : "inconsistent", unit ? "unit" : "other",
                 (double)d.MinLuminance, d.MaxFullFrameLuminance == d.MaxLuminance ? "max" : "other");
-        if (InChild("config") || InChild("omori")) kv += F("bpc=%u colorspace=%u ", d.BitsPerColor, (unsigned)d.ColorSpace);
+        if (forced_sdr) kv += F("bpc=%u colorspace=%u ", d.BitsPerColor, (unsigned)d.ColorSpace);
         raw += F(" bpc=%u colorspace=%u max=%g r=%g,%g g=%g,%g b=%g,%g w=%g,%g", d.BitsPerColor, (unsigned)d.ColorSpace,
                  (double)d.MaxLuminance, (double)d.RedPrimary[0], (double)d.RedPrimary[1], (double)d.GreenPrimary[0],
                  (double)d.GreenPrimary[1], (double)d.BluePrimary[0], (double)d.BluePrimary[1], (double)d.WhitePoint[0],

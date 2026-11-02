@@ -25,7 +25,7 @@
 //       60 to the end: what a leak per frame would show). framegen-slow: 2.4 s with a frame every 40 ms, a game well below
 //       half the display's refresh rate (adaptive frame generation turns on). framegen-phases: 2 s with a frame every
 //       40 ms, then 13 s as fast as it renders (it turns on, then off once generating holds the game back);
-//       both print the frames they presented the same way.
+//       framegen-still: one fixed frame (green background, white box) for 3 s; all print the frames they presented.
 //   cost
 //       The GPU time of one EvaluateFeature with Palworld's inputs (an R11G11B10 colour, a typeless D32S8 depth, an
 //       exposure texture, HDR and inverted depth flags, an RGBA16F UAV output at 2560x1440), from timestamps around 20
@@ -430,7 +430,7 @@ static double GpuMB() {
 static LRESULT CALLBACK WindowProc(HWND w, UINT m, WPARAM wp, LPARAM lp) { return DefWindowProcA(w, m, wp, lp); }
 
 // frames: how many to present, or 0 to present for `fast_s` seconds after `slow_s` seconds with a frame every 40 ms.
-static void FrameGen(UINT frames, double slow_s = 0, double fast_s = 0) {
+static void FrameGen(UINT frames, double slow_s = 0, double fast_s = 0, bool still = false) {
     const UINT w = 1280, h = 720, rw = 640, rh = 360;
     double settled = 0;
     WNDCLASSA wc = {};
@@ -454,6 +454,30 @@ static void FrameGen(UINT frames, double slow_s = 0, double fast_s = 0) {
     ID3D12Resource *depth = gpu->Texture(Tex2D(rw, rh, DXGI_FORMAT_D32_FLOAT, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL), READ);
     ID3D12Resource *motion = gpu->Texture(Tex2D(rw, rh, DXGI_FORMAT_R16G16_FLOAT), READ);
     ID3D12Resource *output = gpu->Texture(Tex2D(w, h, DXGI_FORMAT_R8G8B8A8_UNORM, 1, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS), UAV);
+    if (still) {
+        Staging sc = MakeStaging(*gpu, rw * 8, rh), sd = MakeStaging(*gpu, rw * 4, rh), sm = MakeStaging(*gpu, rw * 4, rh);
+        for (UINT y = 0; y < rh; y++) {
+            auto *c = (uint16_t *)(sc.p + (size_t)y * sc.pitch);
+            auto *d = (float *)(sd.p + (size_t)y * sd.pitch);
+            auto *m = (uint16_t *)(sm.p + (size_t)y * sm.pitch);
+            for (UINT x = 0; x < rw; x++) {
+                bool box = x >= 200 && x < 440 && y >= 120 && y < 240;
+                c[x * 4 + 0] = ToHalf(box ? 1.0f : 0.1f);
+                c[x * 4 + 1] = ToHalf(box ? 1.0f : 0.3f);
+                c[x * 4 + 2] = ToHalf(box ? 1.0f : 0.2f);
+                c[x * 4 + 3] = ToHalf(1.0f);
+                d[x] = 0.5f;
+                m[x * 2] = m[x * 2 + 1] = 0;
+            }
+        }
+        for (auto *t : {color, depth, motion}) gpu->Barrier(t, READ, COPY_DEST);
+        Copy(*gpu, color, sc, DXGI_FORMAT_R16G16B16A16_FLOAT, 0, 0, rw, rh);
+        Copy(*gpu, depth, sd, DXGI_FORMAT_R32_TYPELESS, 0, 0, rw, rh);
+        Copy(*gpu, motion, sm, DXGI_FORMAT_R16G16_FLOAT, 0, 0, rw, rh);
+        for (auto *t : {color, depth, motion}) gpu->Barrier(t, COPY_DEST, READ);
+        gpu->Submit();
+        sc.buffer->Release(); sd.buffer->Release(); sm.buffer->Release();
+    }
     NgxParameter *p = nullptr;
     NGX(N.AllocateParameters(&p));
     p->Set("Width", rw); p->Set("Height", rh); p->Set("OutWidth", w); p->Set("OutHeight", h);
@@ -477,8 +501,8 @@ static void FrameGen(UINT frames, double slow_s = 0, double fast_s = 0) {
         MSG msg;
         while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
         p->Set("Reset", f == 0 ? 1 : 0);
-        p->Set("Jitter.Offset.X", (float)(Halton(f % 8 + 1, 2) - 0.5));
-        p->Set("Jitter.Offset.Y", (float)(Halton(f % 8 + 1, 3) - 0.5));
+        p->Set("Jitter.Offset.X", still ? 0.0f : (float)(Halton(f % 8 + 1, 2) - 0.5));
+        p->Set("Jitter.Offset.Y", still ? 0.0f : (float)(Halton(f % 8 + 1, 3) - 0.5));
         NGX(N.EvaluateFeature(gpu->list, handle, p, nullptr));
         ID3D12Resource *back = buffers[swap->GetCurrentBackBufferIndex()];
         gpu->Barrier(output, UAV, COPY_SOURCE);
@@ -558,6 +582,7 @@ int main(int argc, char **argv) {
         else if (mode == "framegen-soak") FrameGen(1500);
         else if (mode == "framegen-slow") FrameGen(0, 2.4, 0);
         else if (mode == "framegen-phases") FrameGen(0, 2, 13);
+        else if (mode == "framegen-still") FrameGen(0, 0, 3, true);
         else { printf("unknown mode %s\n", mode.c_str()); return 2; }
     }
     if (gpu) N.Shutdown1(gpu->device);
