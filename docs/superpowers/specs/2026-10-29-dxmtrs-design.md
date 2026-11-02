@@ -708,6 +708,44 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
    54b71f6 after the rebase: `tools/rust-check.sh` (6,613 tests, 887 files audited), the key, the Mac build,
    `check.sh` ARM64EC 417 ok and x64 415 ok twice (each of its four failing rows, `atomic64typed`, `bg-leave` and
    `ts-many`'s two, passed in the other run), the native gate (31), the VM DXMT gate (45) and the d3d gate (41).
+   5c. The D3D12 front end in Rust: done 2026-11-02, DXMTRS main 424073c
+   (424073c26e0faa63362090dc5b079de28d6c04c0), which MacNeutron pins (plan `2026-10-30-dxmtrs-step5c-d3d12.md`).
+   Both `d3d12.dll` (ARM64EC, x86_64, i686) and the native `d3d12.dylib` are pure Rust (`src/d3d12`, crate `d3d12`),
+   and all 22 C++ files of `src/d3d12/` plus `src/d3d10/d3d10_blob.{cpp,hpp}` and 5a's C ABI for statistics and the
+   dump folder (`dxmt_stats_*`, `dxmt_dump_*`, `src/dxmt/src/{stats,dump}/abi.rs`) are deleted (`d3d12_interfaces.hpp`,
+   `d3d12_barrier_legacy.hpp`, `d3d12_shared_fence.hpp`, `d3d12.def` and `version.rc` stay for the VM forwarder and
+   the PE link). The switch waited until 4a's Z and 4b had landed on `main` (P3), so `d3d12` consumes `airconv-ir` and
+   `tools/llvm.sh` from `main` and the translator key (`3e3474d503541d410b2c659fa36653ea2c03f52302353b125b93f1e5b15780f6`)
+   does not move. Corrections and decisions (the plan's 5-D and P items):
+   - frame generation and its pacing thread move into the core (`dxmt_core::presenter::framegen`, ordered behind the
+     queue's fence ring through `framegen::Order`), characterized by `adapt_replays_cpp_trace`,
+     `present_orders_as_cpp` and `fgpix.sh` over `d3d12_dlss framegen-still` (5-D3, P11);
+   - natively, unimplemented COM slots report through a thread-local flag in `winemetal.dylib`
+     (`wmt_native_not_implemented` sets it, `MTLD3DNotImplemented` reads and clears it) instead of C++ exceptions, and
+     MacNeutron's VM host (`eac-vm/d3d/gen.py`, the six hand-written sites in `eac-vm/d3d/host/native.cpp`, and
+     `eac-vm/d3d/host/dispatch.c`) checks `mn_not_impl()` beside `catch (...)` so `mn_d3d_not_in_dxmt` still fires
+     (5-D9, P14); `winemetal.dylib` also exports `wmt_native_handle_count` (reading `mn_win32_handle::refs`), pinned by
+     `wmt-exports.sh`;
+   - every COM entry point and spawned thread runs under P20's `slot!` abort-on-panic guard (kept under `perf-build`),
+     while `scope!` and `count!` compile to nothing under `perf-build` (`MACNEUTRON_PROFILE=p`);
+   - every unimplemented slot matches the C++'s `IMPLEMENT_ME` or `E_NOTIMPL` set (`unimpl-parity: equal (25 stubs, 17 E_NOTIMPL)`),
+     every statistics counter and scope label matches the C++ (`statnames: equal (269, 29)`), and `WMTWsiAction`'s wire
+     layout and `restore_display_mode` monitor argument align with `winemetal` across 32-bit and 64-bit targets.
+
+   Gates, once at the end (Task 19 on 0bcf16e and Task 20's fix pass on 424073c + 6a29542): `tools/rust-check.sh` passes
+   all 7 legs (6,799 host unit tests, 1,037 files audited, all 11 generated files byte-equal, `i686-ret.sh` callee-pop
+   byte counts equal across all 269 vtable slots and 7 exports); both Mac `check.sh` lanes pass 418 ok and 0 FAIL
+   (including the new `d3d12_probe` row), wine-arm64's `dxmt` and `dxmt-release` checks pass, Task 6's corpus
+   comparators (`stats-compare.sh --names-as-set`, `hist-compare.sh`, `rec-compare.sh`, `dump-compare.sh`,
+   `log-compare.sh`), `fgpix.sh` on both Mac lanes, `crosshit.sh` both ways, `d3d11_dxgi full --ported` and
+   `d3d12_probe` (`fixed --ported` and `full --ported`) on both Mac lanes and natively, 3DMark pipeline replay (348
+   pipelines, 591 keys) and `pso-compare.sh` on replay and `native-wmt-trace`, the native gate (31/31), loopback gate
+   (31/31), forwarder checks (`dispatch-test`, `answers`, `wire`, `identity`, `wrapped`, `pieces`, `threads`), the guest
+   build (`mtld3d-layout32: ok (132 structs)`, `layout32: ok (241 structs, 222 on the wire)`), the VM DXMT gate (45/45),
+   the d3d gate (41/41), `dxgi-guest.sh` (`d3d11_dxgi` and `d3d12_probe` on i386 and x86_64), VM guest statistics on
+   both widths, `present-gate` (guest and forward), `d3d-smoke` in both WoW64 modes, `parts.sh` path and licence checks,
+   the `p` profile binary checks (0 stats/dump symbols or strings, `d3d12_null` 18/18 equal) and P19's performance rows
+   all pass within budget.
 6. `util`'s remaining templates, `replay` and the meson build go with their last users. With no C++ LTO left, the
    ARM64X link of `tools/arm64x-link.sh` is open to every DLL.
 
@@ -749,7 +787,10 @@ branch in the build's DXMTRS checkout, holds one pipeline lock, and all editing 
   window code: `src/util/wsi_window.hpp`, `wsi_monitor.hpp`, `wsi_platform_win32.hpp` and `util_d3dkmt.h`, and copies
   of `wsi_window_win32.cpp` and `wsi_monitor_win32.cpp`. DXMTRS keeps publishing headers that describe the same
   interfaces, layouts and conversion, at these paths, not under `include/` as first planned (5-D7,
-  `build/step5/map/7-decisions.md`); `d3d12_common.hpp`, once listed here, is MacNeutron's (`dxmt/tests`). A port step
+  `build/step5/map/7-decisions.md`); `d3d12_common.hpp`, once listed here, is MacNeutron's (`dxmt/tests`). Natively,
+  `winemetal.dylib` exports `MTLD3DNotImplemented` (set by `wmt_native_not_implemented` in Rust front ends), which
+  `eac-vm/d3d/gen.py`, `eac-vm/d3d/host/native.cpp` and `eac-vm/d3d/host/dispatch.c` check beside `catch (...)` so
+  unimplemented COM slots report through `mn_d3d_not_in_dxmt` (5-D9, §5 step 5c). A port step
   that touches one runs the forwarder's build and loopback gate, and one that replaces one (the window code included)
   changes the forwarder in the same pin bump.
 - **MacNeutron** relies on the DLL and Unix-library names, the environment variables (`DXMT_*`, `MACNEUTRON_*`,
