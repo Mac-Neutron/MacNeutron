@@ -795,6 +795,24 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
    (`127.5 ns` vs `247.8 ns`).
 6. `util`'s remaining templates, `replay` and the meson build go with their last users. With no C++ LTO left, the
    ARM64X link of `tools/arm64x-link.sh` is open to every DLL.
+   *Step 6 done* (DXMTRS b191ebc, plan `docs/superpowers/plans/2026-11-03-dxmtrs-step6-cleanup.md`): `dxmt-replay` is
+   Rust (`src/replay`, `dxmt-replay` crate, linked into both `dxmt-replay.exe` on Windows PE and `dxmt-replay` on macOS
+   native; `src/replay/dxmt_replay.cpp`, `src/replay/native_main.cpp` and `src/d3d12/d3d12_pipeline_record.{hpp,cpp}`
+   are gone), `src/winemetal/unix/sm50_wow64.c`'s 9 WoW64 32-bit SM50 thunks (`thunk32_SM50*`) live in
+   `src/winemetal/unix/src/g10.rs` (`#[cfg(not(feature = "native"))]`), `src/winemetal/winemetal_thunks.c` is replaced on
+   macOS native by `winemetal-pe` (`src/winemetal/src/lib.rs`, bundled into `winemetal` under `native =
+   ["dep:winemetal-pe"]`), and `libs/DXBCParser/`, `libs/meson.build`, `src/util/meson.build`,
+   `include/{adt.hpp,ftl.hpp,tl/generator.hpp}`, `src/winemetal/Metal.hpp`, `src/dxgi/dxgi_{object,resource}.hpp`, the
+   dead C++ classes in `src/dxmt/dxmt_{format,presenter,scaler,shader_cache}.hpp`, and all 45 unreferenced C/C++ files
+   in `src/util/` are deleted (`92 files changed, 1930 insertions(+), 17155 deletions(-)`), leaving only §6's external
+   consumer closure and `src/nativemetal/win32_{event.c,native.cpp}`. `tools/rust-check.sh` passes all 6 legs (`1,137`
+   files audited), `translator_key` is unchanged (`6c9fa750ccc52b6e052aee6f867b869495575c7382258a01bb2c53760006dbe4`),
+   `ident-diff.sh` shows 0 diffs on all 34 untouched binaries across Mac (`13/16`), native (`5/6`, including
+   `winemetal.dylib` with 0 export diffs) and VM guest (`16/20`), and the full Mac (`check.sh` 420/420 on x64 and
+   arm64ec, `wine-arm64/check.sh`, `presenter/check.sh` 66/66, `d3d9-check.sh`, `wm-probe-check.sh --so` 11/11), native
+   (`wmt-exports.sh`, `wm-probe-check.sh --native` 11/11, `build-tests.sh` including native `dxmt-replay`, `gate.sh`
+   33/33) and VM (`loopback-gate.sh` 33/33, `dxmt/gate.sh` 47/47, `d3d/gate.sh` 43/43, `d3d11-guest.sh`, `dxgi-guest.sh`,
+   `d3d9-gate.sh`, `present-gate.sh` guest and forward, `d3d-smoke.sh` old and new WoW64, `parts.sh`) gate suites pass.
 
 **D3D9's convergence (§7)**, in phases interleaved with the steps, each its own plan:
 - C2 (with step 5's configuration, logging and statistics, or earlier behind the C++ signatures): one configuration
