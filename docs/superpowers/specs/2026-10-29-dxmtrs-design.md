@@ -746,6 +746,53 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
    both widths, `present-gate` (guest and forward), `d3d-smoke` in both WoW64 modes, `parts.sh` path and licence checks,
    the `p` profile binary checks (0 stats/dump symbols or strings, `d3d12_null` 18/18 equal) and P19's performance rows
    all pass within budget.
+   5b. The D3D11 front end and the D3D10 object layer in Rust, with the queue and the encoder live: done 2026-11-03,
+   DXMTRS main 0cb6b8f (0cb6b8f4bcb5af51c3bada9a511999ad23112c15, switch commit 02bb81c plus the core C++ retirement
+   0cb6b8f on top of 5c's 424073c), which MacNeutron pins (plan `2026-10-30-dxmtrs-step5b-d3d11.md`). Both `d3d11.dll`
+   (ARM64EC, x86_64, i686) and the native `d3d11.dylib` are pure Rust (`src/d3d11`, crate `d3d11`), with the D3D10
+   object layer inside `src/d3d11/src/d3d10` (`d3d10core.dll` and `.dylib` call `D3D11CoreCreateDevice` as before) and
+   `dxmt-core`'s command queue, chunk arena, binding and access tracking, passes, flush and optimizer, queries, resource
+   initializer, UAV counters and emulated clears live. All 15 C++/header files of `src/d3d11/` and `src/d3d10/` are
+   deleted (`d3d11_interfaces.hpp`, `d3d11.def` and `version.rc` stay for the VM forwarder and the PE link), and because
+   5c had already switched, Task 18 Step 4's link-closure check retired all 28 remaining C++/header files of `src/dxmt/`
+   (`0cb6b8f`; `libs/DXBCParser` is unlinked by any front end and waits for step 6, P17). Corrections and decisions (the
+   plan's 5-D and P items):
+   - deleting `src/d3d11/d3d11_shader.cpp` switches `translator_key` (`macneutron translator 3`, §5 step 4b P9, 5b P2/P3)
+     to `src/d3d11/src/shader/args.rs`, moving the key once as planned (`3e3474d503541d410b2c659fa36653ea2c03f52302353b125b93f1e5b15780f6`
+     to `6c9fa750ccc52b6e052aee6f867b869495575c7382258a01bb2c53760006dbe4`);
+   - 5c's groundwork (Tasks 1-4 on `step5w`, P23) supplied the native not-implemented flag (`wmt_native_not_implemented`
+     and `MTLD3DNotImplemented`), `ShaderCacheVersion()`, COM vtable generation and environment plumbing, while 5b added
+     `dxmt_util::sha1`, the WSI calls D3D11's swap chain uses, `winemetal-layouts.sh --com --records`,
+     `DXMT_WMTCMD_DUMP` (P26), `d3d11::com::Managed` (`ManagedDeviceChild` refcount separation), and `dxmt-core` chunk
+     capture lifetimes living until `Arena::reset` (`arena_drops_at_reset_not_at_run`, P8) plus `Device::drop` draining
+     the queue before dropping caches (`drop_drains_before_caches`);
+   - every `DXMT_UNREACHABLE` site has a defined non-UB return (`E_INVALIDARG`, `E_FAIL`, `NULL` or `0`, P10), verified
+     by `d3d11_probe` (`NOT_ON_C (--ported): ok`), and all 19 native unimplemented sites set and clear
+     `MTLD3DNotImplemented` (`notimpl: 19/19 sites verified (flag=1,0)`);
+   - MacNeutron's VM forwarder (`eac-vm/d3d/rules.txt`, `6f8fc13`) forwards `ID3D11Device1::CreateDeviceContextState`
+     and wraps the returned `ID3DDeviceContextState` alongside `SwapDeviceContextState`, and `d3d11-guest.sh` passes the
+     Unix path `/mnt/share/cache` for `DXMT_SHADER_CACHE_PATH` (matching `winemetal`'s `fopen` under Wine).
+
+   Gates, once at the end (Tasks 19-20 on 0cb6b8f + 6f8fc13, reports `build/step5b/reports/gates-{rust,mac,native,vm}.md`):
+   `tools/rust-check.sh` passes all 6 legs (6,964 host unit tests across 43 suites, 1,135 files audited, all 12 generated
+   files byte-equal, 0 `Apache-2.0`-only crates); `ident-diff.sh` reports 0 differences across all 42 binary identity
+   tables (`16` Mac, `6` native, `20` VM guest, with and without `ED5`, `OSO=0`, `$HOME=0`); both Mac `check.sh` lanes
+   pass 420 ok and 0 FAIL (adding `a D3D11 and a D3D12 program open one cache table` and `D3D11's COM answers are the
+   C++'s`), wine-arm64's `dxmt` and `dxmt-release` checks, `presenter/check.sh` (66 ok) and `d3d9-check.sh` (59 ok) all
+   pass; `mac-ab.sh` (17/17 programs equal on x64 and arm64ec), `air-compare.sh` (230/230 shaders byte-equal on x64,
+   arm64ec, native and i386 guest), `hist-compare.sh` (17/17 equal), `wmtcmd-compare.sh` (17/17 equal + mutation RED),
+   `spatial.sh` (59/59 lines equal) and `d3d11_probe full` under `DXMT_LOG_LEVEL=debug` (531 log lines and 663 probe
+   lines equal on x64 and arm64ec) all pass; the native gate (33/33), native unit tests, VM host forwarder checks and
+   loopback gate (33/33), VM guest build (`mtld3d-layout32: ok (132 structs)`, `layout32: ok (241 structs, 222 on the
+   wire)`), VM DXMT gate (47/47), `d3d/gate.sh` (43/43, `coverage: ok (277 methods, 114250 calls, all forwarded)`),
+   `d3d11-guest.sh` (`x86_64`, `i386` and all 14 `i386` programs + AIR compare), `dxgi-guest.sh` (`i386` and `x86_64`),
+   `d3d9-gate.sh` (20/20), `present-gate.sh` (`guest` and `forward`, 0 slow presents across 600 D3D11 frames),
+   `d3d-smoke.sh` in both WoW64 modes (38/38 functional checks; 64-bit `smoke.exe`'s `present-held-a-vcpu` row is the
+   pre-existing D3D12 `Queue::present_frame` behavior from 5c), `parts.sh` and the `p` profile checks (0 `dxmt_stats_`
+   symbols, 0 debug/trace log strings in guest PE DLLs, `p-native d3d11_probe fixed` 642/642 equal with `info:` lines
+   `std=44 p=0`) all pass; `present_loop` is equal (`8.289 ms` vs `8.291 ms` on x64, `8.296 ms` vs `8.310 ms` on
+   arm64ec) and `d3d11_draw perf`'s `map_discard_draw` is -50.5% on Mac (`327.6 ns` vs `661.7 ns`) and -48.5% natively
+   (`127.5 ns` vs `247.8 ns`).
 6. `util`'s remaining templates, `replay` and the meson build go with their last users. With no C++ LTO left, the
    ARM64X link of `tools/arm64x-link.sh` is open to every DLL.
 
