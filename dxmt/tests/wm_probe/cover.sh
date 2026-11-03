@@ -154,17 +154,21 @@ ported)
   [ -f "$A" ] || { echo "FAIL cover ported: no archive $A"; exit 1; }
   # The C objects must be the tree's current C: one per src/winemetal/unix/*.c, newer than it.
   for c in "$T"/src/winemetal/unix/*.c; do
+    [ -f "$c" ] || continue
     o=$O/$(basename "${c%.c}").o
     { [ -f "$o" ] && [ "$o" -nt "$c" ]; } || fail "ported: $o is missing or older than $c (run lane-so.sh first)"
   done
   for o in "$O"/*.o; do
+    [ -f "$o" ] || continue
     [ -f "$T/src/winemetal/unix/$(basename "${o%.o}").c" ] || fail "ported: $o has no source in $T"
   done
   [ "$fails" = 0 ] || exit 1
   nm "$O"/*.o 2> /dev/null | awk 'NF >= 2 && $(NF-1) ~ /^[tT]$/ { print substr($NF, 2) }' | sort > "$TMP/c-defs"
   nm "$A" 2> /dev/null | awk 'NF >= 2 && $(NF-1) ~ /^[tT]$/ { print substr($NF, 2) }' | sort > "$TMP/rs-defs"
+  t32=; [ -f "$T/src/winemetal/unix/sm50_wow64.c" ] && t32='|_thunk32_.*'
+  sm50=; [ ! -f "$T/src/airconv/Cargo.toml" ] && sm50='|_SM50.*'
   nm "$A" 2> /dev/null | awk 'NF >= 2 && $(NF-1) ~ /^[A-TV-Za-tv-z]$/ { print $NF }' |
-    /usr/bin/grep -E '^(_NtSetEvent|_SM50.*|_thunk32_.*|_macdrv_functions|_sqlite3_.*|_wmt_native_.*)$' |
+    /usr/bin/grep -E "^(_NtSetEvent${sm50}${t32}|_macdrv_functions|_sqlite3_.*|_wmt_native_.*)$" |
     sort -u > "$TMP/stubs"
   while IFS= read -r l; do fail "ported: the archive defines $l (the link provides it)"; done < "$TMP/stubs"
   for g in "$@"; do awk -v g="$g" '$2 == g' "$SLOTS" | /usr/bin/grep -q . || fail "ported: no group $g"; done

@@ -305,6 +305,10 @@ unsigned wm_call(unsigned slot, void *params) {
     NSUInteger before[8];
     bool first[8];
     pthread_mutex_lock(&lock);
+    /* Slots 75, 78 and 80 free a raw SM50 pointer (not an Objective-C object kept retained in `kept`), so drop its
+     * address from `hnum` in case malloc reuses the same heap address for the next SM50 handle in this case. */
+    if ((slot == 75 || slot == 78 || slot == 80) && params)
+        CFDictionaryRemoveValue(hnum, (const void *)(uintptr_t)*(const uint64_t *)params);
     for (int i = 0; i < s->nowns; i++) {
         v[i] = *s->owns[i].field;
         if (!v[i] || v[i] == WM_FILL64 || tagged(v[i])) continue;
