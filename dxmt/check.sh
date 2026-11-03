@@ -891,6 +891,9 @@ sqlite3 "$db" "CREATE TABLE cache_1 (key BLOB PRIMARY KEY, value BLOB NOT NULL);
 run ours version2 dxmt "$LOOP" 320 240 0 0 10 0
 expect "another build's table is dropped when the cache opens" \
   "$(sqlite3 "$db" "SELECT count(*) FROM sqlite_master WHERE name = 'cache_1'" 2> /dev/null)" 0
+run ours version12 dxmt "$TESTS/d3d12_clear.exe"
+expect "a D3D11 and a D3D12 program open one cache table" \
+  "$(sqlite3 "$db" "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'cache_%'" 2> /dev/null)" 1
 unset CACHE
 run ours vsread-ours dxmt "$TESTS/d3d12_vsread.exe" "Z:$S/vsread.vs.dxil" "Z:$S/vsread.ps.dxil"
 run ref vsread-ref d3dmetal "$TESTS/d3d12_vsread.exe" "Z:$S/vsread.vs.dxil" "Z:$S/vsread.ps.dxil"
@@ -1312,6 +1315,13 @@ expect "dxgi and d3d10core answer as DXMT's C++ did" "${firstdiff:-same}" same
 run ours d3d12-probe dxmt "$TESTS/d3d12_probe.exe" fixed
 firstdiff=$(grep -E '^d12[xdohplsc] ' "$WORK/d3d12-probe.txt" | diff - "$ROOT/dxmt/tests/d3d12_probe.fixed" | sed -n 2p)
 expect "d3d12 answers as DXMT's C++ did" "${firstdiff:-same}" same
+run ours d11probe dxmt "$TESTS/d3d11_probe.exe" "Z:$S/d3d11" fixed
+if [ ! -s "$ROOT/dxmt/tests/d3d11_probe.fixed" ]; then
+  d11diff="no golden"
+else
+  d11diff=$(grep -E '^(d11dev|d11res|d11view|d11state|d11shader|d11ctx|d11defer|d11query|d11ext|d11sc|d11share|d10) ' "$WORK/d11probe.txt" | diff - "$ROOT/dxmt/tests/d3d11_probe.fixed" | sed -n 2p)
+fi
+expect "D3D11's COM answers are the C++'s" "${d11diff:-same}" same
 # d3d10core's D3D10 device on the D3D11 one (init, a map, a query, a draw) and Wine's own d3d10.dll on it (a device, a
 # state block, a draw).
 run ours d3d10-core dxmt "$TESTS/d3d10_core.exe" "Z:$S/d3d11"

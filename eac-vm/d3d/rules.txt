@@ -439,7 +439,7 @@ ID3D11DeviceContext4::Signal own
 ID3D11DeviceContext3::Flush1 own
 # A device's frame latency, which the guest's pacing keeps (native DXMT's present doesn't wait: fork 0088).
 IDXGIDevice1::SetMaximumFrameLatency wrap
-# What DXMT aborts on (UNIMPLEMENTED: the tiled methods, SwapDeviceContextState, the Device3 copies) or answers
+# What DXMT aborts on (UNIMPLEMENTED: the tiled methods, the Device3 copies) or answers
 # E_NOTIMPL itself (counters, class instances: AS_DXMT), and handles shared across processes, which mean nothing
 # across the VM.
 ID3D11DeviceContext2::UpdateTileMappings refuse
@@ -449,8 +449,8 @@ ID3D11DeviceContext2::UpdateTiles refuse
 ID3D11DeviceContext2::ResizeTilePool refuse
 ID3D11DeviceContext2::TiledResourceBarrier refuse
 ID3D11Device2::GetResourceTiling refuse
-ID3D11Device1::CreateDeviceContextState refuse
-ID3D11DeviceContext1::SwapDeviceContextState refuse
+ID3D11Device1::CreateDeviceContextState pFeatureLevels in count=FeatureLevels
+ID3D11Device1::CreateDeviceContextState pChosenFeatureLevel out one
 ID3D11Device3::WriteToSubresource refuse
 ID3D11Device3::ReadFromSubresource refuse
 ID3D11Device::CreateCounter refuse

@@ -13,7 +13,8 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "eac-vm", "d3d"))
 import gen  # noqa: E402
 
-INCLUDE = os.path.join(ROOT, "build", "dxmt-native", "install", "include-native")
+BUILD = os.environ.get("BUILD_DIR") or os.path.join(ROOT, "build")
+INCLUDE = os.environ.get("I") or os.path.join(BUILD, "dxmt-native", "install", "include-native")
 RULES = os.path.join(ROOT, "eac-vm", "d3d", "rules.txt")
 
 

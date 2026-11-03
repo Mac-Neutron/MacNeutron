@@ -204,5 +204,78 @@ int main(int argc, char **argv) {
         printf("transfer %s %08lx %zu\n", nowait ? "nowait" : "readback", (unsigned long)(unsigned)hr, Wrong(got, want));
         st->Release();
     }
+
+    // Dynamic constant buffer UpdateSubresource / UpdateSubresource1:
+    //   1) whole UpdateSubresource
+    //   2) partial box without flags (keeping bytes outside the box)
+    //   3) UpdateSubresource1 with D3D11_COPY_NO_OVERWRITE after a draw
+    //   4) UpdateSubresource1 with D3D11_COPY_DISCARD
+    // each drawn to read back via cbbig.ps (`v[0].x ^ (v[4095].x << 16)`).
+    {
+        ID3D11VertexShader *quad_vs = dev.VS("quad.vs");
+        ID3D11PixelShader *cbbig_ps = dev.PS("cbbig.ps");
+        ID3D11Buffer *dcb = dev.Buffer(65536, D3D11_BIND_CONSTANT_BUFFER, D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE);
+        ID3D11Texture2D *rt_u = dev.Tex2D(4, 1, DXGI_FORMAT_R32_UINT, D3D11_BIND_RENDER_TARGET);
+        ID3D11RenderTargetView *rtv_u = dev.RTV(rt_u);
+
+        auto draw_texel = [&](UINT x) {
+            D3D11_VIEWPORT vp = {(float)x, 0, 1, 1, 0, 1};
+            ctx->OMSetRenderTargets(1, &rtv_u, nullptr);
+            ctx->RSSetViewports(1, &vp);
+            ctx->IASetInputLayout(nullptr);
+            ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            ctx->VSSetShader(quad_vs, nullptr, 0);
+            ctx->PSSetShader(cbbig_ps, nullptr, 0);
+            ctx->PSSetConstantBuffers(0, 1, &dcb);
+            ctx->Draw(3, 0);
+        };
+
+        std::vector<uint32_t> words(16384, 0);
+        words[0] = 0x1234u;
+        words[4095 * 4] = 0x5678u;
+        ctx->UpdateSubresource(dcb, 0, nullptr, words.data(), 0, 0);
+        draw_texel(0);
+
+        D3D11_BOX box_hi = {4095 * 16, 0, 0, 4096 * 16, 1, 1};
+        uint32_t patch_hi[4] = {0x9abcu, 0, 0, 0};
+        ctx->UpdateSubresource(dcb, 0, &box_hi, patch_hi, 0, 0);
+        draw_texel(1);
+
+        if (ctx1) {
+            uint32_t patch_noovr[4] = {0xdef0u, 0, 0, 0};
+            ctx1->UpdateSubresource1(dcb, 0, &box_hi, patch_noovr, 0, 0, D3D11_COPY_NO_OVERWRITE);
+            draw_texel(2);
+
+            words[0] = 0x4321u;
+            words[4095 * 4] = 0x8765u;
+            ctx1->UpdateSubresource1(dcb, 0, nullptr, words.data(), 0, 0, D3D11_COPY_DISCARD);
+            draw_texel(3);
+        }
+
+        std::vector<uint32_t> want_dyncb = {0x56781234u, 0x9abc1234u, 0xdef01234u, 0x87654321u};
+        printf("transfer updatedyncb %zu\n", Wrong(As<uint32_t>(dev.Read(rt_u, 0, 16, 1)), want_dyncb));
+
+        rtv_u->Release();
+        rt_u->Release();
+        dcb->Release();
+        cbbig_ps->Release();
+        quad_vs->Release();
+    }
+
+    // 3D UpdateSubresource with packed rows (SrcRowPitch == EffectiveBytesPerRow) and padded depth pitch
+    // (SrcDepthPitch > EffectiveRows * EffectiveBytesPerRow), exercising UpdateTexture's contiguous branch.
+    {
+        D3D11_TEXTURE3D_DESC d3p = {4, 4, 4, 1, DXGI_FORMAT_R8G8B8A8_UNORM, D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE};
+        ID3D11Texture3D *u3p = nullptr;
+        CHECK(d->CreateTexture3D(&d3p, nullptr, &u3p));
+        const UINT rp_packed = 4 * 4;
+        const UINT dp_padded = rp_packed * 4 + 64;
+        std::vector<uint8_t> p3p = Pattern(dp_padded * 4, 40), w3p(4 * 4 * 4 * 4, 0);
+        ctx->UpdateSubresource(u3p, 0, nullptr, p3p.data(), rp_packed, dp_padded);
+        for (UINT z = 0; z < 4; z++)
+            memcpy(&w3p[z * 4 * rp_packed], &p3p[z * dp_padded], 4 * rp_packed);
+        printf("transfer update3d_paddepth %zu\n", Wrong(Read3D(dev, u3p, rp_packed, 4, 4), w3p));
+        u3p->Release();
+    }
     return 0;
 }

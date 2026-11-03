@@ -97,6 +97,83 @@ struct C { float edges[3] : SV_TessFactor; float inside : SV_InsideTessFactor; }
 [domain("tri")] float4 main(C c, float3 uvw : SV_DomainLocation, const OutputPatch<V, 3> p) : SV_Position {
     return p[0].pos * uvw.x + p[1].pos * uvw.y + p[2].pos * uvw.z;
 })"},
+    // d3d11_draw: indexed/instanced vertex + instance inputs, sampled mipped texture for SetResourceMinLOD, and
+    // pass-through geometry shader.
+    {"draw.vs", "vs_4_0", R"(
+struct I { float2 pos : POSITION; float4 color : COLOR; float2 inst_off : OFFSET; };
+struct V { float4 pos : SV_Position; float4 color : COLOR; };
+V main(I i) {
+    V o;
+    o.pos = float4(i.pos + i.inst_off, 0, 1);
+    o.color = i.color;
+    return o;
+})"},
+    {"draw.ps", "ps_4_0", R"(
+struct V { float4 pos : SV_Position; float4 color : COLOR; };
+float4 main(V v) : SV_Target { return v.color; })"},
+    {"minlod.ps", "ps_4_0", R"(
+Texture2D t : register(t0);
+SamplerState s : register(s0);
+float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target { return t.Sample(s, uv); })"},
+    {"pass.gs", "gs_4_0", R"(
+struct V { float4 pos : SV_Position; };
+[maxvertexcount(3)]
+void main(triangle V p[3], inout TriangleStream<V> s) {
+    s.Append(p[0]);
+    s.Append(p[1]);
+    s.Append(p[2]);
+})"},
+    // d3d11_hazards: long compute UAV write, PS SRV sum, CS SRV sum, long PS RT write, and ordered UAV dispatches.
+    {"haz_cs_write.cs", "cs_5_0", R"(
+RWTexture2D<uint> u : register(u0);
+[numthreads(16, 16, 1)]
+void main(uint3 id : SV_DispatchThreadID) {
+    uint v = id.y * 1024u + id.x + 1u;
+    for (uint i = 0; i < 256u; i++)
+        v = v * 1664525u + 1013904223u + i;
+    u[id.xy] = (v & 255u) + 1u;
+})"},
+    {"haz_ps_read.ps", "ps_5_0", R"(
+Texture2D<uint> t : register(t0);
+uint main(float4 pos : SV_Position) : SV_Target {
+    uint2 b = uint2(pos.xy) * 16u;
+    uint s = 0;
+    for (uint y = 0; y < 16u; y++)
+        for (uint x = 0; x < 16u; x++)
+            s += t.Load(int3(b.x + x, b.y + y, 0));
+    return s;
+})"},
+    {"haz_cs_read.cs", "cs_5_0", R"(
+Texture2D<uint> t : register(t0);
+RWStructuredBuffer<uint> dst : register(u0);
+[numthreads(16, 16, 1)]
+void main(uint3 id : SV_DispatchThreadID) {
+    uint v = t.Load(int3(id.xy, 0));
+    InterlockedAdd(dst[0], v);
+})"},
+    {"haz_ps_write.ps", "ps_5_0", R"(
+uint main(float4 pos : SV_Position) : SV_Target {
+    uint2 xy = uint2(pos.xy);
+    uint v = xy.y * 1024u + xy.x + 7u;
+    for (uint i = 0; i < 256u; i++)
+        v = v * 1664525u + 1013904223u + i;
+    return (v & 255u) + 1u;
+})"},
+    {"haz_uav1.cs", "cs_5_0", R"(
+RWStructuredBuffer<uint> u : register(u0);
+[numthreads(64, 1, 1)]
+void main(uint3 id : SV_DispatchThreadID) {
+    uint v = id.x + 3u;
+    for (uint i = 0; i < 256u; i++)
+        v = v * 1664525u + 1013904223u + i;
+    u[id.x] = (v & 65535u) + 1u;
+})"},
+    {"haz_uav2.cs", "cs_5_0", R"(
+RWStructuredBuffer<uint> u : register(u0);
+[numthreads(64, 1, 1)]
+void main(uint3 id : SV_DispatchThreadID) {
+    u[id.x] = u[id.x] * 3u + 7u;
+})"},
 };
 
 // Compiles HLSL to `path`: prints "dxbc <name> <bytes>", or the compiler's errors; 0 when it wrote the file.

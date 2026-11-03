@@ -75,5 +75,5 @@ barrier-test:
 .PHONY: barrier-test
 
 test: layout roundtrip barrier-test
-	python3 -W error::ResourceWarning -m unittest discover -s tests -p 'test_*.py'
+	I="$(I)" python3 -W error::ResourceWarning -m unittest discover -s tests -p 'test_*.py'
 .PHONY: test

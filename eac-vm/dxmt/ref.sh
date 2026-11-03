@@ -6,7 +6,8 @@
 # build/eac-vm-work/share/dxmt-ref/<name>.<1|2>.txt, .status (the launcher's exit status, or "timeout") and .time.
 # The 4c gate (present-gate.sh) sets MN_REF_INVOCATIONS (its own programs), MN_REF_OUT and MN_REF_RUNS=1.
 # MN_REF_WINE_APP=<wine.app> runs that runtime instead of build/wine-arm64/wine.app (a saved one, to re-record a
-# reference after the C is replaced); the gates skip this script altogether with MN_REF_FROZEN=<folder>.
+# reference after the C is replaced); MN_REF_TESTS=<folder> runs executables from that folder instead of $I (e.g.
+# build/dxmt-tests-arm64ec for the arm64ec lane); the gates skip this script altogether with MN_REF_FROZEN=<folder>.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 WORK="${TMPDIR:-/tmp}/macneutron dxmt-guest-ref"
@@ -34,7 +35,7 @@ while IFS='|' read -r name exe args prefixes; do
     env STEAM_COMPAT_DATA_PATH="$WORK/compat" SteamAppId=0 MACNEUTRON_GRAPHICS=dxmt MACNEUTRON_NO_STEAM_BRIDGE=1 \
       MACNEUTRON_DLSS=$dlss \
       MACNEUTRON_NO_METALFX=1 DXMT_SHADER_CACHE_PATH="$WORK/cache/$name.$i" DXMT_MAX_ANISOTROPY=0 \
-      "$WORK/ours/bin/macneutron" launch waitforexitandrun "$I/$exe" $args \
+      "$WORK/ours/bin/macneutron" launch waitforexitandrun "${MN_REF_TESTS:-$I}/$exe" $args \
       < /dev/null > "$WORK/out" 2>&1 &
     pid=$!
     ( sleep "$TO"; touch "$WORK/timed-out"; kill "$pid" 2> /dev/null ) > /dev/null 2>&1 & dog=$!
