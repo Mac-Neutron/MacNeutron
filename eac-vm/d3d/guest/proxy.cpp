@@ -1689,7 +1689,7 @@ static std::atomic<uint32_t> incs[4]; // each heap type's increment, from its he
 static uint32_t fast_flags() {
     static const uint32_t f = [] {
         const char *v = getenv("MN_D3D_DESCRIPTORS");
-        return v && !std::strcmp(v, "async") ? 0u : v && !std::strcmp(v, "submit") ? MN_D3D_ARG_HANDOFF : MN_D3D_ARG_SYNC;
+        return v && !std::strcmp(v, "sync") ? MN_D3D_ARG_SYNC : v && !std::strcmp(v, "submit") ? MN_D3D_ARG_HANDOFF : 0u;
     }();
     return f;
 }

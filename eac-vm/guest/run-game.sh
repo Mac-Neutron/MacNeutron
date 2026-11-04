@@ -102,6 +102,7 @@ if ! grep -q '^"EmulateModeset"="Y"' "$WINEPREFIX/user.reg" 2>/dev/null ||
   wineserver -k; wineserver -w
 fi
 # MACNEUTRON_VM_D3D=forward (the launcher's): the game's Direct3D through mnd3d.dll to the host's native DXMT.
+export MN_D3D_DESCRIPTORS=${MN_D3D_DESCRIPTORS:-async}
 [ -f /opt/mn-wine/lib/wine/mn-d3d/prefix.sh ] && . /opt/mn-wine/lib/wine/mn-d3d/prefix.sh
 # Proton's Windows-named fonts (eac-vm/fonts) and Wine's own TrueType fonts in the prefix's Windows\Fonts, as Proton
 # links them (its create_fonts_symlinks), a font of the game's own left alone: what the registry names above (and a

@@ -13,7 +13,7 @@ cd "$ROOT"
 rel() { printf '%s' "${1#"$ROOT"/}"; }
 # The p profile with "host" in its flags (spec 2026-10-19-macneutron-performance-build §5): -O3 for the M5, ThinLTO.
 . "$ROOT/wine-arm64/lib.sh"
-if p_flag host; then HOPT="-O3 -mcpu=apple-m5 -flto=thin"; else HOPT=-O2; fi
+HOPT="-O3 -mcpu=${MACNEUTRON_CPU:-apple-m5} -flto=thin"
 # And its PGO (host.profdata, with native DXMT's): instrumented, or built with the profile.
 PGO=$(pgo_cflags host)
 HOPT="$HOPT${PGO:+ $PGO}"
@@ -62,15 +62,13 @@ cmp -s "$ROOT/eac-vm/libtpms/PIN" "$W/libtpms/PIN" || "$ROOT/eac-vm/libtpms/buil
 clang $HOPT -std=gnu2x -Wall -c -I"$W/libkrun/include" -I"$W/libtpms/include" -I"$SSL/include" -o "$W/obj/tpm.c.o" \
   eac-vm/host/tpm.c
 objs="$objs $W/obj/input.c.o $W/obj/audio.c.o $W/obj/tpm.c.o"
-# The executor's C goes through swiftc, which takes no clang optimisation flags: under the p flags, clang compiles it.
+# The executor's C goes through clang so it always gets $HOPT (swiftc takes no clang optimisation flags).
 csrc="eac-vm/metal/host/executor.c eac-vm/metal/host/testops.c eac-vm/metal/ring.c"
-if p_flag host; then
-  for f in $csrc; do
-    clang $HOPT -std=gnu2x -Wall -c -I"$W/libkrun/include" -o "$W/obj/$(basename "$f").o" "$f"
-    objs="$objs $W/obj/$(basename "$f").o"
-  done
-  csrc=
-fi
+for f in $csrc; do
+  clang $HOPT -std=gnu2x -Wall -c -I"$W/libkrun/include" -o "$W/obj/$(basename "$f").o" "$f"
+  objs="$objs $W/obj/$(basename "$f").o"
+done
+csrc=
 # shellcheck disable=SC2086
 swiftc -O $SWIFT_PGO -o "$W/macneutron-vm" eac-vm/host/macneutron-vm.swift $csrc $objs \
   -import-objc-header "$ROOT/eac-vm/host/bridge.h" -Xcc -I"$W/libkrun/include" \
