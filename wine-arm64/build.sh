@@ -73,6 +73,7 @@ export MACOSX_DEPLOYMENT_TARGET=27.0
 # CPU's instruction set, since Apple tuning crashes its SEH unwind emitter ("Failed to evaluate function length in SEH
 # unwind info", Wine's libs/winecrt0/debug.c).
 MACNEUTRON_CPU=${MACNEUTRON_CPU:-apple-m5}
+export MACNEUTRON_CPU
 if [ "$MACNEUTRON_CPU" = generic ]; then
   PE_MARCH=-march=armv8.5-a+fp16fml+aes+sha3
   UNIX_CPU=

@@ -17,6 +17,7 @@ die() { echo "dxmt-native: $*" >&2; exit 1; }
 [ -d "$D/.git" ] || die "no DXMT tree at $D: run make wine-arm64 first"
 [ -f "$SRC/llvm23-arm64/.complete" ] || die "no LLVM at $SRC/llvm23-arm64: run make wine-arm64 first"
 CPU=${MACNEUTRON_CPU:-apple-m5}
+export MACNEUTRON_CPU="$CPU"
 set -- "$B" "$D" --buildtype release -Denable_d3d12=true -Denable_nvapi=false -Denable_nvngx=false \
   -Dwine_builtin_dll=false -Dnative_llvm_path="$SRC/llvm23-arm64" -Dtranslator_key_file="$SRC/dxmt-translator-key"
 # DXMTRS's meson builds Rust static libraries (tools/cargo-staticlib.sh) with cargo. No -Dcargo_toolchain: a tree
