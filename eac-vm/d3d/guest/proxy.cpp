@@ -241,13 +241,15 @@ ULONG STDMETHODCALLTYPE mn_px_AddRef(mn_proxy *This) { return (ULONG)++This->obj
 
 ULONG STDMETHODCALLTYPE mn_px_Release(mn_proxy *This) {
     mn_obj *o = This->obj;
-    long n;
+    // The common release keeps a positive count and never needs the table lock. COM forbids a new
+    // reference from zero, so the recheck under the lock only has to cover the last release.
+    long n = o->refs.fetch_sub(1, std::memory_order_acq_rel) - 1;
+    if (n) return (ULONG)n;
     {
         std::lock_guard<std::mutex> l(objs_lock); // the last one leaves objs before mn_proxy_out can find it
-        n = --o->refs;
-        if (!n) objs.erase(o->handle);
+        if (o->refs.load(std::memory_order_acquire) != 0) return (ULONG)o->refs.load(std::memory_order_relaxed);
+        objs.erase(o->handle);
     }
-    if (n) return (ULONG)n;
     uint64_t h = o->handle;
     mn_d3d_call(MN_D3D_OP_RELEASE, &h);
     if (o->pace) end_pacing(o->pace);

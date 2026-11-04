@@ -48,10 +48,86 @@ uint64_t mn_executor_spin_ns(const char *value) {
 /* A blob's memory is ours once the guest frees it (patch 0005): the table holds one reference, each hold one more,
  * and the last release unmaps it. */
 struct blob { uint32_t ctx_id; uint64_t blob_id; void *ptr; uint64_t size; atomic_int refs; };
-/* ponytail: a linear scan; a hash map when milestone 4b's thousands of buffers make lookups show up */
+/* Open-addressed table keyed by (ctx_id, blob_id).  A tombstone keeps a deletion from breaking a probe chain;
+ * the table is rehashed once the live-plus-tombstone load passes three quarters. */
+#define BLOB_TOMB ((struct blob *)(uintptr_t)1)
 static struct blob **blobs;
-static size_t nblobs, cap_blobs;
+static size_t nblobs, cap_blobs, tombs_blobs;
 static pthread_mutex_t blob_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static size_t blob_hash(uint32_t ctx_id, uint64_t blob_id) {
+    uint64_t x = blob_id ^ ((uint64_t)ctx_id << 32);
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdULL;
+    x ^= x >> 33;
+    x *= 0xc4ceb9fe1a85ec53ULL;
+    x ^= x >> 33;
+    return (size_t)x;
+}
+
+static int blob_grow(size_t cap) {
+    struct blob **grown = calloc(cap, sizeof *grown);
+    if (!grown) return -1;
+    for (size_t i = 0; i < cap_blobs; i++) {
+        struct blob *b = blobs[i];
+        if (!b || b == BLOB_TOMB) continue;
+        size_t j = blob_hash(b->ctx_id, b->blob_id) & (cap - 1);
+        while (grown[j]) j = (j + 1) & (cap - 1);
+        grown[j] = b;
+    }
+    free(blobs);
+    blobs = grown;
+    cap_blobs = cap;
+    tombs_blobs = 0;
+    return 0;
+}
+
+static struct blob *blob_find_locked(uint32_t ctx_id, uint64_t blob_id) {
+    if (!cap_blobs) return NULL;
+    for (size_t i = blob_hash(ctx_id, blob_id) & (cap_blobs - 1);; i = (i + 1) & (cap_blobs - 1)) {
+        struct blob *b = blobs[i];
+        if (!b) return NULL;
+        if (b != BLOB_TOMB && b->ctx_id == ctx_id && b->blob_id == blob_id) return b;
+    }
+}
+
+static int blob_insert_locked(struct blob *b) {
+    if ((nblobs + tombs_blobs + 1) * 4 >= cap_blobs * 3) {
+        size_t cap = cap_blobs ? cap_blobs * 2 : 256;
+        if (blob_grow(cap)) return -1;
+    }
+    size_t first_tomb = SIZE_MAX;
+    for (size_t i = blob_hash(b->ctx_id, b->blob_id) & (cap_blobs - 1);; i = (i + 1) & (cap_blobs - 1)) {
+        struct blob *slot = blobs[i];
+        if (slot == BLOB_TOMB) {
+            if (first_tomb == SIZE_MAX) first_tomb = i;
+            continue;
+        }
+        if (!slot) {
+            size_t at = first_tomb == SIZE_MAX ? i : first_tomb;
+            if (blobs[at] == BLOB_TOMB) tombs_blobs--;
+            blobs[at] = b;
+            nblobs++;
+            return 0;
+        }
+        if (slot->ctx_id == b->ctx_id && slot->blob_id == b->blob_id) return -1;
+    }
+}
+
+static struct blob *blob_remove_locked(uint32_t ctx_id, uint64_t blob_id) {
+    if (!cap_blobs) return NULL;
+    for (size_t i = blob_hash(ctx_id, blob_id) & (cap_blobs - 1);; i = (i + 1) & (cap_blobs - 1)) {
+        struct blob *b = blobs[i];
+        if (!b) return NULL;
+        if (b != BLOB_TOMB && b->ctx_id == ctx_id && b->blob_id == blob_id) {
+            blobs[i] = BLOB_TOMB;
+            nblobs--;
+            tombs_blobs++;
+            if (tombs_blobs > 64 && tombs_blobs * 2 > nblobs) blob_grow(cap_blobs);
+            return b;
+        }
+    }
+}
 
 struct waiter { uint64_t seq, fence_id; uint32_t ring_idx; };
 struct ring {
@@ -100,15 +176,11 @@ static void error(const char *what, uint64_t a, uint64_t b) {
 
 /* The blob and the address of [offset, offset + len) in it, or NULL; under blob_lock. */
 static struct blob *find_blob(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len, void **p) {
-    for (size_t i = 0; i < nblobs; i++)
-        if (blobs[i]->ctx_id == ctx_id && blobs[i]->blob_id == blob_id) {
-            struct blob *b = blobs[i];
-            if (i > 0) blobs[i] = blobs[0], blobs[0] = b;
-            if (offset > b->size || len > b->size - offset) return NULL;
-            *p = (char *)b->ptr + offset;
-            return b;
-        }
-    return NULL;
+    struct blob *b = blob_find_locked(ctx_id, blob_id);
+    if (!b) return NULL;
+    if (offset > b->size || len > b->size - offset) return NULL;
+    *p = (char *)b->ptr + offset;
+    return b;
 }
 
 void *mn_executor_blob(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len) {
@@ -426,14 +498,8 @@ static void blob_created(void *ctx, uint32_t ctx_id, uint64_t blob_id, void *ptr
     (void)ctx;
     struct blob *b = malloc(sizeof *b);
     pthread_mutex_lock(&blob_lock);
-    if (b && nblobs == cap_blobs) {
-        struct blob **grown = realloc(blobs, (cap_blobs ? cap_blobs * 2 : 256) * sizeof *blobs);
-        if (grown) blobs = grown, cap_blobs = cap_blobs ? cap_blobs * 2 : 256;
-    }
-    if (b && nblobs < cap_blobs) {
-        *b = (struct blob){ ctx_id, blob_id, ptr, size, 1 };
-        blobs[nblobs++] = b;
-    } else {
+    if (b) *b = (struct blob){ ctx_id, blob_id, ptr, size, 1 };
+    if (!b || blob_insert_locked(b)) {
         free(b); /* out of memory: the blob stays unknown here, so the guest's ops on it fail */
         error("no memory to track a blob", ctx_id, blob_id);
     }
@@ -444,14 +510,8 @@ static void blob_destroyed(void *ctx, uint32_t ctx_id, uint64_t blob_id, void *p
     (void)ctx;
     struct ring *r = find(ctx_id, blob_id);
     if (r) stop(r); /* a ring blob closed without a detach: its consumer goes before its memory */
-    struct blob *b = NULL;
     pthread_mutex_lock(&blob_lock);
-    for (size_t i = 0; i < nblobs; i++)
-        if (blobs[i]->ctx_id == ctx_id && blobs[i]->blob_id == blob_id) {
-            b = blobs[i];
-            blobs[i] = blobs[--nblobs];
-            break;
-        }
+    struct blob *b = blob_remove_locked(ctx_id, blob_id);
     pthread_mutex_unlock(&blob_lock);
     /* Lookups fail from here on. A handler that uses blob memory holds it (mn_executor_blob_hold), so a blob
      * another ring's op is still using stays mapped until that op lets go, and no op waits for another's. */

@@ -56,12 +56,25 @@ static int add_arena(uint64_t want) {
     return ok ? 0 : -1;
 }
 
+static _Thread_local unsigned last_arena = UINT32_MAX;
+
 static void *arena_ptr(uint64_t blob, uint64_t offset) {
+    /* A thread usually maps the same arena from one call to the next. Entries never change after
+     * `narenas` publishes them, so the cached index needs no lock; only a miss takes the lock. */
+    unsigned i = last_arena;
+    if (i < sizeof arenas / sizeof *arenas) {
+        struct arena *a = &arenas[i];
+        if (a->blob == blob && offset >= a->offset && offset < a->offset + a->len) {
+            return a->ptr + (offset - a->offset);
+        }
+    }
     void *p = NULL;
     pthread_mutex_lock(&arena_lock);
-    for (unsigned i = 0; i < narenas && !p; i++)
-        if (arenas[i].blob == blob && offset >= arenas[i].offset && offset < arenas[i].offset + arenas[i].len)
+    for (i = 0; i < narenas && !p; i++)
+        if (arenas[i].blob == blob && offset >= arenas[i].offset && offset < arenas[i].offset + arenas[i].len) {
             p = arenas[i].ptr + (offset - arenas[i].offset);
+            last_arena = i;
+        }
     pthread_mutex_unlock(&arena_lock);
     return p;
 }
