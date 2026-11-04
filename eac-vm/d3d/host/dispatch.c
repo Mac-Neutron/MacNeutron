@@ -77,7 +77,7 @@ static _Atomic uint64_t counts[MN_D3D_CALLS]; /* with a trace: each method's rec
 #define SLOW_US 4000
 static _Atomic uint64_t slow[MN_D3D_CALLS], slowest_us[MN_D3D_CALLS];
 static pthread_once_t once = PTHREAD_ONCE_INIT;
-static int loaded;
+static int loaded, slow_log;
 static _Thread_local struct { struct mn_wm_ctx *c; const struct mn_wm_call *call; int sync; } cur;
 static _Atomic uint64_t said[(MN_D3D_CALLS + 63) / 64]; /* the methods without host code said so once */
 
@@ -236,6 +236,7 @@ static void present(void *cmdbuf, void *drawable) {
 static void load_once(void) {
     if (!dir) fprintf(stderr, "mn-d3d: error: native DXMT: no directory set\n");
     loaded = dir && !mn_d3d_load(dir);
+    slow_log = getenv("MN_D3D_SLOW_LOG") != NULL;
 }
 
 void mn_d3d_result(int32_t hr) {
@@ -393,12 +394,15 @@ static int32_t d3d(uint32_t ctx_id, void *ring, uint32_t id, const void *p, uint
     const int presenting = id == present_ids[0] || id == present_ids[1];
     if (presenting) atomic_store(&presenter, c->ctx_id), hooked = 0;
     mn_d3d_memory_begin(c->ctx_id, creation && reply);
-    uint64_t t0 = now_us();
+    const int time_call = presenting || slow_log;
+    uint64_t t0 = time_call ? now_us() : 0;
     int32_t s = mn_wm_host_call_table(c, ring, call, stub, p, len, reply, cap, n);
-    uint64_t us = now_us() - t0, top = atomic_load(&slowest_us[id]);
-    if (us > SLOW_US) {
-        atomic_fetch_add(&slow[id], 1);
-        while (us > top && !atomic_compare_exchange_weak(&slowest_us[id], &top, us)) {}
+    if (time_call) {
+        uint64_t us = now_us() - t0, top = atomic_load(&slowest_us[id]);
+        if (us > SLOW_US) {
+            atomic_fetch_add(&slow[id], 1);
+            while (us > top && !atomic_compare_exchange_weak(&slowest_us[id], &top, us)) {}
+        }
     }
     uint64_t need = mn_d3d_memory_end();
     if (presenting && !s && !hooked) mn_wm_present_count(c); /* D3D11's: its present comes on DXMT's thread */

@@ -102,9 +102,11 @@ static void error(const char *what, uint64_t a, uint64_t b) {
 static struct blob *find_blob(uint32_t ctx_id, uint64_t blob_id, uint64_t offset, uint64_t len, void **p) {
     for (size_t i = 0; i < nblobs; i++)
         if (blobs[i]->ctx_id == ctx_id && blobs[i]->blob_id == blob_id) {
-            if (offset > blobs[i]->size || len > blobs[i]->size - offset) return NULL;
-            *p = (char *)blobs[i]->ptr + offset;
-            return blobs[i];
+            struct blob *b = blobs[i];
+            if (i > 0) blobs[i] = blobs[0], blobs[0] = b;
+            if (offset > b->size || len > b->size - offset) return NULL;
+            *p = (char *)b->ptr + offset;
+            return b;
         }
     return NULL;
 }
