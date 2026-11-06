@@ -115,6 +115,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "macneutron-installer"
+version = "0.1.0"
+dependencies = [
+ "macneutron-core",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+]
+
+[[package]]
 name = "macneutron-vm"
 version = "0.1.0"
 

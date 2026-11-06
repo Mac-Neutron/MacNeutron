@@ -5,6 +5,7 @@ members = [
     "crates/macneutron-core",
     "crates/macneutron-cli",
     "crates/macneutron-app",
+    "crates/macneutron-installer",
 ]
 
 [workspace.package]

@@ -1,0 +1,17 @@
+[package]
+name = "macneutron-installer"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# Install MacNeutron.app's executable (Package.swift's MacNeutronInstaller).
+[[bin]]
+name = "MacNeutronInstaller"
+path = "src/main.rs"
+
+[dependencies]
+macneutron-core = { path = "../macneutron-core" }
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["NSArray", "NSBundle", "NSDate", "NSRunLoop", "NSString"] }
+objc2-app-kit = { workspace = true, features = ["NSAlert", "NSApplication", "NSButton", "NSControl", "NSResponder", "NSRunningApplication", "NSView"] }
