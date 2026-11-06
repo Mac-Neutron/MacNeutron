@@ -182,6 +182,8 @@ pub enum SteamPlayError {
     ConfigUnreadable(String),
     VerificationFailed(String),
     PlanDropsMacGames(i64),
+    /// A file-system (or plan-building) failure Swift passed through untyped; its message.
+    Io(String),
 }
 
 impl fmt::Display for SteamPlayError {
@@ -207,11 +209,18 @@ impl fmt::Display for SteamPlayError {
                 "MacNeutron didn't update Steam: the new plan would stop protecting {count} Mac {}. Steam's app list may be unreadable right now.",
                 if *count == 1 { "game" } else { "games" }
             ),
+            SteamPlayError::Io(message) => write!(f, "{message}"),
         }
     }
 }
 
 impl std::error::Error for SteamPlayError {}
+
+impl From<std::io::Error> for SteamPlayError {
+    fn from(error: std::io::Error) -> Self {
+        SteamPlayError::Io(error.to_string())
+    }
+}
 
 /// Starting and stopping Steam. A trait so tests never touch the real client.
 pub trait SteamControlling: Send + Sync {

@@ -318,6 +318,15 @@ extern "C" {
     fn CC_SHA256_Final(md: *mut u8, c: *mut CC_SHA256_CTX) -> *mut u8;
 }
 
+/// `FileManager.removeItem`: removes a file, a symlink or a whole tree, like an item's copy (`libkrun.new` is a folder).
+pub fn remove_item(path: &Path) -> io::Result<()> {
+    if kind(path) == Kind::Directory {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+}
+
 /// `samePath`: standardized, symlink-resolved, trailing slashes trimmed.
 pub fn same_path(a: &Path, b: &Path) -> bool {
     normal(a) == normal(b)

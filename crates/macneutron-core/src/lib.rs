@@ -47,6 +47,7 @@ pub mod vm_tools_installer;
 pub mod app_installer;
 pub mod updater;
 pub mod install_scripts;
+pub mod steam_play_mode;
 
 #[cfg(test)]
 pub(crate) mod rpm_fixture;
@@ -94,3 +95,4 @@ pub use vm_tools_installer::{VMToolsInstallOutcome, VMToolsInstaller};
 pub use app_installer::AppInstallerError;
 pub use updater::{Release, UpdateError, UpdateFailure, UpdateOutcome};
 pub use install_scripts::{InstallScripts, Run};
+pub use steam_play_mode::{SteamPlayMode, SteamPlayStatus};

@@ -73,8 +73,8 @@ impl VMToolsInstaller {
             return Ok(VMToolsInstallOutcome::Deferred(running));
         }
         for item in Self::ITEMS.iter() {
-            let _ = remove_item(&vm.join(format!("{item}.new")));
-            let _ = remove_item(&vm.join(format!("{item}.old")));
+            let _ = posix::remove_item(&vm.join(format!("{item}.new")));
+            let _ = posix::remove_item(&vm.join(format!("{item}.old")));
         }
         for item in Self::ITEMS.iter() {
             let source_path = source(item).to_string_lossy().into_owned();
@@ -89,7 +89,7 @@ impl VMToolsInstaller {
                 .unwrap_or(-1);
             if status != 0 {
                 for item in Self::ITEMS.iter() {
-                    let _ = remove_item(&vm.join(format!("{item}.new")));
+                    let _ = posix::remove_item(&vm.join(format!("{item}.new")));
                 }
                 return Err(RuntimeInstallError::CopyFailed(status));
             }
@@ -99,7 +99,7 @@ impl VMToolsInstaller {
             let status = Self::verify(&vm.join(format!("{item}.new")), runner);
             if status != 0 {
                 for item in Self::ITEMS.iter() {
-                    let _ = remove_item(&vm.join(format!("{item}.new")));
+                    let _ = posix::remove_item(&vm.join(format!("{item}.new")));
                 }
                 return Err(RuntimeInstallError::SignatureInvalid(status));
             }
@@ -107,7 +107,7 @@ impl VMToolsInstaller {
         // Again: the copy takes a moment, and a VM started meanwhile runs from the old tools.
         if let Some(running) = running_under(vm, running_executables) {
             for item in Self::ITEMS.iter() {
-                let _ = remove_item(&vm.join(format!("{item}.new")));
+                let _ = posix::remove_item(&vm.join(format!("{item}.new")));
             }
             return Ok(VMToolsInstallOutcome::Deferred(running));
         }
@@ -120,7 +120,7 @@ impl VMToolsInstaller {
             if !swapped {
                 return Err(RuntimeInstallError::SwapFailed(std::io::Error::last_os_error().raw_os_error().unwrap_or(0)));
             }
-            let _ = remove_item(&vm.join(format!("{item}.new"))); // the old item, after a swap
+            let _ = posix::remove_item(&vm.join(format!("{item}.new"))); // the old item, after a swap
         }
         std::fs::write(&stamp, wanted.as_bytes()).map_err(|e| RuntimeInstallError::Io(e.to_string()))?;
         let _ = std::fs::remove_file(&installing);
@@ -257,15 +257,6 @@ impl VMToolsInstaller {
     fn link_path(vm: &Path) -> PathBuf {
         let text = vm.to_string_lossy().into_owned();
         PathBuf::from(text.strip_suffix('/').unwrap_or(&text))
-    }
-}
-
-/// `FileManager.removeItem`: removes a file, a symlink or a whole tree, like an item's copy (`libkrun.new` is a folder).
-fn remove_item(path: &Path) -> std::io::Result<()> {
-    if posix::kind(path) == posix::Kind::Directory {
-        std::fs::remove_dir_all(path)
-    } else {
-        std::fs::remove_file(path)
     }
 }
 

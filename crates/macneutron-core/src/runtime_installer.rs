@@ -264,7 +264,7 @@ fn is_executable(path: &Path) -> bool {
 }
 
 /// Writes `bytes` to `path` through a temporary file and a rename, so a reader never sees a half-written file.
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

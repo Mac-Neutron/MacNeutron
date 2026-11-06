@@ -8,6 +8,7 @@ use std::sync::Mutex;
 
 use crate::launcher_log::LauncherLog;
 use crate::process_runner::{ExitStatus, ProcessRunner};
+use crate::steam_location::{SteamControlling, SteamLocation, SteamPlayError};
 use crate::tool_layout::ToolLayout;
 
 /// A fresh temp directory whose path contains a space, like Steam's "Application Support".
@@ -361,4 +362,97 @@ pub fn test_preflight() -> crate::preflight::Preflight {
         Box::new(|_| Some(TEST_IDENTITY.to_string())),
         Box::new(|_| true),
     )
+}
+
+// From KeyValuesTests.swift and FakeSteam.swift.
+
+/// Shaped like Steam's config.vdf: tabs, nested blocks, escaped JSON inside a value.
+pub const STEAM_CONFIG_FIXTURE: &str = "\"InstallConfigStore\"\n{\n\t\"Software\"\n\t{\n\t\t\"Valve\"\n\t\t{\n\t\t\t\"Steam\"\n\t\t\t{\n\t\t\t\t\"AutoUpdateWindowEnabled\"\t\t\"0\"\n\t\t\t\t\"Recent\"\t\t\"{\\\"version\\\":2,\\\"data\\\":[]}\"\n\t\t\t\t\"CompatToolMapping\"\n\t\t\t\t{\n\t\t\t\t\t\"440\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\"\t\t\"proton_9\"\n\t\t\t\t\t\t\"config\"\t\t\"\"\n\t\t\t\t\t\t\"priority\"\t\t\"250\"\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n";
+
+pub const OK_SESSION: &str = "[2026-09-27 12:00:00] Client version: 1788652215
+[2026-09-27 12:00:00] Registering tool macneutron, AppID 0
+[2026-09-27 12:00:00] Registering tool macneutron-native, AppID 0
+[2026-09-27 12:00:01] Recording non-user mapping for 3064690 at priority 100 to tool proton-10
+";
+
+pub const MAC_MODE_SESSION: &str = "[2026-09-27 12:00:00] Client version: 1788652215
+[2026-09-27 12:00:00] Registering tool macneutron, AppID 0
+[2026-09-27 12:00:00] Ignoring tool macneutron as it's for a different target platform linux.
+";
+
+/// A Steam install in a temp folder: app bundle, config.vdf, and MacNeutron's runtime tool with a fake CLI.
+pub fn make_fake_steam(config: &str) -> (SteamLocation, PathBuf) {
+    let base = make_temp_dir();
+    let steam = SteamLocation::new(base.join("Steam"));
+    std::fs::create_dir_all(steam.bundle_macos()).unwrap();
+    write(config, &steam.config_vdf(), false);
+    let root = base.join("MacNeutron");
+    write("\"manifest\" {}", &root.join("compatibilitytools.d/macneutron/toolmanifest.vdf"), false);
+    write("#!/bin/sh\necho fake macneutron\n", &root.join("compatibilitytools.d/macneutron/bin/macneutron"), true);
+    (steam, root)
+}
+
+/// Stands in for the Steam client: launching appends `session` to compat_log.txt.
+pub struct FakeSteam {
+    running: Mutex<bool>,
+    dev_config_at_launch: Mutex<Vec<bool>>,
+    intent_at_launch: Mutex<Vec<bool>>,
+    pub steam: SteamLocation,
+    pub session: String,
+    pub intent_file: Option<PathBuf>,
+    pub replace_log_on_launch: bool,
+}
+
+impl FakeSteam {
+    pub fn new(
+        steam: SteamLocation,
+        running: bool,
+        session: &str,
+        intent_file: Option<PathBuf>,
+        replace_log_on_launch: bool,
+    ) -> Self {
+        FakeSteam {
+            running: Mutex::new(running),
+            dev_config_at_launch: Mutex::new(Vec::new()),
+            intent_at_launch: Mutex::new(Vec::new()),
+            steam,
+            session: session.to_string(),
+            intent_file,
+            replace_log_on_launch,
+        }
+    }
+
+    pub fn launches_with_dev_config(&self) -> Vec<bool> {
+        self.dev_config_at_launch.lock().unwrap().clone()
+    }
+
+    pub fn launches_with_intent(&self) -> Vec<bool> {
+        self.intent_at_launch.lock().unwrap().clone()
+    }
+}
+
+impl SteamControlling for FakeSteam {
+    fn is_running(&self) -> bool {
+        *self.running.lock().unwrap()
+    }
+
+    fn quit(&self, _timeout: std::time::Duration) -> Result<(), SteamPlayError> {
+        *self.running.lock().unwrap() = false;
+        Ok(())
+    }
+
+    fn launch(&self) -> Result<(), SteamPlayError> {
+        let has_dev_config = self.steam.steam_dev_config().exists();
+        let has_intent = self.intent_file.as_ref().is_some_and(|f| f.exists());
+        *self.running.lock().unwrap() = true;
+        self.dev_config_at_launch.lock().unwrap().push(has_dev_config);
+        self.intent_at_launch.lock().unwrap().push(has_intent);
+        let old = if self.replace_log_on_launch {
+            String::new()
+        } else {
+            std::fs::read_to_string(self.steam.compat_log()).unwrap_or_default()
+        };
+        write(&(old + &self.session), &self.steam.compat_log(), false);
+        Ok(())
+    }
 }
