@@ -48,6 +48,7 @@ pub mod app_installer;
 pub mod updater;
 pub mod install_scripts;
 pub mod steam_play_mode;
+pub mod prefix_manager;
 
 #[cfg(test)]
 pub(crate) mod rpm_fixture;
@@ -96,3 +97,4 @@ pub use app_installer::AppInstallerError;
 pub use updater::{Release, UpdateError, UpdateFailure, UpdateOutcome};
 pub use install_scripts::{InstallScripts, Run};
 pub use steam_play_mode::{SteamPlayMode, SteamPlayStatus};
+pub use prefix_manager::{PrefixError, PrefixManager};
