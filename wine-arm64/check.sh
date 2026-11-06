@@ -437,7 +437,7 @@ steam_bridge_cmd() {
   out=$(PROBE_REDACT=1 STEAM_COMPAT_CLIENT_INSTALL_PATH="$client" MACNEUTRON_ARM64_APP="$TOOL" \
     MACNEUTRON_ARM64_PREFIX="$PFX" sh "$ROOT/bridge/probe.sh" "$SMITE2_API" 2>&1) && rc=0 || rc=$?
   probe_rows direct || return 1
-  "$ROOT/.build/release/macneutron" install --tool-dir "$BTOOL" --wine-app "$TOOL" \
+  "$ROOT/target/release/macneutron" install --tool-dir "$BTOOL" --wine-app "$TOOL" \
     --steam-exe "$ROOT/build/bridge/arm64/steam.exe" || return 1
   out=$(BRIDGE_CHECK_WORK="${BCOMPAT%/compat}" MACNEUTRON_TOOL_DIR="$BTOOL" sh "$ROOT/bridge/check.sh" 2>&1) \
     && rc=0 || rc=$?

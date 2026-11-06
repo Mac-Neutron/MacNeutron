@@ -44,7 +44,7 @@ ATESTS="$(cd "$ATESTS" && pwd)" ALOOP="$(cd "$(dirname "$ALOOP")" && pwd)/${ALOO
 # launcher (never this one). Each has its own compat folders: either launcher would rebuild the other's prefixes.
 rm -rf "$WORK"; mkdir -p "$WORK/compat"
 cp -cR "$(cd "$REF" && pwd -P)" "$WORK/ref"
-"$ROOT/.build/release/macneutron" install --tool-dir "$WORK/ours" --wine-app "$WINEAPP" > /dev/null \
+"$ROOT/target/release/macneutron" install --tool-dir "$WORK/ours" --wine-app "$WINEAPP" > /dev/null \
   || die "macneutron install could not assemble $WORK/ours"
 
 # run <ours|ref> <name> <backend> <exe> [args...]  →  output in $WORK/<name>.txt. The backend picks the tool folder:

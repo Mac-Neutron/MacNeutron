@@ -15,7 +15,7 @@ case ${MACNEUTRON_PROFILE:-std} in std) O=/mnt/out ;; *) O=/mnt/out-$MACNEUTRON_
 KVER=7.2.10-200.fc44.aarch64
 fail=
 
-swift build -c release --product macneutron --package-path "$ROOT" 2>&1 | tail -1
+make -s -C "$ROOT" build 2>&1 | tail -1
 MKFS=$(sh "$ROOT/vm/setup-tools/build.sh")
 mkdir -p "$G"
 
@@ -46,7 +46,7 @@ VM=$G/vm
 rm -rf "$VM"
 sh "$ROOT/vm/host/stage.sh" "$VM"
 start=$(date +%s)
-"$ROOT/.build/release/macneutron" vm-setup --manifest "$G/vm-manifest.json" --vm "$VM" --mkfs "$MKFS" \
+"$ROOT/target/release/macneutron" vm-setup --manifest "$G/vm-manifest.json" --vm "$VM" --mkfs "$MKFS" \
   | /usr/bin/grep -v '^progress download' || fail="$fail setup"
 echo "vm-setup: the setup took $(( $(date +%s) - start )) s"
 [ -f "$VM/images/manifest.sha256" ] || fail="$fail incomplete"

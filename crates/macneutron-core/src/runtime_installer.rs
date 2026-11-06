@@ -673,7 +673,7 @@ mod tests {
 
     #[test]
     fn steam_exe_option_is_used_when_given() {
-        // A dev build's .build/release/ has no steam.exe beside the CLI.
+        // A dev build's target/release/ has no steam.exe beside the CLI.
         let layout = make_installed_layout("A");
         let steam_exe = make_temp_dir().join("arm64 bridge/steam.exe");
         write("steam.exe arm64", &steam_exe, false);

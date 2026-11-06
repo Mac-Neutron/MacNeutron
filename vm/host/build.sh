@@ -100,9 +100,11 @@ link_args="$link_args -Clink-arg=-lc++"
 # bitcode (-flto=thin) and are passed through -Clink-arg, which cargo does not track: touch the source so the link
 # always reruns (the Swift host relinked on every build too -- swiftc was the link step).
 touch "$ROOT/vm/host/src/main.rs"
+# A member of the root workspace, built in its own target folder: these RUSTFLAGS would otherwise rebuild the shared
+# target/ that make build uses (and BUILD_DIR's p profile keeps its own).
 RUSTFLAGS="-Ctarget-cpu=${MACNEUTRON_CPU:-apple-m5} ${RUST_PGO:+$RUST_PGO }$link_args" \
-  cargo build --release --manifest-path "$ROOT/vm/host/Cargo.toml"
-cp "$ROOT/vm/host/target/release/macneutron-vm" "$W/macneutron-vm"
+  cargo build --release --manifest-path "$ROOT/vm/host/Cargo.toml" --target-dir "$W/cargo-target"
+cp "$W/cargo-target/release/macneutron-vm" "$W/macneutron-vm"
 make -s -C "$ROOT/vm/metal/wm" metal-host
 # The VM's folder is what MacNeutron's launcher runs a game from (Sources/MacNeutronCore/MicroVM.swift).
 cp "$ROOT/vm/run-guest.sh" "$W/run-guest.sh"

@@ -13,11 +13,21 @@ MINGW_A64 = $(MINGW_BIN)/aarch64-w64-mingw32-clang -O3 -flto=thin -static -s $(P
 BRIDGE = build/bridge
 PRESENTER = build/presenter
 
+# cargo: yours on PATH, else rustup's proxy beside the rustup binary (Homebrew keeps it off PATH; vm/host/build.sh
+# finds it the same way), whose rustc is then found on PATH.
+RUSTUP_PROXIES := $(shell r=$$(command -v rustup) && dirname "$$(readlink -f "$$r")")
+ifneq ($(RUSTUP_PROXIES),)
+export PATH := $(PATH):$(RUSTUP_PROXIES)
+endif
+CARGO ?= $(or $(shell command -v cargo),$(RUSTUP_PROXIES)/cargo)
+
+# Every binary but macneutron-vm, which vm/host/build.sh builds with its C objects and libkrun (its link args). The
+# home folder mapped to ~: registry crates' panic locations would name it, and no build path ships (release.sh).
 build:
-	swift build -c release
+	RUSTFLAGS="--remap-path-prefix=$(HOME)=~" $(CARGO) build --release --workspace --exclude macneutron-vm
 
 test:
-	swift test
+	$(CARGO) test --workspace
 
 # The launcher on wine.app in a tool folder assembled with `macneutron install`, and the install itself (gates L5,
 # L6; real Wine, no Steam). See Tests/Smoke/smoke.sh.
@@ -133,8 +143,8 @@ app: build bridge wine-arm64
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Helpers $(APP)/Contents/Resources
 	cp App/Info.plist $(APP)/Contents/Info.plist
-	cp .build/release/MacNeutronApp $(APP)/Contents/MacOS/MacNeutron
-	cp .build/release/macneutron $(APP)/Contents/Helpers/macneutron
+	cp target/release/MacNeutronApp $(APP)/Contents/MacOS/MacNeutron
+	cp target/release/macneutron $(APP)/Contents/Helpers/macneutron
 	codesign --force --sign - $(APP)/Contents/Helpers/macneutron
 	cp -c -R build/wine-arm64/wine.app $(APP)/Contents/Helpers/wine.app
 	sh vm/host/stage.sh $(APP)/Contents/Helpers/vm

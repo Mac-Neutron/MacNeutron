@@ -9,7 +9,8 @@ macOS since: see Graphics). Design:
 `docs/superpowers/specs/`.
 
 **Requirements:** an Apple Silicon Mac with macOS 27 or later, and the Steam client for Mac. Building from source also
-needs Xcode 27 (Swift 6) and the Developer ID setup in `wine-arm64/README.md` (there is no ad-hoc signed `wine.app`).
+needs Xcode 27, Rust (rustup's stable toolchain: `brew install rustup`) and the Developer ID setup in
+`wine-arm64/README.md` (there is no ad-hoc signed `wine.app`).
 
 ## Download and set up
 
@@ -38,8 +39,8 @@ deleted.
 ## Build and test
 
 ```sh
-make build   # swift build -c release
-make test    # unit tests
+make build   # cargo build --release (macneutron-vm: vm/host/build.sh)
+make test    # cargo test --workspace
 make wine-arm64        # native arm64 Wine + FEX + DXMT in a signed wine.app (needs the Developer ID setup in wine-arm64/README.md)
 make wine-arm64-check  # its gates under real Wine
 make dxmt-check        # our DXMT against the frozen Rosetta reference (tools/freeze-rosetta-reference.sh)
@@ -64,12 +65,12 @@ which the build fetches once (118 MB). `make app` signs with `MACNEUTRON_SIGN_ID
 The app does this for you. To assemble a tool folder by hand from a built `wine.app`:
 
 ```sh
-.build/release/macneutron install --tool-dir <dir> --wine-app <path to wine.app>
+target/release/macneutron install --tool-dir <dir> --wine-app <path to wine.app>
 ```
 
 It prints `installed <label>` or `unchanged <label>` (exit 0), or `deferred: <path> is running` (exit 3) when a game is
 using the current runtime. `--force` reinstalls, and `--steam-exe <path>` names the Steam bridge's `steam.exe` when the
-CLI isn't beside one (a tool folder assembled from `.build/release/`).
+CLI isn't beside one (a tool folder assembled from `target/release/`).
 
 ## Per-game options
 
@@ -227,9 +228,9 @@ with its own anti-aliasing or XeSS gains nothing from it.
 ## Licences
 
 `wine.app` carries the licence texts of everything in it under `Contents/Resources/licenses/`, and `MacNeutron.app`
-carries its own and a pointer to those in `Contents/Resources/licenses/`. The Steam bridge (`lsteamclient`) ships under
-Valve's Steamworks SDK licence (`licenses/lsteamclient/`). Provisioning profiles expire: a build signed with an expired
-profile stops launching, so a release is rebuilt before its profile runs out.
+carries its own, its Rust crates' (`rust/`) and a pointer to those in `Contents/Resources/licenses/`. The Steam bridge
+(`lsteamclient`) ships under Valve's Steamworks SDK licence (`licenses/lsteamclient/`). Provisioning profiles expire: a
+build signed with an expired profile stops launching, so a release is rebuilt before its profile runs out.
 
 ## Licence
 

@@ -18,7 +18,7 @@ TO=$(cat "$I/timeout")
 now() { perl -MTime::HiRes=time -e 'printf "%.2f\n", time'; }
 rm -rf "$WORK" "$OUT"; mkdir -p "$WORK/compat" "$OUT"
 WINE_APP=${MN_REF_WINE_APP:-${BUILD_DIR:-$ROOT/build}/wine-arm64/wine.app}
-"$ROOT/.build/release/macneutron" install --tool-dir "$WORK/ours" --wine-app "$WINE_APP" > /dev/null
+"$ROOT/target/release/macneutron" install --tool-dir "$WORK/ours" --wine-app "$WINE_APP" > /dev/null
 stop() {
   [ ! -d "$WORK/compat/pfx" ] || WINEPREFIX="$WORK/compat/pfx" WINEMSYNC=1 \
     "$WORK/ours/wine.app/Contents/Resources/bin/wineserver" -k > /dev/null 2>&1 || true

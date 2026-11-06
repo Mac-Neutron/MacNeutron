@@ -2,7 +2,7 @@
 # DXMT's headless D3D12 and D3D11 test programs (dxmt/tests, the 4b-2 gate's rows, gate.sh), built natively against native
 # DXMT (build.sh's install/lib) into build/dxmt-native/tests/<program>, in parallel. Then a check: d3d12_null natively
 # prints what a fresh macOS run of it prints (vm/dxmt/ref.sh through the runtime's launcher, compare.py's rule).
-# Needs build.sh, and for the check what ref.sh needs (make dxmt-tests, .build/release/macneutron,
+# Needs build.sh, and for the check what ref.sh needs (make dxmt-tests, target/release/macneutron,
 # build/wine-arm64/wine.app). Prints "tests: ok" or "tests: FAIL <what>".
 # MN_D3D_PROGRAMS_LIB: link the programs to that library instead of native DXMT (Direct3D forwarding's loopback, M2),
 # into MN_D3D_PROGRAMS_OUT, with no check (the loopback's gate compares them). MN_D3D_PROGRAMS: those programs only.

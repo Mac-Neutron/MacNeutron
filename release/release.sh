@@ -583,7 +583,7 @@ r3() {
   trap - EXIT
 }
 
-# MacNeutron.app (§6.3 step 3, §7.1): the Swift binaries (thin arm64), wine.app copied whole with ditto (its signature,
+# MacNeutron.app (§6.3 step 3, §7.1): the Rust binaries (thin arm64), wine.app copied whole with ditto (its signature,
 # profile, entitlements and ticket stay), steam.exe and the licences; signed inside-out, never --deep, never re-signing
 # wine.app, no entitlements. Then its licences (R4).
 build_app() {
@@ -595,7 +595,7 @@ build_app() {
     "$A/Contents/Info.plist" || die "can't set the version in $A/Contents/Info.plist"
   m=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$A/Contents/Info.plist" 2> /dev/null || true)
   [ "$m" = 27.0 ] || die "App/Info.plist's LSMinimumSystemVersion is '${m:-missing}', not 27.0"
-  cp "$ROOT/.build/release/MacNeutronApp" "$A/Contents/MacOS/MacNeutron"
+  cp "$ROOT/target/release/MacNeutronApp" "$A/Contents/MacOS/MacNeutron"
   cp "$CLI" "$A/Contents/Helpers/macneutron"
   for f in MacOS/MacNeutron Helpers/macneutron; do
     a=$(lipo -archs "$A/Contents/$f")
@@ -640,8 +640,16 @@ build_app() {
   for f in LICENSE.TXT COPYING.MinGW-w64-runtime.txt; do
     cp "$OUT/wine.app/Contents/Resources/licenses/llvm-mingw/$f" "$AL/"
   done
+  # The crates MacNeutron's Rust binaries link, and Rust's standard library's notices.
+  python3 -I "$ROOT/release/crate-notices.py" "$ROOT" "$AL/rust" "${CARGO:-$(brew --prefix rustup)/bin/cargo}" \
+    || die "can't collect MacNeutron's crates' licences (release/crate-notices.py)"
   cat > "$AL/README" << 'EOF'
 MacNeutron is under the MIT licence (LICENSE, beside this file).
+
+MacNeutron's programs (Contents/MacOS/MacNeutron, Contents/Helpers/macneutron, Contents/Helpers/vm/macneutron-vm,
+and Install MacNeutron, which carries this app) are Rust: they link Rust's standard library (its notices in rust/std/)
+and the crates rust/crates/INDEX lists, each crate's licence files in rust/crates/<crate>-<version>/. zstd-sys compiles
+zstd's decoder in (BSD-3-Clause, its folder's zstd-LICENSE).
 
 steam.exe (Contents/Resources/steam.exe), MacNeutron's own Windows-side Steam stub, is built with llvm-mingw and links
 its mingw-w64 runtime: llvm-mingw's licence is LICENSE.TXT and the runtime's notices COPYING.MinGW-w64-runtime.txt,
@@ -663,7 +671,6 @@ EOF
   cp "$V_SRC/erofs-utils/COPYING" "$ALV/erofs-utils-COPYING"
   cp -R "$V_SRC/erofs-utils/LICENSES" "$ALV/erofs-utils-LICENSES"
   cp "$V_SRC/lz4/lib/LICENSE" "$ALV/lz4-LICENSE"
-  cp "$ROOT/Sources/CZstd/LICENSE" "$ALV/zstd-LICENSE"
   sh "$ROOT/vm/net/licences.sh" "$VMH/gvproxy" "$ALV/gvproxy" > /dev/null || die "can't collect gvproxy's licences"
   cat > "$ALV/README" << 'EOF'
 The microVM games run in (Contents/Helpers/vm and Contents/Resources/vm), and the setup that builds its images on
@@ -682,7 +689,7 @@ this Mac (Contents/Helpers/mkfs.erofs, and Contents/Helpers/macneutron's vm-setu
   (gvproxy/modules/, listed in gvproxy/MODULES.txt) and Go's runtime and standard library (BSD-3-Clause, gvproxy/go/).
 - mkfs.erofs is erofs-utils (GPL-2.0-or-later: erofs-utils-COPYING, erofs-utils-LICENSES/) with lz4 compiled in
   (BSD-2-Clause, lz4-LICENSE). Their source is in the release's source archive (erofs-utils.tar, lz4.tar).
-- macneutron reads Fedora's packages with zstd's decoder (BSD-3-Clause, zstd-LICENSE).
+- macneutron reads Fedora's packages with zstd's decoder (BSD-3-Clause, ../rust/crates/zstd-sys-*/zstd-LICENSE).
 The VM's Fedora packages are downloaded from Fedora (its mirrors, or its build system, Koji) to this Mac by the setup;
 MacNeutron ships none of them but one: its VM parts carry Fedora's alsa-lib for i686 (LGPL-2.1-or-later), whose
 source RPM is in the release's source archive. MacNeutron's own VM parts are a separate download, built from the
@@ -748,7 +755,7 @@ build_installer() {
   m=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INST/Contents/Info.plist" 2> /dev/null || true)
   [ "$m" = 27.0 ] || die "App/Installer-Info.plist's LSMinimumSystemVersion is '${m:-missing}', not 27.0"
   f="$INST/Contents/MacOS/Install MacNeutron"
-  cp "$ROOT/.build/release/MacNeutronInstaller" "$f"
+  cp "$ROOT/target/release/MacNeutronInstaller" "$f"
   a=$(lipo -archs "$f")
   [ "$a" = arm64 ] || die "the installer's binary is '$a', not arm64"
   strip -S "$f" 2> /dev/null || die "can't strip the installer's binary"
@@ -811,8 +818,8 @@ check_dxmt "${BUILD_DIR:-$ROOT/build}/wine-arm64-src/dxmt" "$(. "$ROOT/dxmt/pins
 [ $failed = 0 ] || exit 1
 check_up_to_date || exit 1
 HEAD=$(git -C "$ROOT" rev-parse HEAD)
-CLI="$ROOT/.build/release/macneutron" STEAM_EXE="$ROOT/build/bridge/arm64/steam.exe"
-for f in "$CLI" "$ROOT/.build/release/MacNeutronApp" "$ROOT/.build/release/MacNeutronInstaller" "$STEAM_EXE" \
+CLI="$ROOT/target/release/macneutron" STEAM_EXE="$ROOT/build/bridge/arm64/steam.exe"
+for f in "$CLI" "$ROOT/target/release/MacNeutronApp" "$ROOT/target/release/MacNeutronInstaller" "$STEAM_EXE" \
   "$ROOT/build/bridge/steamprobe.exe"; do
   [ -f "$f" ] || die "no $f: run make build bridge"
 done

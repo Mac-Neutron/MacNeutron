@@ -133,9 +133,20 @@ if [ "${1:-}" = --app ]; then
   done
   # The microVM's host tools and mkfs.erofs (release.sh build_app).
   for f in README libkrun/CRATES.txt libkrun/THIRD-PARTY libkrun/rust-std/COPYRIGHT.html libtpms-LICENSE \
-    openssl-LICENSE.txt erofs-utils-COPYING lz4-LICENSE zstd-LICENSE gvproxy/LICENSE gvproxy/MODULES.txt gvproxy/go/LICENSE; do
+    openssl-LICENSE.txt erofs-utils-COPYING lz4-LICENSE gvproxy/LICENSE gvproxy/MODULES.txt gvproxy/go/LICENSE; do
     [ -s "$AL/vm/$f" ] || { echo "MISSING Contents/Resources/licenses/vm/$f"; abad=1; }
   done
+  # The crates the Rust binaries link (release/crate-notices.py): a folder of licence files for each one its INDEX
+  # names, zstd's own notice, and Rust's standard library's.
+  for f in rust/crates/INDEX rust/std/COPYRIGHT-library.html rust/std/licenses/MIT.txt rust/std/licenses/Apache-2.0.txt; do
+    [ -s "$AL/$f" ] || { echo "MISSING Contents/Resources/licenses/$f"; abad=1; }
+  done
+  while read -r crate version _; do  # "<crate> <version>: <terms>"
+    version=${version%:}
+    ls "$AL/rust/crates/$crate-$version"/* > /dev/null 2>&1 || { echo "MISSING licenses/rust/crates/$crate-$version"; abad=1; }
+  done < "$AL/rust/crates/INDEX" 2> /dev/null
+  g -qF "Meta Platforms" "$AL"/rust/crates/zstd-sys-*/zstd-LICENSE 2> /dev/null \
+    || { echo "MISSING licenses/rust/crates/zstd-sys-*/zstd-LICENSE (zstd's BSD notice)"; abad=1; }
   g -qF 'Contents/Helpers/wine.app/Contents/Resources/licenses/' "$AL/README" 2> /dev/null \
     || { echo "MISSING the README's pointer to Contents/Helpers/wine.app/Contents/Resources/licenses/"; abad=1; }
   g -qF 'Proton-steam-LICENSE.txt' "$AL/README" 2> /dev/null \

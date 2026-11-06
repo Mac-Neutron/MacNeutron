@@ -29,7 +29,7 @@ else
     WS="$WORK/tool/wine.app/Contents/Resources/bin/wineserver"
     [ ! -x "$WS" ] || { WINEPREFIX="$WORK/compat/pfx" WINEMSYNC=1 "$WS" -k
       WINEPREFIX="$WORK/compat/pfx" WINEMSYNC=1 "$WS" -w; } 2>/dev/null || true
-    "$ROOT/.build/release/macneutron" install --tool-dir "$MACNEUTRON_TOOL_DIR" \
+    "$ROOT/target/release/macneutron" install --tool-dir "$MACNEUTRON_TOOL_DIR" \
       --wine-app "$ROOT/build/wine-arm64/wine.app" --steam-exe "$B/steam.exe" \
       || { echo "check: assembling the tool folder failed" >&2; exit 1; }
   fi

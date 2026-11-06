@@ -10,7 +10,7 @@ B="$ROOT/build/presenter"
 WORK="${TMPDIR:-/tmp}/macneutron presenter"
 TOOL="$WORK/tool"
 mkdir -p "$WORK/compat"
-"$ROOT/.build/release/macneutron" install --tool-dir "$TOOL" --wine-app "$ROOT/build/wine-arm64/wine.app" \
+"$ROOT/target/release/macneutron" install --tool-dir "$TOOL" --wine-app "$ROOT/build/wine-arm64/wine.app" \
   || { echo "check: assembling the tool folder failed" >&2; exit 1; }
 fail=0
 expect() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got [$2], want [$3]"; fail=1; fi; }

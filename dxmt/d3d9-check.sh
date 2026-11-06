@@ -21,7 +21,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP=$(cd "${1:-$ROOT/build/wine-arm64/wine.app}" && pwd)
 EXE="$ROOT/build/dxmt-tests/d3d9_triangle.exe" DYN="$ROOT/build/dxmt-tests/d3d9_dynamic.exe"
 ARM="$ROOT/build/dxmt-tests-arm64/d3d9_triangle.exe"
-CLI="$ROOT/.build/release/macneutron"
+CLI="$ROOT/target/release/macneutron"
 for e in "$EXE" "$DYN" "$ARM"; do [ -f "$e" ] || { echo "d3d9-check: no $e: run make dxmt-tests" >&2; exit 2; }; done
 [ -x "$CLI" ] || { echo "d3d9-check: no $CLI: run make build" >&2; exit 2; }
 WORK=${DXMT_CHECK_WORK:-$(mktemp -d "${TMPDIR:-/tmp}/macneutron-d3d9.XXXXXX")}
