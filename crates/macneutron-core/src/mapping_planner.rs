@@ -151,3 +151,105 @@ impl MappingPlanner {
         tool.starts_with("macneutron")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{BTreeMap, HashMap};
+
+    fn app(id: u32, oslist: &[&str], ty: &str) -> AppInfo {
+        AppInfo {
+            app_id: id,
+            name: format!("App {id}"),
+            r#type: ty.to_string(),
+            oslist: oslist.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    fn entry(key: &str, name: &str, with_config: bool) -> KVNode {
+        let mut c = vec![KVNode::string("name", name)];
+        if with_config {
+            c.push(KVNode::string("config", ""));
+        }
+        c.push(KVNode::string("priority", "250"));
+        KVNode::block(key, c)
+    }
+
+    fn name_at(nodes: &[KVNode], path: &[&str]) -> Option<String> {
+        node_at(nodes, path).and_then(|n| n.string_value())
+    }
+
+    #[test]
+    fn routes_by_platform() {
+        let cases: [(&[&str], &str); 6] = [
+            (&["macos"], "macneutron-native"),
+            (&["windows"], "macneutron-proton"),
+            (&["windows", "macos"], "macneutron-native"),
+            (&["macos", "linux"], "macneutron-native"),
+            (&["windows", "linux"], "macneutron-proton"),
+            (&["windows", "macos", "linux"], "macneutron-native"),
+        ];
+        for (oslist, tool) in cases {
+            let plan = MappingPlanner::plan(&[app(10, oslist, "game")], &HashMap::new());
+            assert_eq!(plan["10"], ToolMapping::new(tool, 250), "{oslist:?}");
+        }
+    }
+
+    #[test]
+    fn linux_only_and_tools_are_not_mapped() {
+        let plan = MappingPlanner::plan(
+            &[app(1, &["linux"], "game"), app(2, &["windows"], "tool"), app(3, &["windows"], "dlc")],
+            &HashMap::new(),
+        );
+        assert_eq!(plan.keys().cloned().collect::<Vec<_>>(), vec!["0".to_string()]);
+    }
+
+    #[test]
+    fn global_entry_always_points_at_the_runtime() {
+        assert_eq!(MappingPlanner::plan(&[], &HashMap::new())["0"], ToolMapping::new("macneutron-proton", 75));
+    }
+
+    #[test]
+    fn run_as_windows_only_applies_to_dual_platform_games() {
+        let plan = MappingPlanner::plan(
+            &[app(1, &["windows", "macos"], "game"), app(2, &["macos"], "game")],
+            &HashMap::from([(1, RunAs::Windows), (2, RunAs::Windows)]),
+        );
+        assert_eq!(plan["1"].tool, "macneutron-proton");
+        assert_eq!(plan["2"].tool, "macneutron-native");
+    }
+
+    #[test]
+    fn merge_keeps_other_tools_and_replaces_ours() {
+        let existing = vec![entry("440", "proton_9", true), entry("99", "macneutron", true)];
+        let plan = BTreeMap::from([
+            ("0".to_string(), ToolMapping::new("macneutron", 75)),
+            ("20".to_string(), ToolMapping::new("macneutron-native", 250)),
+        ]);
+        let merged = MappingPlanner::merged(&existing, &plan);
+        assert_eq!(merged.iter().map(|n| n.key.clone()).collect::<Vec<_>>(), vec!["0", "20", "440"]);
+        assert_eq!(MappingPlanner::current(&merged), plan);
+        assert_eq!(name_at(&merged, &["440", "name"]).as_deref(), Some("proton_9"));
+    }
+
+    #[test]
+    fn another_tools_entry_is_never_replaced() {
+        // Spec §5: entries naming another tool are the user's explicit choice and are left alone.
+        let existing = vec![entry("20", "proton_9", false)];
+        let plan = BTreeMap::from([("20".to_string(), ToolMapping::new("macneutron", 250))]);
+        let merged = MappingPlanner::merged(&existing, &plan);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(name_at(&merged, &["20", "name"]).as_deref(), Some("proton_9"));
+    }
+
+    #[test]
+    fn legacy_and_native_entries_are_ours() {
+        let existing = vec![entry("1", "macneutron", true), entry("2", "macneutron-native", true)];
+        assert!(MappingPlanner::claimed_by_other_tools(&existing).is_empty());
+        assert_eq!(MappingPlanner::current(&existing).len(), 2);
+        let plan = BTreeMap::from([("1".to_string(), ToolMapping::new("macneutron-proton", 250))]);
+        let merged = MappingPlanner::merged(&existing, &plan);
+        assert_eq!(name_at(&merged, &["1", "name"]).as_deref(), Some("macneutron-proton"));
+        assert!(node_at(&merged, &["2"]).is_none());
+    }
+}
