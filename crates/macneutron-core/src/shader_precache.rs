@@ -206,7 +206,260 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Instant;
 
-    // Swift's other 12 ShaderPrecacheTests drive `Launcher.launch` (not ported yet): they come with launcher.rs.
+    use crate::launcher::tests::{args, read, test_launcher};
+    use crate::launcher::Launcher;
+    use crate::test_support::{Call, RecordingNotifier, TEST_IDENTITY};
+    use std::sync::{OnceLock, Weak};
+
+    struct PrecacheFixture {
+        launcher: Arc<Launcher>,
+        runner: Arc<FakeRunner>,
+        notifier: Arc<RecordingNotifier>,
+        env: BTreeMap<String, String>,
+        folder: PathBuf,
+        builds: String,
+    }
+
+    impl PrecacheFixture {
+        fn stamp(&self) -> Option<String> {
+            std::fs::read_to_string(self.folder.join("replayed")).ok()
+        }
+
+        fn replays(&self) -> Vec<Call> {
+            self.runner.calls().into_iter().filter(is_replay).collect()
+        }
+
+        fn launcher_log(&self) -> String {
+            read(&self.launcher.log.launcher_log())
+        }
+
+        fn launch(&self, argv: &[&str], env: &BTreeMap<String, String>) -> i32 {
+            self.launcher.launch(&args(argv), env)
+        }
+
+        fn ran_the_game(&self) -> Option<Call> {
+            self.runner.calls().into_iter().find(|c| c.arguments == ["/g/Game.exe"])
+        }
+
+        fn record(&self, name: &str) {
+            write("rec", &self.folder.join(name), false);
+        }
+
+        fn stamped(&self, text: &str) {
+            write(text, &self.folder.join("replayed"), false);
+        }
+    }
+
+    fn is_replay(call: &Call) -> bool {
+        call.arguments.first().is_some_and(|a| a.ends_with("dxmt-replay.exe"))
+    }
+
+    /// A launcher on the fake wine.app (DXMT `fork123`, translator `tr123`, and its replayer). The fake dxmt-replay.exe
+    /// writes a result line to its output and returns `replay_status`, after `on_replay` with the launcher.
+    fn make_precache_fixture_with(replay_status: i32, on_replay: Option<fn(&Launcher, &Call)>) -> PrecacheFixture {
+        let layout = make_tool_layout();
+        write("fork123\n", &layout.wine_app().join("Contents/Resources/DXMT/version"), false);
+        write("tr123\n", &layout.dxmt_translator_file(), false);
+        let this: Arc<OnceLock<Weak<Launcher>>> = Arc::default();
+        let me = this.clone();
+        let runner = Arc::new(FakeRunner::new(move |call| {
+            if call.arguments.first().map(String::as_str) == Some("wineboot") {
+                if let Some(prefix) = call.environment.get("WINEPREFIX") {
+                    let _ = std::fs::create_dir_all(prefix);
+                }
+            }
+            if is_replay(call) {
+                if let Some(output) = &call.output {
+                    let _ = std::fs::write(
+                        output,
+                        "replay progress 2/2\r\nreplay: 2 pipelines (1 graphics, 1 compute), 2 created, 0 failed, 0 bad records, 5 ms\r\n",
+                    );
+                    if let (Some(on_replay), Some(launcher)) = (on_replay, me.get().and_then(Weak::upgrade)) {
+                        on_replay(&launcher, call);
+                    }
+                    return replay_status;
+                }
+            }
+            0
+        }));
+        let notifier = Arc::new(RecordingNotifier::default());
+        let data = make_temp_dir().join("compatdata/42");
+        let launcher = Arc::new(test_launcher(
+            layout,
+            runner.clone(),
+            notifier.clone(),
+            Some(TEST_IDENTITY),
+            make_temp_dir().join("no-vm"),
+        ));
+        let _ = this.set(Arc::downgrade(&launcher));
+        let env = steam_environment(&data, "42");
+        let context = CompatContext::new(&env).unwrap();
+        PrecacheFixture {
+            launcher,
+            runner,
+            notifier,
+            env,
+            folder: ShaderPrecache::folder(&context),
+            builds: format!("tr123 {}", ShaderPrecache::macos_build()),
+        }
+    }
+
+    fn make_precache_fixture() -> PrecacheFixture {
+        make_precache_fixture_with(0, None)
+    }
+
+    const GAME: [&str; 2] = ["waitforexitandrun", "/g/Game.exe"];
+
+    #[test]
+    fn the_game_records_into_its_compat_folder() {
+        let f = make_precache_fixture();
+        f.launch(&GAME, &f.env);
+        let run = f.ran_the_game().unwrap();
+        assert_eq!(run.environment["DXMT_PIPELINE_RECORD"], f.folder.to_string_lossy());
+        assert!(f.folder.to_string_lossy().ends_with("compatdata/42/dxmt-pipelines"));
+    }
+
+    #[test]
+    fn the_first_session_stamps_without_replaying() {
+        let f = make_precache_fixture();
+        assert_eq!(f.launch(&GAME, &f.env), 0);
+        assert!(f.replays().is_empty());
+        assert_eq!(f.stamp(), Some(format!("{}\n", f.builds)));
+    }
+
+    #[test]
+    fn recordings_without_a_stamp_are_not_replayed() {
+        let f = make_precache_fixture();
+        f.record("Game.exe.pipelines");
+        f.launch(&GAME, &f.env);
+        assert!(f.replays().is_empty());
+        assert_eq!(f.stamp(), Some(format!("{}\n", f.builds)));
+    }
+
+    #[test]
+    fn the_same_builds_do_not_replay() {
+        let f = make_precache_fixture();
+        f.record("Game.exe.pipelines");
+        f.stamped(&format!("{}\n", f.builds));
+        f.launch(&GAME, &f.env);
+        assert!(f.replays().is_empty());
+    }
+
+    // The stamp is the translator's key (arm64 release Ruling 46), not DXMT's version: a DXMT update that leaves the
+    // translator alone replays nothing.
+    #[test]
+    fn a_dxmt_update_that_keeps_the_translator_does_not_replay() {
+        let f = make_precache_fixture();
+        f.record("Game.exe.pipelines");
+        f.stamped(&format!("{}\n", f.builds));
+        write("fork456\n", &f.launcher.layout.wine_app().join("Contents/Resources/DXMT/version"), false);
+        f.launch(&GAME, &f.env);
+        assert!(f.replays().is_empty());
+    }
+
+    #[test]
+    fn a_changed_translator_replays() {
+        let f = make_precache_fixture();
+        f.record("Game.exe.pipelines");
+        f.stamped(&format!("{}\n", f.builds));
+        write("tr456\n", &f.launcher.layout.dxmt_translator_file(), false);
+        f.launch(&GAME, &f.env);
+        assert_eq!(f.replays().len(), 1);
+        assert_eq!(f.stamp(), Some(format!("tr456 {}\n", ShaderPrecache::macos_build())));
+    }
+
+    // A stamp from before the key (`<dxmt commit>+<series> <macOS build>`) mismatches once, then the new stamp holds.
+    #[test]
+    fn a_version_era_stamp_replays_once() {
+        let f = make_precache_fixture();
+        f.record("Game.exe.pipelines");
+        f.stamped(&format!(
+            "1fba8d25b5e29ab49012d633676a6b0d4b3b96c5+cd6d4065e615 {}\n",
+            ShaderPrecache::macos_build()
+        ));
+        f.launch(&GAME, &f.env);
+        f.launch(&GAME, &f.env);
+        assert_eq!(f.replays().len(), 1);
+        assert_eq!(f.stamp(), Some(format!("{}\n", f.builds)));
+    }
+
+    #[test]
+    fn changed_builds_replay_every_recording_before_the_game() {
+        let f = make_precache_fixture();
+        let (a, b) = (f.folder.join("A.exe.pipelines"), f.folder.join("B.exe.pipelines"));
+        f.record("A.exe.pipelines");
+        f.record("B.exe.pipelines");
+        f.stamped("old 1A2\n");
+        assert_eq!(f.launch(&GAME, &f.env), 0);
+        let replayer = f.launcher.layout.dxmt_replay().to_string_lossy().into_owned();
+        let replayed: Vec<Vec<String>> = f.replays().into_iter().map(|c| c.arguments).collect();
+        assert_eq!(
+            replayed,
+            [
+                vec![replayer.clone(), format!("Z:{}", a.to_string_lossy())],
+                vec![replayer, format!("Z:{}", b.to_string_lossy())],
+            ]
+        );
+        assert!(f.replays().iter().all(|c| !c.environment.contains_key("DXMT_PIPELINE_RECORD")));
+        let calls = f.runner.calls();
+        let last_replay = calls.iter().rposition(is_replay).unwrap();
+        let game_run = calls.iter().position(|c| c.arguments == ["/g/Game.exe"]).unwrap();
+        assert!(last_replay < game_run);
+        assert_eq!(f.stamp(), Some(format!("{}\n", f.builds)));
+        assert!(f.notifier.posted().is_empty()); // the toast, not notifications
+        assert_eq!(f.notifier.toasts().last().map(String::as_str), Some("Preparing the game's shaders"));
+        assert_eq!(f.notifier.toasts_closed(), f.notifier.toasts().len());
+        assert!(f.launcher_log().contains(
+            "precache: A.exe.pipelines exit=0 replay: 2 pipelines (1 graphics, 1 compute), 2 created, 0 failed, 0 bad records, 5 ms"
+        ));
+    }
+
+    #[test]
+    fn a_failed_replay_still_starts_the_game() {
+        let f = make_precache_fixture_with(1, None);
+        f.record("Game.exe.pipelines");
+        f.stamped("old 1A2\n");
+        assert_eq!(f.launch(&GAME, &f.env), 0);
+        assert!(f.ran_the_game().is_some());
+        assert_eq!(f.stamp(), Some(format!("{}\n", f.builds)));
+        assert!(f.launcher_log().contains("precache: Game.exe.pipelines exit=1 "));
+    }
+
+    #[test]
+    fn the_run_verb_neither_replays_nor_stamps() {
+        let f = make_precache_fixture();
+        f.record("Game.exe.pipelines");
+        f.stamped("old 1A2\n");
+        f.launch(&["run", "/g/Game.exe"], &f.env);
+        assert!(f.replays().is_empty());
+        assert_eq!(f.stamp().as_deref(), Some("old 1A2\n"));
+    }
+
+    #[test]
+    fn precache_can_be_turned_off() {
+        let f = make_precache_fixture();
+        f.record("Game.exe.pipelines");
+        f.stamped("old 1A2\n");
+        let mut env = f.env.clone();
+        env.insert("MACNEUTRON_PRECACHE".into(), "0".into());
+        f.launch(&GAME, &env);
+        assert!(f.replays().is_empty());
+        assert_eq!(f.ran_the_game().unwrap().environment.get("DXMT_PIPELINE_RECORD"), None);
+        assert_eq!(f.stamp().as_deref(), Some("old 1A2\n"));
+    }
+
+    #[test]
+    fn stopping_during_the_replay_starts_no_game() {
+        // Steam's Stop (SIGTERM) arrives while the first recording replays.
+        let f = make_precache_fixture_with(0, Some(|launcher, call| launcher.terminate(&call.environment)));
+        f.record("A.exe.pipelines");
+        f.record("B.exe.pipelines");
+        f.stamped("old 1A2\n");
+        f.launch(&GAME, &f.env);
+        assert_eq!(f.replays().len(), 1);
+        assert!(f.ran_the_game().is_none());
+        assert_eq!(f.stamp().as_deref(), Some("old 1A2\n")); // the next launch prepares the shaders again
+    }
 
     #[test]
     fn the_replay_reports_its_progress_by_quarters() {
