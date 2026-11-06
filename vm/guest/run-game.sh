@@ -1,4 +1,4 @@
-# A game in the guest, as MacNeutron's launcher starts it (Sources/MacNeutronCore/MicroVM.swift puts VERB, APPID,
+# A game in the guest, as MacNeutron's launcher starts it (crates/macneutron-core/src/micro_vm.rs puts VERB, APPID,
 # GAME_DIR, EXE, the game's arguments (set --) and its launch options before this). As Proton's waitforexitandrun: the
 # prefix (/home/mn/pfx, on the game's own state disk), Steam's bridge with Valve's steamclient64.dll from the share, the
 # game through steam.exe, and every process in the prefix waited for. Exits with the game's status.

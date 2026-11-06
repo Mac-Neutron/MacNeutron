@@ -9,7 +9,7 @@ license.workspace = true
 name = "macneutron_app"
 path = "src/lib.rs"
 
-# Package.swift's product; the Makefile copies it to MacNeutron.app/Contents/MacOS/MacNeutron (CFBundleExecutable).
+# The menu-bar app; the Makefile copies it to MacNeutron.app/Contents/MacOS/MacNeutron (CFBundleExecutable).
 [[bin]]
 name = "MacNeutronApp"
 path = "src/main.rs"

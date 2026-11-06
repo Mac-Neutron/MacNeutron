@@ -1,4 +1,4 @@
-//! The Rust counterpart of `Sources/MacNeutronCore/InstallScripts.swift`: Steam's install scripts for one game in
+//! Steam's install scripts for one game in
 //! the VM (spec 2026-10-24-macneutron-install-scripts-design §4.1): the scripts Steam's app manifests list for the game
 //! and the shared redistributables it uses, as run-game.sh runs them in the game's prefix before the game. Steam's rules
 //! are the Steamworks installscripts documentation's; Mac Steam never runs them itself (bridge spec D-16).

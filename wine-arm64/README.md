@@ -185,7 +185,7 @@ The VM's Wine and FEX are the same trees (`vm/wine/sync.sh`, `vm/image/guest-sta
    build", which builds the tree as it is and skips the fetch and the up-to-date check. So does a stash, a second
    branch or a second worktree in that tree. If your commit changes `configure.ac`, run `autoreconf` with autoconf 2.73
    and commit `configure` in the same commit: the build doesn't run it.
-2. `make wine-arm64`, and once (or after a change to a test program or the Swift sources) `make build wine-arm64-tests`.
+2. `make wine-arm64`, and once (or after a change to a test program or the Rust sources) `make build wine-arm64-tests`.
 3. `sh wine-arm64/check.sh <steps>` while working; `make wine-arm64-check` before committing.
 4. Push the commits to the fork's `main` (the shallow tree pushes once the fork has its parent; otherwise rebase them in
    a full clone of the fork), then put the new commit in the pin and commit that here. A commit message says why the

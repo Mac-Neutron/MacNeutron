@@ -1,7 +1,6 @@
 //! Install MacNeutron (spec 2026-10-25-macneutron-installer-design §3.2): asks once (not when the app's update opened
 //! it with --from-app), then app_installer verifies its bundled MacNeutron.app, quits MacNeutron and puts the app in
 //! /Applications, which it opens. Every failure is an alert, and /Applications/MacNeutron.app stays as it was.
-//! (Sources/MacNeutronInstaller/main.swift)
 
 use std::cell::RefCell;
 use std::path::Path;

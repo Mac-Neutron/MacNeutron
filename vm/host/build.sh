@@ -106,7 +106,7 @@ RUSTFLAGS="-Ctarget-cpu=${MACNEUTRON_CPU:-apple-m5} ${RUST_PGO:+$RUST_PGO }$link
   cargo build --release --manifest-path "$ROOT/vm/host/Cargo.toml" --target-dir "$W/cargo-target"
 cp "$W/cargo-target/release/macneutron-vm" "$W/macneutron-vm"
 make -s -C "$ROOT/vm/metal/wm" metal-host
-# The VM's folder is what MacNeutron's launcher runs a game from (Sources/MacNeutronCore/MicroVM.swift).
+# The VM's folder is what MacNeutron's launcher runs a game from (crates/macneutron-core/src/micro_vm.rs).
 cp "$ROOT/vm/run-guest.sh" "$W/run-guest.sh"
 cp "$ROOT/vm/guest/run-game.sh" "$W/run-game.sh"
 # The TPMs' keys are keychain items that trust the binary that made them: signed with MACNEUTRON_SIGN_IDENTITY, a

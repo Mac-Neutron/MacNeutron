@@ -1,5 +1,5 @@
 //! Spec 2026-10-25-macneutron-installer-design §3.2, steps 2-5: the bundled app verified, MacNeutron quit, a copy
-//! beside the target without the downloaded installer's quarantine, swapped in. `Sources/MacNeutronInstaller` is its
+//! beside the target without the downloaded installer's quarantine, swapped in. The macneutron-installer crate is its
 //! front: the confirmation, the alerts, quitting by bundle id, the reopening.
 
 use std::fmt;

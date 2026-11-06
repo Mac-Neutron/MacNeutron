@@ -1,4 +1,4 @@
-//! The Rust counterpart of `Tests/MacNeutronCoreTests/Support.swift`: the fixtures every ported test uses.
+//! The fixtures every ported test uses.
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;

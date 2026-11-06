@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 license.workspace = true
 
-# Install MacNeutron.app's executable (Package.swift's MacNeutronInstaller).
+# Install MacNeutron.app's executable.
 [[bin]]
 name = "MacNeutronInstaller"
 path = "src/main.rs"

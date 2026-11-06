@@ -5,8 +5,8 @@
 # (out/overlay/<sha256>: what package scripts and our build steps wrote). Runs in the builder as root, after build.sh.
 #   recipe.py <root> <initramfs.img> <kver> <out> <rpm dir>...
 # Writes out/recipe/base.tsv, out/recipe/initramfs.tsv, out/overlay/ and out/packages.json; prints counts and the
-# overlay's size. Lines: type path mode uid gid size sha256 source link caps (see Sources/MacNeutronCore/VMSetup/
-# Recipe.swift).
+# overlay's size. Lines: type path mode uid gid size sha256 source link caps (see crates/macneutron-core/src/
+# recipe.rs).
 import hashlib, json, os, shutil, stat, subprocess, sys, tarfile, tempfile
 
 def payload_index(rpm_dirs):

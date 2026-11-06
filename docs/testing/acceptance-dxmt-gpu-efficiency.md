@@ -8,7 +8,7 @@ SMITE 2 installed. Record results at the bottom.
 ## Steps
 
 1. **Tests:** `make dxmt-check` and `make test` pass.
-2. **Install:** with SMITE 2 closed, `.build/release/macneutron install-dxmt build/dxmt`.
+2. **Install:** with SMITE 2 closed, `target/release/macneutron install-dxmt build/dxmt`.
 3. **Run:** SMITE 2 with
    `/usr/bin/env DXMT_D3D12_SM6=1 DXMT_STATS=1 DXMT_DXIL_DUMP=/Users/<you>/dxil-smite2 %command%` (pass labels for
    the per-pass table), at the GPU efficiency spot (the M4/M5 spot of the GPU overlap acceptance test).

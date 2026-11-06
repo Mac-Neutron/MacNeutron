@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # The app's vm-manifest.json (docs/superpowers/specs/2026-10-17-macneutron-vm-setup-design.md §4.3; read by
-# Sources/MacNeutronCore/VMSetup/VMSetupManifest.swift), printed:
+# crates/macneutron-core/src/vm_setup_manifest.rs), printed:
 #   manifest.py <parts archive> <packages.json> <kver> <x86-64-rootfs.erofs> <parts url> [mirror url...]
 # packages.json is recipe.py's (every pinned RPM with its size and SHA-256); the FEX root's package goes in fexRootfs
 # with the SHA-256 of the image inside it. Mirror URLs, for tests, replace Fedora's sources: <mirror>/<rpm file>.

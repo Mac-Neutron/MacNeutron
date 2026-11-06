@@ -9,7 +9,7 @@ imported) and SMITE 2 installed. Record results at the bottom.
 
 1. **Tests:** `make dxmt-check` passes, including every D3D12 stubs comparison with D3DMetal (`d3d12_api`,
    `d3d12_depth` `depth2`, `d3d12_copy`, `d3d12_null`) and the `d3d12_timestamp` rules.
-2. **Install:** `.build/release/macneutron install-dxmt build/dxmt`.
+2. **Install:** `target/release/macneutron install-dxmt build/dxmt`.
 3. **SMITE 2 on our DXMT:** launch options `/usr/bin/env DXMT_DXIL_DUMP=<capture folder> %command%` (capture mode is
    still how SMITE 2 passes Unreal's SM6 check). Reach the lobby; it renders as on D3DMetal. Play a match.
 4. **Logs:** this run's lines in `~/Library/Logs/MacNeutron/steam-2437170.log` have no `unhandled feature` and no
