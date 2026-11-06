@@ -1,5 +1,7 @@
 //! One RPM payload's decompressor, fed as the payload streams in: zstd (most of Fedora's packages) or xz (some,
-//! kernel-core among them). Both use the system libraries through `build.rs`: libzstd and liblzma, which Apple ships.
+//! kernel-core among them). zstd is compiled into the binary (zstd-sys, zstd 1.5.7, as Swift vendored its decoder) and
+//! xz goes through Apple's Compression framework (COMPRESSION_LZMA reads the xz container), so nothing outside the
+//! system is loaded at run time.
 
 use crate::vm_setup_error::VMSetupError;
 
@@ -50,6 +52,9 @@ impl PayloadDecoder {
         }
     }
 }
+
+// zstd's functions below come from zstd-sys's static build.
+use zstd_sys as _;
 
 const CHUNK: usize = 1 << 18;
 
@@ -131,56 +136,49 @@ impl Drop for Zstd {
     }
 }
 
-// liblzma's streaming decoder, which reads the xz container.
+// Apple's Compression framework (libcompression), the decoder Swift used: COMPRESSION_LZMA is the xz container.
 
-#[derive(Debug)]
 #[repr(C)]
-struct LzmaStream {
-    next_in: *const u8,
-    avail_in: usize,
-    total_in: u64,
-    next_out: *mut u8,
-    avail_out: usize,
-    total_out: u64,
-    allocator: *const std::ffi::c_void,
-    internal: *mut std::ffi::c_void,
-    reserved_ptr1: *mut std::ffi::c_void,
-    reserved_ptr2: *mut std::ffi::c_void,
-    reserved_ptr3: *mut std::ffi::c_void,
-    reserved_ptr4: *mut std::ffi::c_void,
-    reserved_int1: u64,
-    reserved_int2: u64,
-    reserved_int3: usize,
-    reserved_int4: usize,
-    reserved_enum1: u32,
-    reserved_enum2: u32,
+struct CompressionStream {
+    dst_ptr: *mut u8,
+    dst_size: usize,
+    src_ptr: *const u8,
+    src_size: usize,
+    state: *mut std::ffi::c_void,
 }
 
-const LZMA_OK: u32 = 0;
-const LZMA_STREAM_END: u32 = 1;
-const LZMA_CONCATENATED: u32 = 0x08;
-const LZMA_FINISH_END: u32 = 3;
+const COMPRESSION_STREAM_DECODE: i32 = 1;
+const COMPRESSION_STREAM_FINALIZE: i32 = 0x0001;
+const COMPRESSION_LZMA: i32 = 0x306;
+const COMPRESSION_STATUS_OK: i32 = 0;
+const COMPRESSION_STATUS_END: i32 = 1;
 
+#[link(name = "compression")]
 extern "C" {
-    fn lzma_stream_decoder(strm: *mut LzmaStream, memlimit: u64, flags: u32) -> u32;
-    fn lzma_code(strm: *mut LzmaStream, action: u32) -> u32;
-    fn lzma_end(strm: *mut LzmaStream);
+    fn compression_stream_init(stream: *mut CompressionStream, operation: i32, algorithm: i32) -> i32;
+    fn compression_stream_process(stream: *mut CompressionStream, flags: i32) -> i32;
+    fn compression_stream_destroy(stream: *mut CompressionStream) -> i32;
 }
 
-#[derive(Debug)]
 struct Xz {
-    stream: Box<LzmaStream>,
+    stream: Box<CompressionStream>,
     ended: bool,
+}
+
+impl std::fmt::Debug for Xz {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Xz").field("ended", &self.ended).finish()
+    }
 }
 
 impl Xz {
     fn new() -> Result<Self, VMSetupError> {
-        let mut stream: LzmaStream = unsafe { std::mem::zeroed() };
-        let status = unsafe { lzma_stream_decoder(&mut stream, u64::MAX, LZMA_CONCATENATED) };
-        if status != LZMA_OK {
+        let mut stream: Box<CompressionStream> = Box::new(unsafe { std::mem::zeroed() });
+        let status = unsafe { compression_stream_init(&mut *stream, COMPRESSION_STREAM_DECODE, COMPRESSION_LZMA) };
+        if status != COMPRESSION_STATUS_OK {
             return Err(VMSetupError::Unsupported("xz".into()));
         }
-        Ok(Xz { stream: Box::new(stream), ended: false })
+        Ok(Xz { stream, ended: false })
     }
 
     fn process(&mut self, data: &[u8], finalize: bool) -> Result<Vec<u8>, VMSetupError> {
@@ -189,22 +187,22 @@ impl Xz {
         }
         let mut out = Vec::new();
         let mut buffer = vec![0u8; CHUNK];
-        self.stream.next_in = data.as_ptr();
-        self.stream.avail_in = data.len();
-        let action = if finalize { LZMA_FINISH_END } else { 0 };
+        self.stream.src_ptr = if data.is_empty() { buffer.as_ptr() } else { data.as_ptr() };
+        self.stream.src_size = data.len();
+        let flags = if finalize { COMPRESSION_STREAM_FINALIZE } else { 0 };
         loop {
-            self.stream.next_out = buffer.as_mut_ptr();
-            self.stream.avail_out = CHUNK;
-            let status = unsafe { lzma_code(&mut *self.stream, action) };
-            out.extend_from_slice(&buffer[..CHUNK - self.stream.avail_out]);
-            if status == LZMA_STREAM_END {
+            self.stream.dst_ptr = buffer.as_mut_ptr();
+            self.stream.dst_size = CHUNK;
+            let status = unsafe { compression_stream_process(&mut *self.stream, flags) };
+            out.extend_from_slice(&buffer[..CHUNK - self.stream.dst_size]);
+            if status == COMPRESSION_STATUS_END {
                 self.ended = true;
                 return Ok(out);
             }
-            if status != LZMA_OK {
+            if status != COMPRESSION_STATUS_OK {
                 return Err(VMSetupError::Corrupt);
             }
-            if !(self.stream.avail_in > 0 || self.stream.avail_out == 0) {
+            if !(self.stream.src_size > 0 || self.stream.dst_size == 0) {
                 break;
             }
         }
@@ -214,7 +212,7 @@ impl Xz {
 
 impl Drop for Xz {
     fn drop(&mut self) {
-        unsafe { lzma_end(&mut *self.stream) };
+        unsafe { compression_stream_destroy(&mut *self.stream) };
     }
 }
 
