@@ -131,9 +131,11 @@ impl VMDownloads {
 pub fn standard_fetch() -> Fetch {
     std::sync::Arc::new(|url: &str| {
         let name = url.rsplit('/').next().unwrap_or("download").to_string();
-        let directory = std::env::temp_dir().join(format!("macneutron-download-{}", std::process::id()));
-        std::fs::create_dir_all(&directory).map_err(|_| ValveClientError::Http(0))?;
-        let out = directory.join(format!("{}-{name}", unique_stamp()));
+        // Each file alone in a fresh folder, as Fetch promises: ValveClient::update deletes the folder of what it
+        // fetched, so a shared one would take a parallel download with it.
+        let directory = std::env::temp_dir().join(format!("macneutron-download-{}-{}", std::process::id(), unique_stamp()));
+        std::fs::create_dir(&directory).map_err(|_| ValveClientError::Http(0))?;
+        let out = directory.join(name);
         let status = std::process::Command::new("/usr/bin/curl")
             .args(["-fsSL", "--retry", "2", "-o"])
             .arg(&out)
@@ -149,14 +151,34 @@ pub fn standard_fetch() -> Fetch {
     })
 }
 
+/// Nanoseconds plus a per-process counter, so two fetches in the same nanosecond still get their own folders.
 fn unique_stamp() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0).to_string()
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    format!("{nanos}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_standard_fetch_gets_a_folder_of_its_own() {
+        let source = std::env::temp_dir().join(format!("mn-fetch-source-{}", std::process::id()));
+        std::fs::write(&source, b"bytes").unwrap();
+        let url = format!("file://{}", source.display());
+        let fetch = standard_fetch();
+        let (a, b) = (fetch(&url).unwrap(), fetch(&url).unwrap());
+        assert_ne!(a.parent(), b.parent());
+        assert_eq!(a.file_name(), source.file_name());
+        assert_eq!(std::fs::read(&a).unwrap(), b"bytes");
+        for path in [&a, &b] {
+            let _ = std::fs::remove_dir_all(path.parent().unwrap());
+        }
+        let _ = std::fs::remove_file(&source);
+    }
     use crate::vm_setup_manifest::{Download, FEXRootfs, Koji, Package, VMSetupManifest};
     use std::collections::HashMap;
 
