@@ -819,6 +819,14 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   reader for `dxmt.conf` and `mtld3d.conf` (`MTLD3D_CONFIG` an alias of `DXMT_CONFIG`), one logger and crash reporter,
   one statistics format (DXMT_STATS's), one perf-build switch for all Rust. D3D9 honours `DXMT_LOG_LEVEL` from the start
   of this phase.
+  Done 2026-11-06, as the SC-2 rulings define it, at DXMTRS main 0e751474 (0e751474f7bdc7088e6faa4518462987f024e362),
+  which MacNeutron pins: one implementation per piece in `dxmt-util` (configuration reader, level parsing, file names,
+  once-macros, crash reporter; D3D9 keeps its queued sink and `env_logger` line format), one perf-tracking switch, and
+  D3D9's statistics in `stats.txt`'s format in perf-tracking builds; the D3D9 binaries are LGPL combined works through
+  `dxmt-util`. It sits on the shared-core refactor SC (14920a40: one D3D10-12 core for settings, COM helpers,
+  swapchains, resources, state and encoding, translator key unchanged) and R3 (aabbc99a: residency removals immediate,
+  `GetCachedBlob` empty, `ExecuteCommandLists` committing at once, the ring's in-flight count before hand-off, D3D11
+  multithread protection off by default, each as at 11067f9).
 - C3 (after step 4's LLVM move, same release): D3D9's shaders through the translator by an SM1-3 front end (mtld3d's
   DXSO parser, IR and linkage moved in; fixed function through the same builder), first with today's D3D9 runtime
   (the translator already writes `[[stage_in]]` vertex inputs without an input layout, and top-level resource
