@@ -18,7 +18,7 @@ use block2::RcBlock;
 use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
-use objc2::{MainThreadMarker, MainThreadOnly};
+use objc2::{MainThreadMarker, MainThreadOnly, Message};
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSColor,
     NSFontTextStyleCallout, NSFontTextStyleHeadline, NSFontTextStyleTitle2, NSFontTextStyleTitle3, NSGridView, NSMenu,
@@ -679,7 +679,7 @@ fn step_view(kit: &Kit, step: &views::Step, room: f64, enabled: bool) -> Retaine
         StepAction::Spinner => Some(upcast(&kit.spinner())),
         StepAction::Button { title, act, enabled: on } => {
             let button = kit.button(title, act.clone(), *on && enabled);
-            button.setKeyEquivalent(&ns("\r")); // .borderedProminent: the accent-colored button
+            button.setBezelColor(Some(&NSColor::controlAccentColor())); // .borderedProminent
             Some(upcast(&button))
         }
     };
@@ -700,6 +700,7 @@ fn step_view(kit: &Kit, step: &views::Step, room: f64, enabled: bool) -> Retaine
 /// (the preview example: a fake model, nothing installed, no Steam).
 pub fn preview(mtm: MainThreadMarker, model: Arc<AppModel>, updates: Arc<UpdateModel>, folder: &Path, select: Option<u32>) {
     let app = install(mtm, model, updates);
+    PREVIEW_CHECKS.with(|checks| *checks.borrow_mut() = folder.to_path_buf());
     let lines: Vec<String> = views::menu(&app.inputs.borrow())
         .into_iter()
         .map(|entry| match entry {
@@ -721,6 +722,51 @@ pub fn preview(mtm: MainThreadMarker, model: Arc<AppModel>, updates: Arc<UpdateM
             snapshot(&window, &folder.join(format!("{scene:?}.png")));
         }
     }
+    check_entry_points(&app);
+}
+
+/// Calls each Objective-C entry point the app defines, as AppKit would, and says what came back (the preview's
+/// `checks.txt`): a wrong selector or signature is a silent no-op or a crash only a run would show.
+fn check_entry_points(app: &App) {
+    use objc2::msg_send;
+    let mut lines = Vec::new();
+
+    let menu = NSMenu::new(app.mtm);
+    let _: () = unsafe { msg_send![&*app.delegate, menuNeedsUpdate: &*menu] };
+    let expected = views::menu(&app.inputs.borrow()).len();
+    lines.push(format!("menuNeedsUpdate: {} items, views::menu {expected}", menu.numberOfItems()));
+
+    let cleanup = app.window(Scene::Cleanup).contentView().expect("cleanup content");
+    let check = find_button(&cleanup, "App 440").expect("the App 440 toggle");
+    unsafe { check.performClick(None) };
+    lines.push(format!("fire: (performClick on App 440) selected {:?}", app.selected.borrow()));
+
+    let before = app.games.selected();
+    app.games.select_row(0);
+    lines.push(format!("tableViewSelectionDidChange: selection {before:?} -> {:?}", app.games.selected()));
+
+    let games = app.window(Scene::Games);
+    games.close();
+    lines.push(format!("windowWillClose: games visible {}", games.isVisible()));
+
+    let application = NSApplication::sharedApplication(app.mtm);
+    application.setDelegate(Some(ProtocolObject::from_ref(&*app.delegate)));
+    application.finishLaunching();
+    lines.push("applicationDidFinishLaunching: returned".into());
+    let _ = std::fs::write(PREVIEW_CHECKS.with(|folder| folder.borrow().join("checks.txt")), lines.join("\n") + "\n");
+}
+
+thread_local! {
+    static PREVIEW_CHECKS: RefCell<std::path::PathBuf> = RefCell::default();
+}
+
+fn find_button(view: &NSView, title: &str) -> Option<Retained<objc2_app_kit::NSButton>> {
+    if let Some(button) = view.downcast_ref::<objc2_app_kit::NSButton>() {
+        if button.title().to_string() == title {
+            return Some(button.retain());
+        }
+    }
+    view.subviews().iter().find_map(|sub| find_button(&sub, title))
 }
 
 /// The window's content (toolbar and title bar excluded), as a PNG.

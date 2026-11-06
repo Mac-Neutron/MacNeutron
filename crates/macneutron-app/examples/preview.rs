@@ -2,7 +2,7 @@
 //! to look at the AppKit port without running the app. Nothing real is touched: HOME is a fresh temporary folder, the
 //! model is never started (no install, no Steam watcher), Steam is never asked anything, and nothing is clicked.
 //!
-//! `cargo run -p macneutron-app --example preview -- <folder>`
+//! `cargo run -p macneutron-app --example preview -- <folder>`; `checks.txt` says what each Objective-C entry point did.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
@@ -32,6 +32,7 @@ fn main() {
     std::fs::create_dir_all(&out).unwrap();
 
     let mut config = AppModelConfig::standard();
+    std::fs::create_dir_all(config.steam.bundle_macos()).unwrap(); // "Steam for Mac is installed." (an empty folder)
     config.installer = Arc::new(|_, _, _, _| panic!("the preview installs nothing"));
     config.vm_installer = Arc::new(|_, _| Ok(VMToolsInstallOutcome::Unchanged));
     config.wine_app_source = None;
@@ -83,6 +84,6 @@ fn main() {
     NSApplication::sharedApplication(mtm).setActivationPolicy(NSApplicationActivationPolicy::Prohibited);
     ui::preview(mtm, model, updates, &out, Some(2977660));
     std::thread::sleep(Duration::from_millis(10));
-    let _ = std::fs::remove_dir_all(home.join("Library"));
+    let _ = std::fs::remove_dir_all(if out.starts_with(&home) { home.join("Library") } else { home });
     println!("{}", out.display());
 }

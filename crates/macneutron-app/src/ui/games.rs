@@ -244,6 +244,18 @@ impl Games {
         self.draw(app, &inputs, true);
     }
 
+    /// The selected game (the preview's checks).
+    pub(crate) fn selected(&self) -> Option<u32> {
+        self.selection.get()
+    }
+
+    /// Selects a row as a click would (the preview's checks).
+    pub(crate) fn select_row(&self, index: usize) {
+        if let Some(views) = self.views.get() {
+            views.table.selectRowIndexes_byExtendingSelection(&NSIndexSet::indexSetWithIndex(index), false);
+        }
+    }
+
     pub(crate) fn cell(&self, app: &App, column: &str, index: usize) -> Option<Retained<NSView>> {
         let row = self.rows.borrow().get(index)?.clone();
         let kit = app.kit(&self.table_targets);
@@ -271,6 +283,8 @@ impl Games {
         let kit = app.kit(&self.options_targets);
         let Some(row) = row else {
             replace(&views.options, &[]);
+            replace(&views.launch, &[]);
+            *self.drawn_launch.borrow_mut() = None; // a game selected again shows its saved launch options
             return;
         };
         let settings = &row.settings;
