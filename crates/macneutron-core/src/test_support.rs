@@ -353,3 +353,12 @@ pub fn make_steam_location(steam_client: bool) -> crate::steam_location::SteamLo
     }
     steam
 }
+
+/// `testPreflight`: no system check, no codesign, a fixed identity.
+pub fn test_preflight() -> crate::preflight::Preflight {
+    crate::preflight::Preflight::new(
+        Box::new(|| true),
+        Box::new(|_| Some(TEST_IDENTITY.to_string())),
+        Box::new(|_| true),
+    )
+}
