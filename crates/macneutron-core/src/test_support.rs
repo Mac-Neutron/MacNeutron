@@ -514,3 +514,112 @@ impl SteamControlling for FakeSteam {
         Ok(())
     }
 }
+
+// From UpdaterTests.swift and FakeValveCDN.swift.
+
+/// GitHub's release list: each entry's tag, draft and prerelease flags, and asset names served under `base`.
+pub fn releases_json(entries: &[(&str, bool, bool, &[&str])], base: &str) -> Vec<u8> {
+    let mut text = String::from("[");
+    for (index, (tag, draft, prerelease, assets)) in entries.iter().enumerate() {
+        if index > 0 {
+            text.push(',');
+        }
+        let assets = assets
+            .iter()
+            .map(|name| format!(r#"{{"name":"{name}","browser_download_url":"{base}/{tag}/{name}"}}"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        text.push_str(&format!(
+            r#"{{"tag_name":"{tag}","draft":{draft},"prerelease":{prerelease},"html_url":"{base}/{tag}","assets":[{assets}]}}"#
+        ));
+    }
+    text.push(']');
+    text.into_bytes()
+}
+
+/// Stands in for Valve's client-update CDN: a manifest and one `bins_win64` zip built from tiny fake PE files (never
+/// Valve's). `fetch` serves both as fresh temporary copies and records every request.
+pub struct FakeValveCDN {
+    zip: PathBuf,
+    state: Mutex<CdnState>,
+}
+
+struct CdnState {
+    served: Vec<String>,
+    offline: bool,
+    text: String,
+    package_name: String,
+}
+
+impl FakeValveCDN {
+    /// Version 1788652215 of the six legacycompat files (`ValveClient::FILES`), signed, built in `dir`.
+    pub fn new(dir: &Path) -> std::sync::Arc<Self> {
+        let folder = dir.join("package");
+        for (member, machine) in crate::valve_client::ValveClient::FILES {
+            let file = folder.join(member);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, pe_bytes(machine, true)).unwrap();
+        }
+        let zip = dir.join("bins_win64.zip");
+        let status = Command::new("/usr/bin/ditto").args(["-c", "-k", "--norsrc"]).arg(&folder).arg(&zip).status().unwrap();
+        assert!(status.success());
+        let data = std::fs::read(&zip).unwrap();
+        let sha2 = crate::posix::sha256(&data);
+        let package_name = format!("bins_win64.zip.{}", &sha2[..40]);
+        let text = Self::manifest("1788652215", &package_name, data.len() as i64, &sha2);
+        let state = Mutex::new(CdnState { served: Vec::new(), offline: false, text, package_name });
+        std::sync::Arc::new(FakeValveCDN { zip, state })
+    }
+
+    pub fn requests(&self) -> Vec<String> {
+        self.state.lock().unwrap().served.clone()
+    }
+
+    pub fn set_offline(&self, offline: bool) {
+        self.state.lock().unwrap().offline = offline;
+    }
+
+    pub fn package_url(&self) -> String {
+        format!("{}{}", crate::valve_client::ValveClient::PACKAGE_BASE, self.state.lock().unwrap().package_name)
+    }
+
+    pub fn fetch(self: &std::sync::Arc<Self>) -> crate::valve_client::Fetch {
+        use crate::valve_client::{ValveClient, ValveClientError};
+        let cdn = self.clone();
+        std::sync::Arc::new(move |url: &str| {
+            let (offline, text) = {
+                let mut state = cdn.state.lock().unwrap();
+                state.served.push(url.to_string());
+                (state.offline, state.text.clone())
+            };
+            if offline {
+                return Err(ValveClientError::Http(404));
+            }
+            let file = make_temp_dir().join(url.rsplit('/').next().unwrap_or("file"));
+            if url == ValveClient::MANIFEST_URL {
+                std::fs::write(&file, text).map_err(|_| ValveClientError::Http(0))?;
+            } else if url == cdn.package_url() {
+                std::fs::copy(&cdn.zip, &file).map_err(|_| ValveClientError::Http(0))?;
+            } else {
+                return Err(ValveClientError::Http(404));
+            }
+            Ok(file)
+        })
+    }
+
+    /// Valve's layout: a root block with `version` and one block per package, `bins_win64` among others.
+    fn manifest(version: &str, file: &str, size: i64, sha2: &str) -> String {
+        let package = |name: &str, file: &str, size: &str, sha2: &str| {
+            format!(
+                "\t\"{name}\"\n\t{{\n\t\t\"file\"\t\t\"{file}\"\n\t\t\"size\"\t\t\"{size}\"\n\t\t\"sha2\"\t\t\"{sha2}\"\n\t\t\"zipvz\"\t\t\"{file}.vz\"\n\t\t\"sha2vz\"\t\t\"{}\"\n\t}}\n",
+                "f".repeat(64)
+            )
+        };
+        format!(
+            "\"win64\"\n{{\n\t\"version\"\t\t\"{version}\"\n{}{}{}}}\n",
+            package("bins_codecs_win64", "bins_codecs_win64.zip.1", "7", &"1".repeat(64)),
+            package("bins_win64", file, &size.to_string(), sha2),
+            package("bins_cef_win64", "bins_cef_win64.zip.2", "9", &"2".repeat(64)),
+        )
+    }
+}

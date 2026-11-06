@@ -51,10 +51,11 @@ pub mod steam_play_mode;
 pub mod prefix_manager;
 pub mod launcher;
 
-#[cfg(test)]
-pub(crate) mod rpm_fixture;
-#[cfg(test)]
-pub(crate) mod test_support;
+// The fixtures every ported test uses; other crates' tests get them through the `test-support` feature.
+#[cfg(any(test, feature = "test-support"))]
+pub mod rpm_fixture;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 
 pub use verb::{LaunchRequest, LaunchRequestError, Verb};
 pub use graphics_backend::GraphicsBackend;

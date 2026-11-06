@@ -11,3 +11,7 @@ plist.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 libc.workspace = true
+
+[features]
+# Exposes `test_support` (FakeSteam, FakeValveCDN, make_tool_layout, ...) to other crates' tests.
+test-support = []

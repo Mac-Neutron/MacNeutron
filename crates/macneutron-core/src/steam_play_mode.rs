@@ -69,11 +69,11 @@ impl SteamPlayMode {
         }
     }
 
-    pub(crate) fn runtime_tool(&self) -> PathBuf {
+    pub fn runtime_tool(&self) -> PathBuf {
         self.tools.join(Self::RUNTIME_FOLDER_NAME)
     }
 
-    pub(crate) fn native_tool(&self) -> PathBuf {
+    pub fn native_tool(&self) -> PathBuf {
         self.tools.join(Self::NATIVE_TOOL_NAME)
     }
 

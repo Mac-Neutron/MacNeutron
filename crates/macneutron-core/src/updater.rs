@@ -677,28 +677,9 @@ pub fn default_fetch() -> Fetch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{make_signed_wine_app, make_temp_dir, write};
+    use crate::test_support::{make_signed_wine_app, make_temp_dir, releases_json, write};
     use std::collections::HashMap;
     use std::sync::Mutex;
-
-    fn releases_json(entries: &[(&str, bool, bool, &[&str])], base: &str) -> Vec<u8> {
-        let mut text = String::from("[");
-        for (index, (tag, draft, prerelease, assets)) in entries.iter().enumerate() {
-            if index > 0 {
-                text.push(',');
-            }
-            let assets = assets
-                .iter()
-                .map(|name| format!(r#"{{"name":"{name}","browser_download_url":"{base}/{tag}/{name}"}}"#))
-                .collect::<Vec<_>>()
-                .join(",");
-            text.push_str(&format!(
-                r#"{{"tag_name":"{tag}","draft":{draft},"prerelease":{prerelease},"html_url":"{base}/{tag}","assets":[{assets}]}}"#
-            ));
-        }
-        text.push(']');
-        text.into_bytes()
-    }
 
     #[test]
     fn pick_takes_the_newest_of_the_running_channel() {
