@@ -217,3 +217,71 @@ pub fn make_signed_wine_app(at: &Path, loader: &Path, short_version: &str, bundl
 pub fn make_log() -> LauncherLog {
     LauncherLog::new(make_temp_dir())
 }
+
+/// An amd64 image whose .rsrc (RVA 0x1000, file offset 0x400) holds `icons` (width byte, bit count, data) as RT_ICON
+/// 1...n and one RT_GROUP_ICON listing them in order, each resource in language 0x409.
+pub fn pe_bytes_icons(icons: &[(u8, u16, Vec<u8>)]) -> Vec<u8> {
+    let (rva, raw, sub, n) = (0x1000usize, 0x400usize, 0x8000_0000usize, icons.len());
+    let le = |value: usize, size: usize| -> Vec<u8> { (0..size).map(|i| ((value >> (8 * i)) & 0xFF) as u8).collect() };
+    let dir = |entries: &[(usize, usize)]| -> Vec<u8> {
+        let mut out = vec![0u8; 14];
+        out.extend(le(entries.len(), 2));
+        for (id, offset) in entries {
+            out.extend(le(*id, 4));
+            out.extend(le(*offset, 4));
+        }
+        out
+    };
+    let icon_names = 32;
+    let icon_languages = icon_names + 16 + 8 * n;
+    let group_names = icon_languages + 24 * n;
+    let group_language = group_names + 24;
+    let leaves = group_language + 24;
+    let group = leaves + 16 * (n + 1);
+    let mut rsrc = dir(&[(3, sub | icon_names), (14, sub | group_names)]);
+    let names: Vec<(usize, usize)> = (0..n).map(|i| (i + 1, sub | (icon_languages + 24 * i))).collect();
+    rsrc.extend(dir(&names));
+    for i in 0..n {
+        rsrc.extend(dir(&[(0x409, leaves + 16 * i)]));
+    }
+    rsrc.extend(dir(&[(1, sub | group_language)]));
+    rsrc.extend(dir(&[(0x409, leaves + 16 * n)]));
+    let mut image = group + 6 + 14 * n;
+    for icon in icons {
+        rsrc.extend(le(rva + image, 4));
+        rsrc.extend(le(icon.2.len(), 4));
+        rsrc.extend(le(0, 8));
+        image += icon.2.len();
+    }
+    rsrc.extend(le(rva + group, 4));
+    rsrc.extend(le(6 + 14 * n, 4));
+    rsrc.extend(le(0, 8));
+    rsrc.extend(le(0, 2));
+    rsrc.extend(le(1, 2));
+    rsrc.extend(le(n, 2));
+    for (i, icon) in icons.iter().enumerate() {
+        rsrc.extend([icon.0, icon.0, 0, 0]);
+        rsrc.extend(le(1, 2));
+        rsrc.extend(le(icon.1 as usize, 2));
+        rsrc.extend(le(icon.2.len(), 4));
+        rsrc.extend(le(i + 1, 2));
+    }
+    for icon in icons {
+        rsrc.extend(&icon.2);
+    }
+
+    let mut bytes = pe_bytes(crate::pe_image::AMD64, false);
+    let optional = 0x98;
+    bytes[0x86] = 1; // NumberOfSections
+    let mut dir2 = le(rva, 4);
+    dir2.extend(le(rsrc.len(), 4));
+    bytes.splice((optional + 128)..(optional + 136), dir2); // directory 2
+    bytes.extend(b".rsrc\0\0\0");
+    bytes.extend(le(rsrc.len(), 4));
+    bytes.extend(le(rva, 4));
+    bytes.extend(le(rsrc.len(), 4));
+    bytes.extend(le(raw, 4));
+    bytes.resize(raw, 0);
+    bytes.extend(rsrc);
+    bytes
+}

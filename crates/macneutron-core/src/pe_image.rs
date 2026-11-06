@@ -18,15 +18,22 @@ fn le(data: &[u8], offset: usize, size: usize) -> Option<usize> {
 /// The COFF `Machine` of a PE file, or None when `url` isn't one (missing, unreadable, a script, truncated).
 /// ARM64EC images report `AMD64`, ARM64X images `ARM64`.
 pub fn machine(path: &Path) -> Option<u16> {
-    let data = std::fs::read(path).ok()?;
-    if data.len() < 64 || data[0] != 0x4D || data[1] != 0x5A {
+    use std::io::{Read, Seek, SeekFrom};
+    // Header only: game exes can be many GB (Swift PEImage.swift:12-21).
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut dos = [0u8; 64];
+    file.read_exact(&mut dos).ok()?;
+    if dos[0] != 0x4D || dos[1] != 0x5A {
         return None;
     }
-    let lfanew = le(&data, 0x3C, 4)?;
-    if lfanew + 6 > data.len() || data[lfanew..lfanew + 4] != [0x50, 0x45, 0, 0] {
+    let lfanew = u32::from_le_bytes([dos[0x3C], dos[0x3D], dos[0x3E], dos[0x3F]]) as u64;
+    file.seek(SeekFrom::Start(lfanew)).ok()?;
+    let mut nt = [0u8; 6];
+    file.read_exact(&mut nt).ok()?;
+    if nt[..4] != [0x50, 0x45, 0, 0] {
         return None;
     }
-    Some((data[lfanew + 4] as u16) | ((data[lfanew + 5] as u16) << 8))
+    Some((nt[4] as u16) | ((nt[5] as u16) << 8))
 }
 
 /// The optional header's Certificate Table (data directory 4) has a non-zero size: the file carries an Authenticode
@@ -160,6 +167,7 @@ pub fn icon(path: &Path) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{make_temp_dir, pe_bytes, pe_bytes_icons, write};
 
     fn temp(name: &str) -> std::path::PathBuf {
         crate::rpm_fixture::temp(name).join("x.exe")
@@ -188,5 +196,89 @@ mod tests {
         assert_eq!(machine(&path), None);
         assert_eq!(machine(&path.with_extension("missing")), None);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn amd64_and_arm64_and_i386_machines_are_read() {
+        let dir = make_temp_dir();
+        for m in [AMD64, ARM64, I386, 0x01c4] {
+            let exe = dir.join(format!("{m}.exe"));
+            std::fs::write(&exe, pe_bytes(m, false)).unwrap();
+            assert_eq!(machine(&exe), Some(m));
+        }
+    }
+
+    #[test]
+    fn a_script_is_not_pe() {
+        let script = make_temp_dir().join("run.sh");
+        write(&format!("#!/bin/sh\necho MZ PE\n{}", "x".repeat(200)), &script, true);
+        assert_eq!(machine(&script), None);
+    }
+
+    #[test]
+    fn a_truncated_mz_is_not_pe() {
+        let dir = make_temp_dir();
+        let short = dir.join("short.exe");
+        std::fs::write(&short, [0x4D, 0x5A, 0, 0]).unwrap();
+        assert_eq!(machine(&short), None);
+        let no_nt = dir.join("nont.exe");
+        std::fs::write(&no_nt, &pe_bytes(AMD64, false)[..0x83]).unwrap();
+        assert_eq!(machine(&no_nt), None);
+    }
+
+    #[test]
+    fn a_missing_file_is_not_pe() {
+        assert_eq!(machine(&make_temp_dir().join("missing.exe")), None);
+    }
+
+    #[test]
+    fn machine_reads_a_path_with_spaces() {
+        let exe = make_temp_dir().join("game \u{e9}/Game.exe");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        std::fs::write(&exe, pe_bytes(ARM64, false)).unwrap();
+        assert_eq!(machine(&exe), Some(ARM64));
+    }
+
+    #[test]
+    fn machine_reads_only_the_header_of_a_huge_file() {
+        let exe = make_temp_dir().join("Huge.exe");
+        std::fs::write(&exe, pe_bytes(AMD64, false)).unwrap();
+        std::fs::OpenOptions::new().write(true).open(&exe).unwrap().set_len(4 << 30).unwrap(); // sparse, 4 GiB
+        let start = std::time::Instant::now();
+        assert_eq!(machine(&exe), Some(AMD64));
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn certificate_table_is_seen_in_pe32_and_pe32_plus() {
+        let dir = make_temp_dir();
+        for m in [I386, AMD64] {
+            for signed in [true, false] {
+                let file = dir.join(format!("{m}-{signed}.dll"));
+                std::fs::write(&file, pe_bytes(m, signed)).unwrap();
+                assert_eq!(has_certificate_table(&file), signed);
+            }
+        }
+        let short = dir.join("short.dll");
+        std::fs::write(&short, &pe_bytes(AMD64, true)[..0x100]).unwrap();
+        assert!(!has_certificate_table(&short));
+    }
+
+    #[test]
+    fn icon_is_the_first_groups_largest_image_as_an_ico() {
+        let small = vec![0x11u8; 40];
+        let big = vec![0x89u8, 0x50, 0x4E, 0x47, 1, 2, 3];
+        let exe = make_temp_dir().join("Game.exe");
+        std::fs::write(&exe, pe_bytes_icons(&[(32, 32, small.clone()), (0, 32, big.clone()), (48, 8, small)])).unwrap();
+        let mut ico: Vec<u8> = vec![0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 32, 0, 7, 0, 0, 0, 22, 0, 0, 0];
+        ico.extend(&big);
+        assert_eq!(icon(&exe), Some(ico));
+    }
+
+    #[test]
+    fn an_image_without_resources_has_no_icon() {
+        let exe = make_temp_dir().join("Game.exe");
+        std::fs::write(&exe, pe_bytes(AMD64, false)).unwrap();
+        assert_eq!(icon(&exe), None);
     }
 }
