@@ -44,13 +44,20 @@ stats() {  # stats <command...>: its run's DXMT_STATS file
   cat "$X/dump/stats.txt" 2> /dev/null || true
   rm -rf "$X"
 }
-if [ -x "$OUT/d3d12_list7" ]; then
+# The default p native build (build.sh without MACNEUTRON_PROFILE=std) compiles statistics and log lines below warnings
+# out (DXMT_PERF_BUILD, which its configure inputs record): the stats checks need a std build.
+PBUILD=; /usr/bin/grep -q DXMT_PERF_BUILD "${BUILD_DIR:-$ROOT/build}/dxmt-native/build/.setup-inputs" 2> /dev/null && PBUILD=1
+if [ -x "$OUT/d3d12_list7" ] && [ -n "$PBUILD" ]; then
+  echo "tests: note: list7 order/emptybarrier skipped (a p native build: no DXMT_STATS; MACNEUTRON_PROFILE=std runs them)"
+elif [ -x "$OUT/d3d12_list7" ]; then
   deps=$(stats env DXMT_D3D12_OVERLAP=1 "$OUT/d3d12_list7" order | /usr/bin/grep -oE 'encoders with a dependency list [0-9]+' || true)
   [ "$deps" = "encoders with a dependency list 2" ] \
     || { echo "tests: FAIL a render pass's resolve isn't ordered: ${deps:-no stats}"; exit 1; }
   bounds=$(stats "$OUT/d3d12_list7" emptybarrier | /usr/bin/grep -oE 'encoder boundaries [0-9]+, [0-9]+ with no barrier' || true)
   [ "$bounds" = "encoder boundaries 1, 1 with no barrier" ] \
     || { echo "tests: FAIL a Barrier that orders nothing made a barrier call: ${bounds:-no stats}"; exit 1; }
+fi
+if [ -x "$OUT/d3d12_list7" ]; then
   # ResolveSubresourceRegion under Metal's validation layer (fork 0129): a rectangle past the destination's edge and a
   # larger destination are Metal misuse unless clipped and resolved through the scratch texture (an assertion ends it).
   valid=$(MTL_DEBUG_LAYER=1 DXMT_LOG_PATH=none "$OUT/d3d12_list7" resolveregion 2> /dev/null | /usr/bin/grep '^resolveregion ' \
@@ -110,8 +117,14 @@ db=$(ls "$X"/fresh/shaders_*.db 2> /dev/null | head -1)
 table=$([ -n "$db" ] && sqlite3 "$db" "select name from sqlite_master where type = 'table' limit 1")
 rows=$([ -n "$table" ] && sqlite3 "$db" "select count(*) from \"$table\"" || echo 0)
 rm -rf "$X"
-[ "$recorded" -gt 0 ] && [ "$dumped" -gt 0 ] \
-  || { echo "tests: FAIL DXMT's files: $recorded recorded, $dumped dumped"; exit 1; }
+# A p build compiles the DXIL dump out (capture mode, DXMT_PERF_BUILD): only the recording is checked there.
+if [ -n "$PBUILD" ]; then
+  [ "$recorded" -gt 0 ] || { echo "tests: FAIL DXMT's files: $recorded recorded"; exit 1; }
+  echo "tests: note: the DXIL dump check skipped (a p native build: no capture mode)"
+else
+  [ "$recorded" -gt 0 ] && [ "$dumped" -gt 0 ] \
+    || { echo "tests: FAIL DXMT's files: $recorded recorded, $dumped dumped"; exit 1; }
+fi
 [ "${rows:-0}" -gt 0 ] || { tail -3 "$OUT/check-replay.txt"; echo "tests: FAIL the native replay: ${rows:-0} cache rows"; exit 1; }
 echo "tests: ok"
 
