@@ -1979,7 +1979,7 @@ pub(crate) mod tests {
             use std::os::unix::fs::PermissionsExt;
             let f = fixture();
             let documents = format!("{}/Documents", f.home);
-            std::fs::set_permissions(&documents, std::fs::Permissions::from_mode(0)).unwrap();
+            std::fs::set_permissions(&documents, std::fs::Permissions::from_mode(0o000)).unwrap();
             let _restore = Defer(|| {
                 let _ = std::fs::set_permissions(&documents, std::fs::Permissions::from_mode(0o755));
             });

@@ -3,8 +3,11 @@
 use std::collections::BTreeMap;
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
+use macneutron_core::launcher::Launcher;
 use macneutron_core::launcher_log::LauncherLog;
+use macneutron_core::preflight::AppleScriptNotifier;
 use macneutron_core::runtime_installer::{
     default_identity, default_running_executables, standard_runner, RuntimeInstallOutcome, RuntimeInstaller,
 };
@@ -15,17 +18,55 @@ use macneutron_core::vm_setup_manifest::VMSetupManifest;
 pub const USAGE: &str = "usage: macneutron launch <verb> <target> [args...]\n       macneutron install --tool-dir <dir> --wine-app <wine.app> [--steam-exe <steam.exe>] [--force]\n       macneutron passthrough <verb> <command> [args...]\n       macneutron vm-setup --manifest <vm-manifest.json> --vm <dir> [--mkfs <mkfs.erofs>] [--min-free-gb <n>]\n       macneutron vm-setup --check-sources --manifest <vm-manifest.json>";
 
 /// Runs one command line and returns its exit code.
-///
-/// `launch` is not implemented yet: it needs the launcher (and a notifier), which the Rust port does not have.
 pub fn run(args: &[String], environment: &BTreeMap<String, String>, executable: &Path) -> i32 {
     let Some((command, rest)) = args.split_first() else { return usage_error() };
     match command.as_str() {
+        "launch" => launch(rest, environment, executable),
         "install" => install(rest, executable),
         "passthrough" => passthrough(rest, environment),
         "vm-setup" => vm_setup(rest, executable),
-        // TODO: `launch` (Launcher + notifier) and the `toast` helper are unported.
+        // TODO: the `toast` helper (AppKit, main.swift's) and StopRequests' quit-request bridge are unported.
         _ => usage_error(),
     }
+}
+
+/// The process's single launch, set before it starts: Steam's quit request (StopRequests) ends its VM.
+static LAUNCHING: OnceLock<Arc<Launcher>> = OnceLock::new();
+
+/// Steam's Stop, a quit request to the launcher (macneutron's StopRequests): a microVM launch ends its VM.
+pub fn quit_requested() {
+    if let Some(launcher) = LAUNCHING.get() {
+        let _ = launcher.stop_vm();
+    }
+}
+
+fn launch(rest: &[String], environment: &BTreeMap<String, String>, executable: &Path) -> i32 {
+    let mut launcher = Launcher::new(ToolLayout::for_executable(executable));
+    launcher.notifier = Arc::new(AppleScriptNotifier::new(Some(executable.to_path_buf())));
+    let launcher = Arc::new(launcher);
+    install_termination_handlers(launcher.clone(), environment.clone());
+    let _ = LAUNCHING.set(launcher.clone());
+    launcher.launch(rest, environment)
+}
+
+/// Steam's Stop button (SIGTERM) and Ctrl-C kill the game's Wine processes, then exit. The signals are blocked and a
+/// thread waits for them (Swift's DispatchSource): `terminate` starts a process and takes locks, which a signal
+/// handler can't. Threads started later inherit the mask; children get an empty one (std's Command resets it).
+fn install_termination_handlers(launcher: Arc<Launcher>, environment: BTreeMap<String, String>) {
+    let mut set: libc::sigset_t = 0;
+    unsafe {
+        libc::sigemptyset(&mut set);
+        libc::sigaddset(&mut set, libc::SIGTERM);
+        libc::sigaddset(&mut set, libc::SIGINT);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+    }
+    std::thread::spawn(move || {
+        let mut signal = 0;
+        if unsafe { libc::sigwait(&set, &mut signal) } == 0 {
+            launcher.terminate(&environment);
+            std::process::exit(128 + signal);
+        }
+    });
 }
 
 fn install(rest: &[String], executable: &Path) -> i32 {
