@@ -275,7 +275,10 @@ mod tests {
 
     #[test]
     fn rejects_broken_input() {
-        assert!(KeyValues::parse("\"a\"\n{\n\"k\" \"v\"\n").is_err());
+        assert_eq!(
+            KeyValues::parse("\"a\"\n{\n\"k\" \"v\"\n"),
+            Err(KeyValuesError::UnterminatedBlock("a".into()))
+        );
         assert!(KeyValues::parse("\"a\" \"unterminated").is_err());
         assert!(KeyValues::parse("}").is_err());
     }

@@ -161,4 +161,85 @@ mod tests {
         assert!(std::fs::read_to_string(log.launcher_log()).unwrap().contains("kept"));
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    fn lines(path: &Path) -> Vec<String> {
+        std::fs::read_to_string(path).unwrap().split('\n').filter(|l| !l.is_empty()).map(String::from).collect()
+    }
+
+    #[test]
+    fn appends_timestamped_lines() {
+        let log = LauncherLog::new(crate::test_support::make_temp_dir().join("Logs"));
+        log.append("verb=run exit=0");
+        log.append("verb=run exit=1");
+        let lines = lines(&log.launcher_log());
+        assert_eq!(lines.len(), 2);
+        assert!(lines[1].ends_with(" verb=run exit=1"));
+        assert!(lines[0].starts_with("20"));
+    }
+
+    #[test]
+    fn rotates_past_one_megabyte() {
+        let log = crate::test_support::make_log();
+        std::fs::write(log.launcher_log(), vec![0u8; ROTATE_BYTES as usize + 1]).unwrap();
+        log.append("fresh");
+        assert!(log.directory.join("launcher.log.1").exists());
+        assert!(std::fs::read_to_string(log.launcher_log()).unwrap().ends_with(" fresh\n"));
+    }
+
+    #[test]
+    fn game_log_is_per_app() {
+        let log = LauncherLog::new(crate::test_support::make_temp_dir().join("Logs"));
+        assert_eq!(log.game_log("42").file_name().unwrap(), "steam-42.log");
+        assert!(log.directory.exists());
+    }
+
+    #[test]
+    fn game_log_rotates_past_fifty_megabytes_keeping_one() {
+        let log = crate::test_support::make_log();
+        let game = log.game_log("42");
+        let old = log.directory.join("steam-42.log.1");
+        let size = |p: &Path| std::fs::metadata(p).ok().map(|m| m.len());
+        crate::test_support::write("older", &old, false);
+        crate::test_support::write("", &game, false);
+        let file = std::fs::OpenOptions::new().write(true).open(&game).unwrap();
+        file.set_len(GAME_LOG_ROTATE_BYTES).unwrap(); // at the limit (sparse): kept
+        assert_eq!(log.game_log("42"), game);
+        assert_eq!(size(&game), Some(GAME_LOG_ROTATE_BYTES));
+        assert_eq!(size(&old), Some(5));
+        file.set_len(GAME_LOG_ROTATE_BYTES + 1).unwrap(); // past it: rotated, the older one gone
+        drop(file);
+        log.game_log("42");
+        assert_eq!(size(&game), None);
+        assert_eq!(size(&old), Some(GAME_LOG_ROTATE_BYTES + 1));
+    }
+
+    #[test]
+    fn concurrent_appends_keep_every_line() {
+        // Launches overlap: no append may overwrite another.
+        let log = crate::test_support::make_log();
+        std::thread::scope(|scope| {
+            for thread in 0..8 {
+                let log = &log;
+                scope.spawn(move || {
+                    for i in 0..50 {
+                        log.append(&format!("thread {thread} line {i}"));
+                    }
+                });
+            }
+        });
+        assert_eq!(lines(&log.launcher_log()).len(), 400);
+    }
+
+    #[test]
+    fn a_quiet_log_writes_only_summaries() {
+        // A performance build (X.Y.Zp) launched without MACNEUTRON_LOG: one line a launch, its summary.
+        let log = LauncherLog::new(crate::test_support::make_temp_dir().join("Logs"));
+        log.set_quiet(true);
+        log.append("note: Steam client folder /x");
+        assert!(!log.launcher_log().exists());
+        log.summary("verb=run appid=1 exit=0");
+        let lines = lines(&log.launcher_log());
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].ends_with(" verb=run appid=1 exit=0"));
+    }
 }

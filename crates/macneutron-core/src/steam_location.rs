@@ -266,3 +266,47 @@ impl SteamControlling for SteamProcess {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{make_temp_dir, write};
+
+    #[test]
+    fn finds_libraries_and_installed_apps() {
+        // makeFakeSteam: only the Steam root matters here.
+        let steam = SteamLocation::new(make_temp_dir().join("Steam"));
+        std::fs::create_dir_all(steam.bundle_macos()).unwrap();
+        let extra = make_temp_dir().join("Games Drive");
+        write(
+            &format!(
+                "\"libraryfolders\"\n{{\n\t\"0\"\n{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n\t\"1\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n}}",
+                steam.root.display(),
+                extra.display()
+            ),
+            &steam.root.join("steamapps/libraryfolders.vdf"),
+            false,
+        );
+        write("", &steam.root.join("steamapps/appmanifest_1062090.acf"), false);
+        write("", &extra.join("steamapps/appmanifest_2977660.acf"), false);
+        assert_eq!(steam.libraries().len(), 2);
+        assert_eq!(steam.installed_app_ids(), BTreeSet::from([1062090, 2977660]));
+    }
+
+    #[test]
+    fn local_config_is_the_most_recent_users() {
+        let steam = SteamLocation::new(make_temp_dir());
+        assert_eq!(steam.local_config(), None); // no users at all
+        write("", &steam.root.join("userdata/12345/config/localconfig.vdf"), false);
+        let ends = |p: Option<PathBuf>| p.is_some_and(|p| p.ends_with("userdata/12345/config/localconfig.vdf"));
+        assert!(ends(steam.local_config())); // the only folder
+        write("", &steam.root.join("userdata/999/config/localconfig.vdf"), false);
+        assert_eq!(steam.local_config(), None); // two folders, no MostRecent
+        write(
+            "\"users\"\n{\n\t\"76561197960278073\"\n\t{\n\t\t\"MostRecent\"\t\t\"1\"\n\t}\n}\n",
+            &steam.root.join("config/loginusers.vdf"),
+            false,
+        );
+        assert!(ends(steam.local_config()));
+    }
+}

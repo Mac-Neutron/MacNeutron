@@ -32,3 +32,18 @@ impl SteamWatcher {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reports_only_transitions() {
+        let mut watcher = SteamWatcher::new();
+        assert_eq!(watcher.observe(true), None);
+        assert_eq!(watcher.observe(true), None);
+        assert_eq!(watcher.observe(false), Some(SteamEvent::Quit));
+        assert_eq!(watcher.observe(false), None);
+        assert_eq!(watcher.observe(true), Some(SteamEvent::Launched));
+    }
+}

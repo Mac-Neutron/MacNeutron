@@ -132,4 +132,20 @@ mod tests {
         );
         assert!(LO::problems("/usr/bin/env %command% -dx12", &env(&[("A", "1")])).is_empty());
     }
+
+    #[test]
+    fn steam_lines_are_each_apps_launch_options() {
+        let file = crate::test_support::make_temp_dir().join("localconfig.vdf");
+        crate::test_support::write(
+            "\"UserLocalConfigStore\" { \"Software\" { \"Valve\" { \"Steam\" { \"apps\" {\n  \"42\" { \"LaunchOptions\" \"/usr/bin/env MACNEUTRON_LOG=1 %command%\" }\n  \"43\" { \"LaunchOptions\" \"\" }\n  \"44\" { \"LastPlayed\" \"1\" }\n} } } } }",
+            &file,
+            false,
+        );
+        let expected: BTreeMap<u32, String> =
+            BTreeMap::from([(42, "/usr/bin/env MACNEUTRON_LOG=1 %command%".to_string())]);
+        assert_eq!(LO::steam_lines(&file), expected);
+        crate::test_support::write("{ not vdf", &file, false);
+        assert!(LO::steam_lines(&file).is_empty());
+        assert!(LO::steam_lines(&file.join("missing")).is_empty());
+    }
 }

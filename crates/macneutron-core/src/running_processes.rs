@@ -35,3 +35,23 @@ pub fn executable_paths() -> Vec<String> {
         paths
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn this_test_process_is_listed() {
+        let exe = std::fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
+        assert!(executable_paths().contains(&exe.to_string_lossy().into_owned()));
+    }
+
+    #[test]
+    fn a_spawned_sleep_is_listed_by_its_executable() {
+        let mut sleep = std::process::Command::new("/bin/sleep").arg("5").spawn().unwrap();
+        let listed = executable_paths().contains(&"/bin/sleep".to_string());
+        let _ = sleep.kill();
+        let _ = sleep.wait();
+        assert!(listed);
+    }
+}

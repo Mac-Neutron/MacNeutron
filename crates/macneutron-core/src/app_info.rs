@@ -175,3 +175,65 @@ impl<'a> Cursor<'a> {
         Ok(s)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{make_app_info_v29, make_temp_dir};
+
+    fn app(id: u32, name: &str, ty: &str, os: &[&str]) -> AppInfo {
+        AppInfo {
+            app_id: id,
+            name: name.into(),
+            r#type: ty.into(),
+            oslist: os.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn reads_name_type_and_platforms() {
+        let apps = vec![
+            app(1062090, "Timberborn", "game", &["windows", "macos"]),
+            app(2977660, "Cats", "game", &["windows"]),
+            app(1628350, "Steam Linux Runtime", "tool", &["linux"]),
+        ];
+        assert_eq!(parse(&make_app_info_v29(&apps, MAGIC_V29)).unwrap(), apps);
+    }
+
+    #[test]
+    fn rejects_other_formats() {
+        assert_eq!(
+            parse(&make_app_info_v29(&[], 0x0756_4428)),
+            Err(AppInfoError::UnsupportedFormat(0x0756_4428))
+        );
+    }
+
+    #[test]
+    fn rejects_truncated_files() {
+        let data = make_app_info_v29(&[app(1, "A", "game", &["windows"])], MAGIC_V29);
+        assert!(parse(&data[..40]).is_err());
+    }
+
+    // Skipped: readsTheRealAppCache (needs the real Steam folder, gated by MACNEUTRON_REAL_STEAM).
+
+    #[test]
+    fn reading_while_steam_rewrites_the_file_never_crashes() {
+        // A short read may fail; it must not crash.
+        let apps: Vec<AppInfo> = (0..3000).map(|i| app(i + 1, &format!("Game {i}"), "game", &["windows"])).collect();
+        let big = make_app_info_v29(&apps, MAGIC_V29);
+        let path = make_temp_dir().join("appinfo.vdf");
+        std::fs::write(&path, &big).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let (writer_path, writer_big) = (path.clone(), big.clone());
+        let writer = std::thread::spawn(move || {
+            while std::time::Instant::now() < deadline {
+                let _ = std::fs::write(&writer_path, &writer_big[..64]);
+                let _ = std::fs::write(&writer_path, &writer_big);
+            }
+        });
+        while std::time::Instant::now() < deadline {
+            let _ = read(&path);
+        }
+        writer.join().unwrap();
+    }
+}

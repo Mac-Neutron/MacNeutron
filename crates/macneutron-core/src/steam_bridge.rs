@@ -111,4 +111,35 @@ mod tests {
         assert_eq!(SteamBridge::client_directory(Some(&root), &steam), bundle);
         assert_eq!(SteamBridge::client_directory(None, &steam), bundle);
     }
+
+    /// macOS Steam's registry.vdf with `language` under HKCU/Software/Valve/Steam, and a sibling block's own `language`.
+    fn registry_vdf(language: &str) -> String {
+        format!(
+            "\"Registry\"\n{{\n\t\"HKCU\"\n\t{{\n\t\t\"Software\"\n\t\t{{\n\t\t\t\"Valve\"\n\t\t\t{{\n\t\t\t\t\"Steam\"\n\t\t\t\t{{\n\t\t\t\t\t\"language\"\t\t\"{language}\"\n\t\t\t\t}}\n\t\t\t\t\"Steamsteamglobal\"\n\t\t\t\t{{\n\t\t\t\t\t\"language\"\t\t\"german\"\n\t\t\t\t}}\n\t\t\t}}\n\t\t}}\n\t}}\n}}\n"
+        )
+    }
+
+    #[test]
+    fn ui_language_comes_from_registry_vdf() {
+        let steam = crate::test_support::make_steam_location(true);
+        crate::test_support::write(&registry_vdf("french"), &steam.registry_vdf(), false);
+        assert_eq!(steam.ui_language().as_deref(), Some("french"));
+        assert_eq!(crate::test_support::make_steam_location(true).ui_language(), None);
+    }
+
+    #[test]
+    fn bridge_needs_steam_exe_and_both_halves_of_the_client() {
+        use crate::test_support::{install_fake_steam_bridge, make_tool_layout};
+        let layout = make_tool_layout();
+        assert!(!layout.steam_bridge_installed()); // wine.app has lsteamclient; the tool folder has no steam.exe yet
+        install_fake_steam_bridge(&layout);
+        assert!(layout.steam_bridge_installed());
+        for half in [layout.lsteamclient_unix(), layout.lsteamclient()] {
+            let saved = std::fs::read(&half).unwrap();
+            std::fs::remove_file(&half).unwrap();
+            assert!(!layout.steam_bridge_installed());
+            std::fs::write(&half, saved).unwrap();
+        }
+        assert!(layout.steam_bridge_installed());
+    }
 }

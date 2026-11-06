@@ -321,4 +321,29 @@ mod tests {
         let env = LaunchEnvironment::build(&base(&[("STEAM_COMPAT_PROTON", "1")]), &context(), GraphicsBackend::Dxmt, false);
         assert!(!env.contains_key("STEAM_COMPAT_PROTON"));
     }
+
+    #[test]
+    fn post_anti_aliasing_reaches_wine() {
+        use crate::game_settings::GameSettings;
+        let settings = GameSettings { post_aa: Some("cmaa2".into()), ..Default::default() };
+        let env = LaunchEnvironment::build(&settings.environment(), &context(), GraphicsBackend::Dxmt, false);
+        assert_eq!(env.get("MACNEUTRON_POST_AA").map(String::as_str), Some("cmaa2"));
+    }
+
+    #[test]
+    fn anisotropic_filtering_reaches_wine() {
+        use crate::game_settings::GameSettings;
+        let forced = |settings: GameSettings, options: &[(&str, &str)]| {
+            let mut merged = settings.environment();
+            merged.extend(base(options)); // a launch option wins
+            LaunchEnvironment::build(&merged, &context(), GraphicsBackend::Dxmt, false)
+                .get("DXMT_MAX_ANISOTROPY")
+                .cloned()
+        };
+        assert_eq!(forced(GameSettings::default(), &[]).as_deref(), Some("16"));
+        let with = |a: &str| GameSettings { anisotropy: Some(a.into()), ..Default::default() };
+        assert_eq!(forced(with("8"), &[]).as_deref(), Some("8"));
+        assert_eq!(forced(with("game"), &[]), None);
+        assert_eq!(forced(GameSettings::default(), &[("DXMT_MAX_ANISOTROPY", "0")]).as_deref(), Some("0"));
+    }
 }

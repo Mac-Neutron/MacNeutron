@@ -285,3 +285,71 @@ pub fn pe_bytes_icons(icons: &[(u8, u16, Vec<u8>)]) -> Vec<u8> {
     bytes.extend(rsrc);
     bytes
 }
+
+/// Port of `makeAppInfoV29` (AppInfoFixture.swift): a minimal appinfo.vdf v29 the way Steam lays it out.
+pub fn make_app_info_v29(apps: &[crate::app_info::AppInfo], magic: u32) -> Vec<u8> {
+    fn index(strings: &mut Vec<String>, key: &str) -> u32 {
+        if let Some(found) = strings.iter().position(|s| s == key) {
+            return found as u32;
+        }
+        strings.push(key.to_string());
+        (strings.len() - 1) as u32
+    }
+    fn capitalized(s: &str) -> String {
+        let mut c = s.chars();
+        c.next().map(|f| f.to_uppercase().collect::<String>() + &c.as_str().to_lowercase()).unwrap_or_default()
+    }
+    let mut strings: Vec<String> = Vec::new();
+    let mut body: Vec<u8> = Vec::new();
+    for app in apps {
+        let mut kv: Vec<u8> = Vec::new();
+        kv.push(0x00);
+        kv.extend(index(&mut strings, "appinfo").to_le_bytes());
+        kv.push(0x02);
+        kv.extend(index(&mut strings, "appid").to_le_bytes());
+        kv.extend(app.app_id.to_le_bytes());
+        kv.push(0x00);
+        kv.extend(index(&mut strings, "common").to_le_bytes());
+        let mut oslist: Vec<&String> = app.oslist.iter().collect();
+        oslist.sort();
+        let oslist = oslist.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(",");
+        for (key, value) in [("name", app.name.clone()), ("type", capitalized(&app.r#type)), ("oslist", oslist)] {
+            kv.push(0x01);
+            kv.extend(index(&mut strings, key).to_le_bytes());
+            kv.extend(value.as_bytes());
+            kv.push(0);
+        }
+        kv.push(0x07);
+        kv.extend(index(&mut strings, "gameid").to_le_bytes());
+        kv.extend((app.app_id as u64).to_le_bytes());
+        kv.extend([0x08, 0x08, 0x08]);
+        let header_len = 4 + 4 + 8 + 20 + 4 + 20;
+        body.extend(app.app_id.to_le_bytes());
+        body.extend(((header_len + kv.len()) as u32).to_le_bytes());
+        body.extend(vec![0u8; header_len]);
+        body.extend(kv);
+    }
+    body.extend(0u32.to_le_bytes());
+    let table_offset = (4 + 4 + 8 + body.len()) as u64;
+    let mut table = (strings.len() as u32).to_le_bytes().to_vec();
+    for s in &strings {
+        table.extend(s.as_bytes());
+        table.push(0);
+    }
+    let mut out = magic.to_le_bytes().to_vec();
+    out.extend(1u32.to_le_bytes());
+    out.extend(table_offset.to_le_bytes());
+    out.extend(body);
+    out.extend(table);
+    out
+}
+
+/// Port of `makeSteamLocation`: a Steam root in a temp folder; `steam_client` puts a steamclient.dylib in the
+/// bundle's MacOS folder.
+pub fn make_steam_location(steam_client: bool) -> crate::steam_location::SteamLocation {
+    let steam = crate::steam_location::SteamLocation::new(make_temp_dir().join("Steam"));
+    if steam_client {
+        write("dylib", &steam.bundle_macos().join("steamclient.dylib"), false);
+    }
+    steam
+}
