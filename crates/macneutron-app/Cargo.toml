@@ -1,0 +1,18 @@
+[package]
+name = "macneutron-app"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lib]
+name = "macneutron_app"
+path = "src/lib.rs"
+
+[dependencies]
+macneutron-core = { path = "../macneutron-core" }
+libc.workspace = true
+plist.workspace = true
+
+[dev-dependencies]
+macneutron-core = { path = "../macneutron-core", features = ["test-support"] }
