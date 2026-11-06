@@ -451,7 +451,10 @@ mod tests {
         // open file description, and with it the lock, alive after `held` is dropped.
         assert_ne!(unsafe { libc::fcntl(held.as_raw_fd(), libc::F_GETFD) } & libc::FD_CLOEXEC, 0);
         drop(held);
-        assert!(open_flock(&path).is_some());
+        // Another test thread spawning a process can hold a copy of the fd between its fork and its exec (closed at
+        // exec by FD_CLOEXEC, checked above), so the lock may outlive the drop by that window: retry for a second.
+        let free = (0..100).any(|_| open_flock(&path).is_some() || { std::thread::sleep(std::time::Duration::from_millis(10)); false });
+        assert!(free);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
