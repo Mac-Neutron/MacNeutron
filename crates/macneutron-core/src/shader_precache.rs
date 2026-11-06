@@ -107,6 +107,7 @@ impl ShaderPrecache {
 
     /// The same natively (Direct3D forwarding: native DXMT in the VM host): the native `tool` on each recording, into the
     /// shader cache at `cache` (DXMT_SHADER_CACHE_PATH, as macneutron-vm gives native DXMT), before the VM boots.
+    #[allow(clippy::too_many_arguments)] // mirrors ShaderPrecache.swift's replayNative
     pub fn replay_native(
         &self,
         tool: &Path,

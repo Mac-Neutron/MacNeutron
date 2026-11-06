@@ -182,7 +182,13 @@ fn merge_and_swap(folder: &Path, name: &str, target: &str, report: &mut ProfileL
                 return;
             }
         }
-        if std::fs::copy(folder.join(path), &to).is_err() {
+        // ProfileLinks.swift:86 `copyItem`: an APFS clone, modification time kept.
+        let from = folder.join(path);
+        let copied = std::fs::copy(&from, &to).and_then(|_| {
+            let modified = std::fs::metadata(&from)?.modified()?;
+            std::fs::File::options().write(true).open(&to)?.set_modified(modified)
+        });
+        if copied.is_err() {
             report.notes.push(format!("left {name}: couldn't copy {}", ProfileLinks::redacted(path)));
             return;
         }
@@ -231,8 +237,13 @@ fn collect_files(root: &Path, dir: &Path, result: &mut Vec<String>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
-        if posix::kind(&path) != posix::Kind::File {
-            continue;
+        match posix::kind(&path) {
+            posix::Kind::Directory => {
+                collect_files(root, &path, result); // ProfileLinks.swift:120 enumerates the whole tree
+                continue;
+            }
+            posix::Kind::File => {}
+            _ => continue,
         }
         let name = entry.file_name();
         let name = name.to_string_lossy();
@@ -277,6 +288,263 @@ fn files_equal(a: &Path, b: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{make_temp_dir, write};
+    use std::os::unix::fs::symlink as unix_symlink;
+
+    /// A prefix whose Wine profile `users/<user>` has the Vista folders wineboot makes; `documents` stands for the Mac's
+    /// own folder, which Wine links `Documents` to.
+    fn make_prefix(user: &str, documents: Option<&Path>) -> PathBuf {
+        let prefix = make_temp_dir().join("pfx");
+        let home = prefix.join(format!("drive_c/users/{user}"));
+        for folder in ["AppData/Local", "AppData/Roaming", "AppData/LocalLow", "Saved Games"] {
+            std::fs::create_dir_all(home.join(folder)).unwrap();
+        }
+        match documents {
+            Some(documents) => {
+                std::fs::create_dir_all(documents).unwrap();
+                unix_symlink(documents, home.join("Documents")).unwrap();
+            }
+            None => std::fs::create_dir_all(home.join("Documents")).unwrap(),
+        }
+        prefix
+    }
+
+    fn users(prefix: &Path, path: &str) -> PathBuf {
+        prefix.join(format!("drive_c/users/{path}"))
+    }
+
+    fn link(prefix: &Path, path: &str) -> Option<String> {
+        std::fs::read_link(users(prefix, path)).ok().map(|p| p.to_string_lossy().into_owned())
+    }
+
+    fn is_real_folder(prefix: &Path, path: &str) -> bool {
+        std::fs::symlink_metadata(users(prefix, path)).map(|m| m.is_dir()).unwrap_or(false)
+    }
+
+    fn read(prefix: &Path, path: &str) -> Option<String> {
+        std::fs::read_to_string(users(prefix, path)).ok()
+    }
+
+    fn seed(prefix: &Path, path: &str, text: &str) {
+        write(text, &users(prefix, path), false);
+    }
+
+    fn apply(prefix: &Path, user: &str) -> ProfileLinkReport {
+        ProfileLinks::apply(prefix, user, true)
+    }
+
+    #[test]
+    fn an_empty_profile_gets_all_four_links() {
+        let prefix = make_prefix("u", None);
+        let report = apply(&prefix, "u");
+        assert_eq!(link(&prefix, "u/Local Settings/Application Data").as_deref(), Some("../AppData/Local"));
+        assert_eq!(link(&prefix, "u/Application Data").as_deref(), Some("AppData/Roaming"));
+        assert_eq!(link(&prefix, "u/My Documents").as_deref(), Some("Documents"));
+        assert_eq!(link(&prefix, "steamuser").as_deref(), Some("u"));
+        assert_eq!(report, ProfileLinkReport::default());
+    }
+
+    #[test]
+    fn seeded_steamuser_merges_into_vista_folders() {
+        // Steam's cloud download wrote WinAppDataLocal's files under its XP name before MacNeutron ever ran.
+        let prefix = make_prefix("u", None);
+        seed(&prefix, "steamuser/Local Settings/Application Data/G/s.sav", "cloud");
+        let report = apply(&prefix, "u");
+        assert_eq!(read(&prefix, "u/AppData/Local/G/s.sav").as_deref(), Some("cloud"));
+        // the path Steam watches
+        assert_eq!(read(&prefix, "steamuser/Local Settings/Application Data/G/s.sav").as_deref(), Some("cloud"));
+        assert_eq!(link(&prefix, "steamuser").as_deref(), Some("u"));
+        assert_eq!(read(&prefix, "steamuser BACKUP/Local Settings/Application Data/G/s.sav").as_deref(), Some("cloud"));
+        assert_eq!(report.conflicts, 0);
+    }
+
+    #[test]
+    fn a_differing_file_changes_nothing() {
+        let prefix = make_prefix("u", None);
+        seed(&prefix, "u/AppData/Local/G/s.sav", "local");
+        seed(&prefix, "steamuser/Local Settings/Application Data/G/s.sav", "cloud");
+        let report = apply(&prefix, "u");
+        assert!(is_real_folder(&prefix, "steamuser"));
+        assert_eq!(read(&prefix, "steamuser/Local Settings/Application Data/G/s.sav").as_deref(), Some("cloud"));
+        assert_eq!(read(&prefix, "u/AppData/Local/G/s.sav").as_deref(), Some("local"));
+        assert!(!is_real_folder(&prefix, "steamuser BACKUP"));
+        assert_eq!(report.conflicts, 1);
+    }
+
+    #[test]
+    fn an_identical_file_merges() {
+        let prefix = make_prefix("u", None);
+        seed(&prefix, "u/AppData/Roaming/G/a.cfg", "same");
+        seed(&prefix, "steamuser/Application Data/G/a.cfg", "same");
+        let report = apply(&prefix, "u");
+        assert_eq!(link(&prefix, "steamuser").as_deref(), Some("u"));
+        assert_eq!(report.conflicts, 0);
+    }
+
+    #[test]
+    fn a_second_run_changes_nothing() {
+        let prefix = make_prefix("u", None);
+        seed(&prefix, "steamuser/Saved Games/G/x", "cloud");
+        apply(&prefix, "u");
+        assert_eq!(apply(&prefix, "u"), ProfileLinkReport::default());
+        assert_eq!(link(&prefix, "steamuser").as_deref(), Some("u"));
+        assert_eq!(read(&prefix, "u/Saved Games/G/x").as_deref(), Some("cloud"));
+    }
+
+    #[test]
+    fn a_profile_named_steamuser_gets_no_steamuser_link() {
+        let prefix = make_prefix("steamuser", None);
+        apply(&prefix, "steamuser");
+        assert!(is_real_folder(&prefix, "steamuser"));
+        assert_eq!(link(&prefix, "steamuser/Application Data").as_deref(), Some("AppData/Roaming"));
+    }
+
+    #[test]
+    fn without_merge_real_folders_stay() {
+        // The app's pass while Steam is closed only adds links; merging is the launch's job.
+        let prefix = make_prefix("u", None);
+        seed(&prefix, "steamuser/Application Data/G/a.cfg", "cloud");
+        let report = ProfileLinks::apply(&prefix, "u", false);
+        assert!(is_real_folder(&prefix, "steamuser"));
+        assert_eq!(read(&prefix, "u/AppData/Roaming/G/a.cfg"), None);
+        assert_eq!(report.notes.len(), 1);
+        assert_eq!(report.conflicts, 0);
+    }
+
+    #[test]
+    fn no_swap_support_leaves_folders_alone() {
+        let prefix = make_prefix("u", None);
+        seed(&prefix, "steamuser/Application Data/G/a.cfg", "cloud");
+        let report = ProfileLinks::apply_with(&prefix, "u", true, |_| false);
+        assert!(is_real_folder(&prefix, "steamuser"));
+        assert_eq!(report.notes.len(), 1);
+    }
+
+    #[test]
+    fn logged_paths_stop_at_the_games_folder() {
+        // Save paths hold SteamIDs, account IDs in hex, persona names; launcher.log ends up in bug reports (spec 4.2).
+        let prefix = make_prefix("u", None);
+        seed(&prefix, "u/AppData/Local/G/0110000103a5b7c9/x", "local");
+        seed(&prefix, "steamuser/Local Settings/Application Data/G/0110000103a5b7c9/x", "cloud");
+        let report = apply(&prefix, "u");
+        assert!(report.notes.iter().any(|n| n.contains("(e.g. Local Settings/Application Data/G/\u{2026})")));
+        assert!(!report.notes.join("").contains("a5b7c9"));
+    }
+
+    // Review Focus
+
+    #[test]
+    fn my_documents_merges_through_wines_documents_link() {
+        let documents = make_temp_dir().join("mac documents");
+        let prefix = make_prefix("u", Some(&documents));
+        seed(&prefix, "steamuser/My Documents/G/a", "cloud");
+        apply(&prefix, "u");
+        assert_eq!(std::fs::read_to_string(documents.join("G/a")).unwrap(), "cloud");
+        assert_eq!(link(&prefix, "steamuser").as_deref(), Some("u"));
+    }
+
+    #[test]
+    fn a_rerun_after_clones_finishes_the_swap() {
+        // A launch killed after cloning but before the swap left equal copies in the profile.
+        let prefix = make_prefix("u", None);
+        seed(&prefix, "steamuser/Local Settings/Application Data/G/s.sav", "cloud");
+        seed(&prefix, "u/AppData/Local/G/s.sav", "cloud");
+        let report = apply(&prefix, "u");
+        assert_eq!(link(&prefix, "steamuser").as_deref(), Some("u"));
+        assert_eq!(report.conflicts, 0);
+    }
+
+    #[test]
+    fn file_against_folder_refuses_the_merge() {
+        let prefix = make_prefix("u", None);
+        seed(&prefix, "u/AppData/Roaming/G/inner", "local folder's file");
+        seed(&prefix, "steamuser/Application Data/G", "a file where the profile has a folder");
+        apply(&prefix, "u");
+        assert!(is_real_folder(&prefix, "steamuser"));
+        assert_eq!(
+            read(&prefix, "steamuser/Application Data/G").as_deref(),
+            Some("a file where the profile has a folder")
+        );
+    }
+
+    #[test]
+    fn missing_profile_links_nothing() {
+        let prefix = make_prefix("someone else", None);
+        let report = apply(&prefix, "u");
+        assert_eq!(link(&prefix, "steamuser"), None);
+        assert_eq!(link(&prefix, "someone else/Application Data"), None);
+        assert_eq!(report.notes.len(), 1);
+    }
+
+    #[test]
+    fn backup_name_skips_taken_names() {
+        let prefix = make_prefix("u", None);
+        std::fs::create_dir_all(users(&prefix, "steamuser BACKUP")).unwrap();
+        seed(&prefix, "steamuser/Saved Games/G/x", "cloud");
+        apply(&prefix, "u");
+        assert_eq!(read(&prefix, "steamuser BACKUP 2/Saved Games/G/x").as_deref(), Some("cloud"));
+        assert_eq!(link(&prefix, "steamuser").as_deref(), Some("u"));
+    }
+
+    // Final review fixes
+
+    #[test]
+    fn a_profile_named_steamuser_in_any_case_is_never_merged_into_itself() {
+        // APFS is case-insensitive: for the Mac user "SteamUser", users/steamuser *is* the profile.
+        let prefix = make_prefix("SteamUser", None);
+        seed(&prefix, "SteamUser/AppData/Local/G/s.sav", "local");
+        let report = apply(&prefix, "SteamUser");
+        assert!(is_real_folder(&prefix, "SteamUser"));
+        assert_eq!(read(&prefix, "SteamUser/AppData/Local/G/s.sav").as_deref(), Some("local"));
+        assert!(!is_real_folder(&prefix, "steamuser BACKUP"));
+        assert_eq!(report.conflicts, 0);
+    }
+
+    #[test]
+    fn a_link_to_another_real_folder_is_left_alone() {
+        // The Mac's short name changed, or two accounts share a library: Steam's watched files resolve through the old
+        // link, and repointing it would make them vanish before Steam's exit pass.
+        let prefix = make_prefix("u", None);
+        seed(&prefix, "old/AppData/Local/G/s.sav", "cloud-synced");
+        unix_symlink("old", users(&prefix, "steamuser")).unwrap();
+        let report = apply(&prefix, "u");
+        assert_eq!(link(&prefix, "steamuser").as_deref(), Some("old"));
+        assert_eq!(read(&prefix, "steamuser/AppData/Local/G/s.sav").as_deref(), Some("cloud-synced"));
+        assert_eq!(report.conflicts, 1);
+    }
+
+    #[test]
+    fn a_dangling_link_is_replaced() {
+        let prefix = make_prefix("u", None);
+        unix_symlink("gone", users(&prefix, "steamuser")).unwrap();
+        let report = apply(&prefix, "u");
+        assert_eq!(link(&prefix, "steamuser").as_deref(), Some("u"));
+        assert_eq!(report, ProfileLinkReport::default());
+    }
+
+    #[test]
+    fn an_equivalent_link_is_kept() {
+        // Proton writes "./AppData/Roaming"; it reaches the same folder, so it isn't churned.
+        let prefix = make_prefix("u", None);
+        unix_symlink("./AppData/Roaming", users(&prefix, "u/Application Data")).unwrap();
+        let report = apply(&prefix, "u");
+        assert_eq!(link(&prefix, "u/Application Data").as_deref(), Some("./AppData/Roaming"));
+        assert_eq!(report, ProfileLinkReport::default());
+    }
+
+    #[test]
+    fn finders_own_files_never_block_a_merge() {
+        // Opening both trees in Finder (to back up saves, say) leaves a different .DS_Store in each.
+        let prefix = make_prefix("u", None);
+        seed(&prefix, "u/AppData/Local/G/.DS_Store", "finder here");
+        seed(&prefix, "steamuser/Local Settings/Application Data/G/.DS_Store", "finder there");
+        seed(&prefix, "steamuser/Local Settings/Application Data/G/._s.sav", "resource fork");
+        seed(&prefix, "steamuser/Local Settings/Application Data/G/s.sav", "cloud");
+        let report = apply(&prefix, "u");
+        assert_eq!(link(&prefix, "steamuser").as_deref(), Some("u"));
+        assert_eq!(read(&prefix, "u/AppData/Local/G/s.sav").as_deref(), Some("cloud"));
+        assert_eq!(report.conflicts, 0);
+    }
 
     fn temp(name: &str) -> PathBuf {
         crate::rpm_fixture::temp(name)
