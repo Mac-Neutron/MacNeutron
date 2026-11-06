@@ -13,6 +13,7 @@
 //! change.
 
 pub mod app_model;
+pub mod ui;
 pub mod update_model;
 pub mod views;
 
