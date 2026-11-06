@@ -67,20 +67,25 @@ impl Children {
 
     /// Stops the child with `pid` (SIGTERM).
     pub fn terminate(pid: u32) {
-        let mut guard = Self::running().lock().unwrap();
-        if let Some((child, _)) = guard.iter_mut().find(|(child, _)| child.id() == pid) {
-            let _ = child.kill();
+        let guard = Self::running().lock().unwrap();
+        if let Some((child, _)) = guard.iter().find(|(child, _)| child.id() == pid) {
+            sigterm(child.id());
         }
     }
 
     /// Every child, or one group's.
     pub fn terminate_all(group: Option<i32>) {
-        for (child, g) in Self::running().lock().unwrap().iter_mut() {
+        for (child, g) in Self::running().lock().unwrap().iter() {
             if group.map(|group| group == *g).unwrap_or(true) {
-                let _ = child.kill();
+                sigterm(child.id());
             }
         }
     }
+}
+
+/// Swift's `Process.terminate()`: SIGTERM, which tar and mkfs.erofs can clean up after (not SIGKILL).
+fn sigterm(pid: u32) {
+    unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
 }
 
 impl VMSetup {

@@ -388,4 +388,20 @@ mod tests {
             .unwrap_err();
         assert_eq!(error, VMSetupError::Mismatch { file: "/etc/motd".into() });
     }
+
+    #[test]
+    fn the_setups_children_end_with_it() {
+        // vm-setup ends its tar and mkfs.erofs when it's told to stop (the app quitting), not only itself. The test ends
+        // its own group: tests run side by side, and ending every child would end their mkfs.erofs too.
+        use std::os::unix::process::ExitStatusExt;
+        let sleeper = || Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let (mine, other) = (Children::run(sleeper(), 99), Children::run(sleeper(), 98));
+        Children::terminate_all(Some(99));
+        let (mut mine, _) = Children::take(mine).unwrap();
+        assert_eq!(mine.wait().unwrap().signal(), Some(libc::SIGTERM));
+        let (mut other, _) = Children::take(other).unwrap();
+        assert!(other.try_wait().unwrap().is_none());
+        other.kill().unwrap();
+        other.wait().unwrap();
+    }
 }

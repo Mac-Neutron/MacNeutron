@@ -336,4 +336,18 @@ mod tests {
         .unwrap_err();
         assert_eq!(error, VMSetupError::Cancelled);
     }
+
+    #[test]
+    fn the_release_names_a_package_no_source_serves() {
+        // Koji files a binary package under its source package: kernel-core is in packages/kernel/.
+        let m = manifest();
+        let sources = m.sources(&kernel());
+        let fex = m.sources(&m.fex_rootfs.package);
+        let only_kernel = VMSetupManifest { packages: vec![kernel()], ..m.clone() };
+        let (k, f) = (sources[2].clone(), fex[0].clone());
+        // the FEX root answers, at the wrong size
+        let head = move |url: &str| if url == k { Some(5) } else if url == f { Some(7) } else { None };
+        let missing = crate::vm_setup::VMSetup::missing_sources(&only_kernel, &head);
+        assert_eq!(missing, vec![m.fex_rootfs.package.file.clone()]);
+    }
 }

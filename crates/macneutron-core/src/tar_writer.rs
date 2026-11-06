@@ -307,4 +307,32 @@ mod tests {
     fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         haystack.windows(needle.len()).position(|w| w == needle)
     }
+
+    #[test]
+    fn cpio_round_trips_through_bsdtar() {
+        let dir = temp("cpio");
+        let archive = dir.join("t.cpio");
+        let file = std::fs::File::create(&archive).unwrap();
+        let mut cpio = crate::cpio::CPIOWriter::new(file);
+        sample(|entry, contents| cpio.add(entry, contents).unwrap());
+        cpio.finish().unwrap();
+        drop(cpio);
+        let text = listing(&archive);
+        assert!(text.contains(" usr/hello\n"), "{text}");
+        assert!(text.contains("usr/link -> hello"), "{text}");
+        assert_eq!(&std::fs::read(&archive).unwrap()[..6], b"070701");
+    }
+
+    #[test]
+    fn a_cpio_device_node_is_written_with_its_numbers() {
+        let console = RecipeEntry { path: "/dev/console".into(), mode: 0o600, uid: 0, gid: 5, kind: Kind::Device { block: false, major: 5, minor: 1 }, capability: None };
+        let archive = temp("cpiodev").join("d.cpio");
+        let mut cpio = crate::cpio::CPIOWriter::new(std::fs::File::create(&archive).unwrap());
+        cpio.add(&console, None).unwrap();
+        cpio.finish().unwrap();
+        drop(cpio);
+        let text = listing(&archive);
+        assert!(text.starts_with("crw-------"), "{text}");
+        assert!(text.contains("5,1") || text.contains("5, 1"), "{text}");
+    }
 }

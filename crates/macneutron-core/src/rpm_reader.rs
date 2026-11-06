@@ -220,4 +220,37 @@ mod tests {
         let err = RPMReader::read_files(&rpm, |_, _, _| Ok(())).unwrap_err();
         assert_eq!(err, VMSetupError::Unsupported("drpm".into()));
     }
+
+    /// Real Fedora packages (kernel-core is xz, systemd zstd), when MN_RPM_SAMPLES names a folder holding them: the
+    /// pinned kernel comes out with the bytes of the image build's own copy. Without it, nothing to check.
+    #[test]
+    fn real_fedora_packages_read() {
+        let Ok(folder) = std::env::var("MN_RPM_SAMPLES") else { return };
+        let mut rpms: Vec<_> = std::fs::read_dir(&folder)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|e| e == "rpm"))
+            .collect();
+        rpms.sort();
+        assert!(rpms.len() >= 2);
+        for rpm in rpms {
+            let mut count = 0;
+            RPMReader::read_files(&rpm, |_, paths, next| {
+                count += 1;
+                if paths.iter().any(|p| p == "/lib/modules/7.2.10-200.fc44.aarch64/vmlinuz") {
+                    let mut hash = crate::posix::Sha256::new();
+                    while let Some(chunk) = next()? {
+                        hash.update(&chunk);
+                    }
+                    let expected = std::fs::read(std::env::var("MN_RPM_VMLINUZ").unwrap()).unwrap();
+                    assert_eq!(hash.finalize(), crate::posix::sha256(&expected));
+                } else {
+                    while next()?.is_some() {}
+                }
+                Ok(())
+            })
+            .unwrap();
+            assert!(count > 0);
+        }
+    }
 }
