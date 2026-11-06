@@ -357,11 +357,27 @@ mod tests {
         std::fs::remove_file(root.join(".installing")).unwrap();
         std::fs::remove_file(root.join("images/manifest.sha256")).unwrap();
         assert!(!MicroVM::is_ready(&root));
+        assert!(MicroVM::find(&root, &env(&[]), Verb::WaitForExitAndRun).is_none());
+    }
+
+    #[test]
+    fn a_game_before_the_vm_tools_are_installed_is_refused() {
+        // Swift's makeVMFixture(vmInstalled: false): the launcher's root is an empty no-vm folder.
+        let none = temp("no-vm");
+        assert!(!MicroVM::is_ready(&none));
+        assert!(MicroVM::find(&none, &env(&[]), Verb::WaitForExitAndRun).is_none());
+        // A macneutron-vm that isn't executable isn't the VM either.
+        let root = make_folder("not-executable");
+        crate::test_support::write("#!/bin/sh\n", &root.join("macneutron-vm"), false);
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(root.join("macneutron-vm"), std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!MicroVM::is_ready(&root));
     }
 
     #[test]
     fn vm_dir_overrides_the_root() {
-        let root = make_folder("root");
+        // Swift's vmDirFromTheEnvironment: the launcher's own root has no VM installed.
+        let root = temp("no-vm");
         let other = make_folder("other");
         let found = MicroVM::find(&root, &env(&[("MACNEUTRON_VM_DIR", other.to_str().unwrap())]), Verb::Run).unwrap();
         assert_eq!(found.root, other);
@@ -393,6 +409,7 @@ mod tests {
         assert!(!MicroVM::is_screen_size("1920x"));
         assert!(!MicroVM::is_screen_size("1920"));
         assert!(!MicroVM::is_screen_size("1920xabc"));
+        assert!(!MicroVM::is_screen_size("big; reboot"));
     }
 
     #[test]
@@ -425,9 +442,16 @@ mod tests {
     #[test]
     fn a_performance_build_drops_stats_and_profile() {
         let vm = MicroVM { root: make_folder("perf") };
-        let environment = env(&[("MACNEUTRON_VM_PROFILE", "1"), ("DXMT_STATS", "1"), ("MACNEUTRON_LOG", "1")]);
+        // Swift's aPerformanceScriptNamesItsProfile: the launcher sets DXMT_LOG_LEVEL=none for a p runtime.
+        let environment = env(&[
+            ("MACNEUTRON_VM_PROFILE", "1"),
+            ("DXMT_STATS", "1"),
+            ("MACNEUTRON_LOG", "1"),
+            ("DXMT_LOG_LEVEL", "none"),
+        ]);
         let script = vm.script(Verb::Run, "1", "/mnt/games/Game/g.exe", &[], &environment, true, "").unwrap();
-        assert!(script.contains("MACNEUTRON_PROFILE='p'"));
+        assert!(script.contains("MACNEUTRON_PROFILE='p'\n"));
+        assert!(script.contains("DXMT_LOG_LEVEL='none'\n"));
         assert!(!script.contains("MACNEUTRON_VM_PROFILE"));
         assert!(!script.contains("DXMT_STATS"));
         assert!(script.contains("MACNEUTRON_LOG='1'"));
@@ -451,10 +475,21 @@ mod tests {
         assert_eq!(shares[2].tag, "game");
         assert_eq!(shares[2].guest, "/mnt/games/SMITE 2");
         assert!(prefix.join("drive_c/users/steamuser").exists());
-        let mounts = MicroVM::mounts_file(&shares);
-        assert!(mounts.starts_with("profile /home/mn/pfx/drive_c/users/steamuser\n"));
-        assert!(mounts.contains(&format!("documents {}/Documents\n", home.to_str().unwrap())));
-        assert!(mounts.ends_with("game /mnt/games/SMITE 2\n"));
+        let home = home.to_str().unwrap();
+        assert_eq!(shares[0].host, path_string(&prefix.join("drive_c/users/steamuser")));
+        assert_eq!(shares[1].host, format!("{home}/Documents"));
+        assert_eq!(shares[2].host, "/Users/someone/Library/Application Support/Steam/steamapps/common/SMITE 2");
+        assert!(shares.iter().all(|s| !s.read_only));
+        assert_eq!(
+            MicroVM::mounts_file(&shares),
+            format!("profile /home/mn/pfx/drive_c/users/steamuser\ndocuments {home}/Documents\ngame /mnt/games/SMITE 2\n")
+        );
+        // MN_MAC_HOME reaches the guest's script.
+        let vm = MicroVM { root: make_folder("home-script") };
+        let script = vm
+            .script(Verb::WaitForExitAndRun, "2437170", "/mnt/games/SMITE 2/g.exe", &[], &env(&[("MN_MAC_HOME", home)]), false, "")
+            .unwrap();
+        assert!(script.contains(&format!("MN_MAC_HOME='{home}'")));
     }
 
     #[test]
@@ -467,6 +502,9 @@ mod tests {
         std::os::unix::fs::symlink("someoneelse", users.join("steamuser")).unwrap();
         let shares = MicroVM::user_shares(&prefix, "/lib/common", "/mnt/games/Game/g.exe", home.to_str().unwrap()).unwrap();
         assert_eq!(shares[0].host, users.join("someoneelse").to_string_lossy());
+        // The link stays, and its folder is made.
+        assert_eq!(std::fs::read_link(users.join("steamuser")).unwrap(), PathBuf::from("someoneelse"));
+        assert!(std::fs::symlink_metadata(users.join("someoneelse")).unwrap().is_dir());
     }
 
     #[test]
@@ -481,6 +519,250 @@ mod tests {
         assert_eq!(MicroVM::game_folder("/mnt/games/SMITE 2/Windows/Hemingway.exe"), Some("SMITE 2".to_string()));
         assert_eq!(MicroVM::game_folder("/mnt/games/Game"), None);
         assert_eq!(MicroVM::game_folder("/tmp/x"), None);
+    }
+
+    const GAME: &str = "/Users/someone/Library/Application Support/Steam/steamapps/common/SMITE 2/Windows/Hemingway.exe";
+
+    /// A home with Documents/, as Swift's makeVMFixture makes it.
+    fn make_home(name: &str) -> String {
+        let home = temp(name).join("home");
+        std::fs::create_dir_all(home.join("Documents")).unwrap();
+        path_string(&home)
+    }
+
+    /// The guest's script for SMITE 2's waitforexitandrun with `arguments` and `environment`.
+    fn smite_script(arguments: &[&str], environment: &BTreeMap<String, String>, performance: bool) -> String {
+        let vm = MicroVM { root: make_folder("smite") };
+        let (_, guest) = MicroVM::guest_path(GAME).unwrap();
+        let arguments: Vec<String> = arguments.iter().map(|a| a.to_string()).collect();
+        vm.script(Verb::WaitForExitAndRun, "2437170", &guest, &arguments, environment, performance, "").unwrap()
+    }
+
+    /// The `export` line's names.
+    fn exported(script: &str) -> Vec<String> {
+        let line = script.lines().find(|l| l.starts_with("export ")).unwrap_or("");
+        line.split(' ').skip(1).map(str::to_string).collect()
+    }
+
+    #[test]
+    fn every_game_runs_in_the_micro_vm() {
+        // Swift's everyGameRunsInTheMicroVM, MicroVM's part: the --steam-map library, the --user-share order and the
+        // state and share paths run-guest.sh gets (MN_STATE, MN_SHARE).
+        let vm = MicroVM { root: make_folder("every") };
+        let (library, guest) = MicroVM::guest_path(GAME).unwrap();
+        assert_eq!(library, "/Users/someone/Library/Application Support/Steam/steamapps/common");
+        assert_eq!(vm.state("2437170"), vm.root.join("state/2437170.img"));
+        assert_eq!(vm.share("2437170"), vm.root.join("runs/2437170"));
+        assert_eq!(vm.run_guest(), vm.root.join("run-guest.sh"));
+        let home = make_home("every-home");
+        let prefix = temp("every-pfx").join("pfx");
+        let shares = MicroVM::user_shares(&prefix, &library, &guest, &home).unwrap();
+        let pairs: Vec<String> = shares.iter().map(|s| format!("{}={}", s.tag, s.host)).collect();
+        assert_eq!(
+            pairs,
+            [
+                format!("profile={}", path_string(&prefix.join("drive_c/users/steamuser"))),
+                format!("documents={home}/Documents"),
+                "game=/Users/someone/Library/Application Support/Steam/steamapps/common/SMITE 2".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_linked_profile_is_shared_as_its_target() {
+        // macOS Wine's profile is named after the Mac user; users/steamuser links to it (ProfileLinks).
+        let prefix = temp("linked").join("pfx");
+        let users = prefix.join("drive_c/users");
+        std::fs::create_dir_all(users.join("chad")).unwrap();
+        std::os::unix::fs::symlink("chad", users.join("steamuser")).unwrap();
+        let shares = MicroVM::user_shares(&prefix, "/lib/common", "/mnt/games/Game/g.exe", &make_home("linked")).unwrap();
+        assert_eq!(shares[0].tag, "profile");
+        assert_eq!(shares[0].host, path_string(&users.join("chad")));
+    }
+
+    #[test]
+    fn a_game_folder_with_an_apostrophe_stays_one_path() {
+        let (library, guest) =
+            MicroVM::guest_path("/Users/someone/Library/Application Support/Steam/steamapps/common/Baldur's Gate 3/bin/bg3.exe")
+                .unwrap();
+        let shares = MicroVM::user_shares(&temp("bg3").join("pfx"), &library, &guest, &make_home("bg3")).unwrap();
+        assert_eq!(shares[2].host, "/Users/someone/Library/Application Support/Steam/steamapps/common/Baldur's Gate 3");
+        assert!(MicroVM::mounts_file(&shares).ends_with("game /mnt/games/Baldur's Gate 3\n"));
+    }
+
+    #[test]
+    fn a_library_on_another_drive_shares_that_librarys_game() {
+        let (library, guest) = MicroVM::guest_path("/Volumes/Games/SteamLibrary/steamapps/common/X/X.exe").unwrap();
+        let shares = MicroVM::user_shares(&temp("drive").join("pfx"), &library, &guest, &make_home("drive")).unwrap();
+        assert_eq!(format!("{}={}", shares[2].tag, shares[2].host), "game=/Volumes/Games/SteamLibrary/steamapps/common/X");
+    }
+
+    #[test]
+    fn documents_that_cant_be_listed_refuse_the_launch() {
+        // macOS's privacy settings refused Steam the Documents folder: never a run without it.
+        use std::os::unix::fs::PermissionsExt;
+        let home = make_home("no-docs");
+        let documents = format!("{home}/Documents");
+        std::fs::set_permissions(&documents, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let result = MicroVM::user_shares(&temp("no-docs").join("pfx"), "/lib/common", "/mnt/games/Game/g.exe", &home);
+        std::fs::set_permissions(&documents, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(result, Err(UserShareError::DocumentsUnreadable(documents)));
+        assert_eq!(
+            UserShareError::DocumentsUnreadable("/D".to_string()).to_string(),
+            "MacNeutron can't open your Documents folder (/D), so a game in the VM couldn't reach its saves there. \
+             Allow Steam in System Settings > Privacy & Security > Files and Folders, then launch the game again."
+        );
+    }
+
+    #[test]
+    fn path_queries_and_games_outside_a_library_stay_on_macos() {
+        assert!(!MicroVM::wanted(&env(&[]), Verb::GetCompatPath));
+        assert_eq!(MicroVM::guest_path("/Applications/Other/Game.exe"), None);
+    }
+
+    #[test]
+    fn the_guest_script_carries_the_launch() {
+        let environment = env(&[
+            ("MACNEUTRON_DLSS", "1"),
+            ("MACNEUTRON_VM_D3D", "forward"),
+            ("MACNEUTRON_VM_D3D32", "forward"),
+            ("MACNEUTRON_VM_WOW64", "1"),
+            ("PROTON_USE_WOW64", "1"),
+            ("MTLD3D_CONFIG", "debug.capsAll=true"),
+        ]);
+        let script = smite_script(&["-homedir=SMITE2Alpha", "it's quoted", ""], &environment, false);
+        assert!(script.contains("APPID='2437170'\n"));
+        assert!(script.contains("GAME_DIR='/mnt/games/SMITE 2/Windows'\n"));
+        assert!(script.contains("EXE='Z:\\mnt\\games\\SMITE 2\\Windows\\Hemingway.exe'\n"));
+        assert!(script.contains("set -- '-homedir=SMITE2Alpha' 'it'\\''s quoted' ''\n"));
+        for (key, value) in &environment {
+            assert!(script.contains(&format!("{key}='{value}'\n")), "{key}");
+        }
+        let exported = exported(&script);
+        for key in ["MACNEUTRON_DLSS", "MACNEUTRON_VM_D3D", "MTLD3D_CONFIG"] {
+            assert!(exported.iter().any(|k| k == key), "{key}");
+        }
+        assert!(script.ends_with("# run-game.sh\nwine steam.exe \"$EXE\" \"$@\"\n"));
+    }
+
+    #[test]
+    fn the_eac_runtime_is_mounted_read_only_in_the_games_vm() {
+        // Linux Steam passes the Proton EasyAntiCheat Runtime to every game under Proton; Mac Steam leaves it in a
+        // library, or Steam's console downloads it.
+        let steam = SteamLocation::new(temp("eac").join("Steam"));
+        let places = [
+            "steamapps/common/Proton EasyAntiCheat Runtime",
+            "steamapps/content/app_1826330/depot_1826331",
+            "Steam.AppBundle/Steam/Contents/MacOS/steamapps/content/app_1826330/depot_1826331",
+        ];
+        for place in places {
+            let runtime = steam.root.join(place);
+            std::fs::create_dir_all(&runtime).unwrap(); // no v2/: not one
+            assert_eq!(MicroVM::eac_runtime(&steam), None, "{place}");
+            std::fs::create_dir_all(runtime.join("v2")).unwrap();
+            assert_eq!(MicroVM::eac_runtime(&steam), Some(path_string(&runtime)), "{place}");
+            std::fs::remove_dir_all(&runtime).unwrap();
+        }
+        // The launcher's share and the guest's word for it (Launcher's part: the --ro-share argument).
+        let share = UserShare { read_only: true, ..UserShare::new("eac-runtime", "/x", MicroVM::GUEST_EAC_RUNTIME) };
+        assert!(MicroVM::mounts_file(&[share]).ends_with("eac-runtime /Volumes/Proton EasyAntiCheat Runtime\n"));
+        let script = smite_script(&[], &env(&[("PROTON_EAC_RUNTIME", MicroVM::GUEST_EAC_RUNTIME)]), false);
+        assert!(script.contains("PROTON_EAC_RUNTIME='/Volumes/Proton EasyAntiCheat Runtime'\n"));
+        assert!(exported(&script).iter().any(|k| k == "PROTON_EAC_RUNTIME"));
+    }
+
+    #[test]
+    fn forwarding_keeps_native_dxmts_state_with_the_game() {
+        let vm = MicroVM { root: make_folder("forward") };
+        assert_eq!(vm.dxmt_state("2437170"), vm.root.join("state/2437170.dxmt"));
+    }
+
+    #[test]
+    fn the_vms_precache_replays_natively_before_the_boot() {
+        let vm = MicroVM { root: make_folder("replay") };
+        assert_eq!(vm.dxmt_replay(), vm.root.join("dxmt/dxmt-replay"));
+    }
+
+    #[test]
+    fn the_vms_precache_is_stamped_with_native_dxmts_key() {
+        let vm = MicroVM { root: make_folder("translator") };
+        assert_eq!(vm.dxmt_translator(), None);
+        crate::test_support::write("native-key\n", &vm.root.join("dxmt-translator"), false);
+        assert_eq!(vm.dxmt_translator().as_deref(), Some("native-key"));
+    }
+
+    #[test]
+    fn the_guests_screen_is_the_macs_display() {
+        let script = smite_script(&[], &env(&[("MN_SCREEN", "3456x2234")]), false);
+        assert!(script.contains("\nMN_SCREEN='3456x2234'\n"));
+        assert!(!MicroVM::is_screen_size("big; reboot"));
+    }
+
+    #[test]
+    fn without_a_display_the_guest_keeps_its_own_screen() {
+        assert!(!smite_script(&[], &env(&[]), false).contains("MN_SCREEN"));
+    }
+
+    #[test]
+    fn perf_turns_on_the_guest_profiler() {
+        assert!(!smite_script(&[], &env(&[]), false).contains("MACNEUTRON_VM_PROFILE"));
+        let script = smite_script(&[], &env(&[("MACNEUTRON_VM_PROFILE", "1")]), false);
+        assert!(script.contains("\nMACNEUTRON_VM_PROFILE='1'\n"));
+        assert!(!script.contains("DXMT_STATS"));
+    }
+
+    #[test]
+    fn a_normal_runtime_keeps_its_console() {
+        assert!(!smite_script(&[], &env(&[]), false).contains("MACNEUTRON_PROFILE="));
+    }
+
+    #[test]
+    fn a_vm_game_gets_wine_debug_as_on_macos() {
+        // LaunchEnvironment's WINEDEBUG reaches the guest: nothing unless logging, MACNEUTRON_LOG=1 and =2's channels,
+        // the user's own wins.
+        let cases = [
+            (None, None, "-all"),
+            (Some("1"), None, "warn+all,warn-seh,+loaddll,warn+steamclient"),
+            (Some("2"), None, "warn+all,+loaddll,+steamclient"),
+            (Some("1"), Some("+relay"), "+relay"),
+        ];
+        for (log, user, want) in cases {
+            let mut base = env(&[]);
+            if let Some(log) = log {
+                base.insert("MACNEUTRON_LOG".into(), log.into());
+            }
+            if let Some(user) = user {
+                base.insert("WINEDEBUG".into(), user.into());
+            }
+            let debug = crate::launch_environment::LaunchEnvironment::wine_debug(&base, log.is_some());
+            base.insert("WINEDEBUG".into(), debug);
+            assert!(smite_script(&[], &base, true).contains(&format!("WINEDEBUG='{want}'\n")), "{log:?}");
+        }
+    }
+
+    #[test]
+    fn a_crash_reporter_override_reaches_the_guest() {
+        let script = smite_script(&[], &env(&[("MN_CRASH_REPORTERS", "mygamecrash")]), false);
+        assert!(script.contains("MN_CRASH_REPORTERS='mygamecrash'"));
+        assert!(exported(&script).iter().any(|k| k == "MN_CRASH_REPORTERS"));
+    }
+
+    #[test]
+    fn a_games_install_scripts_reach_the_guest() {
+        // The install scripts go in front of run-game.sh.
+        let vm = MicroVM { root: make_folder("install") };
+        let install = "mn_install_script() {\n  mn_run 'x'\n}\n";
+        let script = vm.script(Verb::WaitForExitAndRun, "2437170", "/mnt/games/Game/game.exe", &[], &env(&[]), false, install).unwrap();
+        let body = script.find("# run-game.sh").unwrap();
+        assert!(script.find("mn_install_script() {\n").unwrap() < body);
+        assert!(script.ends_with(&format!("{install}# run-game.sh\nwine steam.exe \"$EXE\" \"$@\"\n")));
+    }
+
+    #[test]
+    fn a_timed_out_install_script_is_told_to_the_player() {
+        // MicroVM's part: the launch option's timeout reaches run-game.sh.
+        let script = smite_script(&[], &env(&[("MN_INSTALL_TIMEOUT", "120")]), false);
+        assert!(script.contains("MN_INSTALL_TIMEOUT='120'\n"));
     }
 }
 
