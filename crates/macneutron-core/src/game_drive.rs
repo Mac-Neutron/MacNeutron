@@ -58,7 +58,7 @@ impl GameDrive {
     pub fn python_name(path: &str) -> String {
         let mut resolved: Vec<String> = Vec::new();
         let mut pending: std::collections::VecDeque<String> =
-            path.split('/').map(|s| s.to_string()).collect();
+            path.split('/').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect();
         let mut hops = 0;
         while let Some(part) = pending.pop_front() {
             if part == "." {
@@ -68,7 +68,7 @@ impl GameDrive {
                 resolved.pop();
                 continue;
             }
-            let candidate = format!("/{}/{}", resolved.join("/"), part);
+            let candidate = format!("/{}{}{}", resolved.join("/"), if resolved.is_empty() { "" } else { "/" }, part);
             if hops < 40 {
                 if let Ok(text) = std::fs::read_link(&candidate) {
                     hops += 1;
@@ -76,7 +76,7 @@ impl GameDrive {
                     if text.starts_with('/') {
                         resolved.clear();
                     }
-                    let mut parts: VecDeque<String> = text.split('/').map(|s| s.to_string()).collect();
+                    let mut parts: VecDeque<String> = text.split('/').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect();
                     parts.append(&mut pending);
                     pending = parts;
                     continue;
@@ -167,5 +167,215 @@ mod tests {
         let _ = GameDrive::apply(&dir, &env);
         assert!(std::fs::symlink_metadata(dir.join("dosdevices/s:")).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    use crate::test_support::{make_temp_dir, write};
+    use std::path::PathBuf;
+
+    /// A Steam library `<tmp>/<name>/<steamapps>/common/Game`.
+    fn make_library(name: &str, steamapps: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let lib = make_temp_dir().join(name);
+        let apps = lib.join(steamapps);
+        let game = apps.join("common/Game");
+        std::fs::create_dir_all(&game).unwrap();
+        (lib, apps, game)
+    }
+
+    fn default_library() -> (PathBuf, PathBuf, PathBuf) {
+        make_library("Lib \u{dc}n\u{ef}", "steamapps")
+    }
+
+    fn p(path: &Path) -> String {
+        let text = path.to_string_lossy().into_owned();
+        if text.len() > 1 { text.trim_end_matches('/').to_string() } else { text }
+    }
+
+    fn env(libraries: &str, install: &str) -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("STEAM_COMPAT_LIBRARY_PATHS".to_string(), libraries.to_string()),
+            ("STEAM_COMPAT_INSTALL_PATH".to_string(), install.to_string()),
+        ])
+    }
+
+    fn real(path: &str) -> String {
+        posix::real_path(Path::new(path)).unwrap()
+    }
+
+    /// `pfx/dosdevices/s:`'s target, or None when there is no link.
+    fn drive_link(prefix: &Path) -> Option<String> {
+        std::fs::read_link(prefix.join("dosdevices/s:")).ok().map(|t| t.to_string_lossy().into_owned())
+    }
+
+    fn target(environment: &BTreeMap<String, String>, notes: &mut Vec<String>) -> Option<String> {
+        GameDrive::target(environment, notes)
+    }
+
+    #[test]
+    fn the_librarys_parent_is_the_target() {
+        let (lib, apps, game) = default_library();
+        let other = make_temp_dir().join("Other/steamapps");
+        let mut notes = vec![];
+        let t = target(&env(&format!("{}:{}", p(&other), p(&apps)), &p(&game)), &mut notes);
+        assert_eq!(t, Some(real(&p(&lib))));
+        assert!(notes.is_empty());
+    }
+
+    #[test]
+    fn the_first_substring_match_wins() {
+        // Proton's `entry in install_path` (proton:319): "<root>/L" matches "<root>/L2/..." first, fails validation, and
+        // Proton doesn't try the next entry.
+        let root = make_temp_dir();
+        let apps = root.join("L2/steamapps");
+        let game = apps.join("common/Game");
+        std::fs::create_dir_all(&game).unwrap();
+        let mut notes = vec![];
+        let first = p(&root.join("L"));
+        assert_eq!(target(&env(&format!("{first}:{}", p(&apps)), &p(&game)), &mut notes), Some(first.clone()));
+        assert_eq!(notes, vec![format!("Proton: Error: unable to use parent for game drive, path {first}")]);
+    }
+
+    #[test]
+    fn an_empty_entry_matches_and_removes_the_drive() {
+        // An empty piece matches every install path (proton:319); its fallback, "", removes s: (proton:333-335).
+        let (_, apps, game) = default_library();
+        let environment = env(&format!("::{}", p(&apps)), &p(&game));
+        let mut notes = vec![];
+        assert_eq!(target(&environment, &mut notes), Some(String::new()));
+        assert_eq!(notes, vec!["Proton: Error: unable to use parent for game drive, path ".to_string()]);
+        let prefix = make_temp_dir().join("pfx");
+        GameDrive::apply(&prefix, &env(&p(&apps), &p(&game)));
+        assert!(drive_link(&prefix).is_some());
+        GameDrive::apply(&prefix, &environment);
+        assert!(drive_link(&prefix).is_none());
+    }
+
+    #[test]
+    fn a_legacy_steamapps_folder_named_steamapps_is_the_library() {
+        // Mac Steam passes ".../steamapps" for a folder that may be "SteamApps" on disk (an old install). Python's
+        // realpath, which Proton uses, keeps that spelling; Darwin's realpath(3) gives the on-disk case.
+        let (lib, on_disk, _) = make_library("Lib \u{dc}n\u{ef}", "SteamApps");
+        let apps = p(&on_disk).replace("/SteamApps", "/steamapps");
+        let mut notes = vec![];
+        let t = target(&env(&apps, &format!("{apps}/common/Game")), &mut notes);
+        assert_eq!(t, Some(real(&p(&lib))));
+        assert!(notes.is_empty());
+    }
+
+    #[test]
+    fn a_library_link_follows_its_text_as_pythons_realpath_does() {
+        // Python's realpath resolves a link by its text: "<other>/steamapps" -> "<lib>/steamapps" passes the check even
+        // when the folder is "SteamApps" on disk, where realpath(3) gives "SteamApps".
+        let (lib, _, _) = make_library("Lib \u{dc}n\u{ef}", "SteamApps");
+        let link = make_temp_dir().join("steamapps");
+        posix::symlink(&format!("{}/steamapps", p(&lib)), &link);
+        let mut notes = vec![];
+        let l = p(&link);
+        assert_eq!(target(&env(&l, &format!("{l}/common/Game")), &mut notes), Some(real(&p(&lib))));
+        assert!(notes.is_empty());
+
+        // A link spelled "SteamApps" fails it, as under Proton.
+        let wrong = make_temp_dir().join("steamapps");
+        posix::symlink(&format!("{}/SteamApps", p(&lib)), &wrong);
+        notes.clear();
+        let w = p(&wrong);
+        assert_eq!(target(&env(&w, &format!("{w}/common/Game")), &mut notes), Some(w.clone()));
+        assert_eq!(notes.len(), 1);
+
+        // Hop by hop (a relative link to that link), a trailing slash, and a link text ending in "/.", which Python drops.
+        let hops = make_temp_dir();
+        posix::symlink("hop", &hops.join("steamapps"));
+        posix::symlink(&l, &hops.join("hop"));
+        let dot = make_temp_dir().join("steamapps");
+        posix::symlink(&format!("{}/steamapps/.", p(&lib)), &dot);
+        for entry in [format!("{}/steamapps", p(&hops)), format!("{l}/"), p(&dot)] {
+            notes.clear();
+            let t = target(&env(&entry, &format!("{entry}/common/Game")), &mut notes);
+            assert_eq!(t, Some(real(&p(&lib))), "{entry}");
+            assert!(notes.is_empty(), "{entry}");
+        }
+    }
+
+    #[test]
+    fn a_library_that_fails_validation_gets_protons_fallback() {
+        // The basename is checked as written, after realpath: "SteamApps" isn't "steamapps".
+        let (_, wrong_case, wrong_case_game) = make_library("Lib \u{dc}n\u{ef}", "SteamApps");
+        let mut notes = vec![];
+        assert_eq!(target(&env(&p(&wrong_case), &p(&wrong_case_game)), &mut notes), Some(p(&wrong_case)));
+        assert_eq!(notes.len(), 1);
+
+        // A parent the player can't write.
+        let (lib, apps, game) = default_library();
+        posix::chmod(&lib, 0o555);
+        notes.clear();
+        let t = target(&env(&p(&apps), &p(&game)), &mut notes);
+        posix::chmod(&lib, 0o755);
+        assert_eq!(t, Some(p(&apps)));
+        assert_eq!(notes.len(), 1);
+
+        // steamapps on another volume than its parent.
+        let (_, mounted, mounted_game) = default_library();
+        notes.clear();
+        let t = GameDrive::target_with(
+            &env(&p(&mounted), &p(&mounted_game)),
+            |path| Some(if path.to_string_lossy().ends_with("/steamapps") { 1 } else { 2 }),
+            &mut notes,
+        );
+        assert_eq!(t, Some(p(&mounted)));
+        assert_eq!(notes.len(), 1);
+    }
+
+    #[test]
+    fn no_match_or_missing_variables_means_no_drive() {
+        let (_, apps, game) = default_library();
+        let mut notes = vec![];
+        assert_eq!(target(&env("/nowhere/steamapps", &p(&game)), &mut notes), None);
+        let mut only_libraries = env(&p(&apps), "");
+        only_libraries.remove("STEAM_COMPAT_INSTALL_PATH");
+        assert_eq!(target(&only_libraries, &mut notes), None);
+        let mut only_install = env("", &p(&game));
+        only_install.remove("STEAM_COMPAT_LIBRARY_PATHS");
+        assert_eq!(target(&only_install, &mut notes), None);
+        assert!(notes.is_empty());
+    }
+
+    #[test]
+    fn apply_links_retargets_and_removes() {
+        let prefix = make_temp_dir().join("pfx");
+        let (lib, apps, game) = default_library();
+        let first = env(&p(&apps), &p(&game));
+        GameDrive::apply(&prefix, &first);
+        assert_eq!(drive_link(&prefix), Some(real(&p(&lib))));
+
+        let (lib2, apps2, game2) = make_library("Second", "steamapps");
+        GameDrive::apply(&prefix, &env(&p(&apps2), &p(&game2)));
+        assert_eq!(drive_link(&prefix), Some(real(&p(&lib2))));
+
+        // PROTON_SET_GAME_DRIVE: "0" and "" turn it off; anything else, "false" included, leaves it on (proton:57-58).
+        let with = |value: &str| {
+            let mut e = first.clone();
+            e.insert("PROTON_SET_GAME_DRIVE".into(), value.into());
+            e
+        };
+        for value in ["0", ""] {
+            GameDrive::apply(&prefix, &first);
+            GameDrive::apply(&prefix, &with(value));
+            assert_eq!(drive_link(&prefix), None);
+        }
+        GameDrive::apply(&prefix, &with("false"));
+        assert_eq!(drive_link(&prefix), Some(real(&p(&lib))));
+
+        GameDrive::apply(&prefix, &env("/nowhere/steamapps", &p(&game)));
+        assert_eq!(drive_link(&prefix), None);
+    }
+
+    #[test]
+    fn a_non_link_at_s_is_left_alone() {
+        let prefix = make_temp_dir().join("pfx");
+        let file = prefix.join("dosdevices/s:");
+        write("the player's", &file, false);
+        let (_, apps, game) = default_library();
+        let notes = GameDrive::apply(&prefix, &env(&p(&apps), &p(&game)));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "the player's");
+        assert_eq!(notes, vec!["game drive: dosdevices/s: is not a link, left alone".to_string()]);
     }
 }
