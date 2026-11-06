@@ -75,7 +75,13 @@ if [ -x "$OUT/d3d11_dxgi" ]; then
   DXMT_LOG_PATH=none DXMT_SHADER_CACHE_PATH="$X/cache" "$OUT/d3d11_dxgi" fixed --ported < /dev/null 2> /dev/null \
     | /usr/bin/grep -E '^(dxgif|dxgia|dxgio|d3d10c|dxgil) ' > "$OUT/check-dxgi.txt" || true
   rm -rf "$X"
-  first=$(diff "$OUT/check-dxgi.txt" "$T/d3d11_dxgi.native" | sed -n 2p)
+  # The golden's dxgil lines are a std build's logs (info and debug included): a p build is compared without them.
+  if [ -n "$PBUILD" ]; then
+    /usr/bin/grep -v '^dxgil ' "$OUT/check-dxgi.txt" > "$OUT/check-dxgi.p.txt" || true
+    first=$(/usr/bin/grep -v '^dxgil ' "$T/d3d11_dxgi.native" | diff "$OUT/check-dxgi.p.txt" - | sed -n 2p)
+  else
+    first=$(diff "$OUT/check-dxgi.txt" "$T/d3d11_dxgi.native" | sed -n 2p)
+  fi
   [ -z "$first" ] || { echo "tests: FAIL d3d11_dxgi differs from d3d11_dxgi.native: $first"; exit 1; }
 fi
 if [ -x "$OUT/d3d12_probe" ]; then

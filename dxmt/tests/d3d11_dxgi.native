@@ -311,56 +311,12 @@ dxgil default _dxgi.log warn:  DXGIDeclareAdapterRemovalSupport: stub
 dxgil default _dxgi.log warn:  DXGIFactory: Unknown interface query 0badc0de-1234-0001-0102-030405060708
 dxgil default _dxgi.log warn:  DXGIFactory::GetParent: Unknown interface query 7b7166ec-21c7-44ae-b21a-c9ae321ae369
 dxgil default _dxgi.log warn:  DXGIFactory::GetParent: Unknown interface query 00000000-0000-0000-c000-000000000046
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log warn:  EnumAdapterByLuid: returning an adapter with mismatched luid
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log warn:  DXGIAdapter: Unknown interface query 0badc0de-1234-0002-0102-030405060708
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log warn:  DXGIFactory::EnumWarpAdapter: no WARP, returning the first adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log warn:  DXGIFactory::EnumWarpAdapter: no WARP, returning the first adapter
 dxgil default _dxgi.log warn:  DXGIAdapter: Unknown interface query 0badc0de-1234-0003-0102-030405060708
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log warn:  DXGIAdapter: Unknown interface query 0badc0de-1234-0004-0102-030405060708
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log warn:  MakeWindowAssociation: Ignoring flags 1
 dxgil default _dxgi.log err:   Software adapters not supported
 dxgil default _dxgi.log err:   Unsupported device type
@@ -375,162 +331,12 @@ dxgil default _dxgi.log err:   Not implemented
 dxgil default _dxgi.log err:   Not implemented
 dxgil default _dxgi.log err:   Not implemented
 dxgil default _dxgi.log err:   DXGIFactory::CheckFeatureSupport: unknown feature 99
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log warn:  DXGIAdapter: Unknown interface query 0badc0de-1234-000a-0102-030405060708
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log warn:  DXGIFactory: Unknown interface query 0badc0de-1234-000b-0102-030405060708
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log err:   DXGI: CheckInterfaceSupport: Unsupported interface
 dxgil default _dxgi.log err:   db6f6ddb-ac77-4e88-8253-819df9bbf140
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log warn:  DXGIOutput: Unknown interface query 0badc0de-1234-0014-0102-030405060708
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log warn:  DXGIAdapter: Unknown interface query 0badc0de-1234-0015-0102-030405060708
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log debug: DXGI: For mode <target> found closest mode <result>
 dxgil default _dxgi.log debug: DXGI: For mode <target> found closest mode <result>
 dxgil default _dxgi.log err:   No modes found
@@ -538,166 +344,53 @@ dxgil default _dxgi.log debug: DXGI: For mode <target> found closest mode <resul
 dxgil default _dxgi.log debug: DXGI: For mode <target> found closest mode <result>
 dxgil default _dxgi.log debug: DXGI: For mode <target> found closest mode <result>
 dxgil default _dxgi.log debug: DXGI: For mode <target> found closest mode <result>
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log debug: DXGI: For mode <target> found closest mode <result>
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log warn:  TakeOwnership: Stub
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log warn:  ReleaseOwnership: Stub
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log err:   Not implemented
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log err:   Not implemented
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log err:   Not implemented
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log err:   Not implemented
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log err:   Not implemented
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil default _dxgi.log err:   Not implemented
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil default _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil default _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgia IDXGIAdapter::GetDesc desc@config 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVW nul<128=1 vendor=beef device=1234 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-559 untouched=none
 dxgia IDXGIAdapter1::GetDesc1 desc@config 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVW nul<128=1 vendor=beef device=1234 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-563 untouched=564-567
 dxgia IDXGIAdapter2::GetDesc2 desc@config 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVW nul<128=1 vendor=beef device=1234 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
 dxgia IDXGIAdapter4::GetDesc3 desc@config 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVW nul<128=1 vendor=beef device=1234 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
 dxgio IDXGIOutput6::GetDesc1 desc1@config 00000000 name=monitorinfo rect=monitorinfo monitor=enum attached=1 rotation=0 hdr=consistent primaries=unit min=0 fullframe=max bpc=8 colorspace=0 written=0-211 untouched=212-215
 dxgil config _dxgi.log info:  Found config env: dxgi.customVendorId=beef;dxgi.customDeviceId=1234;dxgi.customDeviceDesc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQR;dxgi.forceSDR=True
-dxgil config _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil config _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil config _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil config _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil config _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil config _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil config _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil config _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil config _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil config _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgia IDXGIAdapter::GetDesc desc@configu 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTU\xe9\U0001d11e nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-559 untouched=none
 dxgia IDXGIAdapter1::GetDesc1 desc@configu 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTU\xe9\U0001d11e nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-563 untouched=564-567
 dxgia IDXGIAdapter2::GetDesc2 desc@configu 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTU\xe9\U0001d11e nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
 dxgia IDXGIAdapter4::GetDesc3 desc@configu 00000000 desc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTU\xe9\U0001d11e nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
 dxgil configu _dxgi.log info:  Found config env: dxgi.customDeviceDesc=ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUé𝄞Z
-dxgil configu _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil configu _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil configu _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil configu _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil configu _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil configu _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil configu _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil configu _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgia IDXGIAdapter::GetDesc desc@confbad 00000000 desc=ab?cd? nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-559 untouched=none
 dxgia IDXGIAdapter1::GetDesc1 desc@confbad 00000000 desc=ab?cd? nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-563 untouched=564-567
 dxgia IDXGIAdapter2::GetDesc2 desc@confbad 00000000 desc=ab?cd? nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
 dxgia IDXGIAdapter4::GetDesc3 desc@confbad 00000000 desc=ab?cd? nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
 dxgil confbad _dxgi.log info:  Found config file: dxmt.conf
-dxgil confbad _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil confbad _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil confbad _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil confbad _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil confbad _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil confbad _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil confbad _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil confbad _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgif dxgi::DXGIGetDebugInterface1 nvext@nvext 00000000 out=untouched
 dxgia IDXGIAdapter::GetDesc desc@nvext 00000000 desc=device-name nul<128=1 vendor=10de device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-559 untouched=none
 dxgia IDXGIAdapter1::GetDesc1 desc@nvext 00000000 desc=device-name nul<128=1 vendor=10de device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-563 untouched=564-567
 dxgia IDXGIAdapter2::GetDesc2 desc@nvext 00000000 desc=device-name nul<128=1 vendor=10de device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
 dxgia IDXGIAdapter4::GetDesc3 desc@nvext 00000000 desc=device-name nul<128=1 vendor=10de device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
-dxgil nvext _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil nvext _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil nvext _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil nvext _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil nvext _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil nvext _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil nvext _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil nvext _dxgi.log warn:  Failed to open D3DKMT adapter
+dxgil nvext none
 dxgia IDXGIAdapter::GetDesc desc@conffile 00000000 desc=device-name nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-559 untouched=none
 dxgia IDXGIAdapter1::GetDesc1 desc@conffile 00000000 desc=device-name nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-563 untouched=564-567
 dxgia IDXGIAdapter2::GetDesc2 desc@conffile 00000000 desc=device-name nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
 dxgia IDXGIAdapter4::GetDesc3 desc@conffile 00000000 desc=device-name nul<128=1 vendor=106b device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
 dxgil conffile _dxgi.log info:  Found config file: dxmt.conf
 dxgil conffile _dxgi.log info:  Found config env: dxgi.customDeviceId=5678
-dxgil conffile _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil conffile _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil conffile _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil conffile _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil conffile _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil conffile _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil conffile _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil conffile _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgia IDXGIAdapter::GetDesc desc@conffile2 00000000 desc=device-name nul<128=1 vendor=2468 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-559 untouched=none
 dxgia IDXGIAdapter1::GetDesc1 desc@conffile2 00000000 desc=device-name nul<128=1 vendor=2468 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-563 untouched=564-567
 dxgia IDXGIAdapter2::GetDesc2 desc@conffile2 00000000 desc=device-name nul<128=1 vendor=2468 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
 dxgia IDXGIAdapter4::GetDesc3 desc@conffile2 00000000 desc=device-name nul<128=1 vendor=2468 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
 dxgil conffile2 _dxgi.log info:  Found config file: other.conf
-dxgil conffile2 _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil conffile2 _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil conffile2 _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil conffile2 _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil conffile2 _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil conffile2 _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil conffile2 _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil conffile2 _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgia IDXGIAdapter::GetDesc desc@emptysection 00000000 desc=device-name nul<128=1 vendor=1357 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry written=0-559 untouched=none
 dxgia IDXGIAdapter1::GetDesc1 desc@emptysection 00000000 desc=device-name nul<128=1 vendor=1357 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 written=0-563 untouched=564-567
 dxgia IDXGIAdapter2::GetDesc2 desc@emptysection 00000000 desc=device-name nul<128=1 vendor=1357 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
 dxgia IDXGIAdapter4::GetDesc3 desc@emptysection 00000000 desc=device-name nul<128=1 vendor=1357 device=0000 subsys=0 revision=0 vram=half-budget sysmem=0 shared=0 luid=bswap-registry flags=0 preemption=0/0 written=0-571 untouched=572-575
 dxgil emptysection _dxgi.log info:  Found config file: dxmt.conf
-dxgil emptysection _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil emptysection _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil emptysection _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil emptysection _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil emptysection _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil emptysection _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil emptysection _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil emptysection _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgif dxgi::CreateDXGIFactory null-riid 80004003 out=null
 dxgil isolate-dxgif.CreateDXGIFactory.null-riid none
 dxgif dxgi::CreateDXGIFactory1 null-riid 80004003 out=null
@@ -719,43 +412,28 @@ dxgil isolate-dxgif.GetParent.getparent-null-riid none
 dxgif IDXGIFactory1::EnumAdapters1 null-out 887a0001 factoryref=1
 dxgil isolate-dxgif.EnumAdapters1.null-out none
 dxgif IDXGIFactory4::EnumAdapterByLuid null-riid 80004003 out=null
-dxgil isolate-dxgif.EnumAdapterByLuid.null-riid _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil isolate-dxgif.EnumAdapterByLuid.null-riid _dxgi.log warn:  Failed to open D3DKMT adapter
-dxgil isolate-dxgif.EnumAdapterByLuid.null-riid _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil isolate-dxgif.EnumAdapterByLuid.null-riid _dxgi.log warn:  Failed to open D3DKMT adapter
+dxgil isolate-dxgif.EnumAdapterByLuid.null-riid none
 dxgif IDXGIFactory4::EnumWarpAdapter null-riid 80004003 out=null
-dxgil isolate-dxgif.EnumWarpAdapter.null-riid _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil isolate-dxgif.EnumWarpAdapter.null-riid _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil isolate-dxgif.EnumWarpAdapter.null-riid _dxgi.log warn:  DXGIFactory::EnumWarpAdapter: no WARP, returning the first adapter
 dxgif IDXGIFactory6::EnumAdapterByGpuPreference null-riid 80004003 out=untouched
-dxgil isolate-dxgif.EnumAdapterByGpuPreference.null-riid _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil isolate-dxgif.EnumAdapterByGpuPreference.null-riid _dxgi.log warn:  Failed to open D3DKMT adapter
+dxgil isolate-dxgif.EnumAdapterByGpuPreference.null-riid none
 dxgif IDXGIFactory5::CheckFeatureSupport null-data 80070057
 dxgil isolate-dxgif.CheckFeatureSupport.null-data none
 dxgia IUnknown::QueryInterface qi-null-riid 80004003 out=null
-dxgil isolate-dxgia.QueryInterface.qi-null-riid _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil isolate-dxgia.QueryInterface.qi-null-riid _dxgi.log warn:  Failed to open D3DKMT adapter
+dxgil isolate-dxgia.QueryInterface.qi-null-riid none
 dxgia IDXGIObject::GetParent getparent-null-riid 80004003 out=null
-dxgil isolate-dxgia.GetParent.getparent-null-riid _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil isolate-dxgia.GetParent.getparent-null-riid _dxgi.log warn:  Failed to open D3DKMT adapter
+dxgil isolate-dxgia.GetParent.getparent-null-riid none
 dxgia IDXGIAdapter::CheckInterfaceSupport null-iid 80070057 umd=untouched
-dxgil isolate-dxgia.CheckInterfaceSupport.null-iid _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil isolate-dxgia.CheckInterfaceSupport.null-iid _dxgi.log warn:  Failed to open D3DKMT adapter
+dxgil isolate-dxgia.CheckInterfaceSupport.null-iid none
 dxgia IDXGIAdapter3::RegisterHardwareContentProtectionTeardownStatusEvent teardown-event 80004001 cookie=untouched
-dxgil isolate-dxgia.RegisterHardwareContentProtectionTeardownStatusEvent.teardown-event _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil isolate-dxgia.RegisterHardwareContentProtectionTeardownStatusEvent.teardown-event _dxgi.log warn:  Failed to open D3DKMT adapter
 dxgil isolate-dxgia.RegisterHardwareContentProtectionTeardownStatusEvent.teardown-event _dxgi.log err:   Not implemented
 dxgia IDXGIAdapter3::RegisterVideoMemoryBudgetChangeNotificationEvent null-cookie 80070057
-dxgil isolate-dxgia.RegisterVideoMemoryBudgetChangeNotificationEvent.null-cookie _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil isolate-dxgia.RegisterVideoMemoryBudgetChangeNotificationEvent.null-cookie _dxgi.log warn:  Failed to open D3DKMT adapter
+dxgil isolate-dxgia.RegisterVideoMemoryBudgetChangeNotificationEvent.null-cookie none
 dxgio IUnknown::QueryInterface qi-null-riid 80004003 out=null
-dxgil isolate-dxgio.QueryInterface.qi-null-riid _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil isolate-dxgio.QueryInterface.qi-null-riid _dxgi.log warn:  Failed to open D3DKMT adapter
+dxgil isolate-dxgio.QueryInterface.qi-null-riid none
 dxgio IDXGIObject::GetParent getparent-null-riid 80004003 out=null
-dxgil isolate-dxgio.GetParent.getparent-null-riid _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil isolate-dxgio.GetParent.getparent-null-riid _dxgi.log warn:  Failed to open D3DKMT adapter
+dxgil isolate-dxgio.GetParent.getparent-null-riid none
 dxgio IDXGIOutput1::GetDisplayModeList1 zero-den 00000000 count=5 zero-den=last closest=887a0002 closest-den=0
-dxgil isolate-dxgio.GetDisplayModeList1.zero-den _dxgi.log warn:  D3DKMTOpenAdapterFromLuid not implemented.
-dxgil isolate-dxgio.GetDisplayModeList1.zero-den _dxgi.log warn:  Failed to open D3DKMT adapter
+dxgil isolate-dxgio.GetDisplayModeList1.zero-den none
 d3d10c d3d10core::D3D10CoreCreateDevice null-adapter 80070057 out=null
 dxgil isolate-d3d10c.D3D10CoreCreateDevice.null-adapter none
