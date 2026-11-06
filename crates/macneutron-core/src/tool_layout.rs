@@ -230,4 +230,33 @@ mod tests {
             "0.7.1 (0123456789ab)"
         );
     }
+
+    #[test]
+    fn genuine_steamclient_support_is_the_runtimes_marker() {
+        use crate::test_support::{make_tool_layout, write};
+        let layout = make_tool_layout();
+        assert!(!layout.supports_genuine_steamclient());
+        write("0036\n", &layout.wine_app().join("Contents/Resources/genuine-steamclient"), false);
+        assert!(layout.supports_genuine_steamclient());
+    }
+
+    #[test]
+    fn layout_from_executable_is_two_levels_up() {
+        let layout = ToolLayout::for_executable(Path::new("/t/macneutron/bin/macneutron"));
+        assert!(layout.root.ends_with("t/macneutron"));
+    }
+
+    #[test]
+    fn runtime_version_comes_from_wine_app_info_plist() {
+        use crate::test_support::{make_temp_dir, write};
+        let layout = ToolLayout::new(make_temp_dir());
+        assert_eq!(layout.runtime_version(), None);
+        let plist = layout.wine_app().join("Contents/Info.plist");
+        let body = |v: &str| format!("<plist><dict><key>CFBundleShortVersionString</key><string>{v}</string></dict></plist>");
+        write(&body("0.1.0"), &plist, false);
+        assert_eq!(layout.runtime_version().as_deref(), Some("0.1.0"));
+        // Read each time: the app keeps one layout while installs swap wine.app underneath it.
+        write(&body("0.1.1"), &plist, false);
+        assert_eq!(layout.runtime_version().as_deref(), Some("0.1.1"));
+    }
 }
