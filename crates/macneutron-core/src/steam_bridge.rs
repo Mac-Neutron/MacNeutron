@@ -112,12 +112,7 @@ mod tests {
         assert_eq!(SteamBridge::client_directory(None, &steam), bundle);
     }
 
-    /// macOS Steam's registry.vdf with `language` under HKCU/Software/Valve/Steam, and a sibling block's own `language`.
-    fn registry_vdf(language: &str) -> String {
-        format!(
-            "\"Registry\"\n{{\n\t\"HKCU\"\n\t{{\n\t\t\"Software\"\n\t\t{{\n\t\t\t\"Valve\"\n\t\t\t{{\n\t\t\t\t\"Steam\"\n\t\t\t\t{{\n\t\t\t\t\t\"language\"\t\t\"{language}\"\n\t\t\t\t}}\n\t\t\t\t\"Steamsteamglobal\"\n\t\t\t\t{{\n\t\t\t\t\t\"language\"\t\t\"german\"\n\t\t\t\t}}\n\t\t\t}}\n\t\t}}\n\t}}\n}}\n"
-        )
-    }
+    use crate::test_support::registry_vdf;
 
     #[test]
     fn ui_language_comes_from_registry_vdf() {

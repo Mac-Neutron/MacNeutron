@@ -68,6 +68,10 @@ impl ProcessRunner for SystemProcessRunner {
         // An explicit environment replaces the inherited one, matching Foundation's `Process.environment`.
         command.env_clear();
         command.envs(environment);
+        // The leader of a process group of its own, as Foundation's Process makes it: Steam's Stop signals the group
+        // of a microVM launch (Launcher::stop_vm).
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
 
         let mut handle: Option<std::fs::File> = None;
         if let Some(path) = output {

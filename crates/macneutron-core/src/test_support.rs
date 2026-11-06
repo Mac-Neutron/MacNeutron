@@ -87,11 +87,69 @@ impl ProcessRunner for FakeRunner {
             environment: environment.clone(),
             output: output.map(|p| p.to_path_buf()),
         };
-        let status = (self.respond)(&call);
-        started(1);
-        self.calls.lock().unwrap().push(call);
-        Ok(status)
+        // Swift's fake records the call first and never reports a child: a `started` pid would be signalled
+        // (Launcher's VMRun kills a stopped launch's process group).
+        let _ = started;
+        self.calls.lock().unwrap().push(call.clone());
+        Ok((self.respond)(&call))
     }
+}
+
+/// Records what the code under test tells the player: notifications, toasts, their updates and closes.
+#[derive(Default)]
+pub struct RecordingNotifier {
+    state: std::sync::Arc<Mutex<Recorded>>,
+}
+
+#[derive(Default)]
+struct Recorded {
+    messages: Vec<String>,
+    shown: Vec<String>,
+    hidden: usize,
+    lines: Vec<String>,
+}
+
+impl RecordingNotifier {
+    pub fn posted(&self) -> Vec<String> {
+        self.state.lock().unwrap().messages.clone()
+    }
+
+    /// Each toast's title, and the file it waits for.
+    pub fn toasts(&self) -> Vec<String> {
+        self.state.lock().unwrap().shown.clone()
+    }
+
+    pub fn toasts_closed(&self) -> usize {
+        self.state.lock().unwrap().hidden
+    }
+
+    /// Every toast's updated messages, in order.
+    pub fn toast_updates(&self) -> Vec<String> {
+        self.state.lock().unwrap().lines.clone()
+    }
+}
+
+impl crate::preflight::Notifier for RecordingNotifier {
+    fn post(&self, _title: &str, message: &str) {
+        self.state.lock().unwrap().messages.push(message.to_string());
+    }
+
+    fn progress(&self, title: &str, _message: &str, until: Option<PathBuf>) -> crate::preflight::ToastHandle {
+        let until = until.map(|u| format!(" until {}", u.to_string_lossy())).unwrap_or_default();
+        self.state.lock().unwrap().shown.push(format!("{title}{until}"));
+        let (update, close) = (self.state.clone(), self.state.clone());
+        crate::preflight::ToastHandle {
+            update: Box::new(move |line| update.lock().unwrap().lines.push(line.to_string())),
+            close: Box::new(move || close.lock().unwrap().hidden += 1),
+        }
+    }
+}
+
+/// macOS Steam's registry.vdf with `language` under HKCU/Software/Valve/Steam, and a sibling block's own `language`.
+pub fn registry_vdf(language: &str) -> String {
+    format!(
+        "\"Registry\"\n{{\n\t\"HKCU\"\n\t{{\n\t\t\"Software\"\n\t\t{{\n\t\t\t\"Valve\"\n\t\t\t{{\n\t\t\t\t\"Steam\"\n\t\t\t\t{{\n\t\t\t\t\t\"language\"\t\t\"{language}\"\n\t\t\t\t}}\n\t\t\t\t\"Steamsteamglobal\"\n\t\t\t\t{{\n\t\t\t\t\t\"language\"\t\t\"german\"\n\t\t\t\t}}\n\t\t\t}}\n\t\t}}\n\t}}\n}}\n"
+    )
 }
 
 /// A FakeRunner whose `wineboot` creates the prefix like the real one does.

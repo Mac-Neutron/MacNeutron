@@ -105,7 +105,7 @@ fn home() -> PathBuf {
 }
 
 /// The current time as ISO-8601 UTC (`2026-11-04T16:30:00Z`), enough for a log line without pulling in a date crate.
-fn iso8601_now() -> String {
+pub(crate) fn iso8601_now() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)

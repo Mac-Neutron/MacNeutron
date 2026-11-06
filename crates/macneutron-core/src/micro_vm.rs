@@ -117,6 +117,27 @@ impl MicroVM {
     /// What a performance build's guest doesn't get: its stats and profiler are compiled out or off.
     pub const NOT_PASSED_TO_PERFORMANCE: [&'static str; 2] = ["MACNEUTRON_VM_PROFILE", "DXMT_STATS"];
 
+    /// The Mac's main display in pixels (its current mode's, not points): the guest's screen. None without one.
+    pub fn main_display() -> Option<(usize, usize)> {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGMainDisplayID() -> u32;
+            fn CGDisplayCopyDisplayMode(display: u32) -> *mut std::ffi::c_void;
+            fn CGDisplayModeGetPixelWidth(mode: *mut std::ffi::c_void) -> usize;
+            fn CGDisplayModeGetPixelHeight(mode: *mut std::ffi::c_void) -> usize;
+            fn CGDisplayModeRelease(mode: *mut std::ffi::c_void);
+        }
+        unsafe {
+            let mode = CGDisplayCopyDisplayMode(CGMainDisplayID());
+            if mode.is_null() {
+                return None;
+            }
+            let size = (CGDisplayModeGetPixelWidth(mode), CGDisplayModeGetPixelHeight(mode));
+            CGDisplayModeRelease(mode);
+            (size.0 > 0 && size.1 > 0).then_some(size)
+        }
+    }
+
     /// "WxH", each side 1 to 16384 (Xvfb's screen; MN_SCREEN from a launch option).
     pub fn is_screen_size(text: &str) -> bool {
         let sides: Vec<&str> = text.split('x').collect();
