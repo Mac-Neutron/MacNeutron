@@ -15,6 +15,9 @@ use macneutron_core::tool_layout::ToolLayout;
 use macneutron_core::vm_setup::VMSetup;
 use macneutron_core::vm_setup_manifest::VMSetupManifest;
 
+pub mod stop_requests;
+pub mod toast;
+
 pub const USAGE: &str = "usage: macneutron launch <verb> <target> [args...]\n       macneutron install --tool-dir <dir> --wine-app <wine.app> [--steam-exe <steam.exe>] [--force]\n       macneutron passthrough <verb> <command> [args...]\n       macneutron vm-setup --manifest <vm-manifest.json> --vm <dir> [--mkfs <mkfs.erofs>] [--min-free-gb <n>]\n       macneutron vm-setup --check-sources --manifest <vm-manifest.json>";
 
 /// Runs one command line and returns its exit code.
@@ -25,7 +28,6 @@ pub fn run(args: &[String], environment: &BTreeMap<String, String>, executable: 
         "install" => install(rest, executable),
         "passthrough" => passthrough(rest, environment),
         "vm-setup" => vm_setup(rest, executable),
-        // TODO: the `toast` helper (AppKit, main.swift's) and StopRequests' quit-request bridge are unported.
         _ => usage_error(),
     }
 }
@@ -53,13 +55,7 @@ fn launch(rest: &[String], environment: &BTreeMap<String, String>, executable: &
 /// thread waits for them (Swift's DispatchSource): `terminate` starts a process and takes locks, which a signal
 /// handler can't. Threads started later inherit the mask; children get an empty one (std's Command resets it).
 fn install_termination_handlers(launcher: Arc<Launcher>, environment: BTreeMap<String, String>) {
-    let mut set: libc::sigset_t = 0;
-    unsafe {
-        libc::sigemptyset(&mut set);
-        libc::sigaddset(&mut set, libc::SIGTERM);
-        libc::sigaddset(&mut set, libc::SIGINT);
-        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
-    }
+    let set = block_termination_signals();
     std::thread::spawn(move || {
         let mut signal = 0;
         if unsafe { libc::sigwait(&set, &mut signal) } == 0 {
@@ -67,6 +63,20 @@ fn install_termination_handlers(launcher: Arc<Launcher>, environment: BTreeMap<S
             std::process::exit(128 + signal);
         }
     });
+}
+
+/// SIGTERM and SIGINT blocked on the calling thread and every thread it starts later, for a sigwait thread to take.
+/// [`stop_requests::run`] blocks them on the main thread before its launch thread starts, so AppKit's main thread
+/// can't take Steam's SIGTERM with the default action.
+pub fn block_termination_signals() -> libc::sigset_t {
+    let mut set: libc::sigset_t = 0;
+    unsafe {
+        libc::sigemptyset(&mut set);
+        libc::sigaddset(&mut set, libc::SIGTERM);
+        libc::sigaddset(&mut set, libc::SIGINT);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+    }
+    set
 }
 
 fn install(rest: &[String], executable: &Path) -> i32 {
