@@ -5,7 +5,8 @@ for i686-pc-windows-msvc too), mtld3d.so, winemetal.so and the VM host's d3d11.d
 (aarch64-apple-darwin), and the VM guest's mtld3d.so (x86_64- and i686-unknown-linux-gnu), all from the tree's one Cargo
 workspace. Each crate's LICENSE*, LICENCE*, COPYING*, NOTICE* and UNLICENSE* files go to
 <out>/crates/<name>-<version>/, and <out>/crates/INDEX lists every crate with its licence expression. The tree's own
-crates are under its zlib LICENSE (src/d3d9's, bundle.sh ships it) or DXMT's LGPL (DXMT's texts); the snmalloc-sys it
+crates are under its zlib LICENSE (src/d3d9's, bundle.sh ships it) or DXMT's LGPL (DXMT's texts); dxmt-util, which every
+D3D9 binary links, is DXMT's LGPL with zlib files from mtld3d: DXMT's texts, wine.app's DXMT/. The snmalloc-sys it
 vendors (vendor/) is third-party code and is listed. A crate that ships no licence file (the objc2 family, MIT or a
 choice including MIT) gets MIT's text with its manifest's authors as the copyright line; one with no file and no MIT
 among its terms stops the run, to be handled by hand. A crate that compiles another project's code in gets that

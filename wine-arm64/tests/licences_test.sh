@@ -53,6 +53,9 @@ check() {  # check <wine.app> <build dir>
   awk '/^DXMT \(/ { p = 1 } p && /^$/ { exit } p' "$L/README" 2> /dev/null | tr -s ' \n' '  ' \
     | g -qF 'd3d11.dll and d3d12.dll carry Rust' \
     || miss "the README's DXMT entry naming d3d11.dll and d3d12.dll as carrying Rust"
+  # The D3D9 binaries link DXMTRS's dxmt-util (LGPL-2.1-or-later): the README's mtld3d entry points at DXMT's text.
+  awk '/^mtld3d / { p = 1 } p && /^$/ { exit } p' "$L/README" 2> /dev/null | g -qF '../DXMT/COPYING.LIB' \
+    || miss "the README's mtld3d entry naming dxmt-util's LGPL (../DXMT/COPYING.LIB)"
   # mtld3d's crates (dxmt/mtld3d-notices.py): a folder of licence files for each one its INDEX names.
   while read -r crate version _; do  # "<crate> <version>: <terms>"
     version=${version%:}
