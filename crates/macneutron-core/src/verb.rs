@@ -84,3 +84,51 @@ impl LaunchRequest {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn parses_steam_invocation() {
+        let request = LaunchRequest::parse(&args(&["waitforexitandrun", "/games/Cats/Cats.exe", "-windowed"])).unwrap();
+        assert_eq!(
+            request,
+            LaunchRequest {
+                verb: Verb::WaitForExitAndRun,
+                target: "/games/Cats/Cats.exe".into(),
+                arguments: args(&["-windowed"]),
+            }
+        );
+    }
+
+    #[test]
+    fn keeps_arguments_with_spaces_and_quotes_intact() {
+        let a = args(&["run", "/Steam Library/Game Dir/Game.exe", "--name=\"Player One\"", "a b", "ünïcode"]);
+        let request = LaunchRequest::parse(&a).unwrap();
+        assert_eq!(request.target, "/Steam Library/Game Dir/Game.exe");
+        assert_eq!(request.arguments, args(&["--name=\"Player One\"", "a b", "ünïcode"]));
+    }
+
+    #[test]
+    fn rejects_missing_verb() {
+        assert_eq!(LaunchRequest::parse(&[]), Err(LaunchRequestError::MissingVerb));
+    }
+
+    #[test]
+    fn rejects_unknown_verb() {
+        assert_eq!(
+            LaunchRequest::parse(&args(&["destroyprefix", "x"])),
+            Err(LaunchRequestError::UnknownVerb("destroyprefix".into()))
+        );
+    }
+
+    #[test]
+    fn rejects_verb_without_target() {
+        assert_eq!(LaunchRequest::parse(&args(&["run"])), Err(LaunchRequestError::MissingTarget(Verb::Run)));
+    }
+}

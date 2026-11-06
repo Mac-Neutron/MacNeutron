@@ -34,7 +34,8 @@ impl GraphicsBackend {
     pub fn select(requested: Option<&str>) -> (GraphicsBackend, Option<String>) {
         let fallback = GraphicsBackend::Dxmt;
         let raw = match requested {
-            Some(r) => r.trim().to_lowercase(),
+            // Swift trims `.whitespaces` (spaces and tabs, not newlines): GraphicsBackend.swift:15.
+            Some(r) => r.trim_matches(|c: char| c == '\t' || (c.is_whitespace() && !matches!(c, '\n' | '\r' | '\u{b}' | '\u{c}' | '\u{85}' | '\u{2028}' | '\u{2029}'))).to_lowercase(),
             None => return (fallback, None),
         };
         if raw.is_empty() {
@@ -56,6 +57,58 @@ impl GraphicsBackend {
         match self {
             GraphicsBackend::Dxmt => "dxgi,d3d10core,d3d11,d3d12=n,b;d3d9,d3d10=b",
             GraphicsBackend::WineD3D => "dxgi,d3d9,d3d10,d3d10core,d3d11,d3d12=b",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_to_dxmt() {
+        assert_eq!(GraphicsBackend::select(None), (GraphicsBackend::Dxmt, None));
+    }
+
+    #[test]
+    fn removed_backends_read_as_dxmt_with_a_note() {
+        for old in ["d3dmetal", "dxvk"] {
+            let (backend, note) = GraphicsBackend::select(Some(old));
+            assert_eq!(backend, GraphicsBackend::Dxmt);
+            assert_eq!(note.as_deref(), Some(format!("'{old}' was removed in 0.1, using dxmt").as_str()));
+        }
+    }
+
+    #[test]
+    fn override_strings_per_backend() {
+        assert_eq!(GraphicsBackend::Dxmt.dll_overrides(), "dxgi,d3d10core,d3d11,d3d12=n,b;d3d9,d3d10=b");
+        assert_eq!(GraphicsBackend::WineD3D.dll_overrides(), "dxgi,d3d9,d3d10,d3d10core,d3d11,d3d12=b");
+    }
+
+    #[test]
+    fn honors_request_case_insensitively() {
+        assert_eq!(GraphicsBackend::select(Some(" WINED3D ")), (GraphicsBackend::WineD3D, None));
+    }
+
+    #[test]
+    fn unknown_request_falls_back_with_note() {
+        let (backend, note) = GraphicsBackend::select(Some("vulkan"));
+        assert_eq!(backend, GraphicsBackend::Dxmt);
+        assert_eq!(note.as_deref(), Some("unknown MACNEUTRON_GRAPHICS 'vulkan', using dxmt"));
+    }
+
+    #[test]
+    fn every_backend_overrides_the_same_dll_set() {
+        let managed: std::collections::BTreeSet<&str> =
+            ["dxgi", "d3d9", "d3d10", "d3d10core", "d3d11", "d3d12"].into_iter().collect();
+        for backend in GraphicsBackend::all() {
+            let names: Vec<&str> = backend
+                .dll_overrides()
+                .split(';')
+                .flat_map(|part| part.split('=').next().unwrap().split(','))
+                .collect();
+            assert_eq!(names.iter().copied().collect::<std::collections::BTreeSet<_>>(), managed, "{backend:?}");
+            assert_eq!(names.len(), managed.len(), "{backend:?} repeats a DLL");
         }
     }
 }
