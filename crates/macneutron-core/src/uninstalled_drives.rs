@@ -215,6 +215,20 @@ mod tests {
     }
 
     #[test]
+    fn listed_app_ids_reads_every_library() {
+        let root = std::env::temp_dir().join(format!("mn-ud-{}-listed", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let steam = SteamLocation::new(root.join("Steam"));
+        let file = steam.root.join("steamapps/libraryfolders.vdf");
+        assert_eq!(steam.listed_app_ids(), None);
+        write(&file, &library_folders(&steam.root, &["231350"], Some(("/Volumes/Games", &["555", "872200"]))));
+        assert_eq!(steam.listed_app_ids(), Some([231350, 555, 872200].into_iter().collect()));
+        write(&file, "\"libraryfolders\"\n{\n");
+        assert_eq!(steam.listed_app_ids(), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn a_drive_from_a_library_steam_no_longer_lists_stays() {
         let env = make_env("reset");
         write(&env.vm.join("runs/999/library"), "/Volumes/Games/steamapps");
