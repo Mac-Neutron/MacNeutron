@@ -131,7 +131,7 @@ public struct Launcher: Sendable {
         // the log folder. The user's MTLD3D_CONFIG comes after it: mtld3d applies the entries in order, so theirs win.
         env["MTLD3D_CONFIG"] = (["log.dir=Z:" + log.directory.appending(path: "mtld3d").path(percentEncoded: false)]
             + [env["MTLD3D_CONFIG"]].compactMap { $0 }).joined(separator: ";")
-        // MACNEUTRON_PERF=1: DXMT's frame statistics, for eac-vm/tests/perf-compare.sh. The user's own settings win.
+        // MACNEUTRON_PERF=1: DXMT's frame statistics, for vm/tests/perf-compare.sh. The user's own settings win.
         // DXMT keeps stats.txt in its DXIL dump folder, which also turns on its capture mode: every new shader, root
         // signature and pipeline is saved there too (a little CPU, and files that build up in the folder): the
         // folder is emptied at each launch, unless the user named another. When their settings or the backend keep
@@ -325,7 +325,7 @@ public struct Launcher: Sendable {
             defer { launched.set(); toast.close() }
             var env = environment
             env["MN_WINDOW_SHOWN"] = windowShown.path(percentEncoded: false)
-            // The game's name on that window and its .exe's icon on the Dock tile (eac-vm/metal/wm/host/winemac.m), not
+            // The game's name on that window and its .exe's icon on the Dock tile (vm/metal/wm/host/winemac.m), not
             // a bare executable's.
             env["MN_APP_NAME"] = Self.gameName(request.target)
             let icon = share.appending(path: "icon.ico")
@@ -335,7 +335,7 @@ public struct Launcher: Sendable {
             env["MN_VM_DIR"] = vm.root.path(percentEncoded: false)
             env["MN_STATE"] = vm.state(appID: context.appID).path(percentEncoded: false)
             env["MN_SHARE"] = vm.share(appID: context.appID).path(percentEncoded: false)
-            env["MN_TOAST"] = layout.launcherBinary.path(percentEncoded: false)  // eac-vm/host/tpm.c's, while macOS asks
+            env["MN_TOAST"] = layout.launcherBinary.path(percentEncoded: false)  // vm/host/tpm.c's, while macOS asks
             // DLSS's NVIDIA extension in native DXMT too (Direct3D forwarding: it reads macneutron-vm's environment)
             if environment["MACNEUTRON_DLSS"] == "1", env["DXMT_ENABLE_NVEXT"] == nil { env["DXMT_ENABLE_NVEXT"] = "1" }
             // Forwarded, native DXMT's shader cache and recordings are the game's, in its VM state folder (macneutron-vm

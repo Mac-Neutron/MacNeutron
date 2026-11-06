@@ -1,6 +1,6 @@
 import Foundation
 
-/// One entry of the tree an image is built from (eac-vm/image/recipe.py wrote it from the builder's own tree).
+/// One entry of the tree an image is built from (vm/image/recipe.py wrote it from the builder's own tree).
 struct RecipeEntry: Equatable {
     enum Kind: Equatable {
         case directory, file(size: Int64, sha256: String, source: Source), symlink(String)

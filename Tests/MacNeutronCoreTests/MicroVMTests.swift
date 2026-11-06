@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import MacNeutronCore
 
-/// A VM folder as eac-vm/host/build.sh lays it out: an executable macneutron-vm, run-guest.sh and run-game.sh.
+/// A VM folder as vm/host/build.sh lays it out: an executable macneutron-vm, run-guest.sh and run-game.sh.
 private func makeVMFolder() throws -> URL {
     let root = try makeTempDir().appending(path: "vm", directoryHint: .isDirectory)
     try write("#!/bin/sh\n", to: root.appending(path: "macneutron-vm"), executable: true)

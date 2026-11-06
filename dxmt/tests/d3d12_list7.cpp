@@ -21,10 +21,10 @@
 //   layout3  OPTIONS12 reports enhanced barriers; the device answers ID3D12Device10, whose CreateCommittedResource3
 //          makes an upload buffer from layout UNDEFINED (mapped) and a texture with a castable format; its creations
 //          that fail leave their out pointer null
-//   d3d12_list7.exe <row>: that row alone (eac-vm/dxmt-native/build-tests.sh runs resolveregion under Metal's
+//   d3d12_list7.exe <row>: that row alone (vm/dxmt-native/build-tests.sh runs resolveregion under Metal's
 //          validation layer, which the barrier rows' UAV clears don't pass yet)
 //   d3d12_list7.exe order: only an ordering scenario for DXMT_D3D12_OVERLAP=1's DXMT_STATS counts
-//          (eac-vm/dxmt-native/build-tests.sh): a pass clearing a 4x MSAA target and resolving it at its end, then a
+//          (vm/dxmt-native/build-tests.sh): a pass clearing a 4x MSAA target and resolving it at its end, then a
 //          pass clearing the target again; prints "order ok" once it ran
 //   d3d12_list7.exe emptybarrier: only two clears with Barrier calls between them that order nothing (no groups, a
 //          group of no barriers, a barrier with nothing to wait on), for DXMT_STATS's boundaries: none with a barrier

@@ -179,7 +179,7 @@ SteamID or the persona name; run it by hand the same way. The x18 hits in Valve'
 Our changes are commits of our forks (github.com/Mac-Neutron: `wine`, `FEX`, `dxmt`, `Proton`, `llvm-project`,
 `libkrun`), each fork's `main` being upstream with our commits, upstream merged in from time to time. The pins name
 the commits a build uses; `build/wine-arm64-src/wine`, `fex` and `dxmt` are shallow checkouts of them (branch `main`).
-The VM's Wine and FEX are the same trees (`eac-vm/wine/sync.sh`, `eac-vm/image/guest-stages.sh fex`).
+The VM's Wine and FEX are the same trees (`vm/wine/sync.sh`, `vm/image/guest-stages.sh fex`).
 
 1. Edit and commit in `build/wine-arm64-src/<wine, fex or dxmt>`. Any change there makes the next build a "development
    build", which builds the tree as it is and skips the fetch and the up-to-date check. So does a stash, a second
@@ -209,7 +209,7 @@ metal's versions. (A tree from before the Rust translator, with no `src/airconv/
 starts no replay; an edit to airconv, even uncommitted, gets new ones (`tests/translator_key_test.sh`). A DXMT
 commit's message names the arm64 failure it fixes.
 
-The same tree also builds natively, as macOS dylibs (`eac-vm/dxmt-native/build.sh`, Direct3D forwarding M1): `d3d12`, `dxgi`, `d3d11`, `d3d10core` and `winemetal` in `build/dxmt-native/install/lib`. Its D3D12 headers, `include/native/d3d12` in the tree, are copies of the pinned llvm-mingw's: after a toolchain bump in `dxmt/pins`, copy them again, or the native and PE builds see different interfaces.
+The same tree also builds natively, as macOS dylibs (`vm/dxmt-native/build.sh`, Direct3D forwarding M1): `d3d12`, `dxgi`, `d3d11`, `d3d10core` and `winemetal` in `build/dxmt-native/install/lib`. Its D3D12 headers, `include/native/d3d12` in the tree, are copies of the pinned llvm-mingw's: after a toolchain bump in `dxmt/pins`, copy them again, or the native and PE builds see different interfaces.
 
 lsteamclient works the same way. Its tree, `build/wine-arm64-src/lsteamclient`, is a sparse, blob-filtered checkout of
 our Proton fork's `lsteamclient/` folder at `deps.pins`' `LSTEAMCLIENT_COMMIT` (without the Steamworks SDK folders),

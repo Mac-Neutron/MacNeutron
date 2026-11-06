@@ -492,7 +492,7 @@ private func i386Exe(named name: String) throws -> String {
 }
 
 @Test func perfTurnsOnDXMTStatsOnMacOS() throws {
-    // MACNEUTRON_PERF=1 (eac-vm/tests/perf-compare.sh): DXMT's frame statistics in the game's perf folder.
+    // MACNEUTRON_PERF=1 (vm/tests/perf-compare.sh): DXMT's frame statistics in the game's perf folder.
     let f = try makeFixture()
     let game = "/Steam/steamapps/common/Some Game/bin/Game.exe"
     var env = f.env

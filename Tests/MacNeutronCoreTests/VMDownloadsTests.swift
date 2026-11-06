@@ -27,7 +27,7 @@ private let kernel = VMSetupManifest.Package(file: "kernel-core-7.2.10-200.fc44.
                                               version: "7.2.10", release: "200.fc44", arch: "aarch64", size: 5,
                                               sha256: sha(Data("core\n".utf8)), sourceRPM: "kernel-7.2.10-200.fc44.src.rpm")
 
-/// What eac-vm/setup/manifest.py prints, shortened.
+/// What vm/setup/manifest.py prints, shortened.
 private let manifestJSON = """
     {"version": 1, "parts": {"url": "https://example.invalid/parts.tar.xz", "size": 3, "sha256": "\(String(repeating: "0", count: 64))"},
      "kernel": "7.2.10-200.fc44.aarch64",

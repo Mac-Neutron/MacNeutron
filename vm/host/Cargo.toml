@@ -1,0 +1,13 @@
+[package]
+name = "macneutron-vm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "macneutron-vm"
+path = "src/main.rs"
+
+# No dependencies: libkrun v2 and the C helpers are reached through hand-written FFI (ffi.rs), and the
+# AppKit main run loop through the tiny appkit_shim.m compiled beside this crate by build.sh.
+[dependencies]

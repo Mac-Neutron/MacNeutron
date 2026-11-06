@@ -6,3 +6,4 @@ build/
 .superpowers/
 .DS_Store
 __pycache__/
+/target/

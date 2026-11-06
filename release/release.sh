@@ -133,10 +133,10 @@ check_vm_manifest() {  # check_vm_manifest <vm-manifest.json> <parts archive>
   [ "$_vm" = "$_vm_size $_vm_sha" ] || { echo "release: vm-manifest.json names parts $_vm, not the archive's $_vm_size $_vm_sha" >&2; return 1; }
 }
 
-# A guest stage in the VM parts was built from the trees this release archives (eac-vm/image/stamps.sh).
+# A guest stage in the VM parts was built from the trees this release archives (vm/image/stamps.sh).
 check_stamp() {  # check_stamp <stage> <its stamp> <the trees' stamp>
-  [ -n "$2" ] || { echo "release: the VM's $1 has no stamp: rebuild it (eac-vm/image/guest-stages.sh $1)" >&2; return 1; }
-  [ "$2" = "$3" ] || { echo "release: the VM's $1 was built from $2, not $3: rebuild it (eac-vm/image/guest-stages.sh $1)" >&2
+  [ -n "$2" ] || { echo "release: the VM's $1 has no stamp: rebuild it (vm/image/guest-stages.sh $1)" >&2; return 1; }
+  [ "$2" = "$3" ] || { echo "release: the VM's $1 was built from $2, not $3: rebuild it (vm/image/guest-stages.sh $1)" >&2
     return 1; }
 }
 
@@ -417,9 +417,9 @@ self_test() {
   passes "parts naming no path of this Mac" check_parts_paths "$T/parts"
   passes "a stage built from these trees" check_stamp wine "wine a" "wine a"
   refused "a stage built from other trees" \
-    "release: the VM's wine was built from wine b, not wine a: rebuild it (eac-vm/image/guest-stages.sh wine)" \
+    "release: the VM's wine was built from wine b, not wine a: rebuild it (vm/image/guest-stages.sh wine)" \
     check_stamp wine "wine b" "wine a"
-  refused "a stage with no stamp" "release: the VM's fex has no stamp: rebuild it (eac-vm/image/guest-stages.sh fex)" \
+  refused "a stage with no stamp" "release: the VM's fex has no stamp: rebuild it (vm/image/guest-stages.sh fex)" \
     check_stamp fex "" "fex a"
   echo "$HOME/x" > "$T/parts/leak.dll"
   refused "parts naming this Mac's home folder" "release: the VM parts name a build or home path: leak.dll " \
@@ -615,19 +615,19 @@ build_app() {
   # the player's Mac (macneutron vm-setup).
   VMH="$A/Contents/Helpers/vm"
   # Built now from this tree (each skips what is current), not whatever build/ holds.
-  sh "$ROOT/eac-vm/setup-tools/build.sh" > /dev/null || die "eac-vm/setup-tools/build.sh failed"
-  sh "$ROOT/eac-vm/libkrun/build.sh" > /dev/null 2>&1 || die "eac-vm/libkrun/build.sh failed"
+  sh "$ROOT/vm/setup-tools/build.sh" > /dev/null || die "vm/setup-tools/build.sh failed"
+  sh "$ROOT/vm/libkrun/build.sh" > /dev/null 2>&1 || die "vm/libkrun/build.sh failed"
   # Native DXMT and its replayer, which macneutron-vm loads from dxmt/ for Direct3D forwarding (host/build.sh copies)
-  sh "$ROOT/eac-vm/dxmt-native/build.sh" > /dev/null 2>&1 || die "eac-vm/dxmt-native/build.sh failed"
-  sh "$ROOT/eac-vm/host/build.sh" > /dev/null 2>&1 || die "eac-vm/host/build.sh failed"
-  sh "$ROOT/eac-vm/host/stage.sh" "$VMH" > /dev/null || die "eac-vm/host/stage.sh failed"
+  sh "$ROOT/vm/dxmt-native/build.sh" > /dev/null 2>&1 || die "vm/dxmt-native/build.sh failed"
+  sh "$ROOT/vm/host/build.sh" > /dev/null 2>&1 || die "vm/host/build.sh failed"
+  sh "$ROOT/vm/host/stage.sh" "$VMH" > /dev/null || die "vm/host/stage.sh failed"
   # The Metal host's winemetal.so is DXMT's: the release wine.app's, as SOURCE names it.
   cp "$OUT/wine.app/Contents/Resources/lib/wine/aarch64-unix/winemetal.so" "$VMH/metal-host/winemetal.so" \
     || die "no winemetal.so in the release wine.app"
   mkdir -p "$A/Contents/Resources/vm" || die "can't make Contents/Resources/vm"
   mv "$VMH"/run-*.sh "$VMH/dxmt-translator" "$A/Contents/Resources/vm/" || die "can't move the VM's scripts"
   F="$OUT/steam-forward"
-  make -s -C "$ROOT/eac-vm/steam-forward" OUT="$F" \
+  make -s -C "$ROOT/vm/steam-forward" OUT="$F" \
     MAC_UNIXLIB="$OUT/wine.app/Contents/Resources/lib/wine/aarch64-unix/lsteamclient.so" \
     CFLAGS="-O2 -Wall -Wextra -Wno-missing-field-initializers -std=c11 '-ffile-prefix-map=$ROOT=.'" \
     "$F/host/mn-steam-host.app" > /dev/null || die "can't build mn-steam-host"
@@ -655,8 +655,8 @@ EOF
   # The microVM's host tools and the setup's mkfs.erofs: their licences, libkrun's crates' among them.
   ALV="$AL/vm"
   mkdir -p "$ALV"
-  python3 "$ROOT/eac-vm/libkrun/licences.py" "$EW/libkrun-src" "$ALV/libkrun" "${CARGO:-$(brew --prefix rustup)/bin/cargo}" \
-    > /dev/null || die "can't collect libkrun's crates' licences (eac-vm/libkrun/licences.py)"
+  python3 "$ROOT/vm/libkrun/licences.py" "$EW/libkrun-src" "$ALV/libkrun" "${CARGO:-$(brew --prefix rustup)/bin/cargo}" \
+    > /dev/null || die "can't collect libkrun's crates' licences (vm/libkrun/licences.py)"
   V_SRC="${BUILD_DIR:-$ROOT/build}/vm-setup-tools-src"
   cp "$EW/libtpms-src/LICENSE" "$ALV/libtpms-LICENSE"
   cp "$(brew --prefix openssl@3)/LICENSE.txt" "$ALV/openssl-LICENSE.txt"
@@ -664,7 +664,7 @@ EOF
   cp -R "$V_SRC/erofs-utils/LICENSES" "$ALV/erofs-utils-LICENSES"
   cp "$V_SRC/lz4/lib/LICENSE" "$ALV/lz4-LICENSE"
   cp "$ROOT/Sources/CZstd/LICENSE" "$ALV/zstd-LICENSE"
-  sh "$ROOT/eac-vm/net/licences.sh" "$VMH/gvproxy" "$ALV/gvproxy" > /dev/null || die "can't collect gvproxy's licences"
+  sh "$ROOT/vm/net/licences.sh" "$VMH/gvproxy" "$ALV/gvproxy" > /dev/null || die "can't collect gvproxy's licences"
   cat > "$ALV/README" << 'EOF'
 The microVM games run in (Contents/Helpers/vm and Contents/Resources/vm), and the setup that builds its images on
 this Mac (Contents/Helpers/mkfs.erofs, and Contents/Helpers/macneutron's vm-setup):
@@ -783,8 +783,8 @@ if [ $PROFILE = p ]; then
   # The normal build's files it must leave alone (check_untouched, at the end): stamped by the check run that starts
   # `make release` (before p-seed and the p wine-arm64 build), else when this run starts.
   NB=$ROOT/build  # build-dir: the normal build, on purpose
-  set -- "$NB/wine-arm64/wine.app/Contents/Info.plist" "$NB/eac-vm-work/images/manifest.sha256" \
-    "$NB/eac-vm-work/images/base.erofs"
+  set -- "$NB/wine-arm64/wine.app/Contents/Info.plist" "$NB/vm-work/images/manifest.sha256" \
+    "$NB/vm-work/images/base.erofs"
   mkdir -p "$ROOT/build/p"
   if [ $mode = check ]; then
     stamps "$@" > "$ROOT/build/p/untouched.txt"
@@ -838,37 +838,37 @@ if [ $mode = release ]; then
 fi
 
 # 2b. The VM (docs/superpowers/specs/2026-10-17-macneutron-vm-setup-design.md §4.7): its images built in the builder
-# (eac-vm/image/build.sh, which writes the recipes and overlay a Mac's setup rebuilds them from), the parts archive,
+# (vm/image/build.sh, which writes the recipes and overlay a Mac's setup rebuilds them from), the parts archive,
 # and the app's manifest of it, whose URL is the release's own asset.
-EW="${BUILD_DIR:-$ROOT/build}/eac-vm-work"  # the VM's work folder (r3 has its own W)
+EW="${BUILD_DIR:-$ROOT/build}/vm-work"  # the VM's work folder (r3 has its own W)
 PARTS="MacNeutron-$V-vm-parts.tar.xz"
-B="$ROOT/eac-vm/builder.sh"
+B="$ROOT/vm/builder.sh"
 # Both profiles' image folders, so one builder serves either release (out: the normal one, outp: the p profile's).
-mkdir -p "$ROOT/build/eac-vm-work/images" "$ROOT/build/p/eac-vm-work/images"
-VM_SHARES="out=$ROOT/build/eac-vm-work/images,outp=$ROOT/build/p/eac-vm-work/images" sh "$B" start > /dev/null \
-  || die "the builder (eac-vm/builder.sh) doesn't start"
+mkdir -p "$ROOT/build/vm-work/images" "$ROOT/build/p/vm-work/images"
+VM_SHARES="out=$ROOT/build/vm-work/images,outp=$ROOT/build/p/vm-work/images" sh "$B" start > /dev/null \
+  || die "the builder (vm/builder.sh) doesn't start"
 # Its /mnt/out (/mnt/out-p) must be this tree's images (a builder started elsewhere would build into another folder).
 sfx=; [ $PROFILE = std ] || sfx=-$PROFILE
 nonce=$(uuidgen)
 echo "$nonce" > "$EW/images/.release-nonce"
 [ "$(sh "$B" ssh "mountpoint -q /mnt/out$sfx || { sudo mkdir -p /mnt/out$sfx; sudo mount -t virtiofs out${sfx#-} /mnt/out$sfx; }
   cat /mnt/out$sfx/.release-nonce 2> /dev/null")" = "$nonce" ] \
-  || die "the builder's /mnt/out$sfx isn't $EW/images: stop it (eac-vm/builder.sh stop) and run the release again"
+  || die "the builder's /mnt/out$sfx isn't $EW/images: stop it (vm/builder.sh stop) and run the release again"
 rm -f "$EW/images/.release-nonce"
-sh "$B" sync "$ROOT/eac-vm/image" mn-image > /dev/null || die "can't copy eac-vm/image into the builder"
+sh "$B" sync "$ROOT/vm/image" mn-image > /dev/null || die "can't copy vm/image into the builder"
 sh "$B" ssh 'sh ~/mn-image/build.sh > /tmp/image.log 2>&1' || die "the image build failed: the builder's /tmp/image.log"
-sh "$ROOT/eac-vm/setup/parts.sh" "$OUT/vm-parts" "$OUT/wine.app" > /dev/null || die "parts.sh failed"
+sh "$ROOT/vm/setup/parts.sh" "$OUT/vm-parts" "$OUT/wine.app" > /dev/null || die "parts.sh failed"
 check_parts_paths "$OUT/vm-parts" || exit 1
 # Each guest stage was built from the trees the source archive carries.
 for s in wine:.mn-source forwarder:.mn-source-forwarder dxmt:.mn-source-dxmt; do
   found=$(tar -xOf "$OUT/vm-parts/wine.tar" "./${s#*:}" 2> /dev/null || true)
-  check_stamp "${s%%:*}" "$found" "$(sh "$ROOT/eac-vm/image/stamps.sh" "${s%%:*}")" || exit 1
+  check_stamp "${s%%:*}" "$found" "$(sh "$ROOT/vm/image/stamps.sh" "${s%%:*}")" || exit 1
 done
 # Direct3D forwarding's DLLs (off by default until it ships): checked when the image has them.
 found=$(tar -xOf "$OUT/vm-parts/wine.tar" ./.mn-source-d3d 2> /dev/null || true)
-[ -z "$found" ] || check_stamp d3d "$found" "$(sh "$ROOT/eac-vm/image/stamps.sh" d3d)" || exit 1
+[ -z "$found" ] || check_stamp d3d "$found" "$(sh "$ROOT/vm/image/stamps.sh" d3d)" || exit 1
 fex=$(awk -F'\t' '$2 == "/usr/share/fex-emu/.mn-source" { print $7 }' "$OUT/vm-parts/recipe/base.tsv")
-check_stamp fex "$(cat "$OUT/vm-parts/overlay/$fex" 2> /dev/null)" "$(sh "$ROOT/eac-vm/image/stamps.sh" fex)" || exit 1
+check_stamp fex "$(cat "$OUT/vm-parts/overlay/$fex" 2> /dev/null)" "$(sh "$ROOT/vm/image/stamps.sh" fex)" || exit 1
 if [ $PROFILE = p ]; then  # the p build's VM parts (spec 2026-10-19-macneutron-performance-build §8)
   rm -rf "$OUT/p-check"; mkdir -p "$OUT/p-check"
   tar -xf "$OUT/vm-parts/wine.tar" -C "$OUT/p-check" || die "can't unpack the parts' wine.tar"
@@ -883,8 +883,8 @@ COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --no-acls --no-fflags --uid
 check_archive_owners "$OUT/$PARTS" || exit 1
 rm -rf "$OUT/vm-parts"
 check_sparse_template "$OUT/$PARTS" || exit 1
-KVER=$(sed -n 's/^KVER=//p' "$ROOT/eac-vm/image/build.sh")
-python3 "$ROOT/eac-vm/setup/manifest.py" "$OUT/$PARTS" "$EW/images/setup/packages.json" "$KVER" \
+KVER=$(sed -n 's/^KVER=//p' "$ROOT/vm/image/build.sh")
+python3 "$ROOT/vm/setup/manifest.py" "$OUT/$PARTS" "$EW/images/setup/packages.json" "$KVER" \
   "$EW/images/x86-64-rootfs.erofs" "https://github.com/Mac-Neutron/MacNeutron/releases/download/v$V/$PARTS" \
   > "$OUT/vm-manifest.json" || die "manifest.py failed"
 check_vm_manifest "$OUT/vm-manifest.json" "$OUT/$PARTS" || exit 1
@@ -933,7 +933,7 @@ printf '%s\n' "$out"
 [ "$st" = 0 ] && [ "$(printf '%s\n' "$out" | tail -n 1)" = "PASS sources" ] || die "R5: the source archive fails"
 
 [ $PROFILE = std ] || check_untouched "$UNTOUCHED" "$NB/wine-arm64/wine.app/Contents/Info.plist" \
-  "$NB/eac-vm-work/images/manifest.sha256" "$NB/eac-vm-work/images/base.erofs" || exit 1
+  "$NB/vm-work/images/manifest.sha256" "$NB/vm-work/images/base.erofs" || exit 1
 
 # 6. Checksums and sizes; the commands that publish it, for the maintainer.
 ( cd "$OUT" && shasum -a 256 "$ZIP" "$TGZ" "$PARTS" "$IZIP" > SHA256SUMS )

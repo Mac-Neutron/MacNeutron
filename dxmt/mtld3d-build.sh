@@ -3,7 +3,7 @@
 # (aarch64-apple-darwin, mtld3d-unix with its winemetal feature, production profile), from DXMTRS's one workspace at
 # the tree's root (src/d3d9), into build/d3d9-cargo/wm; dxmt/d3d9-check.sh and mtld3d-conformance.sh take it as
 # MTLD3D_SO. Prints its path. wine.app's own D3D9 binaries come from DXMT's meson build (wine-arm64/build.sh), the VM
-# guest's from eac-vm/dxmt/build.sh.
+# guest's from vm/dxmt/build.sh.
 #   mtld3d-build.sh --loopback
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

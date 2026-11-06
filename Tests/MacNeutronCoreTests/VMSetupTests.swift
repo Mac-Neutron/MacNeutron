@@ -145,8 +145,8 @@ private func setUp(_ f: SetupFixture, requests: Requests = Requests(), minFreeGB
 
 @Test func theDevelopersFolderIsLeftAlone() async throws {
     let f = try makeSetup()
-    let target = try makeTempDir().appending(path: "eac-vm-work", directoryHint: .isDirectory)
-    try write("dev\n", to: target.appending(path: "images/manifest.sha256"))  // eac-vm/image/build.sh's
+    let target = try makeTempDir().appending(path: "vm-work", directoryHint: .isDirectory)
+    try write("dev\n", to: target.appending(path: "images/manifest.sha256"))  // vm/image/build.sh's
     try FileManager.default.createSymbolicLink(at: f.vm, withDestinationURL: target)
     #expect(try await setUp(f) == 0)
     #expect(try FileManager.default.contentsOfDirectory(atPath: target.path) == ["images"])

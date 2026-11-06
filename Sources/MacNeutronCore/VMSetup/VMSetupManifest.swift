@@ -1,6 +1,6 @@
 import Foundation
 
-/// MacNeutron.app's vm-manifest.json (eac-vm/setup/manifest.py, spec §4.3): the parts archive and every pinned Fedora
+/// MacNeutron.app's vm-manifest.json (vm/setup/manifest.py, spec §4.3): the parts archive and every pinned Fedora
 /// package, each with its size and SHA-256 (the notarized app carries them, so a Mac needs no OpenPGP: Fedora's
 /// signatures were checked when the manifest was made). Its file's hash names the image set it builds.
 struct VMSetupManifest: Codable, Equatable {

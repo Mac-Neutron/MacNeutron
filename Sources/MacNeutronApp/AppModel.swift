@@ -409,7 +409,7 @@ final class AppModel {
             return "Game VM: its folder \(missing) is missing. Reconnect its drive, or Rebuild to start a new VM here."
         }
         if vmRebuildOff {
-            return "Game VM: a developer's folder (its images are eac-vm's own build). MacNeutron never changes it, so "
+            return "Game VM: a developer's folder (its images are vm's own build). MacNeutron never changes it, so "
                 + "Rebuild is off."
         }
         return vmNotice

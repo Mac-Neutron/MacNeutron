@@ -86,8 +86,8 @@ private func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding
 }
 
 @Test func aDevelopersFolderIsLeftAlone() throws {
-    // build/eac-vm-work linked in: eac-vm/image/build.sh's images say `dev`.
-    let target = try makeTempDir().appending(path: "eac-vm-work", directoryHint: .isDirectory)
+    // build/vm-work linked in: vm/image/build.sh's images say `dev`.
+    let target = try makeTempDir().appending(path: "vm-work", directoryHint: .isDirectory)
     try write("dev\n", to: target.appending(path: "images/manifest.sha256"))
     let vm = try makeTempDir().appending(path: "vm")
     try FileManager.default.createSymbolicLink(at: vm, withDestinationURL: target)

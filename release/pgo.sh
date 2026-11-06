@@ -15,7 +15,7 @@ ls "$GUESTRAW"/*.profraw > /dev/null 2>&1 || die "no raw profiles in $GUESTRAW"
 mkdir -p "$ROOT/pgo"
 xcrun llvm-profdata merge --failure-mode=warn -o "$ROOT/pgo/host.profdata" "$HOSTRAW"/*.profraw 2> /dev/null
 # The guest's in the builder, whose clang wrote them.
-B="sh $ROOT/eac-vm/builder.sh"
+B="sh $ROOT/vm/builder.sh"
 BUILDER_HOME=/home/bench/p $B sync "$GUESTRAW" pgo-raw > /dev/null
 BUILDER_HOME=/home/bench/p $B ssh 'llvm-profdata merge -o /tmp/mn-guest.profdata pgo-raw/*.profraw && cat /tmp/mn-guest.profdata' \
   > "$ROOT/pgo/guest.profdata"

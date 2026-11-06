@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// The microVM every game runs in (eac-vm; docs/superpowers/specs/2026-10-15-macneutron-eac-vm-route-design.md): one
+/// The microVM every game runs in (vm; docs/superpowers/specs/2026-10-15-macneutron-vm-route-design.md): one
 /// folder holding macneutron-vm, run-guest.sh, the guest's run-game.sh, the images every game shares (images/) and each
 /// game's own state disk (state/<appid>.img, run-guest.sh's APFS clone of images/state-template.img on first use), TPM
 /// (state/<appid>.tpm, sealed under a key in the login keychain) and share (runs/<appid>: the run's script, results and
@@ -36,7 +36,7 @@ public struct MicroVM: Sendable {
     }
 
     /// The setup (`macneutron vm-setup`) writes images/manifest.sha256 last, once the whole set is in place; the image
-    /// build in eac-vm writes `dev` there.
+    /// build in vm writes `dev` there.
     public static func imagesComplete(_ root: URL) -> Bool {
         FileManager.default.fileExists(atPath: root.appending(path: "images/manifest.sha256").path(percentEncoded: false))
     }
@@ -47,9 +47,9 @@ public struct MicroVM: Sendable {
     func share(appID: String) -> URL { root.appending(path: "runs/\(appID)") }
     /// Native DXMT's own for the game, forwarded (MACNEUTRON_VM_D3D=forward): its shader cache and recorded pipelines.
     func dxmtState(appID: String) -> URL { root.appending(path: "state/\(appID).dxmt") }
-    /// The native replayer of recorded pipelines (eac-vm/dxmt-native/build.sh), beside native DXMT.
+    /// The native replayer of recorded pipelines (vm/dxmt-native/build.sh), beside native DXMT.
     var dxmtReplay: URL { root.appending(path: "dxmt/dxmt-replay") }
-    /// Native DXMT's translator key (`dxmt-translator`, eac-vm/dxmt-native/build.sh's), which keys its recordings.
+    /// Native DXMT's translator key (`dxmt-translator`, vm/dxmt-native/build.sh's), which keys its recordings.
     var dxmtTranslator: String? {
         (try? String(contentsOf: root.appending(path: "dxmt-translator"), encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines)

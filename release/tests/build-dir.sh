@@ -6,17 +6,17 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 # The builder VM (eacvm, its key in eacbench, its host vmhost) is one machine for both profiles; p-seed.sh reads build/.
-shared='bridge|release|perf|presenter|dxmt-tests|wine-arm64-tests|p|eac-vm-work/eacvm|eac-vm-work/eacbench|eac-vm-work/vmhost'
+shared='bridge|release|perf|presenter|dxmt-tests|wine-arm64-tests|p|vm-work/eacvm|vm-work/eacbench|vm-work/vmhost'
 # Each line with its BUILD_DIR forms taken out first, so a second, bare one beside them still shows ("$ROOT"/build too).
-bad=$( { /usr/bin/grep -rnE '\$ROOT"?/build' eac-vm dxmt wine-arm64 release --include='*.sh' --exclude-dir=tests --exclude=p-seed.sh || true; } |
+bad=$( { /usr/bin/grep -rnE '\$ROOT"?/build' vm dxmt wine-arm64 release --include='*.sh' --exclude-dir=tests --exclude=p-seed.sh || true; } |
   sed -E 's/\$\{BUILD_DIR:-\$ROOT\/build\}//g' | /usr/bin/grep -E '\$ROOT"?/build' |
   /usr/bin/grep -vE "\\\$ROOT\"?/build/($shared)([/\"' *]|\$)" | /usr/bin/grep -vF '# build-dir: ' || true)
 # Makefiles likewise: a build/ path only through BUILD_DIR.
-mk=$( { /usr/bin/grep -rnE '(\.\./|ROOT\)/)build/' eac-vm --include=Makefile || true; } | /usr/bin/grep -v 'BUILD_DIR' || true)
+mk=$( { /usr/bin/grep -rnE '(\.\./|ROOT\)/)build/' vm --include=Makefile || true; } | /usr/bin/grep -v 'BUILD_DIR' || true)
 bad="$bad${mk:+
 $mk}"
 # A builder path written out in full lands in the normal profile's home whatever BUILDER_HOME says.
-home=$( { /usr/bin/grep -rnE 'sync .*/home/bench/' eac-vm release --include='*.sh' --exclude-dir=tests || true; } )
+home=$( { /usr/bin/grep -rnE 'sync .*/home/bench/' vm release --include='*.sh' --exclude-dir=tests || true; } )
 if [ -z "$bad$home" ]; then echo "build-dir: ok"; exit 0; fi
 echo "build-dir: FAIL"
 printf '%s\n' "$bad" "$home" | /usr/bin/grep -v '^$'

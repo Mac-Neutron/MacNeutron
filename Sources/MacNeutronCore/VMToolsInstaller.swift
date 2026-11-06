@@ -14,7 +14,7 @@ public enum VMToolsInstallOutcome: Equatable, Sendable {
 /// `RuntimeInstaller` installs wine.app: each item copied beside itself, then swapped in, never while a VM runs from the
 /// folder. The folder's games' files (state/, runs/) and its images/ aren't the tools' and are never touched.
 public enum VMToolsInstaller {
-    /// dxmt: native DXMT and its replayer, which macneutron-vm loads for Direct3D forwarding (eac-vm/d3d).
+    /// dxmt: native DXMT and its replayer, which macneutron-vm loads for Direct3D forwarding (vm/d3d).
     /// dxmt-translator: native DXMT's translator key (MicroVM's `dxmtTranslator`).
     public static let items = ["macneutron-vm", "libkrun", "steam-forward", "gvproxy", "metal-host", "dxmt",
                                "run-guest.sh", "run-game.sh", "dxmt-translator"]
@@ -145,8 +145,8 @@ public enum VMToolsInstaller {
         return hash.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    /// A developer's folder (build/eac-vm-work, usually linked here): its images are eac-vm's own build, whose
-    /// manifest.sha256 says `dev` (eac-vm/image/build.sh). Any other folder, linked or not (a player's VM moved to another
+    /// A developer's folder (build/vm-work, usually linked here): its images are vm's own build, whose
+    /// manifest.sha256 says `dev` (vm/image/build.sh). Any other folder, linked or not (a player's VM moved to another
     /// drive), is the app's to update.
     public static func isDeveloperFolder(_ vm: URL) -> Bool {
         (try? String(contentsOf: vm.appending(path: "images/manifest.sha256"), encoding: .utf8))?
