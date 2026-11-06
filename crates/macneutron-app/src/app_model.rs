@@ -248,6 +248,39 @@ pub struct State {
     apps: Vec<AppInfo>,
 }
 
+/// Nothing read yet: what `AppModel::new` starts from, and what the views' tests build on.
+impl Default for State {
+    fn default() -> Self {
+        State {
+            runtime: None,
+            runtime_notice: None,
+            installing: false,
+            valve_version: None,
+            valve_notice: None,
+            valve_updating: false,
+            games: Vec::new(),
+            orphans: Vec::new(),
+            app_info_error: None,
+            login_item_status: LoginItemStatus::NotRegistered,
+            busy: None,
+            error_message: None,
+            vm_tools_deferred: false,
+            vm_notice: None,
+            vm_setup_running: false,
+            vm_setup_failed: false,
+            generation: 0,
+            vm_tools_installing: false,
+            vm_setup_deferred: false,
+            vm_setup_deferred_at: None,
+            deferred_force: None,
+            install_failed: false,
+            read_status: SteamPlayStatus::Off,
+            tools_changed_under_steam: false,
+            apps: Vec::new(),
+        }
+    }
+}
+
 impl State {
     pub fn status(&self) -> SteamPlayStatus {
         match &self.read_status {
@@ -306,30 +339,8 @@ impl AppModel {
         });
         let state = State {
             runtime: InstalledRuntime::read(&config.layout, &*config.identity),
-            runtime_notice: None,
-            installing: false,
             valve_version: ValveClient::installed(&valve_client.cache).map(|install| install.version),
-            valve_notice: None,
-            valve_updating: false,
-            games: Vec::new(),
-            orphans: Vec::new(),
-            app_info_error: None,
-            login_item_status: LoginItemStatus::NotRegistered,
-            busy: None,
-            error_message: None,
-            vm_tools_deferred: false,
-            vm_notice: None,
-            vm_setup_running: false,
-            vm_setup_failed: false,
-            generation: 0,
-            vm_tools_installing: false,
-            vm_setup_deferred: false,
-            vm_setup_deferred_at: None,
-            deferred_force: None,
-            install_failed: false,
-            read_status: SteamPlayStatus::Off,
-            tools_changed_under_steam: false,
-            apps: Vec::new(),
+            ..State::default()
         };
         Arc::new_cyclic(|me| AppModel {
             steam: config.steam,

@@ -14,6 +14,7 @@
 
 pub mod app_model;
 pub mod update_model;
+pub mod views;
 
 use std::sync::{Arc, Mutex};
 
