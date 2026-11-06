@@ -1609,4 +1609,994 @@ pub(crate) mod tests {
         f.launch(&["waitforexitandrun", LIBRARY_GAME], &perf_env(&f));
         assert!(!f.launcher_log().contains("MACNEUTRON_PERF=1"));
     }
+
+    /// MicroVMTests.swift's tests that go through the launcher.
+    mod vm {
+        use super::*;
+        use crate::micro_vm::UserShareError;
+        use crate::test_support::pe_bytes_icons;
+
+        /// A VM folder as vm/host/build.sh lays it out: an executable macneutron-vm, run-guest.sh and run-game.sh.
+        fn make_vm_folder() -> PathBuf {
+            let root = make_temp_dir().join("vm");
+            write("#!/bin/sh\n", &root.join("macneutron-vm"), true);
+            write("#!/bin/sh\n", &root.join("run-guest.sh"), true);
+            write("# run-game.sh\nwine steam.exe \"$EXE\" \"$@\"\n", &root.join("run-game.sh"), false);
+            write("dev\n", &root.join("images/manifest.sha256"), false);
+            root
+        }
+
+        /// Written whole, as Swift's `atomically: true`: the launcher's stage poll never reads half a line.
+        fn write_atomically(text: &str, to: &Path) {
+            let partial = to.with_extension("partial");
+            write(text, &partial, false);
+            std::fs::rename(&partial, to).unwrap();
+        }
+
+        /// The guest scripts run-guest.sh was given, read while it "runs" (the launcher removes them after).
+        #[derive(Default, Clone)]
+        struct Scripts(Arc<Mutex<Vec<String>>>);
+
+        impl Scripts {
+            fn add(&self, path: Option<&String>) {
+                if let Some(text) = path.and_then(|p| std::fs::read_to_string(p).ok()) {
+                    self.0.lock().unwrap().push(text);
+                }
+            }
+
+            fn all(&self) -> Vec<String> {
+                self.0.lock().unwrap().clone()
+            }
+
+            fn first(&self) -> String {
+                self.all().first().cloned().unwrap_or_default()
+            }
+
+            fn last(&self) -> String {
+                self.all().last().cloned().unwrap_or_default()
+            }
+        }
+
+        struct Options {
+            vm_installed: bool,
+            status: i32,
+            display: Option<(usize, usize)>,
+            version: Option<&'static str>,
+            console: Option<&'static str>,
+            mounts_failed: Option<&'static str>,
+            install_log: Option<&'static str>,
+            crash: Option<&'static str>,
+            stages: Vec<&'static str>,
+            steam: Option<SteamLocation>,
+        }
+
+        impl Default for Options {
+            fn default() -> Self {
+                Options {
+                    vm_installed: true,
+                    status: 0,
+                    display: None,
+                    version: None,
+                    console: None,
+                    mounts_failed: None,
+                    install_log: None,
+                    crash: None,
+                    stages: Vec::new(),
+                    steam: None,
+                }
+            }
+        }
+
+        struct VMFixture {
+            launcher: Launcher,
+            runner: Arc<FakeRunner>,
+            notifier: Arc<RecordingNotifier>,
+            vm: PathBuf,
+            env: BTreeMap<String, String>,
+            /// The launcher's home (its Documents/ made) and the game's compatdata folder.
+            home: String,
+            data_path: PathBuf,
+            scripts: Scripts,
+        }
+
+        impl VMFixture {
+            fn launch(&self, argv: &[&str], env: &BTreeMap<String, String>) -> i32 {
+                self.launcher.launch(&args(argv), env)
+            }
+
+            fn launcher_log(&self) -> String {
+                read(&self.launcher.log.launcher_log())
+            }
+
+            fn calls(&self) -> Vec<Call> {
+                self.runner.calls()
+            }
+
+            fn first(&self) -> Call {
+                self.calls().first().cloned().unwrap()
+            }
+
+            fn last(&self) -> Call {
+                self.calls().last().cloned().unwrap()
+            }
+
+            fn guest_call(&self) -> Call {
+                self.calls().into_iter().rev().find(|c| c.tool == "run-guest.sh").unwrap()
+            }
+
+            fn profile(&self) -> PathBuf {
+                self.data_path.join("pfx/drive_c/users/steamuser")
+            }
+
+            fn share(&self) -> PathBuf {
+                self.vm.join("runs/2437170")
+            }
+        }
+
+        fn make_vm_fixture(o: Options) -> VMFixture {
+            let vm = make_vm_folder();
+            let layout = make_tool_layout();
+            if let Some(version) = o.version {
+                set_runtime_version(version, &layout);
+            }
+            let scripts = Scripts::default();
+            let seen = scripts.clone();
+            let (status, stages) = (o.status, o.stages.clone());
+            let (console, mounts_failed, install_log, crash) = (o.console, o.mounts_failed, o.install_log, o.crash);
+            let runner = Arc::new(FakeRunner::new(move |call| {
+                if call.tool != "run-guest.sh" {
+                    return 0;
+                }
+                seen.add(call.arguments.first());
+                let Some(share) = call.environment.get("MN_SHARE").map(PathBuf::from) else { return status };
+                if let Some(console) = console {
+                    write(console, &share.join("console.log"), false); // macneutron-vm's guest console
+                }
+                // mn-runner's word on a mount that failed, or run-game.sh's on a profile that isn't mounted
+                if let Some(reason) = mounts_failed {
+                    write(reason, &share.join("traces/mounts.failed"), false);
+                }
+                if let Some(log) = install_log {
+                    write(log, &share.join("traces/installscript.log"), false); // the install-script steps it ran
+                }
+                // run-game.sh's crash reporter: its marker, the reporter's ps, and the copy of the game's report
+                if let Some(crash) = crash {
+                    let details = share.join("traces/crash-report");
+                    write(crash, &share.join("traces/crash"), false);
+                    write("CrashReportClie 1234\n", &details.join("ps.txt"), false);
+                    write("report\n", &details.join("report/Crash/context.txt"), false);
+                }
+                // run-game.sh's stages as it goes, each long enough for the launcher's poll to see it
+                for stage in &stages {
+                    write_atomically(stage, &share.join("traces/stage"));
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+                status
+            }));
+            let notifier = Arc::new(RecordingNotifier::default());
+            let home = make_temp_dir().join("home");
+            std::fs::create_dir_all(home.join("Documents")).unwrap();
+            let home = home.to_string_lossy().into_owned();
+            let root = if o.vm_installed { vm.clone() } else { make_temp_dir().join("no-vm") };
+            let mut launcher = test_launcher(layout, runner.clone(), notifier.clone(), Some(TEST_IDENTITY), root);
+            let display = o.display;
+            launcher.display = Box::new(move || display);
+            launcher.home = home.clone();
+            if let Some(steam) = o.steam {
+                launcher.steam = steam;
+            }
+            let data_path = make_temp_dir().join("compatdata/2437170");
+            let env = steam_environment(&data_path, "2437170");
+            VMFixture { launcher, runner, notifier, vm, env, home, data_path, scripts }
+        }
+
+        fn fixture() -> VMFixture {
+            make_vm_fixture(Options::default())
+        }
+
+        const GAME: &str =
+            "/Users/someone/Library/Application Support/Steam/steamapps/common/SMITE 2/Windows/Hemingway.exe";
+
+        fn exported(script: &str) -> Vec<String> {
+            let line = script.lines().find(|l| l.starts_with("export ")).unwrap_or("");
+            line.split(' ').map(str::to_string).collect()
+        }
+
+        #[test]
+        fn every_game_runs_in_the_micro_vm() {
+            let f = make_vm_fixture(Options { status: 3, ..Default::default() });
+            assert_eq!(f.launch(&["waitforexitandrun", GAME, "-homedir=SMITE2Alpha", "-d3d12"], &f.env), 3);
+            let call = f.first();
+            assert_eq!(f.calls().len(), 1); // no host prefix, no host Wine
+            assert_eq!(call.tool, "run-guest.sh");
+            let profile = f.profile().to_string_lossy().into_owned();
+            assert_eq!(
+                call.arguments[1..],
+                [
+                    "--steam-appid".to_string(),
+                    "2437170".into(),
+                    "--ram-mib".into(),
+                    "16384".into(),
+                    "--steam-map".into(),
+                    "/Users/someone/Library/Application Support/Steam/steamapps/common=/mnt/games".into(),
+                    "--user-share".into(),
+                    format!("profile={profile}"),
+                    "--user-share".into(),
+                    format!("documents={}/Documents", f.home),
+                    "--user-share".into(),
+                    "game=/Users/someone/Library/Application Support/Steam/steamapps/common/SMITE 2".into(),
+                ]
+            );
+            assert_eq!(call.environment["MN_VM_DIR"], directory_path(&f.vm));
+            assert_eq!(call.environment["MN_STATE"], f.vm.join("state/2437170.img").to_string_lossy());
+            assert_eq!(call.environment["MN_SHARE"], f.share().to_string_lossy());
+            // The toast macneutron-vm shows while macOS asks for the TPM key's password.
+            assert_eq!(call.environment["MN_TOAST"], f.launcher.layout.launcher_binary().to_string_lossy());
+            assert!(f.launcher_log().contains("verb=waitforexitandrun appid=2437170 backend=vm"));
+            assert!(f.launcher_log().contains("exit=3"));
+        }
+
+        #[test]
+        fn a_crashed_vm_game_keeps_its_report_and_says_where_it_is() {
+            // run-game.sh ends a VM whose game left a crash reporter waiting on the invisible Xvfb. The launcher keeps
+            // the report beside its logs, says where, and Steam sees a failure even if the guest's status came back 0.
+            let marker = "when=2026-10-25T21:00:00Z\nreporter=CrashReportClie\ncommand=C:\\Game\\CrashReportClient.exe\n\
+                          report=/mnt/games/SMITE 2/Saved/Crashes/ABC";
+            let f = make_vm_fixture(Options { crash: Some(marker), ..Default::default() });
+            assert_eq!(f.launch(&["waitforexitandrun", GAME], &f.env), 1);
+            assert_eq!(f.notifier.posted().len(), 1);
+            let message = f.notifier.posted()[0].clone();
+            assert!(message.contains("SMITE 2 crashed"));
+            assert!(message.contains("crash report is in"));
+            let crashes = f.launcher.log.directory.join("crashes/2437170");
+            let folders: Vec<_> = std::fs::read_dir(&crashes).unwrap().map(|e| e.unwrap().file_name()).collect();
+            assert_eq!(folders.len(), 1);
+            let kept = crashes.join(&folders[0]);
+            assert!(kept.join("report/ps.txt").exists());
+            assert!(message.contains(&*kept.to_string_lossy()));
+            assert!(f.launcher_log().contains("crash: appid=2437170 reporter=CrashReportClie"));
+            assert!(f
+                .launcher_log()
+                .contains("reports=/Users/someone/Library/Application Support/Steam/steamapps/common/SMITE 2/Saved/Crashes/ABC"));
+        }
+
+        #[test]
+        fn an_earlier_runs_crash_marker_is_not_reported_again() {
+            let f = fixture();
+            let traces = f.share().join("traces");
+            write("reporter=OldCrash\n", &traces.join("crash"), false);
+            assert_eq!(f.launch(&["waitforexitandrun", GAME], &f.env), 0);
+            assert!(f.notifier.posted().is_empty());
+            assert!(!traces.join("crash").exists());
+        }
+
+        // A game in the VM uses the saves Steam Cloud syncs (spec 2026-10-23-macneutron-vm-shared-saves): its Mac
+        // prefix's profile, ~/Documents and its own folder, shared read-write.
+
+        #[test]
+        fn a_vm_game_gets_its_profile_documents_and_folder() {
+            let f = fixture();
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            let profile = f.profile().to_string_lossy().into_owned();
+            // after the script, appid, RAM and --steam-map pairs
+            assert_eq!(
+                f.first().arguments[7..],
+                [
+                    "--user-share".to_string(),
+                    format!("profile={profile}"),
+                    "--user-share".into(),
+                    format!("documents={}/Documents", f.home),
+                    "--user-share".into(),
+                    "game=/Users/someone/Library/Application Support/Steam/steamapps/common/SMITE 2".into(),
+                ]
+            );
+            assert_eq!(
+                read(&f.share().join("mounts")),
+                format!(
+                    "profile /home/mn/pfx/drive_c/users/steamuser\ndocuments {}/Documents\ngame /mnt/games/SMITE 2\n",
+                    f.home
+                )
+            );
+            assert!(f.scripts.first().contains(&format!("MN_MAC_HOME='{}'", f.home)));
+            assert!(f.profile().exists()); // made: Steam's and Proton's layout
+        }
+
+        /// The `profile=` share run-guest.sh was given.
+        fn profile_share(f: &VMFixture) -> Option<String> {
+            f.first().arguments.iter().find_map(|a| a.strip_prefix("profile=").map(str::to_string))
+        }
+
+        #[test]
+        fn a_vm_only_profile_gets_steams_xp_name_links() {
+            // Steam's Auto-Cloud roots are the profile's XP names (ProfileLinks), which only a macOS launch made
+            // before: a game never run on macOS kept its saves where Steam doesn't look.
+            let f = fixture();
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            let link = |name: &str| std::fs::read_link(f.profile().join(name)).unwrap();
+            assert_eq!(link("Local Settings/Application Data"), PathBuf::from("../AppData/Local"));
+            assert_eq!(link("Application Data"), PathBuf::from("AppData/Roaming"));
+            assert_eq!(link("My Documents"), PathBuf::from("Documents"));
+        }
+
+        #[test]
+        fn cloud_files_steam_put_in_an_xp_folder_reach_the_game() {
+            // Steam's launch download makes real XP-name folders in a profile no macOS launch prepared.
+            let f = fixture();
+            write("cloud\n", &f.profile().join("Local Settings/Application Data/Game/save.sav"), false);
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert_eq!(read(&f.profile().join("AppData/Local/Game/save.sav")), "cloud\n");
+            assert_eq!(
+                std::fs::read_link(f.profile().join("Local Settings/Application Data")).unwrap(),
+                PathBuf::from("../AppData/Local")
+            );
+        }
+
+        #[test]
+        fn a_linked_profile_is_shared_as_its_target() {
+            // macOS Wine's profile is named after the Mac user; users/steamuser links to it (ProfileLinks).
+            let f = fixture();
+            let users = f.data_path.join("pfx/drive_c/users");
+            std::fs::create_dir_all(users.join("chad")).unwrap();
+            std::os::unix::fs::symlink("chad", users.join("steamuser")).unwrap();
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert_eq!(profile_share(&f), Some(users.join("chad").to_string_lossy().into_owned()));
+        }
+
+        #[test]
+        fn a_dangling_profile_link_gets_its_folder_back() {
+            let f = fixture();
+            let users = f.data_path.join("pfx/drive_c/users");
+            std::fs::create_dir_all(&users).unwrap();
+            std::os::unix::fs::symlink("chad", users.join("steamuser")).unwrap();
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert_eq!(std::fs::read_link(users.join("steamuser")).unwrap(), PathBuf::from("chad")); // the link stays
+            assert!(std::fs::symlink_metadata(users.join("chad")).unwrap().is_dir());
+            assert_eq!(profile_share(&f), Some(users.join("chad").to_string_lossy().into_owned()));
+        }
+
+        #[test]
+        fn a_game_folder_with_an_apostrophe_stays_one_path() {
+            let f = fixture();
+            let bg3 = "/Users/someone/Library/Application Support/Steam/steamapps/common/Baldur's Gate 3/bin/bg3.exe";
+            f.launch(&["waitforexitandrun", bg3], &f.env);
+            assert!(f
+                .first()
+                .arguments
+                .contains(&"game=/Users/someone/Library/Application Support/Steam/steamapps/common/Baldur's Gate 3".into()));
+            assert!(read(&f.share().join("mounts")).ends_with("game /mnt/games/Baldur's Gate 3\n"));
+        }
+
+        #[test]
+        fn a_library_on_another_drive_shares_that_librarys_game() {
+            let f = fixture();
+            f.launch(&["waitforexitandrun", "/Volumes/Games/SteamLibrary/steamapps/common/X/X.exe"], &f.env);
+            assert!(f.first().arguments.contains(&"game=/Volumes/Games/SteamLibrary/steamapps/common/X".into()));
+        }
+
+        #[test]
+        fn documents_that_cant_be_listed_refuse_the_launch() {
+            // macOS's privacy settings refused Steam the Documents folder: never a run without it.
+            use std::os::unix::fs::PermissionsExt;
+            let f = fixture();
+            let documents = format!("{}/Documents", f.home);
+            std::fs::set_permissions(&documents, std::fs::Permissions::from_mode(0)).unwrap();
+            let _restore = Defer(|| {
+                let _ = std::fs::set_permissions(&documents, std::fs::Permissions::from_mode(0o755));
+            });
+            assert_ne!(f.launch(&["waitforexitandrun", GAME], &f.env), 0);
+            assert!(f.calls().is_empty());
+            assert!(f.notifier.posted().contains(&UserShareError::DocumentsUnreadable(documents.clone()).to_string()));
+        }
+
+        #[test]
+        fn a_failed_mount_is_told_to_the_player() {
+            let f = make_vm_fixture(Options { status: 1, mounts_failed: Some("no virtiofs tag game\n"), ..Default::default() });
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            let message = "MacNeutron couldn't share this game's saves with the game VM: no virtiofs tag game";
+            assert!(f.notifier.posted().contains(&message.to_string()));
+            assert!(f.launcher_log().contains(message));
+        }
+
+        #[test]
+        fn an_old_mounts_failed_does_not_refuse_the_next_run() {
+            let f = fixture();
+            write("an earlier run's\n", &f.share().join("traces/mounts.failed"), false);
+            assert_eq!(f.launch(&["waitforexitandrun", GAME], &f.env), 0);
+            assert!(!f.notifier.posted().iter().any(|m| m.contains("couldn't share")));
+        }
+
+        /// A 32-bit PE in a Steam library (the VM's game folder).
+        fn i386_game_in_library(name: &str) -> String {
+            let path = make_temp_dir().join(format!("steamapps/common/Old Game/{name}"));
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, pe_bytes(pe_image::I386, false)).unwrap();
+            path.to_string_lossy().into_owned()
+        }
+
+        #[test]
+        fn a_32bit_game_runs_in_the_micro_vm() {
+            let f = fixture();
+            assert_eq!(f.launch(&["waitforexitandrun", &i386_game_in_library("Game.exe")], &f.env), 0);
+            assert_eq!(f.runner.tools(), ["run-guest.sh"]);
+            assert!(f.notifier.posted().is_empty());
+        }
+
+        #[test]
+        fn a_32bit_installer_runs_in_the_micro_vm() {
+            // Proton runs a game's 32-bit redistributable installers; in the VM they run too.
+            let f = fixture();
+            assert_eq!(f.launch(&["run", &i386_game_in_library("Setup.exe"), "/quiet"], &f.env), 0);
+            assert_eq!(f.runner.tools(), ["run-guest.sh"]);
+            assert!(!f.launcher_log().contains("skipped 32-bit installer"));
+        }
+
+        #[test]
+        fn a_32bit_game_waits_for_the_vm_like_any_other() {
+            // Before the app's setup finishes a 32-bit game gets the VM's message, not the macOS refusal.
+            let f = make_vm_fixture(Options { vm_installed: false, ..Default::default() });
+            assert_eq!(f.launch(&["waitforexitandrun", &i386_game_in_library("Game.exe")], &f.env), 1);
+            assert!(f.calls().is_empty());
+            assert_eq!(f.notifier.posted().len(), 1);
+            assert!(f.notifier.posted()[0].contains("game VM isn't ready"));
+        }
+
+        #[test]
+        fn a_32bit_game_opted_out_of_the_vm_is_refused() {
+            let f = fixture();
+            let env = with(&f.env, &[("MACNEUTRON_VM", "0")]);
+            assert_eq!(f.launch(&["waitforexitandrun", &i386_game_in_library("Game.exe")], &env), 1);
+            assert!(f.calls().is_empty());
+            assert_eq!(f.notifier.posted(), [THIRTY_TWO_BIT_TEXT]);
+        }
+
+        #[test]
+        fn the_guest_script_carries_the_launch() {
+            let f = fixture();
+            let env = with(
+                &f.env,
+                &[
+                    ("MACNEUTRON_DLSS", "1"),
+                    ("MACNEUTRON_VM_D3D", "forward"),
+                    ("MACNEUTRON_VM_D3D32", "forward"),
+                    ("MACNEUTRON_VM_WOW64", "1"),
+                    ("PROTON_USE_WOW64", "1"),
+                    ("MTLD3D_CONFIG", "debug.capsAll=true"),
+                ],
+            );
+            f.launch(&["waitforexitandrun", GAME, "-homedir=SMITE2Alpha", "it's quoted", ""], &env);
+            let script = f.scripts.first();
+            assert!(!Path::new(&f.first().arguments[0]).exists());
+            assert!(script.contains("APPID='2437170'\n"));
+            assert!(script.contains("GAME_DIR='/mnt/games/SMITE 2/Windows'\n"));
+            assert!(script.contains("EXE='Z:\\mnt\\games\\SMITE 2\\Windows\\Hemingway.exe'\n"));
+            assert!(script.contains("set -- '-homedir=SMITE2Alpha' 'it'\\''s quoted' ''\n"));
+            for line in [
+                "MACNEUTRON_DLSS='1'\n",
+                "MACNEUTRON_VM_D3D='forward'\n",
+                "MACNEUTRON_VM_D3D32='forward'\n",
+                "MACNEUTRON_VM_WOW64='1'\n",
+                "PROTON_USE_WOW64='1'\n",
+                "MTLD3D_CONFIG='debug.capsAll=true'\n",
+            ] {
+                assert!(script.contains(line), "{line}");
+            }
+            // Exported, so Wine's processes get them (a forwarder trace, guest DXMT's NVIDIA extension or log level)
+            let exported = exported(&script);
+            for key in ["MACNEUTRON_DLSS", "MACNEUTRON_VM_D3D", "MTLD3D_CONFIG"] {
+                assert!(exported.iter().any(|k| k == key), "{key}");
+            }
+            assert!(script.ends_with("# run-game.sh\nwine steam.exe \"$EXE\" \"$@\"\n"));
+        }
+
+        #[test]
+        fn every_launch_shows_a_toast_until_the_games_window_shows() {
+            let f = fixture();
+            let window = f.share().join("traces/window");
+            write("", &window, false); // the last run's
+            let window_text = window.to_string_lossy().into_owned();
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert_eq!(f.notifier.toasts(), [format!("Setting up SMITE 2 until {window_text}")]);
+            assert_eq!(f.notifier.toasts_closed(), 1);
+            assert!(!window.exists());
+            let call = f.guest_call();
+            assert_eq!(call.environment["MN_WINDOW_SHOWN"], window_text); // macneutron-vm's word
+            assert_eq!(call.environment["MN_APP_NAME"], "SMITE 2");
+            assert_eq!(call.environment.get("MN_APP_ICON"), None); // no such exe here
+            write("", &f.vm.join("state/2437170.img"), false); // run-guest.sh made it
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert_eq!(
+                f.notifier.toasts(),
+                [format!("Setting up SMITE 2 until {window_text}"), format!("Starting SMITE 2 until {window_text}")]
+            );
+            assert_eq!(f.notifier.toasts_closed(), 2);
+        }
+
+        #[test]
+        fn the_guests_stages_are_the_toasts_message() {
+            let f = make_vm_fixture(Options {
+                stages: vec!["Updating its Windows environment\n", "Loading the game\n"],
+                ..Default::default()
+            });
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert_eq!(f.notifier.toast_updates(), ["Updating its Windows environment", "Loading the game"]);
+        }
+
+        #[test]
+        fn the_games_exe_icon_goes_to_the_vms_window() {
+            let f = fixture();
+            let exe = make_temp_dir().join("steamapps/common/Some Game/Game.exe");
+            std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+            std::fs::write(&exe, pe_bytes_icons(&[(0, 32, vec![0x89, 0x50, 0x4E, 0x47])])).unwrap();
+            f.launch(&["waitforexitandrun", &exe.to_string_lossy()], &f.env);
+            let call = f.guest_call();
+            assert_eq!(call.environment["MN_APP_NAME"], "Some Game");
+            let icon = &call.environment["MN_APP_ICON"];
+            assert_eq!(std::fs::read(icon).ok(), pe_image::icon(&exe));
+        }
+
+        #[test]
+        fn the_eac_runtime_is_mounted_read_only_in_the_games_vm() {
+            // Linux Steam passes the Proton EasyAntiCheat Runtime to every game under Proton; Mac Steam leaves it in a
+            // library, or Steam's console downloads it (Mac Steam doesn't install the Linux-only tool).
+            let steam_root = make_temp_dir().join("Steam");
+            let places = [
+                "steamapps/common/Proton EasyAntiCheat Runtime",
+                "steamapps/content/app_1826330/depot_1826331",
+                "Steam.AppBundle/Steam/Contents/MacOS/steamapps/content/app_1826330/depot_1826331",
+            ];
+            for place in places {
+                let f = make_vm_fixture(Options { steam: Some(SteamLocation::new(steam_root.clone())), ..Default::default() });
+                let runtime = steam_root.join(place);
+                std::fs::create_dir_all(&runtime).unwrap(); // no v2/: not one
+                f.launch(&["waitforexitandrun", GAME], &f.env);
+                assert!(!f.last().arguments.contains(&"--ro-share".to_string()), "{place}");
+                assert!(!f.scripts.last().contains("PROTON_EAC_RUNTIME"), "{place}");
+                std::fs::create_dir_all(runtime.join("v2")).unwrap();
+                f.launch(&["waitforexitandrun", GAME], &f.env);
+                let call = f.guest_call();
+                let at = call.arguments.iter().position(|a| a == "--ro-share").unwrap();
+                assert_eq!(call.arguments[at + 1], format!("eac-runtime={}", runtime.to_string_lossy()));
+                assert!(read(&f.share().join("mounts")).ends_with("eac-runtime /Volumes/Proton EasyAntiCheat Runtime\n"));
+                let script = f.scripts.last();
+                assert!(script.contains("PROTON_EAC_RUNTIME='/Volumes/Proton EasyAntiCheat Runtime'\n"));
+                assert!(exported(&script).iter().any(|k| k == "PROTON_EAC_RUNTIME")); // Wine's processes get it
+                std::fs::remove_dir_all(&runtime).unwrap();
+            }
+        }
+
+        #[test]
+        fn a_tpm_that_does_not_start_is_told_to_the_player() {
+            // macneutron-vm's 7, with no run.status: its TPM refused to start, so the guest never ran.
+            let f = make_vm_fixture(Options { status: 7, ..Default::default() });
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert!(f.notifier.posted().iter().any(|m| m.contains("TPM")));
+            // A game that itself ends with 7 leaves run.status: nothing to tell.
+            let g = make_vm_fixture(Options { status: 7, ..Default::default() });
+            write("7", &g.share().join("run.status"), false);
+            g.launch(&["waitforexitandrun", GAME], &g.env);
+            assert!(!g.notifier.posted().iter().any(|m| m.contains("TPM")));
+        }
+
+        /// A game in a Steam library runs in the VM or not at all: never on macOS while the setup is still going.
+        fn expect_refused_until_the_vm_is_ready(f: &VMFixture) {
+            assert_ne!(f.launch(&["waitforexitandrun", GAME], &f.env), 0);
+            assert!(f.calls().is_empty()); // no guest, no host prefix, no host Wine
+            assert!(f.notifier.posted().iter().any(|m| m.contains("game VM isn't ready")));
+            assert!(f.launcher_log().contains("game VM isn't ready"));
+        }
+
+        #[test]
+        fn a_game_before_the_vm_setup_finishes_is_refused() {
+            let f = fixture();
+            std::fs::remove_file(f.vm.join("images/manifest.sha256")).unwrap();
+            expect_refused_until_the_vm_is_ready(&f);
+        }
+
+        #[test]
+        fn opting_out_runs_on_macos() {
+            let f = fixture();
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_VM", "0")]));
+            assert!(!f.calls().iter().any(|c| c.tool == "run-guest.sh"));
+            assert!(f.calls().iter().any(|c| c.tool == "wine" && c.arguments.first().map(String::as_str) == Some(GAME)));
+        }
+
+        #[test]
+        fn a_game_before_the_vm_tools_are_installed_is_refused() {
+            expect_refused_until_the_vm_is_ready(&make_vm_fixture(Options { vm_installed: false, ..Default::default() }));
+        }
+
+        #[test]
+        fn a_game_while_the_vm_tools_swap_is_refused() {
+            let f = fixture();
+            write("", &f.vm.join(".installing"), false);
+            expect_refused_until_the_vm_is_ready(&f);
+        }
+
+        #[test]
+        fn path_queries_and_games_outside_a_library_stay_on_macos() {
+            let f = fixture();
+            f.launch(&["getcompatpath", GAME], &f.env);
+            f.launch(&["waitforexitandrun", "/Applications/Other/Game.exe"], &f.env);
+            assert!(!f.calls().iter().any(|c| c.tool == "run-guest.sh"));
+            assert!(f.launcher_log().contains("not in a Steam library"));
+        }
+
+        #[test]
+        fn forwarding_keeps_native_dxmts_state_with_the_game() {
+            // Forwarded, native DXMT runs in macneutron-vm: its shader cache and recordings in the game's VM state
+            // folder, and the game's launch options in its environment (M3 Task 8).
+            let f = fixture();
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_VM_D3D", "forward"), ("DXMT_D3D12_SM6", "0")]));
+            let call = f.last();
+            assert_eq!(call.environment["MN_D3D_STATE"], f.vm.join("state/2437170.dxmt").to_string_lossy());
+            assert_eq!(call.environment["DXMT_D3D12_SM6"], "0");
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_VM_D3D", "guest")]));
+            assert_eq!(f.last().environment.get("MN_D3D_STATE"), None);
+        }
+
+        // Forwarding is the VM's default since M5 passed (2026-10-19, the D3D forwarding spec §8): native DXMT on the
+        // Mac draws for every game; MACNEUTRON_VM_D3D=guest keeps DXMT in the guest.
+        #[test]
+        fn vm_games_forward_direct3d_by_default() {
+            let f = fixture();
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert!(f.scripts.last().contains("\nMACNEUTRON_VM_D3D='forward'\n"));
+            assert_eq!(f.last().environment["MACNEUTRON_VM_D3D"], "forward");
+            assert!(f.last().environment.contains_key("MN_D3D_STATE"));
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_VM_D3D", "guest")]));
+            assert!(f.scripts.last().contains("\nMACNEUTRON_VM_D3D='guest'\n"));
+            assert_eq!(f.last().environment.get("MN_D3D_STATE"), None);
+        }
+
+        #[test]
+        fn the_vms_precache_replays_natively_before_the_boot() {
+            let f = fixture();
+            let pipelines = f.vm.join("state/2437170.dxmt/pipelines");
+            write("recorded\n", &pipelines.join("game.pipelines"), false);
+            write("an older build\n", &pipelines.join("replayed"), false);
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_VM_D3D", "forward")]));
+            assert_eq!(f.runner.tools(), ["dxmt-replay", "run-guest.sh"]);
+            let replay = f.first();
+            assert_eq!(replay.arguments, [pipelines.join("game.pipelines").to_string_lossy().into_owned()]);
+            assert_eq!(
+                replay.environment["DXMT_SHADER_CACHE_PATH"],
+                format!("{}/", f.vm.join("state/2437170.dxmt").to_string_lossy())
+            );
+            assert_eq!(replay.environment.get("DXMT_PIPELINE_RECORD"), None);
+            assert_ne!(read(&pipelines.join("replayed")), "an older build\n");
+            assert!(f.notifier.toasts().iter().any(|t| t.contains("shaders")));
+        }
+
+        #[test]
+        fn the_vms_precache_is_stamped_with_native_dxmts_key() {
+            // The VM's recordings are native DXMT's: its translator key (dxmt-translator in the VM folder), not the
+            // macOS runtime's, which a dev VM folder needn't match (M3's deferred minors).
+            let f = fixture();
+            write("native-key\n", &f.vm.join("dxmt-translator"), false);
+            let pipelines = f.vm.join("state/2437170.dxmt/pipelines");
+            write("recorded\n", &pipelines.join("game.pipelines"), false);
+            write("an older build\n", &pipelines.join("replayed"), false);
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_VM_D3D", "forward")]));
+            assert!(read(&pipelines.join("replayed")).starts_with("native-key "));
+        }
+
+        #[test]
+        fn dlss_turns_on_native_dxmts_nvidia_extension() {
+            // Forwarded, native DXMT in macneutron-vm reads its own environment: DLSS's NVIDIA extension too (M3 Task 6).
+            let f = fixture();
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_DLSS", "1")]));
+            assert_eq!(f.last().environment["DXMT_ENABLE_NVEXT"], "1");
+            let g = fixture();
+            g.launch(&["waitforexitandrun", GAME], &g.env);
+            assert_eq!(g.last().environment.get("DXMT_ENABLE_NVEXT"), None);
+        }
+
+        #[test]
+        fn vm_dir_from_the_environment() {
+            let other = make_vm_folder();
+            let f = make_vm_fixture(Options { vm_installed: false, ..Default::default() });
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_VM_DIR", &other.to_string_lossy())]));
+            assert_eq!(f.first().tool, "run-guest.sh");
+            assert_eq!(f.first().environment["MN_VM_DIR"], directory_path(&other));
+        }
+
+        #[test]
+        fn the_guests_screen_is_the_macs_display() {
+            // Its pixels: the guest's X screen and the most a game is offered; the host window takes its shape.
+            let f = make_vm_fixture(Options { display: Some((3456, 2234)), ..Default::default() });
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert!(f.scripts.last().contains("\nMN_SCREEN='3456x2234'\n"));
+            assert_eq!(f.last().environment["MN_SCREEN"], "3456x2234");
+            // A launch option's size wins; one that isn't WxH doesn't.
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MN_SCREEN", "2560x1600")]));
+            assert!(f.scripts.last().contains("\nMN_SCREEN='2560x1600'\n"));
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MN_SCREEN", "big; reboot")]));
+            assert!(f.scripts.last().contains("\nMN_SCREEN='3456x2234'\n"));
+            assert_eq!(f.last().environment["MN_SCREEN"], "3456x2234");
+        }
+
+        #[test]
+        fn without_a_display_the_guest_keeps_its_own_screen() {
+            let f = fixture();
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert!(!f.scripts.last().contains("MN_SCREEN")); // run-game.sh's 1920x1080
+        }
+
+        #[test]
+        fn perf_turns_on_the_guest_profiler() {
+            let f = fixture();
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert!(!f.scripts.last().contains("MACNEUTRON_VM_PROFILE"));
+            assert!(!f.scripts.last().contains("DXMT_STATS"));
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_PERF", "1")]));
+            assert!(f.scripts.last().contains("\nMACNEUTRON_VM_PROFILE='1'\n"));
+            // Frames are counted on the host: DXMT_STATS's timing would cost the guest a clock read under FEX per D3D12
+            // call.
+            assert!(!f.scripts.last().contains("DXMT_STATS"));
+            assert_eq!(f.last().environment["MN_PRESENT_STATS"], f.share().join("traces/frames.txt").to_string_lossy());
+        }
+
+        /// run-guest.sh as a real process group, a shell and its child (as lockf, the guest's script and macneutron-vm
+        /// are).
+        struct GroupRunner;
+
+        impl ProcessRunner for GroupRunner {
+            fn run(
+                &self,
+                executable: &Path,
+                arguments: &[String],
+                environment: &BTreeMap<String, String>,
+                output: Option<&Path>,
+            ) -> std::io::Result<i32> {
+                self.run_with_started(executable, arguments, environment, output, &mut |_| {})
+            }
+
+            fn run_with_started(
+                &self,
+                executable: &Path,
+                _arguments: &[String],
+                _environment: &BTreeMap<String, String>,
+                _output: Option<&Path>,
+                started: &mut dyn FnMut(i32),
+            ) -> std::io::Result<i32> {
+                if executable.file_name().is_none_or(|n| n != "run-guest.sh") {
+                    return Ok(0);
+                }
+                SystemProcessRunner.run_with_started(
+                    Path::new("/bin/sh"),
+                    &args(&["-c", "sleep 60 & wait"]),
+                    &BTreeMap::new(),
+                    None,
+                    started,
+                )
+            }
+        }
+
+        // Steam's Stop on macOS asks the processes it tracks to quit, the launcher among them: a VM launch's VM ends,
+        // the whole run-guest.sh group, and the launch returns.
+        #[test]
+        fn steams_stop_ends_the_vm() {
+            let home = make_temp_dir().join("home");
+            std::fs::create_dir_all(home.join("Documents")).unwrap();
+            let mut launcher = test_launcher(
+                make_tool_layout(),
+                Arc::new(GroupRunner),
+                Arc::new(RecordingNotifier::default()),
+                Some(TEST_IDENTITY),
+                make_vm_folder(),
+            );
+            launcher.home = home.to_string_lossy().into_owned();
+            let launcher = Arc::new(launcher);
+            let env = steam_environment(&make_temp_dir().join("compatdata/2437170"), "2437170");
+            assert!(!launcher.stop_vm()); // nothing running yet
+            let (sender, result) = std::sync::mpsc::channel();
+            let running = launcher.clone();
+            std::thread::spawn(move || {
+                let _ = sender.send(running.launch(&args(&["waitforexitandrun", GAME]), &env));
+            });
+            let start = std::time::Instant::now();
+            while !launcher.vm_run.running() && start.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            assert!(launcher.vm_run.running());
+            assert!(launcher.stop_vm());
+            assert_eq!(result.recv_timeout(Duration::from_secs(20)), Ok(STOPPED));
+        }
+
+        #[test]
+        fn a_performance_runtime_launches_quietly() {
+            // X.Y.Zp without MACNEUTRON_LOG: no guest console, DXMT logs nothing, one launcher line, no game log.
+            let f = make_vm_fixture(Options { version: Some("0.7.1p"), ..Default::default() });
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            let call = f.guest_call();
+            assert_eq!(call.arguments[call.arguments.len() - 2..], ["--console".to_string(), "/dev/null".into()]);
+            assert_eq!(call.environment["DXMT_LOG_LEVEL"], "none");
+            let log = f.launcher_log();
+            let lines: Vec<&str> = log.split('\n').filter(|l| !l.is_empty()).collect();
+            assert_eq!(lines.len(), 1);
+            assert!(lines[0].contains(" verb=waitforexitandrun appid=2437170 backend=vm"));
+            assert!(!f.launcher.log.directory.join("steam-2437170.log").exists());
+        }
+
+        #[test]
+        fn a_performance_runtime_logs_when_asked() {
+            let f = make_vm_fixture(Options { version: Some("0.7.1p"), ..Default::default() });
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_LOG", "1")]));
+            let call = f.guest_call();
+            assert!(!call.arguments.contains(&"--console".to_string()));
+            assert_eq!(call.environment.get("DXMT_LOG_LEVEL"), None);
+            // the VM's output is the game log
+            assert_eq!(call.output, Some(f.launcher.log.directory.join("steam-2437170.log")));
+        }
+
+        #[test]
+        fn a_performance_script_names_its_profile() {
+            // The guest's run-game.sh keeps quiet for a p runtime; DXMT_STATS and the guest profiler aren't passed.
+            let f = make_vm_fixture(Options { version: Some("0.7.1p"), ..Default::default() });
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("DXMT_STATS", "1"), ("MACNEUTRON_PERF", "1")]));
+            let script = f.scripts.first();
+            assert!(script.contains("MACNEUTRON_PROFILE='p'\n"));
+            assert!(script.contains("DXMT_LOG_LEVEL='none'\n"));
+            assert!(!script.contains("DXMT_STATS="));
+            assert!(!script.contains("MACNEUTRON_VM_PROFILE="));
+        }
+
+        #[test]
+        fn a_normal_runtime_keeps_its_console() {
+            let f = fixture();
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert!(!f.guest_call().arguments.contains(&"--console".to_string()));
+            assert!(!f.scripts.first().contains("MACNEUTRON_PROFILE="));
+        }
+
+        #[test]
+        fn a_vm_game_gets_wine_debug_as_on_macos() {
+            // LaunchEnvironment's WINEDEBUG: nothing unless logging, MACNEUTRON_LOG=1 and =2's channels, the user's own
+            // wins.
+            for (log, user, want) in [
+                (None, None, "-all"),
+                (Some("1"), None, "warn+all,warn-seh,+loaddll,warn+steamclient"),
+                (Some("2"), None, "warn+all,+loaddll,+steamclient"),
+                (Some("1"), Some("+relay"), "+relay"),
+            ] {
+                let f = make_vm_fixture(Options { version: Some("0.7.1p"), ..Default::default() });
+                let mut env = f.env.clone();
+                if let Some(log) = log {
+                    env.insert("MACNEUTRON_LOG".into(), log.into());
+                }
+                if let Some(user) = user {
+                    env.insert("WINEDEBUG".into(), user.into());
+                }
+                f.launch(&["waitforexitandrun", GAME], &env);
+                assert!(f.scripts.first().contains(&format!("WINEDEBUG='{want}'\n")), "MACNEUTRON_LOG={log:?}");
+            }
+        }
+
+        #[test]
+        fn a_crash_reporter_override_reaches_the_guest() {
+            // A reporter with another name is a launch option, so the launcher's environment must reach run-game.sh.
+            let f = fixture();
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MN_CRASH_REPORTERS", "mygamecrash")]));
+            let script = f.scripts.first();
+            assert!(script.contains("MN_CRASH_REPORTERS='mygamecrash'"));
+            assert!(script.contains("export ") && script.contains(" MN_CRASH_REPORTERS"));
+        }
+
+        #[test]
+        fn a_logged_vm_games_log_ends_with_the_guest_console() {
+            let f = make_vm_fixture(Options { console: Some("[    0.1] Linux version\n"), ..Default::default() });
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_LOG", "1")]));
+            let log = read(&f.launcher.log.directory.join("steam-2437170.log"));
+            assert!(log.ends_with("--- the VM's console ---\n[    0.1] Linux version\n"));
+        }
+
+        // Steam's install scripts (spec 2026-10-24-macneutron-install-scripts-design): the launcher reads them from
+        // the game's app manifest and puts them in front of run-game.sh, which runs them and says how each step went.
+
+        /// A game in a temp library (the fixture's app 2437170) whose app manifest lists `script`.
+        fn game_with_install_script(script: &str) -> String {
+            let steamapps = make_temp_dir().join("steamapps");
+            write(
+                "\"AppState\"\n{\n\"installdir\" \"Game\"\n\"InstallScripts\"\n{\n\"2437171\" \"installscript.vdf\"\n}\n}\n",
+                &steamapps.join("appmanifest_2437170.acf"),
+                false,
+            );
+            write(script, &steamapps.join("common/Game/installscript.vdf"), false);
+            steamapps.join("common/Game/game.exe").to_string_lossy().into_owned()
+        }
+
+        #[test]
+        fn a_games_install_scripts_reach_the_guest() {
+            let f = fixture();
+            let exe = game_with_install_script(
+                r#""InstallScript"
+{
+    "Registry" { "HKEY_CURRENT_USER\\Software\\Game" { "string" { "v" "1" } } }
+    "Run Process" { "setup" { "HasRunKey" "HKEY_CURRENT_USER\\Software\\Game" "process 1" "%INSTALLDIR%\\setup.exe" } }
+}"#,
+            );
+            let registry = f.share().join("installscript.reg");
+            f.launch(&["waitforexitandrun", &exe], &f.env);
+            // The Registry entries go as a UTF-16 file in the run share (run-game.sh imports it when it changed).
+            let data = std::fs::read(&registry).unwrap();
+            assert_eq!(data[..2], [0xFF, 0xFE]);
+            let units: Vec<u16> = data[2..].chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            assert!(String::from_utf16(&units).unwrap().contains(r#""v"="1""#));
+            f.launch(&["run", &exe], &f.env);
+            assert_eq!(f.scripts.all().len(), 2);
+            let (game, run) = (f.scripts.first(), f.scripts.last());
+            let body = game.find("# run-game.sh").unwrap();
+            assert!(game.find("mn_install_script() {\n").unwrap() < body);
+            assert!(game.contains(
+                "  mn_run 'HKEY_CURRENT_USER\\Software\\Game' 'setup' '1' 'user.reg' 'Software\\\\Game' '\"setup\"' \
+                 '/mnt/games/Game' 'Z:\\mnt\\games\\Game\\setup.exe'\n"
+            ));
+            // Mac Steam never sends an install script's `run`: Proton's generic verb gets none, and no earlier registry
+            // file.
+            assert!(!run.contains("mn_install_script"));
+            assert!(!registry.exists());
+        }
+
+        #[test]
+        fn install_script_results_reach_launcher_log() {
+            let f = make_vm_fixture(Options { install_log: Some("x86 Update 4 exit 0\nFmSysInfo exit 1\n"), ..Default::default() });
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert!(f.launcher_log().contains("install script 2437170: x86 Update 4 exit 0\n"));
+            assert!(f.launcher_log().contains("install script 2437170: FmSysInfo exit 1\n"));
+        }
+
+        #[test]
+        fn a_performance_runtime_logs_only_the_install_scripts_that_failed() {
+            let f = make_vm_fixture(Options {
+                version: Some("0.7.1p"),
+                install_log: Some("x86 Update 4 exit 0\nFmSysInfo exit 1\n"),
+                ..Default::default()
+            });
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert!(!f.launcher_log().contains("x86 Update 4"));
+            assert!(f.launcher_log().contains("install script 2437170: FmSysInfo exit 1\n"));
+        }
+
+        #[test]
+        fn an_earlier_runs_install_script_results_are_not_reported() {
+            let f = fixture();
+            write("FmSysInfo exit 1\n", &f.share().join("traces/installscript.log"), false);
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert!(!f.launcher_log().contains("install script"));
+        }
+
+        #[test]
+        fn install_script_notes_reach_launcher_log() {
+            let f = fixture();
+            let exe = game_with_install_script(r#""InstallScript" { "Firewall" { "Game" "%INSTALLDIR%\\game.exe" } }"#);
+            f.launch(&["waitforexitandrun", &exe], &f.env);
+            assert!(f.launcher_log().split('\n').any(|l| l.contains("install script 2437170: ") && l.contains("Firewall")));
+        }
+
+        // Where a game ran from, for the app's cleanup of uninstalled games' drives (UninstalledDrives): a drive whose
+        // library Steam's list no longer names is kept.
+        #[test]
+        fn a_vm_run_records_its_library() {
+            let f = fixture();
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            assert_eq!(read(&f.share().join("library")), "/Users/someone/Library/Application Support/Steam/steamapps");
+        }
+
+        // An installer that waited for a click nobody could give costs the timeout at every launch: the player hears
+        // of it, and a launch option sets the timeout.
+        #[test]
+        fn a_timed_out_install_script_is_told_to_the_player() {
+            let f = make_vm_fixture(Options {
+                install_log: Some("x86 Update 4 exit 0\nUE4 Prerequisites exit 124\n"),
+                ..Default::default()
+            });
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MN_INSTALL_TIMEOUT", "120")]));
+            assert_eq!(
+                f.notifier.posted(),
+                ["SMITE 2's install step \"UE4 Prerequisites\" was stopped after waiting too long, maybe for a click in a \
+                  window the game VM can't show. It runs again at the next launch."]
+            );
+            assert!(f.scripts.first().contains("MN_INSTALL_TIMEOUT='120'\n"));
+        }
+    }
 }
