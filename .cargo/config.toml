@@ -1,0 +1,3 @@
+# The same floor as the bundles' LSMinimumSystemVersion (macOS 27).
+[env]
+MACOSX_DEPLOYMENT_TARGET = "27.0"

@@ -8,7 +8,7 @@ Spec: `docs/superpowers/specs/2026-09-30-macneutron-pipeline-cache-design.md` §
 ## Steps
 
 1. **Tests:** `make dxmt-check` and `make test` pass.
-2. **Install:** `.build/release/macneutron install-dxmt build/dxmt`.
+2. **Install:** `target/release/macneutron install-dxmt build/dxmt`.
 3. **First launch:** SMITE 2 with launch options `/usr/bin/env DXMT_D3D12_SM6=1 %command%` (no capture mode).
    - Play the lobby, then a practice match of about five minutes. Keep `Hemingway.log`
      (`…/compatdata/2437170/pfx/drive_c/users/crossover/AppData/Local/SMITE2Alpha/Saved/Logs`).

@@ -1,6 +1,6 @@
 #!/bin/sh
-# Direct3D 9's VM guest build (D3D9 M2b), as eac-vm/dxmt/build.sh's meson installs left it in <folder> (default
-# ${BUILD_DIR:-build}/eac-vm-work/dxmt-guest):
+# Direct3D 9's VM guest build (D3D9 M2b), as vm/dxmt/build.sh's meson installs left it in <folder> (default
+# ${BUILD_DIR:-build}/vm-work/dxmt-guest):
 # each d3d9.dll exports d3d9.def's names undecorated and each mtld3d.dll its unix-call entry, both are Wine builtins of
 # their machine importing ntdll.dll, and mtld3d.so is an x86-64 ELF library with both unix-call tables, needing only
 # glibc, libgcc_s and libstdc++ (snmalloc's). Prints a row a check; exits 1 on a FAIL.
@@ -8,7 +8,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
-G=${1:-$B/eac-vm-work/dxmt-guest}
+G=${1:-$B/vm-work/dxmt-guest}
 LM=$(dirname "$(sh "$ROOT/dxmt/toolchain.sh")")
 DEF=$B/wine-arm64-src/dxmt/src/d3d9/d3d9.def
 fail=0

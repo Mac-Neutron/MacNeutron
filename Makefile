@@ -13,11 +13,21 @@ MINGW_A64 = $(MINGW_BIN)/aarch64-w64-mingw32-clang -O3 -flto=thin -static -s $(P
 BRIDGE = build/bridge
 PRESENTER = build/presenter
 
+# cargo: yours on PATH, else rustup's proxy beside the rustup binary (Homebrew keeps it off PATH; vm/host/build.sh
+# finds it the same way), whose rustc is then found on PATH.
+RUSTUP_PROXIES := $(shell r=$$(command -v rustup) && dirname "$$(readlink -f "$$r")")
+ifneq ($(RUSTUP_PROXIES),)
+export PATH := $(PATH):$(RUSTUP_PROXIES)
+endif
+CARGO ?= $(or $(shell command -v cargo),$(RUSTUP_PROXIES)/cargo)
+
+# Every binary but macneutron-vm, which vm/host/build.sh builds with its C objects and libkrun (its link args). The
+# home folder mapped to ~: registry crates' panic locations would name it, and no build path ships (release.sh).
 build:
-	swift build -c release
+	RUSTFLAGS="--remap-path-prefix=$(HOME)=~" $(CARGO) build --release --workspace --exclude macneutron-vm
 
 test:
-	swift test
+	$(CARGO) test --workspace
 
 # The launcher on wine.app in a tool folder assembled with `macneutron install`, and the install itself (gates L5,
 # L6; real Wine, no Steam). See Tests/Smoke/smoke.sh.
@@ -27,11 +37,11 @@ smoke: build bridge wine-arm64
 # The Steam bridge (docs/superpowers/specs/2026-09-28-macneutron-steam-bridge-design.md): steam.exe and its test
 # helper for the arm64 runtime in $(BRIDGE)/arm64, and the x64 steamprobe.exe, which runs under FEX (steamprobe32.exe:
 # the same for a 32-bit game's steam_api.dll, in the VM). The x86-64 steam.exe is the VM's: run-game.sh takes it from
-# the share's bin/, which the VM parts carry (eac-vm/setup/parts.sh).
+# the share's bin/, which the VM parts carry (vm/setup/parts.sh).
 bridge:
-	mkdir -p $(BRIDGE)/arm64/tests $(BRIDGE)/x86_64 build/eac-vm-work/share/bin
+	mkdir -p $(BRIDGE)/arm64/tests $(BRIDGE)/x86_64 build/vm-work/share/bin
 	$(MINGW) -mwindows -o $(BRIDGE)/x86_64/steam.exe bridge/steam.c -ladvapi32 -lntdll -luser32 -lshell32 -lshlwapi -lole32
-	cp $(BRIDGE)/x86_64/steam.exe build/eac-vm-work/share/bin/steam.exe
+	cp $(BRIDGE)/x86_64/steam.exe build/vm-work/share/bin/steam.exe
 	$(MINGW) -fms-extensions -mwindows -o $(BRIDGE)/steamprobe.exe bridge/probe.c
 	$(MINGW_BIN)/i686-w64-mingw32-clang -O3 -flto=thin -static -s -fms-extensions -mwindows -o $(BRIDGE)/steamprobe32.exe bridge/probe.c
 	$(MINGW_A64) -mwindows -o $(BRIDGE)/arm64/steam.exe bridge/steam.c -ladvapi32 -lntdll -luser32 -lshell32 -lshlwapi -lole32
@@ -107,8 +117,8 @@ wm-probe:
 	mkdir -p $(WM_PROBE_OUT)
 	/usr/bin/clang -fno-objc-arc -fobjc-exceptions -O1 -g -std=gnu2x -Wall -Wextra -Wno-unused-parameter \
 		-DWM_PROBE_SRC='"$(abspath dxmt/tests/wm_probe)"' -DWM_PRESENTER_DEFAULT='"$(WM_PRESENTER_DEFAULT)"' -I$(DXMT_SRC)/winemetal -I$(DXMT_SRC)/airconv \
-		-Idxmt/tests/wm_probe -Ieac-vm/metal/wm/host -o $(WM_PROBE_OUT)/wm_probe dxmt/tests/wm_probe/probe.m dxmt/tests/wm_probe/recorder.m \
-		dxmt/tests/wm_probe/swizzle.m $(WM_CASES) eac-vm/metal/wm/host/loader.c -framework Foundation -framework Metal \
+		-Idxmt/tests/wm_probe -Ivm/metal/wm/host -o $(WM_PROBE_OUT)/wm_probe dxmt/tests/wm_probe/probe.m dxmt/tests/wm_probe/recorder.m \
+		dxmt/tests/wm_probe/swizzle.m $(WM_CASES) vm/metal/wm/host/loader.c -framework Foundation -framework Metal \
 		-framework MetalFX -framework QuartzCore -framework AppKit -framework CoreGraphics -lsqlite3
 .PHONY: wm-probe
 
@@ -124,7 +134,7 @@ dxmt-check: build wine-arm64 dxmt-tests dxmt-tests-arm64ec presenter
 	sh dxmt/check.sh
 	MACNEUTRON_ARM64_TESTS=build/dxmt-tests-arm64ec MACNEUTRON_ARM64_LOOP=build/dxmt-tests-arm64ec/present_loop.exe DXMT_CHECK_WORK="$${TMPDIR:-/tmp}/macneutron dxmt arm64ec" sh dxmt/check.sh
 
-# A development MacNeutron.app, ad hoc signed, with the CLI, wine.app, the microVM's host tools (eac-vm/host/stage.sh)
+# A development MacNeutron.app, ad hoc signed, with the CLI, wine.app, the microVM's host tools (vm/host/stage.sh)
 # and steam.exe inside. Never open it on this Mac:
 # its start installs into the real tool folder. Needs the signing variables (it builds wine.app); make release
 # builds the notarized one.
@@ -133,16 +143,16 @@ app: build bridge wine-arm64
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Helpers $(APP)/Contents/Resources
 	cp App/Info.plist $(APP)/Contents/Info.plist
-	cp .build/release/MacNeutronApp $(APP)/Contents/MacOS/MacNeutron
-	cp .build/release/macneutron $(APP)/Contents/Helpers/macneutron
+	cp target/release/MacNeutronApp $(APP)/Contents/MacOS/MacNeutron
+	cp target/release/macneutron $(APP)/Contents/Helpers/macneutron
 	codesign --force --sign - $(APP)/Contents/Helpers/macneutron
 	cp -c -R build/wine-arm64/wine.app $(APP)/Contents/Helpers/wine.app
-	sh eac-vm/host/stage.sh $(APP)/Contents/Helpers/vm
+	sh vm/host/stage.sh $(APP)/Contents/Helpers/vm
 	mkdir -p $(APP)/Contents/Resources/vm && mv $(APP)/Contents/Helpers/vm/run-*.sh $(APP)/Contents/Helpers/vm/dxmt-translator $(APP)/Contents/Resources/vm/
-	# With the release's identity, as eac-vm/host/build.sh signs it: the TPM keys a release made trust it, no password.
-	codesign --force --sign "$${MACNEUTRON_SIGN_IDENTITY:--}" --entitlements eac-vm/host/hv.plist $(APP)/Contents/Helpers/vm/macneutron-vm
+	# With the release's identity, as vm/host/build.sh signs it: the TPM keys a release made trust it, no password.
+	codesign --force --sign "$${MACNEUTRON_SIGN_IDENTITY:--}" --entitlements vm/host/hv.plist $(APP)/Contents/Helpers/vm/macneutron-vm
 	codesign --force --sign - $(APP)/Contents/Helpers/vm/gvproxy  # the upstream universal binary comes unsigned
-	sh eac-vm/setup-tools/build.sh > /dev/null && cp build/vm-setup-tools/mkfs.erofs $(APP)/Contents/Helpers/mkfs.erofs
+	sh vm/setup-tools/build.sh > /dev/null && cp build/vm-setup-tools/mkfs.erofs $(APP)/Contents/Helpers/mkfs.erofs
 	codesign --force --sign - $(APP)/Contents/Helpers/mkfs.erofs
 	cp $(BRIDGE)/arm64/steam.exe $(APP)/Contents/Resources/steam.exe
 	codesign --force --sign - $(APP)

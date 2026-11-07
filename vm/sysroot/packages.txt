@@ -1,0 +1,21 @@
+# x86-64 Linux sysroot for building guest code in the builder (vm/sysroot/build.sh).
+glibc-devel
+kernel-headers
+gcc
+# Wine's build dependencies (vm/wine/build.sh)
+freetype-devel
+gnutls-devel
+libX11-devel
+libXext-devel
+libXrandr-devel
+libXi-devel
+libXcursor-devel
+libXfixes-devel
+libXinerama-devel
+libXcomposite-devel
+libXrender-devel
+mesa-libGL-devel
+alsa-lib-devel
+fontconfig-devel
+libstdc++-devel
+gcc-c++

@@ -1,0 +1,20 @@
+[package]
+name = "macneutron-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+plist.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+libc.workspace = true
+# zstd 1.5.7's decoder compiled in, so no Homebrew libzstd at run time.
+zstd-sys = { version = "2.1.1", default-features = false }
+
+[features]
+# Exposes `test_support` (FakeSteam, FakeValveCDN, make_tool_layout, ...) to other crates' tests.
+test-support = []

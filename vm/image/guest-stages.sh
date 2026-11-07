@@ -1,0 +1,69 @@
+#!/bin/sh
+# Rebuilds the guest stages image/build.sh packs into the VM (the parts' wine.tar, and FEX in base.erofs) from this
+# tree's sources, each stamped (.mn-source) with what it was built from (stamps.sh), which release.sh checks against
+# the trees its source archive carries. Needs the builder (vm/builder.sh start); Wine's x86-64 build is most of it.
+# dxmt needs MACNEUTRON_SIGN_IDENTITY (vm/dxmt/build.sh signs DXMT's NVIDIA DLLs with it); d3d needs dxmt's build.
+#   guest-stages.sh [wine|forwarder|dxmt|d3d|fonts|fex]...   all six, in that order, by default
+set -eu
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+W=${BUILD_DIR:-$ROOT/build}/vm-work
+S=${BUILD_DIR:-$ROOT/build}/wine-arm64-src
+B="sh $ROOT/vm/builder.sh"
+stamp() { sh "$ROOT/vm/image/stamps.sh" "$1"; }
+# The x86-64 sysroot's compiler wrapper, into this BUILDER_HOME too (the p profile's starts empty).
+$B sync "$ROOT/vm/sysroot" mn-sysroot > /dev/null
+# The guest's PGO profile (pgo/guest.profdata), which builder-side builds use under the p profile.
+[ ! -f "$ROOT/pgo/guest.profdata" ] || $B sync "$ROOT/pgo" pgo > /dev/null
+for stage in ${*:-wine forwarder dxmt d3d fonts fex}; do
+  echo "guest-stages: $stage" >&2
+  case $stage in
+    wine)  # vm/wine/build.sh in the builder, from vm/wine/sync.sh's copies: the x86-64 build, the 32-bit one
+      # (old WoW64's Unix side), and the stage with both (WINE32=0: the 64-bit build's alone)
+      sh "$ROOT/vm/wine/sync.sh"
+      # The tools (makedep, winebuild, widl) are the Wine tree's own: built again from scratch when the tree is another
+      # commit, or its makefiles and syscall tables come from the old ones (2026-10-27, an upstream merge: no rule for a
+      # data-only DLL's spec, an undefined wow64 syscall).
+      tools=$(git -C "$S/wine" rev-parse HEAD)
+      $B ssh "set -e; [ -x wine-tools/tools/winebuild/winebuild ] && [ \"\$(cat wine-tools/.mn-wine 2> /dev/null)\" = $tools ] \
+          || { rm -rf wine-tools && sh mn-wine-build/build.sh tools && echo $tools > wine-tools/.mn-wine; }
+        sh mn-wine-build/build.sh wine; sh mn-wine-build/build.sh wine32; WINE32=${WINE32:-} sh mn-wine-build/build.sh install
+        echo '$(stamp wine)' > wine-stage/opt/mn-wine/.mn-source" ;;
+    forwarder)  # lsteamclient's Unix half for the guest (vm/steam-forward/build-guest.sh), on that Wine build and its
+      # 32-bit one (old WoW64)
+      make -s -C "$ROOT/vm/steam-forward" OUT="$W/steam-forward" "$W/steam-forward/descriptors.c"
+      $B sync "$ROOT/vm/steam-forward" mn-steam-forward > /dev/null
+      $B sync "$W/steam-forward" mn-steam-gen > /dev/null
+      $B sync "$S/lsteamclient/lsteamclient" mn-lsc > /dev/null
+      $B sync "$ROOT/vm/sysroot" mn-sysroot > /dev/null
+      $B ssh "set -e; WINEBUILD=\$HOME/wine-build64 WINEBUILD32=\$HOME/wine-build32 sh mn-steam-forward/build-guest.sh \$HOME/mn-steam-forward \$HOME/mn-lsc \
+        \$HOME/wine-src/include \$HOME/mn-steam-gen \$HOME/mn-steam-out > /dev/null
+        echo '$(stamp forwarder)' > mn-steam-out/.mn-source" ;;
+    dxmt)  # DXMT's x86-64 and i386 DLLs (on the Mac) and the guest winemetal.so (through the builder), staged into it
+      sh "$ROOT/vm/dxmt/build.sh" > /dev/null
+      sh "$ROOT/vm/metal/build-guest.sh" > /dev/null
+      stamp dxmt > "$W/dxmt-guest/.mn-source"
+      sh "$ROOT/vm/dxmt/stage.sh" > /dev/null ;;
+    d3d)  # Direct3D forwarding's guest DLLs (vm/d3d/build-guest.sh, on the Mac) and prefix.sh, staged in the builder
+      sh "$ROOT/vm/d3d/build-guest.sh" > /dev/null
+      rm -rf "$W/d3d-guest-stage"; mkdir -p "$W/d3d-guest-stage"
+      cp -R "$W/d3d-guest/x86_64-windows" "$W/d3d-guest/i386-windows" "$W/d3d-guest-stage/"
+      cp "$ROOT/vm/d3d/guest/prefix.sh" "$W/d3d-guest-stage/"
+      stamp d3d > "$W/d3d-guest-stage/.mn-source"
+      $B sync "$W/d3d-guest-stage" mn-d3d-guest > /dev/null ;;
+    fonts)  # Proton's Windows-named fonts (vm/fonts/build.sh in the builder), from the pinned Liberation sources
+      . "$ROOT/vm/fonts/pins"
+      die() { echo "guest-stages: $*" >&2; exit 1; }
+      FETCH_TAG=fonts; . "$ROOT/dxmt/fetch.sh"
+      mkdir -p "${BUILD_DIR:-$ROOT/build}/fonts-src"
+      fetch "$LIBERATION_URL" "${BUILD_DIR:-$ROOT/build}/fonts-src/liberation-fonts-$LIBERATION_COMMIT.tar.gz" "$LIBERATION_SHA256"
+      rm -rf "$W/fonts-stage"; cp -R "$ROOT/vm/fonts" "$W/fonts-stage"
+      cp "${BUILD_DIR:-$ROOT/build}/fonts-src/liberation-fonts-$LIBERATION_COMMIT.tar.gz" "$W/fonts-stage/"
+      $B sync "$W/fonts-stage" mn-fonts > /dev/null
+      $B ssh "set -e; sh mn-fonts/build.sh" ;;
+    fex)  # vm/image/build-fex.sh in the builder, from the Mac build's FEX tree (one FEX for both)
+      $B sync "$S/fex" fex-linux > /dev/null
+      $B sync "$ROOT/vm/image" mn-image > /dev/null
+      $B ssh "set -e; sh mn-image/build-fex.sh > /dev/null; echo '$(stamp fex)' > fex-linux/build/Bin/.mn-source" ;;
+    *) echo "usage: guest-stages.sh [wine|forwarder|dxmt|d3d|fonts|fex]..." >&2; exit 2 ;;
+  esac
+done

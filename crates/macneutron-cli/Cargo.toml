@@ -1,0 +1,27 @@
+[package]
+name = "macneutron-cli"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lib]
+name = "macneutron_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "macneutron"
+path = "src/main.rs"
+
+[dependencies]
+macneutron-core = { path = "../macneutron-core" }
+libc.workspace = true
+plist.workspace = true
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["NSDictionary", "NSString", "NSGeometry"] }
+objc2-app-kit = { workspace = true, features = [
+    "NSAccessibilityConstants", "NSAnimation", "NSAnimationContext", "NSApplication", "NSCell", "NSColor", "NSControl",
+    "NSFont", "NSFontDescriptor", "NSGlassEffectView", "NSGraphics", "NSLayoutConstraint", "NSPanel", "NSProgressIndicator", "NSResponder",
+    "NSRunningApplication", "NSScreen", "NSShadow", "NSTextField", "NSView", "NSWindow",
+] }
+dispatch2.workspace = true

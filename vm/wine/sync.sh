@@ -1,0 +1,16 @@
+#!/bin/sh
+# Copies the Linux build's sources into the builder: the Mac build's Wine tree (build/wine-arm64-src/wine, our fork at
+# wine-arm64/pins' WINE_COMMIT, without .git) as ~/wine-src, lsteamclient's tree as its dlls/lsteamclient (the Mac
+# build links it there; our Wine registers it), and this folder as ~/mn-wine-build.
+set -eu
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+KEY=${BUILDER_KEY:-$ROOT/build/vm-work/eacbench/key}
+BH=${BUILDER_HOME:-/home/bench}  # builder.sh's: the p profile's builds go to /home/bench/p
+HOST=bench@$("$ROOT/vm/builder.sh" ssh 'hostname -I' | awk '{print $1}')
+RSH="ssh -q -i $KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+rsync -a --delete --exclude .git --exclude /dlls/lsteamclient -e "$RSH" "${BUILD_DIR:-$ROOT/build}/wine-arm64-src/wine/" "$HOST:$BH/wine-src/"
+rsync -a --delete -e "$RSH" "${BUILD_DIR:-$ROOT/build}/wine-arm64-src/lsteamclient/lsteamclient/" "$HOST:$BH/wine-src/dlls/lsteamclient/"
+# lsteamclient's Unix half links libc++ on macOS (our Proton fork); on Linux it is libstdc++, as in
+# Proton. (The guest replaces that half with the Steam forwarder, but the tree builds it.)
+"$ROOT/vm/builder.sh" ssh "sed -i 's/^UNIX_LIBS = -lc++\$/UNIX_LIBS = -lstdc++/' wine-src/dlls/lsteamclient/Makefile.in"
+rsync -a --delete -e "$RSH" "$ROOT/vm/wine/" "$HOST:$BH/mn-wine-build/"

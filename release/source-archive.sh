@@ -11,7 +11,7 @@
 # - libtasn1.tar, nettle.tar, gnutls.tar, freetype.tar, ffmpeg.tar: git archive of each library build.sh builds from
 #   its repository (wine-arm64/deps.pins), at its commit, and gnutls-gnulib.tar, gnutls-cligen.tar and
 #   freetype-dlg.tar for the submodules their bootstraps use; GMP's pinned snapshot as downloaded;
-# - Fedora's alsa-lib source RPM (eac-vm/image/alsa-lib.pin): the source of the VM parts' i686 libasound;
+# - Fedora's alsa-lib source RPM (vm/image/alsa-lib.pin): the source of the VM parts' i686 libasound;
 # - SOURCES.txt: tree, pin, applied commit, patch count (0: our changes are the forks' commits), file. release/verify-sources.sh checks it all (R5).
 # release.sh calls it after its refusals: every tree applied, the repository clean. BUILD_DIR replaces build/.
 set -eu
@@ -75,13 +75,13 @@ COPYFILE_DISABLE=1 tar -cf "$W/lsteamclient.tar" --no-mac-metadata --no-xattrs -
 rm "$W/lsteamclient.list"
 row lsteamclient "$LSTEAMCLIENT_COMMIT" "$a" "$n" lsteamclient.tar
 # The VM setup's mkfs.erofs (GPL-2.0-or-later, Contents/Helpers/mkfs.erofs) and the lz4 compiled into it, at
-# eac-vm/setup-tools/PIN (eac-vm/setup-tools/build.sh, in MacNeutron.tar, builds it).
+# vm/setup-tools/PIN (vm/setup-tools/build.sh, in MacNeutron.tar, builds it).
 VS="${BUILD_DIR:-$ROOT/build}/vm-setup-tools-src"
 while read -r name tag sha; do
   [ "$(git -C "$VS/$name" rev-parse HEAD 2> /dev/null)" = "$sha" ] || die "$VS/$name isn't at $sha ($tag)"
   git -C "$VS/$name" archive --format=tar --prefix="$name/" -o "$W/$name.tar" HEAD
   row "$name" "$sha" "$sha" 0 "$name.tar"
-done < "$ROOT/eac-vm/setup-tools/PIN"
+done < "$ROOT/vm/setup-tools/PIN"
 
 # The libraries built from their repositories (wine-arm64/deps.pins), each at its commit, from deps-git; the submodules
 # their bootstraps use, from deps-src's checkouts, at the commits the trees record; GMP's snapshot as downloaded.
@@ -101,7 +101,7 @@ for t in gnutls/gnulib gnutls/cligen freetype/subprojects/dlg; do
 done
 cp -c "$S/${GMP_URL##*/}" "$W/" || die "no ${GMP_URL##*/} in $S"
 # The VM parts' i686 libasound is Fedora's binary (LGPL-2.1-or-later): its source RPM, one copy for both profiles.
-. "$ROOT/eac-vm/image/alsa-lib.pin"; . "$ROOT/dxmt/fetch.sh"
+. "$ROOT/vm/image/alsa-lib.pin"; . "$ROOT/dxmt/fetch.sh"
 mkdir -p "$ROOT/build/vm-sources"
 FETCH_TAG=release fetch "$ALSA_LIB_SRPM_URL" "$ROOT/build/vm-sources/${ALSA_LIB_SRPM_URL##*/}" "$ALSA_LIB_SRPM_SHA256"
 cp -c "$ROOT/build/vm-sources/${ALSA_LIB_SRPM_URL##*/}" "$W/"

@@ -11,7 +11,7 @@
 # - each library built from its repository at SOURCE's *_COMMIT, which is also the archived deps.pins', and the
 #   submodules its bootstrap uses against the gitlinks it records;
 # - GMP's snapshot's SHA-256 against SOURCE's GMP_SHA256, and alsa-lib's source RPM against the archived
-#   eac-vm/image/alsa-lib.pin;
+#   vm/image/alsa-lib.pin;
 # - LLVM_COMMIT and LLVM_MINGW_SHA256 cited only: present in SOURCE, equal to the archived dxmt/tools/llvm.sh and dxmt/pins.
 # Read-only. BUILD_DIR replaces build/.
 set -eu
@@ -78,10 +78,10 @@ while read -r tree pinned applied n file; do
         2> /dev/null | awk '$2 == "commit" { print $3 }')
       [ -n "$g" ] && [ "$pinned" = "$g" ] && [ "$applied" = "$g" ] \
         || bad "$tree is $applied, not the commit $p records (${g:-none})" ;;
-    erofs-utils | lz4)  # the VM setup's mkfs.erofs and its lz4, at eac-vm/setup-tools/PIN
-      p=$(awk -v n="$tree" '$1 == n { print $3 }' "$M/eac-vm/setup-tools/PIN")
+    erofs-utils | lz4)  # the VM setup's mkfs.erofs and its lz4, at vm/setup-tools/PIN
+      p=$(awk -v n="$tree" '$1 == n { print $3 }' "$M/vm/setup-tools/PIN")
       [ -n "$p" ] && [ "$pinned" = "$p" ] && [ "$applied" = "$p" ] \
-        || bad "$tree is $applied, not eac-vm/setup-tools/PIN's ${p:-missing}" ;;
+        || bad "$tree is $applied, not vm/setup-tools/PIN's ${p:-missing}" ;;
     *) bad "an unknown tree $tree in SOURCES.txt" ;;
   esac
 done < "$D/SOURCES.txt"
@@ -114,11 +114,11 @@ for t in GMP; do
   if [ -z "$f" ] || [ ! -f "$f" ]; then bad "no $t tarball (${u:-no ${t}_URL in SOURCE})"; continue; fi
   [ "$(shasum -a 256 "$f" | cut -d ' ' -f 1)" = "$(key "${t}_SHA256")" ] || bad "${u##*/} doesn't match ${t}_SHA256"
 done
-u=$(pin eac-vm/image/alsa-lib.pin ALSA_LIB_SRPM_URL)
-if [ -z "$u" ] || [ ! -f "$D/${u##*/}" ]; then bad "no alsa-lib source RPM (${u:-no eac-vm/image/alsa-lib.pin})"
+u=$(pin vm/image/alsa-lib.pin ALSA_LIB_SRPM_URL)
+if [ -z "$u" ] || [ ! -f "$D/${u##*/}" ]; then bad "no alsa-lib source RPM (${u:-no vm/image/alsa-lib.pin})"
 else
-  [ "$(shasum -a 256 "$D/${u##*/}" | cut -d ' ' -f 1)" = "$(pin eac-vm/image/alsa-lib.pin ALSA_LIB_SRPM_SHA256)" ] \
-    || bad "${u##*/} doesn't match eac-vm/image/alsa-lib.pin"
+  [ "$(shasum -a 256 "$D/${u##*/}" | cut -d ' ' -f 1)" = "$(pin vm/image/alsa-lib.pin ALSA_LIB_SRPM_SHA256)" ] \
+    || bad "${u##*/} doesn't match vm/image/alsa-lib.pin"
 fi
 v=$(key LLVM_COMMIT)
 lc=$(tar -xf "$D/dxmt.tar" -C "$X" dxmt/tools/llvm.sh 2> /dev/null && . "$X/dxmt/tools/llvm.sh" && echo "$LLVM_AIR_COMMIT" || true)

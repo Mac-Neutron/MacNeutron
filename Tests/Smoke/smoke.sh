@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 WINEAPP="${MACNEUTRON_ARM64_APP:-$ROOT/build/wine-arm64/wine.app}"
 WORK="${TMPDIR:-/tmp}/macneutron smoke"   # a space on purpose: Steam's paths have one
 TOOL="$WORK/tool"
-CLI="$ROOT/.build/release/macneutron"
+CLI="$ROOT/target/release/macneutron"
 LOG="$HOME/Library/Logs/MacNeutron/launcher.log"
 echo "info wine.app: $WINEAPP ($(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$WINEAPP/Contents/Info.plist"))"
 rm -rf "$WORK"

@@ -8,7 +8,7 @@ with D3DMetal (GPTK imported) and SMITE 2 installed. Record results at the botto
 ## Steps
 
 1. **Tests:** `make dxmt-check` and `make test` pass.
-2. **Install:** with SMITE 2 closed, `.build/release/macneutron install-dxmt build/dxmt`.
+2. **Install:** with SMITE 2 closed, `target/release/macneutron install-dxmt build/dxmt`.
 3. **Overlap run:** SMITE 2 with launch options `/usr/bin/env DXMT_D3D12_SM6=1 %command%`.
    - Start a practice match and stand still in one spot, the same spot in every run of the milestone (note it in the
      results).

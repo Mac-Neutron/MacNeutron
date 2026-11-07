@@ -38,7 +38,7 @@ need_tool makeinfo texinfo; need_tool gperf gperf; need_tool wget wget
 xcrun metal --version > /dev/null 2>&1 || missing="$missing, Metal Toolchain (xcodebuild -downloadComponent MetalToolchain)"
 # DXMT's Rust (DXMTRS: Direct3D 9 and its other crates) builds with rustup's MTLD3D_RUST toolchain (dxmt/pins), its
 # llvm-tools, and a target for each of its builds: the ARM64X halves and mtld3d.so here, the VM guest's x86 pairs and
-# its x86_64 and i686 Linux mtld3d.so (eac-vm).
+# its x86_64 and i686 Linux mtld3d.so (vm).
 need_tool rustup rustup
 if command -v rustup > /dev/null 2>&1; then
   . "$ROOT/dxmt/pins"

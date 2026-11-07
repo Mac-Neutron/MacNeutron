@@ -1,8 +1,7 @@
-.build/
-.swiftpm/
 build/
 .claude/worktrees/
 .claude/settings.local.json
 .superpowers/
 .DS_Store
 __pycache__/
+/target/

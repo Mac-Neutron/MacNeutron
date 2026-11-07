@@ -50,7 +50,7 @@ elif [ -n "$dir" ]; then
   set -- "$dir"
 else
   so=${so:-$MAIN/build/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/winemetal.so}
-  make -s -C "$ROOT/eac-vm/metal/wm" metal-host HOST="$TMP/host" WINEMETAL="$so" || exit 2
+  make -s -C "$ROOT/vm/metal/wm" metal-host HOST="$TMP/host" WINEMETAL="$so" || exit 2
   set -- "$TMP/host"
 fi
 mode=fixed ext=fixed

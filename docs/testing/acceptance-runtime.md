@@ -13,8 +13,8 @@ game from Steam first. Do not skip it.
 
 ```sh
 make build
-.build/release/macneutron install-runtime
-.build/release/macneutron import-gptk "/Volumes/<GPTK volume>"   # optional, enables d3dmetal
+target/release/macneutron install-runtime
+target/release/macneutron import-gptk "/Volumes/<GPTK volume>"   # optional, enables d3dmetal
 ```
 
 ## 2. Hide installed games from Steam
