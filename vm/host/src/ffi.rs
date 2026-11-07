@@ -95,11 +95,11 @@ extern "C" {
     pub fn krun_payload_load_external(kernel_path: KrunStr, format: u32, initrd_path: KrunStr, cmdline: KrunStr, err_out: *mut *mut KrunError) -> *mut KrunPayload;
 
     pub fn krun_vmm_builder_new() -> *mut KrunVmmBuilder;
-    pub fn krun_vmm_builder_vcpus(handle: *mut KrunVmmBuilder, count: u8, err_out: *mut *mut KrunError) -> KrunResult;
-    pub fn krun_vmm_builder_ram_mib(handle: *mut KrunVmmBuilder, mib: u32, err_out: *mut *mut KrunError) -> KrunResult;
-    pub fn krun_vmm_builder_payload(handle: *mut KrunVmmBuilder, payload: *mut KrunPayload);
-    pub fn krun_vmm_builder_devices(handle: *mut KrunVmmBuilder, devices: *mut KrunDeviceManager);
-    pub fn krun_vmm_builder_build(handle: *mut KrunVmmBuilder, err_out: *mut *mut KrunError) -> *mut KrunVmm;
+    pub fn krun_vmm_builder_vcpus(handle: *mut *mut KrunVmmBuilder, count: u8, err_out: *mut *mut KrunError) -> KrunResult;
+    pub fn krun_vmm_builder_ram_mib(handle: *mut *mut KrunVmmBuilder, mib: u32, err_out: *mut *mut KrunError) -> KrunResult;
+    pub fn krun_vmm_builder_payload(handle: *mut *mut KrunVmmBuilder, payload: *mut KrunPayload);
+    pub fn krun_vmm_builder_devices(handle: *mut *mut KrunVmmBuilder, devices: *mut KrunDeviceManager);
+    pub fn krun_vmm_builder_build(handle: *mut *mut KrunVmmBuilder, err_out: *mut *mut KrunError) -> *mut KrunVmm;
     pub fn krun_vmm_run(handle: *mut KrunVmm);
 
     pub fn krun_set_trap_handler(fn_: Option<KrunTrapFn>, opaque: *mut c_void) -> i32;
@@ -155,6 +155,8 @@ extern "C" {
     pub fn write(fd: c_int, buf: *const c_void, count: usize) -> isize;
     pub fn close(fd: c_int) -> c_int;
     pub fn flock(fd: c_int, operation: c_int) -> c_int;
+    pub fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
+    pub fn getdtablesize() -> c_int;
     pub fn getpid() -> c_int;
     pub fn usleep(usec: u32) -> c_int;
     pub fn strerror(errnum: c_int) -> *mut c_char;
@@ -167,7 +169,7 @@ extern "C" {
     pub fn atexit(fn_: extern "C" fn()) -> c_int;
     pub fn __error() -> *mut c_int;
     pub fn fstat(fd: c_int, buf: *mut stat) -> c_int;
-    pub fn NSTemporaryDirectory() -> *const c_char;
+    pub fn confstr(name: c_int, buf: *mut c_char, len: usize) -> usize;
 }
 
 // struct stat: only st_size is read (the ext4-grow check). st_size is off_t at the offset the macOS ABI puts it, so
@@ -207,6 +209,8 @@ pub const O_WRONLY: c_int = 0x0001;
 pub const O_CREAT: c_int = 0x0200;
 pub const O_TRUNC: c_int = 0x0400;
 pub const O_CLOEXEC: c_int = 0x1000000;
+pub const F_SETFD: c_int = 2;
+pub const FD_CLOEXEC: c_int = 1;
 pub const LOCK_EX: c_int = 0x0002;
 pub const LOCK_NB: c_int = 0x0004;
 pub const R_OK: c_int = 0x0004;

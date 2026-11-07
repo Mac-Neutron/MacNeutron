@@ -142,6 +142,34 @@ fn flag_present(args: &[String], flag: &str) -> bool {
     args.iter().any(|a| a == flag)
 }
 
+/// Marks every open descriptor close-on-exec before a child is spawned, as Swift's `Process` gave its children none of
+/// the host's. Rust's `Command` closes only close-on-exec descriptors, so gvproxy and mn-steam-host would otherwise
+/// inherit the state disk's and the TPM's locks (raw `open`s here and in tpm.c), hold them after this process exits,
+/// and the next VM would find its state "in use". This process never execs itself, so nothing here needs them across one.
+fn no_inherited_fds() {
+    for fd in 3..unsafe { getdtablesize() } {
+        // SAFETY: F_SETFD on a descriptor that isn't open fails with EBADF and changes nothing.
+        unsafe { fcntl(fd, F_SETFD, FD_CLOEXEC) };
+    }
+}
+
+/// The user's temporary folder with its trailing slash, as Swift's `NSTemporaryDirectory()` gave it: Darwin's
+/// `_CS_DARWIN_USER_TEMP_DIR` (Foundation's own source for it), `/tmp/` when that has no answer.
+fn temp_dir() -> String {
+    const CS_DARWIN_USER_TEMP_DIR: c_int = 65537;
+    let mut buf = [0u8; 1024];
+    // SAFETY: confstr writes at most `buf.len()` bytes, NUL included, and returns the length it needed.
+    let n = unsafe { confstr(CS_DARWIN_USER_TEMP_DIR, buf.as_mut_ptr().cast(), buf.len()) };
+    if n == 0 || n > buf.len() {
+        return "/tmp/".into();
+    }
+    let mut dir = String::from_utf8_lossy(&buf[..n - 1]).into_owned();
+    if !dir.ends_with('/') {
+        dir.push('/');
+    }
+    dir
+}
+
 fn main() {
     let argv_raw: Vec<String> = std::env::args().collect();
     let metal_test_ops = flag_present(&argv_raw, "--metal-test-ops");
@@ -235,7 +263,8 @@ fn main() {
     }
 
     // One VM per state disk: two writers would corrupt its ext4. The lock lives as long as this process.
-    let state_lock = unsafe { open(cstring(&state).as_ptr(), O_RDWR) };
+    // O_CLOEXEC: no child inherits the lock (see `no_inherited_fds`).
+    let state_lock = unsafe { open(cstring(&state).as_ptr(), O_RDWR | O_CLOEXEC) };
     if state_lock < 0 || unsafe { flock(state_lock, LOCK_EX | LOCK_NB) } != 0 {
         fail(3, &format!("{} is in use", state));
     }
@@ -588,9 +617,7 @@ fn main() {
     // The guest reaches the host over vsock: its sound (MN_AUDIO_PORT) and, for a game, Steam (5101).
     let mut e: *mut KrunError = ptr::null_mut();
     let vsock = made(unsafe { krun_vsock_device_new(3, 0, &mut e) }, &mut e, "vsock device");
-    let audio_sock = format!("{}", unsafe {
-        CStr::from_ptr(NSTemporaryDirectory()).to_string_lossy()
-    }) + &format!("mn-audio-{}.sock", unsafe { getpid() });
+    let audio_sock = temp_dir() + &format!("mn-audio-{}.sock", unsafe { getpid() });
     if unsafe { mn_audio_listen(cstring(&audio_sock).as_ptr()) } == 0 {
         unsafe { krun_vsock_device_add_unix_port(vsock, MN_AUDIO_PORT, kstr(&audio_sock), false) };
     } else {
@@ -601,14 +628,13 @@ fn main() {
     // Steam forwarding: mn-steam-host serves the guest's lsteamclient calls against the Mac's Steam.
     let steam_host_pid = AtomicI32::new(0);
     if let Some(appid) = steam_appid {
-        let sock = format!("{}", unsafe {
-            CStr::from_ptr(NSTemporaryDirectory()).to_string_lossy()
-        }) + &format!("mn-steam-{}.sock", unsafe { getpid() });
+        let sock = temp_dir() + &format!("mn-steam-{}.sock", unsafe { getpid() });
         unsafe { unlink(cstring(&sock).as_ptr()) };
         let host_bin = format!(
             "{}/steam-forward/host/mn-steam-host.app/Contents/MacOS/mn-steam-host",
             exe_dir
         );
+        no_inherited_fds();
         let child = Command::new(&host_bin)
             .args([
                 "--socket",
@@ -644,13 +670,12 @@ fn main() {
 
     // Network: gvproxy answers the guest's frames with the Mac's own sockets, over a unixgram socket in vfkit's framing.
     if unsafe { access(cstring(&format!("{}/gvproxy", exe_dir)).as_ptr(), X_OK) } == 0 {
-        let sock = format!("{}", unsafe {
-            CStr::from_ptr(NSTemporaryDirectory()).to_string_lossy()
-        }) + &format!("mn-net-{}.sock", unsafe { getpid() });
+        let sock = temp_dir() + &format!("mn-net-{}.sock", unsafe { getpid() });
         unsafe { unlink(cstring(&sock).as_ptr()) };
         let script = "\"$0\" -listen-vfkit \"unixgram://$1\" -ssh-port -1 -log-file \"$1.log\" & g=$!\n\
              while kill -0 \"$2\" 2>/dev/null && kill -0 $g 2>/dev/null; do sleep 1; done\n\
              kill $g 2>/dev/null; rm -f \"$1\" \"$1.log\"\n";
+        no_inherited_fds();
         let child = Command::new("/bin/sh")
             .args(["-c", script, &format!("{}/gvproxy", exe_dir), &sock, &unsafe { getpid() }.to_string()])
             .spawn();
@@ -700,23 +725,23 @@ fn main() {
         &mut e,
         "kernel",
     );
-    let builder = unsafe { krun_vmm_builder_new() };
+    let mut builder = unsafe { krun_vmm_builder_new() };
     let mut e: *mut KrunError = ptr::null_mut();
     check(
-        unsafe { krun_vmm_builder_vcpus(builder, cpus as u8, &mut e) },
+        unsafe { krun_vmm_builder_vcpus(&mut builder, cpus as u8, &mut e) },
         &format!("{} vCPUs", cpus),
     );
     let mut e: *mut KrunError = ptr::null_mut();
     check(
-        unsafe { krun_vmm_builder_ram_mib(builder, ram_mib, &mut e) },
+        unsafe { krun_vmm_builder_ram_mib(&mut builder, ram_mib, &mut e) },
         &format!("{} MiB", ram_mib),
     );
-    unsafe { krun_vmm_builder_payload(builder, payload) };
-    unsafe { krun_vmm_builder_devices(builder, devices as *mut KrunDeviceManager) };
+    unsafe { krun_vmm_builder_payload(&mut builder, payload) };
+    unsafe { krun_vmm_builder_devices(&mut builder, devices as *mut KrunDeviceManager) };
     eprintln!("macneutron-vm: {} vCPUs, {} MiB", cpus, ram_mib);
     let mut e: *mut KrunError = ptr::null_mut();
     let vmm = made(
-        unsafe { krun_vmm_builder_build(builder, &mut e) },
+        unsafe { krun_vmm_builder_build(&mut builder, &mut e) },
         &mut e,
         "build the VM",
     );
