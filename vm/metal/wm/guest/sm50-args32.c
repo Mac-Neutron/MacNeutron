@@ -77,6 +77,15 @@ static void *convert(const struct mn_sm50_arg32 *a, int *known) {
         if (d) d->bytecode = s->bytecode, d->bytecode_length = s->bytecode_length;
         return d;
     }
+    case SM50_SHADER_D3D9: {
+        const struct mn_sm50_d3d932 *s = (const void *)a;
+        struct mn_sm50_d3d9 *d = calloc(1, sizeof *d);
+        if (d) {
+            d->stage = s->stage;
+            memcpy(d->vs, s->vs, sizeof d->vs), memcpy(d->ps, s->ps, sizeof d->ps);
+        }
+        return d;
+    }
     default:
         *known = 0;
         return NULL;

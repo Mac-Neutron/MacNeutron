@@ -33,6 +33,7 @@ struct mn_sm50_gs_pass_through32 {
 struct mn_sm50_geometry32 { struct mn_sm50_arg32 h; bool strip_topology; };
 struct mn_sm50_tessellator32 { struct mn_sm50_arg32 h; uint32_t max_potential_tess_factor; };
 struct mn_sm50_root_signature32 { struct mn_sm50_arg32 h; uint32_t bytecode, bytecode_length; };
+struct mn_sm50_d3d932 { struct mn_sm50_arg32 h; uint32_t stage; uint8_t vs[MN_SM50_D3D9_VS]; uint8_t ps[MN_SM50_D3D9_PS]; };
 /* DXMT's i386 layouts (its airconv_public.h's *_DATA built for i686). */
 #include <stddef.h>
 _Static_assert(sizeof(struct mn_sm50_stream_output32) == 36 && offsetof(struct mn_sm50_stream_output32, elements) == 32,
@@ -46,6 +47,8 @@ _Static_assert(sizeof(struct mn_sm50_gs_pass_through32) == 16 &&
                offsetof(struct mn_sm50_gs_pass_through32, RasterizationDisabled) == 12, "geometry pass-through");
 _Static_assert(sizeof(struct mn_sm50_geometry32) == 12 && sizeof(struct mn_sm50_tessellator32) == 12 &&
                sizeof(struct mn_sm50_root_signature32) == 16, "geometry, tessellator, root signature");
+_Static_assert(sizeof(struct mn_sm50_d3d932) == 40 && offsetof(struct mn_sm50_d3d932, stage) == 8 &&
+               offsetof(struct mn_sm50_d3d932, vs) == 12 && offsetof(struct mn_sm50_d3d932, ps) == 18, "D3D9");
 
 /* The wire's chain (sm50-wire.h) for the 32-bit one at args32 (0: none, *out NULL), malloc'd; 0, or -1 when out of
  * memory or longer than MN_WM_SM50_ARGS_MAX arguments (a looping chain). Types it doesn't know, and

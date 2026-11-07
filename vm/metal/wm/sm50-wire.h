@@ -38,6 +38,10 @@ struct mn_sm50_gs_pass_through { MN_SM50_ARG; uint32_t DataEncoded; bool Rasteri
 struct mn_sm50_geometry { MN_SM50_ARG; bool strip_topology; };
 struct mn_sm50_tessellator { MN_SM50_ARG; uint32_t max_potential_tess_factor; };
 struct mn_sm50_root_signature { MN_SM50_ARG; uint64_t bytecode, bytecode_length; };
+/* D3D9's specialization: bytes, built by the guest facade without the translator's crates (airconv_public.h). */
+#define MN_SM50_D3D9_VS 6
+#define MN_SM50_D3D9_PS 22
+struct mn_sm50_d3d9 { MN_SM50_ARG; uint32_t stage; uint8_t vs[MN_SM50_D3D9_VS]; uint8_t ps[MN_SM50_D3D9_PS]; };
 
 #if defined(__i386__)
 _Static_assert(offsetof(struct mn_sm50_arg, type) == 8 && sizeof(struct mn_sm50_arg) == 16,
@@ -108,6 +112,13 @@ MN_SAME(mn_sm50_tessellator, SM50_SHADER_PSO_TESSELLATOR_DATA, max_potential_tes
 MN_SAME_SIZE(mn_sm50_root_signature, SM50_SHADER_ROOT_SIGNATURE_DATA)
 MN_SAME(mn_sm50_root_signature, SM50_SHADER_ROOT_SIGNATURE_DATA, bytecode)
 MN_SAME(mn_sm50_root_signature, SM50_SHADER_ROOT_SIGNATURE_DATA, bytecode_length)
+MN_SAME_SIZE(mn_sm50_d3d9, SM50_SHADER_D3D9_DATA)
+MN_SAME(mn_sm50_d3d9, SM50_SHADER_D3D9_DATA, stage)
+MN_SAME(mn_sm50_d3d9, SM50_SHADER_D3D9_DATA, vs)
+MN_SAME(mn_sm50_d3d9, SM50_SHADER_D3D9_DATA, ps)
+_Static_assert(sizeof(((struct SM50_SHADER_D3D9_DATA *)0)->vs) == MN_SM50_D3D9_VS &&
+               sizeof(((struct SM50_SHADER_D3D9_DATA *)0)->ps) == MN_SM50_D3D9_PS, "D3D9 specialization lengths");
+_Static_assert(sizeof(struct mn_sm50_d3d9) < 256, "arg_type.size is a uint8_t");
 #undef MN_SAME
 #undef MN_SAME_SIZE
 #undef MN_SAME2

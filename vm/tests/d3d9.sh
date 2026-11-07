@@ -6,6 +6,7 @@
 #   tri<64|32>-<fresh|nomarker|updated>.txt  d3d9_triangle (x86-64 and i386) in a new prefix, again with mtld3d.dll's
 #                                markers removed from system32 and syswow64 (a prefix made before mtld3d), and
 #                                after run-game.sh's update of such a prefix
+#   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
 # and logs/, mtld3d's logs (MTLD3D_CONFIG log.dir). The 32-bit rows run under old WoW64 (the image's default: the i686
@@ -23,6 +24,11 @@ for t in "$T"/unit/* "$T"/unit32/*; do  # unit32: i686, on the i686 winemetal.so
   MTLD3D_WINEMETAL=$wm/winemetal.so LD_LIBRARY_PATH=$wm timeout -k 10 900 "$t" > "$O/unit-$n.txt" 2>&1
   echo $? > "$O/unit-$n.status"
   echo "guest: unit $n status $(cat "$O/unit-$n.status")"
+done
+for n in metal-sm50-args32-test metal-sm50-args32-test32; do  # D3D9's SM50 node through the 32-bit conversion (C3a)
+  "$B/$n" > "$O/$n.txt" 2>&1
+  echo $? > "$O/$n.status"
+  echo "guest: $n status $(cat "$O/$n.status")"
 done
 prefix() {  # prefix <dir>: a new prefix with mtld3d's test keys (no crash dialog, Wine's own mode changes)
   export WINEPREFIX=$1

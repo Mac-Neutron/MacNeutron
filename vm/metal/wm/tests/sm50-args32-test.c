@@ -1,5 +1,5 @@
 /* M4a: a 32-bit caller's SM50 compilation arguments (DXMT for i386) convert field for field to the wire's chain
- * (sm50-wire.h: airconv's 64-bit layouts), for every argument type, in their order (wm/guest/sm50-args32.c), in a
+ * (sm50-wire.h: airconv's 64-bit layouts), for every argument type (D3D9's bytes included), in their order (wm/guest/sm50-args32.c), in a
  * 64-bit build and an i686 one (old WoW64). The chain sits below 4 GiB, as a 32-bit process's memory does. Prints a
  * line per check; exits 1 on a failure. */
 #define _GNU_SOURCE
@@ -34,12 +34,18 @@ int main(void) {
     struct mn_sm50_common32 co = {{lo(put(&ps, sizeof ps)), SM50_SHADER_COMMON}, SM50_SHADER_METAL_320, (enum SM50_SHADER_FLAG)6};
     struct mn_sm50_stream_output32 so = {{lo(put(&co, sizeof co)), SM50_SHADER_EMULATE_VERTEX_STREAM_OUTPUT}, 2, 4,
                                          {16, 32, 0, 0}, elems};
-    uint32_t first = lo(put(&so, sizeof so));
+    struct mn_sm50_d3d932 d9 = {{lo(put(&so, sizeof so)), SM50_SHADER_D3D9}, 1, {1, 2, 3, 4, 5, 6},
+                                {10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}};
+    uint32_t first = lo(put(&d9, sizeof d9));
 
     struct mn_sm50_arg *c = NULL, *a;
 #define NEXT(a) ((a) ? (struct mn_sm50_arg *)(uintptr_t)(a)->next : NULL)
     CHECK(mn_wm_sm50_args32(first, &c) == 0 && c, "a chain converts");
     a = c;
+    struct mn_sm50_d3d9 *d = (void *)a;
+    CHECK(a && a->type == SM50_SHADER_D3D9 && d->stage == 1 && d->vs[0] == 1 && d->vs[5] == 6 && d->ps[0] == 10 &&
+          d->ps[21] == 31 && !memcmp(d->vs, d9.vs, sizeof d->vs) && !memcmp(d->ps, d9.ps, sizeof d->ps), "D3D9 payload");
+    a = NEXT(a);
     struct mn_sm50_stream_output *o = (void *)a;
     CHECK(a && a->type == SM50_SHADER_EMULATE_VERTEX_STREAM_OUTPUT && o->num_output_slots == 2 && o->num_elements == 4 &&
           o->strides[1] == 32 && o->elements == elems, "stream output");

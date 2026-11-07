@@ -67,6 +67,9 @@ fi
 for n in $units; do
   check "unit $n" "$(cat "$G/unit-$n.status" 2> /dev/null)/$(/usr/bin/grep -c '^test result: ok' "$G/unit-$n.txt" 2> /dev/null)" 0/1
 done
+for n in metal-sm50-args32-test metal-sm50-args32-test32; do
+  check "$n" "$(cat "$G/$n.status" 2> /dev/null)/$(/usr/bin/grep -c '^sm50-args32-test: ok' "$G/$n.txt" 2> /dev/null)" 0/1
+done
 for r in tri64-fresh tri32-fresh tri64-updated tri32-updated; do
   for row in module clear triangle present; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"

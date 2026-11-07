@@ -31,7 +31,7 @@ dump i686-linux-gnu "$@" > "$T/linux" || exit 1
 dump x86_64-linux-gnu > "$T/wire" || exit 1
 join "$T/pe" "$T/linux" | awk '{n++; h=(NF-1)/2; for (i=2; i<=h+1; i++) if ($i != $(i+h)) {print "pe:", $0; bad++; next}}
   END {print n, bad + 0 > "/dev/stderr"}' 2> "$T/pe.n"
-skip='^struct_(sm50_(initialize|compile|get_compiled_bitcode|get_error_message|get_arguments_info|compile_geometry_pipeline_vertex|compile_geometry_pipeline_geometry|compile_tessellation_pipeline_vertex|compile_tessellation_pipeline_hull|compile_tessellation_pipeline_domain)_params|SM50_SHADER_[A-Z_]*_DATA|SM50_SHADER_COMPILATION_ARGUMENT_DATA|WMTMemoryPointer|WMTConstMemoryPointer|WMTWsiHooks|\(unnamed_at_[^ ]*max_align_t[^ ]*) '
+skip='^struct_(sm50_(initialize|compile|get_compiled_bitcode|get_error_message|get_arguments_info|compile_geometry_pipeline_vertex|compile_geometry_pipeline_geometry|compile_tessellation_pipeline_vertex|compile_tessellation_pipeline_hull|compile_tessellation_pipeline_domain)_params|SM50_SHADER_[A-Z0-9_]*_DATA|SM50_SHADER_COMPILATION_ARGUMENT_DATA|WMTMemoryPointer|WMTConstMemoryPointer|WMTWsiHooks|\(unnamed_at_[^ ]*max_align_t[^ ]*) '
 join "$T/linux" "$T/wire" | /usr/bin/grep -Ev "$skip" |
   awk '{n++; h=(NF-1)/2; a=$2; b=$(2+h); sub(/Size:/, "", a); sub(/Size:/, "", b); o1=""; o2=""
         for (i=5; i<=h+1; i++) o1=o1" "$i; for (i=5+h; i<=NF; i++) o2=o2" "$i

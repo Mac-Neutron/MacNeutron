@@ -59,6 +59,7 @@ static const struct arg_type arg_types[] = {
     [SM50_SHADER_ROOT_SIGNATURE2] = {sizeof(struct mn_sm50_root_signature),
         offsetof(struct mn_sm50_root_signature, bytecode), offsetof(struct mn_sm50_root_signature, bytecode_length), 8,
         1},
+    [SM50_SHADER_D3D9] = {.size = sizeof(struct mn_sm50_d3d9)}, /* bytes, no pointers */
 };
 #define NARG_TYPES (sizeof arg_types / sizeof *arg_types)
 
