@@ -243,7 +243,11 @@ static void wait_done(struct thread_ring *t, uint64_t seq) {
      * flooding its load-store unit with speculative reads while the host writes done_seq from another core). */
     for (unsigned i = 1; done_seq(t) < seq; i++) {
         if (!(i & 511) && now_ns() >= until) break;
+#if defined(__x86_64__) || defined(__i386__)
+        __asm__ volatile("pause" ::: "memory");
+#else
         __asm__ volatile("yield" ::: "memory");
+#endif
     }
     while (done_seq(t) < seq) {
         int ffd;
