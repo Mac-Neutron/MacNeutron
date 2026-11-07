@@ -402,6 +402,9 @@ static int32_t d3d(uint32_t ctx_id, void *ring, uint32_t id, const void *p, uint
         if (us > SLOW_US) {
             atomic_fetch_add(&slow[id], 1);
             while (us > top && !atomic_compare_exchange_weak(&slowest_us[id], &top, us)) {}
+            if (presenting) /* which frame: a swapchain's first, or one in the middle of a burst */
+                fprintf(stderr, "mn-d3d: slow present: ctx %u frame %llu %.1f ms\n", c->ctx_id,
+                        (unsigned long long)atomic_load(&c->presented), us / 1000.0);
         }
     }
     uint64_t need = mn_d3d_memory_end();

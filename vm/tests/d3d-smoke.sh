@@ -141,7 +141,8 @@ EOS
     # over 10)
     held=$(/usr/bin/grep -h 'mn-d3d: slow: IDXGISwapChain[0-9]*::Present' "$W/d3d-smoke-$mode.log" 2> /dev/null || true)
     echo "$held" | awk 'NF > 5 && ($4 > 5 || $(NF - 1) > 10) {bad = 1} END {exit !bad}' \
-      && { echo "d3d-smoke: $mode: $held"; fail="$fail present-held-a-vcpu"; }
+      && { echo "d3d-smoke: $mode: $held"; /usr/bin/grep -h 'mn-d3d: slow present:' "$W/d3d-smoke-$mode.log"
+        fail="$fail present-held-a-vcpu"; }
     cat "$SH"/traces/d3d-guest.*.txt 2> /dev/null | /usr/bin/grep -q '::D3D12CreateDevice' || fail="$fail no-guest-trace"
     /usr/bin/grep -q '::D3D12CreateDevice' "$SH/traces/d3d-host.txt" 2> /dev/null || fail="$fail no-host-trace"
   else
