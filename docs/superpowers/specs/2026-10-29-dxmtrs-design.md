@@ -833,6 +833,12 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   arguments), reached without loading MacNeutron's presenter into D3D9 processes. Checked by a corpus of DXSO shaders
   rendered both ways, the conformance suite and the D3D9 gates. The DXSO MSL emitters and `mtld3d_shaders.bin`'s MSL
   records retire at parity (one cold D3D9 cache, expected less first-use stutter).
+  C3a done 2026-11-09 at DXMTRS main aa02c4b1 (aa02c4b117b095bc4a864c17777f3c8b21e8ba61), which MacNeutron pins:
+  the DXSO parser, IR and link data moved into `airconv-ir::dxso`; `SM50_SHADER_D3D9` input (a DXSO sniff on token 0,
+  refused for D3D10-12 and from old WoW64); VS, PS 2-3 and ps_1_x lowered into the translator's IR, with AIR
+  point size and point coordinates; a DXSO corpus with parity against the MSL path (synthetic 152/152, conformance
+  147/149 plus 2 triaged NaN cases); and the VM transport. D3D9's runtime still takes the MSL path (the switch is
+  C3b); DXBC and DXIL output unchanged over 13 corpora; translator key now c298383e…. No release until C3d.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
