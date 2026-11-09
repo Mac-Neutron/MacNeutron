@@ -22,7 +22,7 @@ export MTLD3D_CONFIG="log.dir=Z:$O/logs"
 KEEP=
 if [ "$(cat /mnt/share/d3d9/backend 2> /dev/null)" = air ]; then
   MTLD3D_CONFIG="$MTLD3D_CONFIG;shader.backend=air"
-  export DXMT_CONFIG=shader.backend=air  # the runner sets only MTLD3D_CONFIG
+  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}shader.backend=air"  # the runner sets only MTLD3D_CONFIG
   KEEP="--keep-shader-cache $O/caches"
 fi
 Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &

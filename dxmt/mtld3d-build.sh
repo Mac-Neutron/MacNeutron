@@ -12,11 +12,16 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 B="${BUILD_DIR:-$ROOT/build}"
 T="$B/wine-arm64-src/dxmt"
 [ -f "$T/src/d3d9/Cargo.toml" ] || { echo "mtld3d-build: no Direct3D 9 in $T: run make wine-arm64" >&2; exit 1; }
+AIRCONV_LLVM="${AIRCONV_LLVM:-$B/wine-arm64-src/llvm23-arm64-nolto}"
 O="$B/d3d9-cargo/wm/aarch64-apple-darwin/production"
 # mtld3d-unix links the shader translator on Apple targets (the loopback compiles it, unused under mtl_facade): airconv's
 # build script wants the LLVM it compiles against and an xcrun, as dxmt/tools.sh gives them.
+[ -d "$AIRCONV_LLVM/lib" ] || { echo "mtld3d-build: no $AIRCONV_LLVM: run make llvm-nolto" >&2; exit 1; }
+# The loopback translates through wine.app's winemetal, so wine.app's translator key (the header meson wrote) is its own.
+KEY_H="$B/wine-arm64-src/dxmt-build/src/dxmt_translator_key.h"
+[ -f "$KEY_H" ] || KEY_H=
 ( cd "$T" && env PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 \
-  AIRCONV_LLVM="${AIRCONV_LLVM:-$B/wine-arm64-src/llvm23-arm64-nolto}" AIRCONV_XCRUN="$ROOT/wine-arm64/tools/xcrun-metal.sh" \
+  AIRCONV_LLVM="$AIRCONV_LLVM" ${KEY_H:+DXMT_TRANSLATOR_KEY_H=$KEY_H} AIRCONV_XCRUN="$ROOT/wine-arm64/tools/xcrun-metal.sh" \
   CARGO_TARGET_DIR="$B/d3d9-cargo/wm" cargo "+$MTLD3D_RUST" build -q --profile production \
   --target aarch64-apple-darwin -p mtld3d-unix --features mtld3d-unix/winemetal ) >&2
 cp -c "$O/libmtld3d_unix.dylib" "$O/mtld3d.so"

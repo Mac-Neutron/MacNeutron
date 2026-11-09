@@ -62,7 +62,7 @@ OUT="$B/mtld3d-conformance/run.txt"
 K="$B/mtld3d-conformance/air-caches"
 if [ "$BK" = air ]; then
   rm -rf "$K"; mkdir -p "$K"
-  export DXMT_CONFIG=shader.backend=air  # the runner sets only MTLD3D_CONFIG
+  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}shader.backend=air"  # the runner sets only MTLD3D_CONFIG
   set -- --keep-shader-cache "$K" "$@"
 fi
 ( cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/conformance" \
@@ -98,8 +98,8 @@ if [ "$BK" = air ]; then
     --kinds "$K"/*.bin 2> /dev/null | sed -n '/^kinds /p') || line=
   echo "conformance: air $line"
   miss=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '
-    /^(air_)?sm[0-9](vs|ps)=/ { k = $1; sub(/^air_/, "", k); seen[k] = 1; if ($1 ~ /^air_/) a[k] = $2; else m[k] = $2 }
-    END { for (k in seen) if (m[k] + a[k] > 0 && a[k] < 1) printf "%s ", k }')
+    /^(air_)?sm[0-9](vs|ps)=/ { k = $1; sub(/^air_/, "", k); seen[k] = 1; if ($1 ~ /^air_/) { a[k] = $2; t += $2 } else m[k] = $2 }
+    END { for (k in seen) if (m[k] + a[k] > 0 && a[k] < 1) printf "%s ", k; if (t < 1) printf "no-air-records " }')
   if [ -z "$line" ]; then echo "conformance: FAIL: no kinds line from emit_corpus over $K"; status=1
   elif [ -n "$miss" ]; then echo "conformance: FAIL: no AIR record for: $miss"; status=1; fi
 fi

@@ -158,8 +158,8 @@ if [ "$BK" = air ]; then
       --kinds "$@" 2> /dev/null | sed -n '/^kinds /p') || line=
     echo "info air records $leg: $line"
     miss=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '
-      /^(air_)?sm[0-9](vs|ps)=/ { k = $1; sub(/^air_/, "", k); seen[k] = 1; if ($1 ~ /^air_/) a[k] = $2; else m[k] = $2 }
-      END { for (k in seen) if (m[k] + a[k] > 0 && a[k] < 1) printf "%s ", k }')
+      /^(air_)?sm[0-9](vs|ps)=/ { k = $1; sub(/^air_/, "", k); seen[k] = 1; if ($1 ~ /^air_/) { a[k] = $2; t += $2 } else m[k] = $2 }
+      END { for (k in seen) if (m[k] + a[k] > 0 && a[k] < 1) printf "%s ", k; if (t < 1) printf "no-air-records " }')
     check "air records $leg" "$([ -n "$line" ] && [ -z "$miss" ] && echo ok || echo "none or missing: ${miss:-no kinds line}")" ok
   done
 fi

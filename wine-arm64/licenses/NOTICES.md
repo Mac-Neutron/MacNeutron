@@ -186,7 +186,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-## ConvertUTF (in LLVM 23, linked into `winemetal.so`)
+## ConvertUTF (in LLVM 23, linked into `winemetal.so` and the Mac `mtld3d.so`)
 
 From LLVM's `llvm/lib/Support/ConvertUTF.cpp`:
 
@@ -228,7 +228,7 @@ use or other dealings in these Data Files or Software without prior
 written authorization of the copyright holder.
 ```
 
-## Regular expressions (in LLVM 23, linked into `winemetal.so`)
+## Regular expressions (in LLVM 23, linked into `winemetal.so` and the Mac `mtld3d.so`)
 
 From LLVM's `llvm/lib/Support/regcomp.c` (the full texts are in `llvm/COPYRIGHT.regex`):
 

@@ -48,7 +48,7 @@ mtld3d 0.14.1 (Direct3D 9: d3d9.dll and mtld3d.dll in lib/wine/aarch64-windows, 
   vendor/snmalloc-sys), altered from https://github.com/athei/mtld3d.git release 0.14.1 (0c172127); the crates from
   crates.io at the versions DXMTRS's Cargo.lock pins.
 
-LLVM 23.1.4 (linked statically into winemetal.so)
+LLVM 23.1.4 (linked statically into winemetal.so and the Mac mtld3d.so)
   Licence: Apache-2.0 WITH LLVM-exception, llvm/LICENSE.TXT; its regular-expression code, llvm/COPYRIGHT.regex;
   ConvertUTF (Unicode, Inc.) and the regex notice: NOTICES.md.
   Source: https://github.com/Mac-Neutron/llvm-project.git at LLVM_COMMIT: llvmorg-23.1.4 with Mac-Neutron's AIR writer
