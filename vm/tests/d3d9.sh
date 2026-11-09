@@ -9,7 +9,9 @@
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
-# and logs/, mtld3d's logs (MTLD3D_CONFIG log.dir). The 32-bit rows run under old WoW64 (the image's default: the i686
+# and logs/, mtld3d's logs (MTLD3D_CONFIG log.dir), and with the share's backend file saying air (d3d9-gate.sh
+# D3D9_BACKEND=air) the AIR shader backend: shader.backend=air for d3d9_triangle, DXMT_CONFIG for the conformance runs,
+# caches/<leg>-<subtest>.bin, their kept shader caches. The 32-bit rows run under old WoW64 (the image's default: the i686
 # mtld3d.so and winemetal.so), or new WoW64 when the share's wow64 file says new (d3d9-gate.sh MN_WOW64=new).
 export PATH=/opt/mn-wine/bin:$PATH WINEDEBUG=-all DISPLAY=:0
 [ "$(cat /mnt/share/d3d9/wow64 2> /dev/null)" != new ] || export WINEARCH=wow64
@@ -17,6 +19,12 @@ export WINEDLLOVERRIDES="mscoree,mshtml="  # as MacNeutron's prefixes: no Mono o
 T=/mnt/share/d3d9 O=/mnt/share/traces/d3d9 B=/mnt/share/bin
 rm -rf "$O"; mkdir -p "$O/logs"
 export MTLD3D_CONFIG="log.dir=Z:$O/logs"
+KEEP=
+if [ "$(cat /mnt/share/d3d9/backend 2> /dev/null)" = air ]; then
+  MTLD3D_CONFIG="$MTLD3D_CONFIG;shader.backend=air"
+  export DXMT_CONFIG=shader.backend=air  # the runner sets only MTLD3D_CONFIG
+  KEEP="--keep-shader-cache $O/caches"
+fi
 Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
 for t in "$T"/unit/* "$T"/unit32/*; do  # unit32: i686, on the i686 winemetal.so (named 32-<crate>)
   n=${t##*/} wm=$B/wm
@@ -63,7 +71,7 @@ for lane in "x64 arm64x" "x86 i686-arm64"; do
   prefix /home/mn/d3d9-conf-$1
   # The guest runs a subtest several times slower than macOS (FEX, the transport): 20 minutes each, not 3.
   MTLD3D_CONFORMANCE_TIMEOUT_SECS=1200 "$T/mtld3d-conformance" --wine /opt/mn-wine/bin/wine --wineserver /opt/mn-wine/bin/wineserver \
-    --assets "$T/conformance" --tests-wine-version "$(cat "$T/tests-wine-version")" --arch "$2" \
+    --assets "$T/conformance" --tests-wine-version "$(cat "$T/tests-wine-version")" --arch "$2" $KEEP \
     --exe "$T/winetests/$1/d3d9_test.exe" > "$O/conf-$1.txt" 2>&1
   echo $? > "$O/conf-$1.status"
   timeout 20 wineserver -k

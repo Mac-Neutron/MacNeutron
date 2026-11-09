@@ -7,6 +7,8 @@
 # Builds the Linux test binaries and the runner (DXMTRS's tools/linux-cargo.sh); needs the image with mtld3d
 # (guest-stages.sh dxmt, image/build.sh wine), the VM host (host/build.sh), make build/dxmt-tests/d3d9_triangle.exe
 # build/dxmt-tests-i386/d3d9_triangle.exe, and make wine-arm64-winetests (the x64 and x86 d3d9_test.exe). One VM run.
+# D3D9_BACKEND=air runs mtld3d's AIR shader backend in the guest (the share's backend file) and adds rows that prove
+# it ran AIR: the Unix side's info line in the logs, AIR records of every programmable kind the tests made, per leg.
 # Prints a line a check; exits 1 on a FAIL. The 32-bit rows run under old WoW64, the image's default, or with
 # MN_WOW64=new under new WoW64.
 set -u
@@ -16,14 +18,25 @@ W=$B/vm-work
 T=$B/wine-arm64-src/dxmt
 S=$W/share/d3d9 G=$W/share/traces/d3d9
 fail=0
+BK=${D3D9_BACKEND:-msl}
+case $BK in msl | air) ;; *) echo "FAIL D3D9_BACKEND=$BK: msl or air"; exit 2 ;; esac
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', want '$3'"; fail=1; fi; }
 # D3D9_GATE_TRACES=<folder>: no build and no run, the checks on a saved run's traces (a copy of $G).
 if [ -n "${D3D9_GATE_TRACES:-}" ]; then
   G=$D3D9_GATE_TRACES
   units=$(cd "$G" && ls unit-*.status | sed 's/^unit-//; s/\.status$//')
 else
+  # The translator key is one string in the host's and both guest arches' mtld3d.so (the guest ones staged by
+  # guest-stages.sh, built before this run), or a guest AIR record would carry a key the Mac never writes.
+  key=$(cat "$B/wine-arm64/wine.app/Contents/Resources/DXMT/translator" 2> /dev/null) kr=
+  for so in "$W/dxmt-guest/x86_64-unix/mtld3d.so" "$W/dxmt-guest/i386-unix/mtld3d.so" \
+    "$B/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/mtld3d.so"; do
+    n=$(/usr/bin/grep -c "$key" "$so" 2> /dev/null); { [ -n "$key" ] && [ "${n:-0}" -ge 1 ]; } || kr="$kr ${so#$B/}"
+  done
+  check "key guest=host" "${kr:-ok}" ok
   rm -rf "$S"; mkdir -p "$S/unit" "$S/unit32" "$S/winetests/x64" "$S/winetests/x86"
   echo "${MN_WOW64:-old}" > "$S/wow64"
+  echo "$BK" > "$S/backend"
   # The Linux unit tests (release profile, as their macOS runs), x86_64 and i686 (old WoW64's, on the i686
   # winemetal.so), and the runner; each test binary under its crate's name. DXMTRS's tools/linux-cargo.sh, on the
   # builder's sysroot of each arch (vm/sysroot/fetch.sh), into build/d3d9-cargo/gate-<arch>.
@@ -126,5 +139,30 @@ for want in "$w1" "$w2" "$w3" "$w4"; do
     "$([ -n "$ran" ] && [ "$ran" -ge "$3" ] && echo ok)" ok
 done
 check "conformance x86: no untriaged new failing site" "$(untriaged x86)" none
-[ $fail -eq 0 ] && echo "d3d9 gate: ok" || echo "d3d9 gate: FAIL"
+for l in x64 x86; do
+  check "conformance $l: no validation error or hang" \
+    "$(/usr/bin/grep -cE '^conformance: (METAL VALIDATION|GPU HANG)' "$G/conf-$l.txt" 2> /dev/null)" 0
+done
+if [ "$BK" = air ]; then
+  check "air backend logged" "$(/usr/bin/grep -rqE 'shader backend: air, translator [0-9a-f]{8}' "$G/logs" 2> /dev/null && echo ok)" ok
+  # emit_corpus --kinds over each leg's kept caches (the runner makes $G/caches): per kind, MSL + AIR records > 0
+  # needs an AIR one, as dxmt/mtld3d-conformance.sh's air lane. Built as it builds the runner.
+  . "$ROOT/dxmt/pins"
+  TOOLS=$(sh "$ROOT/dxmt/mtld3d-tools.sh")
+  GA=$(cd "$G" && pwd)
+  for lp in x64:arm64x x86:i686-arm64; do
+    leg=${lp%:*} arch=${lp#*:}
+    set -- "$GA/caches/$arch"-*.bin
+    line=$(cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/kinds" \
+      cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-core --features disk-cache --example emit_corpus -- \
+      --kinds "$@" 2> /dev/null | sed -n '/^kinds /p') || line=
+    echo "info air records $leg: $line"
+    miss=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '
+      /^(air_)?sm[0-9](vs|ps)=/ { k = $1; sub(/^air_/, "", k); seen[k] = 1; if ($1 ~ /^air_/) a[k] = $2; else m[k] = $2 }
+      END { for (k in seen) if (m[k] + a[k] > 0 && a[k] < 1) printf "%s ", k }')
+    check "air records $leg" "$([ -n "$line" ] && [ -z "$miss" ] && echo ok || echo "none or missing: ${miss:-no kinds line}")" ok
+  done
+fi
+sfx=; [ "$BK" = msl ] || sfx=" ($BK)"
+[ $fail -eq 0 ] && echo "d3d9 gate: ok$sfx" || echo "d3d9 gate: FAIL"
 exit $fail

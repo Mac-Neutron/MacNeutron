@@ -15,6 +15,9 @@
 # swapped into the tool folder's own wine.app and signed with MACNEUTRON_SIGN_IDENTITY (ad hoc without one).
 # MTLD3D_PE=<folder> does the same with its ARM64X d3d9.dll and mtld3d.dll (DXMT's build marks both builtin:
 # build/wine-arm64-src/dxmt-install/aarch64-windows): a build of D3D9's PE side checked without rebuilding wine.app.
+# D3D9_BACKEND=air runs mtld3d's AIR shader backend (MTLD3D_CONFIG shader.backend=air, its logs in the work folder) and
+# requires the Unix side's "shader backend: air" line in them; d3d9_triangle is fixed-function, so this is a smoke of the
+# AIR lane, not proof of AIR shaders (dxmt/mtld3d-conformance.sh's air lane is).
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,6 +29,13 @@ for e in "$EXE" "$DYN" "$ARM"; do [ -f "$e" ] || { echo "d3d9-check: no $e: run 
 [ -x "$CLI" ] || { echo "d3d9-check: no $CLI: run make build" >&2; exit 2; }
 WORK=${DXMT_CHECK_WORK:-$(mktemp -d "${TMPDIR:-/tmp}/macneutron-d3d9.XXXXXX")}
 fail=
+BK=${D3D9_BACKEND:-msl} sfx=
+case $BK in
+  msl) ;;
+  air) sfx=" (air)"; rm -rf "$WORK/mtld3d-logs"; mkdir -p "$WORK/mtld3d-logs"
+    export MTLD3D_CONFIG="${MTLD3D_CONFIG:+$MTLD3D_CONFIG;}log.dir=Z:$WORK/mtld3d-logs;shader.backend=air" ;;
+  *) echo "d3d9-check: D3D9_BACKEND=$BK: msl or air" >&2; exit 2 ;;
+esac
 # launch <tool> <compat> <name> [arg]: d3d9_triangle.exe (or $PROG) [arg] through <tool>'s launcher in the prefix of <compat>,
 # killed after 120 s; its lines in $WORK/<name>.txt. MACNEUTRON_VM=0: the macOS path, whatever VM folder this Mac has.
 launch() {
@@ -82,4 +92,6 @@ if [ -n "${OLD:-}" ]; then
   launch ours old updated
   check updated
 fi
-[ -z "$fail" ] && echo "d3d9-check: ok" || { echo "d3d9-check: FAIL$fail"; exit 1; }
+[ "$BK" = msl ] || /usr/bin/grep -rqE 'shader backend: air, translator [0-9a-f]{8}' "$WORK/mtld3d-logs" \
+  || { echo "d3d9-check: no 'shader backend: air' line in $WORK/mtld3d-logs"; fail="$fail air-log"; }
+[ -z "$fail" ] && echo "d3d9-check: ok$sfx" || { echo "d3d9-check: FAIL$fail"; exit 1; }

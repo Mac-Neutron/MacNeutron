@@ -7,11 +7,17 @@
 # configuration are the ones mtld3d's Makefile gave its test runs. MTLD3D_SO=<mtld3d.so> runs that build of D3D9's Unix
 # side instead (the loopback build of D3D9 spec §5.1), in an APFS clone of wine.app beside the prefix.
 # A run whose only new failing sites are dxmt/mtld3d-triaged.txt's, with no new crash, passes ("only triaged sites").
+# D3D9_BACKEND=air runs the same with mtld3d's AIR shader backend (DXMT_CONFIG shader.backend=air) and keeps each
+# subtest's shader cache in build/mtld3d-conformance/air-caches: the lane fails unless every programmable shader kind
+# the tests made has an AIR record there (emit_corpus --kinds), the proof that the lane ran AIR. Either lane fails on
+# a Metal validation error or a GPU hang in the run.
 #   mtld3d-conformance.sh [<wine.app>] [runner args, e.g. --only device]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/dxmt/pins"
 B="${BUILD_DIR:-$ROOT/build}"
+BK=${D3D9_BACKEND:-msl}
+case $BK in msl | air) ;; *) echo "mtld3d-conformance: D3D9_BACKEND=$BK: msl or air" >&2; exit 2 ;; esac
 APP="$B/wine-arm64/wine.app"
 case ${1:-} in *.app) APP=$1; shift ;; esac
 if [ -n "${MTLD3D_SO:-}" ]; then
@@ -53,6 +59,12 @@ mkdir -p "$WINEPREFIX"
   || { echo "mtld3d-conformance: could not register FEX in $WINEPREFIX" >&2; exit 1; }
 status=0
 OUT="$B/mtld3d-conformance/run.txt"
+K="$B/mtld3d-conformance/air-caches"
+if [ "$BK" = air ]; then
+  rm -rf "$K"; mkdir -p "$K"
+  export DXMT_CONFIG=shader.backend=air  # the runner sets only MTLD3D_CONFIG
+  set -- --keep-shader-cache "$K" "$@"
+fi
 ( cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/conformance" \
   cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-conformance -- --wine "$R/bin/wine" \
   --wineserver "$R/bin/wineserver" --assets "$T/tests/d3d9/conformance" \
@@ -73,5 +85,22 @@ if [ $status -ne 0 ]; then
   else
     echo "conformance: untriaged: $(printf '%s' "$left" | tr '\n' ' ')"
   fi
+fi
+# Metal validation errors and GPU hangs fail the run whatever the triage says.
+if /usr/bin/grep -qE '^conformance: (METAL VALIDATION|GPU HANG)' "$OUT"; then
+  echo "conformance: FAIL: Metal validation error or GPU hang in the run"
+  status=1
+fi
+# The AIR lane's proof: per kind, a program the tests made (MSL + AIR records) has an AIR record.
+if [ "$BK" = air ]; then
+  line=$(cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/kinds" \
+    cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-core --features disk-cache --example emit_corpus -- \
+    --kinds "$K"/*.bin 2> /dev/null | sed -n '/^kinds /p') || line=
+  echo "conformance: air $line"
+  miss=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '
+    /^(air_)?sm[0-9](vs|ps)=/ { k = $1; sub(/^air_/, "", k); seen[k] = 1; if ($1 ~ /^air_/) a[k] = $2; else m[k] = $2 }
+    END { for (k in seen) if (m[k] + a[k] > 0 && a[k] < 1) printf "%s ", k }')
+  if [ -z "$line" ]; then echo "conformance: FAIL: no kinds line from emit_corpus over $K"; status=1
+  elif [ -n "$miss" ]; then echo "conformance: FAIL: no AIR record for: $miss"; status=1; fi
 fi
 exit $status
