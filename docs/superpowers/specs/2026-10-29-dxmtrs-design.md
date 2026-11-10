@@ -846,6 +846,18 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   or pipeline failure sends that program to MSL for the session, with no retry (amends C3-13); the Mac mtld3d.so
   links airconv; prewarm under air; depth parity (synthetic 159/159, conformance 147/149 plus 2 triaged); the D3D9
   gates on both backends, Mac and VM, old and new WoW64. Translator key unchanged (c298383e…). No release until C3d.
+  C3c done 2026-11-10 at DXMTRS main a93f9033 (a93f90336353ad350329c044ee7c255b357d3853), which MacNeutron pins:
+  under `shader.backend=air`, fixed-function stages are built as vs_3_0/ps_3_0 DXSO (`mtld3d_core::ff_build`) and go
+  through the same parse, lower and translate as programmable ones; FF reads that DXSO cannot name use four lowering
+  hooks reachable only by registers no valid shader names; AIR FF records (kinds 8/9) carry the FF key and tokens and
+  are rebuilt at prewarm when the builder's output changes (a 64-bit reader also accepts an i686 writer's FF key); a
+  pair is AIR when both stages lower, FF or programmable, and neither has failed (amends C3b's rule); MSL output is
+  byte-identical and its FF records stay sourceless (amends C3-18 for them; regenerable from C3d). Parity: synthetic
+  521/521 (362 FF), conformance 847/896 plus 49 triaged; the D3D9 gates on both backends, Mac and VM, old and new
+  WoW64, every FF stage AIR. Translator key now 051df2a0… (DXBC and DXIL output unchanged over 13 corpora). No
+  release until C3d. One VM row stays open, unexplained: d3d-smoke present-held (forwarded D3D12 presents held about
+  7.8 ms on 2 of every 3 frames for tens of frames, mostly on early boots; no code shared with that path changed); C3d
+  blocks its release on 0 of 6 fresh-state boots showing it (frames 5-72 held >= 16).
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
