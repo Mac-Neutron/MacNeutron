@@ -839,6 +839,13 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   point size and point coordinates; a DXSO corpus with parity against the MSL path (synthetic 152/152, conformance
   147/149 plus 2 triaged NaN cases); and the VM transport. D3D9's runtime still takes the MSL path (the switch is
   C3b); DXBC and DXIL output unchanged over 13 corpora; translator key now c298383e…. No release until C3d.
+  C3b done 2026-11-09 at DXMTRS main b4da41c5 (b4da41c57a2e9bf676b34a28bfd820f740d24481), which MacNeutron pins:
+  the runtime switch `shader.backend=msl|air` (default msl, which behaves as C3a); AIR records in
+  `mtld3d_shaders.bin` (kinds 10-15, keyed by the translator key; older builds drop them); a pair goes AIR only when
+  both stages are programmable and both lower with their real specialization, else both stay MSL, and any AIR library
+  or pipeline failure sends that program to MSL for the session, with no retry (amends C3-13); the Mac mtld3d.so
+  links airconv; prewarm under air; depth parity (synthetic 159/159, conformance 147/149 plus 2 triaged); the D3D9
+  gates on both backends, Mac and VM, old and new WoW64. Translator key unchanged (c298383e…). No release until C3d.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
