@@ -1,0 +1,15 @@
+mtld3d-conformance: lane default
+Wine: wine-11.20 (arm64x), tests from wine-11.20
+warning: baseline taken against the tests of wine-11.19-17-gd57b522eea5, running the tests of wine-11.20 - file:line sites may have drifted; re-baseline expected
+arm64x/device  baseline(failed=738 crash=0) current(failed=739 crash=0) executed=159562 REGRESSION
+  device.c:4471  1 -> 0  flaky (count down, tolerated)
+  device.c:4476  1 -> 0  flaky (count down, tolerated)
+  device.c:14544  0 -> 1  REGRESSION (new failing site, untriaged)
+  device.c:14946  0 -> 1  REGRESSION (new failing site, untriaged)
+  device.c:15104  0 -> 1  REGRESSION (new failing site, untriaged)
+arm64x/visual  baseline(failed=43 crash=0) current(failed=30 crash=0) executed=211219 STALE BASELINE
+  visual.c:15686  15 -> 3  ceiling (below the pin, tolerated)
+  visual.c:16481  1 -> 0  STALE BASELINE (site gone)
+arm64x/stateblock  baseline(failed=0 crash=0) current(failed=0 crash=0) executed=14738 ok
+arm64x/d3d9ex  baseline(failed=74 crash=0) current(failed=74 crash=0) executed=2430 ok
+conformance: REGRESSIONS detected
