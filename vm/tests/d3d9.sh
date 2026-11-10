@@ -69,10 +69,14 @@ tri d3d9_triangle32.exe tri32-updated
 for lane in "x64 arm64x" "x86 i686-arm64"; do
   set -- $lane
   prefix /home/mn/d3d9-conf-$1
+  exe="$T/winetests/$1/d3d9_test.exe"
+  if [ -n "$KEEP" ]; then  # the cache goes beside the EXE, and the guest cannot write the share's test folder
+    mkdir -p "$O/exe/$1" && cp "$exe" "$O/exe/$1/" && exe="$O/exe/$1/d3d9_test.exe"
+  fi
   # The guest runs a subtest several times slower than macOS (FEX, the transport): 20 minutes each, not 3.
   MTLD3D_CONFORMANCE_TIMEOUT_SECS=1200 "$T/mtld3d-conformance" --wine /opt/mn-wine/bin/wine --wineserver /opt/mn-wine/bin/wineserver \
     --assets "$T/conformance" --tests-wine-version "$(cat "$T/tests-wine-version")" --arch "$2" $KEEP \
-    --exe "$T/winetests/$1/d3d9_test.exe" > "$O/conf-$1.txt" 2>&1
+    --exe "$exe" > "$O/conf-$1.txt" 2>&1
   echo $? > "$O/conf-$1.status"
   timeout 20 wineserver -k
   echo "guest: conformance $1 status $(cat "$O/conf-$1.status")"
