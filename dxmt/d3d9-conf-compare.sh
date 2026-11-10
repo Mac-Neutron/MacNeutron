@@ -35,7 +35,10 @@ awk -v tri="$TRI" '
   /^  [a-z0-9_]+\.c:[0-9]+  / {
     if (su == "") next
     s = $1; sites[su " " s] = 1
-    if ($2 == "SKIPPED") { skipped[lane, su, s] = 1; next }
+    if ($2 == "SKIPPED") {  # the runner leaves a skipped site out of current(failed=): its retained count too
+      skipped[lane, su, s] = 1; n = $0; if (sub(/.*baseline count /, "", n)) delta[lane, su] -= n + 0
+      next
+    }
     if ($3 != "->") next  # an untriaged count without a change: as the baseline
     sbase[su, s] = $2; scur[lane, su, s] = $4; listed[lane, su, s] = 1; delta[lane, su] += $4 - $2
     if ($0 ~ /flaky/) flaky[su, s] = 1
@@ -77,6 +80,7 @@ awk -v tri="$TRI" '
         else { print "air-worse " su " " s " " m " -> " a; fails++ }
       }
     }
+    if (!nlegs) { print "missing every suite: no leg in either file"; fails++ }
     if (fails) exit 1
     printf "conf-compare: ok (%d legs, %d suites, %d sites, %d info)\n", nlegs, nsu, nsites, info
   }
