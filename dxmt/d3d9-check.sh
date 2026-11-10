@@ -15,11 +15,14 @@
 # swapped into the tool folder's own wine.app and signed with MACNEUTRON_SIGN_IDENTITY (ad hoc without one).
 # MTLD3D_PE=<folder> does the same with its ARM64X d3d9.dll and mtld3d.dll (DXMT's build marks both builtin:
 # build/wine-arm64-src/dxmt-install/aarch64-windows): a build of D3D9's PE side checked without rebuilding wine.app.
-# D3D9_BACKEND=air runs mtld3d's AIR shader backend (MTLD3D_CONFIG shader.backend=air, its logs in the work folder) and
-# requires the Unix side's "shader backend: air" line in them. d3d9_triangle is fixed-function, so with AIR
-# fixed-function records (kinds 8 and 9) it proves that lane: the programs run from a scratch copy of the folder, so
-# their mtld3d_shaders.bin lands in the work folder, and emit_corpus --kinds over it must show air_ffvs and air_ffps
-# records (programmable kinds are dxmt/mtld3d-conformance.sh's air lane).
+# Two lanes (C3d-6): D3D9_BACKEND=air (the default lane) sets no shader.backend, so the build's default runs, and
+# requires the Unix side's "shader backend: air" line in its logs; D3D9_BACKEND=msl sets shader.backend=msl
+# (MTLD3D_CONFIG) and requires "shader backend: msl". Both run the programs from a scratch copy of the folder, so their
+# mtld3d_shaders.bin lands in the work folder, and print a lane stamp first. D3D9_KINDS=1 adds the kinds row
+# (emit_corpus --kinds, built from build/wine-arm64-src/dxmt, which must match the build): d3d9_triangle is
+# fixed-function, so the default lane must show air_ffvs and air_ffps records, and the msl lane ffvs and ffps records
+# and no air_* record at all (programmable kinds are dxmt/mtld3d-conformance.sh's). The verdict line is
+# "d3d9-check: ok" on the default lane and "d3d9-check: ok (msl)" on the msl lane.
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,16 +34,17 @@ for e in "$EXE" "$DYN" "$ARM"; do [ -f "$e" ] || { echo "d3d9-check: no $e: run 
 [ -x "$CLI" ] || { echo "d3d9-check: no $CLI: run make build" >&2; exit 2; }
 WORK=${DXMT_CHECK_WORK:-$(mktemp -d "${TMPDIR:-/tmp}/macneutron-d3d9.XXXXXX")}
 fail=
-BK=${D3D9_BACKEND:-msl} sfx=
+BK=${D3D9_BACKEND:-air} sfx=
 case $BK in
-  msl) ;;
-  air) sfx=" (air)"; rm -rf "$WORK/mtld3d-logs" "$WORK/air-progs"; mkdir -p "$WORK/mtld3d-logs" "$WORK/air-progs/x64" "$WORK/air-progs/arm64"
-    cp "$EXE" "$DYN" "$WORK/air-progs/x64/" && cp "$ARM" "$WORK/air-progs/arm64/" \
-      || { echo "d3d9-check: could not copy the programs to $WORK/air-progs" >&2; exit 1; }
-    EXE=$WORK/air-progs/x64/$(basename "$EXE") DYN=$WORK/air-progs/x64/$(basename "$DYN") ARM=$WORK/air-progs/arm64/$(basename "$ARM")
-    export MTLD3D_CONFIG="${MTLD3D_CONFIG:+$MTLD3D_CONFIG;}log.dir=Z:$WORK/mtld3d-logs;shader.backend=air" ;;
-  *) echo "d3d9-check: D3D9_BACKEND=$BK: msl or air" >&2; exit 2 ;;
+  air) echo "d3d9-check: lane default" ;;
+  msl) sfx=" (msl)"; echo "d3d9-check: lane msl (shader.backend=msl)" ;;
+  *) echo "d3d9-check: D3D9_BACKEND=$BK: air or msl" >&2; exit 2 ;;
 esac
+rm -rf "$WORK/mtld3d-logs" "$WORK/progs"; mkdir -p "$WORK/mtld3d-logs" "$WORK/progs/x64" "$WORK/progs/arm64"
+cp "$EXE" "$DYN" "$WORK/progs/x64/" && cp "$ARM" "$WORK/progs/arm64/" \
+  || { echo "d3d9-check: could not copy the programs to $WORK/progs" >&2; exit 1; }
+EXE=$WORK/progs/x64/$(basename "$EXE") DYN=$WORK/progs/x64/$(basename "$DYN") ARM=$WORK/progs/arm64/$(basename "$ARM")
+export MTLD3D_CONFIG="${MTLD3D_CONFIG:+$MTLD3D_CONFIG;}log.dir=Z:$WORK/mtld3d-logs${sfx:+;shader.backend=msl}"
 # launch <tool> <compat> <name> [arg]: d3d9_triangle.exe (or $PROG) [arg] through <tool>'s launcher in the prefix of <compat>,
 # killed after 120 s; its lines in $WORK/<name>.txt. MACNEUTRON_VM=0: the macOS path, whatever VM folder this Mac has.
 launch() {
@@ -97,18 +101,31 @@ if [ -n "${OLD:-}" ]; then
   launch ours old updated
   check updated
 fi
-[ "$BK" = msl ] || /usr/bin/grep -rqE 'shader backend: air, translator [0-9a-f]{8}' "$WORK/mtld3d-logs" \
-  || { echo "d3d9-check: no 'shader backend: air' line in $WORK/mtld3d-logs"; fail="$fail air-log"; }
 if [ "$BK" = air ]; then
+  /usr/bin/grep -rqE 'shader backend: air, translator [0-9a-f]{8}' "$WORK/mtld3d-logs" \
+    || { echo "d3d9-check: no 'shader backend: air' line in $WORK/mtld3d-logs"; fail="$fail air-log"; }
+else
+  /usr/bin/grep -rqE 'shader backend: msl, translator ' "$WORK/mtld3d-logs" \
+    || { echo "d3d9-check: no 'shader backend: msl' line in $WORK/mtld3d-logs"; fail="$fail msl-log"; }
+fi
+if [ "${D3D9_KINDS:-0}" = 1 ]; then
   . "$ROOT/dxmt/pins"
   line=$(cd "$ROOT/build/wine-arm64-src/dxmt" && PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 \
     CARGO_TARGET_DIR="$ROOT/build/d3d9-cargo/kinds" cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-core \
-    --features disk-cache --example emit_corpus -- --kinds "$WORK"/air-progs/*/mtld3d_shaders.bin 2> /dev/null \
+    --features disk-cache --example emit_corpus -- --kinds "$WORK"/progs/*/mtld3d_shaders.bin 2> /dev/null \
     | sed -n '/^kinds /p') || line=
-  echo "d3d9-check: air $line"
-  miss=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '
-    /^(air_)?(sm[0-9]|ff)(vs|ps)=/ { k = $1; sub(/^air_/, "", k); seen[k] = 1; if ($1 ~ /^air_/) { a[k] = $2; t += $2; if (k ~ /^ff/) af[k] = $2 } else m[k] = $2 }
-    END { for (k in seen) if (m[k] + a[k] > 0 && a[k] < 1) printf "%s ", k; if (t < 1) printf "no-air-records "; if (af["ffvs"] < 1 || af["ffps"] < 1) printf "no-air-ff-records " }')
-  if [ -z "$line" ]; then fail="$fail air-kinds"; elif [ -n "$miss" ]; then echo "d3d9-check: no AIR record for: $miss"; fail="$fail air-kinds"; fi
+  echo "d3d9-check: $BK $line"
+  if [ "$BK" = air ]; then
+    miss=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '
+      /^(air_)?(sm[0-9]|ff)(vs|ps)=/ { k = $1; sub(/^air_/, "", k); seen[k] = 1; if ($1 ~ /^air_/) { a[k] = $2; t += $2; if (k ~ /^ff/) af[k] = $2 } else m[k] = $2 }
+      END { for (k in seen) if (m[k] + a[k] > 0 && a[k] < 1) printf "%s ", k; if (t < 1) printf "no-air-records "; if (af["ffvs"] < 1 || af["ffps"] < 1) printf "no-air-ff-records " }')
+    kf=air-kinds
+  else
+    miss=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '
+      /^air_(sm[0-9]|ff)(vs|ps)=/ { t += $2 } /^ff(vs|ps)=/ { m[$1] = $2 }
+      END { if (t > 0) printf "air-records-under-msl "; if (m["ffvs"] < 1 || m["ffps"] < 1) printf "no-msl-records " }')
+    kf=msl-kinds
+  fi
+  if [ -z "$line" ]; then fail="$fail $kf"; elif [ -n "$miss" ]; then echo "d3d9-check: kinds: $miss"; fail="$fail $kf $miss"; fi
 fi
 [ -z "$fail" ] && echo "d3d9-check: ok$sfx" || { echo "d3d9-check: FAIL$fail"; exit 1; }

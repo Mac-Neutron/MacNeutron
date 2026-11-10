@@ -7,17 +7,25 @@
 # configuration are the ones mtld3d's Makefile gave its test runs. MTLD3D_SO=<mtld3d.so> runs that build of D3D9's Unix
 # side instead (the loopback build of D3D9 spec §5.1), in an APFS clone of wine.app beside the prefix.
 # A run whose only new failing sites are dxmt/mtld3d-triaged.txt's, with no new crash, passes ("only triaged sites").
-# D3D9_BACKEND=air runs the same with mtld3d's AIR shader backend (DXMT_CONFIG shader.backend=air) and keeps each
-# subtest's shader cache in build/mtld3d-conformance/air-caches: the lane fails unless every programmable shader kind
-# the tests made has an AIR record there (emit_corpus --kinds), the proof that the lane ran AIR. Either lane fails on
-# a Metal validation error or a GPU hang in the run.
+# Two lanes (C3d-6): D3D9_BACKEND=air (the default lane) sets no shader.backend, so the build's default runs;
+# D3D9_BACKEND=msl sets shader.backend=msl (DXMT_CONFIG: the runner sets only MTLD3D_CONFIG). Both keep each subtest's
+# shader cache in build/mtld3d-conformance/caches-<lane> and write the runner's output, after a lane stamp line, to
+# build/mtld3d-conformance/run-<lane>.txt (dxmt/d3d9-conf-compare.sh's inputs). The lane's proof is its kinds row
+# (emit_corpus --kinds; the runner silences the logs): the default lane fails unless every programmable kind the tests
+# made has an AIR record and AIR fixed-function records exist; the msl lane fails on any AIR record or on no MSL
+# programmable and fixed-function record. Either lane fails on a Metal validation error or a GPU hang in the run.
 #   mtld3d-conformance.sh [<wine.app>] [runner args, e.g. --only device]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/dxmt/pins"
 B="${BUILD_DIR:-$ROOT/build}"
-BK=${D3D9_BACKEND:-msl}
-case $BK in msl | air) ;; *) echo "mtld3d-conformance: D3D9_BACKEND=$BK: msl or air" >&2; exit 2 ;; esac
+BK=${D3D9_BACKEND:-air}
+case $BK in
+  air) lane=default stamp="mtld3d-conformance: lane default" ;;
+  msl) lane=msl stamp="mtld3d-conformance: lane msl (shader.backend=msl)" ;;
+  *) echo "mtld3d-conformance: D3D9_BACKEND=$BK: air or msl" >&2; exit 2 ;;
+esac
+echo "$stamp"
 APP="$B/wine-arm64/wine.app"
 case ${1:-} in *.app) APP=$1; shift ;; esac
 if [ -n "${MTLD3D_SO:-}" ]; then
@@ -58,19 +66,18 @@ mkdir -p "$WINEPREFIX"
 "$R/bin/wine" reg add 'HKLM\Software\Microsoft\Wow64\amd64' /ve /d libarm64ecfex.dll /f > /dev/null 2>&1 \
   || { echo "mtld3d-conformance: could not register FEX in $WINEPREFIX" >&2; exit 1; }
 status=0
-OUT="$B/mtld3d-conformance/run.txt"
-K="$B/mtld3d-conformance/air-caches"
-if [ "$BK" = air ]; then
-  rm -rf "$K"; mkdir -p "$K"
-  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}shader.backend=air"  # the runner sets only MTLD3D_CONFIG
-  set -- --keep-shader-cache "$K" "$@"
-fi
+OUT="$B/mtld3d-conformance/run-$lane.txt"
+K="$B/mtld3d-conformance/caches-$lane"
+rm -rf "$K"; mkdir -p "$K"
+[ "$BK" = air ] || export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}shader.backend=msl"  # the runner sets only MTLD3D_CONFIG
+set -- --keep-shader-cache "$K" "$@"
+echo "$stamp" > "$OUT"
 ( cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/conformance" \
   cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-conformance -- --wine "$R/bin/wine" \
   --wineserver "$R/bin/wineserver" --assets "$T/tests/d3d9/conformance" \
-  --tests-wine-version "$("$R/bin/wine" --version)" --arch arm64x --exe "$EXE" "$@" ) > "$OUT" 2>&1 || status=$?
+  --tests-wine-version "$("$R/bin/wine" --version)" --arch arm64x --exe "$EXE" "$@" ) >> "$OUT" 2>&1 || status=$?
 "$R/bin/wineserver" -k > /dev/null 2>&1 || true
-cat "$OUT"
+sed 1d "$OUT"
 # The runner fails on any new failing site; the triaged ones don't fail this run. Each subtest's line names it
 # (<leg>/<subtest> ... REGRESSION), its sites follow, indented.
 if [ $status -ne 0 ]; then
@@ -91,16 +98,20 @@ if /usr/bin/grep -qE '^conformance: (METAL VALIDATION|GPU HANG)' "$OUT"; then
   echo "conformance: FAIL: Metal validation error or GPU hang in the run"
   status=1
 fi
-# The AIR lane's proof: per kind, a program the tests made (MSL + AIR records) has an AIR record.
+# The lane's proof: the kinds of the records its subtests wrote.
+line=$(cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/kinds" \
+  cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-core --features disk-cache --example emit_corpus -- \
+  --kinds "$K"/*.bin 2> /dev/null | sed -n '/^kinds /p') || line=
+echo "conformance: $BK $line"
 if [ "$BK" = air ]; then
-  line=$(cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/kinds" \
-    cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-core --features disk-cache --example emit_corpus -- \
-    --kinds "$K"/*.bin 2> /dev/null | sed -n '/^kinds /p') || line=
-  echo "conformance: air $line"
   miss=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '
     /^(air_)?(sm[0-9]|ff)(vs|ps)=/ { k = $1; sub(/^air_/, "", k); seen[k] = 1; if ($1 ~ /^air_/) { a[k] = $2; t += $2; if (k ~ /^ff/) af[k] = $2 } else m[k] = $2 }
     END { for (k in seen) if (m[k] + a[k] > 0 && a[k] < 1) printf "%s ", k; if (t < 1) printf "no-air-records "; if (af["ffvs"] < 1 || af["ffps"] < 1) printf "no-air-ff-records " }')
-  if [ -z "$line" ]; then echo "conformance: FAIL: no kinds line from emit_corpus over $K"; status=1
-  elif [ -n "$miss" ]; then echo "conformance: FAIL: no AIR record for: $miss"; status=1; fi
+else
+  miss=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '
+    /^air_(sm[0-9]|ff)(vs|ps)=/ { t += $2 } /^sm[0-9](vs|ps)=/ { p += $2 } /^ff(vs|ps)=/ { m[$1] = $2 }
+    END { if (t > 0) printf "air-records-under-msl "; if (p < 1) printf "no-msl-records "; if (m["ffvs"] < 1 || m["ffps"] < 1) printf "no-msl-ff-records " }')
 fi
+if [ -z "$line" ]; then echo "conformance: FAIL: no kinds line from emit_corpus over $K"; status=1
+elif [ -n "$miss" ]; then echo "conformance: FAIL: kinds: $miss"; status=1; fi
 exit $status
