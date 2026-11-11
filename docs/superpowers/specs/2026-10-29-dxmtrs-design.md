@@ -867,6 +867,13 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   release build is measured again). Parked for the maintainer: the D3D9 benches (with the flip's per-launch costs:
   encoder-thread lowering, FF prefilter, per-draw backend probe, z-fighting, the upgrade path), then the MSL emitters'
   deletion and the release with C3 complete.
+  C4's first push, 2026-11-11, DXMTRS main 1d3fa95b (1d3fa95b36902fa3d90ab2313d8cbc96d0625f76): a core hazard fix for
+  every API. A render pass rewriting a target last written 128+ ids back no longer waits on that write
+  unconditionally (its strong bit masked the lane of a weak wait, so a read of a resource written exactly 64 ids back
+  had no fence edge; the C++ DXMT shares the gap); the wait is gated `< LANE` like every other. `d3d11_hazards lane64`
+  pins it on the Mac and in the VM. Also `runtime.mode` (`mtld3d` | `core`) and its process latch; every build runs
+  `mtld3d`. The present-held row is not this change's: on one image, the hold mode showed in 2 of 3 boots of b3673ad4
+  and 0 of 3 of this commit, so C3's release still measures it.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
