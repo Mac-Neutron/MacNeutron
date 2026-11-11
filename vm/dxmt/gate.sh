@@ -29,5 +29,10 @@ while IFS='|' read -r name exe args prefixes; do
   echo "     time: macOS $(cat "$REF/$name.1.time") s, guest $(cat "$G/$name.time") s"
 done < "$W/share/dxmt-tests/invocations"
 python3 -I "$D/compare.py" host "$W/dxmt-guest-run.txt" || fail=1
+# lane64 (DXMTRS C4's deptrack fix): the guest's and macOS's lines must also say ok, not merely agree (smoke: the race
+# is timing-dependent; the host-side deptrack test is the proof).
+for f in "$G/d3d11_hazards_lane64.txt" "$REF/d3d11_hazards_lane64.1.txt"; do
+  /usr/bin/grep -qx 'lane64: ok' "$f" 2> /dev/null || { echo "FAIL d3d11_hazards_lane64: no 'lane64: ok' in $f"; fail=1; }
+done
 [ $fail -eq 0 ] && echo "dxmt gate: all $n programs passed" || echo "dxmt gate: FAIL"
 exit $fail
