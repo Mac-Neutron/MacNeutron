@@ -269,7 +269,8 @@ One build per lock job, its gates in the job.
 - [ ] Job A (plain build, `make wine-arm64`): `dxmt/check.sh` x64 and arm64ec, `wine-arm64/check.sh`,
   `presenter/check.sh`, wm-probe (both modes), translator key unchanged, DXBC/DXIL identity (13 corpora), `d3d9-check`
   default and msl lanes, conformance default, the facade test, the loopback `d3d9-check`, licences and notices
-  (`mtld3d-notices.py`, `d3d9-rt` included), the plain `d3d9.dll`'s imports and section sizes as `main`'s.
+  (`mtld3d-notices.py`, `d3d9-rt` included), the plain `d3d9.dll`'s imports as `main`'s (its `.text` grows by the
+  runtime latch, Task 5's ruling).
 - [ ] Job B (the core pair: a second DXMT build dir with `-Dd3d9_core_runtime=true`, its ARM64X `d3d9.dll` and
   `mtld3d.dll` swapped in through `MTLD3D_PE`): `d3d9-check` with `D3D9_RUNTIME=core` (rows module, clear, triangle,
   present, imports, dynamic, vsync, stale; arm64 expecting the fallback); mutation RED (the lane without `runtime.mode`
