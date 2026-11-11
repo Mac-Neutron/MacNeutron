@@ -15,8 +15,8 @@
 # caches/<leg>-<subtest>.bin, the conformance runs' shader caches, and stamp conf-<leg>.txt's first line with the lane. The 32-bit rows run under old WoW64 (the image's default: the i686
 # mtld3d.so and winemetal.so), or new WoW64 when the share's wow64 file says new (d3d9-gate.sh MN_WOW64=new).
 # The share's runtime file "core" (DXMTRS C4a) sets runtime.mode=core (MTLD3D_CONFIG for d3d9_triangle, DXMT_CONFIG for
-# the conformance runs): each triangle launch logs to logs/<row>, and each conformance leg first runs stateblock alone
-# with --log info into logs/conf-proof-<leg> (the runner silences the logs), the core lane's proof.
+# the conformance runs): each triangle launch logs to logs/<row>, the core lane's proof, and no conformance runs (they
+# start with C4b).
 export PATH=/opt/mn-wine/bin:$PATH WINEDEBUG=-all DISPLAY=:0
 [ "$(cat /mnt/share/d3d9/wow64 2> /dev/null)" != new ] || export WINEARCH=wow64
 export WINEDLLOVERRIDES="mscoree,mshtml="  # as MacNeutron's prefixes: no Mono or Gecko prompt waiting on Xvfb
@@ -79,20 +79,13 @@ W=$WINEPREFIX/drive_c/windows
 timeout 20 wineserver -k
 tri d3d9_triangle.exe tri64-updated
 tri d3d9_triangle32.exe tri32-updated
+[ "$RT" != core ] || exit 0  # no conformance under the core runtime in C4a
 for lane in "x64 arm64x" "x86 i686-arm64"; do
   set -- $lane
   prefix /home/mn/d3d9-conf-$1
   exe="$T/winetests/$1/d3d9_test.exe"
   # The cache goes beside the EXE, and the guest cannot write the share's test folder.
   mkdir -p "$O/exe/$1" && cp "$exe" "$O/exe/$1/" && exe="$O/exe/$1/d3d9_test.exe"
-  if [ "$RT" = core ]; then  # the proof run: stateblock alone, logged
-    mkdir -p "$O/logs/conf-proof-$1"
-    DXMT_CONFIG="$DXMT_CONFIG;log.dir=Z:$O/logs/conf-proof-$1" MTLD3D_CONFORMANCE_TIMEOUT_SECS=1200 "$T/mtld3d-conformance" \
-      --wine /opt/mn-wine/bin/wine --wineserver /opt/mn-wine/bin/wineserver --assets "$T/conformance" \
-      --tests-wine-version "$(cat "$T/tests-wine-version")" --arch "$2" --only stateblock --log info --exe "$exe" \
-      > "$O/conf-proof-$1.txt" 2>&1
-    timeout 20 wineserver -k
-  fi
   echo "$stamp" > "$O/conf-$1.txt"
   # The guest runs a subtest several times slower than macOS (FEX, the transport): 20 minutes each, not 3.
   MTLD3D_CONFORMANCE_TIMEOUT_SECS=1200 "$T/mtld3d-conformance" --wine /opt/mn-wine/bin/wine --wineserver /opt/mn-wine/bin/wineserver \

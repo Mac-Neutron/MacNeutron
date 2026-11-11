@@ -10,10 +10,15 @@
 // list; d3d9_dynamic.cpp has a run-time load's); and "frames: <n>". With the argument "vsync" the device presents at
 // D3DPRESENT_INTERVAL_ONE, as most games do, and "d3d9 vsync" says 60 more presents took under 5 s (a display paces
 // them at its rate; a present the layer never reports presented makes each one wait out mtld3d's 1 s cap). Exits with
-// the number of failures.
+// the number of failures. With "--bench <draws> <frames>" (the probe of DXMTRS C4): no read-back, D3DPRESENT_INTERVAL_
+// IMMEDIATE, each frame a Clear, <draws> DrawPrimitiveUP calls of the triangle (offset by a fraction of a pixel) and a
+// Present, then one line "d3d9 bench: frames <F> draws <D> wall_ms <ms> cpu_ms <ms> vm_used_mb <mb>" (wall by
+// QueryPerformanceCounter, CPU user+kernel by GetProcessTimes, the address space in use by GlobalMemoryStatusEx) and
+// the number of failed module and imports rows as the exit status.
 #include <windows.h>
 #include <d3d9.h>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 static int failures;
@@ -23,7 +28,9 @@ static void row(const char *what, bool ok, const char *why) {
 }
 
 int main(int argc, char **argv) {
-    const bool vsync = argc > 1 && !strcmp(argv[1], "vsync");
+    const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
+    const int benchDraws = bench ? atoi(argv[2]) : 0, benchFrames = bench ? atoi(argv[3]) : 0;
+    const bool vsync = !bench && argc > 1 && !strcmp(argv[1], "vsync");
     WNDCLASSW wc = {};
     wc.lpfnWndProc = DefWindowProcW;
     wc.hInstance = GetModuleHandleW(nullptr);
@@ -54,6 +61,37 @@ int main(int argc, char **argv) {
     const Vertex tri[3] = {{128, 16, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {240, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {16, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)}};
+    if (bench) {
+        LARGE_INTEGER f, t0, t1;
+        QueryPerformanceFrequency(&f);
+        dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+        QueryPerformanceCounter(&t0);
+        for (int i = 0; i < benchFrames; i++) {
+            dev->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 255), 1.0f, 0);
+            dev->BeginScene();
+            for (int d = 0; d < benchDraws; d++) {
+                Vertex v[3] = {tri[0], tri[1], tri[2]};
+                for (Vertex &p : v) p.x += (float)(d & 7) * 0.125f;
+                dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, v, sizeof *v);
+            }
+            dev->EndScene();
+            dev->Present(nullptr, nullptr, nullptr, nullptr);
+        }
+        QueryPerformanceCounter(&t1);
+        FILETIME creation, exited, kernel, user;
+        GetProcessTimes(GetCurrentProcess(), &creation, &exited, &kernel, &user);
+        auto ms = [](FILETIME t) { return (double)(((ULONGLONG)t.dwHighDateTime << 32) | t.dwLowDateTime) / 1e4; };
+        MEMORYSTATUSEX mem = {};
+        mem.dwLength = sizeof mem;
+        GlobalMemoryStatusEx(&mem);
+        printf("d3d9 bench: frames %d draws %d wall_ms %.1f cpu_ms %.1f vm_used_mb %llu\n", benchFrames, benchDraws,
+               (double)(t1.QuadPart - t0.QuadPart) * 1e3 / (double)f.QuadPart, ms(user) + ms(kernel),
+               (unsigned long long)((mem.ullTotalVirtual - mem.ullAvailVirtual) >> 20));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
     IDirect3DSurface9 *rt = nullptr, *sys = nullptr;
     bool read = SUCCEEDED(dev->GetRenderTarget(0, &rt)) &&
                 SUCCEEDED(dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr));

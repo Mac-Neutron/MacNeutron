@@ -24,10 +24,13 @@
 # and no air_* record at all (programmable kinds are dxmt/mtld3d-conformance.sh's). The verdict line is
 # "d3d9-check: ok" on the default lane and "d3d9-check: ok (msl)" on the msl lane.
 # D3D9_RUNTIME=core (DXMTRS C4a, the default backend lane only) runs every row under runtime.mode=core, D3D9's encoder
-# in d3d9.dll over winemetal.dll (a wine.app built with DXMT_D3D9_CORE=1): each launch logs to a folder of its own, which
-# must hold the in-process runtime's lines ("encoder host: pe", "mtl facade: winemetal.dll (WMTUnixCall)") and not
-# mtld3d.so's ("encoder host: unix"), lines the code that ran prints, not the switch. Its stamp is "d3d9-check: lane
-# core (runtime.mode=core)", its verdict "d3d9-check: ok (core)". D3D9_RUNTIME=mtld3d (the default) is the lanes above.
+# in d3d9.dll on dxmt-core (a wine.app built with DXMT_D3D9_CORE=1): each launch logs to a folder of its own, which
+# must hold the core device's line ("d3d9 core: device on dxmt-core") and not mtld3d.so's encoder line ("texture
+# versions: rename pool cap", printed by every mtld3d device), lines the code that ran prints, not the switch. The
+# native arm64 half has no core runtime (C4-15): its launch must hold the fallback warning ("carries no core runtime,
+# so mtld3d runs") and the encoder line. No shader-backend, kinds or conformance rows under core (C4b on). Its stamp is
+# "d3d9-check: lane core (runtime.mode=core)", its verdict "d3d9-check: ok (core)". D3D9_RUNTIME=mtld3d (the default)
+# is the lanes above.
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -39,7 +42,7 @@ for e in "$EXE" "$DYN" "$ARM"; do [ -f "$e" ] || { echo "d3d9-check: no $e: run 
 [ -x "$CLI" ] || { echo "d3d9-check: no $CLI: run make build" >&2; exit 2; }
 WORK=${DXMT_CHECK_WORK:-$(mktemp -d "${TMPDIR:-/tmp}/macneutron-d3d9.XXXXXX")}
 fail=
-BK=${D3D9_BACKEND:-air} sfx= RT=${D3D9_RUNTIME:-mtld3d}
+BK=${D3D9_BACKEND:-air} sfx= msl= RT=${D3D9_RUNTIME:-mtld3d}
 case $RT/$BK in
   mtld3d/*) ;;
   core/air) sfx=" (core)"; echo "d3d9-check: lane core (runtime.mode=core)" ;;
@@ -48,14 +51,14 @@ case $RT/$BK in
 esac
 case $BK in
   air) [ "$RT" = core ] || echo "d3d9-check: lane default" ;;
-  msl) sfx=" (msl)"; echo "d3d9-check: lane msl (shader.backend=msl)" ;;
+  msl) sfx=" (msl)" msl=1; echo "d3d9-check: lane msl (shader.backend=msl)" ;;
   *) echo "d3d9-check: D3D9_BACKEND=$BK: air or msl" >&2; exit 2 ;;
 esac
 rm -rf "$WORK/mtld3d-logs" "$WORK/progs"; mkdir -p "$WORK/mtld3d-logs" "$WORK/progs/x64" "$WORK/progs/arm64"
 cp "$EXE" "$DYN" "$WORK/progs/x64/" && cp "$ARM" "$WORK/progs/arm64/" \
   || { echo "d3d9-check: could not copy the programs to $WORK/progs" >&2; exit 1; }
 EXE=$WORK/progs/x64/$(basename "$EXE") DYN=$WORK/progs/x64/$(basename "$DYN") ARM=$WORK/progs/arm64/$(basename "$ARM")
-export MTLD3D_CONFIG="${MTLD3D_CONFIG:+$MTLD3D_CONFIG;}log.dir=Z:$WORK/mtld3d-logs${sfx:+;shader.backend=msl}"
+export MTLD3D_CONFIG="${MTLD3D_CONFIG:+$MTLD3D_CONFIG;}log.dir=Z:$WORK/mtld3d-logs${msl:+;shader.backend=msl}"
 # launch <tool> <compat> <name> [arg]: d3d9_triangle.exe (or $PROG) [arg] through <tool>'s launcher in the prefix of <compat>,
 # killed after 120 s; its lines in $WORK/<name>.txt. MACNEUTRON_VM=0: the macOS path, whatever VM folder this Mac has.
 launch() {
@@ -73,13 +76,21 @@ launch() {
   { kill "$dog" && wait "$dog"; } 2> /dev/null || true
   tr -d '\r' < "$WORK/$3.out" > "$WORK/$3.txt"
   [ "$RT" = core ] || return 0
-  # The core lane's proof, from the code that ran: the in-process runtime's lines in this launch's logs, none of mtld3d.so's.
+  # The core lane's proof, from the code that ran: the core device's line in this launch's logs and none of mtld3d.so's
+  # encoder line; the native arm64 half has no core runtime (C4-15), so there the fallback warning and the encoder line.
   d="$WORK/mtld3d-logs/$3"
-  if /usr/bin/grep -rq 'encoder host: pe' "$d" && /usr/bin/grep -rqF 'mtl facade: winemetal.dll (WMTUnixCall)' "$d" \
-    && ! /usr/bin/grep -rq 'encoder host: unix' "$d"; then
+  enc='texture versions: rename pool cap'
+  if [ "$3" = arm64 ]; then
+    if /usr/bin/grep -rqF 'carries no core runtime, so mtld3d runs' "$d" && /usr/bin/grep -rqF "$enc" "$d" \
+      && ! /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d"; then
+      echo "d3d9-check: $3: runtime mtld3d (the arm64 fallback)"
+    else
+      echo "d3d9-check: $3: no arm64 fallback in $d"; fail="$fail $3-runtime"
+    fi
+  elif /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d" && ! /usr/bin/grep -rqF "$enc" "$d"; then
     echo "d3d9-check: $3: runtime core"
   else
-    echo "d3d9-check: $3: no in-process runtime in $d"; fail="$fail $3-runtime"
+    echo "d3d9-check: $3: no core device in $d"; fail="$fail $3-runtime"
   fi
 }
 # check <name> [rows]: the rows (default the four) ok, else each missing one named.
@@ -126,14 +137,15 @@ if [ -n "${OLD:-}" ]; then
   launch ours old updated
   check updated
 fi
-if [ "$BK" = air ]; then
+if [ "$RT" = core ]; then :  # no shader-backend row: the core has none in C4a
+elif [ "$BK" = air ]; then
   /usr/bin/grep -rqE 'shader backend: air, translator [0-9a-f]{8}' "$WORK/mtld3d-logs" \
     || { echo "d3d9-check: no 'shader backend: air' line in $WORK/mtld3d-logs"; fail="$fail air-log"; }
 else
   /usr/bin/grep -rqE 'shader backend: msl, translator ' "$WORK/mtld3d-logs" \
     || { echo "d3d9-check: no 'shader backend: msl' line in $WORK/mtld3d-logs"; fail="$fail msl-log"; }
 fi
-if [ "${D3D9_KINDS:-0}" = 1 ]; then
+if [ "${D3D9_KINDS:-0}" = 1 ] && [ "$RT" != core ]; then
   . "$ROOT/dxmt/pins"
   line=$(cd "$ROOT/build/wine-arm64-src/dxmt" && PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 \
     CARGO_TARGET_DIR="$ROOT/build/d3d9-cargo/kinds" cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-core \

@@ -15,11 +15,11 @@
 # vm-work/d3d9-conf/conf-<x64|x86>-<old|new>-<default|msl>.txt (dxmt/d3d9-conf-compare.sh's inputs).
 # Prints a line a check; exits 1 on a FAIL. The 32-bit rows run under old WoW64, the image's default, or with
 # MN_WOW64=new under new WoW64. D3D9_RUNTIME=core (DXMTRS C4a, with the default backend) is a third lane, "core"
-# (the share's runtime file): runtime.mode=core in the guest, D3D9's encoder in d3d9.dll over winemetal.dll (an image
-# built with DXMT_D3D9_CORE=1), no mtld3d.so unit tests; the key is checked in the guest d3d9.dlls too, and every
-# triangle row's logs and each leg's conformance proof run (stateblock with logs) must hold the in-process runtime's
-# lines ("encoder host: pe", "mtl facade: winemetal.dll (WMTUnixCall)", "page boxes: pages from the unix side") and not
-# mtld3d.so's ("encoder host: unix"). Its outputs are conf-<x64|x86>-<old|new>-core.txt.
+# (the share's runtime file): runtime.mode=core in the guest, D3D9's encoder in d3d9.dll on dxmt-core (an image built
+# with DXMT_D3D9_CORE=1), no mtld3d.so unit tests; the key is checked in the guest d3d9.dlls too, and every triangle
+# row's logs must hold the core device's line ("d3d9 core: device on dxmt-core") and not mtld3d.so's encoder line
+# ("texture versions: rename pool cap", printed by every mtld3d device). Under core the guest runs no conformance (it
+# runs from C4b on) and the gate checks no shader-backend or kinds row: the triangle rows, the proof, the sm50 rows.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -115,14 +115,14 @@ for r in tri64-fresh tri32-fresh tri64-updated tri32-updated; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
-# core: runtime <folder>: the in-process runtime's lines in a launch's logs, none of mtld3d.so's (the code that ran
+# core: runtime <folder>: the core device's line in a launch's logs, none of mtld3d.so's encoder line (the code that ran
 # prints them, not the switch).
 runtime() {
-  /usr/bin/grep -rq 'encoder host: pe' "$1" 2> /dev/null && /usr/bin/grep -rqF 'mtl facade: winemetal.dll (WMTUnixCall)' "$1" &&
-    /usr/bin/grep -rqF 'page boxes: pages from the unix side' "$1" && ! /usr/bin/grep -rq 'encoder host: unix' "$1" && echo ok
+  /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
+    && echo ok
 }
 if [ "$RT" = core ]; then
-  for r in tri64-fresh tri32-fresh tri64-updated tri32-updated conf-proof-x64 conf-proof-x86; do
+  for r in tri64-fresh tri32-fresh tri64-updated tri32-updated; do
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
   done
 fi
@@ -130,6 +130,10 @@ fi
 for r in tri64-nomarker tri32-nomarker; do
   check "$r fails without the marker" "$(/usr/bin/grep -c '^d3d9 module ok' "$G/$r.txt" 2> /dev/null)" 0
 done
+if [ "$RT" = core ]; then  # no conformance, shader-backend or kinds rows under core in C4a
+  [ $fail -eq 0 ] && echo "d3d9 gate: ok (core)" || echo "d3d9 gate: FAIL"
+  exit $fail
+fi
 # The runner's per-subtest lines: "<leg>/<subtest>  baseline(failed=N crash=N) current(failed=N crash=N) executed=N
 # <status>".
 figure() { sed -n "s|^$1/$2 .*current(failed=\([0-9]*\) crash=\([0-9]*\)).*|\1 \2|p" "$G/conf-$3.txt" 2> /dev/null; }
