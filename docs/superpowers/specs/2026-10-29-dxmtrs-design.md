@@ -874,6 +874,16 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   pins it on the Mac and in the VM. Also `runtime.mode` (`mtld3d` | `core`) and its process latch; every build runs
   `mtld3d`. The present-held row is not this change's: on one image, the hold mode showed in 2 of 3 boots of b3673ad4
   and 0 of 3 of this commit, so C3's release still measures it.
+  C4a done 2026-11-11 at DXMTRS main b86ced33 (b86ced330965406b5ddc1b86e1a678d31be98b6a), which MacNeutron pins: D3D9
+  as a DXMT front end, off by default. The core gains a queue profile (`Device::with_config`; D3D10-12's defaults
+  unchanged), direct binds and `initialize_dxso`; `d3d9-rt` holds D3D9's `CoreDevice`. A build with
+  `-Dd3d9_core_runtime=true` (MacNeutron's `DXMT_D3D9_CORE=1`) and `runtime.mode=core` runs `d3d9.dll`'s device on
+  dxmt-core: Clear, Present, read-back and a pre-transformed fixed-function `DrawPrimitiveUP`; every other entry point
+  answers D3DERR_NOTAVAILABLE under core, and the native arm64 half keeps mtld3d (no Mac ARM64 winemetal). Gated by a
+  core lane proven by the code that ran (Mac; VM x64 and x86 under old and new WoW64) and a mutation run; D3D10-12
+  gates unchanged. Probe (Mac x64, 2000 draws a frame): wall -3%, CPU +55% a frame, unprofiled; the slice rebuilds its
+  fixed-function tokens every draw (C4b keys pipelines first, then re-benches); the VM and 32-bit address-space probes are
+  C4b's first VM job's exit criteria.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
