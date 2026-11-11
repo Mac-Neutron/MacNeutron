@@ -40,6 +40,8 @@ ln -sfn "$S/wine-build/tools/winebuild/winebuild" "$SDK/bin/winebuild"
 set -- "$B" "$S/dxmt" --cross-file "$S/dxmt/build-win64.txt" --buildtype release --strip --prefix "$W/dxmt-guest" \
   -Dguest_vm=true -Dwine_builtin_dll=true -Denable_d3d12=true -Denable_nvapi=true -Denable_nvngx=true \
   -Dwine_install_path="$SDK" -Dtranslator_key_file="$S/dxmt-translator-key"
+# DXMT_D3D9_CORE=1 (a dev build for DXMTRS C4's gates): D3D9's in-process runtime in d3d9.dll, as wine-arm64/build.sh.
+[ "${DXMT_D3D9_CORE:-0}" != 1 ] || set -- "$@" -Dd3d9_core_runtime=true
 # DXMTRS's meson builds Rust static libraries (tools/cargo-staticlib.sh) with cargo. No -Dcargo_toolchain: a tree
 # without the option (the pinned one, before the Rust plumbing lands on DXMTRS's main) would fail to configure, and
 # its default is mtld3d's toolchain (MTLD3D_RUST) already.
@@ -79,6 +81,7 @@ B32=$W/dxmt-guest-build32
 set -- "$B32" "$S/dxmt" --cross-file "$S/dxmt/build-win32.txt" --buildtype release --strip --prefix "$W/dxmt-guest" \
   -Dguest_vm=true -Dwine_builtin_dll=true -Denable_d3d12=true -Denable_nvapi=false -Denable_nvngx=false \
   -Dwine_install_path="$SDK" -Dtranslator_key_file="$S/dxmt-translator-key"
+[ "${DXMT_D3D9_CORE:-0}" != 1 ] || set -- "$@" -Dd3d9_core_runtime=true
 [ "${MACNEUTRON_PROFILE:-std}" != p ] || set -- "$@" -Dc_args=-DDXMT_PERF_BUILD -Dcpp_args=-DDXMT_PERF_BUILD
 ! p_flag dxmt || set -- "$@" -Db_lto=true -Db_lto_mode=thin
 inputs=$(printf '%s\n' "$@"; cat "$S/dxmt/build-win32.txt"; git -C "$S/dxmt" rev-parse HEAD)

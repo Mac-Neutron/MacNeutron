@@ -538,6 +538,9 @@ set -- "$SRC/dxmt-build" "$D" --cross-file "$D/build-arm64ec.txt" --cross-file "
   -Denable_nvapi=true -Denable_nvngx=true \
   -Dnative_llvm_path="$SRC/llvm23-arm64" -Dwine_build_path="$SRC/wine-build" \
   -Dtranslator_key_file="$SRC/dxmt-translator-key"
+# DXMT_D3D9_CORE=1 (a dev build for DXMTRS C4's gates, never a release): D3D9's in-process runtime linked into d3d9.dll
+# (runtime.mode=core picks it at run time; the shipped build has none until C4e).
+[ "${DXMT_D3D9_CORE:-0}" != 1 ] || set -- "$@" -Dd3d9_core_runtime=true
 # DXMTRS's meson builds Rust static libraries (tools/cargo-staticlib.sh) with cargo. No -Dcargo_toolchain: a tree
 # without the option (the pinned one, before the Rust plumbing lands on DXMTRS's main) would fail to configure, and
 # its default is mtld3d's toolchain (MTLD3D_RUST) already.
