@@ -16,9 +16,10 @@
 # Prints a line a check; exits 1 on a FAIL. The 32-bit rows run under old WoW64, the image's default, or with
 # MN_WOW64=new under new WoW64. D3D9_RUNTIME=core (DXMTRS C4a, with the default backend) is a third lane, "core"
 # (the share's runtime file): runtime.mode=core in the guest, D3D9's encoder in d3d9.dll on dxmt-core (an image built
-# with DXMT_D3D9_CORE=1), no mtld3d.so unit tests; the key is checked in the guest d3d9.dlls too, and every triangle
-# row's logs must hold the core device's line ("d3d9 core: device on dxmt-core") and not mtld3d.so's encoder line
-# ("texture versions: rename pool cap", printed by every mtld3d device). Under core the guest runs no conformance (it
+# with DXMT_D3D9_CORE=1), no mtld3d.so unit tests, and every triangle row's logs must hold the core device's line
+# ("d3d9 core: device on dxmt-core"), not mtld3d.so's encoder line ("texture versions: rename pool cap", printed by
+# every mtld3d device) and none of the core's can't-present lines (no command library, no Metal view, a pipeline that
+# does not build: each still answers D3D_OK). Under core the guest runs no conformance (it
 # runs from C4b on) and the gate checks no shader-backend or kinds row: the triangle rows, the proof, the sm50 rows.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -119,7 +120,7 @@ done
 # prints them, not the switch).
 runtime() {
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
-    && echo ok
+    && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build' "$1" && echo ok
 }
 if [ "$RT" = core ]; then
   for r in tri64-fresh tri32-fresh tri64-updated tri32-updated; do

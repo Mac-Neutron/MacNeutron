@@ -26,7 +26,8 @@
 # D3D9_RUNTIME=core (DXMTRS C4a, the default backend lane only) runs every row under runtime.mode=core, D3D9's encoder
 # in d3d9.dll on dxmt-core (a wine.app built with DXMT_D3D9_CORE=1): each launch logs to a folder of its own, which
 # must hold the core device's line ("d3d9 core: device on dxmt-core") and not mtld3d.so's encoder line ("texture
-# versions: rename pool cap", printed by every mtld3d device), lines the code that ran prints, not the switch. The
+# versions: rename pool cap", printed by every mtld3d device) nor a line saying the core cannot present (no command
+# library, no Metal view, a pipeline that does not build), lines the code that ran prints, not the switch. The
 # native arm64 half has no core runtime (C4-15): its launch must hold the fallback warning ("carries no core runtime,
 # so mtld3d runs") and the encoder line. No shader-backend, kinds or conformance rows under core (C4b on). Its stamp is
 # "d3d9-check: lane core (runtime.mode=core)", its verdict "d3d9-check: ok (core)". D3D9_RUNTIME=mtld3d (the default)
@@ -80,6 +81,8 @@ launch() {
   # encoder line; the native arm64 half has no core runtime (C4-15), so there the fallback warning and the encoder line.
   d="$WORK/mtld3d-logs/$3"
   enc='texture versions: rename pool cap'
+  # A core device that cannot present or draw logs one of these and still answers D3D_OK: none may appear.
+  unpresented='nothing presents|d3d9 core: no Metal view|does not build'
   if [ "$3" = arm64 ]; then
     if /usr/bin/grep -rqF 'carries no core runtime, so mtld3d runs' "$d" && /usr/bin/grep -rqF "$enc" "$d" \
       && ! /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d"; then
@@ -95,7 +98,8 @@ launch() {
     else
       echo "d3d9-check: $3: no core runtime in $d"; fail="$fail $3-runtime"
     fi
-  elif /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d" && ! /usr/bin/grep -rqF "$enc" "$d"; then
+  elif /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d" && ! /usr/bin/grep -rqF "$enc" "$d" \
+    && ! /usr/bin/grep -rqE "$unpresented" "$d"; then
     echo "d3d9-check: $3: runtime core"
   else
     echo "d3d9-check: $3: no core device in $d"; fail="$fail $3-runtime"
