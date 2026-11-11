@@ -858,6 +858,15 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   release until C3d. One VM row stays open, unexplained: d3d-smoke present-held (forwarded D3D12 presents held about
   7.8 ms on 2 of every 3 frames for tens of frames, mostly on early boots; no code shared with that path changed); C3d
   blocks its release on 0 of 6 fresh-state boots showing it (frames 5-72 held >= 16).
+  C3d's flip done 2026-11-10 at DXMTRS main b3673ad4 (b3673ad4187a82b86654109876350cdcb4cc4e9f), which MacNeutron
+  pins: `shader.backend` defaults to `air`; `msl` stays the escape (`mtld3d.conf`, `MTLD3D_CONFIG`). Every D3D9 gate
+  runs a default lane and an explicit msl lane, each stamped and proven by its cache's record kinds; a per-site
+  comparator (`dxmt/d3d9-conf-compare.sh`) finds no site failing more under AIR on five legs (Mac arm64x; VM x64 and x86
+  under old and new WoW64). A cache written under msl keeps its MSL records: from the second launch both sets prewarm
+  until the deletion. The open present-held row showed no hold-mode run in six fresh-state boots (release evidence; the
+  release build is measured again). Parked for the maintainer: the D3D9 benches (with the flip's per-launch costs:
+  encoder-thread lowering, FF prefilter, per-draw backend probe, z-fighting, the upgrade path), then the MSL emitters'
+  deletion and the release with C3 complete.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
