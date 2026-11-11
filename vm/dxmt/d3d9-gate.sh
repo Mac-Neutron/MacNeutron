@@ -62,6 +62,7 @@ else
   echo "${MN_WOW64:-old}" > "$S/wow64"
   echo "$lane" > "$S/backend"
   echo "$RT" > "$S/runtime"
+  [ -z "${D3D9_BENCH:-}" ] || echo 1 > "$S/bench"
   # The Linux unit tests (release profile, as their macOS runs), x86_64 and i686 (old WoW64's, on the i686
   # winemetal.so), and the runner; each test binary under its crate's name. DXMTRS's tools/linux-cargo.sh, on the
   # builder's sysroot of each arch (vm/sysroot/fetch.sh), into build/d3d9-cargo/gate-<arch>.
@@ -125,6 +126,17 @@ runtime() {
 if [ "$RT" = core ]; then
   for r in tri64-fresh tri32-fresh tri64-updated tri32-updated; do
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
+  done
+fi
+if [ -n "${D3D9_BENCH:-}" ]; then
+  rows="bench-32-0 bench-32-600"; [ "${MN_WOW64:-old}" = new ] || rows="bench-64-0 bench-64-600 $rows"
+  mkdir -p "$W/d3d9-bench"
+  for r in $rows; do
+    if [ "$RT" = core ]; then p=$(runtime "$G/logs/$r")
+    else p=$(/usr/bin/grep -rqF 'texture versions: rename pool cap' "$G/logs/$r" 2> /dev/null \
+      && ! /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$G/logs/$r" && echo ok); fi
+    check "$r bench" "$(/usr/bin/grep -c '^d3d9 bench:' "$G/$r.txt" 2> /dev/null)/$(/usr/bin/grep -cx 'status 0' "$G/$r.txt" 2> /dev/null)/$p" 1/1/ok
+    /usr/bin/grep '^d3d9 bench:' "$G/$r.txt" > "$W/d3d9-bench/$r-${MN_WOW64:-old}-$lane.txt" 2> /dev/null
   done
 fi
 # Without the markers d3d9.dll's import of mtld3d.dll isn't found: the reason run-game.sh updates such a prefix.

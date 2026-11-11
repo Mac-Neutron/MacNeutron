@@ -17,6 +17,9 @@
 # The share's runtime file "core" (DXMTRS C4a) sets runtime.mode=core (MTLD3D_CONFIG for d3d9_triangle, DXMT_CONFIG for
 # the conformance runs): each triangle launch logs to logs/<row>, the core lane's proof, and no conformance runs (they
 # start with C4b).
+# The share's bench file (D3D9_BENCH=1, DXMTRS C4b-5): after the triangle rows, bench-<64|32>-<0|600>.txt, d3d9_triangle
+# --bench 2000 <frames> (0 frames first, then 600; the x86-64 rows only under old WoW64), each launch logging to
+# logs/<row> in both lanes.
 export PATH=/opt/mn-wine/bin:$PATH WINEDEBUG=-all DISPLAY=:0
 [ "$(cat /mnt/share/d3d9/wow64 2> /dev/null)" != new ] || export WINEARCH=wow64
 export WINEDLLOVERRIDES="mscoree,mshtml="  # as MacNeutron's prefixes: no Mono or Gecko prompt waiting on Xvfb
@@ -66,6 +69,14 @@ tri() {  # tri <exe> <name>
   tr -d '\r' < "$O/$2.raw" > "$O/$2.txt"; rm -f "$O/$2.raw"
   echo "guest: $2 $(grep -c '^d3d9 [a-z]* ok$' "$O/$2.txt") rows ok"
 }
+bench() {  # bench <exe> <row> <frames>: tri's launch with --bench 2000 <frames>, its logs in logs/<row> in both lanes
+  mkdir -p "$O/logs/$2"
+  MTLD3D_CONFIG="$MTLD3D_CONFIG;log.dir=Z:$O/logs/$2" timeout -k 10 600 wine "$T/$1" --bench 2000 "$3" < /dev/null > "$O/$2.raw" 2>&1
+  echo "status $?" >> "$O/$2.raw"
+  timeout 20 wineserver -k
+  tr -d '\r' < "$O/$2.raw" > "$O/$2.txt"; rm -f "$O/$2.raw"
+  echo "guest: $2 $(grep '^d3d9 bench:' "$O/$2.txt")"
+}
 prefix /home/mn/d3d9
 tri d3d9_triangle.exe tri64-fresh
 tri d3d9_triangle32.exe tri32-fresh
@@ -79,6 +90,11 @@ W=$WINEPREFIX/drive_c/windows
 timeout 20 wineserver -k
 tri d3d9_triangle.exe tri64-updated
 tri d3d9_triangle32.exe tri32-updated
+if [ -f "$T/bench" ]; then
+  if [ "$(cat "$T/wow64" 2> /dev/null)" != new ]; then bench d3d9_triangle.exe bench-64-0 0; bench d3d9_triangle.exe bench-64-600 600; fi
+  bench d3d9_triangle32.exe bench-32-0 0
+  bench d3d9_triangle32.exe bench-32-600 600
+fi
 [ "$RT" != core ] || exit 0  # no conformance under the core runtime in C4a
 for lane in "x64 arm64x" "x86 i686-arm64"; do
   set -- $lane
