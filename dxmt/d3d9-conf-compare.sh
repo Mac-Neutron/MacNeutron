@@ -1,24 +1,41 @@
 #!/bin/sh
-# D3D9 conformance parity per site (C3d-5): two runner outputs of the same leg(s), the msl lane's and the default
-# lane's, each stamped on its first line by dxmt/mtld3d-conformance.sh or vm/tests/d3d9.sh. Fails when, under the default
-# lane (AIR), a site fails more often, a suite crashes more, executes over 0.1% fewer tests or skips a site the msl
-# lane measured; when a suite is missing from either file (each leg needs stateblock, visual, device, d3d9ex); when a
-# file is cut short (a suite's current failures differ from its baseline plus its listed sites' changes, or no closing
-# "conformance:" line); or when the stamps are not msl then default. Information, not failures: a site the runner calls
-# flaky in either file, a worse site listed in <triaged> for that leg and subtest (default dxmt/mtld3d-triaged.txt), a
-# suite that crashed in both ("partial": its counts cover only the failures before the crash). A site a file doesn't
-# list failed there as often as in the baseline (the runner lists every site whose count changed).
-#   d3d9-conf-compare.sh <msl.txt> <default.txt> [<triaged.txt>]
+# D3D9 conformance parity per site (C3d-5): two runner outputs of the same leg(s), a base lane's and a current lane's,
+# each stamped on its first line by dxmt/mtld3d-conformance.sh or vm/tests/d3d9.sh: by default the msl lane's and the
+# default lane's (AIR), with --base-lane and --cur-lane any two (C4a: default, then core, the in-process runtime).
+# Fails when, under the current lane, a site fails more often, a suite crashes more, executes over 0.1% fewer tests or
+# skips a site the base lane measured; when a suite is missing from either file (each leg needs stateblock, visual,
+# device, d3d9ex); when a file is cut short (a suite's current failures differ from its baseline plus its listed sites'
+# changes, or no closing "conformance:" line); or when the stamps are not the base lane's then the current lane's.
+# Information, not failures: a site the runner calls flaky in either file, a worse site listed in <triaged> for that leg
+# and subtest (default dxmt/mtld3d-triaged.txt; dxmt/mtld3d-triaged-core.txt for the core lane), a suite that crashed in
+# both ("partial": its counts cover only the failures before the crash). A site a file doesn't list failed there as
+# often as in the baseline (the runner lists every site whose count changed). Findings are named <cur>-worse etc.
+# (air-worse etc. for the default lane, as C3d named them).
+#   d3d9-conf-compare.sh [--base-lane <lane>] [--cur-lane <lane>] <base.txt> <cur.txt> [<triaged.txt>]
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-[ $# -ge 2 ] || { echo "usage: d3d9-conf-compare.sh <msl.txt> <default.txt> [<triaged.txt>]" >&2; exit 2; }
-MSL=$1 AIR=$2 TRI=${3:-$ROOT/dxmt/mtld3d-triaged.txt}
+BASE=msl CUR=default
+while [ $# -gt 0 ]; do
+  case $1 in
+    --base-lane) BASE=$2; shift 2 ;;
+    --cur-lane) CUR=$2; shift 2 ;;
+    *) break ;;
+  esac
+done
+[ $# -ge 2 ] || {
+  echo "usage: d3d9-conf-compare.sh [--base-lane <lane>] [--cur-lane <lane>] <base.txt> <cur.txt> [<triaged.txt>]" >&2
+  exit 2
+}
+TRI=$ROOT/dxmt/mtld3d-triaged.txt PRE=air
+[ "$CUR" = core ] && TRI=$ROOT/dxmt/mtld3d-triaged-core.txt
+[ "$CUR" = default ] || PRE=$CUR
+MSL=$1 AIR=$2 TRI=${3:-$TRI}
 bad=
-case $(head -1 "$MSL" 2> /dev/null) in *": lane msl"*) ;; *) bad=1; echo "stamp $MSL: not the msl lane" ;; esac
-case $(head -1 "$AIR" 2> /dev/null) in *": lane default"*) ;; *) bad=1; echo "stamp $AIR: not the default lane" ;; esac
+case $(head -1 "$MSL" 2> /dev/null) in *": lane $BASE"*) ;; *) bad=1; echo "stamp $MSL: not the $BASE lane" ;; esac
+case $(head -1 "$AIR" 2> /dev/null) in *": lane $CUR"*) ;; *) bad=1; echo "stamp $AIR: not the $CUR lane" ;; esac
 if [ "$MSL" = "$AIR" ] || cmp -s "$MSL" "$AIR"; then bad=1; echo "stamp $AIR: the same run as $MSL"; fi
 [ -z "$bad" ] || exit 1
-awk -v tri="$TRI" '
+awk -v tri="$TRI" -v pre="$PRE" '
   BEGIN { while ((getline l < tri) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); triaged[f[1] " " f[2]] = 1 }
           nsuite = split("stateblock visual device d3d9ex", want, " ") }
   FNR == 1 { lane = (FILENAME == ARGV[1]) ? "m" : "a"; su = ""; next }
@@ -59,17 +76,17 @@ awk -v tri="$TRI" '
       }
       if (su in tr) { print "truncated " su; fails++; continue }
       both = crash["m", su] > 0 && crash["a", su] > 0
-      if (crash["a", su] > crash["m", su]) { print "air-crash " su; fails++ }
+      if (crash["a", su] > crash["m", su]) { print pre "-crash " su; fails++ }
       else if (both) { print "partial " su; info++ }
       if (!both && exe["m", su] > 0 && exe["a", su] * 1000 < exe["m", su] * 999) {
-        print "air-executed " su " " exe["m", su] " -> " exe["a", su]; fails++
+        print pre "-executed " su " " exe["m", su] " -> " exe["a", su]; fails++
       }
     }
     for (k in sites) {
       split(k, q, " "); su = q[1]; s = q[2]
       if (su in tr || !has["m", su] || !has["a", su]) continue
       nsites++
-      if (skipped["a", su, s] && !skipped["m", su, s]) { print "air-skipped " su " " s; fails++; continue }
+      if (skipped["a", su, s] && !skipped["m", su, s]) { print pre "-skipped " su " " s; fails++; continue }
       if (skipped["m", su, s] || skipped["a", su, s]) continue
       b = sbase[su, s]
       m = listed["m", su, s] ? scur["m", su, s] : b
@@ -77,7 +94,7 @@ awk -v tri="$TRI" '
       if ((su, s) in flaky) { print "info flaky " su " " s; info++; continue }
       if (a > m) {
         if ((su " " s) in triaged) { print "info triaged " su " " s " " m " -> " a; info++ }
-        else { print "air-worse " su " " s " " m " -> " a; fails++ }
+        else { print pre "-worse " su " " s " " m " -> " a; fails++ }
       }
     }
     if (!nlegs) { print "missing every suite: no leg in either file"; fails++ }

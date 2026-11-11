@@ -1,0 +1,3 @@
+# Sites the core runtime (runtime.mode=core, DXMTRS C4a) fails more often than the default lane, for a known cause
+# (C4-7: a macOS window feature the in-process runtime lacks until C4d), one per line: <leg>/<subtest> <file.c:line> <cause>.
+# dxmt/d3d9-conf-compare.sh reads it for --cur-lane core; dxmt/mtld3d-conformance.sh's core lane accepts these sites too.

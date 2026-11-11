@@ -14,16 +14,25 @@
 # (emit_corpus --kinds; the runner silences the logs): the default lane fails unless every programmable kind the tests
 # made has an AIR record and AIR fixed-function records exist; the msl lane fails on any AIR record or on no MSL
 # programmable and fixed-function record. Either lane fails on a Metal validation error or a GPU hang in the run.
+# D3D9_RUNTIME=core (DXMTRS C4a, with the default backend) is a third lane, "core": runtime.mode=core in DXMT_CONFIG,
+# D3D9's encoder in d3d9.dll (a wine.app built with DXMT_D3D9_CORE=1), its output run-core.txt and its caches
+# caches-core. The runner silences the logs, so the lane proves its runtime by a proof run first: stateblock alone with
+# --log info and log.dir in DXMT_CONFIG (build/mtld3d-conformance/proof-core), whose logs must hold the in-process
+# runtime's lines ("encoder host: pe", "mtl facade: winemetal.dll (WMTUnixCall)") and not mtld3d.so's ("encoder host:
+# unix"). Its new failing sites may also be dxmt/mtld3d-triaged-core.txt's.
 #   mtld3d-conformance.sh [<wine.app>] [runner args, e.g. --only device]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/dxmt/pins"
 B="${BUILD_DIR:-$ROOT/build}"
-BK=${D3D9_BACKEND:-air}
-case $BK in
-  air) lane=default stamp="mtld3d-conformance: lane default" ;;
-  msl) lane=msl stamp="mtld3d-conformance: lane msl (shader.backend=msl)" ;;
-  *) echo "mtld3d-conformance: D3D9_BACKEND=$BK: air or msl" >&2; exit 2 ;;
+BK=${D3D9_BACKEND:-air} RT=${D3D9_RUNTIME:-mtld3d}
+case $RT/$BK in
+  mtld3d/air) lane=default stamp="mtld3d-conformance: lane default" ;;
+  mtld3d/msl) lane=msl stamp="mtld3d-conformance: lane msl (shader.backend=msl)" ;;
+  core/air) lane=core stamp="mtld3d-conformance: lane core (runtime.mode=core)" ;;
+  core/*) echo "mtld3d-conformance: D3D9_RUNTIME=core takes the default backend lane only" >&2; exit 2 ;;
+  mtld3d/*) echo "mtld3d-conformance: D3D9_BACKEND=$BK: air or msl" >&2; exit 2 ;;
+  *) echo "mtld3d-conformance: D3D9_RUNTIME=$RT: mtld3d or core" >&2; exit 2 ;;
 esac
 echo "$stamp"
 APP="$B/wine-arm64/wine.app"
@@ -70,19 +79,38 @@ OUT="$B/mtld3d-conformance/run-$lane.txt"
 K="$B/mtld3d-conformance/caches-$lane"
 rm -rf "$K"; mkdir -p "$K"
 [ "$BK" = air ] || export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}shader.backend=msl"  # the runner sets only MTLD3D_CONFIG
+# runner <args...>: D3D9's conformance runner over the x64 tests (arm64x leg).
+runner() {
+  ( cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/conformance" \
+    cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-conformance -- --wine "$R/bin/wine" \
+    --wineserver "$R/bin/wineserver" --assets "$T/tests/d3d9/conformance" \
+    --tests-wine-version "$("$R/bin/wine" --version)" --arch arm64x --exe "$EXE" "$@" )
+}
+if [ "$RT" = core ]; then
+  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}runtime.mode=core"
+  P="$B/mtld3d-conformance/proof-core"
+  rm -rf "$P"; mkdir -p "$P/logs"
+  DXMT_CONFIG="$DXMT_CONFIG;log.dir=Z:$P/logs" runner --only stateblock --log info > "$P/run.txt" 2>&1 || true
+  if /usr/bin/grep -rq 'encoder host: pe' "$P/logs" && /usr/bin/grep -rqF 'mtl facade: winemetal.dll (WMTUnixCall)' \
+    "$P/logs" && ! /usr/bin/grep -rq 'encoder host: unix' "$P/logs"; then
+    echo "conformance: runtime core (proof run: $P)"
+  else
+    echo "conformance: FAIL: the core lane's proof run shows no in-process runtime ($P)"
+    proof=fail
+  fi
+fi
 set -- --keep-shader-cache "$K" "$@"
 echo "$stamp" > "$OUT"
-( cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/conformance" \
-  cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-conformance -- --wine "$R/bin/wine" \
-  --wineserver "$R/bin/wineserver" --assets "$T/tests/d3d9/conformance" \
-  --tests-wine-version "$("$R/bin/wine" --version)" --arch arm64x --exe "$EXE" "$@" ) >> "$OUT" 2>&1 || status=$?
+runner "$@" >> "$OUT" 2>&1 || status=$?
 "$R/bin/wineserver" -k > /dev/null 2>&1 || true
 sed 1d "$OUT"
 # The runner fails on any new failing site; the triaged ones don't fail this run. Each subtest's line names it
 # (<leg>/<subtest> ... REGRESSION), its sites follow, indented.
 if [ $status -ne 0 ]; then
-  left=$(awk -v triaged="$ROOT/dxmt/mtld3d-triaged.txt" '
-    BEGIN { while ((getline l < triaged) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); ok[f[1] " " f[2]] = 1 } }
+  core=; [ "$RT" = core ] && core="$ROOT/dxmt/mtld3d-triaged-core.txt"
+  left=$(awk -v triaged="$ROOT/dxmt/mtld3d-triaged.txt" -v core="$core" '
+    BEGIN { while ((getline l < triaged) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); ok[f[1] " " f[2]] = 1 }
+            if (core != "") while ((getline l < core) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); ok[f[1] " " f[2]] = 1 } }
     /^[a-z0-9_+@-]+\/[a-z0-9]+ / { sub_ = $1; if ($0 ~ /current\(failed=[0-9]+ crash=1\)/ && $0 !~ /baseline\([^)]*crash=1\)/) print sub_ " crash"; next }
     /^  [a-z0-9_]+\.c:[0-9]+ .*REGRESSION/ { if (!((sub_ " " $1) in ok)) print sub_ " " $1 }
   ' "$OUT")
@@ -114,4 +142,5 @@ else
 fi
 if [ -z "$line" ]; then echo "conformance: FAIL: no kinds line from emit_corpus over $K"; status=1
 elif [ -n "$miss" ]; then echo "conformance: FAIL: kinds: $miss"; status=1; fi
+[ "${proof:-}" != fail ] || status=1
 exit $status

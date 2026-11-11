@@ -14,6 +14,9 @@
 # default lane, which sets none. Both keep
 # caches/<leg>-<subtest>.bin, the conformance runs' shader caches, and stamp conf-<leg>.txt's first line with the lane. The 32-bit rows run under old WoW64 (the image's default: the i686
 # mtld3d.so and winemetal.so), or new WoW64 when the share's wow64 file says new (d3d9-gate.sh MN_WOW64=new).
+# The share's runtime file "core" (DXMTRS C4a) sets runtime.mode=core (MTLD3D_CONFIG for d3d9_triangle, DXMT_CONFIG for
+# the conformance runs): each triangle launch logs to logs/<row>, and each conformance leg first runs stateblock alone
+# with --log info into logs/conf-proof-<leg> (the runner silences the logs), the core lane's proof.
 export PATH=/opt/mn-wine/bin:$PATH WINEDEBUG=-all DISPLAY=:0
 [ "$(cat /mnt/share/d3d9/wow64 2> /dev/null)" != new ] || export WINEARCH=wow64
 export WINEDLLOVERRIDES="mscoree,mshtml="  # as MacNeutron's prefixes: no Mono or Gecko prompt waiting on Xvfb
@@ -26,8 +29,15 @@ if [ "$(cat /mnt/share/d3d9/backend 2> /dev/null)" = msl ]; then
   export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}shader.backend=msl"  # the runner sets only MTLD3D_CONFIG
   stamp="mtld3d-conformance: lane msl (shader.backend=msl)"
 fi
+RT=$(cat /mnt/share/d3d9/runtime 2> /dev/null)
+if [ "$RT" = core ]; then
+  MTLD3D_CONFIG="$MTLD3D_CONFIG;runtime.mode=core"
+  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}runtime.mode=core"
+  stamp="mtld3d-conformance: lane core (runtime.mode=core)"
+fi
 Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
 for t in "$T"/unit/* "$T"/unit32/*; do  # unit32: i686, on the i686 winemetal.so (named 32-<crate>)
+  [ -f "$t" ] || continue  # the core lane ships none
   n=${t##*/} wm=$B/wm
   [ "${t%/*}" = "$T/unit" ] || n=32-$n wm=$B/wm/i386
   MTLD3D_WINEMETAL=$wm/winemetal.so LD_LIBRARY_PATH=$wm timeout -k 10 900 "$t" > "$O/unit-$n.txt" 2>&1
@@ -48,7 +58,9 @@ prefix() {  # prefix <dir>: a new prefix with mtld3d's test keys (no crash dialo
   timeout 20 wineserver -k
 }
 tri() {  # tri <exe> <name>
-  timeout -k 10 120 wine "$T/$1" < /dev/null > "$O/$2.raw" 2>&1
+  cfg=$MTLD3D_CONFIG
+  [ "$RT" != core ] || { mkdir -p "$O/logs/$2"; cfg="$cfg;log.dir=Z:$O/logs/$2"; }
+  MTLD3D_CONFIG=$cfg timeout -k 10 120 wine "$T/$1" < /dev/null > "$O/$2.raw" 2>&1
   echo "status $?" >> "$O/$2.raw"
   timeout 20 wineserver -k
   tr -d '\r' < "$O/$2.raw" > "$O/$2.txt"; rm -f "$O/$2.raw"
@@ -73,6 +85,14 @@ for lane in "x64 arm64x" "x86 i686-arm64"; do
   exe="$T/winetests/$1/d3d9_test.exe"
   # The cache goes beside the EXE, and the guest cannot write the share's test folder.
   mkdir -p "$O/exe/$1" && cp "$exe" "$O/exe/$1/" && exe="$O/exe/$1/d3d9_test.exe"
+  if [ "$RT" = core ]; then  # the proof run: stateblock alone, logged
+    mkdir -p "$O/logs/conf-proof-$1"
+    DXMT_CONFIG="$DXMT_CONFIG;log.dir=Z:$O/logs/conf-proof-$1" MTLD3D_CONFORMANCE_TIMEOUT_SECS=1200 "$T/mtld3d-conformance" \
+      --wine /opt/mn-wine/bin/wine --wineserver /opt/mn-wine/bin/wineserver --assets "$T/conformance" \
+      --tests-wine-version "$(cat "$T/tests-wine-version")" --arch "$2" --only stateblock --log info --exe "$exe" \
+      > "$O/conf-proof-$1.txt" 2>&1
+    timeout 20 wineserver -k
+  fi
   echo "$stamp" > "$O/conf-$1.txt"
   # The guest runs a subtest several times slower than macOS (FEX, the transport): 20 minutes each, not 3.
   MTLD3D_CONFORMANCE_TIMEOUT_SECS=1200 "$T/mtld3d-conformance" --wine /opt/mn-wine/bin/wine --wineserver /opt/mn-wine/bin/wineserver \

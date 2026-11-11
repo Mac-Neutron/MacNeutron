@@ -23,6 +23,11 @@
 # fixed-function, so the default lane must show air_ffvs and air_ffps records, and the msl lane ffvs and ffps records
 # and no air_* record at all (programmable kinds are dxmt/mtld3d-conformance.sh's). The verdict line is
 # "d3d9-check: ok" on the default lane and "d3d9-check: ok (msl)" on the msl lane.
+# D3D9_RUNTIME=core (DXMTRS C4a, the default backend lane only) runs every row under runtime.mode=core, D3D9's encoder
+# in d3d9.dll over winemetal.dll (a wine.app built with DXMT_D3D9_CORE=1): each launch logs to a folder of its own, which
+# must hold the in-process runtime's lines ("encoder host: pe", "mtl facade: winemetal.dll (WMTUnixCall)") and not
+# mtld3d.so's ("encoder host: unix"), lines the code that ran prints, not the switch. Its stamp is "d3d9-check: lane
+# core (runtime.mode=core)", its verdict "d3d9-check: ok (core)". D3D9_RUNTIME=mtld3d (the default) is the lanes above.
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -34,9 +39,15 @@ for e in "$EXE" "$DYN" "$ARM"; do [ -f "$e" ] || { echo "d3d9-check: no $e: run 
 [ -x "$CLI" ] || { echo "d3d9-check: no $CLI: run make build" >&2; exit 2; }
 WORK=${DXMT_CHECK_WORK:-$(mktemp -d "${TMPDIR:-/tmp}/macneutron-d3d9.XXXXXX")}
 fail=
-BK=${D3D9_BACKEND:-air} sfx=
+BK=${D3D9_BACKEND:-air} sfx= RT=${D3D9_RUNTIME:-mtld3d}
+case $RT/$BK in
+  mtld3d/*) ;;
+  core/air) sfx=" (core)"; echo "d3d9-check: lane core (runtime.mode=core)" ;;
+  core/*) echo "d3d9-check: D3D9_RUNTIME=core takes the default backend lane only" >&2; exit 2 ;;
+  *) echo "d3d9-check: D3D9_RUNTIME=$RT: mtld3d or core" >&2; exit 2 ;;
+esac
 case $BK in
-  air) echo "d3d9-check: lane default" ;;
+  air) [ "$RT" = core ] || echo "d3d9-check: lane default" ;;
   msl) sfx=" (msl)"; echo "d3d9-check: lane msl (shader.backend=msl)" ;;
   *) echo "d3d9-check: D3D9_BACKEND=$BK: air or msl" >&2; exit 2 ;;
 esac
@@ -48,7 +59,12 @@ export MTLD3D_CONFIG="${MTLD3D_CONFIG:+$MTLD3D_CONFIG;}log.dir=Z:$WORK/mtld3d-lo
 # launch <tool> <compat> <name> [arg]: d3d9_triangle.exe (or $PROG) [arg] through <tool>'s launcher in the prefix of <compat>,
 # killed after 120 s; its lines in $WORK/<name>.txt. MACNEUTRON_VM=0: the macOS path, whatever VM folder this Mac has.
 launch() {
-  env STEAM_COMPAT_DATA_PATH="$WORK/compat/$2" SteamAppId=0 MACNEUTRON_VM=0 MACNEUTRON_GRAPHICS=dxmt \
+  cfg=$MTLD3D_CONFIG
+  if [ "$RT" = core ]; then
+    mkdir -p "$WORK/mtld3d-logs/$3"
+    cfg="$cfg;log.dir=Z:$WORK/mtld3d-logs/$3;runtime.mode=core"
+  fi
+  env MTLD3D_CONFIG="$cfg" STEAM_COMPAT_DATA_PATH="$WORK/compat/$2" SteamAppId=0 MACNEUTRON_VM=0 MACNEUTRON_GRAPHICS=dxmt \
     MACNEUTRON_NO_STEAM_BRIDGE=1 MACNEUTRON_NO_METALFX=1 \
     "$WORK/$1/bin/macneutron" launch waitforexitandrun "${PROG:-$EXE}" ${4:+"$4"} > "$WORK/$3.out" 2>&1 &
   pid=$!
@@ -56,6 +72,15 @@ launch() {
   wait "$pid" || true
   { kill "$dog" && wait "$dog"; } 2> /dev/null || true
   tr -d '\r' < "$WORK/$3.out" > "$WORK/$3.txt"
+  [ "$RT" = core ] || return 0
+  # The core lane's proof, from the code that ran: the in-process runtime's lines in this launch's logs, none of mtld3d.so's.
+  d="$WORK/mtld3d-logs/$3"
+  if /usr/bin/grep -rq 'encoder host: pe' "$d" && /usr/bin/grep -rqF 'mtl facade: winemetal.dll (WMTUnixCall)' "$d" \
+    && ! /usr/bin/grep -rq 'encoder host: unix' "$d"; then
+    echo "d3d9-check: $3: runtime core"
+  else
+    echo "d3d9-check: $3: no in-process runtime in $d"; fail="$fail $3-runtime"
+  fi
 }
 # check <name> [rows]: the rows (default the four) ok, else each missing one named.
 check() {

@@ -14,7 +14,12 @@
 # fixed-function records). Each leg's runner output, stamped with the lane, is kept as
 # vm-work/d3d9-conf/conf-<x64|x86>-<old|new>-<default|msl>.txt (dxmt/d3d9-conf-compare.sh's inputs).
 # Prints a line a check; exits 1 on a FAIL. The 32-bit rows run under old WoW64, the image's default, or with
-# MN_WOW64=new under new WoW64.
+# MN_WOW64=new under new WoW64. D3D9_RUNTIME=core (DXMTRS C4a, with the default backend) is a third lane, "core"
+# (the share's runtime file): runtime.mode=core in the guest, D3D9's encoder in d3d9.dll over winemetal.dll (an image
+# built with DXMT_D3D9_CORE=1), no mtld3d.so unit tests; the key is checked in the guest d3d9.dlls too, and every
+# triangle row's logs and each leg's conformance proof run (stateblock with logs) must hold the in-process runtime's
+# lines ("encoder host: pe", "mtl facade: winemetal.dll (WMTUnixCall)", "page boxes: pages from the unix side") and not
+# mtld3d.so's ("encoder host: unix"). Its outputs are conf-<x64|x86>-<old|new>-core.txt.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -22,13 +27,20 @@ W=$B/vm-work
 T=$B/wine-arm64-src/dxmt
 S=$W/share/d3d9 G=$W/share/traces/d3d9
 fail=0
-BK=${D3D9_BACKEND:-air}
-case $BK in
-  air) lane=default ;;
-  msl) lane=msl ;;
-  *) echo "FAIL D3D9_BACKEND=$BK: air or msl"; exit 2 ;;
+BK=${D3D9_BACKEND:-air} RT=${D3D9_RUNTIME:-mtld3d}
+case $RT/$BK in
+  mtld3d/air) lane=default ;;
+  mtld3d/msl) lane=msl ;;
+  core/air) lane=core ;;
+  core/*) echo "FAIL D3D9_RUNTIME=core takes the default backend lane only"; exit 2 ;;
+  mtld3d/*) echo "FAIL D3D9_BACKEND=$BK: air or msl"; exit 2 ;;
+  *) echo "FAIL D3D9_RUNTIME=$RT: mtld3d or core"; exit 2 ;;
 esac
-echo "d3d9-gate: lane $lane$([ $lane = msl ] && echo ' (shader.backend=msl)')"
+case $lane in
+  msl) echo "d3d9-gate: lane msl (shader.backend=msl)" ;;
+  core) echo "d3d9-gate: lane core (runtime.mode=core)" ;;
+  *) echo "d3d9-gate: lane $lane" ;;
+esac
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', want '$3'"; fail=1; fi; }
 # D3D9_GATE_TRACES=<folder>: no build and no run, the checks on a saved run's traces (a copy of $G).
 if [ -n "${D3D9_GATE_TRACES:-}" ]; then
@@ -37,15 +49,18 @@ if [ -n "${D3D9_GATE_TRACES:-}" ]; then
 else
   # The translator key is one string in the host's and both guest arches' mtld3d.so (the guest ones staged by
   # guest-stages.sh, built before this run), or a guest AIR record would carry a key the Mac never writes.
-  key=$(cat "$B/wine-arm64/wine.app/Contents/Resources/DXMT/translator" 2> /dev/null) kr=
+  key=$(cat "$B/wine-arm64/wine.app/Contents/Resources/DXMT/translator" 2> /dev/null) kr= pe=
+  # The core lane's encoder is d3d9.dll's: its key, in both guest machines' d3d9.dll.
+  [ "$RT" = core ] && pe="$W/dxmt-guest/x86_64-windows/d3d9.dll $W/dxmt-guest/i386-windows/d3d9.dll"
   for so in "$W/dxmt-guest/x86_64-unix/mtld3d.so" "$W/dxmt-guest/i386-unix/mtld3d.so" \
-    "$B/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/mtld3d.so"; do
+    "$B/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/mtld3d.so" $pe; do
     n=$(/usr/bin/grep -c "$key" "$so" 2> /dev/null); { [ -n "$key" ] && [ "${n:-0}" -ge 1 ]; } || kr="$kr ${so#$B/}"
   done
   check "key guest=host" "${kr:-ok}" ok
   rm -rf "$S"; mkdir -p "$S/unit" "$S/unit32" "$S/winetests/x64" "$S/winetests/x86"
   echo "${MN_WOW64:-old}" > "$S/wow64"
   echo "$lane" > "$S/backend"
+  echo "$RT" > "$S/runtime"
   # The Linux unit tests (release profile, as their macOS runs), x86_64 and i686 (old WoW64's, on the i686
   # winemetal.so), and the runner; each test binary under its crate's name. DXMTRS's tools/linux-cargo.sh, on the
   # builder's sysroot of each arch (vm/sysroot/fetch.sh), into build/d3d9-cargo/gate-<arch>.
@@ -55,10 +70,11 @@ else
   export PATH MTLD3D_RUST MTLD3D_LLVM_MINGW="$LM"
   for a in x86_64 i686; do
     case $a in x86_64) u=$S/unit ;; *) u=$S/unit32 ;; esac
+    [ "$RT" = core ] && [ $a = i686 ] && continue  # the core lane runs no mtld3d.so unit tests (the runner below)
     MTLD3D_SYSROOT=$(sh "$ROOT/vm/sysroot/fetch.sh" $a 2>> "$W/d3d9-gate-build.log") \
       || { echo "FAIL the $a sysroot: see $W/d3d9-gate-build.log"; exit 1; }
     export MTLD3D_SYSROOT
-    CARGO_TARGET_DIR=$B/d3d9-cargo/gate-$a MTLD3D_LINUX=$a sh "$T/tools/linux-cargo.sh" test --release --no-run \
+    [ "$RT" = core ] || CARGO_TARGET_DIR=$B/d3d9-cargo/gate-$a MTLD3D_LINUX=$a sh "$T/tools/linux-cargo.sh" test --release --no-run \
       --message-format=json -p mtld3d-shared -p mtld3d-unix -p mtld3d-mtl 2>> "$W/d3d9-gate-build.log" | python3 -I -c '
 import json, shutil, sys
 for line in sys.stdin:
@@ -99,6 +115,17 @@ for r in tri64-fresh tri32-fresh tri64-updated tri32-updated; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
+# core: runtime <folder>: the in-process runtime's lines in a launch's logs, none of mtld3d.so's (the code that ran
+# prints them, not the switch).
+runtime() {
+  /usr/bin/grep -rq 'encoder host: pe' "$1" 2> /dev/null && /usr/bin/grep -rqF 'mtl facade: winemetal.dll (WMTUnixCall)' "$1" &&
+    /usr/bin/grep -rqF 'page boxes: pages from the unix side' "$1" && ! /usr/bin/grep -rq 'encoder host: unix' "$1" && echo ok
+}
+if [ "$RT" = core ]; then
+  for r in tri64-fresh tri32-fresh tri64-updated tri32-updated conf-proof-x64 conf-proof-x86; do
+    check "$r runtime core" "$(runtime "$G/logs/$r")" ok
+  done
+fi
 # Without the markers d3d9.dll's import of mtld3d.dll isn't found: the reason run-game.sh updates such a prefix.
 for r in tri64-nomarker tri32-nomarker; do
   check "$r fails without the marker" "$(/usr/bin/grep -c '^d3d9 module ok' "$G/$r.txt" 2> /dev/null)" 0
@@ -127,8 +154,10 @@ for want in "$w1" "$w2" "$w3" "$w4"; do
 done
 # A lane's new failing sites outside dxmt/mtld3d-triaged.txt (dxmt/mtld3d-conformance.sh's rule), "none" if none.
 untriaged() {
-  left=$(awk -v triaged="$ROOT/dxmt/mtld3d-triaged.txt" '
-    BEGIN { while ((getline l < triaged) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); ok[f[1] " " f[2]] = 1 } }
+  core=; [ "$RT" = core ] && core="$ROOT/dxmt/mtld3d-triaged-core.txt"  # the core lane's known sites too (C4-7)
+  left=$(awk -v triaged="$ROOT/dxmt/mtld3d-triaged.txt" -v core="$core" '
+    BEGIN { while ((getline l < triaged) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); ok[f[1] " " f[2]] = 1 }
+            if (core != "") while ((getline l < core) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); ok[f[1] " " f[2]] = 1 } }
     /^[a-z0-9_+@-]+\/[a-z0-9]+ / { sub_ = $1; next }
     /^  [a-z0-9_]+\.c:[0-9]+ .*REGRESSION/ { if (!((sub_ " " $1) in ok)) printf "%s %s ", sub_, $1 }
   ' "$G/conf-$1.txt" 2> /dev/null)
@@ -182,6 +211,6 @@ for lp in x64:arm64x x86:i686-arm64; do
   fi
   check "$BK records $leg" "$([ -n "$line" ] && [ -z "$miss" ] && echo ok || echo "none or missing: ${miss:-no kinds line}")" ok
 done
-sfx=; [ "$BK" = air ] || sfx=" ($BK)"
+sfx=; [ "$BK" = air ] || sfx=" ($BK)"; [ "$RT" = core ] && sfx=" (core)"
 [ $fail -eq 0 ] && echo "d3d9 gate: ok$sfx" || echo "d3d9 gate: FAIL"
 exit $fail
