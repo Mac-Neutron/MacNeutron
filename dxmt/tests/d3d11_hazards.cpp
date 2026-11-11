@@ -4,6 +4,9 @@
 //        it as SRV, a CopyResource blit, and a CS reading it as SRV.
 //     2) rt-read:   1024x1024 R32_UINT render target written by a 256-loop PS and immediately read as a PS SRV.
 //     3) uav:       two ordered UAV-writing compute dispatches on the same buffer without an intervening SRV rebind.
+//   Run only when named (not in "all"), printing "lane64: ok" or "lane64: FAIL got <v> want <w>":
+//     lane64:    a render pass rewriting a target last written 128 ids earlier while reading one written 64 ids
+//                earlier (DXMTRS deptrack's missed fence wait, fixed in DXMTRS 1d3fa95b).
 #include "d3d11_common.hpp"
 
 static bool want_mode(int argc, char **argv, const char *name, const char *num) {
@@ -183,6 +186,67 @@ int main(int argc, char **argv) {
 
         uav->Release();
         ubuf->Release();
+    }
+
+    bool lane64 = false;
+    for (int i = 2; i < argc; i++) lane64 |= !strcmp(argv[i], "lane64");
+    if (lane64) {
+        // Encoder ids (DXMTRS core): a render pass takes 2 (vertex half, fragment half), a clear/blit/compute pass 1,
+        // and merged passes keep theirs. Every draw below goes to another target than its neighbours (the optimizer
+        // merges only passes with the same targets), and no clear or copy runs before the readback. Checked in DXMTRS
+        // (encoder/pass.rs begin, d3d11 context/encode.rs): a render pass opens only on a draw, loads its targets
+        // (no clear), and a texture created without initial data gets no pass. So with A's ids a (vertex) and
+        // fA = a+1 (fragment):
+        //   A: a, fA            31 fillers: a+2 .. a+63 (2 each)
+        //   B: a+64, fA+64      31 fillers: a+66 .. a+127
+        //   R: a+128, fA+128
+        // R's fragment half rewrites X (last written by A, 128 ids back) and reads T (written by B, exactly 64 ids
+        // back): the pattern that got no fence wait on B before DXMTRS 1d3fa95b. Smoke, not proof: it passes when
+        // B happens to finish before R reads T, so only DXMTRS's host-side deptrack test is conclusive.
+        constexpr UINT XS = 4, FILL = 31;
+        ID3D11Texture2D *x = dev.Tex2D(XS, XS, DXGI_FORMAT_R32_UINT, D3D11_BIND_RENDER_TARGET);
+        ID3D11RenderTargetView *x_rtv = dev.RTV(x);
+        ID3D11Texture2D *t =
+            dev.Tex2D(BIG, BIG, DXGI_FORMAT_R32_UINT, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+        ID3D11RenderTargetView *t_rtv = dev.RTV(t);
+        ID3D11ShaderResourceView *t_srv = dev.SRV(t);
+        ID3D11Texture2D *fill[2 * FILL];
+        ID3D11RenderTargetView *fill_rtv[2 * FILL];
+        for (UINT i = 0; i < 2 * FILL; i++) {
+            fill[i] = dev.Tex2D(1, 1, DXGI_FORMAT_R32_UINT, D3D11_BIND_RENDER_TARGET);
+            fill_rtv[i] = dev.RTV(fill[i]);
+        }
+
+        dev.Draw(quad_vs, ps_write, x_rtv, XS, XS);                                       // A
+        for (UINT i = 0; i < FILL; i++) dev.Draw(quad_vs, ps_write, fill_rtv[i], 1, 1);
+        dev.Draw(quad_vs, ps_write, t_rtv, BIG, BIG);                                    // B: the 256-loop PS
+        for (UINT i = FILL; i < 2 * FILL; i++) dev.Draw(quad_vs, ps_write, fill_rtv[i], 1, 1);
+        ctx->PSSetShaderResources(0, 1, &t_srv);
+        dev.Draw(quad_vs, ps_read, x_rtv, XS, XS);                                       // R: X = T's 16x16 sums
+        ID3D11ShaderResourceView *null_srv = nullptr;
+        ctx->PSSetShaderResources(0, 1, &null_srv);
+
+        std::vector<uint32_t> got = As<uint32_t>(dev.Read(x, 0, XS * 4, XS));
+        uint32_t bad_got = 0, bad_want = 0;
+        bool ok = true;
+        for (UINT py = 0; py < XS && ok; py++)
+            for (UINT px = 0; px < XS && ok; px++) {
+                uint32_t want = 0;
+                for (UINT y = 0; y < 16; y++)
+                    for (UINT xx = 0; xx < 16; xx++) want += expected_texel(px * 16 + xx, py * 16 + y, 7u);
+                if (got[py * XS + px] != want) ok = false, bad_got = got[py * XS + px], bad_want = want;
+            }
+        if (ok)
+            printf("lane64: ok\n");
+        else
+            printf("lane64: FAIL got %u want %u\n", bad_got, bad_want);
+
+        for (UINT i = 0; i < 2 * FILL; i++) fill_rtv[i]->Release(), fill[i]->Release();
+        t_srv->Release();
+        t_rtv->Release();
+        t->Release();
+        x_rtv->Release();
+        x->Release();
     }
 
     uav2_cs->Release();
