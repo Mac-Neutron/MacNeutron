@@ -87,6 +87,14 @@ launch() {
     else
       echo "d3d9-check: $3: no arm64 fallback in $d"; fail="$fail $3-runtime"
     fi
+  elif [ "$3" = dynamic ]; then
+    # d3d9_dynamic.exe makes no device (Direct3DCreate9 through GetProcAddress only): the config's mode, no fallback.
+    if /usr/bin/grep -rqF 'config: runtime.mode = core' "$d" && ! /usr/bin/grep -rqF "$enc" "$d" \
+      && ! /usr/bin/grep -rqF 'carries no core runtime' "$d"; then
+      echo "d3d9-check: $3: runtime core (no device)"
+    else
+      echo "d3d9-check: $3: no core runtime in $d"; fail="$fail $3-runtime"
+    fi
   elif /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d" && ! /usr/bin/grep -rqF "$enc" "$d"; then
     echo "d3d9-check: $3: runtime core"
   else

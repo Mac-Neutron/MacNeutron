@@ -49,11 +49,11 @@ if [ -n "${D3D9_GATE_TRACES:-}" ]; then
 else
   # The translator key is one string in the host's and both guest arches' mtld3d.so (the guest ones staged by
   # guest-stages.sh, built before this run), or a guest AIR record would carry a key the Mac never writes.
-  key=$(cat "$B/wine-arm64/wine.app/Contents/Resources/DXMT/translator" 2> /dev/null) kr= pe=
-  # The core lane's encoder is d3d9.dll's: its key, in both guest machines' d3d9.dll.
-  [ "$RT" = core ] && pe="$W/dxmt-guest/x86_64-windows/d3d9.dll $W/dxmt-guest/i386-windows/d3d9.dll"
+  # The core lane (C4a) writes no AIR records (its pipelines live as long as the device), so it carries no key yet;
+  # d3d9.dll joins this list when the core's cache does (C4b).
+  key=$(cat "$B/wine-arm64/wine.app/Contents/Resources/DXMT/translator" 2> /dev/null) kr=
   for so in "$W/dxmt-guest/x86_64-unix/mtld3d.so" "$W/dxmt-guest/i386-unix/mtld3d.so" \
-    "$B/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/mtld3d.so" $pe; do
+    "$B/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/mtld3d.so"; do
     n=$(/usr/bin/grep -c "$key" "$so" 2> /dev/null); { [ -n "$key" ] && [ "${n:-0}" -ge 1 ]; } || kr="$kr ${so#$B/}"
   done
   check "key guest=host" "${kr:-ok}" ok
