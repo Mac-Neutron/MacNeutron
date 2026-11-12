@@ -892,6 +892,14 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   environment): core CPU 1.72 ms a frame against mtld3d's 1.90 (-9.6%) and C4a's 3.42 (-50%); the VM's guest rows show
   core +31% (x64) and +47% (x86) over mtld3d, whose guest presents bypass the host presenter: an open finding for C4c.
   i686 address space under core stays below mtld3d's.
+  C4b-2 done 2026-11-12 at DXMTRS main 162685bd (162685bdd23db6f30b2186b936c7f25bf35cc491), which MacNeutron pins:
+  programmable SM1-3 draws on the core runtime. `PipelineKey` (mtld3d-core) keys each stage by its fixed-function key or
+  its exact tokens and the layout by its declaration; vs_1_1-3_0 and ps_1_x-3_0 with float, int and bool constants and
+  relative addressing, DrawPrimitive, DrawIndexedPrimitive, their UP forms and fans, colour write masks, wireframe, cull,
+  viewport, clip planes, fog, alpha test and sRGB writes draw under core; samplers, blending, scissor, transformed
+  fixed-function, bump-env and texture-stage constants and an attribute crossing a UP stride still answer D3DERR_NOTAVAILABLE.
+  `d3d9_triangle shaders` (22 rows) gates every D3D9 lane. Probe (Mac x64): core CPU +31% (ff) and +23% (prog) a frame
+  over mtld3d, the cost of re-emitting PSO, viewport, rasterizer state and binds on every draw; dedup is C4d's.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
