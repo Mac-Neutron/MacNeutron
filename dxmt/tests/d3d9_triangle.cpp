@@ -1487,8 +1487,11 @@ static bool bumpRow(bool ff) {
     CK(SetTexture, 0, bump.p);
     CK(SetTexture, 1, t.p);
     const float one = 1.0f;
-    CK(SetTextureStageState, 1, D3DTSS_BUMPENVMAT00, *(const DWORD *)&one);
-    CK(SetTextureStageState, 1, D3DTSS_BUMPENVMAT11, *(const DWORD *)&one);
+    // The cascade's BUMPENVMAP reads the bump stage's matrix (0), texbem the destination stage's (1).
+    for (DWORD stage = 0; stage < 2; stage++) {
+        CK(SetTextureStageState, stage, D3DTSS_BUMPENVMAT00, *(const DWORD *)&one);
+        CK(SetTextureStageState, stage, D3DTSS_BUMPENVMAT11, *(const DWORD *)&one);
+    }
     Com<IDirect3DPixelShader9> ps;
     if (ff) {
         CK(SetTextureStageState, 0, D3DTSS_COLOROP, D3DTOP_BUMPENVMAP);
