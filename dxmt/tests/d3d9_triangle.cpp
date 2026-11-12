@@ -1698,8 +1698,9 @@ static bool rowTexVtx() {
     const Px px[] = {{64, 128, TGRN}, {192, 128, TRED}, {128, 20, BLUE}};
     return frames(BLUE, px, 3, [&] { return vtxDraw(l, 0.75f, 0.5f) && vtxDraw(r, 1.75f, 0.5f); });
 }
-// Three levels of red, green, yellow: texldl at level 1 reads green; MAXMIPLEVEL 2 moves it to yellow (through the
-// vertex LOD table: Metal applies no sampler clamp to an explicit level).
+// Three levels of red, green, yellow: texldl at level 1 reads green; MAXMIPLEVEL 2 moves it to yellow; and a
+// MIPMAPLODBIAS of 1 moves texldl's level 0 to green, which only the vertex LOD table carries (a Metal sampler has no
+// bias).
 static bool rowTexVtxLod() {
     Com<IDirect3DTexture9> t;
     CK(CreateTexture, 4, 4, 3, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &t.p, nullptr);
@@ -1715,7 +1716,13 @@ static bool rowTexVtxLod() {
     const Px one[] = {{128, 128, TGRN}}, two[] = {{128, 128, D3DCOLOR_XRGB(255, 255, 0)}};
     if (!frames(BLUE, one, 1, [&] { return vtxDraw(q, 0.5f, 0.5f, 0, 1); })) return false;
     CK(SetSamplerState, VS0, D3DSAMP_MAXMIPLEVEL, 2);
-    return frames(BLUE, two, 1, [&] { return vtxDraw(q, 0.5f, 0.5f, 0, 1); });
+    if (!frames(BLUE, two, 1, [&] { return vtxDraw(q, 0.5f, 0.5f, 0, 1); })) return false;
+    const float bias = 1.0f;
+    DWORD biasBits;
+    memcpy(&biasBits, &bias, 4);
+    CK(SetSamplerState, VS0, D3DSAMP_MAXMIPLEVEL, 0);
+    CK(SetSamplerState, VS0, D3DSAMP_MIPMAPLODBIAS, biasBits);
+    return frames(BLUE, one, 1, [&] { return vtxDraw(q, 0.5f, 0.5f, 0, 0); });
 }
 // Unbound vertex slots read opaque black: a 2D s0 (its colour, left) and a cube s1 (its alpha as the colour, right).
 static bool rowTexVtxBlack() {
