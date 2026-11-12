@@ -884,6 +884,14 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   gates unchanged. Probe (Mac x64, 2000 draws a frame): wall -3%, CPU +55% a frame, unprofiled; the slice rebuilds its
   fixed-function tokens every draw (C4b keys pipelines first, then re-benches); the VM and 32-bit address-space probes are
   C4b's first VM job's exit criteria.
+  C4b-1 done 2026-11-11 at DXMTRS main 9ff1f787 (9ff1f787fbe9ebbd1eaf60b792b0efece89e48ac), which MacNeutron pins: one compiled-pipeline
+  cache in the core for every API. D3D11's compile scheduler and keyed cache move into dxmt-core
+  (`dxmt_core::scheduler`, `dxmt_core::pipeline_cache`: `Compiled<S>`, `PsoMap<K, S>`), D3D11 on them unchanged; the core
+  path's fixed-function pipelines key on the fixed-function state (`FfPipelineKey` in mtld3d-core) and build only on a
+  miss, still synchronously (async compile, draw skipping and prewarm are C4d's). Probe (Mac x64, 2000 draws a frame, one
+  environment): core CPU 1.72 ms a frame against mtld3d's 1.90 (-9.6%) and C4a's 3.42 (-50%); the VM's guest rows show
+  core +31% (x64) and +47% (x86) over mtld3d, whose guest presents bypass the host presenter: an open finding for C4c.
+  i686 address space under core stays below mtld3d's.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
