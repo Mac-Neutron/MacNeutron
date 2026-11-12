@@ -911,6 +911,20 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   `d3d9_triangle state` rows in every D3D9 lane on the Mac and in the VM, mutation REDs; default runtime, translator key
   and imports unchanged. C4b-3b (textures, samplers, uploads, the full fixed-function pipeline) and C4b-3c (targets,
   MRT, depth, scissor) follow.
+  C4b-3b done 2026-11-12 at DXMTRS main ed03918b (ed03918b3ffb71a9231ed8ba47ce9ea7265eb83a), which MacNeutron pins:
+  pixel-stage textures, samplers and the fixed-function pixel cascade on the core runtime. d3d9-rt keeps a texture store
+  (2D, cube, volume; view twins for sRGB and swizzles; generated mips) and a sampler cache with an opaque black fallback;
+  a texture is created and uploaded at its first sampling bind and re-uploaded from its staging (dirty masks and rects,
+  cube faces, volume depth, block-compressed extents, formats converted to A8R8G8B8) at record time, in blit passes that
+  merge between render passes, a staged-bytes budget committing the chunk early (32 MiB in 32-bit processes). The draw's
+  stage walk, the LOD table and the texture variant are mtld3d-core functions both runtimes share. Staging is the truth
+  under core: never dropped, never read back. Refused with D3DERR_NOTAVAILABLE, each by name: a depth texture sampled,
+  fetch4, a render-target texture sampled, a vertex texture, and a render-target or depth texture's LockRect (C4b-3d).
+  Gated: 33 `d3d9_triangle textures` rows (and the 32-bit tex-big256) in every D3D9 lane on the Mac and in the VM,
+  exactly the five refusals under core, mutation REDs; default runtime, translator key and imports unchanged. Probe
+  (Mac x64, textured): core CPU +22% a frame over mtld3d, C4b-2's re-emission cost. Wine's visual and device suites
+  create no core device yet: core's CreateDevice refuses an auto depth-stencil and multisampling until C4b-3d. C4b-3c
+  (transformed fixed-function, lights, vertex textures) and C4b-3d (targets, MRT, depth, MSAA, fetch4, scissor) follow.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
