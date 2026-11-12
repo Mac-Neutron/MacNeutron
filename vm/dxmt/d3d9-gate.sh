@@ -21,6 +21,8 @@
 # every mtld3d device) and none of the core's can't-present lines (no command library, no Metal view, a pipeline that
 # does not build: each still answers D3D_OK). Under core the guest runs no conformance (it
 # runs from C4b on) and the gate checks no shader-backend or kinds row: the triangle rows, the proof, the sm50 rows.
+# D3D9_BENCH=1 (no other value) adds the guest's d3d9_triangle --bench rows, each proven by its lane's line and kept as
+# vm-work/d3d9-bench/<row>-<old|new>-<lane>.txt by a real run only (vm/tests/d3d9-gate-bench-test.sh).
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -62,7 +64,7 @@ else
   echo "${MN_WOW64:-old}" > "$S/wow64"
   echo "$lane" > "$S/backend"
   echo "$RT" > "$S/runtime"
-  [ -z "${D3D9_BENCH:-}" ] || echo 1 > "$S/bench"
+  [ "${D3D9_BENCH:-}" != 1 ] || echo 1 > "$S/bench"
   # The Linux unit tests (release profile, as their macOS runs), x86_64 and i686 (old WoW64's, on the i686
   # winemetal.so), and the runner; each test binary under its crate's name. DXMTRS's tools/linux-cargo.sh, on the
   # builder's sysroot of each arch (vm/sysroot/fetch.sh), into build/d3d9-cargo/gate-<arch>.
@@ -128,7 +130,7 @@ if [ "$RT" = core ]; then
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
   done
 fi
-if [ -n "${D3D9_BENCH:-}" ]; then
+if [ "${D3D9_BENCH:-}" = 1 ]; then
   rows="bench-32-0 bench-32-600"; [ "${MN_WOW64:-old}" = new ] || rows="bench-64-0 bench-64-600 $rows"
   mkdir -p "$W/d3d9-bench"
   for r in $rows; do
@@ -136,7 +138,9 @@ if [ -n "${D3D9_BENCH:-}" ]; then
     else p=$(/usr/bin/grep -rqF 'texture versions: rename pool cap' "$G/logs/$r" 2> /dev/null \
       && ! /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$G/logs/$r" && echo ok); fi
     check "$r bench" "$(/usr/bin/grep -c '^d3d9 bench:' "$G/$r.txt" 2> /dev/null)/$(/usr/bin/grep -cx 'status 0' "$G/$r.txt" 2> /dev/null)/$p" 1/1/ok
-    /usr/bin/grep '^d3d9 bench:' "$G/$r.txt" > "$W/d3d9-bench/$r-${MN_WOW64:-old}-$lane.txt" 2> /dev/null
+    # A real run's rows only: a trace re-check never rewrites what a run saved.
+    [ -n "${D3D9_GATE_TRACES:-}" ] \
+      || /usr/bin/grep '^d3d9 bench:' "$G/$r.txt" > "$W/d3d9-bench/$r-${MN_WOW64:-old}-$lane.txt" 2> /dev/null
   done
 fi
 # Without the markers d3d9.dll's import of mtld3d.dll isn't found: the reason run-game.sh updates such a prefix.
