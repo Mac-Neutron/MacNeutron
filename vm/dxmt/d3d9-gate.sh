@@ -22,7 +22,12 @@
 # does not build: each still answers D3D_OK). Under core the guest runs no conformance (it
 # runs from C4b on) and the gate checks no shader-backend or kinds row: the triangle rows, the proof, the sm50 rows.
 # D3D9_BENCH=1 (no other value) adds the guest's d3d9_triangle --bench rows, each proven by its lane's line and kept as
-# vm-work/d3d9-bench/<row>-<old|new>-<lane>.txt by a real run only (vm/tests/d3d9-gate-bench-test.sh).
+# vm-work/d3d9-bench/<row>-<old|new>-<lane>.txt by a real run only (vm/tests/d3d9-gate-bench-test.sh): bench-* the
+# fixed-function draw (line "mode ff"), benchp-* the vs_2_0/ps_2_0 one (DXMTRS C4b2-12, "mode prog").
+# Every lane checks d3d9_triangle's 22 shader rows (DXMTRS C4b-2, C4b2-11) for x86-64 and i386 (shd64-fresh,
+# shd32-fresh; "shaders strict" under core: the first frame must match). Under core a launch's logs also hold no core
+# refusal line ("... is not implemented under runtime.mode = core"), but for the shd* rows exactly one, the crossing
+# row's (C4b2-8: its name says "crossing").
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -119,25 +124,42 @@ for r in tri64-fresh tri32-fresh tri64-updated tri32-updated; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
-# core: runtime <folder>: the core device's line in a launch's logs, none of mtld3d.so's encoder line (the code that ran
-# prints them, not the switch).
+for r in shd64-fresh shd32-fresh; do
+  for row in caps vs1 vs2 vs3 consti constb rel decl indexed fan bypass vsff alpha fog mask wire cull viewport clip \
+    srgb crossing getters; do
+    check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
+  done
+done
+# core: runtime <folder> [crossing]: the core device's line in a launch's logs, none of mtld3d.so's encoder line nor
+# of the core's can't-present lines (the code that ran prints them, not the switch), and no refusal line, or with
+# "crossing" exactly one, the crossing row's.
+refused='is not implemented under runtime.mode = core'
 runtime() {
+  n=$(/usr/bin/grep -rhF "$refused" "$1" 2> /dev/null | wc -l | tr -d ' ')
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
-    && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build' "$1" && echo ok
+    && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build' "$1" \
+    && if [ "${2:-}" = crossing ]; then
+      [ "$n" = 1 ] && /usr/bin/grep -rhF "$refused" "$1" | /usr/bin/grep -qi crossing
+    else [ "$n" = 0 ]; fi && echo ok
 }
 if [ "$RT" = core ]; then
   for r in tri64-fresh tri32-fresh tri64-updated tri32-updated; do
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
   done
+  for r in shd64-fresh shd32-fresh; do
+    check "$r runtime core" "$(runtime "$G/logs/$r" crossing)" ok
+  done
 fi
 if [ "${D3D9_BENCH:-}" = 1 ]; then
-  rows="bench-32-0 bench-32-600"; [ "${MN_WOW64:-old}" = new ] || rows="bench-64-0 bench-64-600 $rows"
+  rows="bench-32-0 bench-32-600 benchp-32-0 benchp-32-600"
+  [ "${MN_WOW64:-old}" = new ] || rows="bench-64-0 bench-64-600 benchp-64-0 benchp-64-600 $rows"
   mkdir -p "$W/d3d9-bench"
   for r in $rows; do
+    m=ff; case $r in benchp-*) m=prog ;; esac
     if [ "$RT" = core ]; then p=$(runtime "$G/logs/$r")
     else p=$(/usr/bin/grep -rqF 'texture versions: rename pool cap' "$G/logs/$r" 2> /dev/null \
       && ! /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$G/logs/$r" && echo ok); fi
-    check "$r bench" "$(/usr/bin/grep -c '^d3d9 bench:' "$G/$r.txt" 2> /dev/null)/$(/usr/bin/grep -cx 'status 0' "$G/$r.txt" 2> /dev/null)/$p" 1/1/ok
+    check "$r bench" "$(/usr/bin/grep -c "^d3d9 bench: mode $m " "$G/$r.txt" 2> /dev/null)/$(/usr/bin/grep -cx 'status 0' "$G/$r.txt" 2> /dev/null)/$p" 1/1/ok
     # A real run's rows only: a trace re-check never rewrites what a run saved.
     [ -n "${D3D9_GATE_TRACES:-}" ] \
       || /usr/bin/grep '^d3d9 bench:' "$G/$r.txt" > "$W/d3d9-bench/$r-${MN_WOW64:-old}-$lane.txt" 2> /dev/null

@@ -6,6 +6,8 @@
 #   tri<64|32>-<fresh|nomarker|updated>.txt  d3d9_triangle (x86-64 and i386) in a new prefix, again with mtld3d.dll's
 #                                markers removed from system32 and syswow64 (a prefix made before mtld3d), and
 #                                after run-game.sh's update of such a prefix
+#   shd<64|32>-fresh.txt          d3d9_triangle shaders (DXMTRS C4b-2's 22 shader rows; "shaders strict" under core),
+#                                right after tri32-fresh, 300 s each
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
@@ -18,8 +20,9 @@
 # the conformance runs): each triangle launch logs to logs/<row>, the core lane's proof, and no conformance runs (they
 # start with C4b).
 # The share's bench file (D3D9_BENCH=1, DXMTRS C4b-5): after the triangle rows, bench-<64|32>-<0|600>.txt, d3d9_triangle
-# --bench 2000 <frames> (0 frames first, then 600; the x86-64 rows only under old WoW64), each launch logging to
-# logs/<row> in both lanes.
+# --bench 2000 <frames> (0 frames first, then 600; the x86-64 rows only under old WoW64), and
+# benchp-<64|32>-<0|600>.txt, the same with "prog" (C4b2-12: a vs_2_0/ps_2_0 pair), each launch logging to logs/<row>
+# in both lanes.
 export PATH=/opt/mn-wine/bin:$PATH WINEDEBUG=-all DISPLAY=:0
 [ "$(cat /mnt/share/d3d9/wow64 2> /dev/null)" != new ] || export WINEARCH=wow64
 export WINEDLLOVERRIDES="mscoree,mshtml="  # as MacNeutron's prefixes: no Mono or Gecko prompt waiting on Xvfb
@@ -60,18 +63,20 @@ prefix() {  # prefix <dir>: a new prefix with mtld3d's test keys (no crash dialo
   wine reg add 'HKCU\Software\Wine\X11 Driver' /v EmulateModeset /d Y /f > /dev/null 2>&1
   timeout 20 wineserver -k
 }
-tri() {  # tri <exe> <name>
+tri() {  # tri <exe> <name> [timeout [args...]]: killed after <timeout> s (default 120)
+  exe=$1 name=$2 secs=${3:-120}
+  shift 2; [ $# -eq 0 ] || shift
   cfg=$MTLD3D_CONFIG
-  [ "$RT" != core ] || { mkdir -p "$O/logs/$2"; cfg="$cfg;log.dir=Z:$O/logs/$2"; }
-  MTLD3D_CONFIG=$cfg timeout -k 10 120 wine "$T/$1" < /dev/null > "$O/$2.raw" 2>&1
-  echo "status $?" >> "$O/$2.raw"
+  [ "$RT" != core ] || { mkdir -p "$O/logs/$name"; cfg="$cfg;log.dir=Z:$O/logs/$name"; }
+  MTLD3D_CONFIG=$cfg timeout -k 10 "$secs" wine "$T/$exe" "$@" < /dev/null > "$O/$name.raw" 2>&1
+  echo "status $?" >> "$O/$name.raw"
   timeout 20 wineserver -k
-  tr -d '\r' < "$O/$2.raw" > "$O/$2.txt"; rm -f "$O/$2.raw"
-  echo "guest: $2 $(grep -c '^d3d9 [a-z]* ok$' "$O/$2.txt") rows ok"
+  tr -d '\r' < "$O/$name.raw" > "$O/$name.txt"; rm -f "$O/$name.raw"
+  echo "guest: $name $(grep -c '^d3d9 [a-z0-9]* ok$' "$O/$name.txt") rows ok"
 }
-bench() {  # bench <exe> <row> <frames>: tri's launch with --bench 2000 <frames>, its logs in logs/<row> in both lanes
+bench() {  # bench <exe> <row> <frames> [mode]: tri's launch with --bench 2000 <frames> [mode], its logs in logs/<row>
   mkdir -p "$O/logs/$2"
-  MTLD3D_CONFIG="$MTLD3D_CONFIG;log.dir=Z:$O/logs/$2" timeout -k 10 600 wine "$T/$1" --bench 2000 "$3" < /dev/null > "$O/$2.raw" 2>&1
+  MTLD3D_CONFIG="$MTLD3D_CONFIG;log.dir=Z:$O/logs/$2" timeout -k 10 600 wine "$T/$1" --bench 2000 "$3" ${4:+"$4"} < /dev/null > "$O/$2.raw" 2>&1
   echo "status $?" >> "$O/$2.raw"
   timeout 20 wineserver -k
   tr -d '\r' < "$O/$2.raw" > "$O/$2.txt"; rm -f "$O/$2.raw"
@@ -80,6 +85,9 @@ bench() {  # bench <exe> <row> <frames>: tri's launch with --bench 2000 <frames>
 prefix /home/mn/d3d9
 tri d3d9_triangle.exe tri64-fresh
 tri d3d9_triangle32.exe tri32-fresh
+strict=; [ "$RT" != core ] || strict=strict  # the core compiles synchronously: the first frame must match
+tri d3d9_triangle.exe shd64-fresh 300 shaders $strict
+tri d3d9_triangle32.exe shd32-fresh 300 shaders $strict
 rm -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" "$WINEPREFIX/drive_c/windows/syswow64/mtld3d.dll"
 tri d3d9_triangle.exe tri64-nomarker  # Wine finds no builtin without its marker: these fail
 tri d3d9_triangle32.exe tri32-nomarker
@@ -91,9 +99,14 @@ timeout 20 wineserver -k
 tri d3d9_triangle.exe tri64-updated
 tri d3d9_triangle32.exe tri32-updated
 if [ -f "$T/bench" ]; then
-  if [ "$(cat "$T/wow64" 2> /dev/null)" != new ]; then bench d3d9_triangle.exe bench-64-0 0; bench d3d9_triangle.exe bench-64-600 600; fi
+  if [ "$(cat "$T/wow64" 2> /dev/null)" != new ]; then
+    bench d3d9_triangle.exe bench-64-0 0; bench d3d9_triangle.exe bench-64-600 600
+    bench d3d9_triangle.exe benchp-64-0 0 prog; bench d3d9_triangle.exe benchp-64-600 600 prog
+  fi
   bench d3d9_triangle32.exe bench-32-0 0
   bench d3d9_triangle32.exe bench-32-600 600
+  bench d3d9_triangle32.exe benchp-32-0 0 prog
+  bench d3d9_triangle32.exe benchp-32-600 600 prog
 fi
 [ "$RT" != core ] || exit 0  # no conformance under the core runtime in C4a
 for lane in "x64 arm64x" "x86 i686-arm64"; do

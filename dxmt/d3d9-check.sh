@@ -32,6 +32,10 @@
 # so mtld3d runs") and the encoder line. No shader-backend, kinds or conformance rows under core (C4b on). Its stamp is
 # "d3d9-check: lane core (runtime.mode=core)", its verdict "d3d9-check: ok (core)". D3D9_RUNTIME=mtld3d (the default)
 # is the lanes above.
+# Every lane also runs d3d9_triangle shaders (DXMTRS C4b-2's 22 shader rows, C4b2-11; "shaders strict" under core:
+# the first frame must match), its rows "shaders-<row>". Its launch's logs hold no core refusal line ("... is not
+# implemented under runtime.mode = core") in the mtld3d lanes, and under core exactly one, the crossing row's (C4b2-8:
+# its name says "crossing"), else "shaders-runtime".
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -60,50 +64,62 @@ cp "$EXE" "$DYN" "$WORK/progs/x64/" && cp "$ARM" "$WORK/progs/arm64/" \
   || { echo "d3d9-check: could not copy the programs to $WORK/progs" >&2; exit 1; }
 EXE=$WORK/progs/x64/$(basename "$EXE") DYN=$WORK/progs/x64/$(basename "$DYN") ARM=$WORK/progs/arm64/$(basename "$ARM")
 export MTLD3D_CONFIG="${MTLD3D_CONFIG:+$MTLD3D_CONFIG;}log.dir=Z:$WORK/mtld3d-logs${msl:+;shader.backend=msl}"
-# launch <tool> <compat> <name> [arg]: d3d9_triangle.exe (or $PROG) [arg] through <tool>'s launcher in the prefix of <compat>,
-# killed after 120 s; its lines in $WORK/<name>.txt. MACNEUTRON_VM=0: the macOS path, whatever VM folder this Mac has.
+# launch <tool> <compat> <name> [<secs> [arg...]]: d3d9_triangle.exe (or $PROG) [arg...] through <tool>'s launcher in
+# the prefix of <compat>, killed after <secs> (default 120); its lines in $WORK/<name>.txt. MACNEUTRON_VM=0: the macOS
+# path, whatever VM folder this Mac has.
 launch() {
+  tool=$1 compat=$2 name=$3 secs=${4:-120}
+  shift 3; [ $# -eq 0 ] || shift
   cfg=$MTLD3D_CONFIG
   if [ "$RT" = core ]; then
-    mkdir -p "$WORK/mtld3d-logs/$3"
-    cfg="$cfg;log.dir=Z:$WORK/mtld3d-logs/$3;runtime.mode=core"
+    mkdir -p "$WORK/mtld3d-logs/$name"
+    cfg="$cfg;log.dir=Z:$WORK/mtld3d-logs/$name;runtime.mode=core"
   fi
-  env MTLD3D_CONFIG="$cfg" STEAM_COMPAT_DATA_PATH="$WORK/compat/$2" SteamAppId=0 MACNEUTRON_VM=0 MACNEUTRON_GRAPHICS=dxmt \
+  env MTLD3D_CONFIG="$cfg" STEAM_COMPAT_DATA_PATH="$WORK/compat/$compat" SteamAppId=0 MACNEUTRON_VM=0 MACNEUTRON_GRAPHICS=dxmt \
     MACNEUTRON_NO_STEAM_BRIDGE=1 MACNEUTRON_NO_METALFX=1 \
-    "$WORK/$1/bin/macneutron" launch waitforexitandrun "${PROG:-$EXE}" ${4:+"$4"} > "$WORK/$3.out" 2>&1 &
+    "$WORK/$tool/bin/macneutron" launch waitforexitandrun "${PROG:-$EXE}" "$@" > "$WORK/$name.out" 2>&1 &
   pid=$!
-  ( sleep 120; kill "$pid" 2> /dev/null ) > /dev/null 2>&1 & dog=$!
+  ( sleep "$secs"; kill "$pid" 2> /dev/null ) > /dev/null 2>&1 & dog=$!
   wait "$pid" || true
   { kill "$dog" && wait "$dog"; } 2> /dev/null || true
-  tr -d '\r' < "$WORK/$3.out" > "$WORK/$3.txt"
+  tr -d '\r' < "$WORK/$name.out" > "$WORK/$name.txt"
   [ "$RT" = core ] || return 0
   # The core lane's proof, from the code that ran: the core device's line in this launch's logs and none of mtld3d.so's
   # encoder line; the native arm64 half has no core runtime (C4-15), so there the fallback warning and the encoder line.
-  d="$WORK/mtld3d-logs/$3"
+  d="$WORK/mtld3d-logs/$name"
   enc='texture versions: rename pool cap'
   # A core device that cannot present or draw logs one of these and still answers D3D_OK: none may appear.
   unpresented='nothing presents|d3d9 core: no Metal view|does not build'
-  if [ "$3" = arm64 ]; then
+  if [ "$name" = arm64 ]; then
     if /usr/bin/grep -rqF 'carries no core runtime, so mtld3d runs' "$d" && /usr/bin/grep -rqF "$enc" "$d" \
       && ! /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d"; then
-      echo "d3d9-check: $3: runtime mtld3d (the arm64 fallback)"
+      echo "d3d9-check: $name: runtime mtld3d (the arm64 fallback)"
     else
-      echo "d3d9-check: $3: no arm64 fallback in $d"; fail="$fail $3-runtime"
+      echo "d3d9-check: $name: no arm64 fallback in $d"; fail="$fail $name-runtime"
     fi
-  elif [ "$3" = dynamic ]; then
+  elif [ "$name" = dynamic ]; then
     # d3d9_dynamic.exe makes no device (Direct3DCreate9 through GetProcAddress only): the config's mode, no fallback.
     if /usr/bin/grep -rqF 'config: runtime.mode = core' "$d" && ! /usr/bin/grep -rqF "$enc" "$d" \
       && ! /usr/bin/grep -rqF 'carries no core runtime' "$d"; then
-      echo "d3d9-check: $3: runtime core (no device)"
+      echo "d3d9-check: $name: runtime core (no device)"
     else
-      echo "d3d9-check: $3: no core runtime in $d"; fail="$fail $3-runtime"
+      echo "d3d9-check: $name: no core runtime in $d"; fail="$fail $name-runtime"
     fi
   elif /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d" && ! /usr/bin/grep -rqF "$enc" "$d" \
-    && ! /usr/bin/grep -rqE "$unpresented" "$d"; then
-    echo "d3d9-check: $3: runtime core"
+    && ! /usr/bin/grep -rqE "$unpresented" "$d" && refusals_ok "$name" "$d"; then
+    echo "d3d9-check: $name: runtime core"
   else
-    echo "d3d9-check: $3: no core device in $d"; fail="$fail $3-runtime"
+    echo "d3d9-check: $name: no core device, or a refusal or can't-present line, in $d"; fail="$fail $name-runtime"
+    /usr/bin/grep -rhE "$refused|$unpresented" "$d" | head -5 | sed "s|^|d3d9-check: $name: |" || true
   fi
+}
+# refusals_ok <name> <folder>: the shaders launch's logs hold exactly one core refusal line, the crossing row's
+# (C4b2-8); the other launches are not held to it.
+refused='is not implemented under runtime.mode = core'
+refusals_ok() {
+  [ "$1" = shaders ] || return 0
+  [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 1 ] \
+    && /usr/bin/grep -rhF "$refused" "$2" | /usr/bin/grep -qi crossing
 }
 # check <name> [rows]: the rows (default the four) ok, else each missing one named.
 check() {
@@ -129,8 +145,15 @@ launch ours fresh fresh
 check fresh "module clear triangle present imports"
 PROG=$DYN; launch ours fresh dynamic; PROG=  # (an assignment before a function call outlives it in sh)
 check dynamic "module imports"
-launch ours fresh vsync vsync
+launch ours fresh vsync 120 vsync
 check vsync vsync
+strict=; [ "$RT" != core ] || strict=strict  # the core compiles synchronously: the first frame must match
+launch ours fresh shaders 300 shaders $strict
+check shaders "caps vs1 vs2 vs3 consti constb rel decl indexed fan bypass vsff alpha fog mask wire cull viewport clip
+  srgb crossing getters"
+if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
+  echo "d3d9-check: shaders: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
+fi
 PROG=$ARM; launch ours fresh arm64; PROG=
 check arm64
 P="$WORK/compat/fresh/pfx/drive_c/windows/system32/mtld3d.dll"
