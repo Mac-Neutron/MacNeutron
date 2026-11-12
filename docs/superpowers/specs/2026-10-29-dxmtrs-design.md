@@ -900,6 +900,17 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   fixed-function, bump-env and texture-stage constants and an attribute crossing a UP stride still answer D3DERR_NOTAVAILABLE.
   `d3d9_triangle shaders` (22 rows) gates every D3D9 lane. Probe (Mac x64): core CPU +31% (ff) and +23% (prog) a frame
   over mtld3d, the cost of re-emitting PSO, viewport, rasterizer state and binds on every draw; dedup is C4d's.
+  C4b-3a done 2026-11-12: Wine's stateblock test on the core runtime. API state (transforms, material, lights, stage,
+  sampler and scissor states, textures, stream sources and frequencies, indices, state blocks) and inert objects
+  (vertex/index buffers, 2D/cube/volume textures, additional swap chains: CPU staging only, no Metal object, their locks
+  refused until C4b-3b and C4c) are taken under core; SetRenderTarget binds a back buffer at index 0 (additional chains
+  alias the one back buffer); a core UP draw unbinds stream 0 and the indices; a fixed-function draw whose cascade reads
+  a bound texture is refused (FfTexture) until C4b-3b. Every mtld3d crossing reachable on a core device is guarded inside
+  the method that makes it (state-block Apply and teardown call them directly). Gated: conformance stateblock under the
+  core lane equals the default lane (executed 14738, 0 failing, 0 crashes, the runtime proven from the logs), 12
+  `d3d9_triangle state` rows in every D3D9 lane on the Mac and in the VM, mutation REDs; default runtime, translator key
+  and imports unchanged. C4b-3b (textures, samplers, uploads, the full fixed-function pipeline) and C4b-3c (targets,
+  MRT, depth, scissor) follow.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
