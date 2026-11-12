@@ -754,6 +754,7 @@ static void shaderRows(IDirect3DDevice9 *d, bool strict) {
     if (SUCCEEDED(hr))
         hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
     for (const auto &r : rows) {
+        if (!r.run) continue;  // a row of the other lanes (tex-big256: 32-bit only)
         why[0] = 0;
         bool ok;
         if (FAILED(hr)) ok = fail("GetRenderTarget/CreateOffscreenPlainSurface", hr);
@@ -1526,6 +1527,46 @@ static bool rowTexBig() {
     const Probe pr[] = {{0.5f, 0.5f, D3DCOLOR_XRGB(255, 0, 255)}};
     return probe2d(t.p, pr, 1);
 }
+// 32-bit lanes: 256 MiB of textures sampled in one frame (64 MANAGED 1024x1024 X8R8G8B8, 4 MiB each, each uploaded at
+// its first bind): a 32-bit core process's staged-bytes budget commits the chunk early (C4b3b-3); every cell shows its
+// own texture.
+static bool rowTexBig256() {
+    enum { N = 64 };
+    Com<IDirect3DTexture9> t[N];
+    for (int i = 0; i < N; i++) {
+        const DWORD c = D3DCOLOR_XRGB(i * 4, 255 - i * 4, 128);
+        if (!make2d(t[i], 1024, 1024, 1, D3DFMT_X8R8G8B8, 4, [c](int, int) { return c; })) return false;
+    }
+    Com<IDirect3DPixelShader9> ps;
+    if (!usePs(ps, K2D, 0, false) || !pointClamp(0)) return false;
+    static const int cells[8] = {0, 9, 18, 27, 36, 45, 54, 63};
+    Px px[8];
+    for (int k = 0; k < 8; k++)
+        px[k] = {cells[k] % 8 * 32 + 16, cells[k] / 8 * 32 + 16, D3DCOLOR_XRGB(cells[k] * 4, 255 - cells[k] * 4, 128)};
+    const bool ok = frames(BLUE, px, 8, [&] {
+        for (int i = 0; i < N; i++) {
+            TV3 a[4];
+            const float x = (float)(i % 8 * 32), y = (float)(i / 8 * 32);
+            tquad(a, x, y, x + 32, y + 32, 0.5f, 0.5f);
+            CK(SetTexture, 0, t[i].p);
+            if (!tdraw(a)) return false;
+        }
+        return true;
+    });
+    CK(SetTexture, 0, nullptr);
+    return ok;
+}
+// LockRect on a render-target texture, past the core's slice (C4b-3d's): D3DERR_NOTAVAILABLE under core (strict); in
+// the other lanes any answer but an abort (a lock that succeeds is unlocked).
+static bool rowTexRtLock() {
+    Com<IDirect3DTexture9> t;
+    CK(CreateTexture, 4, 4, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &t.p, nullptr);
+    D3DLOCKED_RECT lr = {};
+    const HRESULT hr = t.p->LockRect(0, &lr, nullptr, D3DLOCK_READONLY);
+    if (SUCCEEDED(hr)) t.p->UnlockRect(0);
+    if (strictMode && hr != D3DERR_NOTAVAILABLE) return fail("LockRect", hr);
+    return true;
+}
 // Released by the application while bound: the stage keeps it, the draw samples it.
 static bool rowTexRelease() {
     IDirect3DTexture9 *t = nullptr;
@@ -1606,7 +1647,8 @@ static void textureRows(IDirect3DDevice9 *d, bool strict) {
         {"tex-update", rowTexUpdate},   {"tex-autogen", rowTexAutogen}, {"tex-black", rowTexBlack},
         {"tex-bumpenv", rowTexBumpEnv}, {"tex-texbem", rowTexTexbem},   {"tex-big", rowTexBig},
         {"tex-release", rowTexRelease}, {"tex-depthtex", rowTexDepthTex}, {"tex-fetch4", rowTexFetch4},
-        {"tex-rttex", rowTexRtTex},     {"tex-vtx", rowTexVtx}};
+        {"tex-rttex", rowTexRtTex},     {"tex-vtx", rowTexVtx},         {"tex-rtlock", rowTexRtLock},
+        {"tex-big256", sizeof(void *) == 4 ? rowTexBig256 : nullptr}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))

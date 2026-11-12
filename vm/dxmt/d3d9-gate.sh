@@ -29,6 +29,8 @@
 # refusal line ("... is not implemented under runtime.mode = core"), but for the shd* rows exactly one, the crossing
 # row's (C4b2-8: its name says "crossing"). Every lane also checks d3d9_triangle state's 12 rows (DXMTRS C4b-3a,
 # st64-fresh, st32-fresh); under core their logs hold exactly those rows' three refusal lines.
+# Every lane also checks d3d9_triangle textures' 33 rows (DXMTRS C4b-3b, tx64-fresh, tx32-fresh), and tx32-fresh the
+# 32-bit-only tex-big256 (the staged-bytes budget); under core their logs hold exactly the five refused rows' lines.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -134,7 +136,8 @@ done
 for r in tx64-fresh tx32-fresh; do
   for row in tex-ps2d tex-ff tex-cascade tex-cube tex-volume tex-mips tex-address tex-filter tex-srgb tex-dxt1 tex-l8 \
     tex-a8 tex-a8l8 tex-r5g6b5 tex-a4r4g4b4 tex-r8g8b8 tex-lock tex-twodraws tex-dynamic tex-levelsurf tex-genmips \
-    tex-update tex-autogen tex-black tex-bumpenv tex-texbem tex-big tex-release tex-depthtex tex-fetch4 tex-rttex tex-vtx; do
+    tex-update tex-autogen tex-black tex-bumpenv tex-texbem tex-big tex-release tex-depthtex tex-fetch4 tex-rttex tex-vtx \
+    tex-rtlock $([ $r = tx32-fresh ] && echo tex-big256); do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
@@ -153,7 +156,8 @@ state_refusals='IDirect3DVertexBuffer9::Lock'
 texture_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture sampled)
 IDirect3DDevice9::Draw*PrimitiveUP (fetch4)
 IDirect3DDevice9::Draw*PrimitiveUP (a render-target texture sampled)
-IDirect3DDevice9::Draw*PrimitiveUP (a vertex shader declaring a sampler)'
+IDirect3DDevice9::Draw*PrimitiveUP (a vertex shader declaring a sampler)
+IDirect3DTexture9::LockRect (a render-target or depth texture)'
 runtime() {
   n=$(/usr/bin/grep -rhF "$refused" "$1" 2> /dev/null | wc -l | tr -d ' ')
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
