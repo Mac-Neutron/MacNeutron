@@ -12,7 +12,7 @@
 #                                strict" under core), after them, 120 s each
 #   tx<64|32>-fresh.txt           d3d9_triangle textures (DXMTRS C4b-3b's and C4b-3c's 38 rows; "textures strict"
 #                                under core), 240 s
-#   fx<64|32>-fresh.txt           d3d9_triangle fixed (DXMTRS C4b-3c's 30 rows of the fixed-function vertex stage;
+#   fx<64|32>-fresh.txt           d3d9_triangle fixed (DXMTRS C4b-3c's 31 rows of the fixed-function vertex stage;
 #                                "fixed strict" under core), 240 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg

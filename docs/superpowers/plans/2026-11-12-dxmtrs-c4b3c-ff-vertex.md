@@ -245,8 +245,11 @@ New: `FfState::ff_vs_rows` (pure, calls the existing fillers: no duplicate of th
 runtime's delta protocol) with one documented `assume_init` over rows initialised at allocation;
 `sampler_state::vertex_lod_table` (moved from the Unix draw, which calls it: no duplicate);
 `VsStageKey::Prog.sampler_kinds` (its wire form exists in `VS_SPEC_WIRE`); `TextureBind.stage`; the `fixed` mode and
-the `lit` bench. Removed: `CoreRefusal::TransformedFf`, `CoreRefusal::VertexTexture`, `DrawFlags::VS_SAMPLES`. A `Vec`
-per FF draw (C4b3c-2). No static, config key, wire field, dependency, derive or lint suppression. Gates: rust-check,
+the `lit` bench. Removed: `CoreRefusal::TransformedFf`, `CoreRefusal::VertexTexture`, `DrawFlags::VS_SAMPLES`. Two
+`Vec`s per FF draw (the rows, then their bytes: C4b3c-2). The vertex slots' sampler-row recipe (the state row, the
+texture's LOD in the spare state, `sample_unfiltered`) is `resolve`'s third copy of the front end's rule (the pixel
+arm's, `push_vertex_sampler_row`'s): one helper is C4d's, with the dedup that reshapes this code. No static, config
+key, wire field, dependency, derive or lint suppression. Gates: rust-check,
 d3d9-check, the VM d3d9 gate, conformance.
 
 ## Rulings

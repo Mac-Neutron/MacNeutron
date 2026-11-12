@@ -40,7 +40,7 @@
 # exactly its refusal line (refusals_ok), in the mtld3d lanes none. Every lane also runs d3d9_triangle textures (DXMTRS
 # C4b-3b's 33 rows of sampled textures and C4b-3c's five vertex-texture rows; "textures strict" under core), its rows
 # "textures-<row>"; under core its launch's logs hold exactly its four refused rows' lines. Every lane also runs
-# d3d9_triangle fixed (DXMTRS C4b-3c's 30 rows of the fixed-function vertex stage; "fixed strict" under core), its rows
+# d3d9_triangle fixed (DXMTRS C4b-3c's 31 rows of the fixed-function vertex stage; "fixed strict" under core), its rows
 # "fixed-<row>"; under core its launch's logs hold exactly its two refused rows' lines (a render-target and a depth
 # texture at a vertex sampler).
 #   d3d9-check.sh [<wine.app>]
@@ -190,7 +190,8 @@ check textures "tex-ps2d tex-ff tex-cascade tex-cube tex-volume tex-mips tex-add
 launch ours fresh fixed 240 fixed $strict
 check fixed "ff-xform ff-persp ff-rhwmix ff-viewchange ff-ambient ff-lightdefault ff-lightdir ff-lightpoint ff-lightspot
   ff-lightsparse ff-light8 ff-specular ff-matsrc ff-normalize ff-fogvertex ff-fogtable ff-texgen ff-tt ff-ttproj
-  ff-tcindex ff-tex ff-blend ff-blendidx ff-point ff-pointscale ff-clip ff-indexed ff-decl tex-vtxrt tex-vtxdepth"
+  ff-tcindex ff-tex ff-blend ff-blendidx ff-point ff-pointscale ff-clip ff-indexed ff-decl tex-vtxrt tex-vtxdepth
+  tex-vtxdepthfmt"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi

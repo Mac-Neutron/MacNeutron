@@ -30,9 +30,9 @@
 // and inert objects (transforms, material and lights, stage, sampler and scissor states, stream frequency, swap chains,
 // the back-buffer target switch, textures, a second device released before its objects, a buffer lock, state blocks,
 // the UP draws' unbinds, a textured fixed-function draw and one whose stage reads no texture), with a 60 s budget.
-// With "fixed" ("fixed strict" under core; DXMTRS C4b-3c): 30 rows "d3d9 ff-<row>|tex-vtx<row> ok|FAIL <why>" of the
+// With "fixed" ("fixed strict" under core; DXMTRS C4b-3c): 31 rows "d3d9 ff-<row>|tex-vtx<row> ok|FAIL <why>" of the
 // fixed-function vertex stage over untransformed layouts (transforms, lights, material sources, fog, texgen and texture
-// transforms, vertex blending, points, a clip plane) and two vertex-sampled target textures the core refuses, with a
+// transforms, vertex blending, points, a clip plane) and three vertex-sampled target textures the core refuses, with a
 // 180 s budget. "--bench <draws> <frames> lit" draws the triangle untransformed and lit ("mode lit").
 #include <windows.h>
 #include <d3d9.h>
@@ -2307,6 +2307,8 @@ static bool vtxTargetRow(DWORD usage, D3DFORMAT format) {
 }
 static bool rowTexVtxRt() { return vtxTargetRow(D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8); }
 static bool rowTexVtxDepth() { return vtxTargetRow(D3DUSAGE_DEPTHSTENCIL, D3DFMT_D24S8); }
+// A depth format made without the DEPTHSTENCIL usage is a depth texture too (the pixel slots refuse it by its format).
+static bool rowTexVtxDepthFmt() { return vtxTargetRow(0, D3DFMT_D24S8); }
 
 static void fixedRows(IDirect3DDevice9 *d, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
@@ -2319,7 +2321,8 @@ static void fixedRows(IDirect3DDevice9 *d, bool strict) {
         {"ff-ttproj", rowFfTtProj},         {"ff-tcindex", rowFfTcIndex},       {"ff-tex", rowFfTex},
         {"ff-blend", rowFfBlend},           {"ff-blendidx", rowFfBlendIdx},     {"ff-point", rowFfPoint},
         {"ff-pointscale", rowFfPointScale}, {"ff-clip", rowFfClip},             {"ff-indexed", rowFfIndexed},
-        {"ff-decl", rowFfDecl},             {"tex-vtxrt", rowTexVtxRt},         {"tex-vtxdepth", rowTexVtxDepth}};
+        {"ff-decl", rowFfDecl},             {"tex-vtxrt", rowTexVtxRt},         {"tex-vtxdepth", rowTexVtxDepth},
+        {"tex-vtxdepthfmt", rowTexVtxDepthFmt}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))

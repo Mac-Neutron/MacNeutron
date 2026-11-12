@@ -31,7 +31,7 @@
 # st64-fresh, st32-fresh); under core their logs hold exactly those rows' three refusal lines.
 # Every lane also checks d3d9_triangle textures' 38 rows (DXMTRS C4b-3b and C4b-3c's vertex textures, tx64-fresh,
 # tx32-fresh), and tx32-fresh the 32-bit-only tex-big256 (the staged-bytes budget); under core their logs hold exactly
-# the four refused rows' lines. Every lane also checks d3d9_triangle fixed's 30 rows (DXMTRS C4b-3c: the fixed-function
+# the four refused rows' lines. Every lane also checks d3d9_triangle fixed's 31 rows (DXMTRS C4b-3c: the fixed-function
 # vertex stage; fx64-fresh, fx32-fresh); under core their logs hold exactly its two refused rows' lines.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -147,7 +147,8 @@ done
 for r in fx64-fresh fx32-fresh; do
   for row in ff-xform ff-persp ff-rhwmix ff-viewchange ff-ambient ff-lightdefault ff-lightdir ff-lightpoint ff-lightspot \
     ff-lightsparse ff-light8 ff-specular ff-matsrc ff-normalize ff-fogvertex ff-fogtable ff-texgen ff-tt ff-ttproj \
-    ff-tcindex ff-tex ff-blend ff-blendidx ff-point ff-pointscale ff-clip ff-indexed ff-decl tex-vtxrt tex-vtxdepth; do
+    ff-tcindex ff-tex ff-blend ff-blendidx ff-point ff-pointscale ff-clip ff-indexed ff-decl tex-vtxrt tex-vtxdepth \
+    tex-vtxdepthfmt; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
@@ -157,10 +158,11 @@ for r in st64-fresh st32-fresh; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
-# core: runtime <folder> [crossing|state]: the core device's line in a launch's logs, none of mtld3d.so's encoder line
-# nor of the core's can't-present lines (the code that ran prints them, not the switch), and no refusal line, or with
-# "crossing" exactly one, the crossing row's, or with "state" exactly the state rows' three (DXMTRS C4b-3a: the textured
-# fixed-function draw, the buffer lock, the texture lock).
+# core: runtime <folder> [crossing|state|textures|fixed]: the core device's line in a launch's logs, none of
+# mtld3d.so's encoder line nor of the core's can't-present lines (the code that ran prints them, not the switch), and no
+# refusal line, or with "crossing" exactly one, the crossing row's, with "textures" or "fixed" exactly that launch's
+# refused rows' (texture_refusals, fixed_refusals), or with "state" exactly the state rows' three (DXMTRS C4b-3a: the
+# textured fixed-function draw, the buffer lock, the texture lock).
 refused='is not implemented under runtime.mode = core'
 state_refusals='IDirect3DVertexBuffer9::Lock'
 texture_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture sampled)
