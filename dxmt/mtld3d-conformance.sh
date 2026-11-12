@@ -14,8 +14,14 @@
 # (emit_corpus --kinds; the runner silences the logs): the default lane fails unless every programmable kind the tests
 # made has an AIR record and AIR fixed-function records exist; the msl lane fails on any AIR record or on no MSL
 # programmable and fixed-function record. Either lane fails on a Metal validation error or a GPU hang in the run.
-# D3D9_RUNTIME=core (DXMTRS C4a) exits 2: the core lane runs conformance from C4b on (C4-13), when the core runtime
-# implements what the tests call.
+# D3D9_RUNTIME=core (DXMTRS C4b-3a, the default backend only) runs stateblock alone (runner args --only stateblock;
+# anything else exits 2: the other suites run under core from C4c) under runtime.mode=core in a wine.app built with
+# DXMT_D3D9_CORE=1, its stamp "mtld3d-conformance: lane core (runtime.mode=core)". Its proof replaces the kinds row
+# (stateblock draws nothing): the run's logs (build/mtld3d-conformance/logs-core, the runner's --log info) hold the core
+# device's line ("d3d9 core: device on dxmt-core"), not mtld3d.so's encoder line ("texture versions: rename pool
+# cap"), no core refusal line and no panic. Any lane run with --only stateblock skips the kinds row and writes
+# run-<lane>-stateblock.txt, keeping the full runs' files. MTLD3D_PE=<folder> runs that folder's d3d9.dll and
+# mtld3d.dll (the PE side, as dxmt/d3d9-check.sh), in an APFS clone of wine.app like MTLD3D_SO's.
 #   mtld3d-conformance.sh [<wine.app>] [runner args, e.g. --only device]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -25,19 +31,34 @@ BK=${D3D9_BACKEND:-air} RT=${D3D9_RUNTIME:-mtld3d}
 case $RT/$BK in
   mtld3d/air) lane=default stamp="mtld3d-conformance: lane default" ;;
   mtld3d/msl) lane=msl stamp="mtld3d-conformance: lane msl (shader.backend=msl)" ;;
-  core/*) echo "mtld3d-conformance: the core lane runs conformance from C4b on (C4a's core runtime does not implement the tests' calls)" >&2; exit 2 ;;
+  core/air) lane=core stamp="mtld3d-conformance: lane core (runtime.mode=core)" ;;
+  core/*) echo "mtld3d-conformance: D3D9_RUNTIME=core takes the default backend lane only" >&2; exit 2 ;;
   mtld3d/*) echo "mtld3d-conformance: D3D9_BACKEND=$BK: air or msl" >&2; exit 2 ;;
   *) echo "mtld3d-conformance: D3D9_RUNTIME=$RT: mtld3d or core" >&2; exit 2 ;;
 esac
 echo "$stamp"
 APP="$B/wine-arm64/wine.app"
 case ${1:-} in *.app) APP=$1; shift ;; esac
-if [ -n "${MTLD3D_SO:-}" ]; then
+# --only stateblock among the runner args: the subset run (no kinds row, its own output file).
+sb=; prev=
+for a in "$@"; do [ "$prev" = --only ] && [ "$a" = stateblock ] && sb=1; prev=$a; done
+if [ "$RT" = core ] && [ -z "$sb" ]; then
+  echo "mtld3d-conformance: the core lane runs stateblock alone (--only stateblock): the other suites are C4c's" >&2
+  exit 2
+fi
+if [ -n "${MTLD3D_SO:-}${MTLD3D_PE:-}" ]; then
   C="$B/mtld3d-conformance/wine.app"
   rm -rf "$C"; mkdir -p "$B/mtld3d-conformance"; cp -cR "$APP" "$C"
-  so="$C/Contents/Resources/lib/wine/aarch64-unix/mtld3d.so"
-  rm -f "$so" && cp "$MTLD3D_SO" "$so" && codesign -f -s "${MACNEUTRON_SIGN_IDENTITY:--}" "$so" 2> /dev/null \
-    || { echo "mtld3d-conformance: could not put $MTLD3D_SO in $C" >&2; exit 1; }
+  if [ -n "${MTLD3D_SO:-}" ]; then
+    so="$C/Contents/Resources/lib/wine/aarch64-unix/mtld3d.so"
+    rm -f "$so" && cp "$MTLD3D_SO" "$so" && codesign -f -s "${MACNEUTRON_SIGN_IDENTITY:--}" "$so" 2> /dev/null \
+      || { echo "mtld3d-conformance: could not put $MTLD3D_SO in $C" >&2; exit 1; }
+  fi
+  for dll in d3d9.dll mtld3d.dll; do
+    [ -n "${MTLD3D_PE:-}" ] || break
+    pe="$C/Contents/Resources/lib/wine/aarch64-windows/$dll"
+    rm -f "$pe" && cp "$MTLD3D_PE/$dll" "$pe" || { echo "mtld3d-conformance: could not put $MTLD3D_PE/$dll in $C" >&2; exit 1; }
+  done
   APP=$C
 fi
 R="$(cd "$APP/Contents/Resources" && pwd)"
@@ -70,10 +91,19 @@ mkdir -p "$WINEPREFIX"
 "$R/bin/wine" reg add 'HKLM\Software\Microsoft\Wow64\amd64' /ve /d libarm64ecfex.dll /f > /dev/null 2>&1 \
   || { echo "mtld3d-conformance: could not register FEX in $WINEPREFIX" >&2; exit 1; }
 status=0
-OUT="$B/mtld3d-conformance/run-$lane.txt"
+OUT="$B/mtld3d-conformance/run-$lane${sb:+-stateblock}.txt"
 K="$B/mtld3d-conformance/caches-$lane"
 rm -rf "$K"; mkdir -p "$K"
 [ "$BK" = air ] || export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}shader.backend=msl"  # the runner sets only MTLD3D_CONFIG
+LOGS="$B/mtld3d-conformance/logs-core"
+if [ "$RT" = core ]; then
+  # The runner's own log.dir (MTLD3D_CONFORMANCE_RAW_DIR) would take the logs elsewhere; its default --log off would
+  # silence them.
+  unset MTLD3D_CONFORMANCE_RAW_DIR
+  rm -rf "$LOGS"; mkdir -p "$LOGS"
+  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}runtime.mode=core;log.dir=Z:$LOGS"
+  set -- --log info "$@"
+fi
 # runner <args...>: D3D9's conformance runner over the x64 tests (arm64x leg).
 runner() {
   ( cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/conformance" \
@@ -108,6 +138,22 @@ if /usr/bin/grep -qE '^conformance: (METAL VALIDATION|GPU HANG)' "$OUT"; then
   echo "conformance: FAIL: Metal validation error or GPU hang in the run"
   status=1
 fi
+if [ "$RT" = core ]; then
+  # The core lane's proof, from the code that ran.
+  if /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$LOGS" \
+    && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$LOGS" \
+    && ! /usr/bin/grep -rqF 'is not implemented under runtime.mode = core' "$LOGS" \
+    && ! /usr/bin/grep -rqF 'panicked' "$LOGS" "$OUT"; then
+    echo "conformance: core: runtime core"
+  else
+    echo "conformance: FAIL: core: no core device, or an encoder, refusal or panic line, in $LOGS"
+    /usr/bin/grep -rhE 'is not implemented|panicked|rename pool cap' "$LOGS" "$OUT" | head -5 | sed 's/^/conformance: /'
+    status=1
+  fi
+  exit $status
+fi
+# Stateblock writes no shader record: a stateblock-only run has no kinds row.
+[ -z "$sb" ] || exit $status
 # The lane's proof: the kinds of the records its subtests wrote.
 line=$(cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/kinds" \
   cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-core --features disk-cache --example emit_corpus -- \

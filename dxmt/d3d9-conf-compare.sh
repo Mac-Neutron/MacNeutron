@@ -11,19 +11,23 @@
 # both ("partial": its counts cover only the failures before the crash). A site a file doesn't list failed there as
 # often as in the baseline (the runner lists every site whose count changed). Findings are named <cur>-worse etc.
 # (air-worse etc. for the default lane, as C3d named them).
-#   d3d9-conf-compare.sh [--base-lane <lane>] [--cur-lane <lane>] <base.txt> <cur.txt> [<triaged.txt>]
+# --suites "<subtest>..." (DXMTRS C4b-3a: the core lane runs stateblock alone until C4c) registers and requires only
+# those subtests; the files' other suites are ignored.
+#   d3d9-conf-compare.sh [--base-lane <lane>] [--cur-lane <lane>] [--suites <list>] <base.txt> <cur.txt> [<triaged.txt>]
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BASE=msl CUR=default
+BASE=msl CUR=default ONLY=
 while [ $# -gt 0 ]; do
   case $1 in
     --base-lane) BASE=$2; shift 2 ;;
     --cur-lane) CUR=$2; shift 2 ;;
+    --suites) ONLY=$2; shift 2 ;;
     *) break ;;
   esac
 done
 [ $# -ge 2 ] || {
-  echo "usage: d3d9-conf-compare.sh [--base-lane <lane>] [--cur-lane <lane>] <base.txt> <cur.txt> [<triaged.txt>]" >&2
+  echo "usage: d3d9-conf-compare.sh [--base-lane <lane>] [--cur-lane <lane>] [--suites <list>] <base.txt> <cur.txt>" \
+    "[<triaged.txt>]" >&2
   exit 2
 }
 TRI=$ROOT/dxmt/mtld3d-triaged.txt PRE=air
@@ -35,13 +39,16 @@ case $(head -1 "$MSL" 2> /dev/null) in *": lane $BASE"*) ;; *) bad=1; echo "stam
 case $(head -1 "$AIR" 2> /dev/null) in *": lane $CUR"*) ;; *) bad=1; echo "stamp $AIR: not the $CUR lane" ;; esac
 if [ "$MSL" = "$AIR" ] || cmp -s "$MSL" "$AIR"; then bad=1; echo "stamp $AIR: the same run as $MSL"; fi
 [ -z "$bad" ] || exit 1
-awk -v tri="$TRI" -v pre="$PRE" '
+awk -v tri="$TRI" -v pre="$PRE" -v only="$ONLY" '
   BEGIN { while ((getline l < tri) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); triaged[f[1] " " f[2]] = 1 }
-          nsuite = split("stateblock visual device d3d9ex", want, " ") }
+          nsuite = split(only != "" ? only : "stateblock visual device d3d9ex", want, " ")
+          for (i = 1; i <= nsuite; i++) wanted[want[i]] = 1 }
   FNR == 1 { lane = (FILENAME == ARGV[1]) ? "m" : "a"; su = ""; next }
   /^conformance: / { closed[lane] = 1; su = ""; next }
   /^[a-z0-9_+@-]+\/[a-z0-9]+  +baseline\(/ {
-    su = $1; split(su, p, "/"); legs[p[1]] = 1; suites[su] = 1; has[lane, su] = 1
+    su = $1; split(su, p, "/")
+    if (!(p[2] in wanted)) { su = ""; next }  # a suite --suites leaves out: its sites with it
+    legs[p[1]] = 1; suites[su] = 1; has[lane, su] = 1
     line = $0
     sub(/.*baseline\(failed=/, "", line); B = line + 0; sub(/^[0-9]+ crash=/, "", line); BC = line + 0
     line = $0; sub(/.*current\(failed=/, "", line); F = line + 0; sub(/^[0-9]+ crash=/, "", line); K = line + 0
