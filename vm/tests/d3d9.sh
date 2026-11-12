@@ -10,7 +10,10 @@
 #                                right after tri32-fresh, 300 s each
 #   st<64|32>-fresh.txt           d3d9_triangle state (DXMTRS C4b-3a's 12 rows of API state and inert objects; "state
 #                                strict" under core), after them, 120 s each
-#   tx<64|32>-fresh.txt           d3d9_triangle textures (DXMTRS C4b-3b's 32 rows; "textures strict" under core), 240 s
+#   tx<64|32>-fresh.txt           d3d9_triangle textures (DXMTRS C4b-3b's and C4b-3c's 38 rows; "textures strict"
+#                                under core), 240 s
+#   fx<64|32>-fresh.txt           d3d9_triangle fixed (DXMTRS C4b-3c's 30 rows of the fixed-function vertex stage;
+#                                "fixed strict" under core), 240 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
@@ -95,6 +98,8 @@ tri d3d9_triangle.exe st64-fresh 120 state $strict
 tri d3d9_triangle32.exe st32-fresh 120 state $strict
 tri d3d9_triangle.exe tx64-fresh 240 textures $strict
 tri d3d9_triangle32.exe tx32-fresh 240 textures $strict
+tri d3d9_triangle.exe fx64-fresh 240 fixed $strict
+tri d3d9_triangle32.exe fx32-fresh 240 fixed $strict
 rm -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" "$WINEPREFIX/drive_c/windows/syswow64/mtld3d.dll"
 tri d3d9_triangle.exe tri64-nomarker  # Wine finds no builtin without its marker: these fail
 tri d3d9_triangle32.exe tri32-nomarker

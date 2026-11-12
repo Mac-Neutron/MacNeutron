@@ -30,11 +30,17 @@
 // and inert objects (transforms, material and lights, stage, sampler and scissor states, stream frequency, swap chains,
 // the back-buffer target switch, textures, a second device released before its objects, a buffer lock, state blocks,
 // the UP draws' unbinds, a textured fixed-function draw and one whose stage reads no texture), with a 60 s budget.
+// With "fixed" ("fixed strict" under core; DXMTRS C4b-3c): 30 rows "d3d9 ff-<row>|tex-vtx<row> ok|FAIL <why>" of the
+// fixed-function vertex stage over untransformed layouts (transforms, lights, material sources, fog, texgen and texture
+// transforms, vertex blending, points, a clip plane) and two vertex-sampled target textures the core refuses, with a
+// 180 s budget. "--bench <draws> <frames> lit" draws the triangle untransformed and lit ("mode lit").
 #include <windows.h>
 #include <d3d9.h>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 
 static int failures;
 static void row(const char *what, bool ok, const char *why) {
@@ -257,7 +263,8 @@ static bool use(const Prog &p) {
     return true;
 }
 
-// Every state a row touches, back to D3D9's defaults (the viewport the whole back buffer).
+static const D3DMATRIX IDENTITY = {{{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}}};
+// Every state a row touches, back to D3D9's defaults (the viewport the whole back buffer; LIGHTING off, see below).
 static bool reset() {
     CK(SetVertexShader, nullptr);
     CK(SetPixelShader, nullptr);
@@ -283,7 +290,35 @@ static bool reset() {
                                       {D3DSAMP_MINFILTER, D3DTEXF_POINT}, {D3DSAMP_MIPFILTER, D3DTEXF_NONE},
                                       {D3DSAMP_MIPMAPLODBIAS, 0}, {D3DSAMP_MAXMIPLEVEL, 0}, {D3DSAMP_SRGBTEXTURE, 0}};
         for (const auto &s : ss) CK(SetSamplerState, stage, (D3DSAMPLERSTATETYPE)s[0], s[1]);
+        // The vertex samplers (DXMTRS C4b-3c's rows bind them).
+        if (stage < 4) {
+            CK(SetTexture, D3DVERTEXTEXTURESAMPLER0 + stage, nullptr);
+            for (const auto &s : ss) CK(SetSamplerState, D3DVERTEXTEXTURESAMPLER0 + stage, (D3DSAMPLERSTATETYPE)s[0], s[1]);
+        }
+        CK(SetTextureStageState, stage, D3DTSS_TEXCOORDINDEX, stage);
+        CK(SetTextureStageState, stage, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+        CK(SetTransform, (D3DTRANSFORMSTATETYPE)(D3DTS_TEXTURE0 + stage), &IDENTITY);
     }
+    // The fixed-function vertex stage (DXMTRS C4b-3c's rows): D3D9's defaults, but for LIGHTING, which is off here
+    // (D3D9's default is on; ff-lightdefault draws with it) so that a row lights only what it sets up.
+    static const float one = 1.0f, zero = 0.0f;
+    DWORD f1, f0;
+    memcpy(&f1, &one, 4), memcpy(&f0, &zero, 4);
+    const DWORD fs[][2] = {
+        {D3DRS_LIGHTING, FALSE}, {D3DRS_AMBIENT, 0}, {D3DRS_COLORVERTEX, TRUE}, {D3DRS_SPECULARENABLE, FALSE},
+        {D3DRS_LOCALVIEWER, TRUE}, {D3DRS_NORMALIZENORMALS, FALSE}, {D3DRS_DIFFUSEMATERIALSOURCE, D3DMCS_COLOR1},
+        {D3DRS_SPECULARMATERIALSOURCE, D3DMCS_COLOR2}, {D3DRS_AMBIENTMATERIALSOURCE, D3DMCS_MATERIAL},
+        {D3DRS_EMISSIVEMATERIALSOURCE, D3DMCS_MATERIAL}, {D3DRS_VERTEXBLEND, D3DVBF_DISABLE},
+        {D3DRS_INDEXEDVERTEXBLENDENABLE, FALSE}, {D3DRS_FOGSTART, f0}, {D3DRS_FOGEND, f1}, {D3DRS_FOGDENSITY, f1},
+        {D3DRS_RANGEFOGENABLE, FALSE}, {D3DRS_POINTSIZE, f1}, {D3DRS_POINTSCALEENABLE, FALSE}, {D3DRS_POINTSCALE_A, f1},
+        {D3DRS_POINTSCALE_B, f0}, {D3DRS_POINTSCALE_C, f0}};
+    for (const auto &s : fs) CK(SetRenderState, (D3DRENDERSTATETYPE)s[0], s[1]);
+    for (D3DTRANSFORMSTATETYPE t : {D3DTS_WORLD, D3DTS_VIEW, D3DTS_PROJECTION, D3DTS_WORLDMATRIX(1), D3DTS_WORLDMATRIX(5),
+                                    D3DTS_WORLDMATRIX(9)})
+        CK(SetTransform, t, &IDENTITY);
+    const D3DMATERIAL9 none = {};
+    CK(SetMaterial, &none);
+    for (DWORD i : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u, 12u, 20u}) CK(LightEnable, i, FALSE);
     return true;
 }
 
@@ -1622,17 +1657,135 @@ static bool rowTexRtTex() {
     CK(CreateTexture, 4, 4, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &t.p, nullptr);
     return refusedRow([&] { return ffTexDraw(t.p); });
 }
-// vs_3_0 { dcl_position v0; dcl_position o0; dcl_2d s0; mov o0, v0 } with ps_3_0 { mov oC0, c0 }: a vertex sampler.
+// Vertex textures (DXMTRS C4b-3c). vsTex writes vs_3_0 { dcl_position v0; dcl_position o0; dcl_color o1; dcl_<kind>
+// s<slot>; texldl r0, c0, s<slot>; mov o0, v0; mov o1, r0 (r0.wwww with alpha) }: the texel at c0 (its w the level) as
+// the vertex colour, which PS_VCOL ps_3_0 { dcl_color v0; mov oC0, v0 } writes. kind: 2 2D, 3 cube, 4 volume.
+static void vsTex(DWORD *t, DWORD kind, DWORD slot, bool alpha) {
+    const DWORD v[24] = {0xfffe0300, 0x0200001f, 0x80000000, 0x900f0000, 0x0200001f, 0x80000000, 0xe00f0000, 0x0200001f,
+                         0x8000000a, 0xe00f0001, 0x0200001f, 0x80000000 | kind << 27, 0xa00f0800 | slot, 0x0300005f,
+                         0x800f0000, 0xa0e40000, 0xa0e40800 | slot, 0x02000001, 0xe00f0000, 0x90e40000, 0x02000001,
+                         0xe00f0001, alpha ? 0x80ff0000 : 0x80e40000, 0x0000ffff};
+    memcpy(t, v, sizeof v);
+}
+static const DWORD PS_VCOL[] = {0xffff0300, 0x0200001f, 0x8000000a, 0x900f0000,
+                                0x02000001, 0x800f0800, 0x90e40000, 0x0000ffff};
+static bool makeVtx(Prog &p, DWORD kind, DWORD slot, bool alpha = false) {
+    DWORD t[24];
+    vsTex(t, kind, slot, alpha);
+    return make(p, DECL_XYZ, t, PS_VCOL);
+}
+// The quad with the coordinate (u, v, w) and the level lod in c0.
+static bool vtxDraw(const V3 *q, float u, float v, float w = 0, float lod = 0) {
+    const float c[4] = {u, v, w, lod};
+    CK(SetVertexShaderConstantF, 0, c, 1);
+    return strip(q);
+}
+static const DWORD VS0 = D3DVERTEXTEXTURESAMPLER0;
+// A 2x1 texture, red then green.
+static bool makeRG(Com<IDirect3DTexture9> &t) {
+    return make2d(t, 2, 1, 1, D3DFMT_X8R8G8B8, 4, [](int x, int) { return x ? TGRN : TRED; });
+}
+// The texel at u 0.75 (green); and at u 1.75 under ADDRESSU MIRROR (red: WRAP and CLAMP both read green there), which
+// shows the vertex sampler's own state row is applied.
 static bool rowTexVtx() {
-    static const DWORD vs[] = {0xfffe0300, 0x0200001f, 0x80000000, 0x900f0000, 0x0200001f, 0x80000000, 0xe00f0000,
-                               0x0200001f, 0x90000000, 0xa00f0800, 0x02000001, 0xe00f0000, 0x90e40000, 0x0000ffff};
-    static const DWORD ps[] = {0xffff0300, 0x02000001, 0x800f0800, 0xa0e40000, 0x0000ffff};
+    Com<IDirect3DTexture9> t;
     Prog p;
-    if (!make(p, DECL_XYZ, vs, ps) || !use(p)) return false;
-    CK(SetPixelShaderConstantF, 0, RED, 1);
+    if (!makeRG(t) || !makeVtx(p, 2, 0) || !use(p)) return false;
+    CK(SetTexture, VS0, t.p);
+    CK(SetSamplerState, VS0, D3DSAMP_ADDRESSU, D3DTADDRESS_MIRROR);
+    V3 l[4], r[4];
+    quad(l, -0.875f, -0.25f, -0.125f, 0.25f), quad(r, 0.125f, -0.25f, 0.875f, 0.25f);
+    const Px px[] = {{64, 128, TGRN}, {192, 128, TRED}, {128, 20, BLUE}};
+    return frames(BLUE, px, 3, [&] { return vtxDraw(l, 0.75f, 0.5f) && vtxDraw(r, 1.75f, 0.5f); });
+}
+// Three levels of red, green, yellow: texldl at level 1 reads green; MAXMIPLEVEL 2 moves it to yellow (through the
+// vertex LOD table: Metal applies no sampler clamp to an explicit level).
+static bool rowTexVtxLod() {
+    Com<IDirect3DTexture9> t;
+    CK(CreateTexture, 4, 4, 3, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &t.p, nullptr);
+    const DWORD levels[3] = {TRED, TGRN, D3DCOLOR_XRGB(255, 255, 0)};
+    for (UINT l = 0; l < 3; l++)
+        if (!fill(t.p, l, 4, [&](int, int) { return levels[l]; })) return false;
+    Prog p;
+    if (!makeVtx(p, 2, 0) || !use(p)) return false;
+    CK(SetTexture, VS0, t.p);
+    CK(SetSamplerState, VS0, D3DSAMP_MIPFILTER, D3DTEXF_POINT);
     V3 q[4];
-    quad(q, -0.5f, -0.5f, 0.5f, 0.5f);
-    return refusedRow([&] { return dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof *q); });
+    quad(q, -0.25f, -0.25f, 0.25f, 0.25f);
+    const Px one[] = {{128, 128, TGRN}}, two[] = {{128, 128, D3DCOLOR_XRGB(255, 255, 0)}};
+    if (!frames(BLUE, one, 1, [&] { return vtxDraw(q, 0.5f, 0.5f, 0, 1); })) return false;
+    CK(SetSamplerState, VS0, D3DSAMP_MAXMIPLEVEL, 2);
+    return frames(BLUE, two, 1, [&] { return vtxDraw(q, 0.5f, 0.5f, 0, 1); });
+}
+// Unbound vertex slots read opaque black: a 2D s0 (its colour, left) and a cube s1 (its alpha as the colour, right).
+static bool rowTexVtxBlack() {
+    Prog a, b;
+    if (!makeVtx(a, 2, 0) || !makeVtx(b, 3, 1, true)) return false;
+    V3 l[4], r[4];
+    quad(l, -0.875f, -0.25f, -0.125f, 0.25f), quad(r, 0.125f, -0.25f, 0.875f, 0.25f);
+    const Px px[] = {{64, 128, 0x000000}, {192, 128, 0xffffff}, {128, 20, BLUE}};
+    return frames(BLUE, px, 3, [&] { return use(a) && vtxDraw(l, 0.5f, 0.5f) && use(b) && vtxDraw(r, 0, 0, 1); });
+}
+// A cube at vertex slot 1, sampled along -y (yellow) and +z (white).
+static bool rowTexVtxCube() {
+    Com<IDirect3DCubeTexture9> c;
+    CK(CreateCubeTexture, 2, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &c.p, nullptr);
+    const DWORD faces[6] = {TRED, TGRN, D3DCOLOR_XRGB(0, 255, 255), D3DCOLOR_XRGB(255, 255, 0), TWHT,
+                            D3DCOLOR_XRGB(255, 0, 255)};
+    for (int f = 0; f < 6; f++) {
+        D3DLOCKED_RECT lr = {};
+        HRESULT hr = c.p->LockRect((D3DCUBEMAP_FACES)f, 0, &lr, nullptr, 0);
+        if (FAILED(hr)) return fail("cube LockRect", hr);
+        for (int y = 0; y < 2; y++)
+            for (int x = 0; x < 2; x++) ((DWORD *)((BYTE *)lr.pBits + y * lr.Pitch))[x] = faces[f];
+        c.p->UnlockRect((D3DCUBEMAP_FACES)f, 0);
+    }
+    Prog p;
+    if (!makeVtx(p, 3, 1) || !use(p)) return false;
+    CK(SetTexture, VS0 + 1, c.p);
+    V3 l[4], r[4];
+    quad(l, -0.875f, -0.25f, -0.125f, 0.25f), quad(r, 0.125f, -0.25f, 0.875f, 0.25f);
+    const Px px[] = {{64, 128, D3DCOLOR_XRGB(255, 255, 0)}, {192, 128, TWHT}};
+    return frames(BLUE, px, 2, [&] { return vtxDraw(l, 0, -1, 0) && vtxDraw(r, 0, 0, 1); });
+}
+// A 2x2x2 volume at vertex slot 2, slice 0 red and slice 1 green, sampled in slice 1.
+static bool rowTexVtxVolume() {
+    Com<IDirect3DVolumeTexture9> v;
+    CK(CreateVolumeTexture, 2, 2, 2, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &v.p, nullptr);
+    D3DLOCKED_BOX lb = {};
+    HRESULT hr = v.p->LockBox(0, &lb, nullptr, 0);
+    if (FAILED(hr)) return fail("LockBox", hr);
+    for (int z = 0; z < 2; z++)
+        for (int y = 0; y < 2; y++)
+            for (int x = 0; x < 2; x++)
+                ((DWORD *)((BYTE *)lb.pBits + z * lb.SlicePitch + y * lb.RowPitch))[x] = z ? TGRN : TRED;
+    v.p->UnlockBox(0);
+    Prog p;
+    if (!makeVtx(p, 4, 2) || !use(p)) return false;
+    CK(SetTexture, VS0 + 2, v.p);
+    CK(SetSamplerState, VS0 + 2, D3DSAMP_ADDRESSW, D3DTADDRESS_CLAMP);
+    V3 q[4];
+    quad(q, -0.25f, -0.25f, 0.25f, 0.25f);
+    const Px px[] = {{128, 128, TGRN}};
+    return frames(BLUE, px, 1, [&] { return vtxDraw(q, 0.5f, 0.5f, 0.75f); });
+}
+// SRGBTEXTURE on a vertex sampler: the 0x80 grey read raw (left), then linearised (right).
+static bool rowTexVtxSrgb() {
+    Com<IDirect3DTexture9> t;
+    Prog p;
+    if (!make2d(t, 1, 1, 1, D3DFMT_X8R8G8B8, 4, [](int, int) { return D3DCOLOR_XRGB(128, 128, 128); }) ||
+        !makeVtx(p, 2, 0) || !use(p))
+        return false;
+    CK(SetTexture, VS0, t.p);
+    V3 l[4], r[4];
+    quad(l, -0.875f, -0.25f, -0.125f, 0.25f), quad(r, 0.125f, -0.25f, 0.875f, 0.25f);
+    const Px px[] = {{64, 128, D3DCOLOR_XRGB(128, 128, 128)}, {192, 128, D3DCOLOR_XRGB(55, 55, 55)}};
+    return frames(BLUE, px, 2, [&] {
+        CK(SetSamplerState, VS0, D3DSAMP_SRGBTEXTURE, FALSE);
+        if (!vtxDraw(l, 0.5f, 0.5f)) return false;
+        CK(SetSamplerState, VS0, D3DSAMP_SRGBTEXTURE, TRUE);
+        return vtxDraw(r, 0.5f, 0.5f);
+    });
 }
 
 static void textureRows(IDirect3DDevice9 *d, bool strict) {
@@ -1648,7 +1801,525 @@ static void textureRows(IDirect3DDevice9 *d, bool strict) {
         {"tex-bumpenv", rowTexBumpEnv}, {"tex-texbem", rowTexTexbem},   {"tex-big", rowTexBig},
         {"tex-release", rowTexRelease}, {"tex-depthtex", rowTexDepthTex}, {"tex-fetch4", rowTexFetch4},
         {"tex-rttex", rowTexRtTex},     {"tex-vtx", rowTexVtx},         {"tex-rtlock", rowTexRtLock},
+        {"tex-vtxlod", rowTexVtxLod},   {"tex-vtxblack", rowTexVtxBlack}, {"tex-vtxcube", rowTexVtxCube},
+        {"tex-vtxvolume", rowTexVtxVolume}, {"tex-vtxsrgb", rowTexVtxSrgb},
         {"tex-big256", sizeof(void *) == 4 ? rowTexBig256 : nullptr}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
+    HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
+    if (SUCCEEDED(hr))
+        hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (FAILED(hr)) ok = fail("GetRenderTarget/CreateOffscreenPlainSurface", hr);
+        else if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = reset() && r.run();
+        row(r.name, ok, why);
+    }
+    if (sysSurf) sysSurf->Release();
+    if (rtSurf) rtSurf->Release();
+}
+
+// The "fixed" mode (DXMTRS C4b-3c): the fixed-function vertex stage over untransformed layouts. Model-space quads,
+// clockwise on screen; a clip-space x or y of c is pixel (c + 1) * 128 or (1 - c) * 128. Every probe sits at least 8
+// pixels inside its quad, and no expected colour is the clear's blue.
+struct FP { float x, y, z; };
+struct FC { float x, y, z; DWORD c; };
+struct FN { float x, y, z, nx, ny, nz; };
+struct FNC { float x, y, z, nx, ny, nz; DWORD c; };
+struct FT { float x, y, z, u, v; };
+struct FT3 { float x, y, z, u, v, w; };
+struct FT2 { float x, y, z, u0, v0, u1, v1; };
+struct FNT { float x, y, z, nx, ny, nz, u, v; };
+struct FB1 { float x, y, z, b; DWORD c; };
+struct FB2 { float x, y, z, b; DWORD idx, c; };
+static const DWORD FVF_C = D3DFVF_XYZ | D3DFVF_DIFFUSE, FVF_N = D3DFVF_XYZ | D3DFVF_NORMAL,
+                   FVF_NC = D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_DIFFUSE;
+// [x0, x1] x [y0, y1] at z; the other fields are the caller's.
+template <class V> static void mquad(V *v, float x0, float y0, float x1, float y1, float z) {
+    v[0].x = x0, v[0].y = y1, v[1].x = x1, v[1].y = y1, v[2].x = x0, v[2].y = y0, v[3].x = x1, v[3].y = y0;
+    for (int i = 0; i < 4; i++) v[i].z = z;
+}
+// The row layouts: one centred quad (pixels 96-160), a left and a right one (16-112, 144-240), or three (16-80,
+// 96-160, 176-240), each 64 pixels tall about y 128.
+template <class V> static void qOne(V *v, float z) { mquad(v, -0.25f, -0.25f, 0.25f, 0.25f, z); }
+template <class V> static void qLeft(V *v, float z) { mquad(v, -0.875f, -0.25f, -0.125f, 0.25f, z); }
+template <class V> static void qRight(V *v, float z) { mquad(v, 0.125f, -0.25f, 0.875f, 0.25f, z); }
+template <class V> static void q3(V *v, int i, float z) { mquad(v, -0.875f + 0.625f * i, -0.25f, -0.375f + 0.625f * i, 0.25f, z); }
+template <class V> static void normals(V *v, float x, float y, float z) {
+    for (int i = 0; i < 4; i++) v[i].nx = x, v[i].ny = y, v[i].nz = z;
+}
+template <class V> static bool fdraw(DWORD fvf, const V *v) {
+    CK(SetFVF, fvf);
+    CK(DrawPrimitiveUP, D3DPT_TRIANGLESTRIP, 2, v, sizeof *v);
+    return true;
+}
+static D3DMATRIX mTrans(float x, float y, float z) {
+    D3DMATRIX m = IDENTITY;
+    m._41 = x, m._42 = y, m._43 = z;
+    return m;
+}
+// An orthographic projection: eye z 0-5 is depth 0-1, x and y scaled by s.
+static D3DMATRIX mOrtho(float s = 1) {
+    D3DMATRIX m = IDENTITY;
+    m._11 = m._22 = s, m._33 = 0.2f;
+    return m;
+}
+// A perspective projection, near 1 and far 5: w is eye z.
+static D3DMATRIX mPersp() {
+    D3DMATRIX m = {};
+    m._11 = m._22 = 1, m._33 = 1.25f, m._34 = 1, m._43 = -1.25f;
+    return m;
+}
+static bool xform(D3DTRANSFORMSTATETYPE t, const D3DMATRIX &m) {
+    CK(SetTransform, t, &m);
+    return true;
+}
+static bool rstate(D3DRENDERSTATETYPE s, DWORD v) {
+    CK(SetRenderState, s, v);
+    return true;
+}
+static DWORD fbits(float f) {
+    DWORD d;
+    memcpy(&d, &f, 4);
+    return d;
+}
+// A directional light along +z (into the screen: a normal of (0, 0, -1) faces it), its diffuse and ambient colours.
+static D3DLIGHT9 ldir(float r, float g, float b, float ar = 0, float ag = 0, float ab = 0) {
+    D3DLIGHT9 l = {};
+    l.Type = D3DLIGHT_DIRECTIONAL, l.Direction = {0, 0, 1}, l.Diffuse = {r, g, b, 1}, l.Ambient = {ar, ag, ab, 1};
+    return l;
+}
+static bool lightOn(DWORD i, const D3DLIGHT9 &l) {
+    CK(SetLight, i, &l);
+    CK(LightEnable, i, TRUE);
+    return true;
+}
+static bool material(float dr, float dg, float db, float ar = 0, float ag = 0, float ab = 0) {
+    D3DMATERIAL9 m = {};
+    m.Diffuse = {dr, dg, db, 1}, m.Ambient = {ar, ag, ab, 1};
+    CK(SetMaterial, &m);
+    return true;
+}
+static const DWORD CC00 = 0x00cc00;
+
+// WORLD, VIEW and an x/y-scaling PROJECTION each move the quad: it lands on pixels 128-192 x 64-128 and nowhere else.
+static bool rowFfXform() {
+    FC q[4];
+    mquad(q, -0.5f, -0.5f, 0.5f, 0.5f, 2.5f);
+    for (FC &v : q) v.c = D3DCOLOR_XRGB(0, 204, 0);
+    if (!xform(D3DTS_WORLD, mTrans(0.5f, 0, 0)) || !xform(D3DTS_VIEW, mTrans(0, 0.5f, 0)) ||
+        !xform(D3DTS_PROJECTION, mOrtho(0.5f)))
+        return false;
+    const Px px[] = {{144, 80, CC00}, {112, 80, BLUE}, {200, 80, BLUE}, {144, 144, BLUE}};
+    return frames(BLUE, px, 4, [&] { return fdraw(FVF_C, q); });
+}
+// A perspective projection divides by w (eye z 2): x halves to pixels 96-160, y to 70-122.
+static bool rowFfPersp() {
+    FC q[4];
+    mquad(q, -0.5f, 0.1f, 0.5f, 0.9f, 2);
+    for (FC &v : q) v.c = D3DCOLOR_XRGB(0, 204, 0);
+    if (!xform(D3DTS_PROJECTION, mPersp())) return false;
+    const Px px[] = {{128, 96, CC00}, {80, 96, BLUE}, {128, 40, BLUE}};
+    return frames(BLUE, px, 3, [&] { return fdraw(FVF_C, q); });
+}
+// A pretransformed quad, an untransformed one and a pretransformed one in one frame: each binds its own constant rows.
+static bool rowFfRhwMix() {
+    RV a[4], c[4];
+    quadRhw(a, 16, 100, 72, 156, D3DCOLOR_XRGB(255, 0, 0)), quadRhw(c, 144, 100, 200, 156, D3DCOLOR_XRGB(255, 255, 0));
+    FC b[4];
+    mquad(b, -0.375f, -0.25f, 0, 0.25f, 0.5f);
+    for (FC &v : b) v.c = D3DCOLOR_XRGB(0, 255, 0);
+    const Px px[] = {{44, 128, 0xff0000}, {104, 128, 0x00ff00}, {172, 128, 0xffff00}, {232, 128, BLUE}};
+    return frames(BLUE, px, 4, [&] {
+        return fdraw(D3DFVF_XYZRHW | D3DFVF_DIFFUSE, a) && fdraw(FVF_C, b) && fdraw(D3DFVF_XYZRHW | D3DFVF_DIFFUSE, c);
+    });
+}
+// Two lit draws of one frame, VIEW turned half a turn about z between them: the quad moves to the opposite corner and
+// stays lit the same (normals (1, 0, 0) against a light along -x: lights and normals turn together). Lights packed
+// with the first draw's VIEW would leave the second draw's diffuse term dark.
+static bool rowFfViewChange() {
+    FN q[4];
+    mquad(q, 0.25f, 0.25f, 0.75f, 0.75f, 2.5f);
+    normals(q, 1, 0, 0);
+    D3DLIGHT9 l = ldir(1, 1, 1, 1, 1, 1);
+    l.Direction = {-1, 0, 0};
+    if (!rstate(D3DRS_LIGHTING, TRUE) || !lightOn(0, l) || !material(0, 0.8f, 0, 0.4f, 0, 0) ||
+        !xform(D3DTS_PROJECTION, mOrtho()))
+        return false;
+    D3DMATRIX turned = IDENTITY;
+    turned._11 = turned._22 = -1;
+    const Px px[] = {{192, 64, 0x66cc00}, {64, 192, 0x66cc00}, {64, 64, BLUE}, {192, 192, BLUE}};
+    return frames(BLUE, px, 4, [&] {
+        return xform(D3DTS_VIEW, IDENTITY) && fdraw(FVF_N, q) && xform(D3DTS_VIEW, turned) && fdraw(FVF_N, q);
+    });
+}
+// LIGHTING with no light: the global ambient times the material's ambient, plus its emissive.
+static bool rowFfAmbient() {
+    FP q[4];
+    qOne(q, 0.5f);
+    D3DMATERIAL9 m = {};
+    m.Ambient = {0.8f, 0.8f, 0.8f, 1}, m.Emissive = {0, 0, 0.4f, 1};
+    CK(SetMaterial, &m);
+    if (!rstate(D3DRS_LIGHTING, TRUE) || !rstate(D3DRS_AMBIENT, 0x00ff8000)) return false;
+    const Px px[] = {{128, 128, 0xcc6666}, {16, 16, BLUE}};
+    return frames(BLUE, px, 2, [&] { return fdraw(D3DFVF_XYZ, q); });
+}
+// D3D9's default, LIGHTING on: with no light and the zero material a coloured vertex draws black.
+static bool rowFfLightDefault() {
+    FC q[4];
+    qOne(q, 0.5f);
+    for (FC &v : q) v.c = D3DCOLOR_XRGB(0, 255, 0);
+    if (!rstate(D3DRS_LIGHTING, TRUE)) return false;
+    const Px px[] = {{128, 128, 0x000000}, {16, 16, BLUE}};
+    return frames(BLUE, px, 2, [&] { return fdraw(FVF_C, q); });
+}
+// One directional light: N.L of 1 (left) and of 0.5 (right) on a 0.8 red material.
+static bool rowFfLightDir() {
+    FN l[4], r[4];
+    qLeft(l, 0.5f), qRight(r, 0.5f);
+    normals(l, 0, 0, -1), normals(r, 0.8660254f, 0, -0.5f);
+    if (!rstate(D3DRS_LIGHTING, TRUE) || !lightOn(0, ldir(1, 1, 1)) || !material(0.8f, 0, 0)) return false;
+    const Px px[] = {{64, 128, 0xcc0000}, {192, 128, 0x660000}};
+    return frames(BLUE, px, 2, [&] { return fdraw(FVF_N, l) && fdraw(FVF_N, r); });
+}
+// Each vertex normal points at the light at (lx, ly, lz).
+static void faceLight(FN *q, float lx, float ly, float lz) {
+    for (int i = 0; i < 4; i++) {
+        const float x = lx - q[i].x, y = ly - q[i].y, z = lz - q[i].z, n = sqrtf(x * x + y * y + z * z);
+        q[i].nx = x / n, q[i].ny = y / n, q[i].nz = z / n;
+    }
+}
+// A point light of range 0.9: the quad within it takes its ambient and diffuse, the one past it nothing.
+static bool rowFfLightPoint() {
+    FN a[4], b[4];
+    mquad(a, -0.8f, -0.2f, -0.4f, 0.2f, 2.5f), mquad(b, 0.4f, -0.2f, 0.8f, 0.2f, 2.5f);
+    faceLight(a, -0.6f, 0, 2), faceLight(b, -0.6f, 0, 2);
+    D3DLIGHT9 l = {};
+    l.Type = D3DLIGHT_POINT, l.Position = {-0.6f, 0, 2}, l.Range = 0.9f, l.Attenuation0 = 1;
+    l.Diffuse = {0, 0.4f, 0, 1}, l.Ambient = {0.8f, 0, 0, 1};
+    if (!rstate(D3DRS_LIGHTING, TRUE) || !lightOn(0, l) || !material(1, 1, 1, 1, 1, 1) ||
+        !xform(D3DTS_PROJECTION, mOrtho()))
+        return false;
+    const Px px[] = {{51, 128, 0xcc6600}, {205, 128, 0x000000}};
+    return frames(BLUE, px, 2, [&] { return fdraw(FVF_N, a) && fdraw(FVF_N, b); });
+}
+// A spot light: the quad inside its inner cone is lit in full, the one outside its outer cone not at all.
+static bool rowFfLightSpot() {
+    FN a[4], b[4];
+    mquad(a, -0.1f, -0.1f, 0.1f, 0.1f, 2.5f), mquad(b, 0.6f, -0.1f, 0.9f, 0.1f, 2.5f);
+    faceLight(a, 0, 0, 1.5f), faceLight(b, 0, 0, 1.5f);
+    D3DLIGHT9 l = {};
+    l.Type = D3DLIGHT_SPOT, l.Position = {0, 0, 1.5f}, l.Direction = {0, 0, 1}, l.Range = 10, l.Attenuation0 = 1;
+    l.Theta = 0.6f, l.Phi = 0.8f, l.Falloff = 1, l.Diffuse = {0, 0.4f, 0, 1}, l.Ambient = {0.8f, 0, 0, 1};
+    if (!rstate(D3DRS_LIGHTING, TRUE) || !lightOn(0, l) || !material(1, 1, 1, 1, 1, 1) ||
+        !xform(D3DTS_PROJECTION, mOrtho()))
+        return false;
+    const Px px[] = {{128, 128, 0xcc6600}, {224, 128, 0x000000}};
+    return frames(BLUE, px, 2, [&] { return fdraw(FVF_N, a) && fdraw(FVF_N, b); });
+}
+// Lights 3 (red) and 12 (green, past the eight built-in indices) both light the quad.
+static bool rowFfLightSparse() {
+    FN q[4];
+    qOne(q, 0.5f);
+    normals(q, 0, 0, -1);
+    if (!rstate(D3DRS_LIGHTING, TRUE) || !lightOn(3, ldir(0.8f, 0, 0)) || !lightOn(12, ldir(0, 0.4f, 0)) ||
+        !material(1, 1, 1))
+        return false;
+    const Px px[] = {{128, 128, 0xcc6600}, {16, 16, BLUE}};
+    return frames(BLUE, px, 2, [&] { return fdraw(FVF_N, q); });
+}
+// Nine lights enabled (0-6 red, 12 green, 20 blue): the first eight by index light the quad, the ninth does not.
+static bool rowFfLight8() {
+    FN q[4];
+    qOne(q, 0.5f);
+    normals(q, 0, 0, -1);
+    if (!rstate(D3DRS_LIGHTING, TRUE) || !material(1, 1, 1)) return false;
+    for (DWORD i = 0; i < 7; i++)
+        if (!lightOn(i, ldir(0.12f, 0, 0))) return false;
+    if (!lightOn(12, ldir(0, 0.4f, 0)) || !lightOn(20, ldir(0, 0, 0.4f))) return false;
+    const Px px[] = {{128, 128, 0xd66600}, {16, 16, BLUE}};
+    return frames(BLUE, px, 2, [&] { return fdraw(FVF_N, q); });
+}
+// SPECULARENABLE: facing the light and the (non-local) viewer, the light's specular colour adds to its diffuse.
+static bool rowFfSpecular() {
+    FN q[4];
+    qOne(q, 0.5f);
+    normals(q, 0, 0, -1);
+    D3DLIGHT9 l = ldir(0.8f, 0, 0);
+    l.Specular = {0, 0.4f, 0, 1};
+    D3DMATERIAL9 m = {};
+    m.Diffuse = {1, 1, 1, 1}, m.Specular = {1, 1, 1, 1}, m.Power = 8;
+    CK(SetMaterial, &m);
+    if (!rstate(D3DRS_LIGHTING, TRUE) || !rstate(D3DRS_SPECULARENABLE, TRUE) || !rstate(D3DRS_LOCALVIEWER, FALSE) ||
+        !lightOn(0, l))
+        return false;
+    const Px px[] = {{128, 128, 0xcc6600}, {16, 16, BLUE}};
+    return frames(BLUE, px, 2, [&] { return fdraw(FVF_N, q); });
+}
+// The diffuse material source: the material (left), the vertex colour (middle), and the material again once
+// COLORVERTEX is off (right).
+static bool rowFfMatSrc() {
+    FNC q[3][4];
+    for (int i = 0; i < 3; i++) {
+        q3(q[i], i, 0.5f), normals(q[i], 0, 0, -1);
+        for (FNC &v : q[i]) v.c = D3DCOLOR_XRGB(0, 204, 0);
+    }
+    if (!rstate(D3DRS_LIGHTING, TRUE) || !lightOn(0, ldir(1, 1, 1)) || !material(0.8f, 0, 0)) return false;
+    const Px px[] = {{48, 128, 0xcc0000}, {128, 128, CC00}, {208, 128, 0xcc0000}};
+    return frames(BLUE, px, 3, [&] {
+        return rstate(D3DRS_COLORVERTEX, TRUE) && rstate(D3DRS_DIFFUSEMATERIALSOURCE, D3DMCS_MATERIAL) &&
+               fdraw(FVF_NC, q[0]) && rstate(D3DRS_DIFFUSEMATERIALSOURCE, D3DMCS_COLOR1) && fdraw(FVF_NC, q[1]) &&
+               rstate(D3DRS_COLORVERTEX, FALSE) && fdraw(FVF_NC, q[2]);
+    });
+}
+// NORMALIZENORMALS: a half-length normal lights at half (left) unless normalised (middle); under a WORLD scale of
+// (2, 1, 1) a normal goes through the inverse transpose before it is normalised (right: 0.894 of the light).
+static bool rowFfNormalize() {
+    FN l[4], m[4], r[4];
+    q3(l, 0, 0.5f), q3(m, 1, 0.5f), mquad(r, 0.1875f, -0.25f, 0.4375f, 0.25f, 0.5f);
+    normals(l, 0, 0, -0.5f), normals(m, 0, 0, -0.5f), normals(r, 0.7071068f, 0, -0.7071068f);
+    D3DMATRIX wide = IDENTITY;
+    wide._11 = 2;
+    if (!rstate(D3DRS_LIGHTING, TRUE) || !lightOn(0, ldir(1, 1, 1)) || !material(0.8f, 0, 0)) return false;
+    const Px px[] = {{48, 128, 0x660000}, {128, 128, 0xcc0000}, {208, 128, 0xb60000}};
+    return frames(BLUE, px, 3, [&] {
+        return xform(D3DTS_WORLD, IDENTITY) && rstate(D3DRS_NORMALIZENORMALS, FALSE) && fdraw(FVF_N, l) &&
+               rstate(D3DRS_NORMALIZENORMALS, TRUE) && fdraw(FVF_N, m) && xform(D3DTS_WORLD, wide) && fdraw(FVF_N, r);
+    });
+}
+// Linear vertex fog over eye z: halfway between FOGSTART 1 and FOGEND 5 the colour is half the fog's.
+static bool rowFfFogVertex() {
+    FC q[4];
+    qOne(q, 3);
+    for (FC &v : q) v.c = D3DCOLOR_XRGB(204, 0, 0);
+    if (!xform(D3DTS_PROJECTION, mOrtho()) || !rstate(D3DRS_FOGENABLE, TRUE) ||
+        !rstate(D3DRS_FOGVERTEXMODE, D3DFOG_LINEAR) || !rstate(D3DRS_FOGSTART, fbits(1)) ||
+        !rstate(D3DRS_FOGEND, fbits(5)) || !rstate(D3DRS_FOGCOLOR, 0x006600))
+        return false;
+    const Px px[] = {{128, 128, 0x663300}, {16, 16, BLUE}};
+    return frames(BLUE, px, 2, [&] { return fdraw(FVF_C, q); });
+}
+// Linear table (pixel) fog over the fixed-function vertex stage: its source is w under a perspective projection
+// (left: w 3 between 1 and 5) and depth under an orthographic one (right: depth 0.5 between 0 and 1).
+static bool rowFfFogTable() {
+    FC l[4], r[4];
+    mquad(l, -0.875f * 3, -0.25f * 3, -0.125f * 3, 0.25f * 3, 3), qRight(r, 2.5f);
+    for (int i = 0; i < 4; i++) l[i].c = r[i].c = D3DCOLOR_XRGB(204, 0, 0);
+    if (!rstate(D3DRS_FOGENABLE, TRUE) || !rstate(D3DRS_FOGTABLEMODE, D3DFOG_LINEAR) ||
+        !rstate(D3DRS_FOGCOLOR, 0x006600))
+        return false;
+    const Px px[] = {{64, 128, 0x663300}, {192, 128, 0x663300}};
+    return frames(BLUE, px, 2, [&] {
+        return xform(D3DTS_PROJECTION, mPersp()) && rstate(D3DRS_FOGSTART, fbits(1)) && rstate(D3DRS_FOGEND, fbits(5)) &&
+               fdraw(FVF_C, l) && xform(D3DTS_PROJECTION, mOrtho()) && rstate(D3DRS_FOGSTART, fbits(0)) &&
+               rstate(D3DRS_FOGEND, fbits(1)) && fdraw(FVF_C, r);
+    });
+}
+// RG on stage 0, point-sampled and clamped, drawn unlit: the texel alone.
+static bool stageRG(Com<IDirect3DTexture9> &t) {
+    if (!makeRG(t) || !pointClamp(0)) return false;
+    CK(SetTexture, 0, t.p);
+    CK(SetTextureStageState, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    return true;
+}
+// Texgen: the eye-space position (z 3 through VIEW) times a texture transform is the coordinate, u = 3 * 0.25: green.
+// A passthrough coordinate (none in the layout) or the model-space position would read red.
+static bool rowFfTexgen() {
+    Com<IDirect3DTexture9> t;
+    FP q[4];
+    mquad(q, -0.5f, -0.25f, 0.5f, 0.25f, 1);
+    D3DMATRIX m = {};
+    m._31 = 0.25f, m._42 = 0.5f;
+    if (!stageRG(t) || !xform(D3DTS_PROJECTION, mOrtho()) || !xform(D3DTS_VIEW, mTrans(0, 0, 2)) ||
+        !xform(D3DTS_TEXTURE0, m))
+        return false;
+    CK(SetTextureStageState, 0, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_CAMERASPACEPOSITION);
+    CK(SetTextureStageState, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
+    const Px px[] = {{96, 128, 0x00ff00}, {160, 128, 0x00ff00}, {16, 16, BLUE}};
+    return frames(BLUE, px, 3, [&] { return fdraw(D3DFVF_XYZ, q); });
+}
+// A COUNT2 texture transform: a two-component coordinate is (u, v, 1), so the translation is the matrix's third row.
+static bool rowFfTt() {
+    Com<IDirect3DTexture9> t;
+    FT q[4];
+    qOne(q, 0.5f);
+    for (FT &v : q) v.u = 0.25f, v.v = 0.5f;
+    D3DMATRIX m = IDENTITY;
+    m._31 = 0.5f;
+    if (!stageRG(t) || !xform(D3DTS_TEXTURE0, m)) return false;
+    CK(SetTextureStageState, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
+    const Px px[] = {{128, 128, 0x00ff00}, {16, 16, BLUE}};
+    return frames(BLUE, px, 2, [&] { return fdraw(D3DFVF_XYZ | D3DFVF_TEX1, q); });
+}
+// COUNT3 | PROJECTED: (u, v) divide by the third component, 0.875 / 2 in a 4x1 texture of red, green, white, yellow.
+static bool rowFfTtProj() {
+    Com<IDirect3DTexture9> t;
+    static const DWORD texels[4] = {TRED, TGRN, TWHT, D3DCOLOR_XRGB(255, 255, 0)};
+    if (!make2d(t, 4, 1, 1, D3DFMT_X8R8G8B8, 4, [](int x, int) { return texels[x]; }) || !pointClamp(0)) return false;
+    CK(SetTexture, 0, t.p);
+    CK(SetTextureStageState, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    CK(SetTextureStageState, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3 | D3DTTFF_PROJECTED);
+    FT3 q[4];
+    qOne(q, 0.5f);
+    for (FT3 &v : q) v.u = 0.875f, v.v = 0.5f, v.w = 2;
+    const Px px[] = {{128, 128, 0x00ff00}, {16, 16, BLUE}};
+    return frames(BLUE, px, 2, [&] { return fdraw(D3DFVF_XYZ | D3DFVF_TEX1 | D3DFVF_TEXCOORDSIZE3(0), q); });
+}
+// TEXCOORDINDEX: stage 0 reads coordinate set 0 (red, left), then set 1 (green, right).
+static bool rowFfTcIndex() {
+    Com<IDirect3DTexture9> t;
+    FT2 l[4], r[4];
+    qLeft(l, 0.5f), qRight(r, 0.5f);
+    for (int i = 0; i < 4; i++) l[i].u0 = r[i].u0 = 0.25f, l[i].u1 = r[i].u1 = 0.75f, l[i].v0 = l[i].v1 = r[i].v0 = r[i].v1 = 0.5f;
+    if (!stageRG(t)) return false;
+    const Px px[] = {{64, 128, 0xff0000}, {192, 128, 0x00ff00}};
+    return frames(BLUE, px, 2, [&] {
+        CK(SetTextureStageState, 0, D3DTSS_TEXCOORDINDEX, 0);
+        if (!fdraw(D3DFVF_XYZ | D3DFVF_TEX2, l)) return false;
+        CK(SetTextureStageState, 0, D3DTSS_TEXCOORDINDEX, 1);
+        return fdraw(D3DFVF_XYZ | D3DFVF_TEX2, r);
+    });
+}
+// Lit and textured, as most fixed-function games draw: the lit 0.8 grey modulates the green texel.
+static bool rowFfTex() {
+    Com<IDirect3DTexture9> t;
+    FNT q[4];
+    qOne(q, 0.5f);
+    normals(q, 0, 0, -1);
+    for (FNT &v : q) v.u = 0.75f, v.v = 0.5f;
+    if (!makeRG(t) || !pointClamp(0) || !rstate(D3DRS_LIGHTING, TRUE) || !lightOn(0, ldir(1, 1, 1)) ||
+        !material(0.8f, 0.8f, 0.8f))
+        return false;
+    CK(SetTexture, 0, t.p);
+    const Px px[] = {{128, 128, CC00}, {16, 16, BLUE}};
+    return frames(BLUE, px, 2, [&] { return fdraw(D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_TEX1, q); });
+}
+// One blend weight of 0.5 between WORLD (identity) and WORLDMATRIX(1) (x + 0.5): the quad moves by 0.25.
+static bool rowFfBlend() {
+    FB1 q[4];
+    mquad(q, -0.75f, 0.25f, -0.25f, 0.75f, 0.5f);
+    for (FB1 &v : q) v.b = 0.5f, v.c = D3DCOLOR_XRGB(0, 255, 0);
+    if (!rstate(D3DRS_VERTEXBLEND, D3DVBF_1WEIGHTS) || !xform(D3DTS_WORLDMATRIX(1), mTrans(0.5f, 0, 0))) return false;
+    const Px px[] = {{96, 64, 0x00ff00}, {48, 64, BLUE}, {144, 64, BLUE}};
+    return frames(BLUE, px, 3, [&] { return fdraw(D3DFVF_XYZB1 | D3DFVF_DIFFUSE, q); });
+}
+// Indexed blending: the vertex's first index (5) names the matrix its weight of 1 takes (x + 0.5).
+static bool rowFfBlendIdx() {
+    FB2 q[4];
+    mquad(q, -0.75f, 0.25f, -0.25f, 0.75f, 0.5f);
+    for (FB2 &v : q) v.b = 1, v.idx = 0x00000905, v.c = D3DCOLOR_XRGB(0, 255, 0);
+    if (!rstate(D3DRS_VERTEXBLEND, D3DVBF_1WEIGHTS) || !rstate(D3DRS_INDEXEDVERTEXBLENDENABLE, TRUE) ||
+        !xform(D3DTS_WORLDMATRIX(5), mTrans(0.5f, 0, 0)) || !xform(D3DTS_WORLDMATRIX(1), mTrans(0, -1, 0)) ||
+        !xform(D3DTS_WORLDMATRIX(9), mTrans(0, -1, 0)))
+        return false;
+    const Px px[] = {{128, 64, 0x00ff00}, {48, 64, BLUE}};
+    return frames(BLUE, px, 2, [&] { return fdraw(D3DFVF_XYZB2 | D3DFVF_LASTBETA_UBYTE4 | D3DFVF_DIFFUSE, q); });
+}
+// A point of POINTSIZE 16 about pixel (128, 64).
+static bool rowFfPoint() {
+    const FC p = {0, 0.5f, 0.5f, D3DCOLOR_XRGB(0, 255, 0)};
+    if (!rstate(D3DRS_POINTSIZE, fbits(16))) return false;
+    const Px px[] = {{124, 60, 0x00ff00}, {132, 68, 0x00ff00}, {142, 64, BLUE}};
+    return frames(BLUE, px, 3, [&] {
+        CK(SetFVF, FVF_C);
+        CK(DrawPrimitiveUP, D3DPT_POINTLIST, 1, &p, sizeof p);
+        return true;
+    });
+}
+// POINTSCALEENABLE: 256 * 0.125 / the eye distance 2 is 16 pixels; a second point past the far plane (depth 1.2) is
+// clipped, not clamped onto it.
+static bool rowFfPointScale() {
+    const FC p[2] = {{0, 0, 2, D3DCOLOR_XRGB(0, 255, 0)}, {0.5f, 0.5f, 6, D3DCOLOR_XRGB(0, 255, 0)}};
+    if (!xform(D3DTS_PROJECTION, mOrtho()) || !rstate(D3DRS_POINTSCALEENABLE, TRUE) ||
+        !rstate(D3DRS_POINTSCALE_A, fbits(0)) || !rstate(D3DRS_POINTSCALE_B, fbits(0)) ||
+        !rstate(D3DRS_POINTSCALE_C, fbits(1)) || !rstate(D3DRS_POINTSIZE, fbits(0.125f)))
+        return false;
+    const Px px[] = {{124, 124, 0x00ff00}, {132, 132, 0x00ff00}, {142, 128, BLUE}, {192, 64, BLUE}};
+    return frames(BLUE, px, 4, [&] {
+        CK(SetFVF, FVF_C);
+        CK(DrawPrimitiveUP, D3DPT_POINTLIST, 2, p, sizeof *p);
+        return true;
+    });
+}
+// A user clip plane is in world space: x >= 0 keeps the quad's right half, which VIEW then moves to pixels 160-224.
+static bool rowFfClip() {
+    FC q[4];
+    mquad(q, -0.5f, 0.25f, 0.5f, 0.75f, 0.5f);
+    for (FC &v : q) v.c = D3DCOLOR_XRGB(0, 255, 0);
+    const float plane[4] = {1, 0, 0, 0};
+    CK(SetClipPlane, 0, plane);
+    if (!xform(D3DTS_VIEW, mTrans(0.25f, 0, 0)) || !rstate(D3DRS_CLIPPLANEENABLE, 1)) return false;
+    const Px px[] = {{192, 64, 0x00ff00}, {144, 64, BLUE}, {112, 64, BLUE}};
+    return frames(BLUE, px, 3, [&] { return fdraw(FVF_C, q); });
+}
+// DrawIndexedPrimitiveUP with min_vertex_index 4 through the fixed-function vertex stage (WORLD x + 0.25).
+static bool rowFfIndexed() {
+    FC v[8];
+    mquad(v, -0.25f, 0.6f, 0.25f, 0.9f, 0.5f), qOne(v + 4, 0.5f);
+    for (FC &q : v) q.c = D3DCOLOR_XRGB(0, 204, 0);
+    const WORD idx[6] = {4, 5, 6, 6, 5, 7};
+    if (!xform(D3DTS_WORLD, mTrans(0.25f, 0, 0))) return false;
+    const Px px[] = {{160, 128, CC00}, {112, 128, BLUE}, {160, 32, BLUE}};
+    return frames(BLUE, px, 3, [&] {
+        CK(SetFVF, FVF_C);
+        CK(DrawIndexedPrimitiveUP, D3DPT_TRIANGLELIST, 4, 4, 2, idx, D3DFMT_INDEX16, v, sizeof *v);
+        return true;
+    });
+}
+// A vertex declaration instead of an FVF, the colour first: it is the diffuse material (COLOR1), lit red over a
+// material that alone would light green.
+static bool rowFfDecl() {
+    struct DV { DWORD c; float x, y, z, nx, ny, nz; };
+    static const D3DVERTEXELEMENT9 elements[] = {
+        {0, 0, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
+        {0, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {0, 16, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL, 0},
+        D3DDECL_END()};
+    Com<IDirect3DVertexDeclaration9> decl;
+    CK(CreateVertexDeclaration, elements, &decl.p);
+    DV q[4];
+    qOne(q, 0.5f);
+    normals(q, 0, 0, -1);
+    for (DV &v : q) v.c = 0xffcc0000;
+    if (!rstate(D3DRS_LIGHTING, TRUE) || !lightOn(0, ldir(1, 1, 1)) || !material(0, 0.8f, 0)) return false;
+    const Px px[] = {{128, 128, 0xcc0000}, {16, 16, BLUE}};
+    return frames(BLUE, px, 2, [&] {
+        CK(SetVertexDeclaration, decl.p);
+        CK(DrawPrimitiveUP, D3DPT_TRIANGLESTRIP, 2, q, sizeof *q);
+        return true;
+    });
+}
+// A render-target, then a depth texture at a vertex sampler the shader reads: past the core's slice (C4b-3d).
+static bool vtxTargetRow(DWORD usage, D3DFORMAT format) {
+    Com<IDirect3DTexture9> t;
+    CK(CreateTexture, 4, 4, 1, usage, format, D3DPOOL_DEFAULT, &t.p, nullptr);
+    Prog p;
+    if (!makeVtx(p, 2, 0) || !use(p)) return false;
+    CK(SetTexture, VS0, t.p);
+    V3 q[4];
+    quad(q, -0.5f, -0.5f, 0.5f, 0.5f);
+    const float c[4] = {0.5f, 0.5f, 0, 0};
+    CK(SetVertexShaderConstantF, 0, c, 1);
+    const bool ok = refusedRow([&] { return dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof *q); });
+    CK(SetTexture, VS0, nullptr);
+    return ok;
+}
+static bool rowTexVtxRt() { return vtxTargetRow(D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8); }
+static bool rowTexVtxDepth() { return vtxTargetRow(D3DUSAGE_DEPTHSTENCIL, D3DFMT_D24S8); }
+
+static void fixedRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"ff-xform", rowFfXform},           {"ff-persp", rowFfPersp},           {"ff-rhwmix", rowFfRhwMix},
+        {"ff-viewchange", rowFfViewChange}, {"ff-ambient", rowFfAmbient},       {"ff-lightdefault", rowFfLightDefault},
+        {"ff-lightdir", rowFfLightDir},     {"ff-lightpoint", rowFfLightPoint}, {"ff-lightspot", rowFfLightSpot},
+        {"ff-lightsparse", rowFfLightSparse}, {"ff-light8", rowFfLight8},       {"ff-specular", rowFfSpecular},
+        {"ff-matsrc", rowFfMatSrc},         {"ff-normalize", rowFfNormalize},   {"ff-fogvertex", rowFfFogVertex},
+        {"ff-fogtable", rowFfFogTable},     {"ff-texgen", rowFfTexgen},         {"ff-tt", rowFfTt},
+        {"ff-ttproj", rowFfTtProj},         {"ff-tcindex", rowFfTcIndex},       {"ff-tex", rowFfTex},
+        {"ff-blend", rowFfBlend},           {"ff-blendidx", rowFfBlendIdx},     {"ff-point", rowFfPoint},
+        {"ff-pointscale", rowFfPointScale}, {"ff-clip", rowFfClip},             {"ff-indexed", rowFfIndexed},
+        {"ff-decl", rowFfDecl},             {"tex-vtxrt", rowTexVtxRt},         {"tex-vtxdepth", rowTexVtxDepth}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
@@ -1675,6 +2346,8 @@ int main(int argc, char **argv) {
     const bool shaders = !bench && argc > 1 && !strcmp(argv[1], "shaders");
     const bool state = !bench && argc > 1 && !strcmp(argv[1], "state");
     const bool textures = !bench && argc > 1 && !strcmp(argv[1], "textures");
+    const bool fixed = !bench && argc > 1 && !strcmp(argv[1], "fixed");
+    const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     WNDCLASSW wc = {};
     wc.lpfnWndProc = DefWindowProcW;
     wc.hInstance = GetModuleHandleW(nullptr);
@@ -1705,6 +2378,13 @@ int main(int argc, char **argv) {
     const Vertex tri[3] = {{128, 16, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {240, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {16, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)}};
+    if (fixed) {
+        fixedRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
     if (textures) {
         textureRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();
@@ -1749,6 +2429,33 @@ int main(int argc, char **argv) {
         }
         dev->SetFVF(texBench ? FVF_T2 : D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
         int failedDraws = 0;
+        // lit (DXMTRS C4b-3c): the triangle untransformed through the fixed-function vertex stage, one directional
+        // light on a 0.8 red material; a frame read back before the timed loop must show the lit colour at the
+        // centre (counted with the failed draws), so the line's numbers are a lit draw's.
+        FN ltri[3] = {{0, 0.875f, 0.5f, 0, 0, -1}, {0.875f, -0.875f, 0.5f, 0, 0, -1}, {-0.875f, -0.875f, 0.5f, 0, 0, -1}};
+        if (litBench) {
+            if (!(rstate(D3DRS_LIGHTING, TRUE) && lightOn(0, ldir(1, 1, 1)) && material(0.8f, 0, 0)))
+                return printf("d3d9 bench FAIL %s\n", why), failures + 1;
+            dev->SetFVF(FVF_N);
+            IDirect3DSurface9 *brt = nullptr, *bsys = nullptr;
+            D3DLOCKED_RECT lr = {};
+            DWORD centre = 0;
+            dev->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 255), 1.0f, 0);
+            dev->BeginScene();
+            failedDraws += FAILED(dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, ltri, sizeof *ltri));
+            dev->EndScene();
+            if (SUCCEEDED(dev->GetRenderTarget(0, &brt)) &&
+                SUCCEEDED(dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &bsys, nullptr)) &&
+                SUCCEEDED(dev->GetRenderTargetData(brt, bsys)) && SUCCEEDED(bsys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+                centre = ((const DWORD *)((const BYTE *)lr.pBits + 128 * lr.Pitch))[128] & 0xffffff;
+                bsys->UnlockRect();
+            }
+            dev->Present(nullptr, nullptr, nullptr, nullptr);
+            if (bsys) bsys->Release();
+            if (brt) brt->Release();
+            // mtld3d may leave the first draw out while its pipeline builds: only a wrong colour counts, not blue.
+            if (centre != 0xcc0000 && centre != 0x0000ff) failedDraws++, printf("d3d9 bench lit centre %06lx\n", (unsigned long)centre);
+        }
         QueryPerformanceCounter(&t0);
         for (int i = 0; i < benchFrames; i++) {
             dev->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 255), 1.0f, 0);
@@ -1759,6 +2466,12 @@ int main(int argc, char **argv) {
                                            {0, 0, 0, 1}};
                     dev->SetVertexShaderConstantF(0, &m[0][0], 4);
                     failedDraws += FAILED(dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, ctri, sizeof *ctri));
+                    continue;
+                }
+                if (litBench) {
+                    FN v[3] = {ltri[0], ltri[1], ltri[2]};
+                    for (FN &q : v) q.x += (float)(d & 7) * 0.125f / 128;
+                    failedDraws += FAILED(dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, v, sizeof *v));
                     continue;
                 }
                 if (texBench) {
@@ -1782,7 +2495,7 @@ int main(int argc, char **argv) {
         mem.dwLength = sizeof mem;
         GlobalMemoryStatusEx(&mem);
         printf("d3d9 bench: mode %s frames %d draws %d wall_ms %.1f cpu_ms %.1f vm_used_mb %llu failed %d\n",
-               prog ? "prog" : texBench ? "tex" : "ff", benchFrames, benchDraws,
+               prog ? "prog" : texBench ? "tex" : litBench ? "lit" : "ff", benchFrames, benchDraws,
                (double)(t1.QuadPart - t0.QuadPart) * 1e3 / (double)f.QuadPart, ms(user) + ms(kernel),
                (unsigned long long)((mem.ullTotalVirtual - mem.ullAvailVirtual) >> 20), failedDraws);
         dev->Release();

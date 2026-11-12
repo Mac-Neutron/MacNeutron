@@ -29,8 +29,10 @@
 # refusal line ("... is not implemented under runtime.mode = core"), but for the shd* rows exactly one, the crossing
 # row's (C4b2-8: its name says "crossing"). Every lane also checks d3d9_triangle state's 12 rows (DXMTRS C4b-3a,
 # st64-fresh, st32-fresh); under core their logs hold exactly those rows' three refusal lines.
-# Every lane also checks d3d9_triangle textures' 33 rows (DXMTRS C4b-3b, tx64-fresh, tx32-fresh), and tx32-fresh the
-# 32-bit-only tex-big256 (the staged-bytes budget); under core their logs hold exactly the five refused rows' lines.
+# Every lane also checks d3d9_triangle textures' 38 rows (DXMTRS C4b-3b and C4b-3c's vertex textures, tx64-fresh,
+# tx32-fresh), and tx32-fresh the 32-bit-only tex-big256 (the staged-bytes budget); under core their logs hold exactly
+# the four refused rows' lines. Every lane also checks d3d9_triangle fixed's 30 rows (DXMTRS C4b-3c: the fixed-function
+# vertex stage; fx64-fresh, fx32-fresh); under core their logs hold exactly its two refused rows' lines.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -137,7 +139,15 @@ for r in tx64-fresh tx32-fresh; do
   for row in tex-ps2d tex-ff tex-cascade tex-cube tex-volume tex-mips tex-address tex-filter tex-srgb tex-dxt1 tex-l8 \
     tex-a8 tex-a8l8 tex-r5g6b5 tex-a4r4g4b4 tex-r8g8b8 tex-lock tex-twodraws tex-dynamic tex-levelsurf tex-genmips \
     tex-update tex-autogen tex-black tex-bumpenv tex-texbem tex-big tex-release tex-depthtex tex-fetch4 tex-rttex tex-vtx \
-    tex-rtlock $([ $r = tx32-fresh ] && echo tex-big256); do
+    tex-rtlock tex-vtxlod tex-vtxblack tex-vtxcube tex-vtxvolume tex-vtxsrgb \
+    $([ $r = tx32-fresh ] && echo tex-big256); do
+    check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
+  done
+done
+for r in fx64-fresh fx32-fresh; do
+  for row in ff-xform ff-persp ff-rhwmix ff-viewchange ff-ambient ff-lightdefault ff-lightdir ff-lightpoint ff-lightspot \
+    ff-lightsparse ff-light8 ff-specular ff-matsrc ff-normalize ff-fogvertex ff-fogtable ff-texgen ff-tt ff-ttproj \
+    ff-tcindex ff-tex ff-blend ff-blendidx ff-point ff-pointscale ff-clip ff-indexed ff-decl tex-vtxrt tex-vtxdepth; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
@@ -156,15 +166,17 @@ state_refusals='IDirect3DVertexBuffer9::Lock'
 texture_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture sampled)
 IDirect3DDevice9::Draw*PrimitiveUP (fetch4)
 IDirect3DDevice9::Draw*PrimitiveUP (a render-target texture sampled)
-IDirect3DDevice9::Draw*PrimitiveUP (a vertex shader declaring a sampler)
 IDirect3DTexture9::LockRect (a render-target or depth texture)'
+fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a render-target texture sampled)
+IDirect3DDevice9::Draw*PrimitiveUP (a depth texture sampled)'
 runtime() {
   n=$(/usr/bin/grep -rhF "$refused" "$1" 2> /dev/null | wc -l | tr -d ' ')
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
     && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build' "$1" \
     && case ${2:-} in
       crossing) [ "$n" = 1 ] && /usr/bin/grep -rhF "$refused" "$1" | /usr/bin/grep -qi crossing ;;
-      state|textures) set_=$state_refusals; [ "$2" = state ] || set_=$texture_refusals
+      state|textures|fixed)
+        case $2 in state) set_=$state_refusals ;; textures) set_=$texture_refusals ;; *) set_=$fixed_refusals ;; esac
         [ "$n" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] && printf '%s\n' "$set_" | while IFS= read -r m; do
           /usr/bin/grep -rqF "d3d9 core: $m $refused" "$1" || exit 1; done ;;
       *) [ "$n" = 0 ] ;;
@@ -182,6 +194,9 @@ if [ "$RT" = core ]; then
   done
   for r in tx64-fresh tx32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" textures)" ok
+  done
+  for r in fx64-fresh fx32-fresh; do
+    check "$r runtime core" "$(runtime "$G/logs/$r" fixed)" ok
   done
 fi
 if [ "${D3D9_BENCH:-}" = 1 ]; then
