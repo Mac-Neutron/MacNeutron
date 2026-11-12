@@ -27,7 +27,8 @@
 # Every lane checks d3d9_triangle's 22 shader rows (DXMTRS C4b-2, C4b2-11) for x86-64 and i386 (shd64-fresh,
 # shd32-fresh; "shaders strict" under core: the first frame must match). Under core a launch's logs also hold no core
 # refusal line ("... is not implemented under runtime.mode = core"), but for the shd* rows exactly one, the crossing
-# row's (C4b2-8: its name says "crossing").
+# row's (C4b2-8: its name says "crossing"). Every lane also checks d3d9_triangle state's 12 rows (DXMTRS C4b-3a,
+# st64-fresh, st32-fresh); under core their logs hold exactly those rows' three refusal lines.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -130,17 +131,30 @@ for r in shd64-fresh shd32-fresh; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
-# core: runtime <folder> [crossing]: the core device's line in a launch's logs, none of mtld3d.so's encoder line nor
-# of the core's can't-present lines (the code that ran prints them, not the switch), and no refusal line, or with
-# "crossing" exactly one, the crossing row's.
+for r in st64-fresh st32-fresh; do
+  for row in state-xform state-material state-tss state-swapchain state-rt state-tex state-late state-lock state-sb \
+    state-upunbind state-fftex state-fftexoff; do
+    check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
+  done
+done
+# core: runtime <folder> [crossing|state]: the core device's line in a launch's logs, none of mtld3d.so's encoder line
+# nor of the core's can't-present lines (the code that ran prints them, not the switch), and no refusal line, or with
+# "crossing" exactly one, the crossing row's, or with "state" exactly the state rows' three (DXMTRS C4b-3a: the textured
+# fixed-function draw, the buffer lock, the texture lock).
 refused='is not implemented under runtime.mode = core'
+state_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a fixed-function stage reading a texture)
+IDirect3DVertexBuffer9::Lock
+IDirect3DTexture9::LockRect'
 runtime() {
   n=$(/usr/bin/grep -rhF "$refused" "$1" 2> /dev/null | wc -l | tr -d ' ')
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
     && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build' "$1" \
-    && if [ "${2:-}" = crossing ]; then
-      [ "$n" = 1 ] && /usr/bin/grep -rhF "$refused" "$1" | /usr/bin/grep -qi crossing
-    else [ "$n" = 0 ]; fi && echo ok
+    && case ${2:-} in
+      crossing) [ "$n" = 1 ] && /usr/bin/grep -rhF "$refused" "$1" | /usr/bin/grep -qi crossing ;;
+      state) [ "$n" = 3 ] && printf '%s\n' "$state_refusals" | while IFS= read -r m; do
+          /usr/bin/grep -rqF "d3d9 core: $m $refused" "$1" || exit 1; done ;;
+      *) [ "$n" = 0 ] ;;
+    esac && echo ok
 }
 if [ "$RT" = core ]; then
   for r in tri64-fresh tri32-fresh tri64-updated tri32-updated; do
@@ -148,6 +162,9 @@ if [ "$RT" = core ]; then
   done
   for r in shd64-fresh shd32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" crossing)" ok
+  done
+  for r in st64-fresh st32-fresh; do
+    check "$r runtime core" "$(runtime "$G/logs/$r" state)" ok
   done
 fi
 if [ "${D3D9_BENCH:-}" = 1 ]; then

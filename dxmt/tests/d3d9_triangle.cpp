@@ -24,6 +24,10 @@
 // undrawn one that keeps it, retrying frames for up to 10 s (mtld3d leaves a draw out while its pipeline builds) unless
 // "shaders strict" (the core compiles synchronously: the first frame must match). The mode has a 90 s budget; rows past
 // it print "FAIL budget". Expected colours are D3DCOLOR_XRGB values, each channel within 1.
+// With "state" ("state strict" under core; DXMTRS C4b-3a): 12 rows "d3d9 state-<row> ok|FAIL <why>" of the API state
+// and inert objects (transforms, material and lights, stage, sampler and scissor states, stream frequency, swap chains,
+// the back-buffer target switch, textures, a second device released before its objects, a buffer lock, state blocks,
+// the UP draws' unbinds, a textured fixed-function draw and one whose stage reads no texture), with a 60 s budget.
 #include <windows.h>
 #include <d3d9.h>
 #include <cstdio>
@@ -743,6 +747,301 @@ static void shaderRows(IDirect3DDevice9 *d, bool strict) {
     if (rtSurf) rtSurf->Release();
 }
 
+// The "state" mode (DXMTRS C4b-3a): the API state and inert objects the core runtime takes, each row starting from
+// reset() and leaving what it set back at D3D9's defaults. Rows whose answer differs by runtime (a lock, a draw the
+// core refuses) take either answer; d3d9-check proves which runtime gave it from the launch's refusal lines.
+static HWND stateHwnd;
+static IDirect3D9 *stateD3d;
+
+static D3DMATRIX diag(float a) {
+    D3DMATRIX m = {};
+    m._11 = m._22 = m._33 = a, m._44 = 1;
+    return m;
+}
+// xform: SetTransform then MultiplyTransform (2 * 3), read back 6 on the diagonal.
+static bool rowXform() {
+    const D3DMATRIX two = diag(2), three = diag(3), six = diag(6), one = diag(1);
+    D3DMATRIX got = {};
+    CK(SetTransform, D3DTS_WORLD, &two);
+    CK(MultiplyTransform, D3DTS_WORLD, &three);
+    CK(GetTransform, D3DTS_WORLD, &got);
+    CK(SetTransform, D3DTS_WORLD, &one);
+    if (memcmp(&got, &six, sizeof got)) return snprintf(why, sizeof why, "GetTransform mismatch"), false;
+    return true;
+}
+// material: SetMaterial, SetLight, LightEnable read back.
+static bool rowMaterial() {
+    D3DMATERIAL9 m = {}, gm = {};
+    m.Diffuse = {0.25f, 0.5f, 0.75f, 1}, m.Power = 8;
+    CK(SetMaterial, &m);
+    CK(GetMaterial, &gm);
+    D3DLIGHT9 l = {}, gl = {};
+    l.Type = D3DLIGHT_DIRECTIONAL, l.Diffuse = {1, 1, 1, 1}, l.Direction = {0, 0, 1};
+    CK(SetLight, 0, &l);
+    CK(GetLight, 0, &gl);
+    CK(LightEnable, 0, TRUE);
+    BOOL on = FALSE;
+    CK(GetLightEnable, 0, &on);
+    CK(LightEnable, 0, FALSE);
+    if (memcmp(&m, &gm, sizeof m) || memcmp(&l, &gl, sizeof l) || !on)
+        return snprintf(why, sizeof why, "Get{Material,Light,LightEnable} mismatch"), false;
+    return true;
+}
+// tss: a texture-stage state, a pixel and a vertex sampler state, the scissor rect and a stream frequency read back.
+static bool rowTss() {
+    DWORD v = 0;
+    CK(SetTextureStageState, 1, D3DTSS_COLOROP, D3DTOP_MODULATE);
+    CK(GetTextureStageState, 1, D3DTSS_COLOROP, &v);
+    CK(SetTextureStageState, 1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    if (v != D3DTOP_MODULATE) return snprintf(why, sizeof why, "GetTextureStageState %lu", v), false;
+    CK(SetSamplerState, 0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    CK(GetSamplerState, 0, D3DSAMP_MAGFILTER, &v);
+    CK(SetSamplerState, 0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+    if (v != D3DTEXF_LINEAR) return snprintf(why, sizeof why, "GetSamplerState %lu", v), false;
+    CK(SetSamplerState, D3DVERTEXTEXTURESAMPLER0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+    CK(GetSamplerState, D3DVERTEXTEXTURESAMPLER0, D3DSAMP_ADDRESSU, &v);
+    CK(SetSamplerState, D3DVERTEXTEXTURESAMPLER0, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
+    if (v != D3DTADDRESS_CLAMP) return snprintf(why, sizeof why, "GetSamplerState (vertex) %lu", v), false;
+    const RECT sr = {1, 2, 30, 40}, full = {0, 0, 256, 256};
+    RECT gr = {};
+    CK(SetScissorRect, &sr);
+    CK(GetScissorRect, &gr);
+    CK(SetScissorRect, &full);
+    if (memcmp(&sr, &gr, sizeof sr)) return snprintf(why, sizeof why, "GetScissorRect mismatch"), false;
+    UINT f = 0;
+    CK(SetStreamSourceFreq, 1, 3);
+    CK(GetStreamSourceFreq, 1, &f);
+    CK(SetStreamSourceFreq, 1, 1);
+    if (f != 3) return snprintf(why, sizeof why, "GetStreamSourceFreq %u", f), false;
+    return true;
+}
+// swapchain: an additional chain, GetSwapChain(0), one chain counted, the chain's present parameters, device and
+// back buffer.
+static bool rowSwapchain() {
+    D3DPRESENT_PARAMETERS pp = {}, gp = {};
+    pp.Windowed = TRUE, pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = stateHwnd;
+    Com<IDirect3DSwapChain9> sc, sc0;
+    Com<IDirect3DDevice9> d;
+    Com<IDirect3DSurface9> bb;
+    CK(CreateAdditionalSwapChain, &pp, &sc.p);
+    CK(GetSwapChain, 0, &sc0.p);
+    if (dev->GetNumberOfSwapChains() != 1)
+        return snprintf(why, sizeof why, "GetNumberOfSwapChains %u", dev->GetNumberOfSwapChains()), false;
+    HRESULT hr = sc.p->GetPresentParameters(&gp);
+    if (FAILED(hr)) return fail("GetPresentParameters", hr);
+    if ((hr = sc.p->GetDevice(&d.p)) != D3D_OK || d.p != dev) return fail("SwapChain GetDevice", hr);
+    if (FAILED(hr = sc.p->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &bb.p))) return fail("GetBackBuffer", hr);
+    return true;
+}
+// rt: the additional chain's back buffer as render target 0, a red clear read back through render target 0's original
+// surface (the chains alias one back buffer); SetRenderTarget(1, NULL); no depth surface; SetDepthStencilSurface(NULL).
+static bool rowRt() {
+    D3DPRESENT_PARAMETERS pp = {};
+    pp.Windowed = TRUE, pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = stateHwnd;
+    Com<IDirect3DSwapChain9> sc;
+    Com<IDirect3DSurface9> bb, ds;
+    CK(CreateAdditionalSwapChain, &pp, &sc.p);
+    HRESULT hr = sc.p->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
+    if (FAILED(hr)) return fail("GetBackBuffer", hr);
+    CK(SetRenderTarget, 0, bb.p);
+    CK(Clear, 0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(255, 0, 0), 1.0f, 0);
+    CK(GetRenderTargetData, rtSurf, sysSurf);
+    D3DLOCKED_RECT lr = {};
+    if (FAILED(hr = sysSurf->LockRect(&lr, nullptr, D3DLOCK_READONLY))) return fail("LockRect", hr);
+    const DWORD got = *(const DWORD *)((const BYTE *)lr.pBits + 128 * lr.Pitch + 128 * 4) & 0xffffff;
+    sysSurf->UnlockRect();
+    CK(SetRenderTarget, 0, rtSurf);
+    CK(Present, nullptr, nullptr, nullptr, nullptr);
+    if (got != 0xff0000) return snprintf(why, sizeof why, "back buffer %06lx want ff0000", (unsigned long)got), false;
+    CK(SetRenderTarget, 1, nullptr);
+    hr = dev->GetDepthStencilSurface(&ds.p);
+    if (hr != D3DERR_NOTFOUND || ds.p) return fail("GetDepthStencilSurface", hr);
+    CK(SetDepthStencilSurface, nullptr);
+    return true;
+}
+// tex: 2D, cube, volume, managed and system-memory textures; a level, its description, the level count, SetLOD; the
+// 2D one bound on pixel stage 0 and vertex slot 0 and read back; the system-memory one bound on stage 1.
+static bool rowTex() {
+    Com<IDirect3DTexture9> t, m, sys;
+    Com<IDirect3DCubeTexture9> c;
+    Com<IDirect3DVolumeTexture9> v;
+    Com<IDirect3DSurface9> level;
+    Com<IDirect3DBaseTexture9> g;
+    CK(CreateTexture, 64, 64, 0, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &t.p, nullptr);
+    CK(CreateTexture, 64, 64, 0, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &m.p, nullptr);
+    CK(CreateTexture, 16, 16, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys.p, nullptr);
+    CK(CreateCubeTexture, 16, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &c.p, nullptr);
+    CK(CreateVolumeTexture, 8, 8, 8, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &v.p, nullptr);
+    HRESULT hr = t.p->GetSurfaceLevel(1, &level.p);
+    if (FAILED(hr)) return fail("GetSurfaceLevel", hr);
+    D3DSURFACE_DESC desc = {};
+    if (FAILED(hr = t.p->GetLevelDesc(1, &desc)) || desc.Width != 32) return fail("GetLevelDesc", hr);
+    if (t.p->GetLevelCount() != 7) return snprintf(why, sizeof why, "GetLevelCount %lu", t.p->GetLevelCount()), false;
+    m.p->SetLOD(2);
+    if (m.p->GetLOD() != 2) return snprintf(why, sizeof why, "GetLOD %lu", m.p->GetLOD()), false;
+    CK(SetTexture, 0, t.p);
+    CK(SetTexture, D3DVERTEXTEXTURESAMPLER0, t.p);
+    CK(GetTexture, 0, &g.p);
+    bool same = g.p == t.p;
+    g.p->Release(), g.p = nullptr;
+    CK(GetTexture, D3DVERTEXTEXTURESAMPLER0, &g.p);
+    same = same && g.p == t.p;
+    hr = dev->SetTexture(1, sys.p);
+    CK(SetTexture, 0, nullptr);
+    CK(SetTexture, 1, nullptr);
+    CK(SetTexture, D3DVERTEXTEXTURESAMPLER0, nullptr);
+    if (FAILED(hr) && hr != D3DERR_INVALIDCALL) return fail("SetTexture (system memory)", hr);
+    if (!same) return snprintf(why, sizeof why, "GetTexture mismatch"), false;
+    return true;
+}
+// late: a second device's (on a window of its own) texture and vertex buffer outlive the application's last
+// reference to that device.
+static bool rowLate() {
+    HWND w = CreateWindowW(L"d3d9_triangle", L"d3d9_triangle late", WS_OVERLAPPEDWINDOW, 400, 100, 64, 64, nullptr,
+                           nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!w) return snprintf(why, sizeof why, "CreateWindowW"), false;
+    D3DPRESENT_PARAMETERS pp = {};
+    pp.Windowed = TRUE, pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = w;
+    IDirect3DDevice9 *d2 = nullptr;
+    HRESULT hr = stateD3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, w, D3DCREATE_HARDWARE_VERTEXPROCESSING,
+                                        &pp, &d2);
+    if (FAILED(hr)) return DestroyWindow(w), fail("CreateDevice", hr);
+    IDirect3DTexture9 *t = nullptr;
+    IDirect3DVertexBuffer9 *vb = nullptr;
+    hr = d2->CreateTexture(16, 16, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &t, nullptr);
+    if (SUCCEEDED(hr)) hr = d2->CreateVertexBuffer(64, 0, 0, D3DPOOL_DEFAULT, &vb, nullptr);
+    if (SUCCEEDED(hr)) hr = d2->SetTexture(0, t);
+    if (SUCCEEDED(hr)) hr = d2->SetStreamSource(0, vb, 0, 16);
+    d2->Release();
+    if (t) t->Release();
+    if (vb) vb->Release();
+    DestroyWindow(w);
+    return SUCCEEDED(hr) || fail("second device", hr);
+}
+// lock: a vertex buffer's Lock answers D3D_OK (then unlocked) or D3DERR_NOTAVAILABLE (core: locks are C4c's).
+static bool rowLock() {
+    Com<IDirect3DVertexBuffer9> vb;
+    CK(CreateVertexBuffer, 64, D3DUSAGE_DYNAMIC, 0, D3DPOOL_DEFAULT, &vb.p, nullptr);
+    void *data = nullptr;
+    HRESULT hr = vb.p->Lock(0, 0, &data, D3DLOCK_DISCARD);
+    if (hr == D3D_OK) return vb.p->Unlock(), true;
+    return hr == D3DERR_NOTAVAILABLE || fail("Lock", hr);
+}
+// sb: a state block of everything captures a bound texture and stream; Apply after unbinding binds them again; a
+// recorded block applies a transform; both answer GetDevice.
+static bool rowSb() {
+    Com<IDirect3DTexture9> t;
+    Com<IDirect3DVertexBuffer9> vb, gvb;
+    Com<IDirect3DStateBlock9> sb, rec;
+    Com<IDirect3DBaseTexture9> g;
+    Com<IDirect3DDevice9> d;
+    CK(CreateTexture, 16, 16, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &t.p, nullptr);
+    CK(CreateVertexBuffer, 64, 0, 0, D3DPOOL_DEFAULT, &vb.p, nullptr);
+    CK(SetTexture, 0, t.p);
+    CK(SetStreamSource, 0, vb.p, 0, 16);
+    CK(CreateStateBlock, D3DSBT_ALL, &sb.p);
+    CK(SetTexture, 0, nullptr);
+    CK(SetStreamSource, 0, nullptr, 0, 0);
+    HRESULT hr = sb.p->Apply();
+    if (FAILED(hr)) return fail("Apply", hr);
+    UINT off = 0, stride = 0;
+    CK(GetTexture, 0, &g.p);
+    CK(GetStreamSource, 0, &gvb.p, &off, &stride);
+    const bool same = g.p == t.p && gvb.p == vb.p && stride == 16;
+    CK(SetTexture, 0, nullptr);
+    CK(SetStreamSource, 0, nullptr, 0, 0);
+    if (!same) return snprintf(why, sizeof why, "Apply did not restore the texture and stream"), false;
+    const D3DMATRIX two = diag(2), one = diag(1);
+    D3DMATRIX got = {};
+    CK(BeginStateBlock);
+    CK(SetTransform, D3DTS_VIEW, &two);
+    CK(EndStateBlock, &rec.p);
+    CK(SetTransform, D3DTS_VIEW, &one);
+    if (FAILED(hr = rec.p->Apply())) return fail("Apply (recorded)", hr);
+    CK(GetTransform, D3DTS_VIEW, &got);
+    CK(SetTransform, D3DTS_VIEW, &one);
+    if (memcmp(&got, &two, sizeof got)) return snprintf(why, sizeof why, "recorded Apply mismatch"), false;
+    if ((hr = rec.p->GetDevice(&d.p)) != D3D_OK || d.p != dev) return fail("StateBlock GetDevice", hr);
+    return true;
+}
+// upunbind: a UP draw unbinds stream 0, an indexed UP draw the indices too.
+static bool rowUpUnbind() {
+    Com<IDirect3DVertexBuffer9> vb, gvb;
+    Com<IDirect3DIndexBuffer9> ib, gib;
+    CK(CreateVertexBuffer, 64, 0, 0, D3DPOOL_DEFAULT, &vb.p, nullptr);
+    CK(CreateIndexBuffer, 64, 0, D3DFMT_INDEX16, D3DPOOL_DEFAULT, &ib.p, nullptr);
+    RV q[4];
+    quadRhw(q, 96, 96, 160, 160, D3DCOLOR_XRGB(255, 255, 255));
+    const WORD idx[6] = {0, 1, 2, 2, 1, 3};
+    CK(SetFVF, D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    CK(SetStreamSource, 0, vb.p, 0, sizeof(RV));
+    CK(BeginScene);
+    CK(DrawPrimitiveUP, D3DPT_TRIANGLESTRIP, 2, q, sizeof *q);
+    UINT off = 0, stride = 0;
+    CK(GetStreamSource, 0, &gvb.p, &off, &stride);
+    CK(SetStreamSource, 0, vb.p, 0, sizeof(RV));
+    CK(SetIndices, ib.p);
+    CK(DrawIndexedPrimitiveUP, D3DPT_TRIANGLELIST, 0, 4, 2, idx, D3DFMT_INDEX16, q, sizeof *q);
+    CK(EndScene);
+    CK(GetIndices, &gib.p);
+    if (gvb.p || gib.p) return snprintf(why, sizeof why, "stream 0 %p indices %p after a UP draw", gvb.p, gib.p), false;
+    return true;
+}
+// fftex: a green texture on stage 0 (MODULATE TEXTURE DIFFUSE) under a white pretransformed quad over a blue clear:
+// drawn green (D3D_OK) or refused (D3DERR_NOTAVAILABLE, the core: textures are C4b-3b's) and blue. fftexoff: the same
+// with stage 0 disabled, drawn white in every lane (the cascade reads no texture, so nothing refuses it).
+struct TV { float x, y, z, rhw; DWORD color; float u, v; };
+static bool texturedQuad(bool stageOn) {
+    Com<IDirect3DTexture9> t;
+    CK(CreateTexture, 4, 4, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &t.p, nullptr);
+    D3DLOCKED_RECT lr = {};
+    if (SUCCEEDED(t.p->LockRect(0, &lr, nullptr, 0))) {  // the core refuses texture locks until C4b-3b
+        for (int y = 0; y < 4; y++)
+            for (int x = 0; x < 4; x++) ((DWORD *)((BYTE *)lr.pBits + y * lr.Pitch))[x] = D3DCOLOR_XRGB(0, 255, 0);
+        t.p->UnlockRect(0);
+    }
+    const DWORD white = D3DCOLOR_XRGB(255, 255, 255);
+    const TV q[4] = {{64, 64, 0.5f, 1, white, 0, 0}, {192, 64, 0.5f, 1, white, 1, 0},
+                     {64, 192, 0.5f, 1, white, 0, 1}, {192, 192, 0.5f, 1, white, 1, 1}};
+    CK(SetFVF, D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+    CK(SetTexture, 0, t.p);
+    CK(SetTextureStageState, 0, D3DTSS_COLOROP, stageOn ? D3DTOP_MODULATE : D3DTOP_DISABLE);
+    Px px[] = {{128, 128, 0x00ff00}, {16, 16, BLUE}};
+    const bool ok = frames(BLUE, px, 2, [&] {
+        HRESULT hr = dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof *q);
+        if (hr != D3D_OK && !(stageOn && hr == D3DERR_NOTAVAILABLE)) return fail("DrawPrimitiveUP", hr);
+        px[0].want = hr != D3D_OK ? BLUE : stageOn ? 0x00ff00 : 0xffffff;
+        return true;
+    });
+    dev->SetTexture(0, nullptr);
+    dev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+    return ok;
+}
+static bool rowFftex() { return texturedQuad(true); }
+static bool rowFftexOff() { return texturedQuad(false); }
+
+static void stateRows(IDirect3DDevice9 *d, IDirect3D9 *d3d, HWND hwnd, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"state-xform", rowXform}, {"state-material", rowMaterial}, {"state-tss", rowTss},
+        {"state-swapchain", rowSwapchain}, {"state-rt", rowRt}, {"state-tex", rowTex}, {"state-late", rowLate},
+        {"state-lock", rowLock}, {"state-sb", rowSb}, {"state-upunbind", rowUpUnbind}, {"state-fftex", rowFftex},
+        {"state-fftexoff", rowFftexOff}};
+    dev = d, stateD3d = d3d, stateHwnd = hwnd, strictMode = strict, budgetEnd = GetTickCount64() + 60000;
+    HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
+    if (SUCCEEDED(hr))
+        hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (FAILED(hr)) ok = fail("GetRenderTarget/CreateOffscreenPlainSurface", hr);
+        else if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = reset() && r.run();
+        row(r.name, ok, why);
+    }
+    if (sysSurf) sysSurf->Release();
+    if (rtSurf) rtSurf->Release();
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
@@ -750,6 +1049,7 @@ int main(int argc, char **argv) {
     const bool prog = bench && argc > 4 && !strcmp(argv[4], "prog");
     const bool vsync = !bench && argc > 1 && !strcmp(argv[1], "vsync");
     const bool shaders = !bench && argc > 1 && !strcmp(argv[1], "shaders");
+    const bool state = !bench && argc > 1 && !strcmp(argv[1], "state");
     WNDCLASSW wc = {};
     wc.lpfnWndProc = DefWindowProcW;
     wc.hInstance = GetModuleHandleW(nullptr);
@@ -780,6 +1080,13 @@ int main(int argc, char **argv) {
     const Vertex tri[3] = {{128, 16, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {240, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {16, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)}};
+    if (state) {
+        stateRows(dev, d3d, hwnd, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
     if (shaders) {
         shaderRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();

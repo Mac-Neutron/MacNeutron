@@ -8,6 +8,8 @@
 #                                after run-game.sh's update of such a prefix
 #   shd<64|32>-fresh.txt          d3d9_triangle shaders (DXMTRS C4b-2's 22 shader rows; "shaders strict" under core),
 #                                right after tri32-fresh, 300 s each
+#   st<64|32>-fresh.txt           d3d9_triangle state (DXMTRS C4b-3a's 12 rows of API state and inert objects; "state
+#                                strict" under core), after them, 120 s each
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
@@ -88,6 +90,8 @@ tri d3d9_triangle32.exe tri32-fresh
 strict=; [ "$RT" != core ] || strict=strict  # the core compiles synchronously: the first frame must match
 tri d3d9_triangle.exe shd64-fresh 300 shaders $strict
 tri d3d9_triangle32.exe shd32-fresh 300 shaders $strict
+tri d3d9_triangle.exe st64-fresh 120 state $strict
+tri d3d9_triangle32.exe st32-fresh 120 state $strict
 rm -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" "$WINEPREFIX/drive_c/windows/syswow64/mtld3d.dll"
 tri d3d9_triangle.exe tri64-nomarker  # Wine finds no builtin without its marker: these fail
 tri d3d9_triangle32.exe tri32-nomarker
