@@ -131,6 +131,13 @@ for r in shd64-fresh shd32-fresh; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
+for r in tx64-fresh tx32-fresh; do
+  for row in tex-ps2d tex-ff tex-cascade tex-cube tex-volume tex-mips tex-address tex-filter tex-srgb tex-dxt1 tex-l8 \
+    tex-a8 tex-a8l8 tex-r5g6b5 tex-a4r4g4b4 tex-r8g8b8 tex-lock tex-twodraws tex-dynamic tex-levelsurf tex-genmips \
+    tex-update tex-autogen tex-black tex-bumpenv tex-texbem tex-big tex-release tex-depthtex tex-fetch4 tex-rttex tex-vtx; do
+    check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
+  done
+done
 for r in st64-fresh st32-fresh; do
   for row in state-xform state-material state-tss state-swapchain state-rt state-tex state-late state-lock state-sb \
     state-upunbind state-fftex state-fftexoff; do
@@ -142,16 +149,19 @@ done
 # "crossing" exactly one, the crossing row's, or with "state" exactly the state rows' three (DXMTRS C4b-3a: the textured
 # fixed-function draw, the buffer lock, the texture lock).
 refused='is not implemented under runtime.mode = core'
-state_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a fixed-function stage reading a texture)
-IDirect3DVertexBuffer9::Lock
-IDirect3DTexture9::LockRect'
+state_refusals='IDirect3DVertexBuffer9::Lock'
+texture_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture sampled)
+IDirect3DDevice9::Draw*PrimitiveUP (fetch4)
+IDirect3DDevice9::Draw*PrimitiveUP (a render-target texture sampled)
+IDirect3DDevice9::Draw*PrimitiveUP (a vertex shader declaring a sampler)'
 runtime() {
   n=$(/usr/bin/grep -rhF "$refused" "$1" 2> /dev/null | wc -l | tr -d ' ')
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
     && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build' "$1" \
     && case ${2:-} in
       crossing) [ "$n" = 1 ] && /usr/bin/grep -rhF "$refused" "$1" | /usr/bin/grep -qi crossing ;;
-      state) [ "$n" = 3 ] && printf '%s\n' "$state_refusals" | while IFS= read -r m; do
+      state|textures) set_=$state_refusals; [ "$2" = state ] || set_=$texture_refusals
+        [ "$n" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] && printf '%s\n' "$set_" | while IFS= read -r m; do
           /usr/bin/grep -rqF "d3d9 core: $m $refused" "$1" || exit 1; done ;;
       *) [ "$n" = 0 ] ;;
     esac && echo ok
@@ -165,6 +175,9 @@ if [ "$RT" = core ]; then
   done
   for r in st64-fresh st32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" state)" ok
+  done
+  for r in tx64-fresh tx32-fresh; do
+    check "$r runtime core" "$(runtime "$G/logs/$r" textures)" ok
   done
 fi
 if [ "${D3D9_BENCH:-}" = 1 ]; then

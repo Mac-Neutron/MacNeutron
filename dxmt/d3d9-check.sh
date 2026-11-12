@@ -37,7 +37,9 @@
 # implemented under runtime.mode = core") in the mtld3d lanes, and under core exactly one, the crossing row's (C4b2-8:
 # its name says "crossing"), else "shaders-runtime". Every lane also runs d3d9_triangle state (DXMTRS C4b-3a's 12 rows
 # of API state and inert objects; "state strict" under core), its rows "state-<row>"; under core its launch's logs hold
-# exactly its three refusal lines (refusals_ok), in the mtld3d lanes none.
+# exactly its refusal line (refusals_ok), in the mtld3d lanes none. Every lane also runs d3d9_triangle textures (DXMTRS
+# C4b-3b's 32 rows of sampled textures; "textures strict" under core), its rows "textures-<row>"; under core its
+# launch's logs hold exactly its four refused rows' lines.
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -116,20 +118,25 @@ launch() {
   fi
 }
 # refusals_ok <name> <folder>: the shaders launch's logs hold exactly one core refusal line, the crossing row's
-# (C4b2-8); the state launch's exactly the three of its refused rows (DXMTRS C4b-3a: the textured fixed-function draw,
-# the buffer lock, the texture lock that fills it), one line each; the other launches are not held to it.
+# (C4b2-8); the state launch's exactly its buffer lock's (DXMTRS C4b-3a); the textures launch's exactly its four
+# refused rows' (DXMTRS C4b-3b: a depth, fetch4, render-target and vertex texture), one line each; the other launches
+# are not held to it.
 refused='is not implemented under runtime.mode = core'
-state_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a fixed-function stage reading a texture)
-IDirect3DVertexBuffer9::Lock
-IDirect3DTexture9::LockRect'
+state_refusals='IDirect3DVertexBuffer9::Lock'
+texture_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture sampled)
+IDirect3DDevice9::Draw*PrimitiveUP (fetch4)
+IDirect3DDevice9::Draw*PrimitiveUP (a render-target texture sampled)
+IDirect3DDevice9::Draw*PrimitiveUP (a vertex shader declaring a sampler)'
 refusals_ok() {
   case $1 in
     shaders)
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 1 ] \
         && /usr/bin/grep -rhF "$refused" "$2" | /usr/bin/grep -qi crossing ;;
-    state)
-      [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 3 ] || return 1
-      printf '%s\n' "$state_refusals" | while IFS= read -r n; do
+    state|textures)
+      set_=$state_refusals; [ "$1" = state ] || set_=$texture_refusals
+      [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] \
+        || return 1
+      printf '%s\n' "$set_" | while IFS= read -r n; do
         /usr/bin/grep -rqF "d3d9 core: $n $refused" "$2" || exit 1
       done ;;
     *) return 0 ;;
@@ -168,6 +175,10 @@ check shaders "caps vs1 vs2 vs3 consti constb rel decl indexed fan bypass vsff a
 launch ours fresh state 120 state $strict
 check state "state-xform state-material state-tss state-swapchain state-rt state-tex state-late state-lock state-sb
   state-upunbind state-fftex state-fftexoff"
+launch ours fresh textures 240 textures $strict
+check textures "tex-ps2d tex-ff tex-cascade tex-cube tex-volume tex-mips tex-address tex-filter tex-srgb tex-dxt1
+  tex-l8 tex-a8 tex-a8l8 tex-r5g6b5 tex-a4r4g4b4 tex-r8g8b8 tex-lock tex-twodraws tex-dynamic tex-levelsurf tex-genmips
+  tex-update tex-autogen tex-black tex-bumpenv tex-texbem tex-big tex-release tex-depthtex tex-fetch4 tex-rttex tex-vtx"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi
