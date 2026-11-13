@@ -38,13 +38,15 @@
 # its name says "crossing"), else "shaders-runtime". Every lane also runs d3d9_triangle state (DXMTRS C4b-3a's 12 rows
 # of API state and inert objects; "state strict" under core), its rows "state-<row>"; under core its launch's logs hold
 # exactly its refusal line (refusals_ok), in the mtld3d lanes none. Every lane also runs d3d9_triangle textures (DXMTRS
-# C4b-3b's 33 rows of sampled textures and C4b-3c's five vertex-texture rows; "textures strict" under core), its rows
-# "textures-<row>"; under core its launch's logs hold exactly its three refused rows' lines. Every lane also runs
+# C4b-3b's 34 rows of sampled textures and C4b-3c's five vertex-texture rows; "textures strict" under core), its rows
+# "textures-<row>"; under core its launch's logs hold exactly its refused row's line. Every lane also runs
 # d3d9_triangle fixed (DXMTRS C4b-3c's 31 rows of the fixed-function vertex stage; "fixed strict" under core), its rows
 # "fixed-<row>"; under core its launch's logs hold exactly its refused rows' line (a depth texture at a vertex
 # sampler). Every lane also runs d3d9_triangle targets (DXMTRS C4b-3d1's 22 rows of render targets other than the back
 # buffer; "targets strict" under core), its rows "targets-<row>"; under core its launch's logs hold exactly its two
-# refused rows' lines (a render target at index 1, a multisampled surface).
+# refused rows' lines (a render target at index 1, a multisampled surface). Every lane also runs d3d9_triangle depth
+# (DXMTRS C4b-3d2's 29 rows of the depth-stencil, on a device with an auto depth-stencil; "depth strict" under core),
+# its rows "depth-<row>"; under core its launch's logs hold exactly its five refused calls' lines.
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -128,28 +130,33 @@ launch() {
   fi
 }
 # refusals_ok <name> <folder>: the shaders launch's logs hold exactly one core refusal line, the crossing row's
-# (C4b2-8); the state launch's exactly its buffer lock's (DXMTRS C4b-3a); the textures launch's exactly its three
-# refused rows' (DXMTRS C4b-3b: a depth and a fetch4 texture, and a render-target texture's LockRect), the fixed
-# launch's exactly its one (DXMTRS C4b-3c: a depth texture at a vertex sampler), the targets launch's exactly its two
-# (DXMTRS C4b-3d1: a render target at index 1, a multisampled surface), one line each; the other launches are not held
-# to it.
+# (C4b2-8); the state launch's exactly its buffer lock's (DXMTRS C4b-3a); the textures launch's exactly its one
+# (DXMTRS C4b-3b: a render-target texture's LockRect), the fixed launch's exactly its one (DXMTRS C4b-3c: a depth
+# texture at a vertex sampler), the targets launch's exactly its two (DXMTRS C4b-3d1: a render target at index 1, a
+# multisampled surface), the depth launch's exactly its five (DXMTRS C4b-3d2: a depth-tested draw and a Z Clear with
+# a depth-stencil of another size than the target, a depth-tested draw sampling the bound depth-stencil, a
+# multisampled depth-stencil surface, a dynamic depth texture's LockRect), one line each; the other launches are not
+# held to it.
 refused='is not implemented under runtime.mode = core'
 state_refusals='IDirect3DVertexBuffer9::Lock'
-texture_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture sampled)
-IDirect3DDevice9::Draw*PrimitiveUP (fetch4)
-IDirect3DTexture9::LockRect (a render-target or depth texture)'
-fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture sampled)'
+texture_refusals='IDirect3DTexture9::LockRect (a render-target or depth texture)'
+fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
 targets_refusals='IDirect3DDevice9::SetRenderTarget (index above 0)
 IDirect3DDevice9::CreateRenderTarget (multisampled)'
+depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth-stencil of another size than the target)
+IDirect3DDevice9::Clear (a depth-stencil of another size than the target)
+IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)
+IDirect3DDevice9::CreateDepthStencilSurface (multisampled)
+IDirect3DTexture9::LockRect (a render-target or depth texture)'
 refusals_ok() {
   case $1 in
     shaders)
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 1 ] \
         && /usr/bin/grep -rhF "$refused" "$2" | /usr/bin/grep -qi crossing ;;
-    state|textures|fixed|targets)
+    state|textures|fixed|targets|depth)
       case $1 in
         state) set_=$state_refusals ;; textures) set_=$texture_refusals ;; fixed) set_=$fixed_refusals ;;
-        *) set_=$targets_refusals ;;
+        targets) set_=$targets_refusals ;; depth) set_=$depth_refusals ;;
       esac
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] \
         || return 1
@@ -195,8 +202,8 @@ check state "state-xform state-material state-tss state-swapchain state-rt state
 launch ours fresh textures 240 textures $strict
 check textures "tex-ps2d tex-ff tex-cascade tex-cube tex-volume tex-mips tex-address tex-filter tex-srgb tex-dxt1
   tex-l8 tex-a8 tex-a8l8 tex-r5g6b5 tex-a4r4g4b4 tex-r8g8b8 tex-lock tex-twodraws tex-dynamic tex-levelsurf tex-genmips
-  tex-update tex-autogen tex-black tex-bumpenv tex-texbem tex-big tex-release tex-depthtex tex-fetch4 tex-rttex tex-vtx
-  tex-rtlock tex-vtxlod tex-vtxblack tex-vtxcube tex-vtxvolume tex-vtxsrgb"
+  tex-update tex-autogen tex-black tex-bumpenv tex-texbem tex-big tex-release tex-depthtex tex-fetch4 tex-fetch4a tex-rttex
+  tex-vtx   tex-rtlock tex-vtxlod tex-vtxblack tex-vtxcube tex-vtxvolume tex-vtxsrgb"
 launch ours fresh fixed 240 fixed $strict
 check fixed "ff-xform ff-persp ff-rhwmix ff-viewchange ff-ambient ff-lightdefault ff-lightdir ff-lightpoint ff-lightspot
   ff-lightsparse ff-light8 ff-specular ff-matsrc ff-normalize ff-fogvertex ff-fogtable ff-texgen ff-tt ff-ttproj
@@ -205,6 +212,10 @@ check fixed "ff-xform ff-persp ff-rhwmix ff-viewchange ff-ambient ff-lightdefaul
 launch ours fresh targets 240 targets $strict
 check targets "rt-tex rt-read rt-surface rt-viewport rt-big rt-mip rt-cube rt-switch rt-rewrite rt-clearonly rt-fresh
   rt-autogen rt-release rt-srgb rt-ps rt-update rt-updatebound rt-formats rt-mrt rt-msaa rt-cubelock rt-huge"
+launch ours fresh depth 240 depth $strict
+check depth "ds-default ds-test ds-func ds-write ds-zenable ds-clearz ds-clearonly ds-stencil ds-twosided ds-bias
+  ds-slope ds-clamp ds-odepth ds-surface ds-nostencil ds-unbound ds-persist ds-texture ds-mip ds-release ds-shadow
+  ds-intz ds-df ds-fetch4 ds-size ds-feedback ds-msaa ds-huge ds-lock"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi

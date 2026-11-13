@@ -39,6 +39,14 @@
 // to, cleared, read back with GetRenderTargetData and sampled; formats, sRGB write, the viewport reset, automatic
 // mipmaps, lifetime and order, a size past the device's limit), two the core refuses (a target at index 1, a
 // multisampled surface), with a 150 s budget.
+// With "depth" ("depth strict" under core; DXMTRS C4b-3d2): 29 rows "d3d9 ds-<row> ok|FAIL <why>" of the depth-stencil,
+// on a device made with an auto D24S8 (the other modes' devices have none): the depth and stencil tests and their
+// state, Clear's Z and stencil, depth bias, the pretransformed clamp, a pixel shader's depth output, depth-stencil
+// surfaces and depth textures and their levels, shadow, raw (INTZ, DF16, DF24) and fetch4 samples of a depth texture,
+// and what the core refuses (a depth-tested draw or Z Clear with a depth-stencil of another size than the target, a
+// depth-tested draw sampling the bound depth-stencil, a multisampled surface, a dynamic depth texture's lock), with a
+// 150 s budget. "--bench <draws> <frames> tex depth" runs the tex bench on such a device, Z cleared each frame and
+// tested ("mode texdepth").
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -1110,8 +1118,8 @@ static void stateRows(IDirect3DDevice9 *d, IDirect3D9 *d3d, HWND hwnd, bool stri
 // The "textures" mode (DXMTRS C4b-3b): sampled textures under the fixed-function cascade and ps_1_1-2_0, each row
 // a frame of pretransformed quads whose texcoords are constant at a texel centre (unless the row is about addressing
 // or filtering), asserting the sampled colour. Alpha is checked by routing it into the colour (a ps_2_0 `mov oC0,
-// r0.wwww`). Rows past the core's slice (a depth, fetch4, render-target or vertex texture) answer D3D_OK and draw
-// under mtld3d, and D3DERR_NOTAVAILABLE without drawing under core ("textures strict").
+// r0.wwww`). A row past the core's slice (a render-target texture's lock; in "fixed", a depth texture at a vertex
+// sampler) answers D3D_OK under mtld3d and D3DERR_NOTAVAILABLE under core ("textures strict").
 struct TV3 { float x, y, z, rhw; DWORD color; float u, v, w; };
 // A pixel-space quad, clockwise, its texcoords (u, v, w) at every vertex.
 static void tquad(TV3 *q, float x0, float y0, float x1, float y1, float u, float v, float w = 0) {
@@ -1688,21 +1696,37 @@ static HRESULT ffTexDraw(IDirect3DBaseTexture9 *t) {
     dev->SetTexture(0, nullptr);
     return hr;
 }
+// A depth texture never rendered to, sampled by the fixed-function stage: the draw answers D3D_OK; what it samples
+// is undefined, so no pixel is asserted (the "depth" mode's rows sample defined depths).
 static bool rowTexDepthTex() {
     Com<IDirect3DTexture9> t;
     CK(CreateTexture, 4, 4, 1, D3DUSAGE_DEPTHSTENCIL, D3DFMT_D24S8, D3DPOOL_DEFAULT, &t.p, nullptr);
-    return refusedRow([&] { return ffTexDraw(t.p); });
+    const Px px[] = {{128, 128, BLUE, 0}};
+    return frames(BLUE, px, 1, [&] {
+        const HRESULT hr = ffTexDraw(t.p);
+        return hr == D3D_OK || fail("DrawPrimitiveUP", hr);
+    });
 }
-static bool rowTexFetch4() {
+// fetch4 (GET4 with a point mag filter) over a 2x2 texture of four values, sampled at texel (0,0)'s centre: the
+// sample is the four texels, one a channel, red (1,0), green (0,1) and blue (1,1). An A8 texture's alphas come the
+// same way.
+static bool fetch4Row(D3DFORMAT f) {
     Com<IDirect3DTexture9> t;
-    if (!make2d(t, 2, 2, 1, D3DFMT_L8, 1, [](int, int) { return 0x80u; })) return false;
+    if (!make2d(t, 2, 2, 1, f, 1, [](int x, int y) { return (DWORD)(0x20 + 0x40 * (x + 2 * y)); })) return false;
     CK(SetSamplerState, 0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
     CK(SetSamplerState, 0, D3DSAMP_MIPMAPLODBIAS, MAKEFOURCC('G', 'E', 'T', '4'));
-    const bool ok = refusedRow([&] { return ffTexDraw(t.p); });
+    TV3 a[4];
+    tquad(a, 96, 96, 160, 160, 0.25f, 0.25f);
+    const Px px[] = {{128, 128, D3DCOLOR_XRGB(0x60, 0xa0, 0xe0)}};
+    CK(SetTexture, 0, t.p);
+    const bool ok = frames(BLUE, px, 1, [&] { return tdraw(a); });
+    CK(SetTexture, 0, nullptr);
     CK(SetSamplerState, 0, D3DSAMP_MIPMAPLODBIAS, MAKEFOURCC('G', 'E', 'T', '1'));
     CK(SetSamplerState, 0, D3DSAMP_MIPMAPLODBIAS, 0);
     return ok;
 }
+static bool rowTexFetch4() { return fetch4Row(D3DFMT_L8); }
+static bool rowTexFetch4a() { return fetch4Row(D3DFMT_A8); }
 // A render-target texture cleared green through SetRenderTarget, then sampled by the fixed-function stage.
 static bool rowTexRtTex() {
     const Px px[] = {{128, 128, TGRN}};
@@ -1863,7 +1887,7 @@ static void textureRows(IDirect3DDevice9 *d, bool strict) {
         {"tex-update", rowTexUpdate},   {"tex-autogen", rowTexAutogen}, {"tex-black", rowTexBlack},
         {"tex-bumpenv", rowTexBumpEnv}, {"tex-texbem", rowTexTexbem},   {"tex-big", rowTexBig},
         {"tex-release", rowTexRelease}, {"tex-depthtex", rowTexDepthTex}, {"tex-fetch4", rowTexFetch4},
-        {"tex-rttex", rowTexRtTex},     {"tex-vtx", rowTexVtx},         {"tex-rtlock", rowTexRtLock},
+        {"tex-fetch4a", rowTexFetch4a}, {"tex-rttex", rowTexRtTex},     {"tex-vtx", rowTexVtx},         {"tex-rtlock", rowTexRtLock},
         {"tex-vtxlod", rowTexVtxLod},   {"tex-vtxblack", rowTexVtxBlack}, {"tex-vtxcube", rowTexVtxCube},
         {"tex-vtxvolume", rowTexVtxVolume}, {"tex-vtxsrgb", rowTexVtxSrgb},
         {"tex-big256", sizeof(void *) == 4 ? rowTexBig256 : nullptr}};
@@ -2990,6 +3014,585 @@ static void targetRows(IDirect3DDevice9 *d, bool strict) {
     if (rtSurf) rtSurf->Release();
 }
 
+// The "depth" mode (DXMTRS C4b-3d2): the depth-stencil, on a device of its own with an auto D24S8 (every other mode's
+// device has none). Quads are pretransformed at the depth named. A row clears Z (and stencil where it tests it) inside
+// its retried body: the device defaults ZENABLE on, and a never-cleared depth is undefined. Every "not drawn" pixel
+// has a drawn control from the same pipeline in the same pass (mtld3d leaves a draw out while its pipeline builds, and
+// a pass whose pipeline disagrees with its planes drops its draws without an error). Depth textures a row attaches,
+// samples or feeds back are 256x256, the size of the back buffer they are drawn against.
+static IDirect3DSurface9 *dsSurf;  // the implicit depth-stencil
+static DWORD zenableDefault;       // D3DRS_ZENABLE as the device made it, read before the first reset
+static const DWORD TYEL = D3DCOLOR_XRGB(255, 255, 0), TMAG = D3DCOLOR_XRGB(255, 0, 255);
+static const D3DFORMAT FMT_INTZ = (D3DFORMAT)MAKEFOURCC('I', 'N', 'T', 'Z'),
+                       FMT_DF16 = (D3DFORMAT)MAKEFOURCC('D', 'F', '1', '6'),
+                       FMT_DF24 = (D3DFORMAT)MAKEFOURCC('D', 'F', '2', '4');
+static const DWORD PS_ODEPTH[] = {
+    0xffff0200,                         // ps_2_0
+    0x02000001, 0x800f0000, 0xa0e40001, // mov r0, c1
+    0x02000001, 0x800f0800, 0xa0e40000, // mov oC0, c0
+    0x02000001, 0x900f0800, 0x80000000, // mov oDepth, r0.x
+    0x0000ffff};
+
+// The depth plane cleared to z (the stencil plane too, to `stencil`, with clearZS).
+static bool clearZ(float z = 1.0f) {
+    CK(Clear, 0, nullptr, D3DCLEAR_ZBUFFER, 0xffffffff, z, 0);
+    return true;
+}
+static bool clearZS(float z, DWORD stencil) {
+    CK(Clear, 0, nullptr, D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL, 0xffffffff, z, stencil);
+    return true;
+}
+static void zq(RV *q, float x0, float y0, float x1, float y1, float z, DWORD c) {
+    quadRhw(q, x0, y0, x1, y1, c);
+    for (int i = 0; i < 4; i++) q[i].z = z;
+}
+static bool zquad(float x0, float y0, float x1, float y1, float z, DWORD c) {
+    RV q[4];
+    zq(q, x0, y0, x1, y1, z, c);
+    return rdraw(q);
+}
+static HRESULT zquadHr(float x0, float y0, float x1, float y1, float z, DWORD c) {
+    RV q[4];
+    zq(q, x0, y0, x1, y1, z, c);
+    dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    return dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof *q);
+}
+static void recolor(RV *q, DWORD c) {
+    for (int i = 0; i < 4; i++) q[i].color = c;
+}
+static bool bindDs(IDirect3DSurface9 *s) {
+    CK(SetDepthStencilSurface, s);
+    return true;
+}
+static bool makeDs(Com<IDirect3DSurface9> &s, D3DFORMAT f = D3DFMT_D24X8, UINT size = 256) {
+    CK(CreateDepthStencilSurface, size, size, f, D3DMULTISAMPLE_NONE, 0, FALSE, &s.p, nullptr);
+    return true;
+}
+static bool makeDepthTex(Com<IDirect3DTexture9> &t, D3DFORMAT f, UINT levels = 1) {
+    CK(CreateTexture, 256, 256, levels, D3DUSAGE_DEPTHSTENCIL, f, D3DPOOL_DEFAULT, &t.p, nullptr);
+    return true;
+}
+static bool bindDsLevel(IDirect3DTexture9 *t, UINT level = 0) {
+    Com<IDirect3DSurface9> s;
+    return levelOf(t, level, s) && bindDs(s.p);
+}
+// The depth and stencil state at D3D9's defaults (ZENABLE on, as this device has it), fetch4 unlatched at stage 0 and
+// the implicit depth-stencil bound: what reset() leaves alone.
+static bool depthReset() {
+    static const DWORD rs[][2] = {
+        {D3DRS_ZENABLE, D3DZB_TRUE}, {D3DRS_ZWRITEENABLE, TRUE}, {D3DRS_ZFUNC, D3DCMP_LESSEQUAL},
+        {D3DRS_STENCILENABLE, FALSE}, {D3DRS_STENCILFAIL, D3DSTENCILOP_KEEP}, {D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP},
+        {D3DRS_STENCILPASS, D3DSTENCILOP_KEEP}, {D3DRS_STENCILFUNC, D3DCMP_ALWAYS}, {D3DRS_STENCILREF, 0},
+        {D3DRS_STENCILMASK, 0xffffffff}, {D3DRS_STENCILWRITEMASK, 0xffffffff}, {D3DRS_TWOSIDEDSTENCILMODE, FALSE},
+        {D3DRS_CCW_STENCILFAIL, D3DSTENCILOP_KEEP}, {D3DRS_CCW_STENCILZFAIL, D3DSTENCILOP_KEEP},
+        {D3DRS_CCW_STENCILPASS, D3DSTENCILOP_KEEP}, {D3DRS_CCW_STENCILFUNC, D3DCMP_ALWAYS}, {D3DRS_DEPTHBIAS, 0},
+        {D3DRS_SLOPESCALEDEPTHBIAS, 0}};
+    for (const auto &s : rs) CK(SetRenderState, (D3DRENDERSTATETYPE)s[0], s[1]);
+    // A numeric bias keeps a fetch4 latch: GET1 clears it.
+    CK(SetSamplerState, 0, D3DSAMP_MIPMAPLODBIAS, MAKEFOURCC('G', 'E', 'T', '1'));
+    CK(SetSamplerState, 0, D3DSAMP_MIPMAPLODBIAS, 0);
+    return bindDs(dsSurf);
+}
+
+// The auto depth-stencil: its description, and ZENABLE on by default with it.
+static bool rowDsDefault() {
+    Com<IDirect3DSurface9> ds;
+    CK(GetDepthStencilSurface, &ds.p);
+    D3DSURFACE_DESC d = {};
+    const HRESULT hr = ds.p->GetDesc(&d);
+    if (FAILED(hr)) return fail("GetDesc", hr);
+    if (d.Width != 256 || d.Height != 256 || d.Format != D3DFMT_D24S8 || d.Usage != D3DUSAGE_DEPTHSTENCIL)
+        return snprintf(why, sizeof why, "desc %ux%u format %d usage %lx", d.Width, d.Height, (int)d.Format,
+                        (unsigned long)d.Usage),
+               false;
+    if (zenableDefault != D3DZB_TRUE)
+        return snprintf(why, sizeof why, "ZENABLE defaults to %lu", (unsigned long)zenableDefault), false;
+    return true;
+}
+// The depth test: red at 0.25 over x 32..160, then green at 0.75 over x 96..224, which the red hides where they
+// overlap.
+static const Px DS_TEST[] = {{64, 128, TRED}, {128, 128, TRED}, {192, 128, TGRN}, {128, 32, BLUE}};
+static bool dsTestBody() {
+    return clearZ() && zquad(32, 96, 160, 160, 0.25f, TRED) && zquad(96, 96, 224, 160, 0.75f, TGRN);
+}
+static bool rowDsTest() { return frames(BLUE, DS_TEST, 4, dsTestBody); }
+// ZFUNC against a depth of 0.5, the functions changing within one pass: NEVER, LESS (nearer, then farther), GREATER,
+// EQUAL (against the depth the same vertices wrote), ALWAYS.
+static bool rowDsFunc() {
+    const Px px[] = {{32, 128, BLUE}, {72, 128, TGRN}, {112, 128, BLUE}, {152, 128, TGRN}, {192, 128, TGRN},
+                     {232, 128, TMAG}};
+    return frames(BLUE, px, 6, [&] {
+        auto with = [&](DWORD func, float x, float z, DWORD c) {
+            return rstate(D3DRS_ZFUNC, func) && zquad(x, 96, x + 32, 160, z, c);
+        };
+        RV e[4];
+        zq(e, 176, 96, 208, 160, 0.3f, TYEL);
+        if (!clearZ(0.5f) || !with(D3DCMP_NEVER, 16, 0.25f, TRED) || !with(D3DCMP_LESS, 56, 0.25f, TGRN) ||
+            !with(D3DCMP_LESS, 96, 0.75f, TRED) || !with(D3DCMP_GREATER, 136, 0.75f, TGRN))
+            return false;
+        if (!rstate(D3DRS_ZFUNC, D3DCMP_ALWAYS) || !rdraw(e)) return false;
+        recolor(e, TGRN);
+        return rstate(D3DRS_ZFUNC, D3DCMP_EQUAL) && rdraw(e) && with(D3DCMP_ALWAYS, 216, 0.75f, TMAG);
+    });
+}
+// ZWRITEENABLE off: the near quad writes no depth, so the far one drawn after it shows over it.
+static bool rowDsWrite() {
+    const Px px[] = {{128, 128, TGRN}, {72, 128, TRED}};
+    return frames(BLUE, px, 2, [&] {
+        return clearZ() && rstate(D3DRS_ZWRITEENABLE, FALSE) && zquad(64, 64, 192, 192, 0.25f, TRED) &&
+               rstate(D3DRS_ZWRITEENABLE, TRUE) && zquad(96, 96, 160, 160, 0.75f, TGRN);
+    });
+}
+// ZENABLE off within a pass: the draw behind a tested one shows and writes no depth (a tested draw at 0.5 after it is
+// hidden by the first quad's 0.25 where it would pass against the untested quad's 0.75).
+static bool rowDsZenable() {
+    const Px px[] = {{128, 128, TGRN}, {176, 128, TRED}, {216, 128, TYEL}, {72, 128, TRED}};
+    return frames(BLUE, px, 4, [&] {
+        return clearZ() && zquad(64, 64, 192, 192, 0.25f, TRED) && rstate(D3DRS_ZENABLE, D3DZB_FALSE) &&
+               zquad(96, 96, 160, 160, 0.75f, TGRN) && rstate(D3DRS_ZENABLE, D3DZB_TRUE) &&
+               zquad(112, 120, 240, 136, 0.5f, TYEL);
+    });
+}
+// Clear's z: against 0.5 a quad at 0.25 draws and one at 0.75 does not.
+static bool rowDsClearZ() {
+    const Px px[] = {{76, 128, TGRN}, {180, 128, BLUE}};
+    return frames(BLUE, px, 2, [&] {
+        return clearZ(0.5f) && zquad(32, 96, 120, 160, 0.25f, TGRN) && zquad(136, 96, 224, 160, 0.75f, TRED);
+    });
+}
+// A Clear with no draw after it before the surface is unbound: A cleared to 0.25, B bound, cleared and drawn against,
+// A bound again with no clear: it still holds 0.25.
+static bool rowDsClearOnly() {
+    const Px px[] = {{76, 128, TGRN}, {180, 128, BLUE}, {32, 32, TRED}};
+    return frames(BLUE, px, 3, [&] {
+        Com<IDirect3DSurface9> a, b;
+        return makeDs(a) && makeDs(b) && bindDs(a.p) && clearZ(0.25f) && bindDs(b.p) && clearZ() &&
+               zquad(16, 16, 48, 48, 0.5f, TRED) && bindDs(a.p) && zquad(32, 96, 120, 160, 0.2f, TGRN) &&
+               zquad(136, 96, 224, 160, 0.5f, TRED) && bindDs(dsSurf);
+    });
+}
+// Stencil 1 everywhere, then in one pass: EQUAL with reference 1, 2 (not drawn) and 0x101 (its low byte); REPLACE then
+// EQUAL; INCR then EQUAL; the read mask; the write mask (bit 0 kept under a REPLACE of 0); the reference back to 0.
+static bool rowDsStencil() {
+    const Px px[] = {{28, 128, TGRN}, {60, 128, BLUE}, {92, 128, TGRN}, {124, 128, TGRN},
+                     {156, 128, TGRN}, {188, 128, TGRN}, {220, 128, TGRN}, {244, 128, TGRN}};
+    return frames(BLUE, px, 8, [&] {
+        auto eq = [&](DWORD ref, float x, float z = 0.5f, DWORD c = TGRN) {
+            return rstate(D3DRS_STENCILFUNC, D3DCMP_EQUAL) && rstate(D3DRS_STENCILPASS, D3DSTENCILOP_KEEP) &&
+                   rstate(D3DRS_STENCILREF, ref) && zquad(x, 96, x + 24, 160, z, c);
+        };
+        auto write = [&](DWORD op, DWORD ref, float x) {
+            return rstate(D3DRS_STENCILFUNC, D3DCMP_ALWAYS) && rstate(D3DRS_STENCILPASS, op) &&
+                   rstate(D3DRS_STENCILREF, ref) && zquad(x, 96, x + 24, 160, 0.5f, TYEL);
+        };
+        if (!clearZS(1.0f, 1) || !rstate(D3DRS_STENCILENABLE, TRUE)) return false;
+        if (!eq(1, 16) || !eq(2, 48, 0.5f, TRED) || !eq(0x101, 80)) return false;
+        if (!write(D3DSTENCILOP_REPLACE, 5, 112) || !eq(5, 112, 0.25f)) return false;
+        if (!write(D3DSTENCILOP_INCR, 0, 144) || !eq(2, 144, 0.25f)) return false;
+        if (!rstate(D3DRS_STENCILMASK, 0x0f) || !eq(0x11, 176) || !rstate(D3DRS_STENCILMASK, 0xffffffff))
+            return false;
+        if (!rstate(D3DRS_STENCILWRITEMASK, 0xfe) || !write(D3DSTENCILOP_REPLACE, 0, 208) ||
+            !rstate(D3DRS_STENCILWRITEMASK, 0xffffffff) || !eq(1, 208, 0.25f))
+            return false;
+        return rstate(D3DRS_STENCILFUNC, D3DCMP_NOTEQUAL) && rstate(D3DRS_STENCILPASS, D3DSTENCILOP_KEEP) &&
+               rstate(D3DRS_STENCILREF, 0) && zquad(236, 96, 252, 160, 0.5f, TGRN);
+    });
+}
+// Two-sided stencil over a stencil of 4: a clockwise quad increments (5), a counter-clockwise one decrements (3).
+static bool rowDsTwoSided() {
+    const Px px[] = {{76, 128, TGRN}, {180, 128, TGRN}};
+    return frames(BLUE, px, 2, [&] {
+        RV cw[4], ccw[4];
+        zq(cw, 32, 96, 120, 160, 0.5f, TYEL);
+        zq(ccw, 136, 96, 224, 160, 0.5f, TYEL);
+        const RV second = ccw[1];
+        ccw[1] = ccw[2], ccw[2] = second;
+        if (!clearZS(1.0f, 4) || !rstate(D3DRS_CULLMODE, D3DCULL_NONE) || !rstate(D3DRS_STENCILENABLE, TRUE) ||
+            !rstate(D3DRS_TWOSIDEDSTENCILMODE, TRUE) || !rstate(D3DRS_STENCILFUNC, D3DCMP_ALWAYS) ||
+            !rstate(D3DRS_CCW_STENCILFUNC, D3DCMP_ALWAYS) || !rstate(D3DRS_STENCILPASS, D3DSTENCILOP_INCR) ||
+            !rstate(D3DRS_CCW_STENCILPASS, D3DSTENCILOP_DECR) || !rdraw(cw) || !rdraw(ccw))
+            return false;
+        return rstate(D3DRS_TWOSIDEDSTENCILMODE, FALSE) && rstate(D3DRS_STENCILFUNC, D3DCMP_EQUAL) &&
+               rstate(D3DRS_STENCILPASS, D3DSTENCILOP_KEEP) && rstate(D3DRS_STENCILREF, 5) &&
+               zquad(32, 96, 120, 160, 0.25f, TGRN) && rstate(D3DRS_STENCILREF, 3) &&
+               zquad(136, 96, 224, 160, 0.25f, TGRN);
+    });
+}
+// DEPTHBIAS under LESS: the same vertices drawn again fail without a bias and pass with -0.01; the same through a
+// programmable vertex shader (clip-space quads over the lower half).
+static bool rowDsBias() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_C0)) return false;
+    const Px px[] = {{76, 96, TRED}, {180, 96, TGRN}, {64, 192, TRED}, {192, 192, TGRN}};
+    return frames(BLUE, px, 4, [&] {
+        const DWORD bias = fbits(-0.01f);
+        RV l[4], r[4];
+        zq(l, 32, 64, 120, 128, 0.5f, TRED), zq(r, 136, 64, 224, 128, 0.5f, TRED);
+        if (!clearZ() || !rstate(D3DRS_ZFUNC, D3DCMP_LESS) || !rdraw(l) || !rdraw(r)) return false;
+        recolor(l, TGRN), recolor(r, TGRN);
+        if (!rdraw(l) || !rstate(D3DRS_DEPTHBIAS, bias) || !rdraw(r) || !rstate(D3DRS_DEPTHBIAS, 0)) return false;
+        V3 pl[4], pr[4];
+        quad(pl, -0.75f, -0.75f, -0.25f, -0.25f), quad(pr, 0.25f, -0.75f, 0.75f, -0.25f);
+        if (!use(p)) return false;
+        CK(SetPixelShaderConstantF, 0, RED, 1);
+        if (!strip(pl) || !strip(pr)) return false;
+        CK(SetPixelShaderConstantF, 0, GREEN, 1);
+        if (!strip(pl) || !rstate(D3DRS_DEPTHBIAS, bias) || !strip(pr) || !rstate(D3DRS_DEPTHBIAS, 0)) return false;
+        CK(SetVertexShader, nullptr);
+        CK(SetPixelShader, nullptr);
+        return true;
+    });
+}
+// SLOPESCALEDEPTHBIAS under LESS: a quad slanted in z (0.2 to 0.8 across it) drawn again passes only with a slope
+// term of -1.
+static bool rowDsSlope() {
+    const Px px[] = {{128, 92, TRED}, {128, 164, TGRN}};
+    return frames(BLUE, px, 2, [&] {
+        RV t[4], b[4];
+        quadRhw(t, 64, 64, 192, 120, TRED), quadRhw(b, 64, 136, 192, 192, TRED);
+        for (RV *q : {t, b}) q[0].z = q[2].z = 0.2f, q[1].z = q[3].z = 0.8f;
+        if (!clearZ() || !rstate(D3DRS_ZFUNC, D3DCMP_LESS) || !rdraw(t) || !rdraw(b)) return false;
+        recolor(t, TGRN), recolor(b, TGRN);
+        return rdraw(t) && rstate(D3DRS_SLOPESCALEDEPTHBIAS, fbits(-1.0f)) && rdraw(b) &&
+               rstate(D3DRS_SLOPESCALEDEPTHBIAS, 0);
+    });
+}
+// A pretransformed quad at z 1.5: drawn (its depth clamped) with ZENABLE off, clipped with the depth test live.
+static bool rowDsClamp() {
+    const Px px[] = {{76, 128, TGRN}, {180, 128, BLUE}, {128, 32, TYEL}};
+    return frames(BLUE, px, 3, [&] {
+        return clearZ() && rstate(D3DRS_ZENABLE, D3DZB_FALSE) && zquad(32, 96, 120, 160, 1.5f, TGRN) &&
+               rstate(D3DRS_ZENABLE, D3DZB_TRUE) && zquad(136, 96, 224, 160, 1.5f, TRED) &&
+               zquad(96, 16, 160, 48, 0.5f, TYEL);
+    });
+}
+// A pixel shader's depth output: a quad at 0.75 writing oDepth 0.25 hides a quad at 0.5 drawn half over it.
+static bool rowDsODepth() {
+    Com<IDirect3DPixelShader9> ps;
+    CK(CreatePixelShader, PS_ODEPTH, &ps.p);
+    const Px px[] = {{96, 128, TRED}, {160, 128, TRED}, {216, 128, TGRN}};
+    return frames(BLUE, px, 3, [&] {
+        static const float depth[4] = {0.25f, 0, 0, 0};
+        if (!clearZ()) return false;
+        CK(SetPixelShader, ps.p);
+        CK(SetPixelShaderConstantF, 0, RED, 1);
+        CK(SetPixelShaderConstantF, 1, depth, 1);
+        if (!zquad(64, 96, 192, 160, 0.75f, TRED)) return false;
+        CK(SetPixelShader, nullptr);
+        return zquad(128, 96, 240, 160, 0.5f, TGRN);
+    });
+}
+// CreateDepthStencilSurface in the depth-only formats: the description, GetDepthStencilSurface, the depth test.
+static bool rowDsSurface() {
+    for (D3DFORMAT f : {D3DFMT_D24X8, D3DFMT_D16}) {
+        Com<IDirect3DSurface9> s, got;
+        if (!makeDs(s, f)) return false;
+        D3DSURFACE_DESC d = {};
+        const HRESULT hr = s.p->GetDesc(&d);
+        if (FAILED(hr)) return fail("GetDesc", hr);
+        if (d.Width != 256 || d.Height != 256 || d.Format != f || d.Usage != D3DUSAGE_DEPTHSTENCIL ||
+            d.Pool != D3DPOOL_DEFAULT)
+            return snprintf(why, sizeof why, "desc %ux%u format %d usage %lx pool %d", d.Width, d.Height, (int)d.Format,
+                            (unsigned long)d.Usage, (int)d.Pool),
+                   false;
+        if (!bindDs(s.p)) return false;
+        CK(GetDepthStencilSurface, &got.p);
+        if (got.p != s.p) return snprintf(why, sizeof why, "GetDepthStencilSurface answers another surface"), false;
+        if (!frames(BLUE, DS_TEST, 4, dsTestBody)) return false;
+    }
+    return bindDs(dsSurf);
+}
+// A format with no stencil plane: STENCILENABLE with NEVER still draws; a Clear of Z and stencil clears Z; a Clear of
+// stencil alone is D3D_OK and touches neither the colour nor Z.
+static bool rowDsNoStencil() {
+    Com<IDirect3DSurface9> s;
+    if (!makeDs(s) || !bindDs(s.p)) return false;
+    const Px px[] = {{128, 48, TGRN}, {76, 128, TGRN}, {180, 128, BLUE}};
+    const bool ok = frames(BLUE, px, 3, [&] {
+        if (!clearZ() || !rstate(D3DRS_STENCILENABLE, TRUE) || !rstate(D3DRS_STENCILFUNC, D3DCMP_NEVER) ||
+            !zquad(96, 32, 160, 64, 0.5f, TGRN) || !rstate(D3DRS_STENCILENABLE, FALSE) || !clearZS(0.5f, 1))
+            return false;
+        CK(Clear, 0, nullptr, D3DCLEAR_STENCIL, 0xffffffff, 0.0f, 1);
+        return zquad(32, 96, 120, 160, 0.4f, TGRN) && zquad(136, 96, 224, 160, 0.6f, TRED);
+    });
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
+// No depth-stencil bound: a Z Clear is D3DERR_INVALIDCALL, Get answers D3DERR_NOTFOUND, draws are untested (the far
+// quad shows over the near one) and a pretransformed quad at z 1.5 is clamped and drawn; the implicit one bound again
+// tests again.
+static bool rowDsUnbound() {
+    CK(SetDepthStencilSurface, nullptr);
+    HRESULT hr = dev->Clear(0, nullptr, D3DCLEAR_ZBUFFER, 0, 1.0f, 0);
+    if (hr != D3DERR_INVALIDCALL) return fail("Clear (no depth-stencil)", hr);
+    IDirect3DSurface9 *none = nullptr;
+    hr = dev->GetDepthStencilSurface(&none);
+    if (none) none->Release();
+    if (hr != D3DERR_NOTFOUND) return fail("GetDepthStencilSurface (none bound)", hr);
+    const Px px[] = {{128, 128, TGRN}, {64, 128, TRED}, {128, 32, TYEL}};
+    if (!frames(BLUE, px, 3, [&] {
+            return zquad(32, 96, 160, 160, 0.25f, TRED) && zquad(96, 96, 224, 160, 0.75f, TGRN) &&
+                   zquad(96, 16, 160, 48, 1.5f, TYEL);
+        }))
+        return false;
+    CK(SetDepthStencilSurface, dsSurf);
+    return frames(BLUE, DS_TEST, 4, dsTestBody);
+}
+// The depth-stencil stays bound across SetRenderTarget: depth written with the back buffer bound hides a quad drawn
+// behind it on a 256x256 render-target texture, which draws beside it.
+static bool rowDsPersist() {
+    return until([&] {
+        Com<IDirect3DTexture9> t;
+        Com<IDirect3DSurface9> s;
+        if (!makeRt(t, 256) || !levelOf(t.p, 0, s)) return false;
+        if (!scene([&] {
+                CK(Clear, 0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, BLUE, 1.0f, 0);
+                return zquad(64, 64, 192, 192, 0.25f, TRED) && target(t.p) && clearTo(BLUE) &&
+                       zquad(128, 96, 240, 160, 0.5f, TGRN) && backToScreen();
+            }))
+            return false;
+        return readTarget(s.p, 256, 256, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+            return want("(160,128)", texel(b, p, 160, 128), BLUE) && want("(216,128)", texel(b, p, 216, 128), TGRN);
+        });
+    });
+}
+// Level 0 of a D24S8 depth texture as the depth-stencil.
+static bool rowDsTexture() {
+    Com<IDirect3DTexture9> t;
+    if (!makeDepthTex(t, D3DFMT_D24S8) || !bindDsLevel(t.p)) return false;
+    const bool ok = frames(BLUE, DS_TEST, 4, dsTestBody);
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
+// A level below 0: level 0 cleared to 0.25 with the back buffer; level 1 with a 128x128 target cleared to 1 and the
+// depth test drawn there, its corner (8..24) untouched; level 0 again with the back buffer and no clear: a quad at 0.4
+// over that corner is hidden (level 0 still holds 0.25, not level 1's clear) and one at 0.2 beside it shows.
+static bool rowDsMip() {
+    return until([&] {
+        Com<IDirect3DTexture9> d, c;
+        Com<IDirect3DSurface9> d0, d1, cs;
+        CK(CreateTexture, 256, 256, 2, D3DUSAGE_DEPTHSTENCIL, D3DFMT_D24X8, D3DPOOL_DEFAULT, &d.p, nullptr);
+        if (!levelOf(d.p, 0, d0) || !levelOf(d.p, 1, d1) || !makeRt(c, 128) || !levelOf(c.p, 0, cs)) return false;
+        const bool drawn = scene([&] {
+            if (!bindDs(d0.p)) return false;
+            CK(Clear, 0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, BLUE, 0.25f, 0);
+            if (!target(c.p) || !bindDs(d1.p)) return false;
+            CK(Clear, 0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, BLUE, 1.0f, 0);
+            return zquad(16, 48, 80, 80, 0.25f, TRED) && zquad(48, 48, 112, 80, 0.75f, TGRN) && backToScreen() &&
+                   bindDs(d0.p) && zquad(8, 8, 24, 24, 0.4f, TYEL) && zquad(40, 8, 56, 24, 0.2f, TGRN);
+        });
+        dev->SetRenderTarget(0, rtSurf);
+        dev->SetDepthStencilSurface(dsSurf);
+        if (!drawn) return false;
+        return readTarget(cs.p, 128, 128, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+                   return want("level 1 (32,64)", texel(b, p, 32, 64), TRED) &&
+                          want("level 1 (64,64)", texel(b, p, 64, 64), TRED) &&
+                          want("level 1 (96,64)", texel(b, p, 96, 64), TGRN);
+               }) &&
+               readTarget(rtSurf, 256, 256, D3DFMT_X8R8G8B8, [&](const BYTE *b, int p) {
+                   return want("level 0 (16,16)", texel(b, p, 16, 16), BLUE) &&
+                          want("level 0 (48,16)", texel(b, p, 48, 16), TGRN);
+               });
+    });
+}
+// A depth-stencil surface the application released while it is bound still tests.
+static bool rowDsRelease() {
+    IDirect3DSurface9 *s = nullptr;
+    CK(CreateDepthStencilSurface, 256, 256, D3DFMT_D24X8, D3DMULTISAMPLE_NONE, 0, FALSE, &s, nullptr);
+    const HRESULT hr = dev->SetDepthStencilSurface(s);
+    s->Release();
+    if (FAILED(hr)) return fail("SetDepthStencilSurface", hr);
+    const bool ok = frames(BLUE, DS_TEST, 4, dsTestBody);
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
+// Depth 0.25 over the left half and 0.75 over the right written into level 0 of `t`, then the implicit depth-stencil
+// back and the frame cleared.
+static bool writeHalves(IDirect3DTexture9 *t) {
+    if (!bindDsLevel(t) || !clearZ() || !zquad(0, 0, 128, 256, 0.25f, TRED) ||
+        !zquad(128, 0, 256, 256, 0.75f, TRED) || !bindDs(dsSurf))
+        return false;
+    CK(Clear, 0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, BLUE, 1.0f, 0);
+    return true;
+}
+// `t` sampled by the fixed-function stage at (u, 0.5) with a third coordinate (a shadow sample's reference) of 0.5,
+// over the 64x64 quad at (x, y).
+static bool sampleAt(IDirect3DBaseTexture9 *t, float x, float y, float u) {
+    TV3 q[4];
+    tquad(q, x, y, x + 64, y + 64, u, 0.5f, 0.5f);
+    CK(SetTexture, 0, t);
+    const bool ok = tdraw(q);
+    CK(SetTexture, 0, nullptr);
+    return ok;
+}
+// A shadow sample of a D24X8 texture: the reference 0.5 is lit against the right half's 0.75 and not against the
+// left half's 0.25.
+static bool rowDsShadow() {
+    const Px px[] = {{64, 128, 0x000000}, {192, 128, 0xffffff}};
+    return frames(BLUE, px, 2, [&] {
+        Com<IDirect3DTexture9> t;
+        return makeDepthTex(t, D3DFMT_D24X8) && writeHalves(t.p) && sampleAt(t.p, 32, 96, 64.5f / 256) &&
+               sampleAt(t.p, 160, 96, 192.5f / 256);
+    });
+}
+// INTZ sampled raw: each half's depth as grey; with LINEAR filters a quarter texel into the right half, still that
+// texel's own depth (a raw depth sample is a point sample).
+static bool rowDsIntz() {
+    const Px px[] = {{64, 128, 0x404040}, {192, 128, 0xbfbfbf}, {128, 48, 0xbfbfbf}};
+    return frames(BLUE, px, 3, [&] {
+        Com<IDirect3DTexture9> t;
+        if (!makeDepthTex(t, FMT_INTZ) || !writeHalves(t.p) || !sampleAt(t.p, 32, 96, 64.5f / 256) ||
+            !sampleAt(t.p, 160, 96, 192.5f / 256))
+            return false;
+        CK(SetSamplerState, 0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+        CK(SetSamplerState, 0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+        const bool ok = sampleAt(t.p, 96, 16, 128.25f / 256);
+        CK(SetSamplerState, 0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+        CK(SetSamplerState, 0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+        return ok;
+    });
+}
+// DF16 and DF24 sampled raw: the depth in red, green and blue 0.
+static bool rowDsDf() {
+    const Px px[] = {{64, 128, 0x400000}, {192, 128, 0xbf0000}};
+    for (D3DFORMAT f : {FMT_DF16, FMT_DF24})
+        if (!frames(BLUE, px, 2, [&] {
+                Com<IDirect3DTexture9> t;
+                return makeDepthTex(t, f) && writeHalves(t.p) && sampleAt(t.p, 32, 96, 64.5f / 256) &&
+                       sampleAt(t.p, 160, 96, 192.5f / 256);
+            }))
+            return false;
+    return true;
+}
+// fetch4 on a DF24 texture cleared to 0.5 and never drawn to: the four texels' depth, one a channel.
+static bool rowDsFetch4() {
+    const Px px[] = {{128, 128, 0x808080}};
+    const bool ok = frames(BLUE, px, 1, [&] {
+        Com<IDirect3DTexture9> t;
+        if (!makeDepthTex(t, FMT_DF24) || !bindDsLevel(t.p) || !clearZ(0.5f) || !bindDs(dsSurf)) return false;
+        CK(Clear, 0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, BLUE, 1.0f, 0);
+        CK(SetSamplerState, 0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+        CK(SetSamplerState, 0, D3DSAMP_MIPMAPLODBIAS, MAKEFOURCC('G', 'E', 'T', '4'));
+        return sampleAt(t.p, 96, 96, 64.5f / 256);
+    });
+    CK(SetSamplerState, 0, D3DSAMP_MIPMAPLODBIAS, MAKEFOURCC('G', 'E', 'T', '1'));
+    CK(SetSamplerState, 0, D3DSAMP_MIPMAPLODBIAS, 0);
+    return ok;
+}
+// A depth-stencil larger than the target (512x512 with the 256x256 back buffer), which D3D9 allows. A colour Clear
+// and a draw with Z and stencil off draw in every lane. A draw that tests depth and a Z Clear are past the core's
+// slice (3d3's): D3DERR_NOTAVAILABLE under core (strict); D3D_OK elsewhere, the result not asserted (the depth was
+// never cleared).
+static bool rowDsSize() {
+    Px px[] = {{76, 128, TGRN}, {180, 128, BLUE}};
+    Com<IDirect3DSurface9> big;
+    if (!makeDs(big, D3DFMT_D24X8, 512)) return false;
+    px[1].mask = strictMode ? 0xffffff : 0;
+    const bool ok = frames(BLUE, px, 2, [&] {
+        if (!bindDs(big.p)) return false;
+        CK(Clear, 0, nullptr, D3DCLEAR_TARGET, BLUE, 1.0f, 0);
+        if (!rstate(D3DRS_ZENABLE, D3DZB_FALSE) || !zquad(32, 96, 120, 160, 0.5f, TGRN) ||
+            !rstate(D3DRS_ZENABLE, D3DZB_TRUE))
+            return false;
+        HRESULT hr = zquadHr(136, 96, 224, 160, 0.5f, TRED);
+        if (strictMode ? hr != D3DERR_NOTAVAILABLE : hr != D3D_OK) return fail("DrawPrimitiveUP (Z on)", hr);
+        hr = dev->Clear(0, nullptr, D3DCLEAR_ZBUFFER, 0, 1.0f, 0);
+        if (strictMode ? hr != D3DERR_NOTAVAILABLE : hr != D3D_OK) return fail("Clear (Z)", hr);
+        return bindDs(dsSurf);
+    });
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
+// The bound depth-stencil (INTZ, cleared to 0.5) sampled by the draw. With Z and stencil off the draw reads it in
+// every lane. With Z on it is past the core's slice (C4c's copy): D3DERR_NOTAVAILABLE under core (strict); D3D_OK
+// elsewhere, the result not asserted.
+static bool rowDsFeedback() {
+    Px px[] = {{64, 128, 0x808080}, {192, 128, BLUE}};
+    px[1].mask = strictMode ? 0xffffff : 0;
+    const bool ok = frames(BLUE, px, 2, [&] {
+        Com<IDirect3DTexture9> t;
+        TV3 a[4], b[4];
+        tquad(a, 32, 96, 96, 160, 64.5f / 256, 0.5f, 0.5f), tquad(b, 160, 96, 224, 160, 192.5f / 256, 0.5f, 0.5f);
+        if (!makeDepthTex(t, FMT_INTZ) || !bindDsLevel(t.p) || !clearZ(0.5f)) return false;
+        CK(SetTexture, 0, t.p);
+        if (!rstate(D3DRS_ZENABLE, D3DZB_FALSE) || !tdraw(a) || !rstate(D3DRS_ZENABLE, D3DZB_TRUE)) return false;
+        const HRESULT hr = dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, b, sizeof *b);
+        CK(SetTexture, 0, nullptr);
+        if (strictMode ? hr != D3DERR_NOTAVAILABLE : hr != D3D_OK) return fail("DrawPrimitiveUP (Z on)", hr);
+        return bindDs(dsSurf);
+    });
+    CK(SetTexture, 0, nullptr);
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
+// A multisampled depth-stencil surface, past the core's slice (3d5's): D3DERR_NOTAVAILABLE under core (strict); in
+// the other lanes any answer but an abort (a surface made is released).
+static bool rowDsMsaa() {
+    IDirect3DSurface9 *s = nullptr;
+    const HRESULT hr =
+        dev->CreateDepthStencilSurface(256, 256, D3DFMT_D24S8, D3DMULTISAMPLE_4_SAMPLES, 0, FALSE, &s, nullptr);
+    if (s) s->Release();
+    if (strictMode && hr != D3DERR_NOTAVAILABLE) return fail("CreateDepthStencilSurface (4 samples)", hr);
+    return true;
+}
+// CreateDepthStencilSurface past the device's 16384 limit, of no width and in a colour format: D3DERR_INVALIDCALL in
+// every lane, and no surface.
+static bool rowDsHuge() {
+    static const struct { UINT w, h; D3DFORMAT f; const char *what; } bad[] = {
+        {16385, 16, D3DFMT_D24X8, "CreateDepthStencilSurface (16385 wide)"},
+        {0, 16, D3DFMT_D24X8, "CreateDepthStencilSurface (no width)"},
+        {64, 64, D3DFMT_X8R8G8B8, "CreateDepthStencilSurface (a colour format)"}};
+    for (const auto &b : bad) {
+        IDirect3DSurface9 *s = nullptr;
+        const HRESULT hr = dev->CreateDepthStencilSurface(b.w, b.h, b.f, D3DMULTISAMPLE_NONE, 0, FALSE, &s, nullptr);
+        if (s) s->Release();
+        if (hr != D3DERR_INVALIDCALL) return fail(b.what, hr);
+    }
+    return true;
+}
+// A dynamic depth texture's LockRect, past the core's slice (C4c's packed upload): D3DERR_NOTAVAILABLE under core
+// (strict); D3D_OK elsewhere (a lock that succeeds is unlocked: an unlock would log a refusal of its own).
+static bool rowDsLock() {
+    Com<IDirect3DTexture9> t;
+    CK(CreateTexture, 64, 64, 1, D3DUSAGE_DYNAMIC, D3DFMT_D16, D3DPOOL_DEFAULT, &t.p, nullptr);
+    D3DLOCKED_RECT lr = {};
+    const HRESULT hr = t.p->LockRect(0, &lr, nullptr, 0);
+    if (SUCCEEDED(hr)) t.p->UnlockRect(0);
+    if (strictMode ? hr != D3DERR_NOTAVAILABLE : hr != D3D_OK) return fail("LockRect", hr);
+    return true;
+}
+
+static void depthRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"ds-default", rowDsDefault},   {"ds-test", rowDsTest},         {"ds-func", rowDsFunc},
+        {"ds-write", rowDsWrite},       {"ds-zenable", rowDsZenable},   {"ds-clearz", rowDsClearZ},
+        {"ds-clearonly", rowDsClearOnly}, {"ds-stencil", rowDsStencil}, {"ds-twosided", rowDsTwoSided},
+        {"ds-bias", rowDsBias},         {"ds-slope", rowDsSlope},       {"ds-clamp", rowDsClamp},
+        {"ds-odepth", rowDsODepth},     {"ds-surface", rowDsSurface},   {"ds-nostencil", rowDsNoStencil},
+        {"ds-unbound", rowDsUnbound},   {"ds-persist", rowDsPersist},   {"ds-texture", rowDsTexture},
+        {"ds-mip", rowDsMip},           {"ds-release", rowDsRelease},   {"ds-shadow", rowDsShadow},
+        {"ds-intz", rowDsIntz},         {"ds-df", rowDsDf},             {"ds-fetch4", rowDsFetch4},
+        {"ds-size", rowDsSize},         {"ds-feedback", rowDsFeedback}, {"ds-msaa", rowDsMsaa},
+        {"ds-huge", rowDsHuge},         {"ds-lock", rowDsLock}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 150000;
+    HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
+    if (SUCCEEDED(hr))
+        hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
+    if (SUCCEEDED(hr)) hr = dev->GetRenderState(D3DRS_ZENABLE, &zenableDefault);
+    if (SUCCEEDED(hr)) hr = dev->GetDepthStencilSurface(&dsSurf);
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (FAILED(hr)) ok = fail("GetRenderTarget/GetDepthStencilSurface", hr);
+        else if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = reset() && depthReset() && r.run();
+        row(r.name, ok, why);
+    }
+    if (dsSurf) dsSurf->Release();
+    if (sysSurf) sysSurf->Release();
+    if (rtSurf) rtSurf->Release();
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
@@ -3002,6 +3605,8 @@ int main(int argc, char **argv) {
     const bool textures = !bench && argc > 1 && !strcmp(argv[1], "textures");
     const bool fixed = !bench && argc > 1 && !strcmp(argv[1], "fixed");
     const bool targets = !bench && argc > 1 && !strcmp(argv[1], "targets");
+    const bool depth = !bench && argc > 1 && !strcmp(argv[1], "depth");
+    const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     WNDCLASSW wc = {};
     wc.lpfnWndProc = DefWindowProcW;
@@ -3024,6 +3629,8 @@ int main(int argc, char **argv) {
     pp.BackBufferWidth = 256, pp.BackBufferHeight = 256, pp.BackBufferFormat = D3DFMT_X8R8G8B8, pp.BackBufferCount = 1;
     pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = hwnd, pp.Windowed = TRUE;
     pp.PresentationInterval = vsync ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
+    // The "depth" mode's device alone has a depth-stencil: the other modes' rows assume none.
+    if (depth || depthBench) pp.EnableAutoDepthStencil = TRUE, pp.AutoDepthStencilFormat = D3DFMT_D24S8;
     IDirect3DDevice9 *dev = nullptr;
     HRESULT hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd, D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp,
                                    &dev);
@@ -3033,6 +3640,13 @@ int main(int argc, char **argv) {
     const Vertex tri[3] = {{128, 16, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {240, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {16, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)}};
+    if (depth) {
+        depthRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
     if (targets) {
         targetRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();
@@ -3120,7 +3734,8 @@ int main(int argc, char **argv) {
         }
         QueryPerformanceCounter(&t0);
         for (int i = 0; i < benchFrames; i++) {
-            dev->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 255), 1.0f, 0);
+            dev->Clear(0, nullptr, depthBench ? D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER : D3DCLEAR_TARGET,
+                       D3DCOLOR_XRGB(0, 0, 255), 1.0f, 0);
             dev->BeginScene();
             for (int d = 0; d < benchDraws; d++) {
                 if (prog) {
@@ -3157,7 +3772,7 @@ int main(int argc, char **argv) {
         mem.dwLength = sizeof mem;
         GlobalMemoryStatusEx(&mem);
         printf("d3d9 bench: mode %s frames %d draws %d wall_ms %.1f cpu_ms %.1f vm_used_mb %llu failed %d\n",
-               prog ? "prog" : texBench ? "tex" : litBench ? "lit" : "ff", benchFrames, benchDraws,
+               prog ? "prog" : texBench ? (depthBench ? "texdepth" : "tex") : litBench ? "lit" : "ff", benchFrames, benchDraws,
                (double)(t1.QuadPart - t0.QuadPart) * 1e3 / (double)f.QuadPart, ms(user) + ms(kernel),
                (unsigned long long)((mem.ullTotalVirtual - mem.ullAvailVirtual) >> 20), failedDraws);
         dev->Release();
