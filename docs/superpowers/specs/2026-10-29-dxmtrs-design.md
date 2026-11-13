@@ -925,6 +925,22 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   (Mac x64, textured): core CPU +22% a frame over mtld3d, C4b-2's re-emission cost. Wine's visual and device suites
   create no core device yet: core's CreateDevice refuses an auto depth-stencil and multisampling until C4b-3d. C4b-3c
   (transformed fixed-function, lights, vertex textures) and C4b-3d (targets, MRT, depth, MSAA, fetch4, scissor) follow.
+  C4b-3c done 2026-11-12 at DXMTRS main a841fe8d (a841fe8d1a093567f66dc0b13b51cd22d60eb40b), which MacNeutron pins: the
+  fixed-function vertex stage and vertex textures on the core runtime. A draw with no vertex shader over an
+  untransformed layout takes the fixed-function vertex stage, whose key and shader the core already built for XYZRHW:
+  `FfState::ff_vs_rows` (mtld3d-core) assembles its constant rows (WV, PROJ, fog, ambient, material, up to eight
+  lights, texture transforms, the blend palette) whole for each draw, where mtld3d sends its encoder mirror deltas. A
+  vs_3_0 that samples binds the vertex slots it declares (texture, view, sampler, the opaque black for none) and the
+  vertex LOD table; the programmable vertex key carries the bound kinds, and the LOD-table rule is one function both
+  runtimes call. d3d9-rt's texture binds name their stage. The depth clamp is a pre-transformed draw's alone (it took
+  every fixed-function draw for one: an untransformed draw under point scale would have clamped, not clipped). Still
+  refused by name: blending and scissor, a depth, fetch4 or render-target texture sampled at a pixel or vertex slot,
+  a render-target or depth texture's LockRect (C4b-3d). Gated: 31 `d3d9_triangle fixed` rows and six vertex-texture
+  rows in every D3D9 lane on the Mac and in the VM, each first passed on mtld3d (default and msl), failing under core
+  before the change and passing strict after it; five mutation REDs; default runtime, translator key and imports
+  unchanged. Probe (Mac x64, lit): core CPU about 4x mtld3d's a frame (3.68 against 0.93 ms for 2000 draws): mtld3d
+  sends no constants when nothing is dirty, the core rebuilds the rows and re-emits every bind each draw; that dedup
+  is C4d's. C4b-3d (targets, MRT, depth, MSAA, blending, fetch4, scissor, the creation gate) follows.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
