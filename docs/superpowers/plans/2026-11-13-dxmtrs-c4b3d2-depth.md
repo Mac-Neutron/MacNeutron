@@ -539,3 +539,32 @@ feeds back are 256x256.
   script edit points). M1-M10, M12, M13, M15 taken; M11: the cut point is dropped; M14: three cases added to rows
   and one rt test, the rest in "Stated gaps"; M16 (the guest's row counter skips hyphenated names) stands, as for
   `rt-*`.
+
+## Execution notes (2026-11-13)
+
+- Built as planned in four commits on DXMTRS (0e9e4bfd the key and the lanes, cb8f73a1 the runtime, aa44e671 the
+  front end, 63f9fda0 sampling); the rows are 29. Under core the depth launch was refused at CreateDevice before
+  Task 4, passed 24 of 29 strict after it (the five sampling rows left) and 29 of 29 after Task 5, with no report
+  under the Metal validation layer.
+- Changes from the plan's text, each ledgered: `CoreDevice` keeps `open_depth: Option<DepthRef>` where the plan had a
+  bool (clippy's limit of three bools in a struct); the draw tests' helpers moved to `fixture.rs`; `core_key_depth`
+  alone decides (no `DEPTH_SIZE` draw flag); a depth texture's block is `(1, 1, 4)` (it is never uploaded or read
+  back); `SampledMasks` derives `Debug, Default` only; the cut point is dropped; the sampled-while-bound rt test is a
+  characterization test on a second colour target.
+- Incident: `gates/jq.sh` was edited while a chain was executing it (sh reads a script as it runs); the original
+  bytes were restored 27 s later, before that job's subshell ended, and the run finished cleanly. Rule since: a
+  changed job gets a new file name.
+- Gates: the six mutants each red on their named row, in no other launch; stateblock under core equal to default; the
+  plain build's translator key and imports unchanged; the VM's core lanes ok on old and new WoW64. The VM's default
+  lanes first failed on executed-test floors only (`visual` 60 short in three of four legs, `d3d9ex` 1 short in one:
+  `test_map_synchronisation`'s timing skip on a Mac in use) and passed in full on the rerun at the same commits.
+- Probe (`build/c4b3d/s2/probe.md`): inconclusive. Single runs did not repeat on a Mac in use (identical code 0.5-0.7
+  ms a frame apart), so C4b-3d1's PE side and this slice's also ran interleaved over five rounds, against the one-run
+  rule. Two comparisons read the tip higher, the interleaved one lower: no regression is measurable, the direction
+  is unknown. C4b-3d3's probe retakes it on a quiet Mac, each tip on its own full build.
+- Wine's `visual` under core (ruling C4b3d2-11, a measurement): the device is created, and the suite stops at
+  `CreateOffscreenPlainSurface(D3DPOOL_DEFAULT)`, which the core does not implement.
+- Final review: no Critical, no Important, 11 Minor, all deferred (the ledger and the close-out list them). Two are
+  inputs to C4b-3d3: the pre-transformed clamp follows the key, so a Z-on, write-off, ALWAYS draw whose depth-stencil
+  is left out is drawn past the far plane where mtld3d clips; `Clear(STENCIL)` of a depth-only depth-stencil of
+  another size is refused where mtld3d does nothing.

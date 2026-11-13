@@ -963,6 +963,35 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   apart): core CPU 2.57 ms a frame against mtld3d's 1.90 (+35%), not above C4b-3c's tip (2.72 and 2.80), a draw
   reading its target's shape without a reference; the core's textured draw was 2.25 at C4b-3b, so C4b-3c's vertex-slot
   work on every draw costs about 0.5 ms a frame, C4d's to remove with the re-emission.
+  C4b-3d2 done 2026-11-13 at DXMTRS main 63f9fda0 (63f9fda05cd1873a228eb817a5b5be4316f6186e), which MacNeutron pins: the
+  depth-stencil on the core runtime. d3d9-rt's `CoreDevice` keeps a depth-stencil by reference (`DepthRef`: a level of a
+  stored depth texture) beside the colour target; `depth_state()` says whether one is bound and whether a pass on the
+  colour target can attach it (it has the target's size). The front end's `core_key_depth` turns that into the draw's
+  key format (`PipelineKey::depth_format`), and the key alone decides the pass (with the depth-stencil or without), the
+  pipeline's depth and stencil formats, a pixel shader's depth output, the depth-stencil state and the pre-transformed
+  clamp lane; a change of depth-stencil, or a draw of the other kind, ends the open pass. A depth texture is a core
+  texture on the render-target path (zeroed by the initializer: depth 0, stencil 0); the auto depth-stencil, a
+  `CreateDepthStencilSurface` surface and a depth texture's level are each one. The creation gate takes
+  `EnableAutoDepthStencil` (`D3DRS_ZENABLE` then defaults on, as under mtld3d). The state is mtld3d-core's
+  `depth_stencil_state` made into Metal state objects the device keeps, set with the stencil reference at each draw; the
+  depth bias goes through the vertex stage's lane, the slope scale through the rasterizer record. `Clear` takes Z and
+  stencil over the whole target (planes the format has not are dropped, as D3D9 has it). Depth textures are sampled with
+  mtld3d's variant masks: a shadow sample through a less-equal compare sampler, INTZ/DF16/DF24 raw through a point
+  sampler, fetch4 on every eligible format. A depth-stencil of another size than the target, or one the draw samples, is
+  left out of that draw's pass when the draw uses no plane. Still refused by name: a draw that tests or writes a
+  depth-stencil of another size than the target and a Z or stencil Clear of one (3d3), a draw that tests or writes the
+  depth-stencil it samples, a depth texture at a vertex sampler and a dynamic depth texture's lock (C4c), a multisampled
+  depth-stencil surface (3d5). Gated: 29 `d3d9_triangle depth` rows on a device with an auto D24S8 in every D3D9 lane on
+  the Mac and in the VM, each first passed on mtld3d (default and msl), failing under core before the change (the device
+  was refused) and passing strict after it, with no report under the Metal validation layer; `tex-fetch4` over four
+  values and a new `tex-fetch4a`; six mutation REDs; the stateblock conformance under core; default runtime, translator
+  key and imports unchanged. Not covered by a row: a shadow sample of a D24S8 texture, `EnableAutoDepthStencil` with
+  format 0. Probe (Mac x64, textured): inconclusive. The Mac was in use and identical code read 0.5-0.7 ms a frame
+  apart; against C4b-3d1's tip the core's textured draw read higher in two comparisons of single runs (4.07 vs the
+  recorded 2.57; 3.50 vs 2.63 and 2.03) and lower in five interleaved rounds (mean 3.15 vs 3.80, mtld3d 1.78), so no
+  regression is measurable and the direction is unknown; C4b-3d3's probe retakes it on a quiet Mac, each tip on its own
+  build. Wine's `visual` under core (measured, not gated) now creates its device and stops at
+  `CreateOffscreenPlainSurface(D3DPOOL_DEFAULT)`, which the core does not implement: the first thing 3d5's sweep needs.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
