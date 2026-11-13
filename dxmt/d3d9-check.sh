@@ -45,7 +45,7 @@
 # sampler). Every lane also runs d3d9_triangle targets (DXMTRS C4b-3d1's 22 rows of render targets other than the back
 # buffer; "targets strict" under core), its rows "targets-<row>"; under core its launch's logs hold exactly its two
 # refused rows' lines (a render target at index 1, a multisampled surface). Every lane also runs d3d9_triangle depth
-# (DXMTRS C4b-3d2's 29 rows of the depth-stencil, on a device with an auto depth-stencil; "depth strict" under core),
+# (DXMTRS C4b-3d2's 30 rows of the depth-stencil, on a device with an auto depth-stencil; "depth strict" under core),
 # its rows "depth-<row>"; under core its launch's logs hold exactly its five refused calls' lines.
 #   d3d9-check.sh [<wine.app>]
 set -eu
@@ -214,8 +214,8 @@ check targets "rt-tex rt-read rt-surface rt-viewport rt-big rt-mip rt-cube rt-sw
   rt-autogen rt-release rt-srgb rt-ps rt-update rt-updatebound rt-formats rt-mrt rt-msaa rt-cubelock rt-huge"
 launch ours fresh depth 240 depth $strict
 check depth "ds-default ds-test ds-func ds-write ds-zenable ds-clearz ds-clearonly ds-stencil ds-twosided ds-bias
-  ds-slope ds-clamp ds-odepth ds-surface ds-nostencil ds-unbound ds-persist ds-texture ds-mip ds-release ds-shadow
-  ds-intz ds-df ds-fetch4 ds-size ds-feedback ds-msaa ds-huge ds-lock"
+  ds-slope ds-clamp ds-odepth ds-surface ds-nostencil ds-unbound ds-persist ds-texture ds-texstencil ds-mip ds-release
+  ds-shadow ds-intz ds-df ds-fetch4 ds-size ds-feedback ds-msaa ds-huge ds-lock"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi

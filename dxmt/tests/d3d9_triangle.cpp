@@ -39,7 +39,7 @@
 // to, cleared, read back with GetRenderTargetData and sampled; formats, sRGB write, the viewport reset, automatic
 // mipmaps, lifetime and order, a size past the device's limit), two the core refuses (a target at index 1, a
 // multisampled surface), with a 150 s budget.
-// With "depth" ("depth strict" under core; DXMTRS C4b-3d2): 29 rows "d3d9 ds-<row> ok|FAIL <why>" of the depth-stencil,
+// With "depth" ("depth strict" under core; DXMTRS C4b-3d2): 30 rows "d3d9 ds-<row> ok|FAIL <why>" of the depth-stencil,
 // on a device made with an auto D24S8 (the other modes' devices have none): the depth and stencil tests and their
 // state, Clear's Z and stencil, depth bias, the pretransformed clamp, a pixel shader's depth output, depth-stencil
 // surfaces and depth textures and their levels, shadow, raw (INTZ, DF16, DF24) and fetch4 samples of a depth texture,
@@ -3364,6 +3364,28 @@ static bool rowDsTexture() {
     CK(SetDepthStencilSurface, dsSurf);
     return ok;
 }
+// A stencil Clear on a texture's level (D24S8): a quad writes stencil 1; Clear(STENCIL) alone, to 0; a quad under EQUAL
+// 1 is then hidden and one under EQUAL 0 shows; Clear(ZBUFFER | STENCIL) to 3, and a quad under EQUAL 3 shows.
+static bool rowDsTexStencil() {
+    Com<IDirect3DTexture9> t;
+    if (!makeDepthTex(t, D3DFMT_D24S8) || !bindDsLevel(t.p)) return false;
+    const Px px[] = {{64, 128, TYEL}, {128, 128, TGRN}, {192, 128, TGRN}};
+    const bool ok = frames(BLUE, px, 3, [&] {
+        auto eq = [&](DWORD ref, float x, DWORD c) {
+            return rstate(D3DRS_STENCILFUNC, D3DCMP_EQUAL) && rstate(D3DRS_STENCILPASS, D3DSTENCILOP_KEEP) &&
+                   rstate(D3DRS_STENCILREF, ref) && zquad(x, 96, x + 48, 160, 0.25f, c);
+        };
+        if (!clearZ() || !rstate(D3DRS_STENCILENABLE, TRUE) || !rstate(D3DRS_STENCILFUNC, D3DCMP_ALWAYS) ||
+            !rstate(D3DRS_STENCILPASS, D3DSTENCILOP_REPLACE) || !rstate(D3DRS_STENCILREF, 1) ||
+            !zquad(16, 96, 240, 160, 0.5f, TYEL))
+            return false;
+        CK(Clear, 0, nullptr, D3DCLEAR_STENCIL, 0, 1.0f, 0);
+        if (!eq(1, 40, TRED) || !eq(0, 104, TGRN)) return false;
+        return clearZS(1.0f, 3) && eq(3, 168, TGRN);
+    });
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
 // A level below 0: level 0 cleared to 0.25 with the back buffer; level 1 with a 128x128 target cleared to 1 and the
 // depth test drawn there, its corner (8..24) untouched; level 0 again with the back buffer and no clear: a quad at 0.4
 // over that corner is hidden (level 0 still holds 0.25, not level 1's clear) and one at 0.2 beside it shows.
@@ -3570,7 +3592,7 @@ static void depthRows(IDirect3DDevice9 *d, bool strict) {
         {"ds-bias", rowDsBias},         {"ds-slope", rowDsSlope},       {"ds-clamp", rowDsClamp},
         {"ds-odepth", rowDsODepth},     {"ds-surface", rowDsSurface},   {"ds-nostencil", rowDsNoStencil},
         {"ds-unbound", rowDsUnbound},   {"ds-persist", rowDsPersist},   {"ds-texture", rowDsTexture},
-        {"ds-mip", rowDsMip},           {"ds-release", rowDsRelease},   {"ds-shadow", rowDsShadow},
+        {"ds-texstencil", rowDsTexStencil}, {"ds-mip", rowDsMip},           {"ds-release", rowDsRelease},   {"ds-shadow", rowDsShadow},
         {"ds-intz", rowDsIntz},         {"ds-df", rowDsDf},             {"ds-fetch4", rowDsFetch4},
         {"ds-size", rowDsSize},         {"ds-feedback", rowDsFeedback}, {"ds-msaa", rowDsMsaa},
         {"ds-huge", rowDsHuge},         {"ds-lock", rowDsLock}};

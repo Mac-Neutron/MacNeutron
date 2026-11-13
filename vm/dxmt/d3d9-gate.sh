@@ -35,7 +35,7 @@
 # vertex stage; fx64-fresh, fx32-fresh); under core their logs hold exactly its refused row's line. Every lane also
 # checks d3d9_triangle targets' 22 rows (DXMTRS C4b-3d1: render targets other than the back buffer; tg64-fresh,
 # tg32-fresh); under core their logs hold exactly its two refused rows' lines. Every lane also checks d3d9_triangle
-# depth's 29 rows (DXMTRS C4b-3d2: the depth-stencil, on a device with an auto depth-stencil; dp64-fresh, dp32-fresh);
+# depth's 30 rows (DXMTRS C4b-3d2: the depth-stencil, on a device with an auto depth-stencil; dp64-fresh, dp32-fresh);
 # under core their logs hold exactly its five refused calls' lines.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -164,8 +164,8 @@ for r in tg64-fresh tg32-fresh; do
 done
 for r in dp64-fresh dp32-fresh; do
   for row in ds-default ds-test ds-func ds-write ds-zenable ds-clearz ds-clearonly ds-stencil ds-twosided ds-bias \
-    ds-slope ds-clamp ds-odepth ds-surface ds-nostencil ds-unbound ds-persist ds-texture ds-mip ds-release ds-shadow \
-    ds-intz ds-df ds-fetch4 ds-size ds-feedback ds-msaa ds-huge ds-lock; do
+    ds-slope ds-clamp ds-odepth ds-surface ds-nostencil ds-unbound ds-persist ds-texture ds-texstencil ds-mip \
+    ds-release ds-shadow ds-intz ds-df ds-fetch4 ds-size ds-feedback ds-msaa ds-huge ds-lock; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
