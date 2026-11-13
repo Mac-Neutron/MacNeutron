@@ -442,3 +442,24 @@ F12 folded (C4b3d1-6). Review 2 (core): C1 folded (the initializer; the fallback
 folded (the two call sites, handles 0xf3+, the copy fake line, the read-back's level and slice, the publish arm);
 M1-M4 folded. Review 3 (rows and gates): C1 folded (commit before the jobs); I1 folded (C4b3d1-11); I2-I4 folded;
 M1-M10 and M12 folded; M11 folded as job `jcr`.
+
+## Execution notes (2026-11-13)
+
+- The rows are 22: the final review's Critical finding added `rt-huge` (`CreateRenderTarget(16385, 16, ...)` answers
+  `D3DERR_INVALIDCALL` in every lane; the core answered `D3D_OK` before DXMTRS dc1eba82, which checks the extent
+  mtld3d's Unix create checks).
+- At the RED before Task 4, 18 of the then 21 rows failed; `rt-mrt`, `rt-msaa` and `rt-cubelock` pass on both sides
+  of the change by design.
+- The fake lines as built: `  target0 #<handle> <width>x<height>` (no key: the tile-barrier key is not on
+  winemetal's wire, so no host test sees it), `MTLTexture_newTextureView #<view> of #<texture> format= type= mip=
+  slice=`, `  pso color0=<format>`, `    copy_to_buffer #<texture> level= slice= size= bytes_per_row=`.
+- The initializer route worked from D3D9's queue (no fallback). `creating_a_target_leaves_the_open_pass_open`
+  became `a_target_made_between_two_draws_is_zeroed_ahead_of_them`: whether the pass was closed cannot be seen
+  through encoders, which the optimizer merges.
+- No helper was extracted from `create_color_target_surface`: the core arm is a branch inside it, after mtld3d's
+  format checks.
+- Mutation (b) did not show the predicted red/blue swap: A8B8G8R8 passed under a BGRA8 pipeline and the 8-byte format
+  caught it. No row detects a wrong pipeline format on a 4-byte target that is not BGRA.
+- The fix pass also removed five target resolves a draw (review minor M3, re-graded by the probe): a draw reads the
+  target's shape without a reference (DXMTRS 2acb1d99). `build/c4b3d/s1/probe.md`.
+- `dxmt/d3d9-check.sh` removes the work folder it made (each run had left 3.7 GiB in the temp folder).

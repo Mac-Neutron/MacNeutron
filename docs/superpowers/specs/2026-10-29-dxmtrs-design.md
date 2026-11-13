@@ -940,7 +940,29 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   before the change and passing strict after it; five mutation REDs; default runtime, translator key and imports
   unchanged. Probe (Mac x64, lit): core CPU about 4x mtld3d's a frame (3.68 against 0.93 ms for 2000 draws): mtld3d
   sends no constants when nothing is dirty, the core rebuilds the rows and re-emits every bind each draw; that dedup
-  is C4d's. C4b-3d (targets, MRT, depth, MSAA, blending, fetch4, scissor, the creation gate) follows.
+  is C4d's. C4b-3d (targets, MRT, depth, MSAA, blending, fetch4, scissor, the creation gate) follows, in five slices
+  (3d1 the target set, 3d2 depth-stencil with the auto-depth creation gate, depth sampling and fetch4, 3d3 blending,
+  scissor and partial clears, 3d4 MRT, 3d5 MSAA and the Wine suite sweep).
+  C4b-3d1 done 2026-11-13 at DXMTRS main 2acb1d99 (2acb1d997de77b5b02cac7f1758b8421c5b001f7), which MacNeutron pins:
+  render targets other than the back buffer on the core runtime. d3d9-rt's `CoreDevice` keeps a colour target by
+  reference (`TargetRef`: the back buffer, or a level and cube face of a stored render-target texture) and resolves it
+  for its render pass, Clear and read-back; a change of target ends the open pass. A render-target texture is a core
+  texture with the render-target usage, tracked a subresource at a time and zeroed by the core's initializer; a level
+  or face is attached through a 2D view of that one subresource; a `CreateRenderTarget` surface is one under an id of
+  its own. The pipeline key carries colour 0's pixel format. `SetRenderTarget(0, ...)`, draws, whole-target `Clear`
+  and `GetRenderTargetData` (mtld3d's checks and answers) use the bound target's size and format; a CPU write into a
+  render target uploads at the write; an AUTOGENMIPMAP target's chain is regenerated when slot 0 leaves it; sRGB write
+  stays in the pixel shader for every target. A sampled render-target texture is no longer refused. Still refused by
+  name: a target at index 1-3 (3d4), a multisampled `CreateRenderTarget` (3d5), an additional swap chain's back buffer
+  read back, blending and scissor, depth and fetch4 textures, a render-target texture's LockRect. Gated: 22
+  `d3d9_triangle targets` rows in every D3D9 lane on the Mac and in the VM, each first passed on mtld3d (default and
+  msl) and passing strict under core after the change (18 failed under core before it, two are the refusals above, one
+  asserts D3D9's own answer for a cube's lock, one a size past the device's limit); five mutation REDs; the stateblock
+  conformance under core; default runtime, translator key and imports unchanged. Not covered by a row: a wrong
+  pipeline colour format on a 4-byte target that is not BGRA. Probe (Mac x64, textured, single runs about 0.1 ms
+  apart): core CPU 2.57 ms a frame against mtld3d's 1.90 (+35%), not above C4b-3c's tip (2.72 and 2.80), a draw
+  reading its target's shape without a reference; the core's textured draw was 2.25 at C4b-3b, so C4b-3c's vertex-slot
+  work on every draw costs about 0.5 ms a frame, C4d's to remove with the re-emission.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
