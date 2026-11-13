@@ -54,7 +54,12 @@ ARM="$ROOT/build/dxmt-tests-arm64/d3d9_triangle.exe"
 CLI="$ROOT/target/release/macneutron"
 for e in "$EXE" "$DYN" "$ARM"; do [ -f "$e" ] || { echo "d3d9-check: no $e: run make dxmt-tests" >&2; exit 2; }; done
 [ -x "$CLI" ] || { echo "d3d9-check: no $CLI: run make build" >&2; exit 2; }
+# The work folder holds a tool install and its prefixes (3.7 GiB a run). One this run made is removed when the run
+# ends: all of it after a pass, the install, prefixes and programs after a failure (its logs and row files stay to be
+# read). A folder the caller names (DXMT_CHECK_WORK) is the caller's.
+made=; [ -n "${DXMT_CHECK_WORK:-}" ] || made=1
 WORK=${DXMT_CHECK_WORK:-$(mktemp -d "${TMPDIR:-/tmp}/macneutron-d3d9.XXXXXX")}
+trap 's=$?; [ -z "$made" ] || { rm -rf "$WORK/ours" "$WORK/old" "$WORK/compat" "$WORK/progs"; [ "$s" != 0 ] || rm -rf "$WORK"; }' EXIT
 fail=
 BK=${D3D9_BACKEND:-air} sfx= msl= RT=${D3D9_RUNTIME:-mtld3d}
 case $RT/$BK in
