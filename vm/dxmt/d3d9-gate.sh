@@ -33,7 +33,7 @@
 # tx32-fresh), and tx32-fresh the 32-bit-only tex-big256 (the staged-bytes budget); under core their logs hold exactly
 # the three refused rows' lines. Every lane also checks d3d9_triangle fixed's 31 rows (DXMTRS C4b-3c: the fixed-function
 # vertex stage; fx64-fresh, fx32-fresh); under core their logs hold exactly its refused row's line. Every lane also
-# checks d3d9_triangle targets' 21 rows (DXMTRS C4b-3d1: render targets other than the back buffer; tg64-fresh,
+# checks d3d9_triangle targets' 22 rows (DXMTRS C4b-3d1: render targets other than the back buffer; tg64-fresh,
 # tg32-fresh); under core their logs hold exactly its two refused rows' lines.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -156,7 +156,7 @@ for r in fx64-fresh fx32-fresh; do
 done
 for r in tg64-fresh tg32-fresh; do
   for row in rt-tex rt-read rt-surface rt-viewport rt-big rt-mip rt-cube rt-switch rt-rewrite rt-clearonly rt-fresh \
-    rt-autogen rt-release rt-srgb rt-ps rt-update rt-updatebound rt-formats rt-mrt rt-msaa rt-cubelock; do
+    rt-autogen rt-release rt-srgb rt-ps rt-update rt-updatebound rt-formats rt-mrt rt-msaa rt-cubelock rt-huge; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done

@@ -34,10 +34,11 @@
 // fixed-function vertex stage over untransformed layouts (transforms, lights, material sources, fog, texgen and texture
 // transforms, vertex blending, points, a clip plane) and three vertex-sampled target textures the core refuses, with a
 // 180 s budget. "--bench <draws> <frames> lit" draws the triangle untransformed and lit ("mode lit").
-// With "targets" ("targets strict" under core; DXMTRS C4b-3d1): 21 rows "d3d9 rt-<row> ok|FAIL <why>" of render targets
+// With "targets" ("targets strict" under core; DXMTRS C4b-3d1): 22 rows "d3d9 rt-<row> ok|FAIL <why>" of render targets
 // other than the back buffer (render-target textures, their levels and cube faces, CreateRenderTarget surfaces: drawn
 // to, cleared, read back with GetRenderTargetData and sampled; formats, sRGB write, the viewport reset, automatic
-// mipmaps, lifetime and order), two the core refuses (a target at index 1, a multisampled surface), with a 150 s budget.
+// mipmaps, lifetime and order, a size past the device's limit), two the core refuses (a target at index 1, a
+// multisampled surface), with a 150 s budget.
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -2953,6 +2954,15 @@ static bool rowRtCubeLock() {
     if (hr != D3DERR_INVALIDCALL) return fail("cube LockRect", hr);
     return true;
 }
+// A render target past the device's 16384 limit: D3DERR_INVALIDCALL in every lane, and no surface (Metal raises for
+// such a texture, which ends the process, so the create must answer first).
+static bool rowRtHuge() {
+    IDirect3DSurface9 *s = nullptr;
+    const HRESULT hr = dev->CreateRenderTarget(16385, 16, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &s, nullptr);
+    if (s) s->Release();
+    if (hr != D3DERR_INVALIDCALL) return fail("CreateRenderTarget (16385 wide)", hr);
+    return true;
+}
 
 static void targetRows(IDirect3DDevice9 *d, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
@@ -2962,7 +2972,8 @@ static void targetRows(IDirect3DDevice9 *d, bool strict) {
         {"rt-clearonly", rowRtClearOnly}, {"rt-fresh", rowRtFresh},     {"rt-autogen", rowRtAutogen},
         {"rt-release", rowRtRelease},   {"rt-srgb", rowRtSrgb},         {"rt-ps", rowRtPs},
         {"rt-update", rowRtUpdate},     {"rt-updatebound", rowRtUpdateBound}, {"rt-formats", rowRtFormats},
-        {"rt-mrt", rowRtMrt},           {"rt-msaa", rowRtMsaa},         {"rt-cubelock", rowRtCubeLock}};
+        {"rt-mrt", rowRtMrt},           {"rt-msaa", rowRtMsaa},         {"rt-cubelock", rowRtCubeLock},
+        {"rt-huge", rowRtHuge}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 150000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))

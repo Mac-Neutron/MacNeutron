@@ -42,7 +42,7 @@
 # "textures-<row>"; under core its launch's logs hold exactly its three refused rows' lines. Every lane also runs
 # d3d9_triangle fixed (DXMTRS C4b-3c's 31 rows of the fixed-function vertex stage; "fixed strict" under core), its rows
 # "fixed-<row>"; under core its launch's logs hold exactly its refused rows' line (a depth texture at a vertex
-# sampler). Every lane also runs d3d9_triangle targets (DXMTRS C4b-3d1's 21 rows of render targets other than the back
+# sampler). Every lane also runs d3d9_triangle targets (DXMTRS C4b-3d1's 22 rows of render targets other than the back
 # buffer; "targets strict" under core), its rows "targets-<row>"; under core its launch's logs hold exactly its two
 # refused rows' lines (a render target at index 1, a multisampled surface).
 #   d3d9-check.sh [<wine.app>]
@@ -199,7 +199,7 @@ check fixed "ff-xform ff-persp ff-rhwmix ff-viewchange ff-ambient ff-lightdefaul
   tex-vtxdepthfmt"
 launch ours fresh targets 240 targets $strict
 check targets "rt-tex rt-read rt-surface rt-viewport rt-big rt-mip rt-cube rt-switch rt-rewrite rt-clearonly rt-fresh
-  rt-autogen rt-release rt-srgb rt-ps rt-update rt-updatebound rt-formats rt-mrt rt-msaa rt-cubelock"
+  rt-autogen rt-release rt-srgb rt-ps rt-update rt-updatebound rt-formats rt-mrt rt-msaa rt-cubelock rt-huge"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi
