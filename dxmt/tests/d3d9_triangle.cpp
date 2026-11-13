@@ -34,6 +34,10 @@
 // fixed-function vertex stage over untransformed layouts (transforms, lights, material sources, fog, texgen and texture
 // transforms, vertex blending, points, a clip plane) and three vertex-sampled target textures the core refuses, with a
 // 180 s budget. "--bench <draws> <frames> lit" draws the triangle untransformed and lit ("mode lit").
+// With "targets" ("targets strict" under core; DXMTRS C4b-3d1): 21 rows "d3d9 rt-<row> ok|FAIL <why>" of render targets
+// other than the back buffer (render-target textures, their levels and cube faces, CreateRenderTarget surfaces: drawn
+// to, cleared, read back with GetRenderTargetData and sampled; formats, sRGB write, the viewport reset, automatic
+// mipmaps, lifetime and order), two the core refuses (a target at index 1, a multisampled surface), with a 150 s budget.
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -264,10 +268,14 @@ static bool use(const Prog &p) {
 }
 
 static const D3DMATRIX IDENTITY = {{{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}}};
-// Every state a row touches, back to D3D9's defaults (the viewport the whole back buffer; LIGHTING off, see below).
+// Every state a row touches, back to D3D9's defaults (the back buffer the one render target and the viewport the whole
+// of it; LIGHTING off, see below).
 static bool reset() {
     CK(SetVertexShader, nullptr);
     CK(SetPixelShader, nullptr);
+    // The back buffer at render target 0 and nothing at 1-3 (DXMTRS C4b-3d1's rows bind others).
+    if (rtSurf) CK(SetRenderTarget, 0, rtSurf);
+    for (DWORD i = 1; i < 4; i++) CK(SetRenderTarget, i, nullptr);
     CK(SetViewport, &FULL);
     static const DWORD rs[][2] = {
         {D3DRS_ALPHATESTENABLE, FALSE}, {D3DRS_ALPHAFUNC, D3DCMP_ALWAYS}, {D3DRS_ALPHAREF, 0},
@@ -334,6 +342,8 @@ static bool matches(DWORD got, const Px &p) {
 template <class F> static bool frames(DWORD clear, const Px *px, int n, F draw) {
     const ULONGLONG now = GetTickCount64(), until = now + 10000 < budgetEnd ? now + 10000 : budgetEnd;
     for (int frame = 1;; frame++) {
+        // A draw() that left another target bound (it failed part-way) does not have the retry clear that target.
+        CK(SetRenderTarget, 0, rtSurf);
         CK(SetViewport, &FULL);
         CK(Clear, 0, nullptr, D3DCLEAR_TARGET, clear, 1.0f, 0);
         CK(BeginScene);
@@ -1591,7 +1601,47 @@ static bool rowTexBig256() {
     CK(SetTexture, 0, nullptr);
     return ok;
 }
-// LockRect on a render-target texture, past the core's slice (C4b-3d's): D3DERR_NOTAVAILABLE under core (strict); in
+// Render targets (DXMTRS C4b-3d1). A size x size render-target texture in the default pool.
+static bool makeRt(Com<IDirect3DTexture9> &t, UINT size = 64, UINT levels = 1, D3DFORMAT f = D3DFMT_A8R8G8B8,
+                   DWORD usage = D3DUSAGE_RENDERTARGET) {
+    CK(CreateTexture, size, size, levels, usage, f, D3DPOOL_DEFAULT, &t.p, nullptr);
+    return true;
+}
+// Level `level` of `t` at render target 0 (which resets the viewport to the level).
+static bool target(IDirect3DTexture9 *t, UINT level = 0) {
+    Com<IDirect3DSurface9> s;
+    const HRESULT hr = t->GetSurfaceLevel(level, &s.p);
+    if (FAILED(hr)) return fail("GetSurfaceLevel", hr);
+    CK(SetRenderTarget, 0, s.p);
+    return true;
+}
+// The back buffer at render target 0 again (and the viewport the whole of it).
+static bool backToScreen() {
+    CK(SetRenderTarget, 0, rtSurf);
+    return true;
+}
+static bool clearTo(DWORD color) {
+    CK(Clear, 0, nullptr, D3DCLEAR_TARGET, color, 1.0f, 0);
+    return true;
+}
+static bool rdraw(const RV *q) {
+    CK(SetFVF, D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    CK(DrawPrimitiveUP, D3DPT_TRIANGLESTRIP, 2, q, sizeof *q);
+    return true;
+}
+// `t` drawn by the fixed-function pixel stage over the pixel-space quad (x0, y0)-(x1, y1), u and v from 0 to 1 across
+// it: with the default 64..192 quad, texel (x, y) of a 64x64 texture covers pixels 64+2x and 65+2x (rows assert at
+// 65+2x, the texel's centre: a pixel centre is at its integer coordinates, so 64+2x samples the texel's edge).
+static bool show(IDirect3DBaseTexture9 *t, float x0 = 64, float y0 = 64, float x1 = 192, float y1 = 192) {
+    const DWORD c = D3DCOLOR_XRGB(255, 255, 255);
+    const TV3 q[4] = {{x0, y0, 0.5f, 1, c, 0, 0, 0}, {x1, y0, 0.5f, 1, c, 1, 0, 0}, {x0, y1, 0.5f, 1, c, 0, 1, 0},
+                      {x1, y1, 0.5f, 1, c, 1, 1, 0}};
+    CK(SetTexture, 0, t);
+    const bool ok = tdraw(q);
+    CK(SetTexture, 0, nullptr);
+    return ok;
+}
+// LockRect on a render-target texture, past the core's slice (C4c's): D3DERR_NOTAVAILABLE under core (strict); in
 // the other lanes any answer but an abort (a lock that succeeds is unlocked).
 static bool rowTexRtLock() {
     Com<IDirect3DTexture9> t;
@@ -1652,10 +1702,15 @@ static bool rowTexFetch4() {
     CK(SetSamplerState, 0, D3DSAMP_MIPMAPLODBIAS, 0);
     return ok;
 }
+// A render-target texture cleared green through SetRenderTarget, then sampled by the fixed-function stage.
 static bool rowTexRtTex() {
-    Com<IDirect3DTexture9> t;
-    CK(CreateTexture, 4, 4, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &t.p, nullptr);
-    return refusedRow([&] { return ffTexDraw(t.p); });
+    const Px px[] = {{128, 128, TGRN}};
+    return frames(BLUE, px, 1, [&] {
+        Com<IDirect3DTexture9> t;
+        if (!makeRt(t, 4, 1, D3DFMT_X8R8G8B8) || !target(t.p) || !clearTo(TGRN) || !backToScreen()) return false;
+        const HRESULT hr = ffTexDraw(t.p);
+        return SUCCEEDED(hr) || fail("DrawPrimitiveUP", hr);
+    });
 }
 // Vertex textures (DXMTRS C4b-3c). vsTex writes vs_3_0 { dcl_position v0; dcl_position o0; dcl_color o1; dcl_<kind>
 // s<slot>; texldl r0, c0, s<slot>; mov o0, v0; mov o1, r0 (r0.wwww with alpha) }: the texel at c0 (its w the level) as
@@ -2297,7 +2352,7 @@ static bool rowFfDecl() {
         return true;
     });
 }
-// A render-target, then a depth texture at a vertex sampler the shader reads: past the core's slice (C4b-3d).
+// A depth texture at a vertex sampler the shader reads: past the core's slice (C4b-3d2).
 static bool vtxTargetRow(DWORD usage, D3DFORMAT format) {
     Com<IDirect3DTexture9> t;
     CK(CreateTexture, 4, 4, 1, usage, format, D3DPOOL_DEFAULT, &t.p, nullptr);
@@ -2312,7 +2367,23 @@ static bool vtxTargetRow(DWORD usage, D3DFORMAT format) {
     CK(SetTexture, VS0, nullptr);
     return ok;
 }
-static bool rowTexVtxRt() { return vtxTargetRow(D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8); }
+// A render-target texture cleared green through SetRenderTarget, at vertex sampler 0: the quad takes its colour.
+static bool rowTexVtxRt() {
+    Prog p;
+    if (!makeVtx(p, 2, 0)) return false;
+    V3 q[4];
+    quad(q, -0.5f, -0.5f, 0.5f, 0.5f);
+    const Px px[] = {{128, 128, TGRN}, {20, 20, BLUE}};
+    return frames(BLUE, px, 2, [&] {
+        Com<IDirect3DTexture9> t;
+        if (!makeRt(t, 4, 1, D3DFMT_X8R8G8B8) || !target(t.p) || !clearTo(TGRN) || !backToScreen() || !use(p))
+            return false;
+        CK(SetTexture, VS0, t.p);
+        const bool ok = vtxDraw(q, 0.5f, 0.5f);
+        CK(SetTexture, VS0, nullptr);
+        return ok;
+    });
+}
 static bool rowTexVtxDepth() { return vtxTargetRow(D3DUSAGE_DEPTHSTENCIL, D3DFMT_D24S8); }
 // A depth format made without the DEPTHSTENCIL usage is a depth texture too (the pixel slots refuse it by its format).
 static bool rowTexVtxDepthFmt() { return vtxTargetRow(0, D3DFMT_D24S8); }
@@ -2346,6 +2417,568 @@ static void fixedRows(IDirect3DDevice9 *d, bool strict) {
     if (rtSurf) rtSurf->Release();
 }
 
+// The "targets" mode (DXMTRS C4b-3d1): render targets other than the back buffer. A row's objects are made inside its
+// per-frame body, so a retried frame (mtld3d leaves a draw out while its pipeline builds) starts from new ones. A row
+// that reads a target back runs its body through until(), which retries as frames() does. Texel and pixel
+// coordinates: x right, y down.
+template <class F> static bool scene(F body) {
+    CK(BeginScene);
+    const bool ok = body();
+    dev->EndScene();
+    return ok;
+}
+// attempt() (which sets `why`) and a Present, until it passes: for up to 10 s within the budget, once when strict.
+template <class F> static bool until(F attempt) {
+    const ULONGLONG now = GetTickCount64(), end = now + 10000 < budgetEnd ? now + 10000 : budgetEnd;
+    for (;;) {
+        const bool ok = attempt();
+        dev->SetRenderTarget(0, rtSurf);
+        CK(Present, nullptr, nullptr, nullptr, nullptr);
+        if (ok) return true;
+        if (strictMode || GetTickCount64() >= end) return false;
+    }
+}
+// GetRenderTargetData of `src` (w x h, format f) into a new system-memory surface, which check(bits, pitch) reads.
+template <class F> static bool readTarget(IDirect3DSurface9 *src, UINT w, UINT h, D3DFORMAT f, F check) {
+    Com<IDirect3DSurface9> sys;
+    CK(CreateOffscreenPlainSurface, w, h, f, D3DPOOL_SYSTEMMEM, &sys.p, nullptr);
+    CK(GetRenderTargetData, src, sys.p);
+    D3DLOCKED_RECT lr = {};
+    const HRESULT hr = sys.p->LockRect(&lr, nullptr, D3DLOCK_READONLY);
+    if (FAILED(hr)) return fail("LockRect", hr);
+    const bool ok = check((const BYTE *)lr.pBits, (int)lr.Pitch);
+    sys.p->UnlockRect();
+    return ok;
+}
+static DWORD texel(const BYTE *bits, int pitch, int x, int y) {
+    DWORD v;
+    memcpy(&v, bits + y * pitch + x * 4, 4);
+    return v;
+}
+// Whether `got` is `expect` in the channels of `mask`, each within 1; `why` names the texel otherwise.
+static bool want(const char *what, DWORD got, DWORD expect, DWORD mask = 0xffffff) {
+    for (int sh = 0; sh < 32; sh += 8)
+        if ((mask >> sh & 0xff) && abs((int)(got >> sh & 0xff) - (int)(expect >> sh & 0xff)) > 1)
+            return snprintf(why, sizeof why, "%s %08lx want %08lx", what, (unsigned long)got, (unsigned long)expect),
+                   false;
+    return true;
+}
+static bool levelOf(IDirect3DTexture9 *t, UINT level, Com<IDirect3DSurface9> &s) {
+    const HRESULT hr = t->GetSurfaceLevel(level, &s.p);
+    return SUCCEEDED(hr) || fail("GetSurfaceLevel", hr);
+}
+// A model-space quad of one colour (identity transforms: clip space), clockwise on screen.
+static void cquad(FC *q, float x0, float y0, float x1, float y1, DWORD c) {
+    mquad(q, x0, y0, x1, y1, 0.5f);
+    for (int i = 0; i < 4; i++) q[i].c = c;
+}
+
+// A texture cleared green with a red pretransformed quad over texels 8..23, then shown on the back buffer: the quad's
+// texel (16,16) at (97,97), green at the three other quadrant points (a flipped or mirrored target moves the red).
+static bool rowRtTex() {
+    const Px px[] = {{97, 97, TRED}, {161, 161, TGRN}, {97, 161, TGRN}, {161, 97, TGRN}, {32, 32, BLUE}};
+    return frames(BLUE, px, 5, [&] {
+        Com<IDirect3DTexture9> a;
+        RV q[4];
+        quadRhw(q, 8, 8, 24, 24, TRED);
+        return makeRt(a) && target(a.p) && clearTo(TGRN) && rdraw(q) && backToScreen() && show(a.p);
+    });
+}
+// The same contents read back, the Clear's alpha 0x80 kept; a destination of another size and no source are
+// D3DERR_INVALIDCALL.
+static bool rowRtRead() {
+    return until([&] {
+        Com<IDirect3DTexture9> a;
+        Com<IDirect3DSurface9> s, small;
+        RV q[4];
+        quadRhw(q, 8, 8, 24, 24, TRED);
+        if (!makeRt(a) || !levelOf(a.p, 0, s)) return false;
+        if (!scene([&] { return target(a.p) && clearTo(0x8000ff00) && rdraw(q) && backToScreen(); })) return false;
+        CK(CreateOffscreenPlainSurface, 32, 32, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &small.p, nullptr);
+        HRESULT hr = dev->GetRenderTargetData(s.p, small.p);
+        if (hr != D3DERR_INVALIDCALL) return fail("GetRenderTargetData (a 32x32 destination)", hr);
+        hr = dev->GetRenderTargetData(nullptr, small.p);
+        if (hr != D3DERR_INVALIDCALL) return fail("GetRenderTargetData (no source)", hr);
+        return readTarget(s.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+            return want("(16,16)", texel(b, p, 16, 16), 0xffff0000, 0xffffffff) &&
+                   want("(48,48)", texel(b, p, 48, 48), 0x8000ff00, 0xffffffff) &&
+                   want("(16,48)", texel(b, p, 16, 48), 0x00ff00);
+        });
+    });
+}
+// A CreateRenderTarget surface: its description, GetRenderTarget answering it, a red Clear and a green model-space quad
+// over clip x, y in [0, 1] (texels 32..63, 0..31).
+static bool rowRtSurface() {
+    return until([&] {
+        Com<IDirect3DSurface9> s, back;
+        CK(CreateRenderTarget, 64, 64, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &s.p, nullptr);
+        D3DSURFACE_DESC d = {};
+        const HRESULT hr = s.p->GetDesc(&d);
+        if (FAILED(hr)) return fail("GetDesc", hr);
+        if (d.Width != 64 || d.Height != 64 || d.Format != D3DFMT_X8R8G8B8 || d.Usage != D3DUSAGE_RENDERTARGET ||
+            d.Pool != D3DPOOL_DEFAULT)
+            return snprintf(why, sizeof why, "desc %ux%u format %d usage %lx pool %d", d.Width, d.Height, (int)d.Format,
+                            (unsigned long)d.Usage, (int)d.Pool),
+                   false;
+        FC q[4];
+        cquad(q, 0, 0, 1, 1, TGRN);
+        if (!scene([&] {
+                CK(SetRenderTarget, 0, s.p);
+                CK(GetRenderTarget, 0, &back.p);
+                return clearTo(TRED) && fdraw(FVF_C, q) && backToScreen();
+            }))
+            return false;
+        if (back.p != s.p) return snprintf(why, sizeof why, "GetRenderTarget answers another surface"), false;
+        return readTarget(s.p, 64, 64, D3DFMT_X8R8G8B8, [&](const BYTE *b, int p) {
+            return want("(48,16)", texel(b, p, 48, 16), TGRN) && want("(16,48)", texel(b, p, 16, 48), TRED) &&
+                   want("(16,16)", texel(b, p, 16, 16), TRED);
+        });
+    });
+}
+// SetRenderTarget resets the viewport and the scissor rectangle to the target; a viewport of the right half then
+// confines a full-clip quad to it; back on the back buffer the viewport is the back buffer's.
+static bool rowRtViewport() {
+    return until([&] {
+        Com<IDirect3DTexture9> a;
+        Com<IDirect3DSurface9> s;
+        if (!makeRt(a) || !levelOf(a.p, 0, s)) return false;
+        D3DVIEWPORT9 onTarget = {}, onScreen = {};
+        RECT sc = {};
+        const D3DVIEWPORT9 half = {32, 0, 32, 64, 0.0f, 1.0f};
+        FC q[4];
+        cquad(q, -1, -1, 1, 1, TGRN);
+        if (!scene([&] {
+                if (!target(a.p)) return false;
+                CK(GetViewport, &onTarget);
+                CK(GetScissorRect, &sc);
+                if (!clearTo(TRED)) return false;
+                CK(SetViewport, &half);
+                if (!fdraw(FVF_C, q) || !backToScreen()) return false;
+                CK(GetViewport, &onScreen);
+                return true;
+            }))
+            return false;
+        const auto is = [](const D3DVIEWPORT9 &v, DWORD size) {
+            return v.X == 0 && v.Y == 0 && v.Width == size && v.Height == size && v.MinZ == 0.0f && v.MaxZ == 1.0f;
+        };
+        if (!is(onTarget, 64) || !is(onScreen, 256) || sc.left != 0 || sc.top != 0 || sc.right != 64 || sc.bottom != 64)
+            return snprintf(why, sizeof why, "viewport %lux%lu at %lu,%lu, scissor %ld,%ld-%ld,%ld, back %lux%lu",
+                            (unsigned long)onTarget.Width, (unsigned long)onTarget.Height, (unsigned long)onTarget.X,
+                            (unsigned long)onTarget.Y, (long)sc.left, (long)sc.top, (long)sc.right, (long)sc.bottom,
+                            (unsigned long)onScreen.Width, (unsigned long)onScreen.Height),
+                   false;
+        return readTarget(s.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+            return want("(48,32)", texel(b, p, 48, 32), TGRN) && want("(16,32)", texel(b, p, 16, 32), TRED);
+        });
+    });
+}
+// A target larger than the back buffer: a quad in its lower right quarter, past the back buffer's 256 pixels.
+static bool rowRtBig() {
+    return until([&] {
+        Com<IDirect3DTexture9> a;
+        Com<IDirect3DSurface9> s;
+        if (!makeRt(a, 512, 1, D3DFMT_X8R8G8B8) || !levelOf(a.p, 0, s)) return false;
+        const D3DVIEWPORT9 quarter = {256, 256, 256, 256, 0.0f, 1.0f};
+        FC q[4];
+        cquad(q, -1, -1, 1, 1, TGRN);
+        if (!scene([&] {
+                if (!target(a.p) || !clearTo(TRED)) return false;
+                CK(SetViewport, &quarter);
+                return fdraw(FVF_C, q) && backToScreen();
+            }))
+            return false;
+        return readTarget(s.p, 512, 512, D3DFMT_X8R8G8B8, [&](const BYTE *b, int p) {
+            return want("(500,500)", texel(b, p, 500, 500), TGRN) && want("(100,100)", texel(b, p, 100, 100), TRED) &&
+                   want("(300,100)", texel(b, p, 300, 100), TRED) && want("(100,300)", texel(b, p, 100, 300), TRED);
+        });
+    });
+}
+// Three levels, each its own target: level 0 red, level 1 green with a blue quad over its texels 0..15, level 2
+// yellow; `level1` takes the viewport SetRenderTarget gave level 1.
+static bool drawMips(Com<IDirect3DTexture9> &a, D3DVIEWPORT9 *level1) {
+    RV q[4];
+    quadRhw(q, 0, 0, 16, 16, TBLU);
+    if (!makeRt(a, 64, 3) || !target(a.p, 0) || !clearTo(TRED) || !target(a.p, 1)) return false;
+    CK(GetViewport, level1);
+    return clearTo(TGRN) && rdraw(q) && target(a.p, 2) && clearTo(D3DCOLOR_XRGB(255, 255, 0)) && backToScreen();
+}
+static bool rowRtMip() {
+    if (!until([&] {
+            Com<IDirect3DTexture9> a;
+            Com<IDirect3DSurface9> s0, s1;
+            D3DVIEWPORT9 v = {};
+            if (!scene([&] { return drawMips(a, &v); }) || !levelOf(a.p, 0, s0) || !levelOf(a.p, 1, s1)) return false;
+            if (v.Width != 32 || v.Height != 32)
+                return snprintf(why, sizeof why, "level 1's viewport %lux%lu", (unsigned long)v.Width,
+                                (unsigned long)v.Height),
+                       false;
+            return readTarget(s1.p, 32, 32, D3DFMT_A8R8G8B8,
+                              [&](const BYTE *b, int p) {
+                                  return want("level 1 (8,8)", texel(b, p, 8, 8), TBLU) &&
+                                         want("level 1 (24,24)", texel(b, p, 24, 24), TGRN);
+                              }) &&
+                   readTarget(s0.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+                       return want("level 0 (32,32)", texel(b, p, 32, 32), TRED);
+                   });
+        }))
+        return false;
+    // Sampled no finer than level 1: its green, away from its blue quad.
+    const Px px[] = {{161, 161, TGRN}};
+    return frames(BLUE, px, 1, [&] {
+        Com<IDirect3DTexture9> a;
+        D3DVIEWPORT9 v = {};
+        if (!drawMips(a, &v)) return false;
+        CK(SetSamplerState, 0, D3DSAMP_MIPFILTER, D3DTEXF_POINT);
+        CK(SetSamplerState, 0, D3DSAMP_MAXMIPLEVEL, 1);
+        const bool ok = show(a.p);
+        CK(SetSamplerState, 0, D3DSAMP_MAXMIPLEVEL, 0);
+        return ok;
+    });
+}
+// A cube whose six faces are each cleared to a colour of their own through GetCubeMapSurface targets.
+static const DWORD CUBE_FACES[6] = {0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff};
+static bool clearCube(Com<IDirect3DCubeTexture9> &c) {
+    CK(CreateCubeTexture, 16, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &c.p, nullptr);
+    for (int f = 0; f < 6; f++) {
+        Com<IDirect3DSurface9> s;
+        const HRESULT hr = c.p->GetCubeMapSurface((D3DCUBEMAP_FACES)f, 0, &s.p);
+        if (FAILED(hr)) return fail("GetCubeMapSurface", hr);
+        CK(SetRenderTarget, 0, s.p);
+        if (!clearTo(0xff000000 | CUBE_FACES[f])) return false;
+    }
+    return backToScreen();
+}
+static bool rowRtCube() {
+    if (!until([&] {
+            Com<IDirect3DCubeTexture9> c;
+            if (!scene([&] { return clearCube(c); })) return false;
+            for (int f = 0; f < 6; f++) {
+                Com<IDirect3DSurface9> s;
+                const HRESULT hr = c.p->GetCubeMapSurface((D3DCUBEMAP_FACES)f, 0, &s.p);
+                if (FAILED(hr)) return fail("GetCubeMapSurface", hr);
+                char name[16];
+                snprintf(name, sizeof name, "face %d", f);
+                if (!readTarget(s.p, 16, 16, D3DFMT_X8R8G8B8,
+                                [&](const BYTE *b, int p) { return want(name, texel(b, p, 8, 8), CUBE_FACES[f]); }))
+                    return false;
+            }
+            return true;
+        }))
+        return false;
+    // Sampled along +z: face 4.
+    const Px px[] = {{148, 116, CUBE_FACES[4]}};
+    return frames(BLUE, px, 1, [&] {
+        Com<IDirect3DCubeTexture9> c;
+        Com<IDirect3DPixelShader9> ps;
+        if (!clearCube(c) || !usePs(ps, KCUBE, 0, false) || !pointClamp(0)) return false;
+        CK(SetTexture, 0, c.p);
+        TV3 d[4];
+        tquad(d, 128, 96, 168, 136, 0, 0, 1);
+        const bool ok = tdraw(d);
+        CK(SetTexture, 0, nullptr);
+        CK(SetPixelShader, nullptr);
+        return ok;
+    });
+}
+// Formats that are not BGRA8: a 16x16 target cleared to (0x40, 0x80, 0xc0, 0xff) with a red quad over x < 8 (red, so
+// that a red/blue swap shows), read back in the format's own layout and sampled.
+struct TargetFormat { D3DFORMAT f; int bytes; const char *name; bool redOnly; };
+static float halfFloat(WORD h) {
+    const int e = h >> 10 & 31, m = h & 1023;
+    const float v = e == 0 ? ldexpf((float)m, -24) : ldexpf((float)(m + 1024), e - 25);
+    return h & 0x8000 ? -v : v;
+}
+// The texel at `p` as (r, g, b, a) in [0, 1]; a red-only format leaves the rest 0.
+static void decodeTexel(D3DFORMAT f, const BYTE *p, float out[4]) {
+    WORD w[4];
+    float fl[4] = {};
+    switch (f) {
+    case D3DFMT_A8B8G8R8:
+        for (int i = 0; i < 4; i++) out[i] = p[i] / 255.0f;
+        return;
+    case D3DFMT_A16B16G16R16:
+        memcpy(w, p, 8);
+        for (int i = 0; i < 4; i++) out[i] = w[i] / 65535.0f;
+        return;
+    case D3DFMT_A16B16G16R16F:
+        memcpy(w, p, 8);
+        for (int i = 0; i < 4; i++) out[i] = halfFloat(w[i]);
+        return;
+    case D3DFMT_R32F:
+        memcpy(fl, p, 4);
+        break;
+    default:
+        memcpy(fl, p, 16);
+        break;
+    }
+    for (int i = 0; i < 4; i++) out[i] = fl[i];
+}
+static bool formatTarget(Com<IDirect3DTexture9> &t, D3DFORMAT f) {
+    RV q[4];
+    quadRhw(q, 0, 0, 8, 16, TRED);
+    return makeRt(t, 16, 1, f) && target(t.p) && clearTo(0xff4080c0) && rdraw(q) && backToScreen();
+}
+static bool rowRtFormats() {
+    static const TargetFormat fmts[] = {{D3DFMT_A8B8G8R8, 4, "A8B8G8R8", false},
+                                        {D3DFMT_A16B16G16R16, 8, "A16B16G16R16", false},
+                                        {D3DFMT_A16B16G16R16F, 8, "A16B16G16R16F", false},
+                                        {D3DFMT_R32F, 4, "R32F", true},
+                                        {D3DFMT_A32B32G32R32F, 16, "A32B32G32R32F", false}};
+    for (const TargetFormat &m : fmts) {
+        const bool read = until([&] {
+            Com<IDirect3DTexture9> t;
+            Com<IDirect3DSurface9> s;
+            if (!scene([&] { return formatTarget(t, m.f); }) || !levelOf(t.p, 0, s)) return false;
+            return readTarget(s.p, 16, 16, m.f, [&](const BYTE *b, int pitch) {
+                float l[4], r[4];
+                decodeTexel(m.f, b + 8 * pitch + 4 * m.bytes, l);
+                decodeTexel(m.f, b + 8 * pitch + 12 * m.bytes, r);
+                const float wl[4] = {1, 0, 0, 1}, wr[4] = {0x40 / 255.0f, 0x80 / 255.0f, 0xc0 / 255.0f, 1};
+                for (int i = 0; i < (m.redOnly ? 1 : 4); i++)
+                    if (fabsf(l[i] - wl[i]) > 0.004f || fabsf(r[i] - wr[i]) > 0.004f)
+                        return snprintf(why, sizeof why, "%s read: x 4 %.3f %.3f %.3f %.3f, x 12 %.3f %.3f %.3f %.3f",
+                                        m.name, l[0], l[1], l[2], l[3], r[0], r[1], r[2], r[3]),
+                               false;
+                return true;
+            });
+        });
+        if (!read) {
+            if (!strstr(why, m.name)) {
+                char first[300];
+                snprintf(first, sizeof first, "%s", why);
+                snprintf(why, sizeof why, "%s: %s", m.name, first);
+            }
+            return false;
+        }
+        // Shown: texel x of the 16 covers pixels 64+8x..71+8x; a red-only format samples (r, 1, 1, 1).
+        const Px px[] = {{97, 129, m.redOnly ? 0xffffffu : 0xff0000u}, {161, 129, m.redOnly ? 0x40ffffu : 0x4080c0u}};
+        if (!frames(BLUE, px, 2, [&] {
+                Com<IDirect3DTexture9> t;
+                return formatTarget(t, m.f) && show(t.p);
+            })) {
+            char first[300];
+            snprintf(first, sizeof first, "%s", why);
+            snprintf(why, sizeof why, "%s shown: %s", m.name, first);
+            return false;
+        }
+    }
+    return true;
+}
+// A quad drawn on the back buffer before the target changes is still there after it changes back.
+static bool rowRtSwitch() {
+    const Px px[] = {{48, 48, TRED}, {192, 192, TGRN}, {128, 128, BLUE}};
+    return frames(BLUE, px, 3, [&] {
+        Com<IDirect3DTexture9> a;
+        RV q[4];
+        quadRhw(q, 32, 32, 64, 64, TRED);
+        return rdraw(q) && makeRt(a) && target(a.p) && clearTo(TGRN) && backToScreen() &&
+               show(a.p, 160, 160, 224, 224);
+    });
+}
+// A texture shown, rewritten and shown again in one frame shows each state: the rewrite does not overtake its reader.
+static bool rowRtRewrite() {
+    const Px px[] = {{64, 64, TGRN}, {192, 192, TRED}, {128, 128, BLUE}};
+    return frames(BLUE, px, 3, [&] {
+        Com<IDirect3DTexture9> a;
+        return makeRt(a) && target(a.p) && clearTo(TGRN) && backToScreen() && show(a.p, 32, 32, 96, 96) &&
+               target(a.p) && clearTo(TRED) && backToScreen() && show(a.p, 160, 160, 224, 224);
+    });
+}
+// Two Clears and no draw: the later one's colour.
+static bool rowRtClearOnly() {
+    const Px px[] = {{129, 129, TGRN}, {32, 32, BLUE}};
+    return frames(BLUE, px, 2, [&] {
+        Com<IDirect3DTexture9> a;
+        return makeRt(a) && target(a.p) && clearTo(TRED) && clearTo(TGRN) && backToScreen() && show(a.p);
+    });
+}
+// A render-target texture nothing was drawn to reads black.
+static bool rowRtFresh() {
+    const Px px[] = {{129, 129, 0x000000}, {32, 32, BLUE}};
+    return frames(BLUE, px, 2, [&] {
+        Com<IDirect3DTexture9> a;
+        return makeRt(a) && show(a.p);
+    });
+}
+// An AUTOGENMIPMAP render target: its lower levels follow level 0 once the target changes away (an 8x8 quad of the 64
+// texels samples level 3, which is red only if it was regenerated; left alone it is black).
+static bool rowRtAutogen() {
+    const Px px[] = {{128, 128, TRED}, {32, 32, BLUE}};
+    return frames(BLUE, px, 2, [&] {
+        Com<IDirect3DTexture9> a;
+        if (!makeRt(a, 64, 0, D3DFMT_X8R8G8B8, D3DUSAGE_RENDERTARGET | D3DUSAGE_AUTOGENMIPMAP)) return false;
+        if (a.p->GetLevelCount() != 1)
+            return snprintf(why, sizeof why, "GetLevelCount %lu", (unsigned long)a.p->GetLevelCount()), false;
+        if (!target(a.p) || !clearTo(TRED) || !backToScreen()) return false;
+        CK(SetSamplerState, 0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+        CK(SetSamplerState, 0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+        CK(SetSamplerState, 0, D3DSAMP_MIPFILTER, D3DTEXF_POINT);
+        return show(a.p, 124, 124, 132, 132);
+    });
+}
+// A texture released while it is the render target still takes the Clear (the back buffer does not: (32,32) stays
+// blue), and one released while bound at stage 0 is still sampled.
+static bool rowRtRelease() {
+    const Px px[] = {{129, 129, TRED}, {32, 32, BLUE}};
+    return frames(BLUE, px, 2, [&] {
+        IDirect3DTexture9 *b = nullptr, *c = nullptr;
+        CK(CreateTexture, 64, 64, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &b, nullptr);
+        bool ok = target(b);
+        b->Release();
+        if (!ok || !clearTo(TGRN) || !backToScreen()) return false;
+        CK(CreateTexture, 64, 64, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &c, nullptr);
+        ok = target(c) && clearTo(TRED) && backToScreen();
+        const HRESULT hr = dev->SetTexture(0, c);
+        c->Release();
+        if (!ok) return false;
+        if (FAILED(hr)) return fail("SetTexture", hr);
+        const DWORD w = D3DCOLOR_XRGB(255, 255, 255);
+        const TV3 q[4] = {{64, 64, 0.5f, 1, w, 0, 0, 0}, {192, 64, 0.5f, 1, w, 1, 0, 0}, {64, 192, 0.5f, 1, w, 0, 1, 0},
+                          {192, 192, 0.5f, 1, w, 1, 1, 0}};
+        ok = tdraw(q);
+        CK(SetTexture, 0, nullptr);
+        return ok;
+    });
+}
+// sRGB write on a target: a Clear of 128 and a quad of 64 are stored encoded (188, 137), and sampled back through
+// D3DSAMP_SRGBTEXTURE they are 128 and 64 again.
+static bool srgbTarget(Com<IDirect3DTexture9> &a) {
+    RV q[4];
+    quadRhw(q, 0, 0, 32, 64, D3DCOLOR_XRGB(64, 64, 64));
+    if (!makeRt(a) || !target(a.p)) return false;
+    CK(SetRenderState, D3DRS_SRGBWRITEENABLE, TRUE);
+    const bool ok = clearTo(D3DCOLOR_XRGB(128, 128, 128)) && rdraw(q);
+    CK(SetRenderState, D3DRS_SRGBWRITEENABLE, FALSE);
+    return ok && backToScreen();
+}
+static bool rowRtSrgb() {
+    if (!until([&] {
+            Com<IDirect3DTexture9> a;
+            Com<IDirect3DSurface9> s;
+            if (!scene([&] { return srgbTarget(a); }) || !levelOf(a.p, 0, s)) return false;
+            return readTarget(s.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+                return want("(48,32)", texel(b, p, 48, 32), 0xbcbcbc) && want("(16,32)", texel(b, p, 16, 32), 0x898989);
+            });
+        }))
+        return false;
+    const Px px[] = {{161, 129, 0x808080}, {97, 129, 0x404040}};
+    return frames(BLUE, px, 2, [&] {
+        Com<IDirect3DTexture9> a;
+        if (!srgbTarget(a)) return false;
+        CK(SetSamplerState, 0, D3DSAMP_SRGBTEXTURE, TRUE);
+        const bool ok = show(a.p);
+        CK(SetSamplerState, 0, D3DSAMP_SRGBTEXTURE, FALSE);
+        return ok;
+    });
+}
+// A programmable pair draws to a target: a ps_2_0 writing c0 (magenta) over a green Clear.
+static bool rowRtPs() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_C0)) return false;
+    return until([&] {
+        Com<IDirect3DTexture9> a;
+        Com<IDirect3DSurface9> s;
+        V3 q[4];
+        quad(q, -1, -1, 1, 1);
+        if (!makeRt(a) || !levelOf(a.p, 0, s)) return false;
+        if (!scene([&] {
+                if (!target(a.p) || !clearTo(TGRN) || !use(p)) return false;
+                CK(SetPixelShaderConstantF, 0, MAGENTA, 1);
+                return strip(q) && backToScreen();
+            }))
+            return false;
+        return readTarget(s.p, 64, 64, D3DFMT_A8R8G8B8,
+                          [&](const BYTE *b, int pch) { return want("(32,32)", texel(b, pch, 32, 32), 0xff00ff); });
+    });
+}
+// UpdateTexture into a render-target texture, then sampled.
+static bool rowRtUpdate() {
+    const Px px[] = {{129, 129, 0x00ffff}, {32, 32, BLUE}};
+    return frames(BLUE, px, 2, [&] {
+        Com<IDirect3DTexture9> src, dst;
+        CK(CreateTexture, 4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &src.p, nullptr);
+        if (!fill(src.p, 0, 4, [](int, int) { return 0xff00ffffu; }) || !makeRt(dst, 4)) return false;
+        CK(UpdateTexture, src.p, dst.p);
+        return show(dst.p);
+    });
+}
+// UpdateTexture into the bound target lands where it is called: after the Clear, before the quad drawn next.
+static bool rowRtUpdateBound() {
+    return until([&] {
+        Com<IDirect3DTexture9> src, a;
+        Com<IDirect3DSurface9> s;
+        CK(CreateTexture, 64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &src.p, nullptr);
+        if (!fill(src.p, 0, 4, [](int, int) { return 0xff00ffffu; }) || !makeRt(a) || !levelOf(a.p, 0, s))
+            return false;
+        RV q[4];
+        quadRhw(q, 0, 0, 32, 64, TRED);
+        if (!scene([&] {
+                if (!target(a.p) || !clearTo(TGRN)) return false;
+                CK(UpdateTexture, src.p, a.p);
+                return rdraw(q) && backToScreen();
+            }))
+            return false;
+        return readTarget(s.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+            return want("(16,32)", texel(b, p, 16, 32), TRED) && want("(48,32)", texel(b, p, 48, 32), 0x00ffff);
+        });
+    });
+}
+// A second render target, past the core's slice (C4b-3d4): D3DERR_NOTAVAILABLE under core (strict), D3D_OK otherwise.
+static bool rowRtMrt() {
+    Com<IDirect3DTexture9> a;
+    Com<IDirect3DSurface9> s;
+    if (!makeRt(a) || !levelOf(a.p, 0, s)) return false;
+    const HRESULT hr = dev->SetRenderTarget(1, s.p);
+    if (SUCCEEDED(hr)) dev->SetRenderTarget(1, nullptr);
+    if (strictMode ? hr != D3DERR_NOTAVAILABLE : hr != D3D_OK) return fail("SetRenderTarget(1)", hr);
+    return true;
+}
+// A multisampled render target, past the core's slice (C4b-3d5): D3DERR_NOTAVAILABLE under core (strict); any answer
+// in the other lanes.
+static bool rowRtMsaa() {
+    IDirect3DSurface9 *s = nullptr;
+    const HRESULT hr =
+        dev->CreateRenderTarget(64, 64, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_4_SAMPLES, 0, FALSE, &s, nullptr);
+    if (s) s->Release();
+    if (strictMode && hr != D3DERR_NOTAVAILABLE) return fail("CreateRenderTarget (4 samples)", hr);
+    return true;
+}
+// A render-target cube is in the default pool and not dynamic: its LockRect is D3DERR_INVALIDCALL in every lane.
+static bool rowRtCubeLock() {
+    Com<IDirect3DCubeTexture9> c;
+    CK(CreateCubeTexture, 16, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &c.p, nullptr);
+    D3DLOCKED_RECT lr = {};
+    const HRESULT hr = c.p->LockRect(D3DCUBEMAP_FACE_POSITIVE_X, 0, &lr, nullptr, D3DLOCK_READONLY);
+    if (SUCCEEDED(hr)) c.p->UnlockRect(D3DCUBEMAP_FACE_POSITIVE_X, 0);
+    if (hr != D3DERR_INVALIDCALL) return fail("cube LockRect", hr);
+    return true;
+}
+
+static void targetRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"rt-tex", rowRtTex},           {"rt-read", rowRtRead},         {"rt-surface", rowRtSurface},
+        {"rt-viewport", rowRtViewport}, {"rt-big", rowRtBig},           {"rt-mip", rowRtMip},
+        {"rt-cube", rowRtCube},         {"rt-switch", rowRtSwitch},     {"rt-rewrite", rowRtRewrite},
+        {"rt-clearonly", rowRtClearOnly}, {"rt-fresh", rowRtFresh},     {"rt-autogen", rowRtAutogen},
+        {"rt-release", rowRtRelease},   {"rt-srgb", rowRtSrgb},         {"rt-ps", rowRtPs},
+        {"rt-update", rowRtUpdate},     {"rt-updatebound", rowRtUpdateBound}, {"rt-formats", rowRtFormats},
+        {"rt-mrt", rowRtMrt},           {"rt-msaa", rowRtMsaa},         {"rt-cubelock", rowRtCubeLock}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 150000;
+    HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
+    if (SUCCEEDED(hr))
+        hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (FAILED(hr)) ok = fail("GetRenderTarget/CreateOffscreenPlainSurface", hr);
+        else if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = reset() && r.run();
+        row(r.name, ok, why);
+    }
+    if (sysSurf) sysSurf->Release();
+    if (rtSurf) rtSurf->Release();
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
@@ -2357,6 +2990,7 @@ int main(int argc, char **argv) {
     const bool state = !bench && argc > 1 && !strcmp(argv[1], "state");
     const bool textures = !bench && argc > 1 && !strcmp(argv[1], "textures");
     const bool fixed = !bench && argc > 1 && !strcmp(argv[1], "fixed");
+    const bool targets = !bench && argc > 1 && !strcmp(argv[1], "targets");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     WNDCLASSW wc = {};
     wc.lpfnWndProc = DefWindowProcW;
@@ -2388,6 +3022,13 @@ int main(int argc, char **argv) {
     const Vertex tri[3] = {{128, 16, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {240, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {16, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)}};
+    if (targets) {
+        targetRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
     if (fixed) {
         fixedRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();

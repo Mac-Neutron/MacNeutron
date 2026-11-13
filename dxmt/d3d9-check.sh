@@ -39,10 +39,12 @@
 # of API state and inert objects; "state strict" under core), its rows "state-<row>"; under core its launch's logs hold
 # exactly its refusal line (refusals_ok), in the mtld3d lanes none. Every lane also runs d3d9_triangle textures (DXMTRS
 # C4b-3b's 33 rows of sampled textures and C4b-3c's five vertex-texture rows; "textures strict" under core), its rows
-# "textures-<row>"; under core its launch's logs hold exactly its four refused rows' lines. Every lane also runs
+# "textures-<row>"; under core its launch's logs hold exactly its three refused rows' lines. Every lane also runs
 # d3d9_triangle fixed (DXMTRS C4b-3c's 31 rows of the fixed-function vertex stage; "fixed strict" under core), its rows
-# "fixed-<row>"; under core its launch's logs hold exactly its two refused rows' lines (a render-target and a depth
-# texture at a vertex sampler).
+# "fixed-<row>"; under core its launch's logs hold exactly its refused rows' line (a depth texture at a vertex
+# sampler). Every lane also runs d3d9_triangle targets (DXMTRS C4b-3d1's 21 rows of render targets other than the back
+# buffer; "targets strict" under core), its rows "targets-<row>"; under core its launch's logs hold exactly its two
+# refused rows' lines (a render target at index 1, a multisampled surface).
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -121,26 +123,29 @@ launch() {
   fi
 }
 # refusals_ok <name> <folder>: the shaders launch's logs hold exactly one core refusal line, the crossing row's
-# (C4b2-8); the state launch's exactly its buffer lock's (DXMTRS C4b-3a); the textures launch's exactly its four
-# refused rows' (DXMTRS C4b-3b: a depth, fetch4 and render-target texture, and a render-target texture's LockRect), the
-# fixed launch's exactly its two (DXMTRS C4b-3c: a render-target and a depth texture at a vertex sampler), one line
-# each; the other launches
-# are not held to it.
+# (C4b2-8); the state launch's exactly its buffer lock's (DXMTRS C4b-3a); the textures launch's exactly its three
+# refused rows' (DXMTRS C4b-3b: a depth and a fetch4 texture, and a render-target texture's LockRect), the fixed
+# launch's exactly its one (DXMTRS C4b-3c: a depth texture at a vertex sampler), the targets launch's exactly its two
+# (DXMTRS C4b-3d1: a render target at index 1, a multisampled surface), one line each; the other launches are not held
+# to it.
 refused='is not implemented under runtime.mode = core'
 state_refusals='IDirect3DVertexBuffer9::Lock'
 texture_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture sampled)
 IDirect3DDevice9::Draw*PrimitiveUP (fetch4)
-IDirect3DDevice9::Draw*PrimitiveUP (a render-target texture sampled)
 IDirect3DTexture9::LockRect (a render-target or depth texture)'
-fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a render-target texture sampled)
-IDirect3DDevice9::Draw*PrimitiveUP (a depth texture sampled)'
+fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture sampled)'
+targets_refusals='IDirect3DDevice9::SetRenderTarget (index above 0)
+IDirect3DDevice9::CreateRenderTarget (multisampled)'
 refusals_ok() {
   case $1 in
     shaders)
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 1 ] \
         && /usr/bin/grep -rhF "$refused" "$2" | /usr/bin/grep -qi crossing ;;
-    state|textures|fixed)
-      case $1 in state) set_=$state_refusals ;; textures) set_=$texture_refusals ;; *) set_=$fixed_refusals ;; esac
+    state|textures|fixed|targets)
+      case $1 in
+        state) set_=$state_refusals ;; textures) set_=$texture_refusals ;; fixed) set_=$fixed_refusals ;;
+        *) set_=$targets_refusals ;;
+      esac
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] \
         || return 1
       printf '%s\n' "$set_" | while IFS= read -r n; do
@@ -192,6 +197,9 @@ check fixed "ff-xform ff-persp ff-rhwmix ff-viewchange ff-ambient ff-lightdefaul
   ff-lightsparse ff-light8 ff-specular ff-matsrc ff-normalize ff-fogvertex ff-fogtable ff-texgen ff-tt ff-ttproj
   ff-tcindex ff-tex ff-blend ff-blendidx ff-point ff-pointscale ff-clip ff-indexed ff-decl tex-vtxrt tex-vtxdepth
   tex-vtxdepthfmt"
+launch ours fresh targets 240 targets $strict
+check targets "rt-tex rt-read rt-surface rt-viewport rt-big rt-mip rt-cube rt-switch rt-rewrite rt-clearonly rt-fresh
+  rt-autogen rt-release rt-srgb rt-ps rt-update rt-updatebound rt-formats rt-mrt rt-msaa rt-cubelock"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi
