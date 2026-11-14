@@ -617,3 +617,36 @@ mtld3d does not give is corrected there, not in the runtime.
   one-line forms; M6, M7 → the helpers and the script edit points; M8 → Task 1 Step 6; M10 → a folder a run, the
   lane's summary line; M11 → no bool added, `clear_regions` pure in mtld3d-core; M12 → the Mac conformance in
   `jr`, the Task 3 rt test that is red before it, the stated gaps, the probe's threshold.
+
+## Execution notes (2026-11-14)
+
+- Built as planned in five commits on DXMTRS over bd2ab193: 3e289e70 (dxmt-core: the area guard, the stencil-only
+  quad), b098d39c (clears), 10644e2f (the scissor, a depth-stencil of any size), f7a33ee7 (hardware sRGB), 8bca6b74
+  (blending). The rows are 36 in the `blend` kind and 31 in `depth`. Each lane read as its step expected: after the
+  clears ten of the eleven `cl-*` rows (the stencil-only quad green on Metal, so ruling 11's fallback was not
+  needed), after the scissor and sizes everything but blending, after sRGB the same with the sRGB rows on the
+  hardware path, after blending both runtimes green.
+- Changes from the plan's text, each ledgered: the rect clears sit beside their whole clears (`recorder.rs`,
+  `depth.rs`) with their tests there, and no d3d9-rt `clear.rs` was made; `target_desc(srgb_write)` answers a pair
+  and the front end compares it with `target_format()` for the hardware bit; the scissor rows that the plan put
+  after the clears (`cl-scissor`) drew with the test off and were green from Task 3.
+- Incident: Task 2's commit was first made while the gate had failed two legs (the command chained on the exit of
+  `tail`); the files were fixed, the whole gate rerun and the commit amended before anything was built on it. Every
+  later commit chained on the gate's own exit code.
+- Controls: all 36 rows, `ds-size` and `ds-rhwclip` were green on the default runtime at their first run, on the
+  Mac (default lane) and in the VM (default, old WoW64, x64 and x86), before any core work; no expectation had to
+  be corrected and no defect of mtld3d was found.
+- Gates on DXMTRS 8bca6b74 with these rows: the Mac's default, msl and core lanes ok; the stateblock conformance
+  under core equal to default; every core launch under Metal's validation layer with no report; the seven mutants
+  each red on its row and in no other launch (the one that removes the area guard is the proof that a load action
+  stops at the pass's area); the plain build's translator key and imports unchanged and the Mac's Wine conformance
+  identical to C4b-3d2's run; the x64 check all passed; the VM's D3D10-12 gate (48 programs) and its D3D9 lanes
+  (both runtimes, old and new WoW64) ok at the first run.
+- Probe (`build/c4b3d/s3/probe.md`): the tip reads 2.18 (tex) and 2.25 (texdepth) ms a frame under core against
+  1.70 and 1.77 under mtld3d. With the retake of the two earlier tips, each on its own build on a quiet Mac
+  (2acb1d99: 2.05; 63f9fda0: 2.22, 2.18), no difference between tips exceeds the 0.32 ms spread of a single run:
+  C4b-3d2 and this slice cost the textured draw nothing measurable.
+- Final review: no Critical, no Important, four Minor, all deferred (the ledger and the close-out list them): a
+  draw d3d9-rt refuses for its depth key answers `D3D_OK` silently (unreachable today); a partial Z Clear of a
+  larger depth-stencil is a pass of its own at every Clear; `bl-mask` cannot see a mask that leaves blue writable;
+  a blended draw asks its target's format through the public `GetDesc`.

@@ -992,6 +992,42 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   regression is measurable and the direction is unknown; C4b-3d3's probe retakes it on a quiet Mac, each tip on its own
   build. Wine's `visual` under core (measured, not gated) now creates its device and stops at
   `CreateOffscreenPlainSurface(D3DPOOL_DEFAULT)`, which the core does not implement: the first thing 3d5's sweep needs.
+  C4b-3d3 done 2026-11-14 at DXMTRS main 8bca6b74 (8bca6b748b92fd036e3101e3f54935d5677c6f09), which MacNeutron pins:
+  partial clears, the scissor test, a depth-stencil of any size, hardware sRGB write and blending on the core runtime.
+  `Clear` resolves each attachment (the colour target; the depth-stencil, against its own size) to a whole clear or to
+  regions with mtld3d's own rules, which moved to mtld3d-core for both runtimes (`clear_area`: the rects cut to the
+  scissor, the viewport clip, the cover test): a whole clear is the core's Clear pass, regions are dxmt-core's quad
+  clear (`ClearRtv`, D3D11's `ClearView`) on that view alone, which takes nothing of the draws' state. A draw carries
+  its scissor as mtld3d resolves it (the rect with the test on, the drawn viewport with it off); d3d9-rt clamps it to
+  the pass's extent, records nothing for a draw cut to no pixel, and records the rect at the first draw of each pass and
+  on a change. The bound depth-stencil is attached whatever its size and the pass draws to the smaller of the two
+  (`DepthState` is gone; the pre-transformed clamp follows the bound depth-stencil, as mtld3d's). A target with an sRGB
+  twin (the back buffer, BGRA8 and RGBA8 render targets) is attached through the twin's view by a draw or Clear made
+  under `D3DRS_SRGBWRITEENABLE`: the key names the twin's format, the pixel stage stops encoding and Metal encodes after
+  the blender; d3d9-rt keeps no sRGB state, and a pass on the other view ends first. A draw's key carries its blend
+  (`CoreBlend`: mtld3d's effective blend and its destination-alpha clamp, in mtld3d's enums, mapped to the wire's
+  numbers by name in d3d9-rt); the blend factor colour is recorded, with the draw's stencil reference, by the draws that
+  read it. Two changes to dxmt-core, the first of C4, each with its test: the optimizer no longer makes a whole-view
+  Clear the load action of a pass whose area is smaller than the view (a load action reaches the pass's area only: D3D11
+  with a depth view larger than its targets had the same hole), and a stencil-only quad clear takes a fragment that
+  writes no depth. No draw state is refused by the UP draws any more; still refused by name: a shader of another device,
+  a depth texture at a vertex sampler, a depth-stencil sampled while the draw uses it and a dynamic depth texture's lock
+  (C4c), a target at index 1 (3d4), multisampled surfaces (3d5). Gated: 36 `d3d9_triangle blend` rows on a device with
+  an auto D24S8 in every D3D9 lane on the Mac and in the VM, `ds-size` turned from a refusal into a result and a new
+  `ds-rhwclip` (31 depth rows), each first passed on mtld3d (Mac default and msl, VM default), red under core before its
+  commit and green strict after it, with no report under Metal's validation layer in any core launch; seven mutation
+  REDs, each on its row alone (the one that removes the area guard is this slice's proof that a load action stops at the
+  pass's area); the stateblock conformance under core; the default runtime's Mac conformance, translator key and imports
+  unchanged; the x64 check and the VM's D3D10-12 gate over the changed dxmt-core. Not covered by a row: blending on
+  32-bit float targets, a blended or scissored multisampled or second target. Known costs, handed to C4d: a Clear made
+  with sRGB write off before draws made with it on (or the reverse) is a pass of its own, as under mtld3d; a partial Z
+  Clear of a larger depth-stencil is a pass of its own at every Clear; a blended draw asks its target's format through
+  `GetDesc`. Probe (Mac x64, textured, one run each): the core read 2.18 (tex) and 2.25 (texdepth) ms a frame against
+  mtld3d's 1.70 and 1.77. The retake C4b-3d2 owed was made on a quiet Mac, each tip on its own full build: C4b-3d1's tip
+  read 2.05 (mtld3d 1.50) and C4b-3d2's 2.22 and 2.18 (mtld3d 1.82 and 1.82). mtld3d's own figure moves 0.32 ms between
+  builds with no change to its draw path, and every difference between the three tips' core figures is below that:
+  neither C4b-3d2 nor this slice cost the textured draw anything this probe can measure, and the core stays 20-37% above
+  mtld3d until C4d's dedup.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
