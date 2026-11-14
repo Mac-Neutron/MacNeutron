@@ -39,14 +39,19 @@
 // to, cleared, read back with GetRenderTargetData and sampled; formats, sRGB write, the viewport reset, automatic
 // mipmaps, lifetime and order, a size past the device's limit), two the core refuses (a target at index 1, a
 // multisampled surface), with a 150 s budget.
-// With "depth" ("depth strict" under core; DXMTRS C4b-3d2): 30 rows "d3d9 ds-<row> ok|FAIL <why>" of the depth-stencil,
+// With "depth" ("depth strict" under core; DXMTRS C4b-3d2): 31 rows "d3d9 ds-<row> ok|FAIL <why>" of the depth-stencil,
 // on a device made with an auto D24S8 (the other modes' devices have none): the depth and stencil tests and their
 // state, Clear's Z and stencil, depth bias, the pretransformed clamp, a pixel shader's depth output, depth-stencil
 // surfaces and depth textures and their levels, shadow, raw (INTZ, DF16, DF24) and fetch4 samples of a depth texture,
-// and what the core refuses (a depth-tested draw or Z Clear with a depth-stencil of another size than the target, a
+// a depth-stencil larger than the target, the pretransformed clip while one is bound, and what the core refuses (a
 // depth-tested draw sampling the bound depth-stencil, a multisampled surface, a dynamic depth texture's lock), with a
 // 150 s budget. "--bench <draws> <frames> tex depth" runs the tex bench on such a device, Z cleared each frame and
 // tested ("mode texdepth").
+// With "blend" ("blend strict" under core; DXMTRS C4b-3d3): 36 rows "d3d9 <cl|sc|sz|sr|bl>-<row> ok|FAIL <why>" on such
+// a device: Clear with rects, under the scissor test and bounded by the viewport (colour, depth, stencil); the scissor
+// test for draws; a depth-stencil larger or smaller than the target; sRGB write with Clear and under blending;
+// blending (factors, operations, separate alpha, the blend factor colour, destination alpha by target), with a 180 s
+// budget. The core refuses none of it.
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -290,7 +295,12 @@ static bool reset() {
         {D3DRS_ALPHATESTENABLE, FALSE}, {D3DRS_ALPHAFUNC, D3DCMP_ALWAYS}, {D3DRS_ALPHAREF, 0},
         {D3DRS_FOGENABLE, FALSE}, {D3DRS_FOGVERTEXMODE, D3DFOG_NONE}, {D3DRS_FOGTABLEMODE, D3DFOG_NONE},
         {D3DRS_FOGCOLOR, 0}, {D3DRS_COLORWRITEENABLE, 0xf}, {D3DRS_FILLMODE, D3DFILL_SOLID},
-        {D3DRS_CULLMODE, D3DCULL_CCW}, {D3DRS_CLIPPLANEENABLE, 0}, {D3DRS_SRGBWRITEENABLE, FALSE}};
+        {D3DRS_CULLMODE, D3DCULL_CCW}, {D3DRS_CLIPPLANEENABLE, 0}, {D3DRS_SRGBWRITEENABLE, FALSE},
+        // Blending and the scissor test (DXMTRS C4b-3d3's rows set them; the rect is reset by SetRenderTarget above).
+        {D3DRS_ALPHABLENDENABLE, FALSE}, {D3DRS_SRCBLEND, D3DBLEND_ONE}, {D3DRS_DESTBLEND, D3DBLEND_ZERO},
+        {D3DRS_BLENDOP, D3DBLENDOP_ADD}, {D3DRS_SEPARATEALPHABLENDENABLE, FALSE}, {D3DRS_SRCBLENDALPHA, D3DBLEND_ONE},
+        {D3DRS_DESTBLENDALPHA, D3DBLEND_ZERO}, {D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD}, {D3DRS_BLENDFACTOR, 0xffffffff},
+        {D3DRS_SCISSORTESTENABLE, FALSE}};
     for (const auto &s : rs) CK(SetRenderState, (D3DRENDERSTATETYPE)s[0], s[1]);
     // Textures, the cascade and the samplers at D3D9's defaults (DXMTRS C4b-3b's rows set them).
     CK(SetRenderState, D3DRS_TEXTUREFACTOR, 0xffffffff);
@@ -300,6 +310,8 @@ static bool reset() {
         CK(SetTextureStageState, stage, D3DTSS_COLORARG1, D3DTA_TEXTURE);
         CK(SetTextureStageState, stage, D3DTSS_COLORARG2, D3DTA_CURRENT);
         CK(SetTextureStageState, stage, D3DTSS_ALPHAOP, stage ? D3DTOP_DISABLE : D3DTOP_SELECTARG1);
+        CK(SetTextureStageState, stage, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        CK(SetTextureStageState, stage, D3DTSS_ALPHAARG2, D3DTA_CURRENT);
         CK(SetTextureStageState, stage, D3DTSS_CONSTANT, 0);
         for (DWORD m = D3DTSS_BUMPENVMAT00; m <= D3DTSS_BUMPENVMAT11; m++) CK(SetTextureStageState, stage, (D3DTEXTURESTAGESTATETYPE)m, 0);
         static const DWORD ss[][2] = {{D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP}, {D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP},
@@ -3501,26 +3513,15 @@ static bool rowDsFetch4() {
     CK(SetSamplerState, 0, D3DSAMP_MIPMAPLODBIAS, 0);
     return ok;
 }
-// A depth-stencil larger than the target (512x512 with the 256x256 back buffer), which D3D9 allows. A colour Clear
-// and a draw with Z and stencil off draw in every lane. A draw that tests depth and a Z Clear are past the core's
-// slice (3d3's): D3DERR_NOTAVAILABLE under core (strict); D3D_OK elsewhere, the result not asserted (the depth was
-// never cleared).
+// A depth-stencil larger than the target (512x512 with the 256x256 back buffer), which D3D9 allows: a Z Clear and
+// depth-tested draws as with one of the target's size (a near quad hides a far one drawn after it).
 static bool rowDsSize() {
-    Px px[] = {{76, 128, TGRN}, {180, 128, BLUE}};
+    const Px px[] = {{128, 128, TGRN}, {48, 128, TRED}, {128, 80, TGRN}, {208, 128, TRED}};
     Com<IDirect3DSurface9> big;
     if (!makeDs(big, D3DFMT_D24X8, 512)) return false;
-    px[1].mask = strictMode ? 0xffffff : 0;
-    const bool ok = frames(BLUE, px, 2, [&] {
-        if (!bindDs(big.p)) return false;
-        CK(Clear, 0, nullptr, D3DCLEAR_TARGET, BLUE, 1.0f, 0);
-        if (!rstate(D3DRS_ZENABLE, D3DZB_FALSE) || !zquad(32, 96, 120, 160, 0.5f, TGRN) ||
-            !rstate(D3DRS_ZENABLE, D3DZB_TRUE))
-            return false;
-        HRESULT hr = zquadHr(136, 96, 224, 160, 0.5f, TRED);
-        if (strictMode ? hr != D3DERR_NOTAVAILABLE : hr != D3D_OK) return fail("DrawPrimitiveUP (Z on)", hr);
-        hr = dev->Clear(0, nullptr, D3DCLEAR_ZBUFFER, 0, 1.0f, 0);
-        if (strictMode ? hr != D3DERR_NOTAVAILABLE : hr != D3D_OK) return fail("Clear (Z)", hr);
-        return bindDs(dsSurf);
+    const bool ok = frames(BLUE, px, 4, [&] {
+        return bindDs(big.p) && clearZ() && zquad(96, 64, 160, 192, 0.3f, TGRN) && zquad(32, 96, 224, 160, 0.7f, TRED) &&
+               bindDs(dsSurf);
     });
     CK(SetDepthStencilSurface, dsSurf);
     return ok;
@@ -3584,6 +3585,28 @@ static bool rowDsLock() {
     return true;
 }
 
+// A pre-transformed draw past the far plane (z 1.5) while a depth-stencil is bound and ZENABLE is on is clipped, not
+// clamped, also when the draw uses no plane of it (ZFUNC ALWAYS, no Z write) and samples it: the quad at z 0.5 draws
+// the sampled depth (0.5, grey), the one at z 1.5 nothing.
+static bool rowDsRhwClip() {
+    const Px px[] = {{64, 128, 0x808080}, {192, 128, BLUE}};
+    const bool ok = frames(BLUE, px, 2, [&] {
+        Com<IDirect3DTexture9> t;
+        TV3 a[4], b[4];
+        tquad(a, 32, 96, 96, 160, 64.5f / 256, 0.5f, 0.5f), tquad(b, 160, 96, 224, 160, 192.5f / 256, 0.5f, 0.5f);
+        for (int i = 0; i < 4; i++) b[i].z = 1.5f;
+        if (!makeDepthTex(t, FMT_INTZ) || !bindDsLevel(t.p) || !clearZ(0.5f) || !rstate(D3DRS_ZFUNC, D3DCMP_ALWAYS) ||
+            !rstate(D3DRS_ZWRITEENABLE, FALSE))
+            return false;
+        CK(SetTexture, 0, t.p);
+        const bool drawn = tdraw(a) && tdraw(b);
+        CK(SetTexture, 0, nullptr);
+        return drawn && bindDs(dsSurf);
+    });
+    CK(SetTexture, 0, nullptr);
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
 static void depthRows(IDirect3DDevice9 *d, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
         {"ds-default", rowDsDefault},   {"ds-test", rowDsTest},         {"ds-func", rowDsFunc},
@@ -3594,7 +3617,8 @@ static void depthRows(IDirect3DDevice9 *d, bool strict) {
         {"ds-unbound", rowDsUnbound},   {"ds-persist", rowDsPersist},   {"ds-texture", rowDsTexture},
         {"ds-texstencil", rowDsTexStencil}, {"ds-mip", rowDsMip},           {"ds-release", rowDsRelease},   {"ds-shadow", rowDsShadow},
         {"ds-intz", rowDsIntz},         {"ds-df", rowDsDf},             {"ds-fetch4", rowDsFetch4},
-        {"ds-size", rowDsSize},         {"ds-feedback", rowDsFeedback}, {"ds-msaa", rowDsMsaa},
+        {"ds-size", rowDsSize},         {"ds-rhwclip", rowDsRhwClip},   {"ds-feedback", rowDsFeedback},
+        {"ds-msaa", rowDsMsaa},
         {"ds-huge", rowDsHuge},         {"ds-lock", rowDsLock}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 150000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
@@ -3615,6 +3639,718 @@ static void depthRows(IDirect3DDevice9 *d, bool strict) {
     if (rtSurf) rtSurf->Release();
 }
 
+// --- The "blend" mode (DXMTRS C4b-3d3): Clear with rects, under the scissor and bounded by the viewport; the scissor
+// test; a depth-stencil of another size than the target; sRGB write under blending; blending. On the depth mode's
+// device (auto D24S8). Each row starts with Z cleared to 1, stencil to 0 and ZENABLE off: a row that tests depth
+// turns it on. frames() resets the scissor rect each frame (its SetRenderTarget), so a row sets its rect in its draw.
+static bool scissor(LONG x1, LONG y1, LONG x2, LONG y2) {
+    const RECT r = {x1, y1, x2, y2};
+    CK(SetScissorRect, &r);
+    return true;
+}
+static bool clearRects(DWORD count, const D3DRECT *rects, DWORD flags, DWORD color, float z = 1.0f, DWORD stencil = 0) {
+    CK(Clear, count, rects, flags, color, z, stencil);
+    return true;
+}
+static bool viewport(DWORD x, DWORD y, DWORD w, DWORD h) {
+    const D3DVIEWPORT9 v = {x, y, w, h, 0.0f, 1.0f};
+    CK(SetViewport, &v);
+    return true;
+}
+static bool blendStart() {
+    CK(Clear, 0, nullptr, D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL, 0, 1.0f, 0);
+    return rstate(D3DRS_ZENABLE, D3DZB_FALSE);
+}
+// Blending on with these factors and operation; the fixed-function alpha is the diffuse alpha.
+static bool blend(DWORD src, DWORD dst, DWORD op = D3DBLENDOP_ADD) {
+    CK(SetTextureStageState, 0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+    CK(SetTextureStageState, 0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+    return rstate(D3DRS_ALPHABLENDENABLE, TRUE) && rstate(D3DRS_SRCBLEND, src) && rstate(D3DRS_DESTBLEND, dst) &&
+           rstate(D3DRS_BLENDOP, op);
+}
+// A cell of a row of cells: the 32-pixel-wide quad i (0-5) at y 96-160, its probe at its centre.
+static bool cell(int i, DWORD c, float z = 0.5f) { return zquad(16.0f + 40 * i, 96, 48.0f + 40 * i, 160, z, c); }
+static Px cellPx(int i, DWORD want) { return {32 + 40 * i, 128, want}; }
+static const DWORD GREY = D3DCOLOR_XRGB(128, 128, 128);
+
+// Clear with two rects: they alone are cleared.
+static bool rowClRects() {
+    const Px px[] = {{48, 48, TGRN}, {208, 208, TGRN}, {128, 128, BLUE}, {100, 48, BLUE}, {15, 48, BLUE}, {16, 48, TGRN},
+                     {79, 48, TGRN}, {80, 48, BLUE}};
+    return frames(BLUE, px, 8, [&] {
+        const D3DRECT r[2] = {{16, 16, 80, 80}, {176, 176, 240, 240}};
+        return clearRects(2, r, D3DCLEAR_TARGET, TGRN);
+    });
+}
+// Rects with a count of 0 clear nothing; no rects with a count clear everything.
+static bool rowClCount() {
+    const Px none[] = {{48, 48, BLUE}, {200, 200, BLUE}}, all[] = {{48, 48, TRED}, {200, 200, TRED}};
+    const D3DRECT r = {16, 16, 80, 80};
+    return frames(BLUE, none, 2, [&] { return clearRects(0, &r, D3DCLEAR_TARGET, TGRN); }) &&
+           frames(BLUE, all, 2, [&] { return clearRects(5, nullptr, D3DCLEAR_TARGET, TRED); });
+}
+// Under the scissor test a Clear with no rects clears the scissor rect, colour and depth (a quad at z 0.5 is hidden
+// where Z was cleared to 0.2); a rect is cut to its overlap with the scissor rect.
+static bool rowClScissor() {
+    const Px a[] = {{128, 128, TGRN}, {32, 32, TRED}, {224, 128, TRED}, {63, 128, TRED}, {64, 128, TGRN}};
+    if (!frames(BLUE, a, 5, [&] {
+            if (!clearZ() || !scissor(64, 64, 192, 192) || !rstate(D3DRS_SCISSORTESTENABLE, TRUE) ||
+                !clearRects(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, TGRN, 0.2f) ||
+                !rstate(D3DRS_SCISSORTESTENABLE, FALSE))
+                return false;
+            return rstate(D3DRS_ZENABLE, D3DZB_TRUE) && zquad(0, 0, 256, 256, 0.5f, TRED) &&
+                   rstate(D3DRS_ZENABLE, D3DZB_FALSE);
+        }))
+        return false;
+    const Px b[] = {{96, 96, TYEL}, {48, 48, BLUE}, {160, 160, BLUE}, {127, 127, TYEL}, {128, 128, BLUE}};
+    return frames(BLUE, b, 5, [&] {
+        const D3DRECT r = {32, 32, 128, 128};
+        return scissor(64, 64, 192, 192) && rstate(D3DRS_SCISSORTESTENABLE, TRUE) &&
+               clearRects(1, &r, D3DCLEAR_TARGET, TYEL) && rstate(D3DRS_SCISSORTESTENABLE, FALSE);
+    });
+}
+// A Clear is bounded by the viewport: colour, depth (a z 0.5 quad hidden inside) and stencil (an EQUAL 7 quad shows
+// inside only); a rect is cut at the viewport's edge.
+static bool rowClViewport() {
+    const Px a[] = {{128, 128, TYEL}, {32, 32, TRED}, {200, 128, TRED}, {63, 128, TRED}, {64, 128, TYEL},
+                    {191, 128, TYEL}, {192, 128, TRED}};
+    if (!frames(BLUE, a, 7, [&] {
+            if (!clearZS(1.0f, 0) || !viewport(64, 64, 128, 128) ||
+                !clearRects(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL, TGRN, 0.2f, 7))
+                return false;
+            CK(SetViewport, &FULL);
+            if (!rstate(D3DRS_ZENABLE, D3DZB_TRUE) || !zquad(0, 0, 256, 256, 0.5f, TRED)) return false;
+            return rstate(D3DRS_STENCILENABLE, TRUE) && rstate(D3DRS_STENCILFUNC, D3DCMP_EQUAL) &&
+                   rstate(D3DRS_STENCILREF, 7) && zquad(0, 0, 256, 256, 0.1f, TYEL) &&
+                   rstate(D3DRS_STENCILENABLE, FALSE) && rstate(D3DRS_ZENABLE, D3DZB_FALSE);
+        }))
+        return false;
+    const Px b[] = {{80, 120, TMAG}, {48, 120, BLUE}, {120, 120, BLUE}, {80, 160, BLUE}};
+    return frames(BLUE, b, 4, [&] {
+        const D3DRECT r = {32, 100, 100, 150};
+        if (!viewport(64, 64, 128, 128) || !clearRects(1, &r, D3DCLEAR_TARGET, TMAG)) return false;
+        CK(SetViewport, &FULL);
+        return true;
+    });
+}
+// A Z Clear of one rect: a quad at z 0.5 is hidden inside it (Z 0.2) and shows outside (Z 1).
+static bool rowClZ() {
+    const Px px[] = {{128, 128, BLUE}, {32, 32, TRED}, {63, 128, TRED}, {64, 128, BLUE}, {191, 191, BLUE}, {192, 192, TRED}};
+    return frames(BLUE, px, 6, [&] {
+        const D3DRECT r = {64, 64, 192, 192};
+        return clearZ() && clearRects(1, &r, D3DCLEAR_ZBUFFER, 0, 0.2f) && rstate(D3DRS_ZENABLE, D3DZB_TRUE) &&
+               zquad(0, 0, 256, 256, 0.5f, TRED) && rstate(D3DRS_ZENABLE, D3DZB_FALSE);
+    });
+}
+// A stencil Clear of one rect: an EQUAL 7 quad shows inside it only, and the depth is left (Z 0.3 everywhere: a quad
+// at z 0.5 stays hidden). On a D24X8 surface the same Clear answers D3D_OK and changes nothing.
+static bool rowClStencil() {
+    const Px px[] = {{128, 128, TGRN}, {32, 32, BLUE}, {63, 128, BLUE}, {64, 128, TGRN}};
+    const D3DRECT r = {64, 64, 192, 192};
+    if (!frames(BLUE, px, 4, [&] {
+            if (!clearZS(0.3f, 0) || !clearRects(1, &r, D3DCLEAR_STENCIL, 0, 1.0f, 7)) return false;
+            if (!rstate(D3DRS_STENCILENABLE, TRUE) || !rstate(D3DRS_STENCILFUNC, D3DCMP_EQUAL) ||
+                !rstate(D3DRS_STENCILREF, 7) || !zquad(0, 0, 256, 256, 0.5f, TGRN) ||
+                !rstate(D3DRS_STENCILENABLE, FALSE))
+                return false;
+            return rstate(D3DRS_ZENABLE, D3DZB_TRUE) && zquad(0, 0, 256, 256, 0.5f, TRED) &&
+                   rstate(D3DRS_ZENABLE, D3DZB_FALSE);
+        }))
+        return false;
+    Com<IDirect3DSurface9> d;
+    if (!makeDs(d)) return false;
+    const Px none[] = {{128, 128, BLUE}, {32, 32, BLUE}};
+    const bool ok = frames(BLUE, none, 2, [&] {
+        if (!bindDs(d.p) || !clearZ(0.3f) || !clearRects(1, &r, D3DCLEAR_STENCIL, 0, 1.0f, 7)) return false;
+        return rstate(D3DRS_ZENABLE, D3DZB_TRUE) && zquad(0, 0, 256, 256, 0.5f, TRED) &&
+               rstate(D3DRS_ZENABLE, D3DZB_FALSE) && bindDs(dsSurf);
+    });
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
+// The colour write mask does not reach a Clear, whole or of a rect.
+static bool rowClMask() {
+    const Px px[] = {{32, 32, TGRN}, {128, 128, TYEL}};
+    return frames(BLUE, px, 2, [&] {
+        const D3DRECT r = {64, 64, 192, 192};
+        return rstate(D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_RED) &&
+               clearRects(0, nullptr, D3DCLEAR_TARGET, TGRN) && clearRects(1, &r, D3DCLEAR_TARGET, TYEL) &&
+               rstate(D3DRS_COLORWRITEENABLE, 0xf);
+    });
+}
+// A rect Clear between two draws keeps its place: white over green over red where they stack.
+static bool rowClOrder() {
+    const Px px[] = {{64, 64, TWHT}, {64, 176, TGRN}, {176, 64, TRED}, {240, 240, BLUE}};
+    return frames(BLUE, px, 4, [&] {
+        const D3DRECT r = {32, 32, 128, 224};
+        return zquad(32, 32, 224, 224, 0.5f, TRED) && clearRects(1, &r, D3DCLEAR_TARGET, TGRN) &&
+               zquad(32, 32, 128, 128, 0.5f, TWHT);
+    });
+}
+// Rect and viewport-bounded clears of a texture's level 1 (32x32) and of a cube target's face.
+static bool rowClLevel() {
+    if (!until([&] {
+            Com<IDirect3DTexture9> t;
+            Com<IDirect3DSurface9> s;
+            if (!scene([&] {
+                    const D3DRECT r = {8, 8, 24, 24};
+                    return makeRt(t, 64, 2) && target(t.p, 1) && clearTo(TBLU) &&
+                           clearRects(1, &r, D3DCLEAR_TARGET, TGRN) && viewport(16, 0, 16, 8) &&
+                           clearRects(0, nullptr, D3DCLEAR_TARGET, TRED) && backToScreen();
+                }) ||
+                !levelOf(t.p, 1, s))
+                return false;
+            return readTarget(s.p, 32, 32, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+                return want("(16,16)", texel(b, p, 16, 16), TGRN) && want("(4,4)", texel(b, p, 4, 4), TBLU) &&
+                       want("(20,4)", texel(b, p, 20, 4), TRED) && want("(28,20)", texel(b, p, 28, 20), TBLU) &&
+                       want("(12,4)", texel(b, p, 12, 4), TBLU);
+            });
+        }))
+        return false;
+    return until([&] {
+        Com<IDirect3DCubeTexture9> c;
+        Com<IDirect3DSurface9> s;
+        if (!scene([&] {
+                const D3DRECT r = {4, 4, 12, 12};
+                if (!clearCube(c)) return false;
+                const HRESULT hr = c.p->GetCubeMapSurface((D3DCUBEMAP_FACES)3, 0, &s.p);
+                if (FAILED(hr)) return fail("GetCubeMapSurface", hr);
+                CK(SetRenderTarget, 0, s.p);
+                return clearRects(1, &r, D3DCLEAR_TARGET, TWHT) && backToScreen();
+            }))
+            return false;
+        return readTarget(s.p, 16, 16, D3DFMT_X8R8G8B8, [&](const BYTE *b, int p) {
+            return want("face (8,8)", texel(b, p, 8, 8), TWHT) && want("face (1,1)", texel(b, p, 1, 1), CUBE_FACES[3]);
+        });
+    });
+}
+// A depth-stencil larger than the target (512 with the 256 back buffer). A Z Clear is bounded by the viewport: seen
+// through a 512 target, a quad at z 0.5 shows where the Clear reached (the 256 square) and is hidden past it (Z 0.1
+// left by a near quad). With the viewport set to the depth-stencil's size, the same Clear reaches all of it.
+static bool rowClBigZ() {
+    Com<IDirect3DSurface9> big;
+    Com<IDirect3DTexture9> t;
+    Com<IDirect3DSurface9> s;
+    if (!makeDs(big, D3DFMT_D24X8, 512) || !makeRt(t, 512) || !levelOf(t.p, 0, s)) return false;
+    const bool ok = until([&] {
+        if (!scene([&] {
+                if (!target(t.p) || !bindDs(big.p) ||
+                    !clearRects(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, TBLU, 1.0f) ||
+                    !rstate(D3DRS_ZENABLE, D3DZB_TRUE) || !zquad(0, 0, 512, 512, 0.1f, TRED))
+                    return false;
+                if (!backToScreen() || !clearZ() || !target(t.p) || !zquad(0, 0, 512, 512, 0.5f, TGRN)) return false;
+                return backToScreen();
+            }))
+            return false;
+        if (!readTarget(s.p, 512, 512, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+                return want("(100,100)", texel(b, p, 100, 100), TGRN) && want("(400,400)", texel(b, p, 400, 400), TRED) &&
+                       want("(300,100)", texel(b, p, 300, 100), TRED) && want("(255,255)", texel(b, p, 255, 255), TGRN) &&
+                       want("(256,256)", texel(b, p, 256, 256), TRED);
+            }))
+            return false;
+        if (!scene([&] {
+                if (!viewport(0, 0, 512, 512) || !clearZ() || !target(t.p) || !zquad(0, 0, 512, 512, 0.5f, TYEL))
+                    return false;
+                return backToScreen();
+            }))
+            return false;
+        return readTarget(s.p, 512, 512, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+            return want("whole (400,400)", texel(b, p, 400, 400), TYEL) &&
+                   want("whole (100,100)", texel(b, p, 100, 100), TYEL);
+        });
+    });
+    dev->SetRenderTarget(0, rtSurf);
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
+// A depth-stencil smaller than the target (128 with the 256 back buffer): a Z Clear of a rect that leaves it is cut
+// to it; a quad at z 0.5 is hidden where the rect cleared to 0.2 and shows beside it.
+static bool rowClSmallZ() {
+    Com<IDirect3DSurface9> small;
+    if (!makeDs(small, D3DFMT_D24X8, 128)) return false;
+    const Px px[] = {{100, 100, BLUE}, {32, 32, TRED}};
+    const bool ok = frames(BLUE, px, 2, [&] {
+        const D3DRECT r = {64, 64, 200, 200};
+        return bindDs(small.p) && clearZ() && clearRects(1, &r, D3DCLEAR_ZBUFFER, 0, 0.2f) &&
+               rstate(D3DRS_ZENABLE, D3DZB_TRUE) && zquad(0, 0, 256, 256, 0.5f, TRED) &&
+               rstate(D3DRS_ZENABLE, D3DZB_FALSE) && bindDs(dsSurf);
+    });
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
+
+// The scissor test: a quad over the whole target draws inside the rect only.
+static bool rowScRect() {
+    const Px px[] = {{128, 128, TRED}, {32, 32, BLUE}, {63, 128, BLUE}, {64, 128, TRED}, {191, 128, TRED},
+                     {192, 128, BLUE}, {128, 63, BLUE}, {128, 192, BLUE}};
+    return frames(BLUE, px, 8, [&] {
+        return scissor(64, 64, 192, 192) && rstate(D3DRS_SCISSORTESTENABLE, TRUE) && zquad(0, 0, 256, 256, 0.5f, TRED) &&
+               rstate(D3DRS_SCISSORTESTENABLE, FALSE);
+    });
+}
+// The rect with the test off bounds nothing.
+static bool rowScOff() {
+    const Px px[] = {{128, 128, TRED}, {32, 32, TRED}, {224, 224, TRED}};
+    return frames(BLUE, px, 3, [&] { return scissor(64, 64, 192, 192) && zquad(0, 0, 256, 256, 0.5f, TRED); });
+}
+// Rects that hold no pixel of the target (inverted, empty, past it, negative) and a viewport off it: every draw
+// answers D3D_OK and draws nothing.
+static bool rowScEmpty() {
+    const Px px[] = {{128, 128, BLUE}, {32, 32, BLUE}, {224, 224, BLUE}};
+    return frames(BLUE, px, 3, [&] {
+        static const LONG rects[][4] = {{192, 192, 64, 64}, {100, 100, 100, 100}, {300, 300, 400, 400}, {-50, -50, -10, -10}};
+        if (!rstate(D3DRS_SCISSORTESTENABLE, TRUE)) return false;
+        for (const auto &r : rects) {
+            if (!scissor(r[0], r[1], r[2], r[3])) return false;
+            const HRESULT hr = zquadHr(0, 0, 256, 256, 0.5f, TRED);
+            if (hr != D3D_OK) return fail("DrawPrimitiveUP (an empty scissor)", hr);
+        }
+        if (!rstate(D3DRS_SCISSORTESTENABLE, FALSE) || !viewport(300, 300, 64, 64)) return false;
+        const HRESULT hr = zquadHr(300, 300, 364, 364, 0.5f, TRED);
+        CK(SetViewport, &FULL);
+        return hr == D3D_OK || fail("DrawPrimitiveUP (a viewport off the target)", hr);
+    });
+}
+// A rect larger than a 64x64 target is cut to it; one that starts before it draws its part on the target.
+static bool rowScClamp() {
+    return until([&] {
+        Com<IDirect3DTexture9> t;
+        Com<IDirect3DSurface9> s;
+        if (!scene([&] {
+                return makeRt(t) && target(t.p) && clearTo(TBLU) && scissor(0, 0, 256, 256) &&
+                       rstate(D3DRS_SCISSORTESTENABLE, TRUE) && zquad(0, 0, 64, 64, 0.5f, TRED) &&
+                       scissor(-32, -32, 32, 32) && zquad(0, 0, 64, 64, 0.5f, TGRN) &&
+                       rstate(D3DRS_SCISSORTESTENABLE, FALSE) && backToScreen();
+            }) ||
+            !levelOf(t.p, 0, s))
+            return false;
+        return readTarget(s.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+            return want("(16,16)", texel(b, p, 16, 16), TGRN) && want("(48,48)", texel(b, p, 48, 48), TRED) &&
+                   want("(48,16)", texel(b, p, 48, 16), TRED) && want("(62,62)", texel(b, p, 62, 62), TRED) &&
+                   want("(31,31)", texel(b, p, 31, 31), TGRN) && want("(32,32)", texel(b, p, 32, 32), TRED);
+        });
+    });
+}
+// The rect follows every change inside one pass: two rects, then the test off.
+static bool rowScPass() {
+    const Px px[] = {{64, 64, TRED}, {192, 64, TGRN}, {128, 64, BLUE}, {128, 228, TWHT}, {64, 150, BLUE}, {8, 228, TWHT}};
+    return frames(BLUE, px, 6, [&] {
+        return rstate(D3DRS_SCISSORTESTENABLE, TRUE) && scissor(16, 16, 112, 112) && zquad(0, 0, 256, 256, 0.5f, TRED) &&
+               scissor(144, 16, 240, 112) && zquad(0, 0, 256, 256, 0.5f, TGRN) &&
+               rstate(D3DRS_SCISSORTESTENABLE, FALSE) && zquad(0, 200, 256, 256, 0.5f, TWHT);
+    });
+}
+// The rect survives a pass break that leaves it alone (another depth-stencil bound): the next quad, with no scissor
+// call since, draws inside it only.
+static bool rowScBreak() {
+    Com<IDirect3DSurface9> d;
+    if (!makeDs(d)) return false;
+    const Px px[] = {{128, 128, TGRN}, {32, 32, BLUE}, {224, 224, BLUE}, {63, 128, BLUE}, {64, 128, TGRN}};
+    const bool ok = frames(BLUE, px, 5, [&] {
+        return rstate(D3DRS_SCISSORTESTENABLE, TRUE) && scissor(64, 64, 192, 192) && zquad(0, 0, 256, 256, 0.5f, TRED) &&
+               bindDs(d.p) && zquad(0, 0, 256, 256, 0.5f, TGRN) && bindDs(dsSurf) &&
+               rstate(D3DRS_SCISSORTESTENABLE, FALSE);
+    });
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
+
+// A depth-stencil larger than the target (512 D24S8 with a 64x64 texture): the depth and stencil tests as on a pair
+// of one size. Z: a near quad on the left half hides a far one. Stencil: written on the top half, an EQUAL quad
+// shows there.
+static bool rowSzLarge() {
+    Com<IDirect3DSurface9> big;
+    if (!makeDs(big, D3DFMT_D24S8, 512)) return false;
+    const bool ok = until([&] {
+        Com<IDirect3DTexture9> t;
+        Com<IDirect3DSurface9> s;
+        if (!scene([&] {
+                if (!makeRt(t) || !target(t.p) || !bindDs(big.p) ||
+                    !clearRects(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL, TBLU, 1.0f, 0) ||
+                    !rstate(D3DRS_ZENABLE, D3DZB_TRUE) || !zquad(0, 0, 32, 64, 0.3f, TRED) ||
+                    !zquad(0, 0, 64, 64, 0.6f, TGRN))
+                    return false;
+                if (!rstate(D3DRS_STENCILENABLE, TRUE) || !rstate(D3DRS_STENCILFUNC, D3DCMP_ALWAYS) ||
+                    !rstate(D3DRS_STENCILPASS, D3DSTENCILOP_REPLACE) || !rstate(D3DRS_STENCILREF, 3) ||
+                    !rstate(D3DRS_COLORWRITEENABLE, 0) || !rstate(D3DRS_ZENABLE, D3DZB_FALSE) ||
+                    !zquad(0, 0, 64, 32, 0.5f, TWHT) || !rstate(D3DRS_COLORWRITEENABLE, 0xf))
+                    return false;
+                return rstate(D3DRS_STENCILFUNC, D3DCMP_EQUAL) && rstate(D3DRS_STENCILPASS, D3DSTENCILOP_KEEP) &&
+                       zquad(0, 0, 64, 64, 0.5f, TYEL) && rstate(D3DRS_STENCILENABLE, FALSE) && bindDs(dsSurf) &&
+                       backToScreen();
+            }) ||
+            !levelOf(t.p, 0, s))
+            return false;
+        return readTarget(s.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+            return want("(16,16)", texel(b, p, 16, 16), TYEL) && want("(48,16)", texel(b, p, 48, 16), TYEL) &&
+                   want("(16,48)", texel(b, p, 16, 48), TRED) && want("(48,48)", texel(b, p, 48, 48), TGRN);
+        });
+    });
+    dev->SetRenderTarget(0, rtSurf);
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
+// A whole Z Clear of a 512 depth-stencil reaches all of it though the next pass draws to a 64x64 target: back on a
+// 512 target, a quad at z 0.5 shows at (400,400), where a near quad (z 0.1) was before the Clear.
+static bool rowSzClear() {
+    Com<IDirect3DSurface9> big;
+    Com<IDirect3DTexture9> t, small;
+    Com<IDirect3DSurface9> s;
+    if (!makeDs(big, D3DFMT_D24X8, 512) || !makeRt(t, 512) || !makeRt(small) || !levelOf(t.p, 0, s)) return false;
+    const bool ok = until([&] {
+        if (!scene([&] {
+                if (!target(t.p) || !bindDs(big.p) ||
+                    !clearRects(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, TBLU, 1.0f) ||
+                    !rstate(D3DRS_ZENABLE, D3DZB_TRUE) || !zquad(0, 0, 512, 512, 0.1f, TRED) || !clearZ())
+                    return false;
+                if (!target(small.p) || !zquad(0, 0, 64, 64, 0.5f, TGRN)) return false;
+                return target(t.p) && zquad(0, 0, 512, 512, 0.5f, TYEL) && bindDs(dsSurf) && backToScreen();
+            }))
+            return false;
+        return readTarget(s.p, 512, 512, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+            return want("(400,400)", texel(b, p, 400, 400), TYEL) && want("(100,300)", texel(b, p, 100, 300), TYEL) &&
+                   want("(32,32)", texel(b, p, 32, 32), TYEL);
+        });
+    });
+    dev->SetRenderTarget(0, rtSurf);
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
+// A depth-stencil smaller than the target (128 with the 256 back buffer): a depth-tested quad draws within it. What
+// lies outside the depth-stencil is not asserted.
+static bool rowSzSmall() {
+    Com<IDirect3DSurface9> small;
+    if (!makeDs(small, D3DFMT_D24X8, 128)) return false;
+    const Px px[] = {{64, 64, TRED}, {16, 100, TRED}};
+    const bool ok = frames(BLUE, px, 2, [&] {
+        return bindDs(small.p) && clearZ() && rstate(D3DRS_ZENABLE, D3DZB_TRUE) && zquad(0, 0, 256, 256, 0.5f, TRED) &&
+               rstate(D3DRS_ZENABLE, D3DZB_FALSE) && bindDs(dsSurf);
+    });
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
+
+// sRGB write and Clear: a Clear to 128 and a rect Clear to 64 are stored encoded (188, 137); with it off, as given;
+// a Clear with it off and a quad with it on each keep their own.
+static bool rowSrClear() {
+    const D3DRECT r = {64, 64, 192, 192};
+    const Px on[] = {{32, 32, 0xbcbcbc}, {128, 128, 0x898989}};
+    if (!frames(BLUE, on, 2, [&] {
+            return rstate(D3DRS_SRGBWRITEENABLE, TRUE) && clearRects(0, nullptr, D3DCLEAR_TARGET, GREY) &&
+                   clearRects(1, &r, D3DCLEAR_TARGET, D3DCOLOR_XRGB(64, 64, 64)) && rstate(D3DRS_SRGBWRITEENABLE, FALSE);
+        }))
+        return false;
+    const Px off[] = {{32, 32, 0x808080}, {128, 128, 0x898989}};
+    return frames(BLUE, off, 2, [&] {
+        return clearRects(0, nullptr, D3DCLEAR_TARGET, GREY) && rstate(D3DRS_SRGBWRITEENABLE, TRUE) &&
+               zquad(64, 64, 192, 192, 0.5f, D3DCOLOR_XRGB(64, 64, 64)) && rstate(D3DRS_SRGBWRITEENABLE, FALSE);
+    });
+}
+// The grey Clear and the half-transparent black quad of sr-blend on the bound target.
+static bool srgbBlend(float x0, float y0, float x1, float y1) {
+    return rstate(D3DRS_SRGBWRITEENABLE, TRUE) && clearRects(0, nullptr, D3DCLEAR_TARGET, GREY) &&
+           blend(D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA) && zquad(x0, y0, x1, y1, 0.5f, D3DCOLOR_ARGB(128, 0, 0, 0)) &&
+           rstate(D3DRS_ALPHABLENDENABLE, FALSE) && rstate(D3DRS_SRGBWRITEENABLE, FALSE);
+}
+// sRGB write under blending. On a target with an sRGB view (the back buffer, an A8R8G8B8 texture) the blend is in
+// linear space: black at alpha 128 over the 128 grey (stored 188) reads 137. On a target without one
+// (A16B16G16R16F) the pixel stage encodes before the blender: 0.735 * 0.498.
+static bool rowSrBlend() {
+    const Px px[] = {{128, 128, 0x898989}, {32, 32, 0xbcbcbc}};
+    if (!frames(BLUE, px, 2, [&] { return srgbBlend(64, 64, 192, 192); })) return false;
+    if (!until([&] {
+            Com<IDirect3DTexture9> t;
+            Com<IDirect3DSurface9> s;
+            if (!scene([&] { return makeRt(t) && target(t.p) && srgbBlend(16, 16, 48, 48) && backToScreen(); }) ||
+                !levelOf(t.p, 0, s))
+                return false;
+            return readTarget(s.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+                return want("(32,32)", texel(b, p, 32, 32), 0x898989) && want("(4,4)", texel(b, p, 4, 4), 0xbcbcbc);
+            });
+        }))
+        return false;
+    return until([&] {
+        Com<IDirect3DTexture9> t;
+        Com<IDirect3DSurface9> s;
+        if (!scene([&] {
+                return makeRt(t, 64, 1, D3DFMT_A16B16G16R16F) && target(t.p) && srgbBlend(16, 16, 48, 48) &&
+                       backToScreen();
+            }) ||
+            !levelOf(t.p, 0, s))
+            return false;
+        return readTarget(s.p, 64, 64, D3DFMT_A16B16G16R16F, [&](const BYTE *b, int pitch) {
+            float in[4], out[4];
+            decodeTexel(D3DFMT_A16B16G16R16F, b + 32 * pitch + 32 * 8, in);
+            decodeTexel(D3DFMT_A16B16G16R16F, b + 4 * pitch + 4 * 8, out);
+            if (fabsf(in[0] - 0.366f) > 0.01f || fabsf(out[0] - 0.735f) > 0.01f)
+                return snprintf(why, sizeof why, "16F: blended %.3f want 0.366, clear %.3f want 0.735", in[0], out[0]),
+                       false;
+            return true;
+        });
+    });
+}
+// sRGB write toggled between blended quads of one frame, over a 128 grey stored as given: with it on the blend is
+// linear (92), with it off it is of the stored values (64).
+static bool rowSrToggle() {
+    const Px px[] = {cellPx(0, 0x5c5c5c), cellPx(2, 0x404040), cellPx(4, 0x5c5c5c), {128, 32, 0x808080}};
+    return frames(BLUE, px, 4, [&] {
+        const DWORD black = D3DCOLOR_ARGB(128, 0, 0, 0);
+        return clearRects(0, nullptr, D3DCLEAR_TARGET, GREY) && blend(D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA) &&
+               rstate(D3DRS_SRGBWRITEENABLE, TRUE) && cell(0, black) && rstate(D3DRS_SRGBWRITEENABLE, FALSE) &&
+               cell(2, black) && rstate(D3DRS_SRGBWRITEENABLE, TRUE) && cell(4, black) &&
+               rstate(D3DRS_SRGBWRITEENABLE, FALSE) && rstate(D3DRS_ALPHABLENDENABLE, FALSE);
+    });
+}
+
+// Source alpha blending: red at alpha 128 over blue.
+static bool rowBlAlpha() {
+    const Px px[] = {{128, 128, 0x80007f}, {32, 32, BLUE}};
+    return frames(BLUE, px, 2, [&] {
+        return blend(D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA) &&
+               zquad(64, 64, 192, 192, 0.5f, D3DCOLOR_ARGB(128, 255, 0, 0));
+    });
+}
+// Additive blending: (64, 64, 64) twice over blue.
+static bool rowBlAdd() {
+    const Px px[] = {{128, 128, 0x8080ff}, {32, 32, BLUE}};
+    return frames(BLUE, px, 2, [&] {
+        const DWORD c = D3DCOLOR_XRGB(64, 64, 64);
+        return blend(D3DBLEND_ONE, D3DBLEND_ONE) && zquad(64, 64, 192, 192, 0.5f, c) && zquad(64, 64, 192, 192, 0.5f, c);
+    });
+}
+// The blend operations, source (150, 100, 50) over (100, 150, 200) with ONE/ONE; MIN and MAX read no factor.
+static bool rowBlOps() {
+    const Px px[] = {cellPx(0, 0x320000), cellPx(1, 0x003296), cellPx(2, 0x646432),
+                     cellPx(3, 0x9696c8), cellPx(4, 0x646432), cellPx(5, 0x9696c8)};
+    return frames(D3DCOLOR_XRGB(100, 150, 200), px, 6, [&] {
+        const DWORD c = D3DCOLOR_XRGB(150, 100, 50);
+        return blend(D3DBLEND_ONE, D3DBLEND_ONE, D3DBLENDOP_SUBTRACT) && cell(0, c) &&
+               rstate(D3DRS_BLENDOP, D3DBLENDOP_REVSUBTRACT) && cell(1, c) && rstate(D3DRS_BLENDOP, D3DBLENDOP_MIN) &&
+               cell(2, c) && rstate(D3DRS_BLENDOP, D3DBLENDOP_MAX) && cell(3, c) &&
+               blend(D3DBLEND_ZERO, D3DBLEND_ZERO, D3DBLENDOP_MIN) && cell(4, c) &&
+               rstate(D3DRS_BLENDOP, D3DBLENDOP_MAX) && cell(5, c);
+    });
+}
+// The colour and alpha factors on an A8R8G8B8 target cleared to (40, 80, 120) with alpha 200, source (200, 100, 50)
+// with alpha 128: destination colour and destination alpha give different values.
+static bool rowBlFactors() {
+    return until([&] {
+        Com<IDirect3DTexture9> t;
+        Com<IDirect3DSurface9> s;
+        if (!scene([&] {
+                static const DWORD f[6][2] = {{D3DBLEND_DESTCOLOR, D3DBLEND_ZERO},  {D3DBLEND_INVDESTCOLOR, D3DBLEND_ZERO},
+                                              {D3DBLEND_ZERO, D3DBLEND_SRCCOLOR},   {D3DBLEND_ZERO, D3DBLEND_INVSRCCOLOR},
+                                              {D3DBLEND_DESTALPHA, D3DBLEND_ZERO},  {D3DBLEND_SRCALPHASAT, D3DBLEND_ZERO}};
+                if (!makeRt(t) || !target(t.p) || !clearTo(D3DCOLOR_ARGB(200, 40, 80, 120))) return false;
+                for (int i = 0; i < 6; i++)
+                    if (!blend(f[i][0], f[i][1]) ||
+                        !zquad(2.0f + 10 * i, 16, 10.0f + 10 * i, 48, 0.5f, D3DCOLOR_ARGB(128, 200, 100, 50)))
+                        return false;
+                return rstate(D3DRS_ALPHABLENDENABLE, FALSE) && backToScreen();
+            }) ||
+            !levelOf(t.p, 0, s))
+            return false;
+        return readTarget(s.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+            static const DWORD wants[6] = {0x1f1f18, 0xa9451a, 0x1f1f18, 0x093160, 0x9d4e27, 0x2b160b};
+            static const char *names[6] = {"DESTCOLOR", "INVDESTCOLOR", "SRCCOLOR", "INVSRCCOLOR", "DESTALPHA", "SRCALPHASAT"};
+            for (int i = 0; i < 6; i++)
+                if (!want(names[i], texel(b, p, 6 + 10 * i, 32), wants[i])) return false;
+            return want("clear", texel(b, p, 6, 56), D3DCOLOR_XRGB(40, 80, 120));
+        });
+    });
+}
+// BOTHSRCALPHA and BOTHINVSRCALPHA as the source factor set both sides, whatever DESTBLEND says.
+static bool rowBlBoth() {
+    const Px px[] = {cellPx(0, 0x80007f), cellPx(2, 0x7f0080)};
+    return frames(BLUE, px, 2, [&] {
+        const DWORD c = D3DCOLOR_ARGB(128, 255, 0, 0);
+        return blend(D3DBLEND_BOTHSRCALPHA, D3DBLEND_ONE) && cell(0, c) && blend(D3DBLEND_BOTHINVSRCALPHA, D3DBLEND_ZERO) &&
+               cell(2, c);
+    });
+}
+// Destination alpha (red by DESTALPHA over a blue of alpha 0x40 by INVDESTALPHA). The back buffer and an A8R8G8B8
+// target read the stored alpha; an X8R8G8B8 target reads 1.
+static bool rowBlDestAlpha() {
+    const DWORD clear = D3DCOLOR_ARGB(0x40, 0, 0, 255);
+    const Px px[] = {{128, 128, 0x4000bf}, {32, 32, BLUE}};
+    if (!frames(BLUE, px, 2, [&] {
+            return clearTo(clear) && blend(D3DBLEND_DESTALPHA, D3DBLEND_INVDESTALPHA) &&
+                   zquad(64, 64, 192, 192, 0.5f, TRED | 0xff000000);
+        }))
+        return false;
+    static const struct { D3DFORMAT f; DWORD want; const char *name; } targets[] = {
+        {D3DFMT_X8R8G8B8, 0xff0000, "X8R8G8B8"}, {D3DFMT_A8R8G8B8, 0x4000bf, "A8R8G8B8"}};
+    for (const auto &m : targets)
+        if (!until([&] {
+                Com<IDirect3DTexture9> t;
+                Com<IDirect3DSurface9> s;
+                if (!scene([&] {
+                        return makeRt(t, 64, 1, m.f) && target(t.p) && clearTo(clear) &&
+                               blend(D3DBLEND_DESTALPHA, D3DBLEND_INVDESTALPHA) &&
+                               zquad(16, 16, 48, 48, 0.5f, TRED | 0xff000000) && rstate(D3DRS_ALPHABLENDENABLE, FALSE) &&
+                               backToScreen();
+                    }) ||
+                    !levelOf(t.p, 0, s))
+                    return false;
+                return readTarget(s.p, 64, 64, m.f, [&](const BYTE *b, int p) {
+                    return want(m.name, texel(b, p, 32, 32), m.want) && want("clear", texel(b, p, 4, 4), 0x0000ff);
+                });
+            }))
+            return false;
+    return true;
+}
+// Separate alpha blending on an A8R8G8B8 target (blue, alpha 0x80): with it on the alpha is the source's (ONE/ZERO),
+// with it off the alpha blends as the colour does.
+static bool rowBlSeparate() {
+    return until([&] {
+        Com<IDirect3DTexture9> t;
+        Com<IDirect3DSurface9> s;
+        if (!scene([&] {
+                const DWORD c = D3DCOLOR_ARGB(0x40, 255, 0, 0);
+                return makeRt(t) && target(t.p) && clearTo(D3DCOLOR_ARGB(0x80, 0, 0, 255)) &&
+                       blend(D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA) && rstate(D3DRS_SRCBLENDALPHA, D3DBLEND_ONE) &&
+                       rstate(D3DRS_DESTBLENDALPHA, D3DBLEND_ZERO) && rstate(D3DRS_SEPARATEALPHABLENDENABLE, TRUE) &&
+                       zquad(4, 16, 28, 48, 0.5f, c) && rstate(D3DRS_SEPARATEALPHABLENDENABLE, FALSE) &&
+                       zquad(36, 16, 60, 48, 0.5f, c) && rstate(D3DRS_ALPHABLENDENABLE, FALSE) && backToScreen();
+            }) ||
+            !levelOf(t.p, 0, s))
+            return false;
+        return readTarget(s.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+            return want("separate", texel(b, p, 16, 32), 0x404000bf, 0xffffffff) &&
+                   want("joint", texel(b, p, 48, 32), 0x704000bf, 0xffffffff);
+        });
+    });
+}
+// The blend factor colour: white by BLENDFACTOR over (0, 0, 100) by INVBLENDFACTOR, the factor changed between two
+// quads of one pass; and as the alpha factor on an A8R8G8B8 target (the factor's alpha).
+static bool rowBlFactor() {
+    const Px px[] = {cellPx(0, 0x40408b), cellPx(2, 0xc0c0d9)};
+    if (!frames(D3DCOLOR_XRGB(0, 0, 100), px, 2, [&] {
+            return blend(D3DBLEND_BLENDFACTOR, D3DBLEND_INVBLENDFACTOR) && rstate(D3DRS_BLENDFACTOR, 0x80404040) &&
+                   cell(0, 0xffffffff) && rstate(D3DRS_BLENDFACTOR, 0xffc0c0c0) && cell(2, 0xffffffff);
+        }))
+        return false;
+    return until([&] {
+        Com<IDirect3DTexture9> t;
+        Com<IDirect3DSurface9> s;
+        if (!scene([&] {
+                return makeRt(t) && target(t.p) && clearTo(D3DCOLOR_ARGB(0, 0, 0, 255)) &&
+                       blend(D3DBLEND_ONE, D3DBLEND_ZERO) && rstate(D3DRS_SRCBLENDALPHA, D3DBLEND_BLENDFACTOR) &&
+                       rstate(D3DRS_DESTBLENDALPHA, D3DBLEND_ZERO) && rstate(D3DRS_SEPARATEALPHABLENDENABLE, TRUE) &&
+                       rstate(D3DRS_BLENDFACTOR, 0x80404040) && zquad(16, 16, 48, 48, 0.5f, 0xffff0000) &&
+                       rstate(D3DRS_SEPARATEALPHABLENDENABLE, FALSE) && rstate(D3DRS_ALPHABLENDENABLE, FALSE) &&
+                       backToScreen();
+            }) ||
+            !levelOf(t.p, 0, s))
+            return false;
+        return readTarget(s.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+            return want("alpha factor", texel(b, p, 32, 32), 0x80ff0000, 0xffffffff);
+        });
+    });
+}
+// A quad that reads the blend factor and is stencil-tested: it shows on the strip whose stencil is its reference (5)
+// and nowhere with another reference (4).
+static bool rowBlStencil() {
+    const Px px[] = {{128, 128, TGRN}, {128, 48, BLUE}, {32, 128, BLUE}, {128, 200, BLUE}};
+    return frames(BLUE, px, 4, [&] {
+        if (!clearZS(1.0f, 0) || !rstate(D3DRS_STENCILENABLE, TRUE) || !rstate(D3DRS_STENCILFUNC, D3DCMP_ALWAYS) ||
+            !rstate(D3DRS_STENCILPASS, D3DSTENCILOP_REPLACE) || !rstate(D3DRS_STENCILREF, 5) ||
+            !rstate(D3DRS_COLORWRITEENABLE, 0) || !zquad(64, 96, 192, 160, 0.5f, TWHT) ||
+            !rstate(D3DRS_COLORWRITEENABLE, 0xf))
+            return false;
+        if (!rstate(D3DRS_STENCILFUNC, D3DCMP_EQUAL) || !rstate(D3DRS_STENCILPASS, D3DSTENCILOP_KEEP) ||
+            !blend(D3DBLEND_BLENDFACTOR, D3DBLEND_ZERO) || !rstate(D3DRS_BLENDFACTOR, 0xffffffff) ||
+            !zquad(0, 0, 256, 256, 0.5f, TGRN | 0xff000000))
+            return false;
+        return rstate(D3DRS_STENCILREF, 4) && zquad(0, 0, 256, 256, 0.5f, TRED | 0xff000000) &&
+               rstate(D3DRS_STENCILENABLE, FALSE);
+    });
+}
+// Blending off with factors and an operation left behind: opaque.
+static bool rowBlOff() {
+    const Px px[] = {{128, 128, TRED}, {32, 32, BLUE}};
+    return frames(BLUE, px, 2, [&] {
+        return blend(D3DBLEND_SRCALPHA, D3DBLEND_ZERO, D3DBLENDOP_MAX) && rstate(D3DRS_ALPHABLENDENABLE, FALSE) &&
+               zquad(64, 64, 192, 192, 0.5f, D3DCOLOR_ARGB(64, 255, 0, 0));
+    });
+}
+// The colour write mask under blending: red and alpha alone move.
+static bool rowBlMask() {
+    const Px px[] = {{128, 128, 0x4000ff}, {32, 32, BLUE}};
+    return frames(BLUE, px, 2, [&] {
+        return rstate(D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_ALPHA) &&
+               blend(D3DBLEND_ONE, D3DBLEND_ONE) && zquad(64, 64, 192, 192, 0.5f, D3DCOLOR_XRGB(64, 64, 64)) &&
+               rstate(D3DRS_COLORWRITEENABLE, 0xf);
+    });
+}
+// Blending with a pixel shader's alpha (ps_2_0 writing c0 = red at 0.25) and with the fixed-function untransformed
+// path's (diffuse alpha 128).
+static bool rowBlProg() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_C0)) return false;
+    const Px px[] = {{64, 128, 0x4000bf}, {192, 128, 0x80007f}, {128, 128, BLUE}};
+    const bool ok = frames(BLUE, px, 3, [&] {
+        static const float c0[4] = {1, 0, 0, 0.25f};
+        V3 q[4];
+        FC f[4];
+        quad(q, -0.75f, -0.25f, -0.25f, 0.25f);
+        cquad(f, 0.25f, -0.25f, 0.75f, 0.25f, D3DCOLOR_ARGB(128, 255, 0, 0));
+        if (!blend(D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA) || !use(p)) return false;
+        CK(SetPixelShaderConstantF, 0, c0, 1);
+        if (!strip(q)) return false;
+        CK(SetVertexShader, nullptr);
+        CK(SetPixelShader, nullptr);
+        return fdraw(FVF_C, f);
+    });
+    dev->SetVertexShader(nullptr);
+    dev->SetPixelShader(nullptr);
+    return ok;
+}
+// The blend factor colour reaches a draw after a pass break (another depth-stencil bound) with no state call since.
+static bool rowBlPass() {
+    Com<IDirect3DSurface9> d;
+    if (!makeDs(d)) return false;
+    const Px px[] = {cellPx(0, 0x8080b2), cellPx(4, 0x8080b2)};
+    const bool ok = frames(D3DCOLOR_XRGB(0, 0, 100), px, 2, [&] {
+        return blend(D3DBLEND_BLENDFACTOR, D3DBLEND_INVBLENDFACTOR) && rstate(D3DRS_BLENDFACTOR, 0x80808080) &&
+               cell(0, 0xffffffff) && bindDs(d.p) && cell(4, 0xffffffff) && bindDs(dsSurf);
+    });
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
+}
+
+static void blendRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"cl-rects", rowClRects},     {"cl-count", rowClCount},       {"cl-scissor", rowClScissor},
+        {"cl-viewport", rowClViewport}, {"cl-z", rowClZ},             {"cl-stencil", rowClStencil},
+        {"cl-mask", rowClMask},       {"cl-order", rowClOrder},       {"cl-level", rowClLevel},
+        {"cl-bigz", rowClBigZ},       {"cl-smallz", rowClSmallZ},     {"sc-rect", rowScRect},
+        {"sc-off", rowScOff},         {"sc-empty", rowScEmpty},       {"sc-clamp", rowScClamp},
+        {"sc-pass", rowScPass},       {"sc-break", rowScBreak},       {"sz-large", rowSzLarge},
+        {"sz-clear", rowSzClear},     {"sz-small", rowSzSmall},       {"sr-clear", rowSrClear},
+        {"sr-blend", rowSrBlend},     {"sr-toggle", rowSrToggle},     {"bl-alpha", rowBlAlpha},
+        {"bl-add", rowBlAdd},         {"bl-ops", rowBlOps},           {"bl-factors", rowBlFactors},
+        {"bl-both", rowBlBoth},       {"bl-destalpha", rowBlDestAlpha}, {"bl-separate", rowBlSeparate},
+        {"bl-factor", rowBlFactor},   {"bl-stencil", rowBlStencil},   {"bl-off", rowBlOff},
+        {"bl-mask", rowBlMask},       {"bl-prog", rowBlProg},         {"bl-pass", rowBlPass}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
+    HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
+    if (SUCCEEDED(hr))
+        hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
+    if (SUCCEEDED(hr)) hr = dev->GetDepthStencilSurface(&dsSurf);
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (FAILED(hr)) ok = fail("GetRenderTarget/GetDepthStencilSurface", hr);
+        else if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = reset() && depthReset() && blendStart() && r.run();
+        row(r.name, ok, why);
+    }
+    if (dsSurf) dsSurf->Release();
+    if (sysSurf) sysSurf->Release();
+    if (rtSurf) rtSurf->Release();
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
@@ -3628,6 +4364,7 @@ int main(int argc, char **argv) {
     const bool fixed = !bench && argc > 1 && !strcmp(argv[1], "fixed");
     const bool targets = !bench && argc > 1 && !strcmp(argv[1], "targets");
     const bool depth = !bench && argc > 1 && !strcmp(argv[1], "depth");
+    const bool blendMode = !bench && argc > 1 && !strcmp(argv[1], "blend");
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     WNDCLASSW wc = {};
@@ -3651,8 +4388,8 @@ int main(int argc, char **argv) {
     pp.BackBufferWidth = 256, pp.BackBufferHeight = 256, pp.BackBufferFormat = D3DFMT_X8R8G8B8, pp.BackBufferCount = 1;
     pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = hwnd, pp.Windowed = TRUE;
     pp.PresentationInterval = vsync ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
-    // The "depth" mode's device alone has a depth-stencil: the other modes' rows assume none.
-    if (depth || depthBench) pp.EnableAutoDepthStencil = TRUE, pp.AutoDepthStencilFormat = D3DFMT_D24S8;
+    // The "depth" and "blend" modes' devices alone have a depth-stencil: the other modes' rows assume none.
+    if (depth || blendMode || depthBench) pp.EnableAutoDepthStencil = TRUE, pp.AutoDepthStencilFormat = D3DFMT_D24S8;
     IDirect3DDevice9 *dev = nullptr;
     HRESULT hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd, D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp,
                                    &dev);
@@ -3662,6 +4399,13 @@ int main(int argc, char **argv) {
     const Vertex tri[3] = {{128, 16, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {240, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {16, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)}};
+    if (blendMode) {
+        blendRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
     if (depth) {
         depthRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();

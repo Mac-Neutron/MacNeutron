@@ -16,8 +16,11 @@
 #                                "fixed strict" under core), 240 s
 #   tg<64|32>-fresh.txt           d3d9_triangle targets (DXMTRS C4b-3d1's 22 rows of render targets other than the
 #                                back buffer; "targets strict" under core), 240 s
-#   dp<64|32>-fresh.txt           d3d9_triangle depth (DXMTRS C4b-3d2's 30 rows of the depth-stencil, on a device with
+#   dp<64|32>-fresh.txt           d3d9_triangle depth (DXMTRS C4b-3d2's 31 rows of the depth-stencil, on a device with
 #                                an auto depth-stencil; "depth strict" under core), 240 s
+#   bl<64|32>-fresh.txt           d3d9_triangle blend (DXMTRS C4b-3d3's 36 rows of partial clears, the scissor test, a
+#                                depth-stencil of another size, sRGB write and blending; "blend strict" under core),
+#                                240 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
@@ -82,7 +85,7 @@ tri() {  # tri <exe> <name> [timeout [args...]]: killed after <timeout> s (defau
   echo "status $?" >> "$O/$name.raw"
   timeout 20 wineserver -k
   tr -d '\r' < "$O/$name.raw" > "$O/$name.txt"; rm -f "$O/$name.raw"
-  echo "guest: $name $(grep -c '^d3d9 [a-z0-9]* ok$' "$O/$name.txt") rows ok"
+  echo "guest: $name $(grep -c '^d3d9 [a-z0-9-]* ok$' "$O/$name.txt") rows ok"
 }
 bench() {  # bench <exe> <row> <frames> [mode]: tri's launch with --bench 2000 <frames> [mode], its logs in logs/<row>
   mkdir -p "$O/logs/$2"
@@ -108,6 +111,8 @@ tri d3d9_triangle.exe tg64-fresh 240 targets $strict
 tri d3d9_triangle32.exe tg32-fresh 240 targets $strict
 tri d3d9_triangle.exe dp64-fresh 240 depth $strict
 tri d3d9_triangle32.exe dp32-fresh 240 depth $strict
+tri d3d9_triangle.exe bl64-fresh 240 blend $strict
+tri d3d9_triangle32.exe bl32-fresh 240 blend $strict
 rm -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" "$WINEPREFIX/drive_c/windows/syswow64/mtld3d.dll"
 tri d3d9_triangle.exe tri64-nomarker  # Wine finds no builtin without its marker: these fail
 tri d3d9_triangle32.exe tri32-nomarker

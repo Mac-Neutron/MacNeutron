@@ -35,8 +35,10 @@
 # vertex stage; fx64-fresh, fx32-fresh); under core their logs hold exactly its refused row's line. Every lane also
 # checks d3d9_triangle targets' 22 rows (DXMTRS C4b-3d1: render targets other than the back buffer; tg64-fresh,
 # tg32-fresh); under core their logs hold exactly its two refused rows' lines. Every lane also checks d3d9_triangle
-# depth's 30 rows (DXMTRS C4b-3d2: the depth-stencil, on a device with an auto depth-stencil; dp64-fresh, dp32-fresh);
-# under core their logs hold exactly its five refused calls' lines.
+# depth's 31 rows (DXMTRS C4b-3d2: the depth-stencil, on a device with an auto depth-stencil; dp64-fresh, dp32-fresh);
+# under core their logs hold exactly its three refused calls' lines. Every lane also checks d3d9_triangle blend's 36
+# rows (DXMTRS C4b-3d3: partial clears, the scissor test, a depth-stencil of another size, sRGB write and blending;
+# bl64-fresh, bl32-fresh); under core their logs hold no refusal line.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -165,7 +167,15 @@ done
 for r in dp64-fresh dp32-fresh; do
   for row in ds-default ds-test ds-func ds-write ds-zenable ds-clearz ds-clearonly ds-stencil ds-twosided ds-bias \
     ds-slope ds-clamp ds-odepth ds-surface ds-nostencil ds-unbound ds-persist ds-texture ds-texstencil ds-mip \
-    ds-release ds-shadow ds-intz ds-df ds-fetch4 ds-size ds-feedback ds-msaa ds-huge ds-lock; do
+    ds-release ds-shadow ds-intz ds-df ds-fetch4 ds-size ds-rhwclip ds-feedback ds-msaa ds-huge ds-lock; do
+    check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
+  done
+done
+for r in bl64-fresh bl32-fresh; do
+  for row in cl-rects cl-count cl-scissor cl-viewport cl-z cl-stencil cl-mask cl-order cl-level cl-bigz cl-smallz \
+    sc-rect sc-off sc-empty sc-clamp sc-pass sc-break sz-large sz-clear sz-small sr-clear sr-blend sr-toggle \
+    bl-alpha bl-add bl-ops bl-factors bl-both bl-destalpha bl-separate bl-factor bl-stencil bl-off bl-mask bl-prog \
+    bl-pass; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
@@ -179,16 +189,15 @@ done
 # of mtld3d.so's encoder line nor of the core's can't-present lines (the code that ran prints them, not the switch), and
 # no refusal line, or with "crossing" exactly one, the crossing row's, with "textures", "fixed", "targets" or "depth"
 # exactly that launch's refused rows' (texture_refusals, fixed_refusals, targets_refusals, depth_refusals), or with
-# "state" exactly the state rows' (state_refusals: the buffer lock).
+# "state" exactly the state rows' (state_refusals: the buffer lock). The blend launches (DXMTRS C4b-3d3) take no
+# kind: no refusal line.
 refused='is not implemented under runtime.mode = core'
 state_refusals='IDirect3DVertexBuffer9::Lock'
 texture_refusals='IDirect3DTexture9::LockRect (a render-target or depth texture)'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
 targets_refusals='IDirect3DDevice9::SetRenderTarget (index above 0)
 IDirect3DDevice9::CreateRenderTarget (multisampled)'
-depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth-stencil of another size than the target)
-IDirect3DDevice9::Clear (a depth-stencil of another size than the target)
-IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)
+depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)
 IDirect3DDevice9::CreateDepthStencilSurface (multisampled)
 IDirect3DTexture9::LockRect (a render-target or depth texture)'
 runtime() {
@@ -228,6 +237,9 @@ if [ "$RT" = core ]; then
   done
   for r in dp64-fresh dp32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" depth)" ok
+  done
+  for r in bl64-fresh bl32-fresh; do
+    check "$r runtime core" "$(runtime "$G/logs/$r")" ok
   done
 fi
 if [ "${D3D9_BENCH:-}" = 1 ]; then

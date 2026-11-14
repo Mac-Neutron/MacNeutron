@@ -45,8 +45,11 @@
 # sampler). Every lane also runs d3d9_triangle targets (DXMTRS C4b-3d1's 22 rows of render targets other than the back
 # buffer; "targets strict" under core), its rows "targets-<row>"; under core its launch's logs hold exactly its two
 # refused rows' lines (a render target at index 1, a multisampled surface). Every lane also runs d3d9_triangle depth
-# (DXMTRS C4b-3d2's 30 rows of the depth-stencil, on a device with an auto depth-stencil; "depth strict" under core),
-# its rows "depth-<row>"; under core its launch's logs hold exactly its five refused calls' lines.
+# (DXMTRS C4b-3d2's 31 rows of the depth-stencil, on a device with an auto depth-stencil; "depth strict" under core),
+# its rows "depth-<row>"; under core its launch's logs hold exactly its three refused calls' lines. Every lane also
+# runs d3d9_triangle blend (DXMTRS C4b-3d3's 36 rows of partial clears, the scissor test, a depth-stencil of another
+# size, sRGB write and blending, on such a device; "blend strict" under core), its rows "blend-<row>"; under core its
+# launch's logs hold no refusal line.
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -133,19 +136,16 @@ launch() {
 # (C4b2-8); the state launch's exactly its buffer lock's (DXMTRS C4b-3a); the textures launch's exactly its one
 # (DXMTRS C4b-3b: a render-target texture's LockRect), the fixed launch's exactly its one (DXMTRS C4b-3c: a depth
 # texture at a vertex sampler), the targets launch's exactly its two (DXMTRS C4b-3d1: a render target at index 1, a
-# multisampled surface), the depth launch's exactly its five (DXMTRS C4b-3d2: a depth-tested draw and a Z Clear with
-# a depth-stencil of another size than the target, a depth-tested draw sampling the bound depth-stencil, a
-# multisampled depth-stencil surface, a dynamic depth texture's LockRect), one line each; the other launches are not
-# held to it.
+# multisampled surface), the depth launch's exactly its three (DXMTRS C4b-3d2: a depth-tested draw sampling the
+# bound depth-stencil, a multisampled depth-stencil surface, a dynamic depth texture's LockRect), one line each; the
+# blend launch's none (DXMTRS C4b-3d3); the other launches are not held to it.
 refused='is not implemented under runtime.mode = core'
 state_refusals='IDirect3DVertexBuffer9::Lock'
 texture_refusals='IDirect3DTexture9::LockRect (a render-target or depth texture)'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
 targets_refusals='IDirect3DDevice9::SetRenderTarget (index above 0)
 IDirect3DDevice9::CreateRenderTarget (multisampled)'
-depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth-stencil of another size than the target)
-IDirect3DDevice9::Clear (a depth-stencil of another size than the target)
-IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)
+depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)
 IDirect3DDevice9::CreateDepthStencilSurface (multisampled)
 IDirect3DTexture9::LockRect (a render-target or depth texture)'
 refusals_ok() {
@@ -163,6 +163,7 @@ refusals_ok() {
       printf '%s\n' "$set_" | while IFS= read -r n; do
         /usr/bin/grep -rqF "d3d9 core: $n $refused" "$2" || exit 1
       done ;;
+    blend) [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
     *) return 0 ;;
   esac
 }
@@ -215,7 +216,11 @@ check targets "rt-tex rt-read rt-surface rt-viewport rt-big rt-mip rt-cube rt-sw
 launch ours fresh depth 240 depth $strict
 check depth "ds-default ds-test ds-func ds-write ds-zenable ds-clearz ds-clearonly ds-stencil ds-twosided ds-bias
   ds-slope ds-clamp ds-odepth ds-surface ds-nostencil ds-unbound ds-persist ds-texture ds-texstencil ds-mip ds-release
-  ds-shadow ds-intz ds-df ds-fetch4 ds-size ds-feedback ds-msaa ds-huge ds-lock"
+  ds-shadow ds-intz ds-df ds-fetch4 ds-size ds-rhwclip ds-feedback ds-msaa ds-huge ds-lock"
+launch ours fresh blend 240 blend $strict
+check blend "cl-rects cl-count cl-scissor cl-viewport cl-z cl-stencil cl-mask cl-order cl-level cl-bigz cl-smallz
+  sc-rect sc-off sc-empty sc-clamp sc-pass sc-break sz-large sz-clear sz-small sr-clear sr-blend sr-toggle bl-alpha
+  bl-add bl-ops bl-factors bl-both bl-destalpha bl-separate bl-factor bl-stencil bl-off bl-mask bl-prog bl-pass"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi
