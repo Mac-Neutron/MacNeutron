@@ -5078,14 +5078,12 @@ static int meanOf(IDirect3DSurface9 *s, D3DFORMAT f, int x, int y, int n) {
         return -1;
     return sum / (3 * n * n);
 }
-// Whether the adapter offers `type` for a windowed A8R8G8B8 target (CheckDeviceMultiSampleType).
+// Whether the adapter offers `type` for a windowed A8R8G8B8 target (CheckDeviceMultiSampleType), asked of main's
+// IDirect3D9 (the core refuses GetDirect3D, which would hide the 2- and 8-sample cells from it).
+static IDirect3D9 *direct3d;
 static bool offers(D3DMULTISAMPLE_TYPE type) {
-    IDirect3D9 *d3d = nullptr;
-    if (FAILED(dev->GetDirect3D(&d3d))) return false;
-    const bool ok =
-        SUCCEEDED(d3d->CheckDeviceMultiSampleType(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, A8, TRUE, type, nullptr));
-    d3d->Release();
-    return ok;
+    return direct3d && SUCCEEDED(direct3d->CheckDeviceMultiSampleType(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, A8, TRUE,
+                                                                      type, nullptr));
 }
 // What an msaa attempt starts from: mrtStart()'s state, no sample mask, alpha-to-coverage off (ADAPTIVETESS_Y 0, the
 // A2M latch cleared by A2M0, then the numeric point size 1: 1.0 alone keeps the latch), the alpha test off and stage
@@ -5524,6 +5522,7 @@ int main(int argc, char **argv) {
     HWND hwnd = CreateWindowW(L"d3d9_triangle", L"d3d9_triangle", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100,
                               r.right - r.left, r.bottom - r.top, nullptr, nullptr, wc.hInstance, nullptr);
     IDirect3D9 *d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    direct3d = d3d;
     row("module", d3d && GetModuleHandleW(L"mtld3d.dll"), d3d ? "no mtld3d.dll in the process" : "Direct3DCreate9");
     // A dllimport function's address is its import slot's content: d3d9.dll is imported here, so mtld3d redirected it.
     row("imports", (void *)&EnumDisplaySettingsW !=
