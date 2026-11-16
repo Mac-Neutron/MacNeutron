@@ -66,6 +66,14 @@
 // latch), sRGB write, blending, index 1-3 targets, the scissor test, a resolve's destination drawn again; what the
 // creators and read-backs answer. With a 180 s budget. The core refuses a StretchRect other than a whole-surface
 // resolve (ms-desc's depth-stencil one).
+// With "buffers" ("buffers strict" under core; DXMTRS C4c-1): 27 rows "d3d9 buf-<row> ok|FAIL <why>" of vertex and
+// index buffers and the draws that read them, on a device with no depth-stencil: GetDirect3D; Lock and Unlock (pools,
+// usages, DISCARD and NOOVERWRITE, a READONLY read-back, a lock held over draws, a partial relock); DrawPrimitive and
+// DrawIndexedPrimitive (lists, strips, fans, a line list, the start vertex, a stream offset, base vertices of both
+// signs, 16- and 32-bit indices); two streams, a stride of zero, a declared stream with nothing bound (buffer and UP
+// draws), instancing; a vertex shader, the fixed-function stage and a texture over buffers; the answers without
+// buffers and a released buffer. With a 180 s budget. The core refuses a stream offset off four bytes and an attribute
+// crossing the stride (buf-refused).
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -849,8 +857,8 @@ static void shaderRows(IDirect3DDevice9 *d, bool strict) {
 }
 
 // The "state" mode (DXMTRS C4b-3a): the API state and inert objects the core runtime takes, each row starting from
-// reset() and leaving what it set back at D3D9's defaults. Rows whose answer differs by runtime (a lock, a draw the
-// core refuses) take either answer; d3d9-check proves which runtime gave it from the launch's refusal lines.
+// reset() and leaving what it set back at D3D9's defaults. Rows whose answer differs by runtime (a draw the core
+// refuses) take either answer; d3d9-check proves which runtime gave it from the launch's refusal lines.
 static HWND stateHwnd;
 static IDirect3D9 *stateD3d;
 
@@ -1019,14 +1027,16 @@ static bool rowLate() {
     DestroyWindow(w);
     return SUCCEEDED(hr) || fail("second device", hr);
 }
-// lock: a vertex buffer's Lock answers D3D_OK (then unlocked) or D3DERR_NOTAVAILABLE (core: locks are C4c's).
+// lock: a dynamic vertex buffer's Lock(DISCARD) and its Unlock answer D3D_OK in every lane (the core's since DXMTRS
+// C4c-1).
 static bool rowLock() {
     Com<IDirect3DVertexBuffer9> vb;
     CK(CreateVertexBuffer, 64, D3DUSAGE_DYNAMIC, 0, D3DPOOL_DEFAULT, &vb.p, nullptr);
     void *data = nullptr;
     HRESULT hr = vb.p->Lock(0, 0, &data, D3DLOCK_DISCARD);
-    if (hr == D3D_OK) return vb.p->Unlock(), true;
-    return hr == D3DERR_NOTAVAILABLE || fail("Lock", hr);
+    if (hr != D3D_OK) return fail("Lock", hr);
+    hr = vb.p->Unlock();
+    return hr == D3D_OK || fail("Unlock", hr);
 }
 // sb: a state block of everything captures a bound texture and stream; Apply after unbinding binds them again; a
 // recorded block applies a transform; both answer GetDevice.
@@ -1096,7 +1106,7 @@ static bool texturedQuad(bool stageOn) {
     Com<IDirect3DTexture9> t;
     CK(CreateTexture, 4, 4, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &t.p, nullptr);
     D3DLOCKED_RECT lr = {};
-    if (SUCCEEDED(t.p->LockRect(0, &lr, nullptr, 0))) {  // the core refuses texture locks until C4b-3b
+    if (SUCCEEDED(t.p->LockRect(0, &lr, nullptr, 0))) {
         for (int y = 0; y < 4; y++)
             for (int x = 0; x < 4; x++) ((DWORD *)((BYTE *)lr.pBits + y * lr.Pitch))[x] = D3DCOLOR_XRGB(0, 255, 0);
         t.p->UnlockRect(0);
@@ -5525,6 +5535,688 @@ static void msaaRows(IDirect3DDevice9 *d, bool strict) {
     if (rtSurf) rtSurf->Release();
 }
 
+// --- The "buffers" mode (DXMTRS C4c-1): vertex and index buffers and the draws that read them, on the state mode's
+// plain device (no depth-stencil). Vertices are pretransformed XYZRHW|DIFFUSE (RV) and pixel-aligned unless said: "left"
+// is the quad (16,64)-(112,192), probed at (64,128), "right" (144,64)-(240,192), probed at (192,128), and every probe
+// sits 8 pixels or more inside its shape. Buffers are default-pool, usage 0, unless said. Every frame clears to blue,
+// so black is a drawn colour. A row that writes a buffer between draws makes and fills it inside its attempt, so a
+// retried frame (mtld3d leaves a draw out while its pipeline builds) starts again from the same bytes.
+static const DWORD FVF_RV = D3DFVF_XYZRHW | D3DFVF_DIFFUSE;
+// The quad (x0,y0)-(x1,y1) as a six-vertex triangle list, both triangles clockwise: (x1,y0) (x0,y1) (x0,y0), then
+// (x1,y0) (x1,y1) (x0,y1). The first alone holds the corner (x0,y0), its vertex 2; the second alone (x1,y1), vertex 4.
+static void listRhw(RV *v, float x0, float y0, float x1, float y1, DWORD c) {
+    v[0] = {x1, y0, 0.5f, 1, c}, v[1] = {x0, y1, 0.5f, 1, c}, v[2] = {x0, y0, 0.5f, 1, c};
+    v[3] = {x1, y0, 0.5f, 1, c}, v[4] = {x1, y1, 0.5f, 1, c}, v[5] = {x0, y1, 0.5f, 1, c};
+}
+static void listLeft(RV *v, DWORD c) { listRhw(v, 16, 64, 112, 192, c); }
+static void listRight(RV *v, DWORD c) { listRhw(v, 144, 64, 240, 192, c); }
+// A triangle with its top edge (x0,y0)-(x1,y0) and its apex at ((x0 + x1) / 2, y1), clockwise: halfway down it spans
+// the middle half of its width (the left quad's (16,64,112,192) spans 40-88 at y 128).
+static void triRhw(RV *v, float x0, float y0, float x1, float y1, DWORD c) {
+    v[0] = {x0, y0, 0.5f, 1, c}, v[1] = {x1, y0, 0.5f, 1, c}, v[2] = {(x0 + x1) / 2, y1, 0.5f, 1, c};
+}
+// n bytes of `data` into the buffer `b` from byte `off`, through Lock(flags) and Unlock.
+template <class B> static bool put(B *b, UINT off, const void *data, UINT n, DWORD flags = 0) {
+    void *p = nullptr;
+    HRESULT hr = b->Lock(off, n, &p, flags);
+    if (FAILED(hr)) return fail("Lock", hr);
+    memcpy(p, data, n);
+    hr = b->Unlock();
+    return SUCCEEDED(hr) || fail("Unlock", hr);
+}
+// A vertex buffer (usage 0) of n bytes in `pool` holding `data`.
+static bool mkVb(Com<IDirect3DVertexBuffer9> &b, const void *data, UINT n, D3DPOOL pool = D3DPOOL_DEFAULT) {
+    CK(CreateVertexBuffer, n, 0, 0, pool, &b.p, nullptr);
+    return put(b.p, 0, data, n);
+}
+static bool mkIb(Com<IDirect3DIndexBuffer9> &b, const void *data, UINT n, D3DFORMAT f, D3DPOOL pool = D3DPOOL_DEFAULT) {
+    CK(CreateIndexBuffer, n, 0, f, pool, &b.p, nullptr);
+    return put(b.p, 0, data, n);
+}
+// `b` at stream 0 as RV vertices from byte `off`.
+static bool rvAt(IDirect3DVertexBuffer9 *b, UINT off = 0) {
+    CK(SetFVF, FVF_RV);
+    CK(SetStreamSource, 0, b, off, sizeof(RV));
+    return true;
+}
+static bool drawList(UINT start = 0, UINT count = 2) {
+    CK(DrawPrimitive, D3DPT_TRIANGLELIST, start, count);
+    return true;
+}
+// Whether a call answered `expect`; `why` names it otherwise.
+static bool answer(const char *call, HRESULT hr, HRESULT expect) { return hr == expect || fail(call, hr); }
+// What a buffers row starts from, beside reset(), which restores no stream, frequency or index state: streams 0 and 1
+// unbound at frequency 1 and no index buffer. Each row sets its own declaration or FVF.
+static bool bufStart() {
+    for (UINT s = 0; s < 2; s++) {
+        CK(SetStreamSource, s, nullptr, 0, 0);
+        CK(SetStreamSourceFreq, s, 1);
+    }
+    CK(SetIndices, nullptr);
+    return true;
+}
+
+// buf-d3d: GetDirect3D answers main's IDirect3D9 with one reference added (read through AddRef and Release); a null
+// out pointer is D3DERR_INVALIDCALL.
+static ULONG refs(IUnknown *u) { return u->AddRef(), u->Release(); }
+static bool rowBufD3d() {
+    Com<IDirect3D9> d3d;
+    const ULONG before = refs(direct3d);
+    CK(GetDirect3D, &d3d.p);
+    const ULONG after = refs(direct3d);
+    if (d3d.p != direct3d || after != before + 1)
+        return snprintf(why, sizeof why, "GetDirect3D %p (main's %p), references %lu then %lu", (void *)d3d.p,
+                        (void *)direct3d, (unsigned long)before, (unsigned long)after),
+               false;
+    return answer("GetDirect3D (null)", dev->GetDirect3D(nullptr), D3DERR_INVALIDCALL);
+}
+// The lock cells of buf-lock on the 64-byte buffer `b`: Lock(0, 0) D3D_OK with a pointer; the bytes written read back
+// under a READONLY lock after Unlock; a Lock at an offset past the length D3DERR_INVALIDCALL; two locks then two
+// unlocks each D3D_OK.
+template <class B> static bool lockCells(B *b) {
+    BYTE *p = nullptr, *q = nullptr;
+    HRESULT hr = b->Lock(0, 0, (void **)&p, 0);
+    if (hr != D3D_OK || !p) return fail("Lock", hr);
+    for (int i = 0; i < 64; i++) p[i] = (BYTE)(i * 7 + 3);
+    if ((hr = b->Unlock()) != D3D_OK) return fail("Unlock", hr);
+    if ((hr = b->Lock(0, 0, (void **)&q, D3DLOCK_READONLY)) != D3D_OK || !q) return fail("Lock (READONLY)", hr);
+    int bad = -1;
+    for (int i = 0; i < 64 && bad < 0; i++)
+        if (q[i] != (BYTE)(i * 7 + 3)) bad = i;
+    if ((hr = b->Unlock()) != D3D_OK) return fail("Unlock (READONLY)", hr);
+    if (bad >= 0) return snprintf(why, sizeof why, "the READONLY lock reads byte %d otherwise", bad), false;
+    hr = b->Lock(128, 4, (void **)&p, 0);
+    if (SUCCEEDED(hr)) b->Unlock();
+    if (hr != D3DERR_INVALIDCALL) return fail("Lock (offset 128 of 64 bytes)", hr);
+    if ((hr = b->Lock(0, 0, (void **)&p, 0)) != D3D_OK) return fail("Lock (the first of two)", hr);
+    if ((hr = b->Lock(0, 0, (void **)&q, 0)) != D3D_OK) return b->Unlock(), fail("Lock (the second of two)", hr);
+    if ((hr = b->Unlock()) != D3D_OK) return b->Unlock(), fail("Unlock (the first of two)", hr);
+    return answer("Unlock (the second of two)", b->Unlock(), D3D_OK);
+}
+// buf-lock: lockCells over a 64-byte vertex buffer (FVF XYZRHW|DIFFUSE) and a 64-byte 16-bit index buffer; GetDesc
+// says the size, pool, usage and FVF or format given.
+static bool rowBufLock() {
+    Com<IDirect3DVertexBuffer9> vb;
+    Com<IDirect3DIndexBuffer9> ib;
+    CK(CreateVertexBuffer, 64, 0, FVF_RV, D3DPOOL_DEFAULT, &vb.p, nullptr);
+    CK(CreateIndexBuffer, 64, 0, D3DFMT_INDEX16, D3DPOOL_DEFAULT, &ib.p, nullptr);
+    if (!lockCells(vb.p) || !lockCells(ib.p)) return false;
+    D3DVERTEXBUFFER_DESC v = {};
+    D3DINDEXBUFFER_DESC i = {};
+    HRESULT hr = vb.p->GetDesc(&v);
+    if (FAILED(hr)) return fail("GetDesc (vertex buffer)", hr);
+    if (FAILED(hr = ib.p->GetDesc(&i))) return fail("GetDesc (index buffer)", hr);
+    if (v.Size != 64 || v.Pool != D3DPOOL_DEFAULT || v.Usage || v.FVF != FVF_RV)
+        return snprintf(why, sizeof why, "vertex buffer size %u pool %d usage %lx fvf %lx", v.Size, (int)v.Pool,
+                        (unsigned long)v.Usage, (unsigned long)v.FVF),
+               false;
+    if (i.Size != 64 || i.Pool != D3DPOOL_DEFAULT || i.Usage || i.Format != D3DFMT_INDEX16)
+        return snprintf(why, sizeof why, "index buffer size %u pool %d usage %lx format %d", i.Size, (int)i.Pool,
+                        (unsigned long)i.Usage, (int)i.Format),
+               false;
+    return true;
+}
+// buf-draw: a red quad at the left, DrawPrimitive(TRIANGLELIST, 0, 2): left red, right blue.
+static bool rowBufDraw() {
+    RV q[6];
+    listLeft(q, TRED);
+    Com<IDirect3DVertexBuffer9> vb;
+    if (!mkVb(vb, q, sizeof q)) return false;
+    const Px px[] = {{64, 128, TRED}, {192, 128, BLUE}};
+    return frames(BLUE, px, 2, [&] { return rvAt(vb.p) && drawList(); });
+}
+// One buffer of a red triangle inside the left quad over (64,128) (vertices 0-2), then a green quad at the right
+// (3-8), at stream offset `off`, DrawPrimitive(TRIANGLELIST, start, 2): right green, left blue.
+static bool startRow(UINT off, UINT start) {
+    RV v[9];
+    triRhw(v, 16, 64, 112, 192, TRED), listRight(v + 3, TGRN);
+    Com<IDirect3DVertexBuffer9> vb;
+    if (!mkVb(vb, v, sizeof v)) return false;
+    const Px px[] = {{192, 128, TGRN}, {64, 128, BLUE}};
+    return frames(BLUE, px, 2, [&] { return rvAt(vb.p, off) && drawList(start); });
+}
+// buf-start: start vertex 3 (from vertex 0 the triangle would cover (64,128)).
+static bool rowBufStart() { return startRow(0, 3); }
+// buf-offset: OffsetInBytes 60 (three vertices) and start 0: the same pixels.
+static bool rowBufOffset() { return startRow(60, 0); }
+// buf-strip: a four-vertex strip at the left, red; then vertices 4-5 of the same buffer as a line list, one green
+// horizontal line at y = 200 from x = 16 to 240: (128,200), the pixel centre row the line runs through, green, (128,202)
+// blue.
+static bool rowBufStrip() {
+    RV v[6];
+    quadRhw(v, 16, 64, 112, 192, TRED);
+    v[4] = {16, 200, 0.5f, 1, TGRN}, v[5] = {240, 200, 0.5f, 1, TGRN};
+    Com<IDirect3DVertexBuffer9> vb;
+    if (!mkVb(vb, v, sizeof v)) return false;
+    const Px px[] = {{64, 128, TRED}, {128, 200, TGRN}, {128, 202, BLUE}};
+    return frames(BLUE, px, 3, [&] {
+        if (!rvAt(vb.p)) return false;
+        CK(DrawPrimitive, D3DPT_TRIANGLESTRIP, 0, 2);
+        CK(DrawPrimitive, D3DPT_LINELIST, 4, 1);
+        return true;
+    });
+}
+// buf-fan: five vertices, 1-4 the right quad as a red fan, 0 at the left (16,128); DrawPrimitive(TRIANGLEFAN, 1, 2):
+// right red, left blue (a fan from vertex 0 would cover (64,128)).
+static bool rowBufFan() {
+    const DWORD r = TRED;
+    const RV v[5] = {{16, 128, 0.5f, 1, r}, {144, 64, 0.5f, 1, r}, {240, 64, 0.5f, 1, r}, {240, 192, 0.5f, 1, r},
+                     {144, 192, 0.5f, 1, r}};
+    Com<IDirect3DVertexBuffer9> vb;
+    if (!mkVb(vb, v, sizeof v)) return false;
+    const Px px[] = {{192, 128, TRED}, {64, 128, BLUE}};
+    return frames(BLUE, px, 2, [&] {
+        if (!rvAt(vb.p)) return false;
+        CK(DrawPrimitive, D3DPT_TRIANGLEFAN, 1, 2);
+        return true;
+    });
+}
+// buf-indexed's buffers in `pool`: four vertices (the left quad, red, as a strip's) and twelve indices of format f, six
+// zeros (two degenerate triangles) then the quad's 0 1 2 2 1 3.
+static bool indexedPair(Com<IDirect3DVertexBuffer9> &vb, Com<IDirect3DIndexBuffer9> &ib, D3DFORMAT f,
+                        D3DPOOL pool = D3DPOOL_DEFAULT) {
+    static const WORD i16[12] = {0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 1, 3};
+    DWORD i32[12];
+    for (int i = 0; i < 12; i++) i32[i] = i16[i];
+    RV q[4];
+    quadRhw(q, 16, 64, 112, 192, TRED);
+    return mkVb(vb, q, sizeof q, pool) &&
+           (f == D3DFMT_INDEX16 ? mkIb(ib, i16, sizeof i16, f, pool) : mkIb(ib, i32, sizeof i32, f, pool));
+}
+// DrawIndexedPrimitive(TRIANGLELIST, 0, 0, 4, 6, 2) of them: left red (from index 0 nothing is drawn).
+static bool indexedDraw(IDirect3DVertexBuffer9 *vb, IDirect3DIndexBuffer9 *ib) {
+    if (!rvAt(vb)) return false;
+    CK(SetIndices, ib);
+    CK(DrawIndexedPrimitive, D3DPT_TRIANGLELIST, 0, 0, 4, 6, 2);
+    return true;
+}
+static bool indexedRow(D3DFORMAT f) {
+    Com<IDirect3DVertexBuffer9> vb;
+    Com<IDirect3DIndexBuffer9> ib;
+    if (!indexedPair(vb, ib, f)) return false;
+    const Px px[] = {{64, 128, TRED}};
+    return frames(BLUE, px, 1, [&] { return indexedDraw(vb.p, ib.p); });
+}
+// buf-indexed: 16-bit indices.
+static bool rowBufIndexed() { return indexedRow(D3DFMT_INDEX16); }
+// buf-index32: 32-bit indices.
+static bool rowBufIndex32() { return indexedRow(D3DFMT_INDEX32); }
+// buf-base: eight vertices, a red quad at the left (0-3) then a green one at the right (4-7), as strips'; one index
+// buffer holding 0 1 2 2 1 3, drawn at base vertex 4: right green, left blue. In a second frame the same buffer
+// rewritten 4 5 6 6 5 7 and drawn at base vertex -4 (MinVertexIndex 4): left red, right blue.
+static bool rowBufBase() {
+    RV v[8];
+    quadRhw(v, 16, 64, 112, 192, TRED), quadRhw(v + 4, 144, 64, 240, 192, TGRN);
+    const WORD lo[6] = {0, 1, 2, 2, 1, 3}, hi[6] = {4, 5, 6, 6, 5, 7};
+    Com<IDirect3DVertexBuffer9> vb;
+    Com<IDirect3DIndexBuffer9> ib;
+    if (!mkVb(vb, v, sizeof v) || !mkIb(ib, lo, sizeof lo, D3DFMT_INDEX16)) return false;
+    const Px right[] = {{192, 128, TGRN}, {64, 128, BLUE}}, left[] = {{64, 128, TRED}, {192, 128, BLUE}};
+    const auto draw = [&](const WORD *idx, INT base, UINT min) {
+        if (!put(ib.p, 0, idx, sizeof lo) || !rvAt(vb.p)) return false;
+        CK(SetIndices, ib.p);
+        CK(DrawIndexedPrimitive, D3DPT_TRIANGLELIST, base, min, 4, 0, 2);
+        return true;
+    };
+    return frames(BLUE, right, 2, [&] { return draw(lo, 4, 0); }) &&
+           frames(BLUE, left, 2, [&] { return draw(hi, -4, 4); });
+}
+// buf-ifan: nine vertices: 0-3 a green quad at the bottom, (64,252) (80,204) (176,204) (128,252), whose vertices 1-3
+// are a triangle over (128,224); 4 at the left, (16,128); 5-8 the right quad as a red fan. Indices 0 0 1 2 3 4 and
+// DrawIndexedPrimitive(TRIANGLEFAN, 4, 0, 9, 2, 2): right red, left and bottom blue. Then indices 0 0 9 10 11 12 at base
+// vertex -4 (MinVertexIndex 9, 4 vertices): the same pixels (a base applied twice fetches vertices 1-4: the bottom
+// drawn); and those indices again from a 32-bit index buffer: the same.
+static bool rowBufIfan() {
+    const DWORD g = TGRN, r = TRED;
+    const RV v[9] = {{64, 252, 0.5f, 1, g},  {80, 204, 0.5f, 1, g},  {176, 204, 0.5f, 1, g},
+                     {128, 252, 0.5f, 1, g}, {16, 128, 0.5f, 1, g},  {144, 64, 0.5f, 1, r},
+                     {240, 64, 0.5f, 1, r},  {240, 192, 0.5f, 1, r}, {144, 192, 0.5f, 1, r}};
+    const WORD i1[6] = {0, 0, 1, 2, 3, 4}, i2[6] = {0, 0, 9, 10, 11, 12};
+    const DWORD i3[6] = {0, 0, 9, 10, 11, 12};
+    Com<IDirect3DVertexBuffer9> vb;
+    Com<IDirect3DIndexBuffer9> a, b, c;
+    if (!mkVb(vb, v, sizeof v) || !mkIb(a, i1, sizeof i1, D3DFMT_INDEX16) || !mkIb(b, i2, sizeof i2, D3DFMT_INDEX16) ||
+        !mkIb(c, i3, sizeof i3, D3DFMT_INDEX32))
+        return false;
+    const Px px[] = {{192, 128, TRED}, {64, 128, BLUE}, {128, 224, BLUE}};
+    const auto fan = [&](IDirect3DIndexBuffer9 *ib, INT base, UINT min, UINT n) {
+        return frames(BLUE, px, 3, [&] {
+            if (!rvAt(vb.p)) return false;
+            CK(SetIndices, ib);
+            CK(DrawIndexedPrimitive, D3DPT_TRIANGLEFAN, base, min, n, 2, 2);
+            return true;
+        });
+    };
+    return fan(a.p, 4, 0, 9) && fan(b.p, -4, 9, 4) && fan(c.p, -4, 9, 4);
+}
+// buf-managed: buf-indexed's buffers in the managed pool: left red; again after a READONLY Lock and Unlock of the
+// vertex buffer: left red. A SYSTEMMEM-pool buffer of the left quad, DrawPrimitive: D3D_OK and left red (what a
+// correct D3D9 draws; the control decides).
+static bool rowBufManaged() {
+    Com<IDirect3DVertexBuffer9> vb, sys;
+    Com<IDirect3DIndexBuffer9> ib;
+    RV q[6];
+    listLeft(q, TRED);
+    if (!indexedPair(vb, ib, D3DFMT_INDEX16, D3DPOOL_MANAGED) || !mkVb(sys, q, sizeof q, D3DPOOL_SYSTEMMEM))
+        return false;
+    const Px px[] = {{64, 128, TRED}};
+    return frames(BLUE, px, 1, [&] { return indexedDraw(vb.p, ib.p); }) && frames(BLUE, px, 1, [&] {
+               void *p = nullptr;
+               HRESULT hr = vb.p->Lock(0, 0, &p, D3DLOCK_READONLY);
+               if (FAILED(hr)) return fail("Lock (READONLY)", hr);
+               if (FAILED(hr = vb.p->Unlock())) return fail("Unlock (READONLY)", hr);
+               return indexedDraw(vb.p, ib.p);
+           }) && frames(BLUE, px, 1, [&] {
+               return rvAt(sys.p) && answer("DrawPrimitive (SYSTEMMEM)", dev->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 2),
+                                            D3D_OK);
+           });
+}
+// buf-dynamic: a DYNAMIC|WRITEONLY buffer of nine vertices: Lock(DISCARD) of vertices 0-2, a red triangle inside the
+// left quad, Unlock, draw; Lock of vertices 3-5 (NOOVERWRITE), a green triangle inside the right quad, Unlock,
+// DrawPrimitive from 3; Lock of vertices 3-5 (NOOVERWRITE) again, a white triangle over (128,224) written into vertices
+// 6-8, past the announced window, Unlock, DrawPrimitive from 6: left red, right green, (128,224) white (mtld3d maps
+// such a buffer directly, so every byte written through the pointer is drawn: DXMTRS C4c-1's ruling 1).
+static bool rowBufDynamic() {
+    RV t[9];
+    triRhw(t, 16, 64, 112, 192, TRED), triRhw(t + 3, 144, 64, 240, 192, TGRN), triRhw(t + 6, 80, 204, 176, 252, TWHT);
+    const Px px[] = {{64, 128, TRED}, {192, 128, TGRN}, {128, 224, TWHT}};
+    return frames(BLUE, px, 3, [&] {
+        Com<IDirect3DVertexBuffer9> vb;
+        CK(CreateVertexBuffer, sizeof t, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &vb.p, nullptr);
+        if (!put(vb.p, 0, t, 3 * sizeof *t, D3DLOCK_DISCARD) || !rvAt(vb.p) || !drawList(0, 1) ||
+            !put(vb.p, 3 * sizeof *t, t + 3, 3 * sizeof *t, D3DLOCK_NOOVERWRITE) || !drawList(3, 1))
+            return false;
+        void *p = nullptr;
+        HRESULT hr = vb.p->Lock(3 * sizeof *t, 3 * sizeof *t, &p, D3DLOCK_NOOVERWRITE);
+        if (FAILED(hr)) return fail("Lock (NOOVERWRITE, vertices 3-5)", hr);
+        memcpy((RV *)p + 3, t + 6, 3 * sizeof *t);
+        if (FAILED(hr = vb.p->Unlock())) return fail("Unlock", hr);
+        return drawList(6, 1);
+    });
+}
+// buf-order: a red quad at the left drawn; the same six vertices locked (flags 0) and overwritten with a green quad at
+// the right, drawn, no Clear between: left red (the first draw kept its bytes), right green.
+static bool rowBufOrder() {
+    RV l[6], r[6];
+    listLeft(l, TRED), listRight(r, TGRN);
+    const Px px[] = {{64, 128, TRED}, {192, 128, TGRN}};
+    return frames(BLUE, px, 2, [&] {
+        Com<IDirect3DVertexBuffer9> vb;
+        return mkVb(vb, l, sizeof l) && rvAt(vb.p) && drawList() && put(vb.p, 0, r, sizeof r) && drawList();
+    });
+}
+// buf-discard: a DYNAMIC|WRITEONLY buffer: Lock(DISCARD), a red quad at the left, draw; Lock(DISCARD), a green quad at
+// the right, draw: left red, right green.
+static bool rowBufDiscard() {
+    RV l[6], r[6];
+    listLeft(l, TRED), listRight(r, TGRN);
+    const Px px[] = {{64, 128, TRED}, {192, 128, TGRN}};
+    return frames(BLUE, px, 2, [&] {
+        Com<IDirect3DVertexBuffer9> vb;
+        CK(CreateVertexBuffer, sizeof l, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &vb.p, nullptr);
+        return put(vb.p, 0, l, sizeof l, D3DLOCK_DISCARD) && rvAt(vb.p) && drawList() &&
+               put(vb.p, 0, r, sizeof r, D3DLOCK_DISCARD) && drawList();
+    });
+}
+// buf-held: Lock, a red quad at the left written, drawn while locked; a green quad at the right written through the
+// same pointer over the same vertices, drawn again, no Clear between; Unlock: left red (the first draw's bytes), right
+// green (the bytes written after it).
+static bool rowBufHeld() {
+    RV l[6], r[6];
+    listLeft(l, TRED), listRight(r, TGRN);
+    const Px px[] = {{64, 128, TRED}, {192, 128, TGRN}};
+    return frames(BLUE, px, 2, [&] {
+        Com<IDirect3DVertexBuffer9> vb;
+        CK(CreateVertexBuffer, sizeof l, 0, 0, D3DPOOL_DEFAULT, &vb.p, nullptr);
+        void *p = nullptr;
+        HRESULT hr = vb.p->Lock(0, 0, &p, 0);
+        if (FAILED(hr)) return fail("Lock", hr);
+        memcpy(p, l, sizeof l);
+        bool ok = rvAt(vb.p) && drawList();
+        if (ok) memcpy(p, r, sizeof r), ok = drawList();
+        if (FAILED(hr = vb.p->Unlock())) return fail("Unlock", hr);
+        return ok;
+    });
+}
+// buf-relock: a white left quad (listRhw's) drawn once and read back white; then Lock(40, 20), vertex 2 alone, rewrites
+// its colour red; cleared and drawn again: 8 inside vertex 2's corner (16,64), at (24,72), the first triangle is red
+// 255 with green below 128 (37 interpolated), and 8 inside the second triangle's corner (112,192), at (104,184), which
+// no red vertex touches, white.
+static bool rowBufRelock() {
+    return until([&] {
+        RV q[6];
+        listLeft(q, TWHT);
+        RV v2 = q[2];
+        v2.color = TRED;
+        Com<IDirect3DVertexBuffer9> vb;
+        const auto drawn = [&] { return clearTo(BLUE) && scene([&] { return rvAt(vb.p) && drawList(); }); };
+        if (!mkVb(vb, q, sizeof q) || !drawn() || !rtHas("the first draw", rtSurf, 256, X8, {{64, 128, TWHT}}) ||
+            !put(vb.p, 2 * sizeof(RV), &v2, sizeof v2) || !drawn())
+            return false;
+        return readTarget(rtSurf, 256, 256, X8, [&](const BYTE *b, int pitch) {
+            const DWORD c = texel(b, pitch, 24, 72);
+            return want("(24,72)", c, TRED, 0xff0000) && inBand("(24,72)'s green", (int)(c >> 8 & 0xff), 0, 127) &&
+                   want("(104,184)", texel(b, pitch, 104, 184), TWHT);
+        });
+    });
+}
+// POSITIONT float4 at stream 0 and COLOR0 D3DCOLOR at stream 1, under the fixed-function stage: the left quad's six
+// positions (listRhw's) at stream 0, `n` colours at stream 1 from byte `off` with `stride`, drawn as a list.
+static bool twoStreams(const DWORD *c, UINT n, UINT off, UINT stride, const Px *px, int np) {
+    static const D3DVERTEXELEMENT9 decl[] = {
+        {0, 0, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITIONT, 0},
+        {1, 0, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0}, D3DDECL_END()};
+    struct P4 { float x, y, z, rhw; } p4[6];
+    RV q[6];
+    listLeft(q, 0);
+    for (int i = 0; i < 6; i++) p4[i] = {q[i].x, q[i].y, q[i].z, q[i].rhw};
+    Prog p;
+    Com<IDirect3DVertexBuffer9> pos, col;
+    if (!make(p, decl, nullptr, nullptr) || !mkVb(pos, p4, sizeof p4) || !mkVb(col, c, n * 4)) return false;
+    return frames(BLUE, px, np, [&] {
+        if (!use(p)) return false;
+        CK(SetStreamSource, 0, pos.p, 0, sizeof *p4);
+        CK(SetStreamSource, 1, col.p, off, stride);
+        return drawList();
+    });
+}
+// buf-streams: stream 1 four red entries then six green, bound at an offset of 16 bytes: the left quad green.
+static bool rowBufStreams() {
+    const DWORD r = TRED, g = TGRN, c[10] = {r, r, r, r, g, g, g, g, g, g};
+    const Px px[] = {{64, 128, TGRN}};
+    return twoStreams(c, 10, 16, 4, px, 1);
+}
+// buf-zero-stride: stream 1 green, red, white, black, red, white at offset 0 and stride 0, every vertex reading the
+// first: 8 inside the two corners vertex 0 does not hold, (24,72) (vertex 2's) and (104,184) (vertex 4's), both green.
+static bool rowBufZeroStride() {
+    const DWORD c[6] = {TGRN, TRED, TWHT, 0xff000000, TRED, TWHT};
+    const Px px[] = {{24, 72, TGRN}, {104, 184, TGRN}};
+    return twoStreams(c, 6, 0, 0, px, 2);
+}
+// vs_1_1 { dcl_position v0; dcl_texcoord0 v1; mov oPos, v0; mov oD0, v1.wwww }.
+static const DWORD VS11_V1W[] = {
+    0xfffe0101,                         // vs_1_1
+    0x0000001f, 0x80000000, 0x900f0000, // dcl_position v0
+    0x0000001f, 0x80000005, 0x900f0001, // dcl_texcoord0 v1
+    0x00000001, 0xc00f0000, 0x90e40000, // mov oPos, v0
+    0x00000001, 0xd00f0000, 0x90ff0001, // mov oD0, v1.wwww
+    0x0000ffff};
+// POSITION float3 at stream 0 and TEXCOORD0 at stream 1 as float3 (it reads w = 1 with nothing bound) or as D3DCOLOR (w
+// 0).
+static const D3DVERTEXELEMENT9 DECL_NULL_F3[] = {
+    {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+    {1, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0}, D3DDECL_END()};
+static const D3DVERTEXELEMENT9 DECL_NULL_C[] = {
+    {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+    {1, 0, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0}, D3DDECL_END()};
+// The left quad in clip space under `decl`, VS11_V1W and ps_1_1's colour, nothing bound at stream 1, from a buffer at
+// stream 0 or by DrawPrimitiveUP: (64,128) `want`.
+static bool nullCell(const D3DVERTEXELEMENT9 *decl, DWORD want, bool up) {
+    Prog p;
+    V3 q[4];
+    quad(q, -0.875f, -0.5f, -0.125f, 0.5f);
+    Com<IDirect3DVertexBuffer9> vb;
+    if (!make(p, decl, VS11_V1W, PS11_V0) || (!up && !mkVb(vb, q, sizeof q))) return false;
+    const Px px[] = {{64, 128, want}};
+    return frames(BLUE, px, 1, [&] {
+        if (!use(p)) return false;
+        if (up) return strip(q);
+        CK(SetStreamSource, 0, vb.p, 0, sizeof *q);
+        CK(DrawPrimitive, D3DPT_TRIANGLESTRIP, 0, 2);
+        return true;
+    });
+}
+// buf-null: nullCell's float3 element white (what mtld3d gives: the control decides) and its D3DCOLOR one black, from a
+// buffer. Then Wine's test_null_stream shape: the fixed-function stage over POSITIONT and COLOR0 at stream 0 and a
+// NORMAL at stream 1, which a pretransformed draw does not consume, nothing bound there: D3D_OK and the left quad red.
+static bool rowBufNull() {
+    static const D3DVERTEXELEMENT9 decl[] = {
+        {0, 0, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITIONT, 0},
+        {0, 16, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
+        {1, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL, 0}, D3DDECL_END()};
+    if (!nullCell(DECL_NULL_F3, TWHT, false) || !nullCell(DECL_NULL_C, 0x000000, false)) return false;
+    RV q[6];
+    listLeft(q, TRED);
+    Prog p;
+    Com<IDirect3DVertexBuffer9> vb;
+    if (!make(p, decl, nullptr, nullptr) || !mkVb(vb, q, sizeof q)) return false;
+    const Px px[] = {{64, 128, TRED}};
+    return frames(BLUE, px, 1, [&] {
+        if (!use(p)) return false;
+        CK(SetStreamSource, 0, vb.p, 0, sizeof(RV));
+        return answer("DrawPrimitive (a stream the stage does not consume)", dev->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 2),
+                      D3D_OK);
+    });
+}
+// buf-null-up: buf-null's first two cells by DrawPrimitiveUP: white (the control decides), black.
+static bool rowBufNullUp() { return nullCell(DECL_NULL_F3, TWHT, true) && nullCell(DECL_NULL_C, 0x000000, true); }
+// vs_3_0 { dcl_position v0; dcl_texcoord0 v1; dcl_position o0; mov r0, v0; add r0.x, r0.x, v1.x; mov o0, r0 }: the
+// position moved right by v1.x (a float1 element reads w = 1, so x alone is added).
+static const DWORD VS30_SHIFT[] = {
+    0xfffe0300,                                     // vs_3_0
+    0x0200001f, 0x80000000, 0x900f0000,             // dcl_position v0
+    0x0200001f, 0x80000005, 0x900f0001,             // dcl_texcoord0 v1
+    0x0200001f, 0x80000000, 0xe00f0000,             // dcl_position o0
+    0x02000001, 0x800f0000, 0x90e40000,             // mov r0, v0
+    0x03000002, 0x80010000, 0x80000000, 0x90000001, // add r0.x, r0.x, v1.x
+    0x02000001, 0xe00f0000, 0x80e40000,             // mov o0, r0
+    0x0000ffff};
+static const DWORD PS30_GREEN[] = {
+    0xffff0300,                                                             // ps_3_0
+    0x05000051, 0xa00f0000, 0x00000000, 0x3f800000, 0x00000000, 0x3f800000, // def c0, 0, 1, 0, 1
+    0x02000001, 0x800f0800, 0xa0e40000,                                     // mov oC0, c0
+    0x0000ffff};
+// buf-instanced: VS30_SHIFT and PS30_GREEN; stream 0 a quad over pixels (16,104)-(64,152) (four vertices, six indices)
+// at INDEXEDDATA | 3, stream 1 three x offsets of 0, 80 and 160 pixels (FLOAT1 TEXCOORD0 in clip units: 0, 0.625,
+// 1.25) at INSTANCEDATA | 1: DrawIndexedPrimitive draws three quads, (40,128) (120,128) (200,128) green; DrawPrimitive
+// of the same quad as a six-vertex list draws one, at the first offset: (40,128) green, (120,128) and (200,128) blue
+// (non-indexed draws never instance). With stream 1's word INSTANCEDATA | 0 (a constant stream) DrawIndexedPrimitive
+// draws every instance at the first offset: the same pixels.
+static bool rowBufInstanced() {
+    static const D3DVERTEXELEMENT9 decl[] = {
+        {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {1, 0, D3DDECLTYPE_FLOAT1, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0}, D3DDECL_END()};
+    V3 q[4];
+    quad(q, -0.875f, -0.1875f, -0.5f, 0.1875f);
+    const V3 l[6] = {q[0], q[1], q[2], q[2], q[1], q[3]};
+    const WORD idx[6] = {0, 1, 2, 2, 1, 3};
+    const float dx[3] = {0, 0.625f, 1.25f};
+    Prog p;
+    Com<IDirect3DVertexBuffer9> quadVb, listVb, offsets;
+    Com<IDirect3DIndexBuffer9> ib;
+    if (!make(p, decl, VS30_SHIFT, PS30_GREEN) || !mkVb(quadVb, q, sizeof q) || !mkVb(listVb, l, sizeof l) ||
+        !mkVb(offsets, dx, sizeof dx) || !mkIb(ib, idx, sizeof idx, D3DFMT_INDEX16))
+        return false;
+    const Px three[] = {{40, 128, TGRN}, {120, 128, TGRN}, {200, 128, TGRN}},
+             one[] = {{40, 128, TGRN}, {120, 128, BLUE}, {200, 128, BLUE}};
+    const auto draw = [&](IDirect3DVertexBuffer9 *v, UINT word, bool indexed) {
+        if (!use(p)) return false;
+        CK(SetStreamSource, 0, v, 0, sizeof(V3));
+        CK(SetStreamSource, 1, offsets.p, 0, sizeof(float));
+        CK(SetStreamSourceFreq, 0, D3DSTREAMSOURCE_INDEXEDDATA | 3);
+        CK(SetStreamSourceFreq, 1, word);
+        CK(SetIndices, ib.p);
+        if (!indexed) return drawList();
+        CK(DrawIndexedPrimitive, D3DPT_TRIANGLELIST, 0, 0, 4, 0, 2);
+        return true;
+    };
+    return frames(BLUE, three, 3, [&] { return draw(quadVb.p, D3DSTREAMSOURCE_INSTANCEDATA | 1, true); }) &&
+           frames(BLUE, one, 3, [&] { return draw(listVb.p, D3DSTREAMSOURCE_INSTANCEDATA | 1, false); }) &&
+           frames(BLUE, one, 3, [&] { return draw(quadVb.p, D3DSTREAMSOURCE_INSTANCEDATA, true); });
+}
+// vs_1_1 { dcl_position v0; m4x4 oPos, v0, c0 }.
+static const DWORD VS11_M4X4[] = {
+    0xfffe0101,                                     // vs_1_1
+    0x0000001f, 0x80000000, 0x900f0000,             // dcl_position v0
+    0x00000014, 0xc00f0000, 0x90e40000, 0xa0e40000, // m4x4 oPos, v0, c0
+    0x0000ffff};
+// buf-shader: a float3 POSITION buffer of a quad over clip x -0.375..0.375 (pixels 80-176) and y -0.5..0.5, under
+// VS11_M4X4 with c0-c3 a translation by -0.5 in x and PS_C0 red: it lands on the left quad, (64,128) red, (160,128)
+// blue. Then the fixed-function untransformed path: an XYZ|DIFFUSE green quad over pixels 32-224, WORLD halving x
+// (pixels 80-176): (128,128) green, (48,128), inside the unscaled quad's edge, blue.
+static bool rowBufShader() {
+    V3 q[4];
+    quad(q, -0.375f, -0.5f, 0.375f, 0.5f);
+    FC f[4];
+    cquad(f, -0.75f, -0.5f, 0.75f, 0.5f, TGRN);
+    Prog p;
+    Com<IDirect3DVertexBuffer9> a, b;
+    if (!make(p, DECL_XYZ, VS11_M4X4, PS_C0) || !mkVb(a, q, sizeof q) || !mkVb(b, f, sizeof f)) return false;
+    const float m[4][4] = {{1, 0, 0, -0.5f}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
+    D3DMATRIX half = IDENTITY;
+    half._11 = 0.5f;
+    const Px vs[] = {{64, 128, TRED}, {160, 128, BLUE}}, ff[] = {{128, 128, TGRN}, {48, 128, BLUE}};
+    return frames(BLUE, vs, 2, [&] {
+        if (!use(p)) return false;
+        CK(SetVertexShaderConstantF, 0, &m[0][0], 4);
+        CK(SetPixelShaderConstantF, 0, RED, 1);
+        CK(SetStreamSource, 0, a.p, 0, sizeof *q);
+        CK(DrawPrimitive, D3DPT_TRIANGLESTRIP, 0, 2);
+        return true;
+    }) && frames(BLUE, ff, 2, [&] {
+        CK(SetVertexShader, nullptr);
+        CK(SetPixelShader, nullptr);
+        CK(SetFVF, FVF_C);
+        CK(SetTransform, D3DTS_WORLD, &half);
+        CK(SetStreamSource, 0, b.p, 0, sizeof *f);
+        CK(DrawPrimitive, D3DPT_TRIANGLESTRIP, 0, 2);
+        return true;
+    });
+}
+// buf-tex: XYZRHW|TEX1 vertices from a buffer, a quad over (64,64)-(192,192) with u and v from 0 to 1, sampling a 2x2
+// texture (red, green over white, yellow) point-sampled through stage 0's SELECTARG1 TEXTURE: (96,96) red, (160,96)
+// green, (96,160) white, (160,160) yellow.
+static bool rowBufTex() {
+    static const DWORD texels[4] = {TRED, TGRN, TWHT, TYEL};
+    const struct { float x, y, z, rhw, u, v; } q[4] = {
+        {64, 64, 0.5f, 1, 0, 0}, {192, 64, 0.5f, 1, 1, 0}, {64, 192, 0.5f, 1, 0, 1}, {192, 192, 0.5f, 1, 1, 1}};
+    Com<IDirect3DTexture9> t;
+    Com<IDirect3DVertexBuffer9> vb;
+    if (!make2d(t, 2, 2, 1, D3DFMT_X8R8G8B8, 4, [](int x, int y) { return texels[x + 2 * y]; }) || !pointClamp(0) ||
+        !mkVb(vb, q, sizeof q))
+        return false;
+    CK(SetTexture, 0, t.p);
+    CK(SetTextureStageState, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    const Px px[] = {{96, 96, TRED}, {160, 96, TGRN}, {96, 160, TWHT}, {160, 160, TYEL}};
+    return frames(BLUE, px, 4, [&] {
+        CK(SetFVF, D3DFVF_XYZRHW | D3DFVF_TEX1);
+        CK(SetStreamSource, 0, vb.p, 0, sizeof *q);
+        CK(DrawPrimitive, D3DPT_TRIANGLESTRIP, 0, 2);
+        return true;
+    });
+}
+// buf-nobuffer: what the draws answer without their buffers, the FVF set, the frame left blue at (64,128), where the
+// bound vertices' red quad would be (each answer as mtld3d gives it: the control decides). DrawPrimitive with nothing at
+// stream 0: D3DERR_INVALIDCALL. DrawIndexedPrimitive with the vertices and no index buffer: D3DERR_INVALIDCALL; with
+// neither buffer: D3D_OK, nothing drawn; as a fan with neither: D3DERR_INVALIDCALL (a fan's index checks come before
+// the streams'). An indexed fan from index 2^20 (2 MiB in, past any page of a 12-byte index buffer):
+// D3DERR_INVALIDCALL. DrawPrimitive of 0 primitives: D3D_OK, nothing drawn; of primitive type 7: D3DERR_INVALIDCALL.
+static bool rowBufNoBuffer() {
+    RV q[6];
+    listLeft(q, TRED);
+    const WORD idx[6] = {0, 1, 2, 3, 4, 5};
+    Com<IDirect3DVertexBuffer9> vb;
+    Com<IDirect3DIndexBuffer9> ib;
+    if (!mkVb(vb, q, sizeof q) || !mkIb(ib, idx, sizeof idx, D3DFMT_INDEX16)) return false;
+    const Px px[] = {{64, 128, BLUE}};
+    return frames(BLUE, px, 1, [&] {
+        CK(SetFVF, FVF_RV);
+        CK(SetStreamSource, 0, nullptr, 0, 0);
+        CK(SetIndices, nullptr);
+        if (!answer("DrawPrimitive (nothing at stream 0)", dev->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 2),
+                    D3DERR_INVALIDCALL))
+            return false;
+        CK(SetStreamSource, 0, vb.p, 0, sizeof(RV));
+        if (!answer("DrawIndexedPrimitive (no index buffer)",
+                    dev->DrawIndexedPrimitive(D3DPT_TRIANGLELIST, 0, 0, 6, 0, 2), D3DERR_INVALIDCALL))
+            return false;
+        CK(SetStreamSource, 0, nullptr, 0, 0);
+        if (!answer("DrawIndexedPrimitive (neither buffer)", dev->DrawIndexedPrimitive(D3DPT_TRIANGLELIST, 0, 0, 6, 0, 2),
+                    D3D_OK) ||
+            !answer("DrawIndexedPrimitive (a fan, neither buffer)",
+                    dev->DrawIndexedPrimitive(D3DPT_TRIANGLEFAN, 0, 0, 6, 0, 2), D3DERR_INVALIDCALL))
+            return false;
+        CK(SetStreamSource, 0, vb.p, 0, sizeof(RV));
+        CK(SetIndices, ib.p);
+        return answer("DrawIndexedPrimitive (a fan past the index buffer)",
+                      dev->DrawIndexedPrimitive(D3DPT_TRIANGLEFAN, 0, 0, 6, 1u << 20, 2), D3DERR_INVALIDCALL) &&
+               answer("DrawPrimitive (0 primitives)", dev->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 0), D3D_OK) &&
+               answer("DrawPrimitive (type 7)", dev->DrawPrimitive((D3DPRIMITIVETYPE)7, 0, 2), D3DERR_INVALIDCALL);
+    });
+}
+// buf-release: a buffer drawn (left red), unbound and released inside its frame, which is presented; a new buffer
+// drawn, unbound and released the same way: its pixels (right green, left blue).
+static bool rowBufRelease() {
+    RV a[6], b[6];
+    listLeft(a, TRED), listRight(b, TGRN);
+    const auto drawn = [&](const RV *v) {
+        Com<IDirect3DVertexBuffer9> vb;
+        if (!mkVb(vb, v, sizeof a) || !rvAt(vb.p) || !drawList()) return false;
+        CK(SetStreamSource, 0, nullptr, 0, 0);
+        return true;
+    };
+    const Px first[] = {{64, 128, TRED}}, second[] = {{192, 128, TGRN}, {64, 128, BLUE}};
+    return frames(BLUE, first, 1, [&] { return drawn(a); }) && frames(BLUE, second, 2, [&] { return drawn(b); });
+}
+// buf-refused: two layouts the core refuses, D3DERR_NOTAVAILABLE and nothing drawn under strict, drawn elsewhere. A
+// stream offset of 2: the left quad's six RV vertices copied from byte 2 of a buffer 2 bytes longer, so the vertices
+// read are exactly those written: left red. A stride of 12 under VS_CROSS's position at offset 0 and TEXCOORD0 FLOAT2 at
+// offset 8, which ends at 16: vertex i reads floats 3i to 3i + 2 of the buffer as its position (the left quad in clip
+// space, z 0.5) and floats 3i + 2 and 3i + 3 as its texcoord, so v1.x is its own z and VS_CROSS writes (1, 0.5, 0, 1)
+// at every vertex: left 0xff8000 (a tail float keeps the last vertex's texcoord inside the buffer).
+static bool rowBufRefused() {
+    RV q[6];
+    listLeft(q, TRED);
+    BYTE shifted[2 + sizeof q] = {};
+    memcpy(shifted + 2, q, sizeof q);
+    V3 c[4];
+    quad(c, -0.875f, -0.5f, -0.125f, 0.5f);
+    float f[13] = {};
+    for (int i = 0; i < 4; i++) f[3 * i] = c[i].x, f[3 * i + 1] = c[i].y, f[3 * i + 2] = c[i].z;
+    static const D3DVERTEXELEMENT9 decl[] = {
+        {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {0, 8, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0}, D3DDECL_END()};
+    Prog p;
+    Com<IDirect3DVertexBuffer9> a, b;
+    if (!mkVb(a, shifted, sizeof shifted) || !mkVb(b, f, sizeof f) || !make(p, decl, VS_CROSS, PS_V0)) return false;
+    const HRESULT expect = strictMode ? D3DERR_NOTAVAILABLE : D3D_OK;
+    const Px offset[] = {{64, 128, strictMode ? BLUE : TRED}}, stride[] = {{64, 128, strictMode ? BLUE : 0xff8000}};
+    return frames(BLUE, offset, 1, [&] {
+        return rvAt(a.p, 2) && answer("DrawPrimitive (offset 2)", dev->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 2), expect);
+    }) && frames(BLUE, stride, 1, [&] {
+        if (!use(p)) return false;
+        CK(SetStreamSource, 0, b.p, 0, 12);
+        return answer("DrawPrimitive (stride 12)", dev->DrawPrimitive(D3DPT_TRIANGLESTRIP, 0, 2), expect);
+    });
+}
+
+static void buffersRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"buf-d3d", rowBufD3d},           {"buf-lock", rowBufLock},         {"buf-draw", rowBufDraw},
+        {"buf-start", rowBufStart},       {"buf-offset", rowBufOffset},     {"buf-strip", rowBufStrip},
+        {"buf-fan", rowBufFan},           {"buf-indexed", rowBufIndexed},   {"buf-index32", rowBufIndex32},
+        {"buf-base", rowBufBase},         {"buf-ifan", rowBufIfan},         {"buf-managed", rowBufManaged},
+        {"buf-dynamic", rowBufDynamic},   {"buf-order", rowBufOrder},       {"buf-discard", rowBufDiscard},
+        {"buf-held", rowBufHeld},         {"buf-relock", rowBufRelock},     {"buf-streams", rowBufStreams},
+        {"buf-null", rowBufNull},         {"buf-null-up", rowBufNullUp},    {"buf-zero-stride", rowBufZeroStride},
+        {"buf-instanced", rowBufInstanced}, {"buf-shader", rowBufShader},   {"buf-tex", rowBufTex},
+        {"buf-nobuffer", rowBufNoBuffer}, {"buf-release", rowBufRelease},   {"buf-refused", rowBufRefused}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
+    HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
+    if (SUCCEEDED(hr))
+        hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (FAILED(hr)) ok = fail("GetRenderTarget/CreateOffscreenPlainSurface", hr);
+        else if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = reset() && bufStart() && r.run();
+        row(r.name, ok, why);
+    }
+    if (sysSurf) sysSurf->Release();
+    if (rtSurf) rtSurf->Release();
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
@@ -5541,6 +6233,7 @@ int main(int argc, char **argv) {
     const bool blendMode = !bench && argc > 1 && !strcmp(argv[1], "blend");
     const bool mrtMode = !bench && argc > 1 && !strcmp(argv[1], "mrt");
     const bool msaaMode = !bench && argc > 1 && !strcmp(argv[1], "msaa");
+    const bool buffersMode = !bench && argc > 1 && !strcmp(argv[1], "buffers");
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     WNDCLASSW wc = {};
@@ -5579,6 +6272,13 @@ int main(int argc, char **argv) {
     const Vertex tri[3] = {{128, 16, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {240, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {16, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)}};
+    if (buffersMode) {
+        buffersRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
     if (msaaMode) {
         msaaRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();
