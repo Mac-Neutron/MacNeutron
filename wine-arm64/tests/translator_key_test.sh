@@ -211,6 +211,28 @@ dies "neither d3d11_shader.cpp nor src/d3d11/src/shader/args.rs"
 mv "$T/saved-d11" "$W/src/d3d11/d3d11_shader.cpp"
 wkeeps "putting d3d11_shader.cpp back"
 
+# The PE side of the SM50 calls: airconv_thunks.c when present, else src/winemetal/src/sm50.rs (the thunks in Rust),
+# and neither dies. The header is hashed in both shapes.
+mkdir -p "$W/src/winemetal/src"
+echo 'pub fn thunk() {}' > "$W/src/winemetal/src/sm50.rs"
+wkeeps "adding src/winemetal/src/sm50.rs while airconv_thunks.c exists"
+mv "$W/src/winemetal/airconv_thunks.c" "$T/saved-thunks"
+ks=$(translator_key "$W" release 2> /dev/null) || ks=
+expect "a tree with sm50.rs and no airconv_thunks.c has a SHA-256 key" \
+  "$(echo "$ks" | LC_ALL=C /usr/bin/grep -cE '^[0-9a-f]{64}$' || true)" 1
+printf ' ' >> "$W/src/winemetal/src/sm50.rs"
+ks2=$(translator_key "$W" release 2> /dev/null) || ks2=
+expect "an edit to src/winemetal/src/sm50.rs without airconv_thunks.c changes the key" \
+  "$([ -n "$ks" ] && [ "$ks2" != "$ks" ] && echo yes)" yes
+cp "$W/src/winemetal/airconv_thunks.h" "$T/saved"; printf ' ' >> "$W/src/winemetal/airconv_thunks.h"
+ks3=$(translator_key "$W" release 2> /dev/null) || ks3=
+expect "the header still changes the key beside sm50.rs" "$([ -n "$ks2" ] && [ "$ks3" != "$ks2" ] && echo yes)" yes
+cp "$T/saved" "$W/src/winemetal/airconv_thunks.h"
+rm -rf "$W/src/winemetal/src"
+dies "neither airconv_thunks.c nor src/winemetal/src/sm50.rs"
+mv "$T/saved-thunks" "$W/src/winemetal/airconv_thunks.c"
+wkeeps "putting airconv_thunks.c back"
+
 # 4. What does not translate: the DXBC parser, the headers, the top-level meson files, the rest of DXMT.
 for f in libs/DXBCParser/DXBCUtils.cpp include/adt.hpp meson.build src/d3d12/d3d12_command_queue.cpp \
   src/d3d11/d3d11_context.cpp src/winemetal/unix/winemetal_unix.c; do

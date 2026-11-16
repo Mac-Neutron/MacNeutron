@@ -183,7 +183,8 @@ toml_sections() {  # toml_sections <file> <[section]>...
 #  - airconv (src/airconv, its shim, passes and .metal helpers, without tests.rs files and tests/ folders), d3d11's
 #    compile arguments (src/d3d11/d3d11_shader.cpp when it exists, else src/d3d11/src/shader/args.rs: its cache entries
 #    key on the variant's fields, not on the argument chain built from them, unlike d3d12's), the PE side of the
-#    airconv calls (src/winemetal/airconv_thunks.[ch]; the unix side's 64-bit thunks pass the pointers through) and
+#    airconv calls (src/winemetal/airconv_thunks.c when it exists, else src/winemetal/src/sm50.rs, and
+#    airconv_thunks.h, whose params they fill; the unix side's 64-bit thunks pass the pointers through) and
 #    tools/llvm.sh (the LLVM commit and recipe);
 #  - the cargo settings that reach the build (the root Cargo.toml's release and production profiles, .cargo/config.toml's
 #    [build], [env] and host target: no comment, no other section; a [profile.*.package.*] section for airconv,
@@ -205,7 +206,14 @@ translator_key() {  # translator_key <dxmt-tree> <buildtype>
   else
     die "no src/d3d11/d3d11_shader.cpp or src/d3d11/src/shader/args.rs in $1"
   fi
-  _tk_l="src/airconv $_tk_d11 src/winemetal/airconv_thunks.c src/winemetal/airconv_thunks.h tools/llvm.sh"
+  if [ -f "$1/src/winemetal/airconv_thunks.c" ]; then
+    _tk_th=src/winemetal/airconv_thunks.c
+  elif [ -f "$1/src/winemetal/src/sm50.rs" ]; then
+    _tk_th=src/winemetal/src/sm50.rs
+  else
+    die "no src/winemetal/airconv_thunks.c or src/winemetal/src/sm50.rs in $1"
+  fi
+  _tk_l="src/airconv $_tk_d11 $_tk_th src/winemetal/airconv_thunks.h tools/llvm.sh"
   for _tk_p in $_tk_l src/airconv/Cargo.toml; do
     [ -e "$1/$_tk_p" ] || die "no $_tk_p in $1"
   done

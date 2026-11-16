@@ -201,7 +201,7 @@ same LLVM without LTO into `build/wine-arm64-src/llvm23-arm64-nolto`, the instal
 both are keyed on the translator's key (`lib.sh`'s `translator_key`, in `dxmt-install/translator` and the bundle's
 `DXMT/translator`), a hash of what changes translated output as the tree has it, committed or not: `src/airconv`,
 d3d11's compile arguments (`src/d3d11/d3d11_shader.cpp`, whose cache entries key on the variant, not on the
-arguments), the airconv thunks (`src/winemetal/airconv_thunks.*`), the cargo settings that reach the translator
+arguments), the airconv thunks (`src/winemetal/airconv_thunks.c` or, once they are Rust, `src/winemetal/src/sm50.rs`, with `airconv_thunks.h`), the cargo settings that reach the translator
 (the release and production profiles, `.cargo/config.toml`'s `[build]`, `[env]` and host target), the Rust
 toolchain and the crates `cargo tree` resolves for airconv, the buildtype, the LLVM pin and recipe, Apple clang's and
 metal's versions. (A tree from before the Rust translator, with no `src/airconv/Cargo.toml`, is keyed as it was:
