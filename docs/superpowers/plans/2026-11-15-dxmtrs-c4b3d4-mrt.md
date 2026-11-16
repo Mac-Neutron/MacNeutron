@@ -414,8 +414,10 @@ site the compiler lists (16 test calls: rt `recorder/tests.rs`, `target/tests.rs
 - **No move and no duplicate of mtld3d's code.** `core_extras` calls mtld3d's own `extra_write_mask` and 3d3's
   `core_blend` (which is `effective_blend_rs` and `d3d_to_metal_blend_rt`); it fills a `PipelineRsBits` from
   render states as `core_blend` does. The pass-set rule restates `recompute_extra_present_mask`'s size test (one
-  comparison) in d3d9-rt, which has no `PassState`: the one near-duplicate, pinned by rt
-  `an_extra_of_another_size_is_not_in_the_set` and the row `mrt-size`.
+  comparison) in d3d9-rt, which has no `PassState`; `target_desc` restates `srgb_write_is_attachable`'s
+  all-or-nothing rule and d3d9-rt's clear restates `resolved_clear_rgba`'s encode decision, for the same reason: three
+  near-duplicates, each pinned (rt `an_extra_of_another_size_is_not_in_the_set` and `mrt-size`;
+  `srgb_twins_are_all_or_nothing` and `mrt-srgb`; `a_clear_encodes_once` and `mrt-srgbclear`).
 - New types: `CoreExtra` (Clone: a key is cloned into the pipeline map; no Copy). New variant
   `DrawRefused::Target`, which is not silent: the front end logs it once (CONTRIBUTING "No silent failures"). New
   fields: `PipelineKey::extras`, `PipelineSource::extras`, `CoreDevice::extras`, `CoreDevice::open_colors`
@@ -512,17 +514,19 @@ mtld3d's code rather than D3D9's formula (Task 1 Step 5's rule).
   `COLORWRITEENABLE2` red|alpha; MRT4 with c0 magenta, c1 yellow, c2 (0.5, 0.5, 0.5, 1): T0 magenta; T2 (0.5, 0,
   0, 1) (`rtIsF`).
 - `mrt-unwritten`: T0, T1 cleared green; `PS_C0` (writes `oC0` alone) with red: T0 red, T1 green; the same with no
-  pixel shader (a pre-transformed red diffuse quad over all): T0 red, T1 green.
+  pixel shader (a pre-transformed blue diffuse quad over all, after a Clear of both to green): T0 blue, T1
+  green.
 - `mrt-nobind`: T0 alone; MRT2 magenta, yellow: T0 magenta and the draw answers `D3D_OK`.
 - `mrt-clear`: T0, T1. A whole `Clear` to red: both red. `Clear(1, (8,8)-(24,24))` to green: (16,16) green and
   (40,40) red on both. Viewport (32,32,16,16), a null-rect Clear to blue: (40,40) blue, (28,28) red on both; the
   viewport back to (0,0,64,64). Scissor rect (0,48)-(64,64) with the test on, a null-rect Clear to white: (32,56)
-  white, (32,44) red on both; the test off. `COLORWRITEENABLE` and `COLORWRITEENABLE1` red only, a whole Clear to
+  white, (20,44) red on both; the test off. `COLORWRITEENABLE` and `COLORWRITEENABLE1` red only, a whole Clear to
   yellow: both (255,255,0); the masks back to 0xf. `SetRenderTarget(1, NULL)`, a whole Clear to black: T0 black,
   T1 still yellow.
 - `mrt-mask`: T0, T1 cleared black; `COLORWRITEENABLE1` red only, MRT2 white, white: T0 white, T1 (255,0,0);
   then both cleared black, `COLORWRITEENABLE` green only and `COLORWRITEENABLE1` 0xf, MRT2 white, white: T0
-  (0,255,0), T1 white.
+  (0,255,0), T1 white; then both cleared black, `COLORWRITEENABLE` 0, MRT2 white, white: T0 black, T1 white (review
+  M9).
 - `mrt-blend`: T0 cleared red, T1 cleared blue; SRCALPHA/INVSRCALPHA, MRT2 with (0,1,0,0.5) and (1,1,1,0.25): T0
   (128,128,0), T1 (64,64,255). Then both cleared again (red, blue), BLENDFACTOR/INVBLENDFACTOR with
   `D3DRS_BLENDFACTOR` 0x80808080, MRT2 white, white: T0 (255,128,128), T1 (128,128,255).
@@ -537,13 +541,12 @@ mtld3d's code rather than D3D9's formula (Task 1 Step 5's rule).
   before the blender, the Clear stored 0.737 in both).
 - `mrt-srgbclear`: `SRGBWRITEENABLE` on, a whole Clear to 0x808080: T0 A8R8G8B8 with T1 R32F: 188 and 0.737
   (±0.004; parity, ruling 10); T0 A8R8G8B8 64 with T1 A8R8G8B8 32: 188 on both; on the first pair a `Clear(1,
-  (8,8)-(24,24))` to 0x404040 over that: (16,16) reads 137 and 0.513, (40,40) the first Clear's values.
+  (8,8)-(24,24))` to 0x404040 over that: (16,16) reads 137 and 0.538, (40,40) the first Clear's values.
 - `mrt-size`: T0 64, T1 32: the bind is `D3D_OK`; both cleared green (whole); MRT2 red, blue: T0 red at (48,48)
   and (8,8), T1 green. `Clear(1, (8,8)-(48,48))` to white: T0 white at (40,40), red at (56,56); T1 white at
   (24,24), green at (4,4). Then `SetRenderTarget(0, a 32 texture U)` with T1 kept: MRT2 red, blue: U red, T1
   blue; `SetRenderTarget(0, T0)` again, MRT2 yellow, magenta: T0 yellow, T1 still blue. A second pair, T0 64 with
-  T1 128, both cleared green by a Clear made with the viewport (0,0,128,128); MRT2 red, blue under the viewport
-  (0,0,64,64): T0 red, T1 green; a whole Clear to white under that viewport: T0 white, T1 white at (32,32) and
+  T1 128, each cleared green at index 0 before the bind; MRT2 red, blue under T0's viewport (0,0,64,64): T0 red, T1 green; a whole Clear to white under that viewport: T0 white, T1 white at (32,32) and
   green at (100,100) (the viewport's rect on T1's own extent).
 - `mrt-switch`: one attempt, nothing between the two draws but the rebind: T0 with A at index 1, both cleared
   black first; MRT2 red, green; `SetRenderTarget(1, B)` (B the same size and format, cleared black before the
@@ -594,3 +597,44 @@ mtld3d's code rather than D3D9's formula (Task 1 Step 5's rule).
   M11 → `extra_write_mask` called; M12, M13 → the signatures, `open_render_pass`; M14 → the logged drop; M15 →
   Review Focus 2; M16 → `ja.sh` with msl; M17 → commit bodies; M18 → the order in the unbind; M19, M20 → the
   bool note, the commands and the constraint's wording.
+
+## Execution notes (2026-11-16)
+
+- Built as planned in four commits on DXMTRS over 8bca6b74: 04a8702e (the fakes: colours 1-7, the tile pipeline),
+  95f47ff7 (draws to several colour targets), 9cd00b09 (Clear over every bound colour target), d4714e45
+  (`SetRenderTarget` at index 1-3). dxmt-core, d3d11 and winemetal are untouched. Tasks 2-5 were written by an Opus
+  subagent from this plan, one writer, this session running the lanes and gates (ledger ruling E-1); its commits
+  carry its own co-author line.
+- Controls: all 20 `mrt` rows and `rt-mrt` were green on the default runtime at their first run, on the Mac (default
+  and msl) and in the VM (default, old WoW64, x64 and x86), before any core work; no expectation had to be corrected
+  and no defect of mtld3d was found. Each lane read as its step expected: after Tasks 3 and 4 exactly as the control
+  (core red on `targets-rt-mrt`, `targets-runtime` and the `mrt` launch alone), after Task 5 both runtimes green,
+  with no fix round.
+- Changes from the plan's text, each ledgered: the eleven new rt tests of Task 3 sit in `target/tests.rs`; a
+  `slot_target(slot)` helper serves `color_size`, the clears and `open_pass`; `open_pass` attaches a slot only when
+  the key names it and the set has it; mutants (b), (e), (f) and (g) are written so the PE build keeps no unused
+  item (the same defects). The appendix above was corrected to the rows where they differed (the float of a 64 grey
+  rect is 0.538; the fixed-function quad of `mrt-unwritten` is blue; one probe of `mrt-clear`; how the 128 pair of
+  `mrt-size` is cleared): the rows were the ones proven on mtld3d.
+- Incidents, none in the code: the first controls job stopped at the build because cargo's crate cache had been
+  emptied that evening (restored with `cargo fetch --locked`, the lock files' crates only: ruling T1-1); the VM
+  control stopped because the builder VM was down after a restart of the Mac and its start line names a share
+  folder that is gone (started by hand with the folder that exists: ruling T1-2; the gate jobs' start line wants the
+  same correction).
+- Gates on DXMTRS d4714e45: the Mac's default, msl and core lanes ok; the stateblock conformance under core equal to
+  default; every core launch under Metal's validation layer with no report (the `mrt` launch included); the seven
+  mutants each red on its row and in no other launch; the plain build's translator key and imports unchanged, the
+  Mac's Wine conformance passed (triaged sites only) and the x64 check all passed; the VM's D3D9 lanes (both
+  runtimes, old and new WoW64) ok at the first run. The VM's D3D10-12 gate was not rerun (ruling 6).
+- Final review (Opus): no Critical, no Important, nine Minor. Two fixed on the MacNeutron side before the VM lanes
+  and controlled by a lane of their own: the once-logged "a draw's colour targets are not its key's" warning now
+  fails its launch in `d3d9-check` and the VM's gate, and `mrt-mask` draws with `COLORWRITEENABLE` 0 on index 0
+  (index 1 still written). Two went into this document (the appendix, the Rules check's three near-duplicates).
+  Five deferred (the ledger and the close-out list them): the test-only `open_render_pass` opens a pass `draw_up`'s
+  shortcut trusts; no test of `set_extra_target`'s "false and nothing changed"; `set_extra_target` has no
+  `#[must_use]` and the unbind discards its answer; `core_extras` narrows the mask with `unwrap_or(0)` where
+  CONVENTIONS asks for `expect`; `forget_texture`'s doc reads as if extras were emptied only with target 0.
+- Probe (`build/c4b3d/s4/probe.md`), on a Mac that was not quiet: this tip read the core at 3.93 and 4.13 ms a
+  frame (tex) against mtld3d's 1.47 and 1.93; C4b-3d3's unchanged tip, rebuilt and run in the same window, 3.85
+  against 1.87 (it had read 2.18 on a quiet Mac). No difference between the two tips exceeds one run's spread; a
+  quiet-Mac figure is owed to C4b-3d5's probe.

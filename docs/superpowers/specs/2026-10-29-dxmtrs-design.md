@@ -1028,6 +1028,46 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   builds with no change to its draw path, and every difference between the three tips' core figures is below that:
   neither C4b-3d2 nor this slice cost the textured draw anything this probe can measure, and the core stays 20-37% above
   mtld3d until C4d's dedup.
+  C4b-3d4 done 2026-11-16 at DXMTRS main d4714e45 (d4714e45b3300772c8bb29b7e9732aed3ba7db36), which MacNeutron pins:
+  render targets at index 1-3 on the core runtime. d3d9-rt's `CoreDevice` keeps three more targets by reference beside
+  target 0. A draw's pass attaches the pass set: target 0 and each of them that resolves, has target 0's size (mtld3d's
+  rule: one of another size stays bound and is skipped by draws) and is not a subresource already in the set. The
+  draw's key is the one source of what the pass attaches: `PipelineKey::extras` names each attached slot's format,
+  write mask and blend (`CoreExtra`), d3d9-rt opens the pass on exactly those slots in those formats, with the pass's
+  slot count the highest attached slot + 1 (the core's optimizer compares that many), a hole left empty in the pass, in
+  the pipeline and in the tile barrier's key, and a key the bound targets do not make is refused before any record
+  (logged once, and a failure of its launch in the gates). mtld3d-core's `core_extras` fills a slot from mtld3d's own
+  rules: `D3DRS_COLORWRITEENABLE1..3` when the bound program writes that `oCn` and an empty mask otherwise (the target
+  is declared and keeps its pixels), the draw's blend clamped on that target's own destination alpha; a programmable
+  pixel stage's variant exports the set's slots (`color_out_mask`, the set shifted by one), the fixed-function one
+  colour 0 alone. Hardware sRGB is all-or-nothing over the set, as mtld3d's: every member through its twin when every
+  member has one, else the pixel stage encodes every output. `Clear` goes to every bound colour target, in the set or
+  not, each judged against its own extent, as one single-view core clear a target (a whole one folds into its slot of
+  the next pass); d3d9-rt takes the linear colour and encodes it when the view it clears is not an sRGB one.
+  `SetRenderTarget(1..3)` binds with mtld3d's bookkeeping (the slot's reference, the AUTOGENMIPMAP regeneration on
+  leaving, no viewport or scissor reset) and a null unbinds; `GetRenderTarget` and `GetRenderTargetData` answer those
+  targets. dxmt-core is unchanged (its pass, pipeline description, optimizer and tile barrier already carried eight
+  slots); its test fakes print colours 1-7 and the tile pipeline. Decisions kept: a duplicate (one subresource at two
+  indices, or two swap chains' back buffers, which alias under core) is drawn once, where mtld3d would hand Metal the
+  texture twice; a set with a target that has no sRGB view is written as mtld3d writes it (encoded before the blender,
+  a float target included), not per target as Windows does. Still refused by name: multisampled surfaces (3d5), a
+  shader of another device, a depth texture at a vertex sampler, the depth-stencil sampled while a draw uses it and a
+  dynamic depth texture's lock (C4c). Gated: 20 `d3d9_triangle mrt` rows on a device with an auto D24S8 in every D3D9
+  lane on the Mac and in the VM, and `rt-mrt` turned from a refusal into a result, each first passed on mtld3d (Mac
+  default and msl, VM default) with no expectation corrected, red under core until the commit that binds index 1-3 and
+  green strict after it, with no report under Metal's validation layer in any core launch; seven mutation REDs, each
+  on its row and in no other launch (a pass count of 1 merges two passes that differ at index 1 alone: the proof that
+  the count is a correctness input); the stateblock conformance under core; the default runtime's Mac conformance,
+  translator key and imports unchanged; the x64 check. Not covered by a row: one surface at two indices, alpha test,
+  fog or a depth output with several targets, a texture sampled while one of its levels is attached at index 1-3 (the
+  barrier's key is proven on the fakes only). Known costs, handed to C4d: a rect Clear with N targets bound is N small
+  passes; a blended draw asks each attached target's format through `GetDesc`; an unwritten extra still keys its
+  blend. Probe (Mac x64, textured, one colour target; the Mac was busy, load 5-10): this tip read the core at 3.93 and
+  4.13 ms a frame against mtld3d's 1.47 and 1.93, and C4b-3d3's unchanged tip, rebuilt and run in the same window,
+  3.85 against 1.87, where it had read 2.18 on a quiet Mac (cause not established): the difference between the tips is
+  inside one run's spread
+  (mtld3d's own figure moved 0.46 between two runs of this tip), so this slice costs the single-target draw nothing
+  the probe can measure, and a quiet-Mac figure is owed to C4b-3d5's probe.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
