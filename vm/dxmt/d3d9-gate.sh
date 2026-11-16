@@ -34,14 +34,16 @@
 # the refused row's line. Every lane also checks d3d9_triangle fixed's 31 rows (DXMTRS C4b-3c: the fixed-function
 # vertex stage; fx64-fresh, fx32-fresh); under core their logs hold exactly its refused row's line. Every lane also
 # checks d3d9_triangle targets' 23 rows (DXMTRS C4b-3d1: render targets other than the back buffer, and C4b-3d5's
-# rt-plain; tg64-fresh, tg32-fresh); under core their logs hold no refusal line. Every lane also checks d3d9_triangle
+# rt-plain; tg64-fresh, tg32-fresh); under core their logs hold exactly one refusal line (a StretchRect
+# that is no multisample resolve). Every lane also checks d3d9_triangle
 # depth's 31 rows (DXMTRS C4b-3d2: the depth-stencil, on a device with an auto depth-stencil; dp64-fresh, dp32-fresh);
 # under core their logs hold exactly its two refused calls' lines. Every lane also checks d3d9_triangle blend's 36
 # rows (DXMTRS C4b-3d3: partial clears, the scissor test, a depth-stencil of another size, sRGB write and blending;
 # bl64-fresh, bl32-fresh); under core their logs hold no refusal line. Every lane also checks d3d9_triangle mrt's 20
 # rows (DXMTRS C4b-3d4: render targets at index 1-3; mr64-fresh, mr32-fresh); under core their logs hold no refusal
 # line. Every lane also checks d3d9_triangle msaa's 16 rows (DXMTRS C4b-3d5: multisampling, on a device whose back
-# buffer and auto depth-stencil have 4 samples; ms64-fresh, ms32-fresh); under core their logs hold no refusal line.
+# buffer and auto depth-stencil have 4 samples; ms64-fresh, ms32-fresh); under core their logs hold exactly one refusal line (a StretchRect
+# that is no multisample resolve).
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -206,12 +208,14 @@ done
 # mtld3d.so's encoder line nor of the core's can't-present or dropped-draw lines (the code that ran prints them, not the
 # switch), and no refusal line, or with "crossing" exactly one, the crossing row's, with "textures", "fixed" or "depth"
 # exactly that launch's refused rows' (texture_refusals, fixed_refusals, depth_refusals), or with "state" exactly the
-# state rows' (state_refusals: the buffer lock). The blend, mrt, targets and msaa launches (DXMTRS C4b-3d3, C4b-3d4,
-# C4b-3d5) take no kind: no refusal line.
+# state rows' (state_refusals: the buffer lock). The blend and mrt launches (DXMTRS C4b-3d3, C4b-3d4) take
+# no kind: no refusal line. The targets and msaa launches take "stretch": exactly the one StretchRect that is no
+# multisample resolve (stretch_refusals, DXMTRS C4b-3d5).
 refused='is not implemented under runtime.mode = core'
 state_refusals='IDirect3DVertexBuffer9::Lock'
 texture_refusals='IDirect3DTexture9::LockRect (a render-target or depth texture)'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
+stretch_refusals='IDirect3DDevice9::StretchRect (other than a multisample resolve)'
 depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)
 IDirect3DTexture9::LockRect (a render-target or depth texture)'
 runtime() {
@@ -220,10 +224,10 @@ runtime() {
     && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key' "$1" \
     && case ${2:-} in
       crossing) [ "$n" = 1 ] && /usr/bin/grep -rhF "$refused" "$1" | /usr/bin/grep -qi crossing ;;
-      state|textures|fixed|depth)
+      state|textures|fixed|depth|stretch)
         case $2 in
           state) set_=$state_refusals ;; textures) set_=$texture_refusals ;; fixed) set_=$fixed_refusals ;;
-          depth) set_=$depth_refusals ;;
+          depth) set_=$depth_refusals ;; stretch) set_=$stretch_refusals ;;
         esac
         [ "$n" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] && printf '%s\n' "$set_" | while IFS= read -r m; do
           /usr/bin/grep -rqF "d3d9 core: $m $refused" "$1" || exit 1; done ;;
@@ -249,7 +253,10 @@ if [ "$RT" = core ]; then
   for r in dp64-fresh dp32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" depth)" ok
   done
-  for r in tg64-fresh tg32-fresh bl64-fresh bl32-fresh mr64-fresh mr32-fresh ms64-fresh ms32-fresh; do
+  for r in tg64-fresh tg32-fresh ms64-fresh ms32-fresh; do
+    check "$r runtime core" "$(runtime "$G/logs/$r" stretch)" ok
+  done
+  for r in bl64-fresh bl32-fresh mr64-fresh mr32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
   done
 fi

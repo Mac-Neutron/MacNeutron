@@ -44,7 +44,8 @@
 # "fixed-<row>"; under core its launch's logs hold exactly its refused rows' line (a depth texture at a vertex
 # sampler). Every lane also runs d3d9_triangle targets (DXMTRS C4b-3d1's 22 rows of render targets other than the back
 # buffer and C4b-3d5's rt-plain: 23; "targets strict" under core), its rows "targets-<row>"; under core its launch's
-# logs hold no refusal line. Every lane also runs d3d9_triangle depth
+# logs hold exactly one refusal line (a StretchRect
+# that is no multisample resolve). Every lane also runs d3d9_triangle depth
 # (DXMTRS C4b-3d2's 31 rows of the depth-stencil, on a device with an auto depth-stencil; "depth strict" under core),
 # its rows "depth-<row>"; under core its launch's logs hold exactly its two refused calls' lines. Every lane also
 # runs d3d9_triangle blend (DXMTRS C4b-3d3's 36 rows of partial clears, the scissor test, a depth-stencil of another
@@ -53,7 +54,8 @@
 # targets at index 1-3, on such a device; "mrt strict" under core), its rows "mrt-<row>"; under core its launch's
 # logs hold no refusal line. Every lane also runs d3d9_triangle msaa (DXMTRS C4b-3d5's 16 rows of multisampling, on a
 # device whose back buffer and auto depth-stencil have 4 samples; "msaa strict" under core), its rows "msaa-<row>";
-# under core its launch's logs hold no refusal line.
+# under core its launch's logs hold exactly one refusal line (a StretchRect
+# that is no multisample resolve).
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -147,6 +149,7 @@ refused='is not implemented under runtime.mode = core'
 state_refusals='IDirect3DVertexBuffer9::Lock'
 texture_refusals='IDirect3DTexture9::LockRect (a render-target or depth texture)'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
+stretch_refusals='IDirect3DDevice9::StretchRect (other than a multisample resolve)'
 depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)
 IDirect3DTexture9::LockRect (a render-target or depth texture)'
 refusals_ok() {
@@ -154,17 +157,17 @@ refusals_ok() {
     shaders)
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 1 ] \
         && /usr/bin/grep -rhF "$refused" "$2" | /usr/bin/grep -qi crossing ;;
-    state|textures|fixed|depth)
+    state|textures|fixed|depth|targets|msaa)
       case $1 in
         state) set_=$state_refusals ;; textures) set_=$texture_refusals ;; fixed) set_=$fixed_refusals ;;
-        depth) set_=$depth_refusals ;;
+        depth) set_=$depth_refusals ;; targets|msaa) set_=$stretch_refusals ;;
       esac
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] \
         || return 1
       printf '%s\n' "$set_" | while IFS= read -r n; do
         /usr/bin/grep -rqF "d3d9 core: $n $refused" "$2" || exit 1
       done ;;
-    blend|mrt|targets|msaa) [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
+    blend|mrt) [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
     *) return 0 ;;
   esac
 }
