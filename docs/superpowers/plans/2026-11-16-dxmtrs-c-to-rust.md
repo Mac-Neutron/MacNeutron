@@ -646,3 +646,193 @@ Tasks 0, 2, 3, 4 and, for them, 8 and 9 are done; Tasks 1, 5, 6 and 7 wait for t
   the gate's clippy and doc lists only, so its test leg never ran them); one Minor, the licence notices, in this pin.
 - Count at the pin, outside `external/` and `vendor/`: 6 files under `src/` (Q1: 3, Q2: 1, Q3: 2) and the 11 of
   `tests/dx11` (Q4).
+
+## Addendum (2026-11-16, evening): the maintainer's answer, Tasks 5 and 6 in detail
+
+The maintainer answered Q1-Q4 in one sentence: "I still want it all on rust". Read per question (Ruling 13):
+
+- **Q1 → T-min.** The only option in which the translator's logic becomes Rust. It adds C++ entry points to the LLVM
+  fork (LLVM's own language, where `LLVMWriteAIRBitcode` already lives) and moves the key a second time.
+- **Q2 → the landing pad now**, the only other option offered. Task 6 below replaces the plan's "60 hand-encoded
+  lines": the pad is clang's own assembly for today's `.m`, kept as assembler directives.
+- **Q3 → the move** (Task 1 as planned; done first, MacNeutron `23881d10`). The five files stay C++, in MacNeutron,
+  beside the C++ proxy that compiles them; they carry DXMT's LGPL 2.1 and DXVK's zlib notice into an MIT tree, said
+  in the folder's README and in the report.
+- **Q4 → delete** (Task 7 as planned). The sentence fits "port five programs" too; delete is taken as the default
+  because no gate builds them, and it is done **last** so an objection costs nothing.
+- **The push of a new branch to `Mac-Neutron/llvm-project`** is not covered by a goal statement: it is asked once,
+  before Task 8's Mac build (the first step that fetches the pinned LLVM commit). Nothing earlier needs it.
+
+Order now: Task 1 → this addendum's review → Task 6 → Task 5 (A1-A6) → Task 7 → Task 8 → Task 9. One pin for
+everything (Ruling 2 holds: the key moves once more, at that pin).
+
+### Task 6 (replaces the default): `delegate_forward.m` becomes a landing pad in `delegate_forward.rs`
+
+**Why assembly and not Rust statements:** unchanged from Section 6. A catch needs a landing pad whose frame holds
+the send; rustc emits no landing pad under `panic = "abort"` and its personality never stops a foreign exception.
+`core::arch::global_asm!` is the tree's existing form for code rustc cannot emit (`src/util/src/boot.rs`,
+`src/d3d9/src/hookable.rs`).
+
+**Files:** `src/d3d9/unix/src/metal/macdrv/delegate_forward.rs` (the pad, the Rust `respondsToSelector:`),
+`delegate_forward/tests.rs` (one more test), `src/d3d9/unix/build.rs` (the cc-rs block and `DELEGATE_FORWARD` go),
+`src/d3d9/unix/Cargo.toml` (`cc` leaves the build dependencies if nothing else there uses it; `Cargo.lock`
+follows), `delegate_forward.m` deleted, `tools/audit.sh` (its entry and reason), `docs/CONVENTIONS.md:65` ("The
+Unix dylib's other C-family object" sentence) and `docs/DEVELOPMENT.md:143-145`.
+
+- [ ] **Step 1 (the reference, before any edit):** `clang -target arm64-apple-macos<the deployment target cc-rs
+  passes> -O2 -fobjc-exceptions -fno-objc-arc -S` and `-c` of today's `.m`, kept under `build/crs/s/df/`: the
+  assembly, `llvm-objdump -d` of `_mtld3d_forward_screen_parameters`, `llvm-objdump --unwind-info`, the bytes of
+  `__TEXT,__gcc_except_tab`, the relocations. The same three records from the object cargo's build script produced
+  for the base (`libmtld3d_delegate_forward.a` in the base's `OUT_DIR`), to learn the flags cc-rs really used.
+- [ ] **Step 2 (the pad):** `global_asm!` under `#[cfg(all(target_vendor = "apple", target_arch = "aarch64",
+  not(mtl_facade)))]` defining `_mtld3d_forward_screen_parameters` as clang emitted it: the prologue with its
+  `.cfi_*` lines, `.cfi_personality 155, ___objc_personality_v0`, `.cfi_lsda 16, <table>`, the send through
+  `"_objc_msgSend$applicationDidChangeScreenParameters:"` (the linker's selector stub, as clang's object uses),
+  `_objc_begin_catch`, `_objc_retain`, `_objc_end_catch`, the cleanup pad into `__Unwind_Resume`, and the
+  exception table in `__TEXT,__gcc_except_tab` written with the assembler's `.uleb128` label differences and the
+  `_OBJC_EHTYPE_id@GOT` type entry. Nothing is encoded by hand: every number in the table is a label difference
+  the assembler computes. A doc block above it says what each part is and that the reference is
+  `clang -S` of the deleted `.m` (its text quoted in the block, so the pad can be re-derived). The only apple
+  target any script builds is aarch64 (`tools/rust-check.sh:72`, `tools/cargo-staticlib.sh`); another apple
+  architecture gets a `compile_error!` naming this block, not a silent missing symbol.
+- [ ] **Step 3 (`respondsToSelector:` in Rust):** `delegate.respondsToSelector(Sel::register(c"applicationDid
+  ChangeScreenParameters:"))`, the form `src/d3d9/unix/src/hud_state.rs:387` already uses (typed method, no
+  `sel!`). What is lost: the `.m` checked the selector against `NSApplicationDelegate` at compile time. What
+  replaces it: a test that a class implementing the method through objc2's typed `define_class!` answers true and
+  a plain `NSObject` answers false (the first exists; the second is added).
+- [ ] **Step 4 (tests, the three that exist are the gate):** a delegate that raises comes back with its name and
+  reason; one that returns answers `Ok`; a receiver without the method comes back as the runtime's
+  unrecognized-selector exception. They run in `tools/rust-check.sh`'s test leg (`tst -p mtld3d-unix`, line 330;
+  the log is checked for the three names, each once). **Mutation RED:** with the first call-site entry's landing
+  pad label replaced by 0 the throwing test must abort the test binary (run by hand, not committed).
+- [ ] **Step 5 (the records):** from the object rustc emits for the module (`--emit obj` of the crate, or the
+  member of `libmtld3d_unix.rlib`): the function's disassembly, unwind info and `__gcc_except_tab` bytes equal
+  Step 1's. From the dev build's `mtld3d.so` at the tip (Task 8): `nm` shows the symbol's code, `llvm-objdump
+  --unwind-info` shows its entry with an LSDA and personality `___objc_personality_v0`, and the base's shows the
+  same. **Stated differences:** none in behaviour; the object is assembled by rustc's LLVM, not Apple clang.
+- [ ] One commit (`d3d9: the delegate forward's Objective-C is a landing pad in Rust`), chained on rust-check.
+  Does not move the key.
+
+### Task 5 as T-min
+
+**The split:** the fork gains **generic** entry points, each a named LLVM C++ call with no translator policy in
+it; every decision the shim or a pass makes becomes Rust.
+
+**A1. References, before any edit (plan Step 1).** A copy of `build/c3/xlate.sh` as `build/crs/s/xlate2.sh`
+(`ROOT` the `c-rust-mn` worktree, the LLVM prefix an argument, outputs under `build/crs/x`). Against the shared
+**no-LTO** install (`build/wine-arm64-src/llvm23-arm64-nolto`, read only): the 13 corpora at the DXMTRS base, their
+output folders kept; the `dxso_identity` digest and program count; `pipeline_text(0)` and `(1)`. **Mutation RED**
+in a scratch worktree (never committed): the corpora with `Lower16BitTexReadPass` left out of `BuildPipeline`, and
+again with `SimdgroupImplicitMemBarrierPass` left out; each must change at least one corpus output, else that
+pass's proof is its unit tests alone (A2) and the ledger says so.
+
+**A2. Unit tests pinned while the shim exists** (one commit, tests only; they call today's `module::optimize`):
+- 16-bit read: a function with `bitcast <4 x i32> %v to <8 x i16>` and `extractelement`s at constant indices 0, 1
+  and 7, one with a variable index (the cast must stay), one cast with no extract; the printed function pinned
+  (the `.lshr16` and `.trunc_to_i16` names, the erased casts).
+- Barrier: with `!air.kernel`, an address-space-3 store followed by two loads (one barrier, after the store); a
+  load whose definition is a call (none); the same module without `!air.kernel` (none); a store that ends its
+  block... cannot (a terminator follows), so the `getNextNode` branch is pinned by the store-then-load case only.
+- Pipeline: the two existing pins (`module/tests.rs:313-358`) stay as they are and must still pass after A5 with
+  **no edit of their expected text**.
+- Bucket A: for `memory(...)` in its four location masks and four `ModRef`s, `captures(none)`, the SDK version
+  flag, fast-math get on an FP and a non-FP value: the shim's answer equals the C-API form's, and the printed
+  form is pinned.
+
+**A3. Bucket A (plan Step 2, no LLVM change), one commit:** `get_fast_math_flags`, `is_fp_math_operator`
+(`LLVMCanValueUseFastMathFlags`, then `LLVMGetFastMathFlags`), `memory_attribute`, `captures_none`
+(`LLVMCreateEnumAttribute` with this LLVM's encoding, the printed-form test guarding it), `set_sdk_version`
+(`LLVMAddModuleFlag` + `LLVMConstDataArray`), `declare_simdgroup_barrier` (`LLVMGetNamedFunction`, else
+`LLVMAddFunction` and three enum attributes at the function index). The six leave `shim.cpp` and `sys.rs`.
+
+**A4. The fork (plan Step 3).** A worktree of `build/forks/llvm-project` at `build/crs/llvm-dev`, branch
+`air-23-extras` from `air-23` (`edc723f40d`). New, additive: `llvm/include/llvm-c/AIRExtras.h`,
+`llvm/lib/AIRExtras/{CMakeLists.txt,AIRExtrasC.cpp}` (component `LLVMAIRExtras`; `LINK_COMPONENTS` Analysis,
+BitReader, Core, Linker, Passes, Support, TransformUtils), and one `add_subdirectory(AIRExtras)` line in
+`llvm/lib/CMakeLists.txt` with the fork's "Modified by Mac-Neutron" note. The LLVM licence header, as
+`AIRWriterC.cpp` carries it. Entry points (C, `extern "C"`, no exceptions, none aborts on a bad argument it can
+test for):
+
+| Entry point | The C++ it is | Replaces |
+| --- | --- | --- |
+| `LLVMAIRBuilderSetFastMathFlags(B, LLVMFastMathFlags)` | `IRBuilder::setFastMathFlags` | `set_fast_math_flags` |
+| `LLVMAIRCopyFastMathFlags(Inst, LLVMFastMathFlags)` | `Instruction::copyFastMathFlags` (replaces; a non-FP value is left alone) | `copy_fast_math_flags` |
+| `LLVMAIRParseBitcode(C, Data, Size, Name, NameLen, LayoutCB, Ctx, *Out, *Error, *ErrorLen)` | `parseBitcodeFile` with `ParserCallbacks::DataLayout`; `LayoutCB(Ctx, Triple, TripleLen, Layout, LayoutLen, *OutLen)` answers the layout to use (bytes the callee owns until its next call; copied at once) or null to keep | `parse_bitcode`; the `i8:32` filter is Rust |
+| `LLVMAIRLinkModules(Dest, Src, Flags)` | `Linker::linkModules`; `Flags` are `Linker::Flags`, static-asserted | `link_only_needed` |
+| `LLVMAIREraseNamedMetadata(M, Name, NameLen)` | `getNamedMetadata` + `eraseNamedMetadata` | same |
+| `LLVMAIRDestroyConstant(C)` | `Constant::destroyConstant` | same |
+| `LLVMAIRGetIdentifiedStructTypes(M, *Out, Capacity)` → count | `Module::getIdentifiedStructTypes` | `rename_struct`'s listing |
+| `LLVMAIRStructSetName(Ty, Name, NameLen)` | `StructType::setName` | `rename_struct`'s rename; the prefix rule is Rust |
+| `LLVMAIRConstantExprAsInstruction(Expr, InsertBefore)` | `ConstantExpr::getAsInstruction` + `insertBefore` | `get_as_instruction` |
+| `LLVMAIRSplitBasicBlock(BB, Before)` | `BasicBlock::splitBasicBlock` | `split_block` |
+| `LLVMAIRSplitBlockAndInsertIfThen(Cond, Before, Unreachable)` | the `BasicBlockUtils` function | same |
+| `LLVMAIRBuildAtomicRMWValue(B, Op, Loaded, Val)` | `buildAtomicRMWValue`, the C enum mapped as `Core.cpp` maps it; null for an operation the mapping lacks | same; which operations the translator accepts is Rust |
+| `LLVMAIRCreateSlotTracker(Fn)`, `LLVMAIRGetLocalSlot(T, V)`, `LLVMAIRDisposeSlotTracker(T)` | `ModuleSlotTracker` + `incorporateFunction`, `getLocalSlot` | `local_slot`; the last-match scan is Rust |
+| `LLVMAIRRunPasses(M, Pipeline, Passes, NumPasses, *Error)` | the shim's managers and `PassBuilder` (no `StandardInstrumentations`), `registerPipelineParsingCallback` for each `{Name, Run, Ctx}` as a function pass, `parsePassPipeline`, `MPM.run` | `run_passes` |
+| `LLVMAIRPrintPipeline(Pipeline, Passes, NumPasses, *Out, *OutLen)` | the same parse, then `printPipeline` (a callback pass prints its name) | `pipeline_text` |
+| `LLVMAIRGetMemoryDefInstruction(AM, Fn, Inst)` | `AM.getResult<MemorySSAAnalysis>(Fn)`, `getMemoryAccess(Inst)->getDefiningAccess()`; when that is a `MemoryDef`, its instruction; else null | the barrier pass's one analysis query |
+
+A pass callback is `LLVMBool Run(void *Ctx, LLVMValueRef Fn, LLVMAIRFunctionAnalysesRef AM)`: non-zero is
+`PreservedAnalyses::none()`, zero `all()`. The callback pass's class prints the name it was registered under.
+Fork tests: none added to LLVM's lit suite (the install builds without tests); the entry points are exercised by
+airconv's unit tests and the corpora. The fork branch is one commit.
+
+**A5. The port (one DXMTRS commit a group, each chained on rust-check with `AIRCONV_LLVM` on the new install):**
+1. `tools/llvm.sh`'s `LLVM_AIR_COMMIT` and `meson.build`'s `llvm_deps` (`-lLLVMAIRExtras`), `sys.rs` declarations
+   for bucket B (the 1:1 renames), `shim.cpp` loses them.
+2. Policy to Rust: the `i8:32` layout filter (a callback), the `dx.types.` rename (list, prefix test, set name),
+   the probe's last-matching-slot scan, the accepted atomic operations.
+3. The pipeline: its text is a constant in `module.rs`, equal to A1's `pipeline_text(1)` with the two passes
+   named `air::Lower16BitTexReadPass` and `air::SimdgroupImplicitMemBarrierPass` (so both pins pass unedited);
+   `optimize` runs it through `LLVMAIRRunPasses`. A parse error cannot happen for the pinned constant; it is
+   returned as `LLVM error: ...` where `optimize`'s callers already return `Result`, never a panic.
+4. The two passes in Rust over the C API, each a function taking the function value (and, for the barrier, the
+   analyses handle): the same walks in the same order (blocks, instructions, `LLVMGetFirstUse` order for the
+   cast's users), the builder positioned as `IRBuilder<>(Instruction*)` positions it (`LLVMPositionBuilderBefore`,
+   which takes the instruction's debug location as the C++ constructor does), the same value names, erasure
+   after the walk and only of instructions left without uses.
+   **Stated difference (one):** a load whose defining access is the function's live-on-entry definition. The C++
+   passes that definition's null instruction to `dyn_cast`, which dereferences it (a crash); the Rust skips the
+   load. A test pins the skip; the corpora never reach it (they would have crashed).
+5. `shim.cpp`, `transforms/`, the cc-rs block of `build.rs`, `cc` in airconv's build dependencies,
+   `airconv_shim_probe` and its test go; `build.rs` keeps the Metal helpers and the link lines; its
+   `rerun-if-changed` loses `shim` and `transforms`.
+
+**A6. Proof (plan Step 4):** rust-check on the new no-LTO install; A2's tests pass unedited; the 13 corpora
+`cmp -r`-equal to A1 and the digest equal, the tip built against `build/crs/llvm23-arm64-nolto`. LLVM is built
+there by `tools/llvm.sh`'s recipe from a **second**, detached worktree at exactly the fork commit
+(`build/crs/llvm-pin`): `build_llvm` deletes a source folder whose HEAD differs, so it never sees the worktree
+being edited. The key's new value is recorded (`translator_key` hashes every non-test file under `src/airconv`,
+so the new Rust files are in it and the deleted C++ is out).
+
+**The shared installs (changes Step 5):** the plan's condition for rebuilding them (C4b-3d5 landed) is stale: the
+session that started this one gates C4c on `build/wine-arm64-src/llvm23-arm64{,-nolto}` now, and `build_llvm`
+deletes an install whose commit differs, so two sessions on two LLVM commits would rebuild against each other at
+every job. Before Task 8 that session gets one message naming the moment; Task 8's job rebuilds both shared
+installs once, the push follows the gates directly, and that session rebases onto the new pin before its next
+build.
+
+**Rules check (addendum):** new files `src/airconv/src/module/passes.rs` (or two files, the implementer's choice
+by size; no `mod.rs`), their tests; no new crate, no new dependency (`cc` leaves two crates); no new static; the
+two pass callbacks are `extern "C"` (a Rust panic in one aborts, as in every airconv export); `global_asm!` is
+used once more (Task 6), under the argument above; no `sel!`, `class!` or `msg_send!`; no lint suppression.
+`tools/audit.sh`'s `C_SOURCES` ends empty and the rule reads "no C, C++ or Objective-C source under `src/` or
+`tests/`".
+
+**Rulings (addendum):**
+
+13. **"All on rust" is read per question as above.** Cost if wrong: Q4 (a deletion, last, reversible from
+    history and upstream); Q3 (five files in the other repository, one commit each way); Q2 (an assembly block
+    where the maintainer might have preferred to wait for C4: one revert); Q1 (the largest: an LLVM pin, three
+    install rebuilds, a second key move, about four agent-days).
+14. **The fork's entry points are generic LLVM calls; nothing translator-specific is C++.** Cost if wrong: an
+    entry point that turns out to need policy grows a parameter, at the price of an LLVM commit and rebuilds.
+15. **The pipeline is the printed text parsed back, not a hand-built pass list.** Cost if wrong: a pass whose
+    printed options do not round-trip would run with different options; guarded by the print-equals-text pin
+    and the corpora.
+16. **The landing pad is clang's assembly, aarch64 only.** Cost if wrong: an x86_64 Mac build of `mtld3d.so`
+    (none exists) stops at a `compile_error!` and needs its own block.
+17. **The live-on-entry crash is not reproduced.** Cost if wrong: none found; a shader that reached it never
+    produced output.
+18. **The fork push is asked for, once, before Task 8.** Cost if wrong: an hour's wait at the gates; the
+    alternative is a push to a public repository on an inferred yes.
