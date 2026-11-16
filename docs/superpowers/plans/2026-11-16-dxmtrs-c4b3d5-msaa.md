@@ -381,8 +381,8 @@ runtimes).
   `ms-a2c`; (c) `resolve_into` takes the stored format's views → `ms-srgbmask` (its unfolded resolve); (d) the
   clamp's "depth bound" input ignores the count → `ms-mismatch`; (e) the mask is narrowed with
   `D3DMULTISAMPLE_4_SAMPLES` whatever the target's type → `ms-nonmask`; (f) alpha-to-coverage takes the device's
-  back-buffer count, not target 0's → `ms-a2c` (its single-sample cell); (g) `color_size` answers `None` for a
-  slot whose sample count is not target 0's → `ms-mrt` (its Clear of the other-count extra).
+  back-buffer count, not target 0's → `ms-a2c` (its single-sample cell); (g) the Clear loop reaches a
+  bound slot of target 0's size and another sample count → `ms-mrt` (that extra turns white).
 - [ ] **Step 3: plain build** (`jr`): translator key and imports unchanged; `d3d9-check` default; the Mac's Wine
   conformance with no new failing site; the x64 `dxmt/check.sh` all passed (idle Mac).
 - [ ] **Step 4: VM** (`jc`, with `vm/dxmt/gate.sh`: dxmt-core changed): D3D10-12's gate ok; the D3D9 lanes on
@@ -543,7 +543,9 @@ depth-stencil of another count is left out: parity), every call `D3D_OK`.
 - `ms-mrt`: T at index 0 and a second 4-sample target at index 1, `PS_MRT2` red, green: each read its own; the
   same pair under `SRGBWRITEENABLE` with the mask 0x3 and white, white over black: 188 on both. With a
   single-sample 64x64 texture at index 1, both cleared blue then `PS_MRT2`: T red, the texture blue (skipped), and
-  a whole Clear to white reaches both. With a 2-sample target at index 1 (when the device offers 2): the same.
+  a whole Clear to white reaches T alone: the texture stays blue (parity: mtld3d clears apart only a bound target
+  of another *size*; one of target 0's size and another sample count is in no pass and gets no Clear). With a
+  2-sample target at index 1 (when the device offers 2): the same.
 - `ms-scissor`: T cleared blue; scissor (16,16)-(48,48), a red quad over all: (32,32) red, (15,32) and (48,32)
   blue; a viewport (0,0,32,64) and a full clip-space quad: (16,32) red, (48,32) blue.
 - `ms-redraw`: T cleared black, a red quad over the left half, resolved into R1; a green quad over the right

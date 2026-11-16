@@ -5347,7 +5347,7 @@ static bool rowMsBlend() {
 // under SRGBWRITEENABLE, cleared black, with the mask 0x3 and white on both: 188 on both. Then, at index 1, a
 // single-sample 64x64 texture, and a 2-sample target when the device offers 2: it and T cleared blue apart, PS_MRT2
 // red, green: T red, it blue (of another sample count than index 0: out of the draw's set; T's red is the drawn
-// control); a whole Clear to white reaches both.
+// control); a whole Clear to white reaches T alone (mtld3d clears apart only a target of another size).
 static bool rowMsMrt() {
     Prog p;
     if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
@@ -5373,7 +5373,8 @@ static bool rowMsMrt() {
                 }) ||
                 !msHas("T0 beside it", t.p, {{32, 32, TRED}}) || !msHas(name, x, {{32, 32, TBLU}}) ||
                 !scene([&] { return clearTo(TWHT); }) || !msHas("T0 cleared", t.p, {{32, 32, 0xffffff}}) ||
-                !msHas(name, x, {{32, 32, 0xffffff}}))
+                // Not the Clear either: mtld3d clears apart only a target of another size (parity).
+                !msHas(name, x, {{32, 32, TBLU}}))
                 return false;
         }
         return true;
