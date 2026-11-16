@@ -836,3 +836,46 @@ used once more (Task 6), under the argument above; no `sel!`, `class!` or `msg_s
     produced output.
 18. **The fork push is asked for, once, before Task 8.** Cost if wrong: an hour's wait at the gates; the
     alternative is a push to a public repository on an inferred yes.
+
+### Review 4 (Opus, the addendum; 0C/6I/minors), folded. Where a line above differs, this section wins.
+
+- **R4-1 (I) the selector stub needs an image the Objective-C runtime reads; the `.m` is what gave `mtld3d.so` its
+  `__objc_imageinfo`.** Task 6's pad takes the selector as an argument and calls `_objc_msgSend` itself: the
+  reference is `clang -S` of a variant `.m` whose `@try` holds `((void (*)(id, SEL, id))objc_msgSend)(receiver,
+  selector, argument)`. No stub, no selector reference, no image info. The Rust passes
+  `Sel::register(c"applicationDidChangeScreenParameters:")`, the same value it asks `respondsToSelector:` with.
+  Step 5 also records that the tip's `mtld3d.so` has no `__objc_imageinfo` and the base's has one (a stated
+  difference of the image, with no reader: objc2 registers classes and selectors at run time).
+- **R4-2 (I) labels.** Every label of the pad is its own (`Lmtld3d_try_*`, the table's `mtld3d_try_send_table`),
+  none copied from clang; no `.build_version`, no `.subsections_via_symbols`; the block returns to `__text`.
+- **R4-3 (I) x86_64 Macs.** Meson and the docs still name `x86_64-apple-darwin` for `mtld3d.so`
+  (`src/d3d9/unix/meson.build:8`, `docs/d3d9/ARCHITECTURE.md:13`). The pad is written for both architectures by the
+  same procedure, not a `compile_error!`. This Mac has no x86_64 Rust target (a download), so the x86_64 block is
+  proved outside cargo: its text assembled by clang equals clang's object for the variant `.m`, and a scratch
+  program linking that object catches a thrown exception under Rosetta. Ruling 16 is replaced by: **both
+  architectures get a pad; the x86_64 one is not run by any gate.** Cost if wrong: an x86_64 build that no one
+  makes today has a pad proved only by the scratch program.
+- **R4-4 (I)** A5's groups 3 and 4 are one commit (the pipeline's text and the two Rust passes).
+- **R4-5 (I)** the fork install (`build/crs/llvm23-arm64-nolto`, the shared no-LTO install's CPU flag and LTO
+  setting) is built at the end of A4, before A5's first commit; A6 only uses it.
+- **R4-6 (I) A2's tests must not pass by accident.** The pipeline runs `early-cse` and `instcombine` before the
+  two passes: the loads read another, unknown threadgroup address than the store; every extract's result is
+  stored or returned; the functions are external. **Mutation RED for A2 as for A1:** in the scratch worktree,
+  with each pass dropped from `BuildPipeline`, that pass's tests fail.
+- **Minors, taken:** the extract index is an `i64` constant and the shift an `i32` one; a fresh builder per pass
+  (`LLVMCreateBuilderInContext`), never the translator's; "no uses" is tested at erase time in the C++'s order;
+  `LLVMVectorTypeKind` only; the barrier call is built with the fixed type `void (i32, i32)`;
+  `LLVMAIRStructSetName` ignores a literal struct; the atomic mapping is the entry point's own switch with a null
+  default; `DEPENDS intrinsics_gen`; `local_slot` compares `slot as i32`, and `converter/tests.rs:271` moves to
+  the Rust function; A2's promise is "expected text unedited" (helpers that call deleted shim symbols change);
+  Ruling 15 adds that `ipsccp`'s `AllowFuncSpec` and `always-inline`'s `InsertLifetime` are never printed and are
+  equal by default on both sides; `pipeline_text(0)` after the port prints the constant without its two names;
+  Step 5's object comes from `--emit obj` under the dev profile; `respondsToSelector:` is sent through
+  `NSObjectProtocol` on the receiver seen as a protocol object (a pointer cast under its `SAFETY:`), since
+  `&AnyObject` has no such method; the "plain `NSObject` answers false" test exists already.
+- **Stale text Task 5 and Task 9 also fix:** DXMTRS `src/airconv/src/lib.rs:6`, `src/airconv/build.rs:3-8,23`,
+  `src/airconv/meson.build:5`; MacNeutron `dxmt/tools.sh:15`, `wine-arm64/lib.sh:183`.
+- **Checked by the review and left as written:** one `add_subdirectory` installs the library and the header; the
+  link components; archive order on Mach-O; one `llvm_deps` list feeds `build.rs` and `build_translate`; the key
+  function lists `src/airconv` by walking it; the live-on-entry claim (a `MemoryDef` with a null instruction, uses
+  not optimized at build in LLVM 23, `dyn_cast` on null under `NDEBUG`); every pass's printed options round-trip.
