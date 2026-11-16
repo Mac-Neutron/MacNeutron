@@ -41,7 +41,7 @@
 # rows (DXMTRS C4b-3d3: partial clears, the scissor test, a depth-stencil of another size, sRGB write and blending;
 # bl64-fresh, bl32-fresh); under core their logs hold no refusal line. Every lane also checks d3d9_triangle mrt's 20
 # rows (DXMTRS C4b-3d4: render targets at index 1-3; mr64-fresh, mr32-fresh); under core their logs hold no refusal
-# line. Every lane also checks d3d9_triangle msaa's 16 rows (DXMTRS C4b-3d5: multisampling, on a device whose back
+# line. Every lane also checks d3d9_triangle msaa's 17 rows (DXMTRS C4b-3d5: multisampling, on a device whose back
 # buffer and auto depth-stencil have 4 samples; ms64-fresh, ms32-fresh); under core their logs hold exactly one refusal line (a StretchRect
 # that is no multisample resolve).
 set -u
@@ -193,7 +193,7 @@ for r in mr64-fresh mr32-fresh; do
   done
 done
 for r in ms64-fresh ms32-fresh; do
-  for row in ms-desc ms-resolve ms-edge ms-back ms-clear ms-depth ms-mismatch ms-mask ms-nonmask ms-a2c ms-srgbmask \
+  for row in ms-initial ms-desc ms-resolve ms-edge ms-back ms-clear ms-depth ms-mismatch ms-mask ms-nonmask ms-a2c ms-srgbmask \
     ms-blend ms-mrt ms-scissor ms-redraw ms-samples; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done

@@ -59,7 +59,7 @@
 // and of another size, the write masks of index 1-3, blending and sRGB write over several targets, Clear over every
 // bound target, the scissor, the viewport and the depth test, the back buffer in a set, automatic mipmaps, order),
 // with a 180 s budget. The core refuses none of it.
-// With "msaa" ("msaa strict" under core; DXMTRS C4b-3d5): 16 rows "d3d9 ms-<row> ok|FAIL <why>" on a device whose
+// With "msaa" ("msaa strict" under core; DXMTRS C4b-3d5): 17 rows "d3d9 ms-<row> ok|FAIL <why>" on a device whose
 // back buffer and auto D24S8 have 4 samples: multisampled CreateRenderTarget surfaces (2, 4, 8 samples and
 // non-maskable) read through StretchRect's resolve, the back buffer's too; edges, Clear with rects and the viewport,
 // the depth test, a depth-stencil of another sample count, D3DRS_MULTISAMPLEMASK, alpha-to-coverage (ATOC and the A2M
@@ -5227,7 +5227,21 @@ static bool rowMsMismatch() {
                        zquad(0, 0, 64, 48, 0.8f, TWHT) && zquad(0, 0, 32, 64, 1.5f, TGRN) && bindDs(dsSurf);
             }))
             return false;
-        return msHas("T", t.p, {{48, 32, 0xffffff}, {48, 56, TRED}, {16, 32, TGRN}});
+        if (!msHas("T", t.p, {{48, 32, 0xffffff}, {48, 56, TRED}, {16, 32, TGRN}})) return false;
+        // A Z Clear does nothing to a depth-stencil of another count than index 0's (parity: mtld3d's is a no-op):
+        // Z cleared to 1 beside a single-sample target, "cleared" to 0.1 beside T, then a quad at z 0.5 beside the
+        // single-sample target again still passes LESSEQUAL.
+        Rt s;
+        if (!mkRt(s) || !scene([&] {
+                if (!bindRt(0, s.s.p) || !bindDs(d.p)) return false;
+                CK(Clear, 0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, TBLK, 1.0f, 0);
+                if (!bindRt(0, t.p)) return false;
+                CK(Clear, 0, nullptr, D3DCLEAR_ZBUFFER, 0, 0.1f, 0);
+                return bindRt(0, s.s.p) && rstate(D3DRS_ZENABLE, D3DZB_TRUE) && zquad(0, 0, 64, 64, 0.5f, TGRN) &&
+                       rstate(D3DRS_ZENABLE, D3DZB_FALSE) && bindDs(dsSurf);
+            }))
+            return false;
+        return rtHas("the depth-stencil of another count, not cleared", s.s.p, 64, A8, {{32, 32, TGRN}});
     });
 }
 // ms-mask: T cleared black, white quads in four columns 16 wide, each under its own D3DRS_MULTISAMPLEMASK: 0x3 (2 of 4
@@ -5468,6 +5482,20 @@ static bool rowRtMsaa() {
     });
 }
 
+// ms-initial: run before anything binds a target, with index 0 still the device's own back buffer (never set: the
+// state a title that never calls SetRenderTarget draws in): the sample mask applies there, 0x3 of 4 samples and a
+// white quad over black reading 128. A retried attempt (the default runtime's pipelines compiling) runs with the
+// back buffer bound by until(), which the default runtime treats alike.
+static bool rowMsInitial() {
+    return until([&] {
+        Rt r;
+        CK(Clear, 0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, TBLK, 1.0f, 0);
+        return rstate(D3DRS_MULTISAMPLEMASK, 0x3) && scene([&] { return zquad(0, 0, 256, 256, 0.5f, TWHT); }) &&
+               rstate(D3DRS_MULTISAMPLEMASK, 0xffffffff) && resolveInto(rtSurf, r, 256, X8) &&
+               rtHas("the back buffer nothing bound", r.s.p, 256, X8, {{128, 128, 0x808080}});
+    });
+}
+
 static void msaaRows(IDirect3DDevice9 *d, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
         {"ms-desc", rowMsDesc},       {"ms-resolve", rowMsResolve},   {"ms-edge", rowMsEdge},
@@ -5481,6 +5509,9 @@ static void msaaRows(IDirect3DDevice9 *d, bool strict) {
     if (SUCCEEDED(hr))
         hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
     if (SUCCEEDED(hr)) hr = dev->GetDepthStencilSurface(&dsSurf);
+    // First, before any reset() binds index 0.
+    why[0] = 0;
+    row("ms-initial", SUCCEEDED(hr) ? rowMsInitial() : fail("GetRenderTarget/GetDepthStencilSurface", hr), why);
     for (const auto &r : rows) {
         why[0] = 0;
         bool ok;

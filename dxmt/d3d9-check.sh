@@ -52,7 +52,7 @@
 # size, sRGB write and blending, on such a device; "blend strict" under core), its rows "blend-<row>"; under core its
 # launch's logs hold no refusal line. Every lane also runs d3d9_triangle mrt (DXMTRS C4b-3d4's 20 rows of render
 # targets at index 1-3, on such a device; "mrt strict" under core), its rows "mrt-<row>"; under core its launch's
-# logs hold no refusal line. Every lane also runs d3d9_triangle msaa (DXMTRS C4b-3d5's 16 rows of multisampling, on a
+# logs hold no refusal line. Every lane also runs d3d9_triangle msaa (DXMTRS C4b-3d5's 17 rows of multisampling, on a
 # device whose back buffer and auto depth-stencil have 4 samples; "msaa strict" under core), its rows "msaa-<row>";
 # under core its launch's logs hold exactly one refusal line (a StretchRect
 # that is no multisample resolve).
@@ -142,8 +142,8 @@ launch() {
 # (C4b2-8); the state launch's exactly its buffer lock's (DXMTRS C4b-3a); the textures launch's exactly its one
 # (DXMTRS C4b-3b: a render-target texture's LockRect), the fixed launch's exactly its one (DXMTRS C4b-3c: a depth
 # texture at a vertex sampler), the depth launch's exactly its two (DXMTRS C4b-3d2: a depth-tested draw sampling the
-# bound depth-stencil, a dynamic depth texture's LockRect), one line each; the blend, mrt, targets and msaa launches'
-# none (DXMTRS C4b-3d3, C4b-3d4, C4b-3d5: multisampled surfaces and the plain surface are the core's since then); the
+# bound depth-stencil, a dynamic depth texture's LockRect), one line each; the targets and msaa launches' exactly
+# their one (DXMTRS C4b-3d5: a StretchRect that is no multisample resolve); the blend and mrt launches' none; the
 # other launches are not held to it.
 refused='is not implemented under runtime.mode = core'
 state_refusals='IDirect3DVertexBuffer9::Lock'
@@ -229,7 +229,7 @@ launch ours fresh mrt 240 mrt $strict
 check mrt "mrt-two mrt-four mrt-hole mrt-unwritten mrt-nobind mrt-clear mrt-mask mrt-blend mrt-destalpha mrt-formats
   mrt-srgb mrt-srgbclear mrt-size mrt-switch mrt-scissor mrt-depth mrt-back mrt-autogen mrt-order mrt-read"
 launch ours fresh msaa 240 msaa $strict
-check msaa "ms-desc ms-resolve ms-edge ms-back ms-clear ms-depth ms-mismatch ms-mask ms-nonmask ms-a2c ms-srgbmask
+check msaa "ms-initial ms-desc ms-resolve ms-edge ms-back ms-clear ms-depth ms-mismatch ms-mask ms-nonmask ms-a2c ms-srgbmask
   ms-blend ms-mrt ms-scissor ms-redraw ms-samples"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
