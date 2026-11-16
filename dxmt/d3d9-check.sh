@@ -110,7 +110,7 @@ launch() {
   d="$WORK/mtld3d-logs/$name"
   enc='texture versions: rename pool cap'
   # A core device that cannot present or draw logs one of these and still answers D3D_OK: none may appear.
-  unpresented='nothing presents|d3d9 core: no Metal view|does not build'
+  unpresented='nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key'
   if [ "$name" = arm64 ]; then
     if /usr/bin/grep -rqF 'carries no core runtime, so mtld3d runs' "$d" && /usr/bin/grep -rqF "$enc" "$d" \
       && ! /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d"; then

@@ -4614,7 +4614,8 @@ static bool rowMrtClear() {
                rtHas("T1 unbound", b.s.p, 64, A8, {{32, 32, 0xffff00}});
     });
 }
-// COLORWRITEENABLE1 masks index 1 alone, COLORWRITEENABLE index 0 alone.
+// COLORWRITEENABLE1 masks index 1 alone, COLORWRITEENABLE index 0 alone; with index 0 masked off whole, index 1 is
+// still drawn.
 static bool rowMrtMask() {
     Prog p;
     if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
@@ -4632,8 +4633,14 @@ static bool rowMrtMask() {
                        rstate(D3DRS_COLORWRITEENABLE1, 0xf) && mrtDraw2(p, F_WHT, F_WHT);
             }))
             return false;
-        return rtHas("T0 green", a.s.p, 64, A8, {{32, 32, 0x00ff00}}) &&
-               rtHas("T1", b.s.p, 64, A8, {{32, 32, 0xffffff}});
+        if (!rtHas("T0 green", a.s.p, 64, A8, {{32, 32, 0x00ff00}}) ||
+            !rtHas("T1", b.s.p, 64, A8, {{32, 32, 0xffffff}}) ||
+            !scene([&] {
+                return clearTo(TBLK) && rstate(D3DRS_COLORWRITEENABLE, 0) && mrtDraw2(p, F_WHT, F_WHT);
+            }))
+            return false;
+        return rtHas("T0 off", a.s.p, 64, A8, {{32, 32, 0x000000}}) &&
+               rtHas("T1 alone", b.s.p, 64, A8, {{32, 32, 0xffffff}});
     });
 }
 // One blend state, each target its own destination and its own source alpha; the blend factor colour on both.

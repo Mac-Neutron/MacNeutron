@@ -211,7 +211,7 @@ IDirect3DTexture9::LockRect (a render-target or depth texture)'
 runtime() {
   n=$(/usr/bin/grep -rhF "$refused" "$1" 2> /dev/null | wc -l | tr -d ' ')
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
-    && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build' "$1" \
+    && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key' "$1" \
     && case ${2:-} in
       crossing) [ "$n" = 1 ] && /usr/bin/grep -rhF "$refused" "$1" | /usr/bin/grep -qi crossing ;;
       state|textures|fixed|targets|depth)
