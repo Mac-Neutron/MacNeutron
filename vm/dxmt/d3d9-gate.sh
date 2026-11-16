@@ -33,14 +33,15 @@
 # tx32-fresh), and tx32-fresh the 32-bit-only tex-big256 (the staged-bytes budget); under core their logs hold exactly
 # the refused row's line. Every lane also checks d3d9_triangle fixed's 31 rows (DXMTRS C4b-3c: the fixed-function
 # vertex stage; fx64-fresh, fx32-fresh); under core their logs hold exactly its refused row's line. Every lane also
-# checks d3d9_triangle targets' 22 rows (DXMTRS C4b-3d1: render targets other than the back buffer; tg64-fresh,
-# tg32-fresh); under core their logs hold exactly its one refused row's line. Every lane also checks d3d9_triangle
+# checks d3d9_triangle targets' 23 rows (DXMTRS C4b-3d1: render targets other than the back buffer, and C4b-3d5's
+# rt-plain; tg64-fresh, tg32-fresh); under core their logs hold no refusal line. Every lane also checks d3d9_triangle
 # depth's 31 rows (DXMTRS C4b-3d2: the depth-stencil, on a device with an auto depth-stencil; dp64-fresh, dp32-fresh);
-# under core their logs hold exactly its three refused calls' lines. Every lane also checks d3d9_triangle blend's 36
+# under core their logs hold exactly its two refused calls' lines. Every lane also checks d3d9_triangle blend's 36
 # rows (DXMTRS C4b-3d3: partial clears, the scissor test, a depth-stencil of another size, sRGB write and blending;
 # bl64-fresh, bl32-fresh); under core their logs hold no refusal line. Every lane also checks d3d9_triangle mrt's 20
 # rows (DXMTRS C4b-3d4: render targets at index 1-3; mr64-fresh, mr32-fresh); under core their logs hold no refusal
-# line.
+# line. Every lane also checks d3d9_triangle msaa's 16 rows (DXMTRS C4b-3d5: multisampling, on a device whose back
+# buffer and auto depth-stencil have 4 samples; ms64-fresh, ms32-fresh); under core their logs hold no refusal line.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -162,7 +163,8 @@ for r in fx64-fresh fx32-fresh; do
 done
 for r in tg64-fresh tg32-fresh; do
   for row in rt-tex rt-read rt-surface rt-viewport rt-big rt-mip rt-cube rt-switch rt-rewrite rt-clearonly rt-fresh \
-    rt-autogen rt-release rt-srgb rt-ps rt-update rt-updatebound rt-formats rt-mrt rt-msaa rt-cubelock rt-huge; do
+    rt-autogen rt-release rt-srgb rt-ps rt-update rt-updatebound rt-formats rt-mrt rt-msaa rt-plain rt-cubelock \
+    rt-huge; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
@@ -188,36 +190,40 @@ for r in mr64-fresh mr32-fresh; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
+for r in ms64-fresh ms32-fresh; do
+  for row in ms-desc ms-resolve ms-edge ms-back ms-clear ms-depth ms-mismatch ms-mask ms-nonmask ms-a2c ms-srgbmask \
+    ms-blend ms-mrt ms-scissor ms-redraw ms-samples; do
+    check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
+  done
+done
 for r in st64-fresh st32-fresh; do
   for row in state-xform state-material state-tss state-swapchain state-rt state-tex state-late state-lock state-sb \
     state-upunbind state-fftex state-fftexoff; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
-# core: runtime <folder> [crossing|state|textures|fixed|targets|depth]: the core device's line in a launch's logs, none
-# of mtld3d.so's encoder line nor of the core's can't-present lines (the code that ran prints them, not the switch), and
-# no refusal line, or with "crossing" exactly one, the crossing row's, with "textures", "fixed", "targets" or "depth"
-# exactly that launch's refused rows' (texture_refusals, fixed_refusals, targets_refusals, depth_refusals), or with
-# "state" exactly the state rows' (state_refusals: the buffer lock). The blend and mrt launches (DXMTRS C4b-3d3,
-# C4b-3d4) take no kind: no refusal line.
+# core: runtime <folder> [crossing|state|textures|fixed|depth]: the core device's line in a launch's logs, none of
+# mtld3d.so's encoder line nor of the core's can't-present or dropped-draw lines (the code that ran prints them, not the
+# switch), and no refusal line, or with "crossing" exactly one, the crossing row's, with "textures", "fixed" or "depth"
+# exactly that launch's refused rows' (texture_refusals, fixed_refusals, depth_refusals), or with "state" exactly the
+# state rows' (state_refusals: the buffer lock). The blend, mrt, targets and msaa launches (DXMTRS C4b-3d3, C4b-3d4,
+# C4b-3d5) take no kind: no refusal line.
 refused='is not implemented under runtime.mode = core'
 state_refusals='IDirect3DVertexBuffer9::Lock'
 texture_refusals='IDirect3DTexture9::LockRect (a render-target or depth texture)'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
-targets_refusals='IDirect3DDevice9::CreateRenderTarget (multisampled)'
 depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)
-IDirect3DDevice9::CreateDepthStencilSurface (multisampled)
 IDirect3DTexture9::LockRect (a render-target or depth texture)'
 runtime() {
   n=$(/usr/bin/grep -rhF "$refused" "$1" 2> /dev/null | wc -l | tr -d ' ')
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
-    && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key' "$1" \
+    && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key' "$1" \
     && case ${2:-} in
       crossing) [ "$n" = 1 ] && /usr/bin/grep -rhF "$refused" "$1" | /usr/bin/grep -qi crossing ;;
-      state|textures|fixed|targets|depth)
+      state|textures|fixed|depth)
         case $2 in
           state) set_=$state_refusals ;; textures) set_=$texture_refusals ;; fixed) set_=$fixed_refusals ;;
-          targets) set_=$targets_refusals ;; depth) set_=$depth_refusals ;;
+          depth) set_=$depth_refusals ;;
         esac
         [ "$n" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] && printf '%s\n' "$set_" | while IFS= read -r m; do
           /usr/bin/grep -rqF "d3d9 core: $m $refused" "$1" || exit 1; done ;;
@@ -240,13 +246,10 @@ if [ "$RT" = core ]; then
   for r in fx64-fresh fx32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" fixed)" ok
   done
-  for r in tg64-fresh tg32-fresh; do
-    check "$r runtime core" "$(runtime "$G/logs/$r" targets)" ok
-  done
   for r in dp64-fresh dp32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" depth)" ok
   done
-  for r in bl64-fresh bl32-fresh mr64-fresh mr32-fresh; do
+  for r in tg64-fresh tg32-fresh bl64-fresh bl32-fresh mr64-fresh mr32-fresh ms64-fresh ms32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
   done
 fi

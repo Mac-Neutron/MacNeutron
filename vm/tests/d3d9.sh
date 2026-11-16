@@ -15,7 +15,7 @@
 #   fx<64|32>-fresh.txt           d3d9_triangle fixed (DXMTRS C4b-3c's 31 rows of the fixed-function vertex stage;
 #                                "fixed strict" under core), 240 s
 #   tg<64|32>-fresh.txt           d3d9_triangle targets (DXMTRS C4b-3d1's 22 rows of render targets other than the
-#                                back buffer; "targets strict" under core), 240 s
+#                                back buffer and C4b-3d5's rt-plain; "targets strict" under core), 240 s
 #   dp<64|32>-fresh.txt           d3d9_triangle depth (DXMTRS C4b-3d2's 31 rows of the depth-stencil, on a device with
 #                                an auto depth-stencil; "depth strict" under core), 240 s
 #   bl<64|32>-fresh.txt           d3d9_triangle blend (DXMTRS C4b-3d3's 36 rows of partial clears, the scissor test, a
@@ -23,6 +23,8 @@
 #                                240 s
 #   mr<64|32>-fresh.txt           d3d9_triangle mrt (DXMTRS C4b-3d4's 20 rows of render targets at index 1-3; "mrt
 #                                strict" under core), 240 s
+#   ms<64|32>-fresh.txt           d3d9_triangle msaa (DXMTRS C4b-3d5's 16 rows of multisampling, on a device whose
+#                                back buffer and auto depth-stencil have 4 samples; "msaa strict" under core), 240 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
@@ -117,6 +119,8 @@ tri d3d9_triangle.exe bl64-fresh 240 blend $strict
 tri d3d9_triangle32.exe bl32-fresh 240 blend $strict
 tri d3d9_triangle.exe mr64-fresh 240 mrt $strict
 tri d3d9_triangle32.exe mr32-fresh 240 mrt $strict
+tri d3d9_triangle.exe ms64-fresh 240 msaa $strict
+tri d3d9_triangle32.exe ms32-fresh 240 msaa $strict
 rm -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" "$WINEPREFIX/drive_c/windows/syswow64/mtld3d.dll"
 tri d3d9_triangle.exe tri64-nomarker  # Wine finds no builtin without its marker: these fail
 tri d3d9_triangle32.exe tri32-nomarker

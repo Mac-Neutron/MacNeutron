@@ -34,18 +34,20 @@
 // fixed-function vertex stage over untransformed layouts (transforms, lights, material sources, fog, texgen and texture
 // transforms, vertex blending, points, a clip plane) and three vertex-sampled target textures the core refuses, with a
 // 180 s budget. "--bench <draws> <frames> lit" draws the triangle untransformed and lit ("mode lit").
-// With "targets" ("targets strict" under core; DXMTRS C4b-3d1): 22 rows "d3d9 rt-<row> ok|FAIL <why>" of render targets
+// With "targets" ("targets strict" under core; DXMTRS C4b-3d1): 23 rows "d3d9 rt-<row> ok|FAIL <why>" of render targets
 // other than the back buffer (render-target textures, their levels and cube faces, CreateRenderTarget surfaces: drawn
 // to, cleared, read back with GetRenderTargetData and sampled; formats, sRGB write, the viewport reset, automatic
-// mipmaps, lifetime and order, a size past the device's limit, a target bound and unbound at index 1), one the core
-// refuses (a multisampled surface), with a 150 s budget.
+// mipmaps, lifetime and order, a size past the device's limit, a target bound and unbound at index 1; since DXMTRS
+// C4b-3d5 a multisampled surface resolved by StretchRect into a texture level, a surface and the back buffer, and the
+// default pool's plain surface), with a 150 s budget. The core refuses a StretchRect other than a whole-surface
+// resolve (rt-msaa's into a 32x32 target).
 // With "depth" ("depth strict" under core; DXMTRS C4b-3d2): 31 rows "d3d9 ds-<row> ok|FAIL <why>" of the depth-stencil,
 // on a device made with an auto D24S8 (the other modes' devices have none): the depth and stencil tests and their
 // state, Clear's Z and stencil, depth bias, the pretransformed clamp, a pixel shader's depth output, depth-stencil
 // surfaces and depth textures and their levels, shadow, raw (INTZ, DF16, DF24) and fetch4 samples of a depth texture,
-// a depth-stencil larger than the target, the pretransformed clip while one is bound, and what the core refuses (a
-// depth-tested draw sampling the bound depth-stencil, a multisampled surface, a dynamic depth texture's lock), with a
-// 150 s budget. "--bench <draws> <frames> tex depth" runs the tex bench on such a device, Z cleared each frame and
+// a depth-stencil larger than the target, the pretransformed clip while one is bound, a multisampled surface beside a
+// single-sample target (DXMTRS C4b-3d5), and what the core refuses (a depth-tested draw sampling the bound
+// depth-stencil, a dynamic depth texture's lock), with a 150 s budget. "--bench <draws> <frames> tex depth" runs the tex bench on such a device, Z cleared each frame and
 // tested ("mode texdepth").
 // With "blend" ("blend strict" under core; DXMTRS C4b-3d3): 36 rows "d3d9 <cl|sc|sz|sr|bl>-<row> ok|FAIL <why>" on such
 // a device: Clear with rects, under the scissor test and bounded by the viewport (colour, depth, stencil); the scissor
@@ -57,6 +59,13 @@
 // and of another size, the write masks of index 1-3, blending and sRGB write over several targets, Clear over every
 // bound target, the scissor, the viewport and the depth test, the back buffer in a set, automatic mipmaps, order),
 // with a 180 s budget. The core refuses none of it.
+// With "msaa" ("msaa strict" under core; DXMTRS C4b-3d5): 16 rows "d3d9 ms-<row> ok|FAIL <why>" on a device whose
+// back buffer and auto D24S8 have 4 samples: multisampled CreateRenderTarget surfaces (2, 4, 8 samples and
+// non-maskable) read through StretchRect's resolve, the back buffer's too; edges, Clear with rects and the viewport,
+// the depth test, a depth-stencil of another sample count, D3DRS_MULTISAMPLEMASK, alpha-to-coverage (ATOC and the A2M
+// latch), sRGB write, blending, index 1-3 targets, the scissor test, a resolve's destination drawn again; what the
+// creators and read-backs answer. With a 180 s budget. The core refuses a StretchRect other than a whole-surface
+// resolve (ms-desc's depth-stencil one).
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -3003,14 +3012,34 @@ static bool rowRtMrt() {
     CK(SetViewport, &FULL);
     return ok;
 }
-// A multisampled render target, past the core's slice (C4b-3d5): D3DERR_NOTAVAILABLE under core (strict); any answer
-// in the other lanes.
-static bool rowRtMsaa() {
-    IDirect3DSurface9 *s = nullptr;
-    const HRESULT hr =
-        dev->CreateRenderTarget(64, 64, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_4_SAMPLES, 0, FALSE, &s, nullptr);
-    if (s) s->Release();
-    if (strictMode && hr != D3DERR_NOTAVAILABLE) return fail("CreateRenderTarget (4 samples)", hr);
+// A multisampled render target resolved by StretchRect (DXMTRS C4b-3d5): with the msaa mode's helpers, below.
+static bool rowRtMsaa();
+// The default pool's plain surface (DXMTRS C4b-3d5): its description (default pool, usage 0, no multisampling); a
+// texel written under LockRect is read back under a second lock; it is no render target: SetRenderTarget(0, it) is
+// D3DERR_INVALIDCALL.
+static bool rowRtPlain() {
+    Com<IDirect3DSurface9> s;
+    CK(CreateOffscreenPlainSurface, 64, 64, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &s.p, nullptr);
+    D3DSURFACE_DESC d = {};
+    HRESULT hr = s.p->GetDesc(&d);
+    if (FAILED(hr)) return fail("GetDesc", hr);
+    if (d.Width != 64 || d.Height != 64 || d.Format != D3DFMT_A8R8G8B8 || d.Pool != D3DPOOL_DEFAULT || d.Usage != 0 ||
+        d.MultiSampleType != D3DMULTISAMPLE_NONE)
+        return snprintf(why, sizeof why, "desc %ux%u format %d pool %d usage %lx samples %d", d.Width, d.Height,
+                        (int)d.Format, (int)d.Pool, (unsigned long)d.Usage, (int)d.MultiSampleType),
+               false;
+    const DWORD v = 0x80402010;
+    D3DLOCKED_RECT lr = {};
+    if (FAILED(hr = s.p->LockRect(&lr, nullptr, 0))) return fail("LockRect", hr);
+    memcpy((BYTE *)lr.pBits + 7 * lr.Pitch + 5 * 4, &v, 4);
+    if (FAILED(hr = s.p->UnlockRect())) return fail("UnlockRect", hr);
+    if (FAILED(hr = s.p->LockRect(&lr, nullptr, D3DLOCK_READONLY))) return fail("LockRect (the second)", hr);
+    const DWORD got = texel((const BYTE *)lr.pBits, (int)lr.Pitch, 5, 7);
+    s.p->UnlockRect();
+    if (!want("(5,7) locked again", got, v, 0xffffffff)) return false;
+    hr = dev->SetRenderTarget(0, s.p);
+    if (SUCCEEDED(hr)) dev->SetRenderTarget(0, rtSurf);
+    if (hr != D3DERR_INVALIDCALL) return fail("SetRenderTarget(0, a plain surface)", hr);
     return true;
 }
 // A render-target cube is in the default pool and not dynamic: its LockRect is D3DERR_INVALIDCALL in every lane.
@@ -3041,8 +3070,8 @@ static void targetRows(IDirect3DDevice9 *d, bool strict) {
         {"rt-clearonly", rowRtClearOnly}, {"rt-fresh", rowRtFresh},     {"rt-autogen", rowRtAutogen},
         {"rt-release", rowRtRelease},   {"rt-srgb", rowRtSrgb},         {"rt-ps", rowRtPs},
         {"rt-update", rowRtUpdate},     {"rt-updatebound", rowRtUpdateBound}, {"rt-formats", rowRtFormats},
-        {"rt-mrt", rowRtMrt},           {"rt-msaa", rowRtMsaa},         {"rt-cubelock", rowRtCubeLock},
-        {"rt-huge", rowRtHuge}};
+        {"rt-mrt", rowRtMrt},           {"rt-msaa", rowRtMsaa},         {"rt-plain", rowRtPlain},
+        {"rt-cubelock", rowRtCubeLock}, {"rt-huge", rowRtHuge}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 150000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
@@ -3581,15 +3610,25 @@ static bool rowDsFeedback() {
     CK(SetDepthStencilSurface, dsSurf);
     return ok;
 }
-// A multisampled depth-stencil surface, past the core's slice (3d5's): D3DERR_NOTAVAILABLE under core (strict); in
-// the other lanes any answer but an abort (a surface made is released).
+// A multisampled depth-stencil surface (DXMTRS C4b-3d5): a 4-sample 256x256 D24S8 surface and its description; bound
+// with the single-sample back buffer, ZENABLE on and Z cleared to 1, a near red quad (x 32..160) then a far green one
+// (x 96..224) over part of it: the green one shows where they overlap (a depth-stencil of another sample count than the
+// target's is left out of the pass, as mtld3d leaves it out), the red beside it, every call D3D_OK.
 static bool rowDsMsaa() {
-    IDirect3DSurface9 *s = nullptr;
-    const HRESULT hr =
-        dev->CreateDepthStencilSurface(256, 256, D3DFMT_D24S8, D3DMULTISAMPLE_4_SAMPLES, 0, FALSE, &s, nullptr);
-    if (s) s->Release();
-    if (strictMode && hr != D3DERR_NOTAVAILABLE) return fail("CreateDepthStencilSurface (4 samples)", hr);
-    return true;
+    const Px px[] = {{128, 128, TGRN}, {64, 128, TRED}, {32, 32, BLUE}};
+    const bool ok = frames(BLUE, px, 3, [&] {
+        Com<IDirect3DSurface9> d;
+        CK(CreateDepthStencilSurface, 256, 256, D3DFMT_D24S8, D3DMULTISAMPLE_4_SAMPLES, 0, FALSE, &d.p, nullptr);
+        D3DSURFACE_DESC desc = {};
+        const HRESULT hr = d.p->GetDesc(&desc);
+        if (FAILED(hr)) return fail("GetDesc", hr);
+        if (desc.MultiSampleType != D3DMULTISAMPLE_4_SAMPLES)
+            return snprintf(why, sizeof why, "desc %d samples", (int)desc.MultiSampleType), false;
+        return bindDs(d.p) && clearZ() && zquad(32, 64, 160, 192, 0.2f, TRED) && zquad(96, 64, 224, 192, 0.8f, TGRN) &&
+               bindDs(dsSurf);
+    });
+    CK(SetDepthStencilSurface, dsSurf);
+    return ok;
 }
 // CreateDepthStencilSurface past the device's 16384 limit, of no width and in a colour format: D3DERR_INVALIDCALL in
 // every lane, and no surface.
@@ -4982,6 +5021,480 @@ static void mrtRows(IDirect3DDevice9 *d, bool strict) {
     if (rtSurf) rtSurf->Release();
 }
 
+// --- The "msaa" mode (DXMTRS C4b-3d5): multisampling, on a device whose X8R8G8B8 back buffer and auto D24S8 have 4
+// samples (Z off unless a row turns it on). "T" is a 64x64 A8R8G8B8 CreateRenderTarget surface of 4 samples unless
+// said; it is read by resolveInto() a new single-sample render-target texture (StretchRect, whole surfaces), then
+// GetRenderTargetData of that. No row uses frames(): it reads the back buffer with GetRenderTargetData, which a
+// multisampled one refuses. A row draws and reads inside one msUntil() attempt (retried while mtld3d's pipelines
+// build), which starts from msStart()'s state and ends with index 1-3 unbound, the auto depth-stencil bound and
+// msStart()'s state again. Quads are pretransformed; a probe sits 8 pixels or more from a quad's edge (a D3D9 quad
+// edge on a pixel boundary halves the edge pixels' samples). A value coverage decides is a band, 48..208 (DXMTRS
+// C4b-3d5 ruling 7), of one texel or of the mean of a 4x4 block; a blended or coverage quad's alpha is its diffuse
+// alpha. Under D3DRS_MULTISAMPLEMASK a Clear is made with the mask at 0xffffffff.
+static const DWORD D3DFMT_ATOC = MAKEFOURCC('A', 'T', 'O', 'C'), FOURCC_A2M1 = MAKEFOURCC('A', '2', 'M', '1'),
+                   FOURCC_A2M0 = MAKEFOURCC('A', '2', 'M', '0');
+// A size x size render-target surface of `type` samples at `quality`, not lockable.
+static bool msRt(Com<IDirect3DSurface9> &s, UINT size = 64, D3DFORMAT f = A8,
+                 D3DMULTISAMPLE_TYPE type = D3DMULTISAMPLE_4_SAMPLES, DWORD quality = 0) {
+    CK(CreateRenderTarget, size, size, f, type, quality, FALSE, &s.p, nullptr);
+    return true;
+}
+// `src` resolved into `dst`, a new single-sample size x size render-target texture of format f, which rtHas then reads.
+static bool resolveInto(IDirect3DSurface9 *src, Rt &dst, UINT size = 64, D3DFORMAT f = A8) {
+    if (!mkRt(dst, size, f)) return false;
+    CK(StretchRect, src, nullptr, dst.s.p, nullptr, D3DTEXF_NONE);
+    return true;
+}
+// rtHas of the square 4-byte target `s`, through resolveInto() when it is multisampled.
+static bool msHas(const char *name, IDirect3DSurface9 *s, std::initializer_list<Tx> px) {
+    D3DSURFACE_DESC d = {};
+    const HRESULT hr = s->GetDesc(&d);
+    if (FAILED(hr)) return fail("GetDesc", hr);
+    if (d.MultiSampleType == D3DMULTISAMPLE_NONE) return rtHas(name, s, d.Width, d.Format, px);
+    Rt r;
+    return resolveInto(s, r, d.Width, d.Format) && rtHas(name, r.s.p, d.Width, d.Format, px);
+}
+// Whether `got` is within lo..hi; `why` names it otherwise.
+static bool inBand(const char *what, int got, int lo = 48, int hi = 208) {
+    if (got >= lo && got <= hi) return true;
+    snprintf(why, sizeof why, "%s %d want %d..%d", what, got, lo, hi);
+    return false;
+}
+// The mean of the colour channels of the n x n block from texel (x, y) of the square 4-byte target `s` (format f);
+// -1, with `why` set, when it cannot be read.
+static int meanOf(IDirect3DSurface9 *s, D3DFORMAT f, int x, int y, int n) {
+    D3DSURFACE_DESC d = {};
+    const HRESULT hr = s->GetDesc(&d);
+    if (FAILED(hr)) return fail("GetDesc", hr), -1;
+    int sum = 0;
+    if (!readTarget(s, d.Width, d.Height, f, [&](const BYTE *b, int pitch) {
+            for (int j = y; j < y + n; j++)
+                for (int i = x; i < x + n; i++) {
+                    const DWORD v = texel(b, pitch, i, j);
+                    sum += (int)(v >> 16 & 0xff) + (int)(v >> 8 & 0xff) + (int)(v & 0xff);
+                }
+            return true;
+        }))
+        return -1;
+    return sum / (3 * n * n);
+}
+// Whether the adapter offers `type` for a windowed A8R8G8B8 target (CheckDeviceMultiSampleType).
+static bool offers(D3DMULTISAMPLE_TYPE type) {
+    IDirect3D9 *d3d = nullptr;
+    if (FAILED(dev->GetDirect3D(&d3d))) return false;
+    const bool ok =
+        SUCCEEDED(d3d->CheckDeviceMultiSampleType(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, A8, TRUE, type, nullptr));
+    d3d->Release();
+    return ok;
+}
+// What an msaa attempt starts from: mrtStart()'s state, no sample mask, alpha-to-coverage off (ADAPTIVETESS_Y 0, the
+// A2M latch cleared by A2M0, then the numeric point size 1: 1.0 alone keeps the latch), the alpha test off and stage
+// 0's alpha the diffuse alpha. reset() restores none of the first three.
+static bool msStart() {
+    const DWORD rs[][2] = {{D3DRS_MULTISAMPLEMASK, 0xffffffff}, {D3DRS_ADAPTIVETESS_Y, 0},
+                           {D3DRS_POINTSIZE, FOURCC_A2M0},      {D3DRS_POINTSIZE, fbits(1.0f)},
+                           {D3DRS_ALPHATESTENABLE, FALSE},      {D3DRS_ALPHAFUNC, D3DCMP_ALWAYS},
+                           {D3DRS_ALPHAREF, 0}};
+    if (!mrtStart()) return false;
+    for (const auto &s : rs) CK(SetRenderState, (D3DRENDERSTATETYPE)s[0], s[1]);
+    CK(SetTextureStageState, 0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+    return true;
+}
+// attempt() from msStart() through until(); after each attempt, passed or not, msStart()'s state again and the auto
+// depth-stencil bound (until() rebinds the back buffer at index 0).
+template <class F> static bool msUntil(F attempt) {
+    return until([&] {
+        const bool ok = msStart() && attempt();
+        msStart();
+        dev->SetDepthStencilSurface(dsSurf);
+        return ok;
+    });
+}
+
+// ms-desc: the back buffer and the auto depth-stencil say 4 samples; GetRenderTargetData of the back buffer, 16-sample
+// creates (mtld3d's creators answer D3DERR_INVALIDCALL for every reject: parity) and a StretchRect from no surface are
+// D3DERR_INVALIDCALL in every lane; a depth-stencil StretchRect (the auto one into a 4-sample D24S8 surface) is past
+// the core's resolve shape: D3DERR_NOTAVAILABLE under core (strict), any answer elsewhere.
+static bool rowMsDesc() {
+    D3DSURFACE_DESC b = {}, d = {};
+    HRESULT hr = rtSurf->GetDesc(&b);
+    if (SUCCEEDED(hr)) hr = dsSurf->GetDesc(&d);
+    if (FAILED(hr)) return fail("GetDesc", hr);
+    if (b.MultiSampleType != D3DMULTISAMPLE_4_SAMPLES || d.MultiSampleType != D3DMULTISAMPLE_4_SAMPLES)
+        return snprintf(why, sizeof why, "back buffer %d samples, depth-stencil %d", (int)b.MultiSampleType,
+                        (int)d.MultiSampleType),
+               false;
+    hr = dev->GetRenderTargetData(rtSurf, sysSurf);
+    if (hr != D3DERR_INVALIDCALL) return fail("GetRenderTargetData (the back buffer)", hr);
+    Com<IDirect3DSurface9> rt16, ds16, ds;
+    hr = dev->CreateRenderTarget(64, 64, A8, D3DMULTISAMPLE_16_SAMPLES, 0, FALSE, &rt16.p, nullptr);
+    if (hr != D3DERR_INVALIDCALL) return fail("CreateRenderTarget (16 samples)", hr);
+    hr = dev->CreateDepthStencilSurface(64, 64, D3DFMT_D24S8, D3DMULTISAMPLE_16_SAMPLES, 0, FALSE, &ds16.p, nullptr);
+    if (hr != D3DERR_INVALIDCALL) return fail("CreateDepthStencilSurface (16 samples)", hr);
+    hr = dev->StretchRect(nullptr, nullptr, rtSurf, nullptr, D3DTEXF_NONE);
+    if (hr != D3DERR_INVALIDCALL) return fail("StretchRect (no source)", hr);
+    CK(CreateDepthStencilSurface, 256, 256, D3DFMT_D24S8, D3DMULTISAMPLE_4_SAMPLES, 0, FALSE, &ds.p, nullptr);
+    hr = dev->StretchRect(dsSurf, nullptr, ds.p, nullptr, D3DTEXF_NONE);
+    if (strictMode && hr != D3DERR_NOTAVAILABLE) return fail("StretchRect (depth-stencil)", hr);
+    return true;
+}
+// ms-resolve: T cleared green, a red quad over x < 32: read (16,32) red, (48,32) green.
+static bool rowMsResolve() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> t;
+        return msRt(t) && scene([&] { return bindRt(0, t.p) && clearTo(TGRN) && zquad(0, 0, 32, 64, 0.5f, TRED); }) &&
+               msHas("T", t.p, {{16, 32, TRED}, {48, 32, TGRN}});
+    });
+}
+// ms-edge: T cleared black, a white clip-space triangle over its lower left half, corners (-1,-1), (-1,1), (1,-1) in
+// that order (clockwise on screen: the default cull keeps it): (8,56) white, (56,8) black. Its hypotenuse is the texel
+// diagonal x = y, through the diagonal texels' centres, so 2 of 4 samples of each are in (128 under the standard
+// pattern; 0 or 255 without multisampling): (31,31) in the band, and the 4x4 mean from (30,30) (6 texels in, 6 out,
+// 4 diagonal: (6 * 255 + 4 * 128) / 16 = 128) in the band.
+static bool rowMsEdge() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> t;
+        Rt r;
+        const FC tri[3] = {{-1, -1, 0.5f, TWHT}, {-1, 1, 0.5f, TWHT}, {1, -1, 0.5f, TWHT}};
+        int mean = -1, diagonal = -1;
+        if (!msRt(t) || !scene([&] {
+                if (!bindRt(0, t.p) || !clearTo(TBLK)) return false;
+                CK(SetFVF, FVF_C);
+                CK(DrawPrimitiveUP, D3DPT_TRIANGLELIST, 1, tri, sizeof *tri);
+                return true;
+            }) ||
+            !resolveInto(t.p, r) || !rtHas("T", r.s.p, 64, A8, {{8, 56, 0xffffff}, {56, 8, 0x000000}}) ||
+            (mean = meanOf(r.s.p, A8, 30, 30, 4)) < 0 || (diagonal = meanOf(r.s.p, A8, 31, 31, 1)) < 0)
+            return false;
+        return inBand("the edge's 4x4 mean from (30,30)", mean) && inBand("the edge's texel (31,31)", diagonal);
+    });
+}
+// ms-back: the multisampled back buffer cleared blue, a red quad over (64,64)-(192,192), Present D3D_OK; then cleared
+// blue and drawn again (a presented DISCARD back buffer is undefined) and read through a 256 X8R8G8B8 target.
+static bool rowMsBack() {
+    return msUntil([&] {
+        const auto frame = [&] {
+            return scene([&] { return backToScreen() && clearTo(TBLU) && zquad(64, 64, 192, 192, 0.5f, TRED); });
+        };
+        if (!frame()) return false;
+        CK(Present, nullptr, nullptr, nullptr, nullptr);
+        return frame() && msHas("the back buffer", rtSurf, {{128, 128, TRED}, {32, 32, TBLU}});
+    });
+}
+// ms-clear: T cleared red whole, green in the rect (8,8)-(24,24), blue through the viewport (32,32,16,16) with no rect:
+// each texel on either side of the rect's edges exact.
+static bool rowMsClear() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> t;
+        const D3DRECT rect = {8, 8, 24, 24};
+        return msRt(t) && scene([&] {
+                   return bindRt(0, t.p) && clearTo(TRED) && clearRects(1, &rect, D3DCLEAR_TARGET, TGRN) &&
+                          viewport(32, 32, 16, 16) && clearTo(TBLU);
+               }) &&
+               msHas("T", t.p, {{16, 16, TGRN}, {40, 40, TBLU}, {28, 28, TRED}, {56, 40, TRED}, {7, 16, TRED},
+                                {8, 16, TGRN}, {23, 16, TGRN}, {24, 16, TRED}});
+    });
+}
+// ms-depth: T 256x256 with the 4-sample auto depth-stencil, Z cleared to 1, LESSEQUAL: a near red quad (z 0.6) over
+// the left half, then a far white one (0.8) over all: (64,128) red, (192,128) white. Then Z of the right half cleared to
+// 0.1 by a rect and a green quad at 0.5 over all: drawn on the left (0.5 passes the red's 0.6: the drawn control),
+// hidden on the right (0.5 fails 0.1).
+static bool rowMsDepth() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> t;
+        const D3DRECT right = {128, 0, 256, 256};
+        return msRt(t, 256) && scene([&] {
+                   return bindRt(0, t.p) && clearRects(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, TBLK) &&
+                          rstate(D3DRS_ZENABLE, D3DZB_TRUE) && zquad(0, 0, 128, 256, 0.6f, TRED) &&
+                          zquad(0, 0, 256, 256, 0.8f, TWHT);
+               }) &&
+               msHas("T", t.p, {{64, 128, TRED}, {192, 128, 0xffffff}}) && scene([&] {
+                   return clearRects(1, &right, D3DCLEAR_ZBUFFER, 0, 0.1f) && zquad(0, 0, 256, 256, 0.5f, TGRN);
+               }) &&
+               msHas("T after the rect's Z", t.p, {{64, 128, TGRN}, {192, 128, 0xffffff}});
+    });
+}
+// ms-mismatch: T (4 samples) with a single-sample 64x64 D24S8 surface bound and ZENABLE on: a Z Clear answers D3D_OK;
+// a near red quad over all, then a far white one over y < 48: white at (48,32) (the depth-stencil of another count is
+// left out of the pass: no depth test), red at (48,56); a pretransformed green quad at z 1.5 over the left half: drawn
+// (no depth plane: the clamp is on; parity).
+static bool rowMsMismatch() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> t, d;
+        if (!msRt(t) || !makeDs(d, D3DFMT_D24S8, 64) || !scene([&] {
+                if (!bindRt(0, t.p) || !bindDs(d.p) || !clearTo(TBLK)) return false;
+                const HRESULT hr = dev->Clear(0, nullptr, D3DCLEAR_ZBUFFER, 0, 1.0f, 0);
+                if (hr != D3D_OK) return fail("Clear (Z)", hr);
+                return rstate(D3DRS_ZENABLE, D3DZB_TRUE) && zquad(0, 0, 64, 64, 0.2f, TRED) &&
+                       zquad(0, 0, 64, 48, 0.8f, TWHT) && zquad(0, 0, 32, 64, 1.5f, TGRN) && bindDs(dsSurf);
+            }))
+            return false;
+        return msHas("T", t.p, {{48, 32, 0xffffff}, {48, 56, TRED}, {16, 32, TGRN}});
+    });
+}
+// ms-mask: T cleared black, white quads in four columns 16 wide, each under its own D3DRS_MULTISAMPLEMASK: 0x3 (2 of 4
+// samples: 255 * 2 / 4 = 127.5, 128), 0x1 (63.75, 64), 0xf (255) and 0x3 through a ps_2_0 writing white (128). On a
+// single-sample target the mask 0x2 leaves a white quad white (the mask does not apply at one sample; were it applied,
+// sample 0 would be out).
+static bool rowMsMask() {
+    Prog p;
+    if (!make(p, nullptr, nullptr, PS_C0)) return false;
+    return msUntil([&] {
+        Com<IDirect3DSurface9> t;
+        Rt s;
+        if (!msRt(t) || !mkRt(s) || !scene([&] {
+                if (!bindRt(0, t.p) || !clearTo(TBLK) || !rstate(D3DRS_MULTISAMPLEMASK, 0x3) ||
+                    !zquad(0, 0, 16, 64, 0.5f, TWHT) || !rstate(D3DRS_MULTISAMPLEMASK, 0x1) ||
+                    !zquad(16, 0, 32, 64, 0.5f, TWHT) || !rstate(D3DRS_MULTISAMPLEMASK, 0xf) ||
+                    !zquad(32, 0, 48, 64, 0.5f, TWHT) || !rstate(D3DRS_MULTISAMPLEMASK, 0x3) || !use(p))
+                    return false;
+                CK(SetPixelShaderConstantF, 0, F_WHT, 1);
+                if (!zquad(48, 0, 64, 64, 0.5f, TWHT)) return false;
+                CK(SetPixelShader, nullptr);
+                return rstate(D3DRS_MULTISAMPLEMASK, 0xffffffff) && bindRt(0, s.s.p) && clearTo(TBLK) &&
+                       rstate(D3DRS_MULTISAMPLEMASK, 0x2) && zquad(0, 0, 64, 64, 0.5f, TWHT);
+            }))
+            return false;
+        return msHas("T", t.p, {{8, 32, 0x808080}, {24, 32, 0x404040}, {40, 32, 0xffffff}, {56, 32, 0x808080}}) &&
+               msHas("a single-sample target", s.s.p, {{32, 32, 0xffffff}});
+    });
+}
+// ms-nonmask: a D3DMULTISAMPLE_NONMASKABLE target of quality 2 (4 samples), its description; cleared black, the mask
+// 0x3 and a white quad: 255 (the mask does not apply to it).
+static bool rowMsNonMask() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> t;
+        if (!msRt(t, 64, A8, D3DMULTISAMPLE_NONMASKABLE, 2)) return false;
+        D3DSURFACE_DESC d = {};
+        const HRESULT hr = t.p->GetDesc(&d);
+        if (FAILED(hr)) return fail("GetDesc", hr);
+        if (d.MultiSampleType != D3DMULTISAMPLE_NONMASKABLE || d.MultiSampleQuality != 2)
+            return snprintf(why, sizeof why, "desc type %d quality %lu", (int)d.MultiSampleType,
+                            (unsigned long)d.MultiSampleQuality),
+                   false;
+        return scene([&] {
+                   return bindRt(0, t.p) && clearTo(TBLK) && rstate(D3DRS_MULTISAMPLEMASK, 0x3) &&
+                          zquad(0, 0, 64, 64, 0.5f, TWHT);
+               }) &&
+               msHas("T", t.p, {{32, 32, 0xffffff}});
+    });
+}
+// ms-a2c: alpha-to-coverage. On T cleared black, white quads in its quadrants: top left, D3DRS_ADAPTIVETESS_Y ATOC
+// with the alpha test on (GREATEREQUAL 0xc0) and alpha 0x80: the test does not kill it, coverage thins it (the 4x4
+// mean from (14,14) in the band); top right, ATOC with the alpha test LESS 0x80 and alpha 0xff: white (full coverage, no
+// alpha test); bottom left, ATOC off, the alpha test off, D3DRS_POINTSIZE A2M1 (the latch) and alpha 0x80: the band
+// (the mean from (14,46)); bottom right, after A2M0, alpha 0x80: white. On a single-sample target, ATOC with the alpha
+// test LESS 0x80: alpha 0 white (the test passes: the pipeline's drawn control, drawn first) and alpha 0xff black (the
+// test applies there and kills it; were coverage taken instead, the two would swap).
+static bool rowMsA2c() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> t;
+        Rt r, s;
+        const DWORD half = D3DCOLOR_ARGB(0x80, 255, 255, 255), none = D3DCOLOR_ARGB(0, 255, 255, 255);
+        int q1 = -1, q3 = -1;
+        if (!msRt(t) || !mkRt(s) || !scene([&] {
+                return bindRt(0, t.p) && clearTo(TBLK) && rstate(D3DRS_ADAPTIVETESS_Y, D3DFMT_ATOC) &&
+                       rstate(D3DRS_ALPHATESTENABLE, TRUE) && rstate(D3DRS_ALPHAREF, 0xc0) &&
+                       rstate(D3DRS_ALPHAFUNC, D3DCMP_GREATEREQUAL) && zquad(0, 0, 32, 32, 0.5f, half) &&
+                       rstate(D3DRS_ALPHAREF, 0x80) && rstate(D3DRS_ALPHAFUNC, D3DCMP_LESS) &&
+                       zquad(32, 0, 64, 32, 0.5f, TWHT) && rstate(D3DRS_ADAPTIVETESS_Y, 0) &&
+                       rstate(D3DRS_ALPHATESTENABLE, FALSE) && rstate(D3DRS_POINTSIZE, FOURCC_A2M1) &&
+                       zquad(0, 32, 32, 64, 0.5f, half) && rstate(D3DRS_POINTSIZE, FOURCC_A2M0) &&
+                       rstate(D3DRS_POINTSIZE, fbits(1.0f)) && zquad(32, 32, 64, 64, 0.5f, half) &&
+                       bindRt(0, s.s.p) && clearTo(TBLK) && rstate(D3DRS_ADAPTIVETESS_Y, D3DFMT_ATOC) &&
+                       rstate(D3DRS_ALPHATESTENABLE, TRUE) && zquad(32, 0, 64, 64, 0.5f, none) &&
+                       zquad(0, 0, 32, 64, 0.5f, TWHT);
+            }) ||
+            !resolveInto(t.p, r) || !rtHas("T", r.s.p, 64, A8, {{48, 16, 0xffffff}, {48, 48, 0xffffff}}) ||
+            !rtHas("a single-sample target", s.s.p, 64, A8, {{48, 32, 0xffffff}, {16, 32, 0x000000}}) ||
+            (q1 = meanOf(r.s.p, A8, 14, 14, 4)) < 0 || (q3 = meanOf(r.s.p, A8, 14, 46, 4)) < 0)
+            return false;
+        return inBand("ATOC at alpha 0x80 (the 4x4 mean from (14,14))", q1) &&
+               inBand("A2M1 at alpha 0x80 (the 4x4 mean from (14,46))", q3);
+    });
+}
+// ms-srgbmask: T under SRGBWRITEENABLE, cleared black, the mask 0x3 and a white quad; a second T the same with sRGB
+// write off; then a Clear of another target, so neither resolve folds into its source's pass. The first reads 188 (2
+// of 4 samples white: the linear average 0.5, encoded 1.055 * 0.5^(1/2.4) - 0.055 = 0.735, 187.6: resolved through the
+// view T was last written in, parity, DXMTRS C4b-3d5 ruling 4), the second 128 (127.5).
+static bool rowMsSrgbMask() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> on, off;
+        Rt other;
+        const auto masked = [&](IDirect3DSurface9 *t, BOOL srgb) {
+            return bindRt(0, t) && rstate(D3DRS_SRGBWRITEENABLE, srgb) && clearTo(TBLK) &&
+                   rstate(D3DRS_MULTISAMPLEMASK, 0x3) && zquad(0, 0, 64, 64, 0.5f, TWHT) &&
+                   rstate(D3DRS_MULTISAMPLEMASK, 0xffffffff) && rstate(D3DRS_SRGBWRITEENABLE, FALSE);
+        };
+        return msRt(on) && msRt(off) && mkRt(other) && scene([&] {
+                   return masked(on.p, TRUE) && masked(off.p, FALSE) && bindRt(0, other.s.p) && clearTo(TBLU);
+               }) &&
+               msHas("sRGB write", on.p, {{32, 32, 0xbcbcbc}}) && msHas("no sRGB write", off.p, {{32, 32, 0x808080}});
+    });
+}
+// ms-blend: T cleared red, SRCALPHA/INVSRCALPHA, a green quad of alpha 0x80: red 255 * 127 / 255 = 127, green 128.
+static bool rowMsBlend() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> t;
+        return msRt(t) && scene([&] {
+                   return bindRt(0, t.p) && clearTo(TRED) && blend(D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA) &&
+                          zquad(0, 0, 64, 64, 0.5f, D3DCOLOR_ARGB(0x80, 0, 255, 0));
+               }) &&
+               msHas("T", t.p, {{32, 32, 0x7f8000}});
+    });
+}
+// ms-mrt: T at index 0 and a second 4-sample target at index 1, PS_MRT2 red, green: each reads its own; the same pair
+// under SRGBWRITEENABLE, cleared black, with the mask 0x3 and white on both: 188 on both. Then, at index 1, a
+// single-sample 64x64 texture, and a 2-sample target when the device offers 2: it and T cleared blue apart, PS_MRT2
+// red, green: T red, it blue (of another sample count than index 0: out of the draw's set; T's red is the drawn
+// control); a whole Clear to white reaches both.
+static bool rowMsMrt() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    const bool two = offers(D3DMULTISAMPLE_2_SAMPLES);
+    return msUntil([&] {
+        Com<IDirect3DSurface9> t, t1, t2;
+        Rt u;
+        if (!msRt(t) || !msRt(t1) || !mkRt(u) || (two && !msRt(t2, 64, A8, D3DMULTISAMPLE_2_SAMPLES)) ||
+            !scene([&] { return bindRt(0, t.p) && bindRt(1, t1.p) && clearTo(TBLK) && mrtDraw2(p, F_RED, F_GRN); }) ||
+            !msHas("T0", t.p, {{32, 32, TRED}}) || !msHas("T1", t1.p, {{32, 32, TGRN}}) || !scene([&] {
+                return rstate(D3DRS_SRGBWRITEENABLE, TRUE) && clearTo(TBLK) && rstate(D3DRS_MULTISAMPLEMASK, 0x3) &&
+                       mrtDraw2(p, F_WHT, F_WHT) && rstate(D3DRS_MULTISAMPLEMASK, 0xffffffff) &&
+                       rstate(D3DRS_SRGBWRITEENABLE, FALSE);
+            }) ||
+            !msHas("T0 sRGB", t.p, {{32, 32, 0xbcbcbc}}) || !msHas("T1 sRGB", t1.p, {{32, 32, 0xbcbcbc}}))
+            return false;
+        for (IDirect3DSurface9 *x : {u.s.p, t2.p}) {
+            if (!x) continue;
+            const char *name = x == u.s.p ? "a single-sample T1" : "a 2-sample T1";
+            if (!scene([&] {
+                    return bindRt(1, nullptr) && clearRt(x, TBLU) && clearRt(t.p, TBLU) && bindRt(1, x) &&
+                           mrtDraw2(p, F_RED, F_GRN);
+                }) ||
+                !msHas("T0 beside it", t.p, {{32, 32, TRED}}) || !msHas(name, x, {{32, 32, TBLU}}) ||
+                !scene([&] { return clearTo(TWHT); }) || !msHas("T0 cleared", t.p, {{32, 32, 0xffffff}}) ||
+                !msHas(name, x, {{32, 32, 0xffffff}}))
+                return false;
+        }
+        return true;
+    });
+}
+// ms-scissor: T cleared blue, the scissor rect (16,16)-(48,48) and a red quad over all: (32,32) red, (15,32) and
+// (48,32) blue; cleared blue again, the viewport (0,0,32,64) and a full clip-space quad: (16,32) red, (48,32) blue.
+static bool rowMsScissor() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> t;
+        FC f[4];
+        cquad(f, -1, -1, 1, 1, TRED);
+        return msRt(t) && scene([&] {
+                   return bindRt(0, t.p) && clearTo(TBLU) && scissor(16, 16, 48, 48) &&
+                          rstate(D3DRS_SCISSORTESTENABLE, TRUE) && zquad(0, 0, 64, 64, 0.5f, TRED) &&
+                          rstate(D3DRS_SCISSORTESTENABLE, FALSE);
+               }) &&
+               msHas("the scissor", t.p, {{32, 32, TRED}, {15, 32, TBLU}, {48, 32, TBLU}}) &&
+               scene([&] { return clearTo(TBLU) && viewport(0, 0, 32, 64) && fdraw(FVF_C, f); }) &&
+               msHas("the viewport", t.p, {{16, 32, TRED}, {48, 32, TBLU}});
+    });
+}
+// ms-redraw: T cleared black, a red quad over its left half, resolved into R1; a green quad over the right half,
+// resolved into R2: R1 red and black, R2 red and green. R1 then at index 0, a white quad over its top half: white
+// there, red and black below.
+static bool rowMsRedraw() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> t;
+        Rt r1, r2;
+        return msRt(t) && scene([&] { return bindRt(0, t.p) && clearTo(TBLK) && zquad(0, 0, 32, 64, 0.5f, TRED); }) &&
+               resolveInto(t.p, r1) && scene([&] { return zquad(32, 0, 64, 64, 0.5f, TGRN); }) &&
+               resolveInto(t.p, r2) && rtHas("R1", r1.s.p, 64, A8, {{16, 32, TRED}, {48, 32, 0x000000}}) &&
+               rtHas("R2", r2.s.p, 64, A8, {{16, 32, TRED}, {48, 32, TGRN}}) &&
+               scene([&] { return bindRt(0, r1.s.p) && zquad(0, 0, 64, 32, 0.5f, TWHT); }) &&
+               rtHas("R1 drawn on", r1.s.p, 64, A8,
+                     {{16, 16, 0xffffff}, {48, 16, 0xffffff}, {16, 48, TRED}, {48, 48, 0x000000}});
+    });
+}
+// ms-samples: for 2 and 8 samples, each where the device offers it: a target of that count cleared black, the mask of
+// its lower half (0x1 of 2, 0x0f of 8) and a white quad: 128 (127.5: half the samples white).
+static bool rowMsSamples() {
+    static const struct { D3DMULTISAMPLE_TYPE type; DWORD mask; const char *name; } counts[] = {
+        {D3DMULTISAMPLE_2_SAMPLES, 0x1, "2 samples"}, {D3DMULTISAMPLE_8_SAMPLES, 0x0f, "8 samples"}};
+    for (const auto &c : counts)
+        if (offers(c.type) && !msUntil([&] {
+                Com<IDirect3DSurface9> t;
+                return msRt(t, 64, A8, c.type) && scene([&] {
+                           return bindRt(0, t.p) && clearTo(TBLK) && rstate(D3DRS_MULTISAMPLEMASK, c.mask) &&
+                                  zquad(0, 0, 64, 64, 0.5f, TWHT);
+                       }) &&
+                       msHas(c.name, t.p, {{32, 32, 0x808080}});
+            }))
+            return false;
+    return true;
+}
+// rt-msaa (the targets kind's device: a single-sample X8R8G8B8 back buffer): a 4-sample 64x64 A8R8G8B8 target and its
+// description; cleared green with a red quad over its left half, resolved into a texture level and into a
+// single-sample CreateRenderTarget surface: (16,32) red, (48,32) green in both; a 4-sample 256x256 X8R8G8B8 target
+// cleared green, resolved into the back buffer cleared blue: green there. GetRenderTargetData of the multisampled
+// target (into a system-memory surface of its size and format) and a lockable multisampled target are
+// D3DERR_INVALIDCALL in every lane; its StretchRect into a 32x32 target is past the core's resolve shape:
+// D3DERR_NOTAVAILABLE under core (strict), any answer elsewhere.
+static bool rowRtMsaa() {
+    return until([&] {
+        Com<IDirect3DSurface9> m, big, s, sys, lock, small;
+        Rt r;
+        D3DSURFACE_DESC d = {};
+        if (!msRt(m)) return false;
+        HRESULT hr = m.p->GetDesc(&d);
+        if (FAILED(hr)) return fail("GetDesc", hr);
+        if (d.MultiSampleType != D3DMULTISAMPLE_4_SAMPLES)
+            return snprintf(why, sizeof why, "desc %d samples", (int)d.MultiSampleType), false;
+        CK(CreateRenderTarget, 64, 64, A8, D3DMULTISAMPLE_NONE, 0, FALSE, &s.p, nullptr);
+        if (!msRt(big, 256, X8) || !scene([&] {
+                return bindRt(0, m.p) && clearTo(TGRN) && zquad(0, 0, 32, 64, 0.5f, TRED) && bindRt(0, big.p) &&
+                       clearTo(TGRN) && backToScreen() && clearTo(TBLU);
+            }) ||
+            !resolveInto(m.p, r) || !rtHas("a texture level", r.s.p, 64, A8, {{16, 32, TRED}, {48, 32, TGRN}}))
+            return false;
+        CK(StretchRect, m.p, nullptr, s.p, nullptr, D3DTEXF_NONE);
+        if (!rtHas("a CreateRenderTarget surface", s.p, 64, A8, {{16, 32, TRED}, {48, 32, TGRN}})) return false;
+        CK(StretchRect, big.p, nullptr, rtSurf, nullptr, D3DTEXF_NONE);
+        if (!rtHas("the back buffer", rtSurf, 256, X8, {{128, 128, TGRN}})) return false;
+        CK(CreateOffscreenPlainSurface, 64, 64, A8, D3DPOOL_SYSTEMMEM, &sys.p, nullptr);
+        hr = dev->GetRenderTargetData(m.p, sys.p);
+        if (hr != D3DERR_INVALIDCALL) return fail("GetRenderTargetData (4 samples)", hr);
+        hr = dev->CreateRenderTarget(64, 64, A8, D3DMULTISAMPLE_4_SAMPLES, 0, TRUE, &lock.p, nullptr);
+        if (hr != D3DERR_INVALIDCALL) return fail("CreateRenderTarget (4 samples, lockable)", hr);
+        CK(CreateRenderTarget, 32, 32, A8, D3DMULTISAMPLE_NONE, 0, FALSE, &small.p, nullptr);
+        hr = dev->StretchRect(m.p, nullptr, small.p, nullptr, D3DTEXF_NONE);
+        if (strictMode && hr != D3DERR_NOTAVAILABLE) return fail("StretchRect (into 32x32)", hr);
+        return true;
+    });
+}
+
+static void msaaRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"ms-desc", rowMsDesc},       {"ms-resolve", rowMsResolve},   {"ms-edge", rowMsEdge},
+        {"ms-back", rowMsBack},       {"ms-clear", rowMsClear},       {"ms-depth", rowMsDepth},
+        {"ms-mismatch", rowMsMismatch}, {"ms-mask", rowMsMask},       {"ms-nonmask", rowMsNonMask},
+        {"ms-a2c", rowMsA2c},         {"ms-srgbmask", rowMsSrgbMask}, {"ms-blend", rowMsBlend},
+        {"ms-mrt", rowMsMrt},         {"ms-scissor", rowMsScissor},   {"ms-redraw", rowMsRedraw},
+        {"ms-samples", rowMsSamples}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
+    HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
+    if (SUCCEEDED(hr))
+        hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
+    if (SUCCEEDED(hr)) hr = dev->GetDepthStencilSurface(&dsSurf);
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (FAILED(hr)) ok = fail("GetRenderTarget/GetDepthStencilSurface", hr);
+        else if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = reset() && depthReset() && blendStart() && r.run();
+        row(r.name, ok, why);
+    }
+    if (dsSurf) dsSurf->Release();
+    if (sysSurf) sysSurf->Release();
+    if (rtSurf) rtSurf->Release();
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
@@ -4997,6 +5510,7 @@ int main(int argc, char **argv) {
     const bool depth = !bench && argc > 1 && !strcmp(argv[1], "depth");
     const bool blendMode = !bench && argc > 1 && !strcmp(argv[1], "blend");
     const bool mrtMode = !bench && argc > 1 && !strcmp(argv[1], "mrt");
+    const bool msaaMode = !bench && argc > 1 && !strcmp(argv[1], "msaa");
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     WNDCLASSW wc = {};
@@ -5020,8 +5534,11 @@ int main(int argc, char **argv) {
     pp.BackBufferWidth = 256, pp.BackBufferHeight = 256, pp.BackBufferFormat = D3DFMT_X8R8G8B8, pp.BackBufferCount = 1;
     pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = hwnd, pp.Windowed = TRUE;
     pp.PresentationInterval = vsync ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
-    // The "depth", "blend" and "mrt" modes' devices alone have a depth-stencil: the other modes' rows assume none.
-    if (depth || blendMode || mrtMode || depthBench) pp.EnableAutoDepthStencil = TRUE, pp.AutoDepthStencilFormat = D3DFMT_D24S8;
+    // The "depth", "blend", "mrt" and "msaa" modes' devices alone have a depth-stencil: the other modes' rows assume none.
+    if (depth || blendMode || mrtMode || msaaMode || depthBench)
+        pp.EnableAutoDepthStencil = TRUE, pp.AutoDepthStencilFormat = D3DFMT_D24S8;
+    // The "msaa" mode's back buffer and auto depth-stencil have 4 samples (DXMTRS C4b-3d5).
+    if (msaaMode) pp.MultiSampleType = D3DMULTISAMPLE_4_SAMPLES;
     IDirect3DDevice9 *dev = nullptr;
     HRESULT hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd, D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp,
                                    &dev);
@@ -5031,6 +5548,13 @@ int main(int argc, char **argv) {
     const Vertex tri[3] = {{128, 16, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {240, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {16, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)}};
+    if (msaaMode) {
+        msaaRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
     if (mrtMode) {
         mrtRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();
