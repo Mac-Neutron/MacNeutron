@@ -165,9 +165,10 @@ upload (C4d); the conformance lane for the three suites (C4c-7).
   - `dxmt/d3d9-check.sh`: `launch ours fresh buffers 240 buffers $strict` after `check msaa` (the kill is 60 s
     past the budget, as every 180 s kind); `check buffers "<the 27 names>"`. `state` moves to the arm of
     `refusals_ok` that asks for exactly zero refusal lines (`state_refusals` goes, with its arm).
-    `buffers_refusals` is one single-quoted value of three lines with no trailing newline:
+    `buffers_refusals` is one single-quoted value of two lines with no trailing newline:
     "IDirect3DDevice9::Draw*Primitive (an attribute crossing the stride)", "IDirect3DDevice9::Draw*Primitive (a
-    stream offset off four bytes)", "IDirect3DDevice9::Draw*Primitive (a buffer of another device)". The
+    stream offset off four bytes)" (the other-device refusal has no row, so it is in no set: were it logged in
+    this launch, the count would fail it). The
     `unpresented` pattern gains `buffer has no core form` (no apostrophe: the pattern is single-quoted). The
     header block, `refusals_ok`'s comment and the kinds list name the new kind and `state`'s empty set.
   - `vm/dxmt/d3d9-gate.sh`: the same constants and `unpresented` entry; `buffers` in the `runtime` helper's kind
@@ -382,7 +383,7 @@ upload (C4d); the conformance lane for the three suites (C4c-7).
   start vertex past `i32::MAX`: mtld3d draws it from a generated list, which instances); none for every other
   `DrawPrimitive`.
 - [ ] rust-check; commit; lane `jt7` (default ok; core: every row of `buffers` green strict, `buffers-runtime`
-  with its three refusal lines, all other launches as before).
+  with its two refusal lines, all other launches as before).
 
 ### Task 8: gates, mutants, the probe
 
@@ -438,8 +439,8 @@ upload (C4d); the conformance lane for the three suites (C4c-7).
   with no repack, so what they share is the queue's own allocation call and the budget's three lines);
   `core_flush` twice (the two buffer types are twins throughout mtld3d). The draw arms repeat the order of
   mtld3d's checks because mtld3d's helpers at those points write into its recorder.
-- Not silent: the three refusals are logged by name and held by the `buffers` launch's set; a draw dropped for a
-  buffer with no core form is logged once and fails its launch.
+- Not silent: the refusals are logged by name, the two a row reaches held by the `buffers` launch's set; a draw
+  dropped for a buffer with no core form is logged once and fails its launch.
 - Refusal literals: two go from each buffer type (`Lock`, `Unlock`), plus `DrawPrimitive`,
   `DrawIndexedPrimitive` and `GetDirect3D` (80 − 7), and three come (the buffer draws' crossing, offset and
   other-device): 76.

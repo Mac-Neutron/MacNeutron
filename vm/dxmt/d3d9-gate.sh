@@ -45,7 +45,7 @@
 # buffer and auto depth-stencil have 4 samples; ms64-fresh, ms32-fresh); under core their logs hold exactly one refusal line (a StretchRect
 # that is no multisample resolve). Every lane also checks d3d9_triangle buffers' 27 rows (DXMTRS C4c-1: vertex and
 # index buffers and the draws that read them; bf64-fresh, bf32-fresh); under core their logs hold exactly its three
-# refusal lines (an attribute crossing the stride, a stream offset off four bytes, a buffer of another device).
+# refusal lines (an attribute crossing the stride, a stream offset off four bytes).
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -217,7 +217,7 @@ done
 # none of mtld3d.so's encoder line nor of the core's can't-present or dropped-draw lines (the code that ran prints them,
 # not the switch), and no refusal line, or with "crossing" exactly one, the crossing row's, with "textures", "fixed",
 # "depth" or "buffers" exactly that launch's refused rows' (texture_refusals, fixed_refusals, depth_refusals,
-# buffers_refusals: DXMTRS C4c-1's crossing attribute, offset off four bytes and buffer of another device). The state,
+# buffers_refusals: DXMTRS C4c-1's crossing attribute and offset off four bytes). The state,
 # blend and mrt launches (DXMTRS C4b-3a, C4b-3d3, C4b-3d4) take no kind: no refusal line (the state launch's since
 # DXMTRS C4c-1: buffer locks are the core's). The targets and msaa launches take "stretch": exactly the one StretchRect
 # that is no multisample resolve (stretch_refusals, DXMTRS C4b-3d5).
@@ -228,8 +228,7 @@ stretch_refusals='IDirect3DDevice9::StretchRect (other than a multisample resolv
 depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)
 IDirect3DTexture9::LockRect (a render-target or depth texture)'
 buffers_refusals='IDirect3DDevice9::Draw*Primitive (an attribute crossing the stride)
-IDirect3DDevice9::Draw*Primitive (a stream offset off four bytes)
-IDirect3DDevice9::Draw*Primitive (a buffer of another device)'
+IDirect3DDevice9::Draw*Primitive (a stream offset off four bytes)'
 runtime() {
   n=$(/usr/bin/grep -rhF "$refused" "$1" 2> /dev/null | wc -l | tr -d ' ')
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \

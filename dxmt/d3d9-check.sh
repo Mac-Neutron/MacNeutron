@@ -58,8 +58,8 @@
 # under core its launch's logs hold exactly one refusal line (a StretchRect
 # that is no multisample resolve). Every lane also runs d3d9_triangle buffers (DXMTRS C4c-1's 27 rows of vertex and
 # index buffers and the draws that read them, on a device with no depth-stencil; "buffers strict" under core), its rows
-# "buffers-<row>"; under core its launch's logs hold exactly its three refusal lines (an attribute crossing the stride,
-# a stream offset off four bytes, a buffer of another device) and no line of a draw dropped for a buffer with no core
+# "buffers-<row>"; under core its launch's logs hold exactly its two refusal lines (an attribute crossing the stride,
+# a stream offset off four bytes) and no line of a draw dropped for a buffer with no core
 # form.
 #   d3d9-check.sh [<wine.app>]
 set -eu
@@ -149,7 +149,7 @@ launch() {
 # (DXMTRS C4b-3d2: a depth-tested draw sampling the bound depth-stencil, a dynamic depth texture's LockRect), one line
 # each; the targets and msaa launches' exactly their one (DXMTRS C4b-3d5: a StretchRect that is no multisample
 # resolve); the buffers launch's exactly its three (DXMTRS C4c-1: an attribute crossing the stride, a stream offset
-# off four bytes, a buffer of another device); the state, blend and mrt launches' none (the state launch's since
+# off four bytes); the state, blend and mrt launches' none (the state launch's since
 # DXMTRS C4c-1: buffer locks are the core's); the other launches are not held to it.
 refused='is not implemented under runtime.mode = core'
 texture_refusals='IDirect3DTexture9::LockRect (a render-target or depth texture)'
@@ -158,8 +158,7 @@ stretch_refusals='IDirect3DDevice9::StretchRect (other than a multisample resolv
 depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)
 IDirect3DTexture9::LockRect (a render-target or depth texture)'
 buffers_refusals='IDirect3DDevice9::Draw*Primitive (an attribute crossing the stride)
-IDirect3DDevice9::Draw*Primitive (a stream offset off four bytes)
-IDirect3DDevice9::Draw*Primitive (a buffer of another device)'
+IDirect3DDevice9::Draw*Primitive (a stream offset off four bytes)'
 refusals_ok() {
   case $1 in
     shaders)
