@@ -21,6 +21,8 @@
 #   bl<64|32>-fresh.txt           d3d9_triangle blend (DXMTRS C4b-3d3's 36 rows of partial clears, the scissor test, a
 #                                depth-stencil of another size, sRGB write and blending; "blend strict" under core),
 #                                240 s
+#   mr<64|32>-fresh.txt           d3d9_triangle mrt (DXMTRS C4b-3d4's 20 rows of render targets at index 1-3; "mrt
+#                                strict" under core), 240 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
@@ -113,6 +115,8 @@ tri d3d9_triangle.exe dp64-fresh 240 depth $strict
 tri d3d9_triangle32.exe dp32-fresh 240 depth $strict
 tri d3d9_triangle.exe bl64-fresh 240 blend $strict
 tri d3d9_triangle32.exe bl32-fresh 240 blend $strict
+tri d3d9_triangle.exe mr64-fresh 240 mrt $strict
+tri d3d9_triangle32.exe mr32-fresh 240 mrt $strict
 rm -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" "$WINEPREFIX/drive_c/windows/syswow64/mtld3d.dll"
 tri d3d9_triangle.exe tri64-nomarker  # Wine finds no builtin without its marker: these fail
 tri d3d9_triangle32.exe tri32-nomarker

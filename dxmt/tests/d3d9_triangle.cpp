@@ -37,8 +37,8 @@
 // With "targets" ("targets strict" under core; DXMTRS C4b-3d1): 22 rows "d3d9 rt-<row> ok|FAIL <why>" of render targets
 // other than the back buffer (render-target textures, their levels and cube faces, CreateRenderTarget surfaces: drawn
 // to, cleared, read back with GetRenderTargetData and sampled; formats, sRGB write, the viewport reset, automatic
-// mipmaps, lifetime and order, a size past the device's limit), two the core refuses (a target at index 1, a
-// multisampled surface), with a 150 s budget.
+// mipmaps, lifetime and order, a size past the device's limit, a target bound and unbound at index 1), one the core
+// refuses (a multisampled surface), with a 150 s budget.
 // With "depth" ("depth strict" under core; DXMTRS C4b-3d2): 31 rows "d3d9 ds-<row> ok|FAIL <why>" of the depth-stencil,
 // on a device made with an auto D24S8 (the other modes' devices have none): the depth and stencil tests and their
 // state, Clear's Z and stencil, depth bias, the pretransformed clamp, a pixel shader's depth output, depth-stencil
@@ -52,6 +52,11 @@
 // test for draws; a depth-stencil larger or smaller than the target; sRGB write with Clear and under blending;
 // blending (factors, operations, separate alpha, the blend factor colour, destination alpha by target), with a 180 s
 // budget. The core refuses none of it.
+// With "mrt" ("mrt strict" under core; DXMTRS C4b-3d4): 20 rows "d3d9 mrt-<row> ok|FAIL <why>" on such a device:
+// render targets at index 1-3 (a pixel shader's oC1-oC3, an empty slot between bound ones, targets of other formats
+// and of another size, the write masks of index 1-3, blending and sRGB write over several targets, Clear over every
+// bound target, the scissor, the viewport and the depth test, the back buffer in a set, automatic mipmaps, order),
+// with a 180 s budget. The core refuses none of it.
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -295,6 +300,8 @@ static bool reset() {
         {D3DRS_ALPHATESTENABLE, FALSE}, {D3DRS_ALPHAFUNC, D3DCMP_ALWAYS}, {D3DRS_ALPHAREF, 0},
         {D3DRS_FOGENABLE, FALSE}, {D3DRS_FOGVERTEXMODE, D3DFOG_NONE}, {D3DRS_FOGTABLEMODE, D3DFOG_NONE},
         {D3DRS_FOGCOLOR, 0}, {D3DRS_COLORWRITEENABLE, 0xf}, {D3DRS_FILLMODE, D3DFILL_SOLID},
+        // Render targets 1-3's write masks (DXMTRS C4b-3d4's rows set them).
+        {D3DRS_COLORWRITEENABLE1, 0xf}, {D3DRS_COLORWRITEENABLE2, 0xf}, {D3DRS_COLORWRITEENABLE3, 0xf},
         {D3DRS_CULLMODE, D3DCULL_CCW}, {D3DRS_CLIPPLANEENABLE, 0}, {D3DRS_SRGBWRITEENABLE, FALSE},
         // Blending and the scissor test (DXMTRS C4b-3d3's rows set them; the rect is reset by SetRenderTarget above).
         {D3DRS_ALPHABLENDENABLE, FALSE}, {D3DRS_SRCBLEND, D3DBLEND_ONE}, {D3DRS_DESTBLEND, D3DBLEND_ZERO},
@@ -2960,15 +2967,41 @@ static bool rowRtUpdateBound() {
         });
     });
 }
-// A second render target, past the core's slice (C4b-3d4): D3DERR_NOTAVAILABLE under core (strict), D3D_OK otherwise.
+// A render target at index 1 (DXMTRS C4b-3d4): bound without moving the viewport or the scissor rect, answered by
+// GetRenderTarget, unbound by a null (GetRenderTarget is then D3DERR_NOTFOUND with a null surface); index 4 and a
+// surface that is no render target are D3DERR_INVALIDCALL.
 static bool rowRtMrt() {
     Com<IDirect3DTexture9> a;
     Com<IDirect3DSurface9> s;
     if (!makeRt(a) || !levelOf(a.p, 0, s)) return false;
-    const HRESULT hr = dev->SetRenderTarget(1, s.p);
+    const D3DVIEWPORT9 v = {13, 17, 40, 30, 0.0f, 1.0f};
+    const RECT sc = {5, 6, 70, 80};
+    CK(SetViewport, &v);
+    CK(SetScissorRect, &sc);
+    HRESULT hr = dev->SetRenderTarget(1, s.p);
+    if (hr != D3D_OK) return fail("SetRenderTarget(1)", hr);
+    D3DVIEWPORT9 gv = {};
+    RECT gs = {};
+    IDirect3DSurface9 *got = nullptr;
+    bool ok = SUCCEEDED(dev->GetViewport(&gv)) && SUCCEEDED(dev->GetScissorRect(&gs)) && gv.X == 13 && gv.Y == 17 &&
+              gv.Width == 40 && gv.Height == 30 && gs.left == 5 && gs.top == 6 && gs.right == 70 && gs.bottom == 80;
+    if (!ok) snprintf(why, sizeof why, "the viewport or the scissor rect moved");
+    hr = dev->GetRenderTarget(1, &got);
+    if (got) got->Release();
+    if (ok && (hr != D3D_OK || got != s.p)) ok = fail("GetRenderTarget(1)", hr);
+    hr = dev->SetRenderTarget(1, nullptr);
+    if (ok && hr != D3D_OK) ok = fail("SetRenderTarget(1, null)", hr);
+    got = s.p;
+    hr = dev->GetRenderTarget(1, &got);
+    if (SUCCEEDED(hr) && got) got->Release();
+    if (ok && (hr != D3DERR_NOTFOUND || got)) ok = fail("GetRenderTarget(1) of an empty slot", hr);
+    hr = dev->SetRenderTarget(4, s.p);
+    if (ok && hr != D3DERR_INVALIDCALL) ok = fail("SetRenderTarget(4)", hr);
+    hr = dev->SetRenderTarget(1, sysSurf);
     if (SUCCEEDED(hr)) dev->SetRenderTarget(1, nullptr);
-    if (strictMode ? hr != D3DERR_NOTAVAILABLE : hr != D3D_OK) return fail("SetRenderTarget(1)", hr);
-    return true;
+    if (ok && hr != D3DERR_INVALIDCALL) ok = fail("SetRenderTarget(1, a system-memory surface)", hr);
+    CK(SetViewport, &FULL);
+    return ok;
 }
 // A multisampled render target, past the core's slice (C4b-3d5): D3DERR_NOTAVAILABLE under core (strict); any answer
 // in the other lanes.
@@ -4351,6 +4384,597 @@ static void blendRows(IDirect3DDevice9 *d, bool strict) {
     if (rtSurf) rtSurf->Release();
 }
 
+// --- The "mrt" mode (DXMTRS C4b-3d4): render targets at index 1-3. On the blend mode's device (auto D24S8, Z off
+// unless a row turns it on). Targets are 64x64 A8R8G8B8 render-target textures unless said, T0..T3 by their index. A
+// row draws and reads back inside one mrtUntil() attempt (retried while mtld3d's pipelines build), or probes the back
+// buffer through frames(); either way an attempt starts from mrtStart()'s state and ends with index 1-3 unbound.
+static const DWORD PS_MRT2[] = {
+    0xffff0200,                         // ps_2_0
+    0x02000001, 0x800f0800, 0xa0e40000, // mov oC0, c0
+    0x02000001, 0x800f0801, 0xa0e40001, // mov oC1, c1
+    0x0000ffff};
+static const DWORD PS_MRT4[] = {
+    0xffff0200,                         // ps_2_0
+    0x02000001, 0x800f0800, 0xa0e40000, // mov oC0, c0
+    0x02000001, 0x800f0801, 0xa0e40001, // mov oC1, c1
+    0x02000001, 0x800f0802, 0xa0e40002, // mov oC2, c2
+    0x02000001, 0x800f0803, 0xa0e40003, // mov oC3, c3
+    0x0000ffff};
+static const DWORD TBLK = 0xff000000, TYLW = D3DCOLOR_XRGB(255, 255, 0);
+static const float F_RED[4] = {1, 0, 0, 1}, F_GRN[4] = {0, 1, 0, 1}, F_BLU[4] = {0, 0, 1, 1}, F_WHT[4] = {1, 1, 1, 1},
+                   F_MAG[4] = {1, 0, 1, 1}, F_YLW[4] = {1, 1, 0, 1};
+
+// A render-target texture and its level 0.
+struct Rt {
+    Com<IDirect3DTexture9> t;
+    Com<IDirect3DSurface9> s;
+};
+static bool mkRt(Rt &r, UINT size = 64, D3DFORMAT f = D3DFMT_A8R8G8B8) {
+    return makeRt(r.t, size, 1, f) && levelOf(r.t.p, 0, r.s);
+}
+static bool bindRt(DWORD slot, IDirect3DSurface9 *s) {
+    CK(SetRenderTarget, slot, s);
+    return true;
+}
+// `s` alone at index 0 (which resets the viewport to it), cleared to `color`: for targets that start apart.
+static bool clearRt(IDirect3DSurface9 *s, DWORD color) { return bindRt(0, s) && clearTo(color); }
+// What an attempt starts from: nothing at index 1-3, no shader, and the states the mrt rows move at their defaults.
+static bool mrtStart() {
+    for (DWORD i = 1; i < 4; i++) CK(SetRenderTarget, i, nullptr);
+    CK(SetVertexShader, nullptr);
+    CK(SetPixelShader, nullptr);
+    static const DWORD rs[][2] = {
+        {D3DRS_COLORWRITEENABLE, 0xf}, {D3DRS_COLORWRITEENABLE1, 0xf}, {D3DRS_COLORWRITEENABLE2, 0xf},
+        {D3DRS_COLORWRITEENABLE3, 0xf}, {D3DRS_ALPHABLENDENABLE, FALSE}, {D3DRS_SRGBWRITEENABLE, FALSE},
+        {D3DRS_SCISSORTESTENABLE, FALSE}, {D3DRS_ZENABLE, D3DZB_FALSE}, {D3DRS_BLENDFACTOR, 0xffffffff}};
+    for (const auto &s : rs) CK(SetRenderState, (D3DRENDERSTATETYPE)s[0], s[1]);
+    return true;
+}
+// attempt() from mrtStart() through until(), index 1-3 unbound after each attempt (until() rebinds index 0 alone).
+template <class F> static bool mrtUntil(F attempt) {
+    return until([&] {
+        const bool ok = mrtStart() && attempt();
+        for (DWORD i = 1; i < 4; i++) dev->SetRenderTarget(i, nullptr);
+        return ok;
+    });
+}
+// The program `p` with c0.. from the n rows of `c`, over a quad covering the viewport at depth z.
+static bool mrtDraw(const Prog &p, const float (*c)[4], int n, float z = 0.5f) {
+    V3 q[4];
+    quad(q, -1, -1, 1, 1);
+    for (V3 &v : q) v.z = z;
+    if (!use(p)) return false;
+    CK(SetPixelShaderConstantF, 0, c[0], n);
+    return strip(q);
+}
+static bool mrtDraw2(const Prog &p, const float *c0, const float *c1, float z = 0.5f) {
+    float c[2][4];
+    memcpy(c[0], c0, sizeof c[0]), memcpy(c[1], c1, sizeof c[1]);
+    return mrtDraw(p, c, 2, z);
+}
+// Texels of the size x size 4-byte target `s` (format f), each within 1 a channel.
+struct Tx { int x, y; DWORD want; };
+static bool rtHas(const char *name, IDirect3DSurface9 *s, UINT size, D3DFORMAT f, std::initializer_list<Tx> px) {
+    return readTarget(s, size, size, f, [&](const BYTE *b, int pitch) {
+        for (const Tx &t : px) {
+            char what[64];
+            snprintf(what, sizeof what, "%s (%d,%d)", name, t.x, t.y);
+            if (!want(what, texel(b, pitch, t.x, t.y), t.want)) return false;
+        }
+        return true;
+    });
+}
+// One texel of the half or float target `s` (format f, `bytes` a texel): its first `channels` within 0.004.
+static bool rtHasF(const char *name, IDirect3DSurface9 *s, UINT size, D3DFORMAT f, int bytes, int x, int y,
+                   const float *expect, int channels) {
+    return readTarget(s, size, size, f, [&](const BYTE *b, int pitch) {
+        float got[4];
+        decodeTexel(f, b + y * pitch + x * bytes, got);
+        for (int i = 0; i < channels; i++)
+            if (fabsf(got[i] - expect[i]) > 0.004f)
+                return snprintf(why, sizeof why, "%s (%d,%d) %.3f %.3f %.3f %.3f want channel %d %.3f", name, x, y,
+                                got[0], got[1], got[2], got[3], i, expect[i]),
+                       false;
+        return true;
+    });
+}
+static const D3DFORMAT A8 = D3DFMT_A8R8G8B8, X8 = D3DFMT_X8R8G8B8;
+
+// Two targets, a ps_2_0 writing oC0 and oC1: each takes its own colour; index 1 is read back while still bound.
+static bool rowMrtTwo() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    return mrtUntil([&] {
+        Rt a, b;
+        if (!mkRt(a) || !mkRt(b) ||
+            !scene([&] { return bindRt(0, a.s.p) && bindRt(1, b.s.p) && clearTo(TGRN) && mrtDraw2(p, F_MAG, F_YLW); }))
+            return false;
+        Com<IDirect3DSurface9> got;
+        CK(GetRenderTarget, 1, &got.p);
+        if (got.p != b.s.p) return snprintf(why, sizeof why, "GetRenderTarget(1) answers another surface"), false;
+        return rtHas("T1 bound", b.s.p, 64, A8, {{32, 32, 0xffff00}, {2, 60, 0xffff00}}) &&
+               rtHas("T0", a.s.p, 64, A8, {{32, 32, 0xff00ff}});
+    });
+}
+// Four targets of four kinds (a texture, a CreateRenderTarget surface, a cube's face 3, level 1 of a 128 texture), a
+// ps_2_0 writing oC0..oC3; COLORWRITEENABLE3 lets green and alpha through on index 3 alone.
+static bool rowMrtFour() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT4)) return false;
+    return mrtUntil([&] {
+        Rt a;
+        Com<IDirect3DSurface9> s1, s2, s3;
+        Com<IDirect3DCubeTexture9> cube;
+        Com<IDirect3DTexture9> mips;
+        if (!mkRt(a) || !makeRt(mips, 128, 2) || !levelOf(mips.p, 1, s3)) return false;
+        CK(CreateRenderTarget, 64, 64, A8, D3DMULTISAMPLE_NONE, 0, FALSE, &s1.p, nullptr);
+        CK(CreateCubeTexture, 64, 1, D3DUSAGE_RENDERTARGET, A8, D3DPOOL_DEFAULT, &cube.p, nullptr);
+        const HRESULT hr = cube.p->GetCubeMapSurface(D3DCUBEMAP_FACE_NEGATIVE_Y, 0, &s2.p);
+        if (FAILED(hr)) return fail("GetCubeMapSurface", hr);
+        const float c[4][4] = {{1, 0, 0, 1}, {0, 1, 0, 1}, {0, 0, 1, 1}, {1, 1, 1, 1}};
+        if (!scene([&] {
+                return bindRt(0, a.s.p) && bindRt(1, s1.p) && bindRt(2, s2.p) && bindRt(3, s3.p) && clearTo(TBLK) &&
+                       rstate(D3DRS_COLORWRITEENABLE3, D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_ALPHA) &&
+                       mrtDraw(p, c, 4);
+            }))
+            return false;
+        return rtHas("T0", a.s.p, 64, A8, {{32, 32, 0xff0000}}) && rtHas("T1", s1.p, 64, A8, {{32, 32, 0x00ff00}}) &&
+               rtHas("T2", s2.p, 64, A8, {{32, 32, 0x0000ff}}) && rtHas("T3", s3.p, 64, A8, {{32, 32, 0x00ff00}});
+    });
+}
+// A hole: index 0 and 2 bound, 1 empty, index 2 a half-float target; COLORWRITEENABLE1 (nothing) is the empty slot's
+// and COLORWRITEENABLE2 (red and alpha) index 2's; oC1 goes nowhere, oC2 to index 2.
+static bool rowMrtHole() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT4)) return false;
+    return mrtUntil([&] {
+        Rt a, h;
+        const float c[4][4] = {{1, 0, 1, 1}, {1, 1, 0, 1}, {0.5f, 0.5f, 0.5f, 1}, {1, 1, 1, 1}};
+        if (!mkRt(a) || !mkRt(h, 64, D3DFMT_A16B16G16R16F) ||
+            !scene([&] {
+                return bindRt(0, a.s.p) && bindRt(2, h.s.p) && clearTo(0) && rstate(D3DRS_COLORWRITEENABLE1, 0) &&
+                       rstate(D3DRS_COLORWRITEENABLE2, D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_ALPHA) &&
+                       mrtDraw(p, c, 4);
+            }))
+            return false;
+        const float half[4] = {0.5f, 0, 0, 1};
+        return rtHas("T0", a.s.p, 64, A8, {{32, 32, 0xff00ff}}) &&
+               rtHasF("T2", h.s.p, 64, D3DFMT_A16B16G16R16F, 8, 32, 32, half, 4);
+    });
+}
+// A bound target the pixel stage does not write keeps its pixels: a ps_2_0 writing oC0 alone, then no pixel shader.
+static bool rowMrtUnwritten() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_C0)) return false;
+    return mrtUntil([&] {
+        Rt a, b;
+        V3 q[4];
+        quad(q, -1, -1, 1, 1);
+        if (!mkRt(a) || !mkRt(b) ||
+            !scene([&] {
+                if (!bindRt(0, a.s.p) || !bindRt(1, b.s.p) || !clearTo(TGRN) || !use(p)) return false;
+                CK(SetPixelShaderConstantF, 0, F_RED, 1);
+                return strip(q);
+            }) ||
+            !rtHas("T0 (ps)", a.s.p, 64, A8, {{32, 32, 0xff0000}}) ||
+            !rtHas("T1 (ps)", b.s.p, 64, A8, {{32, 32, 0x00ff00}}))
+            return false;
+        RV r[4];
+        quadRhw(r, 0, 0, 64, 64, TBLU);
+        if (!scene([&] {
+                CK(SetVertexShader, nullptr);
+                CK(SetPixelShader, nullptr);
+                return clearTo(TGRN) && rdraw(r);
+            }))
+            return false;
+        return rtHas("T0 (fixed)", a.s.p, 64, A8, {{32, 32, 0x0000ff}}) &&
+               rtHas("T1 (fixed)", b.s.p, 64, A8, {{32, 32, 0x00ff00}});
+    });
+}
+// A ps_2_0 writing oC1 with nothing at index 1: index 0 is drawn.
+static bool rowMrtNoBind() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    return mrtUntil([&] {
+        Rt a;
+        if (!mkRt(a) || !scene([&] { return bindRt(0, a.s.p) && clearTo(TGRN) && mrtDraw2(p, F_MAG, F_YLW); }))
+            return false;
+        return rtHas("T0", a.s.p, 64, A8, {{32, 32, 0xff00ff}});
+    });
+}
+// Clear reaches every bound target: whole, a rect, bounded by the viewport, under the scissor test, whatever the
+// write masks; and not a target that was unbound.
+static bool rowMrtClear() {
+    return mrtUntil([&] {
+        Rt a, b;
+        const D3DRECT r = {8, 8, 24, 24};
+        if (!mkRt(a) || !mkRt(b) ||
+            !scene([&] {
+                return bindRt(0, a.s.p) && bindRt(1, b.s.p) && clearTo(TRED) &&
+                       clearRects(1, &r, D3DCLEAR_TARGET, TGRN) && viewport(32, 32, 16, 16) && clearTo(TBLU) &&
+                       viewport(0, 0, 64, 64) && scissor(0, 48, 64, 64) && rstate(D3DRS_SCISSORTESTENABLE, TRUE) &&
+                       clearTo(TWHT) && rstate(D3DRS_SCISSORTESTENABLE, FALSE);
+            }))
+            return false;
+        for (int i = 0; i < 2; i++)
+            if (!rtHas(i ? "T1" : "T0", i ? b.s.p : a.s.p, 64, A8,
+                       {{16, 16, 0x00ff00}, {40, 40, 0x0000ff}, {32, 56, 0xffffff}, {28, 28, 0xff0000},
+                        {56, 40, 0xff0000}, {20, 44, 0xff0000}}))
+                return false;
+        if (!scene([&] {
+                return rstate(D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_RED) &&
+                       rstate(D3DRS_COLORWRITEENABLE1, D3DCOLORWRITEENABLE_RED) && clearTo(TYLW) &&
+                       rstate(D3DRS_COLORWRITEENABLE, 0xf) && rstate(D3DRS_COLORWRITEENABLE1, 0xf);
+            }) ||
+            !rtHas("T0 masked", a.s.p, 64, A8, {{32, 32, 0xffff00}}) ||
+            !rtHas("T1 masked", b.s.p, 64, A8, {{32, 32, 0xffff00}}))
+            return false;
+        if (!scene([&] { return bindRt(1, nullptr) && clearTo(TBLK); })) return false;
+        return rtHas("T0 alone", a.s.p, 64, A8, {{32, 32, 0x000000}}) &&
+               rtHas("T1 unbound", b.s.p, 64, A8, {{32, 32, 0xffff00}});
+    });
+}
+// COLORWRITEENABLE1 masks index 1 alone, COLORWRITEENABLE index 0 alone.
+static bool rowMrtMask() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    return mrtUntil([&] {
+        Rt a, b;
+        if (!mkRt(a) || !mkRt(b) ||
+            !scene([&] {
+                return bindRt(0, a.s.p) && bindRt(1, b.s.p) && clearTo(TBLK) &&
+                       rstate(D3DRS_COLORWRITEENABLE1, D3DCOLORWRITEENABLE_RED) && mrtDraw2(p, F_WHT, F_WHT);
+            }) ||
+            !rtHas("T0", a.s.p, 64, A8, {{32, 32, 0xffffff}}) || !rtHas("T1 red", b.s.p, 64, A8, {{32, 32, 0xff0000}}))
+            return false;
+        if (!scene([&] {
+                return clearTo(TBLK) && rstate(D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_GREEN) &&
+                       rstate(D3DRS_COLORWRITEENABLE1, 0xf) && mrtDraw2(p, F_WHT, F_WHT);
+            }))
+            return false;
+        return rtHas("T0 green", a.s.p, 64, A8, {{32, 32, 0x00ff00}}) &&
+               rtHas("T1", b.s.p, 64, A8, {{32, 32, 0xffffff}});
+    });
+}
+// One blend state, each target its own destination and its own source alpha; the blend factor colour on both.
+static bool rowMrtBlend() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    return mrtUntil([&] {
+        Rt a, b;
+        const float half[4] = {0, 1, 0, 0.5f}, quarter[4] = {1, 1, 1, 0.25f};
+        if (!mkRt(a) || !mkRt(b) ||
+            !scene([&] {
+                return clearRt(b.s.p, TBLU) && clearRt(a.s.p, TRED) && bindRt(1, b.s.p) &&
+                       rstate(D3DRS_ALPHABLENDENABLE, TRUE) && rstate(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA) &&
+                       rstate(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA) && mrtDraw2(p, half, quarter);
+            }) ||
+            !rtHas("T0 alpha", a.s.p, 64, A8, {{32, 32, 0x808000}}) ||
+            !rtHas("T1 alpha", b.s.p, 64, A8, {{32, 32, 0x4040ff}}))
+            return false;
+        if (!scene([&] {
+                return bindRt(1, nullptr) && clearRt(b.s.p, TBLU) && clearRt(a.s.p, TRED) && bindRt(1, b.s.p) &&
+                       rstate(D3DRS_SRCBLEND, D3DBLEND_BLENDFACTOR) && rstate(D3DRS_DESTBLEND, D3DBLEND_INVBLENDFACTOR) &&
+                       rstate(D3DRS_BLENDFACTOR, 0x80808080) && mrtDraw2(p, F_WHT, F_WHT);
+            }))
+            return false;
+        return rtHas("T0 factor", a.s.p, 64, A8, {{32, 32, 0xff8080}}) &&
+               rtHas("T1 factor", b.s.p, 64, A8, {{32, 32, 0x8080ff}});
+    });
+}
+// DESTALPHA/INVDESTALPHA over a clear of alpha 0x40: a target with alpha blends by it, one without takes the source
+// (factors 1 and 0), whichever index each is at.
+static bool rowMrtDestAlpha() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    for (int swap = 0; swap < 2; swap++) {
+        const D3DFORMAT fa = swap ? X8 : A8, fb = swap ? A8 : X8;
+        if (!mrtUntil([&] {
+                Rt a, b;
+                const DWORD clear = 0x40285078;
+                if (!mkRt(a, 64, fa) || !mkRt(b, 64, fb) ||
+                    !scene([&] {
+                        return clearRt(b.s.p, clear) && clearRt(a.s.p, clear) && bindRt(1, b.s.p) &&
+                               rstate(D3DRS_ALPHABLENDENABLE, TRUE) && rstate(D3DRS_SRCBLEND, D3DBLEND_DESTALPHA) &&
+                               rstate(D3DRS_DESTBLEND, D3DBLEND_INVDESTALPHA) && mrtDraw2(p, F_WHT, F_WHT);
+                    }))
+                    return false;
+                return rtHas(swap ? "T0 X8" : "T0 A8", a.s.p, 64, fa, {{32, 32, swap ? 0xffffffu : 0x5e7c9au}}) &&
+                       rtHas(swap ? "T1 A8" : "T1 X8", b.s.p, 64, fb, {{32, 32, swap ? 0x5e7c9au : 0xffffffu}});
+            }))
+            return false;
+    }
+    return true;
+}
+// Targets of three formats in one pass: 8-bit, half float (values above 1 kept) and one-channel float.
+static bool rowMrtFormats() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT4)) return false;
+    return mrtUntil([&] {
+        Rt a, b, r;
+        const float c[4][4] = {{0.25f, 0.5f, 0.75f, 1}, {2.5f, 0.5f, 0.25f, 1}, {3.5f, 0, 0, 1}, {1, 1, 1, 1}};
+        if (!mkRt(a) || !mkRt(b, 64, D3DFMT_A16B16G16R16F) || !mkRt(r, 64, D3DFMT_R32F) ||
+            !scene([&] {
+                return bindRt(0, a.s.p) && bindRt(1, b.s.p) && bindRt(2, r.s.p) && clearTo(TBLK) && mrtDraw(p, c, 4);
+            }))
+            return false;
+        return rtHas("T0", a.s.p, 64, A8, {{32, 32, 0x4080bf}}) &&
+               rtHasF("T1", b.s.p, 64, D3DFMT_A16B16G16R16F, 8, 32, 32, c[1], 4) &&
+               rtHasF("T2", r.s.p, 64, D3DFMT_R32F, 4, 32, 32, c[2], 1);
+    });
+}
+// sRGB write over two targets, a black quad at alpha 0.5 over a 128 grey Clear. Two A8R8G8B8 targets: the blend is
+// linear and encoded (137) on both. With a half-float target at index 1 (no sRGB view) the whole set takes the pixel
+// stage's encode, before the blender: 94 and 0.368 (mtld3d's rule, kept: DXMTRS C4b-3d4 ruling 10).
+static bool rowMrtSrgb() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    for (int mixed = 0; mixed < 2; mixed++) {
+        const D3DFORMAT fb = mixed ? D3DFMT_A16B16G16R16F : A8;
+        if (!mrtUntil([&] {
+                Rt a, b;
+                const float black[4] = {0, 0, 0, 0.5f};
+                if (!mkRt(a) || !mkRt(b, 64, fb) ||
+                    !scene([&] {
+                        return bindRt(0, a.s.p) && bindRt(1, b.s.p) && rstate(D3DRS_SRGBWRITEENABLE, TRUE) &&
+                               clearTo(D3DCOLOR_XRGB(128, 128, 128)) && rstate(D3DRS_ALPHABLENDENABLE, TRUE) &&
+                               rstate(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA) &&
+                               rstate(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA) && mrtDraw2(p, black, black);
+                    }))
+                    return false;
+                if (!mixed)
+                    return rtHas("T0 twins", a.s.p, 64, A8, {{32, 32, 0x898989}}) &&
+                           rtHas("T1 twins", b.s.p, 64, A8, {{32, 32, 0x898989}});
+                const float f[4] = {0.368f, 0.368f, 0.368f, 0};
+                return rtHas("T0 mixed", a.s.p, 64, A8, {{32, 32, 0x5e5e5e}}) &&
+                       rtHasF("T1 mixed", b.s.p, 64, fb, 8, 32, 32, f, 3);
+            }))
+            return false;
+    }
+    return true;
+}
+// Clear under sRGB write encodes each target once: an 8-bit target beside a float one (188 and 0.737, a rect to 64
+// reading 137 and 0.538), and beside an 8-bit one of another size (188 on both).
+static bool rowMrtSrgbClear() {
+    return mrtUntil([&] {
+               Rt a, r;
+               const D3DRECT rect = {8, 8, 24, 24};
+               if (!mkRt(a) || !mkRt(r, 64, D3DFMT_R32F) ||
+                   !scene([&] {
+                       return bindRt(0, a.s.p) && bindRt(1, r.s.p) && rstate(D3DRS_SRGBWRITEENABLE, TRUE) &&
+                              clearTo(D3DCOLOR_XRGB(128, 128, 128)) &&
+                              clearRects(1, &rect, D3DCLEAR_TARGET, D3DCOLOR_XRGB(64, 64, 64));
+                   }))
+                   return false;
+               const float whole[4] = {0.737f, 0, 0, 0}, part[4] = {0.538f, 0, 0, 0};
+               return rtHas("T0", a.s.p, 64, A8, {{40, 40, 0xbcbcbc}, {16, 16, 0x898989}}) &&
+                      rtHasF("T1 whole", r.s.p, 64, D3DFMT_R32F, 4, 40, 40, whole, 1) &&
+                      rtHasF("T1 rect", r.s.p, 64, D3DFMT_R32F, 4, 16, 16, part, 1);
+           }) &&
+           mrtUntil([&] {
+               Rt a, s;
+               if (!mkRt(a) || !mkRt(s, 32) ||
+                   !scene([&] {
+                       return bindRt(0, a.s.p) && bindRt(1, s.s.p) && rstate(D3DRS_SRGBWRITEENABLE, TRUE) &&
+                              clearTo(D3DCOLOR_XRGB(128, 128, 128));
+                   }))
+                   return false;
+               return rtHas("T0 64", a.s.p, 64, A8, {{40, 40, 0xbcbcbc}}) &&
+                      rtHas("T1 32", s.s.p, 32, A8, {{16, 16, 0xbcbcbc}});
+           });
+}
+// A target of another size than index 0's is bound, skipped by draws and reached by Clear (over its own extent); it
+// takes part once index 0 has its size.
+static bool rowMrtSize() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    return mrtUntil([&] {
+               Rt a, b, u;
+               const D3DRECT r = {8, 8, 48, 48};
+               if (!mkRt(a) || !mkRt(b, 32) || !mkRt(u, 32) ||
+                   !scene([&] {
+                       return bindRt(0, a.s.p) && bindRt(1, b.s.p) && clearTo(TGRN) && mrtDraw2(p, F_RED, F_BLU);
+                   }) ||
+                   !rtHas("T0 drawn", a.s.p, 64, A8, {{48, 48, 0xff0000}, {8, 8, 0xff0000}}) ||
+                   !rtHas("T1 skipped", b.s.p, 32, A8, {{16, 16, 0x00ff00}}) ||
+                   !scene([&] { return clearRects(1, &r, D3DCLEAR_TARGET, TWHT); }) ||
+                   !rtHas("T0 rect", a.s.p, 64, A8, {{40, 40, 0xffffff}, {56, 56, 0xff0000}}) ||
+                   !rtHas("T1 rect", b.s.p, 32, A8, {{24, 24, 0xffffff}, {4, 4, 0x00ff00}}) ||
+                   !scene([&] { return bindRt(0, u.s.p) && mrtDraw2(p, F_RED, F_BLU); }) ||
+                   !rtHas("a 32 index 0", u.s.p, 32, A8, {{16, 16, 0xff0000}}) ||
+                   !rtHas("T1 joined", b.s.p, 32, A8, {{16, 16, 0x0000ff}}) ||
+                   !scene([&] { return bindRt(0, a.s.p) && mrtDraw2(p, F_YLW, F_MAG); }))
+                   return false;
+               return rtHas("T0 again", a.s.p, 64, A8, {{32, 32, 0xffff00}}) &&
+                      rtHas("T1 left", b.s.p, 32, A8, {{16, 16, 0x0000ff}});
+           }) &&
+           mrtUntil([&] {
+               Rt a, d;
+               if (!mkRt(a) || !mkRt(d, 128) ||
+                   !scene([&] {
+                       return clearRt(d.s.p, TGRN) && clearRt(a.s.p, TGRN) && bindRt(1, d.s.p) &&
+                              mrtDraw2(p, F_RED, F_BLU);
+                   }) ||
+                   !rtHas("T0 drawn (128)", a.s.p, 64, A8, {{32, 32, 0xff0000}}) ||
+                   !rtHas("T1 128 skipped", d.s.p, 128, A8, {{32, 32, 0x00ff00}, {100, 100, 0x00ff00}}) ||
+                   !scene([&] { return clearTo(TWHT); }))
+                   return false;
+               return rtHas("T0 cleared", a.s.p, 64, A8, {{32, 32, 0xffffff}}) &&
+                      rtHas("T1 128 cleared", d.s.p, 128, A8, {{32, 32, 0xffffff}, {100, 100, 0x00ff00}});
+           });
+}
+// Index 1 rebound between two draws, with nothing else between them: each target has its own draw (two passes that
+// differ at index 1 alone are two passes); then index 0 changed with index 1 kept.
+static bool rowMrtSwitch() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    return mrtUntil([&] {
+        Rt t0, a, b, t1;
+        if (!mkRt(t0) || !mkRt(a) || !mkRt(b) || !mkRt(t1) ||
+            !scene([&] {
+                return clearRt(a.s.p, TBLK) && clearRt(b.s.p, TBLK) && clearRt(t0.s.p, TBLK) && bindRt(1, a.s.p) &&
+                       mrtDraw2(p, F_RED, F_GRN) && bindRt(1, b.s.p) && mrtDraw2(p, F_RED, F_BLU);
+            }) ||
+            !rtHas("A", a.s.p, 64, A8, {{32, 32, 0x00ff00}}) || !rtHas("B", b.s.p, 64, A8, {{32, 32, 0x0000ff}}) ||
+            !scene([&] { return bindRt(0, t1.s.p) && mrtDraw2(p, F_WHT, F_YLW); }))
+            return false;
+        return rtHas("the new index 0", t1.s.p, 64, A8, {{32, 32, 0xffffff}}) &&
+               rtHas("B kept", b.s.p, 64, A8, {{32, 32, 0xffff00}});
+    });
+}
+// The scissor test and a partial viewport cut every target alike.
+static bool rowMrtScissor() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    return mrtUntil([&] {
+        Rt a, b;
+        if (!mkRt(a) || !mkRt(b) ||
+            !scene([&] {
+                return bindRt(0, a.s.p) && bindRt(1, b.s.p) && clearTo(TBLU) && scissor(16, 16, 48, 48) &&
+                       rstate(D3DRS_SCISSORTESTENABLE, TRUE) && mrtDraw2(p, F_RED, F_GRN) &&
+                       rstate(D3DRS_SCISSORTESTENABLE, FALSE);
+            }) ||
+            !rtHas("T0 scissor", a.s.p, 64, A8, {{32, 32, 0xff0000}, {8, 8, 0x0000ff}, {15, 32, 0x0000ff}}) ||
+            !rtHas("T1 scissor", b.s.p, 64, A8, {{32, 32, 0x00ff00}, {8, 8, 0x0000ff}, {48, 32, 0x0000ff}}) ||
+            !scene([&] { return clearTo(TBLU) && viewport(0, 0, 32, 64) && mrtDraw2(p, F_RED, F_GRN); }))
+            return false;
+        return rtHas("T0 viewport", a.s.p, 64, A8, {{16, 32, 0xff0000}, {48, 32, 0x0000ff}}) &&
+               rtHas("T1 viewport", b.s.p, 64, A8, {{16, 32, 0x00ff00}, {48, 32, 0x0000ff}});
+    });
+}
+// The depth test with two targets (256x256, the auto depth-stencil's size): a far quad is hidden behind a near one on
+// both.
+static bool rowMrtDepth() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    return mrtUntil([&] {
+        Rt a, b;
+        if (!mkRt(a, 256) || !mkRt(b, 256) ||
+            !scene([&] {
+                if (!bindRt(0, a.s.p) || !bindRt(1, b.s.p)) return false;
+                CK(Clear, 0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, TBLK, 1.0f, 0);
+                return rstate(D3DRS_ZENABLE, D3DZB_TRUE) && viewport(0, 0, 128, 256) && mrtDraw2(p, F_RED, F_GRN, 0.2f) &&
+                       viewport(0, 0, 256, 256) && mrtDraw2(p, F_WHT, F_WHT, 0.8f) && rstate(D3DRS_ZENABLE, D3DZB_FALSE);
+            }))
+            return false;
+        return rtHas("T0", a.s.p, 256, A8, {{64, 128, 0xff0000}, {192, 128, 0xffffff}}) &&
+               rtHas("T1", b.s.p, 256, A8, {{64, 128, 0x00ff00}, {192, 128, 0xffffff}});
+    });
+}
+// The back buffer in a set: at index 0 with a texture at index 1 (drawn, presented, the texture then shown), and at
+// index 1 under a texture, where it blends by its stored alpha as it does at index 0 (DXMTRS C4b-3d3 ruling 10).
+static bool rowMrtBack() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    const Px px[] = {{32, 32, TRED}, {129, 129, TGRN}};
+    if (!frames(BLUE, px, 2, [&] {
+            Rt b;
+            if (!mrtStart() || !mkRt(b, 256) || !bindRt(1, b.s.p) || !mrtDraw2(p, F_RED, F_GRN) || !bindRt(1, nullptr))
+                return false;
+            CK(SetVertexShader, nullptr);
+            CK(SetPixelShader, nullptr);
+            return show(b.t.p);
+        }))
+        return false;
+    return mrtUntil([&] {
+        Rt a;
+        const DWORD clear = 0x40285078;
+        if (!mkRt(a, 256) ||
+            !scene([&] {
+                return clearRt(rtSurf, clear) && clearRt(a.s.p, clear) && bindRt(1, rtSurf) &&
+                       rstate(D3DRS_ALPHABLENDENABLE, TRUE) && rstate(D3DRS_SRCBLEND, D3DBLEND_DESTALPHA) &&
+                       rstate(D3DRS_DESTBLEND, D3DBLEND_INVDESTALPHA) && mrtDraw2(p, F_WHT, F_WHT);
+            }))
+            return false;
+        return rtHas("the texture", a.s.p, 256, A8, {{128, 128, 0x5e7c9a}}) &&
+               rtHas("the back buffer at index 1", rtSurf, 256, X8, {{128, 128, 0x5e7c9a}});
+    });
+}
+// An AUTOGENMIPMAP target at index 1: its lower levels follow level 0 once it leaves the slot, by an unbind or by
+// another target taking the slot (an 8x8 quad samples level 3: red only if regenerated, black left alone).
+static bool rowMrtAutogen() {
+    const Px px[] = {{128, 128, TRED}, {32, 32, BLUE}};
+    for (int swap = 0; swap < 2; swap++)
+        if (!frames(BLUE, px, 2, [&] {
+                Rt a, other;
+                Com<IDirect3DTexture9> g;
+                Com<IDirect3DSurface9> gs;
+                if (!mrtStart() || !mkRt(a) || !mkRt(other) ||
+                    !makeRt(g, 64, 0, X8, D3DUSAGE_RENDERTARGET | D3DUSAGE_AUTOGENMIPMAP) || !levelOf(g.p, 0, gs) ||
+                    !bindRt(0, a.s.p) || !bindRt(1, gs.p) || !clearTo(TRED) || !bindRt(1, swap ? other.s.p : nullptr) ||
+                    !bindRt(1, nullptr) || !backToScreen())
+                    return false;
+                CK(SetSamplerState, 0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+                CK(SetSamplerState, 0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+                CK(SetSamplerState, 0, D3DSAMP_MIPFILTER, D3DTEXF_POINT);
+                return show(g.p, 124, 124, 132, 132);
+            }))
+            return false;
+    return true;
+}
+// A rect Clear between two draws keeps its place on both targets.
+static bool rowMrtOrder() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    return mrtUntil([&] {
+        Rt a, b;
+        const D3DRECT left = {0, 0, 32, 64};
+        if (!mkRt(a) || !mkRt(b) ||
+            !scene([&] {
+                return bindRt(0, a.s.p) && bindRt(1, b.s.p) && mrtDraw2(p, F_RED, F_RED) &&
+                       clearRects(1, &left, D3DCLEAR_TARGET, TGRN) && viewport(0, 0, 64, 32) &&
+                       mrtDraw2(p, F_WHT, F_WHT) && viewport(0, 0, 64, 64);
+            }))
+            return false;
+        for (int i = 0; i < 2; i++)
+            if (!rtHas(i ? "T1" : "T0", i ? b.s.p : a.s.p, 64, A8,
+                       {{16, 16, 0xffffff}, {16, 48, 0x00ff00}, {48, 48, 0xff0000}, {48, 16, 0xffffff}}))
+                return false;
+        return true;
+    });
+}
+// A read-back of index 1 between two draws of one set: it sees the first draw, and the second still reaches both.
+static bool rowMrtRead() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
+    return mrtUntil([&] {
+        Rt a, b;
+        if (!mkRt(a) || !mkRt(b) ||
+            !scene([&] { return bindRt(0, a.s.p) && bindRt(1, b.s.p) && mrtDraw2(p, F_RED, F_GRN); }) ||
+            !rtHas("T1 first", b.s.p, 64, A8, {{32, 32, 0x00ff00}}) ||
+            !scene([&] { return mrtDraw2(p, F_BLU, F_YLW); }))
+            return false;
+        return rtHas("T0", a.s.p, 64, A8, {{32, 32, 0x0000ff}}) && rtHas("T1", b.s.p, 64, A8, {{32, 32, 0xffff00}});
+    });
+}
+
+static void mrtRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"mrt-two", rowMrtTwo},       {"mrt-four", rowMrtFour},         {"mrt-hole", rowMrtHole},
+        {"mrt-unwritten", rowMrtUnwritten}, {"mrt-nobind", rowMrtNoBind}, {"mrt-clear", rowMrtClear},
+        {"mrt-mask", rowMrtMask},     {"mrt-blend", rowMrtBlend},       {"mrt-destalpha", rowMrtDestAlpha},
+        {"mrt-formats", rowMrtFormats}, {"mrt-srgb", rowMrtSrgb},       {"mrt-srgbclear", rowMrtSrgbClear},
+        {"mrt-size", rowMrtSize},     {"mrt-switch", rowMrtSwitch},     {"mrt-scissor", rowMrtScissor},
+        {"mrt-depth", rowMrtDepth},   {"mrt-back", rowMrtBack},         {"mrt-autogen", rowMrtAutogen},
+        {"mrt-order", rowMrtOrder},   {"mrt-read", rowMrtRead}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
+    HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
+    if (SUCCEEDED(hr))
+        hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
+    if (SUCCEEDED(hr)) hr = dev->GetDepthStencilSurface(&dsSurf);
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (FAILED(hr)) ok = fail("GetRenderTarget/GetDepthStencilSurface", hr);
+        else if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = reset() && depthReset() && blendStart() && r.run();
+        row(r.name, ok, why);
+    }
+    if (dsSurf) dsSurf->Release();
+    if (sysSurf) sysSurf->Release();
+    if (rtSurf) rtSurf->Release();
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
@@ -4365,6 +4989,7 @@ int main(int argc, char **argv) {
     const bool targets = !bench && argc > 1 && !strcmp(argv[1], "targets");
     const bool depth = !bench && argc > 1 && !strcmp(argv[1], "depth");
     const bool blendMode = !bench && argc > 1 && !strcmp(argv[1], "blend");
+    const bool mrtMode = !bench && argc > 1 && !strcmp(argv[1], "mrt");
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     WNDCLASSW wc = {};
@@ -4388,8 +5013,8 @@ int main(int argc, char **argv) {
     pp.BackBufferWidth = 256, pp.BackBufferHeight = 256, pp.BackBufferFormat = D3DFMT_X8R8G8B8, pp.BackBufferCount = 1;
     pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = hwnd, pp.Windowed = TRUE;
     pp.PresentationInterval = vsync ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
-    // The "depth" and "blend" modes' devices alone have a depth-stencil: the other modes' rows assume none.
-    if (depth || blendMode || depthBench) pp.EnableAutoDepthStencil = TRUE, pp.AutoDepthStencilFormat = D3DFMT_D24S8;
+    // The "depth", "blend" and "mrt" modes' devices alone have a depth-stencil: the other modes' rows assume none.
+    if (depth || blendMode || mrtMode || depthBench) pp.EnableAutoDepthStencil = TRUE, pp.AutoDepthStencilFormat = D3DFMT_D24S8;
     IDirect3DDevice9 *dev = nullptr;
     HRESULT hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd, D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp,
                                    &dev);
@@ -4399,6 +5024,13 @@ int main(int argc, char **argv) {
     const Vertex tri[3] = {{128, 16, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {240, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {16, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)}};
+    if (mrtMode) {
+        mrtRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
     if (blendMode) {
         blendRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();
