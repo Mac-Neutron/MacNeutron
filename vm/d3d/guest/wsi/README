@@ -1,0 +1,6 @@
+DXMT's Win32 window and monitor code, as DXMTRS carried it at 40c76ab1 (src/util/wsi_*): the guest's mnd3d.dll makes
+the window changes native DXMT asks for with it (vm/d3d/build-guest.sh compiles the two .cpp; guest/proxy.cpp includes
+wsi_window.hpp). DXMTRS's own window code is Rust (src/util/src/wsi), so the C++ lives here, beside its one user.
+
+Not MacNeutron's MIT: these five files are DXMT's, under the LGPL 2.1 (LICENSE), and derive from DXVK under the zlib
+licence (dxvk.LICENSE). They are unchanged from DXMTRS.

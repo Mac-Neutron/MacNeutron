@@ -26,10 +26,11 @@ cc -O1 -Wall -I"$D3D/guest" -I"$G" -o "$O/convert32-test" "$D3D/tests/convert32-
 "$O/convert32-test" > /dev/null || { "$O/convert32-test"; exit 1; }
 CXF="-std=c++17 -O2 -Wall -Werror -Wno-extern-c-compat -DWIDL_EXPLICIT_AGGREGATE_RETURNS -I$I/d3d12 -I$DXMT/d3d12 -I$DXMT/util -I$G -I$D3D
   -I$D3D/guest"
-# DXMT's own Win32 window code (M3 Task 3: the window changes native DXMT asks for, made in the guest), copied beside
-# guest/dxmt-shim's stand-ins for its logger and string helpers, which its quoted includes then find first.
+# DXMT's own Win32 window code (M3 Task 3: the window changes native DXMT asks for, made in the guest; guest/wsi, which
+# DXMTRS carried until its own window code became Rust), copied beside guest/dxmt-shim's stand-ins for its logger and
+# string helpers, which its quoted includes then find first.
 mkdir -p "$O/wsi"
-cp "$DXMT/util/wsi_window_win32.cpp" "$DXMT/util/wsi_monitor_win32.cpp" "$O/wsi/"
+cp -R "$D3D/guest/wsi/." "$O/wsi/"
 cp -R "$D3D/guest/dxmt-shim/." "$O/wsi/"
 # <arch dir> <compiler prefix> <winemetal.dll's import library> <DllMain's symbol>
 for a in "x86_64-windows x86_64-w64-mingw32 $W/dxmt-guest-build DllMain" "i386-windows i686-w64-mingw32 $W/dxmt-guest-build32 DllMain@12"; do
