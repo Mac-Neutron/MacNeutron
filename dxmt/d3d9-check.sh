@@ -148,7 +148,7 @@ launch() {
 # launch's exactly its one (DXMTRS C4b-3c: a depth texture at a vertex sampler), the depth launch's exactly its two
 # (DXMTRS C4b-3d2: a depth-tested draw sampling the bound depth-stencil, a dynamic depth texture's LockRect), one line
 # each; the targets and msaa launches' exactly their one (DXMTRS C4b-3d5: a StretchRect that is no multisample
-# resolve); the buffers launch's exactly its three (DXMTRS C4c-1: an attribute crossing the stride, a stream offset
+# resolve); the buffers launch's exactly its two (DXMTRS C4c-1: an attribute crossing the stride, a stream offset
 # off four bytes); the state, blend and mrt launches' none (the state launch's since
 # DXMTRS C4c-1: buffer locks are the core's); the other launches are not held to it.
 refused='is not implemented under runtime.mode = core'

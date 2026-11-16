@@ -44,7 +44,7 @@
 # line. Every lane also checks d3d9_triangle msaa's 17 rows (DXMTRS C4b-3d5: multisampling, on a device whose back
 # buffer and auto depth-stencil have 4 samples; ms64-fresh, ms32-fresh); under core their logs hold exactly one refusal line (a StretchRect
 # that is no multisample resolve). Every lane also checks d3d9_triangle buffers' 27 rows (DXMTRS C4c-1: vertex and
-# index buffers and the draws that read them; bf64-fresh, bf32-fresh); under core their logs hold exactly its three
+# index buffers and the draws that read them; bf64-fresh, bf32-fresh); under core their logs hold exactly its two
 # refusal lines (an attribute crossing the stride, a stream offset off four bytes).
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
