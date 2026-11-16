@@ -39,8 +39,7 @@ Fedora's packages, which it downloads from Fedora to the Mac (MacNeutron ships n
   DXMT's Direct3D 9 (d3d9.dll and mtld3d.dll of both widths, mtld3d.so in x86_64-unix and i386-unix: zlib, d3d9/LICENSE,
   altered from mtld3d 0.14.1, with DXMTRS's dxmt-util, LGPL-2.1-or-later, dxmt/, linked into each: LGPL combined works;
   the crates they link, snmalloc's C++ among them, in d3d9/crates, listed in d3d9/crates/INDEX; d3d9.dll and
-  mtld3d.dll also link DXMT's rust_pe_rt.c, LGPL-2.1-or-later, dxmt/, and Rust's
-  standard library, dxmt/rust), and Proton's lsteamclient (BSD-3-Clause, lsteamclient/) with MacNeutron's
+  mtld3d.dll also link Rust's standard library, dxmt/rust), and Proton's lsteamclient (BSD-3-Clause, lsteamclient/) with MacNeutron's
   Steam forwarder (MIT, macneutron/). Its lib/mn-i386 holds Fedora's alsa-lib for i686 ($ALSA_LIB_NVR:
   libasound.so.2, LGPL-2.1-or-later, COPYING.alsa-lib beside it), for 32-bit games' sound. Its share/fonts holds
   Proton's Windows-named fonts, built from the Liberation fonts (SIL OFL 1.1, LICENSE beside them; not Microsoft's

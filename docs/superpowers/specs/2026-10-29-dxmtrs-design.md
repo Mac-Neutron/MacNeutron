@@ -1120,6 +1120,38 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   switch until parity, measured with a 32-bit D3D9 title in the VM's lanes separately.
 - C5 (after C4's parity): `mtld3d.dll`, `mtld3d.so`, mtld3d's transport and wire, the `mtl` facade (its wire mirrors
   with it) and C3's interim pieces retire, and with them winemetal's MSL source-library slots for D3D9.
+- The C, C++ and Objective-C left in the tree (maintainer, 2026-11-16: port them, like the rest of DXMTRS; the inventory,
+  the order and the open questions are in `docs/superpowers/plans/2026-11-16-dxmtrs-c-to-rust.md`). First landing
+  2026-11-16 at DXMTRS main 40c76ab1 (40c76ab1def4126fe30b137bbb69e0aac138670a), which MacNeutron pins: the three groups that
+  depend on no decision. `src/util/rust_pe_rt.c` (the MSVC runtime symbols Rust's `-msvc` objects ask of an llvm-mingw
+  link: `_fltused`, `__chkstk`, i686's `__tls_array`) is the `@pe_rt` arm of `dxmt_dll!`, named once by each PE image's
+  root crate; a meson target made of Rust archives alone takes `rust_no_source`, an empty generated C file, for its link
+  driver. `src/winemetal/airconv_thunks.c` (the twelve SM50 calls of `winemetal.dll`) is `src/winemetal/src/sm50.rs`,
+  through the crate's `exports!` and transport, its prototypes asserted from the existing `sm50-abi.h` seam.
+  `src/nativemetal/win32_event.c` and `win32_native.cpp` (the native build's Win32 handles, events, semaphores, threads
+  and waits, the `mn_win32_handle` protocol MacNeutron's VM host shares) are `src/winemetal/unix/src/native_win32.rs`,
+  the thirteen prototypes now declared in `src/util/win32_native_event.h` and asserted with the handle's layout.
+  Behaviour is unchanged: over 37 image records against the C build no export and no import differs (`_fltused` moved
+  from `.data` to `.rdata`, and is gone from the i686 `d3d9.dll` and both guest `mtld3d.dll`, whose links never
+  referenced it); `winemetal.so` and the five native dylibs are identical records. The translator key moves once,
+  `3a0b1ab584cc3be8e762cefbf6ff7cc643d5a37b1212ab85e562409ac6209bd9` to
+  `cce99ae0860100e960370acaf0bf6fc07e1efe69bbf89a3057a4612f078cd9be`, with no change of translated output: the key hashes
+  the thunks' source text, and `translator_key` (`wine-arm64/lib.sh`) now reads `sm50.rs` where the C file is absent.
+  Gates: `tools/rust-check.sh` at each commit (its test leg now runs `winemetal-pe`'s tests, which the first run of the
+  thunks' commit did not); the Mac build, the x64 `dxmt/check.sh`, `dxmt/d3d9-check.sh`, the plain `d3d9.dll` import
+  list, `wm-probe` on `winemetal.so` and on the native dylib; the native tests with a new 14-case cross test
+  (`vm/dxmt-native/tests/win32-cross.sh`, green against the C dylib first); in the VM the D3D10-12 gate (48 programs),
+  D3D9's default lanes on old and new WoW64, the dxgi and d3d11 guest probes for i386 and x86_64, and forwarding
+  (`present-gate.sh forward`, `d3d-smoke.sh`). The smoke's `present-held-a-vcpu` row failed in the gate run (two presents
+  over 4 ms, a first frame of 15.3 ms); run alternately on the native dylib of the base (C) and of the tip (Rust), same
+  image and host, it failed 2 of 3 on the base and 1 of 3 on the tip: the open row of C3c, not this change.
+  What stays C-family at this pin, each listed with its reason in DXMTRS's `tools/audit.sh` (`C_SOURCES`; a new such
+  file under `src/` or `tests/` fails the gate), and each waiting on a decision of the maintainer: the translator's shim
+  and its two LLVM passes (LLVM's C API does not reach the pass manager, MemorySSA or a module pass; the options run
+  from generic C entry points added to our LLVM fork to keeping the three files); `delegate_forward.m` (`mtld3d.so` is
+  `panic = "abort"`, where no Rust frame can catch an Objective-C exception; C4 re-homes its observer into
+  `winemetal.so`, which unwinds); `wsi_monitor_win32.cpp` and `wsi_window_win32.cpp` (already Rust for DXMTRS, compiled
+  only by MacNeutron's guest proxy, `vm/d3d/build-guest.sh`); the eleven `tests/dx11` sample programs (built by no gate).
 
 Each step is one or more commits, each with its checks green (§8). Pace (maintainer, 2026-10-30): a step's map and plan
 may be written ahead, while earlier steps run, and are rebased onto what has landed before the step starts; steps 4

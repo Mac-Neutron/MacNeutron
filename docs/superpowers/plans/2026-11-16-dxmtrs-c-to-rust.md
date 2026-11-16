@@ -622,3 +622,27 @@ R1 design (1C/5I/9M), R2 build (0C/8I/11M), R3 translator (1C/8I/6M); every find
   `build.rs`: Task 5 Steps 3-4.
 - **R3-9, R3-10** T-min and T-A added, T-fork's relocation said plainly, T-max dropped: Section 1, Q1, Ruling 9.
 - **R3-11..14** 21 functions; the lasting attribute test; bucket A's conditions; Ruling 1's cost.
+
+## Execution notes (2026-11-16)
+
+Tasks 0, 2, 3, 4 and, for them, 8 and 9 are done; Tasks 1, 5, 6 and 7 wait for the answers to Q1-Q4.
+
+- DXMTRS main 40c76ab1: 26a2709b (Task 2), 2c079856 (Task 3), ae870981 (Task 4), 920ec972 (the audit's list of the
+  C-family sources left, with reasons; docs), 40c76ab1 (the gate's test leg runs `winemetal-pe`). MacNeutron: the key
+  function and its test, the cross test, this pin.
+- Task 2 as built: not `src/util/src/pe_rt.rs` but a `@pe_rt` arm of `dxmt_dll!`, named by each image's root crate (a
+  module in the library would not reach the five end-to-end test binaries; `tools/e2e-link.sh` assembles the two
+  symbols for them). Not predicted: `_fltused` is absent from the i686 `d3d9.dll` and both guest `mtld3d.dll`
+  (`--gc-sections` drops a static nothing references); accepted, nothing reads it.
+- Task 3 as built: the prototypes are asserted from the `sm50-abi.h` seam (`--seam-abi ... crate::sm50`), not by
+  hand-written coercions; the generator's slot scan leaves the SM50 slots to the unix-call table.
+- Task 4 as built: one module, `native_win32.rs`, with the prototypes moved into `win32_native_event.h` and generated
+  asserts; the native feature has a test command of its own in the gate.
+- The key: `3a0b1ab5...` to `cce99ae0...` (Task 3's source text), no output change.
+- Gates (Task 8) ran once on the rebased tips: all green but the smoke's `present-held-a-vcpu`, the open row of
+  C3c's ledger; an A/B of the native dylib (C base, Rust tip, three alternate rounds) failed 2 of 3 on the base and 1
+  of 3 on the tip.
+- Final review (Opus, whole diff): no Critical; one Important, fixed in 40c76ab1 (the thunks' six tests were named in
+  the gate's clippy and doc lists only, so its test leg never ran them); one Minor, the licence notices, in this pin.
+- Count at the pin, outside `external/` and `vendor/`: 6 files under `src/` (Q1: 3, Q2: 1, Q3: 2) and the 11 of
+  `tests/dx11` (Q4).
