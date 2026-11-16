@@ -1068,6 +1068,51 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   inside one run's spread
   (mtld3d's own figure moved 0.46 between two runs of this tip), so this slice costs the single-target draw nothing
   the probe can measure, and a quiet-Mac figure is owed to C4b-3d5's probe.
+  C4b-3d5 done 2026-11-16 at DXMTRS main 82a588ba (82a588ba47e33d2e02748dd9dabe64a6edccf684), which MacNeutron pins, and
+  with it C4b-3d as a whole: multisampling on the core runtime. A core texture has a sample count
+  (`CoreTextureDesc::samples`, its two flags packed as `CoreTextureFlags`) and a multisampled one is viewed as a
+  multisample 2D texture; a multisampled `CreateRenderTarget` or `CreateDepthStencilSurface` surface is one such
+  texture, and only the device's back buffer keeps a single-sample twin (the presented texture; its multisampled
+  companion is what draws and clears reach, and Present resolves it first), where mtld3d gives every multisampled target
+  a twin. The pass and the pipeline take target 0's count (`PipelineKey::samples`); an index 1-3 target or a
+  depth-stencil of another count is left out of the pass, as mtld3d leaves it (the depth clamp then reads "no depth
+  plane", a Z or stencil Clear of that depth-stencil does nothing, and a whole Clear does not reach that extra: mtld3d
+  clears apart only a bound target of another size). `D3DRS_MULTISAMPLEMASK` applies on a maskable multisampled target
+  0, the back buffer nothing bound included; alpha-to-coverage (the ATOC and A2M1 requests) replaces the alpha test on a
+  multisampled target 0 and is part of the key; both through mtld3d's own rules (`effective_sample_mask`,
+  `alpha_to_coverage_requested`, `resolve_sample_count`). A resolve (`resolve_into`) goes through the view format last
+  written, so an sRGB-written target averages linear and encodes, and is refused for a format the device cannot resolve.
+  `StretchRect` has one shape under core, the whole-surface resolve of a multisampled render target into a single-sample
+  one of the same size and a format whose bytes copy; every other shape stays a logged refusal,
+  "IDirect3DDevice9::StretchRect (other than a multisample resolve)" (taken here from C4c because nothing else can read
+  a multisampled pixel under core). `GetRenderTargetData` of a multisampled source is `D3DERR_INVALIDCALL`, as D3D9
+  says; a device or surface type the adapter does not offer is `D3DERR_INVALIDCALL`;
+  `CreateOffscreenPlainSurface(D3DPOOL_DEFAULT)` is made (a lockable surface that is no render target; nothing reads it
+  under core until C4c). One dxmt-core change: the optimizer folded a resolve into its source's last render pass across
+  passes that write or read the resolve's destination, for any front end (D3D11 reaches the fold with an array
+  multisampled target only); it now folds only into the render pass right before it, with a unit test, at the cost of
+  one resolve pass of its own where an unrelated pass lies between. Gated: 17 `d3d9_triangle msaa` rows on a device with
+  a 4-sample back buffer and auto D24S8 in every D3D9 lane on the Mac and in the VM, `rt-msaa` and `ds-msaa` turned from
+  refusals into results and `rt-plain` added, each first passed on mtld3d (one expectation corrected to what mtld3d
+  does: the Clear of an extra of another count), red under core until its commit and green strict after it, with no
+  report under Metal's validation layer in any core launch; seven mutation REDs, each on its row and on nothing outside
+  the msaa launch; the stateblock conformance under core; the default runtime's Mac conformance, translator key and
+  imports unchanged; the x64 check and the VM's D3D10-12 gate (dxmt-core changed). The whole-branch review found two
+  defects against mtld3d (the mask on a back buffer nothing bound, the Clear of a depth-stencil of another count), each
+  fixed with a cell that was red before. Coverage-dependent pixels are asserted as bands (48 to 208 of 255), the
+  hardware's. Not covered by a row: a presented multisampled frame (proven on the fakes), a multisampled depth-stencil's
+  resolved depth, sample-rate shading, centroid and `vPos` under multisampling; mtld3d's wait for a resolve to retire on
+  the paravirtual GPU has no counterpart in the core (the VM's rows are the check). Known costs, handed to C4d: Present
+  resolves a multisampled back buffer every frame; the capability table is rebuilt at each `StretchRect` resolve. Probe
+  (Mac x64, textured, single-sample; the Mac in use all day): the core read 3.62 ms a frame against C4b-3d4's tip's 3.47
+  in the same day, inside one run's spread; the quiet-Mac figure is still owed, to C4d's first probe.
+  The Wine suite sweep under core (measured, not gated; `visual`, `device`, `d3d9ex` once each): none runs to its end.
+  Each process ends within seconds at the first refused call its test does not survive: `IDirect3DSurface9::LockRect` of
+  a render target (`visual`, in `stretchrect_test`'s read-back), `IDirect3DVertexBuffer9::Lock` (`device`, in
+  `test_draw_primitive`), `IDirect3DDevice9::GetDirect3D` (`d3d9ex`, in `test_reset`); no panic, no hang, no validation
+  report. Those three are C4c's first work, since each hides everything after it; the refusals met on the way that fail
+  tests without ending them are `StretchRect`'s other shapes, `Reset`, fullscreen devices, the cursor calls,
+  `CreateQuery`, the `Ex` surface creators and the swap chain's display-mode getters.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features

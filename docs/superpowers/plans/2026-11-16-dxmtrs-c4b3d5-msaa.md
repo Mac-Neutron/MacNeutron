@@ -416,9 +416,9 @@ runtimes).
 ## Rules check
 
 - **One dxmt-core change** (Task 3): a guard in the optimizer's scan, with its unit test; the fold was wrong for
-  every front end (a resolve moved before a pass that writes or reads its destination), never reached by D3D11,
-  whose resolve keys do not match a non-array target's pass. Gated by dxmt-core's and d3d11's tests, the x64
-  check and the VM's D3D10-12 gate.
+  every front end (a resolve moved before a pass that writes or reads its destination), reached by D3D11 with
+  an array multisampled target only (its resolve keys do not match a non-array target's pass). Gated by
+  dxmt-core's and d3d11's tests, the x64 check and the VM's D3D10-12 gate.
 - **mtld3d's rules are called**: `resolve_sample_count`, `effective_sample_mask`, `alpha_to_coverage_requested`,
   `PipelineRsBits::alpha_to_coverage`, `copies_bytes`. Restated in d3d9-rt, which has no `PassState`, each one
   comparison and each pinned: the extra's count test (`recompute_extra_present_mask`), the depth-stencil's
@@ -505,27 +505,34 @@ no multisampling; a texel written under `LockRect` is read back under a second l
 single-sample back buffer and `ZENABLE` on, a near quad then a far quad over it: the far one shows (the
 depth-stencil of another count is left out: parity), every call `D3D_OK`.
 
-**msaa (16).**
+**msaa (17, as built: the cells below are the rows', corrected where the rows agent's differ from the draft).**
+- `ms-initial` (added by the final review; run first, before anything binds a target, with index 0 still the
+  device's own back buffer): the mask 0x3 and a white quad over black, the back buffer read through a 256
+  X8R8G8B8 target: 128 in each channel.
 - `ms-desc`: the back buffer and the auto depth-stencil say 4 samples; `GetRenderTargetData` of the back buffer
   is `D3DERR_INVALIDCALL`; `CreateRenderTarget` and `CreateDepthStencilSurface` with 16 samples are
   `D3DERR_INVALIDCALL` (mtld3d's creators answer it for every reject: parity); a `StretchRect` with a null source
   is `D3DERR_INVALIDCALL`; a depth-stencil `StretchRect` (the auto depth into a 4-sample D24S8 surface) is
   `D3DERR_NOTAVAILABLE` under strict, any answer otherwise.
 - `ms-resolve`: T cleared green, a red quad over x < 32: read (16,32) red, (48,32) green.
-- `ms-edge`: T cleared black, a white clip-space triangle (-1,-1), (1,-1), (-1,1): (8,8) and (56,56) are one
-  white and one black, and the 4x4 mean at the hypotenuse's middle (30,30) is in the band.
+- `ms-edge`: T cleared black, a white clip-space triangle (-1,-1), (-1,1), (1,-1) over its lower left half:
+  (8,56) white, (56,8) black; (31,31), on the hypotenuse, in the band, and the 4x4 mean from (30,30) in the band.
 - `ms-back`: the back buffer cleared blue, a red quad (64,64)-(192,192), `Present` `D3D_OK`; then cleared blue
   and drawn again (a presented DISCARD back buffer is undefined) and read through a 256 X8R8G8B8 target:
   (128,128) red, (32,32) blue.
 - `ms-clear`: T: a whole Clear to red; `Clear(1, (8,8)-(24,24))` to green; viewport (32,32,16,16) and a null-rect
   Clear to blue: (16,16) green, (40,40) blue, (28,28) and (56,40) red, and the texels on each side of the rect's
   edges exact ((7,16) red, (8,16) green, (23,16) green, (24,16) red).
-- `ms-depth`: T 256x256 with the 4-sample auto depth-stencil, Z cleared; a near red quad over the left half, a
-  far white quad over all, LESSEQUAL: (64,128) red, (192,128) white; then `Clear(1, (128,0)-(256,256),
-  ZBUFFER, 0.1)` and a green quad at z 0.5 over all: (192,128) still white.
-- `ms-mismatch`: T (4 samples) with a single-sample 64x64 D24S8 surface bound, `ZENABLE` on: a near red quad then
-  a far white one: white (no depth plane in the pass); a pre-transformed green quad at z 1.5: drawn (the clamp is
-  on; parity); a Z Clear answers `D3D_OK`.
+- `ms-depth`: T 256x256 with the 4-sample auto depth-stencil, Z cleared; a near red quad (z 0.6) over the left
+  half, a far white quad (0.8) over all, LESSEQUAL: (64,128) red, (192,128) white; then `Clear(1,
+  (128,0)-(256,256), ZBUFFER, 0.1)` and a green quad at z 0.5 over all: green on the left (the drawn control),
+  (192,128) still white.
+- `ms-mismatch`: T (4 samples) with a single-sample 64x64 D24S8 surface bound, `ZENABLE` on: a near red quad
+  over all then a far white one over y < 48: white at (48,32) (no depth plane in the pass), red at (48,56); a
+  pre-transformed green quad at z 1.5 over the left half: drawn (the clamp is on; parity); a Z Clear answers
+  `D3D_OK`. Added by the final review: that Z Clear does nothing to the depth-stencil (parity: mtld3d's is a
+  no-op): Z cleared to 1 beside a single-sample target, "cleared" to 0.1 beside T, and a quad at z 0.5 beside the
+  single-sample target still passes.
 - `ms-mask`: T cleared black, `D3DRS_MULTISAMPLEMASK` 0x3, a white quad over all: 128 in each channel; 0x1: 64;
   0xf: 255; 0x3 through a ps_2_0 writing white: 128; on a single-sample target the mask 0x2 leaves a white quad
   white.
@@ -533,8 +540,9 @@ depth-stencil of another count is left out: parity), every call `D3D_OK`.
   non-maskable, quality 2; the mask 0x3 and a white quad: 255 (the mask does not apply).
 - `ms-a2c`: `D3DRS_ADAPTIVETESS_Y` = ATOC, `ALPHATESTENABLE` on, `ALPHAREF` 0xc0, `ALPHAFUNC` GREATEREQUAL, a
   white quad of alpha 0x80 over black on T: the 4x4 mean is in the band (the alpha test did not kill it, coverage
-  thinned it). ATOC with `ALPHAFUNC` NEVER and a white quad of alpha 0xff: on T white (coverage, no alpha test);
-  on a single-sample target black (the alpha test applies there). ATOC off, the alpha test off, `D3DRS_POINTSIZE`
+  thinned it). ATOC with `ALPHAFUNC` LESS 0x80 and a white quad of alpha 0xff: on T white (coverage, no alpha
+  test); on a single-sample target alpha 0 is white (the pipeline's drawn control, which a NEVER pipeline would
+  not have) and alpha 0xff black (the alpha test applies there). ATOC off, the alpha test off, `D3DRS_POINTSIZE`
   = A2M1, alpha 0x80: the band on T; after A2M0: white.
 - `ms-srgbmask`: T, `SRGBWRITEENABLE` on, cleared black, the mask 0x3, a white quad; then a Clear of another
   target (a pass between, so the resolve is not folded); read: 188 in each channel (the linear average, encoded:
@@ -553,6 +561,10 @@ depth-stencil of another count is left out: parity), every call `D3D_OK`.
   drawn over its top half: white there, red and black below.
 - `ms-samples`: for each of 2 and 8 samples the device offers: a target of that count, the mask of its lower half
   (0x1 of 2; 0x0f of 8), a white quad over black: 128.
+
+The targets and msaa launches' refusal set is one line, not empty (execution ruling T1-1): `rt-msaa`'s and
+`ms-desc`'s out-of-shape `StretchRect` cells log "IDirect3DDevice9::StretchRect (other than a multisample
+resolve)" under core, and `dxmt/d3d9-check.sh` and `vm/dxmt/d3d9-gate.sh` hold that set (`stretch_refusals`).
 
 ## Review dispositions
 
@@ -576,3 +588,63 @@ depth-stencil of another count is left out: parity), every call `D3D_OK`.
   mutant hygiene, `msaa-runtime` named, the helpers and constants, the stop-early cut, the process carry-overs
   (the cargo cache, the handle grep, headers, the probe's wait and retake pair, the chains), `read_back`, the
   wording conflicts, the cfg'd block, the budget rule.
+
+## Execution notes (2026-11-16)
+
+- Built as planned in seven commits on DXMTRS over 5f9e5caa: 665d5b91 (the default-pool plain surface), fa785176
+  (dxmt-core: a resolve folds only into the render pass right before it), d451d853 (the fakes, and multisampled
+  views through the core pinned), e89569a0 (the sample count in textures, passes and pipelines), cd4b6ca5 (resolve
+  and the multisampled back buffer), 9d53514a (creation, `StretchRect`'s resolve, the read-back's refusal),
+  82a588ba (the final review's two fixes). d3d11 and winemetal are untouched; dxmt-core changes in the optimizer's
+  one guard. The rows were written by one Opus subagent and Tasks 2-7 by another from this plan, one writer a
+  repository, this session running the lanes and gates; their commits carry their own co-author line.
+- Controls: on the default runtime, on the Mac (default and msl) and in the VM (old WoW64, x64 and x86), every new
+  row was green at its first run but one. `ms-mrt` expected a whole Clear to reach a bound extra of target 0's
+  size and another sample count; mtld3d's does not (it clears apart only a bound target of another size, and one
+  of another count is in no pass). The row and the appendix were corrected to parity, the core's Clear follows
+  (`clear_size`), and mutant (g) became "the Clear reaches that slot" (ruling T1-2; cost if wrong: a title mixing
+  sample counts across its targets, which D3D9 does not allow, never sees that target cleared, under both runtimes
+  alike). mtld3d's own doc says such a target "is still owed every Clear": left for the maintainer.
+- Changes from the plan's text, each ledgered: the rows agent's cells where the draft's could not prove what they
+  meant to (the appendix above has them: `ms-edge`'s probes off the hypotenuse, `ms-a2c`'s LESS 0x80 pair,
+  `ms-depth`'s drawn control); the refusal set of one line (T1-1); the rows' `offers()` asks main's `IDirect3D9`,
+  not the device's (`GetDirect3D` is refused under core, which had hidden the 2- and 8-sample cells: T7-1);
+  d3d9-rt depends on the workspace's bitflags; mtld3d's `copies_bytes` takes two formats (its two callers pass
+  the same one twice); the resolve refusal for a format without `CAP_RESOLVE` is tested with RGBA16Uint;
+  `device_capability_map` is rebuilt at each `StretchRect` resolve (C4d's input) (T5-1). The implementer wrote
+  Tasks 5 and 6's code before their tests and proved each test by reverting its guard.
+- Gates. On 9d53514a: the Mac's default, msl and core lanes; the stateblock conformance under core equal to
+  default; all nine core launches under Metal's validation layer with no report; the seven mutants each red on its
+  row and on nothing outside `msaa-*`; the VM's D3D10-12 gate (48 programs) and its D3D9 lanes on both runtimes,
+  old and new WoW64. On the fix tip 82a588ba: the three Mac lanes, the stateblock conformance, the nine launches
+  under validation and the VM's D3D9 lanes again; the plain build's translator key and imports unchanged,
+  `d3d9-check` default, the x64 check all passed, the Mac's Wine conformance with only triaged sites. The plain
+  build's first run (on 9d53514a) reported one untriaged site, device.c:1945 (test_cursor's cursor handle, on a
+  Mac in use); it did not recur at the fix tip and no cursor code changed: ruled a flake of that run (T8-1; cost if
+  wrong: an intermittent cursor-handle difference of the default runtime, older than this slice, goes
+  unexamined). The mutants and the D3D10-12 gate were not rerun for the two front-end lines of the fix.
+- Final review (Opus): no Critical, two Important, four Minor. Important 1: `D3DRS_MULTISAMPLEMASK` was ignored on
+  a multisampled back buffer nothing had bound (a null slot 0 read as no multisampling; mtld3d reads the back
+  buffer's type). Important 2: a Z or stencil Clear wrote a depth-stencil of another sample count than target 0's
+  (mtld3d: nothing). Both fixed in 82a588ba, each with a cell that was red on the old tip under core alone
+  (`ms-initial`, `ms-mismatch`'s Z Clear) and green on the default runtime. Two Minors fixed with them (a comment,
+  a doc). Deferred: `get_render_target_data`'s multisampled-source check and log text are a copy of mtld3d's, not
+  shared; the optimizer's guard holds the fold back across any live pass, also one that does not touch the
+  resolve's textures (ruling 2 states the cost: one resolve pass of its own).
+- Probe (`build/c4b3d/s5/probe.md`): this slice read the core at 3.62 / 3.62 ms a frame (tex / texdepth) against
+  mtld3d's 1.82 / 1.80, and C4b-3d4's tip rebuilt the same day 3.47 / 3.58 against 1.58 / 1.67: no difference
+  beyond one run's spread. The Mac was in use the whole day (the job never saw the load it waited for), so the
+  quiet-Mac figure C4b-3d4 owed is still owed, to C4d's first probe.
+- Sweep (`build/c4b3d/s5/sweep.md`; measured, not a gate, nothing fixed): under core none of `visual`, `device`
+  and `d3d9ex` runs to its end. Each process ends within seconds at the first refused call its test does not
+  survive: `IDirect3DSurface9::LockRect` of a render target (`visual`, in `stretchrect_test`'s read-back, 8 failed
+  lines before it), `IDirect3DVertexBuffer9::Lock` (`device`, in `test_draw_primitive`, 30),
+  `IDirect3DDevice9::GetDirect3D` (`d3d9ex`, in `test_reset`, 19). No panic, no hang, no validation report (a
+  process that dies prints no "executed" count). Until those three answer, a sweep cannot see past them; the
+  others met on the way (`StretchRect`'s other shapes, `Reset`,
+  fullscreen devices, the cursor calls, `CreateQuery`, the `Ex` creators, the swap chain's display-mode getters)
+  fail their tests without ending them.
+- Incidents, none in the code: three jobs were started with the lock command held in a shell variable, which zsh
+  does not split, and ended with 127 before running anything (rerun with the command spelled out); the sweep
+  job's first form stopped at its own self-check, whose pattern matched the script's header comment (a second job
+  file with a narrower check).
