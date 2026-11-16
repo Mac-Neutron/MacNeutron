@@ -638,3 +638,7 @@ mtld3d's code rather than D3D9's formula (Task 1 Step 5's rule).
   frame (tex) against mtld3d's 1.47 and 1.93; C4b-3d3's unchanged tip, rebuilt and run in the same window, 3.85
   against 1.87 (it had read 2.18 on a quiet Mac). No difference between the two tips exceeds one run's spread; a
   quiet-Mac figure is owed to C4b-3d5's probe.
+- After the push the maintainer asked for the five deferred minors: DXMTRS 5f9e5caa (2026-11-16) makes
+  `open_render_pass` the tests' alone, `set_extra_target` `#[must_use]` with the unbind asserting its answer, adds
+  the test of its refusals, takes a write mask's low byte in `core_extras` and corrects `forget_texture`'s doc.
+  Rust gate and the Mac lane (default and core) green; MacNeutron pins it.
