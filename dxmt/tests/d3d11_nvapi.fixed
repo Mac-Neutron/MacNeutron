@@ -72,7 +72,7 @@ nvdisp GPU_GetConnectedDisplayIds(no room) -174
 nvdisp GPU_GetConnectedDisplayIds(wrong) -9
 nvdisp GPU_GetConnectedDisplayIds(v1) 0 count>=1 yes first active 1 connected 1 physical 1 type -1
 nvdisp GPU_GetConnectedDisplayIds(v2) 0 count>=1 yes first active 1 connected 1 physical 1 type -1
-nvdisp GPU_GetConnectedDisplayIds(null array) count-equals-v1 yes
+nvdisp GPU_GetConnectedDisplayIds(null array) count-equals-no-room yes
 nvdisp DISP_GetDisplayIdByDisplayName(primary) 0 same-as-connected yes
 nvdisp DISP_GetDisplayIdByDisplayName(unknown) -6 id=untouched
 nvdisp DISP_GetGDIPrimaryDisplayId(null) -5
