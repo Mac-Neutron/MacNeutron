@@ -180,7 +180,7 @@ toml_sections() {  # toml_sections <file> <[section]>...
 # cache (ShaderCacheVersion, DXMT patch 0003) and the launcher's replay stamp (DXMT/translator) follow it, not DXMT's
 # git version, which every re-fetch changes (git am makes new commits) and an uncommitted edit doesn't. It hashes what
 # changes translated output, as the working tree has it (patched, committed or not, untracked files too):
-#  - airconv (src/airconv, its shim, passes and .metal helpers, without tests.rs files and tests/ folders), d3d11's
+#  - airconv (src/airconv, its passes and .metal helpers, without tests.rs files and tests/ folders), d3d11's
 #    compile arguments (src/d3d11/d3d11_shader.cpp when it exists, else src/d3d11/src/shader/args.rs: its cache entries
 #    key on the variant's fields, not on the argument chain built from them, unlike d3d12's), the PE side of the
 #    airconv calls (src/winemetal/airconv_thunks.c when it exists, else src/winemetal/src/sm50.rs, and

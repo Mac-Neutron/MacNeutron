@@ -1,6 +1,6 @@
 // DXMTRS step 4's DXBC corpus (sources.txt): a compute shader whose groupshared store is read at once by another
 // thread's slot with no barrier between, so airconv's implicit simdgroup barrier pass
-// (A/transforms/simdgroup_implicit_membarrier.cpp: an address space 3 load whose MemorySSA definition is an address
+// (src/airconv/src/module/passes.rs in DXMTRS: an address space 3 load whose MemorySSA definition is an address
 // space 3 store) fires. No C1 metallib calls air.simdgroup.barrier; sync.hlsl and groupshared.hlsl put a barrier before
 // their loads. The store comes from a buffer and the load goes to a UAV, so neither folds away. barrier.cs.dxbc.
 groupshared uint Shared[64];

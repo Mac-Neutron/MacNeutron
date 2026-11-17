@@ -12,7 +12,7 @@ build_probe() {  # build_probe <arch> <llvm> <out-dir> <log-dir>
 
 # The offline corpus tool (DXIL translator plan, Task 5), against the fork's Rust translator: airconv's static library
 # (the production profile, as the images' winemetal links it, without the type oracle), built in <cargo-target-dir> from
-# <dxmt-src>'s workspace (its crates fetched already: cargo runs offline), then linked with LLVM 23 and the shim's C++.
+# <dxmt-src>'s workspace (its crates fetched already: cargo runs offline), then linked with LLVM 23.
 # The -lLLVM list is read from src/airconv/meson.build's llvm_deps (as src/airconv/build.rs reads it), in order. No rustc
 # target-cpu: as the images' (step 4a P10).
 build_translate() {  # build_translate <arch> <llvm> <dxmt-src> <cargo-target-dir> <out-dir> <log-dir>
