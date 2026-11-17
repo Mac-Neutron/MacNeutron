@@ -879,3 +879,39 @@ used once more (Task 6), under the argument above; no `sel!`, `class!` or `msg_s
   link components; archive order on Mach-O; one `llvm_deps` list feeds `build.rs` and `build_translate`; the key
   function lists `src/airconv` by walking it; the live-on-entry claim (a `MemoryDef` with a null instruction, uses
   not optimized at build in LLVM 23, `dyn_cast` on null under `NDEBUG`); every pass's printed options round-trip.
+
+## Execution notes, second landing (2026-11-16, night)
+
+Tasks 1, 5, 6 and 7 are done, and Tasks 8 and 9 for them. No C, C++ or Objective-C source is left in DXMTRS.
+
+- DXMTRS main cdd64734, eight commits over eeb92e2e (C4c-1): 48530f68 (Task 1), 38497787 (Task 7), 07707907 (Task 6),
+  72ae65ea, ad2f887e, 3df691ea and e0723d16 (Task 5: tests first, then the shim's C-API half, the fork's entry points,
+  the pipeline and its two passes), cdd64734 (the audit refuses a C-family source; docs). MacNeutron: the window code
+  in `vm/d3d/guest/wsi`, comments, licences, the spec, this pin.
+- The LLVM fork: `air-23-extras` = 9df6993f (one commit on `air-23`'s edc723f4), pushed with the maintainer's yes;
+  `tools/llvm.sh` pins the commit, which a build fetches by its hash. `air-23` itself was **not** fast-forwarded, where
+  Task 5's Step 3 and Task 9 say it is: the yes named the new branch, so that push waits for the maintainer.
+- Task 5 as built: nineteen entry points, one of them added after the final review, which found that a struct name
+  holding a NUL was cut at it (`LLVMGetStructName` answers a C string): `LLVMAIRGetStructName` answers name and
+  length. One stated difference from the C++: the barrier pass skips a threadgroup load whose MemorySSA definition is
+  live-on-entry, where the C++ dereferenced null; `the_pipeline_skips_a_threadgroup_load_nothing_wrote_before`.
+- Task 6 as built: `_mtld3d_try_send` in `global_asm!` for arm64 and x86_64, byte-equal to clang's object for the
+  reference `@try`; `cc` left the crate and the workspace. The x86_64 block ran under Rosetta in a scratch harness only.
+- Proof of no output change: 13 corpora, 2,742 files byte-equal (non-LTO install, then the shared ThinLTO one in the
+  Mac gate); DXSO identity digest equal over 875 programs. Mutations: without the barrier pass `barrier.cs.dxbc`
+  differs; without the 16-bit read pass no corpus file differs, so that pass rests on its unit tests (RED shown).
+- The key: `cce99ae0...` to `e1074f4f5f966252586e28ef2b935c7a4bc9acb462ef098691730f9091e6e59c`, no output change.
+- Gates (Task 8), once, on the tips cdd64734 and fb1e0e95: rust-check at each of the eight commits; the Mac gate with
+  both shared LLVM installs rebuilt at 9df6993f; the VM gate. Two rows failed. `wm-probe` g3 on the native dylib
+  (`128 resolve-no-pool heap-growth=freed`): the load-sensitive row, three reruns ok. The smoke's
+  `present-held-a-vcpu`: 2 of 4 runs at the tip, the open row's signature each time (frame 1 at 15-18 ms, frame 4 at
+  5-9 ms); no base run at this landing (a base build would turn the shared LLVM installs back and forth), so the
+  attribution rests on the signature and on the first landing's rate (tip 2 of 4, base 2 of 3).
+- Records against the first landing (37 images): `winemetal.so` and the native `winemetal.dylib` differ in 43 lines
+  each, all of them the shim's 21 symbols and the passes' 3 gone and the 19 `LLVMAIR*` added; the three `d3d9.dll`
+  differ in `.text` size and what follows from it (C4c-1, the base moved); the other 32 are identical.
+- Final review (Opus, whole diff): no Critical; the licence notices (I1, I2) and the NUL in a struct name (M1) fixed
+  before the gates; commit messages that named results now match what ran.
+- Not run: `wine-arm64/tests/licences_test.sh`, `vm/tests/vm-setup.sh`, the p profile, the release scripts: owed at
+  the next release. Left as a follow-up: `docs/DEVELOPMENT.md` in DXMTRS still ends its baseline paragraph with "DXMT's
+  own C++ has no baseline of its own", a sentence about code that is gone.

@@ -1192,6 +1192,43 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   `panic = "abort"`, where no Rust frame can catch an Objective-C exception; C4 re-homes its observer into
   `winemetal.so`, which unwinds); `wsi_monitor_win32.cpp` and `wsi_window_win32.cpp` (already Rust for DXMTRS, compiled
   only by MacNeutron's guest proxy, `vm/d3d/build-guest.sh`); the eleven `tests/dx11` sample programs (built by no gate).
+  Second landing 2026-11-16 at DXMTRS main cdd64734 (cdd647344ff36e31ec567290e3acb30070f7816c), which MacNeutron pins,
+  after the maintainer's answer (all of it in Rust): no C, C++ or Objective-C source is left under `src/` or `tests/`,
+  and `tools/audit.sh` fails on one. The translator's shim and its two LLVM passes are Rust. What LLVM's C API covers is
+  called through it (the fast-math queries, the `memory` and `captures` attributes, the SDK version flag); what it lacks
+  comes from nineteen generic C entry points added to our LLVM fork as one component, `LLVMAIRExtras`
+  (`llvm/include/llvm-c/AIRExtras.h`, `llvm/lib/AIRExtras`; Mac-Neutron/llvm-project branch `air-23-extras`,
+  9df6993f28043ccc381aa0b43e2b9acf2a6223fc, the commit `tools/llvm.sh` pins), each one LLVM call that holds no policy of
+  the translator. The pass pipeline is a text constant LLVM's `PassBuilder` parses, its two passes
+  (`air::Lower16BitTexReadPass`, `air::SimdgroupImplicitMemBarrierPass`) Rust callbacks in
+  `src/airconv/src/module/passes.rs`. `delegate_forward.m` is a landing pad in assembly inside `delegate_forward.rs`
+  (`global_asm!`, arm64 and x86_64: what clang emits for the `@try` it replaces, with the Objective-C personality and
+  its exception table), so `mtld3d.so` stays `panic = "abort"` and compiles no Objective-C. The window-system C++ (two
+  sources, three headers) left DXMTRS for `vm/d3d/guest/wsi` here, beside the guest proxy that compiles it, with its
+  licences. The eleven `tests/dx11` programs, their headers and assets and the meson option `enable_tests` are deleted;
+  their nine shaders stay for the corpus.
+  Behaviour is unchanged: the 13 shader corpora translate to the same 2,742 files byte for byte, on a non-LTO LLVM
+  install and on the shared ThinLTO one, and the DXSO identity digest over 875 programs is equal. One stated difference:
+  a threadgroup load whose MemorySSA definition is the function's live-on-entry one is skipped by the barrier pass, where
+  the C++ dereferenced a null instruction; a unit test pins it. A mutation showed that the corpora catch a missing
+  barrier pass and not a missing 16-bit read pass, so unit tests pin both passes' output and the sixteen forms of the
+  `memory` attribute. The translator key moves once, `cce99ae0860100e960370acaf0bf6fc07e1efe69bbf89a3057a4612f078cd9be`
+  to `e1074f4f5f966252586e28ef2b935c7a4bc9acb462ef098691730f9091e6e59c`, with no change of translated output (the LLVM
+  pin and the source text it hashes). Over the 37 image records against the first landing, `winemetal.so` and the native
+  `winemetal.dylib` lose the shim's and the passes' symbols and gain the nineteen `LLVMAIR*`; the three `d3d9.dll`
+  differ by C4c-1's code (the base moved); nothing else differs. `mtld3d.so` holds the pad `_mtld3d_try_send` with its
+  exception table, imports the Objective-C personality and `objc_msgSend`, and has no `__objc_imageinfo` section.
+  Gates: `tools/rust-check.sh` at each of the eight commits; the Mac build with both shared LLVM installs rebuilt at
+  the new pin; the x64 `dxmt/check.sh` (420 rows), `dxmt/d3d9-check.sh`, the plain `d3d9.dll` import list, `wm-probe`
+  on `winemetal.so` and on the native dylib, the native tests; in the VM the D3D10-12 gate (48 programs), D3D9's default
+  lanes on old and new WoW64, the dxgi and d3d11 guest probes for i386 and x86_64, and forwarding. Two rows failed in
+  the gate run: `wm-probe` g3's `resolve-no-pool heap-growth` on the native dylib (the load-sensitive row of C3c's and
+  C3d's ledgers; three reruns passed), and the smoke's `present-held-a-vcpu`, which failed 2 of 4 runs at this tip, each
+  with the open row's signature (two presents over 4 ms: frame 1 at 15 to 18 ms, frame 4 at 5 to 9 ms), the rate the
+  first landing measured on its tip and on its base. No base run was taken at this landing.
+  Not run: `wine-arm64/tests/licences_test.sh` (it needs a bundle) and `vm/tests/vm-setup.sh`, both owed at the next
+  release. The landing pad's x86_64 block is proven by a scratch harness under Rosetta only: no x86_64 Rust target is
+  installed here.
 
 Each step is one or more commits, each with its checks green (§8). Pace (maintainer, 2026-10-30): a step's map and plan
 may be written ahead, while earlier steps run, and are rebased onto what has landed before the step starts; steps 4
