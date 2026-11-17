@@ -60,8 +60,6 @@
 # vertex and index buffers and the draws that read them, on a device with no depth-stencil; "buffers strict" under
 # core), its rows "buffers-<row>"; under core its launch's logs hold exactly its one refusal line (a layout no binding
 # can fetch: buf-wide's attribute wider than its stride) and no line of a draw dropped for a buffer with no core form.
-# D3D9_BUFFERS_SKIP=<row>[,<row>...] (default none) passes "skip=" that list to the buffers launch, which prints "d3d9
-# <row> skip" for each and does not run it: the listed rows are not required, an unlisted row's skip line fails it.
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -235,20 +233,11 @@ check mrt "mrt-two mrt-four mrt-hole mrt-unwritten mrt-nobind mrt-clear mrt-mask
 launch ours fresh msaa 240 msaa $strict
 check msaa "ms-initial ms-desc ms-resolve ms-edge ms-back ms-clear ms-depth ms-mismatch ms-mask ms-nonmask ms-a2c ms-srgbmask
   ms-blend ms-mrt ms-scissor ms-redraw ms-samples"
-skip=${D3D9_BUFFERS_SKIP:-}  # its rows are not required; an unlisted row's "skip" line is not "ok", so check fails it
-launch ours fresh buffers 240 buffers $strict ${skip:+"skip=$skip"}
-rows=
-for r in buf-d3d buf-lock buf-draw buf-start buf-offset buf-strip buf-fan buf-indexed buf-index32 buf-base buf-ifan \
-  buf-managed buf-dynamic buf-order buf-discard buf-held buf-relock buf-streams buf-null buf-null-up buf-zero-stride \
-  buf-instanced buf-shader buf-tex buf-nobuffer buf-release buf-odd buf-cross buf-cross-up buf-cross-multi \
-  buf-cross-odd buf-cross-indexed buf-wide; do
-  case ",$skip," in
-    *",$r,"*) echo "d3d9-check: buffers: $(/usr/bin/grep "^d3d9 $r " "$WORK/buffers.txt" || echo "d3d9 $r: no line")" \
-      "(D3D9_BUFFERS_SKIP: not required)" ;;
-    *) rows="$rows $r" ;;
-  esac
-done
-check buffers "$rows"
+launch ours fresh buffers 240 buffers $strict
+check buffers "buf-d3d buf-lock buf-draw buf-start buf-offset buf-strip buf-fan buf-indexed buf-index32 buf-base buf-ifan
+  buf-managed buf-dynamic buf-order buf-discard buf-held buf-relock buf-streams buf-null buf-null-up buf-zero-stride
+  buf-instanced buf-shader buf-tex buf-nobuffer buf-release buf-odd buf-cross buf-cross-up buf-cross-multi
+  buf-cross-odd buf-cross-indexed buf-wide"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi
