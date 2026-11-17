@@ -72,14 +72,17 @@
 // latch), sRGB write, blending, index 1-3 targets, the scissor test, a resolve's destination drawn again; what the
 // creators and read-backs answer. With a 180 s budget. The core refuses a StretchRect other than a whole-surface
 // resolve (ms-desc's depth-stencil one).
-// With "buffers" ("buffers strict" under core; DXMTRS C4c-1, C4c-2a): 33 rows "d3d9 buf-<row> ok|FAIL <why>" of vertex
-// and index buffers and the draws that read them, on a device with no depth-stencil: GetDirect3D; Lock and Unlock
-// (pools, usages, DISCARD and NOOVERWRITE, a READONLY read-back, a lock held over draws, a partial relock);
+// With "buffers" ("buffers strict" under core; DXMTRS C4c-1, C4c-2a, C4c-2b): 39 rows "d3d9 buf-<row> ok|FAIL <why>" of
+// vertex and index buffers and the draws that read them, on a device with no depth-stencil: GetDirect3D; Lock and
+// Unlock (pools, usages, DISCARD and NOOVERWRITE, a READONLY read-back, a lock held over draws, a partial relock);
 // DrawPrimitive and DrawIndexedPrimitive (lists, strips, fans, a line list, the start vertex, a stream offset, base
 // vertices of both signs, 16- and 32-bit indices); two streams, a stride of zero, a declared stream with nothing bound
 // (buffer and UP draws), instancing; a vertex shader, the fixed-function stage and a texture over buffers; the answers
 // without buffers and a released buffer; stream offsets off four bytes and attributes that end past their stride
-// (buffer, UP, indexed and fan draws, three streams, the fixed-function stage). With a 180 s budget. Under strict a
+// (buffer, UP, indexed and fan draws, three streams, the fixed-function stage); dynamic buffers locked again inside a
+// frame (a whole lock's copy of the old bytes, 300 DISCARDs past a page's suballocations, index buffers under
+// DISCARD, NOOVERWRITE and a fan, READONLY and NOOVERWRITE reads, a crossing layout's append) and a static WRITEONLY
+// buffer locked again after its upload released its backing (buf-writeonly). With a 180 s budget. Under strict a
 // layout no binding can fetch, an attribute wider than its stride (buf-wide), answers D3DERR_NOTAVAILABLE. "buffers
 // [strict] skip=<row>[,<row>...]" prints "d3d9 <row> skip" for each listed row and does not run it.
 #include <windows.h>
@@ -6462,6 +6465,245 @@ static bool rowBufWide() {
                       strictMode ? D3DERR_NOTAVAILABLE : D3D_OK);
     });
 }
+// DXMTRS C4c-2b's rows: dynamic buffers locked again inside one frame, and a static WRITEONLY buffer locked again after
+// its upload released its backing. mtld3d maps a DYNAMIC default-pool buffer directly: a queued draw reads the pages
+// the Lock pointer wrote, so a lock without DISCARD or NOOVERWRITE over bytes an earlier draw of the frame reads would
+// change that draw. No row makes one: each writes through DISCARD, a whole lock after a draw (a new name, the old bytes
+// copied) or NOOVERWRITE past every byte an earlier draw reads. Where two draws of a frame would paint the same
+// pixels, each draws in a scissor band of its own, so every asserted pixel is one draw's.
+
+// A DYNAMIC default-pool vertex buffer of n bytes, `usage` added (WRITEONLY or 0).
+static bool mkDyn(Com<IDirect3DVertexBuffer9> &b, UINT n, DWORD usage) {
+    CK(CreateVertexBuffer, n, D3DUSAGE_DYNAMIC | usage, 0, D3DPOOL_DEFAULT, &b.p, nullptr);
+    return true;
+}
+// The draws that follow inside the scissor band x0 <= x < x1 (the test on; reset() turns it off).
+static bool band(LONG x0, LONG x1) { return scissor(x0, 0, x1, 256) && rstate(D3DRS_SCISSORTESTENABLE, TRUE); }
+// A wide triangle, its top edge across the target at y0 and its apex (128, y0 + 64): 16 pixels down it spans x 32-224.
+static void bandTri(RV *v, float y0, DWORD c) { triRhw(v, 0, y0, 256, y0 + 64, c); }
+// Lock(0, 0, 0) of `b` (whole, no flags), `n` vertices of `v` written from vertex `at`, Unlock.
+static bool rewrite(IDirect3DVertexBuffer9 *b, UINT at, const RV *v, UINT n) {
+    void *p = nullptr;
+    HRESULT hr = b->Lock(0, 0, &p, 0);
+    if (FAILED(hr)) return fail("Lock (whole)", hr);
+    memcpy((RV *)p + at, v, n * sizeof *v);
+    hr = b->Unlock();
+    return SUCCEEDED(hr) || fail("Unlock", hr);
+}
+// buf-dyn-preserve: a DYNAMIC buffer (not WRITEONLY) locked whole without flags after a draw, which mtld3d renames and
+// whose old bytes it copies into the new pages (PreserveKind::Cpu): a rewrite of part keeps the rest. Small cell, 180
+// bytes (one page): three bandTri triangles, T0 at y 16, T1 at 96, T2 at 176, red, drawn in the band x 0-80;
+// rewrite(), T0 green, drawn in x 88-168; rewrite() again, T1 yellow, drawn in x 176-256. Left T0 and T1 red (the first
+// draw read the fill: the lock after it took a new name); middle T0 green, T1 and T2 red (the copy carried the fill);
+// right T0 green (the second copy read the pages the first rewrite wrote, not the name the first draw reads), T1
+// yellow, T2 red. Large cell, 4320 bytes (216 vertices): T0 at vertices 0-2 and T1 at 213-215, past byte 4096, each
+// drawn alone in x 0-128; rewrite(), T0 green, both drawn in x 128-256: left T0 and T1 red, right T0 green and T1 red
+// (the copy carried the bytes past the first page).
+static bool rowBufDynPreserve() {
+    RV fill[9], g0[3], y1[3], big[216] = {};
+    bandTri(fill, 16, TRED), bandTri(fill + 3, 96, TRED), bandTri(fill + 6, 176, TRED);
+    bandTri(g0, 16, TGRN), bandTri(y1, 96, TYEL), bandTri(big, 16, TRED), bandTri(big + 213, 96, TRED);
+    const Px small[] = {{40, 32, TRED},   {40, 112, TRED},  {128, 32, TGRN},  {128, 112, TRED},
+                        {128, 192, TRED}, {216, 32, TGRN},  {216, 112, TYEL}, {216, 192, TRED}},
+             large[] = {{64, 32, TRED}, {64, 112, TRED}, {192, 32, TGRN}, {192, 112, TRED}};
+    const auto both = [] { return drawList(0, 1) && drawList(213, 1); };
+    return frames(BLUE, small, 8, [&] {
+               Com<IDirect3DVertexBuffer9> vb;
+               return mkDyn(vb, sizeof fill, 0) && put(vb.p, 0, fill, sizeof fill) && rvAt(vb.p) && band(0, 80) &&
+                      drawList(0, 3) && rewrite(vb.p, 0, g0, 3) && band(88, 168) && drawList(0, 3) &&
+                      rewrite(vb.p, 3, y1, 3) && band(176, 256) && drawList(0, 3);
+           }) && frames(BLUE, large, 4, [&] {
+               Com<IDirect3DVertexBuffer9> vb;
+               return mkDyn(vb, sizeof big, 0) && put(vb.p, 0, big, sizeof big) && rvAt(vb.p) && band(0, 128) &&
+                      both() && rewrite(vb.p, 0, g0, 3) && band(128, 256) && both();
+           });
+}
+// buf-dyn-many's colour of draw i: red 255 (never the clear), green and blue stepping with i.
+static DWORD manyColour(int i) { return D3DCOLOR_XRGB(255, (i * 7) & 0xff, (i * 13) & 0x7f); }
+// One buf-dyn-many cell: a DYNAMIC|WRITEONLY buffer of `length` bytes, n times Lock(DISCARD) of vertices at to at + 2,
+// a triangle in cell i of a 20 x 15 grid of 12 x 16 cells from (8,8) written there in manyColour(i), Unlock and
+// DrawPrimitive(TRIANGLELIST, at, 1), in one frame. Asserts the eight `probe` cells, each 4 pixels inside its triangle.
+// A DISCARD that wrote in place would move the draw before it to the next cell, leaving its own cell the clear.
+static bool manyCell(UINT length, UINT at, int n, const int (&probe)[8]) {
+    const auto cx = [](int i) { return 8 + 12 * (i % 20); };
+    const auto cy = [](int i) { return 8 + 16 * (i / 20); };
+    Px px[8];
+    for (int k = 0; k < 8; k++) px[k] = {cx(probe[k]) + 6, cy(probe[k]) + 5, manyColour(probe[k])};
+    return frames(BLUE, px, 8, [&] {
+        Com<IDirect3DVertexBuffer9> vb;
+        if (!mkDyn(vb, length, D3DUSAGE_WRITEONLY) || !rvAt(vb.p)) return false;
+        for (int i = 0; i < n; i++) {
+            RV t[3];
+            const float x = (float)cx(i), y = (float)cy(i);
+            triRhw(t, x + 1, y + 1, x + 11, y + 15, manyColour(i));
+            if (!put(vb.p, at * sizeof(RV), t, sizeof t, D3DLOCK_DISCARD) || !drawList(at, 1)) return false;
+        }
+        return true;
+    });
+}
+// buf-dyn-many: manyCell over a one-triangle buffer (60 bytes) 300 times, past one page's suballocations into new
+// names (on the core a 60-byte name is a page of sixteen 256-byte suballocations: cells 15 and 16 straddle the first
+// new name), cells 0, 1 (the first DISCARD after a draw), 2, 15, 16, 17, 150, 299; and over a 4800-byte buffer, its
+// triangle at vertices 237-239 (past byte 4096), 40 times, cells 0, 1 (the first new name the draws must bind: with
+// the rename left out of the frame the second draw binds the first name, whose triangle sits in cell 0), 2, 15, 16,
+// 20, 38, 39.
+static bool rowBufDynMany() {
+    static const int small[8] = {0, 1, 2, 15, 16, 17, 150, 299}, large[8] = {0, 1, 2, 15, 16, 20, 38, 39};
+    return manyCell(3 * sizeof(RV), 0, 300, small) && manyCell(240 * sizeof(RV), 237, 40, large);
+}
+// buf-dyn-index: a DYNAMIC|WRITEONLY 16-bit index buffer over a static vertex buffer of four quads (quadRhw's order):
+// Q0 (16,16)-(112,112) red, Q1 (144,16)-(240,112) green, Q2 (16,144)-(112,240) white, Q3 (144,144)-(240,240) yellow.
+// Filled whole through DISCARD (a first lock: in place) with Q0's list 0 1 2 2 1 3 and zeros after it,
+// DrawIndexedPrimitive(TRIANGLELIST) from index 0. Lock(DISCARD) of indices 0-5, contended after that draw: Q1's 4 5 6
+// 6 5 7, drawn from index 0. A NOOVERWRITE append of indices 6-15, past every index the draws before read: Q2's 8 9 10
+// 10 9 11, drawn from index 6, and Q3's fan 12 13 15 14, an indexed TRIANGLEFAN from index 12 (mtld3d rewrites a fan
+// on the CPU at its draw, from the pages the Lock pointer wrote). Q0 red: the first draw read the first indices (the
+// DISCARD took new pages; one that wrote in place, or a draw that left the buffer unmarked as read, moves that draw
+// to Q1). Q1 green, Q2 white; Q3 yellow: the fan read the appended indices (the first fill's pages hold zeros there,
+// which draw nothing). Two cells: 16 indices, one page (on the core the DISCARD steps to the next suballocation of the
+// same name), and 2052 (4104 bytes, more than a page: the DISCARD takes a new name, which the fan must read, not the
+// name the first draw reads).
+static bool rowBufDynIndex() {
+    RV v[16];
+    quadRhw(v, 16, 16, 112, 112, TRED), quadRhw(v + 4, 144, 16, 240, 112, TGRN);
+    quadRhw(v + 8, 16, 144, 112, 240, TWHT), quadRhw(v + 12, 144, 144, 240, 240, TYEL);
+    static const WORD first[2052] = {0, 1, 2, 2, 1, 3}, second[6] = {4, 5, 6, 6, 5, 7},
+                      append[10] = {8, 9, 10, 10, 9, 11, 12, 13, 15, 14};
+    Com<IDirect3DVertexBuffer9> vb;
+    if (!mkVb(vb, v, sizeof v)) return false;
+    const Px px[] = {{64, 64, TRED}, {192, 64, TGRN}, {64, 192, TWHT}, {192, 192, TYEL}};
+    const auto cell = [&](UINT bytes) {
+        return frames(BLUE, px, 4, [&] {
+            Com<IDirect3DIndexBuffer9> ib;
+            CK(CreateIndexBuffer, bytes, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_DEFAULT, &ib.p,
+               nullptr);
+            if (!put(ib.p, 0, first, bytes, D3DLOCK_DISCARD) || !rvAt(vb.p)) return false;
+            CK(SetIndices, ib.p);
+            CK(DrawIndexedPrimitive, D3DPT_TRIANGLELIST, 0, 0, 16, 0, 2);
+            if (!put(ib.p, 0, second, sizeof second, D3DLOCK_DISCARD)) return false;
+            CK(DrawIndexedPrimitive, D3DPT_TRIANGLELIST, 0, 0, 16, 0, 2);
+            if (!put(ib.p, 12, append, sizeof append, D3DLOCK_NOOVERWRITE)) return false;
+            CK(DrawIndexedPrimitive, D3DPT_TRIANGLELIST, 0, 0, 16, 6, 2);
+            CK(DrawIndexedPrimitive, D3DPT_TRIANGLEFAN, 0, 0, 16, 12, 2);
+            return true;
+        });
+    };
+    return cell(16 * sizeof *first) && cell(sizeof first);
+}
+// buf-dyn-read: a DYNAMIC buffer (not WRITEONLY) of the left quad red then the right quad green (listRhw's, twelve
+// vertices) written through Lock and unlocked; Lock(0, 0, READONLY) reads those 240 bytes; the left quad drawn;
+// Lock(0, 0, NOOVERWRITE) after that draw reads them too (both write in place: new pages would hold other bytes); the
+// right quad drawn. Left red, right green: each draw read the bytes written.
+static bool rowBufDynRead() {
+    RV q[12];
+    listLeft(q, TRED), listRight(q + 6, TGRN);
+    const auto reads = [&](IDirect3DVertexBuffer9 *b, DWORD flags, const char *what) {
+        void *p = nullptr;
+        HRESULT hr = b->Lock(0, 0, &p, flags);
+        if (FAILED(hr)) return fail(what, hr);
+        const bool same = !memcmp(p, q, sizeof q);
+        if (FAILED(hr = b->Unlock())) return fail("Unlock", hr);
+        return same || (snprintf(why, sizeof why, "%s reads other bytes than were written", what), false);
+    };
+    const Px px[] = {{64, 128, TRED}, {192, 128, TGRN}};
+    return frames(BLUE, px, 2, [&] {
+        Com<IDirect3DVertexBuffer9> vb;
+        return mkDyn(vb, sizeof q, 0) && put(vb.p, 0, q, sizeof q) && reads(vb.p, D3DLOCK_READONLY, "Lock (READONLY)") &&
+               rvAt(vb.p) && drawList() && reads(vb.p, D3DLOCK_NOOVERWRITE, "Lock (NOOVERWRITE)") && drawList(6);
+    });
+}
+// buf-dyn-cross: DECL_CROSS under VS_CROSS_Y (DXMTRS C4c-2a's crossing layout, stride 12) from a DYNAMIC|WRITEONLY
+// buffer of 164 bytes, filled through DISCARD: 0x5a, then from byte 2 crossTris(z 0.25, B's edge at 0.875), 0.875 and
+// a marked float (to byte 82), then 0x5a. Drawn at stream offset 2, which fetches bytes 2-77 (vertex 5's texcoord, the
+// 0.875, ends at 78). A NOOVERWRITE append from byte 82, past every byte that draw fetches: crossTris(z 0.75, B's edge
+// at 0, pixel 128), 0 and a marked float; drawn at stream offset 82 (its vertex 5's texcoord ends at 158). (228,204)
+// 0xff40df: the first draw's B, coloured by the float after its six, which the append, written in place, leaves alone.
+// (120,64) 0xffbf80: the second draw's A, over the first's. (140,160) 0xffbf00: the second draw's B, coloured by the 0
+// after its six (the marks read there give another blue). (64,192) the clear.
+static bool rowBufDynCross() {
+    float a[20], b[20];
+    crossTris(a, 0.25f, 0.875f), a[18] = 0.875f, a[19] = 0.375f;
+    crossTris(b, 0.75f, 0.0f), b[18] = 0.0f, b[19] = 0.375f;
+    BYTE fill[2 + sizeof a + sizeof b + 2];
+    memset(fill, 0x5a, sizeof fill), memcpy(fill + 2, a, sizeof a);
+    Prog p;
+    if (!make(p, DECL_CROSS, VS_CROSS_Y, PS_V0)) return false;
+    static const Px px[] = {{228, 204, 0xff40df}, {120, 64, 0xffbf80}, {140, 160, 0xffbf00}, {64, 192, BLUE}};
+    return frames(BLUE, px, 4, [&] {
+        Com<IDirect3DVertexBuffer9> vb;
+        if (!mkDyn(vb, sizeof fill, D3DUSAGE_WRITEONLY) || !put(vb.p, 0, fill, sizeof fill, D3DLOCK_DISCARD) || !use(p))
+            return false;
+        CK(SetStreamSource, 0, vb.p, 2, 12);
+        if (!drawList() || !put(vb.p, 2 + sizeof a, b, sizeof b, D3DLOCK_NOOVERWRITE)) return false;
+        CK(SetStreamSource, 0, vb.p, 2 + sizeof a, 12);
+        return drawList();
+    });
+}
+// A static WRITEONLY default-pool vertex buffer of n bytes holding `data`, filled by one Lock of its whole length (an
+// explicit size, not 0): mtld3d uploads it whole at the Unlock and then releases the backing
+// (release_backing_after_upload).
+static bool mkWriteOnly(Com<IDirect3DVertexBuffer9> &b, const void *data, UINT n) {
+    CK(CreateVertexBuffer, n, D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &b.p, nullptr);
+    return put(b.p, 0, data, n);
+}
+// Vertex k of `b` rewritten as `v` through Lock(20k, 20, 0): flags 0 and a size, a window mtld3d takes at its word
+// (may_trust_lock_bounds) and uploads alone. With `zeros`, the 20 bytes read through the pointer first must be 0.
+static bool window(IDirect3DVertexBuffer9 *b, UINT k, const RV &v, bool zeros) {
+    BYTE *p = nullptr;
+    HRESULT hr = b->Lock(k * sizeof v, sizeof v, (void **)&p, 0);
+    if (FAILED(hr)) return fail("Lock (one vertex)", hr);
+    int bad = -1, got = 0;
+    for (int i = 0; zeros && i < (int)sizeof v && bad < 0; i++)
+        if (p[i]) bad = i, got = p[i];
+    memcpy(p, &v, sizeof v);
+    if (FAILED(hr = b->Unlock())) return fail("Unlock (one vertex)", hr);
+    if (bad >= 0)
+        return snprintf(why, sizeof why, "vertex %u's window reads byte %d as %02x, not 0: the backing was not released",
+                        k, bad, got),
+               false;
+    return true;
+}
+// buf-writeonly: a static WRITEONLY default-pool vertex buffer, whose backing mtld3d releases once its first fill is
+// uploaded whole, locked again: the lock re-creates a zeroed backing and uploads only the window it names. No READONLY
+// or size-0 lock (on a re-created backing either one dirties the whole buffer and uploads its zeros). The left quad
+// (listRhw's, red) filled by mkWriteOnly and drawn; vertex 4 moved from (112,192) to (240,192) stretches the second
+// triangle over (160,176), which only it covers and which needs vertices 3 and 5 as the device holds them (zeros, as a
+// whole upload of the re-created backing gives them, draw nothing there). Cell 1: vertex 4's window reads zeros (red
+// under the core until it releases the backing: DXMTRS C4c-2b), then is moved; drawn: (64,128) and (160,176) red,
+// (200,96) the clear. Cell 2: vertex 2 moved from (16,64) to (16,8), which stretches the first triangle over (32,48),
+// and vertex 4 moved, two windows each unlocked before the draw: (32,48) red, (160,176) red (vertex 3, between the
+// windows, as the device holds it), (64,128) red, (200,96) the clear. Cell 3: a second such buffer, its first lock of
+// its whole length, the left quad written and drawn while locked, the right quad green written through the same
+// pointer over it, Unlock, drawn: left red (the first draw's bytes), right green.
+static bool rowBufWriteOnly() {
+    RV q[6], r[6];
+    listLeft(q, TRED), listRight(r, TGRN);
+    RV v2 = q[2], v4 = q[4];
+    v2.y = 8, v4.x = 240;
+    const Px one[] = {{64, 128, TRED}, {160, 176, TRED}, {200, 96, BLUE}},
+             two[] = {{32, 48, TRED}, {160, 176, TRED}, {64, 128, TRED}, {200, 96, BLUE}},
+             three[] = {{64, 128, TRED}, {192, 128, TGRN}};
+    return frames(BLUE, one, 3, [&] {
+               Com<IDirect3DVertexBuffer9> vb;
+               return mkWriteOnly(vb, q, sizeof q) && rvAt(vb.p) && drawList() && window(vb.p, 4, v4, true) &&
+                      drawList();
+           }) && frames(BLUE, two, 4, [&] {
+               Com<IDirect3DVertexBuffer9> vb;
+               return mkWriteOnly(vb, q, sizeof q) && rvAt(vb.p) && drawList() && window(vb.p, 2, v2, false) &&
+                      window(vb.p, 4, v4, false) && drawList();
+           }) && frames(BLUE, three, 2, [&] {
+               Com<IDirect3DVertexBuffer9> vb;
+               CK(CreateVertexBuffer, sizeof q, D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &vb.p, nullptr);
+               void *p = nullptr;
+               HRESULT hr = vb.p->Lock(0, sizeof q, &p, 0);
+               if (FAILED(hr)) return fail("Lock", hr);
+               memcpy(p, q, sizeof q);
+               bool ok = rvAt(vb.p) && drawList();
+               if (ok) memcpy(p, r, sizeof r);
+               if (FAILED(hr = vb.p->Unlock())) return fail("Unlock", hr);
+               return ok && drawList();
+           });
+}
 
 // Whether `name` is one of the comma-separated names in `list`.
 static bool listed(const char *list, const char *name) {
@@ -6485,7 +6727,9 @@ static void buffersRows(IDirect3DDevice9 *d, bool strict, const char *skip) {
         {"buf-instanced", rowBufInstanced}, {"buf-shader", rowBufShader},   {"buf-tex", rowBufTex},
         {"buf-nobuffer", rowBufNoBuffer}, {"buf-release", rowBufRelease},   {"buf-odd", rowBufOdd},
         {"buf-cross", rowBufCross},       {"buf-cross-up", rowBufCrossUp},  {"buf-cross-multi", rowBufCrossMulti},
-        {"buf-cross-odd", rowBufCrossOdd}, {"buf-cross-indexed", rowBufCrossIndexed}, {"buf-wide", rowBufWide}};
+        {"buf-cross-odd", rowBufCrossOdd}, {"buf-cross-indexed", rowBufCrossIndexed}, {"buf-wide", rowBufWide},
+        {"buf-dyn-preserve", rowBufDynPreserve}, {"buf-dyn-many", rowBufDynMany}, {"buf-dyn-index", rowBufDynIndex},
+        {"buf-dyn-read", rowBufDynRead},  {"buf-dyn-cross", rowBufDynCross}, {"buf-writeonly", rowBufWriteOnly}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))

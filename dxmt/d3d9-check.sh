@@ -27,7 +27,8 @@
 # in d3d9.dll on dxmt-core (a wine.app built with DXMT_D3D9_CORE=1): each launch logs to a folder of its own, which
 # must hold the core device's line ("d3d9 core: device on dxmt-core") and not mtld3d.so's encoder line ("texture
 # versions: rename pool cap", printed by every mtld3d device) nor a line saying the core cannot present (no command
-# library, no Metal view, a pipeline that does not build), lines the code that ran prints, not the switch. The
+# library, no Metal view, a pipeline that does not build) nor that a dynamic buffer fell back to staging ("has no
+# mapped memory", DXMTRS C4c-2b), lines the code that ran prints, not the switch. The
 # native arm64 half has no core runtime (C4-15): its launch must hold the fallback warning ("carries no core runtime,
 # so mtld3d runs") and the encoder line. No shader-backend, kinds or conformance rows under core (C4b on). Its stamp is
 # "d3d9-check: lane core (runtime.mode=core)", its verdict "d3d9-check: ok (core)". D3D9_RUNTIME=mtld3d (the default)
@@ -56,10 +57,12 @@
 # logs hold no refusal line. Every lane also runs d3d9_triangle msaa (DXMTRS C4b-3d5's 17 rows of multisampling, on a
 # device whose back buffer and auto depth-stencil have 4 samples; "msaa strict" under core), its rows "msaa-<row>";
 # under core its launch's logs hold exactly one refusal line (a StretchRect
-# that is no multisample resolve). Every lane also runs d3d9_triangle buffers (DXMTRS C4c-1's and C4c-2a's 33 rows of
-# vertex and index buffers and the draws that read them, on a device with no depth-stencil; "buffers strict" under
-# core), its rows "buffers-<row>"; under core its launch's logs hold exactly its one refusal line (a layout no binding
-# can fetch: buf-wide's attribute wider than its stride) and no line of a draw dropped for a buffer with no core form.
+# that is no multisample resolve). Every lane also runs d3d9_triangle buffers (DXMTRS C4c-1's, C4c-2a's and C4c-2b's 39
+# rows of vertex and index buffers and the draws that read them, on a device with no depth-stencil; "buffers strict"
+# under core), its rows "buffers-<row>"; under core its launch's logs hold exactly its one refusal line (a layout no
+# binding can fetch: buf-wide's attribute wider than its stride) and no line of a draw dropped for a buffer with no core
+# form, and the line logged at the first draw that reads a dynamic buffer in place ("d3d9 core: dynamic buffers are
+# read in place", DXMTRS C4c-2b), else "buffers-direct".
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -117,8 +120,9 @@ launch() {
   # encoder line; the native arm64 half has no core runtime (C4-15), so there the fallback warning and the encoder line.
   d="$WORK/mtld3d-logs/$name"
   enc='texture versions: rename pool cap'
-  # A core device that cannot present or draw logs one of these and still answers D3D_OK: none may appear.
-  unpresented='nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form'
+  # A core device that cannot present or draw logs one of these and still answers D3D_OK: none may appear. "has no
+  # mapped memory": a dynamic buffer staged for want of a usable name (DXMTRS C4c-2b).
+  unpresented='nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form|has no mapped memory'
   if [ "$name" = arm64 ]; then
     if /usr/bin/grep -rqF 'carries no core runtime, so mtld3d runs' "$d" && /usr/bin/grep -rqF "$enc" "$d" \
       && ! /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d"; then
@@ -237,7 +241,17 @@ launch ours fresh buffers 240 buffers $strict
 check buffers "buf-d3d buf-lock buf-draw buf-start buf-offset buf-strip buf-fan buf-indexed buf-index32 buf-base buf-ifan
   buf-managed buf-dynamic buf-order buf-discard buf-held buf-relock buf-streams buf-null buf-null-up buf-zero-stride
   buf-instanced buf-shader buf-tex buf-nobuffer buf-release buf-odd buf-cross buf-cross-up buf-cross-multi
-  buf-cross-odd buf-cross-indexed buf-wide"
+  buf-cross-odd buf-cross-indexed buf-wide buf-dyn-preserve buf-dyn-many buf-dyn-index buf-dyn-read buf-dyn-cross
+  buf-writeonly"
+# Under core: the line d3d9-rt logs at the first draw that reads a dynamic buffer in place (DXMTRS C4c-2b).
+if [ "$RT" = core ]; then
+  if /usr/bin/grep -rqF 'd3d9 core: dynamic buffers are read in place' "$WORK/mtld3d-logs/buffers"; then
+    echo "d3d9-check: buffers: dynamic buffers are read in place"
+  else
+    echo "d3d9-check: buffers: no 'dynamic buffers are read in place' line in $WORK/mtld3d-logs/buffers"
+    fail="$fail buffers-direct"
+  fi
+fi
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi

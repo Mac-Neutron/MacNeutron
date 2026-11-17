@@ -4,7 +4,8 @@
 # saved run's rows under vm-work/d3d9-bench; a bench line of the other mode fails its row; the shader rows (DXMTRS
 # C4b-2): a shd*-fresh trace with all 22 rows passes, one missing a row fails it; under D3D9_RUNTIME=core a shd* launch
 # whose logs lack the core device's line, or hold a refusal line (the crossing row's too since DXMTRS C4c-2a), fails
-# its runtime row.
+# its runtime row; a bf*-fresh launch's logs without the line of dynamic buffers read in place fail its "buffers direct"
+# row, and with a dynamic buffer's fall-back line ("has no mapped memory") its runtime row (DXMTRS C4c-2b).
 # Prints "d3d9-gate-bench-test: ok" or "FAIL <what>".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -71,5 +72,23 @@ want "core: tri64-fresh without the device line fails" \
 cp "$F/logs/shd32-fresh/d3d9.log" "$F/logs/tri64-fresh/d3d9.log"
 want "core: a tri row with a refusal fails" \
   "$(gate "$F" D3D9_RUNTIME=core | /usr/bin/grep -c '^FAIL tri64-fresh runtime core:' || true)" 1
+
+# Core, the buffers launch (DXMTRS C4c-2b): logs with the device line and the launch's one refusal pass the runtime
+# row; bf64-fresh's with the line of dynamic buffers read in place pass "buffers direct", bf32-fresh's without it fail
+# it; bf64-fresh's with a dynamic buffer's fall-back line ("... has no mapped memory ...") added fail the runtime row.
+mkdir -p "$F/logs/bf64-fresh" "$F/logs/bf32-fresh"
+printf '%s\nd3d9 core: IDirect3DDevice9::Draw*Primitive (a layout no binding can fetch) %s\n' "$dev" "$refused" \
+  > "$F/logs/bf32-fresh/d3d9.log"
+{ cat "$F/logs/bf32-fresh/d3d9.log"; echo 'd3d9 core: dynamic buffers are read in place'; } > "$F/logs/bf64-fresh/d3d9.log"
+out=$(gate "$F" D3D9_RUNTIME=core)
+want "core: bf64-fresh with the device line and its refusal passes the runtime row" \
+  "$(printf '%s\n' "$out" | /usr/bin/grep -c '^ok   bf64-fresh runtime core$' || true)" 1
+want "core: bf64-fresh with the line of dynamic buffers read in place passes" \
+  "$(printf '%s\n' "$out" | /usr/bin/grep -c '^ok   bf64-fresh buffers direct$' || true)" 1
+want "core: bf32-fresh without the line of dynamic buffers read in place fails" \
+  "$(printf '%s\n' "$out" | /usr/bin/grep -c '^FAIL bf32-fresh buffers direct:' || true)" 1
+echo 'd3d9 core: dynamic vertex buffer 0x1 has no mapped memory; staged' >> "$F/logs/bf64-fresh/d3d9.log"
+want "core: bf64-fresh with the fall-back line fails the runtime row" \
+  "$(gate "$F" D3D9_RUNTIME=core | /usr/bin/grep -c '^FAIL bf64-fresh runtime core:' || true)" 1
 [ $fail = 0 ] && echo "d3d9-gate-bench-test: ok"
 exit $fail

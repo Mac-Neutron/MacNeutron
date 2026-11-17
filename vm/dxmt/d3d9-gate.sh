@@ -19,7 +19,8 @@
 # with DXMT_D3D9_CORE=1), no mtld3d.so unit tests, and every triangle row's logs must hold the core device's line
 # ("d3d9 core: device on dxmt-core"), not mtld3d.so's encoder line ("texture versions: rename pool cap", printed by
 # every mtld3d device) and none of the core's can't-present lines (no command library, no Metal view, a pipeline that
-# does not build: each still answers D3D_OK). Under core the guest runs no conformance (it
+# does not build: each still answers D3D_OK) nor its line of a dynamic buffer staged for want of a usable name ("has
+# no mapped memory", DXMTRS C4c-2b). Under core the guest runs no conformance (it
 # runs from C4b on) and the gate checks no shader-backend or kinds row: the triangle rows, the proof, the sm50 rows.
 # D3D9_BENCH=1 (no other value) adds the guest's d3d9_triangle --bench rows, each proven by its lane's line and kept as
 # vm-work/d3d9-bench/<row>-<old|new>-<lane>.txt by a real run only (vm/tests/d3d9-gate-bench-test.sh): bench-* the
@@ -43,9 +44,11 @@
 # rows (DXMTRS C4b-3d4: render targets at index 1-3; mr64-fresh, mr32-fresh); under core their logs hold no refusal
 # line. Every lane also checks d3d9_triangle msaa's 17 rows (DXMTRS C4b-3d5: multisampling, on a device whose back
 # buffer and auto depth-stencil have 4 samples; ms64-fresh, ms32-fresh); under core their logs hold exactly one refusal line (a StretchRect
-# that is no multisample resolve). Every lane also checks d3d9_triangle buffers' 33 rows (DXMTRS C4c-1 and C4c-2a:
-# vertex and index buffers and the draws that read them; bf64-fresh, bf32-fresh); under core their logs hold exactly
-# its one refusal line (a layout no binding can fetch: buf-wide's attribute wider than its stride).
+# that is no multisample resolve). Every lane also checks d3d9_triangle buffers' 39 rows (DXMTRS C4c-1, C4c-2a and
+# C4c-2b: vertex and index buffers and the draws that read them; bf64-fresh, bf32-fresh); under core their logs hold
+# exactly its one refusal line (a layout no binding can fetch: buf-wide's attribute wider than its stride), and the
+# line logged at the first draw that reads a dynamic buffer in place ("d3d9 core: dynamic buffers are read in place",
+# DXMTRS C4c-2b; the row "bf<64|32>-fresh buffers direct").
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -204,7 +207,8 @@ for r in bf64-fresh bf32-fresh; do
   for row in buf-d3d buf-lock buf-draw buf-start buf-offset buf-strip buf-fan buf-indexed buf-index32 buf-base buf-ifan \
     buf-managed buf-dynamic buf-order buf-discard buf-held buf-relock buf-streams buf-null buf-null-up buf-zero-stride \
     buf-instanced buf-shader buf-tex buf-nobuffer buf-release buf-odd buf-cross buf-cross-up buf-cross-multi \
-    buf-cross-odd buf-cross-indexed buf-wide; do
+    buf-cross-odd buf-cross-indexed buf-wide buf-dyn-preserve buf-dyn-many buf-dyn-index buf-dyn-read buf-dyn-cross \
+    buf-writeonly; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
@@ -215,8 +219,9 @@ for r in st64-fresh st32-fresh; do
   done
 done
 # core: runtime <folder> [textures|fixed|depth|stretch|buffers]: the core device's line in a launch's logs, none of
-# mtld3d.so's encoder line nor of the core's can't-present or dropped-draw lines (the code that ran prints them, not the
-# switch), and no refusal line, or with "textures", "fixed", "depth" or "buffers" exactly that launch's refused rows'
+# mtld3d.so's encoder line nor of the core's can't-present, dropped-draw or staged-dynamic-buffer ("has no mapped
+# memory", DXMTRS C4c-2b) lines (the code that ran prints them, not the switch), and no refusal line, or with
+# "textures", "fixed", "depth" or "buffers" exactly that launch's refused rows'
 # (texture_refusals, fixed_refusals, depth_refusals, buffers_refusals: DXMTRS C4c-2a's layout no binding can fetch).
 # The shaders, state, blend and mrt launches (DXMTRS C4b-2, C4b-3a, C4b-3d3, C4b-3d4) take no kind: no refusal line
 # (the shaders launch's since DXMTRS C4c-2a, which draws the crossing row; the state launch's since DXMTRS C4c-1:
@@ -232,7 +237,7 @@ buffers_refusals='IDirect3DDevice9::Draw*Primitive (a layout no binding can fetc
 runtime() {
   n=$(/usr/bin/grep -rhF "$refused" "$1" 2> /dev/null | wc -l | tr -d ' ')
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
-    && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form' "$1" \
+    && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form|has no mapped memory' "$1" \
     && case ${2:-} in
       textures|fixed|depth|stretch|buffers)
         case $2 in
@@ -262,6 +267,9 @@ if [ "$RT" = core ]; then
   done
   for r in bf64-fresh bf32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" buffers)" ok
+    # The line d3d9-rt logs at the first draw that reads a dynamic buffer in place (DXMTRS C4c-2b).
+    check "$r buffers direct" \
+      "$(/usr/bin/grep -rqF 'd3d9 core: dynamic buffers are read in place' "$G/logs/$r" 2> /dev/null && echo ok)" ok
   done
   for r in shd64-fresh shd32-fresh st64-fresh st32-fresh bl64-fresh bl32-fresh mr64-fresh mr32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
