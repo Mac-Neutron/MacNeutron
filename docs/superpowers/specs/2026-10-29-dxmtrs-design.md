@@ -1131,7 +1131,8 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   instancing follows mtld3d's rule. Refused by name under core: an attribute crossing its stride and a stream offset off
   four bytes (both until C4c-2), a buffer of another device (kept: the dirty range is one a buffer). Kept divergence, in
   the core's favour: a static WRITEONLY default-pool buffer locked again keeps the bytes it held, where mtld3d, which
-  released the backing, uploads zeros for what the title does not rewrite. Gated: 27 `d3d9_triangle buffers` rows in
+  released the backing, uploads zeros for what the title does not rewrite (ended by C4c-2b: the core releases that
+  backing by mtld3d's rule). Gated: 27 `d3d9_triangle buffers` rows in
   every D3D9 lane on the Mac and in the VM, `state-lock` turned from a refusal into a result, each first passed on
   mtld3d with no expectation corrected, red under core until its commit and green strict after it, with no report under
   Metal's validation layer in any of the ten core launches; eleven mutation REDs, each on its row and on nothing outside
@@ -1177,9 +1178,63 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   core and 1.97 against 1.80 on mtld3d; draws from a static buffer 4.10 against 3.87 and 2.08 against 2.03; a dynamic
   buffer appended to between draws 54.1 against 54.8 on the core and 2.47 against 2.50 on mtld3d. The slice costs
   nothing measurable; the dynamic path under core is 22 times mtld3d's, which is C4c-2b's work and its before figure.
+  C4c-2b done 2026-11-17 at DXMTRS main 21d0ca5f (21d0ca5f5e0e2e38fad17bb944d26ca295edadfa), which MacNeutron pins:
+  default-pool dynamic buffers mapped directly on the core runtime, the static WRITEONLY backing's release, and a
+  count and a cap of the vertex and index bytes in flight. The model is D3D11's `Map` of a dynamic buffer under D3D9's
+  lock rules. At creation a buffer that mtld3d-core's `classify_map_mode` calls `Direct` gets a dxmt-core
+  `DynamicBuffer` in d3d9-rt (`dynamic_create`) and no CPU backing (`BufferBacking::released`): its length is the
+  logical length up to one 4096-byte page and whole pages above; its names are suballocated from one page, placed on
+  32-bit x86 and never write-combined (D3D9 reads these bytes); the first name is zeroed. `Lock` asks d3d9-rt
+  (`dynamic_lock`), which calls mtld3d-core's `plan_lock` with the sequence of the last draw that named the buffer and
+  answers the pointer: the same memory, or a rename, which is the name's next suballocation or, when it has none, a
+  new name, with the old bytes copied over first when the lock keeps them. Every CPU reader (the pointer, the preserve
+  copy, an indexed fan's window through `dynamic_copy`) reads the name the API thread holds, never the encode thread's.
+  A draw uploads nothing and splits no pass: it binds the buffer like any stored one and stamps it after its emit, and
+  the first such draw of a device logs "d3d9 core: dynamic buffers are read in place" once, the gates' proof. A name
+  Metal refuses: at creation the buffer is staged as before, at a rename the lock writes in place, each with an error
+  line the gates fail on. A static default-pool WRITEONLY vertex buffer releases its backing after its upload by
+  mtld3d's rule and guards, and a backing a later windowed lock re-creates is uploaded at the Unlock that ends the
+  lock, as mtld3d uploads each window, so two windows locked before a draw never upload the zeros between them. Index
+  buffers keep their backing (a fan reads it; read-back is C4c-3). The count is one ledger in d3d9-rt (`Retained`):
+  a renamed-away name's size and a staged buffer upload's length enter at the chunk being recorded and leave when the
+  GPU has retired it; at `memory.vbibRetentionCapMB` (512 MiB, 0 for none, textures not counted) the API thread waits
+  for the oldest before a new name or an upload. Gated: six `d3d9_triangle buffers` rows (39 in all) in every D3D9
+  lane on the Mac and in the VM, each first passed on mtld3d (also under Metal's validation layer there, with no
+  report); `buf-writeonly` red under core until the release's commit and the proof token `buffers-direct` until the
+  last one, green strict after it (the other five rows pin behaviour the staged model already gave), with no report
+  under the layer in any of the ten core launches; nine mutation REDs, each on its row and on nothing outside the
+  buffers launch; the stateblock conformance under core; the default runtime's Mac conformance, translator key and
+  imports equal to the base's; the VM's D3D9 gate on default and core, old and new WoW64, where the planned flags hold
+  on x64 and on i386 with no fall-back; the x64 check. Two rows outside the change failed while the Mac was in heavy
+  use. The x64 check's nvapi row on the connected-display count failed in the first run and passed in the second. The
+  VM's default lane on new WoW64 ran 211159 x64 `visual` tests for 211219 in both runs, the count seen in C3b and
+  C4b-1, before this code existed. The reading, from the test's source (its skip line was not captured): Wine's
+  `test_map_synchronisation` estimates from two timed draws how many triangles fit in 100 ms and skips its four cases
+  of fifteen checks, 60, when the estimate passes the device's primitive count. The Mac's plain build, which holds no
+  core code, ran the same 211159 in the first run and 211219 in the second, and the VM's old WoW64 lane ran all of
+  them with the same binary both times (ruling T6-3; the gate's floor is owed that case). One
+  expectation was added after a row's first green: `buf-writeonly`'s two-window cell gained a pixel (ruling T6-1),
+  because its first pixel could not see the zeros between the windows and the mutant that drops the Unlock upload
+  stayed green; the added pixel is green on both runtimes and red under that mutant. No D3D10-12 gate: no file
+  outside `src/d3d9` changed. The whole-branch review found no Critical and no Important defect. Not covered by a
+  row: the zeroed first name, a name Metal refuses (the staged fall-back, the failed rename), the cap (unit tests on
+  the ledger only), the absence of write-combining, a dynamic buffer of another pool, the build without the core
+  runtime (the Rust gate's clippy only). Known gaps, under core only: a write
+  past the end of a dynamic buffer whose bytes end at a page's end leaves the name's memory, where mtld3d's padded page
+  absorbs it; on 32-bit x86 that memory is an exact heap allocation, so a title that overruns its dynamic buffers
+  corrupts its heap (a guard page of padding is owed before core is the default, C4d); a `Lock` from a second thread
+  on a device made without `D3DCREATE_MULTITHREADED` reads d3d9-rt's store unguarded; a fan's window is bounded by the
+  logical length, so one that reaches into mtld3d's padding is refused where mtld3d drew; `DynamicBuffer` never drops
+  a free name (a trim is a dxmt-core change); a failed rename logs at every lock. Inherited from mtld3d, a finding for
+  the maintainer: a whole (size 0) or a `READONLY` lock of a re-created WRITEONLY backing uploads its zeros over the
+  device's bytes. Probe (Mac x64, the Mac in heavy use, CPU ms a frame, tip against base in the same half hour): a
+  dynamic buffer appended to between draws 3.32 against 54.65 on the core (600 frames in 2.5 s against 28.9 s, 182 MB
+  against 468 MB) and 1.98 against 1.88 on mtld3d; draws from a static buffer 2.63 against 2.73 and 1.97 against 1.58;
+  textured UP draws 2.32 against 2.30 and 1.65 against 1.52. The dynamic path costs the core what its other draws
+  cost; what is left over mtld3d is the core's per-draw cost, C4d's work.
   C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
-  offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer gauge and the 32-bit
-  cap; 3 read-back in all its forms
+  offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer count and its cap
+  (done); 3 read-back in all its forms
   (`LockRect` of a target and of the back buffer first: `visual`'s fatal call); 4 `StretchRect`'s other shapes,
   `ColorFill`, `UpdateSurface`; 5 queries; 6 `Reset`, the getters, the swap chain's presents; 7 gamma, frame latency,
   the device's information from winemetal, the `Ex` creators, and the conformance lane for `visual`, `device` and

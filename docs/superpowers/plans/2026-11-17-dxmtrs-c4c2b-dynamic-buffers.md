@@ -404,3 +404,91 @@ both ranges. Fetch, rebase if a main moved. Advisor. Push DXMTRS then MacNeutron
   wanted figure; the bench's gap. I8 → as R2's I5. I9 → the start times. Minors → mutant d names one row;
   `jm.sh`'s edits and `jv0`'s single run in the script list; the fixed fall-back substring; 8 points a frame;
   the VM launch's duration; when each script is written; the `state` launch may hold the proof line too.
+
+## Execution notes
+
+- **Tips.** DXMTRS `c4c` over main a4c94873: 838e9537 (the WRITEONLY release), 53364f54 (the ledger and its
+  cap), 83ad0993 (dynamic buffers in d3d9-rt), 2ecf3926 (the front end maps them), 21d0ca5f (comments, from the
+  final review). Each passed rust-check before its commit. MacNeutron `c4c-mn` over 844be686: the plan,
+  76269e84 (Task 1), d1cbc6c8 (`buf-writeonly`'s added pixel), this commit. The work was paused from 10:57 to
+  12:53 at the maintainer's word, with Task 5 half-edited in the worktree; nothing ran in between.
+- **Controls** (before any code, base a4c94873 / 844be686). `jb`: the base built plain gives the wanted key
+  (e1074f4f…) and imports. `ja`: all 39 buffers rows green on mtld3d (default, msl) at the first run, no
+  expectation corrected; core red exactly by design (`buf-writeonly`, `buffers-direct`). `jv0`: mtld3d under
+  Metal's validation layer, 0 reports. `jcr`: the VM's default lane on old WoW64 ok at its second run (the
+  first died in the host build's code signing during a network outage).
+- **Ruling T1-1.** Scissor bands keep each draw's pixels apart; `buf-dyn-index` runs at two sizes (16 and 2052
+  indices) so the fan's mutant shows on both paths; the crossing row's append draws at stream offset 82;
+  `buf-dyn-many`'s large cell DISCARDs with a partial lock at the tail. Cost if wrong: the controls judge.
+- **Ruling T2-1.** `core_flush` refuses loudly when a backing it is asked to upload whole does not mirror the
+  device (unreachable; it keeps a zeroed re-created backing from going up whole); an Unlock upload that fails
+  logs one warning and leaves the dirty range for the next draw. Cost if wrong: see the review's M6.
+- **Ruling T3-1.** `buffer_upload` holds under the cap after its refusals, not at its literal start; adds in
+  one chunk merge into one entry. Cost if wrong: none in behaviour.
+- **Ruling T4-1.** A `BufferStore` struct holds the proof line's once flag (a fourth bool on `CoreDevice` trips
+  the bool rule); a local `PAGE = 4096` (dxmt-core's is private); the failed-rename line also holds "has no
+  mapped memory", so the gates fail on it, and logs at every failed rename. Cost if wrong: log volume on a
+  device that cannot allocate (the review's M3).
+- **The flags held.** `jc5` (the VM's core lane on old WoW64, right after Task 5): the buffers rows and the proof
+  token green on x64 and i386 with `SUBALLOCATE_FROM_ONE_PAGE` and `CPU_PLACED` on x86 only; the pre-authorised
+  `x86 || guest-vm` expression was not needed.
+- **Ruling T6-1.** Mutant i (the Unlock upload of a re-created backing dropped) stayed green at its first run.
+  The mutation was in the binary and the code then uploaded the zeros between the two windows, as the plan
+  says; the row could not see it: with vertex 3 zeroed (position (0,0), rhw 0) the second triangle stretches to
+  the corner and still covers (160,176), and a vertex of rhw 0 weighs nothing in a perspective-correct colour.
+  The three plan reviews' "red by construction" was wrong on the pixel, not on the mechanism. Cell 2 gained
+  the pixel (114,80), inside the second triangle only with vertex 3 where the device holds it (MacNeutron
+  d1cbc6c8): a pixel added after the row's first green on mtld3d, none changed. `jm3`: default and core green
+  at the final tips, mutants h and i red on `buf-writeonly` alone. Cost if wrong: the hazard of zeros between
+  two windows would have no gate.
+- **Ruling T6-2.** The chain's first `jr` and `jc` each ended with one red row outside the change, on a Mac in
+  heavy use (load 26-42): the x64 check's "nvapi64 answers as DXMT's C++ did" (the total display count against
+  the count a two-entry array call returns: "no" whenever more than two displays are connected at that
+  instant), and the VM's default lane on new WoW64, "conformance x64 visual: at least 211219 tests executed"
+  (211159). Neither was ruled away on one run: both jobs ran again once. Cost if wrong: the rerun shows it.
+- **Ruling T6-3.** The rerun's x64 check passed whole (420 rows). The VM row failed again with the same figure,
+  and was traced in the test's source: Wine's `test_map_synchronisation` times a draw of many triangles against
+  a draw of one, estimates the triangles that fit in 100 ms, and takes its own skip when the estimate passes
+  `MaxPrimitiveCount` (the two timed draws differ by noise, or the single one was the slower). The skipped loop
+  is four lock-flag cases of fifteen checks, 60 exactly, and holds site `visual.c:25196`, the site
+  `CONFORMANCE.md` lists as flaky. The skip line itself was not captured (the gate keeps the runner's summary
+  only): the reading rests on the count, on "failed 29" beside it in every 211159 run on record (C3b, C4b-1,
+  today's), on that site reading 0 in the two runs whose summary is kept, and on the **Mac's plain build, which
+  holds no core code: 211159, failed 29, the site at 0 in `jr`'s first run; 211219 and 30 in its second**. The
+  VM image does hold this slice's lock-path edits (it is built with the core runtime), so the translator key
+  says nothing there; what does is the Mac's figure, the two occurrences before this code existed, the old
+  WoW64 lane's 211219 with the same x64 binary both times, and the final review's finding that the default
+  runtime is unchanged. The slice ships on it. Cost if wrong: a default-runtime change that made the two timed
+  draws equal would hide behind the same figure; the Mac's conformance would show it as a constant, not an
+  intermittent, count. Owed: the gate's floor should accept 211159 when that site reads 0, and keep the skip
+  line.
+- **Ruling T6-4.** `jq` (msl, the stateblock conformance under core, the validation layer) ran at 2ecf3926 +
+  76269e84. The two commits after it are comments only (21d0ca5f) and one added pixel in a row (d1cbc6c8); they
+  are gated by rust-check, `jm3` (default and core at the final tips), the chain's `jr` and `jc`, and the
+  post-push check. Cost if wrong: a fault in the row's edited cell under msl or the layer shows only there.
+- **Gates.** `jt2`: default ok; core: `buf-writeonly` ok, red = `buffers-direct` alone. `jt5`: default ok, core
+  ok, every row green strict. `jc5`: above. `jq` (at 2ecf3926 + 76269e84): d3d9-check ok on default, msl,
+  core; stateblock on both runtimes; ten core launches under the validation layer, 0 reports; the proof line
+  once in the buffers launch, the fall-back line in none. `jm` / `jm2` / `jm3`: nine mutants each red on its
+  named row, nothing outside the buffers launch, tip green (two runs of `jm` were lost to Apple's code-signing
+  timestamp service, which was intermittent all day; `jm2` reuses the eight mutants already built and retries
+  the build). `jr` (second run): key and imports equal the base's, d3d9-check default ok,
+  conformance with only triaged sites, x64 check 420 ok (first run: 419 and the row of T6-2). `jc` (both
+  runs): the VM's D3D9 gate ok on default old WoW64 and on core, old and new; default new WoW64 as T6-3.
+  `jp` / `jp0`: the probe, below.
+- **Final review** (`build/c4c/s2b/review-final.md`): 0 Critical, 0 Important, 7 Minor. Fixed: M5 (stale
+  comments, 21d0ca5f). Ledgered, no fix round: M1 a `Lock` from a second thread on a device without
+  `D3DCREATE_MULTITHREADED` reads d3d9-rt's store unguarded (the title breaks D3D9's contract; cost: a crash in
+  such a title under core); M2 **this plan's "a write past the end stays in pages the name owns" is false at a
+  page's end** (the last suballocation when its size divides 4096; any whole-page length), and on x86 the
+  placed pages are exact heap allocations where mtld3d's padded page absorbed the overrun: one guard page of
+  padding is owed before core is the default (cost: heap corruption in a title that overruns its dynamic
+  buffers, under core only); M3 a failed rename logs at every lock; M4 mtld3d's hazard in Scope is wider than
+  size-0 locks: a windowed `READONLY` lock of a re-created backing uploads its zeros too (the maintainer
+  finding, widened); M6 a failed Unlock upload followed by a second window uploads the zeros between them
+  (a failure path, logged); M7 the cap sits beside the ledger on `CoreDevice`, not inside it. Also noted: no
+  test pins `last_use = 0` after a rename; no row proves the zeroing, the absence of write-combining or the
+  cap; `jm` is the only guard that index buffers map directly.
+- **Probe** (`build/c4c/s2b/probe.md`, the Mac in heavy use, base and tip back to back): `dyn` under core
+  3.32 ms of CPU a frame against 54.65 at the base, 600 frames in 2.5 s against 28.9 s, 182 MB against 468 MB;
+  mtld3d 1.98. Wanted: 10 ms and 10 s. The other rows moved inside the spread.
