@@ -1147,8 +1147,39 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   (Mac x64, textured, UP draws, the Mac in use): the core read 3.27 ms a frame against 3.65 at the base in the same hour
   (3.20 against 3.28 with depth), mtld3d 1.83 against 1.73: no cost of the slice is measurable on the UP path. No bench
   draws from buffers yet; C4c-2 adds one with the dynamic path.
-  C4c's slices: 1 buffers and the draws that read them (done); 2 dynamic buffers mapped directly, crossing attributes
-  (`CrossingFetch`), the WRITEONLY backing's release, the buffer gauge and the 32-bit cap; 3 read-back in all its forms
+  C4c-2a done 2026-11-17 at DXMTRS main a4c94873 (a4c94873c4e1b44880362796e208b6de8402e644), which MacNeutron pins:
+  attributes crossing their stride and stream offsets off four bytes on the core runtime, with mtld3d's own fetch plan.
+  C4c-2 was split (ruling S-1): 2a is this, the part that removes refusals; 2b is the dynamic path, the part that
+  removes a cost. `StreamKey::Bound` gains the stream's shift (its offset's low two bits), so two offsets that differ
+  only there are two pipelines, as on mtld3d. The pipeline source asks mtld3d-core's `CrossingFetch` whenever an
+  attribute crosses or a stream is shifted, and holds its answer: the attributes and layouts a Metal slot, and for
+  every slot the stream it reads and the bytes its binding is advanced by. A crossing attribute moves to a spare slot
+  among the sixteen stream slots, at descriptor offset 0, bound to the same buffer advanced by the attribute's offset;
+  a shifted stream binds at its offset rounded down to four and its attributes gain the shift. d3d9-rt's `draw` binds
+  slot by slot before the pass opens: a stored buffer uploaded once, however many slots bind it; inline bytes advanced and
+  zero-filled to the fed length, which never refuses; zeros as before. Refused by name under core, where mtld3d widens
+  and draws wrong data: a layout no binding can fetch (an attribute wider than its stride, an advanced binding that
+  starts outside its buffer, more than sixteen attributes that cross or are shifted), one line a draw kind,
+  "(a layout no binding can fetch)"; the row `buf-wide` pins the buffer draws' line. The index formats answer through one helper
+  (`convert::index_format`) at their five sites. Gated: seven `d3d9_triangle buffers` rows (33 in all) in every D3D9
+  lane on the Mac and in the VM, and the `shaders` launch's crossing row turned from a refusal into pixels, each first
+  passed on mtld3d with no expectation corrected (the buffers rows also under Metal's validation layer there, with no
+  report), red under
+  core until its commit and green strict after it, with no report under the layer in any of the ten core launches;
+  five mutation REDs, each on its row and on nothing outside the buffers launch; the stateblock conformance under
+  core; the default runtime's Mac conformance, translator key and imports equal to the base's; the VM's D3D9 gate on
+  default and core, old and new WoW64; the x64 check (one row failed in the first run: the hazards program's reference
+  run on D3DMetal, a process that loads no code of ours, printed "fence-order 1 0" for "1 1" and stopped there, a flake
+  of that reference seen once before, on 2026-10-10; run again by the post-push check). No D3D10-12 gate: no file outside `src/d3d9` changed. The whole-branch review found no Critical
+  and no Important defect. Not covered by a row: the advanced binding outside its buffer and the index helper (a unit
+  test each), the UP draws' refusal line, a declaration of more than sixteen attributes, a crossing attribute on a
+  per-instance stream, a zero-stride stream while a fetch is built. Probe (Mac x64, the Mac in use, CPU ms a frame, tip against base): textured UP draws 3.87 against 3.92 on the
+  core and 1.97 against 1.80 on mtld3d; draws from a static buffer 4.10 against 3.87 and 2.08 against 2.03; a dynamic
+  buffer appended to between draws 54.1 against 54.8 on the core and 2.47 against 2.50 on mtld3d. The slice costs
+  nothing measurable; the dynamic path under core is 22 times mtld3d's, which is C4c-2b's work and its before figure.
+  C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
+  offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer gauge and the 32-bit
+  cap; 3 read-back in all its forms
   (`LockRect` of a target and of the back buffer first: `visual`'s fatal call); 4 `StretchRect`'s other shapes,
   `ColorFill`, `UpdateSurface`; 5 queries; 6 `Reset`, the getters, the swap chain's presents; 7 gamma, frame latency,
   the device's information from winemetal, the `Ex` creators, and the conformance lane for `visual`, `device` and

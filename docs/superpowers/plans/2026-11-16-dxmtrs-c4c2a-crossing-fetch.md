@@ -357,3 +357,52 @@ that writes `v1.y`, the bytes 12-16 of a stride-12 vertex, to blue).
   timer, the drop line in the proof. Minors → `vm/tests/d3d9.sh`; one refusal line; `buf-wide`'s buffer and
   the tails; the duration in `jcr`; the fifth index site and the log lines; the inventory unchanged; 35 rows
   ok; the base named at the rebase; the debug log's words; `dyn`'s volume at the base.
+
+## Execution notes
+
+- **Tips.** DXMTRS `c4c` over main cdd64734 (the C-to-Rust port's second landing, which the slice waited for:
+  `tools/rust-check.sh` links the shared LLVM install that landing rebuilt): 05e4ff63 (`index_format`), f6f79012
+  (the key's shift, the fetch in the pipeline source), 7506147d (the binds, the front end), a4c94873 (a test's
+  doc). Each passed rust-check before its commit. MacNeutron `c4c-mn` over 2fdb7ca5: the plan, 8c7ff253 (Task 1),
+  14e81b7c (d3d9-check without the unused skip), this commit. Tasks 4 and 5 of the draft were one task.
+- **Controls** (before any code, base cdd64734 / 2fdb7ca5). `jb`: the base built plain gives the wanted key
+  (e1074f4f…) and imports. `ja`: all 33 buffers rows and the shaders crossing row green on mtld3d (default,
+  msl) at the first run, no expectation corrected; core red exactly by design. `jv0`: mtld3d under Metal's
+  validation layer, the layer proven on by its banner, 0 reports with all rows and with the two shifted rows
+  skipped: ruling 3's first branch, so the gate is 0 reports in all ten core launches and nothing is skipped.
+  `jcr`: the VM's default lane on old WoW64 ok.
+- **Ruling T1-1.** The bench's read-back repeats frames up to 10 s until the centre is the triangle's colour
+  (one frame can read the clear colour while mtld3d compiles its pipeline); `buf-cross-up`'s B edge is at
+  x = 0 so the zero tail is one exact colour; the FVF crossing cell is in. Cost if wrong: a slower bench start.
+- **Ruling T3-1.** `bindings()` returns tuples by value; the shift's packing is inline in the `Bound` arm;
+  `crossing` stays (tests read it). Cost if wrong: none in behaviour.
+- **Ruling T4-1.** Inline and zero feeds are assembled before `open_pass` in the same loop as the buffers; the
+  advanced-binding refusal logs no error of its own (the front end's refusal line is the record). Cost if
+  wrong: the final review reads them.
+- **Ruling T5-0.** Mutant (d) leaves the shaders crossing row green (its probe masks green); (e) may turn it
+  red (it did not). `jm`'s allowed sets were written so before its first run.
+- **Ruling T5-1.** The x64 check's one failed row is the reference's, not ours: the hazards program's run on
+  Apple's D3DMetal printed "fence-order 1 0" (want "1 1") and stopped there on its own (its timer did not
+  fire). The same was seen once before (2026-10-10, the SM 6.8 work's third milestone: all rows passed at the
+  rerun). The same program's two rows on our DXMT passed, the range changes no file outside `src/d3d9`, and
+  the key and imports equal the base's. Run again by the post-push check, once; a second failure there is not
+  ruled away: the reference program is then run alone on an idle Mac and the result goes to the maintainer as
+  a finding of its own. Cost if wrong: a D3D12 fence regression, which our own two rows would show first.
+- **Ruling T6-0.** The chain ran on 7506147d + 8c7ff253; the two fix commits (a test's doc; d3d9-check without
+  the unused skip) are gated by rust-check, one lane (default, core) at the final tips and the post-push
+  check. Cost if wrong: a fault in d3d9-check's edited buffers block shows only there.
+- **Gates** (each once). `jt4`: default ok, core ok, every row green strict under core at the first run. `jq`:
+  d3d9-check ok on default, msl, core; stateblock 14738 executed, 0 failed on both runtimes; ten core launches
+  under the validation layer, 0 reports, buffers 35 rows ok. `jm`: five mutants each red on its named row,
+  nothing outside the buffers launch, tip green. `jr`: key and imports equal the base's, d3d9-check default ok,
+  conformance with only triaged sites, x64 419 ok and the row of ruling T5-1. `jc`: the VM's D3D9 gate ok on
+  default and core, old and new WoW64. `jt6`: default ok, core ok at the final tips.
+- **Final review** (`build/c4c/s2/review-final.md`): 0 Critical, 0 Important, 8 Minor, verdict "push". Fixed:
+  m3 (a test's doc claimed bytes the capture cannot show), m1 (`D3D9_BUFFERS_SKIP` dead since ruling 3 needed
+  no skip). Ledgered: m2 `refused_layout` is a one-line alias with three uses; m4 mutant (e) goes red through
+  an out-of-bounds read of a short bind, near-certain, not by construction; m5 `jv0` proves mtld3d ran by the
+  absence of the core line only; m6 the probe's drop count misses the core's target, depth and present drop
+  lines; m7 no test or row for the instancing rule or a zero-stride stream while a fetch is built; m8 the
+  bench's cpu_ms includes the read-back loop on `buf` and `dyn`.
+- **Probe** (`build/c4c/s2/probe.md`, the Mac in use): no cost of the slice is measurable; `dyn` under core
+  reads 54 ms of CPU a frame against mtld3d's 2.5, C4c-2b's before figure.
