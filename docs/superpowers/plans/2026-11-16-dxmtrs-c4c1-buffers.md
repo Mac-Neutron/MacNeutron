@@ -604,3 +604,50 @@ decides); a cell marked (answer) asserts the HRESULT mtld3d gives, which the row
   not build"; Task 5a; no `test_support.rs`; the fakes' reason; the scripts' headers and the VM loop;
   `buf-relock`'s pixels; the mutants' fallen rows; `jc.sh`'s header (edited before its first run); the cursor
   flake; the probe's wording; the commands.
+
+## Execution notes
+
+- **Tips.** DXMTRS `c4c` over main 40c76ab1: 2242a841 (`GetDirect3D`), d1f2baa7 (fakes), fa2895b9 (the key's
+  streams), fba6b22f (`draw_up` → `draw`), 5b125651 (the buffer store, the upload, draws from stored buffers),
+  759533c0 (`Lock`, `Unlock`), 33d34243 (the two draws, `core_flush`), eeb92e2e (the final review's small fixes).
+  Each passed `tools/rust-check.sh` before its commit. Both mains moved under the slice (the C-to-Rust port's first
+  landing): both branches were rebased with no conflict, the rebased tip passed rust-check on its own, and the
+  translator key is the new main's (cce99ae0…), which this slice leaves unchanged.
+- **Controls.** The 27 rows passed on mtld3d (Mac default and msl, VM default on old WoW64) before any code, with no
+  expectation corrected.
+- **Ruling T1-1.** The buffers launch's refusal set holds two lines, not three: no row reaches the other-device
+  refusal (two devices in one launch), so its line would never appear and the strict set would fail. The Rules
+  check's count stands for the literals in the code (three come). Cost if wrong: that refusal's wording is unpinned.
+- **Ruling E-2.** The lanes of Tasks 2, 4 and 5 ran as one lane on the rebased tip after Task 5 (default ok; core
+  red as the control but `buf-d3d` and `buf-null-up`). Cost if wrong: a regression found one lane later.
+- **Ruling T5-1** (deviations accepted). mtld3d-core's `pipeline_key` re-exports `MAX_STREAMS`; the past-4096 clamp
+  warns once a key at pipeline build; `pipeline()` returns the entry and the refusal moves into the draw;
+  `IndexData` has no derive; the index offset is `u64`. Cost if wrong: a noisier log for a pathological declaration.
+- **Ruling T7-1** (deviations accepted). The other-device test compares `owning_device()` where each buffer is first
+  looked at; the indexed fan reads the index backing through a slice accessor and does not flush the index buffer; a
+  refused first upload forgets the fresh buffer; an `invalid()` helper logs each `INVALIDCALL` mtld3d logs; the UP
+  arm's index-format match became the shared `index_kind`. Cost if wrong: none seen by the final review.
+- **Lanes.** After Task 7 (33d34243): default ok, core ok, all 27 rows green strict at the first run, `state` with
+  no refusal, `buffers` with its two.
+- **Gates** (33d34243 + MacNeutron 6ff9f315). d3d9-check ok on default, msl and core; stateblock 14738 executed and
+  0 failed on default and under core; ten core launches under Metal's validation layer, 0 reports each. Eleven
+  mutants (`gates/mutants.txt`), each red on its row and on nothing outside the buffers launch: a `buf-start`, b
+  `buf-base`, c `buf-held`, d `buf-relock`, e `buf-streams` (the launch ends there: that row and the ten after it
+  fall), f `buf-null`, g `buf-instanced`, h `buf-indexed`, i `buf-zero-stride`, j `buf-offset`, k `buf-ifan`. Plain
+  build: the key as wanted, imports the same, d3d9-check ok, the Mac Wine conformance passed (only triaged sites
+  fail anew). The VM's D3D9 gate ok on default and core, on old and on new WoW64 (D3D9 only: ruling 6).
+- **Ruling T8-1.** The x64 check had 419 rows ok and one failing, "presents to a minimised window return at once"
+  (31 presents slow): the row known to fail while the Mac is in use, and the maintainer was at the Mac. Treated as
+  environmental; the post-push check runs x64 again. Why: no line of dxmt-core, d3d11, d3d12, dxgi or winemetal
+  changed. Cost if wrong: a present-path regression from the other landing ships unseen until that rerun.
+- **Final review** (Opus, whole branch): 0 Critical, 0 Important, 8 Minor. Fixed in one commit (eeb92e2e; MacNeutron
+  a9d7e631 for two script comments): the fan-pattern rule lifted into `convert::fan_fits_pattern`, `index_kind` on
+  `mtl::IndexType`, `#[must_use]` on the two arms, three docs. **Ruling T8-0:** that commit is gated by rust-check,
+  one lane (default ok, core ok) and the post-push check, not a second chain; it changes no behaviour. Ledgered: the
+  index-format table in four places (a helper, C4c-2's first commit); `test_map_synchronisation` site 25196 should
+  pass under core (C4c-7's parity); mtld3d's 32-bit `start_index * index_stride` (for the maintainer); the double
+  upload of a buffer bound twice and drawn while locked (C4d).
+- **Probe** (`build/c4c/s1/probe.md`; Mac x64, the textured UP bench, each run once, the Mac in use with load
+  averages of 6 to 8): CPU ms a frame at the base 40c76ab1 and at 33d34243: tex mtld3d 1.73 and 1.83, tex core 3.65
+  and 3.27, with depth mtld3d 1.82 and 1.85, core 3.28 and 3.20. No cost of the slice is measurable on the UP path.
+  The bench draws no buffer: C4c-2 adds a buffer bench with the dynamic path. The quiet-Mac figure stays owed.

@@ -1113,6 +1113,46 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   report. Those three are C4c's first work, since each hides everything after it; the refusals met on the way that fail
   tests without ending them are `StretchRect`'s other shapes, `Reset`, fullscreen devices, the cursor calls,
   `CreateQuery`, the `Ex` surface creators and the swap chain's display-mode getters.
+  C4c-1 done 2026-11-16 at DXMTRS main eeb92e2e (eeb92e2ea868cef0136cd269d13568b83f1a5f2d), which MacNeutron pins:
+  vertex and index buffers and the draws that read them on the core runtime, C4c's first slice, with `GetDirect3D` (the
+  sweep's three fatal calls but the read-back). Under core every buffer is staged: its CPU backing is the truth and is
+  never released, `Lock` and `Unlock` are bookkeeping on it, and the GPU side is one dxmt-core buffer a D3D9 buffer,
+  made at its first draw. The draw uploads the dirty span through the staging ring before it is encoded; a buffer still
+  locked stays dirty, and a lock of a buffer mtld3d maps directly dirties the whole buffer, since mtld3d shows every
+  byte written through that pointer. `PipelineKey` holds a form a stream (`StreamKey`: unused, inline, bound with its
+  stride, step and rate, or null) in place of one stride, and the layouts come from mtld3d's rules lifted into
+  mtld3d-core (`inline_stream_layout`, `null_stream_layout`, `stepped_stream_layout`), with a parity test against
+  mtld3d's own view for every feed; every attribute keeps slot = stream. A declared stream with nothing bound reads
+  zeros through a constant layout, under UP draws too (a short float element then reads w = 1, as on mtld3d).
+  `DrawPrimitive` and `DrawIndexedPrimitive` answer in the order of mtld3d's checks and share the UP draws' body:
+  d3d9-rt's `draw` (renamed from `draw_up`) takes each stream as bytes, zeros or a stored buffer with its offset, and
+  the indices as bytes or a stored buffer. Fans are rewritten as mtld3d rewrites them (an indexed fan folds its base
+  once; the rule for which fan rides the shared pattern is one function both runtimes ask, `fan_fits_pattern`), and
+  instancing follows mtld3d's rule. Refused by name under core: an attribute crossing its stride and a stream offset off
+  four bytes (both until C4c-2), a buffer of another device (kept: the dirty range is one a buffer). Kept divergence, in
+  the core's favour: a static WRITEONLY default-pool buffer locked again keeps the bytes it held, where mtld3d, which
+  released the backing, uploads zeros for what the title does not rewrite. Gated: 27 `d3d9_triangle buffers` rows in
+  every D3D9 lane on the Mac and in the VM, `state-lock` turned from a refusal into a result, each first passed on
+  mtld3d with no expectation corrected, red under core until its commit and green strict after it, with no report under
+  Metal's validation layer in any of the ten core launches; eleven mutation REDs, each on its row and on nothing outside
+  the buffers launch; the stateblock conformance under core; the default runtime's Mac conformance, translator key and
+  imports unchanged; the VM's D3D9 gate on default and core, old and new WoW64; the x64 check (one row failed in the
+  first run, "presents to a minimised window", the row known to fail while the Mac is in use; run again by the post-push
+  check). No D3D10-12 gate: no line of dxmt-core, d3d11 or winemetal changed. The whole-branch review found no Critical
+  and no Important defect. Not covered by a row: `ProcessVertices` (refused), more than two streams, a buffer bound at
+  two streams, point and line-strip primitives from buffers, an instanced fixed-function draw, a buffer of another
+  device. Known costs: a dynamic buffer appended to between draws pays a whole-buffer upload and a pass split a draw
+  (C4c-2 maps it directly); a 32-bit process holds every backing and sends a first draw's whole buffer through the
+  staging ring (C4c-2's cap); a buffer bound at two streams and drawn while locked uploads twice a draw (C4d). Probe
+  (Mac x64, textured, UP draws, the Mac in use): the core read 3.27 ms a frame against 3.65 at the base in the same hour
+  (3.20 against 3.28 with depth), mtld3d 1.83 against 1.73: no cost of the slice is measurable on the UP path. No bench
+  draws from buffers yet; C4c-2 adds one with the dynamic path.
+  C4c's slices: 1 buffers and the draws that read them (done); 2 dynamic buffers mapped directly, crossing attributes
+  (`CrossingFetch`), the WRITEONLY backing's release, the buffer gauge and the 32-bit cap; 3 read-back in all its forms
+  (`LockRect` of a target and of the back buffer first: `visual`'s fatal call); 4 `StretchRect`'s other shapes,
+  `ColorFill`, `UpdateSurface`; 5 queries; 6 `Reset`, the getters, the swap chain's presents; 7 gamma, frame latency,
+  the device's information from winemetal, the `Ex` creators, and the conformance lane for `visual`, `device` and
+  `d3d9ex` under core, which is C4c's gate. The next sweep is after slice 3.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
