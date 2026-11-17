@@ -123,7 +123,7 @@ die() {
   exit 2
 }
 
-# P15, from A/airconv_context.cpp:110-151 minus the two custom passes. The shim builds InstCombinePass() (no fixpoint
+# P15, from A/airconv_context.cpp:110-151 minus the two custom passes. DXMT built InstCombinePass() (no fixpoint
 # verification, L23/include/llvm/Transforms/InstCombine/InstCombine.h:33), while a textual `instcombine` verifies the
 # fixpoint and aborts the process when one more iteration would change the function (L23/lib/Passes/PassBuilder.cpp,
 # parseInstCombineOptions), hence `instcombine<no-verify-fixpoint>` (ruling R7-5).

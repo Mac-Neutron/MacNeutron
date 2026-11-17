@@ -51,7 +51,8 @@ LLVM 23.1.4 (linked statically into winemetal.so and the Mac mtld3d.so)
   Licence: Apache-2.0 WITH LLVM-exception, llvm/LICENSE.TXT; its regular-expression code, llvm/COPYRIGHT.regex;
   ConvertUTF (Unicode, Inc.) and the regex notice: NOTICES.md.
   Source: https://github.com/Mac-Neutron/llvm-project.git at LLVM_COMMIT: llvmorg-23.1.4 with Mac-Neutron's AIR writer
-  (llvm/lib/Bitcode/AIRWriter, llvm/include/llvm-c/AIRWriter.h, llvm/tools/llvm-air-write, each modified file noting the change).
+  (llvm/lib/Bitcode/AIRWriter, llvm/include/llvm-c/AIRWriter.h, llvm/tools/llvm-air-write) and its C entry points for
+  LLVM calls llvm-c lacks (llvm/lib/AIRExtras, llvm/include/llvm-c/AIRExtras.h), each modified file noting the change.
 
 llvm-mingw, development head (the Windows-side toolchain: DXMT's DLLs, winemetal.dll and libarm64ecfex.dll link its
 runtime)
