@@ -6671,23 +6671,25 @@ static bool window(IDirect3DVertexBuffer9 *b, UINT k, const RV &v, bool zeros) {
 // whole upload of the re-created backing gives them, draw nothing there). Cell 1: vertex 4's window reads zeros (red
 // under the core until it releases the backing: DXMTRS C4c-2b), then is moved; drawn: (64,128) and (160,176) red,
 // (200,96) the clear. Cell 2: vertex 2 moved from (16,64) to (16,8), which stretches the first triangle over (32,48),
-// and vertex 4 moved, two windows each unlocked before the draw: (32,48) red, (160,176) red (vertex 3, between the
-// windows, as the device holds it), (64,128) red, (200,96) the clear. Cell 3: a second such buffer, its first lock of
-// its whole length, the left quad written and drawn while locked, the right quad green written through the same
-// pointer over it, Unlock, drawn: left red (the first draw's bytes), right green.
+// and vertex 4 moved, two windows each unlocked before the draw: (32,48) red, (160,176) red, (114,80) red (inside the
+// second triangle only with vertex 3, between the windows, as the device holds it, at (112,64): were it the backing's
+// zeros, the triangle would end at x 100 on that line; (160,176) cannot tell, a vertex of rhw 0 weighs nothing in the
+// colour and the stretched triangle still covers it), (64,128) red, (200,96) the clear. Cell 3: a second such buffer,
+// its first lock of its whole length, the left quad written and drawn while locked, the right quad green written
+// through the same pointer over it, Unlock, drawn: left red (the first draw's bytes), right green.
 static bool rowBufWriteOnly() {
     RV q[6], r[6];
     listLeft(q, TRED), listRight(r, TGRN);
     RV v2 = q[2], v4 = q[4];
     v2.y = 8, v4.x = 240;
     const Px one[] = {{64, 128, TRED}, {160, 176, TRED}, {200, 96, BLUE}},
-             two[] = {{32, 48, TRED}, {160, 176, TRED}, {64, 128, TRED}, {200, 96, BLUE}},
+             two[] = {{32, 48, TRED}, {160, 176, TRED}, {114, 80, TRED}, {64, 128, TRED}, {200, 96, BLUE}},
              three[] = {{64, 128, TRED}, {192, 128, TGRN}};
     return frames(BLUE, one, 3, [&] {
                Com<IDirect3DVertexBuffer9> vb;
                return mkWriteOnly(vb, q, sizeof q) && rvAt(vb.p) && drawList() && window(vb.p, 4, v4, true) &&
                       drawList();
-           }) && frames(BLUE, two, 4, [&] {
+           }) && frames(BLUE, two, 5, [&] {
                Com<IDirect3DVertexBuffer9> vb;
                return mkWriteOnly(vb, q, sizeof q) && rvAt(vb.p) && drawList() && window(vb.p, 2, v2, false) &&
                       window(vb.p, 4, v4, false) && drawList();
