@@ -18,7 +18,13 @@
 // D3D_OK). "--bench <draws> <frames> tex" (DXMTRS C4b-3b) samples one 64x64 texture through a ps_2_0 each draw.
 // "--bench <draws> <frames> prog" (DXMTRS C4b2-12)
 // draws the triangle through a vs_2_0/ps_2_0 pair over an XYZ declaration instead, setting four VS float rows (the
-// transform) before each draw; the line names the mode: "d3d9 bench: mode ff|prog frames ...".
+// transform) before each draw; the line names the mode: "d3d9 bench: mode ff|prog|tex|texdepth|lit|buf|dyn frames ...".
+// "--bench <draws> <frames> buf" (DXMTRS C4c-2a) draws the triangles from one static WRITEONLY vertex buffer of <draws>
+// of them, draw d DrawPrimitive(TRIANGLELIST, 3 * d, 1); "dyn" from one DYNAMIC|WRITEONLY buffer of 256 and a cursor
+// that runs across frames, each draw locking the next triangle NOOVERWRITE (the first DISCARD, at the wrap), writing
+// it, unlocking and drawing it; a failed Lock or Unlock counts in "failed" too. Before the timed frames both read back
+// frames until one's centre is the triangle's red (for up to 10 s: mtld3d leaves a draw out while its pipeline
+// builds), else one more failure, since a dropped buffer draw answers D3D_OK.
 // With "shaders" (DXMTRS C4b-2's gate rows, C4b2-11): 22 rows of programmable SM1-3 draws (shaders as DWORD token
 // arrays, their assembly beside them), each printing one line "d3d9 <row> ok|FAIL <why>" (stdout unbuffered). Each row
 // starts from reset()'s state; a failing Create, Set or Draw prints "FAIL <call> <hr>" at once; a drawing row asserts,
@@ -66,14 +72,16 @@
 // latch), sRGB write, blending, index 1-3 targets, the scissor test, a resolve's destination drawn again; what the
 // creators and read-backs answer. With a 180 s budget. The core refuses a StretchRect other than a whole-surface
 // resolve (ms-desc's depth-stencil one).
-// With "buffers" ("buffers strict" under core; DXMTRS C4c-1): 27 rows "d3d9 buf-<row> ok|FAIL <why>" of vertex and
-// index buffers and the draws that read them, on a device with no depth-stencil: GetDirect3D; Lock and Unlock (pools,
-// usages, DISCARD and NOOVERWRITE, a READONLY read-back, a lock held over draws, a partial relock); DrawPrimitive and
-// DrawIndexedPrimitive (lists, strips, fans, a line list, the start vertex, a stream offset, base vertices of both
-// signs, 16- and 32-bit indices); two streams, a stride of zero, a declared stream with nothing bound (buffer and UP
-// draws), instancing; a vertex shader, the fixed-function stage and a texture over buffers; the answers without
-// buffers and a released buffer. With a 180 s budget. The core refuses a stream offset off four bytes and an attribute
-// crossing the stride (buf-refused).
+// With "buffers" ("buffers strict" under core; DXMTRS C4c-1, C4c-2a): 33 rows "d3d9 buf-<row> ok|FAIL <why>" of vertex
+// and index buffers and the draws that read them, on a device with no depth-stencil: GetDirect3D; Lock and Unlock
+// (pools, usages, DISCARD and NOOVERWRITE, a READONLY read-back, a lock held over draws, a partial relock);
+// DrawPrimitive and DrawIndexedPrimitive (lists, strips, fans, a line list, the start vertex, a stream offset, base
+// vertices of both signs, 16- and 32-bit indices); two streams, a stride of zero, a declared stream with nothing bound
+// (buffer and UP draws), instancing; a vertex shader, the fixed-function stage and a texture over buffers; the answers
+// without buffers and a released buffer; stream offsets off four bytes and attributes that end past their stride
+// (buffer, UP, indexed and fan draws, three streams, the fixed-function stage). With a 180 s budget. Under strict a
+// layout no binding can fetch, an attribute wider than its stride (buf-wide), answers D3DERR_NOTAVAILABLE. "buffers
+// [strict] skip=<row>[,<row>...]" prints "d3d9 <row> skip" for each listed row and does not run it.
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -758,7 +766,7 @@ static bool rowSrgb() {
     });
 }
 // crossing: TEXCOORD0 FLOAT2 at offset 20 of a 16-byte stride (it ends past the stride) feeding the colour's green, red
-// constant: D3D_OK and drawn (red), or D3DERR_NOTAVAILABLE (the core refuses it until C4c) and undrawn.
+// constant: drawn, red (green, the next vertex's y, not asserted).
 static bool rowCrossing() {
     static const D3DVERTEXELEMENT9 decl[] = {
         {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
@@ -769,12 +777,10 @@ static bool rowCrossing() {
     V3 q[4];
     quad(q, -0.5f, -0.5f, 0.5f, 0.5f);
     for (int i = 0; i < 4; i++) v[i][0] = q[i].x, v[i][1] = q[i].y, v[i][2] = q[i].z;
-    Px px[] = {{128, 128, 0xff0000, 0xff00ff}, {16, 16, BLUE}};
+    const Px px[] = {{128, 128, 0xff0000, 0xff00ff}, {16, 16, BLUE}};
     return frames(BLUE, px, 2, [&] {
         if (!use(p)) return false;
-        HRESULT hr = dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, 16);
-        if (hr != D3D_OK && hr != D3DERR_NOTAVAILABLE) return fail("DrawPrimitiveUP", hr);
-        px[0].want = hr == D3D_OK ? 0xff0000 : BLUE, px[0].mask = hr == D3D_OK ? 0xff00ff : 0xffffff;
+        CK(DrawPrimitiveUP, D3DPT_TRIANGLESTRIP, 2, v, 16);
         return true;
     });
 }
@@ -6158,39 +6164,316 @@ static bool rowBufRelease() {
     const Px first[] = {{64, 128, TRED}}, second[] = {{192, 128, TGRN}, {64, 128, BLUE}};
     return frames(BLUE, first, 1, [&] { return drawn(a); }) && frames(BLUE, second, 2, [&] { return drawn(b); });
 }
-// buf-refused: two layouts the core refuses, D3DERR_NOTAVAILABLE and nothing drawn under strict, drawn elsewhere. A
-// stream offset of 2: the left quad's six RV vertices copied from byte 2 of a buffer 2 bytes longer, so the vertices
-// read are exactly those written: left red. A stride of 12 under VS_CROSS's position at offset 0 and TEXCOORD0 FLOAT2 at
-// offset 8, which ends at 16: vertex i reads floats 3i to 3i + 2 of the buffer as its position (the left quad in clip
-// space, z 0.5) and floats 3i + 2 and 3i + 3 as its texcoord, so v1.x is its own z and VS_CROSS writes (1, 0.5, 0, 1)
-// at every vertex: left 0xff8000 (a tail float keeps the last vertex's texcoord inside the buffer).
-static bool rowBufRefused() {
-    RV q[6];
-    listLeft(q, TRED);
-    BYTE shifted[2 + sizeof q] = {};
-    memcpy(shifted + 2, q, sizeof q);
+// DXMTRS C4c-2a's rows: stream offsets off four bytes and attributes that end past their stream's stride, which
+// mtld3d draws: a stream at an offset off four bytes binds at the multiple of 4 below and its attributes read the
+// remainder further on; an attribute that ends past the stride is fetched through a slot of its own that binds the
+// same stream advanced by the attribute's offset, so vertex i reads stream offset + i * stride + element offset as
+// D3D9 addresses it. Every buffer holds marked bytes (0x5a, or a marked float) before and after what the draws read,
+// never zeros, so a read at a wrong offset, slot or advance gives another position or colour.
+
+// `n` RV vertices (at most 9) into a new buffer from byte `off` (at most 6), the `off` bytes before them and 4 after
+// them 0x5a.
+static bool shiftedVb(Com<IDirect3DVertexBuffer9> &b, UINT off, const RV *v, UINT n) {
+    BYTE bytes[6 + 9 * sizeof(RV) + 4];
+    memset(bytes, 0x5a, sizeof bytes);
+    memcpy(bytes + off, v, n * sizeof *v);
+    return mkVb(b, bytes, off + n * sizeof *v + 4);
+}
+// buf-odd: stream offsets off four bytes, the vertices read exactly those written (shiftedVb); a read 1-3 bytes off
+// takes parts of two fields: other positions (2 bytes off, near 0: these whole-pixel floats' low halves are zero) and
+// colours of another hue (green read 2 bytes early is 0x003f80). Frame 1: the left quad (listRhw's six vertices) red
+// at offset 0, then under the same FVF the right quad green at offset 2: left red, right green. Frame 2: the left quad
+// red at offset 1, the right yellow at offset 3. Frame 3: offset 6 and start vertex 1 over seven vertices, 1-6 the
+// right quad red and 0 a copy of 1: (160,152) red (from vertex 0 the first triangle is degenerate and the second the
+// quad's upper-right half, which leaves (160,152) blue), (64,128) blue. Frame 4: at offset 2 eight vertices, a white
+// left quad then a green one (strip order), indices 0 1 2 2 1 3, DrawIndexedPrimitive(TRIANGLELIST, 4, 0, 4, 0, 2):
+// left green (the base ignored draws white), right blue. Frame 5: twoStreams' positions at offset 0 of stream 0 and
+// six orange D3DCOLORs 0xffff8000 (bytes 00 80 ff ff) at offset 2 of stream 1, so only stream 1 shifts: left 0xff8000
+// (read 2 bytes early, as stream 0's shift of 0 reads them, vertex 0's is 0x80005a5a and the others' 0x8000ffff,
+// cyan), right blue.
+static bool rowBufOdd() {
+    RV red[6], grn[6], yel[6], s[7], q[8];
+    listLeft(red, TRED), listRight(grn, TGRN), listRight(yel, TYEL), listRight(s + 1, TRED), s[0] = s[1];
+    quadRhw(q, 16, 64, 112, 192, TWHT), quadRhw(q + 4, 16, 64, 112, 192, TGRN);
+    static const WORD idx[6] = {0, 1, 2, 2, 1, 3};
+    const DWORD orange = 0xffff8000;
+    DWORD c[7];  // bytes 2-25 the six colours, 0-1 and 26-27 0x5a
+    memset(c, 0x5a, sizeof c);
+    for (int i = 0; i < 6; i++) memcpy((BYTE *)c + 2 + 4 * i, &orange, 4);
+    Com<IDirect3DVertexBuffer9> a, b, d, e, f, g;
+    Com<IDirect3DIndexBuffer9> ib;
+    if (!shiftedVb(a, 0, red, 6) || !shiftedVb(b, 2, grn, 6) || !shiftedVb(d, 1, red, 6) || !shiftedVb(e, 3, yel, 6) ||
+        !shiftedVb(f, 6, s, 7) || !shiftedVb(g, 2, q, 8) || !mkIb(ib, idx, sizeof idx, D3DFMT_INDEX16))
+        return false;
+    const Px one[] = {{64, 128, TRED}, {192, 128, TGRN}}, two[] = {{64, 128, TRED}, {192, 128, TYEL}},
+             three[] = {{160, 152, TRED}, {64, 128, BLUE}}, four[] = {{64, 128, TGRN}, {192, 128, BLUE}},
+             five[] = {{64, 128, 0xff8000}, {192, 128, BLUE}};
+    const auto pair = [&](IDirect3DVertexBuffer9 *l, UINT lo, IDirect3DVertexBuffer9 *r, UINT ro) {
+        return rvAt(l, lo) && drawList() && rvAt(r, ro) && drawList();
+    };
+    return frames(BLUE, one, 2, [&] { return pair(a.p, 0, b.p, 2); }) &&
+           frames(BLUE, two, 2, [&] { return pair(d.p, 1, e.p, 3); }) &&
+           frames(BLUE, three, 2, [&] { return rvAt(f.p, 6) && drawList(1); }) && frames(BLUE, four, 2, [&] {
+               if (!rvAt(g.p, 2)) return false;
+               CK(SetIndices, ib.p);
+               CK(DrawIndexedPrimitive, D3DPT_TRIANGLELIST, 4, 0, 4, 0, 2);
+               return true;
+           }) && twoStreams(c, 7, 2, 4, five, 2);
+}
+// VS_CROSS with blue from v1.y: vs_2_0 { def c0, 1, 0, 0, 1; dcl_position v0; dcl_texcoord0 v1; mov oPos, v0; mov r0,
+// c0; mov r0.y, v1.x; mov r0.z, v1.y; mov oD0, r0 }: the colour (1, v1.x, v1.y).
+static const DWORD VS_CROSS_Y[] = {
+    0xfffe0200,                                                             // vs_2_0
+    0x05000051, 0xa00f0000, 0x3f800000, 0x00000000, 0x00000000, 0x3f800000, // def c0, 1, 0, 0, 1
+    0x0200001f, 0x80000000, 0x900f0000,                                     // dcl_position v0
+    0x0200001f, 0x80000005, 0x900f0001,                                     // dcl_texcoord0 v1
+    0x02000001, 0xc00f0000, 0x90e40000,                                     // mov oPos, v0
+    0x02000001, 0x800f0000, 0xa0e40000,                                     // mov r0, c0
+    0x02000001, 0x80020000, 0x90000001,                                     // mov r0.y, v1.x
+    0x02000001, 0x80040000, 0x90550001,                                     // mov r0.z, v1.y
+    0x02000001, 0xd00f0000, 0x80e40000,                                     // mov oD0, r0
+    0x0000ffff};
+// DXMTRS C4c-1's stride-12 layout: POSITION FLOAT3 at 0 and TEXCOORD0 FLOAT2 at 8, which ends at 16, past a stride
+// of 12: vertex i reads floats 3i to 3i + 2 of its stream as its position and 3i + 2 and 3i + 3 as its texcoord, so
+// v1.x is its own z and v1.y the next vertex's x, or for the last vertex the float after the vertices.
+static const D3DVERTEXELEMENT9 DECL_CROSS[] = {
+    {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+    {0, 8, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0}, D3DDECL_END()};
+// Two triangles as six stride-12 vertices (x, y, z) at floats 0-17 of `f`, all at depth z, clockwise: A, its apex at
+// pixel (32,64) and its right edge on x = 192 from y 16 to 112; B, its apex at (192,184) and its other two vertices on
+// the pixel column of clip x `ex`, at y 136 and 232. Under DECL_CROSS and VS_CROSS_Y a vertex is (1, z, the next
+// vertex's x): A's three take x 0.5 (A's last two and B's apex sit on x = 192), B's first two `ex` and B's last f[18],
+// so each triangle is one colour when f[18] is `ex`. z is none of the cell's x and y, so a texcoord read from the
+// vertex's own start (no advance) gives another green.
+static void crossTris(float *f, float z, float ex) {
+    // B's vertex 4 above its 5 when its edge is right of its apex, below it otherwise: clockwise either way.
+    const float y4 = ex > 0.5f ? -0.0625f : -0.8125f, y5 = ex > 0.5f ? -0.8125f : -0.0625f;
+    const float v[6][2] = {{-0.75f, 0.5f}, {0.5f, 0.875f}, {0.5f, 0.125f}, {0.5f, -0.4375f}, {ex, y4}, {ex, y5}};
+    for (int i = 0; i < 6; i++) f[3 * i] = v[i][0], f[3 * i + 1] = v[i][1], f[3 * i + 2] = z;
+}
+// crossTris(f, 0.25, 0.875) with f[18] 0.875 under VS_CROSS_Y: A 0xff4080 at (120,64); B 0xff40df at (228,204), where
+// B's last vertex, coloured by f[18], weighs 7/12; (64,192) the clear.
+static const Px CROSS_PX[] = {{120, 64, 0xff4080}, {228, 204, 0xff40df}, {64, 192, BLUE}};
+// A frame of CROSS_PX: `p` (DECL_CROSS, VS_CROSS_Y), `vb` at stream 0 from byte `off` at a stride of 12, then draw().
+template <class F> static bool crossFrame(const Prog &p, IDirect3DVertexBuffer9 *vb, UINT off, F draw) {
+    return frames(BLUE, CROSS_PX, 3, [&] {
+        if (!use(p)) return false;
+        CK(SetStreamSource, 0, vb, off, 12);
+        return draw();
+    });
+}
+// buf-cross: DECL_CROSS from buffers through DrawPrimitive, three cells. DXMTRS C4c-1's: the left quad in clip space
+// (z 0.5) as a strip under VS_CROSS (1, v1.x, 0) and a marked float after it, which VS_CROSS does not read: v1.x is
+// each vertex's own z, left 0xff8000 (with no advance v1.x is its x, negative: red). crossTris(z 0.25, B's edge at
+// 0.875, pixel 240) with 0.875 after the six as a list under VS_CROSS_Y: CROSS_PX, B's last vertex coloured by the
+// float after the six. SetFVF XYZ|NORMAL|DIFFUSE (the normal at 12, the colour at 24: 28 bytes) at a stride of 16
+// under the fixed-function stage, LIGHTING off, the left quad as a strip and a fifth vertex: vertex i's colour is the
+// bytes at 16i + 24, vertex i + 1's z, and every z is the float 0x3e808000 (0.2509765625), which as a D3DCOLOR is
+// 0x808000: left 0x808000 (with no advance the colour is the vertex's own x, -0.875 or -0.125: 0x600000 or black).
+// The normal, past the stride too (its first float the vertex's marked fourth), is unused with LIGHTING off.
+static bool rowBufCross() {
     V3 c[4];
     quad(c, -0.875f, -0.5f, -0.125f, 0.5f);
-    float f[13] = {};
-    for (int i = 0; i < 4; i++) f[3 * i] = c[i].x, f[3 * i + 1] = c[i].y, f[3 * i + 2] = c[i].z;
-    static const D3DVERTEXELEMENT9 decl[] = {
+    const DWORD zc = 0x3e808000, mark = 0x3ec00000;  // mark: 0.375
+    float q[13], t[20];
+    DWORD n[20];
+    for (int i = 0; i < 4; i++) {
+        q[3 * i] = c[i].x, q[3 * i + 1] = c[i].y, q[3 * i + 2] = 0.5f;
+        memcpy(n + 4 * i, &c[i], 8), n[4 * i + 2] = zc, n[4 * i + 3] = mark;
+    }
+    q[12] = 0.375f, n[16] = n[17] = n[19] = mark, n[18] = zc;
+    crossTris(t, 0.25f, 0.875f), t[18] = 0.875f, t[19] = 0.375f;
+    Prog x, y;
+    Com<IDirect3DVertexBuffer9> a, b, d;
+    if (!make(x, DECL_CROSS, VS_CROSS, PS_V0) || !make(y, DECL_CROSS, VS_CROSS_Y, PS_V0) || !mkVb(a, q, sizeof q) ||
+        !mkVb(b, t, sizeof t) || !mkVb(d, n, sizeof n))
+        return false;
+    const Px orange[] = {{64, 128, 0xff8000}, {192, 128, BLUE}}, olive[] = {{64, 128, 0x808000}, {192, 128, BLUE}};
+    return frames(BLUE, orange, 2, [&] {
+               if (!use(x)) return false;
+               CK(SetStreamSource, 0, a.p, 0, 12);
+               CK(DrawPrimitive, D3DPT_TRIANGLESTRIP, 0, 2);
+               return true;
+           }) && crossFrame(y, b.p, 0, [] { return drawList(); }) && frames(BLUE, olive, 2, [&] {
+               CK(SetVertexShader, nullptr);
+               CK(SetPixelShader, nullptr);
+               CK(SetFVF, FVF_NC);
+               CK(SetStreamSource, 0, d.p, 0, 16);
+               CK(DrawPrimitive, D3DPT_TRIANGLESTRIP, 0, 2);
+               return true;
+           });
+}
+// buf-cross-up: crossTris(z 0.25, B's edge at 0, pixel 128) under VS_CROSS_Y from the application's memory at a stride
+// of 12, the six floats after the six vertices 1.0: DrawPrimitiveUP(TRIANGLELIST, 2), then DrawIndexedPrimitiveUP of
+// indices 3 4 5 0 1 2 (B first; MinVertexIndex 0 and 6 vertices, so vertex 5 is the last one copied). mtld3d copies
+// the 6 x 12 bytes D3D9 promises, zero-filled up to the last vertex's texcoord end, and reads nothing past them, so B's
+// last vertex reads 0 as its first two read its x: A (120,64) 0xff4080; B (140,160) 0xff4000, where B's last vertex
+// weighs 21/32 (blue 167 had it read the 1.0 after the six); (64,192) the clear.
+static bool rowBufCrossUp() {
+    float f[24];
+    crossTris(f, 0.25f, 0.0f);
+    for (int i = 18; i < 24; i++) f[i] = 1.0f;
+    static const WORD idx[6] = {3, 4, 5, 0, 1, 2};
+    static const Px px[] = {{120, 64, 0xff4080}, {140, 160, 0xff4000}, {64, 192, BLUE}};
+    Prog p;
+    if (!make(p, DECL_CROSS, VS_CROSS_Y, PS_V0)) return false;
+    return frames(BLUE, px, 3, [&] {
+               if (!use(p)) return false;
+               CK(DrawPrimitiveUP, D3DPT_TRIANGLELIST, 2, f, 12);
+               return true;
+           }) && frames(BLUE, px, 3, [&] {
+               if (!use(p)) return false;
+               CK(DrawIndexedPrimitiveUP, D3DPT_TRIANGLELIST, 0, 6, 2, idx, D3DFMT_INDEX16, f, 12);
+               return true;
+           });
+}
+// vs_2_0 { dcl_position v0; dcl_texcoord0 v1; dcl_texcoord1 v2; dcl_color v3; dcl_texcoord2 v4; mov oPos, v0; mov r0,
+// v3; add r0.x, r0.x, v4.x; mov r0.y, v1.x; mov r0.z, v2.z; mov oD0, r0 }: red the colour's plus v4.x, green v1.x,
+// blue v2.z.
+static const DWORD VS_MULTI[] = {
+    0xfffe0200,                                     // vs_2_0
+    0x0200001f, 0x80000000, 0x900f0000,             // dcl_position v0
+    0x0200001f, 0x80000005, 0x900f0001,             // dcl_texcoord0 v1
+    0x0200001f, 0x80010005, 0x900f0002,             // dcl_texcoord1 v2
+    0x0200001f, 0x8000000a, 0x900f0003,             // dcl_color v3
+    0x0200001f, 0x80020005, 0x900f0004,             // dcl_texcoord2 v4
+    0x02000001, 0xc00f0000, 0x90e40000,             // mov oPos, v0
+    0x02000001, 0x800f0000, 0x90e40003,             // mov r0, v3
+    0x03000002, 0x80010000, 0x80000000, 0x90000004, // add r0.x, r0.x, v4.x
+    0x02000001, 0x80020000, 0x90000001,             // mov r0.y, v1.x
+    0x02000001, 0x80040000, 0x90aa0002,             // mov r0.z, v2.z
+    0x02000001, 0xd00f0000, 0x80e40000,             // mov oD0, r0
+    0x0000ffff};
+// buf-cross-multi: three streams under VS_MULTI. Stream 0 at a stride of 12: POSITION FLOAT3 at 0, which fits, and
+// TEXCOORD1 FLOAT3 at 4 and TEXCOORD0 FLOAT2 at 8, which both end at 16; stream 1 six D3DCOLORs 0x00c00000 and a marked
+// one at a stride of 4; stream 2 a TEXCOORD2 FLOAT1 with nothing bound, read as 0. Streams 0-2 keep their slots, so
+// mtld3d fetches the two crossing attributes at slots 3 and 4, each binding stream 0 advanced by its offset: a slot's
+// number is not its stream's. Stream 0 holds crossTris(z 0.25, B's edge at 0.875) and 0.875 after the six: v1.x is z
+// (green 0x40), v2 is (y, z, the next vertex's x) and gives blue, stream 1 red 0xc0: A (120,64) 0xc04080, B (228,204)
+// 0xc040df, (64,192) the clear. Then stream 1 alone crosses: POSITION FLOAT3 at stream 0 (the left quad as a strip,
+// z 0.5) and TEXCOORD0 FLOAT2 at offset 4 of stream 1 at a stride of 8, so no attribute of stream 1 fits and the
+// texcoord takes stream 1's own slot advanced by 4. Stream 1 holds five (p, q) pairs, p 0.75 but the first's 0.125, q
+// 0.25 but the last's 0.375, and vertex i reads (q_i, p_i+1) under VS_CROSS_Y: left 0xff40bf (with no advance it reads
+// (p_i, q_i): green 0xbf, blue 0x40), right blue.
+static bool rowBufCrossMulti() {
+    static const D3DVERTEXELEMENT9 three[] = {
         {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-        {0, 8, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0}, D3DDECL_END()};
+        {0, 4, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},
+        {0, 8, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+        {1, 0, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
+        {2, 0, D3DDECLTYPE_FLOAT1, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 2}, D3DDECL_END()};
+    static const D3DVERTEXELEMENT9 one[] = {
+        {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {1, 4, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0}, D3DDECL_END()};
+    static const DWORD col[7] = {0x00c00000, 0x00c00000, 0x00c00000, 0x00c00000, 0x00c00000, 0x00c00000, 0x5a5a5a5a};
+    float t[20], s[10];
+    crossTris(t, 0.25f, 0.875f), t[18] = 0.875f, t[19] = 0.375f;
+    for (int i = 0; i < 5; i++) s[2 * i] = i ? 0.75f : 0.125f, s[2 * i + 1] = i < 4 ? 0.25f : 0.375f;
+    V3 c[4];
+    quad(c, -0.875f, -0.5f, -0.125f, 0.5f);
+    Prog p, q;
+    Com<IDirect3DVertexBuffer9> a, b, pos, pairs;
+    if (!make(p, three, VS_MULTI, PS_V0) || !make(q, one, VS_CROSS_Y, PS_V0) || !mkVb(a, t, sizeof t) ||
+        !mkVb(b, col, sizeof col) || !mkVb(pos, c, sizeof c) || !mkVb(pairs, s, sizeof s))
+        return false;
+    static const Px multi[] = {{120, 64, 0xc04080}, {228, 204, 0xc040df}, {64, 192, BLUE}},
+                    own[] = {{64, 128, 0xff40bf}, {192, 128, BLUE}};
+    return frames(BLUE, multi, 3, [&] {
+               if (!use(p)) return false;
+               CK(SetStreamSource, 0, a.p, 0, 12);
+               CK(SetStreamSource, 1, b.p, 0, 4);
+               CK(SetStreamSource, 2, nullptr, 0, 0);
+               return drawList();
+           }) && frames(BLUE, own, 2, [&] {
+               if (!use(q)) return false;
+               CK(SetStreamSource, 0, pos.p, 0, sizeof(V3));
+               CK(SetStreamSource, 1, pairs.p, 0, 8);
+               CK(DrawPrimitive, D3DPT_TRIANGLESTRIP, 0, 2);
+               return true;
+           });
+}
+// buf-cross-odd: crossTris(z 0.25, B's edge at 0.875) and 0.875 after the six from byte 2 of a buffer whose first two
+// bytes and last two are 0x5a, bound at offset 2 under VS_CROSS_Y: mtld3d binds stream 0 at 0 and the crossing
+// texcoord's slot at 8, each attribute 2 bytes further on: CROSS_PX (read 2 bytes early, each float takes the zero low
+// half of the next: no triangle where it should be).
+static bool rowBufCrossOdd() {
+    float t[20];
+    crossTris(t, 0.25f, 0.875f), t[18] = 0.875f, t[19] = 0.375f;
+    BYTE b[2 + sizeof t + 2];
+    memset(b, 0x5a, sizeof b), memcpy(b + 2, t, sizeof t);
+    Prog p;
+    Com<IDirect3DVertexBuffer9> vb;
+    if (!make(p, DECL_CROSS, VS_CROSS_Y, PS_V0) || !mkVb(vb, b, sizeof b)) return false;
+    return crossFrame(p, vb.p, 2, [] { return drawList(); });
+}
+// buf-cross-indexed's fan as four stride-12 vertices at depth z, (32,128) then (192,32), (192,128), (192,224) on the
+// column x = 192, clockwise as a fan from the first: under VS_CROSS_Y each vertex's blue is the next vertex's x, 0.5,
+// when the float after the four is 0.5.
+static void crossFan(float *f, float z) {
+    const float v[4][2] = {{-0.75f, 0.0f}, {0.5f, 0.75f}, {0.5f, 0.0f}, {0.5f, -0.75f}};
+    for (int i = 0; i < 4; i++) f[3 * i] = v[i][0], f[3 * i + 1] = v[i][1], f[3 * i + 2] = z;
+}
+// buf-cross-indexed: DECL_CROSS under VS_CROSS_Y from buffers, indexed at a base vertex. Twelve vertices,
+// crossTris(z 0.75) then crossTris(z 0.25), B's edge at 0.875 in both, then 0.875; 16-bit indices 0-5,
+// DrawIndexedPrimitive(TRIANGLELIST, 6, 0, 6, 0, 2): CROSS_PX (the base ignored draws the first six, green 0xbf). Then
+// a fan: eight vertices, crossFan(z 0.625) then crossFan(z 0.375), then 0.5; indices 0-3,
+// DrawIndexedPrimitive(TRIANGLEFAN, 4, 0, 4, 0, 2): (150,100) in its first triangle and (150,156) in its second
+// 0xff6080 (the base ignored, green 0x9f), (224,128) the clear.
+static bool rowBufCrossIndexed() {
+    float t[38], g[26];
+    crossTris(t, 0.75f, 0.875f), crossTris(t + 18, 0.25f, 0.875f), t[36] = 0.875f, t[37] = 0.375f;
+    crossFan(g, 0.625f), crossFan(g + 12, 0.375f), g[24] = 0.5f, g[25] = 0.375f;
+    static const WORD list[6] = {0, 1, 2, 3, 4, 5}, fan[4] = {0, 1, 2, 3};
     Prog p;
     Com<IDirect3DVertexBuffer9> a, b;
-    if (!mkVb(a, shifted, sizeof shifted) || !mkVb(b, f, sizeof f) || !make(p, decl, VS_CROSS, PS_V0)) return false;
-    const HRESULT expect = strictMode ? D3DERR_NOTAVAILABLE : D3D_OK;
-    const Px offset[] = {{64, 128, strictMode ? BLUE : TRED}}, stride[] = {{64, 128, strictMode ? BLUE : 0xff8000}};
-    return frames(BLUE, offset, 1, [&] {
-        return rvAt(a.p, 2) && answer("DrawPrimitive (offset 2)", dev->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 2), expect);
-    }) && frames(BLUE, stride, 1, [&] {
+    Com<IDirect3DIndexBuffer9> ia, ib;
+    if (!make(p, DECL_CROSS, VS_CROSS_Y, PS_V0) || !mkVb(a, t, sizeof t) || !mkVb(b, g, sizeof g) ||
+        !mkIb(ia, list, sizeof list, D3DFMT_INDEX16) || !mkIb(ib, fan, sizeof fan, D3DFMT_INDEX16))
+        return false;
+    static const Px fanPx[] = {{150, 100, 0xff6080}, {150, 156, 0xff6080}, {224, 128, BLUE}};
+    return crossFrame(p, a.p, 0, [&] {
+               CK(SetIndices, ia.p);
+               CK(DrawIndexedPrimitive, D3DPT_TRIANGLELIST, 6, 0, 6, 0, 2);
+               return true;
+           }) && frames(BLUE, fanPx, 3, [&] {
+               if (!use(p)) return false;
+               CK(SetStreamSource, 0, b.p, 0, 12);
+               CK(SetIndices, ib.p);
+               CK(DrawIndexedPrimitive, D3DPT_TRIANGLEFAN, 4, 0, 4, 0, 2);
+               return true;
+           });
+}
+// buf-wide: DECL_XYZ's FLOAT3 position at a stride of 8, narrower than it, over a buffer of four 12-byte vertices (the
+// left quad, z 0.5) under VS_C0 and PS_V0 green, DrawPrimitive(TRIANGLESTRIP, 0, 2): no binding can fetch it. Under
+// strict D3DERR_NOTAVAILABLE and (64,128) the clear; elsewhere D3D_OK and no pixel asserted (mtld3d widens the stride
+// to the attribute's 12 and draws what that reads).
+static bool rowBufWide() {
+    V3 q[4];
+    quad(q, -0.875f, -0.5f, -0.125f, 0.5f);
+    Prog p;
+    Com<IDirect3DVertexBuffer9> vb;
+    if (!make(p, DECL_XYZ, VS_C0, PS_V0) || !mkVb(vb, q, sizeof q)) return false;
+    const Px px[] = {{64, 128, BLUE, strictMode ? 0xffffffu : 0u}};
+    return frames(BLUE, px, 1, [&] {
         if (!use(p)) return false;
-        CK(SetStreamSource, 0, b.p, 0, 12);
-        return answer("DrawPrimitive (stride 12)", dev->DrawPrimitive(D3DPT_TRIANGLESTRIP, 0, 2), expect);
+        CK(SetVertexShaderConstantF, 0, GREEN, 1);
+        CK(SetStreamSource, 0, vb.p, 0, 8);
+        return answer("DrawPrimitive (stride 8)", dev->DrawPrimitive(D3DPT_TRIANGLESTRIP, 0, 2),
+                      strictMode ? D3DERR_NOTAVAILABLE : D3D_OK);
     });
 }
 
-static void buffersRows(IDirect3DDevice9 *d, bool strict) {
+// Whether `name` is one of the comma-separated names in `list`.
+static bool listed(const char *list, const char *name) {
+    const size_t n = strlen(name);
+    for (const char *p = list; p; p = strchr(p, ',')) {
+        if (*p == ',') p++;
+        if (!strncmp(p, name, n) && (p[n] == ',' || !p[n])) return true;
+    }
+    return false;
+}
+// The rows named in `skip` (comma-separated) print "skip" and do not run.
+static void buffersRows(IDirect3DDevice9 *d, bool strict, const char *skip) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
         {"buf-d3d", rowBufD3d},           {"buf-lock", rowBufLock},         {"buf-draw", rowBufDraw},
         {"buf-start", rowBufStart},       {"buf-offset", rowBufOffset},     {"buf-strip", rowBufStrip},
@@ -6200,12 +6483,18 @@ static void buffersRows(IDirect3DDevice9 *d, bool strict) {
         {"buf-held", rowBufHeld},         {"buf-relock", rowBufRelock},     {"buf-streams", rowBufStreams},
         {"buf-null", rowBufNull},         {"buf-null-up", rowBufNullUp},    {"buf-zero-stride", rowBufZeroStride},
         {"buf-instanced", rowBufInstanced}, {"buf-shader", rowBufShader},   {"buf-tex", rowBufTex},
-        {"buf-nobuffer", rowBufNoBuffer}, {"buf-release", rowBufRelease},   {"buf-refused", rowBufRefused}};
+        {"buf-nobuffer", rowBufNoBuffer}, {"buf-release", rowBufRelease},   {"buf-odd", rowBufOdd},
+        {"buf-cross", rowBufCross},       {"buf-cross-up", rowBufCrossUp},  {"buf-cross-multi", rowBufCrossMulti},
+        {"buf-cross-odd", rowBufCrossOdd}, {"buf-cross-indexed", rowBufCrossIndexed}, {"buf-wide", rowBufWide}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
         hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
     for (const auto &r : rows) {
+        if (listed(skip, r.name)) {
+            printf("d3d9 %s skip\n", r.name);
+            continue;
+        }
         why[0] = 0;
         bool ok;
         if (FAILED(hr)) ok = fail("GetRenderTarget/CreateOffscreenPlainSurface", hr);
@@ -6236,6 +6525,8 @@ int main(int argc, char **argv) {
     const bool buffersMode = !bench && argc > 1 && !strcmp(argv[1], "buffers");
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
+    const bool bufBench = bench && argc > 4 && !strcmp(argv[4], "buf");
+    const bool dynBench = bench && argc > 4 && !strcmp(argv[4], "dyn");
     WNDCLASSW wc = {};
     wc.lpfnWndProc = DefWindowProcW;
     wc.hInstance = GetModuleHandleW(nullptr);
@@ -6273,7 +6564,12 @@ int main(int argc, char **argv) {
                            {240, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)},
                            {16, 240, 0.5f, 1, D3DCOLOR_XRGB(255, 0, 0)}};
     if (buffersMode) {
-        buffersRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        bool strict = false;
+        const char *skip = "";
+        for (int i = 2; i < argc; i++)
+            if (!strcmp(argv[i], "strict")) strict = true;
+            else if (!strncmp(argv[i], "skip=", 5)) skip = argv[i] + 5;
+        buffersRows(dev, strict, skip);
         dev->Release();
         d3d->Release();
         DestroyWindow(hwnd);
@@ -6365,20 +6661,14 @@ int main(int argc, char **argv) {
         }
         dev->SetFVF(texBench ? FVF_T2 : D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
         int failedDraws = 0;
-        // lit (DXMTRS C4b-3c): the triangle untransformed through the fixed-function vertex stage, one directional
-        // light on a 0.8 red material; a frame read back before the timed loop must show the lit colour at the
-        // centre (counted with the failed draws), so the line's numbers are a lit draw's.
-        FN ltri[3] = {{0, 0.875f, 0.5f, 0, 0, -1}, {0.875f, -0.875f, 0.5f, 0, 0, -1}, {-0.875f, -0.875f, 0.5f, 0, 0, -1}};
-        if (litBench) {
-            if (!(rstate(D3DRS_LIGHTING, TRUE) && lightOn(0, ldir(1, 1, 1)) && material(0.8f, 0, 0)))
-                return printf("d3d9 bench FAIL %s\n", why), failures + 1;
-            dev->SetFVF(FVF_N);
+        // One frame of draw() over the blue clear, read back: its centre, or 0 when it cannot be read.
+        const auto centreOf = [&](auto draw) {
             IDirect3DSurface9 *brt = nullptr, *bsys = nullptr;
             D3DLOCKED_RECT lr = {};
             DWORD centre = 0;
             dev->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 255), 1.0f, 0);
             dev->BeginScene();
-            failedDraws += FAILED(dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, ltri, sizeof *ltri));
+            draw();
             dev->EndScene();
             if (SUCCEEDED(dev->GetRenderTarget(0, &brt)) &&
                 SUCCEEDED(dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &bsys, nullptr)) &&
@@ -6389,8 +6679,58 @@ int main(int argc, char **argv) {
             dev->Present(nullptr, nullptr, nullptr, nullptr);
             if (bsys) bsys->Release();
             if (brt) brt->Release();
+            return centre;
+        };
+        // lit (DXMTRS C4b-3c): the triangle untransformed through the fixed-function vertex stage, one directional
+        // light on a 0.8 red material; a frame read back before the timed loop must show the lit colour at the
+        // centre (counted with the failed draws), so the line's numbers are a lit draw's.
+        FN ltri[3] = {{0, 0.875f, 0.5f, 0, 0, -1}, {0.875f, -0.875f, 0.5f, 0, 0, -1}, {-0.875f, -0.875f, 0.5f, 0, 0, -1}};
+        if (litBench) {
+            if (!(rstate(D3DRS_LIGHTING, TRUE) && lightOn(0, ldir(1, 1, 1)) && material(0.8f, 0, 0)))
+                return printf("d3d9 bench FAIL %s\n", why), failures + 1;
+            dev->SetFVF(FVF_N);
+            const DWORD centre = centreOf([&] {
+                failedDraws += FAILED(dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, ltri, sizeof *ltri));
+            });
             // mtld3d may leave the first draw out while its pipeline builds: only a wrong colour counts, not blue.
             if (centre != 0xcc0000 && centre != 0x0000ff) failedDraws++, printf("d3d9 bench lit centre %06lx\n", (unsigned long)centre);
+        }
+        // buf and dyn (DXMTRS C4c-2a): the triangle (offset as ff's) from a vertex buffer, `cursor` dyn's next
+        // triangle. bufDraw(d) is draw d's failures: buf's DrawPrimitive; dyn's Lock (NOOVERWRITE, DISCARD at
+        // triangle 0), Unlock and DrawPrimitive.
+        Com<IDirect3DVertexBuffer9> benchVb;
+        UINT cursor = 0;
+        const auto triAt = [&](int d, Vertex *v) {
+            for (int k = 0; k < 3; k++) v[k] = tri[k], v[k].x += (float)(d & 7) * 0.125f;
+        };
+        const auto bufDraw = [&](int d) {
+            if (bufBench) return (int)FAILED(dev->DrawPrimitive(D3DPT_TRIANGLELIST, 3 * d, 1));
+            const UINT at = cursor;
+            cursor = (cursor + 1) % 256;
+            void *p = nullptr;
+            if (FAILED(benchVb.p->Lock(at * sizeof tri, sizeof tri, &p, at ? D3DLOCK_NOOVERWRITE : D3DLOCK_DISCARD)))
+                return 1;
+            triAt(d, (Vertex *)p);
+            return (int)FAILED(benchVb.p->Unlock()) + (int)FAILED(dev->DrawPrimitive(D3DPT_TRIANGLELIST, 3 * at, 1));
+        };
+        if (bufBench || dynBench) {
+            const UINT n = dynBench ? 256 : benchDraws > 0 ? benchDraws : 1;
+            Vertex *v = nullptr;
+            hr = dev->CreateVertexBuffer(n * sizeof tri, D3DUSAGE_WRITEONLY | (dynBench ? D3DUSAGE_DYNAMIC : 0), FVF_RV,
+                                         D3DPOOL_DEFAULT, &benchVb.p, nullptr);
+            if (SUCCEEDED(hr) && bufBench && SUCCEEDED(hr = benchVb.p->Lock(0, 0, (void **)&v, 0))) {
+                for (UINT d = 0; d < n; d++) triAt(d, v + 3 * d);
+                hr = benchVb.p->Unlock();
+            }
+            if (SUCCEEDED(hr)) hr = dev->SetStreamSource(0, benchVb.p, 0, sizeof(Vertex));
+            if (FAILED(hr)) return printf("d3d9 bench FAIL vertex buffer %08lx\n", (unsigned long)hr), failures + 1;
+            // A dropped buffer draw answers D3D_OK: frames are read back until one's centre is red, for up to 10 s
+            // (mtld3d leaves a draw out while its pipeline builds), else one more failure.
+            DWORD centre = 0;
+            for (const ULONGLONG end = GetTickCount64() + 10000; centre != 0xff0000 && GetTickCount64() < end;)
+                centre = centreOf([&] { failedDraws += bufDraw(0); });
+            if (centre != 0xff0000)
+                failedDraws++, printf("d3d9 bench %s centre %06lx\n", bufBench ? "buf" : "dyn", (unsigned long)centre);
         }
         QueryPerformanceCounter(&t0);
         for (int i = 0; i < benchFrames; i++) {
@@ -6398,6 +6738,10 @@ int main(int argc, char **argv) {
                        D3DCOLOR_XRGB(0, 0, 255), 1.0f, 0);
             dev->BeginScene();
             for (int d = 0; d < benchDraws; d++) {
+                if (bufBench || dynBench) {
+                    failedDraws += bufDraw(d);
+                    continue;
+                }
                 if (prog) {
                     const float m[4][4] = {{1, 0, 0, (float)(d & 7) * 0.125f / 128}, {0, 1, 0, 0}, {0, 0, 1, 0},
                                            {0, 0, 0, 1}};
@@ -6432,7 +6776,8 @@ int main(int argc, char **argv) {
         mem.dwLength = sizeof mem;
         GlobalMemoryStatusEx(&mem);
         printf("d3d9 bench: mode %s frames %d draws %d wall_ms %.1f cpu_ms %.1f vm_used_mb %llu failed %d\n",
-               prog ? "prog" : texBench ? (depthBench ? "texdepth" : "tex") : litBench ? "lit" : "ff", benchFrames, benchDraws,
+               bufBench ? "buf" : dynBench ? "dyn" : prog ? "prog" : texBench ? (depthBench ? "texdepth" : "tex")
+               : litBench ? "lit" : "ff", benchFrames, benchDraws,
                (double)(t1.QuadPart - t0.QuadPart) * 1e3 / (double)f.QuadPart, ms(user) + ms(kernel),
                (unsigned long long)((mem.ullTotalVirtual - mem.ullAvailVirtual) >> 20), failedDraws);
         dev->Release();

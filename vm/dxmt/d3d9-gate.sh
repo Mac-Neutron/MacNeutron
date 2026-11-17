@@ -26,8 +26,8 @@
 # fixed-function draw (line "mode ff"), benchp-* the vs_2_0/ps_2_0 one (DXMTRS C4b2-12, "mode prog").
 # Every lane checks d3d9_triangle's 22 shader rows (DXMTRS C4b-2, C4b2-11) for x86-64 and i386 (shd64-fresh,
 # shd32-fresh; "shaders strict" under core: the first frame must match). Under core a launch's logs also hold no core
-# refusal line ("... is not implemented under runtime.mode = core"), but for the shd* rows exactly one, the crossing
-# row's (C4b2-8: its name says "crossing"). Every lane also checks d3d9_triangle state's 12 rows (DXMTRS C4b-3a,
+# refusal line ("... is not implemented under runtime.mode = core"), the shd* rows' none since DXMTRS C4c-2a, which
+# draws the crossing row. Every lane also checks d3d9_triangle state's 12 rows (DXMTRS C4b-3a,
 # st64-fresh, st32-fresh); under core their logs hold no refusal line (since DXMTRS C4c-1: buffer locks are the core's).
 # Every lane also checks d3d9_triangle textures' 39 rows (DXMTRS C4b-3b and C4b-3c's vertex textures, tx64-fresh,
 # tx32-fresh), and tx32-fresh the 32-bit-only tex-big256 (the staged-bytes budget); under core their logs hold exactly
@@ -43,9 +43,9 @@
 # rows (DXMTRS C4b-3d4: render targets at index 1-3; mr64-fresh, mr32-fresh); under core their logs hold no refusal
 # line. Every lane also checks d3d9_triangle msaa's 17 rows (DXMTRS C4b-3d5: multisampling, on a device whose back
 # buffer and auto depth-stencil have 4 samples; ms64-fresh, ms32-fresh); under core their logs hold exactly one refusal line (a StretchRect
-# that is no multisample resolve). Every lane also checks d3d9_triangle buffers' 27 rows (DXMTRS C4c-1: vertex and
-# index buffers and the draws that read them; bf64-fresh, bf32-fresh); under core their logs hold exactly its two
-# refusal lines (an attribute crossing the stride, a stream offset off four bytes).
+# that is no multisample resolve). Every lane also checks d3d9_triangle buffers' 33 rows (DXMTRS C4c-1 and C4c-2a:
+# vertex and index buffers and the draws that read them; bf64-fresh, bf32-fresh); under core their logs hold exactly
+# its one refusal line (a layout no binding can fetch: buf-wide's attribute wider than its stride).
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -203,7 +203,8 @@ done
 for r in bf64-fresh bf32-fresh; do
   for row in buf-d3d buf-lock buf-draw buf-start buf-offset buf-strip buf-fan buf-indexed buf-index32 buf-base buf-ifan \
     buf-managed buf-dynamic buf-order buf-discard buf-held buf-relock buf-streams buf-null buf-null-up buf-zero-stride \
-    buf-instanced buf-shader buf-tex buf-nobuffer buf-release buf-refused; do
+    buf-instanced buf-shader buf-tex buf-nobuffer buf-release buf-odd buf-cross buf-cross-up buf-cross-multi \
+    buf-cross-odd buf-cross-indexed buf-wide; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
@@ -213,28 +214,26 @@ for r in st64-fresh st32-fresh; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
-# core: runtime <folder> [crossing|textures|fixed|depth|stretch|buffers]: the core device's line in a launch's logs,
-# none of mtld3d.so's encoder line nor of the core's can't-present or dropped-draw lines (the code that ran prints them,
-# not the switch), and no refusal line, or with "crossing" exactly one, the crossing row's, with "textures", "fixed",
-# "depth" or "buffers" exactly that launch's refused rows' (texture_refusals, fixed_refusals, depth_refusals,
-# buffers_refusals: DXMTRS C4c-1's crossing attribute and offset off four bytes). The state,
-# blend and mrt launches (DXMTRS C4b-3a, C4b-3d3, C4b-3d4) take no kind: no refusal line (the state launch's since
-# DXMTRS C4c-1: buffer locks are the core's). The targets and msaa launches take "stretch": exactly the one StretchRect
-# that is no multisample resolve (stretch_refusals, DXMTRS C4b-3d5).
+# core: runtime <folder> [textures|fixed|depth|stretch|buffers]: the core device's line in a launch's logs, none of
+# mtld3d.so's encoder line nor of the core's can't-present or dropped-draw lines (the code that ran prints them, not the
+# switch), and no refusal line, or with "textures", "fixed", "depth" or "buffers" exactly that launch's refused rows'
+# (texture_refusals, fixed_refusals, depth_refusals, buffers_refusals: DXMTRS C4c-2a's layout no binding can fetch).
+# The shaders, state, blend and mrt launches (DXMTRS C4b-2, C4b-3a, C4b-3d3, C4b-3d4) take no kind: no refusal line
+# (the shaders launch's since DXMTRS C4c-2a, which draws the crossing row; the state launch's since DXMTRS C4c-1:
+# buffer locks are the core's). The targets and msaa launches take "stretch": exactly the one StretchRect that is no
+# multisample resolve (stretch_refusals, DXMTRS C4b-3d5).
 refused='is not implemented under runtime.mode = core'
 texture_refusals='IDirect3DTexture9::LockRect (a render-target or depth texture)'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
 stretch_refusals='IDirect3DDevice9::StretchRect (other than a multisample resolve)'
 depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)
 IDirect3DTexture9::LockRect (a render-target or depth texture)'
-buffers_refusals='IDirect3DDevice9::Draw*Primitive (an attribute crossing the stride)
-IDirect3DDevice9::Draw*Primitive (a stream offset off four bytes)'
+buffers_refusals='IDirect3DDevice9::Draw*Primitive (a layout no binding can fetch)'
 runtime() {
   n=$(/usr/bin/grep -rhF "$refused" "$1" 2> /dev/null | wc -l | tr -d ' ')
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
     && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form' "$1" \
     && case ${2:-} in
-      crossing) [ "$n" = 1 ] && /usr/bin/grep -rhF "$refused" "$1" | /usr/bin/grep -qi crossing ;;
       textures|fixed|depth|stretch|buffers)
         case $2 in
           textures) set_=$texture_refusals ;; fixed) set_=$fixed_refusals ;; depth) set_=$depth_refusals ;;
@@ -248,9 +247,6 @@ runtime() {
 if [ "$RT" = core ]; then
   for r in tri64-fresh tri32-fresh tri64-updated tri32-updated; do
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
-  done
-  for r in shd64-fresh shd32-fresh; do
-    check "$r runtime core" "$(runtime "$G/logs/$r" crossing)" ok
   done
   for r in tx64-fresh tx32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" textures)" ok
@@ -267,7 +263,7 @@ if [ "$RT" = core ]; then
   for r in bf64-fresh bf32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" buffers)" ok
   done
-  for r in st64-fresh st32-fresh bl64-fresh bl32-fresh mr64-fresh mr32-fresh; do
+  for r in shd64-fresh shd32-fresh st64-fresh st32-fresh bl64-fresh bl32-fresh mr64-fresh mr32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
   done
 fi

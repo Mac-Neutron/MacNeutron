@@ -3,7 +3,8 @@
 # (=0 or another value checks none), the ff and prog rows (8 under old WoW64), and a trace re-check never rewrites a
 # saved run's rows under vm-work/d3d9-bench; a bench line of the other mode fails its row; the shader rows (DXMTRS
 # C4b-2): a shd*-fresh trace with all 22 rows passes, one missing a row fails it; under D3D9_RUNTIME=core a shd* launch
-# whose logs lack the core device's line, or hold a refusal line other than the crossing row's, fails its runtime row.
+# whose logs lack the core device's line, or hold a refusal line (the crossing row's too since DXMTRS C4c-2a), fails
+# its runtime row.
 # Prints "d3d9-gate-bench-test: ok" or "FAIL <what>".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -51,25 +52,24 @@ want "a prog bench row with an ff line fails" \
   "$(printf '%s\n' "$out" | /usr/bin/grep -c '^FAIL benchp-32-600 bench:' || true)" 1
 [ "$(cat "$saved")" = "d3d9 bench: saved" ] || { echo "FAIL a trace re-check rewrote the saved row: '$(cat "$saved")'"; fail=1; }
 
-# Core: shd64-fresh's logs with the device line and the crossing row's refusal pass; shd32-fresh's with another
-# refusal beside it fail; tri64-fresh's without the device line fail.
+# Core: shd64-fresh's logs with the device line and no refusal pass; shd32-fresh's with the crossing row's refusal
+# (which the core draws since DXMTRS C4c-2a) fail; tri64-fresh's without the device line fail.
 dev='d3d9 core: device on dxmt-core'
 refused='is not implemented under runtime.mode = core → D3DERR_NOTAVAILABLE'
 mkdir -p "$F/logs/shd64-fresh" "$F/logs/shd32-fresh" "$F/logs/tri64-fresh"
+echo "$dev" > "$F/logs/shd64-fresh/d3d9.log"
 printf '%s\nd3d9 core: IDirect3DDevice9::DrawPrimitiveUP (an attribute crossing the stride) %s\n' "$dev" "$refused" \
-  > "$F/logs/shd64-fresh/d3d9.log"
-cp "$F/logs/shd64-fresh/d3d9.log" "$F/logs/shd32-fresh/d3d9.log"
-echo "d3d9 core: IDirect3DDevice9::SetTexture $refused" >> "$F/logs/shd32-fresh/d3d9.log"
+  > "$F/logs/shd32-fresh/d3d9.log"
 echo "frames: 10" > "$F/logs/tri64-fresh/d3d9.log"
 out=$(gate "$F" D3D9_RUNTIME=core)
-want "core: shd64-fresh with the crossing refusal alone passes" \
+want "core: shd64-fresh with no refusal passes" \
   "$(printf '%s\n' "$out" | /usr/bin/grep -c '^ok   shd64-fresh runtime core$' || true)" 1
-want "core: shd32-fresh with another refusal fails" \
+want "core: shd32-fresh with the crossing refusal fails" \
   "$(printf '%s\n' "$out" | /usr/bin/grep -c '^FAIL shd32-fresh runtime core:' || true)" 1
 want "core: tri64-fresh without the device line fails" \
   "$(printf '%s\n' "$out" | /usr/bin/grep -c '^FAIL tri64-fresh runtime core:' || true)" 1
-cp "$F/logs/shd64-fresh/d3d9.log" "$F/logs/tri64-fresh/d3d9.log"
-want "core: a tri row with the crossing refusal fails" \
+cp "$F/logs/shd32-fresh/d3d9.log" "$F/logs/tri64-fresh/d3d9.log"
+want "core: a tri row with a refusal fails" \
   "$(gate "$F" D3D9_RUNTIME=core | /usr/bin/grep -c '^FAIL tri64-fresh runtime core:' || true)" 1
 [ $fail = 0 ] && echo "d3d9-gate-bench-test: ok"
 exit $fail
