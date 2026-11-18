@@ -465,3 +465,76 @@ Core at the base (before any code): **R** red by design, **G** green already. Th
   Present; `rt-nolock`'s cells; the colours' rule; the forward declaration; the caller ledger with
   `read_level_from_gpu`; the scripts' prose and `sh -n`; the stale comment's line; the flakes' literals and
   the HID test; the Goal's claim marked as the map's reading with the sweep to check it; the budget.
+
+## Execution notes
+
+- **Tips.** Both mains moved before the first build (MacNeutron 4f09d8a6, the nvapi row's fix from its own
+  session; DXMTRS af3b41af, a docs commit), so the base named in Global Constraints became DXMTRS af3b41af and
+  MacNeutron 4f09d8a6 (`c4c` fast-forwarded with no commit of its own yet, `c4c-mn` rebased). DXMTRS `c4c` over
+  af3b41af: b8cd2d75 (`read_presented`, the shared recording body, Present's resolve as a helper), 085e0956
+  (the lockable target: lock arm, read step, Unlock's upload, no blit destination), 68633b9f (the back buffer
+  `READONLY`, the two named refusals, Unlock's second spot), b0bf398a (the texture arm), 3c366067 (the front
+  buffer), a1d45dd5 (the final review's fix). Each passed rust-check before its commit. MacNeutron `c4c-mn`
+  over 4f09d8a6: the plan, 95004a33 (Task 1), this commit. The work was paused from 20:05 to 23:03 at the
+  maintainer's word (the Mac slept through it; the two jobs that spanned the sleep passed).
+- **Controls** (before any code, base af3b41af / 4f09d8a6; each failing set written in the ledger before its
+  run). `jb`: the base built plain gives the wanted key (e1074f4f…) and 26 imports. `ja`: every new row green
+  on mtld3d (default, msl) at the first run, no expectation corrected; core red on exactly the eleven
+  predicted tokens. `jv0`: targets, textures and msaa on mtld3d under Metal's validation layer, 0 reports.
+  `jcr`: the VM's default lane on old WoW64 ok.
+- **Ruling T1-1.** `ms-bblock` locks the whole multisampled back buffer, not a point, so mutant f (the rect's
+  origin) is red in the targets launch alone and mutant h's expectation reads "frame A's lilac, or unwritten
+  memory on a hidden window". Cost if wrong: the rect path on a multisampled device has no cell (`rt-bblock`
+  holds the rect path, `ms-bblock` the resolve).
+- **Ruling T2-1.** The shared body is two functions (validate, then resolve, then record), so a refused read
+  records nothing on a multisampled back buffer; `read_presented` is `#[must_use]`; `read_back` now answers
+  false for a zero-width source, a pitch product past `usize` and a read of 4 GiB or more, where it panicked
+  or overflowed. Stated: the blit's origin has no unit test (mutant f, ruling 10); a null mapping answers
+  false after the resolve and the blit were recorded. Cost if wrong: none on a path a row takes.
+- **Ruling T3-1.** No warning on a failed `try_begin_lock` (mtld3d logs none there); the arms test
+  `core_texture.is_some()`, set only on a core device; an upload that fails on an unmapped ring block logs two
+  lines. Cost if wrong: log wording.
+- **Ruling T4-1.** An additional swap chain's back buffer is told by `SurfaceFlags::PINS_SWAP_CHAIN`; the
+  back buffer's read arm sits after mtld3d's shared rect, empty, format and pitch checks; the device's
+  `GetFrontBufferData` timer now starts on core. Cost if wrong: none a row sees.
+- **Ruling T7-1.** The chain's `jm` stopped at mutant e: it did not compile (`SurfaceInner::core_texture` is
+  behind the `core-runtime` feature and the build answered "no field `core_texture`" for the d3d9 lib; the
+  generator named the field outside a `cfg`; which of the build's d3d9 libs lacks the feature was not looked up).
+  The mutation is unchanged with the `cfg` on its line; `jm2`
+  reuses the four mutants already built, builds the rest and the tip. Cost if wrong: none for the slice; a
+  mutant that cannot compile gates nothing, so it was rebuilt, not dropped.
+- **Gates** (the chain at a1d45dd5 + 95004a33, 2026-11-18 00:28-01:45). `jt3` (after Task 3): default ok; core
+  red on exactly the nine predicted tokens. `jt6` (after Task 6): default ok, core ok, every row green strict.
+  `jr`: key and imports equal the base's, d3d9-check default ok, conformance with only triaged sites
+  (`visual` 30 of 211219), the x64 check all passed. `jc`: the VM's D3D9 gate ok on default and core, old and
+  new WoW64. `jq`: d3d9-check ok on default, msl, core; stateblock on both runtimes; ten core launches under
+  the validation layer, 0 reports. `jm2` (02:26): nine mutants, each red on its named row alone and on the texel
+  or answer `mutants-expect.txt` named beforehand (a: (12,12) reads zeros; b: (48,16) keeps the clear colour;
+  c: the scribble at (48,48) reaches the target; d: `GetRenderTargetData` into the lockable target answers
+  `D3D_OK`; e: the rect's texel stays at (8,8); f: the rect reads the corner; g: level 0 reads zeros; h: both
+  multisample rows read the frame presented before; i: level 1's lock answers `INVALIDCALL`), nothing outside
+  the mutant's launch, the tip green under core.
+- **Final review** (`build/c4c/s3/review-final.md`, range af3b41af..3c366067): 0 Critical, 1 Important, 6
+  Minor. Traced sound: no recorder call is reachable from an entry point the range opens on a core device; the
+  default runtime's hunks are core arms keyed on what is false or `None` there; Present's resolve moved
+  unchanged. Fixed (a1d45dd5): I1 the front buffer's arm repeated `GetRenderTargetData`'s raw page-slice tail,
+  now one helper (`core_read_into`) both call, the one stated difference being that a failed address
+  conversion in `GetRenderTargetData` answers `INVALIDCALL` where it fell to mtld3d's path (unreachable on a PE
+  target); M1 `rect_bytes` refuses a zero-byte texel; M4 a doc line. Ledgered, no fix round: M2 the lockable
+  read rebuilds the target `core_target()` answers (it would touch mtld3d's shared signature); M3 a full
+  back-buffer lock aborts when its page cannot be allocated, on both runtimes (cost: an abort instead of
+  `INVALIDCALL` in a process out of address space); M6 the commits carry subjects only. Not covered by a row:
+  `IDirect3DTexture9::LockRect` of a depth-stencil-usage texture (`INVALIDCALL` under core now), a rect lock of
+  a render-target texture level (the partial upload), `GetFrontBufferData` into a level of a system-memory
+  texture, `UnlockRect` of a render-target level's surface.
+- **Sweep** (`build/c4c/s3/sweep.md`, job `jw`, gates nothing). `visual` and `device` run to their end under
+  core for the first time (`visual` 2431 failed of 211208 against 30 of 211219 on the default runtime;
+  `device` 1871 of 56686, about 100000 checks not executed, not traced to their tests); the Goal's claim about
+  `getPixelColorFromSurface` held. `d3d9ex` still dies in `test_reset` (`Reset` refused, a null depth-stencil
+  surface). The new failures are refusals by name but two, neither traced in the code: a volume texture bound where the
+  pixel function samples a 2D one (`volume_srgb_test`: black texels, and Metal's validation report six times in
+  the run, undefined behaviour without the layer), and `D3DSAMP_SRGBTEXTURE` (`srgbtexture_test`: with
+  0x7e41882a, 100 and 2 the texel comes out converted under core, unconverted on mtld3d). Neither is this
+  slice's code. `StretchRect`'s other shapes are
+  about 2770 of the 3356 new failures; `GetDC` is the largest of C4c-3b's (231).
+- **No probe.** The slice adds no per-draw or per-frame work on a path a bench takes.

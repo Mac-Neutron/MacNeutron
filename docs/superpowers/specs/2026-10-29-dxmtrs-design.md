@@ -1195,7 +1195,8 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   line the gates fail on. A static default-pool WRITEONLY vertex buffer releases its backing after its upload by
   mtld3d's rule and guards, and a backing a later windowed lock re-creates is uploaded at the Unlock that ends the
   lock, as mtld3d uploads each window, so two windows locked before a draw never upload the zeros between them. Index
-  buffers keep their backing (a fan reads it; read-back is C4c-3). The count is one ledger in d3d9-rt (`Retained`):
+  buffers that are staged keep their backing (a fan reads it; a directly mapped index buffer has none and a fan reads
+  it through `dynamic_copy`; the static WRITEONLY release is C4c-3b's). The count is one ledger in d3d9-rt (`Retained`):
   a renamed-away name's size and a staged buffer upload's length enter at the chunk being recorded and leave when the
   GPU has retired it; at `memory.vbibRetentionCapMB` (512 MiB, 0 for none, textures not counted) the API thread waits
   for the oldest before a new name or an upload. Gated: six `d3d9_triangle buffers` rows (39 in all) in every D3D9
@@ -1232,13 +1233,54 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   against 468 MB) and 1.98 against 1.88 on mtld3d; draws from a static buffer 2.63 against 2.73 and 1.97 against 1.58;
   textured UP draws 2.32 against 2.30 and 1.65 against 1.52. The dynamic path costs the core what its other draws
   cost; what is left over mtld3d is the core's per-draw cost, C4d's work.
+  C4c-3a done 2026-11-18 at DXMTRS main a1d45dd5, which MacNeutron pins: colour read back through locks on the core
+  runtime, on the two primitives it had (`read_back`, `texture_upload`). C4c-3 was split (ruling S-2): 3a is this; 3b
+  is what needs a new primitive. d3d9-rt gains `read_presented`: a rect of the back buffer as Present would show it
+  now, a multisampled back buffer first resolved into the presented texture by the resolve Present records (mtld3d
+  resolves at every flush, so its lock and its front buffer return the frame as drawn so far); `read_back` shares its
+  body, and the device's read-back buffer only grows. In the front end the arms sit inside mtld3d's own functions,
+  where a core device's null handles would otherwise take the wrong branch without a word. A lockable render target
+  keeps its staging: `LockRect` runs mtld3d's `lockable_rt_lock_rect` whole, its read-back step being the core's read
+  of the target (skipped under `DISCARD`), and `UnlockRect` uploads the staging whole at record time unless the lock
+  was `READONLY`; it is no `GetRenderTargetData` or `GetFrontBufferData` destination. The back buffer locks
+  `READONLY` through mtld3d's `backbuffer_lock_readback`, the read being `read_presented` into a zeroed page of the
+  rect. A render-target texture's level locks through `IDirect3DTexture9::LockRect`: one arm at the head of
+  `materialize_subresource_from_gpu`, the seam every reader passes, flushes the texture's CPU writes, reads the level
+  into its staging and fails the lock with an error line when it cannot (no branch answers success over unread
+  staging); what the lock writes goes up at `UnlockRect` as before. `GetFrontBufferData`, both forms, is
+  `read_presented` of the whole back buffer after mtld3d's checks; it and `GetRenderTargetData` form their
+  destination's bytes in one helper. A non-lockable or multisampled target, a depth-stencil surface and a
+  `GetSurfaceLevel` or `GetCubeMapSurface` surface of a target or depth texture answer mtld3d's `INVALIDCALL`.
+  Refused by name under core, 3b's: a writable lock of the back buffer (a device made with
+  `D3DPRESENTFLAG_LOCKABLE_BACKBUFFER`), a lock of an additional swap chain's back buffer (it aliases the device's),
+  the lock of a DYNAMIC depth-format texture, `GetDC`, `ReleaseDC`, `IDirect3DSurface9::PreLoad`.
+  Kept, mtld3d's and now the core's too:
+  a DEFAULT render-target texture's `LockRect` succeeds; the back buffer locks `READONLY` without the lockable flag;
+  a `READONLY` back-buffer lock reports the rect's own pitch; the front buffer is the back buffer as it is now.
+  Gates at the tips (a1d45dd5 + MacNeutron 95004a33): the translator key and the imports equal the base's; the D3D9
+  gate ok on default, msl and core on the Mac, and on default and core in the VM on old and new WoW64; conformance
+  with only triaged sites; the x64 check whole; ten core launches under Metal's validation layer, 0 reports;
+  nine mutants each red on its named row alone, on the texel named beforehand. The whole-branch review found
+  nothing Critical and one Important, fixed (the
+  front buffer's arm repeated a raw page-slice tail; one helper now). No row covers `IDirect3DTexture9::LockRect`
+  of a depth-stencil-usage texture, a rect lock of a render-target level, `GetFrontBufferData` into a level of a
+  system-memory texture, or `UnlockRect` of a render-target level's surface. Kept open: a full back-buffer lock
+  aborts when its page cannot be allocated (both runtimes). No probe: nothing a bench's frame takes changed.
   C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
   offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer count and its cap
-  (done); 3 read-back in all its forms
-  (`LockRect` of a target and of the back buffer first: `visual`'s fatal call); 4 `StretchRect`'s other shapes,
-  `ColorFill`, `UpdateSurface`; 5 queries; 6 `Reset`, the getters, the swap chain's presents; 7 gamma, frame latency,
-  the device's information from winemetal, the `Ex` creators, and the conformance lane for `visual`, `device` and
-  `d3d9ex` under core, which is C4c's gate. The next sweep is after slice 3.
+  (done); 3a colour read-back through locks (lockable targets, the back buffer read-only, render-target texture
+  levels, the front buffer; done); 3b the writable back-buffer lock, an additional swap chain's back buffer, `GetDC`,
+  the surface's `PreLoad`, the DYNAMIC depth texture's lock, the static WRITEONLY index buffer's release;
+  4 `StretchRect`'s other
+  shapes, `ColorFill`, `UpdateSurface`; 5 queries; 6 `Reset`, the getters, the swap chain's presents; 7 gamma, frame
+  latency, the device's information from winemetal, the `Ex` creators, and the conformance lane for `visual`, `device`
+  and `d3d9ex` under core, which is C4c's gate.
+  The sweep after 3a (`build/c4c/s3/sweep.md`, gating nothing): `visual` and `device` run to their end
+  under core (2431 failed of 211208; 1871 of 56686, about 100000 checks not executed), `d3d9ex` dies in
+  `test_reset`; the new failures are refusals by name (`StretchRect`'s other shapes about 2770 of 3356) but two
+  silent ones, not traced yet and owed where their code is next touched: a volume texture bound where the pixel
+  function samples a 2D one (Metal's validation reports it; undefined without the layer), and
+  `D3DSAMP_SRGBTEXTURE` for values other than 0 and 1 (converted under core, not on mtld3d).
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
