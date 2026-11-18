@@ -535,3 +535,85 @@ Important, 7 Minor; R2 0 Critical, 4 Important, 5 Minor; R3 0 Critical, 12 Impor
   `jm` reuses `jmb`'s builds, the map. f14 → the predicted tokens stand; no interim literal is left. f15 →
   the GDI rules. f16 → `core_refuses_lock` in Task 6. f17 → the three budget places. f18 → `jcr` on new WoW64
   too, `DXMT_CHECK_WORK` for `jm`. f19 → the refusals' places, the copied lines.
+
+## Execution notes
+
+- **Tips.** DXMTRS `c4c` over a1d45dd5: 7f201433 (`write_presented`, the ring helper `stage_rows` and the shared
+  `upload` body), 90031c48 (`depth_upload`, `DepthPlanes`, `plane_copies`), fb1abcd2 (the back buffer's two arms,
+  3a's Unlock arm deleted, the chain's refusals removed), 6a9e6e5a (device contexts and `PreLoad`), 4eea8d68 (the
+  dynamic depth texture). Each passed rust-check before its commit. MacNeutron `c4c-mn` over 288a0195: the plan,
+  e043b36e (Task 1), this commit.
+- **Order.** The two d3d9-rt primitives were written while the controls ran (ruling T2-2: a primitive is judged
+  by its unit tests and no row's expectation can be bent to it); the front end's arms after every row was green
+  on mtld3d. Tasks 4 and 6 went to one implementer, so the plan's lane `jt4` was folded into `jt6` (ruling
+  T3-0).
+- **Ruling T1-0.** No `jb`: the base is 3a's tip, whose plain build's key and imports 3a's `jr` and post-push
+  check had just measured; `base-key.txt` and `base-imports.txt` are copies of 3a's. Cost if wrong: none.
+- **Controls** (base a1d45dd5 + e043b36e; each failing set written in the ledger before its run). `ja`: every
+  new row green on mtld3d (default, msl) at the first run, no expectation corrected, the two D24S8 level cells
+  included; core red on exactly the eleven predicted tokens, each row on its refusal. `jv0`: targets and depth
+  on mtld3d under Metal's validation layer, 0 reports. `jcr`: the VM's default lane ok on old and new WoW64.
+- **Ruling T1-1.** `direct3d`'s definition moved up to the globals (a static cannot be forward-declared: this
+  plan's wording was wrong); `rt-chain` passes a null `hDeviceWindow` (`GetCreationParameters` is refused under
+  core and would add a refusal line; mtld3d resolves null to the device's window); the lockable device is made
+  once a row, outside `until()`, with the guard inside each attempt, and its window is visible; the Makefile's
+  pattern rules give every test program `-lgdi32`. Cost if wrong: the controls judged.
+- **An incident.** Task 1's implementer ran `dxmt/toolchain.sh` in the worktree to find the compiler: it started
+  an llvm-mingw build there, outside the pipeline lock, for about two minutes, then stopped it and deleted what
+  it had made. Checked: the worktree clean, no process left, the main checkout's toolchain untouched, no gate
+  overlapped. Later briefs name the toolchain's path and forbid the script.
+- **Ruling T2-1.** `write_presented` lives in `textures.rs` (the body and `Blit` stay private) and reuses
+  `rect_bytes` (so a write of 4 GiB or more is refused too); `stage_rows` packs tight and allocates inside, so
+  `depth_upload` calls it once a plane: **two ring allocations, not this plan's one block with a 16-aligned
+  stencil offset**. Cost if wrong: one more ring block a D24S8 upload.
+- **Ruling T5-1.** `plane_copies` owns the row rule and takes no buffers; the stencil plane is validated at `w`
+  bytes a row and staged at `w` rounded up to 4 (`stage_rows` gained a stride); a copy's bytes-per-row is the
+  staged row, not the caller's pitch; any depth format other than the two is refused; `DepthPlanes` has no
+  derive (this plan's Rules check line was wrong). Stated: the fakes show an optioned record as a bare line (the
+  pure test carries its fields); no unit test passes a stencil plane of a width that is no multiple of 4 (the
+  2x2 level cell and the validation launches are its gates).
+- **Ruling T3-1.** The Unlock tail was verified before 3a's arm was deleted: the mapped flag read before the
+  lock ends, `lock_flags` taken only when mapped, the page dropped only when mapped, the write-back only for a
+  writable lock on a lockable device. The unsafe of the two arms is the device deref, not a page slice
+  (`PageBox::as_mut_slice` is safe: the Rules check line was wrong). `core_backbuffer_read_into_lock`'s error
+  line keeps "LockRect" (only a `READONLY` lock reaches it).
+- **Ruling T4-1.** `GetDC`'s multisample refusal is its own line ahead of mtld3d's lockable-back-buffer test;
+  the helper `core_lockable_render_target()` answers the texture's id; the lock arm is two arms (the helper's,
+  then the non-lockable reject); the depth loop is its own function (`core_upload_depth_levels`).
+- **Ruling T7-0.** Nine mutants, not ten: the plan's g (the writable lock skips its read under `DISCARD`) is
+  dropped, because the read does not see the lock's flags and the mutation would be a signature change; the
+  `DISCARD` cell stays in `lb-lock`, ungated by a mutant. Letters a-f as the plan; g, h, i are the plan's h, i,
+  j. Cost if wrong: that cell has no proof it can go red.
+- **The stop rule did not fire.** `jt6`'s depth launch under core with Metal's validation layer: 0 reports, 33
+  rows ok. Metal takes the plain depth blit and the two optioned plane blits from d3d9-rt.
+- **Gates.** `jt3` (after Task 3): default ok; `lb-lock` and `rt-chain` green under core, red on exactly the
+  nine predicted tokens. `jt6` (at the tip): default ok, core ok, every row green strict, the key the base's.
+  The chain at the tips (4eea8d68 + e043b36e, 05:27-06:54): `jr` the key and the imports the base's, the D3D9
+  gate ok, conformance with only triaged sites (device.c:14544, 14946, 15104), the x64 check all passed; `jc` the
+  VM's D3D9 gate ok on default and core, old and new WoW64 (visual 30 of 211219 on both); `jq` default, msl and
+  core ok, stateblock 0 of 14738 on both runtimes, ten core launches under Metal's validation layer with 0
+  reports; `jm` nine mutants (built once beforehand by `jmb`, all at the first try) each red on its named rows
+  and on the texel `mutants-expect.txt` named, "other rows: none", the tip green.
+- **Final review** (`build/c4c/s3b/review-final.md`, range a1d45dd5..4eea8d68): 0 Critical, 0 Important, 5
+  Minor; "push as is". Traced sound: no recorder call reachable on a core device from any entry point the range
+  opens; the lock and DC state machines on every failure path (`UnlockRect` under a held DC keeps the page);
+  the two primitives validate before recording; `texture_upload` unchanged; every hunk in a function mtld3d
+  runs is gated; no per-process state between two core devices. Ledgered, no fix round: M1 the lock's
+  multisample refusal comes before `try_begin_lock` and the empty-rect check, so on a multisampled lockable
+  device a second lock or an empty rect answers `NOTAVAILABLE` where mtld3d answers `INVALIDCALL` (this plan's
+  "after mtld3d's state checks" holds for `GetDC`'s refusal alone); M2 the two ring allocations (above); M3 two
+  duplicates the Rules check denied (`readback_full_backbuffer`'s arm repeats the shape of 3a's read twin; the
+  whole-level `Blit` literal twice in d3d9-rt); M4 a failed depth upload unpacks again at every bind and logs
+  a warning, not an error; M5 the device's and a chain's back-buffer surfaces each hold their own lock, DC and
+  page (added to the spec's "Kept"). Not covered by a row: simultaneous locks or DCs on the two back-buffer
+  surfaces; a cube face sampled after `ReleaseDC`; `GetDC` on DYNAMIC or DEFAULT colour texture levels,
+  render-target cube faces, A8R8G8B8 or 5-5-5 stores, an R5G6B5 lockable target; D16 and D24X8 levels above 0,
+  narrow D16 widths; `NO_DIRTY_UPDATE`, a `READONLY` re-lock and `DISCARD` on a dynamic depth texture; the
+  stencil bytes; rows below the first in a writable rect lock.
+- **Sweep** (`build/c4c/s3b/sweep.md`, `jw`, gating nothing): new failures over the baseline, `device` 1168 to
+  932 and `visual` 2188 to 2183. `test_getdc` 231 to 0; `test_lockable_backbuffer` 6 to 3 (the three are a lock
+  after a refused `Reset`); `test_resource_access` 2 to 0 and `add_dirty_rect_test` 18 to 13 (which of 3b's
+  calls each met was not traced; the 13 are `UpdateSurface`'s); `test_user_memory_getdc` is not reached
+  (`d3d9ex` dies in `test_reset` as before). No surface or texture refusal is met in the three suites. The six
+  validation reports of `volume_srgb_test` and `srgbtexture_test`'s four failures are unchanged.
+- **No probe.** The range touches no draw or recorder file of d3d9-rt and not `core_draw.rs`.
