@@ -70,14 +70,15 @@
 // and of another size, the write masks of index 1-3, blending and sRGB write over several targets, Clear over every
 // bound target, the scissor, the viewport and the depth test, the back buffer in a set, automatic mipmaps, order),
 // with a 180 s budget. The core refuses none of it.
-// With "msaa" ("msaa strict" under core; DXMTRS C4b-3d5): 19 rows "d3d9 ms-<row> ok|FAIL <why>" on a device whose
+// With "msaa" ("msaa strict" under core; DXMTRS C4b-3d5): 20 rows "d3d9 ms-<row> ok|FAIL <why>" on a device whose
 // back buffer and auto D24S8 have 4 samples: multisampled CreateRenderTarget surfaces (2, 4, 8 samples and
 // non-maskable) read through StretchRect's resolve, the back buffer's too; edges, Clear with rects and the viewport,
 // the depth test, a depth-stencil of another sample count, D3DRS_MULTISAMPLEMASK, alpha-to-coverage (ATOC and the A2M
 // latch), sRGB write, blending, index 1-3 targets, the scissor test, a resolve's destination drawn again; what the
 // creators and read-backs answer; since DXMTRS C4c-3a the back buffer read by a READONLY lock and by
-// GetFrontBufferData. With a 180 s budget. The core refuses a StretchRect other than a whole-surface
-// resolve (ms-desc's depth-stencil one).
+// GetFrontBufferData; since DXMTRS C4c-4b StretchRect of the auto depth-stencil into a depth-stencil surface of 4
+// samples, its depth and stencil judged by draws (ms-dcopy). With a 180 s budget. The core refuses none of it
+// (ms-desc's and ms-dcopy's depth-stencil copies are the core's since DXMTRS C4c-4b).
 // With "buffers" ("buffers strict" under core; DXMTRS C4c-1, C4c-2a, C4c-2b): 39 rows "d3d9 buf-<row> ok|FAIL <why>" of
 // vertex and index buffers and the draws that read them, on a device with no depth-stencil: GetDirect3D; Lock and
 // Unlock (pools, usages, DISCARD and NOOVERWRITE, a READONLY read-back, a lock held over draws, a partial relock);
@@ -91,13 +92,17 @@
 // buffer locked again after its upload released its backing (buf-writeonly). With a 180 s budget. Under strict a
 // layout no binding can fetch, an attribute wider than its stride (buf-wide), answers D3DERR_NOTAVAILABLE. "buffers
 // [strict] skip=<row>[,<row>...]" prints "d3d9 <row> skip" for each listed row and does not run it.
-// With "blit" ("blit strict" under core; DXMTRS C4c-4a): 18 rows "d3d9 <cf|us|sr>-<row> ok|FAIL <why>", on a device
-// with no depth-stencil: ColorFill of render targets lockable or not, the back buffer and an additional swap chain's, a
-// target that is not bound, a render-target texture's levels and cube face, an AUTOGENMIPMAP one, a multisampled one
-// and default-pool plain surfaces, and the surfaces it refuses; UpdateSurface into a texture's level, levels and cube
-// face, a render-target texture's level, render targets and the back buffer, from R5G6B5, and the calls it refuses;
-// StretchRect's D3DERR_INVALIDCALL in every lane, and valid shapes past the core's multisample resolve (D3D_OK, under
-// strict D3DERR_NOTAVAILABLE: their copies are DXMTRS C4c-4b's and 4c's). With a 180 s budget. A format
+// With "blit" ("blit strict" under core; DXMTRS C4c-4a, C4c-4b): 31 rows "d3d9 <cf|us|sr|sc>-<row> ok|FAIL <why>", on a
+// device with no depth-stencil: ColorFill of render targets lockable or not, the back buffer and an additional swap
+// chain's, a target that is not bound, a render-target texture's levels and cube face, an AUTOGENMIPMAP one, a
+// multisampled one and default-pool plain surfaces, and the surfaces it refuses; UpdateSurface into a texture's level,
+// levels and cube face, a render-target texture's level, render targets and the back buffer, from R5G6B5, and the calls
+// it refuses; StretchRect's D3DERR_INVALIDCALL in every lane, and valid shapes the core refuses by name (D3D_OK, under
+// strict D3DERR_NOTAVAILABLE: their copies are DXMTRS C4c-4c's); since DXMTRS C4c-4b StretchRect's unscaled copies
+// (sc-*), their texels judged: between targets, the back buffer and an additional swap chain's, from and into a
+// lockable target, render-target textures' levels and cube faces, from a default-pool texture's levels and plain
+// surfaces, between plain surfaces (raw, and converted into R5G6B5 and from YUY2), within one surface and one texture,
+// into AUTOGENMIPMAP textures, among draws in one scene, and of depth-stencil surfaces. With a 180 s budget. A format
 // CheckDeviceFormat does not offer prints "d3d9 <row>-<format> skip" and its cells do not run.
 #include <windows.h>
 #include <d3d9.h>
@@ -3892,6 +3897,16 @@ static bool depthReset() {
     CK(SetSamplerState, 0, D3DSAMP_MIPMAPLODBIAS, 0);
     return bindDs(dsSurf);
 }
+// What a depth-copy row of the blit and msaa modes (DXMTRS C4c-4b's sc-depth, ms-dcopy) leaves on every path, passed
+// or not, and their reset() does not restore: `ds` bound (null: none), ZENABLE `zenable` (as the mode's device has it),
+// LESSEQUAL with Z writes, the stencil test off at ALWAYS and reference 0. Its own answers are not judged.
+static void depthBack(IDirect3DSurface9 *ds, DWORD zenable) {
+    const DWORD rs[][2] = {{D3DRS_ZENABLE, zenable},       {D3DRS_ZFUNC, D3DCMP_LESSEQUAL},
+                           {D3DRS_ZWRITEENABLE, TRUE},     {D3DRS_STENCILENABLE, FALSE},
+                           {D3DRS_STENCILFUNC, D3DCMP_ALWAYS}, {D3DRS_STENCILREF, 0}};
+    dev->SetDepthStencilSurface(ds);
+    for (const auto &s : rs) dev->SetRenderState((D3DRENDERSTATETYPE)s[0], s[1]);
+}
 
 // The auto depth-stencil: its description, and ZENABLE on by default with it.
 static bool rowDsDefault() {
@@ -5880,8 +5895,9 @@ template <class F> static bool msUntil(F attempt) {
 
 // ms-desc: the back buffer and the auto depth-stencil say 4 samples; GetRenderTargetData of the back buffer, 16-sample
 // creates (mtld3d's creators answer D3DERR_INVALIDCALL for every reject: parity) and a StretchRect from no surface are
-// D3DERR_INVALIDCALL in every lane; a depth-stencil StretchRect (the auto one into a 4-sample D24S8 surface) is past
-// the core's resolve shape: D3DERR_NOTAVAILABLE under core (strict), any answer elsewhere.
+// D3DERR_INVALIDCALL in every lane; a depth-stencil StretchRect (the auto one into a 4-sample D24S8 surface, a copy of
+// equal sample counts since DXMTRS C4c-4b; ms-dcopy judges its planes) is D3D_OK under core (strict), any answer
+// elsewhere.
 static bool rowMsDesc() {
     D3DSURFACE_DESC b = {}, d = {};
     HRESULT hr = rtSurf->GetDesc(&b);
@@ -5902,8 +5918,38 @@ static bool rowMsDesc() {
     if (hr != D3DERR_INVALIDCALL) return fail("StretchRect (no source)", hr);
     CK(CreateDepthStencilSurface, 256, 256, D3DFMT_D24S8, D3DMULTISAMPLE_4_SAMPLES, 0, FALSE, &ds.p, nullptr);
     hr = dev->StretchRect(dsSurf, nullptr, ds.p, nullptr, D3DTEXF_NONE);
-    if (strictMode && hr != D3DERR_NOTAVAILABLE) return fail("StretchRect (depth-stencil)", hr);
+    if (strictMode && hr != D3D_OK) return fail("StretchRect (depth-stencil)", hr);
     return true;
+}
+// ms-dcopy (DXMTRS C4c-4b): the auto depth-stencil (4 samples) cleared to Z 0.25 and stencil 3; D, a 256x256 D24S8
+// surface of 4 samples, bound and cleared to Z 1 and stencil 0; StretchRect of the auto one into D, whole, with no draw
+// between: D3D_OK in every lane. D bound with the back buffer, cleared blue, Z on: a green quad at z 0.1 under stencil
+// EQUAL 3 over (32,32)-(112,224) draws (the stencil was copied), then a red one at z 0.5 under LESSEQUAL with the
+// stencil test off over (144,32)-(224,224) does not (the depth was copied; the quads are apart, so the green one's Z
+// write does not decide it): green at (72,128), blue at (184,128) and (128,128). Its depth-stencil state back on every
+// path (msUntil restores ZENABLE and the auto depth-stencil alone).
+static bool rowMsDcopy() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> d;
+        const bool ok = [&] {
+            CK(CreateDepthStencilSurface, 256, 256, D3DFMT_D24S8, D3DMULTISAMPLE_4_SAMPLES, 0, FALSE, &d.p, nullptr);
+            if (!scene([&] {
+                    return backToScreen() && clearTo(TBLU) && bindDs(dsSurf) && clearZS(0.25f, 3) && bindDs(d.p) &&
+                           clearZS(1.0f, 0);
+                }))
+                return false;
+            CK(StretchRect, dsSurf, nullptr, d.p, nullptr, D3DTEXF_NONE);
+            return scene([&] {
+                       return rstate(D3DRS_ZENABLE, D3DZB_TRUE) && rstate(D3DRS_STENCILENABLE, TRUE) &&
+                              rstate(D3DRS_STENCILFUNC, D3DCMP_EQUAL) && rstate(D3DRS_STENCILREF, 3) &&
+                              zquad(32, 32, 112, 224, 0.1f, TGRN) && rstate(D3DRS_STENCILENABLE, FALSE) &&
+                              zquad(144, 32, 224, 224, 0.5f, TRED);
+                   }) &&
+                   msHas("the back buffer", rtSurf, {{72, 128, TGRN}, {184, 128, TBLU}, {128, 128, TBLU}});
+        }();
+        depthBack(dsSurf, D3DZB_FALSE);
+        return ok;
+    });
 }
 // ms-resolve: T cleared green, a red quad over x < 32: read (16,32) red, (48,32) green.
 static bool rowMsResolve() {
@@ -6310,12 +6356,13 @@ static bool rowMsFront() {
 
 static void msaaRows(IDirect3DDevice9 *d, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
-        {"ms-desc", rowMsDesc},       {"ms-resolve", rowMsResolve},   {"ms-edge", rowMsEdge},
-        {"ms-back", rowMsBack},       {"ms-clear", rowMsClear},       {"ms-depth", rowMsDepth},
-        {"ms-mismatch", rowMsMismatch}, {"ms-mask", rowMsMask},       {"ms-nonmask", rowMsNonMask},
-        {"ms-a2c", rowMsA2c},         {"ms-srgbmask", rowMsSrgbMask}, {"ms-blend", rowMsBlend},
-        {"ms-mrt", rowMsMrt},         {"ms-scissor", rowMsScissor},   {"ms-redraw", rowMsRedraw},
-        {"ms-samples", rowMsSamples}, {"ms-bblock", rowMsBblock},     {"ms-front", rowMsFront}};
+        {"ms-desc", rowMsDesc},       {"ms-dcopy", rowMsDcopy},       {"ms-resolve", rowMsResolve},
+        {"ms-edge", rowMsEdge},       {"ms-back", rowMsBack},         {"ms-clear", rowMsClear},
+        {"ms-depth", rowMsDepth},     {"ms-mismatch", rowMsMismatch}, {"ms-mask", rowMsMask},
+        {"ms-nonmask", rowMsNonMask}, {"ms-a2c", rowMsA2c},           {"ms-srgbmask", rowMsSrgbMask},
+        {"ms-blend", rowMsBlend},     {"ms-mrt", rowMsMrt},           {"ms-scissor", rowMsScissor},
+        {"ms-redraw", rowMsRedraw},   {"ms-samples", rowMsSamples},   {"ms-bblock", rowMsBblock},
+        {"ms-front", rowMsFront}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
@@ -7545,18 +7592,26 @@ static void buffersRows(IDirect3DDevice9 *d, bool strict, const char *skip) {
     if (rtSurf) rtSurf->Release();
 }
 
-// --- The "blit" mode (DXMTRS C4c-4a): ColorFill, UpdateSurface and StretchRect's answers, on the buffers mode's
-// plain device (256x256 X8R8G8B8, no depth-stencil: a row that needs a depth-stencil surface makes one). "A target" is
-// a 64x64 A8R8G8B8 CreateRenderTarget surface, not lockable unless said; quads are pretransformed, in the pixels of the
-// target bound at index 0. A row that reads texels back makes its objects inside one until() attempt, reads with
-// GetRenderTargetData or a lock (unlocked before its texels are judged), and judges only texels the attempt wrote. Its
-// colours have every channel non-zero and no two alike, and each one the GPU fills with has a channel in 0x10..0xf0
-// (an sRGB encode leaves 0 and 255 as they are). A region write (a rect ColorFill of a target, UpdateSurface) starts
-// off the origin, lands at a point other than its source's origin and is no multiple of 4 wide (DXT1's block rects and
-// the plain surface's (4,4)-(8,8) excepted); a GPU write of a target has a draw on it before and one after whose
-// texels pin the order (cf-rtex's first use, a fill over a lock-write, cf-autogen's fill, which no SetRenderTarget may
-// name, and the plain surface's CPU fills excepted). The sr-* rows call neither ColorFill nor UpdateSurface and the
-// cf-* rows no UpdateSurface, so a runtime that refuses one of the three reddens that call's rows alone. A format
+// --- The "blit" mode (DXMTRS C4c-4a): ColorFill, UpdateSurface and StretchRect's answers, and (DXMTRS C4c-4b, the
+// sc-* rows) StretchRect's unscaled copies, on the buffers mode's plain device (256x256 X8R8G8B8, no depth-stencil: a
+// row that needs a depth-stencil surface makes one). "A target" is a 64x64 A8R8G8B8 CreateRenderTarget surface, not
+// lockable unless said; quads are pretransformed, in the pixels of the target bound at index 0. A row that reads texels
+// back makes its objects inside one until() attempt, reads with GetRenderTargetData or a lock (unlocked before its
+// texels are judged), and judges only texels the attempt wrote. Its colours have every channel non-zero and no two
+// alike, and each one the GPU fills with has a channel in 0x10..0xf0 (an sRGB encode leaves 0 and 255 as they are). A
+// region write (a rect ColorFill of a target, UpdateSurface) starts off the origin, lands at a point other than its
+// source's origin and is no multiple of 4 wide (DXT1's block rects and the plain surface's (4,4)-(8,8) excepted); a
+// cf-* or us-* GPU write of a target has a draw on it before and one after whose texels pin the order (cf-rtex's first
+// use, a fill over a lock-write, cf-autogen's fill, which no SetRenderTarget may name, and the plain surface's CPU
+// fills excepted; sc-order orders the copies against draws). An sc-* copy that judges texels moves a rect off its
+// source's origin to another point, no multiple of 4 wide, and judges a texel inside it, one just outside it and the
+// destination's (0,0) (whole copies and test_pointsize's at the origin excepted; a destination nothing wrote before is
+// judged inside alone); a judged inside texel would read another colour were the rect taken from its source's origin
+// (but in a copy from a cube face, cleared one colour, and in sc-order's first, from a target only cleared), and the
+// levels and faces a copy must tell apart hold colours of their own; a depth cell draws a quad that must draw before
+// each that must not. The sr-* rows call neither ColorFill nor UpdateSurface and the cf-*
+// rows no UpdateSurface; of the sc-* rows, sc-rtex, sc-tex and sc-autogen call UpdateSurface and sc-plain ColorFill.
+// So a runtime that refuses one of the three reddens that call's rows and those sc-* rows alone. A format
 // CheckDeviceFormat does not offer prints "d3d9 <row>-<format> skip" and its cells do not run (the row still answers).
 static const DWORD KPLUM = D3DCOLOR_XRGB(0x90, 0x30, 0xa0), KSKY = D3DCOLOR_XRGB(0x60, 0xb0, 0xf0);
 // R5G6B5 colours of the update codec's widening (K565C's red field 0x1f widens to 0xff).
@@ -8090,13 +8145,14 @@ static bool rowUsReject() {
 // sr-reject: StretchRect is D3DERR_INVALIDCALL in every lane, of: a flipped source rect; a destination rect past the
 // edge; a target into a plain surface; a render-target texture's level into a level of a default-pool texture of
 // usage 0; that level into a plain surface; a system-memory plain surface as the source and as the destination; a
-// MANAGED texture's level as the source; a D24S8 depth-stencil surface into a target and a target into one; a
-// depth-stencil pair of two sizes (64 into 32); a depth-stencil pair of one size with the sub-rect (0,0)-(32,32); a
-// single-sample depth-stencil into a 4-sample one; a plain surface's (0,0)-(32,32) into another's (0,0)-(16,16); a
-// target's (0,0)-(32,32) onto its own (32,32)-(48,48). Surfaces are 64x64 A8R8G8B8 unless said.
+// MANAGED texture's level as the source; a D24S8 depth-stencil surface into a target and a target into one; a D24S8
+// depth texture's level into a target (the format gate; DXMTRS C4c-4b); a depth-stencil pair of two sizes (64 into
+// 32); a depth-stencil pair of one size with the sub-rect (0,0)-(32,32); a single-sample depth-stencil into a 4-sample
+// one; a plain surface's (0,0)-(32,32) into another's (0,0)-(16,16); a target's (0,0)-(32,32) onto its own
+// (32,32)-(48,48). Surfaces are 64x64 A8R8G8B8 unless said.
 static bool rowSrReject() {
-    Com<IDirect3DSurface9> a, b, p1, p2, sys, d1, d2, d32, d4, rl, ul, ml;
-    Com<IDirect3DTexture9> rt, ut, mt;
+    Com<IDirect3DSurface9> a, b, p1, p2, sys, d1, d2, d32, d4, rl, ul, ml, dl;
+    Com<IDirect3DTexture9> rt, ut, mt, dt;
     CK(CreateRenderTarget, 64, 64, A8, D3DMULTISAMPLE_NONE, 0, FALSE, &a.p, nullptr);
     CK(CreateRenderTarget, 64, 64, A8, D3DMULTISAMPLE_NONE, 0, FALSE, &b.p, nullptr);
     CK(CreateOffscreenPlainSurface, 64, 64, A8, D3DPOOL_DEFAULT, &p1.p, nullptr);
@@ -8108,7 +8164,10 @@ static bool rowSrReject() {
     CK(CreateDepthStencilSurface, 64, 64, D3DFMT_D24S8, D3DMULTISAMPLE_4_SAMPLES, 0, FALSE, &d4.p, nullptr);
     CK(CreateTexture, 64, 64, 1, 0, A8, D3DPOOL_DEFAULT, &ut.p, nullptr);
     CK(CreateTexture, 64, 64, 1, 0, A8, D3DPOOL_MANAGED, &mt.p, nullptr);
-    if (!makeRt(rt) || !levelOf(rt.p, 0, rl) || !levelOf(ut.p, 0, ul) || !levelOf(mt.p, 0, ml)) return false;
+    CK(CreateTexture, 64, 64, 1, D3DUSAGE_DEPTHSTENCIL, D3DFMT_D24S8, D3DPOOL_DEFAULT, &dt.p, nullptr);
+    if (!makeRt(rt) || !levelOf(rt.p, 0, rl) || !levelOf(ut.p, 0, ul) || !levelOf(mt.p, 0, ml) ||
+        !levelOf(dt.p, 0, dl))
+        return false;
     const RECT flipped = {20, 20, 10, 10}, ten = {10, 10, 20, 20}, quarter = {0, 0, 16, 16}, past = {56, 56, 72, 72},
                half = {0, 0, 32, 32}, onto = {32, 32, 48, 48};
     const D3DTEXTUREFILTERTYPE none = D3DTEXF_NONE;
@@ -8123,6 +8182,7 @@ static bool rowSrReject() {
         {"StretchRect (a MANAGED level as the source)", ml.p, nullptr, a.p, nullptr, none},
         {"StretchRect (a depth-stencil surface into a target)", d1.p, nullptr, a.p, nullptr, none},
         {"StretchRect (a target into a depth-stencil surface)", a.p, nullptr, d1.p, nullptr, none},
+        {"StretchRect (a depth texture's level into a target)", dl.p, nullptr, a.p, nullptr, none},
         {"StretchRect (a depth-stencil pair of two sizes)", d1.p, nullptr, d32.p, nullptr, none},
         {"StretchRect (a depth-stencil pair with a sub-rect)", d1.p, &half, d2.p, &half, none},
         {"StretchRect (a single-sample depth-stencil into a 4-sample one)", d1.p, nullptr, d4.p, nullptr, none},
@@ -8133,53 +8193,508 @@ static bool rowSrReject() {
             return false;
     return true;
 }
-// sr-shape: valid StretchRects, each D3D_OK on mtld3d and, strict, D3DERR_NOTAVAILABLE (past the core's resolve shape;
-// their pixels are C4c-4b's and 4c's), in this order (a target cell logs the refusal before the depth-stencil cell): a
-// target into a target, whole; the back buffer's (0,0)-(64,64) into a target and a target into the back buffer's
-// (0,0)-(64,64); a lockable target into a target; a target's (0,0)-(64,64) into an additional swap chain's back
-// buffer's; a target into a 64-texel render-target cube's face; a default-pool plain surface (written steel through a
-// lock) into a target; a render-target texture's level into another's; a 32x32 render-target texture's level into a
-// target, scaled, LINEAR; that plain surface into an R5G6B5 one, whole (mtld3d converts it on the CPU); a D24S8
-// depth-stencil pair of one size, whole. Surfaces are 64x64 A8R8G8B8 unless said.
+// sr-shape: valid StretchRects the core refuses by name, each D3D_OK on mtld3d and, strict, D3DERR_NOTAVAILABLE (their
+// copies are DXMTRS C4c-4c's; no texel is judged): the back buffer's (0,0)-(64,64) (X8R8G8B8, no alpha) into an
+// A8R8G8B8 target, a converting copy; a 32x32 render-target texture's level into a target, scaled, LINEAR; a target
+// into a 4-sample target; a 4-sample target's (4,6)-(30,28) into a target's (9,5)-(35,27); a default-pool plain
+// surface's (3,2)-(18,16) onto its own (35,30)-(50,44) (last: mtld3d writes it). Surfaces are 64x64 A8R8G8B8 unless
+// said. The shapes it held before DXMTRS C4c-4b are the sc-* rows' copies.
 static bool rowSrShape() {
-    Com<IDirect3DSurface9> a, b, l, chain, face, plain, p565, x0, y0, s32, d1, d2;
-    Com<IDirect3DSwapChain9> sc;
-    Com<IDirect3DCubeTexture9> cube;
-    Com<IDirect3DTexture9> x, y, t32;
-    CK(CreateRenderTarget, 64, 64, A8, D3DMULTISAMPLE_NONE, 0, FALSE, &a.p, nullptr);
-    CK(CreateRenderTarget, 64, 64, A8, D3DMULTISAMPLE_NONE, 0, FALSE, &b.p, nullptr);
-    CK(CreateCubeTexture, 64, 1, D3DUSAGE_RENDERTARGET, A8, D3DPOOL_DEFAULT, &cube.p, nullptr);
+    Com<IDirect3DSurface9> a, m, plain, s32;
+    Com<IDirect3DTexture9> t32;
     CK(CreateOffscreenPlainSurface, 64, 64, A8, D3DPOOL_DEFAULT, &plain.p, nullptr);
-    CK(CreateOffscreenPlainSurface, 64, 64, D3DFMT_R5G6B5, D3DPOOL_DEFAULT, &p565.p, nullptr);
-    CK(CreateDepthStencilSurface, 64, 64, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, FALSE, &d1.p, nullptr);
-    CK(CreateDepthStencilSurface, 64, 64, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, FALSE, &d2.p, nullptr);
-    if (!target64(l) || !chainBackBuffer(nullptr, 0, sc, chain) || !makeRt(x) || !makeRt(y) || !makeRt(t32, 32) ||
-        !levelOf(x.p, 0, x0) || !levelOf(y.p, 0, y0) || !levelOf(t32.p, 0, s32) ||
-        !underLock(plain.p, "LockRect (the plain surface)", nullptr, 0,
-                   [&](BYTE *bits, int p) { paint(bits, p, 0, 0, 64, 64, KSTEEL); }))
-        return false;
-    const HRESULT hr = cube.p->GetCubeMapSurface(D3DCUBEMAP_FACE_POSITIVE_X, 0, &face.p);
-    if (FAILED(hr)) return fail("GetCubeMapSurface", hr);
-    const RECT r64 = {0, 0, 64, 64};
+    if (!target64(a, FALSE) || !msRt(m) || !makeRt(t32, 32) || !levelOf(t32.p, 0, s32)) return false;
+    const RECT r64 = {0, 0, 64, 64}, msFrom = {4, 6, 30, 28}, msTo = {9, 5, 35, 27}, from = {3, 2, 18, 16},
+               onto = {35, 30, 50, 44};
     const D3DTEXTUREFILTERTYPE none = D3DTEXF_NONE;
     const Stretch cells[] = {
-        {"StretchRect (a target into a target)", a.p, nullptr, b.p, nullptr, none},
         {"StretchRect (the back buffer into a target)", rtSurf, &r64, a.p, nullptr, none},
-        {"StretchRect (a target into the back buffer)", a.p, nullptr, rtSurf, &r64, none},
-        {"StretchRect (a lockable target into a target)", l.p, nullptr, a.p, nullptr, none},
-        {"StretchRect (a target into an additional swap chain's back buffer)", a.p, &r64, chain.p, &r64, none},
-        {"StretchRect (a target into a render-target cube's face)", a.p, nullptr, face.p, nullptr, none},
-        {"StretchRect (a plain surface into a target)", plain.p, nullptr, a.p, nullptr, none},
-        {"StretchRect (a render-target texture's level into another's)", x0.p, nullptr, y0.p, nullptr, none},
         {"StretchRect (a 32x32 render-target texture's level into a target, LINEAR)", s32.p, nullptr, a.p, nullptr,
          D3DTEXF_LINEAR},
-        {"StretchRect (an A8R8G8B8 plain surface into an R5G6B5 one)", plain.p, nullptr, p565.p, nullptr, none},
-        {"StretchRect (a depth-stencil pair)", d1.p, nullptr, d2.p, nullptr, none}};
+        {"StretchRect (a target into a 4-sample target)", a.p, nullptr, m.p, nullptr, none},
+        {"StretchRect (a 4-sample target's sub-rect into a target)", m.p, &msFrom, a.p, &msTo, none},
+        {"StretchRect (a plain surface onto itself)", plain.p, &from, plain.p, &onto, none}};
     for (const Stretch &k : cells) {
         const HRESULT got = dev->StretchRect(k.src, k.srcRect, k.dst, k.dstRect, k.filter);
         if (got != (strictMode ? D3DERR_NOTAVAILABLE : D3D_OK)) return fail(k.what, got);
     }
     return true;
+}
+
+// The sc-* rows (DXMTRS C4c-4b): StretchRect's unscaled copies, D3D_OK in every lane, their texels judged. RECTs are
+// right- and bottom-exclusive: (9,7)-(30,29) is 21x22 texels, and at (33,18) it covers x 33..53, y 18..39.
+// StretchRect of src's rect r to dst at (x, y), unscaled, D3DTEXF_NONE (r null: the whole of src into the whole of
+// dst); false, with `why` naming the rect, unless it succeeds.
+static bool copyTo(IDirect3DSurface9 *src, const RECT *r, IDirect3DSurface9 *dst, int x = 0, int y = 0) {
+    const RECT to = r ? RECT{x, y, x + r->right - r->left, y + r->bottom - r->top} : RECT{};
+    const HRESULT hr = dev->StretchRect(src, r, dst, r ? &to : nullptr, D3DTEXF_NONE);
+    if (SUCCEEDED(hr)) return true;
+    if (!r) return fail("StretchRect (whole)", hr);
+    snprintf(why, sizeof why, "StretchRect (%ld,%ld)-(%ld,%ld) to (%d,%d) %08lx", (long)r->left, (long)r->top,
+             (long)r->right, (long)r->bottom, x, y, (unsigned long)hr);
+    return false;
+}
+// The size x size surface `s` of bpp-byte texels written under a lock: `out` whole, then `in` over r (none if empty).
+static bool twoTone(IDirect3DSurface9 *s, int size, DWORD out, const RECT &r, DWORD in, int bpp = 4) {
+    return underLock(s, "LockRect (write)", nullptr, 0, [&](BYTE *b, int p) {
+        paint(b, p, 0, 0, size, size, out, bpp), paint(b, p, r.left, r.top, r.right, r.bottom, in, bpp);
+    });
+}
+// `t` bound, cleared `out`, an `in` quad over r, and the back buffer bound again: one scene.
+static bool drawnTwo(IDirect3DSurface9 *t, DWORD out, const RECT &r, DWORD in) {
+    return scene([&] {
+        return clearRt(t, out) && zquad((float)r.left, (float)r.top, (float)r.right, (float)r.bottom, 0.5f, in) &&
+               backToScreen();
+    });
+}
+// `t` bound and cleared to c, and the back buffer bound again: one scene.
+static bool cleared(IDirect3DSurface9 *t, DWORD c) { return scene([&] { return clearRt(t, c) && backToScreen(); }); }
+// A 64x64 default-pool plain surface of format f.
+static bool plain64(Com<IDirect3DSurface9> &s, D3DFORMAT f = A8) {
+    CK(CreateOffscreenPlainSurface, 64, 64, f, D3DPOOL_DEFAULT, &s.p, nullptr);
+    return true;
+}
+// Face f of the cube `c`.
+static bool faceOf(IDirect3DCubeTexture9 *c, D3DCUBEMAP_FACES f, Com<IDirect3DSurface9> &s) {
+    const HRESULT hr = c->GetCubeMapSurface(f, 0, &s.p);
+    return SUCCEEDED(hr) || fail("GetCubeMapSurface", hr);
+}
+// lockedHas of the 64x64 4-byte surface `s` through a READONLY LockRect.
+static bool lockHas(const char *name, IDirect3DSurface9 *s, std::initializer_list<Tx> px) {
+    return lockedHas(
+        name, [&](auto copy) { return underLock(s, "LockRect (READONLY)", nullptr, D3DLOCK_READONLY, copy); }, px);
+}
+// The R5G6B5 texels px (8 at most) of `s`, read 2 bytes each under a READONLY lock (as plainFills reads them) and
+// judged after the unlock: each exactly its colour's packed565 (the codec truncates; a k565 colour survives rounding
+// too).
+static bool has565(const char *name, IDirect3DSurface9 *s, std::initializer_list<Tx> px) {
+    WORD got[8] = {};
+    if (px.size() > 8) return snprintf(why, sizeof why, "%s: more than 8 texels", name), false;
+    if (!underLock(s, "LockRect (READONLY)", nullptr, D3DLOCK_READONLY, [&](BYTE *b, int pitch) {
+            int i = 0;
+            for (const Tx &t : px) memcpy(&got[i++], b + t.y * pitch + t.x * 2, 2);
+        }))
+        return false;
+    int i = 0;
+    for (const Tx &t : px) {
+        const WORD w = packed565(t.want);
+        if (got[i++] != w)
+            return snprintf(why, sizeof why, "%s (%d,%d) %04x want %04x", name, t.x, t.y, got[i - 1], w), false;
+    }
+    return true;
+}
+
+// sc-rt: A, a target, cleared steel, a rust quad over (7,5)-(32,31); B, a target, cleared aqua. A into B whole: steel
+// at (2,2) and (40,40), rust at (20,18). B cleared aqua again, A's (9,7)-(30,29) (rust) to (33,18): rust at (33,18)
+// (A's (9,7); A's origin is steel), (53,39) and (43,28); aqua at (54,18) (a copy a column wider writes rust there),
+// (33,17), (32,18), (33,40) and (0,0).
+static bool rowScRt() {
+    return until([&] {
+        Com<IDirect3DSurface9> a, b;
+        const RECT rect = {9, 7, 30, 29};
+        return target64(a, FALSE) && target64(b, FALSE) && drawnTwo(a.p, KSTEEL, {7, 5, 32, 31}, KRUST) &&
+               cleared(b.p, KAQUA) && copyTo(a.p, nullptr, b.p) &&
+               rtHas("whole", b.p, 64, A8, {{2, 2, KSTEEL}, {40, 40, KSTEEL}, {20, 18, KRUST}}) &&
+               cleared(b.p, KAQUA) && copyTo(a.p, &rect, b.p, 33, 18) &&
+               rtHas("the rect", b.p, 64, A8,
+                     {{33, 18, KRUST}, {53, 39, KRUST}, {43, 28, KRUST}, {54, 18, KAQUA}, {33, 17, KAQUA},
+                      {32, 18, KAQUA}, {33, 40, KAQUA}, {0, 0, KAQUA}});
+    });
+}
+// sc-bb: A, a target, cleared sage, a gold quad over (1,2)-(63,63); X, an X8R8G8B8 target, cleared plum; the back
+// buffer cleared lilac. A's (5,9)-(38,40) to the back buffer's (101,61); the back buffer's (101,61)-(134,92) to X's
+// (7,11); A's (3,6)-(36,40) to an additional swap chain's back buffer's (150,90) (read from the device's, which it
+// aliases): the back buffer gold at (101,61), (133,91), (150,90) and (182,123), lilac at (134,61), (101,60), (100,61),
+// (101,92), (183,90), (150,89), (149,90), (150,124) and (0,0); X gold at (7,11) and (39,41), plum at (40,11), (7,10),
+// (6,11), (7,42) and (0,0). Then A's (0,0)-(64,64) to the back buffer's (0,0)-(64,64) (test_pointsize's copy, at the
+// origin): sage at (0,0), gold at (32,32), lilac at (64,32) and (32,64). Colour channels (X8R8G8B8).
+static bool rowScBb() {
+    return until([&] {
+        Com<IDirect3DSwapChain9> sc;
+        Com<IDirect3DSurface9> a, x, chain;
+        const RECT toBb = {5, 9, 38, 40}, fromBb = {101, 61, 134, 92}, toChain = {3, 6, 36, 40}, r64 = {0, 0, 64, 64};
+        CK(CreateRenderTarget, 64, 64, X8, D3DMULTISAMPLE_NONE, 0, FALSE, &x.p, nullptr);
+        if (!target64(a, FALSE) || !chainBackBuffer(nullptr, 0, sc, chain) ||
+            !drawnTwo(a.p, KSAGE, {1, 2, 63, 63}, KGOLD) || !cleared(x.p, KPLUM) ||
+            !scene([&] { return backToScreen() && clearTo(KLILAC); }) || !copyTo(a.p, &toBb, rtSurf, 101, 61) ||
+            !copyTo(rtSurf, &fromBb, x.p, 7, 11) || !copyTo(a.p, &toChain, chain.p, 150, 90) ||
+            !rtHas("the back buffer", rtSurf, 256, X8,
+                   {{101, 61, KGOLD}, {133, 91, KGOLD}, {150, 90, KGOLD}, {182, 123, KGOLD}, {134, 61, KLILAC},
+                    {101, 60, KLILAC}, {100, 61, KLILAC}, {101, 92, KLILAC}, {183, 90, KLILAC}, {150, 89, KLILAC},
+                    {149, 90, KLILAC}, {150, 124, KLILAC}, {0, 0, KLILAC}}) ||
+            !rtHas("X", x.p, 64, X8,
+                   {{7, 11, KGOLD}, {39, 41, KGOLD}, {40, 11, KPLUM}, {7, 10, KPLUM}, {6, 11, KPLUM}, {7, 42, KPLUM},
+                    {0, 0, KPLUM}}))
+            return false;
+        return copyTo(a.p, &r64, rtSurf, 0, 0) &&
+               rtHas("test_pointsize's copy", rtSurf, 256, X8,
+                     {{0, 0, KSAGE}, {32, 32, KGOLD}, {64, 32, KLILAC}, {32, 64, KLILAC}});
+    });
+}
+// sc-lockable: L, a lockable target, written under a lock steel with rust over (2,3)-(34,36); A, a target, cleared
+// aqua, a gold quad over (4,0)-(64,8). L's (3,5)-(28,30) (rust) to A's (20,10): rust at (20,10) and (44,34), aqua at
+// (45,10), (20,9), (19,10), (20,35) and (0,0). A's (6,2)-(31,27) to L's (22,30), read under a READONLY lock: gold at
+// (22,30) (A's (6,2); A's origin is aqua) and (46,30), rust at (46,54) and (36,38) (what the first copy wrote), aqua at
+// (22,54); steel at (47,30), (22,55) and (0,0), rust at (21,30) and (22,29) (L's own).
+static bool rowScLockable() {
+    return until([&] {
+        Com<IDirect3DSurface9> l, a;
+        const RECT fromL = {3, 5, 28, 30}, fromA = {6, 2, 31, 27};
+        return target64(l) && target64(a, FALSE) && twoTone(l.p, 64, KSTEEL, {2, 3, 34, 36}, KRUST) &&
+               drawnTwo(a.p, KAQUA, {4, 0, 64, 8}, KGOLD) && copyTo(l.p, &fromL, a.p, 20, 10) &&
+               rtHas("A", a.p, 64, A8,
+                     {{20, 10, KRUST}, {44, 34, KRUST}, {45, 10, KAQUA}, {20, 9, KAQUA}, {19, 10, KAQUA},
+                      {20, 35, KAQUA}, {0, 0, KAQUA}}) &&
+               copyTo(a.p, &fromA, l.p, 22, 30) &&
+               lockHas("L", l.p,
+                       {{22, 30, KGOLD}, {46, 30, KGOLD}, {46, 54, KRUST}, {36, 38, KRUST}, {22, 54, KAQUA},
+                        {47, 30, KSTEEL}, {22, 55, KSTEEL}, {0, 0, KSTEEL}, {21, 30, KRUST}, {22, 29, KRUST}});
+    });
+}
+// sc-rtex: X and Y, 64x64 render-target textures of two levels. X's level 0 written by UpdateSurface from a
+// system-memory surface (steel, rust over (2,1)-(40,40)) and never drawn; its (5,3)-(26,24) (rust) to Y's level 0 at
+// (30,34), Y's first use (what is around the copy is undefined); Y drawn by show() on the back buffer (cleared K565B):
+// rust at Y's texels (30,34), (50,54) and (40,44). X's level 1 bound, cleared aqua, a mint quad over (1,0)-(24,20); Y's
+// level 1 cleared gold; X's level 1's (3,2)-(18,15) (mint) to Y's level 1 at (9,12): mint at (9,12) (X's level 0 there
+// is rust, X's level 1's origin aqua) and (23,24), gold at (24,12), (9,11), (8,12), (9,25) and (0,0).
+// C, a 64-texel render-target cube, face 0 (+x) cleared rose and face 3 (-y) lilac; A, a target, cleared sage, a plum
+// quad over (2,4)-(30,32); A's (4,6)-(27,29) (plum) to face 3 at (31,22), read by GetRenderTargetData: plum at (31,22)
+// and (53,44), lilac at (54,22), (31,21), (30,22), (31,45) and (0,0); face 0 rose at (31,22) and (53,44). D, a
+// 32-texel render-target cube, face 0 cleared sky and face 2 (+y) K565A; face 2's (2,3)-(25,20) to A at (33,40): K565A
+// at (33,40) and (55,56) (face 0's would be sky), sage at (56,40), (33,39), (32,40), (33,57) and (0,0).
+static bool rowScRtex() {
+    if (!until([&] {
+            Com<IDirect3DTexture9> x, y;
+            Com<IDirect3DSurface9> s, x0, x1, y0, y1;
+            const RECT first = {5, 3, 26, 24}, second = {3, 2, 18, 15};
+            CK(CreateOffscreenPlainSurface, 64, 64, A8, D3DPOOL_SYSTEMMEM, &s.p, nullptr);
+            if (!makeRt(x, 64, 2) || !makeRt(y, 64, 2) || !levelOf(x.p, 0, x0) || !levelOf(x.p, 1, x1) ||
+                !levelOf(y.p, 0, y0) || !levelOf(y.p, 1, y1) || !twoTone(s.p, 64, KSTEEL, {2, 1, 40, 40}, KRUST) ||
+                !updateSurface(s.p, nullptr, x0.p, nullptr) || !copyTo(x0.p, &first, y0.p, 30, 34) ||
+                !scene([&] { return backToScreen() && clearTo(K565B) && show(y.p); }) ||
+                !rtHas("Y's level 0, drawn", rtSurf, 256, X8,
+                       {{125, 133, KRUST}, {165, 173, KRUST}, {145, 153, KRUST}}))
+                return false;
+            return drawnTwo(x1.p, KAQUA, {1, 0, 24, 20}, KMINT) && cleared(y1.p, KGOLD) &&
+                   copyTo(x1.p, &second, y1.p, 9, 12) &&
+                   rtHas("Y's level 1", y1.p, 32, A8,
+                         {{9, 12, KMINT}, {23, 24, KMINT}, {24, 12, KGOLD}, {9, 11, KGOLD}, {8, 12, KGOLD},
+                          {9, 25, KGOLD}, {0, 0, KGOLD}});
+        }))
+        return false;
+    return until([&] {
+        Com<IDirect3DCubeTexture9> c, d;
+        Com<IDirect3DSurface9> a, c0, c3, d0, d2;
+        const RECT toFace = {4, 6, 27, 29}, fromFace = {2, 3, 25, 20};
+        CK(CreateCubeTexture, 64, 1, D3DUSAGE_RENDERTARGET, A8, D3DPOOL_DEFAULT, &c.p, nullptr);
+        CK(CreateCubeTexture, 32, 1, D3DUSAGE_RENDERTARGET, A8, D3DPOOL_DEFAULT, &d.p, nullptr);
+        if (!target64(a, FALSE) || !faceOf(c.p, D3DCUBEMAP_FACE_POSITIVE_X, c0) ||
+            !faceOf(c.p, D3DCUBEMAP_FACE_NEGATIVE_Y, c3) || !faceOf(d.p, D3DCUBEMAP_FACE_POSITIVE_X, d0) ||
+            !faceOf(d.p, D3DCUBEMAP_FACE_POSITIVE_Y, d2) || !cleared(c0.p, KROSE) || !cleared(c3.p, KLILAC) ||
+            !cleared(d0.p, KSKY) || !cleared(d2.p, K565A) || !drawnTwo(a.p, KSAGE, {2, 4, 30, 32}, KPLUM) ||
+            !copyTo(a.p, &toFace, c3.p, 31, 22) ||
+            !rtHas("face 3", c3.p, 64, A8,
+                   {{31, 22, KPLUM}, {53, 44, KPLUM}, {54, 22, KLILAC}, {31, 21, KLILAC}, {30, 22, KLILAC},
+                    {31, 45, KLILAC}, {0, 0, KLILAC}}) ||
+            !rtHas("face 0", c0.p, 64, A8, {{31, 22, KROSE}, {53, 44, KROSE}}))
+            return false;
+        return copyTo(d2.p, &fromFace, a.p, 33, 40) &&
+               rtHas("A", a.p, 64, A8,
+                     {{33, 40, K565A}, {55, 56, K565A}, {56, 40, KSAGE}, {33, 39, KSAGE}, {32, 40, KSAGE},
+                      {33, 57, KSAGE}, {0, 0, KSAGE}});
+    });
+}
+// sc-tex: T, a 64x64 default-pool texture of usage 0 and two levels, never bound: level 0 updated whole from a
+// system-memory surface (steel, rust over (5,3)-(34,32)), level 1 from a 32x32 one (aqua, mint over (1,1)-(20,20)). A,
+// a target, cleared gold. Level 0's (7,5)-(30,28) (rust) to A's (26,31), level 1's (2,3)-(17,16) (mint) to A's (5,6):
+// rust at (26,31) and (48,53), mint at (5,6) and (19,18) (level 0 there is steel and rust; level 1's origin is aqua),
+// gold at (49,31), (26,30), (25,31), (26,54), (20,6), (5,5), (4,6), (5,19) and (0,0). The source written rose over
+// (1,2)-(12,14) and that rect updated to level 0's (8,8) (x 8..18, y 8..19, owed to the core texture the first copy
+// made), level 0's (7,5)-(30,28) to A's (26,31) again: rose at (27,34) and (37,45), rust at (26,31), (38,34) and
+// (27,46), mint at (5,6), gold at (0,0).
+static bool rowScTex() {
+    return until([&] {
+        Com<IDirect3DTexture9> t;
+        Com<IDirect3DSurface9> s0, s1, t0, t1, a;
+        const RECT r0 = {7, 5, 30, 28}, r1 = {2, 3, 17, 16}, again = {1, 2, 12, 14};
+        const POINT at = {8, 8};
+        CK(CreateTexture, 64, 64, 2, 0, A8, D3DPOOL_DEFAULT, &t.p, nullptr);
+        CK(CreateOffscreenPlainSurface, 64, 64, A8, D3DPOOL_SYSTEMMEM, &s0.p, nullptr);
+        CK(CreateOffscreenPlainSurface, 32, 32, A8, D3DPOOL_SYSTEMMEM, &s1.p, nullptr);
+        if (!levelOf(t.p, 0, t0) || !levelOf(t.p, 1, t1) || !target64(a, FALSE) ||
+            !twoTone(s0.p, 64, KSTEEL, {5, 3, 34, 32}, KRUST) || !twoTone(s1.p, 32, KAQUA, {1, 1, 20, 20}, KMINT) ||
+            !updateSurface(s0.p, nullptr, t0.p, nullptr) || !updateSurface(s1.p, nullptr, t1.p, nullptr) ||
+            !cleared(a.p, KGOLD) || !copyTo(t0.p, &r0, a.p, 26, 31) || !copyTo(t1.p, &r1, a.p, 5, 6) ||
+            !rtHas("levels 0 and 1", a.p, 64, A8,
+                   {{26, 31, KRUST}, {48, 53, KRUST}, {5, 6, KMINT}, {19, 18, KMINT}, {49, 31, KGOLD}, {26, 30, KGOLD},
+                    {25, 31, KGOLD}, {26, 54, KGOLD}, {20, 6, KGOLD}, {5, 5, KGOLD}, {4, 6, KGOLD}, {5, 19, KGOLD},
+                    {0, 0, KGOLD}}))
+            return false;
+        return twoTone(s0.p, 64, KSTEEL, again, KROSE) && updateSurface(s0.p, &again, t0.p, &at) &&
+               copyTo(t0.p, &r0, a.p, 26, 31) &&
+               rtHas("level 0 updated again", a.p, 64, A8,
+                     {{27, 34, KROSE}, {37, 45, KROSE}, {26, 31, KRUST}, {38, 34, KRUST}, {27, 46, KRUST},
+                      {5, 6, KMINT}, {0, 0, KGOLD}});
+    });
+}
+// sc-plain: P, a plain surface, written under a lock steel with rust over (4,2)-(33,35); A, a target, cleared aqua.
+// P's (6,4)-(29,31) (rust) to A's (27,25): rust at (27,25) and (49,51), aqua at (50,25), (27,24), (26,25), (27,52) and
+// (0,0). Gold filled over P's (8,8)-(20,20), the same copy again: gold at (29,29) and (40,40) (the fill, owed to the
+// core texture the first copy made), rust at (27,25), (41,29) and (29,41), aqua at (50,25).
+static bool rowScPlain() {
+    return until([&] {
+        Com<IDirect3DSurface9> p, a;
+        const RECT rect = {6, 4, 29, 31}, fill = {8, 8, 20, 20};
+        return plain64(p) && target64(a, FALSE) && twoTone(p.p, 64, KSTEEL, {4, 2, 33, 35}, KRUST) &&
+               cleared(a.p, KAQUA) && copyTo(p.p, &rect, a.p, 27, 25) &&
+               rtHas("the copy", a.p, 64, A8,
+                     {{27, 25, KRUST}, {49, 51, KRUST}, {50, 25, KAQUA}, {27, 24, KAQUA}, {26, 25, KAQUA},
+                      {27, 52, KAQUA}, {0, 0, KAQUA}}) &&
+               colorFill(p.p, &fill, KGOLD) && copyTo(p.p, &rect, a.p, 27, 25) &&
+               rtHas("after the fill", a.p, 64, A8,
+                     {{29, 29, KGOLD}, {40, 40, KGOLD}, {27, 25, KRUST}, {41, 29, KRUST}, {29, 41, KRUST},
+                      {50, 25, KAQUA}});
+    });
+}
+// sc-plain2: P, Q and N, plain surfaces, and X, an X8R8G8B8 one: P written under a lock steel with rust over
+// (4,1)-(33,34), Q aqua, X mint, N nothing; A, a target, cleared gold. P's (6,3)-(29,30) (rust) to Q's (31,20), read
+// under a READONLY lock: rust at (31,20) and (53,46), aqua at (54,20), (31,19), (30,20), (31,47) and (0,0). Q's
+// (30,19)-(55,45) to A's (4,6): rust at (5,7) (Q's (31,20); Q's (1,1) is aqua) and (27,31), aqua at (4,6) and (28,31)
+// (Q's own around the first copy), gold at (29,6), (4,5), (3,6), (4,32) and (0,0). P's (7,4)-(28,23) to X's (33,37)
+// (formats unequal, bytes the same): rust at (33,37) and (53,55), mint at (54,37), (33,36), (32,37), (33,56) and (0,0)
+// (colour channels). P's (6,3)-(29,30) onto itself: D3D_OK, P unchanged (rust at (6,3) and (28,29), steel at (0,0) and
+// (40,40)). N, which nothing wrote, into Q, whole: D3D_OK (its texels are not judged).
+static bool rowScPlain2() {
+    return until([&] {
+        Com<IDirect3DSurface9> p, q, x, n, a;
+        const RECT toQ = {6, 3, 29, 30}, fromQ = {30, 19, 55, 45}, toX = {7, 4, 28, 23};
+        if (!plain64(p) || !plain64(q) || !plain64(x, X8) || !plain64(n) || !target64(a, FALSE) ||
+            !twoTone(p.p, 64, KSTEEL, {4, 1, 33, 34}, KRUST) || !twoTone(q.p, 64, KAQUA, {}, 0) ||
+            !twoTone(x.p, 64, KMINT, {}, 0) || !cleared(a.p, KGOLD) || !copyTo(p.p, &toQ, q.p, 31, 20) ||
+            !lockHas("Q", q.p,
+                     {{31, 20, KRUST}, {53, 46, KRUST}, {54, 20, KAQUA}, {31, 19, KAQUA}, {30, 20, KAQUA},
+                      {31, 47, KAQUA}, {0, 0, KAQUA}}) ||
+            !copyTo(q.p, &fromQ, a.p, 4, 6) ||
+            !rtHas("A", a.p, 64, A8,
+                   {{5, 7, KRUST}, {27, 31, KRUST}, {4, 6, KAQUA}, {28, 31, KAQUA}, {29, 6, KGOLD}, {4, 5, KGOLD},
+                    {3, 6, KGOLD}, {4, 32, KGOLD}, {0, 0, KGOLD}}) ||
+            !copyTo(p.p, &toX, x.p, 33, 37) ||
+            !lockHas("X", x.p,
+                     {{33, 37, KRUST}, {53, 55, KRUST}, {54, 37, KMINT}, {33, 36, KMINT}, {32, 37, KMINT},
+                      {33, 56, KMINT}, {0, 0, KMINT}}) ||
+            !answer("StretchRect (a plain surface onto itself, identical rects)",
+                    dev->StretchRect(p.p, &toQ, p.p, &toQ, D3DTEXF_NONE), D3D_OK) ||
+            !lockHas("P", p.p, {{6, 3, KRUST}, {28, 29, KRUST}, {0, 0, KSTEEL}, {40, 40, KSTEEL}}))
+            return false;
+        return answer("StretchRect (a plain surface nothing wrote)",
+                      dev->StretchRect(n.p, nullptr, q.p, nullptr, D3DTEXF_NONE), D3D_OK);
+    });
+}
+// sc-conv: P, a plain surface, written under a lock K565A with K565B over (3,2)-(28,29); R and S, R5G6B5 plain
+// surfaces, R written K565C. P's (5,4)-(26,27) (K565B) to R's (30,31) and P whole into S (CPU conversions), read 2
+// bytes a texel under a lock, each exactly its packed565: R K565B at (30,31) and (50,53), K565C at (51,31), (30,30),
+// (29,31), (30,54) and (0,0); S K565A at (0,0) and (40,40), K565B at (10,10). Y, a YUY2 plain surface where
+// CheckDeviceFormat offers one ("d3d9 sc-conv-yuy2 skip" where not), written under a lock Y 0xb4, U and V 0x80 in every
+// macropixel, into an X8R8G8B8 plain surface whole: (0xc0, 0xbe, 0xc0) at (9,7), the codec's BT.601 decode worked by
+// hand (the bytes copied raw would read (0xb4, 0x80, 0xb4)).
+static bool rowScConv() {
+    Com<IDirect3DSurface9> p, r, s;
+    const RECT rect = {5, 4, 26, 27};
+    if (!plain64(p) || !plain64(r, D3DFMT_R5G6B5) || !plain64(s, D3DFMT_R5G6B5) ||
+        !twoTone(p.p, 64, K565A, {3, 2, 28, 29}, K565B) || !twoTone(r.p, 64, packed565(K565C), {}, 0, 2) ||
+        !copyTo(p.p, &rect, r.p, 30, 31) || !copyTo(p.p, nullptr, s.p) ||
+        !has565("R", r.p,
+                {{30, 31, K565B}, {50, 53, K565B}, {51, 31, K565C}, {30, 30, K565C}, {29, 31, K565C}, {30, 54, K565C},
+                 {0, 0, K565C}}) ||
+        !has565("S", s.p, {{0, 0, K565A}, {40, 40, K565A}, {10, 10, K565B}}))
+        return false;
+    if (!offered(D3DRTYPE_SURFACE, D3DFMT_YUY2, "sc-conv-yuy2")) return true;
+    Com<IDirect3DSurface9> y, x;
+    CK(CreateOffscreenPlainSurface, 64, 64, D3DFMT_YUY2, D3DPOOL_DEFAULT, &y.p, nullptr);
+    return plain64(x, X8) &&
+           underLock(y.p, "LockRect (YUY2)", nullptr, 0,
+                     [&](BYTE *b, int pitch) { paint(b, pitch, 0, 0, 32, 64, 0x80b480b4); }) &&
+           copyTo(y.p, nullptr, x.p) && lockHas("YUY2 into X8R8G8B8", x.p, {{9, 7, D3DCOLOR_XRGB(0xc0, 0xbe, 0xc0)}});
+}
+// sc-same (one subresource at both ends): A, a target, cleared steel, a rust quad over (1,0)-(18,20); A's (3,2)-(16,18)
+// (rust) onto A's (40,32): rust at (40,32) and (52,47), steel at (53,32), (40,31), (39,32), (40,48) and (0,0), the
+// source kept (rust at (3,2) and (15,17)). The back buffer cleared aqua, a gold quad over (2,4)-(39,40); an additional
+// swap chain's back buffer's (4,6)-(37,38) (the device's, aliased) onto the device's at (150,120): gold at (150,120),
+// (182,151) and (4,6), aqua at (183,120), (150,119), (149,120), (150,152) and (0,0).
+static bool rowScSame() {
+    return until([&] {
+        Com<IDirect3DSwapChain9> sc;
+        Com<IDirect3DSurface9> a, chain;
+        const RECT rect = {3, 2, 16, 18}, onBb = {4, 6, 37, 38};
+        if (!target64(a, FALSE) || !chainBackBuffer(nullptr, 0, sc, chain) ||
+            !drawnTwo(a.p, KSTEEL, {1, 0, 18, 20}, KRUST) || !copyTo(a.p, &rect, a.p, 40, 32) ||
+            !rtHas("A", a.p, 64, A8,
+                   {{40, 32, KRUST}, {52, 47, KRUST}, {53, 32, KSTEEL}, {40, 31, KSTEEL}, {39, 32, KSTEEL},
+                    {40, 48, KSTEEL}, {0, 0, KSTEEL}, {3, 2, KRUST}, {15, 17, KRUST}}))
+            return false;
+        return scene([&] { return backToScreen() && clearTo(KAQUA) && zquad(2, 4, 39, 40, 0.5f, KGOLD); }) &&
+               copyTo(chain.p, &onBb, rtSurf, 150, 120) &&
+               rtHas("the back buffer", rtSurf, 256, X8,
+                     {{150, 120, KGOLD}, {182, 151, KGOLD}, {4, 6, KGOLD}, {183, 120, KAQUA}, {150, 119, KAQUA},
+                      {149, 120, KAQUA}, {150, 152, KAQUA}, {0, 0, KAQUA}});
+    });
+}
+// sc-self (one texture, two subresources): T, a 64x64 render-target texture of two levels, level 0 cleared steel with
+// a rust quad over (6,6)-(42,42), level 1 cleared aqua; level 0's (8,8)-(40,40) onto level 1 at (0,0), the whole level
+// (as Wine copies): rust at (0,0) (level 0's origin is steel), (31,31) and (16,16). C, a 64-texel render-target cube,
+// faces 0, 1 (-x) and 4 (+z) cleared gold, mint and rose; face 1's (3,4)-(26,25) onto face 4 at (30,33): mint at
+// (30,33) and (52,53), rose at (53,33), (30,32), (29,33), (30,54) and (0,0); face 0 gold at (30,33) and (52,53), face 1
+// mint at (3,4). A, a target, cleared lilac, a sage quad over (10,10)-(30,30): its (12,12)-(28,28) onto itself,
+// D3D_OK, A unchanged (sage at (12,12) and (27,27), lilac at (0,0) and (40,40)); last, its (0,0)-(32,32) onto its
+// (16,16)-(48,48), overlapping: D3D_OK on mtld3d, under strict D3DERR_NOTAVAILABLE (DXMTRS C4c-4c's).
+static bool rowScSelf() {
+    return until([&] {
+        Com<IDirect3DTexture9> t;
+        Com<IDirect3DCubeTexture9> c;
+        Com<IDirect3DSurface9> l0, l1, f0, f1, f4, a;
+        const RECT level = {8, 8, 40, 40}, face = {3, 4, 26, 25}, same = {12, 12, 28, 28}, half = {0, 0, 32, 32},
+                   onto = {16, 16, 48, 48};
+        CK(CreateCubeTexture, 64, 1, D3DUSAGE_RENDERTARGET, A8, D3DPOOL_DEFAULT, &c.p, nullptr);
+        if (!makeRt(t, 64, 2) || !levelOf(t.p, 0, l0) || !levelOf(t.p, 1, l1) ||
+            !faceOf(c.p, D3DCUBEMAP_FACE_POSITIVE_X, f0) || !faceOf(c.p, D3DCUBEMAP_FACE_NEGATIVE_X, f1) ||
+            !faceOf(c.p, D3DCUBEMAP_FACE_POSITIVE_Z, f4) || !target64(a, FALSE) ||
+            !drawnTwo(l0.p, KSTEEL, {6, 6, 42, 42}, KRUST) || !cleared(l1.p, KAQUA) ||
+            !copyTo(l0.p, &level, l1.p, 0, 0) ||
+            !rtHas("level 1", l1.p, 32, A8, {{0, 0, KRUST}, {31, 31, KRUST}, {16, 16, KRUST}}) ||
+            !cleared(f0.p, KGOLD) || !cleared(f1.p, KMINT) || !cleared(f4.p, KROSE) ||
+            !copyTo(f1.p, &face, f4.p, 30, 33) ||
+            !rtHas("face 4", f4.p, 64, A8,
+                   {{30, 33, KMINT}, {52, 53, KMINT}, {53, 33, KROSE}, {30, 32, KROSE}, {29, 33, KROSE},
+                    {30, 54, KROSE}, {0, 0, KROSE}}) ||
+            !rtHas("face 0", f0.p, 64, A8, {{30, 33, KGOLD}, {52, 53, KGOLD}}) ||
+            !rtHas("face 1", f1.p, 64, A8, {{3, 4, KMINT}}) || !drawnTwo(a.p, KLILAC, {10, 10, 30, 30}, KSAGE) ||
+            !answer("StretchRect (identical rects of one surface)",
+                    dev->StretchRect(a.p, &same, a.p, &same, D3DTEXF_NONE), D3D_OK) ||
+            !rtHas("A", a.p, 64, A8, {{12, 12, KSAGE}, {27, 27, KSAGE}, {0, 0, KLILAC}, {40, 40, KLILAC}}))
+            return false;
+        const HRESULT hr = dev->StretchRect(a.p, &half, a.p, &onto, D3DTEXF_NONE);
+        if (hr != (strictMode ? D3DERR_NOTAVAILABLE : D3D_OK)) return fail("StretchRect (overlapping rects)", hr);
+        return true;
+    });
+}
+// sc-autogen: G and H, 64x64 AUTOGENMIPMAP render-target textures (X8R8G8B8), G cleared rust and H mint; S, a 64x64
+// AUTOGENMIPMAP texture of usage 0 (X8R8G8B8); A, a target, cleared aqua; the back buffer cleared steel; 4x4 quads
+// sample G at (100,100) and H at (100,150) at their level 4 (POINT mip filter): rust at (102,102), mint at (102,152).
+// A into G's level 0, whole (as cf-autogen's fill); S's level 0 updated whole from a system-memory surface written gold
+// (test_mipmap_autogen's source); G at (150,100) and S drawn 64x64 over (180,180)-(244,244) (its level 0); S's level 0
+// into H's level 0, whole; H at (150,150): aqua at (152,102) and gold at (152,152) (each chain regenerated from its
+// copy), gold at (212,212) (S drawn), rust still at (102,102), mint at (102,152), steel at (20,20).
+static bool rowScAutogen() {
+    return until([&] {
+        Com<IDirect3DTexture9> g, h, s;
+        Com<IDirect3DSurface9> a, sys, g0, h0, s0;
+        const DWORD autogen = D3DUSAGE_RENDERTARGET | D3DUSAGE_AUTOGENMIPMAP;
+        CK(CreateTexture, 64, 64, 0, D3DUSAGE_AUTOGENMIPMAP, X8, D3DPOOL_DEFAULT, &s.p, nullptr);
+        CK(CreateOffscreenPlainSurface, 64, 64, X8, D3DPOOL_SYSTEMMEM, &sys.p, nullptr);
+        if (!makeRt(g, 64, 0, X8, autogen) || !makeRt(h, 64, 0, X8, autogen) || !levelOf(g.p, 0, g0) ||
+            !levelOf(h.p, 0, h0) || !levelOf(s.p, 0, s0) || !target64(a, FALSE))
+            return false;
+        CK(SetSamplerState, 0, D3DSAMP_MIPFILTER, D3DTEXF_POINT);
+        return scene([&] {
+                   return clearRt(a.p, KAQUA) && target(g.p) && clearTo(KRUST) && target(h.p) && clearTo(KMINT) &&
+                          backToScreen() && clearTo(KSTEEL) && show(g.p, 100, 100, 104, 104) &&
+                          show(h.p, 100, 150, 104, 154);
+               }) &&
+               copyTo(a.p, nullptr, g0.p) && twoTone(sys.p, 64, KGOLD, {}, 0) &&
+               updateSurface(sys.p, nullptr, s0.p, nullptr) &&
+               scene([&] { return show(g.p, 150, 100, 154, 104) && show(s.p, 180, 180, 244, 244); }) &&
+               copyTo(s0.p, nullptr, h0.p) && scene([&] { return show(h.p, 150, 150, 154, 154); }) &&
+               rtHas("the back buffer", rtSurf, 256, X8,
+                     {{152, 102, KAQUA}, {212, 212, KGOLD}, {152, 152, KGOLD}, {102, 102, KRUST}, {102, 152, KMINT},
+                      {20, 20, KSTEEL}});
+    });
+}
+// sc-order, in one scene: A and B, targets, B cleared aqua, A steel; A's (5,7)-(26,30) to B's (30,20), then a rust quad
+// over A's (0,0)-(40,40). Y's level 1 (a 64x64 render-target texture's, 32x32) cleared lilac, a gold quad over
+// (2,2)-(20,20), A's (44,40)-(57,52) (steel; A's origin is rust by now) to (10,9) over part of it, a rose quad over
+// (25,2)-(31,30) beside it; the same on face 3 (-y) of a 32-texel render-target cube: sky, plum, the copy, sage. B
+// bound, A's (45,44)-(60,57) to B's (5,47), a mint quad over (14,48)-(28,64) over part of it. B: steel at (30,20) and
+// (50,42) (A as the Clear left it: the quad after the copy is not in it), aqua at (51,20), (30,19), (29,20), (30,43)
+// and (0,0); steel at (5,47) and (10,58), mint at (16,52) (over the copy) and (24,60), aqua at (4,47) and (5,46). A:
+// rust at (10,10), steel at (50,50). Y's level 1 and the face: the first quad at (4,4); steel at (10,9), (12,11) (over
+// the first quad) and (22,20); the second quad at (28,15); the clear at (23,12), (10,21) and (0,0).
+static bool rowScOrder() {
+    return until([&] {
+        Com<IDirect3DTexture9> y;
+        Com<IDirect3DCubeTexture9> c;
+        Com<IDirect3DSurface9> a, b, y1, f3;
+        const RECT first = {5, 7, 26, 30}, mid = {44, 40, 57, 52}, last = {45, 44, 60, 57};
+        CK(CreateCubeTexture, 32, 1, D3DUSAGE_RENDERTARGET, A8, D3DPOOL_DEFAULT, &c.p, nullptr);
+        if (!target64(a, FALSE) || !target64(b, FALSE) || !makeRt(y, 64, 2) || !levelOf(y.p, 1, y1) ||
+            !faceOf(c.p, D3DCUBEMAP_FACE_NEGATIVE_Y, f3))
+            return false;
+        // t bound, cleared, a first quad, the copy over part of it, a second quad beside it.
+        const auto around = [&](IDirect3DSurface9 *t, DWORD clear, DWORD one, DWORD two) {
+            return clearRt(t, clear) && zquad(2, 2, 20, 20, 0.5f, one) && copyTo(a.p, &mid, t, 10, 9) &&
+                   zquad(25, 2, 31, 30, 0.5f, two);
+        };
+        const auto has = [&](const char *name, IDirect3DSurface9 *t, DWORD clear, DWORD one, DWORD two) {
+            return rtHas(name, t, 32, A8,
+                         {{4, 4, one}, {10, 9, KSTEEL}, {12, 11, KSTEEL}, {22, 20, KSTEEL}, {28, 15, two},
+                          {23, 12, clear}, {10, 21, clear}, {0, 0, clear}});
+        };
+        return scene([&] {
+                   return clearRt(b.p, KAQUA) && clearRt(a.p, KSTEEL) && copyTo(a.p, &first, b.p, 30, 20) &&
+                          zquad(0, 0, 40, 40, 0.5f, KRUST) && around(y1.p, KLILAC, KGOLD, KROSE) &&
+                          around(f3.p, KSKY, KPLUM, KSAGE) && bindRt(0, b.p) && copyTo(a.p, &last, b.p, 5, 47) &&
+                          zquad(14, 48, 28, 64, 0.5f, KMINT) && backToScreen();
+               }) &&
+               rtHas("B", b.p, 64, A8,
+                     {{30, 20, KSTEEL}, {50, 42, KSTEEL}, {51, 20, KAQUA}, {30, 19, KAQUA}, {29, 20, KAQUA},
+                      {30, 43, KAQUA}, {0, 0, KAQUA}, {5, 47, KSTEEL}, {10, 58, KSTEEL}, {16, 52, KMINT},
+                      {24, 60, KMINT}, {4, 47, KAQUA}, {5, 46, KAQUA}}) &&
+               rtHas("A", a.p, 64, A8, {{10, 10, KRUST}, {50, 50, KSTEEL}}) &&
+               has("Y's level 1", y1.p, KLILAC, KGOLD, KROSE) && has("face 3", f3.p, KSKY, KPLUM, KSAGE);
+    });
+}
+// One sc-depth pair (DXMTRS C4c-4b): T, a target, bound, cleared steel; D1 and D2, 64x64 depth-stencil surfaces of
+// format f: D1 bound, cleared to Z 0.25 (and stencil 3), D2 bound, cleared to Z 1 (and stencil 0), then D1 into the
+// bound D2, whole, with no draw between (as depth_blit_test). Z on, D2 bound: a mint quad at z 0.1 over (4,4)-(19,28)
+// (under stencil EQUAL 3) draws first, then a rust one at 0.5 over (24,4)-(39,28) (no stencil test) and, with a
+// stencil, a gold one at 0.1 under EQUAL 0 over (44,4)-(59,28) do not; D1 bound: an aqua quad at 0.1 over
+// (4,36)-(19,60) draws, a rose one at 0.5 over (24,36)-(39,60) does not (the copy read D1 before these draws). Each
+// quad on texels of its own: mint at (11,16), aqua at (11,48), steel at (31,16), (51,16) and (31,48). Then D1 onto
+// itself, whole: D3D_OK.
+static bool depthPair(D3DFORMAT f, bool stencil) {
+    Com<IDirect3DSurface9> t, d1, d2;
+    const auto clear = [&](float z, DWORD s) { return stencil ? clearZS(z, s) : clearZ(z); };
+    const auto test = [&](DWORD func, DWORD ref) {
+        return !stencil || (rstate(D3DRS_STENCILENABLE, TRUE) && rstate(D3DRS_STENCILFUNC, func) &&
+                            rstate(D3DRS_STENCILREF, ref));
+    };
+    if (!target64(t, FALSE) || !makeDs(d1, f, 64) || !makeDs(d2, f, 64) || !scene([&] {
+            return clearRt(t.p, KSTEEL) && bindDs(d1.p) && clear(0.25f, 3) && bindDs(d2.p) && clear(1.0f, 0);
+        }))
+        return false;
+    CK(StretchRect, d1.p, nullptr, d2.p, nullptr, D3DTEXF_NONE);
+    if (!scene([&] {
+            return rstate(D3DRS_ZENABLE, D3DZB_TRUE) && test(D3DCMP_EQUAL, 3) && zquad(4, 4, 19, 28, 0.1f, KMINT) &&
+                   rstate(D3DRS_STENCILENABLE, FALSE) && zquad(24, 4, 39, 28, 0.5f, KRUST) &&
+                   (!stencil || (test(D3DCMP_EQUAL, 0) && zquad(44, 4, 59, 28, 0.1f, KGOLD) &&
+                                 rstate(D3DRS_STENCILENABLE, FALSE))) &&
+                   bindDs(d1.p) && zquad(4, 36, 19, 60, 0.1f, KAQUA) && zquad(24, 36, 39, 60, 0.5f, KROSE) &&
+                   backToScreen();
+        }) ||
+        !rtHas("T", t.p, 64, A8,
+               {{11, 16, KMINT}, {11, 48, KAQUA}, {31, 16, KSTEEL}, {51, 16, KSTEEL}, {31, 48, KSTEEL}}))
+        return false;
+    return answer("StretchRect (a depth-stencil surface onto itself)",
+                  dev->StretchRect(d1.p, nullptr, d1.p, nullptr, D3DTEXF_NONE), D3D_OK);
+}
+// sc-depth (last): depthPair of D24S8 with its stencil plane, then of D16, depth alone; on every path, passed or not,
+// no depth-stencil bound and the depth state as the device has it (it has none: ZENABLE off).
+static bool rowScDepth() {
+    return until([&] {
+        const bool ok = (depthPair(D3DFMT_D24S8, true) || failIn("D24S8")) &&
+                        (depthPair(D3DFMT_D16, false) || failIn("D16"));
+        depthBack(nullptr, D3DZB_FALSE);
+        return ok;
+    });
 }
 
 static void blitRows(IDirect3DDevice9 *d, bool strict) {
@@ -8189,7 +8704,12 @@ static void blitRows(IDirect3DDevice9 *d, bool strict) {
         {"cf-msaa", rowCfMsaa},     {"cf-plain", rowCfPlain},       {"cf-reject", rowCfReject},
         {"us-tex", rowUsTex},       {"us-level", rowUsLevel},       {"us-rtex", rowUsRtex},
         {"us-rt", rowUsRt},         {"us-bb", rowUsBb},             {"us-conv", rowUsConv},
-        {"us-reject", rowUsReject}, {"sr-reject", rowSrReject},     {"sr-shape", rowSrShape}};
+        {"us-reject", rowUsReject}, {"sr-reject", rowSrReject},     {"sr-shape", rowSrShape},
+        {"sc-rt", rowScRt},         {"sc-bb", rowScBb},             {"sc-lockable", rowScLockable},
+        {"sc-rtex", rowScRtex},     {"sc-tex", rowScTex},           {"sc-plain", rowScPlain},
+        {"sc-plain2", rowScPlain2}, {"sc-conv", rowScConv},         {"sc-same", rowScSame},
+        {"sc-self", rowScSelf},     {"sc-autogen", rowScAutogen},   {"sc-order", rowScOrder},
+        {"sc-depth", rowScDepth}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     const HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     for (const auto &r : rows) {
