@@ -529,4 +529,83 @@ Three Opus reviews of the plan as committed at bff44181; every finding folded ab
 
 ## Execution notes
 
-(filled during execution)
+Executed 2026-11-18. Tips: DXMTRS 3d5dcda3 (940ddce5 `fill`; 06505ab2 `write_presented`'s rect and
+`texture_upload`'s refusal; fd1a2bbc `StretchRect`'s answers; 4a6d2426 `ColorFill`; 3d5dcda3 `UpdateSurface`),
+MacNeutron 4715e242 (the rows). Ledger: `.superpowers/sdd/2026-11-16-dxmtrs-c4c/progress.md`.
+
+- **Ruling T1-1. The cube cell of `cf-rtex` is no lock, and mutant e is dropped.** A render-target cube refuses
+  `LockRect` on both runtimes (`texture.rs:7133-7137`; a target cube cannot be DYNAMIC), which the reviews
+  missed. The cell asserts `INVALIDCALL` for both locks and reads the fill by `GetRenderTargetData`. No CPU read
+  is left that does not claim the level itself, so "the arm skips the claim" is an equivalent mutant: nine
+  mutants, a-d and f-j. The claim stays in `color_fill`, as mtld3d has it, ungated (the final review's M2: its
+  doc names the cube as its reason, which no longer holds). Cost if wrong: a later CPU read that does not claim
+  reads stale staging after a fill; none exists.
+- **Rows beyond the Appendix** (Task 1): draws before and after the fills where the Appendix named none
+  (`cf-lockable`, `cf-rtex`'s level 1 and cube cells, `cf-unbound`'s Y, `cf-msaa`, the chain cell); `cf-unbound`'s
+  fill is whole, so mutant c does not touch it; region sources carry a guard colour and a last-row band (a copy
+  from the wrong origin or pitch moves a colour); `us-level`'s cube probes hold under either face orientation,
+  so they are weak on the destination point; no skip line appeared in any lane (DXT1, YUY2, UYVY are offered).
+- **Controls** (base + the rows): every prediction held at the first run, no expectation corrected. `ja`:
+  default and msl ok, 18 of 18 `blit` rows; core red on exactly the 18 predicted tokens. `jv0`: the launch on
+  mtld3d under Metal's validation layer, reports 0, rows ok 20. `jcr`: the VM's default lane ok on old and new
+  WoW64, 18 `bt64` and 18 `bt32` ok lines each.
+- **Ruling T2-1.** The two emit helpers take a `WMTClearColor` and a `Vec<WMTScissorRect>` (so each is the
+  `emit` alone, byte-identical to the old bodies). The fakes print a lone Clear pass at size 0x0: whole fills are
+  asserted by handle and clear line. Minor, kept: `fill` has its own three-line `inside` closure, a copy of
+  `rect_bytes`'s, and its own colour build. The fakes show neither the quad's colour and coordinates (the
+  `scissor_rects` unit test and the rows hold them) nor `fill`'s `note_written` (`cf-msaa`'s resolve does).
+- **Ruling T3-1.** The classifier's four standalone arms share one helper, `standalone_stretch_info` (mtld3d's
+  two literals differed in the kind, the flags and the two companion handles alone); the final review compared
+  it field by field with the base. Mutant b is a struct update on the core depth arm's own return.
+- **Task 5's entry test** is one `cfg`'d bool, `is_core_device(this) && dst_surf.core_target().is_some()`,
+  inside the parentheses with the handle test: appended as this plan wrote it, `a && b || c` would have pulled a
+  render-target texture's level out of branch C.
+- **Lanes**, each as predicted: `jt3` (fd1a2bbc) core red on the 17 tokens of `ColorFill` and `UpdateSurface`,
+  `sr-reject` and `sr-shape` green, `targets` and `msaa` whole; `jt4` (4a6d2426) the nine `cf-*` rows green at
+  the first run, 8 tokens left; `jt5` (3d5dcda3) default and core ok, 18 of 18 on both, every refusal set exact,
+  the `blit` launch under core with Metal's validation layer: reports 0, rows ok 20. The translator key the
+  base's in each.
+- **The chain** at 3d5dcda3 with 4715e242's rows (`jr`, `jc`, `jq`, `jm`, `jw`, 11:36 to 13:15, every job exit
+  0). `jr`: the plain build's translator key and `d3d9.dll` imports the base's, d3d9-check default ok with 18 of
+  18, the conformance failing anew at triaged sites only. `jc`: the VM's D3D9 gate ok on default and core, old
+  and new WoW64, 18 `bt64` and 18 `bt32` ok lines each (19 under core: the rows and the "runtime core" line).
+  `jq`: default, msl and core ok with 18 of 18, stateblock on both runtimes, the eleven launches under core with
+  Metal's validation layer: reports 0. `jm`: the nine mutants each red on exactly their tokens, "other rows:
+  none", every cell and texel as `mutants-expect.txt` had it before the run (d's texel reads baaff8), the green
+  tip 18 of 18.
+  **The x64 check was red once**: `jr`'s run had 419 rows ok and one FAIL, "XeSS reports no device for an
+  object without DXMT's interface: got [none]" (`xess-wd`: `d3d12_xess` under wined3d, no DXMT in the process,
+  printed msync's two lines and was killed by check.sh's 120 s watchdog). Ruling X-1: a wined3d run's hang is
+  not `src/d3d9`'s; the check was run once more at the same tip (`jx`, 13:22 to 13:47): 420 ok, 0 FAIL, the row's
+  program printing "xess unsupported ok". Not reproduced, not traced; a follow-up if it shows again. Cost if
+  wrong: a real intermittent hang in the XeSS bridge's refusal path stays unlooked at.
+- **Final review** (`build/c4c/s4a/review-final.md`, range 4eea8d68..3d5dcda3): 0 Critical, 0 Important, 3
+  Minor; "push as is". Traced sound: mtld3d unchanged (every arm gated by `cfg` and the device; the shared helper
+  equal to the base's literals); no recorder call and no null-handle read reachable on a core device from the
+  three entries, every return path enumerated; the classifier's answer per surface kind; the helpers verbatim
+  moves with each caller's own `close_pass()`; the region arithmetic; the four callers of `texture_upload`.
+  Ledgered, no fix round: M1 `update_color_target` matches `TargetRef::Texture { id, .. }` and writes level 0,
+  slice 0 (safe by its caller's precondition; a tighter match is `level: 0, face: None`); M2 the claim (above);
+  M3 `backbuffer_page_upload` passes the surface's live extent where the core has its own (equal while the two
+  agree; a disagreement is a refused write and an error line, not a wrong one). **P-1 holds: no probe** (none of
+  the twelve `clear` / `clear_rects` tests changed). Not covered by a row or test, most important first: the
+  core arms' error paths; a multisampled back buffer's fill; the classifier's auto depth-stencil arm (the
+  `msaa` launch's `ms-desc` reaches it, the `blit` launch does not); the claim; a plain surface's upload (4b);
+  a whole fill of an additional chain's back buffer and `UpdateSurface` into it; branch B from a texture-level
+  source; branch C into a render-target level; a converted `UpdateSurface` into the back buffer; target formats
+  other than A8R8G8B8 and X8R8G8B8; on the GPU a rect fill of a face or of level 1, and a clamped rect on a
+  target; a whole fill of a bound single-sample target folded into the next draw's pass; a whole fill under
+  sRGB write; `UpdateSurface` into a DEFAULT plain surface.
+- **Sweep** (`build/c4c/s4a/sweep.md`, job `jw`, gating nothing). New "Test failed" lines over the default runtime's
+  baseline: `visual` 2183 to 1912, `device` 932 to 200, `d3d9ex` 66 as before (it dies in `test_reset`); Wine's own
+  failed counts 2426 to 2162 and 1635 to 939 (they fall by 43 less: Wine counts a success inside a todo block as a
+  failure, and those lines rise from 224 to 231 and from 19 to 55; which checks they are was not traced). Per
+  function: `color_fill_test` 104 to 0, `update_surface_test` 20 to 0, `test_signed_formats` 18 to 0,
+  `test_cube_wrap` 11 to 0, `test_flip` 2 to 0, `test_generate_mipmap` 1 to 0, `test_mipmap_lock` 2 to 0,
+  `test_stretch_rect` 810 to 81 as predicted, `stretchrect_test` 83 to 51, `depth_blit_test` 20 to 15,
+  `test_multisample_stretch_rect` 56 to 54, `add_dirty_rect_test` 13 to 6. The six left in the last are not 4a's
+  calls and failed in 3b's sweep too: five colours after `READONLY` and `NO_DIRTY_UPDATE` writes into a managed
+  texture's levels (not traced in the code; a follow-up) and `EvictManagedResources` refused. `ColorFill` and
+  `UpdateSurface` are met as refusals by no suite. 3a's sweep attributed three functions to the wrong call:
+  `test_cube_wrap` is `UpdateSurface`'s (now 0), `test_filling_convention` is `StretchRect`'s, `test_sysmem_draw` is
+  `ProcessVertices`'s.

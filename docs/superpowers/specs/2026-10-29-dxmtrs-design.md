@@ -1302,13 +1302,57 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   DYNAMIC or DEFAULT colour texture levels, cube faces or an R5G6B5 lockable target, D16 and D24X8 levels above 0,
   `NO_DIRTY_UPDATE` or `DISCARD` on a dynamic depth texture, or the stencil bytes' values; the `DISCARD` cell of
   the writable lock has no mutant. No probe: no draw or recorder file changed.
+  C4c-4a done 2026-11-18 at DXMTRS main 3d5dcda3, which MacNeutron pins: `ColorFill`, `UpdateSurface` and
+  `StretchRect`'s answers on the core runtime; C4c-4 is three slices, each with the one kind of primitive it needs.
+  d3d9-rt gains `fill` (the whole of, or a rect of, any colour target the core resolves, bound or not, through the
+  view of its stored format with the colour as given, as mtld3d's fill writes its bytes whatever sRGB write says;
+  `clear` and `clear_rects` share its two emit bodies and emit what they did), `write_presented` takes a rect, and
+  `texture_upload` refuses a multisampled texture. In the front end `resolve_stretch_surface` takes the device's
+  runtime and classifies a core device's standalone surfaces by `core_target()` and `core_depth()` with a null
+  handle in the kind; **every core arm is keyed on the device, never on those two tests alone** (`core_target()`
+  answers the back buffer on either runtime, and the default lanes run on the build that has the feature).
+  `StretchRect` loses its early jump: a core device runs mtld3d's gates, so what mtld3d rejects there is
+  `D3DERR_INVALIDCALL` on both runtimes, and leaves at two exits (after the depth branch's gates, and after the
+  scaling gate, each ahead of the first flush) for the resolve arm, where a valid shape other than the multisample
+  resolve is still refused by name. `ColorFill` runs mtld3d's gates and then, for a render target (the back buffer,
+  an additional chain's, a standalone target multisampled or not, a texture's level or cube face),
+  `core_arms::color_fill`: the texture's owed uploads, the fill, and on success the GPU claim and an autogen
+  chain's regeneration; a DEFAULT plain surface is filled in its staging as on mtld3d and only marked dirty.
+  `UpdateSurface` into a texture is mtld3d's staging copies as they are; into a standalone target or the back
+  buffer the region goes through `texture_upload` or `write_presented` in application order
+  (`core_arms::update_color_target`). **Kept: on a core device only render-target levels, standalone targets and
+  the back buffer are written by the GPU** (a plain surface and a level that is no target stay CPU-authoritative:
+  the core reads no other texture back), which 4b's plain-to-plain copy has to keep. Answers that differ from
+  mtld3d: a valid `StretchRect` other than the resolve is `D3DERR_NOTAVAILABLE` (the resolve-like shapes
+  `resolve_shape` declines too: an additional chain's back buffer, an AUTOGENMIPMAP destination, X8 into A8, a
+  sub-rect, multisampled into multisampled, the depth resolve), and mtld3d's failures found while running, behind
+  the exits, are not reached. Refusals removed: `IDirect3DDevice9::ColorFill`, `IDirect3DDevice9::UpdateSurface`.
+  Gated at that tip with the `blit` launch's 18 rows (`dxmt/tests/d3d9_triangle.cpp`; every verdict counts them,
+  so a launch that is not wired fails): the plain build's translator key and `d3d9.dll` imports are the base's;
+  d3d9-check default, msl and core, 18 of 18 on each; the Mac's conformance fails anew at triaged sites only;
+  stateblock on both runtimes; the eleven launches under core with Metal's validation layer report nothing; the
+  VM's D3D9 gate on both runtimes and both WoW64 forms, 18 rows in 64-bit and in 32-bit; the x64 check, all 420
+  rows, at its second run (the first had one red: `d3d12_xess` under wined3d, no DXMT in the process, printed
+  nothing and met the check's 120 s watchdog; not reproduced, not traced).
+  Nine mutants (`StretchRect` leaving for the resolve arm ahead of the gates, the core depth arm's sample count,
+  the fill's rect, a fill colour encoded under sRGB write, the texture's owed uploads, the autogen chain's
+  regeneration, the texture arm's and the back buffer's `UpdateSurface` origin, exit 2 below the CPU-convert
+  return) each turn exactly their rows red, at the texel or answer written before the run. The whole-branch
+  review: nothing Critical or Important, three Minors ledgered without a fix round. No row covers the core arms'
+  error paths, a multisampled back buffer's fill, a whole fill of an additional chain's back buffer or
+  `UpdateSurface` into it, a converted `UpdateSurface` into the back buffer, target formats other than A8R8G8B8
+  and X8R8G8B8, or a whole fill under sRGB write; the texture arm's GPU claim has no mutant (no CPU read shows
+  its absence). No probe: no draw file changed, and the twelve `clear` tests pass unchanged over the shared emit
+  bodies.
   C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
   offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer count and its cap
   (done); 3a colour read-back through locks (lockable targets, the back buffer read-only, render-target texture
   levels, the front buffer; done); 3b device contexts, the surface's `PreLoad`, the writable back-buffer lock, an
   additional swap chain's back buffer, the DYNAMIC depth texture's lock (done);
-  4 `StretchRect`'s other
-  shapes, `ColorFill`, `UpdateSurface`; 5 queries; 6 `Reset`, the getters, the swap chain's presents; 7 gamma, frame
+  4a `ColorFill`, `UpdateSurface` and `StretchRect`'s answers (done); 4b `StretchRect`'s unscaled copies of one
+  storage, the depth copy, the CPU routes of plain surfaces; 4c its scaled, converting and YUV copies,
+  multisampled destinations, the depth resolve;
+  5 queries; 6 `Reset`, the getters, the swap chain's presents; 7 gamma, frame
   latency, the device's information from winemetal, the `Ex` creators, and the conformance lane for `visual`, `device`
   and `d3d9ex` under core, which is C4c's gate.
   The sweep after 3a (`build/c4c/s3/sweep.md`, gating nothing): `visual` and `device` run to their end
@@ -1320,8 +1364,18 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   The sweep after 3b (`build/c4c/s3b/sweep.md`, gating nothing): `test_getdc` passes whole under core (231 new
   failures to 0), `test_lockable_backbuffer` keeps the three that are `Reset`'s, and no surface or texture refusal
   is met any more (Wine's own counts as above: `visual` 2426 failed of 211208, `device` 1635 of 56830; `d3d9ex`
-  still dies in `test_reset`, so `test_user_memory_getdc` is not reached). `StretchRect`'s other shapes, `ColorFill` and `UpdateSurface` are about
-  2950 of the 3115 new failures left in the two suites. The two silent differences above are unchanged.
+  still dies in `test_reset`, so `test_user_memory_getdc` is not reached). `StretchRect`'s other shapes,
+  `ColorFill` and `UpdateSurface` are about 2950 of the 3115 new failures left in the two suites. The two silent
+  differences above are unchanged.
+  The sweep after 4a (`build/c4c/s4a/sweep.md`, gating nothing): `color_fill_test`, `update_surface_test`,
+  `test_signed_formats`, `test_cube_wrap`, `test_flip`, `test_generate_mipmap` and `test_mipmap_lock` pass whole
+  under core, and `test_stretch_rect` falls from 810 new failures to 81 on validation alone (Wine's own counts:
+  `visual` 2162 failed of 211218, `device` 939 of 56830; "Test failed" lines over the default runtime's baseline:
+  2183 to 1912 and 932 to 200; `d3d9ex` still dies in `test_reset`). `StretchRect`'s remaining shapes are about
+  1900 of the 2112 lines left in the two suites. The two silent differences are unchanged. A third, older than 4a
+  (the same five lines are in 3b's sweep, among `add_dirty_rect_test`'s 13), is named here and not traced either:
+  that test's five colours after `READONLY` and `NO_DIRTY_UPDATE` writes into a managed texture's levels, which
+  D3D9 does not upload and a core draw shows.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
