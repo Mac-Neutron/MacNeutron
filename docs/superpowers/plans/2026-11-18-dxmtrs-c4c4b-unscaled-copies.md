@@ -71,6 +71,9 @@ Restated because this slice leans on them:
   `INVALIDCALL`. Where it runs: `ja`, each `jt`, `jq` on each work folder's `mtld3d-logs`; `jc` on
   `build/vm-work/share/traces/d3d9/logs` right after each core gate and before the next one wipes it; `jm`
   for each mutant before its work folder is removed (mutants e expects more than 0).
+- **The x64 check (`dxmt/check.sh`) runs once at the end of C4c-4**, not in this slice's chain or post-push
+  check (the maintainer, 2026-11-18: "Yes, once at end"), unless the DXMTRS range leaves `src/d3d9`: `jr.sh` and
+  `post.sh` test `git diff --name-only 3d5dcda3..HEAD` and say which. 4c's chain and post-push check run it.
 - **Every stretch refusal goes through one function** (`core_arms::refuse_stretch()`, the one place that holds
   the literal): the refusal logs once a string pointer, not once a text (`runtime.rs:81-87`), and the gates
   want exactly one line a launch (R3 m2).
@@ -335,9 +338,9 @@ plan's from the Appendix; the file's are final):
   b. the target route hands `copy` the source rect moved to the origin → the same list less a row whose
      every source rect is at the origin (none, by the cell rules);
   c. the ref built for a source that is no target names level 0 → `blit-sc-tex` (its level-1 cell);
-  e. the target route skips the source's `core_flush_dirty` → `blit-sc-tex blit-sc-plain blit-sc-plain2
-     blit-sc-autogen` (each first copy from a source with no core texture answers `INVALIDCALL` with an error
-     line: `notrec` above 0 is expected here; R3 f3);
+  e. the target route skips the source's `core_flush_dirty` → `blit-sc-tex blit-sc-plain blit-sc-plain2`
+     (each first copy from a source with no core texture answers `INVALIDCALL` with an error line: `notrec`
+     above 0 is expected here; R3 f3; `sc-autogen`'s source is drawn before its copy, so it has one);
   e2. it skips that flush only when the source's core texture exists → `blit-sc-tex blit-sc-plain` (their
      owed-upload cells read the old texels);
   f. no `texture_generate_mips` after a copy → `blit-sc-autogen`;
@@ -427,6 +430,10 @@ check. CI. Memory. Scratch deleted by full path once each verdict is ledgered.
   step 4's raw copy; it has no row (the launches make no extended device), so it waits for one.
 - **N-1. `was not recorded` is counted in every verdict** and wanted 0 (today's count is 0: the only two
   literals are 4a's, and its core logs hold none).
+- **O-1. Task 2 runs beside Task 1**, not after the controls (the maintainer asked for speed): the two
+  d3d9-rt primitives depend on no row. Task 3 starts once `jv0` has settled SS and DM, beside `ja` and `jcr`.
+  Cost if wrong: an outcome B means a small edit of `copy`'s same-texture rule or of `copy_depth`'s sample
+  test; a row corrected by `ja` changes no front-end code.
 - **P-2. No probe.** No draw file and no line of `recorder.rs` changes; `texture_shape` keeps one map lookup
   and its answers. If the range touches `recorder.rs`, `draw.rs` or `target.rs`, or `texture_shape` gains a
   second lookup, one bench pair, once.
