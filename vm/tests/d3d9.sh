@@ -15,7 +15,8 @@
 #   fx<64|32>-fresh.txt           d3d9_triangle fixed (DXMTRS C4b-3c's 31 rows of the fixed-function vertex stage;
 #                                "fixed strict" under core), 240 s
 #   tg<64|32>-fresh.txt           d3d9_triangle targets (DXMTRS C4b-3d1's 22 rows of render targets other than the
-#                                back buffer and C4b-3d5's rt-plain; "targets strict" under core), 240 s
+#                                back buffer, C4b-3d5's rt-plain and C4c-3a's four of locks and the front buffer;
+#                                "targets strict" under core), 240 s
 #   dp<64|32>-fresh.txt           d3d9_triangle depth (DXMTRS C4b-3d2's 31 rows of the depth-stencil, on a device with
 #                                an auto depth-stencil; "depth strict" under core), 240 s
 #   bl<64|32>-fresh.txt           d3d9_triangle blend (DXMTRS C4b-3d3's 36 rows of partial clears, the scissor test, a
@@ -24,7 +25,8 @@
 #   mr<64|32>-fresh.txt           d3d9_triangle mrt (DXMTRS C4b-3d4's 20 rows of render targets at index 1-3; "mrt
 #                                strict" under core), 240 s
 #   ms<64|32>-fresh.txt           d3d9_triangle msaa (DXMTRS C4b-3d5's 17 rows of multisampling, on a device whose
-#                                back buffer and auto depth-stencil have 4 samples; "msaa strict" under core), 240 s
+#                                back buffer and auto depth-stencil have 4 samples, and C4c-3a's two reads of the
+#                                back buffer; "msaa strict" under core), 240 s
 #   bf<64|32>-fresh.txt           d3d9_triangle buffers (DXMTRS C4c-1's, C4c-2a's and C4c-2b's 39 rows of vertex and
 #                                index buffers and the draws that read them; "buffers strict" under core), 240 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included

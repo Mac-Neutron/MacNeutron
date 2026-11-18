@@ -40,13 +40,14 @@
 // fixed-function vertex stage over untransformed layouts (transforms, lights, material sources, fog, texgen and texture
 // transforms, vertex blending, points, a clip plane) and three vertex-sampled target textures the core refuses, with a
 // 180 s budget. "--bench <draws> <frames> lit" draws the triangle untransformed and lit ("mode lit").
-// With "targets" ("targets strict" under core; DXMTRS C4b-3d1): 23 rows "d3d9 rt-<row> ok|FAIL <why>" of render targets
+// With "targets" ("targets strict" under core; DXMTRS C4b-3d1): 27 rows "d3d9 rt-<row> ok|FAIL <why>" of render targets
 // other than the back buffer (render-target textures, their levels and cube faces, CreateRenderTarget surfaces: drawn
 // to, cleared, read back with GetRenderTargetData and sampled; formats, sRGB write, the viewport reset, automatic
 // mipmaps, lifetime and order, a size past the device's limit, a target bound and unbound at index 1; since DXMTRS
 // C4b-3d5 a multisampled surface resolved by StretchRect into a texture level, a surface and the back buffer, and the
-// default pool's plain surface), with a 150 s budget. The core refuses a StretchRect other than a whole-surface
-// resolve (rt-msaa's into a 32x32 target).
+// default pool's plain surface; since DXMTRS C4c-3a a lockable target's locks, the surfaces that do not lock, the back
+// buffer's read-only lock and the front buffer's read), with a 180 s budget. The core refuses a StretchRect other than
+// a whole-surface resolve (rt-msaa's into a 32x32 target).
 // With "depth" ("depth strict" under core; DXMTRS C4b-3d2): 31 rows "d3d9 ds-<row> ok|FAIL <why>" of the depth-stencil,
 // on a device made with an auto D24S8 (the other modes' devices have none): the depth and stencil tests and their
 // state, Clear's Z and stencil, depth bias, the pretransformed clamp, a pixel shader's depth output, depth-stencil
@@ -65,12 +66,13 @@
 // and of another size, the write masks of index 1-3, blending and sRGB write over several targets, Clear over every
 // bound target, the scissor, the viewport and the depth test, the back buffer in a set, automatic mipmaps, order),
 // with a 180 s budget. The core refuses none of it.
-// With "msaa" ("msaa strict" under core; DXMTRS C4b-3d5): 17 rows "d3d9 ms-<row> ok|FAIL <why>" on a device whose
+// With "msaa" ("msaa strict" under core; DXMTRS C4b-3d5): 19 rows "d3d9 ms-<row> ok|FAIL <why>" on a device whose
 // back buffer and auto D24S8 have 4 samples: multisampled CreateRenderTarget surfaces (2, 4, 8 samples and
 // non-maskable) read through StretchRect's resolve, the back buffer's too; edges, Clear with rects and the viewport,
 // the depth test, a depth-stencil of another sample count, D3DRS_MULTISAMPLEMASK, alpha-to-coverage (ATOC and the A2M
 // latch), sRGB write, blending, index 1-3 targets, the scissor test, a resolve's destination drawn again; what the
-// creators and read-backs answer. With a 180 s budget. The core refuses a StretchRect other than a whole-surface
+// creators and read-backs answer; since DXMTRS C4c-3a the back buffer read by a READONLY lock and by
+// GetFrontBufferData. With a 180 s budget. The core refuses a StretchRect other than a whole-surface
 // resolve (ms-desc's depth-stencil one).
 // With "buffers" ("buffers strict" under core; DXMTRS C4c-1, C4c-2a, C4c-2b): 39 rows "d3d9 buf-<row> ok|FAIL <why>" of
 // vertex and index buffers and the draws that read them, on a device with no depth-stencil: GetDirect3D; Lock and
@@ -1108,8 +1110,9 @@ static bool rowUpUnbind() {
     return true;
 }
 // fftex: a green texture on stage 0 (MODULATE TEXTURE DIFFUSE) under a white pretransformed quad over a blue clear:
-// drawn green (D3D_OK) or refused (D3DERR_NOTAVAILABLE, the core: textures are C4b-3b's) and blue. fftexoff: the same
-// with stage 0 disabled, drawn white in every lane (the cascade reads no texture, so nothing refuses it).
+// drawn green (D3D_OK), which strict (the core, which draws textures since DXMTRS C4b-3b) requires; the other lanes
+// also take a refusal (D3DERR_NOTAVAILABLE) and blue. fftexoff: the same with stage 0 disabled, drawn white in every
+// lane (the cascade reads no texture, so nothing refuses it).
 struct TV { float x, y, z, rhw; DWORD color; float u, v; };
 static bool texturedQuad(bool stageOn) {
     Com<IDirect3DTexture9> t;
@@ -1165,8 +1168,8 @@ static void stateRows(IDirect3DDevice9 *d, IDirect3D9 *d3d, HWND hwnd, bool stri
 // The "textures" mode (DXMTRS C4b-3b): sampled textures under the fixed-function cascade and ps_1_1-2_0, each row
 // a frame of pretransformed quads whose texcoords are constant at a texel centre (unless the row is about addressing
 // or filtering), asserting the sampled colour. Alpha is checked by routing it into the colour (a ps_2_0 `mov oC0,
-// r0.wwww`). A row past the core's slice (a render-target texture's lock; in "fixed", a depth texture at a vertex
-// sampler) answers D3D_OK under mtld3d and D3DERR_NOTAVAILABLE under core ("textures strict").
+// r0.wwww`). The core refuses none of it since DXMTRS C4c-3a, which locks a render-target texture's levels (in "fixed",
+// a depth texture at a vertex sampler answers D3D_OK under mtld3d and D3DERR_NOTAVAILABLE under core, "fixed strict").
 struct TV3 { float x, y, z, rhw; DWORD color; float u, v, w; };
 // A pixel-space quad, clockwise, its texcoords (u, v, w) at every vertex.
 static void tquad(TV3 *q, float x0, float y0, float x1, float y1, float u, float v, float w = 0) {
@@ -1697,17 +1700,8 @@ static bool show(IDirect3DBaseTexture9 *t, float x0 = 64, float y0 = 64, float x
     CK(SetTexture, 0, nullptr);
     return ok;
 }
-// LockRect on a render-target texture, past the core's slice (C4c's): D3DERR_NOTAVAILABLE under core (strict); in
-// the other lanes any answer but an abort (a lock that succeeds is unlocked).
-static bool rowTexRtLock() {
-    Com<IDirect3DTexture9> t;
-    CK(CreateTexture, 4, 4, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &t.p, nullptr);
-    D3DLOCKED_RECT lr = {};
-    const HRESULT hr = t.p->LockRect(0, &lr, nullptr, D3DLOCK_READONLY);
-    if (SUCCEEDED(hr)) t.p->UnlockRect(0);
-    if (strictMode && hr != D3DERR_NOTAVAILABLE) return fail("LockRect", hr);
-    return true;
-}
+// LockRect of a render-target texture's levels (DXMTRS C4c-3a): with the targets mode's helpers, below.
+static bool rowTexRtLock();
 // Released by the application while bound: the stage keeps it, the draw samples it.
 static bool rowTexRelease() {
     IDirect3DTexture9 *t = nullptr;
@@ -3081,6 +3075,323 @@ static bool rowRtHuge() {
     return true;
 }
 
+// Locks of render targets, of the back buffer and of render-target textures, and the front buffer's read (DXMTRS
+// C4c-3a; tex-rtlock is the textures mode's, ms-bblock and ms-front the msaa mode's). Their colours have every channel
+// non-zero and no two alike, so a read of zeros (a lock that read nothing back) or of another texel, level or frame
+// never passes for the one a cell wants. Every lock is unlocked before what it read is judged.
+static const DWORD KSTEEL = D3DCOLOR_XRGB(0x30, 0x60, 0x90), KRUST = D3DCOLOR_XRGB(0xc0, 0x40, 0x20),
+                   KAQUA = D3DCOLOR_XRGB(0x20, 0xc0, 0xe0), KMINT = D3DCOLOR_XRGB(0x10, 0xf0, 0x80),
+                   KROSE = D3DCOLOR_XRGB(0xf0, 0x20, 0x60), KSAGE = D3DCOLOR_XRGB(0x50, 0xa0, 0x70),
+                   KLILAC = D3DCOLOR_XRGB(0x80, 0x70, 0xf0), KGOLD = D3DCOLOR_XRGB(0xe0, 0xd0, 0x10);
+// LockRect(r, flags) of `s`, f(bits, pitch) under the lock (it reads into the caller's locals, or writes), then
+// UnlockRect whatever f did: the back buffer persists across until()'s attempts, so no path may leave it locked.
+template <class F> static bool underLock(IDirect3DSurface9 *s, const char *what, const RECT *r, DWORD flags, F f) {
+    D3DLOCKED_RECT lr = {};
+    HRESULT hr = s->LockRect(&lr, r, flags);
+    if (FAILED(hr)) return fail(what, hr);
+    f((BYTE *)lr.pBits, (int)lr.Pitch);
+    hr = s->UnlockRect();
+    return SUCCEEDED(hr) || fail("UnlockRect", hr);
+}
+// The same for level `level` of a texture (the whole level).
+template <class F> static bool underLevelLock(IDirect3DTexture9 *t, UINT level, DWORD flags, F f) {
+    D3DLOCKED_RECT lr = {};
+    HRESULT hr = t->LockRect(level, &lr, nullptr, flags);
+    if (FAILED(hr)) return fail(level ? "IDirect3DTexture9::LockRect (level 1)" : "IDirect3DTexture9::LockRect", hr);
+    f((BYTE *)lr.pBits, (int)lr.Pitch);
+    hr = t->UnlockRect(level);
+    return SUCCEEDED(hr) || fail("IDirect3DTexture9::UnlockRect", hr);
+}
+// Texels [x0, x1) x [y0, y1) of 4-byte rows `pitch` apart set to c.
+static void paint(BYTE *bits, int pitch, int x0, int y0, int x1, int y1, DWORD c) {
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++) memcpy(bits + y * pitch + x * 4, &c, 4);
+}
+// A 64x64 A8R8G8B8 CreateRenderTarget surface, lockable unless said.
+static bool target64(Com<IDirect3DSurface9> &s, BOOL lockable = TRUE) {
+    CK(CreateRenderTarget, 64, 64, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, lockable, &s.p, nullptr);
+    return true;
+}
+// rt-lockable: L, a lockable target, cleared steel with a rust triangle (4,4)-(36,4)-(4,36). LockRect(NULL, READONLY)
+// reports the pitch 256 and reads the triangle at (12,12), steel at (48,48) (a lock that read nothing back hands out
+// its staging's zeros); LockRect(NULL, 0) shows the same, and an aqua block written over (40..55, 8..23) reaches the
+// target at UnlockRect (GetRenderTargetData: aqua at (48,16), the triangle and the steel kept). Mint written at (48,48)
+// under a READONLY lock does not reach it. A lock of the rect (8,8)-(16,16) hands out (8,8): rose written at pBits[0]
+// lands there, over the triangle, and (0,0) stays steel. A Clear to sage, then a READONLY lock: sage. A DISCARD lock
+// that writes lilac over the whole surface: lilac everywhere. A second LockRect while locked and a second UnlockRect
+// are D3DERR_INVALIDCALL; so is GetRenderTargetData into L from a non-lockable target of its size and format (a
+// lockable target is no system-memory destination).
+static bool rowRtLockable() {
+    const bool first = until([&] {
+        Com<IDirect3DSurface9> l, n;
+        const RV tri[3] = {{4, 4, 0.5f, 1, KRUST}, {36, 4, 0.5f, 1, KRUST}, {4, 36, 0.5f, 1, KRUST}};
+        if (!target64(l) || !scene([&] {
+                CK(SetRenderTarget, 0, l.p);
+                if (!clearTo(KSTEEL)) return false;
+                CK(SetFVF, D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+                CK(DrawPrimitiveUP, D3DPT_TRIANGLELIST, 1, tri, sizeof *tri);
+                return backToScreen();
+            }))
+            return false;
+        int pitch = 0;
+        DWORD in = 0, out = 0;
+        if (!underLock(l.p, "LockRect (READONLY)", nullptr, D3DLOCK_READONLY, [&](BYTE *b, int p) {
+                pitch = p, in = texel(b, p, 12, 12), out = texel(b, p, 48, 48);
+            }))
+            return false;
+        if (pitch != 256) return snprintf(why, sizeof why, "READONLY lock pitch %d want 256", pitch), false;
+        if (!want("READONLY lock (12,12)", in, KRUST) || !want("READONLY lock (48,48)", out, KSTEEL)) return false;
+        if (!underLock(l.p, "LockRect", nullptr, 0, [&](BYTE *b, int p) {
+                in = texel(b, p, 12, 12), out = texel(b, p, 48, 48);
+                paint(b, p, 40, 8, 56, 24, KAQUA);
+            }))
+            return false;
+        if (!want("lock (12,12)", in, KRUST) || !want("lock (48,48)", out, KSTEEL) ||
+            !readTarget(l.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+                return want("written (48,16)", texel(b, p, 48, 16), KAQUA) &&
+                       want("written (12,12)", texel(b, p, 12, 12), KRUST) &&
+                       want("written (48,48)", texel(b, p, 48, 48), KSTEEL);
+            }))
+            return false;
+        if (!underLock(l.p, "LockRect (READONLY, written)", nullptr, D3DLOCK_READONLY,
+                       [&](BYTE *b, int p) { paint(b, p, 48, 48, 49, 49, KMINT); }) ||
+            !readTarget(l.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+                return want("after a READONLY lock (48,48)", texel(b, p, 48, 48), KSTEEL);
+            }))
+            return false;
+        const RECT r = {8, 8, 16, 16};
+        if (!underLock(l.p, "LockRect (8,8)-(16,16)", &r, 0, [&](BYTE *b, int p) { paint(b, p, 0, 0, 1, 1, KROSE); }) ||
+            !readTarget(l.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+                return want("rect lock (8,8)", texel(b, p, 8, 8), KROSE) &&
+                       want("rect lock (9,8)", texel(b, p, 9, 8), KRUST) &&
+                       want("rect lock (0,0)", texel(b, p, 0, 0), KSTEEL);
+            }))
+            return false;
+        DWORD c[3] = {};
+        if (!scene([&] {
+                CK(SetRenderTarget, 0, l.p);
+                return clearTo(KSAGE) && backToScreen();
+            }) ||
+            !underLock(l.p, "LockRect (READONLY, cleared)", nullptr, D3DLOCK_READONLY, [&](BYTE *b, int p) {
+                c[0] = texel(b, p, 12, 12), c[1] = texel(b, p, 48, 16), c[2] = texel(b, p, 8, 8);
+            }))
+            return false;
+        if (!want("cleared (12,12)", c[0], KSAGE) || !want("cleared (48,16)", c[1], KSAGE) ||
+            !want("cleared (8,8)", c[2], KSAGE))
+            return false;
+        if (!underLock(l.p, "LockRect (DISCARD)", nullptr, D3DLOCK_DISCARD,
+                       [&](BYTE *b, int p) { paint(b, p, 0, 0, 64, 64, KLILAC); }) ||
+            !readTarget(l.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+                for (int y = 0; y < 64; y++)
+                    for (int x = 0; x < 64; x++) {
+                        char what[32];
+                        snprintf(what, sizeof what, "DISCARD (%d,%d)", x, y);
+                        if (!want(what, texel(b, p, x, y), KLILAC)) return false;
+                    }
+                return true;
+            }))
+            return false;
+        D3DLOCKED_RECT lr = {}, lr2 = {};
+        HRESULT hr = l.p->LockRect(&lr, nullptr, D3DLOCK_READONLY);
+        if (FAILED(hr)) return fail("LockRect", hr);
+        const HRESULT second = l.p->LockRect(&lr2, nullptr, D3DLOCK_READONLY);
+        hr = l.p->UnlockRect();
+        const HRESULT again = l.p->UnlockRect();
+        if (second != D3DERR_INVALIDCALL) return fail("LockRect (locked)", second);
+        if (FAILED(hr)) return fail("UnlockRect", hr);
+        if (again != D3DERR_INVALIDCALL) return fail("UnlockRect (unlocked)", again);
+        if (!target64(n, FALSE)) return false;
+        hr = dev->GetRenderTargetData(n.p, l.p);
+        if (hr != D3DERR_INVALIDCALL) return fail("GetRenderTargetData (into a lockable target)", hr);
+        return true;
+    });
+    // On a new L, bound at index 0 throughout: a Clear to steel, an aqua block locked in over (40..55, 8..23), then a
+    // gold quad over (8,40)-(24,56): the block, the Clear and the quad all hold (the pass after the upload loads the
+    // target; it does not clear it again). On M, in application order: a rust quad over the left half, an aqua block
+    // locked in over (16..47, 16..47), a gold quad over the top half: each texel is its last writer's.
+    return first && until([&] {
+        Com<IDirect3DSurface9> l, m;
+        RV gold[4], rust[4], top[4];
+        quadRhw(gold, 8, 40, 24, 56, KGOLD), quadRhw(rust, 0, 0, 32, 64, KRUST), quadRhw(top, 0, 0, 64, 32, KGOLD);
+        const auto block = [&](IDirect3DSurface9 *s, int x0, int y0, int x1, int y1) {
+            return underLock(s, "LockRect (bound)", nullptr, 0,
+                             [&](BYTE *b, int p) { paint(b, p, x0, y0, x1, y1, KAQUA); });
+        };
+        if (!target64(l) || !target64(m) || !scene([&] {
+                CK(SetRenderTarget, 0, l.p);
+                return clearTo(KSTEEL);
+            }) ||
+            !block(l.p, 40, 8, 56, 24) || !scene([&] { return rdraw(gold) && backToScreen(); }) ||
+            !readTarget(l.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+                return want("block (48,16)", texel(b, p, 48, 16), KAQUA) &&
+                       want("Clear (48,48)", texel(b, p, 48, 48), KSTEEL) &&
+                       want("quad after (16,48)", texel(b, p, 16, 48), KGOLD);
+            }))
+            return false;
+        return scene([&] {
+                   CK(SetRenderTarget, 0, m.p);
+                   return clearTo(KSTEEL) && rdraw(rust);
+               }) &&
+               block(m.p, 16, 16, 48, 48) && scene([&] { return rdraw(top) && backToScreen(); }) &&
+               readTarget(m.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+                   return want("the quad before (8,48)", texel(b, p, 8, 48), KRUST) &&
+                          want("the block over it (24,40)", texel(b, p, 24, 40), KAQUA) &&
+                          want("the quad after (24,24)", texel(b, p, 24, 24), KGOLD) &&
+                          want("the Clear (56,48)", texel(b, p, 56, 48), KSTEEL);
+               });
+    });
+}
+// rt-nolock: LockRect is D3DERR_INVALIDCALL in every lane on the surfaces with no CPU copy: a Lockable = FALSE target,
+// a 4-sample one, a D24S8 CreateDepthStencilSurface (this device has no auto one), a render-target texture's
+// GetSurfaceLevel(0) and a render-target cube's GetCubeMapSurface face. Nothing is unlocked after a refused lock and
+// its out structure is not read.
+static bool rowRtNolock() {
+    Com<IDirect3DSurface9> plain, ms, ds, level, face;
+    Com<IDirect3DTexture9> t;
+    Com<IDirect3DCubeTexture9> c;
+    if (!target64(plain, FALSE)) return false;
+    CK(CreateRenderTarget, 64, 64, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_4_SAMPLES, 0, FALSE, &ms.p, nullptr);
+    CK(CreateDepthStencilSurface, 64, 64, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, FALSE, &ds.p, nullptr);
+    if (!makeRt(t) || !levelOf(t.p, 0, level)) return false;
+    CK(CreateCubeTexture, 16, 1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &c.p, nullptr);
+    HRESULT hr = c.p->GetCubeMapSurface(D3DCUBEMAP_FACE_POSITIVE_X, 0, &face.p);
+    if (FAILED(hr)) return fail("GetCubeMapSurface", hr);
+    const struct { IDirect3DSurface9 *s; const char *what; } cells[] = {
+        {plain.p, "LockRect (a non-lockable target)"}, {ms.p, "LockRect (a 4-sample target)"},
+        {ds.p, "LockRect (a depth-stencil surface)"}, {level.p, "LockRect (a render-target texture's level)"},
+        {face.p, "LockRect (a render-target cube's face)"}};
+    for (const auto &k : cells) {
+        D3DLOCKED_RECT lr = {};
+        hr = k.s->LockRect(&lr, nullptr, D3DLOCK_READONLY);
+        if (hr != D3DERR_INVALIDCALL) return fail(k.what, hr);
+    }
+    return true;
+}
+// rt-bblock: the back buffer cleared steel, a rust quad over (32,32)-(96,96) and an aqua one over (160,160)-(224,224).
+// GetBackBuffer's surface locked READONLY by the one-texel rects at (64,64) and (192,192) reads rust and aqua at pBits
+// (the rect's texel; a read from the surface's origin would give the corner's steel); locked READONLY whole, the two
+// through the pitch it reports, and steel at (0,0). LockRect(NULL, 0) (the device was made without
+// D3DPRESENTFLAG_LOCKABLE_BACKBUFFER), an empty rect, a second lock while locked and a second UnlockRect are
+// D3DERR_INVALIDCALL, and a lock after the empty rect's succeeds. No path leaves the back buffer locked.
+static bool rowRtBblock() {
+    return until([&] {
+        Com<IDirect3DSurface9> bb;
+        RV a[4], b[4];
+        quadRhw(a, 32, 32, 96, 96, KRUST), quadRhw(b, 160, 160, 224, 224, KAQUA);
+        if (!scene([&] { return backToScreen() && clearTo(KSTEEL) && rdraw(a) && rdraw(b); })) return false;
+        CK(GetBackBuffer, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
+        const RECT ra = {64, 64, 65, 65}, rb = {192, 192, 193, 193}, empty = {10, 10, 10, 11};
+        DWORD pa = 0, pb = 0, wa = 0, wb = 0, corner = 0;
+        // pBits of a one-texel rect is that texel: read at (0,0) of the mapping, whatever pitch it reports.
+        const auto one = [&](const RECT *r, DWORD &got) {
+            return underLock(bb.p, "LockRect (a one-texel rect)", r, D3DLOCK_READONLY,
+                             [&](BYTE *p, int) { got = texel(p, 0, 0, 0); });
+        };
+        if (!one(&ra, pa) || !one(&rb, pb) ||
+            !underLock(bb.p, "LockRect (NULL, READONLY)", nullptr, D3DLOCK_READONLY, [&](BYTE *p, int pitch) {
+                wa = texel(p, pitch, 64, 64), wb = texel(p, pitch, 192, 192), corner = texel(p, pitch, 0, 0);
+            }))
+            return false;
+        if (!want("(64,64) by its rect", pa, KRUST) || !want("(192,192) by its rect", pb, KAQUA) ||
+            !want("(64,64) whole", wa, KRUST) || !want("(192,192) whole", wb, KAQUA) ||
+            !want("(0,0) whole", corner, KSTEEL))
+            return false;
+        D3DLOCKED_RECT lr = {};
+        HRESULT hr = bb.p->LockRect(&lr, nullptr, 0);
+        if (SUCCEEDED(hr)) bb.p->UnlockRect();
+        if (hr != D3DERR_INVALIDCALL) return fail("LockRect (NULL, 0)", hr);
+        hr = bb.p->LockRect(&lr, &empty, D3DLOCK_READONLY);
+        if (SUCCEEDED(hr)) bb.p->UnlockRect();
+        if (hr != D3DERR_INVALIDCALL) return fail("LockRect (an empty rect)", hr);
+        if (FAILED(hr = bb.p->LockRect(&lr, nullptr, D3DLOCK_READONLY)))
+            return fail("LockRect (after the empty rect)", hr);
+        const HRESULT second = bb.p->LockRect(&lr, nullptr, D3DLOCK_READONLY);
+        hr = bb.p->UnlockRect();
+        const HRESULT again = bb.p->UnlockRect();
+        if (second != D3DERR_INVALIDCALL) return fail("LockRect (locked)", second);
+        if (FAILED(hr)) return fail("UnlockRect", hr);
+        if (again != D3DERR_INVALIDCALL) return fail("UnlockRect (unlocked)", again);
+        return true;
+    });
+}
+// rt-front: the back buffer cleared steel with a gold quad over (96,96)-(160,160), and no Present: the device's
+// GetFrontBufferData(0) into a 256x256 A8R8G8B8 system-memory surface reads it, gold at (128,128) and steel at (16,16)
+// (the front buffer is the back buffer as it is now, mtld3d's reading), as the implicit swap chain's own
+// GetFrontBufferData does at (128,128). Swap chain 1, no destination and a 512x512 one are D3DERR_INVALIDCALL.
+static bool rowRtFront() {
+    return until([&] {
+        Com<IDirect3DSurface9> d, e, big;
+        Com<IDirect3DSwapChain9> sc;
+        RV q[4];
+        quadRhw(q, 96, 96, 160, 160, KGOLD);
+        if (!scene([&] { return backToScreen() && clearTo(KSTEEL) && rdraw(q); })) return false;
+        CK(CreateOffscreenPlainSurface, 256, 256, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &d.p, nullptr);
+        CK(CreateOffscreenPlainSurface, 256, 256, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &e.p, nullptr);
+        CK(CreateOffscreenPlainSurface, 512, 512, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &big.p, nullptr);
+        CK(GetSwapChain, 0, &sc.p);
+        CK(GetFrontBufferData, 0, d.p);
+        HRESULT hr = sc.p->GetFrontBufferData(e.p);
+        if (FAILED(hr)) return fail("IDirect3DSwapChain9::GetFrontBufferData", hr);
+        DWORD in = 0, out = 0, chain = 0;
+        if (!underLock(d.p, "LockRect (the device's read)", nullptr, D3DLOCK_READONLY, [&](BYTE *b, int p) {
+                in = texel(b, p, 128, 128), out = texel(b, p, 16, 16);
+            }) ||
+            !underLock(e.p, "LockRect (the swap chain's read)", nullptr, D3DLOCK_READONLY,
+                       [&](BYTE *b, int p) { chain = texel(b, p, 128, 128); }))
+            return false;
+        if (!want("front (128,128)", in, KGOLD) || !want("front (16,16)", out, KSTEEL) ||
+            !want("the swap chain's front (128,128)", chain, KGOLD))
+            return false;
+        if ((hr = dev->GetFrontBufferData(1, d.p)) != D3DERR_INVALIDCALL)
+            return fail("GetFrontBufferData (swap chain 1)", hr);
+        if ((hr = dev->GetFrontBufferData(0, nullptr)) != D3DERR_INVALIDCALL)
+            return fail("GetFrontBufferData (no destination)", hr);
+        if ((hr = dev->GetFrontBufferData(0, big.p)) != D3DERR_INVALIDCALL)
+            return fail("GetFrontBufferData (512x512)", hr);
+        return true;
+    });
+}
+// tex-rtlock (the textures mode's row): IDirect3DTexture9::LockRect of a 64x64 A8R8G8B8 render-target texture of two
+// levels (D3D9 refuses the lock of a non-dynamic default-pool texture; mtld3d takes it, a divergence kept). Level 0
+// cleared steel with a rust quad over (8,8)-(24,24), level 1 sage with a gold quad over (0,0)-(16,16): a READONLY lock
+// of level 0 reads rust at (16,16) and steel at (48,48) (a lock that read nothing back hands out its staging's zeros),
+// one of level 1 gold at (8,8) and sage at (24,24) (no colour of level 0's: a read of another level shows). Level 0
+// locked to write an aqua block over (32..47, 32..47), then a rose quad over (40,40)-(56,56) drawn into it:
+// GetRenderTargetData of level 0 reads rust at (16,16), aqua at (36,36), rose at (44,44) (the draw after the write
+// lands over it) and steel at (8,48).
+static bool rowTexRtLock() {
+    return until([&] {
+        Com<IDirect3DTexture9> t;
+        Com<IDirect3DSurface9> s0;
+        RV q0[4], q1[4], over[4];
+        quadRhw(q0, 8, 8, 24, 24, KRUST), quadRhw(q1, 0, 0, 16, 16, KGOLD), quadRhw(over, 40, 40, 56, 56, KROSE);
+        if (!makeRt(t, 64, 2) || !levelOf(t.p, 0, s0) || !scene([&] {
+                return target(t.p, 0) && clearTo(KSTEEL) && rdraw(q0) && target(t.p, 1) && clearTo(KSAGE) &&
+                       rdraw(q1) && backToScreen();
+            }))
+            return false;
+        DWORD l0[2] = {}, l1[2] = {};
+        if (!underLevelLock(t.p, 0, D3DLOCK_READONLY, [&](BYTE *b, int p) {
+                l0[0] = texel(b, p, 16, 16), l0[1] = texel(b, p, 48, 48);
+            }) ||
+            !underLevelLock(t.p, 1, D3DLOCK_READONLY, [&](BYTE *b, int p) {
+                l1[0] = texel(b, p, 8, 8), l1[1] = texel(b, p, 24, 24);
+            }))
+            return false;
+        if (!want("level 0 (16,16)", l0[0], KRUST) || !want("level 0 (48,48)", l0[1], KSTEEL) ||
+            !want("level 1 (8,8)", l1[0], KGOLD) || !want("level 1 (24,24)", l1[1], KSAGE))
+            return false;
+        return underLevelLock(t.p, 0, 0, [&](BYTE *b, int p) { paint(b, p, 32, 32, 48, 48, KAQUA); }) &&
+               scene([&] { return target(t.p, 0) && rdraw(over) && backToScreen(); }) &&
+               readTarget(s0.p, 64, 64, D3DFMT_A8R8G8B8, [&](const BYTE *b, int p) {
+                   return want("written (16,16)", texel(b, p, 16, 16), KRUST) &&
+                          want("written (36,36)", texel(b, p, 36, 36), KAQUA) &&
+                          want("drawn over (44,44)", texel(b, p, 44, 44), KROSE) &&
+                          want("written (8,48)", texel(b, p, 8, 48), KSTEEL);
+               });
+    });
+}
+
 static void targetRows(IDirect3DDevice9 *d, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
         {"rt-tex", rowRtTex},           {"rt-read", rowRtRead},         {"rt-surface", rowRtSurface},
@@ -3090,8 +3401,9 @@ static void targetRows(IDirect3DDevice9 *d, bool strict) {
         {"rt-release", rowRtRelease},   {"rt-srgb", rowRtSrgb},         {"rt-ps", rowRtPs},
         {"rt-update", rowRtUpdate},     {"rt-updatebound", rowRtUpdateBound}, {"rt-formats", rowRtFormats},
         {"rt-mrt", rowRtMrt},           {"rt-msaa", rowRtMsaa},         {"rt-plain", rowRtPlain},
-        {"rt-cubelock", rowRtCubeLock}, {"rt-huge", rowRtHuge}};
-    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 150000;
+        {"rt-cubelock", rowRtCubeLock}, {"rt-huge", rowRtHuge},     {"rt-lockable", rowRtLockable},
+        {"rt-nolock", rowRtNolock},     {"rt-bblock", rowRtBblock},     {"rt-front", rowRtFront}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
         hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
@@ -5515,6 +5827,49 @@ static bool rowMsInitial() {
     });
 }
 
+// The back buffer read after two frames (DXMTRS C4c-3a): A, cleared sage with a lilac quad over (64,64)-(192,192), and
+// presented; B, cleared steel with a gold quad there, not presented. B is read: the frame drawn since the Present,
+// which the read resolves first (not A, which the Present resolved). Each attempt presents its own A.
+static bool msTwoFrames() {
+    const auto frame = [](DWORD clear, DWORD quad) {
+        return scene([&] { return backToScreen() && clearTo(clear) && zquad(64, 64, 192, 192, 0.5f, quad); });
+    };
+    if (!frame(KSAGE, KLILAC)) return false;
+    CK(Present, nullptr, nullptr, nullptr, nullptr);
+    return frame(KSTEEL, KGOLD);
+}
+// ms-bblock: the multisampled back buffer locked READONLY reads B: gold at (128,128), steel at (32,32). The lock is
+// whole (from the origin), so the row sees the resolve and not the rect's origin, which rt-bblock's rects see.
+static bool rowMsBblock() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> bb;
+        DWORD in = 0, out = 0;
+        if (!msTwoFrames()) return false;
+        CK(GetBackBuffer, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
+        if (!underLock(bb.p, "LockRect (NULL, READONLY)", nullptr, D3DLOCK_READONLY, [&](BYTE *b, int p) {
+                in = texel(b, p, 128, 128), out = texel(b, p, 32, 32);
+            }))
+            return false;
+        return want("the back buffer (128,128)", in, KGOLD) && want("the back buffer (32,32)", out, KSTEEL);
+    });
+}
+// ms-front: GetFrontBufferData into a 256x256 A8R8G8B8 system-memory surface reads B: gold at (128,128), steel at
+// (32,32).
+static bool rowMsFront() {
+    return msUntil([&] {
+        Com<IDirect3DSurface9> s;
+        DWORD in = 0, out = 0;
+        if (!msTwoFrames()) return false;
+        CK(CreateOffscreenPlainSurface, 256, 256, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &s.p, nullptr);
+        CK(GetFrontBufferData, 0, s.p);
+        if (!underLock(s.p, "LockRect (the front buffer's read)", nullptr, D3DLOCK_READONLY, [&](BYTE *b, int p) {
+                in = texel(b, p, 128, 128), out = texel(b, p, 32, 32);
+            }))
+            return false;
+        return want("front (128,128)", in, KGOLD) && want("front (32,32)", out, KSTEEL);
+    });
+}
+
 static void msaaRows(IDirect3DDevice9 *d, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
         {"ms-desc", rowMsDesc},       {"ms-resolve", rowMsResolve},   {"ms-edge", rowMsEdge},
@@ -5522,7 +5877,7 @@ static void msaaRows(IDirect3DDevice9 *d, bool strict) {
         {"ms-mismatch", rowMsMismatch}, {"ms-mask", rowMsMask},       {"ms-nonmask", rowMsNonMask},
         {"ms-a2c", rowMsA2c},         {"ms-srgbmask", rowMsSrgbMask}, {"ms-blend", rowMsBlend},
         {"ms-mrt", rowMsMrt},         {"ms-scissor", rowMsScissor},   {"ms-redraw", rowMsRedraw},
-        {"ms-samples", rowMsSamples}};
+        {"ms-samples", rowMsSamples}, {"ms-bblock", rowMsBblock},     {"ms-front", rowMsFront}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))

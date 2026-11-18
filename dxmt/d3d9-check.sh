@@ -33,36 +33,36 @@
 # so mtld3d runs") and the encoder line. No shader-backend, kinds or conformance rows under core (C4b on). Its stamp is
 # "d3d9-check: lane core (runtime.mode=core)", its verdict "d3d9-check: ok (core)". D3D9_RUNTIME=mtld3d (the default)
 # is the lanes above.
-# Every lane also runs d3d9_triangle shaders (DXMTRS C4b-2's 22 shader rows, C4b2-11; "shaders strict" under core:
-# the first frame must match), its rows "shaders-<row>". Its launch's logs hold no core refusal line ("... is not
+# Every lane also runs d3d9_triangle shaders (DXMTRS C4b-2's 22 shader rows, C4b2-11; "shaders strict" under core: the
+# first frame must match), its rows "shaders-<row>". Its launch's logs hold no core refusal line ("... is not
 # implemented under runtime.mode = core") in any lane (under core since DXMTRS C4c-2a, which draws the crossing row),
-# else "shaders-runtime". Every lane also runs d3d9_triangle state (DXMTRS C4b-3a's 12 rows
-# of API state and inert objects; "state strict" under core), its rows "state-<row>"; its launch's logs hold no refusal
-# line in any lane (under core since DXMTRS C4c-1, which made buffer locks the core's). Every lane also runs
-# d3d9_triangle textures (DXMTRS C4b-3b's 34 rows of sampled textures and C4b-3c's five vertex-texture rows; "textures
-# strict" under core), its rows "textures-<row>"; under core its launch's logs hold exactly its refused row's line.
-# Every lane also runs
-# d3d9_triangle fixed (DXMTRS C4b-3c's 31 rows of the fixed-function vertex stage; "fixed strict" under core), its rows
-# "fixed-<row>"; under core its launch's logs hold exactly its refused rows' line (a depth texture at a vertex
-# sampler). Every lane also runs d3d9_triangle targets (DXMTRS C4b-3d1's 22 rows of render targets other than the back
-# buffer and C4b-3d5's rt-plain: 23; "targets strict" under core), its rows "targets-<row>"; under core its launch's
-# logs hold exactly one refusal line (a StretchRect
-# that is no multisample resolve). Every lane also runs d3d9_triangle depth
-# (DXMTRS C4b-3d2's 31 rows of the depth-stencil, on a device with an auto depth-stencil; "depth strict" under core),
-# its rows "depth-<row>"; under core its launch's logs hold exactly its two refused calls' lines. Every lane also
-# runs d3d9_triangle blend (DXMTRS C4b-3d3's 36 rows of partial clears, the scissor test, a depth-stencil of another
-# size, sRGB write and blending, on such a device; "blend strict" under core), its rows "blend-<row>"; under core its
-# launch's logs hold no refusal line. Every lane also runs d3d9_triangle mrt (DXMTRS C4b-3d4's 20 rows of render
-# targets at index 1-3, on such a device; "mrt strict" under core), its rows "mrt-<row>"; under core its launch's
-# logs hold no refusal line. Every lane also runs d3d9_triangle msaa (DXMTRS C4b-3d5's 17 rows of multisampling, on a
-# device whose back buffer and auto depth-stencil have 4 samples; "msaa strict" under core), its rows "msaa-<row>";
-# under core its launch's logs hold exactly one refusal line (a StretchRect
-# that is no multisample resolve). Every lane also runs d3d9_triangle buffers (DXMTRS C4c-1's, C4c-2a's and C4c-2b's 39
-# rows of vertex and index buffers and the draws that read them, on a device with no depth-stencil; "buffers strict"
-# under core), its rows "buffers-<row>"; under core its launch's logs hold exactly its one refusal line (a layout no
-# binding can fetch: buf-wide's attribute wider than its stride) and no line of a draw dropped for a buffer with no core
-# form, and the line logged at the first draw that reads a dynamic buffer in place ("d3d9 core: dynamic buffers are
-# read in place", DXMTRS C4c-2b), else "buffers-direct".
+# else "shaders-runtime". Every lane also runs d3d9_triangle state (DXMTRS C4b-3a's 12 rows of API state and inert
+# objects; "state strict" under core), its rows "state-<row>"; its launch's logs hold no refusal line in any lane (under
+# core since DXMTRS C4c-1, which made buffer locks the core's). Every lane also runs d3d9_triangle textures (DXMTRS
+# C4b-3b's 34 rows of sampled textures and C4b-3c's five vertex-texture rows; "textures strict" under core), its rows
+# "textures-<row>"; under core its launch's logs hold no refusal line (since DXMTRS C4c-3a, which locks a render-target
+# texture's levels). Every lane also runs d3d9_triangle fixed (DXMTRS C4b-3c's 31 rows of the fixed-function vertex
+# stage; "fixed strict" under core), its rows "fixed-<row>"; under core its launch's logs hold exactly its refused rows'
+# line (a depth texture at a vertex sampler). Every lane also runs d3d9_triangle targets (DXMTRS C4b-3d1's 22 rows of
+# render targets other than the back buffer, C4b-3d5's rt-plain and C4c-3a's four of locks and the front buffer:
+# rt-lockable, rt-nolock, rt-bblock, rt-front: 27; "targets strict" under core), its rows "targets-<row>"; under core
+# its launch's logs hold exactly one refusal line (a StretchRect that is no multisample resolve). Every lane also runs
+# d3d9_triangle depth (DXMTRS C4b-3d2's 31 rows of the depth-stencil, on a device with an auto depth-stencil; "depth
+# strict" under core), its rows "depth-<row>"; under core its launch's logs hold exactly its two refused calls' lines
+# (the second a dynamic depth texture's lock, "a depth texture" since DXMTRS C4c-3a). Every lane also runs d3d9_triangle
+# blend (DXMTRS C4b-3d3's 36 rows of partial clears, the scissor test, a depth-stencil of another size, sRGB write and
+# blending, on such a device; "blend strict" under core), its rows "blend-<row>"; under core its launch's logs hold no
+# refusal line. Every lane also runs d3d9_triangle mrt (DXMTRS C4b-3d4's 20 rows of render targets at index 1-3, on such
+# a device; "mrt strict" under core), its rows "mrt-<row>"; under core its launch's logs hold no refusal line. Every
+# lane also runs d3d9_triangle msaa (DXMTRS C4b-3d5's 17 rows of multisampling and C4c-3a's two reads of the back
+# buffer, ms-bblock and ms-front: 19, on a device whose back buffer and auto depth-stencil have 4 samples; "msaa strict"
+# under core), its rows "msaa-<row>"; under core its launch's logs hold exactly one refusal line (a StretchRect that is
+# no multisample resolve). Every lane also runs d3d9_triangle buffers (DXMTRS C4c-1's, C4c-2a's and C4c-2b's 39 rows of
+# vertex and index buffers and the draws that read them, on a device with no depth-stencil; "buffers strict" under
+# core), its rows "buffers-<row>"; under core its launch's logs hold exactly its one refusal line (a layout no binding
+# can fetch: buf-wide's attribute wider than its stride) and no line of a draw dropped for a buffer with no core form,
+# and the line logged at the first draw that reads a dynamic buffer in place ("d3d9 core: dynamic buffers are read in
+# place", DXMTRS C4c-2b), else "buffers-direct".
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -146,26 +146,25 @@ launch() {
     /usr/bin/grep -rhE "$refused|$unpresented" "$d" | head -5 | sed "s|^|d3d9-check: $name: |" || true
   fi
 }
-# refusals_ok <name> <folder>: the textures launch's logs hold exactly its one core refusal line (DXMTRS C4b-3b: a
-# render-target texture's LockRect), the fixed launch's exactly its one (DXMTRS C4b-3c: a depth texture at a vertex
-# sampler), the depth launch's exactly its two (DXMTRS C4b-3d2: a depth-tested draw sampling the bound depth-stencil, a
-# dynamic depth texture's LockRect), one line each; the targets and msaa launches' exactly their one (DXMTRS C4b-3d5: a
-# StretchRect that is no multisample resolve); the buffers launch's exactly its one (DXMTRS C4c-2a: a layout no binding
-# can fetch); the shaders, state, blend and mrt launches' none (the shaders launch's since DXMTRS C4c-2a, which draws
-# the crossing row; the state launch's since DXMTRS C4c-1: buffer locks are the core's); the other launches are not
-# held to it.
+# refusals_ok <name> <folder>: the fixed launch's logs hold exactly its one core refusal line (DXMTRS C4b-3c: a depth
+# texture at a vertex sampler), the depth launch's exactly its two (DXMTRS C4b-3d2: a depth-tested draw sampling the
+# bound depth-stencil, a dynamic depth texture's LockRect), one line each; the targets and msaa launches' exactly their
+# one (DXMTRS C4b-3d5: a StretchRect that is no multisample resolve); the buffers launch's exactly its one (DXMTRS
+# C4c-2a: a layout no binding can fetch); the shaders, state, textures, blend and mrt launches' none (the shaders
+# launch's since DXMTRS C4c-2a, which draws the crossing row; the state launch's since DXMTRS C4c-1: buffer locks are
+# the core's; the textures launch's since DXMTRS C4c-3a: a render-target texture's lock is the core's); the other
+# launches are not held to it.
 refused='is not implemented under runtime.mode = core'
-texture_refusals='IDirect3DTexture9::LockRect (a render-target or depth texture)'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
 stretch_refusals='IDirect3DDevice9::StretchRect (other than a multisample resolve)'
 depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)
-IDirect3DTexture9::LockRect (a render-target or depth texture)'
+IDirect3DTexture9::LockRect (a depth texture)'
 buffers_refusals='IDirect3DDevice9::Draw*Primitive (a layout no binding can fetch)'
 refusals_ok() {
   case $1 in
-    textures|fixed|depth|targets|msaa|buffers)
+    fixed|depth|targets|msaa|buffers)
       case $1 in
-        textures) set_=$texture_refusals ;; fixed) set_=$fixed_refusals ;; depth) set_=$depth_refusals ;;
+        fixed) set_=$fixed_refusals ;; depth) set_=$depth_refusals ;;
         targets|msaa) set_=$stretch_refusals ;; buffers) set_=$buffers_refusals ;;
       esac
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] \
@@ -173,7 +172,7 @@ refusals_ok() {
       printf '%s\n' "$set_" | while IFS= read -r n; do
         /usr/bin/grep -rqF "d3d9 core: $n $refused" "$2" || exit 1
       done ;;
-    shaders|state|blend|mrt) [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
+    shaders|state|textures|blend|mrt) [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
     *) return 0 ;;
   esac
 }
@@ -222,7 +221,8 @@ check fixed "ff-xform ff-persp ff-rhwmix ff-viewchange ff-ambient ff-lightdefaul
   tex-vtxdepthfmt"
 launch ours fresh targets 240 targets $strict
 check targets "rt-tex rt-read rt-surface rt-viewport rt-big rt-mip rt-cube rt-switch rt-rewrite rt-clearonly rt-fresh
-  rt-autogen rt-release rt-srgb rt-ps rt-update rt-updatebound rt-formats rt-mrt rt-msaa rt-plain rt-cubelock rt-huge"
+  rt-autogen rt-release rt-srgb rt-ps rt-update rt-updatebound rt-formats rt-mrt rt-msaa rt-plain rt-cubelock rt-huge
+  rt-lockable rt-nolock rt-bblock rt-front"
 launch ours fresh depth 240 depth $strict
 check depth "ds-default ds-test ds-func ds-write ds-zenable ds-clearz ds-clearonly ds-stencil ds-twosided ds-bias
   ds-slope ds-clamp ds-odepth ds-surface ds-nostencil ds-unbound ds-persist ds-texture ds-texstencil ds-mip ds-release
@@ -236,7 +236,7 @@ check mrt "mrt-two mrt-four mrt-hole mrt-unwritten mrt-nobind mrt-clear mrt-mask
   mrt-srgb mrt-srgbclear mrt-size mrt-switch mrt-scissor mrt-depth mrt-back mrt-autogen mrt-order mrt-read"
 launch ours fresh msaa 240 msaa $strict
 check msaa "ms-initial ms-desc ms-resolve ms-edge ms-back ms-clear ms-depth ms-mismatch ms-mask ms-nonmask ms-a2c ms-srgbmask
-  ms-blend ms-mrt ms-scissor ms-redraw ms-samples"
+  ms-blend ms-mrt ms-scissor ms-redraw ms-samples ms-bblock ms-front"
 launch ours fresh buffers 240 buffers $strict
 check buffers "buf-d3d buf-lock buf-draw buf-start buf-offset buf-strip buf-fan buf-indexed buf-index32 buf-base buf-ifan
   buf-managed buf-dynamic buf-order buf-discard buf-held buf-relock buf-streams buf-null buf-null-up buf-zero-stride
