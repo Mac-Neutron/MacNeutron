@@ -15,10 +15,12 @@
 #   fx<64|32>-fresh.txt           d3d9_triangle fixed (DXMTRS C4b-3c's 31 rows of the fixed-function vertex stage;
 #                                "fixed strict" under core), 240 s
 #   tg<64|32>-fresh.txt           d3d9_triangle targets (DXMTRS C4b-3d1's 22 rows of render targets other than the
-#                                back buffer, C4b-3d5's rt-plain and C4c-3a's four of locks and the front buffer;
-#                                "targets strict" under core), 240 s
+#                                back buffer, C4b-3d5's rt-plain, C4c-3a's four of locks and the front buffer and
+#                                C4c-3b's eight of device contexts, an additional swap chain's back buffer and a
+#                                lockable back buffer; "targets strict" under core), 240 s
 #   dp<64|32>-fresh.txt           d3d9_triangle depth (DXMTRS C4b-3d2's 31 rows of the depth-stencil, on a device with
-#                                an auto depth-stencil; "depth strict" under core), 240 s
+#                                an auto depth-stencil, C4c-3b's ds-dynlock among them; "depth strict" under core),
+#                                240 s
 #   bl<64|32>-fresh.txt           d3d9_triangle blend (DXMTRS C4b-3d3's 36 rows of partial clears, the scissor test, a
 #                                depth-stencil of another size, sRGB write and blending; "blend strict" under core),
 #                                240 s

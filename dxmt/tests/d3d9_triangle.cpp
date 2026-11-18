@@ -40,22 +40,26 @@
 // fixed-function vertex stage over untransformed layouts (transforms, lights, material sources, fog, texgen and texture
 // transforms, vertex blending, points, a clip plane) and three vertex-sampled target textures the core refuses, with a
 // 180 s budget. "--bench <draws> <frames> lit" draws the triangle untransformed and lit ("mode lit").
-// With "targets" ("targets strict" under core; DXMTRS C4b-3d1): 27 rows "d3d9 rt-<row> ok|FAIL <why>" of render targets
-// other than the back buffer (render-target textures, their levels and cube faces, CreateRenderTarget surfaces: drawn
-// to, cleared, read back with GetRenderTargetData and sampled; formats, sRGB write, the viewport reset, automatic
+// With "targets" ("targets strict" under core; DXMTRS C4b-3d1): 35 rows "d3d9 <rt|dc|lb>-<row> ok|FAIL <why>" of render
+// targets other than the back buffer (render-target textures, their levels and cube faces, CreateRenderTarget surfaces:
+// drawn to, cleared, read back with GetRenderTargetData and sampled; formats, sRGB write, the viewport reset, automatic
 // mipmaps, lifetime and order, a size past the device's limit, a target bound and unbound at index 1; since DXMTRS
 // C4b-3d5 a multisampled surface resolved by StretchRect into a texture level, a surface and the back buffer, and the
 // default pool's plain surface; since DXMTRS C4c-3a a lockable target's locks, the surfaces that do not lock, the back
-// buffer's read-only lock and the front buffer's read), with a 180 s budget. The core refuses a StretchRect other than
-// a whole-surface resolve (rt-msaa's into a 32x32 target).
+// buffer's read-only lock and the front buffer's read; since DXMTRS C4c-3b device contexts (GetDC, GDI, ReleaseDC) of
+// CPU stores, a texture level, a render-target texture's level, a lockable target and the back buffer, an additional
+// swap chain's back buffer, and, on a second device made with D3DPRESENTFLAG_LOCKABLE_BACKBUFFER, its back buffer's
+// writable lock and device context, its own and an additional swap chain's), with a 180 s budget. The core refuses a
+// StretchRect other than a whole-surface resolve (rt-msaa's into a 32x32 target). The program links gdi32.
 // With "depth" ("depth strict" under core; DXMTRS C4b-3d2): 31 rows "d3d9 ds-<row> ok|FAIL <why>" of the depth-stencil,
 // on a device made with an auto D24S8 (the other modes' devices have none): the depth and stencil tests and their
 // state, Clear's Z and stencil, depth bias, the pretransformed clamp, a pixel shader's depth output, depth-stencil
 // surfaces and depth textures and their levels, shadow, raw (INTZ, DF16, DF24) and fetch4 samples of a depth texture,
 // a depth-stencil larger than the target, the pretransformed clip while one is bound, a multisampled surface beside a
-// single-sample target (DXMTRS C4b-3d5), and what the core refuses (a depth-tested draw sampling the bound
-// depth-stencil, a dynamic depth texture's lock), with a 150 s budget. "--bench <draws> <frames> tex depth" runs the tex bench on such a device, Z cleared each frame and
-// tested ("mode texdepth").
+// single-sample target (DXMTRS C4b-3d5), dynamic depth textures written through their locks and sampled (DXMTRS
+// C4c-3b), and what the core refuses (a depth-tested draw sampling the bound depth-stencil), with a 150 s budget.
+// "--bench <draws> <frames> tex depth" runs the tex bench on such a device, Z cleared each frame and tested ("mode
+// texdepth").
 // With "blend" ("blend strict" under core; DXMTRS C4b-3d3): 36 rows "d3d9 <cl|sc|sz|sr|bl>-<row> ok|FAIL <why>" on such
 // a device: Clear with rects, under the scissor test and bounded by the viewport (colour, depth, stencil); the scissor
 // test for draws; a depth-stencil larger or smaller than the target; sRGB write with Clear and under blending;
@@ -105,6 +109,7 @@ static void row(const char *what, bool ok, const char *why) {
 // (c + 1) * 128 or (1 - c) * 128.
 static IDirect3DDevice9 *dev;
 static IDirect3DSurface9 *rtSurf, *sysSurf;
+static IDirect3D9 *direct3d;  // main's, for the msaa mode's offers() and the targets mode's lockable device
 static bool strictMode;
 static ULONGLONG budgetEnd;
 static char why[384];
@@ -3102,10 +3107,10 @@ template <class F> static bool underLevelLock(IDirect3DTexture9 *t, UINT level, 
     hr = t->UnlockRect(level);
     return SUCCEEDED(hr) || fail("IDirect3DTexture9::UnlockRect", hr);
 }
-// Texels [x0, x1) x [y0, y1) of 4-byte rows `pitch` apart set to c.
-static void paint(BYTE *bits, int pitch, int x0, int y0, int x1, int y1, DWORD c) {
+// Texels [x0, x1) x [y0, y1) of `bpp`-byte texels in rows `pitch` apart set to c (its low `bpp` bytes).
+static void paint(BYTE *bits, int pitch, int x0, int y0, int x1, int y1, DWORD c, int bpp = 4) {
     for (int y = y0; y < y1; y++)
-        for (int x = x0; x < x1; x++) memcpy(bits + y * pitch + x * 4, &c, 4);
+        for (int x = x0; x < x1; x++) memcpy(bits + y * pitch + x * bpp, &c, bpp);
 }
 // A 64x64 A8R8G8B8 CreateRenderTarget surface, lockable unless said.
 static bool target64(Com<IDirect3DSurface9> &s, BOOL lockable = TRUE) {
@@ -3392,6 +3397,381 @@ static bool rowTexRtLock() {
     });
 }
 
+// Texels of the size x size 4-byte target `s` (format f), each within 1 a channel.
+struct Tx { int x, y; DWORD want; };
+static bool rtHas(const char *name, IDirect3DSurface9 *s, UINT size, D3DFORMAT f, std::initializer_list<Tx> px) {
+    return readTarget(s, size, size, f, [&](const BYTE *b, int pitch) {
+        for (const Tx &t : px) {
+            char what[64];
+            snprintf(what, sizeof what, "%s (%d,%d)", name, t.x, t.y);
+            if (!want(what, texel(b, pitch, t.x, t.y), t.want)) return false;
+        }
+        return true;
+    });
+}
+// `why` prefixed with the failing cell's name `what` and `more`; false.
+static bool failIn(const char *what, const char *more = "") {
+    char w[sizeof why];
+    snprintf(w, sizeof w, "%s%s: %s", what, more, why);
+    memcpy(why, w, sizeof why);
+    return false;
+}
+static bool rtri(const RV *v) {
+    CK(SetFVF, D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    CK(DrawPrimitiveUP, D3DPT_TRIANGLELIST, 1, v, sizeof *v);
+    return true;
+}
+
+// Device contexts, the writable lock of a lockable back buffer and an additional swap chain's back buffer (DXMTRS
+// C4c-3b), in the colours above. GDI's COLORREF is 0x00BBGGRR where the rows' colours are 0x00RRGGBB, and GDI writes
+// alpha 0, so a cell after GDI judges the colour channels alone (want's default mask). A DC is released, as a lock is
+// unlocked, before what it read is judged.
+static COLORREF gdi(DWORD c) { return RGB(c >> 16 & 255, c >> 8 & 255, c & 255); }
+// GetDC of `s`, f(dc) under it (it reads into the caller's locals and draws: false, with `why` set, when GDI fails),
+// then ReleaseDC whatever f did: the back buffer persists across until()'s attempts, so no path may leave a DC held.
+template <class F> static bool underDc(IDirect3DSurface9 *s, const char *what, F f) {
+    HDC dc = nullptr;
+    HRESULT hr = s->GetDC(&dc);
+    if (FAILED(hr)) return fail(what, hr);
+    const bool ok = f(dc);
+    hr = s->ReleaseDC(dc);
+    if (FAILED(hr)) return fail("ReleaseDC", hr);
+    return ok;
+}
+// [x0, x1) x [y0, y1) of `dc` filled with c by FillRect.
+static bool gdiFill(HDC dc, int x0, int y0, int x1, int y1, DWORD c) {
+    const HBRUSH b = CreateSolidBrush(gdi(c));
+    const RECT r = {x0, y0, x1, y1};
+    const bool ok = b && FillRect(dc, &r, b);
+    if (b) DeleteObject(b);
+    return ok || (snprintf(why, sizeof why, "FillRect"), false);
+}
+// GetDC of `s` is D3DERR_INVALIDCALL and leaves the caller's handle as it was.
+static bool noDc(IDirect3DSurface9 *s, const char *what) {
+    const HDC mark = reinterpret_cast<HDC>(static_cast<INT_PTR>(0x5a5a));
+    HDC dc = mark;
+    const HRESULT hr = s->GetDC(&dc);
+    if (SUCCEEDED(hr)) s->ReleaseDC(dc);
+    if (hr != D3DERR_INVALIDCALL) return fail(what, hr);
+    return dc == mark || (snprintf(why, sizeof why, "%s wrote the handle (%p)", what, (void *)dc), false);
+}
+// R5G6B5 colours exact in 5-6-5: each channel its field with its high bits repeated below it (GDI's expansion), so
+// what GDI reads and writes and a lock's WORD (packed565) are one colour.
+static DWORD k565(DWORD r, DWORD g, DWORD b) {
+    return (r << 3 | r >> 2) << 16 | (g << 2 | g >> 4) << 8 | (b << 3 | b >> 2);
+}
+static WORD packed565(DWORD c) { return (WORD)((c >> 19 & 31) << 11 | (c >> 10 & 63) << 5 | (c >> 3 & 31)); }
+static const DWORD K565A = k565(0x18, 0x10, 0x04), K565B = k565(0x06, 0x30, 0x1c);
+
+// One dc-mem surface, `bpp`-byte texels (4: X8R8G8B8, 2: R5G6B5): a written over (8..39, 8..39) through LockRect, then
+// PreLoad; under GetDC, GetPixel reads a at (16,16), b fills (24..55, 24..55), and a second GetDC and a LockRect are
+// D3DERR_INVALIDCALL; after ReleaseDC a READONLY lock reads b at (32,32), where GDI drew, and a at (16,16) (an R5G6B5
+// texel as its WORD, exactly).
+static bool dcMem(IDirect3DSurface9 *s, int bpp, DWORD a, DWORD b) {
+    const auto packed = [&](DWORD c) { return bpp == 2 ? (DWORD)packed565(c) : c; };
+    if (!underLock(s, "LockRect", nullptr, 0,
+                   [&](BYTE *p, int pitch) { paint(p, pitch, 8, 8, 40, 40, packed(a), bpp); }))
+        return false;
+    s->PreLoad();
+    COLORREF in = CLR_INVALID;
+    HRESULT second = D3D_OK, locked = D3D_OK;
+    if (!underDc(s, "GetDC", [&](HDC dc) {
+            in = GetPixel(dc, 16, 16);
+            HDC dc2 = nullptr;
+            if (SUCCEEDED(second = s->GetDC(&dc2))) s->ReleaseDC(dc2);
+            D3DLOCKED_RECT lr = {};
+            if (SUCCEEDED(locked = s->LockRect(&lr, nullptr, 0))) s->UnlockRect();
+            return gdiFill(dc, 24, 24, 56, 56, b);
+        }))
+        return false;
+    if (second != D3DERR_INVALIDCALL) return fail("GetDC (a DC held)", second);
+    if (locked != D3DERR_INVALIDCALL) return fail("LockRect (a DC held)", locked);
+    if (!want("GetPixel (16,16)", in, gdi(a))) return false;
+    DWORD in2 = 0, gdi2 = 0;
+    if (!underLock(s, "LockRect (READONLY)", nullptr, D3DLOCK_READONLY, [&](BYTE *p, int pitch) {
+            memcpy(&in2, p + 16 * pitch + 16 * bpp, bpp), memcpy(&gdi2, p + 32 * pitch + 32 * bpp, bpp);
+        }))
+        return false;
+    if (bpp == 4) return want("READONLY lock (16,16)", in2, a) && want("READONLY lock (32,32)", gdi2, b);
+    if (in2 != packed(a) || gdi2 != packed(b))
+        return snprintf(why, sizeof why, "READONLY lock (16,16) %04lx want %04lx, (32,32) %04lx want %04lx",
+                        (unsigned long)in2, (unsigned long)packed(a), (unsigned long)gdi2, (unsigned long)packed(b)),
+               false;
+    return true;
+}
+// dc-mem: GetDC and ReleaseDC of the CPU stores (dcMem): a 64x64 X8R8G8B8 and an R5G6B5 system-memory plain surface,
+// a default-pool X8R8G8B8 plain surface and a face of a 64-texel MANAGED X8R8G8B8 cube. An A2R10G10B10 system-memory
+// surface has no GDI format: GetDC is D3DERR_INVALIDCALL and leaves the handle.
+static bool rowDcMem() {
+    Com<IDirect3DSurface9> sys, r565, plain, face, a2;
+    Com<IDirect3DCubeTexture9> cube;
+    CK(CreateOffscreenPlainSurface, 64, 64, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sys.p, nullptr);
+    CK(CreateOffscreenPlainSurface, 64, 64, D3DFMT_R5G6B5, D3DPOOL_SYSTEMMEM, &r565.p, nullptr);
+    CK(CreateOffscreenPlainSurface, 64, 64, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &plain.p, nullptr);
+    CK(CreateCubeTexture, 64, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &cube.p, nullptr);
+    CK(CreateOffscreenPlainSurface, 64, 64, D3DFMT_A2R10G10B10, D3DPOOL_SYSTEMMEM, &a2.p, nullptr);
+    const HRESULT hr = cube.p->GetCubeMapSurface(D3DCUBEMAP_FACE_NEGATIVE_Y, 0, &face.p);
+    if (FAILED(hr)) return fail("GetCubeMapSurface", hr);
+    if (!dcMem(sys.p, 4, KRUST, KAQUA)) return failIn("system memory");
+    if (!dcMem(r565.p, 2, K565A, K565B)) return failIn("R5G6B5");
+    if (!dcMem(plain.p, 4, KMINT, KROSE)) return failIn("default pool");
+    if (!dcMem(face.p, 4, KSAGE, KLILAC)) return failIn("cube face");
+    return noDc(a2.p, "A2R10G10B10: GetDC");
+}
+// dc-tex: a 64x64 MANAGED X8R8G8B8 texture written steel through a lock and drawn once by show() (steel: it is
+// uploaded); under GetDC of its level 0 GetPixel reads steel at (8,8) and rust fills texels (16..47, 16..47); after
+// ReleaseDC the quad drawn again shows rust at texel (32,32) and steel at (8,8) (the level is dirty again), read back.
+static bool rowDcTex() {
+    return until([&] {
+        Com<IDirect3DTexture9> t;
+        Com<IDirect3DSurface9> s;
+        CK(CreateTexture, 64, 64, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &t.p, nullptr);
+        const auto shown = [&](const char *when, DWORD at32) {
+            return scene([&] { return backToScreen() && clearTo(KLILAC) && show(t.p); }) &&
+                   rtHas(when, rtSurf, 256, D3DFMT_X8R8G8B8, {{129, 129, at32}, {81, 81, KSTEEL}});
+        };
+        if (!fill(t.p, 0, 4, [](int, int) { return KSTEEL; }) || !levelOf(t.p, 0, s) || !shown("drawn", KSTEEL))
+            return false;
+        COLORREF in = CLR_INVALID;
+        if (!underDc(s.p, "GetDC", [&](HDC dc) {
+                in = GetPixel(dc, 8, 8);
+                return gdiFill(dc, 16, 16, 48, 48, KRUST);
+            }))
+            return false;
+        return want("GetPixel (8,8)", in, gdi(KSTEEL)) && shown("drawn after ReleaseDC", KRUST);
+    });
+}
+// dc-rtex: a 64x64 render-target texture's level 0 cleared steel with a rust triangle (4,4)-(36,4)-(4,36); under GetDC
+// GetPixel reads rust at (12,12) and steel at (56,56), and aqua fills (40..55, 8..23); after ReleaseDC
+// GetRenderTargetData reads aqua at (48,16), rust at (12,12) and steel at (56,56).
+static bool rowDcRtex() {
+    return until([&] {
+        Com<IDirect3DTexture9> t;
+        Com<IDirect3DSurface9> s;
+        const RV tri[3] = {{4, 4, 0.5f, 1, KRUST}, {36, 4, 0.5f, 1, KRUST}, {4, 36, 0.5f, 1, KRUST}};
+        COLORREF in = CLR_INVALID, out = CLR_INVALID;
+        if (!makeRt(t) || !levelOf(t.p, 0, s) ||
+            !scene([&] { return target(t.p) && clearTo(KSTEEL) && rtri(tri) && backToScreen(); }) ||
+            !underDc(s.p, "GetDC", [&](HDC dc) {
+                in = GetPixel(dc, 12, 12), out = GetPixel(dc, 56, 56);
+                return gdiFill(dc, 40, 8, 56, 24, KAQUA);
+            }))
+            return false;
+        return want("GetPixel (12,12)", in, gdi(KRUST)) && want("GetPixel (56,56)", out, gdi(KSTEEL)) &&
+               rtHas("after ReleaseDC", s.p, 64, D3DFMT_A8R8G8B8, {{48, 16, KAQUA}, {12, 12, KRUST}, {56, 56, KSTEEL}});
+    });
+}
+// dc-rt: L, a lockable 64x64 target, written lilac whole through a lock (its staging holds lilac), then cleared steel
+// with a rust triangle (4,4)-(36,4)-(4,36): under GetDC GetPixel reads rust at (12,12) and steel at (56,56), not lilac
+// (the staging is read back first), and aqua fills (40..55, 8..23); after ReleaseDC a gold triangle (60,28)-(60,60)-
+// (28,60) is drawn: GetRenderTargetData reads aqua at (48,16), rust at (12,12), gold at (52,52) and steel at (8,56).
+static bool rowDcRt() {
+    return until([&] {
+        Com<IDirect3DSurface9> l;
+        const RV rust[3] = {{4, 4, 0.5f, 1, KRUST}, {36, 4, 0.5f, 1, KRUST}, {4, 36, 0.5f, 1, KRUST}};
+        const RV gold[3] = {{60, 60, 0.5f, 1, KGOLD}, {28, 60, 0.5f, 1, KGOLD}, {60, 28, 0.5f, 1, KGOLD}};
+        COLORREF in = CLR_INVALID, out = CLR_INVALID;
+        if (!target64(l) ||
+            !underLock(l.p, "LockRect", nullptr, 0, [&](BYTE *b, int p) { paint(b, p, 0, 0, 64, 64, KLILAC); }) ||
+            !scene([&] {
+                CK(SetRenderTarget, 0, l.p);
+                return clearTo(KSTEEL) && rtri(rust) && backToScreen();
+            }) ||
+            !underDc(l.p, "GetDC", [&](HDC dc) {
+                in = GetPixel(dc, 12, 12), out = GetPixel(dc, 56, 56);
+                return gdiFill(dc, 40, 8, 56, 24, KAQUA);
+            }))
+            return false;
+        return want("GetPixel (12,12)", in, gdi(KRUST)) && want("GetPixel (56,56)", out, gdi(KSTEEL)) && scene([&] {
+                   CK(SetRenderTarget, 0, l.p);
+                   return rtri(gold) && backToScreen();
+               }) &&
+               rtHas("after ReleaseDC", l.p, 64, D3DFMT_A8R8G8B8,
+                     {{48, 16, KAQUA}, {12, 12, KRUST}, {52, 52, KGOLD}, {8, 56, KSTEEL}});
+    });
+}
+// dc-bb: the device's back buffer (no D3DPRESENTFLAG_LOCKABLE_BACKBUFFER): GetDC is D3DERR_INVALIDCALL and leaves the
+// handle; ReleaseDC of a null handle is D3DERR_INVALIDCALL.
+static bool rowDcBb() {
+    Com<IDirect3DSurface9> bb;
+    CK(GetBackBuffer, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
+    if (!noDc(bb.p, "GetDC")) return false;
+    const HRESULT hr = bb.p->ReleaseDC(nullptr);
+    return hr == D3DERR_INVALIDCALL || fail("ReleaseDC (a null handle)", hr);
+}
+
+// The back-buffer rows' rust triangle over a steel clear: (40,40) inside it, (248,8) the clear's.
+static const RV BB_RUST[3] = {{16, 16, 0.5f, 1, KRUST}, {112, 16, 0.5f, 1, KRUST}, {16, 112, 0.5f, 1, KRUST}};
+// 256x256 X8R8G8B8 windowed parameters on `w`, D3DSWAPEFFECT_COPY: an additional swap chain's or the lockable
+// device's (`flags` D3DPRESENTFLAG_LOCKABLE_BACKBUFFER).
+static D3DPRESENT_PARAMETERS params256(HWND w, DWORD flags) {
+    D3DPRESENT_PARAMETERS pp = {};
+    pp.BackBufferWidth = 256, pp.BackBufferHeight = 256, pp.BackBufferFormat = D3DFMT_X8R8G8B8, pp.BackBufferCount = 1;
+    pp.SwapEffect = D3DSWAPEFFECT_COPY, pp.hDeviceWindow = w, pp.Windowed = TRUE, pp.Flags = flags;
+    pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    return pp;
+}
+// An additional swap chain of `dev` on `w` (null: the device's window) and its back buffer.
+static bool chainBackBuffer(HWND w, DWORD flags, Com<IDirect3DSwapChain9> &sc, Com<IDirect3DSurface9> &bb) {
+    D3DPRESENT_PARAMETERS pp = params256(w, flags);
+    CK(CreateAdditionalSwapChain, &pp, &sc.p);
+    const HRESULT hr = sc.p->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
+    return SUCCEEDED(hr) || fail("IDirect3DSwapChain9::GetBackBuffer", hr);
+}
+// rt-chain: an additional swap chain of the device's size on the device's window (a null hDeviceWindow: the core
+// refuses GetCreationParameters); the device's back buffer cleared steel with the rust triangle. The chain's back
+// buffer (an alias of the device's) locked READONLY reads rust at (40,40) and steel at (248,8); LockRect(NULL, 0) of
+// it is D3DERR_INVALIDCALL (the device has no lockable back buffer); GetRenderTargetData of it into a system-memory
+// surface reads the same two texels.
+static bool rowRtChain() {
+    return until([&] {
+        Com<IDirect3DSwapChain9> sc;
+        Com<IDirect3DSurface9> bb;
+        DWORD in = 0, out = 0;
+        if (!chainBackBuffer(nullptr, 0, sc, bb) ||
+            !scene([&] { return backToScreen() && clearTo(KSTEEL) && rtri(BB_RUST); }) ||
+            !underLock(bb.p, "LockRect (READONLY)", nullptr, D3DLOCK_READONLY, [&](BYTE *b, int p) {
+                in = texel(b, p, 40, 40), out = texel(b, p, 248, 8);
+            }))
+            return false;
+        if (!want("READONLY lock (40,40)", in, KRUST) || !want("READONLY lock (248,8)", out, KSTEEL)) return false;
+        D3DLOCKED_RECT lr = {};
+        const HRESULT hr = bb.p->LockRect(&lr, nullptr, 0);
+        if (SUCCEEDED(hr)) bb.p->UnlockRect();
+        if (hr != D3DERR_INVALIDCALL) return fail("LockRect (NULL, 0)", hr);
+        return rtHas("GetRenderTargetData", bb.p, 256, D3DFMT_X8R8G8B8, {{40, 40, KRUST}, {248, 8, KSTEEL}});
+    });
+}
+
+// The lockable device of lb-lock and lb-dc: a second device from main's IDirect3D9 on a visible window of its own,
+// params256 with D3DPRESENTFLAG_LOCKABLE_BACKBUFFER, never presented. A row makes it once (one made again for each
+// attempt would build its pipelines again); its members release the back buffer, then the device, then the window.
+struct Window {
+    HWND h = nullptr;
+    ~Window() { if (h) DestroyWindow(h); }
+};
+struct Lockable {
+    Window w;
+    Com<IDirect3DDevice9> d;
+    Com<IDirect3DSurface9> bb;
+};
+static bool makeLockable(Lockable &l) {
+    RECT r = {0, 0, 256, 256};
+    AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
+    l.w.h = CreateWindowW(L"d3d9_triangle", L"d3d9_triangle lockable", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 400, 100,
+                          r.right - r.left, r.bottom - r.top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!l.w.h) return snprintf(why, sizeof why, "CreateWindowW"), false;
+    D3DPRESENT_PARAMETERS pp = params256(l.w.h, D3DPRESENTFLAG_LOCKABLE_BACKBUFFER);
+    HRESULT hr = direct3d ? direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, l.w.h,
+                                                   D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp, &l.d.p)
+                          : E_POINTER;
+    if (FAILED(hr)) return fail("CreateDevice (a lockable back buffer)", hr);
+    hr = l.d.p->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &l.bb.p);
+    return SUCCEEDED(hr) || fail("GetBackBuffer (the lockable device)", hr);
+}
+// While it lives, the globals `dev` and `rtSurf` that the helpers read name another device and its back buffer; then
+// main's again. Declared inside an attempt, it ends before until()'s Present, which presents main's device.
+struct OnDevice {
+    IDirect3DDevice9 *const dev0 = dev;
+    IDirect3DSurface9 *const rt0 = rtSurf;
+    OnDevice(IDirect3DDevice9 *d, IDirect3DSurface9 *rt) { dev = d, rtSurf = rt; }
+    ~OnDevice() { dev = dev0, rtSurf = rt0; }
+};
+// lb-lock (on the lockable device): its back buffer cleared steel with the rust triangle. LockRect(NULL, 0) reads rust
+// at (40,40) and steel at (248,8), and aqua is written over (160..223, 16..79); after UnlockRect a gold triangle
+// (240,144)-(240,240)-(144,240) is drawn: GetRenderTargetData reads aqua at (192,48), rust, gold at (216,216) and steel
+// (the pass after the write loads). LockRect(NULL, DISCARD) with mint written over (100..139, 100..139): mint there and
+// the four texels above as they were (the lock still reads the frame, mtld3d's rule). LockRect of (8,8)-(16,16) with
+// rose written at pBits: rose at (8,8), steel at (0,0). A whole READONLY lock with lilac written at (40,40): rust there
+// after the unlock. A second LockRect while locked and one of an empty rect are D3DERR_INVALIDCALL. An additional
+// swap chain's back buffer locked LockRect(NULL, 0) with sage written over (40..71, 160..223): the device's back
+// buffer reads sage at (56,192).
+static bool rowLbLock() {
+    Lockable l;
+    if (!makeLockable(l)) return false;
+    return until([&] {
+        const OnDevice on(l.d.p, l.bb.p);
+        IDirect3DSurface9 *const bb = l.bb.p;
+        const RV gold[3] = {{240, 240, 0.5f, 1, KGOLD}, {144, 240, 0.5f, 1, KGOLD}, {240, 144, 0.5f, 1, KGOLD}};
+        const D3DFORMAT x8 = D3DFMT_X8R8G8B8;
+        DWORD in = 0, out = 0;
+        if (!scene([&] { return backToScreen() && clearTo(KSTEEL) && rtri(BB_RUST); }) ||
+            !underLock(bb, "LockRect (NULL, 0)", nullptr, 0, [&](BYTE *b, int p) {
+                in = texel(b, p, 40, 40), out = texel(b, p, 248, 8);
+                paint(b, p, 160, 16, 224, 80, KAQUA);
+            }))
+            return false;
+        if (!want("lock (40,40)", in, KRUST) || !want("lock (248,8)", out, KSTEEL) ||
+            !scene([&] { return rtri(gold); }) ||
+            !rtHas("written", bb, 256, x8, {{192, 48, KAQUA}, {40, 40, KRUST}, {216, 216, KGOLD}, {248, 8, KSTEEL}}) ||
+            !underLock(bb, "LockRect (NULL, DISCARD)", nullptr, D3DLOCK_DISCARD,
+                       [&](BYTE *b, int p) { paint(b, p, 100, 100, 140, 140, KMINT); }) ||
+            !rtHas("DISCARD", bb, 256, x8,
+                   {{120, 120, KMINT}, {192, 48, KAQUA}, {40, 40, KRUST}, {216, 216, KGOLD}, {248, 8, KSTEEL}}))
+            return false;
+        const RECT r = {8, 8, 16, 16}, empty = {10, 10, 10, 11};
+        if (!underLock(bb, "LockRect (8,8)-(16,16)", &r, 0, [&](BYTE *b, int) { paint(b, 0, 0, 0, 1, 1, KROSE); }) ||
+            !rtHas("rect lock", bb, 256, x8, {{8, 8, KROSE}, {0, 0, KSTEEL}}) ||
+            !underLock(bb, "LockRect (NULL, READONLY)", nullptr, D3DLOCK_READONLY,
+                       [&](BYTE *b, int p) { paint(b, p, 40, 40, 41, 41, KLILAC); }) ||
+            !rtHas("after a READONLY lock", bb, 256, x8, {{40, 40, KRUST}}))
+            return false;
+        D3DLOCKED_RECT lr = {};
+        HRESULT hr = bb->LockRect(&lr, nullptr, D3DLOCK_READONLY);
+        if (FAILED(hr)) return fail("LockRect", hr);
+        const HRESULT second = bb->LockRect(&lr, nullptr, D3DLOCK_READONLY);
+        hr = bb->UnlockRect();
+        if (second != D3DERR_INVALIDCALL) return fail("LockRect (locked)", second);
+        if (FAILED(hr)) return fail("UnlockRect", hr);
+        hr = bb->LockRect(&lr, &empty, 0);
+        if (SUCCEEDED(hr)) bb->UnlockRect();
+        if (hr != D3DERR_INVALIDCALL) return fail("LockRect (an empty rect)", hr);
+        Com<IDirect3DSwapChain9> sc;
+        Com<IDirect3DSurface9> chain;
+        return chainBackBuffer(l.w.h, D3DPRESENTFLAG_LOCKABLE_BACKBUFFER, sc, chain) &&
+               underLock(chain.p, "the chain's LockRect (NULL, 0)", nullptr, 0,
+                         [&](BYTE *b, int p) { paint(b, p, 40, 160, 72, 224, KSAGE); }) &&
+               rtHas("the chain's write", bb, 256, x8, {{56, 192, KSAGE}, {40, 40, KRUST}});
+    });
+}
+// lb-dc (on the lockable device): its back buffer cleared steel with the rust triangle; under GetDC GetPixel reads rust
+// at (40,40) and steel at (248,8), and aqua fills (160..223, 16..79); after ReleaseDC GetRenderTargetData reads aqua at
+// (192,48), rust and steel. Under a second GetDC mint fills (100..139, 100..139) and UnlockRect, no lock held, is
+// D3D_OK; after ReleaseDC mint is at (120,120) and aqua kept. Under GetDC of an additional swap chain's back buffer
+// sage fills (40..71, 160..223); after ReleaseDC the device's back buffer reads sage at (56,192).
+static bool rowLbDc() {
+    Lockable l;
+    if (!makeLockable(l)) return false;
+    return until([&] {
+        const OnDevice on(l.d.p, l.bb.p);
+        IDirect3DSurface9 *const bb = l.bb.p;
+        const D3DFORMAT x8 = D3DFMT_X8R8G8B8;
+        COLORREF in = CLR_INVALID, out = CLR_INVALID;
+        if (!scene([&] { return backToScreen() && clearTo(KSTEEL) && rtri(BB_RUST); }) ||
+            !underDc(bb, "GetDC", [&](HDC dc) {
+                in = GetPixel(dc, 40, 40), out = GetPixel(dc, 248, 8);
+                return gdiFill(dc, 160, 16, 224, 80, KAQUA);
+            }))
+            return false;
+        HRESULT unlocked = E_FAIL;
+        if (!want("GetPixel (40,40)", in, gdi(KRUST)) || !want("GetPixel (248,8)", out, gdi(KSTEEL)) ||
+            !rtHas("after ReleaseDC", bb, 256, x8, {{192, 48, KAQUA}, {40, 40, KRUST}, {248, 8, KSTEEL}}) ||
+            !underDc(bb, "GetDC (the second)", [&](HDC dc) {
+                if (!gdiFill(dc, 100, 100, 140, 140, KMINT)) return false;
+                unlocked = bb->UnlockRect();
+                return true;
+            }))
+            return false;
+        if (unlocked != D3D_OK) return fail("UnlockRect (a DC held, no lock)", unlocked);
+        Com<IDirect3DSwapChain9> sc;
+        Com<IDirect3DSurface9> chain;
+        return rtHas("UnlockRect under the DC", bb, 256, x8, {{120, 120, KMINT}, {192, 48, KAQUA}}) &&
+               chainBackBuffer(l.w.h, D3DPRESENTFLAG_LOCKABLE_BACKBUFFER, sc, chain) &&
+               underDc(chain.p, "the chain's GetDC", [&](HDC dc) { return gdiFill(dc, 40, 160, 72, 224, KSAGE); }) &&
+               rtHas("the chain's DC", bb, 256, x8, {{56, 192, KSAGE}, {40, 40, KRUST}});
+    });
+}
+
 static void targetRows(IDirect3DDevice9 *d, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
         {"rt-tex", rowRtTex},           {"rt-read", rowRtRead},         {"rt-surface", rowRtSurface},
@@ -3402,7 +3782,11 @@ static void targetRows(IDirect3DDevice9 *d, bool strict) {
         {"rt-update", rowRtUpdate},     {"rt-updatebound", rowRtUpdateBound}, {"rt-formats", rowRtFormats},
         {"rt-mrt", rowRtMrt},           {"rt-msaa", rowRtMsaa},         {"rt-plain", rowRtPlain},
         {"rt-cubelock", rowRtCubeLock}, {"rt-huge", rowRtHuge},     {"rt-lockable", rowRtLockable},
-        {"rt-nolock", rowRtNolock},     {"rt-bblock", rowRtBblock},     {"rt-front", rowRtFront}};
+        {"rt-nolock", rowRtNolock},     {"rt-bblock", rowRtBblock},     {"rt-front", rowRtFront},
+        {"dc-mem", rowDcMem},           {"dc-tex", rowDcTex},           {"dc-rtex", rowDcRtex},
+        {"dc-rt", rowDcRt},             {"dc-bb", rowDcBb},             {"rt-chain", rowRtChain},
+        // The lockable device's rows last (a second device beside the first; DXMTRS C4c-3b).
+        {"lb-lock", rowLbLock},         {"lb-dc", rowLbDc}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
@@ -3842,11 +4226,11 @@ static bool writeHalves(IDirect3DTexture9 *t) {
     CK(Clear, 0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, BLUE, 1.0f, 0);
     return true;
 }
-// `t` sampled by the fixed-function stage at (u, 0.5) with a third coordinate (a shadow sample's reference) of 0.5,
+// `t` sampled by the fixed-function stage at (u, v) with a third coordinate (a shadow sample's reference) of 0.5,
 // over the 64x64 quad at (x, y).
-static bool sampleAt(IDirect3DBaseTexture9 *t, float x, float y, float u) {
+static bool sampleAt(IDirect3DBaseTexture9 *t, float x, float y, float u, float v = 0.5f) {
     TV3 q[4];
-    tquad(q, x, y, x + 64, y + 64, u, 0.5f, 0.5f);
+    tquad(q, x, y, x + 64, y + 64, u, v, 0.5f);
     CK(SetTexture, 0, t);
     const bool ok = tdraw(q);
     CK(SetTexture, 0, nullptr);
@@ -3976,15 +4360,72 @@ static bool rowDsHuge() {
     }
     return true;
 }
-// A dynamic depth texture's LockRect, past the core's slice (C4c's packed upload): D3DERR_NOTAVAILABLE under core
-// (strict); D3D_OK elsewhere (a lock that succeeds is unlocked: an unlock would log a refusal of its own).
-static bool rowDsLock() {
+// A dynamic depth texture's lock (DXMTRS C4c-3b): 64x64 D3DUSAGE_DYNAMIC textures written through LockRect in mtld3d's
+// packings and sampled as shadow maps (reference 0.5: lit, white, over 0.75; not, black, over 0.25), each sample at a
+// texel's centre on an odd row. D16 is a little-endian WORD a texel, 0x4000 for 0.25 and 0xbfff for 0.75; D24X8 has
+// its depth in bytes 0-2 under a byte 3 that is not zero (0xee400000, 0xeebfffff); D24S8 stencil 0xa5 in byte 0 under
+// its depth in bytes 1-3 (0x400000a5, 0xbfffffa5).
+struct DynDepth { D3DFORMAT f; const char *name; int bpp; DWORD lo, hi; };
+static const DynDepth DYN_DEPTH[] = {{D3DFMT_D16, "D16", 2, 0x4000, 0xbfff},
+                                     {D3DFMT_D24X8, "D24X8", 4, 0xee400000, 0xeebfffff},
+                                     {D3DFMT_D24S8, "D24S8", 4, 0x400000a5, 0xbfffffa5}};
+// Level `level` of the 64-texel `t` written: its texels left of the middle column `left`, the others `right`.
+static bool halves(IDirect3DTexture9 *t, UINT level, const DynDepth &k, DWORD left, DWORD right) {
+    const int mid = 32 >> level;
+    return fill(t, level, k.bpp, [&](int x, int) { return x < mid ? left : right; });
+}
+// Texel (tx, ty) of a level `w` texels wide sampled, held to that level (MIPFILTER POINT, MAXMIPLEVEL `level`) when
+// `level` is not 0; lit or not.
+struct DepthProbe { int tx, ty, w; bool lit; UINT level = 0; };
+// One frame: Z cleared, write() (the locks: the same bytes on a retry), then probe i over the quad at (64 i, 96).
+template <class W> static bool dynFrame(IDirect3DTexture9 *t, W write, std::initializer_list<DepthProbe> probes) {
+    Px px[4];
+    int n = 0;
+    for (const DepthProbe &p : probes) px[n] = {64 * n + 32, 128, p.lit ? 0xffffffu : 0u}, n++;
+    return frames(BLUE, px, n, [&] {
+        if (!clearZ() || !write()) return false;
+        int i = 0;
+        for (const DepthProbe &p : probes) {
+            CK(SetSamplerState, 0, D3DSAMP_MIPFILTER, p.level ? D3DTEXF_POINT : D3DTEXF_NONE);
+            CK(SetSamplerState, 0, D3DSAMP_MAXMIPLEVEL, p.level);
+            if (!sampleAt(t, 64.0f * i++, 96, (p.tx + 0.5f) / p.w, (p.ty + 0.5f) / p.w)) return false;
+        }
+        CK(SetSamplerState, 0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        CK(SetSamplerState, 0, D3DSAMP_MAXMIPLEVEL, 0);
+        return true;
+    });
+}
+// ds-dynlock: per format, one texture: the left half 0.25 and the right 0.75 (texel (48,47) lit, (16,47) not), then
+// locked again with the halves swapped (swapped). On D24X8 the halves again and the top-left quadrant 0.75 through
+// GetSurfaceLevel(0)'s LockRect of (0,0)-(32,32): (16,15) lit, (16,47) still not. On a D24S8 texture with its full
+// chain: level 0 the halves, level 1 (32x32) swapped and level 5 (2x2) 0.25 | 0.75, each sampled held to its level:
+// level 1's (8,15) lit and (24,15) not, level 5's (1,1) lit and (0,1) not. One frames() a state.
+static bool rowDsDynLock() {
+    for (const DynDepth &k : DYN_DEPTH) {
+        Com<IDirect3DTexture9> t;
+        CK(CreateTexture, 64, 64, 1, D3DUSAGE_DYNAMIC, k.f, D3DPOOL_DEFAULT, &t.p, nullptr);
+        if (!dynFrame(t.p, [&] { return halves(t.p, 0, k, k.lo, k.hi); }, {{16, 47, 64, false}, {48, 47, 64, true}}))
+            return failIn(k.name);
+        if (!dynFrame(t.p, [&] { return halves(t.p, 0, k, k.hi, k.lo); }, {{16, 47, 64, true}, {48, 47, 64, false}}))
+            return failIn(k.name, " swapped");
+        if (k.f != D3DFMT_D24X8) continue;
+        const auto quadrant = [&] {
+            Com<IDirect3DSurface9> s;
+            const RECT r = {0, 0, 32, 32};
+            return halves(t.p, 0, k, k.lo, k.hi) && levelOf(t.p, 0, s) &&
+                   underLock(s.p, "the level's LockRect (0,0)-(32,32)", &r, 0,
+                             [&](BYTE *b, int p) { paint(b, p, 0, 0, 32, 32, k.hi); });
+        };
+        if (!dynFrame(t.p, quadrant, {{16, 15, 64, true}, {16, 47, 64, false}})) return failIn(k.name, " quadrant");
+    }
+    const DynDepth &k = DYN_DEPTH[2];
     Com<IDirect3DTexture9> t;
-    CK(CreateTexture, 64, 64, 1, D3DUSAGE_DYNAMIC, D3DFMT_D16, D3DPOOL_DEFAULT, &t.p, nullptr);
-    D3DLOCKED_RECT lr = {};
-    const HRESULT hr = t.p->LockRect(0, &lr, nullptr, 0);
-    if (SUCCEEDED(hr)) t.p->UnlockRect(0);
-    if (strictMode ? hr != D3DERR_NOTAVAILABLE : hr != D3D_OK) return fail("LockRect", hr);
+    CK(CreateTexture, 64, 64, 0, D3DUSAGE_DYNAMIC, k.f, D3DPOOL_DEFAULT, &t.p, nullptr);
+    const auto levels = [&] {
+        return halves(t.p, 0, k, k.lo, k.hi) && halves(t.p, 1, k, k.hi, k.lo) && halves(t.p, 5, k, k.lo, k.hi);
+    };
+    if (!dynFrame(t.p, levels, {{8, 15, 32, true, 1}, {24, 15, 32, false, 1}, {1, 1, 2, true, 5}, {0, 1, 2, false, 5}}))
+        return failIn(k.name, " levels");
     return true;
 }
 
@@ -4022,7 +4463,7 @@ static void depthRows(IDirect3DDevice9 *d, bool strict) {
         {"ds-intz", rowDsIntz},         {"ds-df", rowDsDf},             {"ds-fetch4", rowDsFetch4},
         {"ds-size", rowDsSize},         {"ds-rhwclip", rowDsRhwClip},   {"ds-feedback", rowDsFeedback},
         {"ds-msaa", rowDsMsaa},
-        {"ds-huge", rowDsHuge},         {"ds-lock", rowDsLock}};
+        {"ds-huge", rowDsHuge},         {"ds-dynlock", rowDsDynLock}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 150000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
@@ -4822,18 +5263,6 @@ static bool mrtDraw2(const Prog &p, const float *c0, const float *c1, float z = 
     memcpy(c[0], c0, sizeof c[0]), memcpy(c[1], c1, sizeof c[1]);
     return mrtDraw(p, c, 2, z);
 }
-// Texels of the size x size 4-byte target `s` (format f), each within 1 a channel.
-struct Tx { int x, y; DWORD want; };
-static bool rtHas(const char *name, IDirect3DSurface9 *s, UINT size, D3DFORMAT f, std::initializer_list<Tx> px) {
-    return readTarget(s, size, size, f, [&](const BYTE *b, int pitch) {
-        for (const Tx &t : px) {
-            char what[64];
-            snprintf(what, sizeof what, "%s (%d,%d)", name, t.x, t.y);
-            if (!want(what, texel(b, pitch, t.x, t.y), t.want)) return false;
-        }
-        return true;
-    });
-}
 // One texel of the half or float target `s` (format f, `bytes` a texel): its first `channels` within 0.004.
 static bool rtHasF(const char *name, IDirect3DSurface9 *s, UINT size, D3DFORMAT f, int bytes, int x, int y,
                    const float *expect, int channels) {
@@ -5411,7 +5840,6 @@ static int meanOf(IDirect3DSurface9 *s, D3DFORMAT f, int x, int y, int n) {
 }
 // Whether the adapter offers `type` for a windowed A8R8G8B8 target (CheckDeviceMultiSampleType), asked of main's
 // IDirect3D9 (the core refuses GetDirect3D, which would hide the 2- and 8-sample cells from it).
-static IDirect3D9 *direct3d;
 static bool offers(D3DMULTISAMPLE_TYPE type) {
     return direct3d && SUCCEEDED(direct3d->CheckDeviceMultiSampleType(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, A8, TRUE,
                                                                       type, nullptr));

@@ -74,7 +74,7 @@ dxmt-tests:
 	mkdir -p build/dxmt-tests
 	$(MAKE) -s -j$(shell sysctl -n hw.ncpu) $(DXMT_TESTS)
 build/dxmt-tests/%.exe: dxmt/tests/%.cpp dxmt/tests/d3d12_common.hpp dxmt/tests/d3d11_common.hpp
-	$(MINGWXX) -std=c++17 $(NVAPI_INC) -o $@ $< -ld3d12 -ld3d11 -ld3d10 -ld3d9 -ld3dcompiler -ldxgi -luser32 -lpsapi
+	$(MINGWXX) -std=c++17 $(NVAPI_INC) -o $@ $< -ld3d12 -ld3d11 -ld3d10 -ld3d9 -ld3dcompiler -ldxgi -luser32 -lpsapi -lgdi32
 
 # d3d11_nvapi builds against NVIDIA's own nvapi.h, from DXMT's tree (make wine-arm64 fetches it).
 build/dxmt-tests/d3d11_nvapi.exe build/dxmt-tests-arm64ec/d3d11_nvapi.exe: NVAPI_INC = -Ibuild/wine-arm64-src/dxmt/external/nvapi
@@ -84,13 +84,13 @@ build/dxmt-tests/d3d11_dxgi.exe build/dxmt-tests-arm64ec/d3d11_dxgi.exe: $(wildc
 # D3D9's for i386 too, the VM guest's 32-bit lane (D3D9 M2b: D3D9's i386 pair under the guest's new WoW64).
 build/dxmt-tests-i386/%.exe: dxmt/tests/%.cpp
 	mkdir -p build/dxmt-tests-i386
-	$(MINGW_BIN)/i686-w64-mingw32-clang++ -O2 -static -s -std=c++17 -Wl,--large-address-aware -o $@ $< -ld3d9 -luser32
+	$(MINGW_BIN)/i686-w64-mingw32-clang++ -O2 -static -s -std=c++17 -Wl,--large-address-aware -o $@ $< -ld3d9 -luser32 -lgdi32
 
 # And for arm64: a native arm64 process loads the ARM64X d3d9.dll's native half, which no x64 or ARM64EC program
 # reaches.
 build/dxmt-tests-arm64/%.exe: dxmt/tests/%.cpp
 	mkdir -p build/dxmt-tests-arm64
-	$(MINGW_BIN)/aarch64-w64-mingw32-clang++ -O2 -static -s -std=c++17 -o $@ $< -ld3d9 -luser32
+	$(MINGW_BIN)/aarch64-w64-mingw32-clang++ -O2 -static -s -std=c++17 -o $@ $< -ld3d9 -luser32 -lgdi32
 
 # The same programs and present_loop for ARM64EC, for the arm64 runtime (arm64 DXMT spec §7), built in parallel.
 MINGW_EC = $(MINGW_BIN)/arm64ec-w64-mingw32-clang -O3 -flto=thin -static -s $(PE_MARCH)
@@ -101,7 +101,7 @@ dxmt-tests-arm64ec:
 	mkdir -p build/dxmt-tests-arm64ec
 	$(MAKE) -s -j$(shell sysctl -n hw.ncpu) $(DXMT_TESTS_EC)
 build/dxmt-tests-arm64ec/%.exe: dxmt/tests/%.cpp dxmt/tests/d3d12_common.hpp dxmt/tests/d3d11_common.hpp
-	$(MINGWXX_EC) -std=c++17 $(NVAPI_INC) -o $@ $< -ld3d12 -ld3d11 -ld3d10 -ld3d9 -ld3dcompiler -ldxgi -luser32 -lpsapi
+	$(MINGWXX_EC) -std=c++17 $(NVAPI_INC) -o $@ $< -ld3d12 -ld3d11 -ld3d10 -ld3d9 -ld3dcompiler -ldxgi -luser32 -lpsapi -lgdi32
 build/dxmt-tests-arm64ec/present_loop.exe: presenter/tests/present_loop.c
 	$(MINGW_EC) -o $@ $< -ld3d11 -ldxgi -luser32 -lgdi32 -ldxguid -luuid
 
