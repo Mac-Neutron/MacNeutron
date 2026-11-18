@@ -52,7 +52,10 @@
 # C4c-2b: vertex and index buffers and the draws that read them; bf64-fresh, bf32-fresh); under core their logs hold
 # exactly its one refusal line (a layout no binding can fetch: buf-wide's attribute wider than its stride), and the line
 # logged at the first draw that reads a dynamic buffer in place ("d3d9 core: dynamic buffers are read in place", DXMTRS
-# C4c-2b; the row "bf<64|32>-fresh buffers direct").
+# C4c-2b; the row "bf<64|32>-fresh buffers direct"). Every lane also checks d3d9_triangle blit's 18 rows (DXMTRS
+# C4c-4a: ColorFill, UpdateSurface and StretchRect's answers, on a device with no depth-stencil; bt64-fresh,
+# bt32-fresh); under core their logs hold exactly one refusal line (a StretchRect that is no multisample resolve:
+# sr-shape's).
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -216,6 +219,12 @@ for r in bf64-fresh bf32-fresh; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
+for r in bt64-fresh bt32-fresh; do
+  for row in cf-rt cf-lockable cf-bb cf-unbound cf-rtex cf-autogen cf-msaa cf-plain cf-reject us-tex us-level us-rtex \
+    us-rt us-bb us-conv us-reject sr-reject sr-shape; do
+    check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
+  done
+done
 for r in st64-fresh st32-fresh; do
   for row in state-xform state-material state-tss state-swapchain state-rt state-tex state-late state-lock state-sb \
     state-upunbind state-fftex state-fftexoff; do
@@ -231,8 +240,8 @@ done
 # The shaders, state, textures, blend and mrt launches (DXMTRS C4b-2, C4b-3a, C4b-3b, C4b-3d3, C4b-3d4) take no kind:
 # no refusal line (the shaders launch's since DXMTRS C4c-2a, which draws the crossing row; the state launch's since
 # DXMTRS C4c-1: buffer locks are the core's; the textures launch's since DXMTRS C4c-3a: a render-target texture's lock
-# is the core's). The targets and msaa launches take "stretch": exactly the one StretchRect that is no multisample
-# resolve (stretch_refusals, DXMTRS C4b-3d5).
+# is the core's). The targets, msaa and blit launches take "stretch": exactly the one StretchRect that is no
+# multisample resolve (stretch_refusals, DXMTRS C4b-3d5; blit's sr-shape, DXMTRS C4c-4a).
 refused='is not implemented under runtime.mode = core'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
 stretch_refusals='IDirect3DDevice9::StretchRect (other than a multisample resolve)'
@@ -266,7 +275,7 @@ if [ "$RT" = core ]; then
   for r in dp64-fresh dp32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" depth)" ok
   done
-  for r in tg64-fresh tg32-fresh ms64-fresh ms32-fresh; do
+  for r in tg64-fresh tg32-fresh ms64-fresh ms32-fresh bt64-fresh bt32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" stretch)" ok
   done
   for r in bf64-fresh bf32-fresh; do
