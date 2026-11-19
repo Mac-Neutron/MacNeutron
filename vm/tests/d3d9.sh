@@ -32,8 +32,8 @@
 #   bf<64|32>-fresh.txt           d3d9_triangle buffers (DXMTRS C4c-1's, C4c-2a's and C4c-2b's 39 rows of vertex and
 #                                index buffers and the draws that read them; "buffers strict" under core), 240 s
 #   bt<64|32>-fresh.txt           d3d9_triangle blit (DXMTRS C4c-4a's 18 rows of ColorFill, UpdateSurface and
-#                                StretchRect's answers and C4c-4b's 13 of its unscaled copies: 31; "blit strict"
-#                                under core), 240 s
+#                                StretchRect's answers, C4c-4b's 13 of its unscaled copies and C4c-4c's 10 of its
+#                                sampled ones: 41; "blit strict" under core), 240 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64

@@ -47,8 +47,9 @@
 # render targets other than the back buffer, C4b-3d5's rt-plain, C4c-3a's four of locks and the front buffer:
 # rt-lockable, rt-nolock, rt-bblock, rt-front, and C4c-3b's eight of device contexts, an additional swap chain's back
 # buffer and a lockable back buffer: dc-mem, dc-tex, dc-rtex, dc-rt, dc-bb, rt-chain, lb-lock, lb-dc: 35; "targets
-# strict" under core), its rows "targets-<row>"; under core its launch's logs hold exactly one refusal line (a
-# StretchRect that is no multisample resolve). Every lane also runs d3d9_triangle depth (DXMTRS C4b-3d2's 31 rows of
+# strict" under core), its rows "targets-<row>"; under core its launch's logs hold no refusal line (since DXMTRS
+# C4c-4c, which copies rt-msaa's multisampled surface into a 32x32 target). Every lane also runs d3d9_triangle depth
+# (DXMTRS C4b-3d2's 31 rows of
 # the depth-stencil, on a device with an auto depth-stencil, ds-dynlock C4c-3b's; "depth strict" under core), its rows
 # "depth-<row>"; under core its launch's logs hold exactly its one refused call's line (a depth-tested draw sampling
 # the bound depth-stencil; a dynamic depth texture's lock is the core's since DXMTRS C4c-3b). Every lane also runs
@@ -66,10 +67,11 @@
 # can fetch: buf-wide's attribute wider than its stride) and no line of a draw dropped for a buffer with no core form,
 # and the line logged at the first draw that reads a dynamic buffer in place ("d3d9 core: dynamic buffers are read in
 # place", DXMTRS C4c-2b), else "buffers-direct". Every lane also runs d3d9_triangle blit (DXMTRS C4c-4a's 18 rows of
-# ColorFill, UpdateSurface and StretchRect's answers and C4c-4b's 13 sc-* rows of StretchRect's unscaled copies: 31, on
-# a device with no depth-stencil; "blit strict" under core), its rows "blit-<row>"; under core its launch's logs hold
-# exactly one refusal line (the literal of a StretchRect that is no multisample resolve: sr-shape's shapes and sc-self's
-# overlapping rects, DXMTRS C4c-4c's).
+# ColorFill, UpdateSurface and StretchRect's answers, C4c-4b's 13 sc-* rows of StretchRect's unscaled copies and
+# C4c-4c's 10 sq-* rows of its sampled ones: 41, on a device with no depth-stencil; "blit strict" under core), its rows
+# "blit-<row>"; under core its launch's logs hold exactly one refusal line (the literal of a StretchRect that is no
+# multisample resolve: since DXMTRS C4c-4c sr-shape's depth-stencil resolve alone, itself a multisample resolve, of
+# depth, which the literal's name no longer excludes; DXMTRS C4c-4d's).
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -155,14 +157,15 @@ launch() {
 }
 # refusals_ok <name> <folder>: the fixed launch's logs hold exactly its one core refusal line (DXMTRS C4b-3c: a depth
 # texture at a vertex sampler), the depth launch's exactly its one (DXMTRS C4b-3d2: a depth-tested draw sampling the
-# bound depth-stencil; a dynamic depth texture's LockRect is the core's since DXMTRS C4c-3b); the targets and blit
-# launches' exactly their one (DXMTRS C4b-3d5: a StretchRect that is no multisample resolve; blit's, DXMTRS C4c-4a:
-# sr-shape's valid shapes, and since DXMTRS C4c-4b sc-self's overlapping rects); the buffers launch's
-# exactly its one (DXMTRS C4c-2a: a layout no binding can fetch); the shaders, state, textures, blend, mrt and msaa
-# launches' none (the shaders launch's since DXMTRS C4c-2a, which draws the crossing row; the state launch's since
+# bound depth-stencil; a dynamic depth texture's LockRect is the core's since DXMTRS C4c-3b); the blit launch's exactly
+# its one (DXMTRS C4c-4a: a StretchRect that is no multisample resolve; since DXMTRS C4c-4c sr-shape's depth-stencil
+# resolve alone); the buffers launch's
+# exactly its one (DXMTRS C4c-2a: a layout no binding can fetch); the shaders, state, textures, targets, blend, mrt and
+# msaa launches' none (the shaders launch's since DXMTRS C4c-2a, which draws the crossing row; the state launch's since
 # DXMTRS C4c-1: buffer locks are the core's; the textures launch's since DXMTRS C4c-3a: a render-target texture's lock
-# is the core's; the msaa launch's since DXMTRS C4c-4b: a depth-stencil copy of 4 samples is the core's); the other
-# launches are not held to it.
+# is the core's; the targets launch's since DXMTRS C4c-4c: a scaled copy of a multisampled surface is the core's; the
+# msaa launch's since DXMTRS C4c-4b: a depth-stencil copy of 4 samples is the core's); the other launches are not held
+# to it.
 refused='is not implemented under runtime.mode = core'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
 stretch_refusals='IDirect3DDevice9::StretchRect (other than a multisample resolve)'
@@ -170,17 +173,18 @@ depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled wh
 buffers_refusals='IDirect3DDevice9::Draw*Primitive (a layout no binding can fetch)'
 refusals_ok() {
   case $1 in
-    fixed|depth|targets|blit|buffers)
+    fixed|depth|blit|buffers)
       case $1 in
         fixed) set_=$fixed_refusals ;; depth) set_=$depth_refusals ;;
-        targets|blit) set_=$stretch_refusals ;; buffers) set_=$buffers_refusals ;;
+        blit) set_=$stretch_refusals ;; buffers) set_=$buffers_refusals ;;
       esac
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] \
         || return 1
       printf '%s\n' "$set_" | while IFS= read -r n; do
         /usr/bin/grep -rqF "d3d9 core: $n $refused" "$2" || exit 1
       done ;;
-    shaders|state|textures|blend|mrt|msaa) [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
+    shaders|state|textures|targets|blend|mrt|msaa)
+      [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
     *) return 0 ;;
   esac
 }
@@ -263,7 +267,8 @@ fi
 launch ours fresh blit 240 blit $strict
 check blit "cf-rt cf-lockable cf-bb cf-unbound cf-rtex cf-autogen cf-msaa cf-plain cf-reject us-tex us-level us-rtex
   us-rt us-bb us-conv us-reject sr-reject sr-shape sc-rt sc-bb sc-lockable sc-rtex sc-tex sc-plain sc-plain2 sc-conv
-  sc-same sc-self sc-autogen sc-order sc-depth"
+  sc-same sc-self sc-autogen sc-order sq-scale sq-level sq-conv sq-swizzle sq-yuv sq-ms sq-overlap sq-plain sq-order
+  sq-autogen sc-depth"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi
