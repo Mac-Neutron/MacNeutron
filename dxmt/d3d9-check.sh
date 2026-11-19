@@ -37,8 +37,10 @@
 # first frame must match), its rows "shaders-<row>". Its launch's logs hold no core refusal line ("... is not
 # implemented under runtime.mode = core") in any lane (under core since DXMTRS C4c-2a, which draws the crossing row),
 # else "shaders-runtime". Every lane also runs d3d9_triangle state (DXMTRS C4b-3a's 12 rows of API state and inert
-# objects; "state strict" under core), its rows "state-<row>"; its launch's logs hold no refusal line in any lane (under
-# core since DXMTRS C4c-1, which made buffer locks the core's). Every lane also runs d3d9_triangle textures (DXMTRS
+# objects and C4c-6a's four of the getters, the stubs, Present's other forms and an extended device: state-getters,
+# state-stubs, state-present, state-ex: 16; "state strict" under core), its rows "state-<row>"; its launch's logs hold no
+# refusal line in any lane (under core since DXMTRS C4c-1, which made buffer locks the core's, and C4c-6a, which makes
+# the four rows' calls the core's). Every lane also runs d3d9_triangle textures (DXMTRS
 # C4b-3b's 34 rows of sampled textures and C4b-3c's five vertex-texture rows; "textures strict" under core), its rows
 # "textures-<row>"; under core its launch's logs hold no refusal line (since DXMTRS C4c-3a, which locks a render-target
 # texture's levels). Every lane also runs d3d9_triangle fixed (DXMTRS C4b-3c's 31 rows of the fixed-function vertex
@@ -133,8 +135,9 @@ launch() {
   d="$WORK/mtld3d-logs/$name"
   enc='texture versions: rename pool cap'
   # A core device that cannot present or draw logs one of these and still answers D3D_OK: none may appear. "has no
-  # mapped memory": a dynamic buffer staged for want of a usable name (DXMTRS C4c-2b).
-  unpresented='nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form|has no mapped memory'
+  # mapped memory": a dynamic buffer staged for want of a usable name (DXMTRS C4c-2b). "was not recorded": a copy or a
+  # resolve the core did not record, or an occlusion query left open at the device's end (DXMTRS C4c-4b, C4c-5).
+  unpresented='nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form|has no mapped memory|was not recorded'
   if [ "$name" = arm64 ]; then
     if /usr/bin/grep -rqF 'carries no core runtime, so mtld3d runs' "$d" && /usr/bin/grep -rqF "$enc" "$d" \
       && ! /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d"; then
@@ -163,7 +166,8 @@ launch() {
 # bound depth-stencil; a dynamic depth texture's LockRect is the core's since DXMTRS C4c-3b); the buffers launch's
 # exactly its one (DXMTRS C4c-2a: a layout no binding can fetch); the shaders, state, textures, targets, blend, mrt,
 # msaa, blit and queries launches' none (the shaders launch's since DXMTRS C4c-2a, which draws the crossing row; the
-# state launch's since DXMTRS C4c-1: buffer locks are the core's; the textures launch's since DXMTRS C4c-3a: a
+# state launch's since DXMTRS C4c-1: buffer locks are the core's, and since DXMTRS C4c-6a the getters, the stubs and
+# the presents; the textures launch's since DXMTRS C4c-3a: a
 # render-target texture's lock is the core's; the targets launch's since DXMTRS C4c-4c: a scaled copy of a
 # multisampled surface is the core's; the msaa launch's since DXMTRS C4c-4b: a depth-stencil copy of 4 samples is the
 # core's, and since DXMTRS C4c-4d its resolve; the blit launch's since DXMTRS C4c-4d: a depth-stencil resolve is the
@@ -220,7 +224,7 @@ check shaders "caps vs1 vs2 vs3 consti constb rel decl indexed fan bypass vsff a
   srgb crossing getters"
 launch ours fresh state 120 state $strict
 check state "state-xform state-material state-tss state-swapchain state-rt state-tex state-late state-lock state-sb
-  state-upunbind state-fftex state-fftexoff"
+  state-upunbind state-fftex state-fftexoff state-getters state-stubs state-present state-ex"
 launch ours fresh textures 240 textures $strict
 check textures "tex-ps2d tex-ff tex-cascade tex-cube tex-volume tex-mips tex-address tex-filter tex-srgb tex-dxt1
   tex-l8 tex-a8 tex-a8l8 tex-r5g6b5 tex-a4r4g4b4 tex-r8g8b8 tex-lock tex-twodraws tex-dynamic tex-levelsurf tex-genmips

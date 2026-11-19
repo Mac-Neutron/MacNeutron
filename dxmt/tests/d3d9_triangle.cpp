@@ -32,10 +32,13 @@
 // undrawn one that keeps it, retrying frames for up to 10 s (mtld3d leaves a draw out while its pipeline builds) unless
 // "shaders strict" (the core compiles synchronously: the first frame must match). The mode has a 90 s budget; rows past
 // it print "FAIL budget". Expected colours are D3DCOLOR_XRGB values, each channel within 1.
-// With "state" ("state strict" under core; DXMTRS C4b-3a): 12 rows "d3d9 state-<row> ok|FAIL <why>" of the API state
+// With "state" ("state strict" under core; DXMTRS C4b-3a): 16 rows "d3d9 state-<row> ok|FAIL <why>" of the API state
 // and inert objects (transforms, material and lights, stage, sampler and scissor states, stream frequency, swap chains,
 // the back-buffer target switch, textures, a second device released before its objects, a buffer lock, state blocks,
-// the UP draws' unbinds, a textured fixed-function draw and one whose stage reads no texture), with a 60 s budget.
+// the UP draws' unbinds, a textured fixed-function draw and one whose stage reads no texture; since DXMTRS C4c-6a the
+// getters (creation parameters, display mode, raster status, texture memory), the stubs and obsolete calls with
+// EvictManagedResources' re-publish, Present's other forms and an additional swap chain's Present, each judged by an
+// occlusion query a present completes, and an extended device's calls and PresentEx), with a 60 s budget.
 // With "fixed" ("fixed strict" under core; DXMTRS C4b-3c): 31 rows "d3d9 ff-<row>|tex-vtx<row> ok|FAIL <why>" of the
 // fixed-function vertex stage over untransformed layouts (transforms, lights, material sources, fog, texgen and texture
 // transforms, vertex blending, points, a clip plane) and three vertex-sampled target textures the core refuses, with a
@@ -909,7 +912,9 @@ static void shaderRows(IDirect3DDevice9 *d, bool strict) {
 
 // The "state" mode (DXMTRS C4b-3a): the API state and inert objects the core runtime takes, each row starting from
 // reset() and leaving what it set back at D3D9's defaults. Rows whose answer differs by runtime (a draw the core
-// refuses) take either answer; d3d9-check proves which runtime gave it from the launch's refusal lines.
+// refuses) take either answer; d3d9-check proves which runtime gave it from the launch's refusal lines. DXMTRS
+// C4c-6a's four (state-getters, state-stubs, state-present, state-ex; defined after the query helpers their present
+// cells use) want mtld3d's answers in every lane.
 static HWND stateHwnd;
 static IDirect3D9 *stateD3d;
 
@@ -1183,12 +1188,18 @@ static bool texturedQuad(bool stageOn) {
 static bool rowFftex() { return texturedQuad(true); }
 static bool rowFftexOff() { return texturedQuad(false); }
 
+static bool rowStateGetters();
+static bool rowStateStubs();
+static bool rowStatePresent();
+static bool rowStateEx();
+
 static void stateRows(IDirect3DDevice9 *d, IDirect3D9 *d3d, HWND hwnd, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
         {"state-xform", rowXform}, {"state-material", rowMaterial}, {"state-tss", rowTss},
         {"state-swapchain", rowSwapchain}, {"state-rt", rowRt}, {"state-tex", rowTex}, {"state-late", rowLate},
         {"state-lock", rowLock}, {"state-sb", rowSb}, {"state-upunbind", rowUpUnbind}, {"state-fftex", rowFftex},
-        {"state-fftexoff", rowFftexOff}};
+        {"state-fftexoff", rowFftexOff}, {"state-getters", rowStateGetters}, {"state-stubs", rowStateStubs},
+        {"state-present", rowStatePresent}, {"state-ex", rowStateEx}};
     dev = d, stateD3d = d3d, stateHwnd = hwnd, strictMode = strict, budgetEnd = GetTickCount64() + 60000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
@@ -3657,8 +3668,9 @@ static bool chainBackBuffer(HWND w, DWORD flags, Com<IDirect3DSwapChain9> &sc, C
     const HRESULT hr = sc.p->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
     return SUCCEEDED(hr) || fail("IDirect3DSwapChain9::GetBackBuffer", hr);
 }
-// rt-chain: an additional swap chain of the device's size on the device's window (a null hDeviceWindow: the core
-// refuses GetCreationParameters); the device's back buffer cleared steel with the rust triangle. The chain's back
+// rt-chain: an additional swap chain of the device's size on the device's window (a null hDeviceWindow, which names
+// the device's window: this mode is given no window, and the core refused GetCreationParameters before DXMTRS
+// C4c-6a); the device's back buffer cleared steel with the rust triangle. The chain's back
 // buffer (an alias of the device's) locked READONLY reads rust at (40,40) and steel at (248,8); LockRect(NULL, 0) of
 // it is D3DERR_INVALIDCALL (the device has no lockable back buffer); GetRenderTargetData of it into a system-memory
 // surface reads the same two texels.
@@ -9804,6 +9816,309 @@ static void queriesRows(IDirect3DDevice9 *d, bool strict) {
         row(r.name, ok, why);
     }
     if (rtSurf) rtSurf->Release();
+}
+
+// --- The "state" mode's rows of DXMTRS C4c-6a (in stateRows' table after state-fftexoff; defined here, after the query
+// helpers their present cells use). Each cell wants what mtld3d, the default runtime, answers. The core refuses these
+// calls (D3DERR_NOTAVAILABLE, with its refusal line) until DXMTRS C4c-6a's front end: a row stops at its first refused
+// call and prints "FAIL <call> 8876086a". No out value is read before its call's answer is judged.
+
+// One present cell, judged by a query (GetFrontBufferData reads the back buffer as it is now on both runtimes, so it
+// cannot tell that a present happened): an OCCLUSION BEGIN, a quad over (x0,y0)-(x1,y1) (zquad's exact count `count`),
+// END; a first GetData(&d, 4, 0) that must answer S_FALSE (nothing has presented since the END, and such a poll
+// finishes on neither runtime: qy-noflush); then, while that poll answers S_FALSE and for 5 s at most, present() (the
+// form under test, which must answer D3D_OK), Sleep(10) and the poll: S_OK and exactly `count` (mtld3d publishes the
+// count at a frame's start once the END's frame retired, the core once a present committed the END's chunk and it
+// retired). Nothing else submits from the first poll to the last: no other Present, no FLUSH poll, no read-back. A row
+// runs it as one until() attempt, whose Present comes after it; `form` names the cell in `why`.
+template <class F>
+static bool presentCounts(const char *form, float x0, float y0, float x1, float y1, DWORD count, F present) {
+    Com<IDirect3DQuery9> q;
+    if (!newQuery(q) || !issue(q.p, D3DISSUE_BEGIN) || !quadIn(x0, y0, x1, y1) || !issue(q.p, D3DISSUE_END))
+        return failIn(form);
+    DWORD d = 0xffffffff;
+    HRESULT hr = q.p->GetData(&d, sizeof d, 0);
+    if (hr != S_FALSE)
+        return snprintf(why, sizeof why, "%s: GetData (4 bytes, no flag) before a present %08lx, want S_FALSE", form,
+                        (unsigned long)hr),
+               false;
+    for (const ULONGLONG end = GetTickCount64() + 5000;;) {
+        if ((hr = present()) != D3D_OK) return fail(form, hr);
+        Sleep(10);
+        d = 0xffffffff;
+        hr = q.p->GetData(&d, sizeof d, 0);
+        if (hr == S_OK) return exact("count", d, count) || failIn(form);
+        if (hr != S_FALSE) return fail("GetData (4 bytes, no flag)", hr) || failIn(form);
+        if (GetTickCount64() >= end)
+            return snprintf(why, sizeof why, "%s: GetData (no flag) S_FALSE for 5 s of them", form), false;
+    }
+}
+// The mode main's IDirect3D9::GetAdapterDisplayMode reports, in `a`.
+static bool adapterMode(D3DDISPLAYMODE &a) {
+    const HRESULT hr = stateD3d->GetAdapterDisplayMode(D3DADAPTER_DEFAULT, &a);
+    return hr == D3D_OK || fail("IDirect3D9::GetAdapterDisplayMode", hr);
+}
+// Whether a reported mode is `a` (size, refresh and format); `why` names both otherwise.
+static bool sameMode(const char *what, UINT w, UINT h, UINT hz, D3DFORMAT f, const D3DDISPLAYMODE &a) {
+    if (w == a.Width && h == a.Height && hz == a.RefreshRate && f == a.Format) return true;
+    snprintf(why, sizeof why, "%s %ux%u@%u format %d, want the adapter's %ux%u@%u format %d", what, w, h, hz, (int)f,
+             a.Width, a.Height, a.RefreshRate, (int)a.Format);
+    return false;
+}
+// Whether an extended mode is `a`, its Size kept, progressive, with the identity rotation.
+static bool sameModeEx(const char *what, const D3DDISPLAYMODEEX &m, D3DDISPLAYROTATION rot, const D3DDISPLAYMODE &a) {
+    if (!sameMode(what, m.Width, m.Height, m.RefreshRate, m.Format, a)) return false;
+    if (m.Size == sizeof m && m.ScanLineOrdering == D3DSCANLINEORDERING_PROGRESSIVE && rot == D3DDISPLAYROTATION_IDENTITY)
+        return true;
+    return snprintf(why, sizeof why, "%s Size %u, scan-line ordering %d, rotation %d", what, m.Size,
+                    (int)m.ScanLineOrdering, (int)rot),
+           false;
+}
+
+// state-getters: GetCreationParameters D3D_OK with what main made the device with (D3DADAPTER_DEFAULT, HAL, stateHwnd
+// as the focus window, D3DCREATE_HARDWARE_VERTEXPROCESSING), a null pointer D3DERR_INVALIDCALL; GetDisplayMode(0)
+// D3D_OK with GetAdapterDisplayMode's mode (a windowed device reports the desktop's, both read live) in X8R8G8B8 (the
+// adapter's first format), GetDisplayMode(1) and (0, NULL) D3DERR_INVALIDCALL; the implicit swap chain's GetDisplayMode
+// the same mode, a null pointer D3DERR_INVALIDCALL; GetRasterStatus of the device and of the chain D3DERR_INVALIDCALL
+// (mtld3d's stubs); GetAvailableTextureMem above zero, and at least 2 MiB lower while a 1024x1024 A8R8G8B8 default-pool
+// texture of one level (4 MiB, charged at its create) lives.
+static bool rowStateGetters() {
+    D3DDEVICE_CREATION_PARAMETERS cp = {};
+    HRESULT hr = dev->GetCreationParameters(&cp);
+    if (hr != D3D_OK) return fail("GetCreationParameters", hr);
+    if (cp.AdapterOrdinal != D3DADAPTER_DEFAULT || cp.DeviceType != D3DDEVTYPE_HAL || cp.hFocusWindow != stateHwnd ||
+        cp.BehaviorFlags != D3DCREATE_HARDWARE_VERTEXPROCESSING)
+        return snprintf(why, sizeof why, "GetCreationParameters adapter %u, type %d, focus %p, flags %#lx",
+                        cp.AdapterOrdinal, (int)cp.DeviceType, (void *)cp.hFocusWindow, (unsigned long)cp.BehaviorFlags),
+               false;
+    if (!answer("GetCreationParameters (NULL)", dev->GetCreationParameters(nullptr), D3DERR_INVALIDCALL)) return false;
+    D3DDISPLAYMODE a = {}, m = {};
+    if (!adapterMode(a) || !answer("GetDisplayMode(0)", dev->GetDisplayMode(0, &m), D3D_OK) ||
+        !sameMode("GetDisplayMode(0)", m.Width, m.Height, m.RefreshRate, m.Format, a))
+        return false;
+    if (m.Format != D3DFMT_X8R8G8B8)
+        return snprintf(why, sizeof why, "GetDisplayMode(0) format %d, want X8R8G8B8", (int)m.Format), false;
+    if (!answer("GetDisplayMode(1)", dev->GetDisplayMode(1, &m), D3DERR_INVALIDCALL) ||
+        !answer("GetDisplayMode(0, NULL)", dev->GetDisplayMode(0, nullptr), D3DERR_INVALIDCALL))
+        return false;
+    Com<IDirect3DSwapChain9> sc;
+    CK(GetSwapChain, 0, &sc.p);
+    D3DDISPLAYMODE cm = {};
+    D3DRASTER_STATUS rs = {};
+    if (!answer("IDirect3DSwapChain9::GetDisplayMode", sc.p->GetDisplayMode(&cm), D3D_OK) ||
+        !sameMode("IDirect3DSwapChain9::GetDisplayMode", cm.Width, cm.Height, cm.RefreshRate, cm.Format, a) ||
+        !answer("IDirect3DSwapChain9::GetDisplayMode (NULL)", sc.p->GetDisplayMode(nullptr), D3DERR_INVALIDCALL) ||
+        !answer("GetRasterStatus", dev->GetRasterStatus(0, &rs), D3DERR_INVALIDCALL) ||
+        !answer("IDirect3DSwapChain9::GetRasterStatus", sc.p->GetRasterStatus(&rs), D3DERR_INVALIDCALL))
+        return false;
+    const UINT before = dev->GetAvailableTextureMem();
+    if (!before) return snprintf(why, sizeof why, "GetAvailableTextureMem 0"), false;
+    Com<IDirect3DTexture9> t;
+    CK(CreateTexture, 1024, 1024, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &t.p, nullptr);
+    const UINT with = dev->GetAvailableTextureMem();
+    if (with > before || before - with < 2u << 20)
+        return snprintf(why, sizeof why, "GetAvailableTextureMem %u, then %u with a 4 MiB texture: want 2 MiB less at least",
+                        before, with),
+               false;
+    return true;
+}
+// state-stubs: SetDialogBoxMode(FALSE), SetClipStatus and GetClipStatus D3DERR_INVALIDCALL (stubs);
+// SetPaletteEntries(0) D3D_OK with every entry's peFlags 0xFF, D3DERR_INVALIDCALL with one entry's 0x80 (no
+// D3DPTEXTURECAPS_ALPHAPALETTE without debug.capsAll, which no lane sets) and with a null pointer; GetPaletteEntries
+// D3DERR_INVALIDCALL; SetCurrentTexturePalette(0) D3D_OK; GetCurrentTexturePalette D3DERR_INVALIDCALL;
+// SetSoftwareVertexProcessing(FALSE) D3D_OK, GetSoftwareVertexProcessing FALSE; SetNPatchMode(2) and (0) D3D_OK,
+// GetNPatchMode 0; DrawRectPatch, DrawTriPatch and DeletePatch D3DERR_INVALIDCALL; ValidateDevice at reset()'s state
+// (POINT filters, no texture) D3D_OK and one pass, with a null pointer D3D_OK. Then EvictManagedResources over a managed
+// 4x4 X8R8G8B8 texture on stage 0 (MODULATE TEXTURE DIFFUSE under a white quad over (64,64)-(192,192), blue clear): it
+// is written steel and drawn, steel at (128,128) and blue at (16,16) through frames() (so the level was uploaded), then
+// written rust under D3DLOCK_NO_DIRTY_UPDATE; EvictManagedResources D3D_OK; drawn again: rust (the eviction marks an
+// uploaded level dirty, so the next draw publishes the CPU copy: Wine's add_dirty_rect_test). Nothing is judged between
+// the write and the eviction (the core publishes such a write at the next draw anyway). Stage 0 is unbound after.
+static bool rowStateStubs() {
+    D3DCLIPSTATUS9 cs = {D3DCS_ALL, 0};
+    if (!answer("SetDialogBoxMode(FALSE)", dev->SetDialogBoxMode(FALSE), D3DERR_INVALIDCALL) ||
+        !answer("SetClipStatus", dev->SetClipStatus(&cs), D3DERR_INVALIDCALL) ||
+        !answer("GetClipStatus", dev->GetClipStatus(&cs), D3DERR_INVALIDCALL))
+        return false;
+    PALETTEENTRY pal[256];
+    for (PALETTEENTRY &e : pal) e = {0x10, 0x20, 0x30, 0xff};
+    if (!answer("SetPaletteEntries", dev->SetPaletteEntries(0, pal), D3D_OK)) return false;
+    pal[5].peFlags = 0x80;
+    UINT palette = 7;
+    if (!answer("SetPaletteEntries (an entry's alpha 0x80)", dev->SetPaletteEntries(0, pal), D3DERR_INVALIDCALL) ||
+        !answer("SetPaletteEntries (NULL)", dev->SetPaletteEntries(0, nullptr), D3DERR_INVALIDCALL) ||
+        !answer("GetPaletteEntries", dev->GetPaletteEntries(0, pal), D3DERR_INVALIDCALL) ||
+        !answer("SetCurrentTexturePalette", dev->SetCurrentTexturePalette(0), D3D_OK) ||
+        !answer("GetCurrentTexturePalette", dev->GetCurrentTexturePalette(&palette), D3DERR_INVALIDCALL) ||
+        !answer("SetSoftwareVertexProcessing(FALSE)", dev->SetSoftwareVertexProcessing(FALSE), D3D_OK))
+        return false;
+    const BOOL software = dev->GetSoftwareVertexProcessing();
+    if (software != FALSE) return snprintf(why, sizeof why, "GetSoftwareVertexProcessing %d", (int)software), false;
+    if (!answer("SetNPatchMode(2)", dev->SetNPatchMode(2.0f), D3D_OK) ||
+        !answer("SetNPatchMode(0)", dev->SetNPatchMode(0.0f), D3D_OK))
+        return false;
+    const float segments = dev->GetNPatchMode();
+    if (segments != 0.0f) return snprintf(why, sizeof why, "GetNPatchMode %g", (double)segments), false;
+    const float segs[4] = {1, 1, 1, 1};
+    const D3DRECTPATCH_INFO rect = {};
+    const D3DTRIPATCH_INFO tri = {};
+    DWORD passes = 0xdead;
+    if (!answer("DrawRectPatch", dev->DrawRectPatch(1, segs, &rect), D3DERR_INVALIDCALL) ||
+        !answer("DrawTriPatch", dev->DrawTriPatch(1, segs, &tri), D3DERR_INVALIDCALL) ||
+        !answer("DeletePatch", dev->DeletePatch(1), D3DERR_INVALIDCALL) ||
+        !answer("ValidateDevice", dev->ValidateDevice(&passes), D3D_OK) || !exact("ValidateDevice's passes", passes, 1) ||
+        !answer("ValidateDevice (NULL)", dev->ValidateDevice(nullptr), D3D_OK))
+        return false;
+    Com<IDirect3DTexture9> t;
+    CK(CreateTexture, 4, 4, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &t.p, nullptr);
+    const auto paint = [&](DWORD c, DWORD flags, const char *call) {
+        D3DLOCKED_RECT lr = {};
+        HRESULT h = t.p->LockRect(0, &lr, nullptr, flags);
+        if (FAILED(h)) return fail(call, h);
+        for (int y = 0; y < 4; y++)
+            for (int x = 0; x < 4; x++) ((DWORD *)((BYTE *)lr.pBits + y * lr.Pitch))[x] = c;
+        h = t.p->UnlockRect(0);
+        return SUCCEEDED(h) || fail("UnlockRect", h);
+    };
+    const DWORD white = D3DCOLOR_XRGB(255, 255, 255);
+    const TV q[4] = {{64, 64, 0.5f, 1, white, 0, 0}, {192, 64, 0.5f, 1, white, 1, 0},
+                     {64, 192, 0.5f, 1, white, 0, 1}, {192, 192, 0.5f, 1, white, 1, 1}};
+    const auto draw = [&] {
+        CK(SetFVF, D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+        CK(SetTexture, 0, t.p);
+        CK(DrawPrimitiveUP, D3DPT_TRIANGLESTRIP, 2, q, sizeof *q);
+        return true;
+    };
+    const Px old[] = {{128, 128, KSTEEL}, {16, 16, BLUE}}, fresh[] = {{128, 128, KRUST}, {16, 16, BLUE}};
+    const bool ok = paint(KSTEEL, 0, "LockRect") && (frames(BLUE, old, 2, draw) || failIn("before the eviction")) &&
+                    paint(KRUST, D3DLOCK_NO_DIRTY_UPDATE, "LockRect (NO_DIRTY_UPDATE)") &&
+                    answer("EvictManagedResources", dev->EvictManagedResources(), D3D_OK) &&
+                    (frames(BLUE, fresh, 2, draw) || failIn("after the eviction"));
+    dev->SetTexture(0, nullptr);
+    return ok;
+}
+// state-present: Present's other forms, each a presentCounts cell (one until() attempt) over one of qy-reuse's quads: a
+// source rect (0,0)-(128,128), over (20,20)-(28,28) (8x8: 64); that destination rect, over (40,20)-(56,28) (16x8: 128); a
+// dirty region of that one rect, over (70,20)-(86,36) (16x16: 256); a destination window override, a second (hidden)
+// window the attempt makes before its BEGIN and destroys after (stateHwnd is the device's own), over (20,40)-(52,56)
+// (32x16: 512); and IDirect3DSwapChain9::Present(.., 0) of an additional swap chain made before the BEGIN as
+// state-swapchain makes one, over (70,40)-(102,72) (32x32: 1024). mtld3d warns each argument once, ignores it and
+// presents the whole back buffer into the device window; an additional chain presents the device's back buffer. A
+// present that does nothing leaves the poll at S_FALSE: what is judged is that a present happened, not where.
+static bool rowStatePresent() {
+    static const RECT r = {0, 0, 128, 128};
+    static const struct { RGNDATAHEADER h; RECT r; } rgn = {
+        {sizeof(RGNDATAHEADER), RDH_RECTANGLES, 1, sizeof(RECT), {0, 0, 128, 128}}, {0, 0, 128, 128}};
+    const RGNDATA *const region = (const RGNDATA *)&rgn;
+    return until([&] {
+               return presentCounts("Present (a source rect)", 20, 20, 28, 28, 64,
+                                    [&] { return dev->Present(&r, nullptr, nullptr, nullptr); });
+           }) &&
+           until([&] {
+               return presentCounts("Present (a destination rect)", 40, 20, 56, 28, 128,
+                                    [&] { return dev->Present(nullptr, &r, nullptr, nullptr); });
+           }) &&
+           until([&] {
+               return presentCounts("Present (a dirty region)", 70, 20, 86, 36, 256,
+                                    [&] { return dev->Present(nullptr, nullptr, nullptr, region); });
+           }) &&
+           until([&] {
+               Window w;
+               w.h = CreateWindowW(L"d3d9_triangle", L"d3d9_triangle override", WS_OVERLAPPEDWINDOW, 400, 100, 64, 64,
+                                   nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+               if (!w.h) return snprintf(why, sizeof why, "CreateWindowW"), false;
+               return presentCounts("Present (another window)", 20, 40, 52, 56, 512,
+                                    [&] { return dev->Present(nullptr, nullptr, w.h, nullptr); });
+           }) &&
+           until([&] {
+               D3DPRESENT_PARAMETERS pp = {};
+               pp.Windowed = TRUE, pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = stateHwnd;
+               Com<IDirect3DSwapChain9> sc;
+               CK(CreateAdditionalSwapChain, &pp, &sc.p);
+               return presentCounts("IDirect3DSwapChain9::Present (an additional chain)", 70, 40, 102, 72, 1024,
+                                    [&] { return sc.p->Present(nullptr, nullptr, nullptr, nullptr, 0); });
+           });
+}
+// state-ex: an IDirect3D9Ex of its own (Direct3DCreate9Ex) and an extended device (CreateDeviceEx, windowed, params256:
+// D3DPRESENT_INTERVAL_IMMEDIATE) on a visible window of its own (a second Metal view on the launch's window is untried),
+// everything released on every path (the chains and the back buffer, the device, the IDirect3D9Ex, then the window); a
+// create that fails is a FAIL with its hr (d3d9.dll always exports Direct3DCreate9Ex). On it: GetDisplayModeEx(0) (Size
+// set) D3D_OK with GetAdapterDisplayMode's mode, progressive, Size kept, D3DDISPLAYROTATION_IDENTITY; of swap chain 1
+// and with a null mode D3DERR_INVALIDCALL; the implicit chain's IDirect3DSwapChain9Ex::GetDisplayModeEx the same;
+// PresentEx(.., 0) as a presentCounts cell over (60,60)-(84,76) (24x16: 384), the device's globals swapped in for it
+// (OnDevice, inside the attempt); WaitForVBlank(0) D3D_OK and (1) D3DERR_INVALIDCALL; GetLastPresentCount D3D_OK and 0
+// (mtld3d counts no present), a null pointer D3DERR_INVALIDCALL; GetPresentStats D3D_OK with zero counts and times, a
+// null pointer D3DERR_INVALIDCALL; CheckResourceResidency(NULL, 0) D3D_OK; ComposeRects of nothing D3D_OK (mtld3d reads
+// no argument and composes nothing); SetGPUThreadPriority(0) D3D_OK; GetGPUThreadPriority D3D_OK and 0, a null pointer
+// D3DERR_INVALIDCALL; SetConvolutionMonoKernel D3DERR_INVALIDCALL. GetAvailableTextureMem is not asked of it (an
+// extended device's figure does not shrink).
+static bool rowStateEx() {
+    RECT wr = {0, 0, 256, 256};
+    AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, FALSE);
+    Window w;
+    w.h = CreateWindowW(L"d3d9_triangle", L"d3d9_triangle ex", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 400, 100,
+                        wr.right - wr.left, wr.bottom - wr.top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!w.h) return snprintf(why, sizeof why, "CreateWindowW"), false;
+    Com<IDirect3D9Ex> d3d;
+    HRESULT hr = Direct3DCreate9Ex(D3D_SDK_VERSION, &d3d.p);
+    if (hr != D3D_OK || !d3d.p) return fail("Direct3DCreate9Ex", hr);
+    D3DPRESENT_PARAMETERS pp = params256(w.h, 0);
+    Com<IDirect3DDevice9Ex> ex;
+    hr = d3d.p->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, w.h, D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp, nullptr,
+                               &ex.p);
+    if (hr != D3D_OK || !ex.p) return fail("CreateDeviceEx", hr);
+    Com<IDirect3DSurface9> bb;
+    Com<IDirect3DSwapChain9> sc;
+    Com<IDirect3DSwapChain9Ex> scx;
+    if ((hr = ex.p->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb.p)) != D3D_OK)
+        return fail("GetBackBuffer (the extended device)", hr);
+    if ((hr = ex.p->GetSwapChain(0, &sc.p)) != D3D_OK) return fail("GetSwapChain (the extended device)", hr);
+    if ((hr = sc.p->QueryInterface(__uuidof(IDirect3DSwapChain9Ex), (void **)&scx.p)) != S_OK || !scx.p)
+        return fail("QueryInterface (IDirect3DSwapChain9Ex)", hr);
+    D3DDISPLAYMODE a = {};
+    D3DDISPLAYMODEEX m = {}, cm = {};
+    m.Size = cm.Size = sizeof m;
+    D3DDISPLAYROTATION rot = (D3DDISPLAYROTATION)0, crot = (D3DDISPLAYROTATION)0;
+    if (!answer("GetDisplayModeEx(0)", ex.p->GetDisplayModeEx(0, &m, &rot), D3D_OK) || !adapterMode(a) ||
+        !sameModeEx("GetDisplayModeEx(0)", m, rot, a) ||
+        !answer("GetDisplayModeEx(1)", ex.p->GetDisplayModeEx(1, &m, &rot), D3DERR_INVALIDCALL) ||
+        !answer("GetDisplayModeEx(0, NULL)", ex.p->GetDisplayModeEx(0, nullptr, &rot), D3DERR_INVALIDCALL) ||
+        !answer("IDirect3DSwapChain9Ex::GetDisplayModeEx", scx.p->GetDisplayModeEx(&cm, &crot), D3D_OK) ||
+        !sameModeEx("IDirect3DSwapChain9Ex::GetDisplayModeEx", cm, crot, a))
+        return false;
+    if (!until([&] {
+            OnDevice on(ex.p, bb.p);
+            return presentCounts("PresentEx", 60, 60, 84, 76, 384,
+                                 [&] { return ex.p->PresentEx(nullptr, nullptr, nullptr, nullptr, 0); });
+        }))
+        return false;
+    UINT presents = 7;
+    D3DPRESENTSTATS st;
+    memset(&st, 0xab, sizeof st);
+    if (!answer("WaitForVBlank(0)", ex.p->WaitForVBlank(0), D3D_OK) ||
+        !answer("WaitForVBlank(1)", ex.p->WaitForVBlank(1), D3DERR_INVALIDCALL) ||
+        !answer("GetLastPresentCount", scx.p->GetLastPresentCount(&presents), D3D_OK) ||
+        !exact("GetLastPresentCount", presents, 0) ||
+        !answer("GetLastPresentCount (NULL)", scx.p->GetLastPresentCount(nullptr), D3DERR_INVALIDCALL) ||
+        !answer("GetPresentStats", scx.p->GetPresentStats(&st), D3D_OK))
+        return false;
+    if (st.PresentCount || st.PresentRefreshCount || st.SyncRefreshCount || st.SyncQPCTime.QuadPart ||
+        st.SyncGPUTime.QuadPart)
+        return snprintf(why, sizeof why, "GetPresentStats counts %u %u %u, times %lld %lld, want zeros", st.PresentCount,
+                        st.PresentRefreshCount, st.SyncRefreshCount, (long long)st.SyncQPCTime.QuadPart,
+                        (long long)st.SyncGPUTime.QuadPart),
+               false;
+    INT priority = 7;
+    float rows[4] = {1, 1, 1, 1}, columns[4] = {1, 1, 1, 1};
+    return answer("GetPresentStats (NULL)", scx.p->GetPresentStats(nullptr), D3DERR_INVALIDCALL) &&
+           answer("CheckResourceResidency", ex.p->CheckResourceResidency(nullptr, 0), D3D_OK) &&
+           answer("ComposeRects", ex.p->ComposeRects(nullptr, nullptr, nullptr, 0, nullptr, D3DCOMPOSERECTS_COPY, 0, 0),
+                  D3D_OK) &&
+           answer("SetGPUThreadPriority(0)", ex.p->SetGPUThreadPriority(0), D3D_OK) &&
+           answer("GetGPUThreadPriority", ex.p->GetGPUThreadPriority(&priority), D3D_OK) &&
+           exact("GetGPUThreadPriority", (unsigned long long)priority, 0) &&
+           answer("GetGPUThreadPriority (NULL)", ex.p->GetGPUThreadPriority(nullptr), D3DERR_INVALIDCALL) &&
+           answer("SetConvolutionMonoKernel", ex.p->SetConvolutionMonoKernel(4, 4, rows, columns), D3DERR_INVALIDCALL);
 }
 
 int main(int argc, char **argv) {

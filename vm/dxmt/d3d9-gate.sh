@@ -28,8 +28,10 @@
 # Every lane checks d3d9_triangle's 22 shader rows (DXMTRS C4b-2, C4b2-11) for x86-64 and i386 (shd64-fresh,
 # shd32-fresh; "shaders strict" under core: the first frame must match). Under core a launch's logs also hold no core
 # refusal line ("... is not implemented under runtime.mode = core"), the shd* rows' none since DXMTRS C4c-2a, which
-# draws the crossing row. Every lane also checks d3d9_triangle state's 12 rows (DXMTRS C4b-3a, st64-fresh, st32-fresh);
-# under core their logs hold no refusal line (since DXMTRS C4c-1: buffer locks are the core's). Every lane also checks
+# draws the crossing row. Every lane also checks d3d9_triangle state's 16 rows (DXMTRS C4b-3a's 12 and C4c-6a's
+# state-getters, state-stubs, state-present and state-ex; st64-fresh, st32-fresh); under core their logs hold no refusal
+# line (since DXMTRS C4c-1: buffer locks are the core's; since DXMTRS C4c-6a the getters, the stubs and the presents).
+# Every lane also checks
 # d3d9_triangle textures' 39 rows (DXMTRS C4b-3b and C4b-3c's vertex textures, tx64-fresh, tx32-fresh), and tx32-fresh
 # the 32-bit-only tex-big256 (the staged-bytes budget); under core their logs hold no refusal line (since DXMTRS C4c-3a,
 # which locks a render-target texture's levels). Every lane also checks d3d9_triangle fixed's 31 rows (DXMTRS C4b-3c:
@@ -241,7 +243,7 @@ for r in qu64-fresh qu32-fresh; do
 done
 for r in st64-fresh st32-fresh; do
   for row in state-xform state-material state-tss state-swapchain state-rt state-tex state-late state-lock state-sb \
-    state-upunbind state-fftex state-fftexoff; do
+    state-upunbind state-fftex state-fftexoff state-getters state-stubs state-present state-ex; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
@@ -253,7 +255,8 @@ done
 # buffers_refusals: DXMTRS C4c-2a's layout no binding can fetch).
 # The shaders, state, textures, targets, blend, mrt, msaa, blit and queries launches (DXMTRS C4b-2, C4b-3a, C4b-3b,
 # C4b-3d1, C4b-3d3, C4b-3d4, C4b-3d5, C4c-4a, C4c-5) take no kind: no refusal line (the shaders launch's since DXMTRS
-# C4c-2a, which draws the crossing row; the state launch's since DXMTRS C4c-1: buffer locks are the core's; the
+# C4c-2a, which draws the crossing row; the state launch's since DXMTRS C4c-1: buffer locks are the core's, and since
+# DXMTRS C4c-6a the getters, the stubs and the presents; the
 # textures launch's since DXMTRS C4c-3a: a render-target texture's lock is the core's; the targets launch's since
 # DXMTRS C4c-4c: a scaled copy of a multisampled surface is the core's; the msaa launch's since DXMTRS C4c-4b: a
 # depth-stencil copy of 4 samples is the core's, and since DXMTRS C4c-4d its resolve; the blit launch's since DXMTRS
@@ -265,7 +268,7 @@ buffers_refusals='IDirect3DDevice9::Draw*Primitive (a layout no binding can fetc
 runtime() {
   n=$(/usr/bin/grep -rhF "$refused" "$1" 2> /dev/null | wc -l | tr -d ' ')
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
-    && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form|has no mapped memory' "$1" \
+    && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form|has no mapped memory|was not recorded' "$1" \
     && case ${2:-} in
       fixed|depth|buffers)
         case $2 in

@@ -8,8 +8,9 @@
 #                                after run-game.sh's update of such a prefix
 #   shd<64|32>-fresh.txt          d3d9_triangle shaders (DXMTRS C4b-2's 22 shader rows; "shaders strict" under core),
 #                                right after tri32-fresh, 300 s each
-#   st<64|32>-fresh.txt           d3d9_triangle state (DXMTRS C4b-3a's 12 rows of API state and inert objects; "state
-#                                strict" under core), after them, 120 s each
+#   st<64|32>-fresh.txt           d3d9_triangle state (DXMTRS C4b-3a's 12 rows of API state and inert objects and
+#                                C4c-6a's four of the getters, the stubs, Present's other forms and an extended
+#                                device: 16; "state strict" under core), after them, 120 s each
 #   tx<64|32>-fresh.txt           d3d9_triangle textures (DXMTRS C4b-3b's and C4b-3c's 39 rows; "textures strict"
 #                                under core), 240 s
 #   fx<64|32>-fresh.txt           d3d9_triangle fixed (DXMTRS C4b-3c's 31 rows of the fixed-function vertex stage;
