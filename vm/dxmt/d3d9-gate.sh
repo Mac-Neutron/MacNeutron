@@ -46,20 +46,20 @@
 # rows (DXMTRS C4b-3d3: partial clears, the scissor test, a depth-stencil of another size, sRGB write and blending;
 # bl64-fresh, bl32-fresh); under core their logs hold no refusal line. Every lane also checks d3d9_triangle mrt's 20
 # rows (DXMTRS C4b-3d4: render targets at index 1-3; mr64-fresh, mr32-fresh); under core their logs hold no refusal
-# line. Every lane also checks d3d9_triangle msaa's 20 rows (DXMTRS C4b-3d5: multisampling, on a device whose back
+# line. Every lane also checks d3d9_triangle msaa's 21 rows (DXMTRS C4b-3d5: multisampling, on a device whose back
 # buffer and auto depth-stencil have 4 samples, C4c-3a's ms-bblock and ms-front: the back buffer read by a lock and by
-# GetFrontBufferData, and C4c-4b's ms-dcopy: a depth-stencil copy of 4 samples; ms64-fresh, ms32-fresh); under core
-# their logs hold no refusal line (since DXMTRS C4c-4b, which copies ms-desc's and ms-dcopy's depth-stencil surfaces).
+# GetFrontBufferData, C4c-4b's ms-dcopy: a depth-stencil copy of 4 samples, and C4c-4d's ms-dres: a depth-stencil
+# resolve; ms64-fresh, ms32-fresh); under core their logs hold no refusal line (since DXMTRS C4c-4b, which copies
+# ms-desc's and ms-dcopy's depth-stencil surfaces, and C4c-4d, which resolves ms-dres's).
 # Every lane also checks d3d9_triangle buffers' 39 rows (DXMTRS C4c-1, C4c-2a and
 # C4c-2b: vertex and index buffers and the draws that read them; bf64-fresh, bf32-fresh); under core their logs hold
 # exactly its one refusal line (a layout no binding can fetch: buf-wide's attribute wider than its stride), and the line
 # logged at the first draw that reads a dynamic buffer in place ("d3d9 core: dynamic buffers are read in place", DXMTRS
 # C4c-2b; the row "bf<64|32>-fresh buffers direct"). Every lane also checks d3d9_triangle blit's 41 rows (DXMTRS
-# C4c-4a: ColorFill, UpdateSurface and StretchRect's answers, C4c-4b's 13 sc-* rows: StretchRect's unscaled copies, and
-# C4c-4c's 10 sq-* rows: its sampled ones; on a device with no depth-stencil; bt64-fresh, bt32-fresh); under core their
-# logs hold exactly one refusal line (the literal of a StretchRect that is no multisample resolve: since DXMTRS C4c-4c
-# sr-shape's depth-stencil resolve alone, itself a multisample resolve, of depth, which the literal's name no longer
-# excludes; DXMTRS C4c-4d's).
+# C4c-4a: ColorFill, UpdateSurface and StretchRect's answers, C4c-4b's 13 sc-* rows: StretchRect's unscaled copies,
+# C4c-4c's 10 sq-* rows: its sampled ones, and C4c-4d's sd-resolve: its depth-stencil resolve; on a device with no
+# depth-stencil; bt64-fresh, bt32-fresh); under core their logs hold no refusal line (since DXMTRS C4c-4d, which
+# resolves sd-resolve's depth-stencil surfaces).
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -209,8 +209,8 @@ for r in mr64-fresh mr32-fresh; do
   done
 done
 for r in ms64-fresh ms32-fresh; do
-  for row in ms-initial ms-desc ms-dcopy ms-resolve ms-edge ms-back ms-clear ms-depth ms-mismatch ms-mask ms-nonmask \
-    ms-a2c ms-srgbmask ms-blend ms-mrt ms-scissor ms-redraw ms-samples ms-bblock ms-front; do
+  for row in ms-initial ms-desc ms-dcopy ms-dres ms-resolve ms-edge ms-back ms-clear ms-depth ms-mismatch ms-mask \
+    ms-nonmask ms-a2c ms-srgbmask ms-blend ms-mrt ms-scissor ms-redraw ms-samples ms-bblock ms-front; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
@@ -225,8 +225,8 @@ for r in bf64-fresh bf32-fresh; do
 done
 for r in bt64-fresh bt32-fresh; do
   for row in cf-rt cf-lockable cf-bb cf-unbound cf-rtex cf-autogen cf-msaa cf-plain cf-reject us-tex us-level us-rtex \
-    us-rt us-bb us-conv us-reject sr-reject sr-shape sc-rt sc-bb sc-lockable sc-rtex sc-tex sc-plain sc-plain2 sc-conv \
-    sc-same sc-self sc-autogen sc-order sq-scale sq-level sq-conv sq-swizzle sq-yuv sq-ms sq-overlap sq-plain \
+    us-rt us-bb us-conv us-reject sr-reject sd-resolve sc-rt sc-bb sc-lockable sc-rtex sc-tex sc-plain sc-plain2 \
+    sc-conv sc-same sc-self sc-autogen sc-order sq-scale sq-level sq-conv sq-swizzle sq-yuv sq-ms sq-overlap sq-plain \
     sq-order sq-autogen sc-depth; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
@@ -237,22 +237,21 @@ for r in st64-fresh st32-fresh; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
-# core: runtime <folder> [fixed|depth|stretch|buffers]: the core device's line in a launch's logs, none of
+# core: runtime <folder> [fixed|depth|buffers]: the core device's line in a launch's logs, none of
 # mtld3d.so's encoder line nor of the core's can't-present, dropped-draw or staged-dynamic-buffer ("has no mapped
 # memory", DXMTRS C4c-2b) lines (the code that ran prints them, not the switch), and no refusal line, or with
 # "fixed", "depth" or "buffers" exactly that launch's refused rows'
 # (fixed_refusals, depth_refusals: one line since DXMTRS C4c-3b, which locks a dynamic depth texture,
 # buffers_refusals: DXMTRS C4c-2a's layout no binding can fetch).
-# The shaders, state, textures, targets, blend, mrt and msaa launches (DXMTRS C4b-2, C4b-3a, C4b-3b, C4b-3d1, C4b-3d3,
-# C4b-3d4, C4b-3d5) take no kind: no refusal line (the shaders launch's since DXMTRS C4c-2a, which draws the crossing
-# row; the state launch's since DXMTRS C4c-1: buffer locks are the core's; the textures launch's since DXMTRS C4c-3a: a
-# render-target texture's lock is the core's; the targets launch's since DXMTRS C4c-4c: a scaled copy of a
-# multisampled surface is the core's; the msaa launch's since DXMTRS C4c-4b: a depth-stencil copy of 4 samples is the
-# core's). The blit launch takes "stretch": exactly the one StretchRect that is no multisample resolve
-# (stretch_refusals, DXMTRS C4c-4a; since C4c-4c sr-shape's depth-stencil resolve alone).
+# The shaders, state, textures, targets, blend, mrt, msaa and blit launches (DXMTRS C4b-2, C4b-3a, C4b-3b, C4b-3d1,
+# C4b-3d3, C4b-3d4, C4b-3d5, C4c-4a) take no kind: no refusal line (the shaders launch's since DXMTRS C4c-2a, which
+# draws the crossing row; the state launch's since DXMTRS C4c-1: buffer locks are the core's; the textures launch's
+# since DXMTRS C4c-3a: a render-target texture's lock is the core's; the targets launch's since DXMTRS C4c-4c: a scaled
+# copy of a multisampled surface is the core's; the msaa launch's since DXMTRS C4c-4b: a depth-stencil copy of 4
+# samples is the core's, and since DXMTRS C4c-4d its resolve; the blit launch's since DXMTRS C4c-4d: a depth-stencil
+# resolve is the core's).
 refused='is not implemented under runtime.mode = core'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
-stretch_refusals='IDirect3DDevice9::StretchRect (other than a multisample resolve)'
 depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)'
 buffers_refusals='IDirect3DDevice9::Draw*Primitive (a layout no binding can fetch)'
 runtime() {
@@ -260,10 +259,9 @@ runtime() {
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
     && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form|has no mapped memory' "$1" \
     && case ${2:-} in
-      fixed|depth|stretch|buffers)
+      fixed|depth|buffers)
         case $2 in
-          fixed) set_=$fixed_refusals ;; depth) set_=$depth_refusals ;;
-          stretch) set_=$stretch_refusals ;; buffers) set_=$buffers_refusals ;;
+          fixed) set_=$fixed_refusals ;; depth) set_=$depth_refusals ;; buffers) set_=$buffers_refusals ;;
         esac
         [ "$n" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] && printf '%s\n' "$set_" | while IFS= read -r m; do
           /usr/bin/grep -rqF "d3d9 core: $m $refused" "$1" || exit 1; done ;;
@@ -283,9 +281,6 @@ if [ "$RT" = core ]; then
   for r in dp64-fresh dp32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" depth)" ok
   done
-  for r in bt64-fresh bt32-fresh; do
-    check "$r runtime core" "$(runtime "$G/logs/$r" stretch)" ok
-  done
   for r in bf64-fresh bf32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" buffers)" ok
     # The line d3d9-rt logs at the first draw that reads a dynamic buffer in place (DXMTRS C4c-2b).
@@ -293,7 +288,7 @@ if [ "$RT" = core ]; then
       "$(/usr/bin/grep -rqF 'd3d9 core: dynamic buffers are read in place' "$G/logs/$r" 2> /dev/null && echo ok)" ok
   done
   for r in shd64-fresh shd32-fresh st64-fresh st32-fresh tg64-fresh tg32-fresh bl64-fresh bl32-fresh mr64-fresh \
-    mr32-fresh ms64-fresh ms32-fresh; do
+    mr32-fresh ms64-fresh ms32-fresh bt64-fresh bt32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
   done
 fi

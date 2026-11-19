@@ -71,15 +71,16 @@
 // and of another size, the write masks of index 1-3, blending and sRGB write over several targets, Clear over every
 // bound target, the scissor, the viewport and the depth test, the back buffer in a set, automatic mipmaps, order),
 // with a 180 s budget. The core refuses none of it.
-// With "msaa" ("msaa strict" under core; DXMTRS C4b-3d5): 20 rows "d3d9 ms-<row> ok|FAIL <why>" on a device whose
+// With "msaa" ("msaa strict" under core; DXMTRS C4b-3d5): 21 rows "d3d9 ms-<row> ok|FAIL <why>" on a device whose
 // back buffer and auto D24S8 have 4 samples: multisampled CreateRenderTarget surfaces (2, 4, 8 samples and
 // non-maskable) read through StretchRect's resolve, the back buffer's too; edges, Clear with rects and the viewport,
 // the depth test, a depth-stencil of another sample count, D3DRS_MULTISAMPLEMASK, alpha-to-coverage (ATOC and the A2M
 // latch), sRGB write, blending, index 1-3 targets, the scissor test, a resolve's destination drawn again; what the
 // creators and read-backs answer; since DXMTRS C4c-3a the back buffer read by a READONLY lock and by
 // GetFrontBufferData; since DXMTRS C4c-4b StretchRect of the auto depth-stencil into a depth-stencil surface of 4
-// samples, its depth and stencil judged by draws (ms-dcopy). With a 180 s budget. The core refuses none of it
-// (ms-desc's and ms-dcopy's depth-stencil copies are the core's since DXMTRS C4c-4b).
+// samples, its depth and stencil judged by draws (ms-dcopy); since DXMTRS C4c-4d its resolve into a single-sample one,
+// judged the same way (ms-dres). With a 180 s budget. The core refuses none of it (ms-desc's and ms-dcopy's
+// depth-stencil copies are the core's since DXMTRS C4c-4b, ms-dres's resolve since DXMTRS C4c-4d).
 // With "buffers" ("buffers strict" under core; DXMTRS C4c-1, C4c-2a, C4c-2b): 39 rows "d3d9 buf-<row> ok|FAIL <why>" of
 // vertex and index buffers and the draws that read them, on a device with no depth-stencil: GetDirect3D; Lock and
 // Unlock (pools, usages, DISCARD and NOOVERWRITE, a READONLY read-back, a lock held over draws, a partial relock);
@@ -93,23 +94,24 @@
 // buffer locked again after its upload released its backing (buf-writeonly). With a 180 s budget. Under strict a
 // layout no binding can fetch, an attribute wider than its stride (buf-wide), answers D3DERR_NOTAVAILABLE. "buffers
 // [strict] skip=<row>[,<row>...]" prints "d3d9 <row> skip" for each listed row and does not run it.
-// With "blit" ("blit strict" under core; DXMTRS C4c-4a, C4c-4b, C4c-4c): 41 rows "d3d9 <cf|us|sr|sc|sq>-<row> ok|FAIL
+// With "blit" ("blit strict" under core; DXMTRS C4c-4a to C4c-4d): 41 rows "d3d9 <cf|us|sr|sc|sq|sd>-<row> ok|FAIL
 // <why>", on a device with no depth-stencil: ColorFill of render targets lockable or not, the back buffer and an
 // additional swap chain's, a target that is not bound, a render-target texture's levels and cube face, an AUTOGENMIPMAP
 // one, a multisampled one and default-pool plain surfaces, and the surfaces it refuses; UpdateSurface into a texture's
 // level, levels and cube face, a render-target texture's level, render targets and the back buffer, from R5G6B5, and
-// the calls it refuses; StretchRect's D3DERR_INVALIDCALL in every lane, and the valid shape the core refuses by name
-// (a multisampled depth-stencil surface resolved into a single-sample one: D3D_OK, under strict D3DERR_NOTAVAILABLE;
-// DXMTRS C4c-4d's); since DXMTRS C4c-4b StretchRect's unscaled copies (sc-*), their texels judged: between targets, the
-// back buffer and an additional swap chain's, from and into a lockable target, render-target textures' levels and cube
-// faces, from a default-pool texture's levels and plain surfaces, between plain surfaces (raw, and converted into
-// R5G6B5 and from YUY2), within one surface and one texture, into AUTOGENMIPMAP textures, among draws in one scene, and
-// of depth-stencil surfaces; since DXMTRS C4c-4c its sampled copies (sq-*), their texels judged: scaled (NONE, POINT,
-// LINEAR, from and into sub-rects, levels and cube faces), converting (from the back buffer and X8R8G8B8, into and out
-// of R5G6B5 and A16B16G16R16F targets, alpha judged), through a format's swizzle (A4R4G4B4, L8), from YUY2, UYVY, YV12
-// and NV12 plain surfaces, into and out of multisampled targets, between overlapping rects of one surface, of an
-// additional swap chain's back buffer and the device's, and two levels of one texture, a plain surface onto itself,
-// among draws in one scene (a wireframe one included) and into an AUTOGENMIPMAP texture. With a 180 s budget. A format
+// the calls it refuses; StretchRect's D3DERR_INVALIDCALL in every lane; since DXMTRS C4c-4b StretchRect's unscaled
+// copies (sc-*), their texels judged: between targets, the back buffer and an additional swap chain's, from and into a
+// lockable target, render-target textures' levels and cube faces, from a default-pool texture's levels and plain
+// surfaces, between plain surfaces (raw, and converted into R5G6B5 and from YUY2), within one surface and one texture,
+// into AUTOGENMIPMAP textures, among draws in one scene, and of depth-stencil surfaces; since DXMTRS C4c-4c its sampled
+// copies (sq-*), their texels judged: scaled (NONE, POINT, LINEAR, from and into sub-rects, levels and cube faces),
+// converting (from the back buffer and X8R8G8B8, into and out of R5G6B5 and A16B16G16R16F targets, alpha judged),
+// through a format's swizzle (A4R4G4B4, L8), from YUY2, UYVY, YV12 and NV12 plain surfaces, into and out of
+// multisampled targets, between overlapping rects of one surface, of an additional swap chain's back buffer and the
+// device's, and two levels of one texture, a plain surface onto itself, among draws in one scene (a wireframe one
+// included) and into an AUTOGENMIPMAP texture; since DXMTRS C4c-4d its depth-stencil resolve (sd-resolve): a
+// multisampled depth-stencil surface into a single-sample one, D24S8 and D16, its depth and stencil judged by draws.
+// With a 180 s budget. The core refuses none of it (sd-resolve's resolve is its since DXMTRS C4c-4d). A format
 // CheckDeviceFormat (or, for a YUV source, CheckDeviceFormatConversion) does not offer prints "d3d9 <row>-<format>
 // skip" and its cells do not run.
 #include <windows.h>
@@ -3878,8 +3880,10 @@ static bool bindDs(IDirect3DSurface9 *s) {
     CK(SetDepthStencilSurface, s);
     return true;
 }
-static bool makeDs(Com<IDirect3DSurface9> &s, D3DFORMAT f = D3DFMT_D24X8, UINT size = 256) {
-    CK(CreateDepthStencilSurface, size, size, f, D3DMULTISAMPLE_NONE, 0, FALSE, &s.p, nullptr);
+// A size x size depth-stencil surface of format f and `type` samples, not discarded.
+static bool makeDs(Com<IDirect3DSurface9> &s, D3DFORMAT f = D3DFMT_D24X8, UINT size = 256,
+                   D3DMULTISAMPLE_TYPE type = D3DMULTISAMPLE_NONE) {
+    CK(CreateDepthStencilSurface, size, size, f, type, 0, FALSE, &s.p, nullptr);
     return true;
 }
 static bool makeDepthTex(Com<IDirect3DTexture9> &t, D3DFORMAT f, UINT levels = 1) {
@@ -3907,9 +3911,10 @@ static bool depthReset() {
     CK(SetSamplerState, 0, D3DSAMP_MIPMAPLODBIAS, 0);
     return bindDs(dsSurf);
 }
-// What a depth-copy row of the blit and msaa modes (DXMTRS C4c-4b's sc-depth, ms-dcopy) leaves on every path, passed
-// or not, and their reset() does not restore: `ds` bound (null: none), ZENABLE `zenable` (as the mode's device has it),
-// LESSEQUAL with Z writes, the stencil test off at ALWAYS and reference 0. Its own answers are not judged.
+// What a depth-copy or depth-resolve row of the blit and msaa modes (DXMTRS C4c-4b's sc-depth, ms-dcopy, C4c-4d's
+// sd-resolve, ms-dres) leaves on every path, passed or not, and their reset() does not restore: `ds` bound (null:
+// none), ZENABLE `zenable` (as the mode's device has it), LESSEQUAL with Z writes, the stencil test off at ALWAYS and
+// reference 0. Its own answers are not judged.
 static void depthBack(IDirect3DSurface9 *ds, DWORD zenable) {
     const DWORD rs[][2] = {{D3DRS_ZENABLE, zenable},       {D3DRS_ZFUNC, D3DCMP_LESSEQUAL},
                            {D3DRS_ZWRITEENABLE, TRUE},     {D3DRS_STENCILENABLE, FALSE},
@@ -5961,6 +5966,40 @@ static bool rowMsDcopy() {
         return ok;
     });
 }
+// ms-dres (DXMTRS C4c-4d): the auto depth-stencil (4 samples) cleared to Z 0.25 and stencil 3 beside the back buffer;
+// D, a 256x256 D24S8 surface of one sample, bound, then S, a single-sample 256x256 target, beside it (a Clear or a draw
+// reaches a depth-stencil only beside a target of its sample count: ms-mismatch), S cleared blue and D to Z 1 and
+// stencil 0; StretchRect of the auto one into D, whole, between scenes, with no draw between: D3D_OK in every lane (the
+// depth-stencil resolve). S and D bound, Z on: a green quad at z 0.1 under stencil EQUAL 3 over (16,32)-(80,224) draws
+// (the stencil was resolved), then a red one at z 0.5 under LESSEQUAL with the stencil test off over (96,32)-(160,224)
+// (the depth was) and a yellow one at z 0.1 under EQUAL 0 over (176,32)-(240,224) do not: green at (48,128), blue at
+// (128,128) and (208,128). Its depth-stencil state back on every path (msUntil restores ZENABLE and the auto
+// depth-stencil alone).
+static bool rowMsDres() {
+    return msUntil([&] {
+        Rt s;
+        Com<IDirect3DSurface9> d;
+        const bool ok = [&] {
+            if (!mkRt(s, 256) || !makeDs(d, D3DFMT_D24S8, 256) || !scene([&] {
+                    return backToScreen() && bindDs(dsSurf) && clearZS(0.25f, 3) && bindDs(d.p) &&
+                           clearRt(s.s.p, TBLU) && clearZS(1.0f, 0);
+                }))
+                return false;
+            CK(StretchRect, dsSurf, nullptr, d.p, nullptr, D3DTEXF_NONE);
+            return scene([&] {
+                       return rstate(D3DRS_ZENABLE, D3DZB_TRUE) && rstate(D3DRS_STENCILENABLE, TRUE) &&
+                              rstate(D3DRS_STENCILFUNC, D3DCMP_EQUAL) && rstate(D3DRS_STENCILREF, 3) &&
+                              zquad(16, 32, 80, 224, 0.1f, TGRN) && rstate(D3DRS_STENCILENABLE, FALSE) &&
+                              zquad(96, 32, 160, 224, 0.5f, TRED) && rstate(D3DRS_STENCILENABLE, TRUE) &&
+                              rstate(D3DRS_STENCILREF, 0) && zquad(176, 32, 240, 224, 0.1f, TYEL) &&
+                              rstate(D3DRS_STENCILENABLE, FALSE) && backToScreen();
+                   }) &&
+                   rtHas("S", s.s.p, 256, A8, {{48, 128, TGRN}, {128, 128, TBLU}, {208, 128, TBLU}});
+        }();
+        depthBack(dsSurf, D3DZB_FALSE);
+        return ok;
+    });
+}
 // ms-resolve: T cleared green, a red quad over x < 32: read (16,32) red, (48,32) green.
 static bool rowMsResolve() {
     return msUntil([&] {
@@ -6367,13 +6406,13 @@ static bool rowMsFront() {
 
 static void msaaRows(IDirect3DDevice9 *d, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
-        {"ms-desc", rowMsDesc},       {"ms-dcopy", rowMsDcopy},       {"ms-resolve", rowMsResolve},
-        {"ms-edge", rowMsEdge},       {"ms-back", rowMsBack},         {"ms-clear", rowMsClear},
-        {"ms-depth", rowMsDepth},     {"ms-mismatch", rowMsMismatch}, {"ms-mask", rowMsMask},
-        {"ms-nonmask", rowMsNonMask}, {"ms-a2c", rowMsA2c},           {"ms-srgbmask", rowMsSrgbMask},
-        {"ms-blend", rowMsBlend},     {"ms-mrt", rowMsMrt},           {"ms-scissor", rowMsScissor},
-        {"ms-redraw", rowMsRedraw},   {"ms-samples", rowMsSamples},   {"ms-bblock", rowMsBblock},
-        {"ms-front", rowMsFront}};
+        {"ms-desc", rowMsDesc},         {"ms-dcopy", rowMsDcopy},       {"ms-dres", rowMsDres},
+        {"ms-resolve", rowMsResolve},   {"ms-edge", rowMsEdge},         {"ms-back", rowMsBack},
+        {"ms-clear", rowMsClear},       {"ms-depth", rowMsDepth},       {"ms-mismatch", rowMsMismatch},
+        {"ms-mask", rowMsMask},         {"ms-nonmask", rowMsNonMask},   {"ms-a2c", rowMsA2c},
+        {"ms-srgbmask", rowMsSrgbMask}, {"ms-blend", rowMsBlend},       {"ms-mrt", rowMsMrt},
+        {"ms-scissor", rowMsScissor},   {"ms-redraw", rowMsRedraw},     {"ms-samples", rowMsSamples},
+        {"ms-bblock", rowMsBblock},     {"ms-front", rowMsFront}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
@@ -7605,9 +7644,10 @@ static void buffersRows(IDirect3DDevice9 *d, bool strict, const char *skip) {
 
 // --- The "blit" mode (DXMTRS C4c-4a): ColorFill, UpdateSurface and StretchRect's answers, and (DXMTRS C4c-4b, the
 // sc-* rows) StretchRect's unscaled copies and (DXMTRS C4c-4c, the sq-* rows) its sampled ones (scaled, converting,
-// from YUV, multisampled, overlapping), on the buffers mode's plain device (256x256 X8R8G8B8, no depth-stencil: a
-// row that needs a depth-stencil surface makes one). "A target" is a 64x64 A8R8G8B8 CreateRenderTarget surface, not
-// lockable unless said; quads are pretransformed, in the pixels of the target bound at index 0. A row that reads texels
+// from YUV, multisampled, overlapping) and (DXMTRS C4c-4d, sd-resolve) its depth-stencil resolve, on the buffers mode's
+// plain device (256x256 X8R8G8B8, no depth-stencil: a row that needs a depth-stencil surface makes one). "A target" is
+// a 64x64 A8R8G8B8 CreateRenderTarget surface, not lockable unless said; quads are pretransformed, in the pixels of the
+// target bound at index 0. A row that reads texels
 // back makes its objects inside one until() attempt, reads with GetRenderTargetData or a lock (unlocked before its
 // texels are judged), and judges only texels the attempt wrote. Its colours have every channel non-zero and no two
 // alike, and each one the GPU fills with has a channel in 0x10..0xf0 (an sRGB encode leaves 0 and 255 as they are). A
@@ -7629,11 +7669,11 @@ static void buffersRows(IDirect3DDevice9 *d, bool strict, const char *skip) {
 // k565 colours (the GPU rounds, the CPU truncates), read 2 bytes a texel, and its way back within 1; a multisampled
 // source is drawn, and probed, 2 texels or more from its quads' edges (an edge through a pixel's centre covers half its
 // samples); sq-order's and sq-level's copies take their source from another texture than their destination. The sr-*
-// rows call neither ColorFill nor UpdateSurface and the cf-* rows no UpdateSurface; of the sc-* rows, sc-rtex, sc-tex
-// and sc-autogen call UpdateSurface and sc-plain ColorFill; of the sq-* rows, sq-conv calls UpdateSurface (its usage-0
-// X8R8G8B8 texture) and none ColorFill. So a runtime that refuses one of the three reddens that call's rows and those
-// sc-* and sq-* rows alone. A format CheckDeviceFormat does not offer prints "d3d9 <row>-<format> skip" and its cells
-// do not run (the row still answers).
+// and sd-* rows call neither ColorFill nor UpdateSurface and the cf-* rows no UpdateSurface; of the sc-* rows, sc-rtex,
+// sc-tex and sc-autogen call UpdateSurface and sc-plain ColorFill; of the sq-* rows, sq-conv calls UpdateSurface (its
+// usage-0 X8R8G8B8 texture) and none ColorFill. So a runtime that refuses one of the three reddens that call's rows and
+// those sc-* and sq-* rows alone. A format CheckDeviceFormat does not offer prints "d3d9 <row>-<format> skip" and its
+// cells do not run (the row still answers).
 static const DWORD KPLUM = D3DCOLOR_XRGB(0x90, 0x30, 0xa0), KSKY = D3DCOLOR_XRGB(0x60, 0xb0, 0xf0);
 // R5G6B5 colours of the update codec's widening (K565C's red field 0x1f widens to 0xff).
 static const DWORD K565C = k565(0x1f, 0x2a, 0x0b), K565D = k565(0x0c, 0x22, 0x14);
@@ -8223,19 +8263,79 @@ static bool rowSrReject() {
             return false;
     return true;
 }
-// sr-shape: the valid StretchRect the core refuses by name, D3D_OK on mtld3d and, strict, D3DERR_NOTAVAILABLE (no
-// texel is judged): a 64x64 D24S8 depth-stencil surface of 4 samples into a single-sample one, whole (the depth-stencil
-// resolve, DXMTRS C4c-4d's). The refusal's name, "other than a multisample resolve", now covers this one shape alone,
-// itself a multisample resolve, of depth. The shapes it held before DXMTRS C4c-4b are the sc-* rows' copies, those it
-// held before DXMTRS C4c-4c the sq-* rows'.
-static bool rowSrShape() {
-    Com<IDirect3DSurface9> d4, d1;
-    CK(CreateDepthStencilSurface, 64, 64, D3DFMT_D24S8, D3DMULTISAMPLE_4_SAMPLES, 0, FALSE, &d4.p, nullptr);
-    CK(CreateDepthStencilSurface, 64, 64, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, FALSE, &d1.p, nullptr);
-    const HRESULT got = dev->StretchRect(d4.p, nullptr, d1.p, nullptr, D3DTEXF_NONE);
-    if (got != (strictMode ? D3DERR_NOTAVAILABLE : D3D_OK))
-        return fail("StretchRect (a 4-sample depth-stencil surface into a single-sample one)", got);
-    return true;
+// The sd-resolve row (DXMTRS C4c-4d): StretchRect of a 64x64 depth-stencil surface of 4 samples into a single-sample
+// one of its format, whole, between scenes (D3D9 refuses a depth StretchRect inside one), with no draw between: D3D_OK
+// in every lane, the destination's depth and stencil judged by draws (before DXMTRS C4c-4d the core refused it by name;
+// the shapes that refusal held before DXMTRS C4c-4b and C4c-4c are the sc-* and sq-* rows'). A Clear or a draw reaches
+// a depth-stencil only beside a target of its sample count (ms-mismatch): "M" is a 64x64 A8R8G8B8 target of 4 samples,
+// bound with each 4-sample surface, "T" a single-sample one, bound with each single-sample surface: a pair is bound
+// depth-stencil first, then target, and cleared or drawn to only once both are.
+// One sd-resolve pair: M and T cleared steel; S, of format f and 4 samples, bound with M and cleared to Z 0.25 (and
+// stencil 3); D, single-sample, bound with T and cleared to Z 1 (and stencil 0); S into D. Z on, T and D bound: a mint
+// quad at z 0.1 over (4,4)-(19,28) (under stencil EQUAL 3) draws first, then a rust one at 0.5 over (24,4)-(39,28) (no
+// stencil test) and, with a stencil, a gold one at 0.1 under EQUAL 0 over (44,4)-(59,28) do not (as depthPair's); then
+// in that scene, before any read-back, M and S bound: an aqua quad at 0.1 over (0,32)-(28,64) draws and, with a
+// stencil, a rose one at 0.5 over (36,32)-(64,64) does not (the resolve left S untouched). T: mint at (11,16), steel
+// at (31,16) and (51,16); with a stencil, M through its resolve: aqua at (12,48), steel at (50,48), 8 texels or more
+// from the quads' edges. Without one (the D16 pair) the aqua quad is not judged: it is there so that a Clear of S that
+// is not ordered before the resolve's read folds into its pass, and D then holds what S held before that Clear (the
+// mint quad does not draw).
+static bool resolvePair(D3DFORMAT f, bool stencil) {
+    Com<IDirect3DSurface9> t, m, s, d;
+    const auto clear = [&](float z, DWORD v) { return stencil ? clearZS(z, v) : clearZ(z); };
+    const auto test = [&](DWORD func, DWORD ref) {
+        return !stencil || (rstate(D3DRS_STENCILENABLE, TRUE) && rstate(D3DRS_STENCILFUNC, func) &&
+                            rstate(D3DRS_STENCILREF, ref));
+    };
+    if (!target64(t, FALSE) || !msRt(m) || !makeDs(s, f, 64, D3DMULTISAMPLE_4_SAMPLES) || !makeDs(d, f, 64) ||
+        !scene([&] {
+            return bindDs(s.p) && clearRt(m.p, KSTEEL) && clear(0.25f, 3) && bindDs(d.p) && clearRt(t.p, KSTEEL) &&
+                   clear(1.0f, 0);
+        }))
+        return false;
+    CK(StretchRect, s.p, nullptr, d.p, nullptr, D3DTEXF_NONE);
+    return scene([&] {
+               return rstate(D3DRS_ZENABLE, D3DZB_TRUE) && test(D3DCMP_EQUAL, 3) && zquad(4, 4, 19, 28, 0.1f, KMINT) &&
+                      rstate(D3DRS_STENCILENABLE, FALSE) && zquad(24, 4, 39, 28, 0.5f, KRUST) &&
+                      (!stencil || (test(D3DCMP_EQUAL, 0) && zquad(44, 4, 59, 28, 0.1f, KGOLD) &&
+                                    rstate(D3DRS_STENCILENABLE, FALSE))) &&
+                      bindDs(s.p) && bindRt(0, m.p) && zquad(0, 32, 28, 64, 0.1f, KAQUA) &&
+                      (!stencil || zquad(36, 32, 64, 64, 0.5f, KROSE)) && backToScreen();
+           }) &&
+           rtHas("T", t.p, 64, A8, {{11, 16, KMINT}, {31, 16, KSTEEL}, {51, 16, KSTEEL}}) &&
+           (!stencil || msHas("M", m.p, {{12, 48, KAQUA}, {50, 48, KSTEEL}}));
+}
+// The sd-resolve of a drawn source: M cleared steel with S, a D24S8 surface of 4 samples, cleared to Z 1; Z on and the
+// stencil test off, a sky quad at z 0.3 over (0,0)-(48,16) (asymmetric: a flipped or transposed read shows); T cleared
+// steel with D, single-sample, cleared to Z 1; S into D. T and D: a lilac quad at 0.5 over all draws outside that rect
+// and not inside it: steel at (32,8), lilac at (56,8) and (32,40), each 8 texels or more from every quad's edge (an
+// edge texel's samples are split between the quad and what lies beside it, and which of them is sample 0 depends on
+// the sample pattern). The sky quad has no drawn control: one left out leaves (32,8) lilac, and until() retries.
+static bool resolveDrawn() {
+    Com<IDirect3DSurface9> t, m, s, d;
+    if (!target64(t, FALSE) || !msRt(m) || !makeDs(s, D3DFMT_D24S8, 64, D3DMULTISAMPLE_4_SAMPLES) ||
+        !makeDs(d, D3DFMT_D24S8, 64) || !scene([&] {
+            return bindDs(s.p) && clearRt(m.p, KSTEEL) && clearZ(1.0f) && rstate(D3DRS_ZENABLE, D3DZB_TRUE) &&
+                   rstate(D3DRS_STENCILENABLE, FALSE) && zquad(0, 0, 48, 16, 0.3f, KSKY) && bindDs(d.p) &&
+                   clearRt(t.p, KSTEEL) && clearZ(1.0f);
+        }))
+        return false;
+    CK(StretchRect, s.p, nullptr, d.p, nullptr, D3DTEXF_NONE);
+    return scene([&] { return zquad(0, 0, 64, 64, 0.5f, KLILAC) && backToScreen(); }) &&
+           rtHas("T", t.p, 64, A8, {{32, 8, KSTEEL}, {56, 8, KLILAC}, {32, 40, KLILAC}});
+}
+// sd-resolve: resolvePair of D24S8 with its stencil plane, resolveDrawn, then resolvePair of D16, depth alone. Each
+// texel a cell judges has one value in all its samples, so no cell tells sample 0 (what mtld3d's resolve keeps) from
+// another reduction. On every path, passed or not, no depth-stencil bound and the depth state as the device has it (it
+// has none: ZENABLE off).
+static bool rowSdResolve() {
+    return until([&] {
+        const bool ok = (resolvePair(D3DFMT_D24S8, true) || failIn("D24S8")) &&
+                        (resolveDrawn() || failIn("a drawn source")) &&
+                        (resolvePair(D3DFMT_D16, false) || failIn("D16"));
+        depthBack(nullptr, D3DZB_FALSE);
+        return ok;
+    });
 }
 
 // The sc-* rows (DXMTRS C4c-4b): StretchRect's unscaled copies, D3D_OK in every lane, their texels judged. RECTs are
@@ -9228,7 +9328,7 @@ static void blitRows(IDirect3DDevice9 *d, bool strict) {
         {"cf-msaa", rowCfMsaa},     {"cf-plain", rowCfPlain},       {"cf-reject", rowCfReject},
         {"us-tex", rowUsTex},       {"us-level", rowUsLevel},       {"us-rtex", rowUsRtex},
         {"us-rt", rowUsRt},         {"us-bb", rowUsBb},             {"us-conv", rowUsConv},
-        {"us-reject", rowUsReject}, {"sr-reject", rowSrReject},     {"sr-shape", rowSrShape},
+        {"us-reject", rowUsReject}, {"sr-reject", rowSrReject},     {"sd-resolve", rowSdResolve},
         {"sc-rt", rowScRt},         {"sc-bb", rowScBb},             {"sc-lockable", rowScLockable},
         {"sc-rtex", rowScRtex},     {"sc-tex", rowScTex},           {"sc-plain", rowScPlain},
         {"sc-plain2", rowScPlain2}, {"sc-conv", rowScConv},         {"sc-same", rowScSame},
