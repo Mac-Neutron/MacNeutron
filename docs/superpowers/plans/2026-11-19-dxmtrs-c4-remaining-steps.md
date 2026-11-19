@@ -12,10 +12,14 @@ Every slice still gets its own code map, plan, three reviews and gates: nothing 
   draws, dynamic buffers, every read-back form, device contexts, `ColorFill`, `UpdateSurface`, all of
   `StretchRect`). DXMTRS main 7d48da31, MacNeutron main 1f895aa8. The core runtime is opt-in
   (`runtime.mode = core` on a `core-runtime` build); the shipped default is mtld3d, unchanged.
-- In its gates: **C4c-5, queries** (plan `2026-11-19-dxmtrs-c4c5-queries.md`). Code on `c4c` (DXMTRS 2c2be796,
-  501d43d1) and rows on `c4c-mn` (761cbe1d), unpushed; the controls on mtld3d and on core before the code
-  held their predictions. Left: the VM control, the lane, five mutants, the chain (sweep first), one probe,
-  the whole-branch review, spec, pin, push.
+- Done since this file was first written: **C4c-5, queries** (plan `2026-11-19-dxmtrs-c4c5-queries.md`;
+  DXMTRS 501d43d1). **C4c-6a** (the getters, the stubs and the presents: plan
+  `2026-11-19-dxmtrs-c4c6a-getters-presents.md`) is built, its gates next; the map of slice 6
+  (`build/c4c/s6/map.md`) cut it as 6a (below's 6a and 6b together), 6c (windowed `Reset`) and 6d (fullscreen
+  devices and the window subclass, or a move to C4d). **6a leaves three of the calls listed below refused**:
+  `ProcessVertices` (its staged destination needs the vertex buffers' upload path; `test_sysmem_draw` asks
+  for it, so 7d owes it) and the multisampled back buffer's writable lock and `GetDC` (no suite meets them;
+  7d decides whether they stay refusals).
 - Wine's suites under core after 4d (`build/c4c/s4d/sweep.md`): `visual` 65 new failing lines over the default
   runtime's baseline, `device` 115, `d3d9ex` 66 with the suite ending early in `test_reset`. The x64 check
   (D3D10-12 on the Mac) is green at 7d48da31.
@@ -115,6 +119,10 @@ Findings from C4c-3 to C4c-5 that are not C4c's to fix (each is in a slice's exe
   occlusion query (the core does not count it, as D3D9); a `READONLY` lock of a re-created `WRITEONLY`
   backing; `test_cursor`'s device.c:1945 flake in the default conformance; the startup-failure tests'
   deadline, widened from 5 s to 30 s in C4c-4d after five red gate runs (what slowed them is untraced).
+- The core under D3D9, found by C4c-5's sweep: a draw that samples the texture bound as its target draws a
+  Metal validation report from the pass barrier ("threadsPerTile (16, 16) must equal tile size (32, 32)":
+  three reports attributed to `test_sample_attached_rendertarget` by elimination: new with the slice that
+  lets it run, one a draw of its three), untraced; owed at 7d.
 - dxmt-core (shared with D3D10-12): a span whose END sits alone in a chunk is never issued (settled in
   d3d9-rt for D3D9; the shape exists for D3D11); a draw pass with no query active, merged behind a
   counting pass, counts its draws (D3D9's passes now start with counting off); `render_pipeline` drops

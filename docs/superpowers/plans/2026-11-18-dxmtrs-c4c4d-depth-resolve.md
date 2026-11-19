@@ -71,7 +71,8 @@ attachment, that writes each texel's depth (and stencil) from sample 0 of the so
   ALWAYS with depth write, and, **only when the format has a stencil plane**, stencil REPLACE on pass with
   compare ALWAYS and write mask ff **on both faces**: a D3D9 state snapshot handed to the existing
   `depth_state_handle` (no new field; **a 0 handle answers false**: Metal's default state writes no depth; R2
-  f4); viewport (depth 0 to 1) and scissor the whole level; rasterizer fill solid, cull none; the source's plane views bound READ at fragment
+  f4); viewport (depth 0 to 1) and scissor the whole level; rasterizer fill solid, cull none; the source's
+  plane views bound READ at fragment
   textures 0 and 1; three vertices.
 - **Order of work** (R2 f5): the functions, the pipeline and the state are made first; only then the scratch
   is created and the copy recorded, so a pass Metal cannot make records nothing.
@@ -180,7 +181,8 @@ The post-push check does the same. Mutants (final tokens in `gates/mutants-expec
      this mutant leaves alone;
   d. the depth-only fragment function returns 1.0 → `blit-sd-resolve` (cell 4).
   Held by the unit tests: the attachments' planes and actions, the depth-stencil state's record, the stencil
-  view; by Task 3's validation run: the pipeline's formats. Not gated, stated: which sample is read (no row and no Wine test tells sample 0 from an average;
+  view; by Task 3's validation run: the pipeline's formats. Not gated, stated: which sample is read (no row and
+  no Wine test tells sample 0 from an average;
   the shader's literal 0 is what the review reads).
 - `jw`: the sweep → `build/c4c/s4d/sweep.md`.
 - **Probe: none** (no draw file changes; `depth.rs` gains a method no draw calls).
@@ -274,7 +276,8 @@ below), 7d48da31 (the front end; the tip). MacNeutron `c4c-mn`: 1294ab68 (the ro
   (`rc3-6.log`, ok) the test passes and its binary ends in about 6 s: the cancel came late, not never. So the
   range holds one test-only commit in `src/d3d9/unix` (86d43511), **against "mtld3d unchanged" read to the
   letter**; mtld3d's behaviour is unchanged. Not traced: what slowed the runs under cargo that night (another
-  application at 200 to 300% CPU and a system daemon's spikes were seen). What it gives up: a teardown regression of 5 to
+  application at 200 to 300% CPU and a system daemon's spikes were seen). What it gives up: a teardown
+  regression of 5 to
   30 s now passes that test. The commit's first message said nine runs; the logs hold five; reworded before any
   push (trees identical; the lane had run on the same tree under its earlier name, 8e26e51e).
 - **Controls**, every prediction held at the first run. `jv0` (mtld3d under Metal's validation layer, the base):
@@ -307,7 +310,8 @@ below), 7d48da31 (the front end; the tip). MacNeutron `c4c-mn`: 1294ab68 (the ro
   the swap is not identified). Seven test processes the watchdog's TERM had not ended, and the prefix's
   services, were stopped by PID. **`jx2`** (07:28 to 07:55, the Mac in use at a load of 10, a user-activity
   assertion held; the builder VM powered off during its build step): key the base's, **420 rows ok, 0 failed,
-  "dxmt-check: all passed"**, nothing left running. For the maintainer: check.sh's watchdog should kill -9 and reap; a hung row stalled
+  "dxmt-check: all passed"**, nothing left running. For the maintainer: check.sh's watchdog should kill -9 and
+  reap; a hung row stalled
   every later row of that run; the XeSS test also hung once at noon on 2026-11-18 (X-1), untraced.
 - **Final review** (`build/c4c/s4d/review-final.md`, range 8bde3b14..8e26e51e, the tip's tree, and the rows):
   0 Critical, 0 Important, 9 Minor; "push as is once the gates are green". Traced sound: every false answer

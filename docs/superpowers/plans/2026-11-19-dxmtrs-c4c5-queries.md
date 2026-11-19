@@ -355,4 +355,69 @@ validation launches (the waits are bounded at 5 s a cell).
 
 ## Execution notes
 
-(after execution)
+Executed 2026-11-19. DXMTRS `c4c`: 2c2be796 (the recorder half), 501d43d1 (the front end; the tip). MacNeutron
+`c4c-mn`: 761cbe1d (the rows). Artefacts: `build/c4c/s5` (map, reviews, `rc*.log`, `gates/`, `sweep.md`,
+`probe.md`).
+
+- **Ruling O-2 held**: the map, this plan, its reviews, the rows and both code tasks ran beside C4c-4d's gates;
+  the controls on mtld3d and on core before the code ran before 4d's push, on a side commit of the rows
+  (f143ae44, never pushed) whose four files equal the commit's (761cbe1d: `git diff` empty).
+- **Controls**, every prediction held at the first run. `jv0` (mtld3d under Metal's validation layer, the base):
+  reports 0, rows ok 14: **the twelve rows' expectations are mtld3d's answers**, no second row commit. `ja`:
+  default and msl ok (12 of 12); core red on exactly `queries-runtime` and the twelve `queries-qy-*` (twelve
+  "CreateQuery ... 8876086a" lines; the launch exits). `jcr`: the VM's default lane ok on old and new WoW64, 12
+  `qu64`/`qu32` ok lines each.
+- **Rows as written** (Task 1): helpers `newQuery`, `issue`, `waitFor`, `exact`, `countIs`, `bracket`, `quadIn`,
+  `presentNow`, `signalled`; a budget of 120 s; quad corners on integers (exact by the top-left rule, argued once
+  in the mode's comment); `qy-pass`'s first cell is two scenes with the copy and the fill between them, its
+  areas chosen so that no wrong sum equals the right one; `qy-reuse` uses powers of two. No deviation from the
+  plan's expectations.
+- **Task 2 as built** (2c2be796; `rc2.log` ok at the first run): `rt/src/device/query.rs`. Against the plan:
+  `OcclusionAnswer` derives `Debug`, `PartialEq`, `Eq` only (`Clone`/`Copy` would need the derive inventory,
+  outside the task's paths: the Rules check contradicted itself there); the flag and the count are one field,
+  `open_brackets: Option<u32>` (`None` until the device's first BEGIN); `occlusion_poll` takes `&Occlusion`;
+  `Occlusion` wraps a private four-state enum (never, open, closed, empty); `encode_triangle_state` takes a
+  fourth parameter, whether to record counting off; a BEGIN on an open bracket goes through
+  `occlusion_release`. Twelve tests, by name in the ledger's report; the implementer's own red check
+  (`rc2-h1red.log`): with the settle removed, `an_end_alone_in_its_chunk_is_read_back` answers `Pending`. Not
+  held by a test: the depth resolve's record (a site that merges with no draw pass).
+- **Task 3 as built** (501d43d1; `rc3-2.log` ok, `rc3.log` red on audit for two doc titles over one line): the
+  `Occlusion` in a `RefCell` on `QueryInner` (the first rung; the inner was never `Sync`); three `unsafe` blocks,
+  each the device's dereference with the file's SAFETY wording; the BOOL write moved to one helper both
+  runtimes use; every arm ahead of every mtld3d recorder call. **Deviation, accepted**: with
+  `query.flushImmediate` on, the poll is told not to wait, so the stub answers at once, as mtld3d tests the knob
+  before its wait. Flagged: on a `core-runtime` build an mtld3d device's `Issue`, `GetData` and Release take
+  one test of the device's core more. A core device emits no frame-dump line and no query-wait timer.
+- **Lane `jt3`** at the tip, exactly as predicted: default and core ok, 12 of 12 on both (and 41, 21); `queries`
+  under core with the validation layer: reports 0, rows ok 14. **Settled by the run**: Metal takes the disabled
+  visibility mode without a result buffer; d3d9-rt's passes get their visibility buffer; the settle answers a
+  span whose END sits alone in a chunk; the proxy draw counts.
+- **Mutants**: five, `gates/mutants-expect.txt` written before any existed.
+- **The chain** at 501d43d1 with 761cbe1d's rows (`jmb`, then `jw`, `jr`, `jc`, `jq`, `jm`; 08:53 to 10:22),
+  each job as predicted. `jw` first: below. `jr`: key and imports the base's, d3d9-check default ok, the
+  conformance fails anew at triaged sites only (both runs), "x64 check: not run" (**ruling X-3**: the range
+  holds `docs/d3d9/STATUS.md`; a docs path is not counted when deciding the x64 check). `jc`: the VM's gate ok
+  on default and core, old and new WoW64, 12 `qu64`/`qu32` ok lines each (one more under core): the visibility
+  read-back works in the guest, 64- and 32-bit. `jq`: default, msl and core ok with every row, stateblock on
+  both runtimes, the twelve launches under core with the validation layer: reports 0. `jm`: a reads 0 in the
+  nine counting rows; b waits out `qy-present`'s first cell; c waits out `qy-event`'s first END; d reads 640
+  for 512 in `qy-pass`'s second cell; e leaves every row green and one "was not recorded" line: **each as
+  written beforehand**, the green tip whole.
+- **Final review** (`build/c4c/s5/review-final.md`): 0 Critical, 0 Important, 6 Minor; "push as is once the
+  gates are green". Ledgered, no fix round: the Rules check's errors (above, and the three `unsafe` blocks and
+  the inner enum's `Default` it did not list); the SAFETY comments argue liveness, not exclusivity (sound);
+  `NEVER_ISSUED` sits mid-file; 501d43d1 names no alternative considered; one test sets the process-wide
+  logger for its test binary; a core OCCLUSION query still builds an unused mtld3d mailbox core. Not covered
+  by a row or test: the Release arm outside this slice's job scripts (`d3d9-check.sh` and the VM gate do not
+  count "was not recorded": a line for them in C4c-6); an EVENT that answers done early; the two config
+  opt-ins under core; the record's mode at the `StretchRect` quad.
+- **Sweep** (`build/c4c/s5/sweep.md`, job `jw`, gating nothing): no failing line moved, no panic, no
+  `CreateQuery` refusal; `test_sample_attached_rendertarget` runs (`visual` 211160 to 211200 checks) with 0
+  failed lines; `device` executes two checks more, passing (`test_refcount`'s, by elimination). **Three new
+  Metal validation reports** (the pass barrier of a texture attached and sampled in one pass: "threadsPerTile
+  (16, 16) must equal tile size (32, 32)"), attributed to that test's three draws by elimination: the log
+  names no function. Ruling W5-1: not this slice's code and no blocker; owed at C4c-7's parity.
+- **Probe** (`build/c4c/s5/probe.md`, the Mac in use): the tip used less CPU than the base (1540 against 2370
+  ms over 600 frames), which a change that adds a call cannot explain: load noise. No cost is measurable; the
+  quiet-Mac probe stays owed at C4c's end.
+- **The x64 check** did not run in this slice; it runs at the end of C4c-7.

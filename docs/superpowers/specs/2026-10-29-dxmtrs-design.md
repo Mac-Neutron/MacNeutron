@@ -1468,13 +1468,52 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   or Important, nine Minors ledgered. **One file of the range is outside the plan**: the deadline of two
   mtld3d-unix startup-failure tests goes from 5 s to 30 s (test code only), after one of them failed five
   runs of the Rust gate in a row on an unchanged crate while passing when its binary ran directly; with 30 s
-  the test passes and its binary ends in about 6 s, so the cancel it waits for came late, not never; what slowed those runs is not
+  the test passes and its binary ends in about 6 s, so the cancel it waits for came late, not never; what
+  slowed those runs is not
   traced, and a teardown regression of 5 to 30 s would now pass that test. No row tells sample 0 from another
   reduction, and the rows' surfaces are square.
   **The x64 check, once for C4c-4** (maintainer, 2026-11-18), at that tip on the plain build: 420 rows ok, 0
   failed, at its second run. The first, unattended at 03:40, stopped completing rows at 03:54 and resumed at
   07:21 when the maintainer came back to a window saying the Mac had run out of memory (30 rows failed, all
   inside that stall): spoiled by the machine, not judged. No probe: no draw file changed.
+  C4c-5 done 2026-11-19 at DXMTRS main 501d43d1, which MacNeutron pins: queries on the core runtime.
+  `CreateQuery` answers as on mtld3d (EVENT and OCCLUSION; every other type `D3DERR_NOTAVAILABLE`). d3d9-rt
+  gains `event_stamp` and `event_done` (**an EVENT on the queue's own clocks with mtld3d's two rules**: done
+  once the chunk its END was recorded in has retired, which the finish thread signals only after that chunk's
+  command buffer completed; a poll commits the recording chunk when the END is still in it, flag or not) and
+  the OCCLUSION bracket (`Occlusion`, `occlusion_begin`, `occlusion_end`, `occlusion_poll`,
+  `occlusion_release`) over dxmt-core's `VisibilityQuery` as it is: **a fresh one a BEGIN** (an open bracket
+  is ended first: the encoder's active count is a plain counter, and a chunk still to be read back may hold
+  the old one), END first an empty span that answers 0, END twice keeping the result, a poll with the flag
+  waiting for the END's chunk. **dxmt-core reads a chunk back only when its passes wrote results, so a span
+  whose END sits alone in a chunk is never issued; d3d9-rt settles it** (an empty range issued once that chunk
+  retired: nothing added, the chunk marked) instead of changing the shared core. The draw closure bumps the
+  visibility offset before each of its two draw records, and **from a device's first OCCLUSION BEGIN on, a
+  draw pass and the `StretchRect` quad's pass start with counting off**: the core's optimizer puts an earlier
+  pass's records in front of a later pass's on the same targets, and a pass with no query active records no
+  mode, so behind a counting pass it would count. The device counts its open brackets and logs "was not
+  recorded" if one is left at its end, which is how the gates hold the front end's Release arm. In the front
+  end the query's `Occlusion` sits in a `RefCell`; `Issue`, `GetData` and the final Release take a core arm
+  ahead of every mtld3d recorder call; the answers and the bytes written are mtld3d's, the two config
+  opt-ins included. Differences from mtld3d, stated: the core counts only an application's draws (mtld3d
+  also counts a scaled `StretchRect` into the bound target right after a counted draw: its finding); END
+  first answers 0 at once; no slot cap; no render scale.
+  Gated at that tip with a twelfth launch of twelve rows (`queries`): the plain build's translator key and
+  `d3d9.dll` imports are the base's; d3d9-check default, msl and core, every row; the Mac's conformance fails
+  anew at triaged sites only; stateblock on both runtimes; the twelve launches under core with Metal's
+  validation layer report nothing (Metal takes the disabled visibility mode in a pass without a result
+  buffer); the VM's D3D9 gate on both runtimes and both WoW64 forms, in 64-bit and in 32-bit (the visibility
+  read-back works in the guest); no "was not recorded" line in any lane. Before any gate of the code the
+  rows ran on mtld3d under the validation layer, all green: their expectations are mtld3d's answers. Five
+  mutants (no bump in the draw closure, the settle removed, an EVENT's poll that never commits, no pass
+  starting with counting off, the front end's Release arm removed) turn red what was named before the run,
+  each at its cell and value; the last reddens no row and shows as one "was not recorded" line, which is
+  the gate. The whole-branch review: nothing Critical or Important, six Minors ledgered. Held by no row or
+  test, stated: an EVENT that answers done early; the two config opt-ins under core; which mode the record
+  carries at the `StretchRect` quad (no row may put a `StretchRect` right after a counted draw: mtld3d
+  counts it); and the Release arm's gate lives in the slice's job scripts, not yet in `d3d9-check.sh`. The
+  probe (`build/c4c/s5/probe.md`, a Mac in use): no cost of the bump is measurable. The x64 check did not run
+  in this slice (the range is inside `src/d3d9` and one doc); it runs at the end of C4c-7.
   C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
   offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer count and its cap
   (done); 3a colour read-back through locks (lockable targets, the back buffer read-only, render-target texture
@@ -1484,7 +1523,7 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   target, between plain surfaces on the CPU, the depth-stencil copy (done); 4c its scaled, converting and YUV
   copies into a target, multisampled ends, overlapping rects of one surface (done); 4d the depth-stencil
   resolve (done);
-  5 queries; 6 `Reset`, the getters, the swap chain's presents; 7 gamma, frame
+  5 queries (done); 6 `Reset`, the getters, the swap chain's presents; 7 gamma, frame
   latency, the device's information from winemetal, the `Ex` creators, and the conformance lane for `visual`, `device`
   and `d3d9ex` under core, which is C4c's gate.
   The sweep after 3a (`build/c4c/s3/sweep.md`, gating nothing): `visual` and `device` run to their end
@@ -1528,6 +1567,13 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   854 of 56830; "Test failed" lines over the default runtime's baseline: 70 to 65 and 115; `d3d9ex` still dies
   in `test_reset`). No `StretchRect`, `ColorFill` or `UpdateSurface` line is left in the three suites. The
   three silent differences are unchanged.
+  The sweep after 5 (`build/c4c/s5/sweep.md`, gating nothing, run first in the chain): as predicted no failing
+  line moved (none was the refusal's), and no suite meets `CreateQuery`'s refusal;
+  `test_sample_attached_rendertarget` runs under core for the first time (40 checks more in `visual`, no
+  failed line), and **three Metal validation reports are new** ("threadsPerTile (16, 16) must equal tile size
+  (32, 32)": the pass barrier of a texture attached and sampled in one pass; attributed to that test's three
+  draws by elimination), not this slice's code, not traced, owed at C4c-7's parity. Wine's own counts: `visual`
+  315 failed of 211200, `device` 854 of 56832.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
