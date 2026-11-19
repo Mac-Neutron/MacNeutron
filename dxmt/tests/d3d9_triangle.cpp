@@ -114,6 +114,18 @@
 // With a 180 s budget. The core refuses none of it (sd-resolve's resolve is its since DXMTRS C4c-4d). A format
 // CheckDeviceFormat (or, for a YUV source, CheckDeviceFormatConversion) does not offer prints "d3d9 <row>-<format>
 // skip" and its cells do not run.
+// With "queries" ("queries strict" under core; DXMTRS C4c-5): 12 rows "d3d9 qy-<row> ok|FAIL <why>" of
+// IDirect3DQuery9, on a device with no depth-stencil: CreateQuery's support probe and the types it makes (EVENT and
+// OCCLUSION) or refuses, the query's type, size, device and reference; EVENT's answer before and after its END, a
+// poll without the flag and without a Present that must finish; OCCLUSION's exact counts of pretransformed quads
+// (GetData's sizes 2, 4, 8 and 0, a quad behind an occluder, the proxy draw with colour and Z writes off), spans with
+// no draw (never issued: 0xdd bytes; END first, BEGIN and END, BEGIN|END, 400 pairs: 0), an open span's S_FALSE, BEGIN
+// twice and END twice, a span across Present (its END alone after it), two overlapping queries, draws among a Clear,
+// a StretchRect and a ColorFill of their target (which count nothing) and on a second target, a draw after END between
+// passes of one target, a query released while open, one query used again, and a poll without the flag across
+// Presents. With a 120 s budget. A runtime that refuses CreateQuery (D3DERR_NOTAVAILABLE: the core before DXMTRS
+// C4c-5's front end) makes each row print "FAIL CreateQuery 8876086a" (qy-support's "FAIL CreateQuery (EVENT, NULL)
+// 8876086a").
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -9350,6 +9362,450 @@ static void blitRows(IDirect3DDevice9 *d, bool strict) {
     if (rtSurf) rtSurf->Release();
 }
 
+// --- The "queries" mode (DXMTRS C4c-5): IDirect3DQuery9's EVENT and OCCLUSION, on the blit mode's plain device
+// (256x256 X8R8G8B8, single-sample, no depth-stencil: qy-count makes and binds one and unbinds it on every path,
+// depthBack). Every count is of zquad's pretransformed quads at z 0.5 (on the back buffer unless said), exact: zquad
+// puts the strip's vertices at the rect's integer corners, and D3D9 puts a pixel's centre at its integer coordinates,
+// so each edge runs through a line of centres, which the top-left rule gives to the quad on its left and top edges and
+// to neither side on its right and bottom ones: (x0,y0)-(x1,y1) covers exactly (x1-x0)*(y1-y0) pixels, one sample each,
+// and the strip's diagonal gives each centre on it to one of its two triangles (a shift of the whole quad by under half
+// a pixel moves opposite edges together and keeps the count, so no half-pixel convention changes it). A row's quads do
+// not overlap unless said, and the counts a cell could add up by mistake differ from the one it wants. Counts are
+// compared exactly (exact(), not want(), which allows one a byte), read with GetData(&d, 4, 0) after waitFor() (Wine's
+// wait_query: GetData(NULL, 0, D3DGETDATA_FLUSH) until S_OK, 5 s at most). Every counting cell is one until() attempt,
+// from its BEGIN (and what it draws before it) through the read and the compare: mtld3d leaves a draw out of its frame
+// while its pipeline builds unless a query counts, so a quad drawn before a BEGIN (qy-count's occluder) can be missing
+// at the first attempt; under strict a cell has one attempt. A cell's query is made in its attempt (qy-reuse's re-BEGUN
+// by each) and released by Com on every path. A row stops at its first failing call and says why: a CreateQuery that
+// does not answer D3D_OK (the core runtime refuses it, D3DERR_NOTAVAILABLE, until DXMTRS C4c-5's front end) prints
+// "FAIL CreateQuery 8876086a" (qy-support's "FAIL CreateQuery (EVENT, NULL) 8876086a") and no query is touched. On the
+// core only an application's draws count (D3D9's rule); mtld3d also counts a scaled StretchRect into the bound target
+// right after a counted draw (a stated divergence), so no cell puts one there. Waits: a cell returns at its first wait
+// that runs out (5 s), so under strict a failing row costs one 5 s wait at most (twelve rows: 60 s); in mtld3d lanes
+// until() retries a cell for up to 10 s; the mode's budget is 120 s, the launches' watchdog 240 s.
+
+// A query of type t (OCCLUSION unless said) in q, or false with `why` "CreateQuery <hr>" and q null.
+static bool newQuery(Com<IDirect3DQuery9> &q, D3DQUERYTYPE t = D3DQUERYTYPE_OCCLUSION) {
+    CK(CreateQuery, t, &q.p);
+    return q.p || (snprintf(why, sizeof why, "CreateQuery D3D_OK and no query"), false);
+}
+// Issue(flags): D3D_OK, else false with `why`.
+static bool issue(IDirect3DQuery9 *q, DWORD flags) {
+    const HRESULT hr = q->Issue(flags);
+    const char *call = flags == D3DISSUE_BEGIN ? "Issue(BEGIN)"
+                       : flags == D3DISSUE_END ? "Issue(END)"
+                                               : "Issue(BEGIN|END)";
+    return hr == D3D_OK || fail(call, hr);
+}
+// Wine's wait_query: GetData(NULL, 0, D3DGETDATA_FLUSH) until S_OK, Sleep(10) between polls, for 5 s at most (by the
+// clock: a FLUSH poll may block in the call); false with `why` at another answer or when the 5 s run out.
+static bool waitFor(IDirect3DQuery9 *q) {
+    const ULONGLONG end = GetTickCount64() + 5000;
+    for (;;) {
+        const HRESULT hr = q->GetData(nullptr, 0, D3DGETDATA_FLUSH);
+        if (hr == S_OK) return true;
+        if (hr != S_FALSE) return fail("GetData (NULL, 0, FLUSH)", hr);
+        if (GetTickCount64() >= end)
+            return snprintf(why, sizeof why, "GetData (NULL, 0, FLUSH) S_FALSE for 5 s"), false;
+        Sleep(10);
+    }
+}
+// Whether `got` is exactly `expect` (a count or a sentinel); `why` names it otherwise.
+static bool exact(const char *what, unsigned long long got, unsigned long long expect) {
+    if (got == expect) return true;
+    snprintf(why, sizeof why, "%s %llu (%#llx) want %llu (%#llx)", what, got, got, expect, expect);
+    return false;
+}
+// GetData(&d, 4, 0): S_OK and d exactly `expect`.
+static bool countIs(IDirect3DQuery9 *q, DWORD expect) {
+    DWORD d = 0xfefefefe;
+    const HRESULT hr = q->GetData(&d, sizeof d, 0);
+    return hr == S_OK ? exact("count", d, expect) : fail("GetData (4 bytes)", hr);
+}
+// BEGIN, body(), END, the wait, the count: exactly `expect`.
+template <class F> static bool bracket(IDirect3DQuery9 *q, DWORD expect, F body) {
+    return issue(q, D3DISSUE_BEGIN) && body() && issue(q, D3DISSUE_END) && waitFor(q) && countIs(q, expect);
+}
+// A quad over (x0,y0)-(x1,y1) at z 0.5 in a scene of its own.
+static bool quadIn(float x0, float y0, float x1, float y1, DWORD c = KRUST) {
+    return scene([&] { return zquad(x0, y0, x1, y1, 0.5f, c); });
+}
+static bool presentNow() {
+    CK(Present, nullptr, nullptr, nullptr, nullptr);
+    return true;
+}
+// GetData(&b, 4, 0) of an EVENT query: S_OK with b TRUE.
+static bool signalled(IDirect3DQuery9 *q, const char *what) {
+    BOOL b = 7;
+    const HRESULT hr = q->GetData(&b, sizeof b, 0);
+    if (hr == S_OK && b == TRUE) return true;
+    return snprintf(why, sizeof why, "%s: GetData %08lx, BOOL %d", what, (unsigned long)hr, (int)b), false;
+}
+
+// qy-support (no draw, no until()): for EVENT and OCCLUSION, CreateQuery(t, NULL), the support probe, D3D_OK, and
+// CreateQuery(t, &q) D3D_OK: the device's reference count one up while q lives (the query holds the device),
+// GetType t, GetDataSize 4 (a BOOL, a DWORD count), GetDevice D3D_OK and the device (that reference given back at
+// once), and after q's Release the count back where it was. For type 3 (no type), VCACHE, VERTEXSTATS, TIMESTAMP,
+// TIMESTAMPDISJOINT and TIMESTAMPFREQ: both calls D3DERR_NOTAVAILABLE, the out pointer still 0xdeadbeef (Wine's
+// test_query_support's answers; mtld3d makes EVENT and OCCLUSION alone).
+static bool rowQySupport() {
+    for (const D3DQUERYTYPE t : {D3DQUERYTYPE_EVENT, D3DQUERYTYPE_OCCLUSION}) {
+        const char *name = t == D3DQUERYTYPE_EVENT ? "EVENT" : "OCCLUSION";
+        char what[64];
+        snprintf(what, sizeof what, "CreateQuery (%s, NULL)", name);
+        HRESULT hr = dev->CreateQuery(t, nullptr);
+        if (hr != D3D_OK) return fail(what, hr);
+        const ULONG before = refs(dev);
+        Com<IDirect3DQuery9> q;
+        if (!newQuery(q, t)) return failIn(name);
+        const ULONG with = refs(dev);
+        if (with != before + 1)
+            return snprintf(why, sizeof why, "%s: the device's references %lu with the query, %lu before", name,
+                            (unsigned long)with, (unsigned long)before),
+                   false;
+        if (q.p->GetType() != t)
+            return snprintf(why, sizeof why, "%s: GetType %d", name, (int)q.p->GetType()), false;
+        if (q.p->GetDataSize() != 4)
+            return snprintf(why, sizeof why, "%s: GetDataSize %lu", name, (unsigned long)q.p->GetDataSize()), false;
+        IDirect3DDevice9 *got = nullptr;
+        hr = q.p->GetDevice(&got);
+        if (got) got->Release();
+        if (hr != D3D_OK) return fail("GetDevice", hr), failIn(name);
+        if (got != dev) return snprintf(why, sizeof why, "%s: GetDevice another device", name), false;
+        q.p->Release(), q.p = nullptr;
+        const ULONG after = refs(dev);
+        if (after != before)
+            return snprintf(why, sizeof why, "%s: the device's references %lu after the query's Release, %lu before",
+                            name, (unsigned long)after, (unsigned long)before),
+                   false;
+    }
+    for (const DWORD t : {(DWORD)3, (DWORD)D3DQUERYTYPE_VCACHE, (DWORD)D3DQUERYTYPE_VERTEXSTATS,
+                          (DWORD)D3DQUERYTYPE_TIMESTAMP, (DWORD)D3DQUERYTYPE_TIMESTAMPDISJOINT,
+                          (DWORD)D3DQUERYTYPE_TIMESTAMPFREQ}) {
+        IDirect3DQuery9 *const sentinel = (IDirect3DQuery9 *)(ULONG_PTR)0xdeadbeef;
+        IDirect3DQuery9 *q = sentinel;  // never a Com: a runtime that left it must not see a Release
+        char what[64];
+        snprintf(what, sizeof what, "CreateQuery (type %lu, NULL)", (unsigned long)t);
+        HRESULT hr = dev->CreateQuery((D3DQUERYTYPE)t, nullptr);
+        if (hr != D3DERR_NOTAVAILABLE) return fail(what, hr);
+        snprintf(what, sizeof what, "CreateQuery (type %lu)", (unsigned long)t);
+        hr = dev->CreateQuery((D3DQUERYTYPE)t, &q);
+        if (SUCCEEDED(hr) && q && q != sentinel) q->Release();  // a query made where none may be
+        if (hr != D3DERR_NOTAVAILABLE) return fail(what, hr);
+        if (q != sentinel) return snprintf(why, sizeof why, "%s: the out pointer written", what), false;
+    }
+    return true;
+}
+// qy-event (no count, no until()): an EVENT query never issued: GetData(&b, 4, 0) S_OK, b TRUE. A quad over
+// (16,16)-(48,48), Issue(END), the wait (FLUSH): GetData(&b, 4, 0) S_OK, b TRUE; GetData(NULL, 0, 0) S_OK. Another
+// quad over (64,16)-(96,48), Issue(END), then GetData(&b, 4, 0) polled with no flag and no Present (Sleep(10) between
+// polls): S_OK with b TRUE within 5 s (a poll submits what is recorded while the END is in it, flag or not: mtld3d's
+// rule, which a title polling without the flag and without a Present needs). Nothing in the row presents or reads back:
+// even the first wait finishes only because a poll submits (EndScene does not).
+static bool rowQyEvent() {
+    Com<IDirect3DQuery9> q;
+    if (!newQuery(q, D3DQUERYTYPE_EVENT) || !signalled(q.p, "never issued")) return false;
+    if (!quadIn(16, 16, 48, 48) || !issue(q.p, D3DISSUE_END) || !waitFor(q.p)) return failIn("the first END");
+    if (!signalled(q.p, "the first END")) return false;
+    const HRESULT hr = q.p->GetData(nullptr, 0, 0);
+    if (hr != S_OK) return fail("the first END: GetData (NULL, 0, 0)", hr);
+    if (!quadIn(64, 16, 96, 48) || !issue(q.p, D3DISSUE_END)) return failIn("the second END");
+    for (const ULONGLONG end = GetTickCount64() + 5000;;) {
+        BOOL b = 7;
+        const HRESULT h = q.p->GetData(&b, sizeof b, 0);
+        if (h == S_OK) return b == TRUE || (snprintf(why, sizeof why, "the second END: S_OK, BOOL %d", (int)b), false);
+        if (h != S_FALSE) return fail("the second END: GetData (no flag)", h);
+        if (GetTickCount64() >= end)
+            return snprintf(why, sizeof why, "the second END: GetData (no flag, no Present) S_FALSE for 5 s"), false;
+        Sleep(10);
+    }
+}
+// qy-count: BEGIN, a quad over (32,32)-(96,64) (64x32: 2048), END, the wait: GetData(&d, 4, 0) S_OK, 2048; size 2: the
+// low WORD 2048, the next WORD still 0xffff; size 8: 2048 and a high DWORD 0 (over 0xffffffff); size 0: S_OK, the
+// DWORD still 0xffffffff. Then a 256x256 D24S8 depth-stencil bound, ZENABLE on (ZFUNC LESSEQUAL, Z writes on: the
+// defaults), its depth cleared to 1: an occluder (mint) over (16,16)-(64,80) at z 0.1, drawn in a scene before BEGIN,
+// then the same quad at z 0.5 inside the span: 1024 (its columns 32..63 fail the test, 64..95 pass: 32x32; the
+// occluder's right edge, x 64, runs through the column of centres the top-left rule leaves to the quad, its other
+// edges lie outside the quad; 2048 if the occluder was left out). Then the proxy draw, the target cleared steel with
+// the depth: the occluder again, then, colour writes off (COLORWRITEENABLE 0) and Z writes off, the Z test on, BEGIN,
+// the same quad in rust, END: 1024, and the back buffer still steel at (80,48) (the quad's passing half) and mint at
+// (40,48) (behind it, the occluder's), 16 pixels or more from every edge. Each count its own until() attempt; each
+// depth attempt, on every path, puts the colour and Z writes back on, binds no depth-stencil and turns ZENABLE off (as
+// the device has it: no depth-stencil, depthBack).
+static bool rowQyCount() {
+    const bool sizes = until([&] {
+        Com<IDirect3DQuery9> q;
+        WORD w[2] = {0xffff, 0xffff};
+        DWORD d8[2] = {0xffffffff, 0xffffffff}, z = 0xffffffff;
+        if (!newQuery(q)) return false;
+        if (!bracket(q.p, 2048, [] { return quadIn(32, 32, 96, 64); })) return failIn("size 4");
+        HRESULT hr = q.p->GetData(w, 2, 0);
+        if (hr != S_OK) return fail("GetData (2 bytes)", hr);
+        if (!exact("size 2: the low WORD", w[0], 2048) || !exact("size 2: the next WORD", w[1], 0xffff)) return false;
+        hr = q.p->GetData(d8, 8, 0);
+        if (hr != S_OK) return fail("GetData (8 bytes)", hr);
+        if (!exact("size 8: the low DWORD", d8[0], 2048) || !exact("size 8: the high DWORD", d8[1], 0)) return false;
+        hr = q.p->GetData(&z, 0, 0);
+        if (hr != S_OK) return fail("GetData (0 bytes)", hr);
+        return exact("size 0: the buffer", z, 0xffffffff);
+    });
+    if (!sizes) return false;
+    Com<IDirect3DSurface9> ds;
+    if (!makeDs(ds, D3DFMT_D24S8)) return false;
+    // In a scene: ds bound, Z on, the planes of `flags` cleared (the target steel, the depth 1), the occluder drawn.
+    const auto occluder = [&](DWORD flags) {
+        return scene([&] {
+            return bindDs(ds.p) && rstate(D3DRS_ZENABLE, D3DZB_TRUE) && clearRects(0, nullptr, flags, KSTEEL) &&
+                   zquad(16, 16, 64, 80, 0.1f, KMINT);
+        });
+    };
+    return until([&] {
+               Com<IDirect3DQuery9> q;
+               const bool ok = newQuery(q) &&
+                               ((occluder(D3DCLEAR_ZBUFFER) &&
+                                 bracket(q.p, 1024, [] { return quadIn(32, 32, 96, 64); })) ||
+                                failIn("behind an occluder"));
+               depthBack(nullptr, D3DZB_FALSE);
+               return ok;
+           }) &&
+           until([&] {
+               Com<IDirect3DQuery9> q;
+               const auto proxy = [] {
+                   const bool drawn = scene([] {
+                       return rstate(D3DRS_COLORWRITEENABLE, 0) && rstate(D3DRS_ZWRITEENABLE, FALSE) &&
+                              zquad(32, 32, 96, 64, 0.5f, KRUST);
+                   });
+                   dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0xf);
+                   return drawn;
+               };
+               const bool ok = newQuery(q) &&
+                               ((occluder(D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER) && bracket(q.p, 1024, proxy) &&
+                                 rtHas("the back buffer", rtSurf, 256, X8, {{80, 48, KSTEEL}, {40, 48, KMINT}})) ||
+                                failIn("the proxy draw"));
+               dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0xf);
+               depthBack(nullptr, D3DZB_FALSE);
+               return ok;
+           });
+}
+// qy-empty: spans with no draw, each cell its own until() attempt and query. Never issued: GetData(NULL, 0, FLUSH)
+// S_OK, then GetData(&d, 4, FLUSH) S_OK with d[0] 0xdddddddd and d[1] still 0xffffffff (Wine's). END first (a query
+// never begun): D3D_OK, the wait, 0. BEGIN, END: 0. BEGIN|END in one Issue: 0. Last, 400 BEGIN/END pairs of one query
+// in one scene and the wait right after them: 0 (400, not Wine's 1000: on mtld3d a BEGIN and an END each take one of a
+// frame's 1024 result slots; the cell before presents, so the pairs start a frame).
+static bool rowQyEmpty() {
+    return until([&] {
+               Com<IDirect3DQuery9> q;
+               DWORD d[2] = {0xffffffff, 0xffffffff};
+               if (!newQuery(q)) return false;
+               HRESULT hr = q.p->GetData(nullptr, 0, D3DGETDATA_FLUSH);
+               if (hr != S_OK) return fail("never issued: GetData (NULL, 0, FLUSH)", hr);
+               hr = q.p->GetData(d, 4, D3DGETDATA_FLUSH);
+               if (hr != S_OK) return fail("never issued: GetData (4 bytes, FLUSH)", hr);
+               return exact("never issued: the DWORD", d[0], 0xdddddddd) &&
+                      exact("never issued: the next DWORD", d[1], 0xffffffff);
+           }) &&
+           until([&] {
+               Com<IDirect3DQuery9> q;
+               return newQuery(q) &&
+                      ((issue(q.p, D3DISSUE_END) && waitFor(q.p) && countIs(q.p, 0)) || failIn("END first"));
+           }) &&
+           until([&] {
+               Com<IDirect3DQuery9> q;
+               return newQuery(q) && (bracket(q.p, 0, [] { return true; }) || failIn("BEGIN, END"));
+           }) &&
+           until([&] {
+               Com<IDirect3DQuery9> q;
+               return newQuery(q) && ((issue(q.p, D3DISSUE_BEGIN | D3DISSUE_END) && waitFor(q.p) && countIs(q.p, 0)) ||
+                                      failIn("BEGIN|END"));
+           }) &&
+           until([&] {
+               Com<IDirect3DQuery9> q;
+               const auto pairs = [&] {
+                   for (int i = 0; i < 400; i++)
+                       if (!issue(q.p, D3DISSUE_BEGIN) || !issue(q.p, D3DISSUE_END)) return false;
+                   return true;
+               };
+               return newQuery(q) && ((scene(pairs) && waitFor(q.p) && countIs(q.p, 0)) || failIn("400 pairs"));
+           });
+}
+// qy-open: BEGIN, a quad over (100,100)-(148,124) (48x24: 1152), then, the span still open, GetData(&d, 4, FLUSH):
+// S_FALSE and d still 0xffffffff (its END is not recorded: nothing to wait for); END, the wait: 1152.
+static bool rowQyOpen() {
+    return until([&] {
+        Com<IDirect3DQuery9> q;
+        DWORD d = 0xffffffff;
+        if (!newQuery(q) || !issue(q.p, D3DISSUE_BEGIN) || !quadIn(100, 100, 148, 124)) return false;
+        const HRESULT hr = q.p->GetData(&d, sizeof d, D3DGETDATA_FLUSH);
+        if (hr != S_FALSE) return fail("open: GetData (4 bytes, FLUSH)", hr);
+        return exact("open: the buffer", d, 0xffffffff) && issue(q.p, D3DISSUE_END) && waitFor(q.p) &&
+               countIs(q.p, 1152);
+    });
+}
+// qy-twice: BEGIN, quad A over (16,16)-(80,48) (64x32: 2048), BEGIN again (the span restarts), quad B over
+// (120,120)-(150,140) (30x20: 600), END, the wait: 600 (2648 if A stayed in); END again: D3D_OK, and GetData(&d, 4, 0),
+// no wait, still 600.
+static bool rowQyTwice() {
+    return until([&] {
+        Com<IDirect3DQuery9> q;
+        return newQuery(q) && issue(q.p, D3DISSUE_BEGIN) && quadIn(16, 16, 80, 48) &&
+               bracket(q.p, 600, [] { return quadIn(120, 120, 150, 140); }) &&
+               ((issue(q.p, D3DISSUE_END) && countIs(q.p, 600)) || failIn("END again"));
+    });
+}
+// qy-present: BEGIN, a quad over (20,20)-(60,60) (40x40: 1600), Present, then END with nothing drawn or cleared after
+// the Present (on the core the END sits alone in the chunk after the Present's), the wait: 1600. Then BEGIN, quad A
+// over (20,100)-(52,116) (32x16: 512), Present, quad B over (100,100)-(116,116) (16x16: 256), END, the wait: 768. Each
+// Present after its scene's EndScene; each cell its own until() attempt.
+static bool rowQyPresent() {
+    return until([&] {
+               Com<IDirect3DQuery9> q;
+               return newQuery(q) &&
+                      (bracket(q.p, 1600, [] { return quadIn(20, 20, 60, 60) && presentNow(); }) ||
+                       failIn("END after a Present"));
+           }) &&
+           until([&] {
+               Com<IDirect3DQuery9> q;
+               return newQuery(q) && (bracket(q.p, 768,
+                                              [] {
+                                                  return quadIn(20, 100, 52, 116) && presentNow() &&
+                                                         quadIn(100, 100, 116, 116);
+                                              }) ||
+                                      failIn("across a Present"));
+           });
+}
+// qy-two, in one scene: Q1 BEGIN, quad A over (16,16)-(32,32) (16x16: 256), Q2 BEGIN, quad B over (48,16)-(80,32)
+// (32x16: 512), Q1 END, quad C over (96,16)-(104,24) (8x8: 64), Q2 END; the waits: Q1 768 (A + B), Q2 576 (B + C).
+static bool rowQyTwo() {
+    return until([&] {
+        Com<IDirect3DQuery9> q1, q2;
+        return newQuery(q1) && newQuery(q2) && scene([&] {
+                   return issue(q1.p, D3DISSUE_BEGIN) && zquad(16, 16, 32, 32, 0.5f, KRUST) &&
+                          issue(q2.p, D3DISSUE_BEGIN) && zquad(48, 16, 80, 32, 0.5f, KMINT) &&
+                          issue(q1.p, D3DISSUE_END) && zquad(96, 16, 104, 24, 0.5f, KGOLD) && issue(q2.p, D3DISSUE_END);
+               }) &&
+               ((waitFor(q1.p) && countIs(q1.p, 768)) || failIn("Q1")) &&
+               ((waitFor(q2.p) && countIs(q2.p, 576)) || failIn("Q2"));
+    });
+}
+// qy-pass. Draws among a Clear, a copy and a fill: T and U, 64x64 targets, S a 32x32 one ColorFill'd mint; in a scene,
+// T bound and cleared steel, BEGIN, quad A over (4,4)-(36,20) (32x16: 512, rust), then at once a Clear of T's rect
+// (40,4)-(59,13) to aqua; between scenes S whole into T's (40,24)-(53,35) (StretchRect, scaled, POINT: S is one colour)
+// and a ColorFill of T's (4,24)-(15,31) gold; in a second scene quad B over (4,44)-(20,60) (16x16: 256, rose), U bound,
+// quad C over (4,4)-(12,12) (8x8: 64, lilac), END; the wait: 832 (A + B + C: the Clear, the copy and the fill count
+// nothing; the rect Clear comes right after A on purpose: on mtld3d it ends the counting pass, so the copy after it is
+// not counted there either; their areas, 171, 143 and 77, make every other sum of the six differ from 832). T: rust at
+// (20,12), aqua at (49,8), mint at (46,29), gold at (9,27), rose at (12,52), steel at (50,52), 3 texels or more from
+// every rect's edge. Then a draw after END: new T and U (not cleared), in one scene, T bound, BEGIN, quad A on T over
+// (4,4)-(36,20) (512), END, U bound, a quad on U over (8,8)-(40,40) (32x32: 1024), T bound, quad D on T over
+// (40,40)-(56,48) (16x8: 128); the wait: 512, A alone (with nothing between A and D that commits or reads, no
+// depth-stencil bound and nothing of T sampled, T's two passes merge around U's on the core, and D counts there, 640,
+// unless D's pass starts with counting off). No cell puts a StretchRect right after a counted draw: mtld3d counts that
+// copy's quad, the core does not (a stated divergence).
+static bool rowQyPass() {
+    return until([&] {
+               Com<IDirect3DQuery9> q;
+               Com<IDirect3DSurface9> t, u, s;
+               const D3DRECT cleared = {40, 4, 59, 13};
+               const RECT copied = {40, 24, 53, 35}, filled = {4, 24, 15, 31};
+               if (!newQuery(q) || !target64(t, FALSE) || !target64(u, FALSE)) return false;
+               CK(CreateRenderTarget, 32, 32, A8, D3DMULTISAMPLE_NONE, 0, FALSE, &s.p, nullptr);
+               return colorFill(s.p, nullptr, KMINT) &&
+                      ((scene([&] {
+                            return clearRt(t.p, KSTEEL) && issue(q.p, D3DISSUE_BEGIN) &&
+                                   zquad(4, 4, 36, 20, 0.5f, KRUST) &&
+                                   clearRects(1, &cleared, D3DCLEAR_TARGET, KAQUA);
+                        }) &&
+                        stretchTo(s.p, nullptr, t.p, &copied, D3DTEXF_POINT) && colorFill(t.p, &filled, KGOLD) &&
+                        scene([&] {
+                            return zquad(4, 44, 20, 60, 0.5f, KROSE) && bindRt(0, u.p) &&
+                                   zquad(4, 4, 12, 12, 0.5f, KLILAC) && issue(q.p, D3DISSUE_END) && backToScreen();
+                        }) &&
+                        waitFor(q.p) && countIs(q.p, 832)) ||
+                       failIn("draws among a Clear, a copy and a fill")) &&
+                      rtHas("T", t.p, 64, A8,
+                            {{20, 12, KRUST}, {49, 8, KAQUA}, {46, 29, KMINT}, {9, 27, KGOLD}, {12, 52, KROSE},
+                             {50, 52, KSTEEL}});
+           }) &&
+           until([&] {
+               Com<IDirect3DQuery9> q;
+               Com<IDirect3DSurface9> t, u;
+               return newQuery(q) && target64(t, FALSE) && target64(u, FALSE) &&
+                      ((scene([&] {
+                            return bindRt(0, t.p) && issue(q.p, D3DISSUE_BEGIN) && zquad(4, 4, 36, 20, 0.5f, KRUST) &&
+                                   issue(q.p, D3DISSUE_END) && bindRt(0, u.p) && zquad(8, 8, 40, 40, 0.5f, KMINT) &&
+                                   bindRt(0, t.p) && zquad(40, 40, 56, 48, 0.5f, KGOLD) && backToScreen();
+                        }) &&
+                        waitFor(q.p) && countIs(q.p, 512)) ||
+                       failIn("a draw after END"));
+           });
+}
+// qy-release: BEGIN, a quad over (16,16)-(80,80) (64x64: 4096), the query released with its span open; a new query:
+// BEGIN, quad B over (100,20)-(124,44) (24x24: 576), END, the wait: 576.
+static bool rowQyRelease() {
+    return until([&] {
+        Com<IDirect3DQuery9> open, q;
+        if (!newQuery(open) || !issue(open.p, D3DISSUE_BEGIN) || !quadIn(16, 16, 80, 80)) return false;
+        open.p->Release(), open.p = nullptr;
+        return newQuery(q) && bracket(q.p, 576, [] { return quadIn(100, 20, 124, 44); });
+    });
+}
+// qy-reuse: one query, made once, each cell its own until() attempt (a retry BEGINs it again): BEGIN, a quad, END, the
+// wait, the count, for quads over (20,20)-(28,28) (8x8: 64), (40,20)-(56,28) (16x8: 128) and (70,20)-(86,36) (16x16:
+// 256); then BEGIN, a quad over (20,40)-(52,56) (32x16: 512), END, BEGIN, a quad over (70,40)-(102,72) (32x32: 1024),
+// END, with no read between, the wait: 1024 (each area its own power of 2: a count carried over shows).
+static bool rowQyReuse() {
+    Com<IDirect3DQuery9> q;
+    if (!newQuery(q)) return false;
+    return until([&] { return bracket(q.p, 64, [] { return quadIn(20, 20, 28, 28); }) || failIn("the first"); }) &&
+           until([&] { return bracket(q.p, 128, [] { return quadIn(40, 20, 56, 28); }) || failIn("the second"); }) &&
+           until([&] { return bracket(q.p, 256, [] { return quadIn(70, 20, 86, 36); }) || failIn("the third"); }) &&
+           until([&] {
+               return (issue(q.p, D3DISSUE_BEGIN) && quadIn(20, 40, 52, 56) && issue(q.p, D3DISSUE_END) &&
+                       bracket(q.p, 1024, [] { return quadIn(70, 40, 102, 72); })) ||
+                      failIn("two spans, no read between");
+           });
+}
+// qy-noflush: BEGIN, a quad over (60,60)-(84,76) (24x16: 384), END; GetData(&d, 4, 0) polled, a Present and Sleep(10)
+// after each S_FALSE, for 5 s at most: S_OK, 384 (mtld3d publishes the count at a frame's start once the END's frame
+// retired, the core once a Present committed the END's chunk and it retired). Without the flag and without a Present
+// such a poll finishes on neither runtime: stated, not judged.
+static bool rowQyNoflush() {
+    return until([&] {
+        Com<IDirect3DQuery9> q;
+        if (!newQuery(q) || !issue(q.p, D3DISSUE_BEGIN) || !quadIn(60, 60, 84, 76) || !issue(q.p, D3DISSUE_END))
+            return false;
+        for (const ULONGLONG end = GetTickCount64() + 5000;;) {
+            DWORD d = 0xffffffff;
+            const HRESULT hr = q.p->GetData(&d, sizeof d, 0);
+            if (hr == S_OK) return exact("count", d, 384);
+            if (hr != S_FALSE) return fail("GetData (4 bytes, no flag)", hr);
+            if (GetTickCount64() >= end)
+                return snprintf(why, sizeof why, "GetData (no flag) S_FALSE for 5 s of Presents"), false;
+            if (!presentNow()) return false;
+            Sleep(10);
+        }
+    });
+}
+
+static void queriesRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"qy-support", rowQySupport}, {"qy-event", rowQyEvent}, {"qy-count", rowQyCount},
+        {"qy-empty", rowQyEmpty},     {"qy-open", rowQyOpen},   {"qy-twice", rowQyTwice},
+        {"qy-present", rowQyPresent}, {"qy-two", rowQyTwo},     {"qy-pass", rowQyPass},
+        {"qy-release", rowQyRelease}, {"qy-reuse", rowQyReuse}, {"qy-noflush", rowQyNoflush}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 120000;
+    const HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (FAILED(hr)) ok = fail("GetRenderTarget", hr);
+        else if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = reset() && r.run();
+        row(r.name, ok, why);
+    }
+    if (rtSurf) rtSurf->Release();
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
@@ -9368,6 +9824,7 @@ int main(int argc, char **argv) {
     const bool msaaMode = !bench && argc > 1 && !strcmp(argv[1], "msaa");
     const bool buffersMode = !bench && argc > 1 && !strcmp(argv[1], "buffers");
     const bool blitMode = !bench && argc > 1 && !strcmp(argv[1], "blit");
+    const bool queriesMode = !bench && argc > 1 && !strcmp(argv[1], "queries");
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     const bool bufBench = bench && argc > 4 && !strcmp(argv[4], "buf");
@@ -9415,6 +9872,13 @@ int main(int argc, char **argv) {
             if (!strcmp(argv[i], "strict")) strict = true;
             else if (!strncmp(argv[i], "skip=", 5)) skip = argv[i] + 5;
         buffersRows(dev, strict, skip);
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
+    if (queriesMode) {
+        queriesRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();
         d3d->Release();
         DestroyWindow(hwnd);

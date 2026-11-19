@@ -36,6 +36,8 @@
 #                                StretchRect's answers, C4c-4b's 13 of its unscaled copies, C4c-4c's 10 of its
 #                                sampled ones and C4c-4d's one of its depth-stencil resolve: 41; "blit strict" under
 #                                core), 240 s
+#   qu<64|32>-fresh.txt           d3d9_triangle queries (DXMTRS C4c-5's 12 rows of EVENT and OCCLUSION queries;
+#                                "queries strict" under core), 240 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
@@ -136,6 +138,8 @@ tri d3d9_triangle.exe bf64-fresh 240 buffers $strict
 tri d3d9_triangle32.exe bf32-fresh 240 buffers $strict
 tri d3d9_triangle.exe bt64-fresh 240 blit $strict
 tri d3d9_triangle32.exe bt32-fresh 240 blit $strict
+tri d3d9_triangle.exe qu64-fresh 240 queries $strict
+tri d3d9_triangle32.exe qu32-fresh 240 queries $strict
 rm -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" "$WINEPREFIX/drive_c/windows/syswow64/mtld3d.dll"
 tri d3d9_triangle.exe tri64-nomarker  # Wine finds no builtin without its marker: these fail
 tri d3d9_triangle32.exe tri32-nomarker

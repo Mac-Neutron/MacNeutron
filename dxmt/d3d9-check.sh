@@ -71,7 +71,10 @@
 # ColorFill, UpdateSurface and StretchRect's answers, C4c-4b's 13 sc-* rows of StretchRect's unscaled copies, C4c-4c's
 # 10 sq-* rows of its sampled ones and C4c-4d's depth-stencil resolve, sd-resolve: 41, on a device with no
 # depth-stencil; "blit strict" under core), its rows "blit-<row>"; under core its launch's logs hold no refusal line
-# (since DXMTRS C4c-4d, which resolves sd-resolve's depth-stencil surfaces).
+# (since DXMTRS C4c-4d, which resolves sd-resolve's depth-stencil surfaces). Every lane also runs d3d9_triangle queries
+# (DXMTRS C4c-5's 12 rows of EVENT and OCCLUSION queries, on a device with no depth-stencil; "queries strict" under
+# core), its rows "queries-<row>"; under core its launch's logs hold no refusal line (since DXMTRS C4c-5, which makes
+# CreateQuery the core's).
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -159,12 +162,12 @@ launch() {
 # texture at a vertex sampler), the depth launch's exactly its one (DXMTRS C4b-3d2: a depth-tested draw sampling the
 # bound depth-stencil; a dynamic depth texture's LockRect is the core's since DXMTRS C4c-3b); the buffers launch's
 # exactly its one (DXMTRS C4c-2a: a layout no binding can fetch); the shaders, state, textures, targets, blend, mrt,
-# msaa and blit launches' none (the shaders launch's since DXMTRS C4c-2a, which draws the crossing row; the state
-# launch's since DXMTRS C4c-1: buffer locks are the core's; the textures launch's since DXMTRS C4c-3a: a render-target
-# texture's lock is the core's; the targets launch's since DXMTRS C4c-4c: a scaled copy of a multisampled surface is
-# the core's; the msaa launch's since DXMTRS C4c-4b: a depth-stencil copy of 4 samples is the core's, and since DXMTRS
-# C4c-4d its resolve; the blit launch's since DXMTRS C4c-4d: a depth-stencil resolve is the core's); the other launches
-# are not held to it.
+# msaa, blit and queries launches' none (the shaders launch's since DXMTRS C4c-2a, which draws the crossing row; the
+# state launch's since DXMTRS C4c-1: buffer locks are the core's; the textures launch's since DXMTRS C4c-3a: a
+# render-target texture's lock is the core's; the targets launch's since DXMTRS C4c-4c: a scaled copy of a
+# multisampled surface is the core's; the msaa launch's since DXMTRS C4c-4b: a depth-stencil copy of 4 samples is the
+# core's, and since DXMTRS C4c-4d its resolve; the blit launch's since DXMTRS C4c-4d: a depth-stencil resolve is the
+# core's; the queries launch's since DXMTRS C4c-5: CreateQuery is the core's); the other launches are not held to it.
 refused='is not implemented under runtime.mode = core'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
 depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)'
@@ -180,7 +183,7 @@ refusals_ok() {
       printf '%s\n' "$set_" | while IFS= read -r n; do
         /usr/bin/grep -rqF "d3d9 core: $n $refused" "$2" || exit 1
       done ;;
-    shaders|state|textures|targets|blend|mrt|msaa|blit)
+    shaders|state|textures|targets|blend|mrt|msaa|blit|queries)
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
     *) return 0 ;;
   esac
@@ -266,6 +269,9 @@ check blit "cf-rt cf-lockable cf-bb cf-unbound cf-rtex cf-autogen cf-msaa cf-pla
   us-rt us-bb us-conv us-reject sr-reject sd-resolve sc-rt sc-bb sc-lockable sc-rtex sc-tex sc-plain sc-plain2 sc-conv
   sc-same sc-self sc-autogen sc-order sq-scale sq-level sq-conv sq-swizzle sq-yuv sq-ms sq-overlap sq-plain sq-order
   sq-autogen sc-depth"
+launch ours fresh queries 240 queries $strict
+check queries "qy-support qy-event qy-count qy-empty qy-open qy-twice qy-present qy-two qy-pass qy-release qy-reuse
+  qy-noflush"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi
