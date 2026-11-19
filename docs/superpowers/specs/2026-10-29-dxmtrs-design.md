@@ -1428,12 +1428,53 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   the quad's source read untracked, the plain self-copy's destination point, the view without its swizzle, the
   two packed YUV orders swapped) turn red the rows named before the run (one of them at another cell than
   the one named); the untracked read reddens one row more than predicted (a copy from the back buffer then
-  shows a colour from before the row's own Clear and draw; not traced further), which hides nothing. The whole-branch review: nothing Critical or Important, five Minors ledgered without a fix round
+  shows a colour from before the row's own Clear and draw; not traced further), which hides nothing. The
+  whole-branch review: nothing Critical or Important, five Minors ledgered without a fix round
   (among them: d3d9-rt now depends on mtld3d-types outside its tests; a refused pipeline logs no Metal text;
   two Metal constants restated in `stretch.rs`). No row covers a sampled copy from or into a multisampled back
   buffer (the sweep's functions reach the second), a YUV source's sub-rect, a swizzled view of a level above 0
   or of a cube face, or an extended device's paths. The x64 check did not run in this slice (the range is
   inside `src/d3d9`); it runs at the end of C4c-4d. No probe: no draw file changed.
+  C4c-4d done 2026-11-19 at DXMTRS main 7d48da31, which MacNeutron pins: `StretchRect`'s depth-stencil resolve
+  on the core runtime, which closes C4c-4. d3d9-rt gains `depth_resolve`, **a render pass of its own with no
+  colour target** on the destination's level: one covering triangle whose fragment function writes, for each
+  texel, sample 0 of the source's depth (`[[depth(any)]]`) and, for a format with that plane, of its stencil
+  (`[[stencil]]`, under a state that always passes and replaces), as mtld3d's compute resolve keeps them; both
+  planes load as don't-care (the gates allow whole surfaces only) and are stored. A depth-only source (D16,
+  D24X8) is read itself; **a source with stencil is first copied (4b's `copy_depth`) into a scratch
+  multisampled depth texture made with views in another format**, because Metal gives the `X32_Stencil8` view
+  only to a texture with that usage and the core's depth textures have none; the scratch is forgotten once
+  its copy is recorded. The functions are compiled once a device from a text of d3d9-rt's own (mtld3d has no
+  fragment resolve to share), through 4c's compile helper made to take a text and its entry names; the quad's
+  and the resolve's state records share one helper. The pass never merges with a draw's (no colour against
+  one or more), and a Clear of the destination recorded before it folds into it and is dropped. In the front
+  end `stretch_depth` sends the one pair of unequal sample counts the gates let through, more samples into
+  one, to it; a resolve the core does not record logs "was not recorded" and answers `D3DERR_INVALIDCALL`,
+  where mtld3d answers `D3D_OK` with a warning. **No `StretchRect` of a depth-stencil pair is refused by name
+  any more**; the refusal's remaining callers are in the colour arm (an extended device's whole-surface copy
+  into a non-target, a plain pair no CPU route serves, a multisampled colour source of a format this GPU does
+  not resolve).
+  Gated at that tip with one row replaced in the `blit` launch (`sd-resolve`, 41 rows) and one new in `msaa`
+  (`ms-dres`, 21): the plain build's translator key and `d3d9.dll` imports are the base's; d3d9-check default,
+  msl and core, every row, and no launch meets a refusal of `StretchRect` any more; the Mac's conformance
+  fails anew at triaged sites only; stateblock on both runtimes; the eleven launches under core with Metal's
+  validation layer report nothing (the first compile of the resolve's text, its colourless pass and the
+  scratch's multisampled stencil view among them); the VM's D3D9 gate on both runtimes and both WoW64 forms,
+  in 64-bit and in 32-bit; no "was not recorded" line in any lane. Before any gate of the code the `blit`,
+  `targets` and `msaa` launches ran on mtld3d under the validation layer: its own compute resolve, judged by
+  pixels for the first time, is silent and green. Four mutants (the stencil written as 0, the scratch read
+  without its copy, the depth-only source read untracked, the depth-only function returning 1.0) turn red the
+  cells named before the run, each at the texel and colour named. The whole-branch review: nothing Critical
+  or Important, nine Minors ledgered. **One file of the range is outside the plan**: the deadline of two
+  mtld3d-unix startup-failure tests goes from 5 s to 30 s (test code only), after one of them failed five
+  runs of the Rust gate in a row on an unchanged crate while passing when its binary ran directly; with 30 s
+  the test passes and its binary ends in about 6 s, so the cancel it waits for came late, not never; what slowed those runs is not
+  traced, and a teardown regression of 5 to 30 s would now pass that test. No row tells sample 0 from another
+  reduction, and the rows' surfaces are square.
+  **The x64 check, once for C4c-4** (maintainer, 2026-11-18), at that tip on the plain build: 420 rows ok, 0
+  failed, at its second run. The first, unattended at 03:40, stopped completing rows at 03:54 and resumed at
+  07:21 when the maintainer came back to a window saying the Mac had run out of memory (30 rows failed, all
+  inside that stall): spoiled by the machine, not judged. No probe: no draw file changed.
   C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
   offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer count and its cap
   (done); 3a colour read-back through locks (lockable targets, the back buffer read-only, render-target texture
@@ -1442,7 +1483,7 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   4a `ColorFill`, `UpdateSurface` and `StretchRect`'s answers (done); 4b `StretchRect`'s unscaled copies: into a
   target, between plain surfaces on the CPU, the depth-stencil copy (done); 4c its scaled, converting and YUV
   copies into a target, multisampled ends, overlapping rects of one surface (done); 4d the depth-stencil
-  resolve;
+  resolve (done);
   5 queries; 6 `Reset`, the getters, the swap chain's presents; 7 gamma, frame
   latency, the device's information from winemetal, the `Ex` creators, and the conformance lane for `visual`, `device`
   and `d3d9ex` under core, which is C4c's gate.
@@ -1482,6 +1523,11 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   56830; "Test failed" lines over the default runtime's baseline: 1278 to 70 and 155 to 115; `d3d9ex` still
   dies in `test_reset`). `StretchRect` is 5 of the 185 lines left in the two suites (the depth-stencil resolve,
   4d). The three silent differences are unchanged.
+  The sweep after 4d (`build/c4c/s4d/sweep.md`, gating nothing): `multisampled_depth_buffer_test` 5 new
+  failures to 0 as predicted, nothing else moved (Wine's own counts: `visual` 315 failed of 211160, `device`
+  854 of 56830; "Test failed" lines over the default runtime's baseline: 70 to 65 and 115; `d3d9ex` still dies
+  in `test_reset`). No `StretchRect`, `ColorFill` or `UpdateSurface` line is left in the three suites. The
+  three silent differences are unchanged.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features

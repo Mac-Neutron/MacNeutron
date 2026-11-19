@@ -244,4 +244,84 @@ re-derived from 4c's tip when Task 3 is written.
 
 ## Execution notes
 
-(after execution)
+Executed 2026-11-18 and 19. DXMTRS `c4c`: c7bab8d2 (`depth_resolve`), 86d43511 (a test's deadline: ruling T-1
+below), 7d48da31 (the front end; the tip). MacNeutron `c4c-mn`: 1294ab68 (the rows). Artefacts:
+`build/c4c/s4d` (map, reviews, `rc*.log`, `gates/`, `sweep.md`).
+
+- **Ruling O-2 held again**: the map, the plan, its reviews, the rows and Task 2 ran beside 4c's lanes and
+  chain; Task 3 was written beside 4c's chain. No rework.
+- **Rows as written** (Task 1): cell 2 runs in cell 1's second scene before any read-back (so the source's read
+  is ordered for D24S8 too); cell 3 clears the destination to 1.0 first; `makeDs` gained a sample-type
+  argument; helpers `resolvePair`, `resolveDrawn`. `sr-shape` is gone (its depth resolve is `sd-resolve`'s),
+  `stretch_refusals` with it; `blit` is in the "none" list of both scripts. The row commit's message says "in
+  one scene" of the drawn source's resolve; the resolve sits between two scenes (final review, Minor).
+- **Task 2 as built** (c7bab8d2; `rc2.log` ok at the first run): `depth_resolve` in `rt/depth.rs`,
+  `resolve_pipeline`, `RESOLVE_MSL` (a vertex function and two fragment functions, safe math); `stretch.rs`'s
+  compile helper generalised (`compile_functions`) and **one shared `encode_triangle_state`** for the quad's and
+  the resolve's state records (a deviation the implementer flagged: it avoids a third unsafe slot-write site;
+  the quad's records and tests are unchanged); two `CoreDevice` fields (`resolve_functions`,
+  `resolve_pipelines`); the state through `depth_state_handle`, with no field of its own (the Rules check named
+  one: final review, Minor). Eight tests, by name in the ledger's report.
+- **Task 3 as built** (7d48da31): `stretch_depth`'s arm; the equal-refs test stays ahead of it (unreachable for
+  unequal counts); two literal error lines, one a verb, so each greps to its source; the docs of the module, of
+  `stretch_depth` and of `refuse_stretch` (its callers' shapes, all in the colour arm); 4c's review M4 (two doc
+  comments in d3d9-rt) fixed here.
+- **Ruling T-1: a test's deadline, outside the plan.** Task 3's Rust gate failed five runs in a row
+  (`rc3.log` to `rc3-5.log`, 23:34 to 00:45; both test passes of each) on mtld3d-unix's
+  `submit_spawn_failure_joins_encoder_and_service_workers` alone, on a crate and dependencies byte-identical
+  to the tree whose gate had passed at 23:08; the same binary run directly passed six times of six.
+  Its prewarm worker gives up after `DEADLINE`, 5 s, if the supervisor has not cancelled it. With 30 s
+  (`rc3-6.log`, ok) the test passes and its binary ends in about 6 s: the cancel came late, not never. So the
+  range holds one test-only commit in `src/d3d9/unix` (86d43511), **against "mtld3d unchanged" read to the
+  letter**; mtld3d's behaviour is unchanged. Not traced: what slowed the runs under cargo that night (another
+  application at 200 to 300% CPU and a system daemon's spikes were seen). What it gives up: a teardown regression of 5 to
+  30 s now passes that test. The commit's first message said nine runs; the logs hold five; reworded before any
+  push (trees identical; the lane had run on the same tree under its earlier name, 8e26e51e).
+- **Controls**, every prediction held at the first run. `jv0` (mtld3d under Metal's validation layer, the base):
+  reports 0 in `blit`, `targets`, `msaa`; rows ok 43, 37, 23; **mtld3d's compute resolve, judged by pixels for
+  the first time, is green** (`sd-resolve`, `ms-dres`). `ja`: default and msl ok (41 of 41, 21 of 21); core red
+  on exactly `blit-sd-resolve`, `msaa-ms-dres`, `blit-runtime`, `msaa-runtime`. `jcr`: the VM's default lane
+  ok on old and new WoW64, 41 `bt` and 21 `ms` ok lines each.
+- **Lane `jt3`** at the tip, exactly as predicted: default and core ok, 41 of 41 and 21 of 21 on both, no
+  refusal line in any launch, `was not recorded` 0; `blit` and `msaa` under core with the validation layer:
+  reports 0, rows ok 43 and 23. **Ruling SP-1 held**: Metal takes the colourless pass, `depth2d_ms`, the
+  scratch's multisampled `X32_Stencil8` view and `[[stencil]]` under REPLACE; DR-1 and DR-2 stand.
+- **Mutants**: four (a, b, c, d), `gates/mutants-expect.txt` written before any existed, with the answer
+  (`D3D_OK`, no error line) beside each cell so that a text that does not compile is not read as the red.
+- **The chain** at 7d48da31 with 1294ab68's rows (`jmb`, `jr`, `jc`, `jq`, `jm`, `jw`; 01:37 to 03:05), each
+  job as predicted. `jr`: key and imports the base's, d3d9-check default ok, the conformance fails anew at
+  triaged sites only (both runs), "outside src/d3d9: none". `jc`: the VM's gate ok on default and core, old and
+  new WoW64, 41 `bt64`/`bt32` and 21 `ms64`/`ms32` ok lines each (one more under core), no "was not recorded"
+  line. `jq`: default, msl and core ok with every row, stateblock on both runtimes, the eleven launches under
+  core with the validation layer: reports 0 (`blit` 43, `targets` 37, `msaa` 23 rows ok). `jm`: a and b red on
+  `blit-sd-resolve` (D24S8: T (11,16) steel want mint) and `msaa-ms-dres` (S (48,128) blue want green), c on
+  `blit-sd-resolve` (D16: T (11,16)), d on `blit-sd-resolve` (D16: T (31,16) rust want steel): **each cell and
+  colour as written beforehand**, no other row, the green tip whole.
+- **The x64 check** (`jx`, then `jx2`; ruling X-2). `jx` started at 03:36 with nothing else running (build,
+  tests, key the base's, load 7.7) and `dxmt/check.sh` at 03:40; its row outputs stop at 03:54 and resume at
+  07:21; it ended 07:27 with 390 rows ok and 30 failed, every one a row inside the stall (XeSS, DLSS, nvapi,
+  dxgi, d3d10, frame generation: "got [none]"). No system or display sleep was recorded. The maintainer, back
+  at 07:21, reported a window saying the Mac had run out of memory: macOS pauses applications until it is
+  answered, which fits (not proven by a log line; swap was 17.5 of 18.4 GB used, and the project's builder VM,
+  three days up, held about 17 GB of memory; powering it off moved swap by half a gigabyte, so what holds
+  the swap is not identified). Seven test processes the watchdog's TERM had not ended, and the prefix's
+  services, were stopped by PID. **`jx2`** (07:28 to 07:55, the Mac in use at a load of 10, a user-activity
+  assertion held; the builder VM powered off during its build step): key the base's, **420 rows ok, 0 failed,
+  "dxmt-check: all passed"**, nothing left running. For the maintainer: check.sh's watchdog should kill -9 and reap; a hung row stalled
+  every later row of that run; the XeSS test also hung once at noon on 2026-11-18 (X-1), untraced.
+- **Final review** (`build/c4c/s4d/review-final.md`, range 8bde3b14..8e26e51e, the tip's tree, and the rows):
+  0 Critical, 0 Important, 9 Minor; "push as is once the gates are green". Traced sound: every false answer
+  records nothing (the one after the scratch exists is unreachable); the scratch's release and its safety (the
+  encoder keeps the allocation until the chunk retires); the pass, the pipeline's formats, the state, the
+  views, the text (it cannot flip the image); the read of the source tracked; the pass never merges with a
+  draw's; the arm keyed on the device; nothing outside `src/d3d9`. Ledgered, no fix round: the doc's "nothing
+  recorded" for the unreachable path; a refused depth-stencil state logs "its draws take Metal's default" at
+  each call; `MATH_MODE_SAFE` restated locally (as 4c's M3); the two error branches of `stretch_depth` could
+  be one; this plan's Rules check and its claim that cell 2 shows the source's read was ordered (no probe
+  judges it); T-1's comment states history; two commits lack the alternatives and verification lines
+  `CONTRIBUTING.md` asks for. Not covered by a row or test, most important first: which sample is read; a
+  surface that is not square (a width and height swapped in the pass's size would pass); extended-device
+  paths.
+- **Sweep** (`build/c4c/s4d/sweep.md`, job `jw`, gating nothing): `multisampled_depth_buffer_test` 5 to 0 as
+  predicted, nothing else moved; `visual` 70 to 65 new "Test failed" lines (Wine's own count 320 to 315),
+  `device` 115, `d3d9ex` 66; no suite meets `StretchRect`'s refusal any more.
