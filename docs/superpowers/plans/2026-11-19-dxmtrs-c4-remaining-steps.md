@@ -14,14 +14,15 @@ Every slice still gets its own code map, plan, three reviews and gates: nothing 
   (`runtime.mode = core` on a `core-runtime` build); the shipped default is mtld3d, unchanged.
 - Done since this file was first written: **C4c-5, queries** (plan `2026-11-19-dxmtrs-c4c5-queries.md`;
   DXMTRS 501d43d1). **C4c-6a** (the getters, the stubs and the presents: plan
-  `2026-11-19-dxmtrs-c4c6a-getters-presents.md`) is built, its gates next; the map of slice 6
+  `2026-11-19-dxmtrs-c4c6a-getters-presents.md`; DXMTRS d8ac1c1b) is done too; the map of slice 6
   (`build/c4c/s6/map.md`) cut it as 6a (below's 6a and 6b together), 6c (windowed `Reset`) and 6d (fullscreen
   devices and the window subclass, or a move to C4d). **6a leaves three of the calls listed below refused**:
   `ProcessVertices` (its staged destination needs the vertex buffers' upload path; `test_sysmem_draw` asks
   for it, so 7d owes it) and the multisampled back buffer's writable lock and `GetDC` (no suite meets them;
   7d decides whether they stay refusals).
-- Wine's suites under core after 4d (`build/c4c/s4d/sweep.md`): `visual` 65 new failing lines over the default
-  runtime's baseline, `device` 115, `d3d9ex` 66 with the suite ending early in `test_reset`. The x64 check
+- Wine's suites under core after 6a (`build/c4c/s6/sweep.md`): `visual` 55 new failing lines over the default
+  runtime's baseline, `device` 103, `d3d9ex` 57 with the suite ending early in `test_reset` (65, 115 and 66
+  after 4d). The x64 check
   (D3D10-12 on the Mac) is green at 7d48da31.
 
 ## C4c, what is left

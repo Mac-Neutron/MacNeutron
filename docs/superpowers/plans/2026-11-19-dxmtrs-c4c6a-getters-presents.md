@@ -237,4 +237,60 @@ its own; stated instead).
 
 ## Execution notes
 
-(after execution)
+Executed 2026-11-19. DXMTRS `c4c`: 27815682 (the guards and the eviction's arm), cdcfe882 (the presents),
+d8ac1c1b (STATUS.md; the tip). MacNeutron `c4c-mn`: 7cf13e8a (the rows). Artefacts: `build/c4c/s6` (the map of
+all of slice 6, reviews, `rc*.log`, `gates/`, `sweep.md`).
+
+- **Ruling S6-1**: the map cut slice 6 as 6a (this slice: its groups A and B together, since neither needs a
+  mechanism), 6c (windowed `Reset`) and 6d (fullscreen devices and the window subclass, or a move to C4d).
+- **Ruling O-2 held**: the map, this plan, its reviews, the rows and both code tasks ran beside C4c-5's chain.
+- **Rows as written** (Task 1): helpers `presentCounts`, `adapterMode`, `sameMode`, `sameModeEx`; the present
+  forms use `qy-reuse`'s quads (counts 64, 128, 256, 512, 1024; `PresentEx` 384); the destination window is a
+  hidden window the attempt makes; `state-ex`'s device sits on a visible window of its own. Cells that pin a
+  lenient answer of mtld3d's, as the plan asked: `ValidateDevice(NULL)` `D3D_OK`, `ComposeRects` with null
+  arguments `D3D_OK`, `GetLastPresentCount` 0 after presents. The eviction's cell tells nothing on core (below).
+  **Also in the row commit**: "was not recorded" joins both gate scripts' list of lines a core launch must not
+  hold (C4c-5's notes had promised the Release arm's gate a place in the repository). No run of this slice
+  produced that line, so the addition is unproven by a run: C4c-6c re-cuts C4c-5's mutant e on its base and
+  judges it by `d3d9-check.sh`'s own `queries-runtime` token.
+- **Task 2 as built** (27815682; `rc2.log` ok at the first run): 32 guards removed, none of the Goal's lists
+  kept. `ValidateDevice` reaches the process-wide device information's lazy initialiser (a unix call a core
+  `CreateDevice` has already forced; not the device's recorder). The eviction's arm is a branch inside
+  `evict_managed_resources`, not a function in `core_arms`. **Finding: its marking loop marks nothing on a
+  core device today** (it marks levels that were uploaded, a flag only mtld3d's upload paths set), so the arm
+  cannot be told from one that only logs, and no row or mutant holds it.
+- **Task 3 as built** (cdcfe882; `rc3.log` ok at the first run): the core branch is the first statement of
+  `DeviceInner::present`, calling `core_arms::present(core, &present_params)` (its input is the `CoreDevice`
+  and the device's parameters, not the device); the old arm, the three refusals and `swapchain.rs`'s
+  `on_core_device` go; no visibility change, no new `unsafe`. On a core device a plain `Present` now also runs
+  mtld3d's timer and its once-only warning helpers.
+- **A third commit** (d8ac1c1b; `rc4.log` ok): STATUS.md says what the core answers and still refuses; its
+  message reworded once after the final review (trees identical; the gates ran on the same tree as ce486c03).
+- **Controls**, every prediction held at the first run. `jv0`: `state` on mtld3d under the validation layer:
+  reports 0, rows ok 18: the four rows' expectations are mtld3d's answers. `ja`: default and msl ok (16 of 16);
+  core red on exactly `state-runtime` and the four new tokens (`GetCreationParameters`, `SetDialogBoxMode`,
+  "Present (a source rect)", `GetDisplayModeEx(0)`, each 8876086a). `jcr`: the VM's default lane ok on old and
+  new WoW64, 16 `st64`/`st32` ok lines each.
+- **Lane `jt3`** at the tip's tree, as predicted: default and core ok, 16 of 16 on both; `state` under core
+  with the validation layer: reports 0, rows ok 18; key the base's.
+- **Mutants**: three (a, b, c), each cut at its own entry (at the branch the three are one path);
+  `gates/mutants-expect.txt` written before any run.
+- **The chain** (`jmb`, then `jw`, `jr`, `jc`, `jq`, `jm`; 11:41 to 12:49), each job as predicted. `jr`: key and
+  imports the base's, d3d9-check default ok, the conformance fails anew at triaged sites only, "x64 check: not
+  run". `jc`: the VM's gate ok on default and core, old and new WoW64, 16 `st64`/`st32` ok lines (17 under
+  core). `jq`: default, msl and core ok, stateblock on both runtimes, the twelve launches under core with the
+  validation layer: reports 0 (`state` 18). `jm`: a waits out `state-present`'s last cell (the additional
+  chain), b `state-ex`'s `PresentEx` cell, c `state-present`'s first cell (a source rect), each with the line
+  written beforehand; the green tip whole.
+- **Final review** (`build/c4c/s6/review-final.md`): 0 Critical, 0 Important, 4 Minor; "push as is once the
+  gates are green". Ledgered: the eviction's cell passes on core through the unlock path, not the eviction;
+  the STATUS.md commit's message (reworded); `DeviceInner::present`'s doc still describes only mtld3d's frame
+  swap. Not covered by a row or test: that the eviction re-publishes anything on core; that a present reached
+  a drawable (a cell proves a commit, and a present into a hidden window commits too); whose parameters an
+  additional chain uses; a double present.
+- **Sweep** (`build/c4c/s6/sweep.md`): every function of the Goal's list cleared, and none that runs further
+  added a site: `visual` 65 to 55 new "Test failed" lines, `device` 115 to 103, `d3d9ex` 66 to 57.
+  **`add_dirty_rect_test` went 6 to 5**: the line was the refused call's own answer (visual.c:19306); before
+  the run I had corrected the plan's 5 to 6 on the implementer's finding that the arm marks nothing, which is
+  true and beside the point for that line. Its five colour lines are unchanged.
+- **No probe, no x64 check** (the range is inside `src/d3d9` and one doc).

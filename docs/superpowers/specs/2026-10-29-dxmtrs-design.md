@@ -1514,6 +1514,40 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   counts it); and the Release arm's gate lives in the slice's job scripts, not yet in `d3d9-check.sh`. The
   probe (`build/c4c/s5/probe.md`, a Mac in use): no cost of the bump is measurable. The x64 check did not run
   in this slice (the range is inside `src/d3d9` and one doc); it runs at the end of C4c-7.
+  C4c-6a done 2026-11-19 at DXMTRS main d8ac1c1b, which MacNeutron pins: the getters, the obsolete calls and
+  every form of `Present` on the core runtime, **with no new mechanism**. Thirty-four refusal sites go (and
+  the present arm's own refusal of rects): thirty-one where mtld3d's own body touches no recorder, the
+  eviction's, which takes an arm, and the two other present entries' (the creation parameters, the display
+  modes of the device and
+  of the swap chain, the texture-memory figure, the raster status, the palette, clip-status, N-patch,
+  software-vertex-processing and patch calls, `ValidateDevice`, the extended device's present counters,
+  residency, compose and priority calls): the body that runs on a core device is the one mtld3d always ran.
+  **One core branch at the top of the device's present** replaces the arm `Present` had: `Present` with a
+  source rect, a destination rect, a destination window or a dirty region, `PresentEx` and the swap chain's
+  `Present` now run mtld3d's own entry code down to it, so they present the whole back buffer into the
+  device's window with mtld3d's warnings for what is ignored, as mtld3d does (and D3D11's `Present1`);
+  an additional swap chain presents the device's back buffer. `EvictManagedResources` runs mtld3d's marking
+  loop and destroys nothing. Differences from mtld3d, stated: a present skips mtld3d's frame capture and
+  cursor work (C4d's); the eviction keeps the GPU copies, and its marks find nothing to mark on a core device
+  today; `GetAvailableTextureMem` does not count standalone render-target and depth-stencil surfaces;
+  `ValidateDevice` answers one pass for a state whose draw the core refuses. Still refused: `Reset` and what
+  tests for it, fullscreen devices, `ProcessVertices`, the multisampled back buffer's writable lock and
+  `GetDC`, and C4c-7's calls.
+  Gated at that tip with four new rows in the `state` launch (16): the plain build's translator key and
+  `d3d9.dll` imports are the base's; d3d9-check default, msl and core, every row; the Mac's conformance fails
+  anew at triaged sites only; stateblock on both runtimes; the twelve launches under core with Metal's
+  validation layer report nothing; the VM's D3D9 gate on both runtimes and both WoW64 forms, in 64-bit and
+  in 32-bit. **That a present happened is judged by an occlusion query polled without the flush flag, which
+  only the form under test can complete**: reading the front buffer reads the back buffer on both runtimes
+  and cannot tell. Before any gate of the code the rows ran on mtld3d under the validation layer, all green.
+  Three mutants (the swap chain's `Present`, `PresentEx`, and a `Present` with a source rect each returning
+  without presenting on a core device) turn red the cell named before the run. Both gate scripts now list
+  "was not recorded" among the lines a core launch must not hold, which only the slices' job scripts counted
+  before; **no run has shown that addition red yet** (C4c-6c's mutants take C4c-5's open-bracket mutant for
+  it). The whole-branch review: nothing Critical or Important, four Minors ledgered. Held by no row or
+  test, stated: that a present reached a drawable (a cell proves a commit); one present a call; a rect not
+  stretched; the eviction's arm. No probe (no draw file changed); no x64 check (inside `src/d3d9` and one
+  doc).
   C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
   offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer count and its cap
   (done); 3a colour read-back through locks (lockable targets, the back buffer read-only, render-target texture
@@ -1523,7 +1557,8 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   target, between plain surfaces on the CPU, the depth-stencil copy (done); 4c its scaled, converting and YUV
   copies into a target, multisampled ends, overlapping rects of one surface (done); 4d the depth-stencil
   resolve (done);
-  5 queries (done); 6 `Reset`, the getters, the swap chain's presents; 7 gamma, frame
+  5 queries (done); 6a the getters, the obsolete calls and the presents (done); 6c `Reset`; 6d fullscreen
+  devices; 7 gamma, frame
   latency, the device's information from winemetal, the `Ex` creators, and the conformance lane for `visual`, `device`
   and `d3d9ex` under core, which is C4c's gate.
   The sweep after 3a (`build/c4c/s3/sweep.md`, gating nothing): `visual` and `device` run to their end
@@ -1574,6 +1609,12 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   (32, 32)": the pass barrier of a texture attached and sampled in one pass; attributed to that test's three
   draws by elimination), not this slice's code, not traced, owed at C4c-7's parity. Wine's own counts: `visual`
   315 failed of 211200, `device` 854 of 56832.
+  The sweep after 6a (`build/c4c/s6/sweep.md`, gating nothing): every function named before the run cleared
+  (`test_get_display_mode`, `test_creation_parameters`, `test_vidmem_accounting`, `test_set_palette`,
+  `test_pixel_format`, `test_swapchain_get_displaymode_ex` 9 lines, `test_mvp_software_vertex_shaders`,
+  `test_evict_bound_resources`, `ds_size_test`) and none that now runs further added a site; "Test failed"
+  lines over the default runtime's baseline: `visual` 65 to 55, `device` 115 to 103, `d3d9ex` 66 to 57. Of the
+  215 left, about 138 wait for `Reset`.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
