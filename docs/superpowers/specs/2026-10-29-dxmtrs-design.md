@@ -1344,14 +1344,60 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   and X8R8G8B8, or a whole fill under sRGB write; the texture arm's GPU claim has no mutant (no CPU read shows
   its absence). No probe: no draw file changed, and the twelve `clear` tests pass unchanged over the shared emit
   bodies.
+  C4c-4b done 2026-11-18 at DXMTRS main 30080983, which MacNeutron pins: `StretchRect`'s unscaled copies on the
+  core runtime. d3d9-rt gains `copy` (one texture-to-texture blit from any stored colour level, a target or
+  not, or the back buffer, into a target; refused, with nothing recorded, for an end that does not resolve, a
+  multisampled end, unequal stored formats, a rect or origin that leaves its level, and one texture at both ends
+  unless mtld3d's own `same_surface_route` says `Direct`) and `copy_depth` (a whole depth-stencil level into
+  another of the same size, format and sample count); the wire record is built by the pure `blit_record`, and
+  the copy's two `access_texture` calls are what orders it among the passes, since texture allocations are
+  untracked. In the front end the two exits of `StretchRect` reach `core_arms::stretch_depth` and
+  `stretch_colour`. A colour copy first tries the multisample resolve (4a's, unchanged), then is refused by name
+  when it scales, has a multisampled end, or converts into a target; then **the destination itself decides**: a
+  render target takes the GPU route (the source's and the destination's owed uploads, the blit, and on success
+  the destination's GPU claim and an autogen chain's regeneration; a level that is no target and a plain surface
+  are sources through their core texture, made and uploaded at first use); a plain surface takes the CPU route
+  from another plain surface only (a raw staging copy when the two stagings hold the same bytes, mtld3d's
+  `convert_stretch_dst_staging` otherwise, a YUV source included), so **the invariant holds: on a core device
+  only render-target levels, standalone targets and the back buffer are written by the GPU**, on an extended
+  device too. One texture at both ends follows mtld3d's rule: identical rects are `D3D_OK` with nothing
+  recorded, disjoint rects or two subresources are one blit, overlapping rects are refused by name. A depth
+  pair of equal sample counts is one blit, multisampled included, and one surface at both ends is `D3D_OK`. Every
+  refusal by name goes through one function (the log is once a string pointer), and a copy the core does not
+  record logs "was not recorded" and answers `D3DERR_INVALIDCALL`; the gates count those lines. Answers that
+  differ from mtld3d, each `D3DERR_NOTAVAILABLE` by name: a scaled copy, a converting copy into a target (a YUV
+  decode included), a multisampled source's sub-rect or a multisampled destination, the depth resolve,
+  overlapping rects of one subresource, a plain surface onto itself, an extended device's whole-surface copy
+  into a non-target. Where mtld3d blits a plain pair and claims the destination for the GPU, the core copies
+  the staging; a block-compressed plain pair with a rect off the block grid rounds out to whole blocks (not
+  judged; the grid check belongs to the gates of both runtimes).
+  Gated at that tip with thirteen new rows of the `blit` launch (31 in all) and one of `msaa` (20): the plain
+  build's translator key and `d3d9.dll` imports are the base's; d3d9-check default, msl and core, every row;
+  the Mac's conformance fails anew at triaged sites only (at its second run: the first had one more,
+  device.c:1945 in `test_cursor`, the host's cursor state, not reproduced); stateblock on both runtimes; the
+  eleven launches under core with Metal's validation layer report nothing; the VM's D3D9 gate on both runtimes
+  and both WoW64 forms, in 64-bit and in 32-bit; no "was not recorded" line in any lane. Before any front-end
+  code, the `blit` and `msaa` launches ran on mtld3d under the validation layer, silent and with their pixels
+  judged: that settled that Metal copies between disjoint rects of one subresource and between two multisampled
+  depth textures of one count. Ten mutants (the copy's destination origin, its source origin, the level of a
+  source that is no target, the source's owed uploads at first use and afterwards, the autogen chain's
+  regeneration, the plain copy's destination point, the depth copy's direction, the copy's tracked source read
+  and its tracked destination subresource) turn red the rows named before the run (two of them at another
+  texel than the one named); the last reddens two rows more than predicted (a Clear of the destination's level or face is then not
+  ordered before the blit), which hides nothing. The whole-branch review: nothing Critical or Important, three
+  Minors ledgered without a fix round. No row covers the CPU route's dirty mark on a destination that already
+  has a core texture (a cell for 4c), the claim after a copy into a level, a cube face of a texture that is no
+  target as a source, or an extended device's paths. The x64 check did not run in this slice: the range is
+  inside `src/d3d9`, and the maintainer set it at the end of C4c-4 (2026-11-18). No probe: no draw file
+  changed.
   C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
   offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer count and its cap
   (done); 3a colour read-back through locks (lockable targets, the back buffer read-only, render-target texture
   levels, the front buffer; done); 3b device contexts, the surface's `PreLoad`, the writable back-buffer lock, an
   additional swap chain's back buffer, the DYNAMIC depth texture's lock (done);
-  4a `ColorFill`, `UpdateSurface` and `StretchRect`'s answers (done); 4b `StretchRect`'s unscaled copies of one
-  storage, the depth copy, the CPU routes of plain surfaces; 4c its scaled, converting and YUV copies,
-  multisampled destinations, the depth resolve;
+  4a `ColorFill`, `UpdateSurface` and `StretchRect`'s answers (done); 4b `StretchRect`'s unscaled copies: into a
+  target, between plain surfaces on the CPU, the depth-stencil copy (done); 4c its scaled, converting and YUV
+  copies into a target, multisampled ends, the depth resolve, overlapping rects of one surface;
   5 queries; 6 `Reset`, the getters, the swap chain's presents; 7 gamma, frame
   latency, the device's information from winemetal, the `Ex` creators, and the conformance lane for `visual`, `device`
   and `d3d9ex` under core, which is C4c's gate.
@@ -1376,6 +1422,13 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   (the same five lines are in 3b's sweep, among `add_dirty_rect_test`'s 13), is named here and not traced either:
   that test's five colours after `READONLY` and `NO_DIRTY_UPDATE` writes into a managed texture's levels, which
   D3D9 does not upload and a core draw shows.
+  The sweep after 4b (`build/c4c/s4b/sweep.md`, gating nothing): every function moved as predicted before the
+  run: `test_pointsize` 570 new failures to 0, `depth_blit_test` 15 to 0, `test_mipmap_autogen` 8 to 0,
+  `test_stretch_rect` 81 to 40, `stretchrect_test` 51 to 17, `test_scene` 5 to 1, `test_blit_format_conversion`
+  10 to 8 (Wine's own counts: `visual` 1528 failed of 211160, `device` 894 of 56830; "Test failed" lines over
+  the default runtime's baseline: 1912 to 1278 and 200 to 155; `d3d9ex` still dies in `test_reset`).
+  `StretchRect`'s remaining shapes are about 1215 of the 1433 lines left in the two suites. The three silent
+  differences are unchanged.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features

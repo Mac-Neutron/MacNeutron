@@ -508,4 +508,78 @@ Three reviews, 2026-11-18: R1 design (0 Critical, 4 Important, 9 Minor), R2 reco
 
 ## Execution notes
 
-(after execution)
+Executed 2026-11-18. DXMTRS `c4c`: e949c472 (`copy`, `blit_record`, `level_shape`), a6741461 (`copy_depth`),
+5d3a8bc3 (copies into a target), e8f01b97 (plain to plain), 30080983 (the depth-stencil copy; the tip).
+MacNeutron `c4c-mn`: 3654dc9b (the rows). Artefacts: `build/c4c/s4b` (map, reviews, `rc*.log`, `gates/`).
+
+- **Rulings SS and DM: outcome A for both**, decided by `jv0` before any front-end code: on mtld3d under Metal's
+  validation layer the `blit` launch (rows ok 33) and the `msaa` launch (rows ok 22) report nothing, and
+  `sc-same`, `sc-self`, `sc-depth`, `ms-desc`, `ms-dcopy` judge their pixels green; the one expected
+  "render.scale ... copying the overlap" warning shows. The first `msaa` launch on mtld3d under the layer found
+  nothing else. `jt5` showed the same two facts on core.
+- **Controls**: every prediction held at the first run, no expectation corrected. `ja`: default and msl ok
+  (`blit` 31 of 31, `msaa` 20 of 20); core red on exactly the thirteen `blit-sc-*` tokens and `msaa-runtime`,
+  `msaa-ms-desc`, `msaa-ms-dcopy`; `was not recorded` 0. `jcr`: the VM's default lane ok on old and new WoW64,
+  31 `bt64`/`bt32` and 20 `ms64`/`ms32` ok lines each.
+- **Rows as written** (Task 1): each source's second colour is a quad larger than the copied rect, so a copied
+  rect is one colour and no probe sits on a quad's edge; `sc-autogen`'s source is drawn before its copy (it has
+  a core texture: mutant e leaves the row green); the cells that cannot show a wrong source origin (uniform
+  cube faces, `sc-order`'s first copy) are named in the section comment, and each row has a cell that can;
+  `sc-conv` runs outside `until()` (CPU only); helpers `copyTo`, `twoTone`, `drawnTwo`, `cleared`, `plain64`,
+  `faceOf`, `lockHas`, `has565`, `depthBack`, `depthPair`.
+- **Ruling O-1 held**: Task 2 ran beside Task 1; no outcome B, no rework.
+- **Task 2 as built.** `blit_record` is `pub(super)` (`copy_depth` calls it), not private. `rect_bytes` and
+  `copy` share one private `inside()` in `surface.rs`; `fill` keeps its closure in `recorder.rs`, which stays
+  untouched (the Rules check said one function for three callers: two of three share; final review M2).
+  `copy`'s refusals run before `same_surface_route`, whose additions are unchecked. The implementer also ran two
+  red checks of its own: the accesses moved to level 0, slice 0 turn the two colour fence tests red
+  (`rc2m.log`); `copy_depth`'s accesses dropped turn its two red (`rc2m2.log`). **No unit test holds the
+  direction of a copy** (a swapped depth pair still touches both textures): mutant h and the rows hold it.
+  `target.rs` is in the range by `TargetRef`'s doc sentence alone: P-2 holds, no probe.
+- **Tasks 3-5 as built.** `refuse_stretch()` is private, `#[cold] #[inline(never)]`, and returns the answer;
+  `obj` reaches `stretch_colour` in Task 4's commit; `same_surface_route` is computed once, ahead of the split;
+  the same-bytes key reads the device's mapping (`map_for_device`) for `is_expanded_upload`; the unsafe blocks
+  are more than the Rules check named (the two surface derefs in each arm, the source parent's shared `as_ref()`
+  for the ref of a level that is no target), each with its SAFETY comment.
+- **Lanes**, each exactly as predicted (translator key the base's; `was not recorded` 0): `jt3` (5d3a8bc3) core
+  red on `blit-sc-plain2`, `blit-sc-conv`, `blit-sc-depth` and the three `msaa` tokens, the `blit` launch under
+  core with the validation layer: reports 0, rows ok 30; `jt4` (e8f01b97) red on `blit-sc-depth` and the three
+  `msaa` tokens; `jt5` (30080983) default and core ok, 31 of 31 and 20 of 20 on both, `blit` and `msaa` under core
+  with the layer: reports 0, rows ok 33 and 22.
+- **Mutants**: ten (a, b, c, e, e2, f, g, h, l, m), `gates/mutants-expect.txt` written before any existed. Against
+  the plan's lists, from the rows as committed: a and b also redden `blit-sc-plain2` (its plain-into-target cell
+  is the GPU route); e reddens `blit-sc-tex`, `blit-sc-plain`, `blit-sc-plain2` (not `sc-rtex`: `UpdateSurface`
+  into a render-target texture uploads at once).
+- **The chain** at 30080983 with 3654dc9b's rows (`jmb`, `jr`, `jc`, `jq`, `jm`, `jw`; 17:24 to 20:26, the lock
+  shared with 4c's spike and recorder checks). `jr`: key and imports the base's, d3d9-check default ok (31 and
+  20 rows), "x64 check: not run"; **the conformance had one untriaged site**, device.c:1945 (`test_cursor`:
+  `GetCursorInfo`'s flags, the host session's cursor; Wine's own comment calls the test unreliable). Ruling
+  C-1: not this range's code; the conformance alone ran once more at the tip (`jrc`): only the three triaged
+  sites, 1945 not reproduced, not traced. `jc`: the VM's gate ok on default and core, old and new WoW64, 31
+  `bt64`/`bt32` and 20 `ms64`/`ms32` ok lines each (one more under core), no error line in the VM's logs.
+  `jq`: default, msl and core ok with every row, stateblock on both runtimes, the eleven launches under core
+  with the validation layer: reports 0. `jm`: nine mutants red on exactly their tokens, each answer and colour
+  as `mutants-expect.txt` had it (a with one error line, e with three, as predicted), the green tip whole.
+  **Mutant m reddened `blit-sc-rtex` and `blit-sc-self` beside the predicted `blit-sc-order`**: with the
+  destination's write tracked at level 0, slice 0, a Clear of the destination's level 1 or face is not ordered
+  before the blit, and those rows read the Clear's colour. Ruling J-1: the prediction undercounted the
+  mutant's reach; the tip is green on all three and the unit fence tests go red on the same mutation
+  (`rc2m.log`); no rerun.
+- **Final review** (`build/c4c/s4b/review-final.md`, range 3d5dcda3..30080983 and the rows): 0 Critical, 0
+  Important, 3 Minor; "push as is". Traced sound: mtld3d unchanged (the two exit calls, behind `cfg` and
+  `dev.is_core()`); the invariant in the front end and in `copy`; every return path of both arms; the borrows of
+  the two parent textures; the direction and the record of both copies; the raw copy's key and rect form; one
+  call site for the literal. Ledgered, no fix round: M1 `core_arms.rs`'s module doc lists the refused shapes
+  less three (`stretch_colour`'s own doc names them; 4c rewrites the list); M2 `inside` (above); M3 this
+  section's corrections of the plan's text. Not covered by a row or test, most important first: the CPU route's
+  dirty mark when the destination already has a core texture (`sc-plain2`'s q is made whole after the copy: a
+  cell for 4c); the claim after a copy into a level; a cube face of a texture that is no target as a source;
+  extended-device paths; the ordering of a multisampled depth copy's source read; the order inside one blit
+  encoder, held by pixels alone.
+- **The x64 check** did not run in this slice (the range is inside `src/d3d9`); it runs at the end of C4c-4.
+- **Sweep** (`build/c4c/s4b/sweep.md`, job `jw`, gating nothing): each function as the Goal's table predicted:
+  `test_pointsize` 570 to 0, `test_stretch_rect` 81 to 40, `stretchrect_test` 51 to 17, `test_scene` 5 to 1,
+  `depth_blit_test` 15 to 0, `test_mipmap_autogen` 8 to 0, `test_blit_format_conversion` 10 to 8; also
+  `multisampled_depth_buffer_test` 17 to 12. New "Test failed" lines over the default runtime's baseline:
+  `visual` 1912 to 1278, `device` 200 to 155, `d3d9ex` 66 as before; Wine's own failed counts 2162 to 1528 and
+  939 to 894 (the same falls: no todo check changed).
