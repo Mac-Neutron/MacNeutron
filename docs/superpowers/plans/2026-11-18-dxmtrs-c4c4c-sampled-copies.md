@@ -4,8 +4,8 @@ Slice 4 of C4c, third part. Process: the C4 program's (code map, this plan, thre
 before code, rows first, one commit a feature, full gates once, one whole-branch review, spec, pin, push).
 Maps: `build/c4c/s4c/map.md` (cited "map 1a", "map 2b" ...), `build/c4c/s4b/map.md` ("4b map"),
 `build/c4c/s4/map.md` ("old map"). The 4a and 4b plans (`2026-11-18-dxmtrs-c4c4a-fill-update-validation.md`,
-`2026-11-18-dxmtrs-c4c4b-unscaled-copies.md`) hold the rules this one repeats by name only. Sweep:
-`build/c4c/s4b/sweep.md`. Reviews: `build/c4c/s4c/review-{1-design,2-core,3-exec}.md`. Ledger:
+`2026-11-18-dxmtrs-c4c4b-unscaled-copies.md`) hold the rules this one repeats by name only. Reviews:
+`build/c4c/s4c/review-{1-design,2-core,3-exec}.md` (cited "R1 f3" = review 1, finding 3). Ledger:
 `.superpowers/sdd/2026-11-16-dxmtrs-c4c/progress.md`.
 
 ## Goal
@@ -18,30 +18,42 @@ works whatever its shape:
   8888, 8888 to and from float targets ...), 1:1 or scaled;
 - **from a YUV plain surface** (packed YUY2 and UYVY, planar YV12 and NV12), any size;
 - **into a multisampled target**, and **from a multisampled target** in the shapes the whole-surface resolve
-  does not cover (a sub-rect, a scaled copy, into an AUTOGENMIPMAP level, multisampled into multisampled, the
-  additional swap chain's back buffer);
+  does not cover (a sub-rect, a scaled or converting copy, multisampled into multisampled);
 - **between overlapping rects of one subresource**, and scaled between two levels or faces of one texture;
 
 and **a plain surface copied onto itself** with different rects (on the CPU).
 
 Still refused by name (`D3DERR_NOTAVAILABLE`, the same literal): **the depth-stencil resolve** (ruling S-6: its
 own slice, C4c-4d), an extended device's whole-surface copy into a non-target (4b's ruling X-2), a plain pair
-no CPU route serves (4b's K-1), and a multisampled source of a format this GPU does not resolve.
+no CPU route serves (4b's K-1), and a multisampled standalone source of a format this GPU does not resolve.
 
-Wine, predicted from 4b's sweep and the test sources (map 3c; "Test failed" lines over the default runtime's
-baseline; the reviews derive the numbers, the ledger holds them before the sweep): `yuv_layout_test`,
-`yuv_color_test`, `stretchrect_test`, `test_multisample_stretch_rect`, `test_blit_format_conversion`,
-`clear_test`, `np2_stretch_rect_test`, `test_filling_convention`, `test_stretch_rect` each to 0;
-`multisampled_depth_buffer_test` keeps what its depth resolve decides.
+Wine, derived by R3 from 4a's raw sweep and 4b's predicted changes ("Test failed" lines over the default
+runtime's baseline; re-read against 4b's own sweep once it exists):
+
+| function | after 4b → after 4c |
+|---|---|
+| `yuv_layout_test` | 992 → 0 |
+| `yuv_color_test` | 106 → 0 |
+| `test_multisample_stretch_rect` | 54 → 0 |
+| `test_blit_format_conversion` | 8 → 0 |
+| `clear_test` | 5 → 0 |
+| `np2_stretch_rect_test` | 5 → 0 |
+| `test_filling_convention` | 14 → 0 |
+| `stretchrect_test` | 17 → 0 |
+| `test_stretch_rect` (device) | 40 → 0 |
+| `multisampled_depth_buffer_test` | 12 → 5 (visual.c:17504 once, :17524 four times: the depth resolve) |
 
 ## Global Constraints
 
 The 4b plan's, unchanged, with this slice's names: worktrees `build/c4b3c/dx` (`c4c`) and `build/c4b3c/mn`
-(`c4c-mn`); **base DXMTRS main and MacNeutron main as C4c-4b pushed them** (the ledger names both SHAs; fetch
-before the first build and before the push); job scripts in `build/c4c/s4c/gates`, copied from s4b's and edited
-before their first run (guard: `/usr/bin/grep -nE 'c4c/s4b|c4c4b|C4c-4b'` over them prints nothing; VM state
-names `c4c4c-*`); `base-key.txt` and `base-imports.txt` copied from s4b when 4b's `jr` and `post` printed
-"same"; a rerun is a new job name; every verdict counts its rows and its `was not recorded` lines (0 wanted);
+(`c4c-mn`). **The base is what C4c-4b pushed** (the ledger names both SHAs): Task 1's controls run only after
+that push, with `DXTIP` the pushed DXMTRS SHA; `base-key.txt` and `base-imports.txt` are copied from s4b once
+4b's `jr` printed "same" for both; if 4b's push moved its tip, the predictions here are re-derived (R3 f15).
+Job scripts in `build/c4c/s4c/gates`, copied from s4b's and edited before their first run (guard:
+`/usr/bin/grep -nE 'c4c/s4b|c4c4b|C4c-4b'` over them prints nothing; VM state names `c4c4c-*`; **and the
+positive checks**: `head.sh`'s `BLIT_ROWS` 41; `jv0.sh` runs `blit targets msaa` and greps this slice's rows;
+`jm.sh` and `jmb.sh` carry this plan's letters and tokens; `jcr.sh`/`jc.sh` want 41; R3 f10). A rerun is a new
+job name (`jv0b` is its own file); every verdict counts its rows and its `was not recorded` lines (0 wanted);
 every `d3d9-check.sh` run sets `DXMT_CHECK_WORK`; the pipeline lock; no implementer runs `dxmt/toolchain.sh`;
 each DXMTRS commit passes `tools/rust-check.sh`; home path `~`, privacy scan.
 
@@ -52,198 +64,264 @@ each DXMTRS commit passes `tools/rust-check.sh`; home path `~`, privacy scan.
   surface.
 - **Every stretch refusal goes through `refuse_stretch()`**; a copy the core does not record logs "was not
   recorded" and answers `D3DERR_INVALIDCALL`.
-- **Files outside `src/d3d9`:** none in shipped code. Rulings M-2 and F-1 below name the two places this
-  slice may touch that mtld3d or the tests share.
-- **The x64 check (`dxmt/check.sh`) runs once at the end of C4c-4**, which ruling S-6 makes C4c-4d: not in this
-  slice's chain or post-push check unless the DXMTRS range leaves `src/d3d9` (shipped code; ruling F-1's
-  test-support file does not count, and `jr.sh`/`post.sh` say which files they found).
+- **Files outside `src/d3d9`:** none. Ruling M-2 names the one mtld3d file this slice touches.
+- **The x64 check (`dxmt/check.sh`) runs once at the end of C4c-4**, which ruling S-6 makes C4c-4d. `jr.sh` and
+  `post.sh` test `git diff --name-only $X64_BASE..HEAD` (4b's pushed DXMTRS SHA) against `^src/d3d9/`, print
+  "outside src/d3d9: <files or none>", and run the check only when there are some (R3 f11).
 
 ## The mechanism
 
 ### The shader (shared with mtld3d; ruling M-2)
 
-mtld3d's blit source (`unix/src/metal/blit.rs:67-183`: `mtld3d_blit_vs`, `mtld3d_blit_ps`; map 1a quotes it)
-moves, byte for byte, into the shared crate (`mtld3d_core::stretch_rect`, a `pub const BLIT_MSL: &str` beside
-`BlitDecode`), and `unix/src/metal/blit.rs` compiles that constant. One text, two runtimes; mtld3d compiles
-the same bytes with the same options.
+mtld3d's blit source (`unix/src/metal/blit.rs:67-183`, one raw literal; map 1a quotes it) **and its two
+entry-point names** (`:185-188`) move, byte for byte, into the shared crate (`mtld3d_core::stretch_rect`:
+`pub const BLIT_MSL`, `BLIT_VS`, `BLIT_PS`, beside `BlitDecode`), with `const _: () =
+assert!(BLIT_MSL.is_ascii());` (winemetal's thunk decodes the source as ASCII; R2 f6). mtld3d's file compiles
+that constant, as before. One text, two runtimes: its `[[buffer(0)]]`, `[[texture(0)]]` and `[[sampler(0)]]`
+are free in dxmt-core's direct-binding model (R2: a d3d9 pass's argument buffer is null and later binds
+override).
 
 ### d3d9-rt: `stretch` (new file `rt/src/device/stretch.rs`)
 
 `pub fn stretch(&mut self, quad: &StretchQuad) -> bool` (`#[must_use]`), with
 `pub struct StretchQuad { src: TargetRef, src_rect: [u32; 4], src_view: u32, dst: TargetRef, dst_rect: [u32; 4],
-linear: bool, decode: BlitDecode }` (`src_view`: the `WMTPixelFormat` to sample the source through, its
-swizzle bits included; ruling SW). One render pass that samples the source's one subresource onto the
-destination rect:
+linear: bool, decode: f32 }` (`src_view`: the `WMTPixelFormat` to sample through, swizzle bits included,
+ruling SW; `decode`: `BlitDecode::uniform()`'s number, so no derive is added: R1 f12). One render pass that
+samples the source's one subresource onto the destination rect:
 
-- **Source**: any stored colour level (`level_shape` + `stored_texture`, as `copy`) or the single-sample back
-  buffer, through **a 2D view of that one level and slice** (the key `texture_target` builds, with `src_view`'s
-  format), so a level above 0 and a cube face are sampled as level 0 of the view. **Destination**: a target
-  (`shape`/`resolve`), through its stored format's view (never the sRGB twin: the copy is verbatim, map 1a),
+- **Source**: any stored colour level (`level_shape` + `stored_texture`, as `copy`) through **a 2D view of that
+  one level and slice** in `src_view` (the key `texture_target` builds; for the back buffer
+  `back_buffer.key.with_format(src_view)`, R1 f13), so a level above 0 and a cube face are level 0 of the
+  view. **A multisampled back buffer is a source through its presented texture**: `resolve_presented()` first,
+  then `presented()` (what mtld3d samples and what Present shows; no scratch: R1 f7). `copy` (4b) gains the
+  same source rule in this slice's first d3d9-rt commit. **Destination**: a target (`shape`/`resolve`: the
+  drawn texture), through its stored format's view (never the sRGB twin: the copy is verbatim, map 1a),
   **multisampled or not**.
-- False, and nothing recorded: an end that does not resolve; a multisampled source; an empty rect or one that
-  leaves its level (`checked_add`); **one texture at both ends** (`Arc::ptr_eq`: a pass does not sample what it
-  attaches; the front end goes through a scratch); a planar decode (`Yv12`, `Nv12`: the core's planar texture
-  holds luma alone, map 2d; the front end decodes on the CPU); a library, pipeline or sampler Metal does not
-  make (logged once).
-- **Uniforms by a pure function** `quad_uniforms(src: &Shape, rect: [u32; 4], decode) -> ([f32; 4], [f32; 4])`
-  (the vertex `xform` = rect over the level's extent, as mtld3d computes it; the fragment `(0.0, decode,
-  level width, level height)`: with a one-level view the level uniform is 0), unit-tested.
-- **Recorded**: `close_pass()`, then one `emit`: a render pass on the destination view (load LOAD, store
-  STORE), the source accessed READ, viewport and scissor the destination rect, the pipeline of
-  `(destination stored format, destination samples)`, the sampler (min and mag LINEAR or NEAREST, mip NEAREST,
-  clamp), three vertices. Then `note_written(dst, stored format)`: unlike a blit the quad writes through a
-  view, and a later resolve or Present of a multisampled destination reads that note.
-- **Owned by `CoreDevice`** (no static): the library (made at first use by
-  `MTLDevice_newLibraryWithSourceOptions` with mtld3d's options, MSL 2.4 and fast math; the spike
-  `build/c4c/s4c/gates/jsp.log` showed the call working in every core launch on the Mac and in the VM, 64-bit
-  and 32-bit, old and new WoW64), the two functions, a map of pipelines by `(format, samples)`, the two
-  samplers.
+- False, and nothing recorded (the library is made only after these checks): an end that does not resolve; a
+  multisampled source other than the back buffer; an empty rect or one that leaves its level (`checked_add`,
+  through `surface.rs`'s `inside`, made `pub(super)`); **one texture at both ends** (`Arc::ptr_eq`: a pass
+  does not sample what it attaches, and no tile barrier is recorded); a planar decode (the core's planar
+  texture holds luma alone, map 2d); **a `src_view` whose base format is neither the source's stored format
+  nor its twin, or that differs from the stored format on a texture without `VIEW_TWINS`** (R2 f2, f10); a
+  library or pipeline Metal does not make (the failure is remembered for the device, Metal's error text logged
+  once in words the launches' "unpresented" pattern matches; R2 f7, R3 m8).
+- **Uniforms by a pure function** `quad_uniforms(src: &Shape, rect: [u32; 4], decode: f32) -> ([f32; 4],
+  [f32; 4])`: the vertex `xform` = the rect over **the source level's own extent** (as mtld3d divides by the
+  addressed subresource's extent; R2 f14), the fragment `(0.0, decode, level width, level height)` (level 0 of
+  a one-level view).
+- **Recorded**: `close_pass()`, then one `emit` holding the whole pass (`start_render_pass` to `end_pass`, as
+  `read_rect` does; `render_open` stays false): the destination view attached LOAD/STORE with the level's
+  extent as the pass's size (a pending Clear of the destination then folds in); the source accessed READ;
+  **the rasterizer state: fill solid, cull none, no depth bias** (R2 f1, Critical: the optimizer merges this
+  pass with a draw pass on the same view, and Metal keeps that draw's cull and fill; mtld3d's quad sets both
+  for the same reason); viewport and scissor the destination rect; the pipeline of `(destination stored
+  format, destination samples)`; the sampler; the two 16-byte uniforms at slot 0 of each stage; three
+  vertices. Then `note_written(dst, stored format)`.
+- **The record code is written in `stretch.rs`** (about forty lines that repeat what `draw.rs` and
+  `open_pass` encode: a duplicate, named in the Rules check; sharing it would edit `draw.rs` and
+  `recorder.rs`, which ruling P-3 keeps untouched; R2 f4). **The sampler comes from `CoreDevice::sampler`**
+  (the existing cache, through `mtld3d_core::sampler_state`'s helpers, as mtld3d takes its blit sampler from
+  its ordinary cache): min and mag LINEAR or POINT, mip POINT, clamp.
+- **Owned by `CoreDevice`** (no static; the fields after `device`, per its drop-order doc): the library slot
+  (made at first use by `MTLDevice_newLibraryWithSourceOptions` with mtld3d's options as raw values: language
+  version `0x20004`, math mode 2, invariance 0; a failure remembered), the two functions, the map of
+  pipelines by `(format, samples)` (`Option`, a refusal kept), built through dxmt-core's public
+  `render_pipeline` as `ClearRtv`'s are.
+
+**`scratch_like`** (new, `textures.rs`): `pub fn scratch_like(&mut self, like: TargetRef, width: u32, height:
+u32) -> Option<TargetRef>`: a single-sample, one-level 2D **target** registered under a fresh id with `like`'s
+stored format, **its sRGB twin and `VIEW_TWINS` when it has them** (R1 f3, R2 f2, Critical: `resolve_into`
+resolves through the source's last written view and asserts the destination has it). The caller forgets it
+(`forget_texture`; the recorded closures hold their own).
 
 ### Front end (`core_arms.rs`)
 
-`stretch_colour` keeps step 1 (the resolve) and its plain-destination routes. Its refusal of step 2 goes; for
-**a destination that is a target** the arm now, in order:
+`StretchCall` gains `filter: u32` (set at the exit; R1 f4). `stretch_colour` keeps step 1 (the resolve) and
+its plain-destination routes. For **a destination that is a target** the arm, in order:
 
-1. **settles the source** to a single-sample ref and a decode:
-   - a planar YUV plain surface: its staging decoded on the CPU (`pixel_convert::convert_region` into
-     X8R8G8B8, the whole level) and uploaded into a scratch texture; decode none;
-   - a packed YUV plain surface: its own core texture (`core_flush_dirty`), decode `Yuy2` or `Uyvy`;
-   - a multisampled source: `core.resolve_into(source, scratch)` (a scratch target of its size and stored
-     format); false (a format this GPU does not resolve) → `refuse_stretch()`;
-   - anything else: 4b's ref (`core_target()`, or the parent texture's level after `core_flush_dirty`); decode
-     `blit_decode(src format)` (mode 5 for the three X formats, as mtld3d);
-2. **one texture at both ends** (4b's test; a scratch source is never the destination's): `Skip` → `D3D_OK`;
-   `Direct` and unscaled → 4b's `copy`; otherwise (overlapping rects, or a scaled copy between two levels or
-   faces) the source region is copied into a scratch target of its size and stored format, and the scratch is
-   the source from here;
-3. **the copy**: unscaled, same bytes, single-sample destination → `core.copy` (4b's blit); anything else →
-   `core.stretch` (the filter: LINEAR when the call says LINEAR; the view format by ruling SW);
-4. on success, as 4b: the destination's claim and an autogen chain's regeneration; every scratch is forgotten
-   (`forget_texture`: the recorded closures hold their own).
+0. **One texture at both ends, on the call's own refs** (4b's test, first: R1 f2): `Skip` → `D3D_OK`, nothing
+   recorded (a multisampled target onto itself included).
+1. `core_flush_dirty` of the source's parent texture (not for a planar source) and of the destination's when
+   they are two textures, as 4b (R1 f5: a destination never used on the device is made here).
+2. **The source settled** to a single-sample ref, a view format, a rect and a decode:
 
-A scratch is `core.texture_create(TextureId::new_unique(), ..)` (a target when a blit or a resolve writes it,
-uploaded by `texture_upload` when the CPU fills it) inside one helper that forgets it on every path.
+   | source | ref | view | rect | decode |
+   |---|---|---|---|---|
+   | a planar YUV plain surface | a scratch **texture** of the level's size, X8R8G8B8's stored format, filled by `texture_upload` from the staging decoded on the CPU (ruling Y-1) | stored | the call's | none (the decode wrote alpha ff) |
+   | a packed YUV plain surface | its core texture | stored | the call's | `Yuy2` / `Uyvy` |
+   | the multisampled back buffer | `BackBuffer` (the primitives read its presented texture) | stored | the call's | `blit_decode(format)` |
+   | another multisampled target | `scratch_like(source, its size)`, written by `core.resolve_into` (false: `refuse_stretch()`, ruling R-1) | stored | the call's | `blit_decode(format)` |
+   | a level of a texture that is no target | 4b's ref | **the swizzled view** (`view_format(stored, ti.swizzle)`) | the call's | `blit_decode(format)` |
+   | anything else (a target level, a standalone target, the back buffer) | 4b's ref | stored | the call's | `blit_decode(format)` |
 
-**A plain surface onto itself** (step 4 of 4b's arm, `SameSurfaceRoute` other than `Skip`): the source rect's
-rows are copied out of the staging, then written back at the destination point by
-`copy_bytes_to_staging_region` (one texture, so no second borrow), overlapping or not.
+3. **The source's texture is still the destination's** (a single-sample one-texture pair) and the copy is not
+   an unscaled `Direct`: the source region is copied (4b's `copy`) into `scratch_like(source, region size)`;
+   the scratch is the source from here, its rect `(0, 0, w, h)`, view stored, decode unchanged (mtld3d's
+   scratch route, map 1e).
+4. **The copy**: unscaled, same bytes, single-sample destination → `core.copy` (4b's blit); anything else →
+   `core.stretch` (`linear = filter == D3DTEXF_LINEAR`).
+5. On success, as 4b: the destination's claim and an autogen chain's regeneration. Every scratch is forgotten
+   on every path, failed ones included.
+
+**A plain surface onto itself** (`ptr::eq(src, dst)`, both `IS_OFFSCREEN_PLAIN_DEFAULT`, route other than
+`Skip`; R1 f6: nothing else takes this route, so an extended device's cube faces keep 4b's refusal): the
+level's bytes are copied out (`surface_source_image(None, level)?.bytes.to_vec()`), then
+`copy_bytes_to_staging_region(level, &SourceImage { that copy, .. }, Some(source rect), destination point)`
+writes them back: the function's own block and bounds checks serve a DXT surface (R1 f10).
 
 `stretch_depth` is unchanged: the resolve stays refused (S-6).
 
 ## Review Focus (for the final review)
 
-- mtld3d unchanged: the moved shader text byte-identical; every other hunk behind `cfg` and the device test.
-- `stretch`: what it attaches, samples and tracks; the uniforms; the destination's sample count; `note_written`;
-  pass state after it; every refusal; what the device owns.
-- Every scratch: who writes it, in what format, that it is forgotten on every path and never reachable as an
-  application surface.
-- The routes against mtld3d's answers for every shape the gates let through; the one-texture rule.
+- mtld3d unchanged: the moved shader text and names byte-identical; every other hunk behind `cfg` and the
+  device test.
+- `stretch`: what it attaches, samples and tracks; the rasterizer state; the uniforms; the destination's
+  sample count; `note_written`; every refusal; what the device owns and when it is released.
+- Every scratch: its description, who writes it, its rect and view in the quad, that it is forgotten on every
+  path and never an application surface.
+- The routes against mtld3d's answers for every shape the gates let through; the order of steps 0-4; the view
+  rule (SW).
 - The invariant.
 
 ## Tasks
 
 ### Task 1: rows, scripts, controls (MacNeutron)
 
-Rows in the Appendix: ten new `sq-*` rows in the `blit` launch, `sr-shape` cut down to the one shape still
-refused (the depth resolve), `sc-self`'s overlap cell and `targets`' `rt-msaa` 32x32 cell judged instead of
-strict-refused, one cell added to `sc-plain2` (4b's review: the CPU route's dirty mark on a destination that
-already has a core texture). Scripts: the `check blit` lists and row loops; **the refusal sets**: `targets`
-moves to "none" (`d3d9-check.sh`'s `refusals_ok`, `d3d9-gate.sh`'s `stretch` loop), `blit` keeps its one line
-(`sr-shape`), `msaa` stays none; prose; `sh -n`.
+Rows in the Appendix: ten new `sq-*` rows in the `blit` launch (41 rows); `sr-shape` cut down to the depth
+resolve; **`sc-self` loses its overlap cell, which is `sq-overlap`'s first, judged** (R3 f3); `targets`'
+`rt-msaa` 32x32 cell judged; one cell added to `sc-plain2` (4b's review: the CPU route's dirty mark on a
+destination that already has a core texture; a red there at `ja` is a 4b defect to fix first, not a row to
+correct: R3 m6). **New helpers** (R3 f5): `stretchTo(src, srect, dst, drect, filter)` with a `why`; a judge
+with an alpha mask (`rtHasA`, or a mask in `Tx`); `offered` with a usage argument (a render-target format
+asked with `D3DUSAGE_RENDERTARGET`); `converts(src, dst, name)` over `CheckDeviceFormatConversion` with a skip
+line; writers for UYVY, YV12 and NV12 as Wine writes them (visual.c:13028-13075); a 2-byte reader of an
+R5G6B5 target through `GetRenderTargetData` into an R5G6B5 SYSTEMMEM surface.
 
-**Rules for every new cell**: the 4b plan's (rects off the origin, widths no multiple of 4, inside / just
-outside / (0,0) texels, written colours distinct, no judgement of unwritten texels, depth state restored), plus:
-- a scaled cell judges texels **whose source texel is unambiguous under nearest sampling** (no probe on a
-  source texel boundary), and a LINEAR cell judges one texel of each flat area and one texel whose two source
-  texels differ, against the value computed from the mapping of map 1a, within 1;
-- **every converting cell reads the destination's alpha** where the destination has one (X8R8G8B8 into
-  A8R8G8B8 reads ff), and a 16-bit destination is read with the 2-byte reader;
-- a format a lane may lack is asked with `CheckDeviceFormat` (`offered`) and skipped with a skip line; YUV
-  cells use `CheckDeviceFormatConversion` where Wine's tests do;
-- each scaled or converting cell has, somewhere in its row, a destination the copy does not cover whole.
+Scripts, every place (R3 f10; two of them fail silently if half done):
+- `dxmt/d3d9-check.sh` `refusals_ok`: `targets` leaves the outer case (`:173`) and the inner `targets|blit`
+  case (`:176`) **and joins the "none" list (`:183`)**; the `check blit` list; prose `:46-51`, `:68-72`,
+  `:156-165`.
+- `vm/dxmt/d3d9-gate.sh`: `tg64-fresh tg32-fresh` leave the `stretch` loop (`:281`) **and join the no-kind
+  loop (`:290`)**; the blit row loop; prose `:37-41`, `:55-59`, `:240-247`. `vm/tests/d3d9.sh` `:34-35`.
+- The test file's prose: the header, the blit-mode comment (which rows call `ColorFill` and `UpdateSurface`),
+  `rowRtMsaa`, `rowSrShape`, `rowScSelf`; one sentence that the refusal's name now covers a depth resolve.
+- `sh -n` on the scripts.
 
-Job scripts in `build/c4c/s4c/gates` from s4b's (`head.sh` exists from the spike: `BLIT_ROWS=41`,
-`MSAA_ROWS=20`; `jv0.sh` runs `blit`, `targets` and `msaa` on mtld3d under the validation layer).
+**Rules for every new cell**: the 4b plan's, plus:
+- a scaled cell judges texels whose source texel is unambiguous under nearest sampling. **Named exception**:
+  a downscale by an even factor samples exactly between two source texels (64 into 16: source 4i + 2.0;
+  `rt-msaa`'s 64 into 32: 2i + 1.0), so its colour edges sit on multiples of that factor and each such pair is
+  one colour (R3 m1);
+- `sq-scale`'s 2x POINT cell judges destination texels 31 and 32 (either side of the source edge at 16) as the
+  pure colours (mutant c's cell), and its LINEAR cell judges 30 (A), 31 (¾A + ¼B), 32 (¼A + ¾B), 33 (B) within 1;
+- **every converting cell judges the destination's alpha** through the alpha-mask helper; **every 565 cell
+  uses `k565` colours** (the GPU rounds where the CPU truncates; replicated colours agree), is read by the new
+  2-byte reader, and its way back is judged within 1;
+- `sq-swizzle`'s fills tell the raw texels from the D3D colours in every channel: A4R4G4B4 `0x9c63`, L8 `0x5a`;
+  `sq-yuv`'s macropixels have Y, U and V pairwise distinct (Y b4, U 60, V a0 decodes to (f3, b1, 7f) by the
+  shader and by the CPU decode alike) and flat areas aligned to 2 in x (and in y for the planar formats);
+- a render-target format a lane may lack is asked with `offered(.., D3DUSAGE_RENDERTARGET)`; a YUV cell asks
+  `converts`; a skipped cell prints its skip line;
+- `sq-order`'s and `sq-level`'s copies take their source from **another texture** than their destination
+  (they are Task 3's; one texture beyond `Direct` is Task 4's, in `sq-overlap`);
+- a cell that changes FILLMODE or CULLMODE restores it on every path.
 
-**Controls, in this order:**
-1. `jv0` on the row commit: reports 0 and the row counts. **It decides ruling SW**: `sq-swizzle`'s cells on
-   mtld3d say what mtld3d's quad samples a swizzled source through. If they read the D3D colours (luminance
-   replicated, 4444's channels in place), the row stays as written. If they read the raw stored texels, that is
-   an mtld3d finding for the maintainer; the cells become answer-only in a second row commit (`jv0b` confirms),
-   and the core still binds the swizzled view (the D3D answer).
+Job scripts in `build/c4c/s4c/gates` (the positive checks above).
+
+**Controls, in this order, after 4b's push:**
+1. `JOBS=jv0` alone, on the row commit: `blit`, `targets`, `msaa` on mtld3d under the validation layer:
+   reports 0, rows ok 43, 37, 22. **It confirms ruling SW**: predicted from source, `sq-swizzle` reads the D3D
+   colours (a plain surface is a texture that is no target; mtld3d binds its swizzled view). If it does not,
+   the finding is ledgered, the cells become answer-only in a second row commit, and `jv0b` (its own file)
+   confirms. **First-time shapes on mtld3d under the layer** (`sr-shape`'s depth resolve, a compute pass; the
+   judged overlap route): a report or a red cell there is an mtld3d finding for the maintainer, ledgered, and
+   decides nothing (R3 f14).
 2. `ja` on the final row commit: default and msl all green at the first run; core red on exactly the ten
-   `blit-sq-*`, `blit-sc-self` (its overlap cell), `targets-rt-msaa`, `targets-runtime`, and nothing else
-   (`sr-shape` green: the depth resolve is refused at the base too; `sc-plain2`'s new cell green: it is 4b's
-   code).
-3. `jcr`: the VM's default lane on old and new WoW64, row lines counted.
+   `blit-sq-*`, `targets-rt-msaa`, `targets-runtime`; nothing else (`sc-self`, `sr-shape`, `sc-plain2` green).
+3. `jcr`: the VM's default lane on old and new WoW64: `bt64`/`bt32` 41 ok lines each.
 
 Commit: "dxmt, vm: d3d9_triangle rows for StretchRect's sampled copies (DXMTRS C4c-4c)".
 
-### Task 2: the shader's move and `stretch` (d3d9-rt)
+### Task 2: the shader's move, the back buffer's presented source, `scratch_like`, `stretch` (d3d9-rt)
 
-Two commits. (i) "d3d9: the StretchRect quad's shader in the shared crate": the constant's move alone;
-`git diff` shows the same lines removed and added; mtld3d's unit tests pass untouched. (ii) "d3d9: a sampled
-copy on the core runtime": `stretch` and its tests on the fakes:
-- `quad_uniforms`: a sub-rect of level 1 of a 64-texel texture; each decode's number;
-- refusals, each false with no line (drain and take the calls first): an unknown end, a multisampled source,
-  a non-target destination, an empty rect, a rect past its level, one texture at both ends (two levels of it
-  included), a planar decode;
-- a stretch records one render pass on the destination's view with one draw of three vertices, after the open
-  pass's end; `!render_open` after it; the pipeline call once for two stretches into one format and count,
-  twice when the count differs; a 4-sample destination's pass names its count;
-- **fences** (4b's form): a Clear of the source level, then a stretch from it: the quad's pass waits on the
-  Clear's; a stretch into level 1 (and into a cube face), then a real draw on it: the draw waits on the quad's
-  pass;
-- `note_written`: a stretch into a 4-sample target, then `resolve_into` from it, resolves through the stored
-  format.
-
-The fakes need `MTLDevice_newLibraryWithSourceOptions` (ruling F-1).
+Three commits. (i) "d3d9: the StretchRect quad's shader in the shared crate": the constants' move alone;
+mtld3d's unit tests pass untouched. (ii) "d3d9: a multisampled back buffer is a copy's source through its
+presented texture": `copy`'s source rule, with a test (a 4-sample back buffer copied from: a resolve, then
+one `blit 4`). (iii) "d3d9: a sampled copy on the core runtime": `scratch_like`, `stretch`, and tests on the
+fakes as they are (what they print: R2 f5; `MTLDevice_newLibraryWithSourceOptions` is exported by the
+crate's own test fixture under `cfg(test)`, returning a handle the fakes never make: ruling F-1):
+- `quad_uniforms`: a sub-rect of level 1 of a 64-texel texture; a decode's number carried through;
+- refusals, each false with no line (drain and take the calls first): an unknown end, a multisampled source
+  that is no back buffer, a non-target destination, an empty rect, a rect past its level, one texture at both
+  ends (two levels of it included), a planar decode, a `src_view` of another base format, a swizzled
+  `src_view` on a texture without `VIEW_TWINS`;
+- a stretch records one render pass on the destination's view: the fakes' viewport and scissor lines hold the
+  destination rect; the view line of the source holds its format, mip and slice (level 1; a cube's face 3);
+  the sampler's filters for `linear` and not; `render 12 fill_mode=0 cull_mode=0`; the two 16-byte binds; one
+  draw of three vertices; `!render_open` after it;
+- **the rasterizer state under a merge** (R2 f1): a draw on D at `cull_mode: 1`, then a stretch into D: in the
+  one merged pass the quad's own rasterizer record sits after the draw's and before the quad's draw (told
+  apart by the stretch pipeline's `pso` handle);
+- the pipeline: `pso samples=4` for a 4-sample destination; one pipeline for two stretches of one format and
+  count, a second for another count (the test makes no rect clear: `ClearRtv`'s pipelines print the same
+  line);
+- **fences** (R2 f3: same-target render passes merge, so the follower is a blit): a Clear of level 1 of X,
+  then a stretch from it: the quad's pass waits on the Clear's; a stretch from level 1 of X, then a draw on
+  it: the draw's pass waits on the quad's; a stretch into level 1 (and into a cube face), then `read_back` of
+  it: the blit waits on the quad's pass;
+- `note_written` (R3 f2): a 4-sample target with `VIEW_TWINS` cleared through its sRGB twin, a stretch into
+  it, then `resolve_into` from it: the resolve's view names the stored format;
+- `scratch_like` of a twinned 4-sample target cleared through its twin, then `resolve_into` the scratch: one
+  resolve, no panic (the fixture's 4-sample description gains a twin for this test; R2 f2).
+  Not testable on the fakes, stated: a pipeline or sampler Metal refuses; the library's creation count.
 
 ### Task 3: scaled and converting copies between single-sample ends (front end)
 
-The source's ref and decode for every single-sample source that is no planar surface, step 3's choice between
-`copy` and `stretch`, ruling SW's view format, the claim and the autogen chain. A multisampled end, one texture
-at both ends beyond `Direct`, and a planar source still answer `refuse_stretch()`. Lane `jt3` (default, core):
-green strict under core: `sq-scale sq-level sq-conv sq-swizzle sq-order sq-autogen` and `sq-yuv`'s packed
-cells' row if no planar format is offered; failing tokens predicted and written in the ledger before the run.
-**The `blit` launch once under core with the validation layer.** Commit: "d3d9: StretchRect scales and
+`StretchCall`'s `filter`; steps 0, 1, the single-sample rows of step 2's table (packed YUV included, the
+planar row and the standalone multisampled row excepted), step 4, step 5. A multisampled end, step 3 and a
+planar source answer `refuse_stretch()` for now. Lane `jt3` (default, core): failing tokens predicted
+`blit-sq-yuv blit-sq-ms blit-sq-overlap blit-sq-plain targets-rt-msaa targets-runtime` (planar formats are
+always offered, so `sq-yuv` is red until Task 4); `targets` 1 refusal line, `blit` 1; **the `blit` launch once
+under core with the validation layer** (reports 0, rows ok 39: the first real compile of the shared text, a
+function and a pipeline from it, through the options call; R2 f9). Commit: "d3d9: StretchRect scales and
 converts into a target on the core runtime".
 
-### Task 4: scratch routes (front end)
+### Task 4: multisampled ends, one texture at both ends, planar YUV (front end)
 
-The scratch helper; a multisampled source; a multisampled destination; one texture at both ends (overlap,
-scaled levels and faces); the planar decode. Lane `jt4`: `sq-ms sq-overlap sq-yuv` green, `sc-self` and
-`targets`' `rt-msaa` green, `targets` with no refusal line. **`blit`, `targets` and `msaa` once under core with
-the validation layer.** Commit: "d3d9: StretchRect through a scratch texture on the core runtime".
+The rest of step 2's table, step 3. Lane `jt4`: failing tokens predicted `blit-sq-plain`; `targets` 0 lines,
+`blit` 1, `msaa` 0; **`blit`, `targets`, `msaa` once under core with the layer** (rows ok 42, 37, 22).
+Commit: "d3d9: StretchRect through a scratch texture on the core runtime".
 
 ### Task 5: a plain surface onto itself (front end)
 
 Lane `jt5` at the tip: every row of every launch green strict under core, every refusal set exact (`blit` 1,
-`targets` 0, `msaa` 0), `was not recorded` 0. Commit: "d3d9: StretchRect of a plain surface onto itself on the
-core runtime".
+`targets` 0, `msaa` 0), `was not recorded` 0; the validation launches rows ok 43, 37, 22. Commit: "d3d9:
+StretchRect of a plain surface onto itself on the core runtime".
 
 ### Task 6: gates
 
-As the 4b plan's Task 6. Mutants (final lists in `gates/mutants-expect.txt` from the rows as committed, before
-`jmb`):
-  a. `stretch`'s viewport and scissor at the destination's (0, 0);
-  b. the vertex uniform's origin zeroed (the source rect read from the level's origin);
-  c. the front end hands `stretch` LINEAR for every filter;
-  d. the front end hands decode none for an X source (alpha not forced);
-  e. the source view names level 0, slice 0 of its texture;
-  f. no `note_written` after a stretch;
-  g. the multisampled source is sampled without its resolve into the scratch (the arm skips the resolve and
-     hands the scratch as is);
-  h. the overlap route copies straight (4b's blit refuses it: an error line), or its scratch copy reads the
-     destination's origin;
-  i. `stretch` tracks no source read;
-  j. the plain self-copy writes at the source's point.
-  Each red on exactly its tokens. Not gated by a row mutant, stated: `quad_uniforms`'s fields (the unit test);
-  the destination's pipeline sample count (a wrong one is a validation report in `jq`); the scratch's release
-  (no leak is a test's to see: the final review reads every path).
-- `jw`: the sweep → `build/c4c/s4c/sweep.md`.
-- **Probe: none** if `recorder.rs`, `draw.rs`, `target.rs` and `texture_shape` are untouched; `stretch` adds
-  fields to `CoreDevice`, which no draw reads.
+As the 4b plan's Task 6. **Mutants** (eight; final token lists in `gates/mutants-expect.txt` from the rows as
+committed, before `jmb`; each red on exactly its tokens):
+  b. the front end hands `stretch` the source rect moved to the origin → `blit-sq-scale` and every row with a
+     scaled or converting source rect off the origin over a second colour;
+  c. the front end hands `stretch` LINEAR for every filter → `blit-sq-scale` (texels 31 and 32), and the other
+     2x POINT cells that probe at an edge;
+  g. a multisampled standalone source is handed on as its unwritten scratch (the resolve skipped) →
+     `blit-sq-ms targets-rt-msaa`;
+  h. the overlap route skips its scratch (the copy handed straight to `copy`, which refuses one subresource's
+     overlapping rects) → `blit-sq-overlap`, with `was not recorded` above 0;
+  i. `stretch` tracks no source read → `blit-sq-order`;
+  j. the plain self-copy writes at the source's point → `blit-sq-plain`;
+  l. the front end hands `src_view` without its swizzle bits → `blit-sq-swizzle`;
+  m. the front end hands `Uyvy` for YUY2 and `Yuy2` for UYVY → `blit-sq-yuv`.
+  **Held by Task 2's unit tests on what the fakes print, not by a row mutant** (R2 f5, R3 f8): the viewport and
+  scissor, the source view's level and slice, the destination's level and slice, the sampler's filter, the
+  rasterizer state, `quad_uniforms`, `note_written` (a row cannot see it: R3 f2), the pipeline's sample count.
+  **Not gated at all, stated**: decode mode 5 for a raw X source (it shows only where the source's padding
+  byte is not ff; the rows' colours are opaque; `blit_decode` is mtld3d's own function and `sq-conv` judges
+  alpha ff; R3 f1); a scratch's release.
+- `jw`: the sweep → `build/c4c/s4c/sweep.md`, against the Goal's table.
+- **Probe: none** (ruling P-3).
 
 ### Task 7: review. Task 8: spec, pin, push.
 
@@ -251,17 +329,23 @@ As the 4b plan's.
 
 ## Rules check
 
-- **A static:** none (mtld3d's own `OnceLock` library stays in its unix side; the core's library, functions,
-  pipelines and samplers are fields of `CoreDevice`). **A config key, a wire field, a dependency, a derive, a
-  lint suppression:** none.
-- **New pub items:** `CoreDevice::stretch`, `StretchQuad`; `mtld3d_core::stretch_rect::BLIT_MSL`. **New
-  state:** the five `CoreDevice` fields above.
-- **A duplicate:** none meant: one shader text for both runtimes; `stretch`'s rect checks use `surface.rs`'s
-  `inside`; the routes reuse 4b's refs, `copy`, the claim and the regeneration; the CPU decode is
-  `pixel_convert`'s.
+- **A static:** none (mtld3d's own `OnceLock` library stays in its unix side; the core's library slot,
+  functions and pipeline map are fields of `CoreDevice`). **A config key, a wire field, a dependency, a derive,
+  a lint suppression:** none. **An `export_name`:** one, test-only, in d3d9-rt's fixture (ruling F-1; not one of
+  `d3d9.dll`'s API exports, which `docs/CONVENTIONS.md` covers).
+- **New pub items:** `CoreDevice::stretch`, `StretchQuad`, `CoreDevice::scratch_like`;
+  `mtld3d_core::stretch_rect::{BLIT_MSL, BLIT_VS, BLIT_PS}`; `surface.rs`'s `inside` becomes `pub(super)`.
+  **Changed:** `copy`'s source rule for a multisampled back buffer; `StretchCall` gains `filter`. **New
+  state:** three `CoreDevice` fields (the library slot, the functions, the pipeline map).
+- **A duplicate, named:** `stretch.rs`'s record of a pass, a pipeline bind, a viewport, a scissor, a
+  rasterizer state and a draw repeats `draw.rs`'s and `open_pass`'s encoding; sharing it would edit the draw
+  path (P-3). None else: one shader text and one pair of names for both runtimes; the sampler is the cache's;
+  the routes reuse 4b's refs, `copy`, the claim and the regeneration; the CPU decode is `pixel_convert`'s.
 - **Not silent:** a quad Metal cannot make logs once and answers false; the arm logs "was not recorded".
-- **Divergence added:** planar YUV is decoded on the CPU and then sampled (ruling Y-1); a multisampled source
-  is resolved into a scratch where mtld3d samples the resolve its passes keep. Stated under "Stated gaps".
+- **Divergence added** (also under "Stated gaps"): planar YUV is decoded on the CPU and then sampled; a
+  standalone multisampled source is resolved into a scratch where mtld3d samples the resolve its passes keep;
+  a multisampled target copied onto itself at disjoint 1:1 rects keeps the copy, where mtld3d's blit lands on
+  its resolve texture and the next resolve overwrites it (R1 f2).
 
 ## Rulings (planning)
 
@@ -269,72 +353,83 @@ As the 4b plan's.
   0 of both planes and plane blits (map 1d); dxmt-core has no depth resolve and the wire's attachments no
   resolve fields (map 2f). It shares nothing with the sampled quad. Cost if wrong: one more slice's fixed cost
   (about three hours); the x64 check moves to 4d's end with it.
-- **Q-1. The quad is a pass of d3d9-rt's own, compiled from mtld3d's source, not an internal fixed-function
-  draw through `CoreDevice::draw`.** The same shader gives the same texel mapping, filter and packed-YUV
-  decode as the default lanes expect; a fixed-function draw would couple the copy to the front end's draw
-  resolution and its half-pixel fixup and cannot decode YUV. The spike settled the one unknown (compiling MSL
-  from the PE side in every lane). Cost if wrong: a Metal source compile at a device's first sampled copy
-  (once a device; mtld3d pays the same).
-- **M-2. The shader text moves to the shared crate**, a hunk of mtld3d's code outside `cfg`: a constant's
-  move, byte-identical. Its gates: mtld3d's unit tests untouched, the default lanes, the translator key, the
-  Mac's conformance. Cost if wrong: caught by those; the alternative (a second copy in d3d9-rt) is a duplicate
-  the rules forbid.
-- **F-1. The test fakes gain the library-from-source call** if d3d9-rt's unit tests cannot provide the symbol
-  from their own fixture (tried first: an export in `rt/src/device/fixture.rs` under `cfg(test)`). If the
-  fakes crate (`src/dxmt/fakes`, test support, in no shipped binary) must change, it gains that one export,
-  and the x64 check is still not owed (no shipped file outside `src/d3d9` changes).
-- **SW. A swizzled source is sampled through its D3D format's view** (`view_format(stored, swizzle)`: an X
-  format's alpha one, L8 replicated, A4R4G4B4's channels in place), from the device's mapping of the source's
-  D3D format. Decode mode 5 stays for the X formats, as mtld3d has it. What mtld3d's own quad does with L8 and
-  A4R4G4B4 is not established (map open question 1): `jv0` on `sq-swizzle` says, and decides whether the row
-  judges pixels (Task 1).
-- **Y-1. Planar YUV is decoded on the CPU** from the plain surface's staging and uploaded to a scratch, then
-  sampled: the core's planar texture holds luma alone. NONE and POINT match mtld3d within the decode's
-  rounding (Wine's tolerance is 1); under LINEAR mtld3d filters luma only and the core filters decoded RGB.
-  Cost if wrong: a LINEAR planar copy differs from mtld3d's at chroma edges; fixing the core's planar texture
-  layout is the later remedy.
-- **R-1. A multisampled source of a format this GPU does not resolve is refused by name.** Cost if wrong:
-  32-bit float multisampled targets before Apple9 answer `NOTAVAILABLE` where mtld3d resolves in its pass.
-- **P-3. No probe** (Task 6's condition).
+- **Q-1. The quad is a pass of d3d9-rt's own, compiled from mtld3d's source**, not an internal fixed-function
+  draw through `CoreDevice::draw`: the same shader gives the same texel mapping, filter and packed-YUV decode
+  as the default lanes expect. The spike (`build/c4c/s4c/gates/jsp.log`) showed the plain compile call working
+  from the recorder in every core launch (the Mac; the VM, 64-bit and 32-bit, old and new WoW64); it did not
+  run the options call, a function or a pipeline from a source library, or this text: `jt3`'s first core run
+  is that test (the options slot is in the VM's call table: R2 f9). Cost if wrong: Task 3 falls back to the
+  internal draw. A compile runs once a device, on the API thread, at its first sampled copy (mtld3d: once a
+  process, on its encoder side).
+- **M-2. The shader text and its entry names move to the shared crate**, a hunk of mtld3d's code outside
+  `cfg`: constants moved, byte-identical. Its gates: mtld3d's unit tests untouched, the default lanes, the
+  translator key, the Mac's conformance.
+- **F-1. d3d9-rt's test fixture exports the library-from-source call** under `cfg(test)` (the test binary
+  links with dynamic lookup and the fakes do not define the symbol; R2). `src/dxmt/fakes` does not change.
+- **SW. The source is sampled as mtld3d's quad samples it** (settled from source, R1 f1): through the
+  swizzled view for a level of a texture that is no render target, through the stored format for a target's
+  level, a standalone target, the back buffer and every scratch; decode by `blit_decode`. So an R16F or
+  G16R16 target as a source gives Metal's missing channels (0, and alpha 1), as on mtld3d.
+- **Y-1. Planar YUV is decoded on the CPU** from the plain surface's staging (`pixel_convert::convert_region`:
+  `src_pitch` the image's, `src_slice_pitch` = pitch × height, into X8R8G8B8 at pitch w × 4; R1 f9), the whole
+  level, and uploaded to a scratch, then sampled. NONE and POINT pick the texel and chroma block mtld3d's
+  shader picks; the rounding agrees within Wine's tolerance of 1. Under LINEAR mtld3d filters luma only and
+  the core filters decoded RGB.
+- **R-1. A standalone multisampled source of a format this GPU does not resolve is refused by name.**
+- **P-3. No probe**: `recorder.rs`, `draw.rs`, `target.rs` and `stored_shape` stay untouched; `stretch` is a
+  new file and three fields no draw reads. `copy`'s source rule is in `surface.rs`.
 
 ## Stated gaps
 
 Refused by name after 4c: the depth resolve (4d); an extended device's copy into a non-target; a plain pair
-outside every CPU route; R-1's formats. Not built, stated: LINEAR on a planar source (Y-1); a scratch texture
-is made and released at each call that needs one (a cache is the later remedy if a title leans on these
-shapes); LINEAR sampling of a 32-bit float source is whatever Metal does on this GPU, as on mtld3d.
+outside every CPU route; R-1's formats. Not built, stated:
+- LINEAR on a planar source (Y-1);
+- **costs a call**: a scratch target is created, zeroed by the initializer (a pass on its queue and a wait)
+  and released at each call that needs one (a standalone multisampled source also pays the resolve and a
+  rebuild of the capability map); a planar source pays a CPU decode of its whole level and an upload. A cache
+  a source, as mtld3d keeps, is the later remedy if a title leans on these shapes (R1 f7, R2 f11);
+- LINEAR sampling of a 32-bit float source is whatever Metal does on this GPU, as on mtld3d;
+- the unscaled overlap route's two blits rely on their order inside one blit encoder (`sq-overlap`'s first
+  cell holds it; R2 f13);
+- no cell for a multisampled source into an AUTOGENMIPMAP level or a multisampled additional chain's back
+  buffer (the launches' devices; the routes are the table's).
 
 ## Appendix: the rows
 
 Launch `blit` (31 + 10 = 41 rows; the new ones after `sc-order` and before `sc-depth`, which stays last).
-Surfaces are 64x64 A8R8G8B8 unless said.
+Surfaces are 64x64 A8R8G8B8 unless said; "target" a non-lockable standalone target.
 
 | row | cells |
 |---|---|
-| `sq-scale` | a 32x32 target of four flat quadrants into a 64x64 target whole, POINT (2x: each quadrant's texels) and NONE; a's {8,8,24,24} into b's {5,7,37,39} (2x into a sub-rect): inside, the texel just outside, (0,0); a 64x64 target into a 16x16 one, POINT (the nearest texel of each quadrant); LINEAR 2x of a two-colour edge: one texel in each flat area and the blended one |
-| `sq-level` | level 1 of a 2-level render-target texture (cleared another colour than level 0) scaled into a target; a target scaled into level 1 of a texture and into face 3 of a cube (face 0 unchanged); face 2 of a cube scaled into a target |
-| `sq-conv` | the back buffer's rect (X8R8G8B8) into an A8R8G8B8 target, 1:1: the colour and alpha ff; an A8R8G8B8 target into an R5G6B5 one (2-byte read) and back; an A8R8G8B8 target into an A16B16G16R16F one and back, if offered; a usage-0 X8R8G8B8 texture's level into an A8R8G8B8 target (alpha ff) |
-| `sq-swizzle` | an A4R4G4B4 plain surface and an L8 one (each if offered), written under a lock, 1:1 into an A8R8G8B8 target: the D3D colours (ruling SW; the control decides whether pixels are judged) |
-| `sq-yuv` | a YUY2 and a UYVY plain surface (each if the conversion is offered) of flat macropixel areas into a target, 1:1 and 2x POINT: the decoded colours within 1; a YV12 and an NV12 one likewise, POINT |
-| `sq-ms` | a target into a 4-sample target whole, then that into a third target by the whole resolve: the colours (the note); a target's rect into a 4-sample target's rect, resolved and judged with the texel just outside; a 4-sample target's rect into a target, 1:1 at an offset and 2x; a 4-sample target into another 4-sample one, resolved and judged |
-| `sq-overlap` | a target's {4,6,37,38} onto its own (20,18), overlapping: the moved texels as a copy through a buffer gives them; an additional chain's back buffer's rect onto the device's, overlapping; level 0 of a 2-level render-target texture scaled onto its level 1 |
-| `sq-plain` | a plain surface's rect onto itself, disjoint and overlapping: read under a READONLY lock, then copied into a target (the CPU write reaches the GPU) |
-| `sq-order` | in one scene: a Clear of a, a scaled copy of a into b, then a draw on a: b holds the Clear's colour; a draw on level 1 of a texture, a scaled copy into it covering part of the draw, a draw beside it; the same on a cube's face 3 |
+| `sq-scale` | a 32x32 target of four flat quadrants into a 64x64 target whole, POINT: each quadrant, and texels 31 and 32 across each edge; the same NONE; a's {8,8,24,24} into b's {5,7,37,39} (2x into a sub-rect): (5,7), (20,22), (21,23), the texel just outside, (0,0); a 64x64 target (edges at 32) into a 16x16 one, POINT; LINEAR 2x across an edge at 16: texels 30, 31, 32, 33 |
+| `sq-level` | level 1 of a 2-level render-target texture (another colour than level 0) scaled into a target; a target scaled into level 1 of a second render-target texture and into face 3 of a render-target cube (face 0 unchanged); face 2 of a second cube (face 0 another colour) scaled into a target |
+| `sq-conv` | the back buffer's rect (X8R8G8B8) into a target, 1:1: the colour and alpha ff; an X8R8G8B8 target cleared with alpha 40 into a target: alpha ff (the padding read first; if it does not read 40 the cell prints a skip line for the padding and still judges ff); a target of `k565` colours into an R5G6B5 target (2-byte reader) and back (within 1); a target into an A16B16G16R16F target and back, if offered; a usage-0 X8R8G8B8 texture's level into a target: alpha ff |
+| `sq-swizzle` | an A4R4G4B4 plain surface filled 9c63 and an L8 one filled 5a (each if offered), 1:1 into a target: (99, cc, 66, alpha 33) and (5a, 5a, 5a, ff) |
+| `sq-yuv` | a YUY2 and a UYVY plain surface (each if `converts`) of two flat areas with Y, U, V pairwise distinct, into a target 1:1 and 2x POINT: the decoded colours within 1; a YV12 and an NV12 one likewise |
+| `sq-ms` | a target into a 4-sample target whole, then that into a third target by the whole resolve; a target's rect into a cleared 4-sample target's rect, resolved, with the texel just outside; a 4-sample target's rect into a target, 1:1 at an offset and 2x; a 4-sample target into another 4-sample one, resolved |
+| `sq-overlap` | a target's {4,6,37,38} onto its own (20,18): the moved texels as a copy through a buffer gives them, the rest untouched; an additional chain's back buffer's rect onto the device's, overlapping; level 0 of a 2-level render-target texture scaled onto its level 1 |
+| `sq-plain` | a plain surface's rect onto itself, disjoint and overlapping: read under a READONLY lock, then copied into a target |
+| `sq-order` | in one scene: a Clear of a, a scaled copy of a into b, then a draw on a: b holds the Clear's colour; a draw on level 1 of a texture, a scaled copy from another target into it covering part of the draw, a draw beside it; the same on a cube's face 3; **a wireframe draw on b (FILLMODE restored after), then a scaled copy into b: the copy's texels are whole** |
 | `sq-autogen` | a 32x32 target scaled into level 0 of an AUTOGENMIPMAP render-target texture, then a minified draw of it reads the new colour |
 
 `sr-shape` keeps one cell: a 4-sample D24S8 surface into a single-sample one, `NOTAVAILABLE` under strict,
-`D3D_OK` otherwise (the launch's one refusal line). `sc-self`'s overlap cell becomes `sq-overlap`'s first.
-`sc-plain2` gains: q copied into a target before the plain copy into q, and again after it (the dirty mark).
-Launch `targets`: `rt-msaa`'s 32x32 cell answers `D3D_OK` in every lane and its colour is judged.
-
-**The quad's fields and the cell that decides each:** destination origin and size `sq-scale` (sub-rect);
-source origin `sq-scale`; source level `sq-level`; source slice `sq-level` (face 2); destination level and
-slice `sq-level`; filter `sq-scale` (LINEAR against POINT); decode 5 `sq-conv` (alpha); the view's swizzle
-`sq-swizzle`; the packed decodes `sq-yuv`; the destination's sample count and the note `sq-ms`.
+`D3D_OK` otherwise (the launch's one refusal line, logged at every stage). `sc-plain2` gains: q copied into a
+target before the plain copy into q, and again after it. Launch `targets`: `rt-msaa`'s 32x32 cell answers
+`D3D_OK` in every lane and judges (8,16) and (24,16).
 
 ## Review dispositions
 
-(after the three reviews)
+Three reviews, 2026-11-18: R1 design (0 Critical, 8 Important, 8 Minor), R2 recorder (2, 3, 9), R3 execution
+(2, 13, 9). Every finding folded as cited above. Decided against a reviewer's alternative:
+
+- **R3 f1** (decode 5): mutant d dropped, not made decisive: whether an X8 target keeps a non-ff padding
+  byte on both runtimes is not established; `sq-conv` carries the cell that would show it and says in its skip
+  line when it cannot.
+- **R3 f8** (mutants for the destination's level and slice): held by the unit test on the fakes' view and
+  attachment lines; the swizzle and the packed order got mutants l and m.
+- **R1 f7c** (decode only the source rect of a planar surface): not taken; the cost is stated.
+- The two Criticals of R2 (the rasterizer state; the scratch's twin) and of R3 (two equivalent mutants) are
+  in the mechanism, Task 2's tests and Task 6's list.
 
 ## Execution notes
 
