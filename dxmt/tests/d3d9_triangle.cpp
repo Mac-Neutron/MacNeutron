@@ -129,6 +129,21 @@
 // Presents. With a 120 s budget. A runtime that refuses CreateQuery (D3DERR_NOTAVAILABLE: the core before DXMTRS
 // C4c-5's front end) makes each row print "FAIL CreateQuery 8876086a" (qy-support's "FAIL CreateQuery (EVENT, NULL)
 // 8876086a").
+// With "reset" ("reset strict" under core; DXMTRS C4c-6c): 14 rows "d3d9 rs-<row> ok|FAIL <why>" of Reset and ResetEx
+// of a windowed device, TestCooperativeLevel and CheckDeviceState, each row on a device and a visible window of its own
+// (never maximized): Resets to another size (past the creation size, and a zero size taking the window's client area),
+// with the auto depth-stencil kept, dropped and brought back in another format, from one sample to four and back;
+// what blocks a plain device's Reset (default-pool textures, render targets and vertex buffers, a held back buffer;
+// not a managed texture, a query or the device's own bindings) and the reset it then owes (TestCooperativeLevel and
+// Present D3DERR_DEVICENOTRESET); the state a Reset returns to its defaults and the implicit targets it binds again
+// (an AUTOGENMIPMAP target and a target at index 1 among them); a Reset inside a scene, refused or not; invalid present
+// parameters (refused with nothing changed, or refused owing a reset); another device window; an extended device's
+// ResetEx, which keeps its state, and its back buffer and auto depth-stencil held across one; queries issued before a
+// Reset and read after it; Resets in a row. A draw after a Reset is judged by reading the back buffer back, a present
+// by an occlusion query a present completes (presentCounts). Under "strict" alone, rs-refuse asks for a Reset into
+// fullscreen, which the core refuses (D3DERR_NOTAVAILABLE); elsewhere it does nothing and passes: no device of this
+// mode leaves windowed mode on mtld3d. With a 200 s budget. The core before DXMTRS C4c-6c's front end refuses Reset,
+// ResetEx, TestCooperativeLevel and CheckDeviceState: each row prints "FAIL ... 8876086a" at its first such call.
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -10121,6 +10136,669 @@ static bool rowStateEx() {
            answer("SetConvolutionMonoKernel", ex.p->SetConvolutionMonoKernel(4, 4, rows, columns), D3DERR_INVALIDCALL);
 }
 
+// --- The "reset" mode (DXMTRS C4c-6c): Reset and ResetEx of a windowed device, TestCooperativeLevel and
+// CheckDeviceState. Each row makes a device and a window of its own (rsDevice: a visible plain window, never maximized,
+// whose client area is 256x256, and a 256x256 X8R8G8B8 device on it, DISCARD, IMMEDIATE, one back buffer, with the auto
+// depth-stencil the row names; an extended row's from an IDirect3D9Ex of its own) and releases everything on every
+// path; while it runs, the globals the helpers read name its device (OnDevice; rtSurf null, so until()'s rebind of it
+// is an INVALIDCALL nothing reads). Every Reset is made outside until(), with no implicit surface held unless the cell
+// holds one on purpose (a held one blocks a plain device's Reset). A draw after a Reset is judged by reading the back
+// buffer (bbRead: GetRenderTargetData into a system-memory surface of its size, a multisampled one resolved first by
+// StretchRect into a single-sample target of its size) in one until() attempt (mtld3d leaves a draw out while a new
+// device's pipelines build); a present by presentCounts, its query made after the Reset, on a single-sample back
+// buffer.
+// A plain Reset turns D3DRS_ZENABLE on whether or not the device has an auto depth-stencil (mtld3d's default; native's
+// follows the auto depth-stencil): every judged draw sets it, on with Z cleared to 1 where there is one, off elsewhere.
+// Each cell wants what mtld3d, the default runtime, answers. The core refuses Reset, ResetEx, TestCooperativeLevel and
+// CheckDeviceState (D3DERR_NOTAVAILABLE) until DXMTRS C4c-6c's front end: a row stops at its first refused call and
+// prints its "FAIL ... 8876086a". The mode's budget is 200 s, the launches' watchdog 300 s.
+
+// A row's device: its window, an extended row's IDirect3D9Ex, the device (`ex` the same one, extended), released in
+// reverse: the device, the IDirect3D9Ex, then the window.
+struct RsDevice {
+    Window w;
+    Com<IDirect3D9Ex> d3d;
+    Com<IDirect3DDevice9Ex> ex;
+    Com<IDirect3DDevice9> d;
+};
+// A visible plain window of its own at (x,100) whose client area is cw x ch (mtld3d gives a maximized window's back
+// buffer its client area whatever the request, so none is maximized).
+static bool rsWindow(Window &w, int cw, int ch, int x = 400) {
+    RECT r = {0, 0, cw, ch};
+    AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
+    w.h = CreateWindowW(L"d3d9_triangle", L"d3d9_triangle reset", WS_OVERLAPPEDWINDOW | WS_VISIBLE, x, 100,
+                        r.right - r.left, r.bottom - r.top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    return w.h || (snprintf(why, sizeof why, "CreateWindowW"), false);
+}
+// Windowed present parameters on `w`: width x height X8R8G8B8, one back buffer, DISCARD, IMMEDIATE, `ms` samples, an
+// auto depth-stencil of `depth` (none for D3DFMT_UNKNOWN).
+static D3DPRESENT_PARAMETERS rsParams(HWND w, UINT width, UINT height, D3DFORMAT depth = D3DFMT_UNKNOWN,
+                                      D3DMULTISAMPLE_TYPE ms = D3DMULTISAMPLE_NONE) {
+    D3DPRESENT_PARAMETERS pp = {};
+    pp.BackBufferWidth = width, pp.BackBufferHeight = height, pp.BackBufferFormat = D3DFMT_X8R8G8B8;
+    pp.BackBufferCount = 1, pp.MultiSampleType = ms, pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = w;
+    pp.Windowed = TRUE, pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    pp.EnableAutoDepthStencil = depth != D3DFMT_UNKNOWN, pp.AutoDepthStencilFormat = depth;
+    return pp;
+}
+// r's window and a 256x256 device on it (rsParams, `depth`): from main's IDirect3D9, or, `extended`, CreateDeviceEx of
+// an IDirect3D9Ex of its own. A create that fails is a FAIL with its hr.
+static bool rsDevice(RsDevice &r, D3DFORMAT depth = D3DFMT_UNKNOWN, bool extended = false) {
+    if (!rsWindow(r.w, 256, 256)) return false;
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256, depth);
+    HRESULT hr;
+    if (!extended) {
+        hr = direct3d ? direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, r.w.h,
+                                               D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp, &r.d.p)
+                      : E_POINTER;
+        return (hr == D3D_OK && r.d.p) || fail("CreateDevice", hr);
+    }
+    hr = Direct3DCreate9Ex(D3D_SDK_VERSION, &r.d3d.p);
+    if (hr != D3D_OK || !r.d3d.p) return fail("Direct3DCreate9Ex", hr);
+    hr = r.d3d.p->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, r.w.h, D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp,
+                                 nullptr, &r.ex.p);
+    if (hr != D3D_OK || !r.ex.p) return fail("CreateDeviceEx", hr);
+    r.d.p = r.ex.p, r.d.p->AddRef();
+    return true;
+}
+static bool resetIs(const char *what, D3DPRESENT_PARAMETERS &pp, HRESULT expect = D3D_OK) {
+    return answer(what, dev->Reset(&pp), expect);
+}
+static bool coopIs(HRESULT expect) { return answer("TestCooperativeLevel", dev->TestCooperativeLevel(), expect); }
+static bool presentIs(HRESULT expect) {
+    return answer("Present", dev->Present(nullptr, nullptr, nullptr, nullptr), expect);
+}
+// `s`'s description: w x h of format f and `ms` samples.
+static bool descIs(const char *name, IDirect3DSurface9 *s, UINT w, UINT h, D3DFORMAT f,
+                   D3DMULTISAMPLE_TYPE ms = D3DMULTISAMPLE_NONE) {
+    D3DSURFACE_DESC d = {};
+    const HRESULT hr = s->GetDesc(&d);
+    if (FAILED(hr)) return fail("GetDesc", hr) || failIn(name);
+    if (d.Width == w && d.Height == h && d.Format == f && d.MultiSampleType == ms) return true;
+    return snprintf(why, sizeof why, "%s %ux%u format %d, %d samples; want %ux%u format %d, %d samples", name, d.Width,
+                    d.Height, (int)d.Format, (int)d.MultiSampleType, w, h, (int)f, (int)ms),
+           false;
+}
+// GetBackBuffer's and GetDepthStencilSurface's descriptions (each surface released at once).
+static bool bbIs(UINT w, UINT h, D3DMULTISAMPLE_TYPE ms = D3DMULTISAMPLE_NONE) {
+    Com<IDirect3DSurface9> bb;
+    CK(GetBackBuffer, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
+    return (bb.p || fail("GetBackBuffer (no surface)", E_POINTER)) &&
+           descIs("the back buffer", bb.p, w, h, D3DFMT_X8R8G8B8, ms);
+}
+static bool dsIs(UINT w, UINT h, D3DFORMAT f, D3DMULTISAMPLE_TYPE ms = D3DMULTISAMPLE_NONE) {
+    Com<IDirect3DSurface9> ds;
+    CK(GetDepthStencilSurface, &ds.p);
+    return (ds.p || fail("GetDepthStencilSurface (no surface)", E_POINTER)) &&
+           descIs("the auto depth-stencil", ds.p, w, h, f, ms);
+}
+// GetViewport (0,0) w x h, depth range [mn, mx]; GetScissorRect (0,0)-(w,h).
+static bool extentIs(UINT w, UINT h, float mn = 0.0f, float mx = 1.0f) {
+    D3DVIEWPORT9 v = {};
+    RECT s = {};
+    CK(GetViewport, &v);
+    CK(GetScissorRect, &s);
+    if (v.X || v.Y || v.Width != w || v.Height != h || v.MinZ != mn || v.MaxZ != mx)
+        return snprintf(why, sizeof why, "the viewport (%lu,%lu) %lux%lu, %g..%g; want (0,0) %ux%u, %g..%g",
+                        (unsigned long)v.X, (unsigned long)v.Y, (unsigned long)v.Width, (unsigned long)v.Height,
+                        (double)v.MinZ, (double)v.MaxZ, w, h, (double)mn, (double)mx),
+               false;
+    if (s.left || s.top || s.right != (LONG)w || s.bottom != (LONG)h)
+        return snprintf(why, sizeof why, "the scissor rect (%ld,%ld)-(%ld,%ld), want (0,0)-(%u,%u)", (long)s.left,
+                        (long)s.top, (long)s.right, (long)s.bottom, w, h),
+               false;
+    return true;
+}
+// The back buffer read: GetRenderTargetData into a system-memory surface of its size (a multisampled one, square,
+// resolved first by resolveInto, as ms-back reads it), check(bits, pitch) on it.
+template <class F> static bool bbRead(F check) {
+    Com<IDirect3DSurface9> bb;
+    Rt one;
+    CK(GetBackBuffer, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
+    if (!bb.p) return fail("GetBackBuffer (no surface)", E_POINTER);
+    D3DSURFACE_DESC d = {};
+    const HRESULT hr = bb.p->GetDesc(&d);
+    if (FAILED(hr)) return fail("GetDesc (the back buffer)", hr);
+    IDirect3DSurface9 *src = bb.p;
+    if (d.MultiSampleType != D3DMULTISAMPLE_NONE) {
+        if (d.Width != d.Height)
+            return snprintf(why, sizeof why, "a multisampled back buffer %ux%u, not square", d.Width, d.Height), false;
+        if (!resolveInto(bb.p, one, d.Width, d.Format)) return false;
+        src = one.s.p;
+    }
+    return readTarget(src, d.Width, d.Height, d.Format, check);
+}
+static bool bbHas(std::initializer_list<Tx> px) {
+    return bbRead([&](const BYTE *b, int p) { return txHas("the back buffer", b, p, px); });
+}
+// The back buffer cleared blue; Z cleared to 1 and the depth test on when `z`, else the test off.
+static bool clearBlue(bool z) {
+    if (!rstate(D3DRS_ZENABLE, z ? D3DZB_TRUE : D3DZB_FALSE)) return false;
+    CK(Clear, 0, nullptr, D3DCLEAR_TARGET | (z ? D3DCLEAR_ZBUFFER : 0), BLUE, 1.0f, 0);
+    return true;
+}
+// A draw after a Reset (one until() attempt): clearBlue(z), a rust quad over (x0,y0)-(x1,y1) at z 0.5, the back buffer
+// read: rust at the quad's centre, blue at (bx,by).
+static bool lands(int x0, int y0, int x1, int y1, int bx, int by, bool z = false) {
+    return clearBlue(z) && quadIn((float)x0, (float)y0, (float)x1, (float)y1, KRUST) &&
+           bbHas({{(x0 + x1) / 2, (y0 + y1) / 2, KRUST}, {bx, by, BLUE}});
+}
+// A present after a Reset: one until() attempt of clearBlue(z) and presentCounts over the 16x8 quad at (8,8)-(24,16)
+// (128), its query made now.
+static bool presents(bool z = false) {
+    return until([&] {
+        return clearBlue(z) && presentCounts("Present", 8, 8, 24, 16, 128,
+                                             [] { return dev->Present(nullptr, nullptr, nullptr, nullptr); });
+    });
+}
+// The depth test (one until() attempt): clearBlue(true), red at z 0.25 over (32,96)-(160,160), then green at 0.75 over
+// (96,96)-(304,160), which the red hides where they overlap: red at (64,128) and (128,128), green at (288,128) (past
+// the creation size), blue at (288,32). The back buffer is 320 wide or more.
+static bool depthLands() {
+    return clearBlue(true) &&
+           scene([] { return zquad(32, 96, 160, 160, 0.25f, TRED) && zquad(96, 96, 304, 160, 0.75f, TGRN); }) &&
+           bbHas({{64, 128, TRED}, {128, 128, TRED}, {288, 128, TGRN}, {288, 32, BLUE}});
+}
+// GetDepthStencilSurface with no auto depth-stencil: D3DERR_NOTFOUND and the out pointer NULL.
+static bool noDepth() {
+    IDirect3DSurface9 *const mark = reinterpret_cast<IDirect3DSurface9 *>(static_cast<INT_PTR>(0x5a5a));
+    IDirect3DSurface9 *ds = mark;
+    const HRESULT hr = dev->GetDepthStencilSurface(&ds);
+    if (SUCCEEDED(hr) && ds && ds != mark) ds->Release();
+    if (hr != D3DERR_NOTFOUND) return fail("GetDepthStencilSurface (no auto depth-stencil)", hr);
+    return !ds ||
+           (snprintf(why, sizeof why, "GetDepthStencilSurface (no auto depth-stencil) left %p", (void *)ds), false);
+}
+
+// rs-size (no auto depth-stencil): Reset to 384x320 (past the creation size both ways) D3D_OK: the back buffer 384x320
+// X8R8G8B8, the viewport (0,0) 384x320 over 0..1 and the scissor rect (0,0)-(384,320); a quad over (320,256)-(376,312)
+// lands (rust at (348,284), blue at (300,300)). Reset to 0x0 D3D_OK: the struct reads the window's client area back
+// (GetClientRect, 256x256), and the back buffer, viewport and scissor rect are that size; a quad 8 pixels in from its
+// bottom-right corner lands (blue at (8,8)).
+static bool rowRsSize() {
+    RsDevice r;
+    if (!rsDevice(r)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 384, 320);
+    if (!resetIs("Reset (to 384x320)", pp)) return false;
+    if (!bbIs(384, 320) || !extentIs(384, 320) || !until([] { return lands(320, 256, 376, 312, 300, 300); }))
+        return failIn("384x320");
+    RECT c = {};
+    if (!GetClientRect(r.w.h, &c) || c.right <= 0 || c.bottom <= 0)
+        return snprintf(why, sizeof why, "GetClientRect"), false;
+    const UINT cw = (UINT)c.right, ch = (UINT)c.bottom;
+    pp = rsParams(r.w.h, 0, 0);
+    if (!resetIs("Reset (a zero size)", pp)) return false;
+    if (pp.BackBufferWidth != cw || pp.BackBufferHeight != ch)
+        return snprintf(why, sizeof why, "Reset (a zero size) wrote %ux%u back, want the client area's %ux%u",
+                        pp.BackBufferWidth, pp.BackBufferHeight, cw, ch),
+               false;
+    return (bbIs(cw, ch) && extentIs(cw, ch) &&
+            until([&] { return lands((int)cw - 40, (int)ch - 40, (int)cw - 8, (int)ch - 8, 8, 8); })) ||
+           failIn("the client area");
+}
+// rs-depth (an auto D24S8): Reset to 320x240 with D24S8 D3D_OK: GetDepthStencilSurface 320x240 D24S8, depthLands.
+// Reset at that size with no auto depth-stencil D3D_OK: GetDepthStencilSurface D3DERR_NOTFOUND and NULL; a quad over
+// (240,160)-(304,224), the depth test off, lands (blue at (8,8)). Reset at that size with an auto D16 D3D_OK:
+// GetDepthStencilSurface 320x240 D16, depthLands.
+static bool rowRsDepth() {
+    RsDevice r;
+    if (!rsDevice(r, D3DFMT_D24S8)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 320, 240, D3DFMT_D24S8);
+    if (!resetIs("Reset (to 320x240, D24S8)", pp)) return false;
+    if (!bbIs(320, 240) || !dsIs(320, 240, D3DFMT_D24S8) || !until(depthLands)) return failIn("D24S8 at 320x240");
+    pp = rsParams(r.w.h, 320, 240);
+    if (!resetIs("Reset (no auto depth-stencil)", pp)) return false;
+    if (!noDepth() || !until([] { return lands(240, 160, 304, 224, 8, 8); })) return failIn("no auto depth-stencil");
+    pp = rsParams(r.w.h, 320, 240, D3DFMT_D16);
+    if (!resetIs("Reset (an auto D16 at that size)", pp)) return false;
+    return (dsIs(320, 240, D3DFMT_D16) && until(depthLands)) || failIn("D16 at 320x240");
+}
+// The white pretransformed triangle (0,0), (256,256), (0,256) over a black clear (Z 1, the depth test on): its
+// hypotenuse runs through the diagonal pixels' centres (D3D9 puts a centre at integer coordinates), so 2 of a pixel's 4
+// samples are in at 4 samples (ms-edge's band, 48..208, for the mean of (128,128)'s channels) and none or all at one
+// (0 or 255). White at (32,224), black at (224,32). One until() attempt.
+static bool edgeLands(bool four) {
+    const RV tri[3] = {{0, 0, 0.5f, 1, TWHT}, {256, 256, 0.5f, 1, TWHT}, {0, 256, 0.5f, 1, TWHT}};
+    if (!rstate(D3DRS_ZENABLE, D3DZB_TRUE)) return false;
+    CK(Clear, 0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0, 1.0f, 0);
+    if (!scene([&] { return rtri(tri); })) return false;
+    int mean = -1;
+    if (!bbRead([&](const BYTE *b, int p) {
+            const DWORD d = texel(b, p, 128, 128);
+            mean = ((int)(d >> 16 & 0xff) + (int)(d >> 8 & 0xff) + (int)(d & 0xff)) / 3;
+            return txHas("the back buffer", b, p, {{32, 224, TWHT}, {224, 32, 0}});
+        }))
+        return false;
+    if (four) return inBand("the diagonal's (128,128)", mean);
+    return mean <= 1 || mean >= 254 ||
+           (snprintf(why, sizeof why, "the diagonal's (128,128) %d, want 0 or 255 at one sample", mean), false);
+}
+// rs-msaa (an auto D24S8): Reset to 4 samples at 256x256 D3D_OK: the back buffer and GetDepthStencilSurface say 4
+// samples; edgeLands(4 samples), its until() Present D3D_OK (the resolve at present, judged by its answer alone: a
+// present's occlusion count of a multisampled back buffer is not pinned). Reset back to one sample D3D_OK: both say
+// none; edgeLands(one), a present (presents).
+static bool rowRsMsaa() {
+    RsDevice r;
+    if (!rsDevice(r, D3DFMT_D24S8)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    const D3DMULTISAMPLE_TYPE four = D3DMULTISAMPLE_4_SAMPLES;
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256, D3DFMT_D24S8, four);
+    if (!resetIs("Reset (to 4 samples)", pp)) return false;
+    if (!bbIs(256, 256, four) || !dsIs(256, 256, D3DFMT_D24S8, four) || !until([] { return edgeLands(true); }))
+        return failIn("4 samples");
+    pp = rsParams(r.w.h, 256, 256, D3DFMT_D24S8);
+    if (!resetIs("Reset (back to one sample)", pp)) return false;
+    return (bbIs(256, 256) && dsIs(256, 256, D3DFMT_D24S8) && until([] { return edgeLands(false); }) &&
+            presents(true)) ||
+           failIn("one sample again");
+}
+// One blocker of rs-blockers: make(held), the resource the application then holds; Reset D3DERR_INVALIDCALL;
+// TestCooperativeLevel and Present D3DERR_DEVICENOTRESET; the resource released; Reset and TestCooperativeLevel D3D_OK.
+template <class T, class F> static bool blockedBy(const char *what, HWND w, F make) {
+    D3DPRESENT_PARAMETERS pp = rsParams(w, 256, 256);
+    {
+        Com<T> held;
+        if (!make(held) || !resetIs("Reset", pp, D3DERR_INVALIDCALL) || !coopIs(D3DERR_DEVICENOTRESET) ||
+            !presentIs(D3DERR_DEVICENOTRESET))
+            return failIn(what);
+    }
+    return (resetIs("Reset (released)", pp) && coopIs(D3D_OK)) || failIn(what);
+}
+// rs-blockers (no auto depth-stencil), a blocker each: a 64x64 default-pool texture, a 64x64 CreateRenderTarget
+// surface, a 64-byte default-pool vertex buffer, the back buffer (GetBackBuffer). Then a managed texture and an
+// OCCLUSION query alive: Reset and TestCooperativeLevel D3D_OK, a quad lands, until()'s Present D3D_OK.
+static bool rowRsBlockers() {
+    RsDevice r;
+    if (!rsDevice(r)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    const HWND w = r.w.h;
+    if (!blockedBy<IDirect3DTexture9>("a default-pool texture", w,
+                                      [](Com<IDirect3DTexture9> &t) {
+                                          CK(CreateTexture, 64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &t.p,
+                                             nullptr);
+                                          return true;
+                                      }) ||
+        !blockedBy<IDirect3DSurface9>("a render target", w,
+                                      [](Com<IDirect3DSurface9> &s) {
+                                          CK(CreateRenderTarget, 64, 64, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE,
+                                             &s.p, nullptr);
+                                          return true;
+                                      }) ||
+        !blockedBy<IDirect3DVertexBuffer9>("a default-pool vertex buffer", w,
+                                           [](Com<IDirect3DVertexBuffer9> &b) {
+                                               CK(CreateVertexBuffer, 64, D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &b.p,
+                                                  nullptr);
+                                               return true;
+                                           }) ||
+        !blockedBy<IDirect3DSurface9>("the back buffer held", w, [](Com<IDirect3DSurface9> &s) {
+            CK(GetBackBuffer, 0, 0, D3DBACKBUFFER_TYPE_MONO, &s.p);
+            return true;
+        }))
+        return false;
+    Com<IDirect3DTexture9> managed;
+    Com<IDirect3DQuery9> q;
+    CK(CreateTexture, 64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &managed.p, nullptr);
+    if (!newQuery(q)) return false;
+    D3DPRESENT_PARAMETERS pp = rsParams(w, 256, 256);
+    return (resetIs("Reset", pp) && coopIs(D3D_OK) && until([] { return lands(160, 160, 224, 224, 32, 32); })) ||
+           failIn("a managed texture and a query alive");
+}
+// rs-state (an auto D24S8): a 64x64 render-target texture's level bound at target 0 and the application's references
+// released (the device's binding blocks nothing); the viewport (8,8) 32x32; CULLMODE NONE, FILLMODE WIREFRAME,
+// ALPHABLENDENABLE TRUE, ZENABLE FALSE, LIGHTING FALSE; a managed 4x4 texture written gold at stage 0 and a managed
+// vertex buffer at stream 0, both held. Reset at 256x256 D3D_OK: CULLMODE CCW, FILLMODE SOLID, ALPHABLENDENABLE FALSE,
+// ZENABLE TRUE (the device has an auto depth-stencil), LIGHTING TRUE; GetTexture(0) and GetStreamSource(0) D3D_OK and
+// NULL; the viewport (0,0) 256x256 over 0..1 and the scissor rect the whole. One attempt, Z on: a rust quad over
+// (160,160)-(224,224) and the managed texture under a white quad over (32,160)-(96,224) (MODULATE): rust at (192,192)
+// and gold at (64,192), outside the old target and viewport, blue at (128,32) and (24,24) (the Clear reached the back
+// buffer, not the old target).
+static bool rowRsState() {
+    RsDevice r;
+    if (!rsDevice(r, D3DFMT_D24S8)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    Com<IDirect3DTexture9> managed;
+    Com<IDirect3DVertexBuffer9> vb;
+    CK(CreateTexture, 4, 4, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &managed.p, nullptr);
+    if (!underLevelLock(managed.p, 0, 0, [](BYTE *b, int p) { paint(b, p, 0, 0, 4, 4, KGOLD); })) return false;
+    CK(CreateVertexBuffer, 4 * sizeof(RV), 0, FVF_RV, D3DPOOL_MANAGED, &vb.p, nullptr);
+    {
+        Com<IDirect3DTexture9> t;
+        Com<IDirect3DSurface9> s;
+        if (!makeRt(t) || !levelOf(t.p, 0, s)) return false;
+        CK(SetRenderTarget, 0, s.p);
+    }
+    static const D3DVIEWPORT9 small = {8, 8, 32, 32, 0.0f, 1.0f};
+    CK(SetViewport, &small);
+    static const DWORD set[][2] = {{D3DRS_CULLMODE, D3DCULL_NONE},
+                                   {D3DRS_FILLMODE, D3DFILL_WIREFRAME},
+                                   {D3DRS_ALPHABLENDENABLE, TRUE},
+                                   {D3DRS_ZENABLE, D3DZB_FALSE},
+                                   {D3DRS_LIGHTING, FALSE}};
+    for (const auto &s : set) CK(SetRenderState, (D3DRENDERSTATETYPE)s[0], s[1]);
+    CK(SetTexture, 0, managed.p);
+    CK(SetStreamSource, 0, vb.p, 0, sizeof(RV));
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256, D3DFMT_D24S8);
+    if (!resetIs("Reset (states and bindings set)", pp)) return false;
+    static const DWORD want[][2] = {{D3DRS_CULLMODE, D3DCULL_CCW},
+                                    {D3DRS_FILLMODE, D3DFILL_SOLID},
+                                    {D3DRS_ALPHABLENDENABLE, FALSE},
+                                    {D3DRS_ZENABLE, D3DZB_TRUE},
+                                    {D3DRS_LIGHTING, TRUE}};
+    for (const auto &s : want) {
+        DWORD v = 0xdeadbeef;
+        CK(GetRenderState, (D3DRENDERSTATETYPE)s[0], &v);
+        if (v != s[1])
+            return snprintf(why, sizeof why, "GetRenderState(%lu) %lu, want %lu", (unsigned long)s[0],
+                            (unsigned long)v, (unsigned long)s[1]),
+                   false;
+    }
+    IDirect3DBaseTexture9 *tex = nullptr;
+    HRESULT hr = dev->GetTexture(0, &tex);
+    if (tex) tex->Release();
+    if (hr != D3D_OK || tex) return fail(tex ? "GetTexture(0) a texture" : "GetTexture(0)", hr);
+    IDirect3DVertexBuffer9 *stream = nullptr;
+    UINT offset = 7, stride = 7;
+    hr = dev->GetStreamSource(0, &stream, &offset, &stride);
+    if (stream) stream->Release();
+    if (hr != D3D_OK || stream) return fail(stream ? "GetStreamSource(0) a buffer" : "GetStreamSource(0)", hr);
+    if (!extentIs(256, 256)) return false;
+    const DWORD white = D3DCOLOR_XRGB(255, 255, 255);
+    const TV q[4] = {{32, 160, 0.5f, 1, white, 0, 0}, {96, 160, 0.5f, 1, white, 1, 0},
+                     {32, 224, 0.5f, 1, white, 0, 1}, {96, 224, 0.5f, 1, white, 1, 1}};
+    return until([&] {
+               if (!clearBlue(true) || !quadIn(160, 160, 224, 224, KRUST)) return false;
+               const bool drawn = scene([&] {
+                   CK(SetFVF, D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+                   CK(SetTexture, 0, managed.p);
+                   CK(DrawPrimitiveUP, D3DPT_TRIANGLESTRIP, 2, q, sizeof *q);
+                   return true;
+               });
+               dev->SetTexture(0, nullptr);
+               return drawn && bbHas({{192, 192, KRUST}, {64, 192, KGOLD}, {128, 32, BLUE}, {24, 24, BLUE}});
+           }) ||
+           failIn("after the Reset");
+}
+// rs-autogen (no auto depth-stencil): an AUTOGENMIPMAP 64x64 X8R8G8B8 render-target texture's level 0 at target 0 and a
+// plain one's at target 1, cleared green, the application's references released while both are bound. Reset at
+// 256x256 D3D_OK (the device's bindings block nothing); GetRenderTarget(1) D3DERR_NOTFOUND and NULL;
+// GetRenderTarget(0) the back buffer (GetBackBuffer's object); a quad over (160,160)-(224,224) lands (blue at (32,32),
+// inside the old targets' extent).
+static bool rowRsAutogen() {
+    RsDevice r;
+    if (!rsDevice(r)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    {
+        Com<IDirect3DTexture9> a, b;
+        Com<IDirect3DSurface9> a0, b0;
+        if (!makeRt(a, 64, 0, D3DFMT_X8R8G8B8, D3DUSAGE_RENDERTARGET | D3DUSAGE_AUTOGENMIPMAP) ||
+            !makeRt(b, 64, 1, D3DFMT_X8R8G8B8) || !levelOf(a.p, 0, a0) || !levelOf(b.p, 0, b0))
+            return false;
+        CK(SetRenderTarget, 0, a0.p);
+        CK(SetRenderTarget, 1, b0.p);
+        if (!clearTo(TGRN)) return false;
+    }
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256);
+    if (!resetIs("Reset (targets 0 and 1 released while bound)", pp)) return false;
+    IDirect3DSurface9 *const mark = reinterpret_cast<IDirect3DSurface9 *>(static_cast<INT_PTR>(0x5a5a));
+    IDirect3DSurface9 *one = mark;
+    HRESULT hr = dev->GetRenderTarget(1, &one);
+    if (SUCCEEDED(hr) && one && one != mark) one->Release();
+    if (hr != D3DERR_NOTFOUND) return fail("GetRenderTarget(1)", hr);
+    if (one) return snprintf(why, sizeof why, "GetRenderTarget(1) left %p", (void *)one), false;
+    {
+        Com<IDirect3DSurface9> rt0, bb;
+        CK(GetRenderTarget, 0, &rt0.p);
+        CK(GetBackBuffer, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
+        if (!rt0.p || rt0.p != bb.p)
+            return snprintf(why, sizeof why, "GetRenderTarget(0) is not the back buffer"), false;
+    }
+    return until([] { return lands(160, 160, 224, 224, 32, 32); }) || failIn("after the Reset");
+}
+// rs-scene (no auto depth-stencil): BeginScene, Reset D3D_OK, EndScene D3DERR_INVALIDCALL (the Reset ended the scene),
+// BeginScene and EndScene D3D_OK. A 64x64 default-pool texture alive, BeginScene, Reset D3DERR_INVALIDCALL, EndScene
+// D3DERR_INVALIDCALL (the refused Reset ended it too); the texture released, Reset and TestCooperativeLevel D3D_OK, a
+// quad lands.
+static bool rowRsScene() {
+    RsDevice r;
+    if (!rsDevice(r)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256);
+    CK(BeginScene);
+    if (!resetIs("Reset (in a scene)", pp)) return dev->EndScene(), false;
+    if (!answer("EndScene (after the Reset)", dev->EndScene(), D3DERR_INVALIDCALL)) return false;
+    CK(BeginScene);
+    CK(EndScene);
+    {
+        Com<IDirect3DTexture9> t;
+        CK(CreateTexture, 64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &t.p, nullptr);
+        CK(BeginScene);
+        if (!resetIs("Reset (in a scene, a default-pool texture alive)", pp, D3DERR_INVALIDCALL))
+            return dev->EndScene(), false;
+        if (!answer("EndScene (after the refused Reset)", dev->EndScene(), D3DERR_INVALIDCALL)) return false;
+    }
+    return (resetIs("Reset (released)", pp) && coopIs(D3D_OK) &&
+            until([] { return lands(160, 160, 224, 224, 32, 32); })) ||
+           failIn("after the refused Reset");
+}
+// rs-invalid (no auto depth-stencil): Reset with swap effect 0 D3DERR_INVALIDCALL, nothing changed:
+// TestCooperativeLevel D3D_OK, a quad lands, until()'s Present D3D_OK. Reset with MultiSampleType 3 (no power of two:
+// no device makes it) and, after a valid one, Reset with an auto depth-stencil of X8R8G8B8 (no depth format): each
+// D3DERR_INVALIDCALL, then TestCooperativeLevel and Present D3DERR_DEVICENOTRESET, a valid Reset and
+// TestCooperativeLevel D3D_OK. A quad lands.
+static bool rowRsInvalid() {
+    RsDevice r;
+    if (!rsDevice(r)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256);
+    pp.SwapEffect = (D3DSWAPEFFECT)0;
+    if (!resetIs("Reset (swap effect 0)", pp, D3DERR_INVALIDCALL)) return false;
+    if (!coopIs(D3D_OK) || !until([] { return lands(160, 160, 224, 224, 32, 32); })) return failIn("swap effect 0");
+    for (const bool samples : {true, false}) {
+        const char *what = samples ? "Reset (MultiSampleType 3)" : "Reset (an auto depth-stencil of X8R8G8B8)";
+        pp = rsParams(r.w.h, 256, 256);
+        if (samples) pp.MultiSampleType = (D3DMULTISAMPLE_TYPE)3;
+        else pp.EnableAutoDepthStencil = TRUE, pp.AutoDepthStencilFormat = D3DFMT_X8R8G8B8;
+        if (!resetIs(what, pp, D3DERR_INVALIDCALL)) return false;
+        pp = rsParams(r.w.h, 256, 256);
+        if (!coopIs(D3DERR_DEVICENOTRESET) || !presentIs(D3DERR_DEVICENOTRESET) || !resetIs("Reset (valid)", pp) ||
+            !coopIs(D3D_OK))
+            return failIn(what);
+    }
+    return until([] { return lands(160, 160, 224, 224, 32, 32); }) || failIn("after the valid Reset");
+}
+// rs-refuse, under the launch's "strict" alone (the core lanes; elsewhere it does nothing and passes: on mtld3d a Reset
+// into fullscreen would change the display mode of the machine the gates run on). No auto depth-stencil, nothing held:
+// a well-formed Reset into fullscreen (Windowed FALSE, the adapter's mode's size and refresh rate, X8R8G8B8, DISCARD,
+// IMMEDIATE) D3DERR_NOTAVAILABLE (the core refuses it by name, "IDirect3DDevice9::Reset (into fullscreen)", after
+// mtld3d's validation); TestCooperativeLevel D3D_OK (no reset owed); a quad lands, until()'s Present D3D_OK.
+static bool rowRsRefuse() {
+    if (!strictMode) return true;
+    RsDevice r;
+    if (!rsDevice(r)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    D3DDISPLAYMODE m = {};
+    const HRESULT hr = direct3d ? direct3d->GetAdapterDisplayMode(D3DADAPTER_DEFAULT, &m) : E_POINTER;
+    if (hr != D3D_OK) return fail("IDirect3D9::GetAdapterDisplayMode", hr);
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, m.Width, m.Height);
+    pp.Windowed = FALSE, pp.FullScreen_RefreshRateInHz = m.RefreshRate;
+    if (!resetIs("Reset (into fullscreen)", pp, D3DERR_NOTAVAILABLE)) return false;
+    return (coopIs(D3D_OK) && until([] { return lands(160, 160, 224, 224, 32, 32); })) ||
+           failIn("after the refused fullscreen Reset");
+}
+// rs-window (no auto depth-stencil): a second visible plain window, client area 192x160. Reset naming it, 256x256,
+// D3D_OK: a quad lands, a present. Reset naming no window, 0x0, D3D_OK: the struct reads the second window's client
+// area back (GetClientRect; a zero size resolves against the device's window, which the first Reset made the second)
+// and keeps its NULL window; the back buffer is that size, a quad 8 pixels in from its corner lands, a present. Which
+// window the presents reach no row can tell (a present into a hidden window commits too): stated, not judged.
+static bool rowRsWindow() {
+    Window b;
+    if (!rsWindow(b, 192, 160, 700)) return false;
+    RsDevice r;
+    if (!rsDevice(r)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    RECT c = {};
+    if (!GetClientRect(b.h, &c) || c.right <= 0 || c.bottom <= 0)
+        return snprintf(why, sizeof why, "GetClientRect (the second window)"), false;
+    const UINT cw = (UINT)c.right, ch = (UINT)c.bottom;
+    D3DPRESENT_PARAMETERS pp = rsParams(b.h, 256, 256);
+    if (!resetIs("Reset (onto a second window)", pp)) return false;
+    if (!bbIs(256, 256) || !until([] { return lands(160, 160, 224, 224, 32, 32); }) || !presents())
+        return failIn("on the second window");
+    pp = rsParams(nullptr, 0, 0);
+    if (!resetIs("Reset (no window named, a zero size)", pp)) return false;
+    if (pp.BackBufferWidth != cw || pp.BackBufferHeight != ch || pp.hDeviceWindow)
+        return snprintf(why, sizeof why, "Reset (no window named) wrote %ux%u back and window %p, want %ux%u and NULL",
+                        pp.BackBufferWidth, pp.BackBufferHeight, (void *)pp.hDeviceWindow, cw, ch),
+               false;
+    return (bbIs(cw, ch) &&
+            until([&] { return lands((int)cw - 40, (int)ch - 40, (int)cw - 8, (int)ch - 8, 8, 8); }) && presents()) ||
+           failIn("the second window's client area");
+}
+// rs-ex (an extended device, no auto depth-stencil): a 64x64 default-pool texture held and bound at stage 0; a 64x64
+// CreateRenderTarget surface held and bound at target 0 (an extended device keeps it alive across the reset, so the
+// target the draw below reaches tells the implicit one from it); the viewport (8,8) 32x32 over 0.25..0.75, CULLMODE
+// NONE. ResetEx to 320x240, no mode, D3D_OK (a default-pool resource blocks no extended Reset): the back buffer
+// 320x240, the viewport (0,0) 320x240 over 0.25..0.75 (its depth range kept), the scissor rect the whole, CULLMODE
+// still NONE, GetTexture(0) still the texture; TestCooperativeLevel and CheckDeviceState D3D_OK; the texture unbound,
+// a quad over (240,160)-(304,224) lands in the back buffer. Reset (the base slot) to 256x256 D3D_OK: the viewport
+// (0,0) 256x256 over 0.25..0.75. ResetEx with swap effect 0 D3DERR_INVALIDCALL, nothing changed (the viewport as it
+// was, TestCooperativeLevel and CheckDeviceState D3D_OK); ResetEx of windowed parameters with a mode
+// D3DERR_INVALIDCALL; a quad lands, until()'s Present D3D_OK.
+static bool rowRsEx() {
+    RsDevice r;
+    if (!rsDevice(r, D3DFMT_UNKNOWN, true)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    Com<IDirect3DTexture9> t;
+    Com<IDirect3DSurface9> rt;
+    CK(CreateTexture, 64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &t.p, nullptr);
+    if (!target64(rt, FALSE)) return false;
+    CK(SetRenderTarget, 0, rt.p);
+    static const D3DVIEWPORT9 v = {8, 8, 32, 32, 0.25f, 0.75f};
+    CK(SetViewport, &v);
+    CK(SetRenderState, D3DRS_CULLMODE, D3DCULL_NONE);
+    CK(SetTexture, 0, t.p);
+    IDirect3DDevice9Ex *const ex = r.ex.p;
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 320, 240);
+    if (!answer("ResetEx (to 320x240, a default-pool texture alive)", ex->ResetEx(&pp, nullptr), D3D_OK)) return false;
+    DWORD cull = 0;
+    CK(GetRenderState, D3DRS_CULLMODE, &cull);
+    if (cull != D3DCULL_NONE)
+        return snprintf(why, sizeof why, "CULLMODE %lu after ResetEx", (unsigned long)cull), false;
+    IDirect3DBaseTexture9 *bound = nullptr;
+    HRESULT hr = dev->GetTexture(0, &bound);
+    if (bound) bound->Release();
+    if (hr != D3D_OK || bound != t.p) return fail(bound ? "GetTexture(0) another texture" : "GetTexture(0)", hr);
+    if (!bbIs(320, 240) || !extentIs(320, 240, 0.25f, 0.75f) || !coopIs(D3D_OK) ||
+        !answer("CheckDeviceState", ex->CheckDeviceState(r.w.h), D3D_OK))
+        return failIn("after ResetEx");
+    CK(SetTexture, 0, nullptr);
+    if (!until([] { return lands(240, 160, 304, 224, 8, 8); })) return failIn("after ResetEx");
+    pp = rsParams(r.w.h, 256, 256);
+    if (!resetIs("Reset (the extended device, to 256x256)", pp)) return false;
+    if (!extentIs(256, 256, 0.25f, 0.75f)) return failIn("after Reset");
+    pp.SwapEffect = (D3DSWAPEFFECT)0;
+    if (!answer("ResetEx (swap effect 0)", ex->ResetEx(&pp, nullptr), D3DERR_INVALIDCALL)) return false;
+    if (!extentIs(256, 256, 0.25f, 0.75f) || !coopIs(D3D_OK) ||
+        !answer("CheckDeviceState", ex->CheckDeviceState(r.w.h), D3D_OK))
+        return failIn("after the rejected ResetEx");
+    pp = rsParams(r.w.h, 256, 256);
+    D3DDISPLAYMODEEX mode = {sizeof mode, 256, 256, 0, D3DFMT_X8R8G8B8, D3DSCANLINEORDERING_PROGRESSIVE};
+    if (!answer("ResetEx (windowed, a mode)", ex->ResetEx(&pp, &mode), D3DERR_INVALIDCALL)) return false;
+    return until([] { return lands(160, 160, 224, 224, 32, 32); }) || failIn("after the rejected ResetEx");
+}
+// rs-held (an extended device, an auto D24S8): the back buffer and the auto depth-stencil held (GetBackBuffer,
+// GetDepthStencilSurface) across ResetEx to 320x240, no mode, D3D_OK: the held ones still 256x256 X8R8G8B8 and
+// 256x256 D24S8; GetBackBuffer and GetDepthStencilSurface new objects, 320x240 X8R8G8B8 and D24S8; depthLands, the
+// held ones still held (nothing is asked of them but GetDesc).
+static bool rowRsHeld() {
+    RsDevice r;
+    if (!rsDevice(r, D3DFMT_D24S8, true)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    Com<IDirect3DSurface9> hb, hd, nb, nd;
+    CK(GetBackBuffer, 0, 0, D3DBACKBUFFER_TYPE_MONO, &hb.p);
+    CK(GetDepthStencilSurface, &hd.p);
+    if (!hb.p || !hd.p) return snprintf(why, sizeof why, "an implicit surface D3D_OK and NULL"), false;
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 320, 240, D3DFMT_D24S8);
+    if (!answer("ResetEx (to 320x240, both implicit surfaces held)", r.ex.p->ResetEx(&pp, nullptr), D3D_OK))
+        return false;
+    if (!descIs("the held back buffer", hb.p, 256, 256, D3DFMT_X8R8G8B8) ||
+        !descIs("the held depth-stencil", hd.p, 256, 256, D3DFMT_D24S8))
+        return false;
+    CK(GetBackBuffer, 0, 0, D3DBACKBUFFER_TYPE_MONO, &nb.p);
+    CK(GetDepthStencilSurface, &nd.p);
+    if (!nb.p || !nd.p || nb.p == hb.p || nd.p == hd.p)
+        return snprintf(why, sizeof why,
+                        "after ResetEx GetBackBuffer %p (held %p), GetDepthStencilSurface %p (held %p)", (void *)nb.p,
+                        (void *)hb.p, (void *)nd.p, (void *)hd.p),
+               false;
+    return (descIs("the new back buffer", nb.p, 320, 240, D3DFMT_X8R8G8B8) &&
+            descIs("the new depth-stencil", nd.p, 320, 240, D3DFMT_D24S8) && until(depthLands)) ||
+           failIn("after ResetEx");
+}
+// rs-query (no auto depth-stencil): an EVENT query's END after a quad; an OCCLUSION query's BEGIN, a quad over
+// (64,16)-(96,48) (32x32: 1024), END; a second OCCLUSION query's BEGIN, a quad over (16,64)-(48,80) (32x16: 512), its
+// span left open. Reset to 320x240 (a resizing Reset: mtld3d's encoder cuts an open span at the drain and reopens it
+// after) D3D_OK; a quad over (260,160)-(276,168) (16x8: 128, past the creation size), the second's END. Read after the
+// Reset, each waitFor (FLUSH polls): the EVENT S_OK and TRUE, the first 1024, the second 640 (512 + 128). A present.
+// Every BEGIN is ENDed on a passing path.
+static bool rowRsQuery() {
+    RsDevice r;
+    if (!rsDevice(r)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    Com<IDirect3DQuery9> e, c, o;
+    if (!newQuery(e, D3DQUERYTYPE_EVENT) || !newQuery(c) || !newQuery(o)) return false;
+    if (!quadIn(16, 16, 48, 48) || !issue(e.p, D3DISSUE_END) || !issue(c.p, D3DISSUE_BEGIN) ||
+        !quadIn(64, 16, 96, 48) || !issue(c.p, D3DISSUE_END) || !issue(o.p, D3DISSUE_BEGIN) || !quadIn(16, 64, 48, 80))
+        return failIn("before the Reset");
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 320, 240);
+    if (!resetIs("Reset (to 320x240, queries in flight)", pp)) return false;
+    if (!rstate(D3DRS_ZENABLE, D3DZB_FALSE) || !quadIn(260, 160, 276, 168) || !issue(o.p, D3DISSUE_END))
+        return failIn("after the Reset");
+    return ((waitFor(e.p) && signalled(e.p, "the EVENT")) || failIn("the EVENT ended before the Reset")) &&
+           ((waitFor(c.p) && countIs(c.p, 1024)) || failIn("the OCCLUSION ended before the Reset")) &&
+           ((waitFor(o.p) && countIs(o.p, 640)) || failIn("the OCCLUSION open across the Reset")) &&
+           (presents() || failIn("after the Reset"));
+}
+// rs-twice (an auto D24S8): Resets in a row to 320x240, 192x288, 384x384 and 256x256 (with D24S8), each D3D_OK and
+// followed by: the back buffer that size; Z on, a quad 8 pixels in from its bottom-right corner lands (blue at
+// (8,8)); a present (Z cleared).
+static bool rowRsTwice() {
+    RsDevice r;
+    if (!rsDevice(r, D3DFMT_D24S8)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    static const UINT sizes[][2] = {{320, 240}, {192, 288}, {384, 384}, {256, 256}};
+    for (const auto &s : sizes) {
+        const int w = (int)s[0], h = (int)s[1];
+        char what[48];
+        snprintf(what, sizeof what, "Reset (to %dx%d)", w, h);
+        D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, s[0], s[1], D3DFMT_D24S8);
+        if (!resetIs(what, pp)) return false;
+        if (!bbIs(s[0], s[1]) || !until([&] { return lands(w - 40, h - 40, w - 8, h - 8, 8, 8, true); }) ||
+            !presents(true))
+            return failIn(what);
+    }
+    return true;
+}
+
+static void resetRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"rs-size", rowRsSize},       {"rs-depth", rowRsDepth},   {"rs-msaa", rowRsMsaa},
+        {"rs-blockers", rowRsBlockers}, {"rs-state", rowRsState}, {"rs-autogen", rowRsAutogen},
+        {"rs-scene", rowRsScene},     {"rs-invalid", rowRsInvalid}, {"rs-refuse", rowRsRefuse},
+        {"rs-window", rowRsWindow},   {"rs-ex", rowRsEx},         {"rs-held", rowRsHeld},
+        {"rs-query", rowRsQuery},     {"rs-twice", rowRsTwice}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 200000;
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = r.run();
+        row(r.name, ok, why);
+    }
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
@@ -10140,6 +10818,7 @@ int main(int argc, char **argv) {
     const bool buffersMode = !bench && argc > 1 && !strcmp(argv[1], "buffers");
     const bool blitMode = !bench && argc > 1 && !strcmp(argv[1], "blit");
     const bool queriesMode = !bench && argc > 1 && !strcmp(argv[1], "queries");
+    const bool resetMode = !bench && argc > 1 && !strcmp(argv[1], "reset");
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     const bool bufBench = bench && argc > 4 && !strcmp(argv[4], "buf");
@@ -10194,6 +10873,13 @@ int main(int argc, char **argv) {
     }
     if (queriesMode) {
         queriesRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
+    if (resetMode) {
+        resetRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();
         d3d->Release();
         DestroyWindow(hwnd);

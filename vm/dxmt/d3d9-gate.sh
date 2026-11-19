@@ -63,7 +63,11 @@
 # depth-stencil; bt64-fresh, bt32-fresh); under core their logs hold no refusal line (since DXMTRS C4c-4d, which
 # resolves sd-resolve's depth-stencil surfaces). Every lane also checks d3d9_triangle queries' 12 rows (DXMTRS C4c-5:
 # EVENT and OCCLUSION queries, on a device with no depth-stencil; qu64-fresh, qu32-fresh); under core their logs hold
-# no refusal line (since DXMTRS C4c-5, which makes CreateQuery the core's).
+# no refusal line (since DXMTRS C4c-5, which makes CreateQuery the core's). Every lane also checks d3d9_triangle reset's
+# 14 rows (DXMTRS C4c-6c: Reset and ResetEx of a windowed device, TestCooperativeLevel and CheckDeviceState, each row on
+# a device and a window of its own; "reset strict" under core, where rs-refuse alone asks for a Reset into fullscreen;
+# rs64-fresh, rs32-fresh); under core their logs hold exactly its one refusal line (that Reset into fullscreen, refused
+# by name).
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -241,18 +245,25 @@ for r in qu64-fresh qu32-fresh; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
+for r in rs64-fresh rs32-fresh; do
+  for row in rs-size rs-depth rs-msaa rs-blockers rs-state rs-autogen rs-scene rs-invalid rs-refuse rs-window rs-ex \
+    rs-held rs-query rs-twice; do
+    check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
+  done
+done
 for r in st64-fresh st32-fresh; do
   for row in state-xform state-material state-tss state-swapchain state-rt state-tex state-late state-lock state-sb \
     state-upunbind state-fftex state-fftexoff state-getters state-stubs state-present state-ex; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
-# core: runtime <folder> [fixed|depth|buffers]: the core device's line in a launch's logs, none of
+# core: runtime <folder> [fixed|depth|buffers|reset]: the core device's line in a launch's logs, none of
 # mtld3d.so's encoder line nor of the core's can't-present, dropped-draw or staged-dynamic-buffer ("has no mapped
 # memory", DXMTRS C4c-2b) lines (the code that ran prints them, not the switch), and no refusal line, or with
-# "fixed", "depth" or "buffers" exactly that launch's refused rows'
+# "fixed", "depth", "buffers" or "reset" exactly that launch's refused rows'
 # (fixed_refusals, depth_refusals: one line since DXMTRS C4c-3b, which locks a dynamic depth texture,
-# buffers_refusals: DXMTRS C4c-2a's layout no binding can fetch).
+# buffers_refusals: DXMTRS C4c-2a's layout no binding can fetch, reset_refusals: DXMTRS C4c-6c's Reset into
+# fullscreen, rs-refuse's under strict alone).
 # The shaders, state, textures, targets, blend, mrt, msaa, blit and queries launches (DXMTRS C4b-2, C4b-3a, C4b-3b,
 # C4b-3d1, C4b-3d3, C4b-3d4, C4b-3d5, C4c-4a, C4c-5) take no kind: no refusal line (the shaders launch's since DXMTRS
 # C4c-2a, which draws the crossing row; the state launch's since DXMTRS C4c-1: buffer locks are the core's, and since
@@ -265,14 +276,16 @@ refused='is not implemented under runtime.mode = core'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
 depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)'
 buffers_refusals='IDirect3DDevice9::Draw*Primitive (a layout no binding can fetch)'
+reset_refusals='IDirect3DDevice9::Reset (into fullscreen)'
 runtime() {
   n=$(/usr/bin/grep -rhF "$refused" "$1" 2> /dev/null | wc -l | tr -d ' ')
   /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
     && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form|has no mapped memory|was not recorded' "$1" \
     && case ${2:-} in
-      fixed|depth|buffers)
+      fixed|depth|buffers|reset)
         case $2 in
           fixed) set_=$fixed_refusals ;; depth) set_=$depth_refusals ;; buffers) set_=$buffers_refusals ;;
+          reset) set_=$reset_refusals ;;
         esac
         [ "$n" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] && printf '%s\n' "$set_" | while IFS= read -r m; do
           /usr/bin/grep -rqF "d3d9 core: $m $refused" "$1" || exit 1; done ;;
@@ -291,6 +304,9 @@ if [ "$RT" = core ]; then
   done
   for r in dp64-fresh dp32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" depth)" ok
+  done
+  for r in rs64-fresh rs32-fresh; do
+    check "$r runtime core" "$(runtime "$G/logs/$r" reset)" ok
   done
   for r in bf64-fresh bf32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" buffers)" ok

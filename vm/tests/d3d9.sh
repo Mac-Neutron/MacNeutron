@@ -39,6 +39,9 @@
 #                                core), 240 s
 #   qu<64|32>-fresh.txt           d3d9_triangle queries (DXMTRS C4c-5's 12 rows of EVENT and OCCLUSION queries;
 #                                "queries strict" under core), 240 s
+#   rs<64|32>-fresh.txt           d3d9_triangle reset (DXMTRS C4c-6c's 14 rows of Reset and ResetEx of a windowed
+#                                device, each row on a device and a window of its own; "reset strict" under core, where
+#                                rs-refuse alone asks for a Reset into fullscreen), 300 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
@@ -141,6 +144,8 @@ tri d3d9_triangle.exe bt64-fresh 240 blit $strict
 tri d3d9_triangle32.exe bt32-fresh 240 blit $strict
 tri d3d9_triangle.exe qu64-fresh 240 queries $strict
 tri d3d9_triangle32.exe qu32-fresh 240 queries $strict
+tri d3d9_triangle.exe rs64-fresh 300 reset $strict
+tri d3d9_triangle32.exe rs32-fresh 300 reset $strict
 rm -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" "$WINEPREFIX/drive_c/windows/syswow64/mtld3d.dll"
 tri d3d9_triangle.exe tri64-nomarker  # Wine finds no builtin without its marker: these fail
 tri d3d9_triangle32.exe tri32-nomarker
