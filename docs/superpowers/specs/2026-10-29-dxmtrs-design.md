@@ -1390,6 +1390,50 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   target as a source, or an extended device's paths. The x64 check did not run in this slice: the range is
   inside `src/d3d9`, and the maintainer set it at the end of C4c-4 (2026-11-18). No probe: no draw file
   changed.
+  C4c-4c done 2026-11-19 at DXMTRS main 8bde3b14, which MacNeutron pins: `StretchRect`'s scaled, converting,
+  YUV, multisampled and overlapping copies on the core runtime. d3d9-rt gains `stretch`, **a render pass of its
+  own** that samples one subresource of any stored colour texture onto a rect of a target, multisampled or
+  not, with mtld3d's own quad shader: the text and its two entry names now live in the shared crate
+  (`mtld3d_core::stretch_rect::BLIT_MSL`), byte for byte, and each runtime compiles it (the core once a device,
+  through `MTLDevice_newLibraryWithSourceOptions` with mtld3d's options; a spike had shown the call working from
+  the recorder in every lane). The pass records its own rasterizer state, viewport, scissor, pipeline (by the
+  destination's stored format and sample count), sampler (the device's cache) and uniforms (a pure function,
+  the rect over the source level's own extent), **because the core merges it with a draw's pass on the same
+  target and Metal would keep that draw's cull and fill**; the source is a one-level, one-slice view in the
+  format the front end names, read through the tracker; the destination is written through its stored format
+  and noted so. `copy` and `stretch` read a multisampled back buffer through its presented texture, resolved
+  first. `scratch_like` makes a private single-sample target like another, with its sRGB twin when it has one
+  (a resolve goes through the view the source was last written in). In the front end `stretch_colour` now, for
+  a destination that is a target: answers one texture's identical rects first; flushes both parents; settles
+  the source (a planar YUV plain surface is decoded on the CPU into a scratch texture; a packed one is decoded
+  by the shader from its own texels; a standalone multisampled target is resolved into a scratch; **a level of
+  a texture that is no target is sampled through its swizzled view, a target, the back buffer and a scratch
+  through the stored format**, as mtld3d's quad binds them, with `blit_decode`'s alpha rule); copies a
+  single-sample source out to a scratch when it is still the destination's texture and the copy is not an
+  unscaled disjoint one; then blits (4b) when the copy is unscaled, of one storage and into a single-sample
+  target, and samples otherwise. A plain surface copied onto itself is a CPU copy through a buffer. Refused by
+  name after it: the depth-stencil resolve (C4c-4d), an extended device's whole-surface copy into a non-target,
+  a plain pair no CPU route serves, a standalone multisampled source of a format this GPU does not resolve.
+  Differences from mtld3d, stated: LINEAR on a planar source filters decoded RGB (mtld3d filters luma only);
+  a multisampled target copied onto itself at disjoint rects keeps the copy (mtld3d's lands on its resolve
+  texture); a scratch is made, zeroed and released at each call that needs one.
+  Gated at that tip with ten new rows of the `blit` launch (41 in all): the plain build's translator key and
+  `d3d9.dll` imports are the base's; d3d9-check default, msl and core, every row; the Mac's conformance fails
+  anew at triaged sites only; stateblock on both runtimes; the eleven launches under core with Metal's
+  validation layer report nothing; the VM's D3D9 gate on both runtimes and both WoW64 forms, in 64-bit and in
+  32-bit (the shader compiles and draws in the guest); no "was not recorded" line in any lane. Before any
+  front-end code the `blit`, `targets` and `msaa` launches ran on mtld3d under the validation layer, silent and
+  with their pixels judged, the swizzled-view cell among them. Eight mutants (the source rect moved to the
+  origin, LINEAR for every filter, the multisampled source's resolve skipped, the overlap's scratch skipped,
+  the quad's source read untracked, the plain self-copy's destination point, the view without its swizzle, the
+  two packed YUV orders swapped) turn red the rows named before the run (one of them at another cell than
+  the one named); the untracked read reddens one row more than predicted (a copy from the back buffer then
+  shows a colour from before the row's own Clear and draw; not traced further), which hides nothing. The whole-branch review: nothing Critical or Important, five Minors ledgered without a fix round
+  (among them: d3d9-rt now depends on mtld3d-types outside its tests; a refused pipeline logs no Metal text;
+  two Metal constants restated in `stretch.rs`). No row covers a sampled copy from or into a multisampled back
+  buffer (the sweep's functions reach the second), a YUV source's sub-rect, a swizzled view of a level above 0
+  or of a cube face, or an extended device's paths. The x64 check did not run in this slice (the range is
+  inside `src/d3d9`); it runs at the end of C4c-4d. No probe: no draw file changed.
   C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
   offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer count and its cap
   (done); 3a colour read-back through locks (lockable targets, the back buffer read-only, render-target texture
@@ -1397,7 +1441,8 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   additional swap chain's back buffer, the DYNAMIC depth texture's lock (done);
   4a `ColorFill`, `UpdateSurface` and `StretchRect`'s answers (done); 4b `StretchRect`'s unscaled copies: into a
   target, between plain surfaces on the CPU, the depth-stencil copy (done); 4c its scaled, converting and YUV
-  copies into a target, multisampled ends, the depth resolve, overlapping rects of one surface;
+  copies into a target, multisampled ends, overlapping rects of one surface (done); 4d the depth-stencil
+  resolve;
   5 queries; 6 `Reset`, the getters, the swap chain's presents; 7 gamma, frame
   latency, the device's information from winemetal, the `Ex` creators, and the conformance lane for `visual`, `device`
   and `d3d9ex` under core, which is C4c's gate.
@@ -1429,6 +1474,14 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   the default runtime's baseline: 1912 to 1278 and 200 to 155; `d3d9ex` still dies in `test_reset`).
   `StretchRect`'s remaining shapes are about 1215 of the 1433 lines left in the two suites. The three silent
   differences are unchanged.
+  The sweep after 4c (`build/c4c/s4c/sweep.md`, gating nothing): every function moved as predicted before the
+  run: `yuv_layout_test` 992 new failures to 0, `yuv_color_test` 106 to 0, `test_multisample_stretch_rect` 54
+  to 0, `test_stretch_rect` 40 to 0, `stretchrect_test` 17 to 0, `test_filling_convention` 14 to 0,
+  `test_blit_format_conversion` 8 to 0, `np2_stretch_rect_test` 5 to 0, `clear_test` 5 to 0,
+  `multisampled_depth_buffer_test` 12 to 5 (Wine's own counts: `visual` 320 failed of 211160, `device` 854 of
+  56830; "Test failed" lines over the default runtime's baseline: 1278 to 70 and 155 to 115; `d3d9ex` still
+  dies in `test_reset`). `StretchRect` is 5 of the 185 lines left in the two suites (the depth-stencil resolve,
+  4d). The three silent differences are unchanged.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features

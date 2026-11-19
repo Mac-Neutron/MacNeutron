@@ -433,4 +433,84 @@ Three reviews, 2026-11-18: R1 design (0 Critical, 8 Important, 8 Minor), R2 reco
 
 ## Execution notes
 
-(after execution)
+Executed 2026-11-18 and 19. DXMTRS `c4c`: 64a46594 (the shader in the shared crate), a647a10d (a multisampled
+back buffer as a copy source), fd1b22d9 (`stretch`, `StretchQuad`, `quad_uniforms`, `scratch_like`), 7bedadf2
+(scales and converts into a target), 520b49cd (the scratch routes), 8bde3b14 (a plain surface onto itself; the
+tip). MacNeutron `c4c-mn`: eab85179 (the rows). Artefacts: `build/c4c/s4c` (map, reviews, `rc*.log`, `gates/`,
+`sweep.md`).
+
+- **The spike** (`jsp`, before any 4c code, a throwaway build): a library made through
+  `MTLDevice_newLibraryWithSourceOptions` from the recorder in every core launch on the Mac and in the VM's two
+  WoW64 forms. Ruling Q-1 stood; the real text first compiled in `jt3`, and in the VM guest in `jc`.
+- **Controls**: every prediction held at the first run. `jv0` (mtld3d under Metal's validation layer, the base):
+  reports 0 in `blit`, `targets`, `msaa`; rows ok 43, 37, 22; no skip line (the X8 target's padding reads 40 on
+  mtld3d, so `sq-conv`'s alpha cell is decisive); **ruling SW confirmed** (`sq-swizzle` green on mtld3d). `ja`:
+  default and msl ok (41 of 41, 20 of 20); core red on exactly `targets-runtime`, `targets-rt-msaa` and the ten
+  `blit-sq-*`; `was not recorded` 0. `jcr`: the VM's default lane ok on old and new WoW64, 41 `bt64`/`bt32` and
+  20 `ms64`/`ms32` ok lines each.
+- **Ruling O-2 held**: Task 2 ran beside the controls, and 4d's map, plan, reviews, rows and recorder commit
+  beside 4c's lanes and chain; no rework.
+- **Task 2 as built.** The literal moved byte for byte (5617 bytes, the same sha256 before and after). Against
+  the Rules check: **ruling D-1**, d3d9-rt's `Cargo.toml` moves the workspace crate mtld3d-types from
+  dev-dependencies to dependencies (the D3D sampler constants; `Cargo.lock` unchanged, no external crate); two
+  `CoreDevice` fields, not three (`quad_functions: OnceLock<Option<[Obj; 2]>>`, the library released once its
+  functions exist, and `quad_pipelines`); new `pub(super)` `copy_source` and `view_twins`; mtld3d gains a const
+  `entry_name` helper. Every failure line says "does not build"; a refused pipeline logs its format and count
+  without Metal's text (`render_pipeline` drops it; final review M1). Red rust-check runs on the way were the
+  tests' or lints' own (a resolve pass prints no size on the fakes, two clippy lints, a doc shape, a fixture
+  helper), no code change.
+- **Tasks 3-5 as built.** Only `core_arms.rs` and one line of `device.rs`. Step 0 (one texture's identical
+  rects) is in the first commit; one `with_scratch` helper forgets the scratch on every path; the back buffer's
+  view comes from `map_for_device`; the planar scratch is BGRA8 with its twin; a multisampled back buffer onto
+  itself goes to `stretch` (the presented texture read, the companion written). `rc4.log` was red on rustfmt and
+  on one mtld3d-unix timing test (`submit_spawn_failure_joins_encoder_and_service_workers`), green at the next
+  run: a flake of a loaded Mac, not this range's code (it returned six times in a row during 4d's Task 3 while
+  the chain's builds ran).
+- **Lanes**, each exactly as predicted (translator key the base's; `was not recorded` 0): `jt3` (7bedadf2) core
+  red on `blit-sq-yuv` (its YV12 cell: the packed cells passed), `blit-sq-ms`, `blit-sq-overlap`,
+  `blit-sq-plain`, `targets-rt-msaa`, `targets-runtime`, and `blit` under core with the validation layer:
+  reports 0, rows ok 39; `jt4` (520b49cd) red on `blit-sq-plain` alone, `blit`, `targets`, `msaa` under the
+  layer: reports 0, rows ok 42, 37, 22; `jt5` (8bde3b14) default and core ok, 41 of 41 and 20 of 20 on both,
+  the three launches under the layer: reports 0, rows ok 43, 37, 22; no skip line under core either.
+- **Mutants**: eight (b, c, g, h, i, j, l, m), `gates/mutants-expect.txt` written before any existed, from the
+  rows as committed. Mutant j's first form made the call answer false; it was regenerated as "writes at the
+  source's point" before any build.
+- **The chain** at 8bde3b14 with eab85179's rows (`jmb`, `jr`, `jc`, `jq`, `jm`, `jw`; 22:28 to 00:23). `jr`:
+  key and imports the base's, d3d9-check default ok (41 and 20 rows), the conformance fails anew at triaged
+  sites only (both runs), "outside src/d3d9: none", "x64 check: not run". `jc`: the VM's gate ok on default and
+  core, old and new WoW64, 41 `bt64`/`bt32` and 20 `ms64`/`ms32` ok lines each (one more under core), no
+  "was not recorded" line: the shared shader compiles and draws in the guest, 64-bit and 32-bit. `jq`: default,
+  msl and core ok with every row, stateblock on both runtimes, the eleven launches under core with the
+  validation layer: reports 0 (`blit` 43, `targets` 37, `msaa` 22 rows ok). `jm`: the eight mutants red on
+  their tokens, each cell and colour as `mutants-expect.txt` had it but one (h with one "was not recorded"
+  line), the green tip whole. The one: b's `sq-order` fails at the wireframe copy's cell, B (6,46) rust want
+  steel, which the row judges before the level cell the expectation named (A's origin is rust by that copy
+  too). **Mutant i reddened `blit-sq-conv` beside the predicted `blit-sq-order`**: its back-buffer cell reads
+  steel in A, a colour the row never puts in the back buffer (lilac, a rust quad), so the copy sampled the
+  back buffer before the row's own Clear and quad; whose steel it was is not traced. Ruling J-2: the
+  prediction undercounted the mutant's reach, as J-1 in 4b; the tip is green on both; no rerun.
+- **Final review** (`build/c4c/s4c/review-final.md`, range 30080983..8bde3b14 and the rows): 0 Critical, 0
+  Important, 5 Minor; "push as is once the gates are green". Forgetting a scratch right after recording is
+  safe (the initializer's batch keeps the allocation until its zero-fill completes, and every commit flushes
+  that batch first). Ledgered, no fix round: M1 (above); M2 the Rules check's omissions (above); M3
+  `stretch.rs` restates two Metal values locally (the language version, the math mode) against "ABI constants
+  have one home": their home would be the wire crate, outside `src/d3d9`, a follow-up; M4 two doc comments
+  still name `copy` as the only reader of a level that is no target (fixed in 4d's front-end commit); M5
+  `stretch`'s multisampled back-buffer source has no unit test of its own. Not covered by a row or test, most
+  important first: a sampled copy from a multisampled back buffer; a sampled copy into the back buffer (the
+  sweep's `yuv_layout_test`, `clear_test`, `test_filling_convention` reach it); a YUV source's sub-rect; a
+  swizzled view of a level above 0 or of a cube face; a multisampled standalone target onto itself and a scaled
+  copy into a sub-rect of a multisampled target; a scaled copy between two faces of one cube; LINEAR on a
+  converting copy (the sweep's `test_blit_format_conversion`); R-1 (not reachable on this GPU); a scratch's
+  release; a block-compressed plain surface onto itself off the block grid.
+- **The x64 check** did not run in this slice (the range is inside `src/d3d9`); it runs at the end of C4c-4d.
+- **Sweep** (`build/c4c/s4c/sweep.md`, job `jw`, gating nothing): each function as the Goal's table predicted:
+  `yuv_layout_test` 992 to 0, `yuv_color_test` 106 to 0, `test_multisample_stretch_rect` 54 to 0,
+  `test_stretch_rect` 40 to 0, `stretchrect_test` 17 to 0, `test_filling_convention` 14 to 0,
+  `test_blit_format_conversion` 8 to 0, `np2_stretch_rect_test` 5 to 0, `clear_test` 5 to 0,
+  `multisampled_depth_buffer_test` 12 to 5. New "Test failed" lines over the default runtime's baseline:
+  `visual` 1278 to 70, `device` 155 to 115, `d3d9ex` 66 as before; Wine's own failed counts 1528 to 320 and 894
+  to 854 (the same falls: no todo check changed).
+- **Found beside the slice**: a `d3d12_xess.exe` of C4c-4a's first x64 check (the `xess-wd` hang of ruling X-1)
+  had been spinning on one core since 2026-11-18 11:59, with its prefix's seven service processes; stopped by
+  PID on 2026-11-19 00:25. `dxmt/check.sh`'s watchdog does not reap the process it gives up on: a follow-up.
