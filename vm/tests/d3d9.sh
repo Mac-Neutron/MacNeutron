@@ -41,11 +41,14 @@
 #                                "queries strict" under core), 240 s
 #   rs<64|32>-fresh.txt           d3d9_triangle reset (DXMTRS C4c-6c's 14 rows of Reset and ResetEx of a windowed
 #                                device, each row on a device and a window of its own; "reset strict" under core, where
-#                                rs-refuse alone asks for a Reset into fullscreen), 300 s
+#                                rs-refuse alone asks for a Reset to an R5G6B5 back buffer), 300 s
 #   ex<64|32>-fresh.txt           d3d9_triangle extras (DXMTRS C4c-7a's 15 rows of the gamma ramp, frame latency, the
 #                                Ex creators, RESZ and the cursor calls, each row on a device and a window of its own;
-#                                "extras strict" under core, where rz-self and rz-refuse alone run and cu-setcursor
-#                                wants the core's class cursor), 300 s
+#                                "extras strict" under core, where rz-self and rz-refuse alone run), 300 s
+#   fs<64|32>-fresh.txt           d3d9_triangle fullscreen (DXMTRS C4c-6d's 9 rows of fullscreen devices, Reset into
+#                                and out of fullscreen and the window subclass, each row on a plain device and a window
+#                                of its own, in this prefix, which emulates mode sets; "fullscreen strict" under core,
+#                                where ws-size wants the back buffer kept), 300 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
@@ -152,6 +155,8 @@ tri d3d9_triangle.exe rs64-fresh 300 reset $strict
 tri d3d9_triangle32.exe rs32-fresh 300 reset $strict
 tri d3d9_triangle.exe ex64-fresh 300 extras $strict
 tri d3d9_triangle32.exe ex32-fresh 300 extras $strict
+tri d3d9_triangle.exe fs64-fresh 300 fullscreen $strict
+tri d3d9_triangle32.exe fs32-fresh 300 fullscreen $strict
 rm -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" "$WINEPREFIX/drive_c/windows/syswow64/mtld3d.dll"
 tri d3d9_triangle.exe tri64-nomarker  # Wine finds no builtin without its marker: these fail
 tri d3d9_triangle32.exe tri32-nomarker

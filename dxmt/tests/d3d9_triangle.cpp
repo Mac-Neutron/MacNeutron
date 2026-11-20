@@ -140,9 +140,9 @@
 // parameters (refused with nothing changed, or refused owing a reset); another device window; an extended device's
 // ResetEx, which keeps its state, and its back buffer and auto depth-stencil held across one; queries issued before a
 // Reset and read after it; Resets in a row. A draw after a Reset is judged by reading the back buffer back, a present
-// by an occlusion query a present completes (presentCounts). Under "strict" alone, rs-refuse asks for a Reset into
-// fullscreen, which the core refuses (D3DERR_NOTAVAILABLE); elsewhere it does nothing and passes: no device of this
-// mode leaves windowed mode on mtld3d. With a 200 s budget. The core before DXMTRS C4c-6c's front end refuses Reset,
+// by an occlusion query a present completes (presentCounts). Under "strict" alone, rs-refuse asks for a Reset to an
+// R5G6B5 back buffer, which the core refuses (D3DERR_NOTAVAILABLE); elsewhere it does nothing and passes: mtld3d makes
+// that Reset with a format it draws. With a 200 s budget. The core before DXMTRS C4c-6c's front end refuses Reset,
 // ResetEx, TestCooperativeLevel and CheckDeviceState: each row prints "FAIL ... 8876086a" at its first such call.
 // With "extras" ("extras strict" under core; DXMTRS C4c-7a): 15 rows "d3d9 <gm|fl|ex|rz|cu>-<row> ok|FAIL <why>", each
 // on a device and a visible window of its own (reset's): the gamma ramp's Set and Get (stored and reported, a ramp that
@@ -156,10 +156,22 @@
 // calls (SetCursorProperties' answers, ShowCursor's, the cursor GetCursor reports across a WM_SETCURSOR). A sample
 // count the adapter does not offer is a FAIL. Under "strict" alone, rz-self makes the bound depth-stencil's own texture
 // RESZ's destination and rz-refuse asks for a RESZ into a dynamic depth texture, which the core refuses
-// (D3DERR_NOTAVAILABLE); elsewhere both do nothing and pass; and cu-setcursor wants the class cursor back after
-// WM_SETCURSOR (the core has no window subclass) where mtld3d keeps its own. No row moves the pointer. With a 200 s
-// budget. The core before DXMTRS C4c-7a's front end refuses each call: every row but rz-refuse prints its "FAIL ..." at
-// its first such call.
+// (D3DERR_NOTAVAILABLE); elsewhere both do nothing and pass. No row moves the pointer. With a 200 s budget. The core
+// before DXMTRS C4c-7a's front end refuses each call: every row but rz-refuse prints its "FAIL ..." at its first such
+// call; and before DXMTRS C4c-6d's subclass cu-setcursor's last cell gets the class cursor back.
+// With "fullscreen" ("fullscreen strict" under core; DXMTRS C4c-6d): 9 rows "d3d9 <fs|ws>-<row> ok|FAIL <why>", each
+// on a plain device and a window of its own (reset's): fullscreen devices (created, refused, Reset into and out of
+// fullscreen, onto another window and to another mode), the window that covers the monitor, the window subclass (its
+// window procedure, its answer to WM_ACTIVATEAPP and to an external resize of a fullscreen window), and a windowed
+// device's window resized (ws-size). The program runs on a person's working Mac: every fs-* row first asks whether Wine
+// emulates mode sets for it (EmulateModeset) and FAILs before any device when it does not; fs-cover alone makes a
+// fullscreen device without D3DCREATE_NOWINDOWCHANGES (its window covers the primary monitor for well under a second in
+// a strict lane); a row that sets a display mode puts the registry's back itself; no row changes the foreground window,
+// minimises a window, moves the pointer or sleeps a fixed time. Each cell wants what mtld3d answers, in every lane, but
+// one: under "strict" ws-size wants the back buffer and the viewport kept where mtld3d's follow the window (the core
+// does not follow a windowed device's window: DXMTRS C4c-6d's R6d-3). With a 200 s budget. The core before DXMTRS
+// C4c-6d's front end refuses a fullscreen device: every fs-* row prints its "FAIL ..." at its first fullscreen create
+// or Reset (fs-wndproc at its windowed half: no subclass).
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -9886,10 +9898,21 @@ static bool presentCounts(const char *form, float x0, float y0, float x1, float 
             return snprintf(why, sizeof why, "%s: GetData (no flag) S_FALSE for 5 s of them", form), false;
     }
 }
-// The mode main's IDirect3D9::GetAdapterDisplayMode reports, in `a`.
-static bool adapterMode(D3DDISPLAYMODE &a) {
-    const HRESULT hr = stateD3d->GetAdapterDisplayMode(D3DADAPTER_DEFAULT, &a);
-    return hr == D3D_OK || fail("IDirect3D9::GetAdapterDisplayMode", hr);
+// The mode main's IDirect3D9::GetAdapterDisplayMode reports, in `a`; with `smaller` (DXMTRS C4c-6d's mode rows),
+// instead the first mode EnumAdapterModes lists for X8R8G8B8 that is smaller than that one both ways, a FAIL saying so
+// when it lists none.
+static bool adapterMode(D3DDISPLAYMODE &a, bool smaller = false) {
+    const HRESULT hr = direct3d->GetAdapterDisplayMode(D3DADAPTER_DEFAULT, &a);
+    if (hr != D3D_OK) return fail("IDirect3D9::GetAdapterDisplayMode", hr);
+    if (!smaller) return true;
+    const D3DDISPLAYMODE desk = a;
+    for (UINT i = 0, n = direct3d->GetAdapterModeCount(D3DADAPTER_DEFAULT, D3DFMT_X8R8G8B8); i < n; i++)
+        if (direct3d->EnumAdapterModes(D3DADAPTER_DEFAULT, D3DFMT_X8R8G8B8, i, &a) == D3D_OK && a.Width < desk.Width &&
+            a.Height < desk.Height)
+            return true;
+    return snprintf(why, sizeof why, "EnumAdapterModes lists no X8R8G8B8 mode smaller than the desktop's %ux%u",
+                    desk.Width, desk.Height),
+           false;
 }
 // Whether a reported mode is `a` (size, refresh and format); `why` names both otherwise.
 static bool sameMode(const char *what, UINT w, UINT h, UINT hz, D3DFORMAT f, const D3DDISPLAYMODE &a) {
@@ -10189,33 +10212,38 @@ static bool rsWindow(Window &w, int cw, int ch, int x = 400) {
     return w.h || (snprintf(why, sizeof why, "CreateWindowW"), false);
 }
 // Windowed present parameters on `w`: width x height X8R8G8B8, one back buffer, DISCARD, IMMEDIATE, `ms` samples, an
-// auto depth-stencil of `depth` (none for D3DFMT_UNKNOWN).
+// auto depth-stencil of `depth` (none for D3DFMT_UNKNOWN); with `full` (DXMTRS C4c-6d), fullscreen ones (Windowed
+// FALSE) at the refresh rate of the mode `full`.
 static D3DPRESENT_PARAMETERS rsParams(HWND w, UINT width, UINT height, D3DFORMAT depth = D3DFMT_UNKNOWN,
-                                      D3DMULTISAMPLE_TYPE ms = D3DMULTISAMPLE_NONE) {
+                                      D3DMULTISAMPLE_TYPE ms = D3DMULTISAMPLE_NONE,
+                                      const D3DDISPLAYMODE *full = nullptr) {
     D3DPRESENT_PARAMETERS pp = {};
     pp.BackBufferWidth = width, pp.BackBufferHeight = height, pp.BackBufferFormat = D3DFMT_X8R8G8B8;
     pp.BackBufferCount = 1, pp.MultiSampleType = ms, pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = w;
-    pp.Windowed = TRUE, pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    pp.Windowed = !full, pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    pp.FullScreen_RefreshRateInHz = full ? full->RefreshRate : 0;
     pp.EnableAutoDepthStencil = depth != D3DFMT_UNKNOWN, pp.AutoDepthStencilFormat = depth;
     return pp;
 }
-// r's window and a 256x256 device on it (rsParams, `depth`, `ms` samples): from main's IDirect3D9, or, `extended`,
-// CreateDeviceEx of an IDirect3D9Ex of its own. A create that fails is a FAIL with its hr.
+// r's window (rsWindow's, client area 256x256, unless the row made it first) and a device on it: 256x256 (rsParams,
+// `depth`, `ms` samples) or, with `full`, fullscreen at that mode's size and refresh rate; behaviour flags
+// D3DCREATE_HARDWARE_VERTEXPROCESSING and `flags`. From main's IDirect3D9, or, `extended`, CreateDeviceEx of an
+// IDirect3D9Ex of its own. A create that fails is a FAIL with its hr.
 static bool rsDevice(RsDevice &r, D3DFORMAT depth = D3DFMT_UNKNOWN, bool extended = false,
-                     D3DMULTISAMPLE_TYPE ms = D3DMULTISAMPLE_NONE) {
-    if (!rsWindow(r.w, 256, 256)) return false;
-    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256, depth, ms);
+                     D3DMULTISAMPLE_TYPE ms = D3DMULTISAMPLE_NONE, const D3DDISPLAYMODE *full = nullptr,
+                     DWORD flags = 0) {
+    if (!r.w.h && !rsWindow(r.w, 256, 256)) return false;
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, full ? full->Width : 256, full ? full->Height : 256, depth, ms, full);
+    flags |= D3DCREATE_HARDWARE_VERTEXPROCESSING;
     HRESULT hr;
     if (!extended) {
-        hr = direct3d ? direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, r.w.h,
-                                               D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp, &r.d.p)
+        hr = direct3d ? direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, r.w.h, flags, &pp, &r.d.p)
                       : E_POINTER;
-        return (hr == D3D_OK && r.d.p) || fail("CreateDevice", hr);
+        return (hr == D3D_OK && r.d.p) || fail(full ? "CreateDevice (fullscreen)" : "CreateDevice", hr);
     }
     hr = Direct3DCreate9Ex(D3D_SDK_VERSION, &r.d3d.p);
     if (hr != D3D_OK || !r.d3d.p) return fail("Direct3DCreate9Ex", hr);
-    hr = r.d3d.p->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, r.w.h, D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp,
-                                 nullptr, &r.ex.p);
+    hr = r.d3d.p->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, r.w.h, flags, &pp, nullptr, &r.ex.p);
     if (hr != D3D_OK || !r.ex.p) return fail("CreateDeviceEx", hr);
     r.d.p = r.ex.p, r.d.p->AddRef();
     return true;
@@ -10627,24 +10655,22 @@ static bool rowRsInvalid() {
     }
     return until([] { return lands(160, 160, 224, 224, 32, 32); }) || failIn("after the valid Reset");
 }
-// rs-refuse, under the launch's "strict" alone (the core lanes; elsewhere it does nothing and passes: on mtld3d a Reset
-// into fullscreen would change the display mode of the machine the gates run on). No auto depth-stencil, nothing held:
-// a well-formed Reset into fullscreen (Windowed FALSE, the adapter's mode's size and refresh rate, X8R8G8B8, DISCARD,
-// IMMEDIATE) D3DERR_NOTAVAILABLE (the core refuses it by name, "IDirect3DDevice9::Reset (into fullscreen)", after
-// mtld3d's validation); TestCooperativeLevel D3D_OK (no reset owed); a quad lands, until()'s Present D3D_OK.
+// rs-refuse, under the launch's "strict" alone (the core lanes; elsewhere it does nothing and passes: mtld3d makes this
+// Reset, with a back buffer of a format it draws). No auto depth-stencil, nothing held: a windowed 256x256 Reset to an
+// R5G6B5 back buffer D3DERR_NOTAVAILABLE (the core refuses it by name, "IDirect3DDevice9::Reset (a back-buffer format
+// the core does not make)", after mtld3d's validation, which R5G6B5 at one sample passes); TestCooperativeLevel D3D_OK
+// (no reset owed); a quad lands, until()'s Present D3D_OK (the device still usable). Since DXMTRS C4c-6d the launch's
+// one refusal: a Reset into fullscreen is the core's (the fullscreen launch).
 static bool rowRsRefuse() {
     if (!strictMode) return true;
     RsDevice r;
     if (!rsDevice(r)) return false;
     const OnDevice on(r.d.p, nullptr);
-    D3DDISPLAYMODE m = {};
-    const HRESULT hr = direct3d ? direct3d->GetAdapterDisplayMode(D3DADAPTER_DEFAULT, &m) : E_POINTER;
-    if (hr != D3D_OK) return fail("IDirect3D9::GetAdapterDisplayMode", hr);
-    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, m.Width, m.Height);
-    pp.Windowed = FALSE, pp.FullScreen_RefreshRateInHz = m.RefreshRate;
-    if (!resetIs("Reset (into fullscreen)", pp, D3DERR_NOTAVAILABLE)) return false;
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256);
+    pp.BackBufferFormat = D3DFMT_R5G6B5;
+    if (!resetIs("Reset (an R5G6B5 back buffer)", pp, D3DERR_NOTAVAILABLE)) return false;
     return (coopIs(D3D_OK) && until([] { return lands(160, 160, 224, 224, 32, 32); })) ||
-           failIn("after the refused fullscreen Reset");
+           failIn("after the refused R5G6B5 Reset");
 }
 // rs-window (no auto depth-stencil): a second visible plain window, client area 192x160. Reset naming it, 256x256,
 // D3D_OK: a quad lands, a present. Reset naming no window, 0x0, D3D_OK: the struct reads the second window's client
@@ -10821,9 +10847,8 @@ static void resetRows(IDirect3DDevice9 *d, bool strict) {
 // --- The "extras" mode (DXMTRS C4c-7a): gamma, frame latency, the Ex creators, RESZ and the cursor calls. Each row
 // makes a device and a window of its own (rsDevice's; an extended one where a row says so) and, while it runs, the
 // globals the helpers read name that device and its back buffer (OnDevice: until()'s rebind and clearRt read rtSurf);
-// no row makes a Reset. Each cell wants what mtld3d, the default runtime, answers, in every lane, but in three rows:
-// rz-self and rz-refuse do nothing and pass unless "strict", and cu-setcursor's last cell wants the core's gap under
-// "strict" (no window subclass: the class cursor is back). A row that draws judges it in one until() attempt with
+// no row makes a Reset. Each cell wants what mtld3d, the default runtime, answers, in every lane, but in two rows:
+// rz-self and rz-refuse do nothing and pass unless "strict". A row that draws judges it in one until() attempt with
 // fresh objects (mtld3d leaves a draw out while a new device's pipelines build); every judged draw sets ZENABLE
 // itself, and stage 0 is left unbound on every path. No row calls SetCursorPosition or reads the pointer's position.
 // The core before DXMTRS C4c-7a's front end refuses every call the mode is about (D3DERR_NOTAVAILABLE; the gamma calls
@@ -11358,11 +11383,10 @@ static bool rowCuShow() {
 // cu-setcursor: the row's window's class given the arrow as its cursor (the class's window procedure is
 // DefWindowProcW, which sets the class cursor at a client-area WM_SETCURSOR); SetCursorProperties (the opaque bitmap)
 // D3D_OK, ShowCursor(TRUE): GetCursor() a cursor that is not the arrow (the Direct3D one); the row sends the window
-// WM_SETCURSOR (HTCLIENT) itself, then GetCursor(): the same Direct3D cursor on mtld3d (its window subclass consumes
-// the message while its cursor shows). Under "strict" the cell wants the core's gap instead: the arrow (the core has
-// no subclass, so DefWindowProcW sets the class cursor), a cell that turns red the day the core gets the subclass,
-// when it is rewritten. No D3D call between the four. The row ends on ShowCursor(TRUE) and the class cursor as it was,
-// on every path (the class is every d3d9_triangle window's).
+// WM_SETCURSOR (HTCLIENT) itself, then GetCursor(): the same Direct3D cursor, in every lane (the window subclass
+// consumes the message while its cursor shows; the core's device has it since DXMTRS C4c-6d: without it
+// DefWindowProcW sets the class cursor, the arrow). No D3D call between the four. The row ends on ShowCursor(TRUE) and
+// the class cursor as it was, on every path (the class is every d3d9_triangle window's).
 static bool rowCuSetCursor() {
     RsDevice r;
     Com<IDirect3DSurface9> bb, bmp;
@@ -11381,11 +11405,11 @@ static bool rowCuSetCursor() {
             return snprintf(why, sizeof why, "GetCursor() after ShowCursor(TRUE) %p: none or the arrow (%p)",
                             (void *)shown, (void *)arrow),
                    false;
-        const HCURSOR expect = strictMode ? arrow : shown;
-        const char *const which = strictMode ? "the arrow: the core has no window subclass" : "the Direct3D cursor";
-        return after == expect || (snprintf(why, sizeof why, "GetCursor() after WM_SETCURSOR %p, want %p (%s)",
-                                            (void *)after, (void *)expect, which),
-                                   false);
+        return after == shown ||
+               (snprintf(why, sizeof why,
+                         "GetCursor() after WM_SETCURSOR %p, want %p (the Direct3D cursor; the arrow %p)",
+                         (void *)after, (void *)shown, (void *)arrow),
+                false);
     }();
     dev->ShowCursor(TRUE);
     SetClassLongPtrW(r.w.h, GCLP_HCURSOR, (LONG_PTR)before);
@@ -11399,6 +11423,406 @@ static void extrasRows(IDirect3DDevice9 *d, bool strict) {
         {"rz-auto", rowRzAuto},   {"rz-single", rowRzSingle},   {"rz-plain", rowRzPlain},
         {"rz-edges", rowRzEdges}, {"rz-self", rowRzSelf},       {"rz-refuse", rowRzRefuse},
         {"cu-props", rowCuProps}, {"cu-show", rowCuShow},       {"cu-setcursor", rowCuSetCursor}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 200000;
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = r.run();
+        row(r.name, ok, why);
+    }
+}
+
+// --- The "fullscreen" mode (DXMTRS C4c-6d): fullscreen devices, Reset into and out of fullscreen and the window
+// subclass. Each row makes a plain device and a window of its own (rsDevice's; an extended device keeps the window's
+// rect when it leaves fullscreen, which the rect cells below do not want; Wine's d3d9ex runs CreateDeviceEx's and
+// ResetEx's fullscreen forms) and, while it runs, the globals the helpers read name its device (OnDevice, rtSurf null,
+// as the reset mode's). A fullscreen device asks for the desktop's current mode (GetAdapterDisplayMode: its size and
+// refresh rate), which sets no mode, unless the row tests a mode change. Each cell wants what mtld3d, the default
+// runtime, answers, in every lane, but ws-size's under "strict". A draw is judged by reading the back buffer back in
+// one until() attempt, a present by presentCounts (presents()) or by Present's answer. A row that judges what a release
+// gives back ends OnDevice's scope first and wants the release's count 0 (a reference left would read as a window,
+// procedure or mode not given back).
+// The gates run this program on a person's working Mac, so: every fs-* row first asks modesEmulated() and FAILs, before
+// it makes a window or touches a device, when Wine does not emulate mode sets for it (a mode set would then switch the
+// display); only fs-cover makes a fullscreen device without D3DCREATE_NOWINDOWCHANGES (on the Mac a window covering a
+// screen rises above other applications' windows while this program is active, and the Dock and the menu bar hide,
+// for under a second in a strict lane); the two rows that set a mode put the registry's mode back themselves on every
+// path (ModeBack, after their release cell); no row changes the foreground window, minimises a window or moves the
+// pointer, and a row that waits for a posted message pumps the queue until a condition holds (pumpUntil), never for a
+// fixed time. The core before DXMTRS C4c-6d's front end refuses a fullscreen device and a Reset into fullscreen
+// (D3DERR_NOTAVAILABLE) and installs no subclass: each fs-* row FAILs at its first fullscreen create or Reset,
+// fs-wndproc at its windowed half. The mode's budget is 200 s, the launches' watchdog 300 s.
+
+// Whether Wine emulates mode sets for this program: EmulateModeset under HKCU\Software\Wine\AppDefaults\<this
+// program's file name>\X11 Driver, else under HKCU\Software\Wine\X11 Driver, its first character one of yYtT1 (win32u's
+// reading; d3d12_fullscreen.cpp's guard, by the module's own name: d3d9_triangle.exe, the guest's d3d9_triangle32.exe).
+// Otherwise false, `why` saying so.
+static bool modesEmulated() {
+    char path[MAX_PATH] = {}, app[MAX_PATH + 64];
+    const DWORD n = GetModuleFileNameA(nullptr, path, sizeof path);
+    const char *exe = path;
+    for (DWORD i = 0; i < n; i++)
+        if (path[i] == '\\' || path[i] == '/') exe = path + i + 1;
+    snprintf(app, sizeof app, "Software\\Wine\\AppDefaults\\%s\\X11 Driver", exe);
+    for (const char *key : {(const char *)app, "Software\\Wine\\X11 Driver"}) {
+        char v[256] = {};
+        DWORD size = sizeof v;
+        if (RegGetValueA(HKEY_CURRENT_USER, key, "EmulateModeset", RRF_RT_REG_SZ, nullptr, v, &size) != ERROR_SUCCESS)
+            continue;
+        if (v[0] && strchr("yYtT1", v[0])) return true;
+        break;
+    }
+    return snprintf(why, sizeof why, "EmulateModeset is off for %s: a mode set would switch this machine's display",
+                    exe),
+           false;
+}
+// A window's placement: its style, extended style (GetWindowLongW) and rect (GetWindowRect).
+struct Placement {
+    LONG style, exstyle;
+    RECT rect;
+};
+static Placement placement(HWND h) {
+    Placement p = {GetWindowLongW(h, GWL_STYLE), GetWindowLongW(h, GWL_EXSTYLE), {}};
+    GetWindowRect(h, &p.rect);
+    return p;
+}
+// Whether h's placement is `want`; `why` names both, after `what`.
+static bool placementIs(const char *what, HWND h, const Placement &want) {
+    const Placement p = placement(h);
+    if (p.style == want.style && p.exstyle == want.exstyle && EqualRect(&p.rect, &want.rect)) return true;
+    snprintf(why, sizeof why,
+             "%s: style %#lx, extended style %#lx, rect (%ld,%ld)-(%ld,%ld); want %#lx, %#lx, (%ld,%ld)-(%ld,%ld)",
+             what, (unsigned long)p.style, (unsigned long)p.exstyle, (long)p.rect.left, (long)p.rect.top,
+             (long)p.rect.right, (long)p.rect.bottom, (unsigned long)want.style, (unsigned long)want.exstyle,
+             (long)want.rect.left, (long)want.rect.top, (long)want.rect.right, (long)want.rect.bottom);
+    return false;
+}
+// h's window procedure (GWLP_WNDPROC, read with the W call: the class is registered W).
+static LONG_PTR procOf(HWND h) { return GetWindowLongPtrW(h, GWLP_WNDPROC); }
+// Drain this thread's queue (PeekMessageW, DispatchMessageW), then cond(); again after waiting at most 10 ms for the
+// next message (MsgWaitForMultipleObjects), until cond() holds or 2 s have passed: false then, cond()'s `why` kept. The
+// subclass's re-cover and re-activation are messages it posts to the window, whose thread is this one.
+template <class F> static bool pumpUntil(F cond) {
+    for (const ULONGLONG end = GetTickCount64() + 2000;;) {
+        MSG m;
+        while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&m);
+        if (cond()) return true;
+        if (GetTickCount64() >= end) return false;
+        MsgWaitForMultipleObjects(0, nullptr, FALSE, 10, QS_ALLINPUT);
+    }
+}
+// The scope guard of a row that sets a display mode, made before its device: the registry's mode (EnumDisplaySettingsW,
+// ENUM_REGISTRY_SETTINGS) read then; at its end, after the row's release cell, ChangeDisplaySettingsW(NULL, 0) when the
+// desktop's current mode has another size or cannot be read (mtld3d's own restore compares the sizes alone).
+// currentIs(what, w, h): the desktop's current mode (ENUM_CURRENT_SETTINGS) is w x h, else `why` names both.
+struct ModeBack {
+    DEVMODEW reg = {};
+    ModeBack() { reg.dmSize = sizeof reg, EnumDisplaySettingsW(nullptr, ENUM_REGISTRY_SETTINGS, &reg); }
+    ~ModeBack() {
+        DEVMODEW c = {};
+        c.dmSize = sizeof c;
+        if (!EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &c) || c.dmPelsWidth != reg.dmPelsWidth ||
+            c.dmPelsHeight != reg.dmPelsHeight)
+            ChangeDisplaySettingsW(nullptr, 0);
+    }
+    bool currentIs(const char *what, DWORD w, DWORD h) const {
+        DEVMODEW c = {};
+        c.dmSize = sizeof c;
+        if (!EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &c))
+            return snprintf(why, sizeof why, "%s: EnumDisplaySettingsW (current) failed", what), false;
+        if (c.dmPelsWidth == w && c.dmPelsHeight == h) return true;
+        return snprintf(why, sizeof why, "%s: the desktop's current mode %lux%lu, want %lux%lu", what,
+                        (unsigned long)c.dmPelsWidth, (unsigned long)c.dmPelsHeight, (unsigned long)w,
+                        (unsigned long)h),
+               false;
+    }
+};
+
+// fs-create (D3DCREATE_NOWINDOWCHANGES): a fullscreen device at the desktop's mode on a window whose client area is
+// 256x256: D3D_OK; GetPresentParameters Windowed 0; the back buffer the mode's size; CreateAdditionalSwapChain of a
+// windowed 256x256 chain D3DERR_INVALIDCALL; a quad lands; Present D3D_OK; the window's placement as before the create.
+// The cells that tell a fullscreen device from a windowed one: Windowed 0 (a windowed device says 1), the additional
+// chain refused (a windowed device makes it: rt-chain), and the back buffer at the mode's size where the client area is
+// 256x256 (a fullscreen request not taken as a display mode follows the client area). The placement says the flag was
+// kept: no cover.
+static bool rowFsCreate() {
+    if (!modesEmulated()) return false;
+    D3DDISPLAYMODE m = {};
+    if (!adapterMode(m)) return false;
+    RsDevice r;
+    if (!rsWindow(r.w, 256, 256)) return false;
+    const Placement p0 = placement(r.w.h);
+    if (!rsDevice(r, D3DFMT_UNKNOWN, false, D3DMULTISAMPLE_NONE, &m, D3DCREATE_NOWINDOWCHANGES)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    D3DPRESENT_PARAMETERS cp = rsParams(r.w.h, 256, 256), got = {};
+    Com<IDirect3DSwapChain9> sc, extra;
+    CK(GetSwapChain, 0, &sc.p);
+    return answer("IDirect3DSwapChain9::GetPresentParameters", sc.p->GetPresentParameters(&got), D3D_OK) &&
+           exact("GetPresentParameters' Windowed", (unsigned long long)got.Windowed, 0) &&
+           (bbIs(m.Width, m.Height) || failIn("the mode's size, the client area 256x256")) &&
+           answer("CreateAdditionalSwapChain (windowed, on a fullscreen device)",
+                  dev->CreateAdditionalSwapChain(&cp, &extra.p), D3DERR_INVALIDCALL) &&
+           (until([] { return lands(160, 160, 224, 224, 32, 32); }) || failIn("a quad")) && presentIs(D3D_OK) &&
+           placementIs("the window (D3DCREATE_NOWINDOWCHANGES)", r.w.h, p0);
+}
+// fs-cover, the one row whose window covers the monitor (no D3DCREATE_NOWINDOWCHANGES): a fullscreen device at the
+// desktop's mode: D3D_OK; the window borderless at the primary monitor's rect (style (before | WS_POPUP | WS_SYSMENU) &
+// ~(WS_CAPTION | WS_THICKFRAME), extended style before & ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE): mtld3d's); a quad
+// lands and a present. The window made half the monitor's size with SetWindowPos (SWP_NOZORDER | SWP_NOACTIVATE),
+// GetWindowRect another rect than the monitor's, then the queue pumped: covering again (the subclass's WM_SIZE arm
+// posts the re-cover to the window; the cell before the pump tells a re-cover from a SetWindowPos that never shrank
+// it).
+// Reset to a windowed 256x256: the placement as before the create, a quad lands. Reset into fullscreen: covering again.
+// The release: the placement as before. Then a second device on the window, fullscreen at 333x222 (a size no display
+// mode has): D3D_OK, its back buffer the monitor's size (such a request follows the client area, which the device
+// reads after its window covers the monitor: 256x256 if it read it before), and its release gives the placement back.
+static bool rowFsCover() {
+    if (!modesEmulated()) return false;
+    D3DDISPLAYMODE m = {};
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof mi;
+    if (!adapterMode(m)) return false;
+    if (!GetMonitorInfoW(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi))
+        return snprintf(why, sizeof why, "GetMonitorInfoW (the primary monitor)"), false;
+    const RECT &mon = mi.rcMonitor;
+    const LONG mw = mon.right - mon.left, mh = mon.bottom - mon.top;
+    RsDevice r;
+    if (!rsWindow(r.w, 256, 256)) return false;
+    const Placement p0 = placement(r.w.h);
+    const Placement cover = {(LONG)((p0.style | WS_POPUP | WS_SYSMENU) & ~(WS_CAPTION | WS_THICKFRAME)),
+                             (LONG)(p0.exstyle & ~(WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE)), mon};
+    if (!rsDevice(r, D3DFMT_UNKNOWN, false, D3DMULTISAMPLE_NONE, &m)) return false;
+    {
+        const OnDevice on(r.d.p, nullptr);
+        if (!placementIs("the window after the create", r.w.h, cover) ||
+            !until([] { return lands(160, 160, 224, 224, 32, 32); }) || !presents())
+            return failIn("covering");
+        SetWindowPos(r.w.h, nullptr, mon.left + mw / 4, mon.top + mh / 4, mw / 2, mh / 2,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        RECT now = {};
+        GetWindowRect(r.w.h, &now);
+        if (EqualRect(&now, &mon))
+            return snprintf(why, sizeof why, "made smaller: SetWindowPos left the window at the monitor's rect"), false;
+        if (!pumpUntil([&] { return placementIs("made smaller, the queue pumped", r.w.h, cover); })) return false;
+        D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256);
+        if (!resetIs("Reset (to a windowed 256x256)", pp)) return false;
+        if (!placementIs("after the windowed Reset", r.w.h, p0) ||
+            !until([] { return lands(160, 160, 224, 224, 32, 32); }))
+            return failIn("windowed");
+        pp = rsParams(r.w.h, m.Width, m.Height, D3DFMT_UNKNOWN, D3DMULTISAMPLE_NONE, &m);
+        if (!resetIs("Reset (into fullscreen)", pp) || !placementIs("after the Reset into fullscreen", r.w.h, cover))
+            return false;
+    }
+    ULONG left = r.d.p->Release();
+    r.d.p = nullptr;
+    if (!exact("the device's Release", left, 0) || !placementIs("after the release", r.w.h, p0)) return false;
+    D3DDISPLAYMODE odd = m;
+    odd.Width = 333, odd.Height = 222;
+    if (!rsDevice(r, D3DFMT_UNKNOWN, false, D3DMULTISAMPLE_NONE, &odd)) return failIn("333x222");
+    {
+        const OnDevice on(r.d.p, nullptr);
+        if (!bbIs((UINT)mw, (UINT)mh)) return failIn("333x222 (no mode): the monitor's size");
+    }
+    left = r.d.p->Release();
+    r.d.p = nullptr;
+    return (exact("the device's Release", left, 0) && placementIs("after the release", r.w.h, p0)) ||
+           failIn("333x222");
+}
+// fs-reject (D3DCREATE_NOWINDOWCHANGES): fullscreen creates at the desktop's mode with a zero width, with
+// MultiSampleType 3 (no power of two: no device makes it) and with D3DFMT_UNKNOWN (resolved for a windowed device
+// alone; a fullscreen one names no format, which the sample count's check refuses): each D3DERR_INVALIDCALL and no
+// device, the window's placement as before. INVALIDCALL is mtld3d's answer to each, where a runtime that takes no
+// fullscreen device answers D3DERR_NOTAVAILABLE at the first.
+static bool rowFsReject() {
+    if (!modesEmulated()) return false;
+    D3DDISPLAYMODE m = {};
+    if (!adapterMode(m)) return false;
+    Window w;
+    if (!rsWindow(w, 256, 256)) return false;
+    const Placement p0 = placement(w.h);
+    static const char *const cells[] = {"a zero width", "MultiSampleType 3", "D3DFMT_UNKNOWN"};
+    for (int i = 0; i < 3; i++) {
+        D3DPRESENT_PARAMETERS pp = rsParams(w.h, m.Width, m.Height, D3DFMT_UNKNOWN, D3DMULTISAMPLE_NONE, &m);
+        if (i == 0) pp.BackBufferWidth = 0;
+        if (i == 1) pp.MultiSampleType = (D3DMULTISAMPLE_TYPE)3;
+        if (i == 2) pp.BackBufferFormat = D3DFMT_UNKNOWN;
+        Com<IDirect3DDevice9> d;
+        const HRESULT hr = direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, w.h,
+                                                  D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_NOWINDOWCHANGES,
+                                                  &pp, &d.p);
+        if (hr != D3DERR_INVALIDCALL || d.p)
+            return snprintf(why, sizeof why, "CreateDevice (fullscreen, %s) %08lx and device %p, want %08lx and none",
+                            cells[i], (unsigned long)hr, (void *)d.p, (unsigned long)D3DERR_INVALIDCALL),
+                   false;
+        if (!placementIs("the window", w.h, p0)) return failIn(cells[i]);
+    }
+    return true;
+}
+// fs-reset-in (D3DCREATE_NOWINDOWCHANGES): a windowed 256x256 device; Reset into fullscreen at the desktop's mode
+// D3D_OK: GetPresentParameters Windowed 0, the back buffer the mode's size (the client area is still 256x256), a quad
+// lands; Reset to a windowed 256x256 D3D_OK: the back buffer 256x256, a quad lands. The fullscreen cells are
+// fs-create's, reached by a Reset.
+static bool rowFsResetIn() {
+    if (!modesEmulated()) return false;
+    D3DDISPLAYMODE m = {};
+    if (!adapterMode(m)) return false;
+    RsDevice r;
+    if (!rsDevice(r, D3DFMT_UNKNOWN, false, D3DMULTISAMPLE_NONE, nullptr, D3DCREATE_NOWINDOWCHANGES)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, m.Width, m.Height, D3DFMT_UNKNOWN, D3DMULTISAMPLE_NONE, &m);
+    if (!resetIs("Reset (into fullscreen)", pp)) return false;
+    {
+        Com<IDirect3DSwapChain9> sc;
+        D3DPRESENT_PARAMETERS got = {};
+        CK(GetSwapChain, 0, &sc.p);
+        if (!answer("IDirect3DSwapChain9::GetPresentParameters", sc.p->GetPresentParameters(&got), D3D_OK) ||
+            !exact("GetPresentParameters' Windowed", (unsigned long long)got.Windowed, 0) || !bbIs(m.Width, m.Height) ||
+            !until([] { return lands(160, 160, 224, 224, 32, 32); }))
+            return failIn("into fullscreen");
+    }
+    pp = rsParams(r.w.h, 256, 256);
+    if (!resetIs("Reset (to a windowed 256x256)", pp)) return false;
+    return (bbIs(256, 256) && until([] { return lands(160, 160, 224, 224, 32, 32); })) || failIn("back to windowed");
+}
+// fs-reset-window (D3DCREATE_NOWINDOWCHANGES): window B (client area 192x160) and window A, A's procedure read; a
+// fullscreen device at the desktop's mode on A: A's procedure another than its own (the subclass's); Reset into
+// fullscreen naming B D3D_OK: a quad lands, a present; B's procedure the one A had after the create, A's its own again
+// (the subclass followed the device). The cell after the create keeps the last two from passing with no subclass
+// anywhere (A and B share their class's procedure). Which window the present reached is unjudged, as in rs-window.
+static bool rowFsResetWindow() {
+    if (!modesEmulated()) return false;
+    D3DDISPLAYMODE m = {};
+    if (!adapterMode(m)) return false;
+    Window b;
+    if (!rsWindow(b, 192, 160, 700)) return false;
+    RsDevice r;
+    if (!rsWindow(r.w, 256, 256)) return false;
+    const LONG_PTR a0 = procOf(r.w.h);
+    if (!rsDevice(r, D3DFMT_UNKNOWN, false, D3DMULTISAMPLE_NONE, &m, D3DCREATE_NOWINDOWCHANGES)) return false;
+    const LONG_PTR a1 = procOf(r.w.h);
+    if (a1 == a0)
+        return snprintf(why, sizeof why, "after the create A's window procedure %p, its own", (void *)a1), false;
+    const OnDevice on(r.d.p, nullptr);
+    D3DPRESENT_PARAMETERS pp = rsParams(b.h, m.Width, m.Height, D3DFMT_UNKNOWN, D3DMULTISAMPLE_NONE, &m);
+    if (!resetIs("Reset (into fullscreen, onto window B)", pp)) return false;
+    if (!until([] { return lands(160, 160, 224, 224, 32, 32); }) || !presents()) return failIn("on window B");
+    const LONG_PTR bp = procOf(b.h), ap = procOf(r.w.h);
+    if (bp == a1 && ap == a0) return true;
+    return snprintf(why, sizeof why, "after the Reset B's window procedure %p (want %p, A's after the create), A's %p "
+                    "(want its own %p)", (void *)bp, (void *)a1, (void *)ap, (void *)a0),
+           false;
+}
+// fs-wndproc: a windowed 256x256 device, then a fullscreen one at the desktop's mode (D3DCREATE_NOWINDOWCHANGES), each
+// on a window of its own: the window's procedure after the create another than the one read before it (the subclass),
+// after the release that one again. Both halves read GWLP_WNDPROC, which nothing but the subclass changes.
+static bool rowFsWndproc() {
+    if (!modesEmulated()) return false;
+    D3DDISPLAYMODE m = {};
+    if (!adapterMode(m)) return false;
+    for (const bool full : {false, true}) {
+        const char *const what = full ? "a fullscreen device" : "a windowed device";
+        RsDevice r;
+        if (!rsWindow(r.w, 256, 256)) return false;
+        const LONG_PTR p0 = procOf(r.w.h);
+        if (!rsDevice(r, D3DFMT_UNKNOWN, false, D3DMULTISAMPLE_NONE, full ? &m : nullptr,
+                      full ? D3DCREATE_NOWINDOWCHANGES : 0))
+            return failIn(what);
+        const LONG_PTR p1 = procOf(r.w.h);
+        if (p1 == p0)
+            return snprintf(why, sizeof why, "%s: the window procedure %p after the create, its own", what, (void *)p1),
+                   false;
+        const ULONG left = r.d.p->Release();
+        r.d.p = nullptr;
+        if (!exact("the device's Release", left, 0)) return failIn(what);
+        const LONG_PTR p2 = procOf(r.w.h);
+        if (p2 != p0)
+            return snprintf(why, sizeof why, "%s: the window procedure %p after the release, want its own %p", what,
+                            (void *)p2, (void *)p0),
+                   false;
+    }
+    return true;
+}
+// fs-reset-mode (D3DCREATE_NOWINDOWCHANGES): a fullscreen device at the desktop's mode; Reset to a smaller mode the
+// adapter lists D3D_OK: the desktop's current mode (EnumDisplaySettingsW, ENUM_CURRENT_SETTINGS) that mode's size;
+// after the release the registry's (ENUM_REGISTRY_SETTINGS, read before the device). Both cells read user32, not the
+// device: the first holds only if the Reset set the mode, the second only if the release put it back. A real
+// activation change during the row (the person switching applications) also restores the registry's mode.
+static bool rowFsResetMode() {
+    if (!modesEmulated()) return false;
+    D3DDISPLAYMODE m = {}, s = {};
+    if (!adapterMode(m) || !adapterMode(s, true)) return false;
+    const ModeBack back;
+    RsDevice r;
+    if (!rsDevice(r, D3DFMT_UNKNOWN, false, D3DMULTISAMPLE_NONE, &m, D3DCREATE_NOWINDOWCHANGES)) return false;
+    {
+        const OnDevice on(r.d.p, nullptr);
+        D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, s.Width, s.Height, D3DFMT_UNKNOWN, D3DMULTISAMPLE_NONE, &s);
+        if (!resetIs("Reset (to a smaller mode the adapter lists)", pp) ||
+            !back.currentIs("after the Reset", s.Width, s.Height))
+            return false;
+    }
+    const ULONG left = r.d.p->Release();
+    r.d.p = nullptr;
+    return exact("the device's Release", left, 0) &&
+           back.currentIs("after the release (the registry's)", back.reg.dmPelsWidth, back.reg.dmPelsHeight);
+}
+// fs-activate (D3DCREATE_NOWINDOWCHANGES): a fullscreen device made at a smaller mode the adapter lists: the desktop's
+// current mode that one; the queue drained once (an activation change pending from the person's own application switch
+// is spent before the cells: it would restore the mode inside them). The row sends the window WM_ACTIVATEAPP(FALSE):
+// the current mode the registry's at once; WM_ACTIVATEAPP(TRUE) and the queue pumped: the smaller one again (the
+// subclass posts the re-activation). A sent message takes the subclass's arm as a real one does. The first cell keeps
+// the second from passing on a device that set no mode; the third holds only if the subclass set it again. A real
+// activation change during the row also restores the registry's mode.
+static bool rowFsActivate() {
+    if (!modesEmulated()) return false;
+    D3DDISPLAYMODE s = {};
+    if (!adapterMode(s, true)) return false;
+    const ModeBack back;
+    RsDevice r;
+    if (!rsDevice(r, D3DFMT_UNKNOWN, false, D3DMULTISAMPLE_NONE, &s, D3DCREATE_NOWINDOWCHANGES)) return false;
+    if (!back.currentIs("after the create (a real activation change also restores the mode)", s.Width, s.Height))
+        return false;
+    pumpUntil([] { return true; });
+    SendMessageW(r.w.h, WM_ACTIVATEAPP, FALSE, 0);
+    if (!back.currentIs("after WM_ACTIVATEAPP(FALSE) (the registry's)", back.reg.dmPelsWidth, back.reg.dmPelsHeight))
+        return false;
+    SendMessageW(r.w.h, WM_ACTIVATEAPP, TRUE, 0);
+    return pumpUntil([&] {
+        return back.currentIs("after WM_ACTIVATEAPP(TRUE), the queue pumped (a real activation change during the row "
+                              "also restores the mode)",
+                              s.Width, s.Height);
+    });
+}
+// ws-size, last (a windowed device's window resized: DXMTRS C4c-6d's R6d-3): a windowed 256x256 device; its window
+// resized with SetWindowPos (SWP_NOZORDER | SWP_NOACTIVATE) to the outer rect of a 320x240 client area, which sends
+// WM_SIZE before it returns (no pump); the client area then read (GetClientRect) another than 256x256 (else no cell
+// below tells a resize from none). On mtld3d the back buffer's description, the viewport and the scissor rect are that
+// client area (its subclass's WM_SIZE arm re-makes the back buffer: only a resize that reached it gets there); under
+// "strict" they keep 256x256 (a core device's back buffer does not follow its window). In both a quad lands and Present
+// answers D3D_OK. GetPresentParameters follows on neither runtime: not judged.
+static bool rowWsSize() {
+    RsDevice r;
+    if (!rsDevice(r)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    RECT o = {0, 0, 320, 240}, c = {};
+    AdjustWindowRect(&o, WS_OVERLAPPEDWINDOW, FALSE);
+    SetWindowPos(r.w.h, nullptr, 400, 100, o.right - o.left, o.bottom - o.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    if (!GetClientRect(r.w.h, &c) || c.right <= 0 || c.bottom <= 0 || (c.right == 256 && c.bottom == 256))
+        return snprintf(why, sizeof why, "after SetWindowPos the client area %ldx%ld, want another than 256x256",
+                        (long)c.right, (long)c.bottom),
+               false;
+    const UINT w = strictMode ? 256 : (UINT)c.right, h = strictMode ? 256 : (UINT)c.bottom;
+    if (!bbIs(w, h) || !extentIs(w, h))
+        return failIn(strictMode ? "kept (strict: a core device does not follow its window)" : "the new client area");
+    return (until([] { return lands(160, 160, 224, 224, 32, 32); }) && presentIs(D3D_OK)) || failIn("after the resize");
+}
+
+static void fullscreenRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"fs-create", rowFsCreate},     {"fs-cover", rowFsCover},           {"fs-reject", rowFsReject},
+        {"fs-reset-in", rowFsResetIn},  {"fs-reset-window", rowFsResetWindow}, {"fs-wndproc", rowFsWndproc},
+        {"fs-reset-mode", rowFsResetMode}, {"fs-activate", rowFsActivate},  {"ws-size", rowWsSize}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 200000;
     for (const auto &r : rows) {
         why[0] = 0;
@@ -11430,6 +11854,7 @@ int main(int argc, char **argv) {
     const bool queriesMode = !bench && argc > 1 && !strcmp(argv[1], "queries");
     const bool resetMode = !bench && argc > 1 && !strcmp(argv[1], "reset");
     const bool extrasMode = !bench && argc > 1 && !strcmp(argv[1], "extras");
+    const bool fullscreenMode = !bench && argc > 1 && !strcmp(argv[1], "fullscreen");
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     const bool bufBench = bench && argc > 4 && !strcmp(argv[4], "buf");
@@ -11498,6 +11923,13 @@ int main(int argc, char **argv) {
     }
     if (extrasMode) {
         extrasRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
+    if (fullscreenMode) {
+        fullscreenRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();
         d3d->Release();
         DestroyWindow(hwnd);

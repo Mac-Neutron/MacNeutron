@@ -78,12 +78,16 @@
 # core), its rows "queries-<row>"; under core its launch's logs hold no refusal line (since DXMTRS C4c-5, which makes
 # CreateQuery the core's). Every lane also runs d3d9_triangle reset (DXMTRS C4c-6c's 14 rows of Reset and ResetEx of a
 # windowed device, TestCooperativeLevel and CheckDeviceState, each row on a device and a window of its own; "reset
-# strict" under core, where rs-refuse alone asks for a Reset into fullscreen), its rows "reset-<row>"; under core its
-# launch's logs hold exactly its one refusal line (that Reset into fullscreen, refused by name). Every lane also runs
-# d3d9_triangle extras (DXMTRS C4c-7a's 15 rows of the gamma ramp, frame latency, the Ex creators, RESZ and the cursor
-# calls, each row on a device and a window of its own; "extras strict" under core, where rz-self and rz-refuse alone
-# run and cu-setcursor wants the core's class cursor), its rows "extras-<row>"; under core its launch's logs hold
-# exactly its one refusal line (rz-refuse's RESZ into a dynamic depth texture, refused by name).
+# strict" under core, where rs-refuse alone asks for a Reset to an R5G6B5 back buffer), its rows "reset-<row>"; under
+# core its launch's logs hold exactly its one refusal line (that Reset to a back-buffer format the core does not make,
+# refused by name). Every lane also runs d3d9_triangle extras (DXMTRS C4c-7a's 15 rows of the gamma ramp, frame
+# latency, the Ex creators, RESZ and the cursor calls, each row on a device and a window of its own; "extras strict"
+# under core, where rz-self and rz-refuse alone run), its rows "extras-<row>"; under core its launch's logs hold exactly
+# its one refusal line (rz-refuse's RESZ into a dynamic depth texture, refused by name). Every lane also runs
+# d3d9_triangle fullscreen (DXMTRS C4c-6d's 9 rows of fullscreen devices, Reset into and out of fullscreen and the
+# window subclass, each row on a plain device and a window of its own, every fs-* row FAILing before any device unless
+# Wine emulates mode sets for it; "fullscreen strict" under core, where ws-size wants the back buffer kept), its rows
+# "fullscreen-<row>"; under core its launch's logs hold no refusal line.
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -172,9 +176,11 @@ launch() {
 # texture at a vertex sampler), the depth launch's exactly its one (DXMTRS C4b-3d2: a depth-tested draw sampling the
 # bound depth-stencil; a dynamic depth texture's LockRect is the core's since DXMTRS C4c-3b); the buffers launch's
 # exactly its one (DXMTRS C4c-2a: a layout no binding can fetch); the reset launch's exactly its one (DXMTRS C4c-6c: a
-# Reset into fullscreen, which rs-refuse asks for under strict alone); the extras launch's exactly its one (DXMTRS
-# C4c-7a: a RESZ into a dynamic depth texture, which rz-refuse asks for under strict alone); the shaders, state,
-# textures, targets, blend, mrt, msaa, blit and queries launches' none (the shaders launch's since DXMTRS C4c-2a,
+# Reset to a back-buffer format the core does not make, which rs-refuse asks for under strict alone; its one since
+# DXMTRS C4c-6d, which makes a Reset into fullscreen the core's); the extras launch's exactly its one (DXMTRS C4c-7a:
+# a RESZ into a dynamic depth texture, which rz-refuse asks for under strict alone); the shaders, state, textures,
+# targets, blend, mrt, msaa, blit, queries and fullscreen launches' none (the fullscreen launch's since DXMTRS C4c-6d,
+# which makes fullscreen devices and Resets into fullscreen the core's; the shaders launch's since DXMTRS C4c-2a,
 # which draws the crossing row; the state launch's since DXMTRS C4c-1: buffer locks are the core's, and since DXMTRS
 # C4c-6a the getters, the stubs and the presents; the textures launch's since DXMTRS C4c-3a: a
 # render-target texture's lock is the core's; the targets launch's since DXMTRS C4c-4c: a scaled copy of a
@@ -185,7 +191,7 @@ refused='is not implemented under runtime.mode = core'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
 depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)'
 buffers_refusals='IDirect3DDevice9::Draw*Primitive (a layout no binding can fetch)'
-reset_refusals='IDirect3DDevice9::Reset (into fullscreen)'
+reset_refusals='IDirect3DDevice9::Reset (a back-buffer format the core does not make)'
 extras_refusals='IDirect3DDevice9::SetRenderState(RESZ) (into a dynamic depth texture)'
 refusals_ok() {
   case $1 in
@@ -199,7 +205,7 @@ refusals_ok() {
       printf '%s\n' "$set_" | while IFS= read -r n; do
         /usr/bin/grep -rqF "d3d9 core: $n $refused" "$2" || exit 1
       done ;;
-    shaders|state|textures|targets|blend|mrt|msaa|blit|queries)
+    shaders|state|textures|targets|blend|mrt|msaa|blit|queries|fullscreen)
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
     *) return 0 ;;
   esac
@@ -294,6 +300,8 @@ check reset "rs-size rs-depth rs-msaa rs-blockers rs-state rs-autogen rs-scene r
 launch ours fresh extras 300 extras $strict
 check extras "gm-ramp fl-latency ex-rt ex-ds ex-plain rz-msaa rz-auto rz-single rz-plain rz-edges rz-self rz-refuse
   cu-props cu-show cu-setcursor"
+launch ours fresh fullscreen 300 fullscreen $strict
+check fullscreen "fs-create fs-cover fs-reject fs-reset-in fs-reset-window fs-wndproc fs-reset-mode fs-activate ws-size"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi
