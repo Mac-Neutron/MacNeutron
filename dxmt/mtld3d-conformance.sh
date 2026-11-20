@@ -14,14 +14,16 @@
 # (emit_corpus --kinds; the runner silences the logs): the default lane fails unless every programmable kind the tests
 # made has an AIR record and AIR fixed-function records exist; the msl lane fails on any AIR record or on no MSL
 # programmable and fixed-function record. Either lane fails on a Metal validation error or a GPU hang in the run.
-# D3D9_RUNTIME=core (DXMTRS C4b-3a, the default backend only) runs stateblock alone (runner args --only stateblock;
-# anything else exits 2: the other suites run under core from C4c) under runtime.mode=core in a wine.app built with
-# DXMT_D3D9_CORE=1, its stamp "mtld3d-conformance: lane core (runtime.mode=core)". Its proof replaces the kinds row
-# (stateblock draws nothing): the run's logs (build/mtld3d-conformance/logs-core, the runner's --log info) hold the core
-# device's line ("d3d9 core: device on dxmt-core"), not mtld3d.so's encoder line ("texture versions: rename pool
-# cap"), no core refusal line and no panic. Any lane run with --only stateblock skips the kinds row and writes
-# run-<lane>-stateblock.txt, keeping the full runs' files. MTLD3D_PE=<folder> runs that folder's d3d9.dll and
-# mtld3d.dll (the PE side, as dxmt/d3d9-check.sh), in an APFS clone of wine.app like MTLD3D_SO's.
+# D3D9_RUNTIME=core (DXMTRS C4b-3a, the default backend only) runs every suite (since DXMTRS C4c-7d-2; stateblock
+# alone before) under runtime.mode=core in a wine.app built with DXMT_D3D9_CORE=1, its stamp "mtld3d-conformance: lane
+# core (runtime.mode=core)", a full run's output run-core.txt (d3d9-conf-compare.sh --base-lane default --cur-lane
+# core). Its proof replaces the kinds row: the run's logs (build/mtld3d-conformance/logs-core, the runner's --log info)
+# hold the core device's line ("d3d9 core: device on dxmt-core"), not mtld3d.so's encoder line ("texture versions:
+# rename pool cap"), no core refusal line and no panic (the core lane unsets MTLD3D_CONFORMANCE_RAW_DIR:
+# the runner's own log.dir would take the logs out of the proof's reach). Any lane run with --only stateblock skips
+# the kinds row
+# and writes run-<lane>-stateblock.txt, keeping the full runs' files. MTLD3D_PE=<folder> runs that folder's d3d9.dll
+# and mtld3d.dll (the PE side, as dxmt/d3d9-check.sh), in an APFS clone of wine.app like MTLD3D_SO's.
 #   mtld3d-conformance.sh [<wine.app>] [runner args, e.g. --only device]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -42,10 +44,6 @@ case ${1:-} in *.app) APP=$1; shift ;; esac
 # --only stateblock among the runner args: the subset run (no kinds row, its own output file).
 sb=; prev=
 for a in "$@"; do [ "$prev" = --only ] && [ "$a" = stateblock ] && sb=1; prev=$a; done
-if [ "$RT" = core ] && [ -z "$sb" ]; then
-  echo "mtld3d-conformance: the core lane runs stateblock alone (--only stateblock): the other suites are C4c's" >&2
-  exit 2
-fi
 if [ -n "${MTLD3D_SO:-}${MTLD3D_PE:-}" ]; then
   C="$B/mtld3d-conformance/wine.app"
   rm -rf "$C"; mkdir -p "$B/mtld3d-conformance"; cp -cR "$APP" "$C"
@@ -97,8 +95,8 @@ rm -rf "$K"; mkdir -p "$K"
 [ "$BK" = air ] || export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}shader.backend=msl"  # the runner sets only MTLD3D_CONFIG
 LOGS="$B/mtld3d-conformance/logs-core"
 if [ "$RT" = core ]; then
-  # The runner's own log.dir (MTLD3D_CONFORMANCE_RAW_DIR) would take the logs elsewhere; its default --log off would
-  # silence them.
+  # The runner's own log.dir (MTLD3D_CONFORMANCE_RAW_DIR) would take the logs elsewhere, and the proof would find
+  # none; its default --log off would silence them.
   unset MTLD3D_CONFORMANCE_RAW_DIR
   rm -rf "$LOGS"; mkdir -p "$LOGS"
   export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}runtime.mode=core;log.dir=Z:$LOGS"

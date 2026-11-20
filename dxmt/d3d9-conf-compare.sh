@@ -2,7 +2,8 @@
 # D3D9 conformance parity per site (C3d-5): two runner outputs of the same leg(s), a base lane's and a current lane's,
 # each stamped on its first line by dxmt/mtld3d-conformance.sh or vm/tests/d3d9.sh: by default the msl lane's and the
 # default lane's (AIR), with --base-lane and --cur-lane any two (C4a: default, then core, the in-process runtime).
-# Fails when, under the current lane, a site fails more often, a suite crashes more, executes over 0.1% fewer tests or
+# Fails when, under the current lane, a site fails more often, a suite crashes more, executes over 0.1% and more than
+# 16 fewer tests (DXMTRS C4c-7d-2: the default lane alone has read d3d9ex's 2426 to 2438, past its 0.1%, 2.4) or
 # skips a site the base lane measured; when a suite is missing from either file (each leg needs stateblock, visual,
 # device, d3d9ex); when a file is cut short (a suite's current failures differ from its baseline plus its listed sites'
 # changes, or no closing "conformance:" line); or when the stamps are not the base lane's then the current lane's.
@@ -11,8 +12,8 @@
 # both ("partial": its counts cover only the failures before the crash). A site a file doesn't list failed there as
 # often as in the baseline (the runner lists every site whose count changed). Findings are named <cur>-worse etc.
 # (air-worse etc. for the default lane, as C3d named them).
-# --suites "<subtest>..." (DXMTRS C4b-3a: the core lane runs stateblock alone until C4c) registers and requires only
-# those subtests; the files' other suites are ignored.
+# --suites "<subtest>..." (DXMTRS C4b-3a) registers and requires only those subtests; the files' other suites are
+# ignored.
 #   d3d9-conf-compare.sh [--base-lane <lane>] [--cur-lane <lane>] [--suites <list>] <base.txt> <cur.txt> [<triaged.txt>]
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -85,7 +86,7 @@ awk -v tri="$TRI" -v pre="$PRE" -v only="$ONLY" '
       both = crash["m", su] > 0 && crash["a", su] > 0
       if (crash["a", su] > crash["m", su]) { print pre "-crash " su; fails++ }
       else if (both) { print "partial " su; info++ }
-      if (!both && exe["m", su] > 0 && exe["a", su] * 1000 < exe["m", su] * 999) {
+      if (!both && exe["m", su] > 0 && exe["a", su] * 1000 < exe["m", su] * 999 && exe["m", su] - exe["a", su] > 16) {
         print pre "-executed " su " " exe["m", su] " -> " exe["a", su]; fails++
       }
     }
