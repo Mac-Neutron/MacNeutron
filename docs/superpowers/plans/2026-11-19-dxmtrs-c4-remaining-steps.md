@@ -79,8 +79,8 @@ would take them. The grouping is a proposal; each slice's map decides.
   cannot do what this line says inside C4c. The logger's thunks (`InitLogger`, `OpenLog`, `WriteLog`) reach
   `mtld3d.so` on every core run whatever 7b does (their move is C4d's); `GetDeviceInfo` can be answered on
   the PE side from winemetal's existing exports with no file outside `src/d3d9`; memory pages on the Mac
-  have no winemetal call (a new export, five files outside `src/d3d9`). Options: do `GetDeviceInfo` alone
-  in C4c and move pages to C4d with the logger; or move all of 7b to C4d.
+  have no winemetal call (a new export, five files outside `src/d3d9`). **The maintainer's decision of
+  2026-11-20: all of 7b moves to C4d**, with the logger's move.
 - **7c (done in 7a)**: the cursor calls answer as mtld3d; the window subclass, which keeps the Direct3D
   cursor at `WM_SETCURSOR`, comes with 6d.
 - **7d, C4c's gate**: the conformance lane for `visual`, `device` and `d3d9ex` under core
@@ -104,7 +104,8 @@ would take them. The grouping is a proposal; each slice's map decides.
 
 Order: 6a, 6b, 6c, 7a (with 7c's cursor calls folded in: the 7a plan's ruling R7a-1), **6d** (fullscreen
 devices, `Reset` into fullscreen and the window subclass on the core: 87 of the sweep's lines, and the
-cursor's `WM_SETCURSOR` re-assert 7a leaves out), 7b, 7d. 6c, 6d and 7d are the ones whose size is not known:
+cursor's `WM_SETCURSOR` re-assert 7a leaves out), 7d (7b moved to C4d). 6c, 6d and 7d are the ones whose
+size is not known:
 6c because `Reset` opens
 code paths no suite has reached under core, 7d because the count of sites is only known once 6c lands.
 
@@ -137,8 +138,8 @@ From the outline, unchanged in scope; sizes are guesses from the pace so far (ab
 ## Waiting on the maintainer
 
 Decisions: the go-ahead for C4d and after; a game run in the VM (C4e); the benches and the release (C4e).
-**The roadmap's 7b** (its entry above has the options). **The cursor on core without the window subclass**
-(7a's ruling R7a-7): closed by slice 6d.
+**A windowed core device's back buffer does not follow its window** (the 6d plan's ruling R6d-3): proposed as
+a slice 6e, else C4d's. The cursor on core without the window subclass (7a's ruling R7a-7): closed by slice 6d.
 Findings from C4c-3 to C4c-7a that are not C4c's to fix (each is in a slice's execution notes):
 
 - mtld3d, from C4c-7a's rows: a RESZ with a colour texture of the depth-stencil's size at stage 0 leaves

@@ -1629,8 +1629,8 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   5 queries (done); 6a the getters, the obsolete calls and the presents (done); 6c `Reset`, windowed (done);
   7a gamma, frame latency, the `Ex` creators, RESZ and the cursor calls (done); 6d fullscreen devices and the
   window subclass
-  (inside C4c: the maintainer's decision of 2026-11-19); 7b the device's information from winemetal (put to the
-  maintainer: the logger keeps `mtld3d.so` on the core's path whatever it does); 7d `ProcessVertices`, the silent
+  (inside C4c: the maintainer's decision of 2026-11-19); 7b the device's information and pages from winemetal
+  (moved to C4d with the logger's move: the maintainer's decision of 2026-11-20); 7d `ProcessVertices`, the silent
   differences, the gamma ramp applied on a fullscreen device, and the conformance lane for `visual`, `device` and
   `d3d9ex` under core, which is C4c's gate.
   The sweep after 3a (`build/c4c/s3/sweep.md`, gating nothing): `visual` and `device` run to their end
