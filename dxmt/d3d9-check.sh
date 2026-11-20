@@ -88,11 +88,12 @@
 # window subclass, each row on a plain device and a window of its own, every fs-* row FAILing before any device unless
 # Wine emulates mode sets for it; "fullscreen strict" under core, where ws-size wants the back buffer kept), its rows
 # "fullscreen-<row>"; under core its launch's logs hold no refusal line. Every lane also runs d3d9_triangle parity
-# (DXMTRS C4c-7d-1's 9 rows of D3DSAMP_SRGBTEXTURE's low bit, a volume texture of depth 1, a managed texture's uploaded
-# levels, ProcessVertices, a one-sample RESZ between two depth formats and the gamma ramp on a fullscreen device,
-# rz-cross and gm-full each on a device and a window of its own, gm-full FAILing before any device unless Wine
-# emulates mode sets for it; "parity strict" under core), its rows "parity-<row>"; under core its launch's logs hold
-# no refusal line.
+# (DXMTRS C4c-7d-1's and C4c-7d-2's 11 rows of D3DSAMP_SRGBTEXTURE's low bit, a volume texture of depth 1, a managed
+# texture's uploaded levels, ProcessVertices, a one-sample RESZ between two depth formats, the gamma ramp on a
+# fullscreen device, a draw that samples its own render target and a new texture's texels nothing wrote, rz-cross and
+# gm-full each on a device and a window of its own, tex-unwritten's first half too, gm-full FAILing before any device
+# unless Wine emulates mode sets for it; "parity strict" under core), its rows "parity-<row>"; under core its launch's
+# logs hold no refusal line.
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -309,7 +310,7 @@ check extras "gm-ramp fl-latency ex-rt ex-ds ex-plain rz-msaa rz-auto rz-single 
 launch ours fresh fullscreen 300 fullscreen $strict
 check fullscreen "fs-create fs-cover fs-reject fs-reset-in fs-reset-window fs-wndproc fs-reset-mode fs-activate ws-size"
 launch ours fresh parity 300 parity $strict
-check parity "sr-lsb vo-one dr-keep pv-sysmem pv-draw pv-dynsrc pv-dyndst rz-cross gm-full"
+check parity "sr-lsb vo-one dr-keep pv-sysmem pv-draw pv-dynsrc pv-dyndst rz-cross gm-full tb-self tex-unwritten"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi

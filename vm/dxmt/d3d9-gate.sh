@@ -74,10 +74,11 @@
 # checks d3d9_triangle fullscreen's 9 rows (DXMTRS C4c-6d: fullscreen devices, Reset into and out of fullscreen and the
 # window subclass, each row on a plain device and a window of its own, in the guest's prefix, which emulates mode sets;
 # "fullscreen strict" under core, where ws-size wants the back buffer kept; fs64-fresh, fs32-fresh); under core their
-# logs hold no refusal line. Every lane also checks d3d9_triangle parity's 9 rows (DXMTRS C4c-7d-1:
+# logs hold no refusal line. Every lane also checks d3d9_triangle parity's 11 rows (DXMTRS C4c-7d-1, C4c-7d-2:
 # D3DSAMP_SRGBTEXTURE's low bit, a volume texture of depth 1, a managed texture's uploaded levels, ProcessVertices, a
-# one-sample RESZ between two depth formats and the gamma ramp on a fullscreen device, rz-cross and gm-full each on a
-# device and a window of its own, in the guest's prefix, which emulates mode sets; "parity strict" under core;
+# one-sample RESZ between two depth formats, the gamma ramp on a fullscreen device, a draw that samples its own render
+# target and a new texture's texels nothing wrote, rz-cross and gm-full each on a device and a window of its own,
+# tex-unwritten's first half too, in the guest's prefix, which emulates mode sets; "parity strict" under core;
 # pa64-fresh, pa32-fresh); under core their logs hold no refusal line.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -274,7 +275,7 @@ for r in fs64-fresh fs32-fresh; do
   done
 done
 for r in pa64-fresh pa32-fresh; do
-  for row in sr-lsb vo-one dr-keep pv-sysmem pv-draw pv-dynsrc pv-dyndst rz-cross gm-full; do
+  for row in sr-lsb vo-one dr-keep pv-sysmem pv-draw pv-dynsrc pv-dyndst rz-cross gm-full tb-self tex-unwritten; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
