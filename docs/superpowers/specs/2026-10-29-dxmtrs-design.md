@@ -1871,6 +1871,23 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   review (1 Important + 3 Minor fixed in `e35af64d` / `ca341c6c`), `jq1` (default/msl/core + 16/16 core Metal validation
   launches 0 reports), `jc1` (VM D3D9 gate default & core across old/new WoW64, x64/x86), and plain build `jr1` (translator
   key and `d3d9.dll` imports identical, `d3d9-default` and `conf-default` exit 0).
+  **C4d-2b (Core device-lost latch from `dxmt-core` queue failures)** done 2026-11-20 at DXMTRS main `df342453`
+  (`df342453160726ac04ca775b954a7534ad5830ba`), which MacNeutron pins. Leaves `src/d3d9/` (`src/dxmt/src/queue.rs` +
+  test fakes; zero winemetal changes, translator key and plain `d3d9.dll` imports unchanged): `Queue::finish` re-reads
+  `MTLCommandBuffer_status` after `waitUntilCompleted`, latches an atomic `has_error` flag permanently on nil or
+  non-completed command buffers, logs the first `NSError` description or status once without stalling frame-latency
+  signaling or chunk retirement, and exposes `Queue::has_error` through `CoreDevice::has_error` into `d3d9`
+  `DeviceInner`. Core devices now match `mtld3d` permanent `D3DERR_DEVICELOST` semantics across `Present`, `PresentEx`,
+  `SwapChain::Present`, `TestCooperativeLevel`, `CheckDeviceState`, `Reset`, `ResetEx`, `Query::{Issue,GetData}`, draws
+  (including fans and UP stream/IB reset), synchronous GPU readbacks, `ProcessVertices`, and staged VB/IB unlocks while
+  keeping `Clear`/`StretchRect`/`ColorFill`/`UpdateSurface`/`RESZ`/mip-generation `D3D_OK` without growing uncommitted
+  chunks, and matching `debug.failNextSubmit` end-to-end. Gated: `rust-check.sh` (all 6 legs, 250 `d3d9-rt` tests, 227
+  single-threaded `dxmt-core` tests, `audit` clean on 1271 files), fresh final code review (1 Important + 3 Minor fixed
+  in `df342453`), `jt1` (default & core `lost` 2/2 ok, Metal validation 0 reports across `parity`/`msaa`/`fullscreen`/`lost`),
+  `jl1` (full Wine conformance default & core, `conf-core` exit 0, `conf-compare: ok`, 0 validation reports), `jq1`
+  (default/msl/core + 17/17 core Metal validation launches 0 reports), `jx1` (bounded idle Mac x64 D3D10-12 `dxmt/check.sh`
+  420 ok / 0 FAIL), `jc1` (VM D3D10-12 gate 48/48 + VM D3D9 default & core across old/new WoW64, x64/x86 with `lo64`/`lo32`
+  passing), and plain build `jr1` (translator key and `d3d9.dll` imports identical, `d3d9-default` and `conf-default` exit 0).
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features

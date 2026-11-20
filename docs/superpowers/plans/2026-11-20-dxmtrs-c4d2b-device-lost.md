@@ -1,7 +1,7 @@
 # DXMTRS C4d-2b Implementation Plan: Core Device-Lost Latch (Review-Folded)
 
 **Date:** 2026-11-20
-**Status:** Finalized after 3 independent adversarial reviews (`review-1-queue.md`, `review-2-d3d9.md`, `review-3-tests.md`).
+**Status:** Completed 2026-11-20 at DXMTRS `df342453` (`c86e119b` + review fix `df342453`), MacNeutron pinned and verified across `rust-check.sh`, `jt1`, `jl1`, `jq1`, `jx1` (420/420 D3D10-12), `jc1` (VM 48/48 + D3D9 old/new WoW64 x64/x86), and `jr1`.
 **Scope:** Wire Metal command-buffer failure reporting from `dxmt-core` (`Queue`) through `d3d9-rt` (`CoreDevice`) into `d3d9` (`DeviceInner`) so core D3D9 devices latch `D3DERR_DEVICELOST` permanently across `TestCooperativeLevel`, `CheckDeviceState`, `Present`, `PresentEx`, `SwapChain::Present`, `Reset`, `ResetEx`, `Query::Issue`/`GetData`, draws (including fans and UP draws), synchronous GPU readbacks, `ProcessVertices`, and staged VB/IB unlocks, while keeping `Clear`/`StretchRect`/`ColorFill`/`UpdateSurface`/`RESZ` return-code parity (`D3D_OK`) without growing uncommitted core chunks, and matching `debug.failNextSubmit` end-to-end across Mac and VM.
 
 **Leaves `src/d3d9/`?** Yes (`src/dxmt/src/queue.rs`, `src/dxmt/src/fakes.rs`, `src/dxmt/src/queue/tests.rs`, `src/dxmt/src/fence/tests.rs`, `src/dxmt/src/presenter/tests.rs`, `src/dxmt/fakes/src/lib.rs`, `src/dxmt/fakes/tests/capture.rs`, `src/d3d11/src/device/tests.rs`). Requires bounded idle Mac x64 D3D10-12 check (`jx1`, never between `02:55` and `03:36`) and VM D3D10-12 gate (`JC_D3D10=1`).
