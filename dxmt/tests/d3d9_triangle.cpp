@@ -187,6 +187,11 @@
 // D3DCREATE_NOWINDOWCHANGES, the desktop's mode; no foreground change, minimised window, pointer move or fixed sleep);
 // no cell sees the ramp on screen. With a 200 s budget. The core before DXMTRS C4c-7d-1's front end refuses
 // ProcessVertices (D3DERR_NOTAVAILABLE): each pv-* row prints its "FAIL ProcessVertices ... 8876086a".
+// With "lost" ("lost strict" under core; DXMTRS C4d-2b): 2 rows "d3d9 lost-<plain|ex> ok|FAIL <why>", each on a device
+// and a window of its own (reset's), launched with MTLD3D_CONFIG including debug.failNextSubmit=true: permanent
+// D3DERR_DEVICELOST latching across Present/PresentEx/SwapChain::Present, TestCooperativeLevel, CheckDeviceState,
+// Reset/ResetEx, Clear (still D3D_OK), DrawPrimitiveUP (with stream 0 reset), Query::Issue/GetData and
+// GetFrontBufferData. With a 180 s budget.
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -12429,6 +12434,84 @@ static void parityRows(IDirect3DDevice9 *d, bool strict) {
     if (rtSurf) rtSurf->Release();
 }
 
+// --- The "lost" mode (DXMTRS C4d-2b): permanent D3DERR_DEVICELOST latching under debug.failNextSubmit=true. Each row
+// makes a device and a window of its own (rsDevice's) so each gets its own armed failNextSubmit flag. Budget 180 s.
+static bool rowLostPlain() {
+    RsDevice r;
+    if (!rsDevice(r)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    if (!coopIs(D3D_OK)) return false;
+    if (!presentIs(D3DERR_DEVICELOST)) return failIn("first Present");
+    if (!coopIs(D3DERR_DEVICELOST)) return failIn("after first Present");
+    if (!presentIs(D3DERR_DEVICELOST)) return failIn("second Present");
+    {
+        Com<IDirect3DSwapChain9> sc;
+        CK(GetSwapChain, 0, &sc.p);
+        if (!answer("SwapChain::Present", sc.p->Present(nullptr, nullptr, nullptr, nullptr, 0), D3DERR_DEVICELOST))
+            return false;
+    }
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256);
+    if (!resetIs("Reset", pp, D3DERR_DEVICELOST) || !coopIs(D3DERR_DEVICELOST)) return failIn("after Reset");
+    if (!answer("Clear", dev->Clear(0, nullptr, D3DCLEAR_TARGET, TBLK, 1.0f, 0), D3D_OK)) return false;
+    Com<IDirect3DVertexBuffer9> vb, gvb;
+    CK(CreateVertexBuffer, sizeof(RV) * 3, 0, 0, D3DPOOL_DEFAULT, &vb.p, nullptr);
+    CK(SetStreamSource, 0, vb.p, 0, sizeof(RV));
+    CK(SetFVF, D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    const RV tri[3] = {{64, 16, 0.5f, 1, TRED}, {128, 128, 0.5f, 1, TRED}, {16, 128, 0.5f, 1, TRED}};
+    CK(BeginScene);
+    const HRESULT hrDraw = dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, tri, sizeof *tri);
+    CK(EndScene);
+    if (!answer("DrawPrimitiveUP", hrDraw, D3DERR_DEVICELOST)) return false;
+    UINT off = 0, stride = 0;
+    CK(GetStreamSource, 0, &gvb.p, &off, &stride);
+    if (gvb.p) return snprintf(why, sizeof why, "stream 0 %p after lost DrawPrimitiveUP", (void *)gvb.p), false;
+    Com<IDirect3DQuery9> q;
+    CK(CreateQuery, D3DQUERYTYPE_EVENT, &q.p);
+    if (!answer("Query::Issue", q.p->Issue(D3DISSUE_END), D3DERR_DEVICELOST)) return false;
+    BOOL val = FALSE;
+    if (!answer("Query::GetData", q.p->GetData(&val, sizeof val, 0), D3DERR_DEVICELOST)) return false;
+    Com<IDirect3DSurface9> sys;
+    CK(CreateOffscreenPlainSurface, 256, 256, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys.p, nullptr);
+    return answer("GetFrontBufferData", dev->GetFrontBufferData(0, sys.p), D3DERR_DEVICELOST);
+}
+
+static bool rowLostEx() {
+    RsDevice r;
+    if (!rsDevice(r, D3DFMT_UNKNOWN, true)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    if (!coopIs(D3D_OK) || !answer("CheckDeviceState", r.ex.p->CheckDeviceState(r.w.h), D3D_OK)) return false;
+    if (!answer("PresentEx", r.ex.p->PresentEx(nullptr, nullptr, nullptr, nullptr, 0), D3DERR_DEVICELOST))
+        return false;
+    if (!coopIs(D3D_OK)) return failIn("after first PresentEx");
+    if (!answer("CheckDeviceState", r.ex.p->CheckDeviceState(r.w.h), D3DERR_DEVICELOST)) return false;
+    if (!answer("second PresentEx", r.ex.p->PresentEx(nullptr, nullptr, nullptr, nullptr, 0), D3DERR_DEVICELOST))
+        return false;
+    if (!presentIs(D3DERR_DEVICELOST)) return failIn("Present after PresentEx");
+    {
+        Com<IDirect3DSwapChain9> sc;
+        CK(GetSwapChain, 0, &sc.p);
+        if (!answer("SwapChain::Present", sc.p->Present(nullptr, nullptr, nullptr, nullptr, 0), D3DERR_DEVICELOST))
+            return false;
+    }
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256);
+    if (!answer("ResetEx", r.ex.p->ResetEx(&pp, nullptr), D3DERR_DEVICELOST)) return false;
+    if (!resetIs("Reset", pp, D3DERR_DEVICELOST)) return false;
+    return coopIs(D3D_OK);
+}
+
+static void lostRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"lost-plain", rowLostPlain}, {"lost-ex", rowLostEx}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = r.run();
+        row(r.name, ok, why);
+    }
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
@@ -12452,6 +12535,7 @@ int main(int argc, char **argv) {
     const bool extrasMode = !bench && argc > 1 && !strcmp(argv[1], "extras");
     const bool fullscreenMode = !bench && argc > 1 && !strcmp(argv[1], "fullscreen");
     const bool parityMode = !bench && argc > 1 && !strcmp(argv[1], "parity");
+    const bool lostMode = !bench && argc > 1 && !strcmp(argv[1], "lost");
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     const bool bufBench = bench && argc > 4 && !strcmp(argv[4], "buf");
@@ -12534,6 +12618,13 @@ int main(int argc, char **argv) {
     }
     if (parityMode) {
         parityRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
+    if (lostMode) {
+        lostRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();
         d3d->Release();
         DestroyWindow(hwnd);
