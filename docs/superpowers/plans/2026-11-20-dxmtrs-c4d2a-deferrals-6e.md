@@ -167,3 +167,14 @@ Run `jt1`, `jl1` (full Wine conformance default & core + compare, checking `visu
 ## Rules check
 - **New `static` / config key / wire field / dependency / `Clone`/`Copy` derive / lint suppression / em dash**: none.
 - **Outside `src/d3d9/`**: none (`tools/derive_inventory.txt` untouched; translator key unchanged; x64 check not required for C4d-2a).
+
+## Execution Notes (2026-11-20)
+- **DXMTRS commits**: `79230399` (initial implementation), `e35af64d` (final code review fixes: `CoreDevice::reset_targets` custom RT0 reset on missing back buffer + `reset_targets_to_implicit` `debug_assert!` relaxation + unit test, `create_dc_on_surface` cleanup on `GetDC` error, stale `texture.rs` doc comments).
+- **MacNeutron commits**: `f0165605` (`ms-lblock`, `ms-lbdc`, expanded `ws-size`, `tex-unwritten` Cell (a)+(b), script row updates), `ca341c6c` (`ws-size` width guard `w < 280` + parity banner update), followed by pin/spec commit.
+- **Gates**:
+  - `LC_ALL=C sh tools/rust-check.sh`: all 6 legs green (249 `d3d9-rt` tests + full workspace tests, `audit: clean (1271 files)`).
+  - `jt1` (`79230399`): exit 0 (`d3d9-default` & `d3d9-core` ok; `msaa` 23/23, `fullscreen` 9/9, `parity` 11/11; Metal validation 0 reports across `parity`, `msaa`, `fullscreen`; `render 41` = 1; `was not recorded` = 0; `gamma ramp` = 1).
+  - `jl1` (`79230399`): exit 0 (`conf-core` exit 0, `core validation reports: 0`, `conf-compare: ok`, `triaged-core lines: 0`, `visual.c:15686` dropped `15 -> 3` on both default and core).
+  - `jq1` (`e35af64d`): exit 0 (`d3d9-default`, `d3d9-msl`, `d3d9-core` all ok; 16/16 core Metal validation launches `reports 0`, `not ok 0`).
+  - `jc1` (`e35af64d`): exit 0 (VM D3D9 gate default & core across old/new WoW64, x64/x86; `pa64`/`pa32` = 11 default / 12 core; `was not recorded` = 0; builder VM stopped).
+  - `jr1` (`e35af64d`): exit 0 (plain build without `DXMT_D3D9_CORE`; translator key `e1074f4f...` and `d3d9.dll` imports identical to base; `d3d9-default` and `conf-default` exit 0).

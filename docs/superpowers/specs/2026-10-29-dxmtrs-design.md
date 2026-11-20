@@ -1851,6 +1851,26 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   frame dropped 41% to 49% (Round 2 `tex` 3.87 -> 1.97 vs `mtld3d` 2.00; `buf` 3.38 -> 1.90 vs `mtld3d` 1.63; `dyn`
   3.72 -> 2.18 vs `mtld3d` 2.17 ms/f; 2400-frame core 1.51 / 1.45 / 1.74 ms/f; `_MTLRenderCommandEncoder_encodeCommands`
   down to 1.1%-2.3% of wall time on `dxmt-encode-thr`).
+  **C4d-2a (Fix B zeroed texture staging, MSAA back-buffer writable LockRect/GetDC, and Slice 6e windowed core auto-resize)**
+  done 2026-11-20 at DXMTRS main `e35af64d` (`e35af64dece635e28fea5b7b64a536250caecd05`), which MacNeutron pins. Purely
+  inside `src/d3d9/` plus `docs/d3d9/STATUS.md` and `tests/d3d9/conformance/CONFORMANCE.md` (zero changes outside
+  `src/d3d9/`, translator key and plain `d3d9.dll` imports unchanged): (1) `PageBox::zero_fill` and
+  `StagingTake::try_take_zeroed` zero all texture creation staging (2D, planar YUV, volume, cube), SYSTEMMEM/SCRATCH
+  `CreateOffscreenPlainSurface`, and non-`DISCARD`/partial re-materialized staging levels on both runtimes (`visual.c:15686`
+  dropped from 15 to 3 on both default and core); (2) `CoreDevice::write_presented_msaa` uploads into a transient 1x
+  scratch texture and stretches into the multisampled companion, removing both `refuse_under_core!` gates in `surface.rs`
+  (and the unused macro in `lib.rs`), fixing the 100%-scale MSAA fallback on `mtld3d`, and guarding `backbuffer_page_upload`
+  with `readback_dims`; (3) `CoreDevice::has_back_buffer`, fallible `CoreDevice::resize -> bool` rejecting zero dims and
+  null Metal allocations without updating the layer, `CoreDevice::reset_targets` clearing custom RT0 on missing back buffer,
+  and `DeviceInner::apply_core_auto_resize` bring full `WM_SIZE` windowed auto-resize parity (back buffer, auto D24S8,
+  viewport/scissor when RT0 is back buffer, plain vs extended `min_z`/`max_z`, custom RT0/DS and unbound DS preservation).
+  Gated: `rust-check.sh` (249 `d3d9-rt` tests + workspace tests, `audit` clean on 1271 files), `jt1` (default & core
+  `msaa` 23/23 with `ms-lblock`/`ms-lbdc`, `fullscreen` 9/9 with expanded `ws-size`, `parity` 11/11 with `tex-unwritten`,
+  Metal validation 0 reports across `parity`/`msaa`/`fullscreen`, `render 41` = 1), `jl1` (full Wine conformance default &
+  core, `conf-core` exit 0, `conf-compare: ok`, 0 validation reports, `visual.c:15686` 15 -> 3 on both), fresh final code
+  review (1 Important + 3 Minor fixed in `e35af64d` / `ca341c6c`), `jq1` (default/msl/core + 16/16 core Metal validation
+  launches 0 reports), `jc1` (VM D3D9 gate default & core across old/new WoW64, x64/x86), and plain build `jr1` (translator
+  key and `d3d9.dll` imports identical, `d3d9-default` and `conf-default` exit 0).
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
