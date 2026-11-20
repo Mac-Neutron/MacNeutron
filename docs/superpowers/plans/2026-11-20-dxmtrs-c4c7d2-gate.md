@@ -220,4 +220,63 @@ confirm: one tile pipeline, one consumer, the C++ wrote 0).
 
 ## Execution notes
 
-(after the gates)
+Done 2026-11-20. DXMTRS 58b6f76b (the drain), af92fc60 (the flag: the code the gates ran), 91a0fc4c (STATUS.md
+and ARCHITECTURE.md; the Rust gate again, ok); MacNeutron 6902d0ee, 36ad51b8, f70f7420, fd95f27b. Logs and job
+scripts in `build/c4c/s7d2`.
+
+- **Task 0, FETCH4** (`fetch4.md`). `test_fetch4` writes four bytes of each texture and reads the texels it
+  never wrote as zero. A texture's staging memory is not initialised at creation and comes from a process-wide
+  pool; mtld3d empties that pool when a device's encoder shuts down, and a core device's release never did, so
+  under core three more cells read an earlier test's bytes. The fix is that drain at a core device's release
+  (58b6f76b). By reading it was "the only difference found, not a proven cause"; the lane settled it:
+  **visual.c:15686 fails 3 times on both lanes** (6 under core in every sweep before). Not taken: zeroing the
+  staging at creation, as Wine does (both runtimes, one memset a level, cost not measured): for the maintainer.
+- **Task 1, the flag**: `tgsize_matches_tile_size` is 0, the C++'s value (af92fc60). The host test's new
+  assertion (`  tile tgsize=0` in the fakes' record) was shown red with the flag at 1 (`rc2-red.log`).
+- **Rows**: `tb-self` (a draw that samples its own target, Wine-shaped, on a 64x64 target). **Controls at the
+  base**: green on every lane, and under strict core with Metal's validation layer **exactly one
+  "threadsPerTile (16, 16) must equal tile size" report**, so the row arms the barrier and shows the report
+  before the fix. **Ruling J-7d2-1: the second row, `tex-unwritten`, is dropped.** Its control could not be
+  judged: mtld3d on the Mac reads an older allocation's bytes there too (black in the VM). Cost if wrong: no
+  row sees the drain; the conformance lane's site does. `parity` is 10 rows.
+- **The lane and the tool** (36ad51b8): the core lane runs every suite and keeps its proof; the parity tool's
+  executed rule got a floor ("over 0.1% **and** more than 16 fewer"), which the final review found unpinned by
+  the tool's own test: two cases added (fd95f27b; 16 fewer passes, 17 fails), the test run.
+- **Gates at af92fc60 + f70f7420**: the Rust gate ok at each commit. `jt`: d3d9-check ok on default and core,
+  `parity` 10 of 10; `parity` under core with the validation layer: **no report** (one at the base), the
+  ramp's line present. `jl`: the default lane and the core lane exit 0, the core lane with its proof and no
+  validation report; **the compare: ok (1 leg, 4 suites, 21 sites, 2 info: the flaky device.c:4471 and 4476),
+  `dxmt/mtld3d-triaged-core.txt` empty**; `d3d9ex` executes 2430 checks under core against the default
+  lane's 2438 (8 fewer, inside the floor; the default runtime itself read 2430 in `jr`: the spread of a run). `jq`:
+  d3d9-check on default, msl and core; the sixteen launches under the validation layer: no report. `jc2`: the VM's
+  D3D9 gate on both runtimes and both WoW64 forms, 64- and 32-bit, and `vm/dxmt/gate.sh`: all 48 D3D10-12 programs
+  passed, twice. `jr`: the plain build's translator key and `d3d9.dll` imports are the base's; the default conformance
+  fails anew at triaged sites only. **`jx`: the x64 check, alone, 23 minutes: 420 rows ok, 0 failed**, nothing left
+  running. This is the check batched for slices 5 to 7.
+- **What the D3D10-12 evidence for the flag is, stated as it is** (R7d2-1): `d3d11_compute` under the
+  validation layer reports nothing, but its command histogram holds no tile dispatch (ruling J-7d2-2: the
+  launch needed its shaders folder as an argument, so it was not run at the base): **no D3D10-12 program in
+  the gates dispatches the barrier**. The x64 check and the VM gate say "no collateral", no more. The proof of
+  the fix is D3D9's: one report at the base, none at the tip, on a row that arms the barrier.
+  **`jh`, after the final review's M3**: the tip's `parity` launch under core with the validation layer and
+  the command histogram: `tb-self` ok, **one tile dispatch record (render type 41), no report**: the barrier
+  still dispatches at the tip. (My first count of the record's type, 39, was wrong; `d3d11_compute`'s
+  histogram holds neither.)
+- **Pitfalls**: `DXMT_WMTCMD_HISTOGRAM` names its output file, and I set it to `1`: a file named `1` in the
+  working directory (here the main checkout, whose clean check then stopped two jobs before they did
+  anything: moved, the jobs rerun under new names). My brief for the rows wrongly cut the lane's `unset
+  MTLD3D_CONFORMANCE_RAW_DIR` (with it set the core proof fails): restored before any run.
+- **The probe**: taken once (`probe.md`, job `jp2`), core against mtld3d on one build, CPU ms a frame: textured UP
+  draws 3.53 against 1.57, draws from a static buffer 3.38 against 1.63, a dynamic buffer appended to between
+  draws 2.58 against 2.13. A first try found no quiet minute in ten; the second started at a one-minute load
+  of 2.82 and ended at 4.17. Earlier probes read the core's textured draw at about 2.2 (2.05 to 2.57) or at
+  3.3 to 4.1, mtld3d's at 1.47 to 1.93 throughout, **the cause of the two bands not established**: the Mac's
+  load does not explain it (C4c-2b's probe read 2.32 on a Mac in heavy use; today `tex` ran first, at the
+  lowest load, and read the highest). **A cost added by slices 3 to 7 is not excluded**: C4c-2b's tip read
+  `tex` 2.32 and `buf` 2.63, today's 3.53 and 3.38, in different windows. The run that tells: C4c-2b's tip
+  (21d0ca5f) against today's, `tex` and `buf`, in one window (C4d's first probe). Reported, not fixed
+  (R7d2-3). A third job without the quiet wait (the maintainer's word
+  of that morning) was queued and not needed.
+- **The final review** (`review-final.md`): push after one Important (the floor's test, above); Minors: the
+  ARCHITECTURE.md sentence on the drain (corrected), no histogram on the tip's `parity` launch (taken since:
+  `jh`), the rest noted.

@@ -50,6 +50,17 @@ Every slice still gets its own code map, plan, three reviews and gates: nothing 
   baseline and meet no refusal; one site under a baseline ceiling (visual.c:15686) fails 6 times against
   mtld3d's 3 (7d-2's first task). **What is left of C4c is 7d-2** (plan
   `2026-11-20-dxmtrs-c4c7d2-gate.md`).
+- **C4c-7d-2 is done, and with it C4c** (2026-11-20; DXMTRS 91a0fc4c, which MacNeutron pins). The conformance
+  lane under core passes and the per-site compare of the two lanes is ok with an **empty**
+  `dxmt/mtld3d-triaged-core.txt` (visual.c:15686 at 3 on both: a core device's release now drains the texture
+  staging pool); no Metal validation report is left (the tile barrier's flag is back at the C++'s value in
+  dxmt-core); the x64 check batched for slices 5 to 7 is green (420 rows, 0 failed), the VM's D3D10-12 gate
+  too. The probe was taken once (`build/c4c/s7d2/probe.md`): the core costs 1.2 to 2.3 times
+  mtld3d's CPU a frame on the three benches (3.53 against 1.57 ms textured, 3.38 against 1.63 from a static
+  buffer, 2.58 against 2.13 dynamic); **a cost added by C4c's slices 3 to 7 is not excluded** (below, the
+  findings). **The run stops here**: nothing below "After C4c" is started
+  without a go-ahead. The spec's "C4c is done" paragraph says what the core runtime does, what it refuses by
+  name and where it differs from mtld3d.
 
 ## C4c, what is left
 
@@ -125,7 +136,8 @@ code paths no suite has reached under core, 7d because the count of sites is onl
 
 **C4c is done when** the conformance lane under core passes with a triage file whose every line has a
 reason, the x64 check is green at the tip, the probe is taken, and the spec's C4c paragraph says so. The run
-stops there.
+stops there. **Met on 2026-11-20** (the triage file is empty; the probe taken once, a cost added by slices 3 to 7 not
+excluded).
 
 ## After C4c (not started without a go-ahead)
 
@@ -153,11 +165,45 @@ From the outline, unchanged in scope; sizes are guesses from the pace so far (ab
 
 Decisions: the go-ahead for C4d and after; a game run in the VM (C4e); the benches and the release (C4e).
 **A windowed core device's back buffer does not follow its window** (the 6d plan's ruling R6d-3): proposed as
-a slice 6e, else C4d's. **From 6d, for C4d's presenter work**: a fullscreen mode below the desktop's is magnified
+a slice 6e, else C4d's; **asked twice, not answered, so by the stated default it is C4d's** and was not
+started. **From 6d, for C4d's presenter work**: a fullscreen mode below the desktop's is magnified
 with the nearest-neighbour filter under emulated mode sets (R6d-5); a fullscreen core device presents into a
 window another application covers; the gates' one covering row covers the display three times a launch. The
 cursor on core without the window subclass (7a's ruling R7a-7): closed by slice 6d.
-Findings from C4c-3 to C4c-7a that are not C4c's to fix (each is in a slice's execution notes):
+**Left undone inside C4c, each a decision**: the device-lost latch (no GPU failure latches a device-lost
+answer under core: it needs a failure report from dxmt-core's queue); the multisampled back buffer's writable
+lock and `GetDC` (refused by name; no suite meets them); 7b (the log, the device's information and the pages
+still come from `mtld3d.so` under core: C4d, the decision of 2026-11-20).
+Findings from C4c-3 to C4c-7d-2 that are not C4c's to fix (each is in a slice's execution notes):
+
+- From C4c-7d-2. **Shared with D3D10-12**: the tile barrier's flag was a difference the Rust port introduced
+  (fixed); no D3D10-12 program in the gates dispatches the barrier, and every run here saw 32x32 tiles, so
+  whether a 16x16 dispatch is valid under a smaller tile size is not known; the barrier is armed once a pass
+  (upstream's design); when the tile pipeline fails to build, a fake handle is used (older than C4c);
+  dxmt-core folds a `Clear` into a pass that samples its own target (a difference from mtld3d, recorded).
+  **The conformance runner**: a baseline "ceiling" hides a count that differs between the runtimes
+  (visual.c:15686 failed 6 times against 3 through all of C4c and no sweep showed it: the compare tool does
+  now); the baseline is older than Wine 11.20 (three `device` sites are triaged for it). **Both runtimes**: a
+  texture's staging is not zeroed at creation, where Wine zero-fills (`test_fetch4` depends on allocator
+  contents; a fix is written up in `build/c4c/s7d2/fetch4.md`, one memset a level, cost not measured); ATI1
+  is sampled with alpha one where Wine replicates red (the three failures left at visual.c:15686, on both
+  runtimes).
+- From C4c-7d-1 and 7a, the core under D3D9 (STATUS.md has each): `ProcessVertices` with a stream stride below
+  the FVF's vertex size on a directly mapped source aborts the process (an application error on both
+  runtimes; mtld3d reads its page padding); each change of the gamma ramp makes the next present wait for the
+  queued frames and rebuild the presenter's pipelines (a game that fades through the ramp stalls each frame),
+  and no gate sees a ramp on screen; the frame latency bounds the queue without the display's pace
+  (`present.maxFps` is C4d's); `GetAvailableTextureMem` does not count `CreateRenderTarget` and
+  `CreateDepthStencilSurface` surfaces; a multisampled RESZ between two pixel formats is skipped (mtld3d
+  converts it); `cursor.scale` and `cursor.software` are not followed.
+- **The core's draw cost, for C4d's first probe**: on the textured bench its CPU a frame has read either about
+  2.2 ms (2.05 to 2.57) or 3.3 to 4.1 since C4b-3d, mtld3d's 1.47 to 1.93 throughout; the cause of the two
+  bands is not established and the Mac's load does not explain it. C4c's closing probe read 3.53 (`tex`) and
+  3.38 (`buf`) where C4c-2b's tip had read 2.32 and 2.63 in another window: **a cost added by slices 3 to 7
+  is not excluded**. The run that tells: C4c-2b's tip (DXMTRS 21d0ca5f) against C4c's (91a0fc4c), `tex` and
+  `buf`, in one window; then a profile, before the dedup.
+- The core lane's logs hold two error lines "no Metal view for window" (`visual`, `d3d9ex`; in every sweep
+  since 6d, no failing site with them): not traced.
 
 - mtld3d, from C4c-7d-1's control: a one-sample RESZ from a D24X8 depth-stencil leaves an INTZ destination
   reading zero (the core leaves it as it was); texture staging is not zeroed at creation on either runtime
@@ -179,7 +225,7 @@ Findings from C4c-3 to C4c-7a that are not C4c's to fix (each is in a slice's ex
 - The core under D3D9, found by C4c-5's sweep: a draw that samples the texture bound as its target draws a
   Metal validation report from the pass barrier ("threadsPerTile (16, 16) must equal tile size (32, 32)":
   three reports attributed to `test_sample_attached_rendertarget` by elimination: new with the slice that
-  lets it run, one a draw of its three), untraced; owed at 7d.
+  lets it run, one a draw of its three). **Closed by 7d-2**: the flag of the tile barrier's pipeline.
 - dxmt-core (shared with D3D10-12): a span whose END sits alone in a chunk is never issued (settled in
   d3d9-rt for D3D9; the shape exists for D3D11); a draw pass with no query active, merged behind a
   counting pass, counts its draws (D3D9's passes now start with counting off); `render_pipeline` drops

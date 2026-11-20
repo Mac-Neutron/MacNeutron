@@ -1682,6 +1682,54 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   before their builds and nothing else. Stated gaps: no gate sees a ramp on screen; a directly mapped
   source is copied to its end at each call; four edge answers of `ProcessVertices` differ from mtld3d's
   (the final review's list). No probe, no x64 check here: 7d-2 runs both.
+  C4c-7d-2 done 2026-11-20 at DXMTRS main 91a0fc4c, which MacNeutron pins: **C4c is done.** The slice is the
+  gate and two fixes it needed. A core device's release now empties the texture staging pool, as mtld3d's
+  encoder shutdown does: without it `test_fetch4`, which reads texels it never wrote, saw an earlier test's
+  bytes in three more cells under core (visual.c:15686, 6 failures against 3, under a baseline ceiling in
+  every sweep of C4c; 3 on both lanes now). And dxmt-core's tile-barrier pipeline no longer claims its
+  threadgroup matches the tile (`tgsize_matches_tile_size` 0, the C++'s value: the Rust port had set it), which
+  ends the "threadsPerTile (16, 16) must equal tile size" validation reports of a draw that samples its own
+  target: one report at the base on a new row that arms the barrier (`tb-self`), none at the tip. That is
+  shared code: no D3D10-12 program in the gates dispatches the barrier, so D3D10-12's evidence is "no
+  collateral" (the x64 check, the VM's gate, `d3d11_compute` under the validation layer), and the runs here
+  see 32x32 tiles only. At the tip the row's launch still holds one tile dispatch in its command histogram.
+  **The gate.** `dxmt/mtld3d-conformance.sh` runs every suite under core, and `dxmt/d3d9-conf-compare.sh`
+  compares the two lanes site by site: **ok, 4 suites, 21 sites, with `dxmt/mtld3d-triaged-core.txt` empty**
+  (two flaky `device` sites as information); no Metal validation report in the core lane, none in the sixteen
+  row launches under core. d3d9-check on default, msl and core, every row; the VM's D3D9 gate on both runtimes
+  and both WoW64 forms, 64- and 32-bit; the VM's D3D10-12 gate (48 programs); the plain build's translator key
+  and `d3d9.dll` imports unchanged; **the x64 check, batched for slices 5 to 7: 420 rows ok, 0 failed.**
+  **The probe** (one build, one run each, CPU ms a frame, core against mtld3d): textured UP draws 3.53
+  against 1.57, draws from a static buffer 3.38 against 1.63, a dynamic buffer appended to between draws 2.58
+  against 2.13: the core costs 1.2 to 2.3 times mtld3d's CPU a frame on these benches (load 2.82 at the start,
+  4.17 at the end). Since C4b-3d the core's textured figure has read either about 2.2 or 3.3 to 4.1, mtld3d's
+  1.47 to 1.93 throughout, and the cause of the two bands is not established (the Mac's load does not explain
+  it: C4c-2b's probe read 2.32 in heavy use, and today's highest figure was the first run, at the lowest
+  load). **A cost added by C4c's slices 3 to 7 is not excluded** (C4c-2b's tip read 2.32 and 2.63 where
+  today's reads 3.53 and 3.38, in different windows). C4d's first probe owes the run that tells: C4c-2b's tip
+  against this one in one window, then a profile, before the dedup.
+  **What C4c leaves.** With `runtime.mode = core` on a `core-runtime` build, D3D9 runs on dxmt-core, the core
+  D3D10-12 use: buffers and every draw that reads them, dynamic buffers mapped directly, every read-back and
+  lock form, device contexts, `ColorFill`, `UpdateSurface`, all of `StretchRect`, queries, the getters and
+  every `Present` form, `Reset` windowed and fullscreen, fullscreen devices and the window subclass, gamma,
+  frame latency, the `Ex` creators, RESZ, the cursor calls and `ProcessVertices`; Wine's `visual`, `device`,
+  `d3d9ex` and `stateblock` fail under core only where they fail on mtld3d and meet no refusal. **Still
+  refused by name** (`D3DERR_NOTAVAILABLE`, STATUS.md's list): a `Reset` to a back-buffer format other than
+  X8R8G8B8 or A8R8G8B8; a `SetRenderTarget` or `SetDepthStencilSurface` of a surface the core does not target
+  or attach; a writable `LockRect` and a `GetDC` of a multisampled back buffer; a RESZ into a dynamic depth
+  texture; a `StretchRect` of a pair the core does not copy; a draw whose layout no binding can fetch, that
+  reads another device's buffer, binds a shader no core device created, samples a depth texture at a vertex
+  sampler or samples the depth-stencil it tests or writes. **Where it differs from mtld3d** (STATUS.md, each
+  with its reason): a windowed device's back buffer does not follow its window's size until a `Reset`; under
+  emulated mode sets a fullscreen mode below the desktop's is magnified with nearest-neighbour filtering, and
+  a covered fullscreen window is still presented into; a change of the gamma ramp costs a wait for the queued
+  frames and a rebuild of the presenter's pipelines, and the ramp is skipped with HDR output; the frame
+  latency bounds the queue without the display's pace; no GPU failure latches a device-lost answer; a back
+  buffer an extended device's application holds across `ResetEx` keeps its description but no pixels; four RESZ
+  cases, four edge answers of `ProcessVertices` (one aborts the process: a stride below the FVF's size on a
+  directly mapped source), two of occlusion queries, four of the getters and presents; `cursor.scale` and
+  `cursor.software` are not followed. The core runtime stays opt-in and the shipped default is mtld3d. Its
+  log, the device's information and its memory pages still come from `mtld3d.so` (7b, moved to C4d).
   C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
   offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer count and its cap
   (done); 3a colour read-back through locks (lockable targets, the back buffer read-only, render-target texture
@@ -1696,7 +1744,7 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   window subclass (done); 7b the device's information and pages from winemetal
   (moved to C4d with the logger's move: the maintainer's decision of 2026-11-20); 7d-1 `ProcessVertices`, the silent
   differences and the gamma ramp applied on a fullscreen device (done); 7d-2 the conformance lane for `visual`, `device`
-  and `d3d9ex` under core, the batched x64 check and the probe, which are C4c's gate.
+  and `d3d9ex` under core, the batched x64 check and the probe, which are C4c's gate (done).
   The sweep after 3a (`build/c4c/s3/sweep.md`, gating nothing): `visual` and `device` run to their end
   under core (2431 failed of 211208; 1871 of 56686, about 100000 checks not executed), `d3d9ex` dies in
   `test_reset`; the new failures are refusals by name (`StretchRect`'s other shapes about 2770 of 3356) but two
@@ -1783,6 +1831,8 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   core**: visual.c:15686, 6 against mtld3d's 3, in every sweep of C4c (found by 7d-2's plan review: the
   runner's "ceiling" hid it; 7d-2's first task). Three Metal validation
   reports are left, all the tile dispatch (7d-2).
+  After 7d-2 the lane replaces the sweeps: the two runtimes agree at every site (visual.c:15686 at 3 on both)
+  and the core lane holds no validation report.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
