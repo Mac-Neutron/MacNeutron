@@ -1652,6 +1652,36 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   size is resolved). The whole-branch review: push as is, six Minors (one STATUS.md bullet, corrected; the
   cover count; two answers the create's order changes on core, both towards mtld3d or unreachable; two log
   texts, for 7d-1). No probe (no draw file changed); no x64 check (inside `src/d3d9` and two docs).
+  C4c-7d-1 done 2026-11-20 at DXMTRS main 78e0ae50, which MacNeutron pins: the differences Wine's suites
+  showed over the runner's baseline between the core runtime and mtld3d (one more hides under a baseline
+  ceiling: below). Four causes, each one predicate or one arm: the core's
+  sRGB view follows the sampler's low bit, as the sampler key did on both runtimes; a `CreateVolumeTexture`
+  of depth 1 is a 2D texture in the core's store, as it is on mtld3d (six Metal validation reports go with
+  it); a texture level counts as uploaded once its dirty upload is recorded, **only if it was dirty** (so a
+  `READONLY` or `NO_DIRTY_UPDATE` unlock marks nothing, the eviction publishes again, and the very first
+  lock of a level still reaches the GPU); `ProcessVertices` on the core (a directly mapped source read
+  through the core; a destination's processed window sent to the core **alone** when its CPU copy was
+  released and re-created, never by widening a range over zeros; a dynamic destination through the core's
+  lock). And the gamma ramp is applied on a fullscreen core device by dxmt-core's presenter, **exact at
+  every 8-bit code** (the presenter only ever sees those), one ramp for the device's life; each change of it
+  makes the next present wait for the queued frames and rebuild the presenter's pipelines, where mtld3d
+  passes the ramp with the frame. The plan's reviews found two defects of its first design before any code
+  (the zeros-over-GPU-bytes upload; marking levels nothing wrote), and the final review a row that could
+  not see the first of them: the row was rewritten and a mutant added.
+  Gated at that tip's code (e5530477; 78e0ae50 corrects STATUS.md and passed the Rust gate) with a sixteenth
+  launch of nine rows (`parity`). Before any code: mtld3d green but for one cell everywhere, **the control
+  the 7a slice owed: after a one-sample RESZ from a D24X8 depth-stencil, mtld3d leaves an INTZ destination
+  reading zero**, where the core leaves it as it was (a fourth RESZ difference in STATUS.md, a finding for
+  mtld3d's maintainer; the cell is judged under core alone); the core red on the rows expected, with four
+  reports of a 3D texture's type under the validation layer. At the tip: the plain build's translator key
+  and `d3d9.dll` imports are the base's; d3d9-check default, msl and core, every row; the Mac's conformance
+  fails anew at triaged sites only; stateblock on both runtimes; the sixteen launches under core with
+  Metal's validation layer report nothing and the core's log holds the ramp's line; the VM's D3D9 gate on
+  both runtimes and both WoW64 forms, in 64-bit and in 32-bit (with the row for `ProcessVertices`' windows
+  in its first form: its second form ran on the Mac's lanes). Six mutants turn red exactly the cells named
+  before their builds and nothing else. Stated gaps: no gate sees a ramp on screen; a directly mapped
+  source is copied to its end at each call; four edge answers of `ProcessVertices` differ from mtld3d's
+  (the final review's list). No probe, no x64 check here: 7d-2 runs both.
   C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
   offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer count and its cap
   (done); 3a colour read-back through locks (lockable targets, the back buffer read-only, render-target texture
@@ -1665,7 +1695,7 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   7a gamma, frame latency, the `Ex` creators, RESZ and the cursor calls (done); 6d fullscreen devices and the
   window subclass (done); 7b the device's information and pages from winemetal
   (moved to C4d with the logger's move: the maintainer's decision of 2026-11-20); 7d-1 `ProcessVertices`, the silent
-  differences and the gamma ramp applied on a fullscreen device; 7d-2 the conformance lane for `visual`, `device`
+  differences and the gamma ramp applied on a fullscreen device (done); 7d-2 the conformance lane for `visual`, `device`
   and `d3d9ex` under core, the batched x64 check and the probe, which are C4c's gate.
   The sweep after 3a (`build/c4c/s3/sweep.md`, gating nothing): `visual` and `device` run to their end
   under core (2431 failed of 211208; 1871 of 56686, about 100000 checks not executed), `d3d9ex` dies in
@@ -1747,6 +1777,12 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   what the default runtime executes** (159570 checks, 56814 before): the functions that skipped after a
   refused fullscreen create run and bring mtld3d's own failures with them and nothing else. The one refusal
   a suite still meets is `ProcessVertices`. Of the 23 lines left, 20 are 7d-1's, 3 triaged.
+  The sweep after 7d-1 (`build/c4c/s7d/sweep.md`, gating nothing): **`visual` 20 to 0 lines over the default
+  runtime's baseline**, `device` 3 (triaged), `d3d9ex` 0: nothing over the runner's baseline, and **no suite
+  meets a refusal**, for the first time. **One site under a baseline ceiling still fails more often under
+  core**: visual.c:15686, 6 against mtld3d's 3, in every sweep of C4c (found by 7d-2's plan review: the
+  runner's "ceiling" hid it; 7d-2's first task). Three Metal validation
+  reports are left, all the tile dispatch (7d-2).
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features

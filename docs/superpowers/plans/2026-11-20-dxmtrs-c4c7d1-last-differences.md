@@ -287,4 +287,39 @@ Three reviews: **two Critical (R2), both in the draft's mechanism, both folded**
 
 ## Execution notes
 
-(after the gates)
+- **Commits.** MacNeutron: rows 1b75890f (launch `parity`, nine rows), 7f792edf (`rz-cross`'s INTZ cell
+  under strict alone, after the control), f12d3c68 (`pv-draw` rewritten after the final review). DXMTRS:
+  1ecbc9c5, 4941a88c, 6aee94ba (the three predicates, one gate run split exactly), 5e4744c2
+  (`ProcessVertices`), e4359245 (the ramp; its first gate run failed clippy on a fourth bool in
+  `CoreDevice`, fixed by a struct), e5530477 (small things), 78e0ae50 (STATUS.md after the final review).
+  The pin is 78e0ae50; the chain ran at e5530477, the last lane and the last mutant at 78e0ae50.
+- **Controls**: as written beforehand. The core at the base: red `sr-lsb`, `vo-one` (black; four reports of
+  a 3D texture's type under the validation layer), `dr-keep` (at its READONLY cell), the four `pv` rows and
+  `parity-runtime`; green `rz-cross`, `gm-full`. mtld3d (Mac, the validation layer, the VM): green but
+  **`rz-cross`'s INTZ cell: the destination cleared to 1.0 reads 0 after a one-sample RESZ from D24X8**.
+  So 7a's ruling R7a-4 was wrong to call that pair parity: the core skips it and keeps the destination,
+  mtld3d queues a copy Metal's side refuses and the destination reads zero (why: not traced). The cell went
+  strict-only (7f792edf); STATUS.md's RESZ bullet has four differences; the finding is on the maintainer's
+  list.
+- **Lane and chain** (`jt1`, then `jmb`, `jw`, `jr`, `jc`, `jq`, `jm`): every row green on both runtimes
+  (`parity` 9 of 9); `parity` under core with the validation layer: no report, the ramp's line once; the
+  plain build's key and imports the base's; conformance at triaged sites only; the VM on both runtimes, both
+  forms, both widths; sixteen launches under validation, no report; **mutants d, e, f, h, i red on exactly
+  the cells written before their builds, no other row**.
+- **Sweep** (`build/c4c/s7d/sweep.md`): as predicted: `visual` 20 to 0 over the baseline, `device` 3
+  triaged, `d3d9ex` 0; no refusal line in any suite; three validation reports left, the tile dispatch.
+  **The Goal's "every one a line mtld3d has too" is not quite so**: visual.c:15686 is a line mtld3d has, but
+  it fails 6 times under core and 3 on mtld3d (the runner's ceiling hid the count; 7d-2's plan review found
+  it; 7d-2's first task).
+- **Final review** (`build/c4c/s7d/review-final.md`): no Critical; two Important, neither in the code. I1:
+  `pv-draw` wrote one window after the release and so could not tell a window sent alone from one joined to
+  the dirty range (review 2's C1 in its own form); mutant f was the stronger "whole buffer". The row now
+  writes two windows around vertices the GPU holds (f12d3c68) and **mutant g, the window joined to the
+  range, is red at "4-7 still B" and nowhere else** (`jm2`; `jt2` green on both runtimes with the new row).
+  The VM ran the row's first form only. I2: STATUS.md, above. Minors recorded, not fixed: a stream stride
+  below the FVF's vertex size aborts on a directly mapped source where mtld3d reads on (M1: the pure
+  function's check); four edge answers that differ (M2); the refused-upload fallback joins the range, as
+  `Unlock`'s own does (M3); a dynamic destination's lock may rename the buffer (M4); the direct source is
+  copied to its end each call (M5); `vo-one`, `gm-full` and the cube and volume marks are covered by
+  reading or the validation layer only (M6).
+- **No probe, no x64 check** (7d-2).

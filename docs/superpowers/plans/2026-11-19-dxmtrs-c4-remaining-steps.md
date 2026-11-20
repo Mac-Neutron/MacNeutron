@@ -46,6 +46,10 @@ Every slice still gets its own code map, plan, three reviews and gates: nothing 
   cause, **by reading, not yet shown by a run**, is a flag of dxmt-core's tile-barrier pipeline set in the
   Rust port where the C++ had it clear (`build/c4c/s7d/tile-dispatch.md`; which Wine function draws them is
   attributed, not confirmed): outside `src/d3d9`; the batched x64 check; the quiet-Mac probe).
+- **C4c-7d-1 is done** (DXMTRS 78e0ae50): under core Wine's three suites have no line over the runner's
+  baseline and meet no refusal; one site under a baseline ceiling (visual.c:15686) fails 6 times against
+  mtld3d's 3 (7d-2's first task). **What is left of C4c is 7d-2** (plan
+  `2026-11-20-dxmtrs-c4c7d2-gate.md`).
 
 ## C4c, what is left
 
@@ -155,6 +159,9 @@ window another application covers; the gates' one covering row covers the displa
 cursor on core without the window subclass (7a's ruling R7a-7): closed by slice 6d.
 Findings from C4c-3 to C4c-7a that are not C4c's to fix (each is in a slice's execution notes):
 
+- mtld3d, from C4c-7d-1's control: a one-sample RESZ from a D24X8 depth-stencil leaves an INTZ destination
+  reading zero (the core leaves it as it was); texture staging is not zeroed at creation on either runtime
+  (Wine zero-fills; `build/c4c/s7d2/fetch4.md`).
 - mtld3d, from C4c-7a's rows: a RESZ with a colour texture of the depth-stencil's size at stage 0 leaves
   that texture zeroed (the copy is queued, then refused for its formats; not traced); a RESZ with the bound
   depth-stencil's own texture at stage 0 sends Metal a copy of the texture onto itself (read, not run).
