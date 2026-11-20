@@ -144,6 +144,22 @@
 // fullscreen, which the core refuses (D3DERR_NOTAVAILABLE); elsewhere it does nothing and passes: no device of this
 // mode leaves windowed mode on mtld3d. With a 200 s budget. The core before DXMTRS C4c-6c's front end refuses Reset,
 // ResetEx, TestCooperativeLevel and CheckDeviceState: each row prints "FAIL ... 8876086a" at its first such call.
+// With "extras" ("extras strict" under core; DXMTRS C4c-7a): 15 rows "d3d9 <gm|fl|ex|rz|cu>-<row> ok|FAIL <why>", each
+// on a device and a visible window of its own (reset's): the gamma ramp's Set and Get (stored and reported, a ramp that
+// does not rise, null ramps and swap chain 1 ignored); an extended device's frame latency (Get, Set 0, 30 and 31, Get
+// NULL; frames drawn, read back and presented at a latency of 1); CreateRenderTargetEx, CreateDepthStencilSurfaceEx and
+// CreateOffscreenPlainSurfaceEx (drawn to, bound, locked in three pools; the usages they refuse, with the out slot as
+// passed, D3DFMT_UNKNOWN's NULL, a restricted-content usage in GetDesc); RESZ (SetRenderState(D3DRS_POINTSIZE,
+// 0x7fa05000)) of four flat depth bands into an INTZ texture, from a 4-sample surface, a 2-sample auto depth-stencil
+// and a 1-sample surface, into a texture made without D3DUSAGE_DEPTHSTENCIL, and the cases it skips (no texture at
+// stage 0, no depth-stencil bound, another size, a colour texture), read by the fixed-function raw sample; the cursor
+// calls (SetCursorProperties' answers, ShowCursor's, the cursor GetCursor reports across a WM_SETCURSOR). A sample
+// count the adapter does not offer is a FAIL. Under "strict" alone, rz-self makes the bound depth-stencil's own texture
+// RESZ's destination and rz-refuse asks for a RESZ into a dynamic depth texture, which the core refuses
+// (D3DERR_NOTAVAILABLE); elsewhere both do nothing and pass; and cu-setcursor wants the class cursor back after
+// WM_SETCURSOR (the core has no window subclass) where mtld3d keeps its own. No row moves the pointer. With a 200 s
+// budget. The core before DXMTRS C4c-7a's front end refuses each call: every row but rz-refuse prints its "FAIL ..." at
+// its first such call.
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -3925,8 +3941,9 @@ static bool makeDs(Com<IDirect3DSurface9> &s, D3DFORMAT f = D3DFMT_D24X8, UINT s
     CK(CreateDepthStencilSurface, size, size, f, type, 0, FALSE, &s.p, nullptr);
     return true;
 }
-static bool makeDepthTex(Com<IDirect3DTexture9> &t, D3DFORMAT f, UINT levels = 1) {
-    CK(CreateTexture, 256, 256, levels, D3DUSAGE_DEPTHSTENCIL, f, D3DPOOL_DEFAULT, &t.p, nullptr);
+static bool makeDepthTex(Com<IDirect3DTexture9> &t, D3DFORMAT f, UINT levels = 1, DWORD usage = D3DUSAGE_DEPTHSTENCIL,
+                         UINT size = 256) {
+    CK(CreateTexture, size, size, levels, usage, f, D3DPOOL_DEFAULT, &t.p, nullptr);
     return true;
 }
 static bool bindDsLevel(IDirect3DTexture9 *t, UINT level = 0) {
@@ -5917,10 +5934,11 @@ static int meanOf(IDirect3DSurface9 *s, D3DFORMAT f, int x, int y, int n) {
         return -1;
     return sum / (3 * n * n);
 }
-// Whether the adapter offers `type` for a windowed A8R8G8B8 target (CheckDeviceMultiSampleType), asked of main's
-// IDirect3D9 (the core refuses GetDirect3D, which would hide the 2- and 8-sample cells from it).
-static bool offers(D3DMULTISAMPLE_TYPE type) {
-    return direct3d && SUCCEEDED(direct3d->CheckDeviceMultiSampleType(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, A8, TRUE,
+// Whether the adapter offers `type` for a windowed A8R8G8B8 target (or format f: the extras mode asks D24S8 too)
+// (CheckDeviceMultiSampleType), asked of main's IDirect3D9 (the core refuses GetDirect3D, which would hide the 2- and
+// 8-sample cells from it).
+static bool offers(D3DMULTISAMPLE_TYPE type, D3DFORMAT f = A8) {
+    return direct3d && SUCCEEDED(direct3d->CheckDeviceMultiSampleType(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, f, TRUE,
                                                                       type, nullptr));
 }
 // What an msaa attempt starts from: mrtStart()'s state, no sample mask, alpha-to-coverage off (ADAPTIVETESS_Y 0, the
@@ -10181,11 +10199,12 @@ static D3DPRESENT_PARAMETERS rsParams(HWND w, UINT width, UINT height, D3DFORMAT
     pp.EnableAutoDepthStencil = depth != D3DFMT_UNKNOWN, pp.AutoDepthStencilFormat = depth;
     return pp;
 }
-// r's window and a 256x256 device on it (rsParams, `depth`): from main's IDirect3D9, or, `extended`, CreateDeviceEx of
-// an IDirect3D9Ex of its own. A create that fails is a FAIL with its hr.
-static bool rsDevice(RsDevice &r, D3DFORMAT depth = D3DFMT_UNKNOWN, bool extended = false) {
+// r's window and a 256x256 device on it (rsParams, `depth`, `ms` samples): from main's IDirect3D9, or, `extended`,
+// CreateDeviceEx of an IDirect3D9Ex of its own. A create that fails is a FAIL with its hr.
+static bool rsDevice(RsDevice &r, D3DFORMAT depth = D3DFMT_UNKNOWN, bool extended = false,
+                     D3DMULTISAMPLE_TYPE ms = D3DMULTISAMPLE_NONE) {
     if (!rsWindow(r.w, 256, 256)) return false;
-    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256, depth);
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256, depth, ms);
     HRESULT hr;
     if (!extended) {
         hr = direct3d ? direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, r.w.h,
@@ -10799,6 +10818,594 @@ static void resetRows(IDirect3DDevice9 *d, bool strict) {
     }
 }
 
+// --- The "extras" mode (DXMTRS C4c-7a): gamma, frame latency, the Ex creators, RESZ and the cursor calls. Each row
+// makes a device and a window of its own (rsDevice's; an extended one where a row says so) and, while it runs, the
+// globals the helpers read name that device and its back buffer (OnDevice: until()'s rebind and clearRt read rtSurf);
+// no row makes a Reset. Each cell wants what mtld3d, the default runtime, answers, in every lane, but in three rows:
+// rz-self and rz-refuse do nothing and pass unless "strict", and cu-setcursor's last cell wants the core's gap under
+// "strict" (no window subclass: the class cursor is back). A row that draws judges it in one until() attempt with
+// fresh objects (mtld3d leaves a draw out while a new device's pipelines build); every judged draw sets ZENABLE
+// itself, and stage 0 is left unbound on every path. No row calls SetCursorPosition or reads the pointer's position.
+// The core before DXMTRS C4c-7a's front end refuses every call the mode is about (D3DERR_NOTAVAILABLE; the gamma calls
+// do nothing, ShowCursor answers FALSE): each row but rz-refuse fails at its first such call (rz-refuse wants the
+// refusal it already gives). The mode's budget is 200 s, the launches' watchdog 300 s.
+
+// A row's device (rsDevice) and its back buffer, for OnDevice; declared after the RsDevice, released before it.
+static bool exDevice(RsDevice &r, Com<IDirect3DSurface9> &bb, D3DFORMAT depth = D3DFMT_UNKNOWN, bool extended = false,
+                     D3DMULTISAMPLE_TYPE ms = D3DMULTISAMPLE_NONE) {
+    if (!rsDevice(r, depth, extended, ms)) return false;
+    const HRESULT hr = r.d.p->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
+    return (SUCCEEDED(hr) && bb.p) || fail("GetBackBuffer", hr);
+}
+// A ramp whose channel c (red, green, blue) holds level(c, i) at entry i.
+template <class F> static D3DGAMMARAMP gammaRamp(F level) {
+    D3DGAMMARAMP g;
+    for (int i = 0; i < 256; i++) g.red[i] = level(0, i), g.green[i] = level(1, i), g.blue[i] = level(2, i);
+    return g;
+}
+// GetGammaRamp(sc) into a ramp of 0xab bytes (a marker no channel of which rises), then all 768 levels against `want`;
+// `why` names the first that differs.
+static bool gammaIs(const char *what, UINT sc, const D3DGAMMARAMP &want) {
+    D3DGAMMARAMP got;
+    memset(&got, 0xab, sizeof got);
+    dev->GetGammaRamp(sc, &got);
+    static const char *const names[3] = {"red", "green", "blue"};
+    const WORD *g[3] = {got.red, got.green, got.blue}, *w[3] = {want.red, want.green, want.blue};
+    for (int c = 0; c < 3; c++)
+        for (int i = 0; i < 256; i++)
+            if (g[c][i] != w[c][i])
+                return snprintf(why, sizeof why, "%s: %s[%d] %#x, want %#x", what, names[c], i, (unsigned)g[c][i],
+                                (unsigned)w[c][i]),
+                       false;
+    return true;
+}
+// gm-ramp (a plain device): GetGammaRamp(0) into gammaIs's marker reads the identity (entry i of each channel i * 257,
+// the ramp a device starts with: only a Get that ran writes it over the marker); SetGammaRamp(0) of a rising ramp
+// (red i * 200, green i * 100 + 7, blue i * 256, which no device starts with), and Get reads it back (only a stored Set
+// does); a flat ramp (every entry 0x8000: no channel rises) is ignored, Get unchanged; a null ramp to Set and to Get,
+// and a Set on swap chain 1 of another rising ramp (i * 150), change nothing, Get unchanged; Get on swap chain 1 writes
+// nothing (its marker stays). The null and swap-chain-1 cells alone would pass on a call that does nothing: they ride
+// on the first two. A windowed device stores the ramp and applies none: nothing changes on screen.
+static bool rowGmRamp() {
+    RsDevice r;
+    Com<IDirect3DSurface9> bb;
+    if (!exDevice(r, bb)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    const D3DGAMMARAMP identity = gammaRamp([](int, int i) { return (WORD)(i * 257); }),
+                       rising = gammaRamp([](int c, int i) {
+                           return (WORD)(c == 0 ? i * 200 : c == 1 ? i * 100 + 7 : i * 256);
+                       }),
+                       flat = gammaRamp([](int, int) { return (WORD)0x8000; }),
+                       other = gammaRamp([](int, int i) { return (WORD)(i * 150); });
+    D3DGAMMARAMP marker;
+    memset(&marker, 0xab, sizeof marker);
+    if (!gammaIs("GetGammaRamp (the device's own)", 0, identity)) return false;
+    dev->SetGammaRamp(0, D3DSGR_NO_CALIBRATION, &rising);
+    if (!gammaIs("GetGammaRamp (after a rising ramp)", 0, rising)) return false;
+    dev->SetGammaRamp(0, D3DSGR_NO_CALIBRATION, &flat);
+    if (!gammaIs("GetGammaRamp (after a flat ramp)", 0, rising)) return false;
+    dev->SetGammaRamp(0, D3DSGR_NO_CALIBRATION, nullptr);
+    dev->GetGammaRamp(0, nullptr);
+    dev->SetGammaRamp(1, D3DSGR_NO_CALIBRATION, &other);
+    return gammaIs("GetGammaRamp (after null ramps and swap chain 1's)", 0, rising) &&
+           gammaIs("GetGammaRamp (swap chain 1)", 1, marker);
+}
+// GetMaximumFrameLatency into a marker: D3D_OK and exactly `expect`.
+static bool latencyIs(IDirect3DDevice9Ex *ex, const char *what, UINT expect) {
+    UINT v = 0xdeadbeef;
+    return answer(what, ex->GetMaximumFrameLatency(&v), D3D_OK) && exact(what, v, expect);
+}
+// fl-latency (an extended device, no depth-stencil): Get 3 (the default); Set 30 D3D_OK, Get 30 (only a stored Set
+// reads 30); Set 31 D3DERR_INVALIDCALL (past the limit), Get still 30; Set 0 D3D_OK (the default again), Get 3; Get
+// (NULL) D3DERR_INVALIDCALL. Set 1, then three frames, each a quad 56 pixels right of the last, read back (blue where
+// the last one was: this frame's back buffer) and presented (until()); Set 0 and one more frame. The presents show
+// commits and no hang at a bound of 1 and after a Set 0, not the bound itself: no row can tell how far the CPU ran
+// ahead.
+static bool rowFlLatency() {
+    RsDevice r;
+    Com<IDirect3DSurface9> bb;
+    if (!exDevice(r, bb, D3DFMT_UNKNOWN, true)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    IDirect3DDevice9Ex *const ex = r.ex.p;
+    if (!latencyIs(ex, "GetMaximumFrameLatency (the default)", 3) ||
+        !answer("SetMaximumFrameLatency(30)", ex->SetMaximumFrameLatency(30), D3D_OK) ||
+        !latencyIs(ex, "GetMaximumFrameLatency (after 30)", 30) ||
+        !answer("SetMaximumFrameLatency(31)", ex->SetMaximumFrameLatency(31), D3DERR_INVALIDCALL) ||
+        !latencyIs(ex, "GetMaximumFrameLatency (after the refused 31)", 30) ||
+        !answer("SetMaximumFrameLatency(0)", ex->SetMaximumFrameLatency(0), D3D_OK) ||
+        !latencyIs(ex, "GetMaximumFrameLatency (after 0)", 3) ||
+        !answer("GetMaximumFrameLatency (NULL)", ex->GetMaximumFrameLatency(nullptr), D3DERR_INVALIDCALL) ||
+        !answer("SetMaximumFrameLatency(1)", ex->SetMaximumFrameLatency(1), D3D_OK))
+        return false;
+    for (int i = 0; i < 4; i++) {
+        if (i == 3 && !answer("SetMaximumFrameLatency(0) (after the frames)", ex->SetMaximumFrameLatency(0), D3D_OK))
+            return false;
+        const int x = 16 + 56 * i;
+        char what[48];
+        snprintf(what, sizeof what, i < 3 ? "frame %d at a latency of 1" : "frame %d, after a Set 0", i + 1);
+        if (!until([&] { return lands(x, 96, x + 32, 160, i ? x - 40 : 200, i ? 128 : 32); })) return failIn(what);
+    }
+    return true;
+}
+// GetDesc's Usage and Pool of `s`: exactly `usage` and `pool`.
+static bool usageIs(const char *name, IDirect3DSurface9 *s, DWORD usage, D3DPOOL pool) {
+    D3DSURFACE_DESC d = {};
+    const HRESULT hr = s->GetDesc(&d);
+    if (FAILED(hr)) return fail("GetDesc", hr) || failIn(name);
+    if (d.Usage == usage && d.Pool == pool) return true;
+    return snprintf(why, sizeof why, "%s usage %#lx pool %d; want usage %#lx pool %d", name, (unsigned long)d.Usage,
+                    (int)d.Pool, (unsigned long)usage, (int)pool),
+           false;
+}
+// An Ex create into a slot holding noDepth's marker (a raw pointer, never a Com<>: its Release of the marker would end
+// the launch): `expect`, and the slot as passed (`kept`) or NULL; a surface it made is released.
+template <class F> static bool slotAfter(const char *what, HRESULT expect, bool kept, F create) {
+    IDirect3DSurface9 *const mark = reinterpret_cast<IDirect3DSurface9 *>(static_cast<INT_PTR>(0x5a5a));
+    IDirect3DSurface9 *s = mark;
+    const HRESULT hr = create(&s);
+    if (SUCCEEDED(hr) && s && s != mark) s->Release();
+    if (hr != expect) return fail(what, hr);
+    IDirect3DSurface9 *const slot = kept ? mark : nullptr;
+    return s == slot || (snprintf(why, sizeof why, "%s left %p, want %p", what, (void *)s, (void *)slot), false);
+}
+// ex-rt (an extended device): CreateRenderTargetEx 64x64 A8R8G8B8, one sample, not lockable, usage 0: D3D_OK, its
+// description (64x64 A8R8G8B8, one sample, Usage RENDERTARGET, Pool DEFAULT); bound, cleared steel, a rust quad over
+// (16,16)-(48,48), read back through GetRenderTargetData: rust at (32,32), steel at (56,8) (only a made surface a pass
+// reaches holds them). Usage RENDERTARGET (no extended usage): D3DERR_INVALIDCALL and the slot as passed;
+// D3DFMT_UNKNOWN, usage 0: D3DERR_INVALIDCALL from the base creator and the slot NULL (a refusal that skipped the base
+// creator would leave the marker).
+static bool rowExRt() {
+    RsDevice r;
+    Com<IDirect3DSurface9> bb, s;
+    if (!exDevice(r, bb, D3DFMT_UNKNOWN, true)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    IDirect3DDevice9Ex *const ex = r.ex.p;
+    const HRESULT hr = ex->CreateRenderTargetEx(64, 64, A8, D3DMULTISAMPLE_NONE, 0, FALSE, &s.p, nullptr, 0);
+    if (hr != D3D_OK || !s.p) return fail("CreateRenderTargetEx (usage 0)", hr);
+    if (!descIs("the Ex target", s.p, 64, 64, A8) ||
+        !usageIs("the Ex target", s.p, D3DUSAGE_RENDERTARGET, D3DPOOL_DEFAULT))
+        return false;
+    if (!until([&] {
+            return rstate(D3DRS_ZENABLE, D3DZB_FALSE) && clearRt(s.p, KSTEEL) && quadIn(16, 16, 48, 48) &&
+                   backToScreen() && rtHas("the Ex target", s.p, 64, A8, {{32, 32, KRUST}, {56, 8, KSTEEL}});
+        }))
+        return failIn("drawn into");
+    return slotAfter("CreateRenderTargetEx (usage RENDERTARGET)", D3DERR_INVALIDCALL, true,
+                     [&](IDirect3DSurface9 **o) {
+                         return ex->CreateRenderTargetEx(64, 64, A8, D3DMULTISAMPLE_NONE, 0, FALSE, o, nullptr,
+                                                         D3DUSAGE_RENDERTARGET);
+                     }) &&
+           slotAfter("CreateRenderTargetEx (D3DFMT_UNKNOWN)", D3DERR_INVALIDCALL, false, [&](IDirect3DSurface9 **o) {
+               return ex->CreateRenderTargetEx(64, 64, D3DFMT_UNKNOWN, D3DMULTISAMPLE_NONE, 0, FALSE, o, nullptr, 0);
+           });
+}
+// ex-ds (an extended device, no auto depth-stencil): CreateDepthStencilSurfaceEx 256x256 D24S8, one sample, usage 0:
+// D3D_OK, its description (256x256 D24S8, Usage DEPTHSTENCIL, Pool DEFAULT); bound, Z cleared to 1 and on, a red quad
+// at z 0.25 over (32,96)-(160,160), then a green one at 0.75 over (96,96)-(224,160): red at (64,128) and (128,128)
+// (only a bound, tested depth-stencil hides the later draw), green at (192,128), blue at (128,32). Usage DEPTHSTENCIL:
+// D3DERR_INVALIDCALL and the slot as passed; D3DFMT_UNKNOWN: D3DERR_INVALIDCALL and the slot NULL; usage
+// RESTRICTED_CONTENT: D3D_OK and GetDesc's Usage DEPTHSTENCIL | RESTRICTED_CONTENT (only the Ex create reports the
+// extended bit).
+static bool rowExDs() {
+    RsDevice r;
+    Com<IDirect3DSurface9> bb, ds, rc;
+    if (!exDevice(r, bb, D3DFMT_UNKNOWN, true)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    IDirect3DDevice9Ex *const ex = r.ex.p;
+    HRESULT hr =
+        ex->CreateDepthStencilSurfaceEx(256, 256, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, FALSE, &ds.p, nullptr, 0);
+    if (hr != D3D_OK || !ds.p) return fail("CreateDepthStencilSurfaceEx (usage 0)", hr);
+    if (!descIs("the Ex depth-stencil", ds.p, 256, 256, D3DFMT_D24S8) ||
+        !usageIs("the Ex depth-stencil", ds.p, D3DUSAGE_DEPTHSTENCIL, D3DPOOL_DEFAULT))
+        return false;
+    CK(SetDepthStencilSurface, ds.p);
+    if (!until([] {
+            return clearBlue(true) &&
+                   scene([] { return zquad(32, 96, 160, 160, 0.25f, TRED) && zquad(96, 96, 224, 160, 0.75f, TGRN); }) &&
+                   bbHas({{64, 128, TRED}, {128, 128, TRED}, {192, 128, TGRN}, {128, 32, BLUE}});
+        }))
+        return failIn("bound");
+    CK(SetDepthStencilSurface, nullptr);
+    if (!slotAfter("CreateDepthStencilSurfaceEx (usage DEPTHSTENCIL)", D3DERR_INVALIDCALL, true,
+                   [&](IDirect3DSurface9 **o) {
+                       return ex->CreateDepthStencilSurfaceEx(256, 256, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, FALSE, o,
+                                                              nullptr, D3DUSAGE_DEPTHSTENCIL);
+                   }) ||
+        !slotAfter("CreateDepthStencilSurfaceEx (D3DFMT_UNKNOWN)", D3DERR_INVALIDCALL, false,
+                   [&](IDirect3DSurface9 **o) {
+                       return ex->CreateDepthStencilSurfaceEx(256, 256, D3DFMT_UNKNOWN, D3DMULTISAMPLE_NONE, 0, FALSE,
+                                                              o, nullptr, 0);
+                   }))
+        return false;
+    hr = ex->CreateDepthStencilSurfaceEx(256, 256, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, FALSE, &rc.p, nullptr,
+                                         D3DUSAGE_RESTRICTED_CONTENT);
+    if (hr != D3D_OK || !rc.p) return fail("CreateDepthStencilSurfaceEx (RESTRICTED_CONTENT)", hr);
+    return usageIs("the restricted-content depth-stencil", rc.p, D3DUSAGE_DEPTHSTENCIL | D3DUSAGE_RESTRICTED_CONTENT,
+                   D3DPOOL_DEFAULT);
+}
+// ex-plain (an extended device): CreateOffscreenPlainSurfaceEx 64x64 A8R8G8B8 with usage 0 in the default,
+// system-memory and scratch pools, each D3D_OK: a texel written at (5,7) under LockRect(0) reads back under a second,
+// READONLY lock (only a made, lockable surface holds it); the managed pool D3DERR_INVALIDCALL; usage DYNAMIC (no
+// extended usage) D3DERR_INVALIDCALL and the slot as passed; usage RESTRICTED_CONTENT in the default pool D3D_OK, and
+// GetDesc's Usage exactly RESTRICTED_CONTENT (a plain surface's own usage is 0: rt-plain) and Pool DEFAULT.
+static bool rowExPlain() {
+    RsDevice r;
+    Com<IDirect3DSurface9> bb, rc;
+    if (!exDevice(r, bb, D3DFMT_UNKNOWN, true)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    IDirect3DDevice9Ex *const ex = r.ex.p;
+    static const struct { D3DPOOL pool; const char *name; } pools[] = {
+        {D3DPOOL_DEFAULT, "the default pool"}, {D3DPOOL_SYSTEMMEM, "the system-memory pool"},
+        {D3DPOOL_SCRATCH, "the scratch pool"}};
+    for (const auto &k : pools) {
+        Com<IDirect3DSurface9> s;
+        const DWORD v = 0x80402010;
+        DWORD got = 0;
+        const HRESULT hr = ex->CreateOffscreenPlainSurfaceEx(64, 64, A8, k.pool, &s.p, nullptr, 0);
+        if (hr != D3D_OK || !s.p) return fail("CreateOffscreenPlainSurfaceEx (usage 0)", hr) || failIn(k.name);
+        if (!underLock(s.p, "LockRect", nullptr, 0, [&](BYTE *b, int p) { paint(b, p, 5, 7, 6, 8, v); }) ||
+            !underLock(s.p, "LockRect (READONLY)", nullptr, D3DLOCK_READONLY,
+                       [&](BYTE *b, int p) { got = texel(b, p, 5, 7); }) ||
+            !want("(5,7) locked again", got, v, 0xffffffff))
+            return failIn(k.name);
+    }
+    IDirect3DSurface9 *m = nullptr;
+    HRESULT hr = ex->CreateOffscreenPlainSurfaceEx(64, 64, A8, D3DPOOL_MANAGED, &m, nullptr, 0);
+    if (m) m->Release();
+    if (hr != D3DERR_INVALIDCALL) return fail("CreateOffscreenPlainSurfaceEx (the managed pool)", hr);
+    if (!slotAfter("CreateOffscreenPlainSurfaceEx (usage DYNAMIC)", D3DERR_INVALIDCALL, true,
+                   [&](IDirect3DSurface9 **o) {
+                       return ex->CreateOffscreenPlainSurfaceEx(64, 64, A8, D3DPOOL_DEFAULT, o, nullptr,
+                                                                D3DUSAGE_DYNAMIC);
+                   }))
+        return false;
+    hr = ex->CreateOffscreenPlainSurfaceEx(64, 64, A8, D3DPOOL_DEFAULT, &rc.p, nullptr, D3DUSAGE_RESTRICTED_CONTENT);
+    if (hr != D3D_OK || !rc.p) return fail("CreateOffscreenPlainSurfaceEx (RESTRICTED_CONTENT)", hr);
+    return usageIs("the restricted-content plain surface", rc.p, D3DUSAGE_RESTRICTED_CONTENT, D3DPOOL_DEFAULT);
+}
+
+// The RESZ rows (rz-*), each on a device with a 1-sample 256x256 back buffer unless said. A source depth-stencil is
+// bound beside a target of its sample count (a Clear or a draw reaches a depth-stencil only beside one: ms-dres) while
+// bands() draws four flat depth bands into it; a destination made with D3DUSAGE_DEPTHSTENCIL is first cleared to Z 1
+// through its level beside a 1-sample target, so a RESZ that did nothing reads 0xff there, never a band; then the
+// destination at stage 0 and RESZ (SetRenderState(D3DRS_POINTSIZE, RESZ)) in the same scene, and the destination read
+// with no depth-stencil bound by the fixed-function raw sample ds-intz proves in every lane (sampleAt), into a 1-sample
+// target of its own. POINTSIZE is set to 1.0 at each attempt's start, so an attempt reads its own RESZ's store. A
+// sample count the adapter does not offer is a FAIL, never a skip.
+static const DWORD RESZ = 0x7fa05000;
+// The bands' depths: 0.125, 0.375, 0.625 and 0.875 over x 0-63, 64-127, 128-191 and 192-255 (none 0, a fresh core
+// depth texture's content, nor 1, the destinations' clear), and their raw INTZ samples (ds-intz's rounding: 0.25 reads
+// 0x40).
+static const DWORD BAND[4] = {0x202020, 0x606060, 0x9f9f9f, 0xdfdfdf};
+static bool bands() {
+    if (!rstate(D3DRS_ZENABLE, D3DZB_TRUE) || !rstate(D3DRS_ZFUNC, D3DCMP_ALWAYS)) return false;
+    CK(Clear, 0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, BLUE, 1.0f, 0);
+    for (int i = 0; i < 4; i++)
+        if (!zquad(64.0f * i, 0, 64.0f * i + 64, 256, 0.125f + 0.25f * i, TRED)) return false;
+    return true;
+}
+static bool resz(const char *what, HRESULT expect = D3D_OK) {
+    return answer(what, dev->SetRenderState(D3DRS_POINTSIZE, RESZ), expect);
+}
+static bool pointSizeIs(const char *what, DWORD expect) {
+    DWORD v = 0xdeadbeef;
+    CK(GetRenderState, D3DRS_POINTSIZE, &v);
+    return exact(what, v, expect);
+}
+// `read` alone at index 0, no depth-stencil bound, the depth test off, cleared blue: what a destination is read into.
+static bool readInto(IDirect3DSurface9 *read) {
+    return bindRt(0, read) && bindDs(nullptr) && rstate(D3DRS_ZENABLE, D3DZB_FALSE) && clearTo(BLUE);
+}
+// Whether `ms` samples are offered for an A8R8G8B8 target and a D24S8 depth-stencil (offers()); a FAIL otherwise.
+static bool samplesOffered(D3DMULTISAMPLE_TYPE ms) {
+    return (offers(ms) && offers(ms, D3DFMT_D24S8)) ||
+           (snprintf(why, sizeof why, "%d samples of A8R8G8B8 and D24S8 not both offered (CheckDeviceMultiSampleType)",
+                     (int)ms),
+            false);
+}
+// One attempt of a band row: `dst` cleared to Z 1 first when `prefill`; the bands drawn into `src` beside `target`;
+// `dst` at stage 0, RESZ D3D_OK and, when `point`, GetRenderState(POINTSIZE) the magic (the state stored); `dst` read:
+// band i's centre texel sampled over the 64x64 quad at (64 i, 96), its band's grey at (64 i + 32, 128).
+static bool reszBands(IDirect3DSurface9 *target, IDirect3DSurface9 *src, IDirect3DTexture9 *dst, bool prefill,
+                      bool point) {
+    Rt read;
+    if (!mkRt(read, 256) || !rstate(D3DRS_POINTSIZE, fbits(1.0f))) return false;
+    const bool drawn = scene([&] {
+        if (prefill && !(bindRt(0, read.s.p) && bindDsLevel(dst) && clearZ())) return false;
+        if (!bindRt(0, target) || !bindDs(src) || !bands()) return false;
+        CK(SetTexture, 0, dst);
+        if (!resz("SetRenderState(POINTSIZE, RESZ)") ||
+            (point && !pointSizeIs("GetRenderState(POINTSIZE) after RESZ", RESZ)) || !readInto(read.s.p))
+            return false;
+        for (int i = 0; i < 4; i++)
+            if (!sampleAt(dst, 64.0f * i, 96, (64 * i + 32.5f) / 256)) return false;
+        return true;
+    });
+    dev->SetTexture(0, nullptr);
+    return drawn && rtHas("the destination", read.s.p, 256, A8,
+                          {{32, 128, BAND[0]}, {96, 128, BAND[1]}, {160, 128, BAND[2]}, {224, 128, BAND[3]}});
+}
+// rz-msaa: a 4-sample 256x256 D24S8 surface (the count ms-dres runs in every lane) beside a 4-sample target, into an
+// INTZ texture: RESZ D3D_OK, POINTSIZE the magic (only a stored state reads it), the four bands in the texture (only a
+// resolve writes them over its Z 1 clear).
+static bool rowRzMsaa() {
+    if (!samplesOffered(D3DMULTISAMPLE_4_SAMPLES)) return false;
+    RsDevice r;
+    Com<IDirect3DSurface9> bb;
+    if (!exDevice(r, bb)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    return until([] {
+        Com<IDirect3DSurface9> t, s;
+        Com<IDirect3DTexture9> d;
+        return msRt(t, 256, A8, D3DMULTISAMPLE_4_SAMPLES) && makeDs(s, D3DFMT_D24S8, 256, D3DMULTISAMPLE_4_SAMPLES) &&
+               makeDepthTex(d, FMT_INTZ) && reszBands(t.p, s.p, d.p, true, true);
+    });
+}
+// rz-auto: a device whose back buffer and auto D24S8 have 2 samples (resz_test's second part): as rz-msaa from the auto
+// depth-stencil beside the back buffer (the destination's clear and the read beside 1-sample targets of their own).
+static bool rowRzAuto() {
+    if (!samplesOffered(D3DMULTISAMPLE_2_SAMPLES)) return false;
+    RsDevice r;
+    Com<IDirect3DSurface9> bb, ads;
+    if (!exDevice(r, bb, D3DFMT_D24S8, false, D3DMULTISAMPLE_2_SAMPLES)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    CK(GetDepthStencilSurface, &ads.p);
+    return until([&] {
+        Com<IDirect3DTexture9> d;
+        return makeDepthTex(d, FMT_INTZ) && reszBands(rtSurf, ads.p, d.p, true, true);
+    });
+}
+// rz-single: a 1-sample 256x256 D24S8 surface beside the back buffer, into the INTZ texture: RESZ D3D_OK (a copy),
+// POINTSIZE the magic, the four bands (only a copy writes them over the Z 1 clear).
+static bool rowRzSingle() {
+    RsDevice r;
+    Com<IDirect3DSurface9> bb;
+    if (!exDevice(r, bb)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    return until([] {
+        Com<IDirect3DSurface9> s;
+        Com<IDirect3DTexture9> d;
+        return makeDs(s, D3DFMT_D24S8, 256) && makeDepthTex(d, FMT_INTZ) && reszBands(rtSurf, s.p, d.p, true, true);
+    });
+}
+// rz-plain: the destination an INTZ texture made without D3DUSAGE_DEPTHSTENCIL (no attachment, so never cleared: its
+// content before is undefined on mtld3d and zero on core, and no band is either), a fresh texture a source: from the
+// 4-sample source first (rz-msaa's), then another from a 1-sample one (rz-single's), each the four bands (only a RESZ
+// that takes a plain depth texture writes them, and in the first half only one that resolves). POINTSIZE is not read:
+// rz-msaa and rz-single read it.
+static bool rowRzPlain() {
+    if (!samplesOffered(D3DMULTISAMPLE_4_SAMPLES)) return false;
+    RsDevice r;
+    Com<IDirect3DSurface9> bb;
+    if (!exDevice(r, bb)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    if (!until([] {
+            Com<IDirect3DSurface9> t, s;
+            Com<IDirect3DTexture9> d;
+            return msRt(t, 256, A8, D3DMULTISAMPLE_4_SAMPLES) &&
+                   makeDs(s, D3DFMT_D24S8, 256, D3DMULTISAMPLE_4_SAMPLES) && makeDepthTex(d, FMT_INTZ, 1, 0) &&
+                   reszBands(t.p, s.p, d.p, false, false);
+        }))
+        return failIn("from the 4-sample source");
+    return until([] {
+               Com<IDirect3DSurface9> s;
+               Com<IDirect3DTexture9> d;
+               return makeDs(s, D3DFMT_D24S8, 256) && makeDepthTex(d, FMT_INTZ, 1, 0) &&
+                      reszBands(rtSurf, s.p, d.p, false, false);
+           }) ||
+           failIn("from the 1-sample source");
+}
+// rz-edges: a 1-sample D24S8 source holding the bands beside the back buffer; INTZ destinations made with
+// D3DUSAGE_DEPTHSTENCIL and cleared to Z 1 first (A, B, the control C, and L, 512x512, cleared beside the 256x256
+// target: a depth-stencil larger than the target, ds-size), and a 256x256 A8R8G8B8 render-target texture cleared
+// gold. Each RESZ D3D_OK and the destination still at its clear: no texture at stage 0 (A elsewhere); L at stage 0
+// (another size); the colour texture at stage 0 (no depth format); B at stage 0 with no depth-stencil bound (last: it
+// unbinds the source). "Unchanged" says something only if the source held the bands in this attempt: so before the
+// last case, the control, C at stage 0 (the source's size), reads the band (mtld3d leaves the band draws out while
+// their pipeline builds, and every other cell would then pass on a skip that never happened). Read: band 1's texel
+// (96) of A, B, L and C over the quads at (0,96), (64,96), (128,96) and (192,96) (white, white, white, band 1's
+// grey), the colour texture's (96,128) gold.
+static bool rowRzEdges() {
+    RsDevice r;
+    Com<IDirect3DSurface9> bb;
+    if (!exDevice(r, bb)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    return until([] {
+        Rt read, colour;
+        Com<IDirect3DSurface9> s;
+        Com<IDirect3DTexture9> a, b, c, l;
+        if (!mkRt(read, 256) || !mkRt(colour, 256) || !makeDs(s, D3DFMT_D24S8, 256) || !makeDepthTex(a, FMT_INTZ) ||
+            !makeDepthTex(b, FMT_INTZ) || !makeDepthTex(c, FMT_INTZ) ||
+            !makeDepthTex(l, FMT_INTZ, 1, D3DUSAGE_DEPTHSTENCIL, 512))
+            return false;
+        const bool drawn = scene([&] {
+            if (!clearRt(colour.s.p, KGOLD) || !bindRt(0, read.s.p)) return false;
+            for (IDirect3DTexture9 *t : {a.p, b.p, c.p, l.p})
+                if (!bindDsLevel(t) || !clearZ()) return false;
+            if (!bindRt(0, rtSurf) || !bindDs(s.p) || !bands()) return false;
+            CK(SetTexture, 0, nullptr);
+            if (!resz("RESZ (no texture at stage 0)")) return false;
+            CK(SetTexture, 0, l.p);
+            if (!resz("RESZ (a 512x512 destination)")) return false;
+            CK(SetTexture, 0, colour.t.p);
+            if (!resz("RESZ (a colour texture at stage 0)")) return false;
+            CK(SetTexture, 0, c.p);
+            if (!resz("RESZ (the control, a destination of the source's size)")) return false;
+            CK(SetTexture, 0, b.p);
+            if (!bindDs(nullptr) || !resz("RESZ (no depth-stencil bound)")) return false;
+            return readInto(read.s.p) && sampleAt(a.p, 0, 96, 96.5f / 256) && sampleAt(b.p, 64, 96, 96.5f / 256) &&
+                   sampleAt(l.p, 128, 96, 96.5f / 512, 128.5f / 512) && sampleAt(c.p, 192, 96, 96.5f / 256);
+        });
+        dev->SetTexture(0, nullptr);
+        return drawn &&
+               readTarget(read.s.p, 256, 256, A8,
+                          [](const BYTE *t, int p) {
+                              return txHas("no texture at stage 0: A", t, p, {{32, 128, 0xffffff}}) &&
+                                     txHas("no depth-stencil bound: B", t, p, {{96, 128, 0xffffff}}) &&
+                                     txHas("another size: L", t, p, {{160, 128, 0xffffff}}) &&
+                                     txHas("the control: C", t, p, {{224, 128, BAND[1]}});
+                          }) &&
+               rtHas("a colour texture at stage 0", colour.s.p, 256, A8, {{96, 128, KGOLD}});
+    });
+}
+// rz-self, under the launch's "strict" alone (elsewhere it does nothing and passes: mtld3d sends Metal a copy of a
+// texture onto itself there, a finding not exercised by a gate). An INTZ texture made with D3DUSAGE_DEPTHSTENCIL, its
+// level bound as the depth-stencil beside the back buffer and cleared to Z 0.5, then at stage 0 too, with no draw
+// between the bind and the RESZ: RESZ D3D_OK, POINTSIZE the magic (the state stored though nothing was copied); its
+// level unbound, the texture read: 0.5's grey at (128,128), as it was (a self-copy that wrote it reads otherwise).
+static bool rowRzSelf() {
+    if (!strictMode) return true;
+    RsDevice r;
+    Com<IDirect3DSurface9> bb;
+    if (!exDevice(r, bb)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    return until([] {
+        Rt read;
+        Com<IDirect3DTexture9> t;
+        if (!mkRt(read, 256) || !makeDepthTex(t, FMT_INTZ) || !rstate(D3DRS_POINTSIZE, fbits(1.0f))) return false;
+        const bool drawn = scene([&] {
+            if (!bindRt(0, rtSurf) || !bindDsLevel(t.p) || !clearZ(0.5f)) return false;
+            CK(SetTexture, 0, t.p);
+            return resz("RESZ (the bound depth-stencil's own texture at stage 0)") &&
+                   pointSizeIs("GetRenderState(POINTSIZE) after RESZ", RESZ) && readInto(read.s.p) &&
+                   sampleAt(t.p, 96, 96, 128.5f / 256);
+        });
+        dev->SetTexture(0, nullptr);
+        return drawn && rtHas("the texture, unbound", read.s.p, 256, A8, {{128, 128, 0x808080}});
+    });
+}
+// rz-refuse, under the launch's "strict" alone (elsewhere it does nothing and passes): a 1-sample D24S8 surface bound
+// beside the back buffer and a 256x256 D3DUSAGE_DYNAMIC D24S8 texture at stage 0: POINTSIZE 1.0 (0x3f800000) before;
+// RESZ D3DERR_NOTAVAILABLE (the core refuses it by name, "IDirect3DDevice9::SetRenderState(RESZ) (into a dynamic depth
+// texture)", before the state's store); POINTSIZE still 1.0 after (a refusal placed after the store reads the magic);
+// the texture unbound, a quad lands, until()'s Present D3D_OK.
+static bool rowRzRefuse() {
+    if (!strictMode) return true;
+    RsDevice r;
+    Com<IDirect3DSurface9> bb, ds;
+    Com<IDirect3DTexture9> t;
+    if (!exDevice(r, bb)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    if (!makeDs(ds, D3DFMT_D24S8, 256)) return false;
+    CK(CreateTexture, 256, 256, 1, D3DUSAGE_DYNAMIC, D3DFMT_D24S8, D3DPOOL_DEFAULT, &t.p, nullptr);
+    CK(SetDepthStencilSurface, ds.p);
+    CK(SetTexture, 0, t.p);
+    const bool refused = pointSizeIs("GetRenderState(POINTSIZE) before RESZ", fbits(1.0f)) &&
+                         resz("RESZ (into a dynamic D24S8 texture)", D3DERR_NOTAVAILABLE) &&
+                         pointSizeIs("GetRenderState(POINTSIZE) after the refused RESZ", fbits(1.0f));
+    CK(SetTexture, 0, nullptr);
+    return refused && (until([] { return lands(160, 160, 224, 224, 32, 32); }) || failIn("after the refused RESZ"));
+}
+
+// The cursor rows' bitmap: a size x size offscreen plain surface of format f in `pool`, painted opaque gold (alpha
+// 0xff) under a lock: shown, it is a visible pointer, never a transparent one.
+static bool cursorBitmap(Com<IDirect3DSurface9> &s, UINT size = 32, D3DFORMAT f = A8, D3DPOOL pool = D3DPOOL_DEFAULT) {
+    CK(CreateOffscreenPlainSurface, size, size, f, pool, &s.p, nullptr);
+    return underLock(s.p, "LockRect (the cursor bitmap)", nullptr, 0,
+                     [&](BYTE *b, int p) { paint(b, p, 0, 0, (int)size, (int)size, 0xff000000 | KGOLD); });
+}
+// cu-props: SetCursorProperties with no bitmap D3DERR_INVALIDCALL; a 32x32 A8R8G8B8 bitmap of the default pool and one
+// of the scratch pool D3D_OK; a 24x24 one (no power of two) and a 32x32 X8R8G8B8 one D3DERR_INVALIDCALL; the default
+// pool's with the hot spot (40,40), outside it, D3D_OK (mtld3d checks no hot spot). Only a body that ran tells
+// INVALIDCALL from D3D_OK by the bitmap (a refusal answers D3DERR_NOTAVAILABLE to all). The cursor is never shown, so
+// no call sets the thread's cursor.
+static bool rowCuProps() {
+    RsDevice r;
+    Com<IDirect3DSurface9> bb, def, scratch, odd, x8;
+    if (!exDevice(r, bb)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    if (!cursorBitmap(def) || !cursorBitmap(scratch, 32, A8, D3DPOOL_SCRATCH) || !cursorBitmap(odd, 24) ||
+        !cursorBitmap(x8, 32, X8))
+        return false;
+    return answer("SetCursorProperties (no bitmap)", dev->SetCursorProperties(0, 0, nullptr), D3DERR_INVALIDCALL) &&
+           answer("SetCursorProperties (32x32 A8R8G8B8, the default pool)", dev->SetCursorProperties(0, 0, def.p),
+                  D3D_OK) &&
+           answer("SetCursorProperties (32x32 A8R8G8B8, the scratch pool)", dev->SetCursorProperties(0, 0, scratch.p),
+                  D3D_OK) &&
+           answer("SetCursorProperties (24x24)", dev->SetCursorProperties(0, 0, odd.p), D3DERR_INVALIDCALL) &&
+           answer("SetCursorProperties (X8R8G8B8)", dev->SetCursorProperties(0, 0, x8.p), D3DERR_INVALIDCALL) &&
+           answer("SetCursorProperties (the hot spot (40,40))", dev->SetCursorProperties(40, 40, def.p), D3D_OK);
+}
+// cu-show: ShowCursor answers the visibility before the call: TRUE 0, TRUE 0 (no cursor set: nothing latches);
+// SetCursorProperties (the opaque bitmap) D3D_OK; TRUE 0, TRUE 1, FALSE 1, FALSE 0, TRUE 0. The answers after the
+// properties tell a body that keeps the state from one that answers FALSE to all (the first two alone do not). The row
+// ends on ShowCursor(TRUE) on every path: a hide is not undone at the device's release.
+static bool rowCuShow() {
+    RsDevice r;
+    Com<IDirect3DSurface9> bb, bmp;
+    if (!exDevice(r, bb)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    if (!cursorBitmap(bmp)) return false;
+    static const struct { BOOL show, prev; } calls[] = {{TRUE, FALSE}, {TRUE, FALSE}, {TRUE, FALSE}, {TRUE, TRUE},
+                                                        {FALSE, TRUE}, {FALSE, FALSE}, {TRUE, FALSE}};
+    const bool ok = [&] {
+        for (int i = 0; i < 7; i++) {
+            if (i == 2 && !answer("SetCursorProperties", dev->SetCursorProperties(0, 0, bmp.p), D3D_OK)) return false;
+            const BOOL got = dev->ShowCursor(calls[i].show);
+            if (got != calls[i].prev)
+                return snprintf(why, sizeof why, "ShowCursor(%s), call %d: %d, want %d",
+                                calls[i].show ? "TRUE" : "FALSE", i + 1, (int)got, (int)calls[i].prev),
+                       false;
+        }
+        return true;
+    }();
+    dev->ShowCursor(TRUE);
+    return ok;
+}
+// cu-setcursor: the row's window's class given the arrow as its cursor (the class's window procedure is
+// DefWindowProcW, which sets the class cursor at a client-area WM_SETCURSOR); SetCursorProperties (the opaque bitmap)
+// D3D_OK, ShowCursor(TRUE): GetCursor() a cursor that is not the arrow (the Direct3D one); the row sends the window
+// WM_SETCURSOR (HTCLIENT) itself, then GetCursor(): the same Direct3D cursor on mtld3d (its window subclass consumes
+// the message while its cursor shows). Under "strict" the cell wants the core's gap instead: the arrow (the core has
+// no subclass, so DefWindowProcW sets the class cursor), a cell that turns red the day the core gets the subclass,
+// when it is rewritten. No D3D call between the four. The row ends on ShowCursor(TRUE) and the class cursor as it was,
+// on every path (the class is every d3d9_triangle window's).
+static bool rowCuSetCursor() {
+    RsDevice r;
+    Com<IDirect3DSurface9> bb, bmp;
+    if (!exDevice(r, bb)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    if (!cursorBitmap(bmp)) return false;
+    const HCURSOR arrow = LoadCursor(nullptr, IDC_ARROW);
+    const ULONG_PTR before = SetClassLongPtrW(r.w.h, GCLP_HCURSOR, (LONG_PTR)arrow);
+    const bool ok = [&] {
+        if (!answer("SetCursorProperties", dev->SetCursorProperties(0, 0, bmp.p), D3D_OK)) return false;
+        dev->ShowCursor(TRUE);
+        const HCURSOR shown = GetCursor();
+        SendMessageW(r.w.h, WM_SETCURSOR, (WPARAM)r.w.h, MAKELPARAM(HTCLIENT, WM_MOUSEMOVE));
+        const HCURSOR after = GetCursor();
+        if (!shown || shown == arrow)
+            return snprintf(why, sizeof why, "GetCursor() after ShowCursor(TRUE) %p: none or the arrow (%p)",
+                            (void *)shown, (void *)arrow),
+                   false;
+        const HCURSOR expect = strictMode ? arrow : shown;
+        const char *const which = strictMode ? "the arrow: the core has no window subclass" : "the Direct3D cursor";
+        return after == expect || (snprintf(why, sizeof why, "GetCursor() after WM_SETCURSOR %p, want %p (%s)",
+                                            (void *)after, (void *)expect, which),
+                                   false);
+    }();
+    dev->ShowCursor(TRUE);
+    SetClassLongPtrW(r.w.h, GCLP_HCURSOR, (LONG_PTR)before);
+    return ok;
+}
+
+static void extrasRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"gm-ramp", rowGmRamp},   {"fl-latency", rowFlLatency}, {"ex-rt", rowExRt},
+        {"ex-ds", rowExDs},       {"ex-plain", rowExPlain},     {"rz-msaa", rowRzMsaa},
+        {"rz-auto", rowRzAuto},   {"rz-single", rowRzSingle},   {"rz-plain", rowRzPlain},
+        {"rz-edges", rowRzEdges}, {"rz-self", rowRzSelf},       {"rz-refuse", rowRzRefuse},
+        {"cu-props", rowCuProps}, {"cu-show", rowCuShow},       {"cu-setcursor", rowCuSetCursor}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 200000;
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = r.run();
+        row(r.name, ok, why);
+    }
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
@@ -10819,6 +11426,7 @@ int main(int argc, char **argv) {
     const bool blitMode = !bench && argc > 1 && !strcmp(argv[1], "blit");
     const bool queriesMode = !bench && argc > 1 && !strcmp(argv[1], "queries");
     const bool resetMode = !bench && argc > 1 && !strcmp(argv[1], "reset");
+    const bool extrasMode = !bench && argc > 1 && !strcmp(argv[1], "extras");
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     const bool bufBench = bench && argc > 4 && !strcmp(argv[4], "buf");
@@ -10880,6 +11488,13 @@ int main(int argc, char **argv) {
     }
     if (resetMode) {
         resetRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
+    if (extrasMode) {
+        extrasRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();
         d3d->Release();
         DestroyWindow(hwnd);

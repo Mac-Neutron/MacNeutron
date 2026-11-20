@@ -79,7 +79,11 @@
 # CreateQuery the core's). Every lane also runs d3d9_triangle reset (DXMTRS C4c-6c's 14 rows of Reset and ResetEx of a
 # windowed device, TestCooperativeLevel and CheckDeviceState, each row on a device and a window of its own; "reset
 # strict" under core, where rs-refuse alone asks for a Reset into fullscreen), its rows "reset-<row>"; under core its
-# launch's logs hold exactly its one refusal line (that Reset into fullscreen, refused by name).
+# launch's logs hold exactly its one refusal line (that Reset into fullscreen, refused by name). Every lane also runs
+# d3d9_triangle extras (DXMTRS C4c-7a's 15 rows of the gamma ramp, frame latency, the Ex creators, RESZ and the cursor
+# calls, each row on a device and a window of its own; "extras strict" under core, where rz-self and rz-refuse alone
+# run and cu-setcursor wants the core's class cursor), its rows "extras-<row>"; under core its launch's logs hold
+# exactly its one refusal line (rz-refuse's RESZ into a dynamic depth texture, refused by name).
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -168,10 +172,11 @@ launch() {
 # texture at a vertex sampler), the depth launch's exactly its one (DXMTRS C4b-3d2: a depth-tested draw sampling the
 # bound depth-stencil; a dynamic depth texture's LockRect is the core's since DXMTRS C4c-3b); the buffers launch's
 # exactly its one (DXMTRS C4c-2a: a layout no binding can fetch); the reset launch's exactly its one (DXMTRS C4c-6c: a
-# Reset into fullscreen, which rs-refuse asks for under strict alone); the shaders, state, textures, targets, blend,
-# mrt, msaa, blit and queries launches' none (the shaders launch's since DXMTRS C4c-2a, which draws the crossing row;
-# the state launch's since DXMTRS C4c-1: buffer locks are the core's, and since DXMTRS C4c-6a the getters, the stubs and
-# the presents; the textures launch's since DXMTRS C4c-3a: a
+# Reset into fullscreen, which rs-refuse asks for under strict alone); the extras launch's exactly its one (DXMTRS
+# C4c-7a: a RESZ into a dynamic depth texture, which rz-refuse asks for under strict alone); the shaders, state,
+# textures, targets, blend, mrt, msaa, blit and queries launches' none (the shaders launch's since DXMTRS C4c-2a,
+# which draws the crossing row; the state launch's since DXMTRS C4c-1: buffer locks are the core's, and since DXMTRS
+# C4c-6a the getters, the stubs and the presents; the textures launch's since DXMTRS C4c-3a: a
 # render-target texture's lock is the core's; the targets launch's since DXMTRS C4c-4c: a scaled copy of a
 # multisampled surface is the core's; the msaa launch's since DXMTRS C4c-4b: a depth-stencil copy of 4 samples is the
 # core's, and since DXMTRS C4c-4d its resolve; the blit launch's since DXMTRS C4c-4d: a depth-stencil resolve is the
@@ -181,12 +186,13 @@ fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex 
 depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)'
 buffers_refusals='IDirect3DDevice9::Draw*Primitive (a layout no binding can fetch)'
 reset_refusals='IDirect3DDevice9::Reset (into fullscreen)'
+extras_refusals='IDirect3DDevice9::SetRenderState(RESZ) (into a dynamic depth texture)'
 refusals_ok() {
   case $1 in
-    fixed|depth|buffers|reset)
+    fixed|depth|buffers|reset|extras)
       case $1 in
         fixed) set_=$fixed_refusals ;; depth) set_=$depth_refusals ;; buffers) set_=$buffers_refusals ;;
-        reset) set_=$reset_refusals ;;
+        reset) set_=$reset_refusals ;; extras) set_=$extras_refusals ;;
       esac
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] \
         || return 1
@@ -285,6 +291,9 @@ check queries "qy-support qy-event qy-count qy-empty qy-open qy-twice qy-present
 launch ours fresh reset 300 reset $strict
 check reset "rs-size rs-depth rs-msaa rs-blockers rs-state rs-autogen rs-scene rs-invalid rs-refuse rs-window rs-ex
   rs-held rs-query rs-twice"
+launch ours fresh extras 300 extras $strict
+check extras "gm-ramp fl-latency ex-rt ex-ds ex-plain rz-msaa rz-auto rz-single rz-plain rz-edges rz-self rz-refuse
+  cu-props cu-show cu-setcursor"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi
