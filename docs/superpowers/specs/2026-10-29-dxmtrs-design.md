@@ -1548,6 +1548,38 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   test, stated: that a present reached a drawable (a cell proves a commit); one present a call; a rect not
   stretched; the eviction's arm. No probe (no draw file changed); no x64 check (inside `src/d3d9` and one
   doc).
+  C4c-6c done 2026-11-19 at DXMTRS main 4166a54a, which MacNeutron pins: `Reset`, `ResetEx`,
+  `TestCooperativeLevel` and `CheckDeviceState` on the core runtime, for a windowed device. The core's
+  branches sit **inside mtld3d's own `reset_impl` and its helpers**, beside the recorder calls they replace,
+  so the validation, the default-pool rule, the defaults and the needs-reset state are mtld3d's code. d3d9-rt
+  gains `resize` (**the back buffer and its multisampled companion re-made in place after a drain, the Metal
+  view and the presenter kept**: by a reading of the window driver, never run, a view made again on one
+  window leaks a client surface each time on the Mac, which the plan's first design, a re-attach, would do),
+  `retarget` (a new view and presenter
+  only when the device window changes; a failure is a warning and the `Reset` still `D3D_OK`, as on mtld3d)
+  and `reset_targets`. The automatic depth-stencil is re-made under a fresh id, kept or dropped;
+  `reset_targets_to_implicit` regenerates a bound autogen target's mipmaps and puts the core's targets back
+  before the teardown (its recorder call was reachable on a core device and would have panicked). On an
+  extended device the surfaces an application holds across `ResetEx` are detached as on mtld3d: a held
+  depth-stencil keeps its old texture, **a held back buffer becomes inert** (it keeps its description and
+  answers `D3DERR_INVALIDCALL` for every use), where mtld3d keeps its pixels. Refused by name after mtld3d's
+  validation, without marking the device as needing a reset: a `Reset` into fullscreen and one to a
+  back-buffer format the core does not make. The core has no device-lost answer from the GPU (dxmt-core
+  reports no command-buffer failure): `TestCooperativeLevel` answers only for a `Reset` that was refused.
+  Gated at that tip with a thirteenth launch of fourteen rows (`reset`, each row on a device and a window of
+  its own): the plain build's translator key and `d3d9.dll` imports are the base's; d3d9-check default, msl
+  and core, every row; the Mac's conformance fails anew at triaged sites only; stateblock on both runtimes;
+  the thirteen launches under core with Metal's validation layer report nothing; the VM's D3D9 gate on both
+  runtimes and both WoW64 forms, in 64-bit and in 32-bit. Before any gate of the code the rows ran on mtld3d
+  under the validation layer, all green. Five mutants turn red what was named before the run (the old back
+  buffer kept; the depth-stencil not re-made; a refused `Reset` that does not mark the device; the targets
+  not put back; and C4c-5's open-bracket mutant, **which shows the gate scripts' "was not recorded" line red
+  for the first time**), with one miss: the depth-stencil mutant leaves `rs-msaa` green, because no row sees
+  the automatic depth-stencil's sample count. The whole-branch review: nothing Critical or Important, six
+  Minors ledgered; **which window a re-targeted device presents into is held by that review alone** (no row
+  or host test can tell). Stated gaps: that window; the depth-stencil's sample count; a return to a window
+  the device left makes a second view there; a lock held across `ResetEx`. No probe (no draw file changed);
+  no x64 check (inside `src/d3d9` and one doc).
   C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
   offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer count and its cap
   (done); 3a colour read-back through locks (lockable targets, the back buffer read-only, render-target texture
@@ -1557,8 +1589,9 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   target, between plain surfaces on the CPU, the depth-stencil copy (done); 4c its scaled, converting and YUV
   copies into a target, multisampled ends, overlapping rects of one surface (done); 4d the depth-stencil
   resolve (done);
-  5 queries (done); 6a the getters, the obsolete calls and the presents (done); 6c `Reset`; 6d fullscreen
-  devices; 7 gamma, frame
+  5 queries (done); 6a the getters, the obsolete calls and the presents (done); 6c `Reset`, windowed (done); 6d
+  fullscreen
+  devices (the maintainer's decision: a slice of C4c or C4d's window work); 7 gamma, frame
   latency, the device's information from winemetal, the `Ex` creators, and the conformance lane for `visual`, `device`
   and `d3d9ex` under core, which is C4c's gate.
   The sweep after 3a (`build/c4c/s3/sweep.md`, gating nothing): `visual` and `device` run to their end
@@ -1615,6 +1648,15 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   `test_evict_bound_resources`, `ds_size_test`) and none that now runs further added a site; "Test failed"
   lines over the default runtime's baseline: `visual` 65 to 55, `device` 115 to 103, `d3d9ex` 66 to 57. Of the
   215 left, about 138 wait for `Reset`.
+  The sweep after 6c (`build/c4c/s6c/sweep.md`, gating nothing): each function as predicted from a reading of
+  it to its end, within two lines: `device` 103 to 39 (`test_swapchain_parameters` 62 to 15,
+  `test_reset_resources`, `test_lockable_backbuffer`, `test_scissor_size`, `test_scene` and
+  `test_swapchain_multisample_reset` to 0), `visual` 55 to 51, and **`d3d9ex` runs to its end for the first
+  time under core** (1967 checks, no crash; `test_reset` 54 to 16), so its count rises, as predicted, from 57
+  to 138: the functions it never reached, most of them waiting for C4c-7a's `Ex` creators
+  (`test_resource_access` 60). What `device` keeps is fullscreen's or the window subclass's; one of its
+  lines (`test_cursor_pos`) went by a skip of that run (the host's cursor could not be warped), not by the
+  slice. No Metal validation report is new: `visual`'s nine of C4c-5's sweep, none in the two others.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features

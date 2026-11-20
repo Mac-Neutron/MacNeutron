@@ -14,15 +14,21 @@ Every slice still gets its own code map, plan, three reviews and gates: nothing 
   (`runtime.mode = core` on a `core-runtime` build); the shipped default is mtld3d, unchanged.
 - Done since this file was first written: **C4c-5, queries** (plan `2026-11-19-dxmtrs-c4c5-queries.md`;
   DXMTRS 501d43d1). **C4c-6a** (the getters, the stubs and the presents: plan
-  `2026-11-19-dxmtrs-c4c6a-getters-presents.md`; DXMTRS d8ac1c1b) is done too; the map of slice 6
+  `2026-11-19-dxmtrs-c4c6a-getters-presents.md`; DXMTRS d8ac1c1b) and **C4c-6c** (windowed `Reset`: plan
+  `2026-11-19-dxmtrs-c4c6c-reset.md`; DXMTRS 4166a54a) are done too (**6c leaves two things undone**: fullscreen
+  devices, the open decision; and the device-lost latch, which needs a failure report from dxmt-core's queue,
+  outside `src/d3d9`: owed to a slice that runs the x64 check, 7b, or dropped at the maintainer's word); the
+  map of slice 6
   (`build/c4c/s6/map.md`) cut it as 6a (below's 6a and 6b together), 6c (windowed `Reset`) and 6d (fullscreen
   devices and the window subclass, or a move to C4d). **6a leaves three of the calls listed below refused**:
   `ProcessVertices` (its staged destination needs the vertex buffers' upload path; `test_sysmem_draw` asks
   for it, so 7d owes it) and the multisampled back buffer's writable lock and `GetDC` (no suite meets them;
   7d decides whether they stay refusals).
-- Wine's suites under core after 6a (`build/c4c/s6/sweep.md`): `visual` 55 new failing lines over the default
-  runtime's baseline, `device` 103, `d3d9ex` 57 with the suite ending early in `test_reset` (65, 115 and 66
-  after 4d). The x64 check
+- Wine's suites under core after 6c (`build/c4c/s6c/sweep.md`): `visual` 51 new failing lines over the default
+  runtime's baseline, `device` 39, `d3d9ex` 138 now that it runs to its end (it ended early in `test_reset`
+  before; 65, 115 and 66 after 4d). **Fullscreen is the open decision**: what `device` keeps is fullscreen's
+  or the window subclass's, and so is much of `d3d9ex`'s `test_reset`, `test_reset_ex` and
+  `test_swapchain_parameters`. The x64 check
   (D3D10-12 on the Mac) is green at 7d48da31.
 
 ## C4c, what is left
@@ -132,6 +138,10 @@ Findings from C4c-3 to C4c-5 that are not C4c's to fix (each is in a slice's exe
   back-buffer lock aborts when its page cannot be allocated; a dynamic buffer's guard page and a second
   thread's `Lock`; a scratch texture is made at each call that needs one (a cache later); extended-device
   paths have no row.
+- From C4c-6c: d3d9-rt's `open_window` never releases a Metal view whose layer came back null; a `Reset` back
+  to a window the device left makes a second view on it (by a reading of the window driver, each view made on
+  a window leaves a client surface until the window is destroyed); a lock or device context held across
+  `ResetEx` on the old back buffer has no row; no row sees the automatic depth-stencil's sample count.
 - The build: the code-signing timestamp service drops out for hours (`make wine-arm64` then fails in
   codesign: retry); `d3d9-check.sh`'s "shaders, state" message fires for any launch.
 
