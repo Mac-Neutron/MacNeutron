@@ -337,4 +337,48 @@ Three reviews, no Critical. Folded:
 
 ## Execution notes
 
-(after the gates)
+- **Commits.** MacNeutron: rows 5640717b (launch `fullscreen`, nine rows; `rs-refuse` on R5G6B5;
+  `cu-setcursor` without its strict branch). DXMTRS: 0f55d538 (Task 2), a9514c5f (Task 3), 25001b77 (Task 4),
+  each through `tools/rust-check.sh`; 28166459, a correction of STATUS.md's RESZ bullet after the final
+  review, through the gate too. The pin is 28166459; every lane ran at 25001b77, whose code it has.
+- **Controls** (`ja` with the validation launch, `jcr`; DXMTRS at the base): **as written beforehand**.
+  mtld3d: `fullscreen` under the validation layer, no report, rows ok 11; default and msl green; the VM,
+  both widths and both WoW64 forms, 9 of 9. The core at the base: red on the eight `fs-*` rows (each at its
+  create or its `Reset`; `fs-reject` at its first cell; `fs-wndproc` at its windowed cell), on
+  `fullscreen-runtime` (the `Reset` refusal's line: the zero-refusal arm proven) and on `cu-setcursor` (the
+  class arrow back after `WM_SETCURSOR`: 7a's inferred gap, observed); green `ws-size`, `rs-refuse`,
+  `reset-runtime`. No second row commit.
+- **Lane** (`jt1`, 25001b77 with 5640717b): d3d9-check ok on default and core, `fullscreen` 9 of 9 on both;
+  `fullscreen` under core with the validation layer: reports 0.
+- **Chain**: `jw` below; `jr` (plain build: key and imports the base's, conformance at triaged sites only,
+  x64 check not due); `jc` (the VM, default and core, old and new WoW64, 64- and 32-bit: ok, `fullscreen` 9
+  and 10 with the runtime line); `jq` (fifteen launches under the validation layer: no report; stateblock
+  equal on both runtimes); `jm`: **a, c, d and f red on exactly the cells written before their builds, no
+  other row, green whole** (a: `fs-cover`'s re-cover cell and `fs-activate`'s deactivation; c: those two,
+  `fs-wndproc`, `fs-reset-window` and `cu-setcursor`; d: `fs-reset-window`'s procedure cell; f: `fs-cover`'s
+  333x222 cell, 256x256 where the monitor's size is wanted).
+- **Sweep** (`build/c4c/s6d/sweep.md`): every count as R1 predicted: over the baseline `device` 27 to 3
+  (triaged: 14544, 14946, 15104), `d3d9ex` 62 to 0 (the runner: "ok"), `visual` 20; "Test failed" 739, 74,
+  39. `device` executes 159570 checks where it executed 56814: what the default runtime executes. The
+  function with the four sites at risk ran clean. No new Metal validation report. Baseline lines back in
+  `device`: 52, not R1's 54 (two sites the runner marks flaky, device.c:4471 and 4476, did not fail in this
+  run); `d3d9ex` 35.
+- **The auto-resize's return, seen**: the core logs of `jt1`'s `fullscreen` launches hold its info line
+  ("a windowed device's back buffer keeps its size ..."), so `ws-size`'s `WM_SIZE` reached the arm and took
+  the return (the lanes capture info lines).
+- **Final review** (`build/c4c/s6d/review-final.md`): push as is; no Critical, no Important, six Minors.
+  m-1: STATUS.md's RESZ bullet counted the scratch texture as a difference and left the real third one (the
+  bound depth-stencil's own texture) in the skip list: corrected in 28166459. m-2: **the create's order
+  changes two more answers on core** than the one the implementer noted (a windowed create with an
+  unsupported format and an unresolvable size: now `D3DERR_NOTAVAILABLE`): with an unsupported format and an
+  invalid multisample type it now answers `D3DERR_INVALIDCALL`, mtld3d's answer; with no Metal device and an
+  unresolvable size `D3DERR_NOTAVAILABLE` (unreachable in practice). m-3: **`fs-cover` covers the display in
+  three sessions a launch** (the create, the `Reset` back into fullscreen, the 333x222 create), not the two
+  the constraint above says; in the default and msl lanes a covered attempt may retry for up to 10 s; the
+  windowed round trip cannot move to a row under the flag (it is the only check of a managed window's
+  placement across a `Reset`). Said to the maintainer. m-4, m-5: three log texts inexact on one runtime,
+  for 7d-1. m-6: `fs-reject`'s placement cells pass whatever the create's order, as the plan says.
+- **For the maintainer**: the cover count above; R6d-3 (a windowed core device does not follow its window:
+  proposed as a slice 6e, else C4d); R6d-5 (nearest-neighbour magnification of a sub-desktop fullscreen
+  mode under emulated mode sets); the covered-window presents.
+- **No probe, no x64 check.**

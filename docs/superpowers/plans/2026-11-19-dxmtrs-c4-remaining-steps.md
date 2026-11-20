@@ -36,6 +36,16 @@ Every slice still gets its own code map, plan, three reviews and gates: nothing 
   latency, the `Ex` creators, RESZ and the cursor calls (7c folded in). The sweep after it
   (`build/c4c/s7a/sweep.md`): `visual` 20 lines over the baseline, `device` 27, `d3d9ex` 62: 87 of the 109
   wait for slice 6d, 20 for 7d, 2 are triaged.
+- **C4c-6d is done** (plan `2026-11-19-dxmtrs-c4c6d-fullscreen-subclass.md`; DXMTRS 28166459): fullscreen
+  devices, `Reset` into fullscreen and the window subclass on the core. The sweep after it
+  (`build/c4c/s6d/sweep.md`): `device` 3 lines over the baseline (the three triaged for mtld3d), `d3d9ex` 0,
+  `visual` 20; `device` executes as many checks as on the default runtime. **What is left of C4c: 7d-1** (plan
+  `2026-11-20-dxmtrs-c4c7d1-last-differences.md`: the 20 lines, `ProcessVertices`, the gamma ramp on a
+  fullscreen device) **and 7d-2, the gate** (the conformance lane under core with
+  `dxmt/d3d9-conf-compare.sh` as the per-site parity tool; the three tile-dispatch validation reports, whose
+  cause, **by reading, not yet shown by a run**, is a flag of dxmt-core's tile-barrier pipeline set in the
+  Rust port where the C++ had it clear (`build/c4c/s7d/tile-dispatch.md`; which Wine function draws them is
+  attributed, not confirmed): outside `src/d3d9`; the batched x64 check; the quiet-Mac probe).
 
 ## C4c, what is left
 
@@ -139,7 +149,10 @@ From the outline, unchanged in scope; sizes are guesses from the pace so far (ab
 
 Decisions: the go-ahead for C4d and after; a game run in the VM (C4e); the benches and the release (C4e).
 **A windowed core device's back buffer does not follow its window** (the 6d plan's ruling R6d-3): proposed as
-a slice 6e, else C4d's. The cursor on core without the window subclass (7a's ruling R7a-7): closed by slice 6d.
+a slice 6e, else C4d's. **From 6d, for C4d's presenter work**: a fullscreen mode below the desktop's is magnified
+with the nearest-neighbour filter under emulated mode sets (R6d-5); a fullscreen core device presents into a
+window another application covers; the gates' one covering row covers the display three times a launch. The
+cursor on core without the window subclass (7a's ruling R7a-7): closed by slice 6d.
 Findings from C4c-3 to C4c-7a that are not C4c's to fix (each is in a slice's execution notes):
 
 - mtld3d, from C4c-7a's rows: a RESZ with a colour texture of the depth-stencil's size at stage 0 leaves

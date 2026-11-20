@@ -1617,6 +1617,41 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   copy also zeroes a depth destination, a one-sample pair of two formats leaves different contents on the
   two runtimes (one mtld3d control owed at 7d). No probe (no draw file changed); no x64 check (inside
   `src/d3d9` and one doc).
+  C4c-6d done 2026-11-20 at DXMTRS main 28166459, which MacNeutron pins: fullscreen devices and the window
+  subclass on the core runtime, inside C4c by the maintainer's decision. **The core device runs mtld3d's own
+  fullscreen code** (the mode set, the borderless window over the primary monitor, the restore), which is
+  user32 and front-end state: `create_core_device` makes a fullscreen device with every check that reads no
+  window ahead of the entry, so a refused create never touches the window; the by-name refusal of a `Reset`
+  into fullscreen goes, and what follows it was already the core's (C4c-6c). **mtld3d's window subclass is
+  installed on a core device's window**: its one path into the recorder, the auto-resize on `WM_SIZE`,
+  returns first, keyed on the recorder's absence (which holds through the release, where `is_core` does
+  not); every other arm is user32, the cursor state and the fullscreen session (read arm by arm before and
+  after the code). So the Direct3D cursor is kept at `WM_SETCURSOR` (the gap 7a left), a deactivated
+  application gets the registry's mode back and the device's when it returns, a resized fullscreen window
+  covers again, and the subclass follows the device to another window at a `Reset`. A device is never lost,
+  as on mtld3d. Differences from mtld3d, each in STATUS.md: a windowed core device's back buffer does not
+  follow its window's size (the auto-resize would drain and resize the core from the window's thread;
+  proposed as a slice of its own); **under emulated mode sets, the launcher's usual case, a fullscreen mode
+  other than the desktop's is magnified by Core Animation with the nearest-neighbour filter** (the layer's
+  drawable has the back buffer's size, as D3D11's on this core), where mtld3d resamples; a fullscreen core
+  device keeps presenting into a window another application covers, where mtld3d drops those presents; the
+  gamma ramp is not applied (7d-1); the present's pace is unchanged.
+  Gated at that tip's code (25001b77; 28166459 corrects one STATUS.md bullet and passed the Rust gate) with
+  a fifteenth launch of nine rows (`fullscreen`). **The gates' machine**: every row first checks that mode
+  sets are emulated and fails, never skips, when they are not; rows ask for the desktop's own mode; **one row
+  covers the display** (three sessions a launch, not the two the plan said: the final review counted), every
+  other takes `D3DCREATE_NOWINDOWCHANGES`; no row changes the foreground window or moves the pointer. Before
+  any code: the launch on mtld3d under the validation layer and in the VM, all green; on the core the eight
+  fullscreen rows and `cu-setcursor` red (the class cursor came back: 7a's gap, observed), `ws-size` and
+  `rs-refuse` green, as written beforehand. At the tip: the plain build's translator key and `d3d9.dll`
+  imports are the base's; d3d9-check default, msl and core, every row; the Mac's conformance fails anew at
+  triaged sites only; stateblock on both runtimes; the fifteen launches under core with Metal's validation
+  layer report nothing; the VM's D3D9 gate on both runtimes and both WoW64 forms, in 64-bit and in 32-bit.
+  Four mutants turn red exactly the cells named before their builds and nothing else (the fullscreen session
+  not kept; the subclass not installed; the cursor's re-target not called at a `Reset`; the entry after the
+  size is resolved). The whole-branch review: push as is, six Minors (one STATUS.md bullet, corrected; the
+  cover count; two answers the create's order changes on core, both towards mtld3d or unreachable; two log
+  texts, for 7d-1). No probe (no draw file changed); no x64 check (inside `src/d3d9` and two docs).
   C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
   offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer count and its cap
   (done); 3a colour read-back through locks (lockable targets, the back buffer read-only, render-target texture
@@ -1628,11 +1663,10 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   resolve (done);
   5 queries (done); 6a the getters, the obsolete calls and the presents (done); 6c `Reset`, windowed (done);
   7a gamma, frame latency, the `Ex` creators, RESZ and the cursor calls (done); 6d fullscreen devices and the
-  window subclass
-  (inside C4c: the maintainer's decision of 2026-11-19); 7b the device's information and pages from winemetal
-  (moved to C4d with the logger's move: the maintainer's decision of 2026-11-20); 7d `ProcessVertices`, the silent
-  differences, the gamma ramp applied on a fullscreen device, and the conformance lane for `visual`, `device` and
-  `d3d9ex` under core, which is C4c's gate.
+  window subclass (done); 7b the device's information and pages from winemetal
+  (moved to C4d with the logger's move: the maintainer's decision of 2026-11-20); 7d-1 `ProcessVertices`, the silent
+  differences and the gamma ramp applied on a fullscreen device; 7d-2 the conformance lane for `visual`, `device`
+  and `d3d9ex` under core, the batched x64 check and the probe, which are C4c's gate.
   The sweep after 3a (`build/c4c/s3/sweep.md`, gating nothing): `visual` and `device` run to their end
   under core (2431 failed of 211208; 1871 of 56686, about 100000 checks not executed), `d3d9ex` dies in
   `test_reset`; the new failures are refusals by name (`StretchRect`'s other shapes about 2770 of 3356) but two
@@ -1705,6 +1739,14 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   No Metal validation report is new. Of the 109 lines
   left, 87 wait for fullscreen and the window subclass (slice 6d), 20 for 7d (`ProcessVertices` 5, three
   silent differences 15), 2 are triaged.
+  The sweep after 6d (`build/c4c/s6d/sweep.md`, gating nothing): **every count as predicted from a reading
+  of each function to its end**: lines over the default runtime's baseline `device` 27 to 3 (the three
+  triaged for mtld3d: device.c:14544, 15104, and 14946, which appears as predicted), `d3d9ex` 62 to 0 (the
+  runner says "ok": 74 failed lines, the baseline's 74), `visual` 20 unchanged (the function that makes a
+  fullscreen multisampled device runs for the first time: none of its sites failed). **`device` now executes
+  what the default runtime executes** (159570 checks, 56814 before): the functions that skipped after a
+  refused fullscreen create run and bring mtld3d's own failures with them and nothing else. The one refusal
+  a suite still meets is `ProcessVertices`. Of the 23 lines left, 20 are 7d-1's, 3 triaged.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
