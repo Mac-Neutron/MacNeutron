@@ -11197,14 +11197,16 @@ static bool rowRzPlain() {
 }
 // rz-edges: a 1-sample D24S8 source holding the bands beside the back buffer; INTZ destinations made with
 // D3DUSAGE_DEPTHSTENCIL and cleared to Z 1 first (A, B, the control C, and L, 512x512, cleared beside the 256x256
-// target: a depth-stencil larger than the target, ds-size), and a 256x256 A8R8G8B8 render-target texture cleared
-// gold. Each RESZ D3D_OK and the destination still at its clear: no texture at stage 0 (A elsewhere); L at stage 0
-// (another size); the colour texture at stage 0 (no depth format); B at stage 0 with no depth-stencil bound (last: it
-// unbinds the source). "Unchanged" says something only if the source held the bands in this attempt: so before the
-// last case, the control, C at stage 0 (the source's size), reads the band (mtld3d leaves the band draws out while
-// their pipeline builds, and every other cell would then pass on a skip that never happened). Read: band 1's texel
-// (96) of A, B, L and C over the quads at (0,96), (64,96), (128,96) and (192,96) (white, white, white, band 1's
-// grey), the colour texture's (96,128) gold.
+// target: a depth-stencil larger than the target, ds-size), and a 128x128 A8R8G8B8 render-target texture cleared gold
+// (another size than the source: at the source's size mtld3d leaves it zeroed, a finding for the maintainer's list the
+// first control run showed on the Mac and in the VM; the core skips a texture of no depth format at any size). Each
+// RESZ D3D_OK and the destination still at its clear: no texture at stage 0 (A elsewhere); L at stage 0 (another size);
+// the colour texture at stage 0 (no depth format, another size); B at stage 0 with no depth-stencil bound (last: it
+// unbinds the source). "Unchanged" says something only if the source held the bands in this attempt: so before the last
+// case, the control, C at stage 0 (the source's size), reads the band (mtld3d leaves the band draws out while their
+// pipeline builds, and every other cell would then pass on a skip that never happened). Read: band 1's texel (96) of A,
+// B, L and C over the quads at (0,96), (64,96), (128,96) and (192,96) (white, white, white, band 1's grey), the colour
+// texture's (48,64) gold.
 static bool rowRzEdges() {
     RsDevice r;
     Com<IDirect3DSurface9> bb;
@@ -11214,7 +11216,7 @@ static bool rowRzEdges() {
         Rt read, colour;
         Com<IDirect3DSurface9> s;
         Com<IDirect3DTexture9> a, b, c, l;
-        if (!mkRt(read, 256) || !mkRt(colour, 256) || !makeDs(s, D3DFMT_D24S8, 256) || !makeDepthTex(a, FMT_INTZ) ||
+        if (!mkRt(read, 256) || !mkRt(colour, 128) || !makeDs(s, D3DFMT_D24S8, 256) || !makeDepthTex(a, FMT_INTZ) ||
             !makeDepthTex(b, FMT_INTZ) || !makeDepthTex(c, FMT_INTZ) ||
             !makeDepthTex(l, FMT_INTZ, 1, D3DUSAGE_DEPTHSTENCIL, 512))
             return false;
@@ -11245,7 +11247,7 @@ static bool rowRzEdges() {
                                      txHas("another size: L", t, p, {{160, 128, 0xffffff}}) &&
                                      txHas("the control: C", t, p, {{224, 128, BAND[1]}});
                           }) &&
-               rtHas("a colour texture at stage 0", colour.s.p, 256, A8, {{96, 128, KGOLD}});
+               rtHas("a colour texture at stage 0", colour.s.p, 128, A8, {{48, 64, KGOLD}});
     });
 }
 // rz-self, under the launch's "strict" alone (elsewhere it does nothing and passes: mtld3d sends Metal a copy of a
