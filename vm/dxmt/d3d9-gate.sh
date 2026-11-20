@@ -163,6 +163,7 @@ for line in sys.stdin:
   # The tests' Wine version: our Wine's, whose tree they were built from (dxmt/mtld3d-conformance.sh's).
   "$B/wine-arm64/wine.app/Contents/Resources/bin/wine" --version > "$S/tests-wine-version"
   rm -rf "$G"
+  rm -rf "$G/wm-cache"; mkdir -p "$G/wm-cache"; export MN_WM_CACHE_DIR="$G/wm-cache"
   MN_RUN_TIMEOUT=7200 "$ROOT/vm/run-guest.sh" "$ROOT/vm/tests/d3d9.sh" > "$W/d3d9-guest-run.txt" 2>&1 \
     || { echo "FAIL the guest run: see $W/d3d9-guest-run.txt"; fail=1; }
   units=$(ls "$S/unit"; ls "$S/unit32" | sed 's/^/32-/')
@@ -366,6 +367,36 @@ if [ "$RT" = core ]; then
     pa32-fresh lo64-fresh lo32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
   done
+  for r in shd64-cold shd64-warm; do
+    check "$r runtime core" "$(runtime "$G/logs/$r")" ok
+    for row in caps vs1 vs2 vs3 consti constb rel decl indexed fan bypass vsff alpha fog mask wire cull viewport clip \
+      srgb crossing getters; do
+      check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
+    done
+  done
+  cold_sum=$(/usr/bin/grep -rhF 'd3d9 core: shader cache summary:' "$G/logs/shd64-cold" 2> /dev/null | tail -1)
+  echo "info shd64-cold cache summary: ${cold_sum:-none}"
+  check "shd64-cold cache misses and recipes_saved" \
+    "$(printf '%s\n' "$cold_sum" | /usr/bin/grep -qE '(^|[ ,])(cache_)?misses=[1-9]' \
+      && printf '%s\n' "$cold_sum" | /usr/bin/grep -qE '(^|[ ,])recipes_saved=[1-9]' && echo ok)" ok
+  warm_sum=$(/usr/bin/grep -rhF 'd3d9 core: shader cache summary:' "$G/logs/shd64-warm" 2> /dev/null | tail -1)
+  echo "info shd64-warm cache summary: ${warm_sum:-none}"
+  check "shd64-warm cache hits, zero misses, recipes_loaded" \
+    "$(printf '%s\n' "$warm_sum" | /usr/bin/grep -qE '(^|[ ,])(cache_)?hits=[1-9]' \
+      && printf '%s\n' "$warm_sum" | /usr/bin/grep -qE '(^|[ ,])(cache_)?misses=0([^0-9]|$)' \
+      && printf '%s\n' "$warm_sum" | /usr/bin/grep -qE '(^|[ ,])recipes_loaded=[1-9]' && echo ok)" ok
+  wm_dbs=0 wm_bad=
+  for db in "$G/wm-cache/"*shaders_*.db; do
+    [ -f "$db" ] || continue
+    wm_dbs=$((wm_dbs + 1))
+    t=$(sqlite3 "$db" "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'cache_%';" 2> /dev/null || true)
+    tc=$(printf '%s\n' "$t" | sed '/^$/d' | wc -l | tr -d ' ')
+    echo "info wm-cache db $(basename "$db"): tables=${t:-none} count=$tc"
+    [ "$tc" = 1 ] && [ "$t" != "cache_5555813613417847110" ] && [ "$t" != "cache_10131673474557754031" ] \
+      || wm_bad="$wm_bad $(basename "$db"):$tc:$t"
+  done
+  check "wm-cache sqlite db exists" "$([ "$wm_dbs" -ge 1 ] && echo ok)" ok
+  check "wm-cache single non-dev table" "${wm_bad:-ok}" ok
 fi
 if [ "${D3D9_BENCH:-}" = 1 ]; then
   rows="bench-32-0 bench-32-600 benchp-32-0 benchp-32-600"

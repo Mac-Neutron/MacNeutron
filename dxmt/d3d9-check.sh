@@ -126,6 +126,8 @@ case $BK in
   *) echo "d3d9-check: D3D9_BACKEND=$BK: air or msl" >&2; exit 2 ;;
 esac
 rm -rf "$WORK/mtld3d-logs" "$WORK/progs"; mkdir -p "$WORK/mtld3d-logs" "$WORK/progs/x64" "$WORK/progs/arm64"
+export DXMT_SHADER_CACHE_PATH="${DXMT_SHADER_CACHE_PATH:-$WORK/shader-cache}"
+mkdir -p "$DXMT_SHADER_CACHE_PATH"
 cp "$EXE" "$DYN" "$WORK/progs/x64/" && cp "$ARM" "$WORK/progs/arm64/" \
   || { echo "d3d9-check: could not copy the programs to $WORK/progs" >&2; exit 1; }
 EXE=$WORK/progs/x64/$(basename "$EXE") DYN=$WORK/progs/x64/$(basename "$DYN") ARM=$WORK/progs/arm64/$(basename "$ARM")
@@ -140,6 +142,7 @@ launch() {
   if [ "$RT" = core ]; then
     mkdir -p "$WORK/mtld3d-logs/$name"
     cfg="$cfg;log.dir=Z:$WORK/mtld3d-logs/$name;runtime.mode=core"
+    case " $* " in *" strict "*) cfg="$cfg;shader.asyncCompile=false" ;; esac
   fi
   [ "$name" != lost ] || cfg="$cfg;debug.failNextSubmit=true"
   env MTLD3D_CONFIG="$cfg" STEAM_COMPAT_DATA_PATH="$WORK/compat/$compat" SteamAppId=0 MACNEUTRON_VM=0 MACNEUTRON_GRAPHICS=dxmt \
@@ -217,7 +220,7 @@ refusals_ok() {
       printf '%s\n' "$set_" | while IFS= read -r n; do
         /usr/bin/grep -rqF "d3d9 core: $n $refused" "$2" || exit 1
       done ;;
-    shaders|state|textures|targets|blend|mrt|msaa|blit|queries|fullscreen|parity|lost)
+    shaders|state|textures|targets|blend|mrt|msaa|blit|queries|fullscreen|parity|lost|cache-cold|cache-warm)
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
     *) return 0 ;;
   esac
@@ -248,7 +251,7 @@ PROG=$DYN; launch ours fresh dynamic; PROG=  # (an assignment before a function 
 check dynamic "module imports"
 launch ours fresh vsync 120 vsync
 check vsync vsync
-strict=; [ "$RT" != core ] || strict=strict  # the core compiles synchronously: the first frame must match
+strict=; [ "$RT" != core ] || strict=strict  # the core compiles asynchronously by default since C4d-3; strict launches pass shader.asyncCompile=false
 launch ours fresh shaders 300 shaders $strict
 check shaders "caps vs1 vs2 vs3 consti constb rel decl indexed fan bypass vsff alpha fog mask wire cull viewport clip
   srgb crossing getters"
@@ -339,7 +342,75 @@ if [ -n "${OLD:-}" ]; then
   launch ours old updated
   check updated
 fi
-if [ "$RT" = core ]; then :  # no shader-backend row: the core has none in C4a
+if [ "$RT" = core ]; then
+  # Core SQLite shader cache + async compile + real D3D11 single-table coexistence check (DXMTRS C4d-3).
+  rm -rf "$WORK/cache-coexist"; mkdir -p "$WORK/cache-coexist"
+  _saved_cache_path=$DXMT_SHADER_CACHE_PATH
+  _saved_mtld3d_cfg=$MTLD3D_CONFIG
+  export DXMT_SHADER_CACHE_PATH="$WORK/cache-coexist"
+  export DXMT_CACHE_EXE="d3d9_coexist"
+  MTLD3D_CONFIG="$_saved_mtld3d_cfg;shader.asyncCompile=true;shaderCache.enable=true"
+
+  shader_rows="caps vs1 vs2 vs3 consti constb rel decl indexed fan bypass vsff alpha fog mask wire cull viewport clip
+    srgb crossing getters"
+  launch ours fresh cache-cold 300 shaders
+  check cache-cold "$shader_rows"
+  db=$(find "$WORK/cache-coexist" -maxdepth 2 -name 'shaders_*.db' 2> /dev/null | head -1)
+  cold_tables=
+  if [ -z "$db" ]; then
+    echo "d3d9-check: cache-coexist: no shaders_*.db in $WORK/cache-coexist"
+    fail="$fail cache-cold-db"
+  else
+    cold_tables=$(sqlite3 "$db" "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'cache_%';" 2> /dev/null || true)
+    cold_count=$(printf '%s\n' "$cold_tables" | sed '/^$/d' | wc -l | tr -d ' ')
+    echo "d3d9-check: cache-coexist cold: db=$(basename "$db") tables=${cold_tables:-none} count=$cold_count"
+    if [ "$cold_count" != 1 ] || [ "$cold_tables" = "cache_5555813613417847110" ] || [ "$cold_tables" = "cache_10131673474557754031" ]; then
+      echo "d3d9-check: cache-coexist: expected 1 non-dev cache_* table, got '$cold_tables'"
+      fail="$fail cache-cold-table"
+    fi
+  fi
+  cold_sum=$(/usr/bin/grep -rhF 'd3d9 core: shader cache summary:' "$WORK/mtld3d-logs/cache-cold" 2> /dev/null | tail -1 || true)
+  echo "d3d9-check: cache-cold summary: ${cold_sum:-none}"
+  if ! printf '%s\n' "$cold_sum" | /usr/bin/grep -qE '(^|[ ,])(cache_)?misses=[1-9]' \
+    || ! printf '%s\n' "$cold_sum" | /usr/bin/grep -qE '(^|[ ,])recipes_saved=[1-9]'; then
+    echo "d3d9-check: cache-cold: missing misses>=1 or recipes_saved>=1 in summary"
+    fail="$fail cache-cold-summary"
+  fi
+
+  if [ -n "$db" ] && [ -f "$ROOT/build/dxmt-tests/d3d11_draw.exe" ] && [ -d "$ROOT/dxmt/tests/shaders/d3d11" ]; then
+    env DXMT_SHADER_CACHE_PATH="$WORK/cache-coexist" DXMT_CACHE_EXE="d3d9_coexist" \
+      STEAM_COMPAT_DATA_PATH="$WORK/compat/fresh" SteamAppId=0 MACNEUTRON_VM=0 MACNEUTRON_GRAPHICS=dxmt \
+      MACNEUTRON_NO_STEAM_BRIDGE=1 MACNEUTRON_NO_METALFX=1 \
+      "$WORK/ours/bin/macneutron" launch waitforexitandrun "$ROOT/build/dxmt-tests/d3d11_draw.exe" \
+      "Z:$ROOT/dxmt/tests/shaders/d3d11" < /dev/null > "$WORK/coexist-d3d11.out" 2>&1 &
+    dpid=$!
+    ( sleep 120; kill "$dpid" 2> /dev/null ) > /dev/null 2>&1 & ddog=$!
+    drc=0; wait "$dpid" || drc=$?
+    { kill "$ddog" && wait "$ddog"; } 2> /dev/null || true
+    tr -d '\r' < "$WORK/coexist-d3d11.out" > "$WORK/coexist-d3d11.txt"
+    d11_tables=$(sqlite3 "$db" "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'cache_%';" 2> /dev/null || true)
+    d11_count=$(printf '%s\n' "$d11_tables" | sed '/^$/d' | wc -l | tr -d ' ')
+    echo "d3d9-check: cache-coexist d3d11: rc=$drc tables=${d11_tables:-none} count=$d11_count"
+    if [ "$drc" != 0 ] || [ "$d11_count" != 1 ] || [ "$d11_tables" != "$cold_tables" ]; then
+      echo "d3d9-check: cache-coexist: D3D11 failed or changed table from '$cold_tables' to '$d11_tables'"
+      fail="$fail cache-coexist-d3d11"
+    fi
+  fi
+
+  launch ours fresh cache-warm 300 shaders
+  check cache-warm "$shader_rows"
+  warm_sum=$(/usr/bin/grep -rhF 'd3d9 core: shader cache summary:' "$WORK/mtld3d-logs/cache-warm" 2> /dev/null | tail -1 || true)
+  echo "d3d9-check: cache-warm summary: ${warm_sum:-none}"
+  if ! printf '%s\n' "$warm_sum" | /usr/bin/grep -qE '(^|[ ,])(cache_)?hits=[1-9]' \
+    || ! printf '%s\n' "$warm_sum" | /usr/bin/grep -qE '(^|[ ,])(cache_)?misses=0([^0-9]|$)' \
+    || ! printf '%s\n' "$warm_sum" | /usr/bin/grep -qE '(^|[ ,])recipes_loaded=[1-9]'; then
+    echo "d3d9-check: cache-warm: missing hits>=1, misses=0, or recipes_loaded>=1 in summary"
+    fail="$fail cache-warm-summary"
+  fi
+
+  export DXMT_SHADER_CACHE_PATH="$_saved_cache_path"
+  unset DXMT_CACHE_EXE
+  MTLD3D_CONFIG="$_saved_mtld3d_cfg"
 elif [ "$BK" = air ]; then
   /usr/bin/grep -rqE 'shader backend: air, translator [0-9a-f]{8}' "$WORK/mtld3d-logs" \
     || { echo "d3d9-check: no 'shader backend: air' line in $WORK/mtld3d-logs"; fail="$fail air-log"; }

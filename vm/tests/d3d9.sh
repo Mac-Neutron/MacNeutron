@@ -116,7 +116,11 @@ tri() {  # tri <exe> <name> [timeout [args...]]: killed after <timeout> s (defau
   exe=$1 name=$2 secs=${3:-120}
   shift 2; [ $# -eq 0 ] || shift
   cfg=$MTLD3D_CONFIG
-  [ "$RT" != core ] || { mkdir -p "$O/logs/$name"; cfg="$cfg;log.dir=Z:$O/logs/$name"; }
+  if [ "$RT" = core ]; then
+    mkdir -p "$O/logs/$name"
+    cfg="$cfg;log.dir=Z:$O/logs/$name"
+    case " $* " in *" strict "*) cfg="$cfg;shader.asyncCompile=false" ;; esac
+  fi
   case $name in lo*-*) cfg="$cfg;debug.failNextSubmit=true" ;; esac
   MTLD3D_CONFIG=$cfg timeout -k 10 "$secs" wine "$T/$exe" "$@" < /dev/null > "$O/$name.raw" 2>&1
   echo "status $?" >> "$O/$name.raw"
@@ -135,7 +139,7 @@ bench() {  # bench <exe> <row> <frames> [mode]: tri's launch with --bench 2000 <
 prefix /home/mn/d3d9
 tri d3d9_triangle.exe tri64-fresh
 tri d3d9_triangle32.exe tri32-fresh
-strict=; [ "$RT" != core ] || strict=strict  # the core compiles synchronously: the first frame must match
+strict=; [ "$RT" != core ] || strict=strict  # the core compiles asynchronously by default since C4d-3; strict launches pass shader.asyncCompile=false
 tri d3d9_triangle.exe shd64-fresh 300 shaders $strict
 tri d3d9_triangle32.exe shd32-fresh 300 shaders $strict
 tri d3d9_triangle.exe st64-fresh 120 state $strict
@@ -180,6 +184,15 @@ W=$WINEPREFIX/drive_c/windows
 timeout 20 wineserver -k
 tri d3d9_triangle.exe tri64-updated
 tri d3d9_triangle32.exe tri32-updated
+if [ "$RT" = core ]; then
+  _saved_cfg=$MTLD3D_CONFIG
+  MTLD3D_CONFIG="$_saved_cfg;shader.asyncCompile=true;shaderCache.enable=true"
+  export DXMT_CACHE_EXE=d3d9_vm_cache
+  tri d3d9_triangle.exe shd64-cold 300 shaders
+  tri d3d9_triangle.exe shd64-warm 300 shaders
+  unset DXMT_CACHE_EXE
+  MTLD3D_CONFIG=$_saved_cfg
+fi
 if [ -f "$T/bench" ]; then
   if [ "$(cat "$T/wow64" 2> /dev/null)" != new ]; then
     bench d3d9_triangle.exe bench-64-0 0; bench d3d9_triangle.exe bench-64-600 600

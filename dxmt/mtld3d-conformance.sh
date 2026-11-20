@@ -100,6 +100,8 @@ if [ "$RT" = core ]; then
   unset MTLD3D_CONFORMANCE_RAW_DIR
   rm -rf "$LOGS"; mkdir -p "$LOGS"
   export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}runtime.mode=core;log.dir=Z:$LOGS"
+  export DXMT_SHADER_CACHE_PATH="${DXMT_SHADER_CACHE_PATH:-$K}"
+  mkdir -p "$DXMT_SHADER_CACHE_PATH"
   set -- --log info "$@"
 fi
 # runner <args...>: D3D9's conformance runner over the x64 tests (arm64x leg).
