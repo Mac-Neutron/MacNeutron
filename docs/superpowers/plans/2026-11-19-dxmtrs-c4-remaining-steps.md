@@ -18,7 +18,7 @@ Every slice still gets its own code map, plan, three reviews and gates: nothing 
   `2026-11-19-dxmtrs-c4c6c-reset.md`; DXMTRS 4166a54a) are done too (**6c leaves two things undone**: fullscreen
   devices, which are slice 6d by the maintainer's decision of 2026-11-19; and the device-lost latch, which
   needs a failure report from dxmt-core's queue,
-  outside `src/d3d9`: owed to a slice that runs the x64 check, 7b, or dropped at the maintainer's word); the
+  outside `src/d3d9`: owed to the slice that runs the x64 check, 7d, or dropped at the maintainer's word); the
   map of slice 6
   (`build/c4c/s6/map.md`) cut it as 6a (below's 6a and 6b together), 6c (windowed `Reset`) and 6d (fullscreen
   devices and the window subclass: **inside C4c**, the maintainer's decision of 2026-11-19, after 7a). **6a
@@ -32,6 +32,10 @@ Every slice still gets its own code map, plan, three reviews and gates: nothing 
   or the window subclass's, and so is much of `d3d9ex`'s `test_reset`, `test_reset_ex` and
   `test_swapchain_parameters`. The x64 check
   (D3D10-12 on the Mac) is green at 7d48da31.
+- **C4c-7a is done** (plan `2026-11-19-dxmtrs-c4c7a-ex-resz-cursor.md`; DXMTRS f5604fa7): gamma, frame
+  latency, the `Ex` creators, RESZ and the cursor calls (7c folded in). The sweep after it
+  (`build/c4c/s7a/sweep.md`): `visual` 20 lines over the baseline, `device` 27, `d3d9ex` 62: 87 of the 109
+  wait for slice 6d, 20 for 7d, 2 are triaged.
 
 ## C4c, what is left
 
@@ -64,15 +68,21 @@ would take them. The grouping is a proposal; each slice's map decides.
 
 ### C4c-7: the rest, and C4c's gate
 
-- **7a**: `SetGammaRamp`/`GetGammaRamp`, `SetMaximumFrameLatency`/`GetMaximumFrameLatency`,
+- **7a (done, with 7c)**: `SetGammaRamp`/`GetGammaRamp`, `SetMaximumFrameLatency`/`GetMaximumFrameLatency`,
   `SetGPUThreadPriority`/`GetGPUThreadPriority`, the `Ex` creators (`CreateRenderTargetEx`,
   `CreateOffscreenPlainSurfaceEx`, `CreateDepthStencilSurfaceEx`), `SetRenderState(RESZ)` (`resz_test`, 31
   lines: a depth resolve through a render state; 4d's `depth_resolve` is the mechanism).
 - **7b**: the device's information and pages from winemetal (thunks 1, 22, 23: `GetDeviceInfo`,
   `AllocPages`, `FreePages` leave mtld3d.so).
   **This touches winemetal: outside `src/d3d9`, so the slice runs the x64 check itself.**
-- **7c**: the cursor calls (`ShowCursor`, `SetCursorProperties`, `SetCursorPosition`) if the map shows
-  they can be had without the window work of C4d; otherwise they move to C4d with a line here saying so.
+  **What the 7a map found (`build/c4c/s7a/map.md`, sections 3 and 7), put to the maintainer:** the slice
+  cannot do what this line says inside C4c. The logger's thunks (`InitLogger`, `OpenLog`, `WriteLog`) reach
+  `mtld3d.so` on every core run whatever 7b does (their move is C4d's); `GetDeviceInfo` can be answered on
+  the PE side from winemetal's existing exports with no file outside `src/d3d9`; memory pages on the Mac
+  have no winemetal call (a new export, five files outside `src/d3d9`). Options: do `GetDeviceInfo` alone
+  in C4c and move pages to C4d with the logger; or move all of 7b to C4d.
+- **7c (done in 7a)**: the cursor calls answer as mtld3d; the window subclass, which keeps the Direct3D
+  cursor at `WM_SETCURSOR`, comes with 6d.
 - **7d, C4c's gate**: the conformance lane for `visual`, `device` and `d3d9ex` under core
   (`dxmt/mtld3d-conformance.sh` with `D3D9_RUNTIME=core`), per-site parity with the default runtime: every
   site that fails under core and not on mtld3d is fixed or triaged with its reason in
@@ -81,6 +91,14 @@ would take them. The grouping is a proposal; each slice's map decides.
   `D3DSAMP_SRGBTEXTURE` values other than 0 and 1 (`srgbtexture_test`), `add_dirty_rect_test`'s five
   colours (a managed texture's `READONLY`/`NO_DIRTY_UPDATE` writes showing in the next draw),
   `ds_size_test`, `test_sysmem_draw`, `test_mvp_software_vertex_shaders`, `test_backbuffer_resize`.
+  From 7a's map and reviews, also 7d's: `ProcessVertices` needs one front-end arm (its staged destination
+  marks dirty and answers `D3D_OK` in place of the two recorder calls); `srgbtexture_test`'s cause is read
+  (`core_draw.rs` tests `!= 0` where the shared predicate tests the low bit); a multisampled RESZ between
+  two pixel formats (skipped on core, converted by mtld3d); RESZ into a dynamic depth texture (refused);
+  one mtld3d control (a one-sample D24X8 source into a cleared INTZ: does mtld3d zero it?); a kept scratch
+  for the stencil-format multisampled RESZ; **the gamma ramp applied on a fullscreen core device** (it
+  leaves `src/d3d9`, and 7d runs the x64 check anyway); the stale `StretchRect` refusal name; a re-baseline
+  against Wine 11.20 before the per-site parity.
   Also owed at C4c's end: **the x64 check once for slices 5 to 7** (maintainer, 2026-11-18) and **the
   quiet-Mac probe** of the core's draw cost that slices since C4b-3d2 left open.
 
@@ -119,7 +137,13 @@ From the outline, unchanged in scope; sizes are guesses from the pace so far (ab
 ## Waiting on the maintainer
 
 Decisions: the go-ahead for C4d and after; a game run in the VM (C4e); the benches and the release (C4e).
-Findings from C4c-3 to C4c-5 that are not C4c's to fix (each is in a slice's execution notes):
+**The roadmap's 7b** (its entry above has the options). **The cursor on core without the window subclass**
+(7a's ruling R7a-7): closed by slice 6d.
+Findings from C4c-3 to C4c-7a that are not C4c's to fix (each is in a slice's execution notes):
+
+- mtld3d, from C4c-7a's rows: a RESZ with a colour texture of the depth-stencil's size at stage 0 leaves
+  that texture zeroed (the copy is queued, then refused for its formats; not traced); a RESZ with the bound
+  depth-stencil's own texture at stage 0 sends Metal a copy of the texture onto itself (read, not run).
 
 - `dxmt/check.sh`: its watchdog sends TERM, which a hung test ignores, and does not reap: a hung
   `d3d12_xess.exe` spun for twelve hours on 2026-11-18, and one hang stalls every later row; the XeSS test

@@ -1580,6 +1580,43 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   or host test can tell). Stated gaps: that window; the depth-stencil's sample count; a return to a window
   the device left makes a second view there; a lock held across `ResetEx`. No probe (no draw file changed);
   no x64 check (inside `src/d3d9` and one doc).
+  C4c-7a done 2026-11-19 at DXMTRS main f5604fa7, which MacNeutron pins: the gamma ramp, the frame latency,
+  the extended device's `CreateRenderTargetEx`, `CreateOffscreenPlainSurfaceEx` and
+  `CreateDepthStencilSurfaceEx`, `SetRenderState(D3DRS_POINTSIZE, RESZ)` and the three cursor calls on the
+  core runtime (the roadmap's 7c folded in: the cursor's bodies need no window work for their answers). Ten
+  refusals go and **mtld3d's own bodies run on a core device** (traced to their leaves before and after the
+  code: none reaches the recorder); the latency bound is enforced through dxmt-core's queue, at the value
+  mtld3d would enforce, from the device's creation (a configured `present.maxFrameLatency` holds on core
+  too), with no new item in d3d9-rt. RESZ is one front-end arm over C4c-4b's depth copy and 4d's resolve:
+  the bound depth-stencil into level 0 of the depth texture at stage 0, **named by the texture, made with
+  `D3DUSAGE_DEPTHSTENCIL` or not**, at the call, the state stored by mtld3d's code after it. What the core
+  cannot pair is skipped with one warning and `D3D_OK`, as mtld3d's skips answer. Refused by name, after
+  the source check and before anything is made, stored or recorded: RESZ into a `D3DUSAGE_DYNAMIC` depth
+  texture. Differences from mtld3d, each in STATUS.md: that refusal; a multisampled source of another pixel
+  format than the destination's is skipped where mtld3d's transfer converts (D24X8, D16 or D32 into INTZ,
+  D24S8 or D24FS8 into DF24 or DF16); the latency bound counts the GPU's retirement where mtld3d also waits
+  for the display's pace; **without the window subclass, while the Direct3D cursor shows, the window's next
+  `WM_SETCURSOR` reaches the game's window procedure and its class cursor replaces it** (a row pins it;
+  slice 6d brings the subclass); the cursor's scale is 1 and `cursor.software` is not followed.
+  Gated at that tip's code (53422d08; f5604fa7 adds a correction of two STATUS.md sentences and passed the
+  Rust gate) with a fourteenth launch of fifteen rows (`extras`): before any code, the launch on mtld3d
+  under the validation layer and in the VM, **one cell red everywhere: with a colour texture of the
+  source's size at stage 0, mtld3d's RESZ leaves that texture zeroed** (its copy is refused for the formats
+  after it was queued; not traced further; the row's texture moved to another size, where mtld3d skips
+  first), and on the core the fourteen rows expected red, the one expected green (`rz-refuse`: the blanket
+  refusal gave its answer already). At the tip: the plain build's translator key and `d3d9.dll` imports are
+  the base's; d3d9-check default, msl and core, every row; the Mac's conformance fails anew at triaged sites
+  only; stateblock on both runtimes; the fourteen launches under core with Metal's validation layer report
+  nothing; the VM's D3D9 gate on both runtimes and both WoW64 forms, in 64-bit and in 32-bit. Four mutants
+  turn red exactly what was named before their builds and nothing else (RESZ that always copies; a
+  destination taken only with `D3DUSAGE_DEPTHSTENCIL`; the refusal answered after the store; the arm
+  returning before the store). The whole-branch review: push as is, five Minors (two STATUS.md sentences,
+  corrected; three row cells that cannot fail on core, stated). Stated gaps: no row or mutant sees the
+  latency's enforcement or `SetCursorPosition`; gamma has rows only (no Wine test calls it); a
+  stencil-format multisampled RESZ makes a scratch texture at every call; if mtld3d's queued-then-refused
+  copy also zeroes a depth destination, a one-sample pair of two formats leaves different contents on the
+  two runtimes (one mtld3d control owed at 7d). No probe (no draw file changed); no x64 check (inside
+  `src/d3d9` and one doc).
   C4c's slices: 1 buffers and the draws that read them (done); 2a crossing attributes (`CrossingFetch`) and odd stream
   offsets (done); 2b dynamic buffers mapped directly, the WRITEONLY backing's release, the buffer count and its cap
   (done); 3a colour read-back through locks (lockable targets, the back buffer read-only, render-target texture
@@ -1589,11 +1626,13 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   target, between plain surfaces on the CPU, the depth-stencil copy (done); 4c its scaled, converting and YUV
   copies into a target, multisampled ends, overlapping rects of one surface (done); 4d the depth-stencil
   resolve (done);
-  5 queries (done); 6a the getters, the obsolete calls and the presents (done); 6c `Reset`, windowed (done); 6d
-  fullscreen
-  devices (the maintainer's decision: a slice of C4c or C4d's window work); 7 gamma, frame
-  latency, the device's information from winemetal, the `Ex` creators, and the conformance lane for `visual`, `device`
-  and `d3d9ex` under core, which is C4c's gate.
+  5 queries (done); 6a the getters, the obsolete calls and the presents (done); 6c `Reset`, windowed (done);
+  7a gamma, frame latency, the `Ex` creators, RESZ and the cursor calls (done); 6d fullscreen devices and the
+  window subclass
+  (inside C4c: the maintainer's decision of 2026-11-19); 7b the device's information from winemetal (put to the
+  maintainer: the logger keeps `mtld3d.so` on the core's path whatever it does); 7d `ProcessVertices`, the silent
+  differences, the gamma ramp applied on a fullscreen device, and the conformance lane for `visual`, `device` and
+  `d3d9ex` under core, which is C4c's gate.
   The sweep after 3a (`build/c4c/s3/sweep.md`, gating nothing): `visual` and `device` run to their end
   under core (2431 failed of 211208; 1871 of 56686, about 100000 checks not executed), `d3d9ex` dies in
   `test_reset`; the new failures are refusals by name (`StretchRect`'s other shapes about 2770 of 3356) but two
@@ -1657,6 +1696,15 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   (`test_resource_access` 60). What `device` keeps is fullscreen's or the window subclass's; one of its
   lines (`test_cursor_pos`) went by a skip of that run (the host's cursor could not be warped), not by the
   slice. No Metal validation report is new: `visual`'s nine of C4c-5's sweep, none in the two others.
+  The sweep after 7a (`build/c4c/s7a/sweep.md`, gating nothing): **every count as predicted**, in each of
+  the three units the plan's first review named: lines over the default runtime's baseline `visual` 51 to 20
+  (`resz_test` 31 to 0), `device` 39 to 27 (`test_cursor` 12 to 0; `test_cursor_pos` skipped again, the
+  host's cursor could not be warped), `d3d9ex` 138 to 62 (`test_resource_access` 60, `test_frame_latency`
+  9, `test_format_unknown` 4 and `test_create_depth_stencil_surface_ex` 3 to 0; Wine's own summary, which
+  also counts checks that succeed inside todo blocks, goes from 180 to 138: 37 such successes now).
+  No Metal validation report is new. Of the 109 lines
+  left, 87 wait for fullscreen and the window subclass (slice 6d), 20 for 7d (`ProcessVertices` 5, three
+  silent differences 15), 2 are triaged.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features

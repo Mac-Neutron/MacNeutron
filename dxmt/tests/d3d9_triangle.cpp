@@ -11254,7 +11254,8 @@ static bool rowRzEdges() {
 // texture onto itself there, a finding not exercised by a gate). An INTZ texture made with D3DUSAGE_DEPTHSTENCIL, its
 // level bound as the depth-stencil beside the back buffer and cleared to Z 0.5, then at stage 0 too, with no draw
 // between the bind and the RESZ: RESZ D3D_OK, POINTSIZE the magic (the state stored though nothing was copied); its
-// level unbound, the texture read: 0.5's grey at (128,128), as it was (a self-copy that wrote it reads otherwise).
+// level unbound, the texture read: 0.5's grey at (128,128), as it was (a self-copy would read the same: the answer
+// and the stored state are this row's cells, and the validation-layer run is the cover of the core's own-level test).
 static bool rowRzSelf() {
     if (!strictMode) return true;
     RsDevice r;

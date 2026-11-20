@@ -51,7 +51,9 @@ the window subclass (87: slice 6d, the maintainer's decision of 2026-11-19), `Pr
 three silent differences (15), which are 7d's, and the two triaged lines. **Wine's own summary line counts
 differently** (it adds the
 checks that succeed inside a todo block): about 33 such successes appear in `d3d9ex` (d3d9ex.c:4483 x30,
-4026, 813, 830) where 76 failures go, so its summary stays near 138 while the runner's count falls to 62.
+4026, 813, 830) where 76 failures go, so its summary falls less than the runner's count does (measured: 180
+to 138, where the runner's lines over the baseline go from 138 to 62; the draft of this sentence said "stays
+near 138", mixing the two units).
 
 ## Global Constraints
 
@@ -367,4 +369,47 @@ Three reviews, no Critical. Folded:
 
 ## Execution notes
 
-(after the gates)
+- **Commits.** MacNeutron: rows 18e67c2d (15 rows, launch `extras`), a second row commit 3b7cccf8
+  (`rz-edges`' colour texture at another size, below). DXMTRS: e13f3707 (Task 2), bca646d5 (Task 3),
+  53422d08 (Task 4), each through `tools/rust-check.sh`; f5604fa7, a correction of two STATUS.md sentences
+  after the final review, through the gate too. The pin is f5604fa7; every lane ran at 53422d08, whose
+  code it has.
+- **Controls** (`ja` with the validation launch, `jcr`; DXMTRS at the base, rows 18e67c2d): the core red on
+  the fourteen rows named and on `extras-runtime`, `rz-refuse` green: as predicted. mtld3d (default, msl,
+  under the validation layer: no report; the VM, both widths, both WoW64 forms): **one cell red
+  everywhere**, `rz-edges`' colour texture of the source's size at stage 0 read back zeroed where its clear
+  colour was wanted. mtld3d's encoder queues the copy, which ends the pass, and the Metal side then refuses
+  it for its formats (`copy_texture_reject`); why the texture loses its clear is not traced (a guess: the
+  queued whole-level copy drops the pending clear). **An mtld3d finding for the maintainer's list.** Ruling
+  J-7a-1: the row's colour texture moved to 128x128 (mtld3d skips on the size before queuing anything);
+  the controls were not rerun: `jt` judged the cell on both runtimes and `jc` in the VM, green.
+  Task 1's item 10 above still says "of the source's size": superseded by this note. The VM offers 2
+  samples (`rz-auto` green there).
+- **Lane** (`jt1`, 53422d08 with 3b7cccf8): d3d9-check ok on default and core, `extras` 15 of 15 on both;
+  `extras` under core with the validation layer: reports 0.
+- **Chain**: `jw` below; `jr` (plain build: key and imports the base's, conformance at triaged sites only,
+  x64 check not due); `jc` (the VM, default and core, old and new WoW64, 64- and 32-bit: ok, `extras` 15 and
+  16 with the runtime line); `jq` (fourteen launches under the validation layer: no report; stateblock
+  equal on both runtimes); `jm`: **a, b, f and g red on exactly the cells written before their builds, no
+  other row, green whole**.
+- **Sweep** (`build/c4c/s7a/sweep.md`): every count as predicted, in the three units R1 named: over the
+  baseline `visual` 51 to 20, `device` 39 to 27, `d3d9ex` 138 to 62; "Test failed" lines 39, 711, 101;
+  Wine's summaries 270, 766, 138. `test_cursor_pos` skipped again (the pointer could not be warped): not
+  judged. No new Metal validation report.
+- **Final review** (`build/c4c/s7a/review-final.md`): push as is; no Critical, no Important, five Minors.
+  m-1 and m-3: STATUS.md said "a hidden cursor comes back the same way" and "another size or sample count":
+  the first is no difference from mtld3d (its subclass forwards `WM_SETCURSOR` when its cursor is hidden,
+  so **R7a-7's cost was overstated there**; the difference is while the Direct3D cursor shows, when the
+  message reaches the game's procedure), the second cannot happen (a destination's core form has one
+  sample) and left out the pair of two formats, the depth-stencil's own texture, and that the refusal is
+  not recorded into an open state block: corrected in f5604fa7. m-2: the mtld3d finding above was in a test
+  comment only, and it bears on R7a-4: if the same queued-then-refused copy zeroes a depth destination, a
+  one-sample pair of two formats is not parity in what the destination holds afterwards: **one mtld3d
+  control owed at 7d** (a one-sample D24X8 source into a cleared INTZ). m-4: three cells cannot fail on
+  core (`rz-self`'s content: a self-copy reads the same; `rz-edges`' colour cell and its "no texture" cell:
+  their `D3D_OK` carries them); the comment that claimed otherwise corrected; a dynamic colour texture at
+  stage 0 has no cell (7d). m-5: the guest script's header, corrected.
+- **For the maintainer** (also in the roadmap): the cursor without the subclass (R7a-7), closed by slice 6d;
+  mtld3d zeroing a colour texture on a RESZ it cannot do; mtld3d copying a texture onto itself for RESZ with
+  the bound depth-stencil's own texture at stage 0; the roadmap's 7b.
+- **No probe, no x64 check.**
