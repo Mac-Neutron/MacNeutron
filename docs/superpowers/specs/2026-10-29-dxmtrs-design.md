@@ -1833,6 +1833,24 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   reports are left, all the tile dispatch (7d-2).
   After 7d-2 the lane replaces the sweeps: the two runtimes agree at every site (visual.c:15686 at 3 on both)
   and the core lane holds no validation report.
+  **C4d-0 (baseline A/B probe) and C4d-1 (core draw-path deduplication)** done 2026-11-20 at DXMTRS main `ff3c5c5f`
+  (`ff3c5c5f6091f71512c099cfdcfdc0cbc74d7790`), which MacNeutron pins. First, C4d-0's one-window interleaved A/B probe
+  (`build/c4d/s0/probe-ab.md`, `21d0ca5f` vs `91a0fc4c`) confirmed zero regression from C4c slices 3 to 7 (`tex` 2.70 vs
+  2.72, `buf` 2.75 vs 2.72, `dyn` 2.82 vs 2.98 ms/f under load 2.53) and localized the ~2.1x CPU gap against `mtld3d` to
+  per-draw re-resolution on the API thread and redundant per-draw Metal encoder state calls on `dxmt-encode-thr`. C4d-1
+  (purely inside `src/d3d9/`, zero changes outside `src/d3d9/`, translator key and plain `d3d9.dll` imports unchanged)
+  adds Layer 1 per-pass Metal state deduplication (`PassBound` with `last_draw_gen` fast path, independent vertex/pixel
+  texture & sampler tables, warm inline byte slots), a 24-entry `FxHasher` `PsoMemo` with O(1) `key_gen` lookup,
+  monotonic `target_gen` and `BufferStore::next_generation`, a cached `Dynamic::mapped` `NOOVERWRITE|READONLY` lock fast
+  path with inline dynamic-ID stamping, compact draw closures (A/B/C with `Chunk::allocate_cpu` for single-stream UP
+  draws), and Layer 2 `DrawCache` + `TextureInner::has_any_dirty` + `core_created` buffer flag. Gates: `rust-check.sh`
+  (246 `d3d9-rt` + workspace tests, `audit` clean on 1271 files), `jt1`/`jt2` (default/core + Metal validation 0 reports
+  + `render 41` = 1), `jl1` (full Wine conformance default & core, `conf-compare: ok`, 0 validation reports), `jq1`
+  (default/msl/core + 16 validation launches, 0 reports), `jc1` (VM D3D9 gate default & core across old/new WoW64,
+  x64/x86), plain build `jr3`, and quiet-Mac one-window A/B probe `jp_c4d1` (`build/c4d/s1/probe.md`): core net CPU per
+  frame dropped 41% to 49% (Round 2 `tex` 3.87 -> 1.97 vs `mtld3d` 2.00; `buf` 3.38 -> 1.90 vs `mtld3d` 1.63; `dyn`
+  3.72 -> 2.18 vs `mtld3d` 2.17 ms/f; 2400-frame core 1.51 / 1.45 / 1.74 ms/f; `_MTLRenderCommandEncoder_encodeCommands`
+  down to 1.1%-2.3% of wall time on `dxmt-encode-thr`).
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features

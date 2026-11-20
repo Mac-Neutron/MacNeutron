@@ -128,3 +128,16 @@ Fresh adversarial review of full C4d-1 diff; update spec & ledger; privacy scan 
 - **New `Clone` / `Copy` derive**: none (`tools/derive_inventory.txt` stays untouched!).
 - **New lint suppression / `pub(crate)` / `mod.rs` / glob import / type alias / inline `mod tests` / em dash**: none.
 - **Outside `src/d3d9/`**: none (`Chunk::allocate_cpu` only used if already `pub`, else inline `[u8; 256]` keeps zero changes outside `src/d3d9/`).
+
+## Execution notes
+
+- Landed 2026-11-20 at DXMTRS `main` `ff3c5c5f6091f71512c099cfdcfdc0cbc74d7790` (initial implementation `27a3d515`, review fix `ff3c5c5f`). Strictly inside `src/d3d9/` (18 files, zero changes outside `src/d3d9/`, `tools/derive_inventory.txt` untouched, translator key unchanged).
+- Three plan reviews folded (`build/c4d/s1/review-{1-design,2-core,3-exec}.md`) and fresh adversarial final review completed (`build/c4d/s1/review-final.md`: 0 Critical, 1 Important `last_draw_gen` clear on `key_gen == 0` bypass draws + regression test, 2 Minor items all resolved in `ff3c5c5f`).
+- Gates:
+  - `LC_ALL=C sh tools/rust-check.sh`: fmt, gen, clippy, doc, test (246 `d3d9-rt` + workspace tests), audit (1271 files) all green.
+  - `jt1` (`27a3d515`) & `jt2` (`ff3c5c5f`): exit 0 (`d3d9-default` ok, `d3d9-core` ok, `parity` Metal validation 0 reports, `render 41 = 1`, `was not recorded = 0`, `gamma ramp = 1`).
+  - `jl1` (`27a3d515`): exit 0 (default & core Wine conformance; `core validation reports: 0`, `conf-compare: ok`, `triaged-core lines: 0`).
+  - `jq1` (`27a3d515`): `d3d9-default`, `d3d9-msl`, `d3d9-core` all ok, 16/16 Metal validation launches `reports 0`, `not ok 0`, exact row counts.
+  - `jc1` (`27a3d515`): exit 0 (VM D3D9 gate default & core across old & new WoW64, x64 & x86; builder VM stopped).
+  - `jr3` (`ff3c5c5f`, plain build): translator key & `d3d9.dll` imports identical to base, `d3d9-default` ok, `air kinds 3 files`, `visual` 30/211219, `stateblock` 0/14738 (3 default-lane focus/cursor sites under display sleep).
+  - `jp_c4d1` (`91a0fc4c` vs `ff3c5c5f`, quiet Mac, `build/c4d/s1/probe.md`): core net CPU ms/frame dropped 41% to 49% (`tex` 3.87 -> 1.97 vs mtld3d 2.00; `buf` 3.38 -> 1.90 vs mtld3d 1.63; `dyn` 3.72 -> 2.18 vs mtld3d 2.17 in Round 2; 2400-frame core net CPU 1.51 / 1.45 / 1.74 ms/f); `_MTLRenderCommandEncoder_encodeCommands` collapsed to 1.1% to 2.3% of wall time on `dxmt-encode-thr`.
