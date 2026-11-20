@@ -11891,8 +11891,8 @@ static bool rowWsSize() {
         CK(SetViewport, &v0);
         UINT w = 0, h = 0;
         if (!resizeWin(r.w.h, 320, 240, 256, 256, w, h)) return false;
-        if (w <= 256)
-            return snprintf(why, sizeof why, "after SetWindowPos client width %u, want > 256", w), false;
+        if (w < 280)
+            return snprintf(why, sizeof why, "after SetWindowPos client width %u, want >= 280", w), false;
         if (!bbIs(w, h) || !dsIs(w, h, D3DFMT_D24S8) || !extentIs(w, h, 0.0f, 1.0f))
             return failIn("plain device auto-resize");
         const int x1 = (int)w - 8, x0 = 256 + ((int)w - 256) / 4;
@@ -11994,10 +11994,11 @@ static void fullscreenRows(IDirect3DDevice9 *d, bool strict) {
     }
 }
 
-// --- The "parity" mode (DXMTRS C4c-7d-1, C4c-7d-2): the last differences Wine's tests see between D3D9's core runtime
-// and mtld3d. sr-lsb, vo-one, dr-keep, the pv-* rows and tb-self run on the launch's device (256x256 X8R8G8B8, no
-// depth-stencil), reset() and bufStart() before each, and read back through frames(); rz-cross and gm-full make a
-// device and a window of their own (reset's) and, while they run, the globals the helpers read name it (OnDevice).
+// --- The "parity" mode (DXMTRS C4c-7d-1, C4c-7d-2, C4d-2a): the last differences Wine's tests see between D3D9's
+// core runtime and mtld3d. sr-lsb, vo-one, dr-keep, the pv-* rows, tb-self and tex-unwritten run on the launch's
+// device (256x256 X8R8G8B8, no depth-stencil), reset() and bufStart() before each, and read back through frames();
+// rz-cross, gm-full and tex-unwritten's second cell make a device and a window of their own (reset's) and, while
+// they run, the globals the helpers read name it (OnDevice).
 // Each cell wants what mtld3d, the default runtime, answers, in every lane
 // ("strict", the core's, only asks the first frame to match), and each row's comment says why its cells hold only if
 // the feature works. The mode's budget is 200 s, the launches' watchdog 300 s.
