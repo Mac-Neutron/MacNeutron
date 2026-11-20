@@ -47,8 +47,9 @@ stage 0; a 1-sample surface into one; no depth-stencil bound):
 | d3d9ex | `test_user_memory` | 0 | 0 (it runs further: site 819 fails as on mtld3d, a baseline line) |
 
 Totals over the baseline: `visual` 51 → 20, `device` 39 → 27, `d3d9ex` 138 → 62. What stays: fullscreen and
-the window subclass (87: the maintainer's decision), `ProcessVertices` (5) and the three silent differences
-(15), which are 7d's, and the two triaged lines. **Wine's own summary line counts differently** (it adds the
+the window subclass (87: slice 6d, the maintainer's decision of 2026-11-19), `ProcessVertices` (5) and the
+three silent differences (15), which are 7d's, and the two triaged lines. **Wine's own summary line counts
+differently** (it adds the
 checks that succeed inside a todo block): about 33 such successes appear in `d3d9ex` (d3d9ex.c:4483 x30,
 4026, 813, 830) where 76 failures go, so its summary stays near 138 while the runner's count falls to 62.
 
@@ -315,8 +316,9 @@ Each with its cost if wrong.
   kept**: against the core as it is today (every cursor call refused, so the class cursor always) nothing
   gets worse, the answers become mtld3d's (twelve Wine lines), and `cu-setcursor` pins the gap in a row
   instead of leaving it inferred. Cost if wrong: a game that treats a successful `SetCursorProperties` as a
-  promise shows the class arrow where under the refusal it might have drawn its own pointer; opt-in runtime;
-  C4d's window work owes the subclass. **Put to the maintainer at the slice's wrap-up.**
+  promise shows the class arrow where under the refusal it might have drawn its own pointer; opt-in runtime.
+  **Slice 6d owes the subclass** (the maintainer's decision of 2026-11-19 puts fullscreen and the window
+  subclass inside C4c, right after this slice), and `cu-setcursor`'s strict cell is rewritten there.
 - **P-7a: no probe; X-7a: no x64 check** (constraints above). Cost if wrong: a draw-cost change unseen
   until 7d's probe; a regression outside D3D9 unseen until 7d's check. Neither is expected from a diff that
   touches neither the draw path nor a file outside `src/d3d9`.

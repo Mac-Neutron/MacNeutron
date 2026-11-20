@@ -16,17 +16,19 @@ Every slice still gets its own code map, plan, three reviews and gates: nothing 
   DXMTRS 501d43d1). **C4c-6a** (the getters, the stubs and the presents: plan
   `2026-11-19-dxmtrs-c4c6a-getters-presents.md`; DXMTRS d8ac1c1b) and **C4c-6c** (windowed `Reset`: plan
   `2026-11-19-dxmtrs-c4c6c-reset.md`; DXMTRS 4166a54a) are done too (**6c leaves two things undone**: fullscreen
-  devices, the open decision; and the device-lost latch, which needs a failure report from dxmt-core's queue,
+  devices, which are slice 6d by the maintainer's decision of 2026-11-19; and the device-lost latch, which
+  needs a failure report from dxmt-core's queue,
   outside `src/d3d9`: owed to a slice that runs the x64 check, 7b, or dropped at the maintainer's word); the
   map of slice 6
   (`build/c4c/s6/map.md`) cut it as 6a (below's 6a and 6b together), 6c (windowed `Reset`) and 6d (fullscreen
-  devices and the window subclass, or a move to C4d). **6a leaves three of the calls listed below refused**:
+  devices and the window subclass: **inside C4c**, the maintainer's decision of 2026-11-19, after 7a). **6a
+  leaves three of the calls listed below refused**:
   `ProcessVertices` (its staged destination needs the vertex buffers' upload path; `test_sysmem_draw` asks
   for it, so 7d owes it) and the multisampled back buffer's writable lock and `GetDC` (no suite meets them;
   7d decides whether they stay refusals).
 - Wine's suites under core after 6c (`build/c4c/s6c/sweep.md`): `visual` 51 new failing lines over the default
   runtime's baseline, `device` 39, `d3d9ex` 138 now that it runs to its end (it ended early in `test_reset`
-  before; 65, 115 and 66 after 4d). **Fullscreen is the open decision**: what `device` keeps is fullscreen's
+  before; 65, 115 and 66 after 4d). **Fullscreen is slice 6d**: what `device` keeps is fullscreen's
   or the window subclass's, and so is much of `d3d9ex`'s `test_reset`, `test_reset_ex` and
   `test_swapchain_parameters`. The x64 check
   (D3D10-12 on the Mac) is green at 7d48da31.
@@ -82,7 +84,10 @@ would take them. The grouping is a proposal; each slice's map decides.
   Also owed at C4c's end: **the x64 check once for slices 5 to 7** (maintainer, 2026-11-18) and **the
   quiet-Mac probe** of the core's draw cost that slices since C4b-3d2 left open.
 
-Order: 6a, 6b, 6c, 7a, 7b, 7c, 7d. 6c and 7d are the two whose size is not known: 6c because `Reset` opens
+Order: 6a, 6b, 6c, 7a (with 7c's cursor calls folded in: the 7a plan's ruling R7a-1), **6d** (fullscreen
+devices, `Reset` into fullscreen and the window subclass on the core: 87 of the sweep's lines, and the
+cursor's `WM_SETCURSOR` re-assert 7a leaves out), 7b, 7d. 6c, 6d and 7d are the ones whose size is not known:
+6c because `Reset` opens
 code paths no suite has reached under core, 7d because the count of sites is only known once 6c lands.
 
 **C4c is done when** the conformance lane under core passes with a triage file whose every line has a
