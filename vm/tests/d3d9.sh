@@ -29,7 +29,8 @@
 #                                strict" under core), 240 s
 #   ms<64|32>-fresh.txt           d3d9_triangle msaa (DXMTRS C4b-3d5's 17 rows of multisampling, on a device whose
 #                                back buffer and auto depth-stencil have 4 samples, C4c-3a's two reads of the back
-#                                buffer, C4c-4b's depth-stencil copy and C4c-4d's depth-stencil resolve: 21; "msaa
+#                                buffer, C4c-4b's depth-stencil copy, C4c-4d's depth-stencil resolve, and C4d-2a's
+#                                writable LockRect and GetDC on a 4x MSAA lockable back buffer: 23; "msaa
 #                                strict" under core), 240 s
 #   bf<64|32>-fresh.txt           d3d9_triangle buffers (DXMTRS C4c-1's, C4c-2a's and C4c-2b's 39 rows of vertex and
 #                                index buffers and the draws that read them; "buffers strict" under core), 240 s
@@ -47,9 +48,9 @@
 #                                "extras strict" under core, where rz-self and rz-refuse alone run), 300 s
 #   fs<64|32>-fresh.txt           d3d9_triangle fullscreen (DXMTRS C4c-6d's 9 rows of fullscreen devices, Reset into
 #                                and out of fullscreen and the window subclass, each row on a plain device and a window
-#                                of its own, in this prefix, which emulates mode sets; "fullscreen strict" under core,
-#                                where ws-size wants the back buffer kept), 300 s
-#   pa<64|32>-fresh.txt           d3d9_triangle parity (DXMTRS C4c-7d-1's and C4c-7d-2's 10 rows of the last
+#                                of its own, in this prefix, which emulates mode sets; "fullscreen strict" under core),
+#                                300 s
+#   pa<64|32>-fresh.txt           d3d9_triangle parity (DXMTRS C4c-7d-1's, C4c-7d-2's and C4d-2a's 11 rows of the last
 #                                differences between the core runtime and mtld3d, rz-cross and gm-full each on a device
 #                                and a window of its own, gm-full fullscreen in this
 #                                prefix; "parity strict" under core), 300 s

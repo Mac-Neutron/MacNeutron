@@ -60,8 +60,9 @@
 # refusal line. Every lane also runs d3d9_triangle mrt (DXMTRS C4b-3d4's 20 rows of render targets at index 1-3, on such
 # a device; "mrt strict" under core), its rows "mrt-<row>"; under core its launch's logs hold no refusal line. Every
 # lane also runs d3d9_triangle msaa (DXMTRS C4b-3d5's 17 rows of multisampling, C4c-3a's two reads of the back buffer,
-# ms-bblock and ms-front, C4c-4b's depth-stencil copy of 4 samples, ms-dcopy, and C4c-4d's depth-stencil resolve,
-# ms-dres: 21, on a device whose back buffer and auto depth-stencil have 4 samples; "msaa strict" under core), its rows
+# ms-bblock and ms-front, C4c-4b's depth-stencil copy of 4 samples, ms-dcopy, C4c-4d's depth-stencil resolve,
+# ms-dres, and C4d-2a's 4x MSAA back-buffer writable LockRect and GetDC, ms-lblock and ms-lbdc: 23, on a device whose
+# back buffer and auto depth-stencil have 4 samples; "msaa strict" under core), its rows
 # "msaa-<row>"; under core its launch's logs hold no refusal line (since DXMTRS C4c-4b, which copies ms-desc's and
 # ms-dcopy's depth-stencil surfaces, and C4c-4d, which resolves ms-dres's). Every
 # lane also runs d3d9_triangle buffers (DXMTRS C4c-1's, C4c-2a's and C4c-2b's 39 rows of
@@ -86,11 +87,11 @@
 # its one refusal line (rz-refuse's RESZ into a dynamic depth texture, refused by name). Every lane also runs
 # d3d9_triangle fullscreen (DXMTRS C4c-6d's 9 rows of fullscreen devices, Reset into and out of fullscreen and the
 # window subclass, each row on a plain device and a window of its own, every fs-* row FAILing before any device unless
-# Wine emulates mode sets for it; "fullscreen strict" under core, where ws-size wants the back buffer kept), its rows
+# Wine emulates mode sets for it; "fullscreen strict" under core), its rows
 # "fullscreen-<row>"; under core its launch's logs hold no refusal line. Every lane also runs d3d9_triangle parity
-# (DXMTRS C4c-7d-1's and C4c-7d-2's 10 rows of D3DSAMP_SRGBTEXTURE's low bit, a volume texture of depth 1, a managed
-# texture's uploaded levels, ProcessVertices, a one-sample RESZ between two depth formats, the gamma ramp on a
-# fullscreen device, a draw that samples its own render target, rz-cross and
+# (DXMTRS C4c-7d-1's, C4c-7d-2's and C4d-2a's 11 rows of D3DSAMP_SRGBTEXTURE's low bit, a volume texture of depth 1, a
+# managed texture's uploaded levels, ProcessVertices, a one-sample RESZ between two depth formats, the gamma ramp on a
+# fullscreen device, a draw that samples its own render target, and zeroed unwritten texture staging, rz-cross and
 # gm-full each on a device and a window of its own, gm-full FAILing before any device
 # unless Wine emulates mode sets for it; "parity strict" under core), its rows "parity-<row>"; under core its launch's
 # logs hold no refusal line.
@@ -277,7 +278,7 @@ check mrt "mrt-two mrt-four mrt-hole mrt-unwritten mrt-nobind mrt-clear mrt-mask
   mrt-srgb mrt-srgbclear mrt-size mrt-switch mrt-scissor mrt-depth mrt-back mrt-autogen mrt-order mrt-read"
 launch ours fresh msaa 240 msaa $strict
 check msaa "ms-initial ms-desc ms-dcopy ms-dres ms-resolve ms-edge ms-back ms-clear ms-depth ms-mismatch ms-mask
-  ms-nonmask ms-a2c ms-srgbmask ms-blend ms-mrt ms-scissor ms-redraw ms-samples ms-bblock ms-front"
+  ms-nonmask ms-a2c ms-srgbmask ms-blend ms-mrt ms-scissor ms-redraw ms-samples ms-bblock ms-front ms-lblock ms-lbdc"
 launch ours fresh buffers 240 buffers $strict
 check buffers "buf-d3d buf-lock buf-draw buf-start buf-offset buf-strip buf-fan buf-indexed buf-index32 buf-base buf-ifan
   buf-managed buf-dynamic buf-order buf-discard buf-held buf-relock buf-streams buf-null buf-null-up buf-zero-stride
@@ -310,7 +311,7 @@ check extras "gm-ramp fl-latency ex-rt ex-ds ex-plain rz-msaa rz-auto rz-single 
 launch ours fresh fullscreen 300 fullscreen $strict
 check fullscreen "fs-create fs-cover fs-reject fs-reset-in fs-reset-window fs-wndproc fs-reset-mode fs-activate ws-size"
 launch ours fresh parity 300 parity $strict
-check parity "sr-lsb vo-one dr-keep pv-sysmem pv-draw pv-dynsrc pv-dyndst rz-cross gm-full tb-self"
+check parity "sr-lsb vo-one dr-keep pv-sysmem pv-draw pv-dynsrc pv-dyndst rz-cross gm-full tb-self tex-unwritten"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi

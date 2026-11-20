@@ -48,10 +48,11 @@
 # rows (DXMTRS C4b-3d3: partial clears, the scissor test, a depth-stencil of another size, sRGB write and blending;
 # bl64-fresh, bl32-fresh); under core their logs hold no refusal line. Every lane also checks d3d9_triangle mrt's 20
 # rows (DXMTRS C4b-3d4: render targets at index 1-3; mr64-fresh, mr32-fresh); under core their logs hold no refusal
-# line. Every lane also checks d3d9_triangle msaa's 21 rows (DXMTRS C4b-3d5: multisampling, on a device whose back
+# line. Every lane also checks d3d9_triangle msaa's 23 rows (DXMTRS C4b-3d5: multisampling, on a device whose back
 # buffer and auto depth-stencil have 4 samples, C4c-3a's ms-bblock and ms-front: the back buffer read by a lock and by
-# GetFrontBufferData, C4c-4b's ms-dcopy: a depth-stencil copy of 4 samples, and C4c-4d's ms-dres: a depth-stencil
-# resolve; ms64-fresh, ms32-fresh); under core their logs hold no refusal line (since DXMTRS C4c-4b, which copies
+# GetFrontBufferData, C4c-4b's ms-dcopy: a depth-stencil copy of 4 samples, C4c-4d's ms-dres: a depth-stencil
+# resolve, and C4d-2a's ms-lblock and ms-lbdc: writable LockRect and GetDC on a 4x MSAA lockable back buffer;
+# ms64-fresh, ms32-fresh); under core their logs hold no refusal line (since DXMTRS C4c-4b, which copies
 # ms-desc's and ms-dcopy's depth-stencil surfaces, and C4c-4d, which resolves ms-dres's).
 # Every lane also checks d3d9_triangle buffers' 39 rows (DXMTRS C4c-1, C4c-2a and
 # C4c-2b: vertex and index buffers and the draws that read them; bf64-fresh, bf32-fresh); under core their logs hold
@@ -73,12 +74,12 @@
 # hold exactly its one refusal line (rz-refuse's RESZ into a dynamic depth texture, refused by name). Every lane also
 # checks d3d9_triangle fullscreen's 9 rows (DXMTRS C4c-6d: fullscreen devices, Reset into and out of fullscreen and the
 # window subclass, each row on a plain device and a window of its own, in the guest's prefix, which emulates mode sets;
-# "fullscreen strict" under core, where ws-size wants the back buffer kept; fs64-fresh, fs32-fresh); under core their
-# logs hold no refusal line. Every lane also checks d3d9_triangle parity's 10 rows (DXMTRS C4c-7d-1, C4c-7d-2:
+# "fullscreen strict" under core; fs64-fresh, fs32-fresh); under core their
+# logs hold no refusal line. Every lane also checks d3d9_triangle parity's 11 rows (DXMTRS C4c-7d-1, C4c-7d-2, C4d-2a:
 # D3DSAMP_SRGBTEXTURE's low bit, a volume texture of depth 1, a managed texture's uploaded levels, ProcessVertices, a
 # one-sample RESZ between two depth formats, the gamma ramp on a fullscreen device, a draw that samples its own render
-# target, rz-cross and gm-full each on a device and a window of its own, in the guest's prefix, which emulates
-# mode sets; "parity strict" under core;
+# target, and zeroed unwritten texture staging, rz-cross and gm-full each on a device and a window of its own, in the
+# guest's prefix, which emulates mode sets; "parity strict" under core;
 # pa64-fresh, pa32-fresh); under core their logs hold no refusal line.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -230,7 +231,8 @@ for r in mr64-fresh mr32-fresh; do
 done
 for r in ms64-fresh ms32-fresh; do
   for row in ms-initial ms-desc ms-dcopy ms-dres ms-resolve ms-edge ms-back ms-clear ms-depth ms-mismatch ms-mask \
-    ms-nonmask ms-a2c ms-srgbmask ms-blend ms-mrt ms-scissor ms-redraw ms-samples ms-bblock ms-front; do
+    ms-nonmask ms-a2c ms-srgbmask ms-blend ms-mrt ms-scissor ms-redraw ms-samples ms-bblock ms-front ms-lblock \
+    ms-lbdc; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
@@ -275,7 +277,7 @@ for r in fs64-fresh fs32-fresh; do
   done
 done
 for r in pa64-fresh pa32-fresh; do
-  for row in sr-lsb vo-one dr-keep pv-sysmem pv-draw pv-dynsrc pv-dyndst rz-cross gm-full tb-self; do
+  for row in sr-lsb vo-one dr-keep pv-sysmem pv-draw pv-dynsrc pv-dyndst rz-cross gm-full tb-self tex-unwritten; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done

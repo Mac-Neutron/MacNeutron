@@ -74,7 +74,7 @@
 // and of another size, the write masks of index 1-3, blending and sRGB write over several targets, Clear over every
 // bound target, the scissor, the viewport and the depth test, the back buffer in a set, automatic mipmaps, order),
 // with a 180 s budget. The core refuses none of it.
-// With "msaa" ("msaa strict" under core; DXMTRS C4b-3d5): 21 rows "d3d9 ms-<row> ok|FAIL <why>" on a device whose
+// With "msaa" ("msaa strict" under core; DXMTRS C4b-3d5): 23 rows "d3d9 ms-<row> ok|FAIL <why>" on a device whose
 // back buffer and auto D24S8 have 4 samples: multisampled CreateRenderTarget surfaces (2, 4, 8 samples and
 // non-maskable) read through StretchRect's resolve, the back buffer's too; edges, Clear with rects and the viewport,
 // the depth test, a depth-stencil of another sample count, D3DRS_MULTISAMPLEMASK, alpha-to-coverage (ATOC and the A2M
@@ -82,7 +82,8 @@
 // creators and read-backs answer; since DXMTRS C4c-3a the back buffer read by a READONLY lock and by
 // GetFrontBufferData; since DXMTRS C4c-4b StretchRect of the auto depth-stencil into a depth-stencil surface of 4
 // samples, its depth and stencil judged by draws (ms-dcopy); since DXMTRS C4c-4d its resolve into a single-sample one,
-// judged the same way (ms-dres). With a 180 s budget. The core refuses none of it (ms-desc's and ms-dcopy's
+// judged the same way (ms-dres); since DXMTRS C4d-2a writable LockRect and GetDC on a 4-sample lockable back buffer
+// (ms-lblock, ms-lbdc). With a 180 s budget. The core refuses none of it (ms-desc's and ms-dcopy's
 // depth-stencil copies are the core's since DXMTRS C4c-4b, ms-dres's resolve since DXMTRS C4c-4d).
 // With "buffers" ("buffers strict" under core; DXMTRS C4c-1, C4c-2a, C4c-2b): 39 rows "d3d9 buf-<row> ok|FAIL <why>" of
 // vertex and index buffers and the draws that read them, on a device with no depth-stencil: GetDirect3D; Lock and
@@ -167,21 +168,21 @@
 // emulates mode sets for it (EmulateModeset) and FAILs before any device when it does not; fs-cover alone makes a
 // fullscreen device without D3DCREATE_NOWINDOWCHANGES (its window covers the primary monitor for well under a second in
 // a strict lane); a row that sets a display mode puts the registry's back itself; no row changes the foreground window,
-// minimises a window, moves the pointer or sleeps a fixed time. Each cell wants what mtld3d answers, in every lane, but
-// one: under "strict" ws-size wants the back buffer and the viewport kept where mtld3d's follow the window (the core
-// does not follow a windowed device's window: DXMTRS C4c-6d's R6d-3). With a 200 s budget. The core before DXMTRS
+// minimises a window, moves the pointer or sleeps a fixed time. Each cell wants what mtld3d answers, in every lane
+// (since DXMTRS C4d-2a, ws-size's windowed auto-resize included). With a 200 s budget. The core before DXMTRS
 // C4c-6d's front end refuses a fullscreen device: every fs-* row prints its "FAIL ..." at its first fullscreen create
 // or Reset (fs-wndproc at its windowed half: no subclass).
-// With "parity" ("parity strict" under core; DXMTRS C4c-7d-1, C4c-7d-2): 10 rows "d3d9 <sr|vo|dr|pv|rz|gm|tb>-<row>
-// ok|FAIL <why>" of the last differences Wine's tests see between D3D9's core runtime and mtld3d: D3DSAMP_SRGBTEXTURE's
-// low bit (sr-lsb), a volume texture of depth 1 sampled raw and decoded (vo-one), a managed texture's uploaded levels
-// under READONLY and NO_DIRTY_UPDATE locks, AddDirtyRect and EvictManagedResources (dr-keep), ProcessVertices from and
-// into system-memory, default-pool WRITEONLY and dynamic buffers, read back and drawn (pv-sysmem, pv-draw, pv-dynsrc,
-// pv-dyndst), a one-sample RESZ from D24X8 into DF24 and into INTZ (rz-cross) and the gamma ramp on a fullscreen
-// device, across a Reset to windowed and back (gm-full); since DXMTRS C4c-7d-2 a draw that samples its own render
-// target, for the validation layer (tb-self). sr-, vo-, dr-, pv-* and tb-self run on the launch's device; rz-cross and
-// gm-full on a device and a window of their own (reset's). Each cell wants what mtld3d
-// answers, in every lane.
+// With "parity" ("parity strict" under core; DXMTRS C4c-7d-1, C4c-7d-2, C4d-2a): 11 rows
+// "d3d9 <sr|vo|dr|pv|rz|gm|tb|tex>-<row> ok|FAIL <why>" of the last differences Wine's tests see between D3D9's core
+// runtime and mtld3d: D3DSAMP_SRGBTEXTURE's low bit (sr-lsb), a volume texture of depth 1 sampled raw and decoded
+// (vo-one), a managed texture's uploaded levels under READONLY and NO_DIRTY_UPDATE locks, AddDirtyRect and
+// EvictManagedResources (dr-keep), ProcessVertices from and into system-memory, default-pool WRITEONLY and dynamic
+// buffers, read back and drawn (pv-sysmem, pv-draw, pv-dynsrc, pv-dyndst), a one-sample RESZ from D24X8 into DF24 and
+// into INTZ (rz-cross) and the gamma ramp on a fullscreen device, across a Reset to windowed and back (gm-full); since
+// DXMTRS C4c-7d-2 a draw that samples its own render target, for the validation layer (tb-self); since DXMTRS C4d-2a
+// zeroed unwritten texture staging on same-device and cross-device pool reuse (tex-unwritten). sr-, vo-, dr-, pv-*,
+// tb-self and tex-unwritten run on the launch's device; rz-cross and gm-full on a device and a window of their own
+// (reset's). Each cell wants what mtld3d answers, in every lane.
 // gm-full keeps the fullscreen mode's rules (modesEmulated() first and a FAIL before any device without it,
 // D3DCREATE_NOWINDOWCHANGES, the desktop's mode; no foreground change, minimised window, pointer move or fixed sleep);
 // no cell sees the ramp on screen. With a 200 s budget. The core before DXMTRS C4c-7d-1's front end refuses
@@ -6487,6 +6488,56 @@ static bool rowMsFront() {
     });
 }
 
+// A 256x256 4x MSAA lockable device (D3DPRESENTFLAG_LOCKABLE_BACKBUFFER + D3DSWAPEFFECT_DISCARD).
+static bool makeMsaaLockable(Lockable &l) {
+    RECT r = {0, 0, 256, 256};
+    AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
+    l.w.h = CreateWindowW(L"d3d9_triangle", L"d3d9_triangle msaa lockable", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 400, 100,
+                          r.right - r.left, r.bottom - r.top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!l.w.h) return snprintf(why, sizeof why, "CreateWindowW"), false;
+    D3DPRESENT_PARAMETERS pp = {};
+    pp.BackBufferWidth = 256, pp.BackBufferHeight = 256, pp.BackBufferFormat = D3DFMT_X8R8G8B8, pp.BackBufferCount = 1;
+    pp.MultiSampleType = D3DMULTISAMPLE_4_SAMPLES, pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    pp.hDeviceWindow = l.w.h, pp.Windowed = TRUE, pp.Flags = D3DPRESENTFLAG_LOCKABLE_BACKBUFFER;
+    pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    HRESULT hr = direct3d ? direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, l.w.h,
+                                                   D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp, &l.d.p)
+                          : E_POINTER;
+    if (FAILED(hr)) return fail("CreateDevice (4x MSAA lockable back buffer)", hr);
+    hr = l.d.p->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &l.bb.p);
+    return SUCCEEDED(hr) || fail("GetBackBuffer (4x MSAA lockable device)", hr);
+}
+// ms-lblock (DXMTRS C4d-2a): 4x MSAA lockable back buffer written through LockRect(NULL, 0) on its left half after a
+// green draw, then drawn on its top-right quadrant with blue; read back via msHas.
+static bool rowMsLbLock() {
+    Lockable l;
+    if (!makeMsaaLockable(l)) return false;
+    const OnDevice on(l.d.p, l.bb.p);
+    return until([&] {
+        if (!reset() || !msStart()) return false;
+        if (!scene([&] { return backToScreen() && clearTo(TBLK) && zquad(0, 0, 256, 256, 0.5f, TGRN); })) return false;
+        if (!underLock(l.bb.p, "LockRect (NULL, 0)", nullptr, 0,
+                       [&](BYTE *b, int p) { paint(b, p, 0, 0, 128, 256, TRED); }))
+            return false;
+        if (!scene([&] { return zquad(128, 0, 256, 128, 0.5f, TBLU); })) return false;
+        return msHas("the 4x MSAA lockable back buffer", l.bb.p, {{64, 128, TRED}, {192, 64, TBLU}, {192, 192, TGRN}});
+    });
+}
+// ms-lbdc (DXMTRS C4d-2a): 4x MSAA lockable back buffer written through GetDC + FillRect on its left half after a
+// green draw, then drawn on its top-right quadrant with blue; read back via msHas.
+static bool rowMsLbDc() {
+    Lockable l;
+    if (!makeMsaaLockable(l)) return false;
+    const OnDevice on(l.d.p, l.bb.p);
+    return until([&] {
+        if (!reset() || !msStart()) return false;
+        if (!scene([&] { return backToScreen() && clearTo(TBLK) && zquad(0, 0, 256, 256, 0.5f, TGRN); })) return false;
+        if (!underDc(l.bb.p, "GetDC", [&](HDC dc) { return gdiFill(dc, 0, 0, 128, 256, TRED); })) return false;
+        if (!scene([&] { return zquad(128, 0, 256, 128, 0.5f, TBLU); })) return false;
+        return msHas("the 4x MSAA lockable back buffer", l.bb.p, {{64, 128, TRED}, {192, 64, TBLU}, {192, 192, TGRN}});
+    });
+}
+
 static void msaaRows(IDirect3DDevice9 *d, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
         {"ms-desc", rowMsDesc},         {"ms-dcopy", rowMsDcopy},       {"ms-dres", rowMsDres},
@@ -6495,7 +6546,8 @@ static void msaaRows(IDirect3DDevice9 *d, bool strict) {
         {"ms-mask", rowMsMask},         {"ms-nonmask", rowMsNonMask},   {"ms-a2c", rowMsA2c},
         {"ms-srgbmask", rowMsSrgbMask}, {"ms-blend", rowMsBlend},       {"ms-mrt", rowMsMrt},
         {"ms-scissor", rowMsScissor},   {"ms-redraw", rowMsRedraw},     {"ms-samples", rowMsSamples},
-        {"ms-bblock", rowMsBblock},     {"ms-front", rowMsFront}};
+        {"ms-bblock", rowMsBblock},     {"ms-front", rowMsFront},       {"ms-lblock", rowMsLbLock},
+        {"ms-lbdc", rowMsLbDc}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
@@ -11454,7 +11506,7 @@ static void extrasRows(IDirect3DDevice9 *d, bool strict) {
 // ResetEx's fullscreen forms) and, while it runs, the globals the helpers read name its device (OnDevice, rtSurf null,
 // as the reset mode's). A fullscreen device asks for the desktop's current mode (GetAdapterDisplayMode: its size and
 // refresh rate), which sets no mode, unless the row tests a mode change. Each cell wants what mtld3d, the default
-// runtime, answers, in every lane, but ws-size's under "strict". A draw is judged by reading the back buffer back in
+// runtime, answers, in every lane (since DXMTRS C4d-2a, ws-size's windowed auto-resize included). A draw is judged by reading the back buffer back in
 // one until() attempt, a present by presentCounts (presents()) or by Present's answer. A row that judges what a release
 // gives back ends OnDevice's scope first and wants the release's count 0 (a reference left would read as a window,
 // procedure or mode not given back).
@@ -11809,28 +11861,122 @@ static bool rowFsActivate() {
                               s.Width, s.Height);
     });
 }
-// ws-size, last (a windowed device's window resized: DXMTRS C4c-6d's R6d-3): a windowed 256x256 device; its window
-// resized with SetWindowPos (SWP_NOZORDER | SWP_NOACTIVATE) to the outer rect of a 320x240 client area, which sends
-// WM_SIZE before it returns (no pump); the client area then read (GetClientRect) another than 256x256 (else no cell
-// below tells a resize from none). On mtld3d the back buffer's description, the viewport and the scissor rect are that
-// client area (its subclass's WM_SIZE arm re-makes the back buffer: only a resize that reached it gets there); under
-// "strict" they keep 256x256 (a core device's back buffer does not follow its window). In both a quad lands and Present
-// answers D3D_OK. GetPresentParameters follows on neither runtime: not judged.
+// ws-size, last (a windowed device's window resized: DXMTRS C4c-6d's R6d-3, C4d-2a Slice 6e): a windowed 256x256
+// device with auto D24S8; its viewport min_z..max_z set to 0.25..0.75, then resized with SetWindowPos (SWP_NOZORDER |
+// SWP_NOACTIVATE) to the outer rect of a 320x240 client area, which sends WM_SIZE before it returns (no pump). Both
+// mtld3d and core follow the new client area (w, h): back buffer, auto depth-stencil, viewport and scissor grow, plain
+// device resets min_z..max_z to 0.0..1.0, and a depth-tested draw past x = 256 derived from (w, h) lands and Present
+// returns D3D_OK. Custom RT0 keeps its own GetViewport and GetScissorRect across a second SetWindowPos that changes
+// GetClientRect; rebinding the back buffer via GetBackBuffer + SetRenderTarget restores auto-resize viewport tracking;
+// customDs stays bound and depth-tests across WM_SIZE; SetDepthStencilSurface(nullptr) stays unbound across WM_SIZE;
+// and an extended device preserves min_z..max_z (0.25..0.75) across WM_SIZE.
 static bool rowWsSize() {
-    RsDevice r;
-    if (!rsDevice(r)) return false;
-    const OnDevice on(r.d.p, nullptr);
-    RECT o = {0, 0, 320, 240}, c = {};
-    AdjustWindowRect(&o, WS_OVERLAPPEDWINDOW, FALSE);
-    SetWindowPos(r.w.h, nullptr, 400, 100, o.right - o.left, o.bottom - o.top, SWP_NOZORDER | SWP_NOACTIVATE);
-    if (!GetClientRect(r.w.h, &c) || c.right <= 0 || c.bottom <= 0 || (c.right == 256 && c.bottom == 256))
-        return snprintf(why, sizeof why, "after SetWindowPos the client area %ldx%ld, want another than 256x256",
-                        (long)c.right, (long)c.bottom),
-               false;
-    const UINT w = strictMode ? 256 : (UINT)c.right, h = strictMode ? 256 : (UINT)c.bottom;
-    if (!bbIs(w, h) || !extentIs(w, h))
-        return failIn(strictMode ? "kept (strict: a core device does not follow its window)" : "the new client area");
-    return (until([] { return lands(160, 160, 224, 224, 32, 32); }) && presentIs(D3D_OK)) || failIn("after the resize");
+    const auto resizeWin = [&](HWND hw, int rw, int rh, UINT oldW, UINT oldH, UINT &nw, UINT &nh) -> bool {
+        RECT o = {0, 0, rw, rh}, c = {};
+        AdjustWindowRect(&o, WS_OVERLAPPEDWINDOW, FALSE);
+        SetWindowPos(hw, nullptr, 400, 100, o.right - o.left, o.bottom - o.top, SWP_NOZORDER | SWP_NOACTIVATE);
+        if (!GetClientRect(hw, &c) || c.right <= 0 || c.bottom <= 0 ||
+            ((UINT)c.right == oldW && (UINT)c.bottom == oldH))
+            return snprintf(why, sizeof why, "after SetWindowPos the client area %ldx%ld, want another than %ux%u",
+                            (long)c.right, (long)c.bottom, oldW, oldH),
+                   false;
+        nw = (UINT)c.right, nh = (UINT)c.bottom;
+        return true;
+    };
+    {
+        RsDevice r;
+        if (!rsDevice(r, D3DFMT_D24S8)) return false;
+        const OnDevice on(r.d.p, nullptr);
+        const D3DVIEWPORT9 v0 = {0, 0, 256, 256, 0.25f, 0.75f};
+        CK(SetViewport, &v0);
+        UINT w = 0, h = 0;
+        if (!resizeWin(r.w.h, 320, 240, 256, 256, w, h)) return false;
+        if (w <= 256)
+            return snprintf(why, sizeof why, "after SetWindowPos client width %u, want > 256", w), false;
+        if (!bbIs(w, h) || !dsIs(w, h, D3DFMT_D24S8) || !extentIs(w, h, 0.0f, 1.0f))
+            return failIn("plain device auto-resize");
+        const int x1 = (int)w - 8, x0 = 256 + ((int)w - 256) / 4;
+        const int y0 = (int)h / 4, y1 = (int)h * 3 / 4;
+        const int mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+        if (!until([&] {
+                return clearBlue(true) &&
+                       scene([&] {
+                           return zquad(32.0f, (float)y0, 192.0f, (float)y1, 0.25f, TRED) &&
+                                  zquad(128.0f, (float)y0, (float)x1, (float)y1, 0.75f, TGRN);
+                       }) &&
+                       bbHas({{64, my, TRED}, {160, my, TRED}, {mx, my, TGRN}, {mx, 8, BLUE}});
+            }) ||
+            !presentIs(D3D_OK))
+            return failIn("drawn past x = 256 after the resize");
+
+        Rt rt;
+        if (!mkRt(rt, 64) || !bindRt(0, rt.s.p)) return failIn("custom RT0");
+        const D3DVIEWPORT9 rvp = {4, 4, 48, 48, 0.1f, 0.9f};
+        const RECT rsc = {4, 4, 52, 52};
+        CK(SetViewport, &rvp);
+        CK(SetScissorRect, &rsc);
+        UINT w2 = 0, h2 = 0;
+        if (!resizeWin(r.w.h, 360, 280, w, h, w2, h2)) return failIn("second SetWindowPos (custom RT0)");
+        if (!bbIs(w2, h2)) return failIn("back buffer during custom RT0");
+        D3DVIEWPORT9 gvp = {};
+        RECT gsc = {};
+        CK(GetViewport, &gvp);
+        CK(GetScissorRect, &gsc);
+        if (gvp.X != rvp.X || gvp.Y != rvp.Y || gvp.Width != rvp.Width || gvp.Height != rvp.Height ||
+            gvp.MinZ != rvp.MinZ || gvp.MaxZ != rvp.MaxZ)
+            return snprintf(why, sizeof why,
+                            "custom RT0 viewport (%lu,%lu) %lux%lu %g..%g after WM_SIZE; want (4,4) 48x48 0.1..0.9",
+                            (unsigned long)gvp.X, (unsigned long)gvp.Y, (unsigned long)gvp.Width,
+                            (unsigned long)gvp.Height, (double)gvp.MinZ, (double)gvp.MaxZ),
+                   false;
+        if (gsc.left != rsc.left || gsc.top != rsc.top || gsc.right != rsc.right || gsc.bottom != rsc.bottom)
+            return snprintf(why, sizeof why,
+                            "custom RT0 scissor (%ld,%ld)-(%ld,%ld) after WM_SIZE; want (4,4)-(52,52)",
+                            (long)gsc.left, (long)gsc.top, (long)gsc.right, (long)gsc.bottom),
+                   false;
+
+        Com<IDirect3DSurface9> bb;
+        CK(GetBackBuffer, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
+        CK(SetRenderTarget, 0, bb.p);
+        UINT w3 = 0, h3 = 0;
+        if (!resizeWin(r.w.h, 400, 300, w2, h2, w3, h3)) return failIn("third SetWindowPos (rebound back buffer)");
+        if (!bbIs(w3, h3) || !extentIs(w3, h3))
+            return failIn("auto-resize viewport tracking after rebinding back buffer");
+
+        Com<IDirect3DSurface9> customDs, gotDs;
+        if (!makeDs(customDs, D3DFMT_D24S8, 512) || !bindDs(customDs.p)) return failIn("customDs");
+        UINT w4 = 0, h4 = 0;
+        if (!resizeWin(r.w.h, 352, 264, w3, h3, w4, h4)) return failIn("fourth SetWindowPos (customDs)");
+        CK(GetDepthStencilSurface, &gotDs.p);
+        if (gotDs.p != customDs.p)
+            return snprintf(why, sizeof why, "after WM_SIZE GetDepthStencilSurface %p, want customDs %p",
+                            (void *)gotDs.p, (void *)customDs.p),
+                   false;
+        if (!bbIs(w4, h4) || !extentIs(w4, h4)) return failIn("after fourth SetWindowPos (customDs)");
+        if (!until([&] {
+                return clearBlue(true) &&
+                       scene([&] { return zquad(32, 64, 160, 160, 0.25f, TRED) && zquad(96, 64, 224, 160, 0.75f, TGRN); }) &&
+                       bbHas({{64, 112, TRED}, {128, 112, TRED}, {192, 112, TGRN}, {192, 16, BLUE}});
+            }))
+            return failIn("depth test with customDs after WM_SIZE");
+
+        if (!bindDs(nullptr)) return failIn("SetDepthStencilSurface(nullptr)");
+        UINT w5 = 0, h5 = 0;
+        if (!resizeWin(r.w.h, 336, 252, w4, h4, w5, h5)) return failIn("fifth SetWindowPos (no depth-stencil)");
+        if (!bbIs(w5, h5) || !noDepth()) return failIn("SetDepthStencilSurface(nullptr) across WM_SIZE");
+    }
+    {
+        RsDevice rx;
+        if (!rsDevice(rx, D3DFMT_UNKNOWN, true)) return failIn("extended device");
+        const OnDevice onx(rx.d.p, nullptr);
+        const D3DVIEWPORT9 vx = {0, 0, 256, 256, 0.25f, 0.75f};
+        CK(SetViewport, &vx);
+        UINT xw = 0, xh = 0;
+        if (!resizeWin(rx.w.h, 320, 240, 256, 256, xw, xh)) return failIn("extended device");
+        if (!bbIs(xw, xh) || !extentIs(xw, xh, 0.25f, 0.75f))
+            return failIn("extended device preserves min_z/max_z");
+    }
+    return true;
 }
 
 static void fullscreenRows(IDirect3DDevice9 *d, bool strict) {
@@ -12204,12 +12350,68 @@ static bool rowTbSelf() {
     return ok;
 }
 
+// tex-unwritten (DXMTRS C4d-2a Fix B): zeroed unwritten texture staging on same-device LIFO pool reuse and
+// cross-device release. Cell (a): 2x2 A8R8G8B8 MANAGED red texture drawn and released on dev, then a new 2x2 A8R8G8B8
+// MANAGED texture writes only (0,0) = TGRN; (0,0) samples green and unwritten (1,1) samples 0 in both RGB and alpha.
+// Cell (b): 2x2 A8R8G8B8 MANAGED red texture created, drawn, and released on a separate RsDevice BEFORE releasing
+// RsDevice, then a new 2x2 A8R8G8B8 MANAGED texture on dev writes only (0,0) = TGRN and checks RGB and alpha.
+static bool rowTexUnwritten() {
+    const auto checkGreenOnly = [&](const char *cell) -> bool {
+        Com<IDirect3DTexture9> green;
+        CK(CreateTexture, 2, 2, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &green.p, nullptr);
+        if (!underLevelLock(green.p, 0, 0, [](BYTE *b, int) {
+                const DWORD v = TGRN;
+                memcpy(b, &v, 4);
+            }))
+            return failIn(cell);
+        const Probe rgb[] = {{0.25f, 0.25f, TGRN}, {0.75f, 0.75f, 0x000000}};
+        const Probe alpha[] = {{0.25f, 0.25f, 0xffffff}, {0.75f, 0.75f, 0x000000}};
+        if (!probe2d(green.p, rgb, 2, false)) return failIn(cell, " RGB");
+        if (!probe2d(green.p, alpha, 2, true)) return failIn(cell, " alpha");
+        dev->SetTexture(0, nullptr);
+        dev->SetPixelShader(nullptr);
+        return true;
+    };
+    {
+        Com<IDirect3DTexture9> red;
+        if (!make2d(red, 2, 2, 1, D3DFMT_A8R8G8B8, 4, [](int, int) { return TRED; })) return failIn("(a) red texture");
+        const Probe prRed[] = {{0.25f, 0.25f, TRED}, {0.75f, 0.75f, TRED}};
+        if (!probe2d(red.p, prRed, 2)) return failIn("(a) red draw");
+        dev->SetTexture(0, nullptr);
+        dev->SetPixelShader(nullptr);
+    }
+    if (!checkGreenOnly("(a)")) return false;
+    {
+        RsDevice r;
+        Com<IDirect3DSurface9> bb;
+        if (!exDevice(r, bb)) return failIn("(b) RsDevice");
+        const OnDevice on(r.d.p, bb.p);
+        {
+            Com<IDirect3DTexture9> red;
+            Com<IDirect3DPixelShader9> ps;
+            if (!make2d(red, 2, 2, 1, D3DFMT_A8R8G8B8, 4, [](int, int) { return TRED; }) ||
+                !usePs(ps, K2D, 0, false) || !pointClamp(0))
+                return failIn("(b) red texture");
+            TV3 q[4];
+            tquad(q, 0, 0, 256, 256, 0.5f, 0.5f);
+            CK(SetTexture, 0, red.p);
+            if (!until([&] {
+                    return clearBlue(false) && scene([&] { return tdraw(q); }) && bbHas({{128, 128, TRED}});
+                }))
+                return failIn("(b) red draw");
+            dev->SetTexture(0, nullptr);
+            dev->SetPixelShader(nullptr);
+        }
+    }
+    return checkGreenOnly("(b)");
+}
+
 static void parityRows(IDirect3DDevice9 *d, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
         {"sr-lsb", rowSrLsb},       {"vo-one", rowVoOne},     {"dr-keep", rowDrKeep},
         {"pv-sysmem", rowPvSysmem}, {"pv-draw", rowPvDraw},   {"pv-dynsrc", rowPvDynsrc},
         {"pv-dyndst", rowPvDyndst}, {"rz-cross", rowRzCross}, {"gm-full", rowGmFull},
-        {"tb-self", rowTbSelf}};
+        {"tb-self", rowTbSelf},     {"tex-unwritten", rowTexUnwritten}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 200000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
