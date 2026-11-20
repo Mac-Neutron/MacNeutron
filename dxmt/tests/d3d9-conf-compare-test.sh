@@ -68,4 +68,9 @@ v "$X/core" 's|visual.c:15686  15 -> 3|visual.c:15686  15 -> 4|; s|current(faile
 t runtime-worse 1 '^core-worse arm64x/visual visual\.c:15686 3 -> 4$' $L "$D" "$X/core-worse"
 echo "arm64x/visual visual.c:15686 a window feature the core runtime lacks until C4d" > "$X/triaged-core"
 t runtime-triaged 0 '^info triaged arm64x/visual visual\.c:15686 3 -> 4$' $L "$D" "$X/core-worse" "$X/triaged-core"
+# The executed rule's floor (DXMTRS C4c-7d-2): over 0.1% fewer checks fails only past 16 checks fewer.
+v "$X/core" 's|executed=2430 ok|executed=2414 ok|' > "$X/core-16"
+t runtime-executed-floor 0 '^conf-compare: ok' $L "$D" "$X/core-16"
+v "$X/core" 's|executed=2430 ok|executed=2413 ok|' > "$X/core-17"
+t runtime-executed 1 '^core-executed arm64x/d3d9ex 2430 -> 2413$' $L "$D" "$X/core-17"
 [ -z "$fail" ] && echo "d3d9-conf-compare-test: ok" || { echo "d3d9-conf-compare-test: FAIL"; exit 1; }
