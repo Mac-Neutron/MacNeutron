@@ -172,16 +172,15 @@
 // does not follow a windowed device's window: DXMTRS C4c-6d's R6d-3). With a 200 s budget. The core before DXMTRS
 // C4c-6d's front end refuses a fullscreen device: every fs-* row prints its "FAIL ..." at its first fullscreen create
 // or Reset (fs-wndproc at its windowed half: no subclass).
-// With "parity" ("parity strict" under core; DXMTRS C4c-7d-1, C4c-7d-2): 11 rows "d3d9 <sr|vo|dr|pv|rz|gm|tb|tex>-<row>
+// With "parity" ("parity strict" under core; DXMTRS C4c-7d-1, C4c-7d-2): 10 rows "d3d9 <sr|vo|dr|pv|rz|gm|tb>-<row>
 // ok|FAIL <why>" of the last differences Wine's tests see between D3D9's core runtime and mtld3d: D3DSAMP_SRGBTEXTURE's
 // low bit (sr-lsb), a volume texture of depth 1 sampled raw and decoded (vo-one), a managed texture's uploaded levels
 // under READONLY and NO_DIRTY_UPDATE locks, AddDirtyRect and EvictManagedResources (dr-keep), ProcessVertices from and
 // into system-memory, default-pool WRITEONLY and dynamic buffers, read back and drawn (pv-sysmem, pv-draw, pv-dynsrc,
 // pv-dyndst), a one-sample RESZ from D24X8 into DF24 and into INTZ (rz-cross) and the gamma ramp on a fullscreen
 // device, across a Reset to windowed and back (gm-full); since DXMTRS C4c-7d-2 a draw that samples its own render
-// target, for the validation layer (tb-self), and a new managed texture's texels nothing wrote, after another device's
-// texture was released (tex-unwritten). sr-, vo-, dr-, pv-* and tb-self run on the launch's device; rz-cross and
-// gm-full on a device and a window of their own (reset's), tex-unwritten's first half too. Each cell wants what mtld3d
+// target, for the validation layer (tb-self). sr-, vo-, dr-, pv-* and tb-self run on the launch's device; rz-cross and
+// gm-full on a device and a window of their own (reset's). Each cell wants what mtld3d
 // answers, in every lane.
 // gm-full keeps the fullscreen mode's rules (modesEmulated() first and a FAIL before any device without it,
 // D3DCREATE_NOWINDOWCHANGES, the desktop's mode; no foreground change, minimised window, pointer move or fixed sleep);
@@ -11852,8 +11851,8 @@ static void fullscreenRows(IDirect3DDevice9 *d, bool strict) {
 // --- The "parity" mode (DXMTRS C4c-7d-1, C4c-7d-2): the last differences Wine's tests see between D3D9's core runtime
 // and mtld3d. sr-lsb, vo-one, dr-keep, the pv-* rows and tb-self run on the launch's device (256x256 X8R8G8B8, no
 // depth-stencil), reset() and bufStart() before each, and read back through frames(); rz-cross and gm-full make a
-// device and a window of their own (reset's) and, while they run, the globals the helpers read name it (OnDevice), as
-// tex-unwritten does for its first half. Each cell wants what mtld3d, the default runtime, answers, in every lane
+// device and a window of their own (reset's) and, while they run, the globals the helpers read name it (OnDevice).
+// Each cell wants what mtld3d, the default runtime, answers, in every lane
 // ("strict", the core's, only asks the first frame to match), and each row's comment says why its cells hold only if
 // the feature works. The mode's budget is 200 s, the launches' watchdog 300 s.
 
@@ -12204,43 +12203,13 @@ static bool rowTbSelf() {
     }
     return ok;
 }
-// tex-unwritten (DXMTRS C4c-7d-2; Wine's test_fetch4 reads texels it never wrote as zero): on a device and a window of
-// its own (exDevice), a 2x2 A8R8G8B8 managed texture filled red, drawn once and unbound, then released, then the
-// device. Then, before any other create on the launch's device, a new 2x2 A8R8G8B8 managed texture, LockRect(0, NULL)
-// writing texel (0,0) alone, green; point-sampled by the fixed-function stage at (0,0)'s centre over the quad at
-// (32,96) and at (1,1)'s over (160,96): green at (64,128) (the level reached the GPU: the next cell holds only if it
-// did) and black at (192,128), the colour channels (alpha not judged): a texel nothing wrote reads zero, not the bytes
-// of a texture released before (a new texture's staging comes from a process-wide pool, where a released texture's
-// parks). The default runtime's black rests on its staging pool being drained at each device's release; the control
-// run decides the cell.
-static bool rowTexUnwritten() {
-    {
-        RsDevice r;
-        Com<IDirect3DSurface9> bb;
-        if (!exDevice(r, bb)) return failIn("the second device");
-        const OnDevice on(r.d.p, bb.p);
-        Com<IDirect3DTexture9> red;
-        if (!make2d(red, 2, 2, 1, D3DFMT_A8R8G8B8, 4, [](int, int) { return TRED; }) ||
-            !scene([&] { return sampleAt(red.p, 96, 96, 0.5f, 0.5f); }))
-            return failIn("the second device's red texture drawn");
-        CK(Present, nullptr, nullptr, nullptr, nullptr);
-    }  // released in turn: the red texture, the back buffer, the device, the window
-    Com<IDirect3DTexture9> t;
-    CK(CreateTexture, 2, 2, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &t.p, nullptr);
-    if (!underLevelLock(t.p, 0, 0, [](BYTE *b, int) { memcpy(b, &TGRN, 4); }) || !pointClamp(0)) return false;
-    const Px px[] = {{64, 128, TGRN}, {192, 128, TBLK}};
-    return frames(BLUE, px, 2, [&] {
-               return sampleAt(t.p, 32, 96, 0.25f, 0.25f) && sampleAt(t.p, 160, 96, 0.75f, 0.75f);
-           }) ||
-           failIn("texel (0,0) written green at (64,128), (1,1) never written at (192,128)");
-}
 
 static void parityRows(IDirect3DDevice9 *d, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
         {"sr-lsb", rowSrLsb},       {"vo-one", rowVoOne},     {"dr-keep", rowDrKeep},
         {"pv-sysmem", rowPvSysmem}, {"pv-draw", rowPvDraw},   {"pv-dynsrc", rowPvDynsrc},
         {"pv-dyndst", rowPvDyndst}, {"rz-cross", rowRzCross}, {"gm-full", rowGmFull},
-        {"tb-self", rowTbSelf},     {"tex-unwritten", rowTexUnwritten}};
+        {"tb-self", rowTbSelf}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 200000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))

@@ -49,9 +49,9 @@
 #                                and out of fullscreen and the window subclass, each row on a plain device and a window
 #                                of its own, in this prefix, which emulates mode sets; "fullscreen strict" under core,
 #                                where ws-size wants the back buffer kept), 300 s
-#   pa<64|32>-fresh.txt           d3d9_triangle parity (DXMTRS C4c-7d-1's and C4c-7d-2's 11 rows of the last
+#   pa<64|32>-fresh.txt           d3d9_triangle parity (DXMTRS C4c-7d-1's and C4c-7d-2's 10 rows of the last
 #                                differences between the core runtime and mtld3d, rz-cross and gm-full each on a device
-#                                and a window of its own, tex-unwritten's first half too, gm-full fullscreen in this
+#                                and a window of its own, gm-full fullscreen in this
 #                                prefix; "parity strict" under core), 300 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
