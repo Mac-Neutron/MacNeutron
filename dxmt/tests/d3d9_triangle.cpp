@@ -12026,25 +12026,34 @@ static bool pvQuads(Com<IDirect3DVertexBuffer9> &src) {
     cquad(v, -0.875f, -0.5f, -0.125f, 0.5f, TRED), cquad(v + 4, 0.125f, -0.5f, 0.875f, 0.5f, TGRN);
     return mkVb(src, v, sizeof v, D3DPOOL_SYSTEMMEM) && fcStream(src.p);
 }
-// pv-draw: a default-pool D3DUSAGE_WRITEONLY destination of eight vertices, never locked (games' usual: the core
-// releases its CPU copy once it is uploaded). ProcessVertices of A (source 0-3) into vertices 0-3; a frame drawing
-// them as a strip: red at (64,128), blue at (192,128). Then the source's FVF and stream set again (rvAt replaced both)
-// and ProcessVertices of B (source 4-7) into vertices 4-7; a frame drawing both strips: red at (64,128), green at
-// (192,128), blue at (128,128). B's cell holds only if the second call's window reaches the GPU after the first draw
-// made the buffer whole there; A's only if that window reaches it alone (one widened to the whole buffer would send
-// the re-created CPU copy's zeros over A).
+// pv-draw: a default-pool D3DUSAGE_WRITEONLY destination of twelve vertices, never locked (games' usual: the core
+// releases its CPU copy once it is uploaded). ProcessVertices of A (source 0-3) into vertices 0-3, of B (source 4-7)
+// into 4-7 and of A into 8-11; a frame drawing strips 0 and 4: red at (64,128), green at (192,128), blue between
+// (the buffer is whole on the GPU and its CPU copy released). Then, the source's FVF and stream set again (rvAt
+// replaced both), **two windows around 4-7 with no draw between them**: B into 0-3 and B into 8-11. A frame drawing
+// strip 4 alone: green at (192,128), blue at (64,128): B at 4-7 is still there only if each window reached the GPU
+// alone (windows joined into one range, or the whole buffer, would send the re-created CPU copy's zeros over it). A
+// frame drawing strip 0 alone: green at (192,128), blue at (64,128): the window into 0-3 reached the GPU (A, red at
+// the left, is what a window that never arrived leaves there).
 static bool rowPvDraw() {
     Com<IDirect3DVertexBuffer9> src, dst;
     if (!pvQuads(src)) return false;
-    CK(CreateVertexBuffer, 8 * sizeof(RV), D3DUSAGE_WRITEONLY, FVF_RV, D3DPOOL_DEFAULT, &dst.p, nullptr);
-    const Px a[] = {{64, 128, TRED}, {192, 128, BLUE}}, ab[] = {{64, 128, TRED}, {192, 128, TGRN}, {128, 128, BLUE}};
+    CK(CreateVertexBuffer, 12 * sizeof(RV), D3DUSAGE_WRITEONLY, FVF_RV, D3DPOOL_DEFAULT, &dst.p, nullptr);
+    const Px ab[] = {{64, 128, TRED}, {192, 128, TGRN}, {128, 128, BLUE}}, b[] = {{192, 128, TGRN}, {64, 128, BLUE}};
     if (!answer("ProcessVertices (A into 0-3)", dev->ProcessVertices(0, 0, 4, dst.p, nullptr, 0), D3D_OK) ||
-        !(frames(BLUE, a, 2, [&] { return rvAt(dst.p) && stripAt(0); }) || failIn("A drawn")))
+        !answer("ProcessVertices (B into 4-7)", dev->ProcessVertices(4, 4, 4, dst.p, nullptr, 0), D3D_OK) ||
+        !answer("ProcessVertices (A into 8-11)", dev->ProcessVertices(0, 8, 4, dst.p, nullptr, 0), D3D_OK) ||
+        !(frames(BLUE, ab, 3, [&] { return rvAt(dst.p) && stripAt(0) && stripAt(4); }) || failIn("A and B drawn")))
         return false;
     return fcStream(src.p) &&
-           answer("ProcessVertices (B into 4-7)", dev->ProcessVertices(4, 4, 4, dst.p, nullptr, 0), D3D_OK) &&
-           (frames(BLUE, ab, 3, [&] { return rvAt(dst.p) && stripAt(0) && stripAt(4); }) ||
-            failIn("A and B drawn after the second ProcessVertices (A at (64,128), B at (192,128))"));
+           answer("ProcessVertices (B into 0-3, after the draw)", dev->ProcessVertices(4, 0, 4, dst.p, nullptr, 0),
+                  D3D_OK) &&
+           answer("ProcessVertices (B into 8-11, after the draw)", dev->ProcessVertices(4, 8, 4, dst.p, nullptr, 0),
+                  D3D_OK) &&
+           (frames(BLUE, b, 2, [&] { return rvAt(dst.p) && stripAt(4); }) ||
+            failIn("4-7 drawn after two windows around it (B still there)")) &&
+           (frames(BLUE, b, 2, [&] { return rvAt(dst.p) && stripAt(0); }) ||
+            failIn("0-3 drawn after its window (B where A was)"));
 }
 // pv-dyndst: ProcessVertices of A into a default-pool D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY destination (mapped
 // directly, never locked): D3D_OK, and a frame drawing it: red at (64,128), blue at (192,128). Only vertices written
