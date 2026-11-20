@@ -172,6 +172,18 @@
 // does not follow a windowed device's window: DXMTRS C4c-6d's R6d-3). With a 200 s budget. The core before DXMTRS
 // C4c-6d's front end refuses a fullscreen device: every fs-* row prints its "FAIL ..." at its first fullscreen create
 // or Reset (fs-wndproc at its windowed half: no subclass).
+// With "parity" ("parity strict" under core; DXMTRS C4c-7d-1): 9 rows "d3d9 <sr|vo|dr|pv|rz|gm>-<row> ok|FAIL <why>"
+// of the last differences Wine's tests see between D3D9's core runtime and mtld3d: D3DSAMP_SRGBTEXTURE's low bit
+// (sr-lsb), a volume texture of depth 1 sampled raw and decoded (vo-one), a managed texture's uploaded levels under
+// READONLY and NO_DIRTY_UPDATE locks, AddDirtyRect and EvictManagedResources (dr-keep), ProcessVertices from and into
+// system-memory, default-pool WRITEONLY and dynamic buffers, read back and drawn (pv-sysmem, pv-draw, pv-dynsrc,
+// pv-dyndst), a one-sample RESZ from D24X8 into DF24 and into INTZ (rz-cross) and the gamma ramp on a fullscreen
+// device, across a Reset to windowed and back (gm-full). sr-, vo-, dr- and pv-* run on the launch's device; rz-cross
+// and gm-full on a device and a window of their own (reset's). Each cell wants what mtld3d answers, in every lane.
+// gm-full keeps the fullscreen mode's rules (modesEmulated() first and a FAIL before any device without it,
+// D3DCREATE_NOWINDOWCHANGES, the desktop's mode; no foreground change, minimised window, pointer move or fixed sleep);
+// no cell sees the ramp on screen. With a 200 s budget. The core before DXMTRS C4c-7d-1's front end refuses
+// ProcessVertices (D3DERR_NOTAVAILABLE): each pv-* row prints its "FAIL ProcessVertices ... 8876086a".
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -11833,6 +11845,317 @@ static void fullscreenRows(IDirect3DDevice9 *d, bool strict) {
     }
 }
 
+// --- The "parity" mode (DXMTRS C4c-7d-1): the last differences Wine's tests see between D3D9's core runtime and
+// mtld3d. sr-lsb, vo-one, dr-keep and the pv-* rows run on the launch's device (256x256 X8R8G8B8, no depth-stencil),
+// reset() and bufStart() before each, and read back through frames(); rz-cross and gm-full make a device and a window
+// of their own (reset's) and, while they run, the globals the helpers read name it (OnDevice). Each cell wants what
+// mtld3d, the default runtime, answers, in every lane ("strict", the core's, only asks the first frame to match), and
+// each row's comment says why its cells hold only if the feature works. The mode's budget is 200 s, the launches'
+// watchdog 300 s.
+
+// sr-lsb: a 1x1 X8R8G8B8 texture of grey 128 (an sRGB code whose linear value is 55) sampled by the fixed-function
+// stage five times in one frame, D3DSAMP_SRGBTEXTURE 0, 1, 2, 3 and 0x7e41882a set before each draw, over the 64x64
+// quads at (0,32), (64,32), (128,32), (192,32) and (0,160): mtld3d decodes when the value's low bit is set, so 128,
+// 55, 128, 55, 128. The cells of 1 and 3 hold only if the decode shows at all (else the raw cells would pass on a
+// runtime that never decodes); those of 2 and 0x7e41882a only if the view is picked by the low bit (a test of "not
+// 0" decodes both).
+static bool rowSrLsb() {
+    Com<IDirect3DTexture9> t;
+    if (!make2d(t, 1, 1, 1, D3DFMT_X8R8G8B8, 4, [](int, int) { return gray(128); })) return false;
+    static const DWORD values[5] = {0, 1, 2, 3, 0x7e41882a};
+    Px px[5];
+    for (int i = 0; i < 5; i++) px[i] = {64 * (i % 4) + 32, i < 4 ? 64 : 192, gray(values[i] & 1 ? 55 : 128)};
+    return frames(BLUE, px, 5, [&] {
+               for (int i = 0; i < 5; i++) {
+                   CK(SetSamplerState, 0, D3DSAMP_SRGBTEXTURE, values[i]);
+                   if (!sampleAt(t.p, 64.0f * (i % 4), i < 4 ? 32.0f : 160.0f, 0.5f)) return false;
+               }
+               return true;
+           }) ||
+           failIn("SRGBTEXTURE 0, 1, 2, 3 at y 64 left to right, 0x7e41882a at (32,192)");
+}
+// vo-one: a 1x1x1 X8R8G8B8 volume texture of grey 128, managed (filled by LockBox), and a default-pool one filled by
+// UpdateTexture from a system-memory one, each sampled by the fixed-function stage at (0.5, 0.5, 0.5) (three
+// coordinates), D3DSAMP_SRGBTEXTURE off then on, over the quads at x 0, 64, 128 and 192: 128, 55, 128, 55. A volume of
+// depth 1 is a 2D texture on mtld3d, and the stage declares its sampler 2D: only a 2D texture both reads the texel (a
+// 3D one bound where 2D is declared reads nothing defined, and the validation layer reports it) and takes the sRGB
+// view (the decoded cells).
+static bool rowVoOne() {
+    Com<IDirect3DVolumeTexture9> managed, sys, def;
+    const auto volume = [&](Com<IDirect3DVolumeTexture9> &v, D3DPOOL pool) {
+        CK(CreateVolumeTexture, 1, 1, 1, 1, 0, D3DFMT_X8R8G8B8, pool, &v.p, nullptr);
+        if (pool == D3DPOOL_DEFAULT) return true;
+        D3DLOCKED_BOX lb = {};
+        HRESULT hr = v.p->LockBox(0, &lb, nullptr, 0);
+        if (FAILED(hr)) return fail("LockBox", hr);
+        *(DWORD *)lb.pBits = gray(128);
+        hr = v.p->UnlockBox(0);
+        return SUCCEEDED(hr) || fail("UnlockBox", hr);
+    };
+    if (!volume(managed, D3DPOOL_MANAGED) || !volume(sys, D3DPOOL_SYSTEMMEM) || !volume(def, D3DPOOL_DEFAULT))
+        return false;
+    CK(UpdateTexture, sys.p, def.p);
+    const Px px[] = {{32, 128, gray(128)}, {96, 128, gray(55)}, {160, 128, gray(128)}, {224, 128, gray(55)}};
+    return frames(BLUE, px, 4, [&] {
+               for (int i = 0; i < 4; i++) {
+                   CK(SetSamplerState, 0, D3DSAMP_SRGBTEXTURE, (DWORD)(i & 1));
+                   if (!sampleAt(i < 2 ? managed.p : def.p, 64.0f * i, 96, 0.5f)) return false;
+               }
+               return true;
+           }) ||
+           failIn("left to right: managed raw, managed sRGB, the UpdateTexture twin raw, the twin sRGB");
+}
+// dr-keep: a managed 4x2 X8R8G8B8 texture of two levels (level 1 2x1), made once and never filled at its create. A
+// level is shown by probe2d at u 1/8 and 7/8, v 1/4 (texels 0 and 3 of level 0's first row, texels 0 and 1 of level
+// 1), MIPFILTER POINT and MAXMIPLEVEL 0 or 1, a frame a level; a write is every texel of a level, level 0 and level 1
+// in colours of their own (so a level-1 probe that sampled level 0 reads the wrong one). The cells:
+// (i) the texture bound and drawn before any lock (nothing judged), then a READONLY lock of level 0 writing steel:
+// level 0 steel (a level's very first lock uploads, READONLY or not; a mark set for every level a texture's first
+// upload carries keeps it out). Then rust (level 0) and gold (level 1) written with no flag: shown (both uploaded).
+// (ii) READONLY locks writing aqua and lilac: rust and gold (an uploaded level's READONLY unlock marks nothing; the
+// level-1 cell holds only if level 1 is marked uploaded too).
+// (iii) NO_DIRTY_UPDATE locks writing mint and rose: rust and gold (a managed uploaded level's such unlock likewise).
+// (iv) AddDirtyRect of (2,0)-(4,2), D3D_OK: level 0 rust at texel 0 and mint at texel 3, level 1 gold at texel 0 and
+// rose at texel 1 (each level's clipped rect, halved with its edges rounded out, (1,0)-(2,1) on level 1, uploads from
+// the CPU copy, and nothing else: texel 0 holds only if the upload is that rect, texel 3 only if it happens).
+// (v) EvictManagedResources, D3D_OK: mint and rose at every texel (each uploaded level marked dirty again, so the CPU
+// copy, the last written, uploads whole).
+static bool rowDrKeep() {
+    Com<IDirect3DTexture9> t;
+    CK(CreateTexture, 4, 2, 2, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &t.p, nullptr);
+    const auto write = [&](UINT l, DWORD flags, DWORD c) {
+        return underLevelLock(t.p, l, flags, [&](BYTE *b, int p) { paint(b, p, 0, 0, 4 >> l, 2 >> l, c); });
+    };
+    const auto both = [&](DWORD flags, DWORD c0, DWORD c1) { return write(0, flags, c0) && write(1, flags, c1); };
+    const auto shows = [&](UINT l, DWORD left, DWORD right) {
+        CK(SetSamplerState, 0, D3DSAMP_MIPFILTER, D3DTEXF_POINT);
+        CK(SetSamplerState, 0, D3DSAMP_MAXMIPLEVEL, l);
+        const Probe pr[] = {{0.125f, 0.25f, left}, {0.875f, 0.25f, right}};
+        const bool ok = probe2d(t.p, pr, 2);
+        dev->SetSamplerState(0, D3DSAMP_MAXMIPLEVEL, 0);
+        return ok || failIn(l ? "level 1" : "level 0");
+    };
+    const auto levels = [&](DWORD l0a, DWORD l0b, DWORD l1a, DWORD l1b) {
+        return shows(0, l0a, l0b) && shows(1, l1a, l1b);
+    };
+    // (i)'s first draw: the texture sampled over one quad, no pixel judged.
+    const auto drawn = [&] {
+        Com<IDirect3DPixelShader9> ps;
+        if (!usePs(ps, K2D, 0, false) || !pointClamp(0)) return false;
+        CK(SetTexture, 0, t.p);
+        TV3 q[4];
+        tquad(q, 16, 96, 56, 136, 0.5f, 0.5f);
+        return frames(BLUE, nullptr, 0, [&] { return tdraw(q); });
+    };
+    if (!drawn() || !write(0, D3DLOCK_READONLY, KSTEEL) || !shows(0, KSTEEL, KSTEEL))
+        return failIn("(i) a READONLY first lock of a level drawn before any lock");
+    if (!both(0, KRUST, KGOLD) || !levels(KRUST, KRUST, KGOLD, KGOLD)) return failIn("written with no flag");
+    if (!both(D3DLOCK_READONLY, KAQUA, KLILAC) || !levels(KRUST, KRUST, KGOLD, KGOLD))
+        return failIn("(ii) READONLY after the upload");
+    if (!both(D3DLOCK_NO_DIRTY_UPDATE, KMINT, KROSE) || !levels(KRUST, KRUST, KGOLD, KGOLD))
+        return failIn("(iii) NO_DIRTY_UPDATE after the upload");
+    const RECT part = {2, 0, 4, 2};
+    if (!answer("AddDirtyRect", t.p->AddDirtyRect(&part), D3D_OK) || !levels(KRUST, KMINT, KGOLD, KROSE))
+        return failIn("(iv) AddDirtyRect (2,0)-(4,2)");
+    return (answer("EvictManagedResources", dev->EvictManagedResources(), D3D_OK) &&
+            levels(KMINT, KMINT, KROSE, KROSE)) ||
+           failIn("(v) EvictManagedResources");
+}
+
+// The ProcessVertices rows (pv-*): the source is stream 0 read through SetFVF(XYZ | DIFFUSE) (FC, stride 16); the
+// destination a vertex buffer made with FVF XYZRHW | DIFFUSE (one made with FVF 0 is D3DERR_INVALIDCALL on both
+// runtimes). Under reset()'s identity transforms, LIGHTING off and its full 256x256 viewport, a vertex (x, y, z)
+// becomes ((x + 1) * 128, (1 - y) * 128, z, rhw 1), its colour copied. Every call is made outside frames(), so a
+// retried frame draws what one call wrote. pv-sysmem's and pv-dynsrc's vertices (dyadic, so each result is exact):
+static const FC PV_SRC[4] = {{-0.5f, 0.5f, 0.25f, KRUST}, {0.75f, 0.25f, 0.5f, KSTEEL}, {-0.25f, -0.75f, 0.75f, KAQUA},
+                             {0.5f, -0.5f, 1.0f, KMINT}};
+// `src` at stream 0 as FC vertices, read through FVF_C.
+static bool fcStream(IDirect3DVertexBuffer9 *src) {
+    CK(SetFVF, FVF_C);
+    CK(SetStreamSource, 0, src, 0, sizeof(FC));
+    return true;
+}
+// Four vertices from `first` drawn as a strip.
+static bool stripAt(UINT first) {
+    CK(DrawPrimitive, D3DPT_TRIANGLESTRIP, first, 2);
+    return true;
+}
+// ProcessVertices(0, 0, 4) of PV_SRC from `src` (bound as fcStream) into a new system-memory destination, read under
+// a READONLY lock: D3D_OK and each vertex transformed (within 0.01 a coordinate, the colour exact), else `why` names
+// the first that is not.
+static bool pvRead(IDirect3DVertexBuffer9 *src) {
+    Com<IDirect3DVertexBuffer9> dst;
+    CK(CreateVertexBuffer, 4 * sizeof(RV), 0, FVF_RV, D3DPOOL_SYSTEMMEM, &dst.p, nullptr);
+    if (!fcStream(src) || !answer("ProcessVertices", dev->ProcessVertices(0, 0, 4, dst.p, nullptr, 0), D3D_OK))
+        return false;
+    void *p = nullptr;
+    HRESULT hr = dst.p->Lock(0, 0, &p, D3DLOCK_READONLY);
+    if (FAILED(hr)) return fail("Lock (READONLY) of the destination", hr);
+    RV got[4];
+    memcpy(got, p, sizeof got);
+    if (FAILED(hr = dst.p->Unlock())) return fail("Unlock (the destination)", hr);
+    for (int i = 0; i < 4; i++) {
+        const FC &s = PV_SRC[i];
+        const RV w = {(s.x + 1) * 128, (1 - s.y) * 128, s.z, 1, s.c}, &g = got[i];
+        if (fabsf(g.x - w.x) > 0.01f || fabsf(g.y - w.y) > 0.01f || fabsf(g.z - w.z) > 0.01f ||
+            fabsf(g.rhw - w.rhw) > 0.01f || g.color != w.color)
+            return snprintf(why, sizeof why, "vertex %d (%g, %g, %g, rhw %g) %08lx, want (%g, %g, %g, rhw 1) %08lx", i,
+                            (double)g.x, (double)g.y, (double)g.z, (double)g.rhw, (unsigned long)g.color, (double)w.x,
+                            (double)w.y, (double)w.z, (unsigned long)w.color),
+                   false;
+    }
+    return true;
+}
+// pv-sysmem: pvRead from a system-memory source: only a call that ran the transform writes the four vertices.
+static bool rowPvSysmem() {
+    Com<IDirect3DVertexBuffer9> src;
+    return mkVb(src, PV_SRC, sizeof PV_SRC, D3DPOOL_SYSTEMMEM) && pvRead(src.p);
+}
+// pv-dynsrc: pvRead from a default-pool D3DUSAGE_DYNAMIC source written through Lock(DISCARD), a buffer mtld3d and the
+// core map directly (its bytes are where the GPU reads them; the core keeps no CPU copy of it): D3D_OK with the four
+// vertices only from a call that reads the mapped bytes.
+static bool rowPvDynsrc() {
+    Com<IDirect3DVertexBuffer9> src;
+    return mkDyn(src, sizeof PV_SRC, 0) && put(src.p, 0, PV_SRC, sizeof PV_SRC, D3DLOCK_DISCARD) && pvRead(src.p);
+}
+// pv-draw's and pv-dyndst's system-memory source, bound (fcStream): quad A at vertices 0-3, red, over pixels
+// (16,64)-(112,192), and quad B at 4-7, green, over (144,64)-(240,192), each a clockwise strip once transformed.
+static bool pvQuads(Com<IDirect3DVertexBuffer9> &src) {
+    FC v[8];
+    cquad(v, -0.875f, -0.5f, -0.125f, 0.5f, TRED), cquad(v + 4, 0.125f, -0.5f, 0.875f, 0.5f, TGRN);
+    return mkVb(src, v, sizeof v, D3DPOOL_SYSTEMMEM) && fcStream(src.p);
+}
+// pv-draw: a default-pool D3DUSAGE_WRITEONLY destination of eight vertices, never locked (games' usual: the core
+// releases its CPU copy once it is uploaded). ProcessVertices of A (source 0-3) into vertices 0-3; a frame drawing
+// them as a strip: red at (64,128), blue at (192,128). Then the source's FVF and stream set again (rvAt replaced both)
+// and ProcessVertices of B (source 4-7) into vertices 4-7; a frame drawing both strips: red at (64,128), green at
+// (192,128), blue at (128,128). B's cell holds only if the second call's window reaches the GPU after the first draw
+// made the buffer whole there; A's only if that window reaches it alone (one widened to the whole buffer would send
+// the re-created CPU copy's zeros over A).
+static bool rowPvDraw() {
+    Com<IDirect3DVertexBuffer9> src, dst;
+    if (!pvQuads(src)) return false;
+    CK(CreateVertexBuffer, 8 * sizeof(RV), D3DUSAGE_WRITEONLY, FVF_RV, D3DPOOL_DEFAULT, &dst.p, nullptr);
+    const Px a[] = {{64, 128, TRED}, {192, 128, BLUE}}, ab[] = {{64, 128, TRED}, {192, 128, TGRN}, {128, 128, BLUE}};
+    if (!answer("ProcessVertices (A into 0-3)", dev->ProcessVertices(0, 0, 4, dst.p, nullptr, 0), D3D_OK) ||
+        !(frames(BLUE, a, 2, [&] { return rvAt(dst.p) && stripAt(0); }) || failIn("A drawn")))
+        return false;
+    return fcStream(src.p) &&
+           answer("ProcessVertices (B into 4-7)", dev->ProcessVertices(4, 4, 4, dst.p, nullptr, 0), D3D_OK) &&
+           (frames(BLUE, ab, 3, [&] { return rvAt(dst.p) && stripAt(0) && stripAt(4); }) ||
+            failIn("A and B drawn after the second ProcessVertices (A at (64,128), B at (192,128))"));
+}
+// pv-dyndst: ProcessVertices of A into a default-pool D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY destination (mapped
+// directly, never locked): D3D_OK, and a frame drawing it: red at (64,128), blue at (192,128). Only vertices written
+// where the GPU reads them draw.
+static bool rowPvDyndst() {
+    Com<IDirect3DVertexBuffer9> src, dst;
+    if (!pvQuads(src)) return false;
+    CK(CreateVertexBuffer, 4 * sizeof(RV), D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, FVF_RV, D3DPOOL_DEFAULT, &dst.p,
+       nullptr);
+    const Px px[] = {{64, 128, TRED}, {192, 128, BLUE}};
+    return answer("ProcessVertices (A into a dynamic buffer)", dev->ProcessVertices(0, 0, 4, dst.p, nullptr, 0),
+                  D3D_OK) &&
+           (frames(BLUE, px, 2, [&] { return rvAt(dst.p) && stripAt(0); }) || failIn("A drawn"));
+}
+// rz-cross (DXMTRS C4c-7a's ruling R7a-4: a one-sample RESZ between two depth formats), one until() attempt: a 1-sample
+// 256x256 D24X8 surface holds bands() beside the back buffer; a DF24 and an INTZ texture made with
+// D3DUSAGE_DEPTHSTENCIL, each cleared to Z 1 first; in one scene RESZ D3D_OK with the DF24 texture at stage 0, then
+// with the INTZ one; both read by the raw sample, band i's centre texel over the quads at (64 i, 32) (DF24) and (64 i,
+// 160) (INTZ), red alone judged (DF24 holds the depth in red). (a) DF24 (Depth32Float, the source's Metal format on
+// both runtimes): the bands' depths (only a copy writes them over the clear's 0xff). (b) INTZ (Depth32Float_Stencil8):
+// 0xff, its clear (the core skips a pair of two Metal formats; mtld3d queues a blit between them, which the first
+// control run decides). (a) is (b)'s control: (b)'s 0xff says something only when the source held the bands.
+static bool rowRzCross() {
+    RsDevice r;
+    Com<IDirect3DSurface9> bb;
+    if (!exDevice(r, bb)) return false;
+    const OnDevice on(r.d.p, bb.p);
+    return until([] {
+        Rt read;
+        Com<IDirect3DSurface9> s;
+        Com<IDirect3DTexture9> df, intz;
+        if (!mkRt(read, 256) || !makeDs(s, D3DFMT_D24X8) || !makeDepthTex(df, FMT_DF24) ||
+            !makeDepthTex(intz, FMT_INTZ) || !rstate(D3DRS_POINTSIZE, fbits(1.0f)))
+            return false;
+        const bool drawn = scene([&] {
+            if (!bindRt(0, read.s.p)) return false;
+            for (IDirect3DTexture9 *t : {df.p, intz.p})
+                if (!bindDsLevel(t) || !clearZ()) return false;
+            if (!bindRt(0, rtSurf) || !bindDs(s.p) || !bands()) return false;
+            CK(SetTexture, 0, df.p);
+            if (!resz("RESZ ((a) D24X8 into DF24)")) return false;
+            CK(SetTexture, 0, intz.p);
+            if (!resz("RESZ ((b) D24X8 into INTZ)") || !readInto(read.s.p)) return false;
+            for (int i = 0; i < 4; i++)
+                if (!sampleAt(df.p, 64.0f * i, 32, (64 * i + 32.5f) / 256) ||
+                    !sampleAt(intz.p, 64.0f * i, 160, (64 * i + 32.5f) / 256))
+                    return false;
+            return true;
+        });
+        dev->SetTexture(0, nullptr);
+        return drawn && readTarget(read.s.p, 256, 256, A8, [](const BYTE *t, int p) {
+                   return txHas("(a) D24X8 into DF24, the bands", t, p,
+                                {{32, 64, BAND[0], 0xff0000}, {96, 64, BAND[1], 0xff0000},
+                                 {160, 64, BAND[2], 0xff0000}, {224, 64, BAND[3], 0xff0000}}) &&
+                          txHas("(b) D24X8 into INTZ cleared to Z 1, unchanged", t, p,
+                                {{32, 192, 0xff0000, 0xff0000}, {96, 192, 0xff0000, 0xff0000},
+                                 {160, 192, 0xff0000, 0xff0000}, {224, 192, 0xff0000, 0xff0000}});
+               });
+    });
+}
+// gm-full (the fullscreen mode's rules: modesEmulated() first, a FAIL before any device without it; a fullscreen
+// device with D3DCREATE_NOWINDOWCHANGES at the desktop's mode): SetGammaRamp(0) of gm-ramp's rising ramp, Get reads it
+// back; a quad lands, read back unchanged (rust: the back buffer is read before the ramp, on both runtimes), and a
+// present (presents()). Reset to a windowed 256x256 with the ramp still set: a quad lands. Reset into fullscreen again:
+// a quad lands and a present. The identity set: Get reads it, a quad lands, Present D3D_OK. No cell sees the ramp on
+// screen: under core the launch's log holds the line the core logs when a ramp first applies (the gates count it),
+// and the validation layer watches the presenter's path.
+static bool rowGmFull() {
+    if (!modesEmulated()) return false;
+    D3DDISPLAYMODE m = {};
+    if (!adapterMode(m)) return false;
+    RsDevice r;
+    if (!rsDevice(r, D3DFMT_UNKNOWN, false, D3DMULTISAMPLE_NONE, &m, D3DCREATE_NOWINDOWCHANGES)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    const D3DGAMMARAMP identity = gammaRamp([](int, int i) { return (WORD)(i * 257); }),
+                       rising = gammaRamp([](int c, int i) {
+                           return (WORD)(c == 0 ? i * 200 : c == 1 ? i * 100 + 7 : i * 256);
+                       });
+    const auto frame = [] { return until([] { return lands(160, 160, 224, 224, 32, 32); }); };
+    D3DPRESENT_PARAMETERS win = rsParams(r.w.h, 256, 256),
+                          full = rsParams(r.w.h, m.Width, m.Height, D3DFMT_UNKNOWN, D3DMULTISAMPLE_NONE, &m);
+    dev->SetGammaRamp(0, D3DSGR_NO_CALIBRATION, &rising);
+    if (!gammaIs("GetGammaRamp (a rising ramp set)", 0, rising) || !frame() || !presents())
+        return failIn("fullscreen, the ramp set");
+    if (!resetIs("Reset (to a windowed 256x256, the ramp still set)", win) || !frame()) return failIn("windowed");
+    if (!resetIs("Reset (into fullscreen again)", full) || !frame() || !presents()) return failIn("fullscreen again");
+    dev->SetGammaRamp(0, D3DSGR_NO_CALIBRATION, &identity);
+    return (gammaIs("GetGammaRamp (the identity set)", 0, identity) && frame() && presentIs(D3D_OK)) ||
+           failIn("the identity");
+}
+
+static void parityRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"sr-lsb", rowSrLsb},       {"vo-one", rowVoOne},     {"dr-keep", rowDrKeep},
+        {"pv-sysmem", rowPvSysmem}, {"pv-draw", rowPvDraw},   {"pv-dynsrc", rowPvDynsrc},
+        {"pv-dyndst", rowPvDyndst}, {"rz-cross", rowRzCross}, {"gm-full", rowGmFull}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 200000;
+    HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
+    if (SUCCEEDED(hr))
+        hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (FAILED(hr)) ok = fail("GetRenderTarget/CreateOffscreenPlainSurface", hr);
+        else if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = reset() && bufStart() && r.run();
+        row(r.name, ok, why);
+    }
+    if (sysSurf) sysSurf->Release();
+    if (rtSurf) rtSurf->Release();
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
@@ -11855,6 +12178,7 @@ int main(int argc, char **argv) {
     const bool resetMode = !bench && argc > 1 && !strcmp(argv[1], "reset");
     const bool extrasMode = !bench && argc > 1 && !strcmp(argv[1], "extras");
     const bool fullscreenMode = !bench && argc > 1 && !strcmp(argv[1], "fullscreen");
+    const bool parityMode = !bench && argc > 1 && !strcmp(argv[1], "parity");
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     const bool bufBench = bench && argc > 4 && !strcmp(argv[4], "buf");
@@ -11930,6 +12254,13 @@ int main(int argc, char **argv) {
     }
     if (fullscreenMode) {
         fullscreenRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
+    if (parityMode) {
+        parityRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();
         d3d->Release();
         DestroyWindow(hwnd);

@@ -74,7 +74,11 @@
 # checks d3d9_triangle fullscreen's 9 rows (DXMTRS C4c-6d: fullscreen devices, Reset into and out of fullscreen and the
 # window subclass, each row on a plain device and a window of its own, in the guest's prefix, which emulates mode sets;
 # "fullscreen strict" under core, where ws-size wants the back buffer kept; fs64-fresh, fs32-fresh); under core their
-# logs hold no refusal line.
+# logs hold no refusal line. Every lane also checks d3d9_triangle parity's 9 rows (DXMTRS C4c-7d-1:
+# D3DSAMP_SRGBTEXTURE's low bit, a volume texture of depth 1, a managed texture's uploaded levels, ProcessVertices, a
+# one-sample RESZ between two depth formats and the gamma ramp on a fullscreen device, rz-cross and gm-full each on a
+# device and a window of its own, in the guest's prefix, which emulates mode sets; "parity strict" under core;
+# pa64-fresh, pa32-fresh); under core their logs hold no refusal line.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -269,6 +273,11 @@ for r in fs64-fresh fs32-fresh; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
+for r in pa64-fresh pa32-fresh; do
+  for row in sr-lsb vo-one dr-keep pv-sysmem pv-draw pv-dynsrc pv-dyndst rz-cross gm-full; do
+    check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
+  done
+done
 for r in st64-fresh st32-fresh; do
   for row in state-xform state-material state-tss state-swapchain state-rt state-tex state-late state-lock state-sb \
     state-upunbind state-fftex state-fftexoff state-getters state-stubs state-present state-ex; do
@@ -284,8 +293,9 @@ done
 # back-buffer format the core does not make, rs-refuse's under strict alone (its one since DXMTRS C4c-6d, which makes a
 # Reset into fullscreen the core's), extras_refusals: DXMTRS C4c-7a's RESZ into a dynamic depth texture, rz-refuse's
 # under strict alone).
-# The shaders, state, textures, targets, blend, mrt, msaa, blit, queries and fullscreen launches (DXMTRS C4b-2,
-# C4b-3a, C4b-3b, C4b-3d1, C4b-3d3, C4b-3d4, C4b-3d5, C4c-4a, C4c-5, C4c-6d) take no kind: no refusal line (the
+# The shaders, state, textures, targets, blend, mrt, msaa, blit, queries, fullscreen and parity launches (DXMTRS
+# C4b-2, C4b-3a, C4b-3b, C4b-3d1, C4b-3d3, C4b-3d4, C4b-3d5, C4c-4a, C4c-5, C4c-6d, C4c-7d-1) take no kind: no refusal
+# line (the parity launch's since DXMTRS C4c-7d-1, which makes ProcessVertices the core's; the
 # fullscreen launch's since DXMTRS C4c-6d, which makes fullscreen devices and Resets into fullscreen the core's; the
 # shaders launch's since DXMTRS C4c-2a, which draws the crossing row; the state launch's since DXMTRS C4c-1: buffer
 # locks are the core's, and since
@@ -341,7 +351,8 @@ if [ "$RT" = core ]; then
       "$(/usr/bin/grep -rqF 'd3d9 core: dynamic buffers are read in place' "$G/logs/$r" 2> /dev/null && echo ok)" ok
   done
   for r in shd64-fresh shd32-fresh st64-fresh st32-fresh tg64-fresh tg32-fresh bl64-fresh bl32-fresh mr64-fresh \
-    mr32-fresh ms64-fresh ms32-fresh bt64-fresh bt32-fresh qu64-fresh qu32-fresh fs64-fresh fs32-fresh; do
+    mr32-fresh ms64-fresh ms32-fresh bt64-fresh bt32-fresh qu64-fresh qu32-fresh fs64-fresh fs32-fresh pa64-fresh \
+    pa32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
   done
 fi

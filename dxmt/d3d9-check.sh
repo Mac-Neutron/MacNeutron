@@ -87,7 +87,12 @@
 # d3d9_triangle fullscreen (DXMTRS C4c-6d's 9 rows of fullscreen devices, Reset into and out of fullscreen and the
 # window subclass, each row on a plain device and a window of its own, every fs-* row FAILing before any device unless
 # Wine emulates mode sets for it; "fullscreen strict" under core, where ws-size wants the back buffer kept), its rows
-# "fullscreen-<row>"; under core its launch's logs hold no refusal line.
+# "fullscreen-<row>"; under core its launch's logs hold no refusal line. Every lane also runs d3d9_triangle parity
+# (DXMTRS C4c-7d-1's 9 rows of D3DSAMP_SRGBTEXTURE's low bit, a volume texture of depth 1, a managed texture's uploaded
+# levels, ProcessVertices, a one-sample RESZ between two depth formats and the gamma ramp on a fullscreen device,
+# rz-cross and gm-full each on a device and a window of its own, gm-full FAILing before any device unless Wine
+# emulates mode sets for it; "parity strict" under core), its rows "parity-<row>"; under core its launch's logs hold
+# no refusal line.
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -179,7 +184,8 @@ launch() {
 # Reset to a back-buffer format the core does not make, which rs-refuse asks for under strict alone; its one since
 # DXMTRS C4c-6d, which makes a Reset into fullscreen the core's); the extras launch's exactly its one (DXMTRS C4c-7a:
 # a RESZ into a dynamic depth texture, which rz-refuse asks for under strict alone); the shaders, state, textures,
-# targets, blend, mrt, msaa, blit, queries and fullscreen launches' none (the fullscreen launch's since DXMTRS C4c-6d,
+# targets, blend, mrt, msaa, blit, queries, fullscreen and parity launches' none (the parity launch's since DXMTRS
+# C4c-7d-1, which makes ProcessVertices the core's; the fullscreen launch's since DXMTRS C4c-6d,
 # which makes fullscreen devices and Resets into fullscreen the core's; the shaders launch's since DXMTRS C4c-2a,
 # which draws the crossing row; the state launch's since DXMTRS C4c-1: buffer locks are the core's, and since DXMTRS
 # C4c-6a the getters, the stubs and the presents; the textures launch's since DXMTRS C4c-3a: a
@@ -205,7 +211,7 @@ refusals_ok() {
       printf '%s\n' "$set_" | while IFS= read -r n; do
         /usr/bin/grep -rqF "d3d9 core: $n $refused" "$2" || exit 1
       done ;;
-    shaders|state|textures|targets|blend|mrt|msaa|blit|queries|fullscreen)
+    shaders|state|textures|targets|blend|mrt|msaa|blit|queries|fullscreen|parity)
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
     *) return 0 ;;
   esac
@@ -302,6 +308,8 @@ check extras "gm-ramp fl-latency ex-rt ex-ds ex-plain rz-msaa rz-auto rz-single 
   cu-props cu-show cu-setcursor"
 launch ours fresh fullscreen 300 fullscreen $strict
 check fullscreen "fs-create fs-cover fs-reject fs-reset-in fs-reset-window fs-wndproc fs-reset-mode fs-activate ws-size"
+launch ours fresh parity 300 parity $strict
+check parity "sr-lsb vo-one dr-keep pv-sysmem pv-draw pv-dynsrc pv-dyndst rz-cross gm-full"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
 fi
