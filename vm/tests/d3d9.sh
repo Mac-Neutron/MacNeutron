@@ -62,6 +62,10 @@
 #                                on a device and a window of its own; "pace strict maxfps50" under core enforces full
 #                                pacing floors, while mtld3d default passes "notime" as macdrv_wm.rs has no
 #                                addPresentedHandler), 120 s
+#   sc<64|32>-fresh.txt           d3d9_triangle scale (DXMTRS C4d-4b's 5 rows of render.scale=0.5, render.lodBias=true
+#                                and MetalFX spatial upscaling under
+#                                render.scale=0.5;render.lodBias=true;debug.presentOccluded=true: scale-desc,
+#                                scale-draw, scale-stretch, scale-vpos, scale-mfx; "scale strict" under core), 180 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
@@ -128,6 +132,7 @@ tri() {  # tri <exe> <name> [timeout [args...]]: killed after <timeout> s (defau
   fi
   case $name in lo*-*) cfg="$cfg;debug.failNextSubmit=true" ;; esac
   case $name in pc*-*) cfg="$cfg;present.maxFps=50;debug.presentOccluded=true" ;; esac
+  case $name in sc*-*) cfg="$cfg;render.scale=0.5;render.lodBias=true;debug.presentOccluded=true" ;; esac
   MTLD3D_CONFIG=$cfg timeout -k 10 "$secs" wine "$T/$exe" "$@" < /dev/null > "$O/$name.raw" 2>&1
   echo "status $?" >> "$O/$name.raw"
   timeout 20 wineserver -k
@@ -184,6 +189,8 @@ tri d3d9_triangle32.exe lo32-fresh 180 lost $strict
 pace_opts="maxfps50"; [ "$RT" = core ] || pace_opts="notime"
 tri d3d9_triangle.exe pc64-fresh 120 pace $strict $pace_opts
 tri d3d9_triangle32.exe pc32-fresh 120 pace $strict $pace_opts
+tri d3d9_triangle.exe sc64-fresh 180 scale $strict
+tri d3d9_triangle32.exe sc32-fresh 180 scale $strict
 rm -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" "$WINEPREFIX/drive_c/windows/syswow64/mtld3d.dll"
 tri d3d9_triangle.exe tri64-nomarker  # Wine finds no builtin without its marker: these fail
 tri d3d9_triangle32.exe tri32-nomarker

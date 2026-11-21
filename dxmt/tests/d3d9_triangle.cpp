@@ -199,6 +199,11 @@
 // < 5000 ms), D3DPRESENT_INTERVAL_FOUR (row "pace-two") over 32 presents (>= 640 ms unless "notime", and < 5000 ms on
 // 60-144 Hz displays), and 5 presents on a hidden window (exercising debug.presentOccluded=true cleanly). With a 120 s
 // budget.
+// With "scale" ("scale strict" under core; DXMTRS C4d-4b): 5 rows "d3d9 scale-<desc|draw|stretch|vpos|mfx> ok|FAIL
+// <why>", launched with render.scale=0.5;render.lodBias=true;debug.presentOccluded=true: logical 256x256 descriptor
+// preservation, Clear/viewport/scissor/ColorFill/GetRenderTargetData readback, StretchRect + sub-rect + backbuffer
+// LockRect, ps_3_0 vPos coordinate mapping, and 40 presents exercising MetalFX spatial upscaling + occlusion query
+// logical area rescaling. With a 180 s budget.
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -12619,6 +12624,139 @@ static void paceRows(IDirect3DDevice9 *d, bool strict, bool maxfps50, bool noTim
     }
 }
 
+// --- The "scale" mode (DXMTRS C4d-4b): render.scale=0.5 + render.lodBias + MetalFX spatial upscaling. Budget 180 s.
+static const DWORD PS30_VPOS[] = {
+    0xffff0300,                                                             // ps_3_0
+    0x05000051, 0xa00f0000, 0x3b800000, 0x3b800000, 0x00000000, 0x3f800000, // def c0, 1/256, 1/256, 0, 1
+    0x0200001f, 0x80000000, 0x90031000,                                     // dcl vPos.xy
+    0x02000001, 0x800f0000, 0xa0e40000,                                     // mov r0, c0
+    0x03000005, 0x80030000, 0x90e41000, 0xa0e40000,                         // mul r0.xy, vPos, c0
+    0x02000001, 0x800f0800, 0x80e40000,                                     // mov oC0, r0
+    0x0000ffff};
+
+static bool rowScaleDesc() {
+    Com<IDirect3DSurface9> bb, rt;
+    CK(GetBackBuffer, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
+    CK(GetRenderTarget, 0, &rt.p);
+    if (!descIs("GetBackBuffer", bb.p, 256, 256, X8) || !descIs("GetRenderTarget", rt.p, 256, 256, X8))
+        return false;
+    Com<IDirect3DTexture9> tex;
+    if (!makeRt(tex, 256, 1, A8)) return false;
+    D3DSURFACE_DESC td = {};
+    const HRESULT hr = tex.p->GetLevelDesc(0, &td);
+    if (FAILED(hr)) return fail("GetLevelDesc(0)", hr);
+    if (td.Width != 256 || td.Height != 256)
+        return snprintf(why, sizeof why, "GetLevelDesc(0) %ux%u, want 256x256", td.Width, td.Height), false;
+    return true;
+}
+
+static bool rowScaleDraw() {
+    const RECT fillRect = {8, 8, 56, 56};
+    return until([&] {
+        if (!clearBlue(false) || !quadIn(64, 64, 192, 192, TRED)) return false;
+        if (!scissor(192, 16, 224, 48) || !rstate(D3DRS_SCISSORTESTENABLE, TRUE) ||
+            !quadIn(0, 0, 256, 256, TGRN) || !rstate(D3DRS_SCISSORTESTENABLE, FALSE))
+            return false;
+        if (!colorFill(rtSurf, &fillRect, TGRN)) return false;
+        CK(GetRenderTargetData, rtSurf, sysSurf);
+        D3DLOCKED_RECT lr = {};
+        const HRESULT hr = sysSurf->LockRect(&lr, nullptr, D3DLOCK_READONLY);
+        if (FAILED(hr)) return fail("LockRect (GetRenderTargetData)", hr);
+        const bool ok = txHas("scale-draw", (const BYTE *)lr.pBits, (int)lr.Pitch,
+                              {{128, 128, TRED}, {32, 32, TGRN}, {240, 240, BLUE}, {208, 32, TGRN}, {184, 32, BLUE}});
+        sysSurf->UnlockRect();
+        return ok;
+    });
+}
+
+static bool rowScaleStretch() {
+    const RECT subSrc = {160, 32, 224, 96}, subDst = {16, 16, 48, 48};
+    return until([&] {
+        Com<IDirect3DSurface9> rt, bb;
+        CK(CreateRenderTarget, 256, 256, X8, D3DMULTISAMPLE_NONE, 0, FALSE, &rt.p, nullptr);
+        if (!scene([&] {
+                return bindRt(0, rt.p) && clearTo(TRED) && zquad(128, 0, 256, 256, 0.5f, TGRN) && backToScreen() &&
+                       clearTo(BLUE);
+            }))
+            return false;
+        if (!stretchTo(rt.p, nullptr, rtSurf, nullptr, D3DTEXF_POINT)) return false;
+        if (!stretchTo(rt.p, &subSrc, rtSurf, &subDst, D3DTEXF_POINT)) return false;
+        CK(GetBackBuffer, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
+        DWORD cLeft = 0, cRight = 0, cSub = 0;
+        if (!underLock(bb.p, "backbuffer LockRect (READONLY)", nullptr, D3DLOCK_READONLY, [&](BYTE *b, int p) {
+                cLeft = texel(b, p, 64, 128);
+                cRight = texel(b, p, 192, 128);
+                cSub = texel(b, p, 32, 32);
+            }))
+            return false;
+        return want("(64,128)", cLeft, TRED) && want("(192,128)", cRight, TGRN) &&
+               want("sub-rect (32,32)", cSub, TGRN);
+    });
+}
+
+static bool rowScaleVpos() {
+    Prog p;
+    if (!make(p, DECL_XYZ, VS30_POS, PS30_VPOS)) return false;
+    V3 q[4];
+    quad(q, -1, -1, 1, 1);
+    return until([&] {
+        if (!scene([&] { return backToScreen() && clearTo(BLUE) && use(p) && strip(q); })) return false;
+        return readTarget(rtSurf, 256, 256, X8, [&](const BYTE *b, int pitch) {
+            const DWORD p1 = texel(b, pitch, 192, 64), p2 = texel(b, pitch, 64, 192);
+            const int r1 = (int)(p1 >> 16 & 0xff), g1 = (int)(p1 >> 8 & 0xff);
+            const int r2 = (int)(p2 >> 16 & 0xff), g2 = (int)(p2 >> 8 & 0xff);
+            if (r1 > 160 && g1 < 96 && r2 < 96 && g2 > 160) return true;
+            snprintf(why, sizeof why, "(192,64) R=%d G=%d, (64,192) R=%d G=%d", r1, g1, r2, g2);
+            return false;
+        });
+    });
+}
+
+static bool rowScaleMfx() {
+    RsDevice r;
+    if (!rsDevice(r)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    int presented = 0;
+    for (int i = 0; i < 40; i++) {
+        if (!clearBlue(false) || !quadIn(64, 64, 192, 192, TRED)) return false;
+        presented += dev->Present(nullptr, nullptr, nullptr, nullptr) == D3D_OK;
+    }
+    if (presented != 40) return snprintf(why, sizeof why, "%d of 40 presents", presented), false;
+    Com<IDirect3DQuery9> q;
+    if (!newQuery(q) || !issue(q.p, D3DISSUE_BEGIN) || !quadIn(64, 64, 192, 192, TRED) ||
+        !issue(q.p, D3DISSUE_END) || !waitFor(q.p))
+        return false;
+    DWORD pixels = 0;
+    const HRESULT hr = q.p->GetData(&pixels, sizeof pixels, 0);
+    if (hr != S_OK) return fail("GetData (occlusion)", hr);
+    if (pixels < 10000 || pixels > 24000)
+        return snprintf(why, sizeof why, "occlusion count %lu, want 10000..24000", (unsigned long)pixels), false;
+    return true;
+}
+
+static void scaleRows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"scale-desc", rowScaleDesc},
+        {"scale-draw", rowScaleDraw},
+        {"scale-stretch", rowScaleStretch},
+        {"scale-vpos", rowScaleVpos},
+        {"scale-mfx", rowScaleMfx}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
+    HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
+    if (SUCCEEDED(hr))
+        hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (FAILED(hr)) ok = fail("GetRenderTarget/CreateOffscreenPlainSurface", hr);
+        else if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = reset() && r.run();
+        row(r.name, ok, why);
+    }
+    if (sysSurf) sysSurf->Release();
+    if (rtSurf) rtSurf->Release();
+}
+
 static bool hasMaxFps50(int argc, char **argv) {
     for (int i = 2; i < argc; i++)
         if (!strcmp(argv[i], "maxfps50")) return true;
@@ -12657,6 +12795,7 @@ int main(int argc, char **argv) {
     const bool parityMode = !bench && argc > 1 && !strcmp(argv[1], "parity");
     const bool lostMode = !bench && argc > 1 && !strcmp(argv[1], "lost");
     const bool paceMode = !bench && argc > 1 && !strcmp(argv[1], "pace");
+    const bool scaleMode = !bench && argc > 1 && !strcmp(argv[1], "scale");
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     const bool bufBench = bench && argc > 4 && !strcmp(argv[4], "buf");
@@ -12757,6 +12896,13 @@ int main(int argc, char **argv) {
             if (!strcmp(argv[i], "strict")) strict = true;
             else if (!strcmp(argv[i], "notime")) noTime = true;
         paceRows(dev, strict, hasMaxFps50(argc, argv), noTime);
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
+    if (scaleMode) {
+        scaleRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
         dev->Release();
         d3d->Release();
         DestroyWindow(hwnd);
