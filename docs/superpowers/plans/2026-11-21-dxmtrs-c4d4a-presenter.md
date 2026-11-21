@@ -56,7 +56,7 @@
      - `display_sync: bool`
      - `psos: FxHashMap<(D3d9PresentVariant, u32), Option<Arc<Obj>>>`
    - `#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)] enum D3d9PresentVariant { Sdr, SdrGamma, HdrPassthrough, HdrPassthroughGamma, HdrBt2446, HdrBt2446Gamma }`
-   - `#[repr(C)] #[derive(Clone, Copy, Debug)] struct D3D9HdrUniforms { l_hdr_nits: f32, p_hdr: f32, log2_p_hdr: f32, inv_p_minus_one: f32 }` (exact `mtld3d` `hdr_uniforms(peak)` math: `l_hdr_nits = 203.0 * peak`, `p_hdr = 1.0 + 32.0 * (l_hdr_nits / 10000.0).powf(1.0 / 2.4)`, etc., verified against `src/d3d9/unix/src/metal/present.rs:160-166`).
+   - `#[repr(C)] #[derive(Clone, Copy, Debug)] struct D3D9HdrUniforms { l_hdr_nits: f32, p_hdr: f32, log2_p_hdr: f32, inv_p_minus_one: f32 }` (exact `mtld3d` `hdr_uniforms(peak)` math: `l_hdr_nits = 100.0 * peak`, `p_hdr = 1.0 + 32.0 * (l_hdr_nits / 10000.0).powf(1.0 / 2.4)`, etc., verified against `src/d3d9/unix/src/metal/present.rs:160-166`).
 3. **`Presenter::new_d3d9(device, metal_layer, cmd_library, width, height, hdr_enable) -> Arc<Self>`**:
    - Skips allocating the unused 1024x1 `RGBA32Float` `gamma_lut_texture`!
    - Initializes `layer_props` with `drawable_width = width`, `drawable_height = height`, `pixel_format = WMT_PIXEL_FORMAT_BGRA8_UNORM`, `framebuffer_only = 0`, `display_sync_enabled = 1`.

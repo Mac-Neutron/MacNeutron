@@ -84,7 +84,7 @@
 # rows (DXMTRS C4d-2b: permanent D3DERR_DEVICELOST latching under debug.failNextSubmit=true: lost-plain and lost-ex,
 # each on a device and a window of its own; "lost strict" under core; lo64-fresh, lo32-fresh); under core their logs
 # hold no refusal line. Every lane also checks d3d9_triangle pace's 3 rows (DXMTRS C4d-4a: present pacing and occluded
-# presents under present.maxFps=30;debug.presentOccluded=true: pace-imm, pace-two, pace-occ, each on a device and a
+# presents under present.maxFps=50;debug.presentOccluded=true: pace-imm, pace-two, pace-occ, each on a device and a
 # window of its own; "pace strict" under core; pc64-fresh, pc32-fresh); under core their logs hold no refusal line.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)

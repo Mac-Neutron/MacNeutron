@@ -97,7 +97,7 @@
 # logs hold no refusal line. Every lane also runs d3d9_triangle lost (DXMTRS C4d-2b's 2 rows of the device-lost failure
 # latch under debug.failNextSubmit=true, lost-plain and lost-ex; "lost strict" under core), its rows "lost-<row>";
 # under core its launch's logs hold no refusal line. Every lane also runs d3d9_triangle pace (DXMTRS C4d-4a's 3 rows of
-# present pacing and occluded presents under present.maxFps=30;debug.presentOccluded=true: pace-imm, pace-two,
+# present pacing and occluded presents under present.maxFps=50;debug.presentOccluded=true: pace-imm, pace-two,
 # pace-occ; "pace strict" under core), its rows "pace-<row>"; under core its launch's logs hold no refusal line.
 #   d3d9-check.sh [<wine.app>]
 set -eu
@@ -147,7 +147,7 @@ launch() {
     case " $* " in *" strict "*) cfg="$cfg;shader.asyncCompile=false" ;; esac
   fi
   [ "$name" != lost ] || cfg="$cfg;debug.failNextSubmit=true"
-  [ "$name" != pace ] || cfg="$cfg;present.maxFps=30;debug.presentOccluded=true"
+  [ "$name" != pace ] || cfg="$cfg;present.maxFps=50;debug.presentOccluded=true"
   env MTLD3D_CONFIG="$cfg" STEAM_COMPAT_DATA_PATH="$WORK/compat/$compat" SteamAppId=0 MACNEUTRON_VM=0 MACNEUTRON_GRAPHICS=dxmt \
     MACNEUTRON_NO_STEAM_BRIDGE=1 MACNEUTRON_NO_METALFX=1 \
     "$WORK/$tool/bin/macneutron" launch waitforexitandrun "${PROG:-$EXE}" "$@" > "$WORK/$name.out" 2>&1 &
@@ -325,7 +325,7 @@ launch ours fresh parity 300 parity $strict
 check parity "sr-lsb vo-one dr-keep pv-sysmem pv-draw pv-dynsrc pv-dyndst rz-cross gm-full tb-self tex-unwritten"
 launch ours fresh lost 180 lost $strict
 check lost "lost-plain lost-ex"
-launch ours fresh pace 120 pace $strict maxfps30
+launch ours fresh pace 120 pace $strict maxfps50
 check pace "pace-imm pace-two pace-occ"
 if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
   echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"

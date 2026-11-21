@@ -192,11 +192,11 @@
 // D3DERR_DEVICELOST latching across Present/PresentEx/SwapChain::Present, TestCooperativeLevel, CheckDeviceState,
 // Reset/ResetEx, Clear (still D3D_OK), DrawPrimitiveUP (with stream 0 reset), Query::Issue/GetData and
 // GetFrontBufferData. With a 180 s budget.
-// With "pace" ("pace strict" under core; optional "maxfps30" or MTLD3D_CONFIG present.maxFps=30; DXMTRS C4d-4a): 3 rows
+// With "pace" ("pace strict" under core; optional "maxfps50" or MTLD3D_CONFIG present.maxFps=50; DXMTRS C4d-4a): 3 rows
 // "d3d9 pace-<imm|two|occ> ok|FAIL <why>", each on a device and a window of its own (reset's):
-// D3DPRESENT_INTERVAL_IMMEDIATE over 15 presents (paced >= 350 ms when present.maxFps=30 is active, < 5000 ms),
-// D3DPRESENT_INTERVAL_TWO over 15 presents (>= 150 ms and < 5000 ms on 60-120 Hz displays), and 5 presents on a
-// hidden window (exercising debug.presentOccluded=true cleanly). With a 120 s budget.
+// D3DPRESENT_INTERVAL_IMMEDIATE over 24 presents (paced >= 350 ms when present.maxFps=50 is active, < 5000 ms),
+// D3DPRESENT_INTERVAL_FOUR (row "pace-two") over 24 presents (>= 520 ms and < 5000 ms on 60-144 Hz displays), and 5
+// presents on a hidden window (exercising debug.presentOccluded=true cleanly). With a 120 s budget.
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -12534,9 +12534,9 @@ static void lostRows(IDirect3DDevice9 *d, bool strict) {
     }
 }
 
-// --- The "pace" mode (DXMTRS C4d-4a): present pacing (INTERVAL_IMMEDIATE + maxFps, INTERVAL_TWO) and hidden-window
+// --- The "pace" mode (DXMTRS C4d-4a): present pacing (INTERVAL_IMMEDIATE + maxFps, INTERVAL_FOUR) and hidden-window
 // occluded present (debug.presentOccluded=true). Budget 120 s.
-static bool paceMaxFps30;
+static bool paceMaxFps50;
 static bool rowPaceImm() {
     RsDevice r;
     if (!rsDevice(r)) return false;
@@ -12545,16 +12545,16 @@ static bool rowPaceImm() {
     QueryPerformanceFrequency(&f);
     QueryPerformanceCounter(&t0);
     int ok = 0;
-    for (int i = 0; i < 15; i++) {
+    for (int i = 0; i < 24; i++) {
         dev->Clear(0, nullptr, D3DCLEAR_TARGET, BLUE, 1.0f, 0);
         ok += dev->Present(nullptr, nullptr, nullptr, nullptr) == D3D_OK;
     }
     QueryPerformanceCounter(&t1);
     const double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart;
-    printf("pace-imm: %d/15 presents in %.1f ms (maxfps30=%d)\n", ok, ms, paceMaxFps30 ? 1 : 0);
-    if (ok != 15) return snprintf(why, sizeof why, "%d of 15 presents", ok), false;
-    if (ms >= 5000.0 || (paceMaxFps30 && ms < 350.0))
-        return snprintf(why, sizeof why, "15 presents in %.1f ms (maxfps30=%d)", ms, paceMaxFps30 ? 1 : 0), false;
+    printf("pace-imm: %d/24 presents in %.1f ms (maxfps50=%d)\n", ok, ms, paceMaxFps50 ? 1 : 0);
+    if (ok != 24) return snprintf(why, sizeof why, "%d of 24 presents", ok), false;
+    if (ms >= 5000.0 || (paceMaxFps50 && ms < 350.0))
+        return snprintf(why, sizeof why, "24 presents in %.1f ms (maxfps50=%d)", ms, paceMaxFps50 ? 1 : 0), false;
     return true;
 }
 
@@ -12562,25 +12562,25 @@ static bool rowPaceTwo() {
     RsDevice r;
     if (!rsWindow(r.w, 256, 256)) return false;
     D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256);
-    pp.PresentationInterval = D3DPRESENT_INTERVAL_TWO;
+    pp.PresentationInterval = D3DPRESENT_INTERVAL_FOUR;
     const HRESULT hr = direct3d ? direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, r.w.h,
                                                          D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp, &r.d.p)
                                 : E_POINTER;
-    if (FAILED(hr) || !r.d.p) return fail("CreateDevice (INTERVAL_TWO)", hr);
+    if (FAILED(hr) || !r.d.p) return fail("CreateDevice (INTERVAL_FOUR)", hr);
     const OnDevice on(r.d.p, nullptr);
     LARGE_INTEGER f, t0, t1;
     QueryPerformanceFrequency(&f);
     QueryPerformanceCounter(&t0);
     int ok = 0;
-    for (int i = 0; i < 15; i++) {
+    for (int i = 0; i < 24; i++) {
         dev->Clear(0, nullptr, D3DCLEAR_TARGET, BLUE, 1.0f, 0);
         ok += dev->Present(nullptr, nullptr, nullptr, nullptr) == D3D_OK;
     }
     QueryPerformanceCounter(&t1);
     const double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart;
-    printf("pace-two: %d/15 presents in %.1f ms\n", ok, ms);
-    if (ok != 15) return snprintf(why, sizeof why, "%d of 15 presents", ok), false;
-    if (ms < 150.0 || ms >= 5000.0) return snprintf(why, sizeof why, "15 presents in %.1f ms", ms), false;
+    printf("pace-two: %d/24 presents in %.1f ms\n", ok, ms);
+    if (ok != 24) return snprintf(why, sizeof why, "%d of 24 presents", ok), false;
+    if (ms < 520.0 || ms >= 5000.0) return snprintf(why, sizeof why, "24 presents in %.1f ms", ms), false;
     return true;
 }
 
@@ -12604,10 +12604,10 @@ static bool rowPaceOcc() {
     return true;
 }
 
-static void paceRows(IDirect3DDevice9 *d, bool strict, bool maxfps30) {
+static void paceRows(IDirect3DDevice9 *d, bool strict, bool maxfps50) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
         {"pace-imm", rowPaceImm}, {"pace-two", rowPaceTwo}, {"pace-occ", rowPaceOcc}};
-    dev = d, strictMode = strict, paceMaxFps30 = maxfps30, budgetEnd = GetTickCount64() + 120000;
+    dev = d, strictMode = strict, paceMaxFps50 = maxfps50, budgetEnd = GetTickCount64() + 120000;
     for (const auto &r : rows) {
         why[0] = 0;
         bool ok;
@@ -12617,14 +12617,14 @@ static void paceRows(IDirect3DDevice9 *d, bool strict, bool maxfps30) {
     }
 }
 
-static bool hasMaxFps30(int argc, char **argv) {
+static bool hasMaxFps50(int argc, char **argv) {
     for (int i = 2; i < argc; i++)
-        if (!strcmp(argv[i], "maxfps30")) return true;
+        if (!strcmp(argv[i], "maxfps50")) return true;
     char cfg[4096] = {};
     if (GetEnvironmentVariableA("MTLD3D_CONFIG", cfg, sizeof cfg) > 0) {
         const char *last = nullptr;
         for (const char *p = strstr(cfg, "present.maxFps="); p; p = strstr(p + 1, "present.maxFps=")) last = p + 15;
-        if (last && !strncmp(last, "30", 2) && (last[2] == '\0' || last[2] == ';' || last[2] == ',' || last[2] == ' '))
+        if (last && !strncmp(last, "50", 2) && (last[2] == '\0' || last[2] == ';' || last[2] == ',' || last[2] == ' '))
             return true;
     }
     return false;
@@ -12753,7 +12753,7 @@ int main(int argc, char **argv) {
         bool strict = false;
         for (int i = 2; i < argc; i++)
             if (!strcmp(argv[i], "strict")) strict = true;
-        paceRows(dev, strict, hasMaxFps30(argc, argv));
+        paceRows(dev, strict, hasMaxFps50(argc, argv));
         dev->Release();
         d3d->Release();
         DestroyWindow(hwnd);
