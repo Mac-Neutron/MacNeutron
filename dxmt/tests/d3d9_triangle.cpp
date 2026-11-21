@@ -199,11 +199,12 @@
 // < 5000 ms), D3DPRESENT_INTERVAL_FOUR (row "pace-two") over 32 presents (>= 640 ms unless "notime", and < 5000 ms on
 // 60-144 Hz displays), and 5 presents on a hidden window (exercising debug.presentOccluded=true cleanly). With a 120 s
 // budget.
-// With "scale" ("scale strict" under core; DXMTRS C4d-4b): 5 rows "d3d9 scale-<desc|draw|stretch|vpos|mfx> ok|FAIL
-// <why>", launched with render.scale=0.5;render.lodBias=true;debug.presentOccluded=true: logical 256x256 descriptor
-// preservation, Clear/viewport/scissor/ColorFill/GetRenderTargetData readback, StretchRect + sub-rect + backbuffer
-// LockRect, ps_3_0 vPos coordinate mapping, and 40 presents exercising MetalFX spatial upscaling + occlusion query
-// logical area rescaling. With a 180 s budget.
+// With "scale" ("scale strict" under core; DXMTRS C4d-4b): 7 rows "d3d9 scale-<desc|draw|stretch|vpos|lod|write|mfx>
+// ok|FAIL <why>", launched with render.scale=0.5;render.lodBias=true;debug.presentOccluded=true: logical 256x256
+// descriptor preservation, Clear/viewport/scissor/ColorFill/GetRenderTargetData readback, StretchRect + sub-rect +
+// backbuffer LockRect, ps_3_0 vPos coordinate mapping, render.lodBias mip selection compensation, sub-viewport +
+// writable backbuffer LockRect(0) resampling, and 40+5 presents exercising MetalFX spatial upscaling + occlusion query
+// logical area rescaling + D3DGAMMARAMP gamma pass. With a 180 s budget.
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -12712,6 +12713,96 @@ static bool rowScaleVpos() {
     });
 }
 
+static bool rowScaleLod() {
+    Com<IDirect3DTexture9> tex;
+    CK(CreateTexture, 256, 256, 2, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex.p, nullptr);
+    if (!fill(tex.p, 0, 4, [](int, int) { return 0xffff0000u; }) ||
+        !fill(tex.p, 1, 4, [](int, int) { return 0xff00ff00u; }))
+        return false;
+    Com<IDirect3DPixelShader9> ps;
+    if (!usePs(ps, K2D, 0, false)) return false;
+    const TV3 q[4] = {{0, 0, 0.5f, 1, TWHT, 0, 0, 0},
+                      {256, 0, 0.5f, 1, TWHT, 1, 0, 0},
+                      {0, 256, 0.5f, 1, TWHT, 0, 1, 0},
+                      {256, 256, 0.5f, 1, TWHT, 1, 1, 0}};
+    return until([&] {
+        const bool drawn = scene([&] {
+            if (!backToScreen() || !clearTo(BLUE) || !pointClamp(0)) return false;
+            CK(SetSamplerState, 0, D3DSAMP_MIPFILTER, D3DTEXF_POINT);
+            CK(SetSamplerState, 0, D3DSAMP_MIPMAPLODBIAS, 0);
+            CK(SetTexture, 0, tex.p);
+            CK(SetPixelShader, ps.p);
+            return tdraw(q);
+        });
+        dev->SetTexture(0, nullptr);
+        dev->SetPixelShader(nullptr);
+        if (!drawn) return false;
+        return readTarget(rtSurf, 256, 256, X8, [&](const BYTE *b, int pitch) {
+            const DWORD px = texel(b, pitch, 128, 128);
+            const int r = (int)(px >> 16 & 0xff), g = (int)(px >> 8 & 0xff), bl = (int)(px & 0xff);
+            if (r > 200 && g < 50 && bl < 50) return true;
+            snprintf(why, sizeof why, "(128,128) R=%d G=%d B=%d (want RED)", r, g, bl);
+            return false;
+        });
+    });
+}
+
+static bool rowScaleWrite() {
+    Lockable l;
+    if (!makeLockable(l)) return false;
+    Prog p;
+    {
+        const OnDevice on(l.d.p, l.bb.p);
+        if (!make(p, DECL_XYZ, VS_POS, PS_C0)) return false;
+    }
+    V3 q[4];
+    quad(q, -1, -1, 1, 1);
+    const D3DVIEWPORT9 rightHalf = {128, 0, 128, 256, 0.0f, 1.0f};
+    const RECT writeRect = {32, 32, 96, 96};
+    return until([&] {
+        const OnDevice on(l.d.p, l.bb.p);
+        const bool drawn = scene([&] {
+            if (!backToScreen() || !clearTo(0xff0000ffu)) return false;
+            CK(SetViewport, &rightHalf);
+            if (!use(p)) return false;
+            CK(SetPixelShaderConstantF, 0, GREEN, 1);
+            const bool ok = strip(q);
+            CK(SetViewport, &FULL);
+            CK(SetVertexShader, nullptr);
+            CK(SetPixelShader, nullptr);
+            return ok;
+        });
+        if (!drawn) return false;
+        DWORD cLeft = 0, cRight = 0;
+        if (!underLock(l.bb.p, "backbuffer LockRect (READONLY, sub-viewport)", nullptr, D3DLOCK_READONLY,
+                       [&](BYTE *b, int pitch) {
+                           cLeft = texel(b, pitch, 64, 128);
+                           cRight = texel(b, pitch, 192, 128);
+                       }))
+            return false;
+        if (!want("sub-viewport left (64,128)", cLeft, BLUE) ||
+            !want("sub-viewport right (192,128)", cRight, TGRN))
+            return false;
+        if (!underLock(l.bb.p, "backbuffer LockRect (writable)", &writeRect, 0,
+                       [&](BYTE *b, int pitch) { paint(b, pitch, 0, 0, 64, 64, 0xffff00ffu); }))
+            return false;
+        DWORD cMag = 0, cGrn = 0;
+        if (!underLock(l.bb.p, "backbuffer LockRect (READONLY, after write)", nullptr, D3DLOCK_READONLY,
+                       [&](BYTE *b, int pitch) {
+                           cMag = texel(b, pitch, 64, 64);
+                           cGrn = texel(b, pitch, 192, 128);
+                       }))
+            return false;
+        const int mr = (int)(cMag >> 16 & 0xff), mg = (int)(cMag >> 8 & 0xff), mb = (int)(cMag & 0xff);
+        if (!(mr > 200 && mg < 50 && mb > 200))
+            return snprintf(why, sizeof why, "(64,64) R=%d G=%d B=%d (want MAGENTA)", mr, mg, mb), false;
+        const int gr = (int)(cGrn >> 16 & 0xff), gg = (int)(cGrn >> 8 & 0xff), gb = (int)(cGrn & 0xff);
+        if (!(gr < 50 && gg > 200 && gb < 50))
+            return snprintf(why, sizeof why, "(192,128) R=%d G=%d B=%d (want GREEN)", gr, gg, gb), false;
+        return true;
+    });
+}
+
 static bool rowScaleMfx() {
     RsDevice r;
     if (!rsDevice(r)) return false;
@@ -12731,6 +12822,19 @@ static bool rowScaleMfx() {
     if (hr != S_OK) return fail("GetData (occlusion)", hr);
     if (pixels < 10000 || pixels > 24000)
         return snprintf(why, sizeof why, "occlusion count %lu, want 10000..24000", (unsigned long)pixels), false;
+    const D3DGAMMARAMP ramp = gammaRamp([](int c, int i) { return (WORD)(c == 2 ? i * 128 : i * 257); }),
+                       identity = gammaRamp([](int, int i) { return (WORD)(i * 257); });
+    dev->SetGammaRamp(0, 0, &ramp);
+    int gammaPresented = 0;
+    for (int i = 0; i < 5; i++) {
+        if (!clearBlue(false) || !quadIn(64, 64, 192, 192, TRED)) {
+            dev->SetGammaRamp(0, 0, &identity);
+            return false;
+        }
+        gammaPresented += dev->Present(nullptr, nullptr, nullptr, nullptr) == D3D_OK;
+    }
+    dev->SetGammaRamp(0, 0, &identity);
+    if (gammaPresented != 5) return snprintf(why, sizeof why, "%d of 5 gamma presents", gammaPresented), false;
     return true;
 }
 
@@ -12740,6 +12844,8 @@ static void scaleRows(IDirect3DDevice9 *d, bool strict) {
         {"scale-draw", rowScaleDraw},
         {"scale-stretch", rowScaleStretch},
         {"scale-vpos", rowScaleVpos},
+        {"scale-lod", rowScaleLod},
+        {"scale-write", rowScaleWrite},
         {"scale-mfx", rowScaleMfx}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);

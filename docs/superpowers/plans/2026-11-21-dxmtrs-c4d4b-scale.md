@@ -101,8 +101,12 @@
    - `d3d9-rt`: `SETTLED_PRESENTS = 30` hysteresis (frames 1..29 linear shader, frame 30+ `MTLCommandBuffer_encodeSpatialScale` into private output texture); mixed-axis shrink stays on linear shader; `set_spatial_scaler_supported(dev, false)` & null `newSpatialScaler` fall back cleanly; resize/retarget drops old scaler & resets `settled_count`; scaled readback/write round-trips; occlusion query rescaling.
 2. **Mac & VM E2E (`d3d9_triangle.cpp`, `d3d9-check.sh`, `vm/tests/d3d9.sh`, `vm/dxmt/d3d9-gate.sh`, `jt`/`jq`)**:
    - Keep `MACNEUTRON_NO_METALFX=1` (suppresses `libmacneutron-present.dylib`, NOT D3D9 MetalFX!).
-   - Run a `scale` mode with `MTLD3D_CONFIG="runtime.mode=core;render.scale=0.5;debug.presentOccluded=true"` presenting 40 frames under `MTL_DEBUG_LAYER=1` (`0` reports!), verifying:
-     - Logical `D3DSURFACE_DESC` dims preserved
-     - Viewport/scissor/`Clear`/`ColorFill`/`StretchRect`/`GetRenderTargetData`/backbuffer `LockRect`/`vPos`/`render.lodBias` readbacks pass
-     - Diagnostic line confirms `MetalFX spatial scaler engaged` on frame 30.
+   - Run a `scale` mode with `MTLD3D_CONFIG="runtime.mode=core;render.scale=0.5;render.lodBias=true;debug.presentOccluded=true"` presenting 40+5 frames under `MTL_DEBUG_LAYER=1` (`0` reports!), verifying all 7 `scale` rows (`scale-desc`, `scale-draw`, `scale-stretch`, `scale-vpos`, `scale-lod`, `scale-write`, `scale-mfx`):
+     - Logical `D3DSURFACE_DESC` dims preserved (`scale-desc`)
+     - Viewport/scissor/`Clear`/`ColorFill`/`GetRenderTargetData` readbacks pass (`scale-draw`)
+     - `StretchRect` + sub-rect + readonly backbuffer `LockRect` pass (`scale-stretch`)
+     - `ps_3_0` `vPos` coordinate mapping passes (`scale-vpos`)
+     - `render.lodBias = true` mip selection compensation passes (`scale-lod`)
+     - Sub-viewport scaling + writable backbuffer `LockRect(0)` resampling pass (`scale-write`)
+     - 40 presents + occlusion query logical area rescaling + `D3DGAMMARAMP` gamma pass + MetalFX spatial upscaling (`scale-mfx`), and diagnostic line confirms `MetalFX spatial scaler engaged` on frame 30.
    - Full gate suite: `rust-check.sh`, `jt1`, `jl1`, `jq1`, `jx1`, `jc1` (`JC_D3D10=1`), `jr1`, fresh final review, push, `post.sh`, CI.
