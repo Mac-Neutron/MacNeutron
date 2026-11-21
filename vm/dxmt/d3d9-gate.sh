@@ -113,8 +113,8 @@ if [ -n "${D3D9_GATE_TRACES:-}" ]; then
 else
   # The translator key is one string in the host's and both guest arches' mtld3d.so (the guest ones staged by
   # guest-stages.sh, built before this run), or a guest AIR record would carry a key the Mac never writes.
-  # The core lane (C4a) writes no AIR records (its pipelines live as long as the device), so it carries no key yet;
-  # d3d9.dll joins this list when the core's cache does (C4b).
+  # The core lane writes no mtld3d.so AIR records (d3d9.dll shares DXMT's SQLite shader cache, whose non-dev
+  # cache_<version> table is verified in wm-cache below), so it carries no translator key here.
   key=$(cat "$B/wine-arm64/wine.app/Contents/Resources/DXMT/translator" 2> /dev/null) kr=
   for so in "$W/dxmt-guest/x86_64-unix/mtld3d.so" "$W/dxmt-guest/i386-unix/mtld3d.so" \
     "$B/wine-arm64/wine.app/Contents/Resources/lib/wine/aarch64-unix/mtld3d.so"; do
@@ -162,10 +162,13 @@ for line in sys.stdin:
   done
   # The tests' Wine version: our Wine's, whose tree they were built from (dxmt/mtld3d-conformance.sh's).
   "$B/wine-arm64/wine.app/Contents/Resources/bin/wine" --version > "$S/tests-wine-version"
-  rm -rf "$G"
-  rm -rf "$G/wm-cache"; mkdir -p "$G/wm-cache"; export MN_WM_CACHE_DIR="$G/wm-cache"
-  MN_RUN_TIMEOUT=7200 "$ROOT/vm/run-guest.sh" "$ROOT/vm/tests/d3d9.sh" > "$W/d3d9-guest-run.txt" 2>&1 \
+  WM_CACHE="$W/d3d9-wm-cache"
+  rm -rf "$G" "$WM_CACHE"
+  mkdir -p "$WM_CACHE"
+  MN_WM_CACHE_DIR="$WM_CACHE" MN_RUN_TIMEOUT=7200 "$ROOT/vm/run-guest.sh" "$ROOT/vm/tests/d3d9.sh" > "$W/d3d9-guest-run.txt" 2>&1 \
     || { echo "FAIL the guest run: see $W/d3d9-guest-run.txt"; fail=1; }
+  rm -rf "$G/wm-cache"
+  cp -R "$WM_CACHE" "$G/wm-cache" 2> /dev/null || true
   units=$(ls "$S/unit"; ls "$S/unit32" | sed 's/^/32-/')
   mkdir -p "$W/d3d9-conf"
   for l in x64 x86; do cp "$G/conf-$l.txt" "$W/d3d9-conf/conf-$l-${MN_WOW64:-old}-$lane.txt" 2> /dev/null || true; done

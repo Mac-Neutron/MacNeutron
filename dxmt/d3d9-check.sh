@@ -377,7 +377,11 @@ if [ "$RT" = core ]; then
     fail="$fail cache-cold-summary"
   fi
 
-  if [ -n "$db" ] && [ -f "$ROOT/build/dxmt-tests/d3d11_draw.exe" ] && [ -d "$ROOT/dxmt/tests/shaders/d3d11" ]; then
+  if [ ! -f "$ROOT/build/dxmt-tests/d3d11_draw.exe" ] || [ ! -d "$ROOT/dxmt/tests/shaders/d3d11" ]; then
+    echo "d3d9-check: cache-coexist: missing d3d11_draw.exe or shaders/d3d11"
+    fail="$fail cache-coexist-d3d11"
+  elif [ -n "$db" ]; then
+    cold_rows=$(sqlite3 "$db" "SELECT COUNT(*) FROM \"$cold_tables\";" 2> /dev/null || echo 0)
     env DXMT_SHADER_CACHE_PATH="$WORK/cache-coexist" DXMT_CACHE_EXE="d3d9_coexist" \
       STEAM_COMPAT_DATA_PATH="$WORK/compat/fresh" SteamAppId=0 MACNEUTRON_VM=0 MACNEUTRON_GRAPHICS=dxmt \
       MACNEUTRON_NO_STEAM_BRIDGE=1 MACNEUTRON_NO_METALFX=1 \
@@ -388,11 +392,13 @@ if [ "$RT" = core ]; then
     drc=0; wait "$dpid" || drc=$?
     { kill "$ddog" && wait "$ddog"; } 2> /dev/null || true
     tr -d '\r' < "$WORK/coexist-d3d11.out" > "$WORK/coexist-d3d11.txt"
+    db_count=$(find "$WORK/cache-coexist" -maxdepth 2 -name 'shaders_*.db' 2> /dev/null | wc -l | tr -d ' ')
     d11_tables=$(sqlite3 "$db" "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'cache_%';" 2> /dev/null || true)
     d11_count=$(printf '%s\n' "$d11_tables" | sed '/^$/d' | wc -l | tr -d ' ')
-    echo "d3d9-check: cache-coexist d3d11: rc=$drc tables=${d11_tables:-none} count=$d11_count"
-    if [ "$drc" != 0 ] || [ "$d11_count" != 1 ] || [ "$d11_tables" != "$cold_tables" ]; then
-      echo "d3d9-check: cache-coexist: D3D11 failed or changed table from '$cold_tables' to '$d11_tables'"
+    d11_rows=$(sqlite3 "$db" "SELECT COUNT(*) FROM \"$cold_tables\";" 2> /dev/null || echo 0)
+    echo "d3d9-check: cache-coexist d3d11: rc=$drc db_count=$db_count tables=${d11_tables:-none} count=$d11_count rows=${cold_rows}->${d11_rows}"
+    if [ "$drc" != 0 ] || [ "$db_count" != 1 ] || [ "$d11_count" != 1 ] || [ "$d11_tables" != "$cold_tables" ] || [ "$d11_rows" -le "$cold_rows" ]; then
+      echo "d3d9-check: cache-coexist: D3D11 failed, created extra DB, changed table, or added no rows"
       fail="$fail cache-coexist-d3d11"
     fi
   fi
