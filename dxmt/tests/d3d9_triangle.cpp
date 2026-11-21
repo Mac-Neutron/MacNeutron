@@ -192,11 +192,13 @@
 // D3DERR_DEVICELOST latching across Present/PresentEx/SwapChain::Present, TestCooperativeLevel, CheckDeviceState,
 // Reset/ResetEx, Clear (still D3D_OK), DrawPrimitiveUP (with stream 0 reset), Query::Issue/GetData and
 // GetFrontBufferData. With a 180 s budget.
-// With "pace" ("pace strict" under core; optional "maxfps50" or MTLD3D_CONFIG present.maxFps=50; DXMTRS C4d-4a): 3 rows
+// With "pace" ("pace strict" under core; optional "maxfps50" or MTLD3D_CONFIG present.maxFps=50, and optional "notime"
+// used only by VM mtld3d default lane where macdrv_wm.rs has no addPresentedHandler; DXMTRS C4d-4a): 3 rows
 // "d3d9 pace-<imm|two|occ> ok|FAIL <why>", each on a device and a window of its own (reset's):
-// D3DPRESENT_INTERVAL_IMMEDIATE over 24 presents (paced >= 350 ms when present.maxFps=50 is active, < 5000 ms),
-// D3DPRESENT_INTERVAL_FOUR (row "pace-two") over 24 presents (>= 520 ms and < 5000 ms on 60-144 Hz displays), and 5
-// presents on a hidden window (exercising debug.presentOccluded=true cleanly). With a 120 s budget.
+// D3DPRESENT_INTERVAL_IMMEDIATE over 24 presents (paced >= 350 ms when present.maxFps=50 is active unless "notime",
+// < 5000 ms), D3DPRESENT_INTERVAL_FOUR (row "pace-two") over 24 presents (>= 520 ms unless "notime", and < 5000 ms on
+// 60-144 Hz displays), and 5 presents on a hidden window (exercising debug.presentOccluded=true cleanly). With a 120 s
+// budget.
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -12536,7 +12538,7 @@ static void lostRows(IDirect3DDevice9 *d, bool strict) {
 
 // --- The "pace" mode (DXMTRS C4d-4a): present pacing (INTERVAL_IMMEDIATE + maxFps, INTERVAL_FOUR) and hidden-window
 // occluded present (debug.presentOccluded=true). Budget 120 s.
-static bool paceMaxFps50;
+static bool paceMaxFps50, paceNoTime;
 static bool rowPaceImm() {
     RsDevice r;
     if (!rsDevice(r)) return false;
@@ -12553,7 +12555,7 @@ static bool rowPaceImm() {
     const double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart;
     printf("pace-imm: %d/24 presents in %.1f ms (maxfps50=%d)\n", ok, ms, paceMaxFps50 ? 1 : 0);
     if (ok != 24) return snprintf(why, sizeof why, "%d of 24 presents", ok), false;
-    if (ms >= 5000.0 || (paceMaxFps50 && ms < 350.0))
+    if (ms >= 5000.0 || (!paceNoTime && paceMaxFps50 && ms < 350.0))
         return snprintf(why, sizeof why, "24 presents in %.1f ms (maxfps50=%d)", ms, paceMaxFps50 ? 1 : 0), false;
     return true;
 }
@@ -12580,7 +12582,7 @@ static bool rowPaceTwo() {
     const double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart;
     printf("pace-two: %d/24 presents in %.1f ms\n", ok, ms);
     if (ok != 24) return snprintf(why, sizeof why, "%d of 24 presents", ok), false;
-    if (ms < 520.0 || ms >= 5000.0) return snprintf(why, sizeof why, "24 presents in %.1f ms", ms), false;
+    if ((!paceNoTime && ms < 520.0) || ms >= 5000.0) return snprintf(why, sizeof why, "24 presents in %.1f ms", ms), false;
     return true;
 }
 
@@ -12604,10 +12606,10 @@ static bool rowPaceOcc() {
     return true;
 }
 
-static void paceRows(IDirect3DDevice9 *d, bool strict, bool maxfps50) {
+static void paceRows(IDirect3DDevice9 *d, bool strict, bool maxfps50, bool noTime) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
         {"pace-imm", rowPaceImm}, {"pace-two", rowPaceTwo}, {"pace-occ", rowPaceOcc}};
-    dev = d, strictMode = strict, paceMaxFps50 = maxfps50, budgetEnd = GetTickCount64() + 120000;
+    dev = d, strictMode = strict, paceMaxFps50 = maxfps50, paceNoTime = noTime, budgetEnd = GetTickCount64() + 120000;
     for (const auto &r : rows) {
         why[0] = 0;
         bool ok;
@@ -12750,10 +12752,11 @@ int main(int argc, char **argv) {
         return failures;
     }
     if (paceMode) {
-        bool strict = false;
+        bool strict = false, noTime = false;
         for (int i = 2; i < argc; i++)
             if (!strcmp(argv[i], "strict")) strict = true;
-        paceRows(dev, strict, hasMaxFps50(argc, argv));
+            else if (!strcmp(argv[i], "notime")) noTime = true;
+        paceRows(dev, strict, hasMaxFps50(argc, argv), noTime);
         dev->Release();
         d3d->Release();
         DestroyWindow(hwnd);
