@@ -196,7 +196,7 @@
 // used only by VM mtld3d default lane where macdrv_wm.rs has no addPresentedHandler; DXMTRS C4d-4a): 3 rows
 // "d3d9 pace-<imm|two|occ> ok|FAIL <why>", each on a device and a window of its own (reset's):
 // D3DPRESENT_INTERVAL_IMMEDIATE over 24 presents (paced >= 350 ms when present.maxFps=50 is active unless "notime",
-// < 5000 ms), D3DPRESENT_INTERVAL_FOUR (row "pace-two") over 24 presents (>= 520 ms unless "notime", and < 5000 ms on
+// < 5000 ms), D3DPRESENT_INTERVAL_FOUR (row "pace-two") over 32 presents (>= 640 ms unless "notime", and < 5000 ms on
 // 60-144 Hz displays), and 5 presents on a hidden window (exercising debug.presentOccluded=true cleanly). With a 120 s
 // budget.
 #include <windows.h>
@@ -12574,15 +12574,15 @@ static bool rowPaceTwo() {
     QueryPerformanceFrequency(&f);
     QueryPerformanceCounter(&t0);
     int ok = 0;
-    for (int i = 0; i < 24; i++) {
+    for (int i = 0; i < 32; i++) {
         dev->Clear(0, nullptr, D3DCLEAR_TARGET, BLUE, 1.0f, 0);
         ok += dev->Present(nullptr, nullptr, nullptr, nullptr) == D3D_OK;
     }
     QueryPerformanceCounter(&t1);
     const double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart;
-    printf("pace-two: %d/24 presents in %.1f ms\n", ok, ms);
-    if (ok != 24) return snprintf(why, sizeof why, "%d of 24 presents", ok), false;
-    if ((!paceNoTime && ms < 520.0) || ms >= 5000.0) return snprintf(why, sizeof why, "24 presents in %.1f ms", ms), false;
+    printf("pace-two: %d/32 presents in %.1f ms\n", ok, ms);
+    if (ok != 32) return snprintf(why, sizeof why, "%d of 32 presents", ok), false;
+    if ((!paceNoTime && ms < 640.0) || ms >= 5000.0) return snprintf(why, sizeof why, "32 presents in %.1f ms", ms), false;
     return true;
 }
 
