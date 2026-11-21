@@ -83,7 +83,9 @@
 # pa64-fresh, pa32-fresh); under core their logs hold no refusal line. Every lane also checks d3d9_triangle lost's 2
 # rows (DXMTRS C4d-2b: permanent D3DERR_DEVICELOST latching under debug.failNextSubmit=true: lost-plain and lost-ex,
 # each on a device and a window of its own; "lost strict" under core; lo64-fresh, lo32-fresh); under core their logs
-# hold no refusal line.
+# hold no refusal line. Every lane also checks d3d9_triangle pace's 3 rows (DXMTRS C4d-4a: present pacing and occluded
+# presents under present.maxFps=30;debug.presentOccluded=true: pace-imm, pace-two, pace-occ, each on a device and a
+# window of its own; "pace strict" under core; pc64-fresh, pc32-fresh); under core their logs hold no refusal line.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${BUILD_DIR:-$ROOT/build}
@@ -293,6 +295,11 @@ for r in lo64-fresh lo32-fresh; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
+for r in pc64-fresh pc32-fresh; do
+  for row in pace-imm pace-two pace-occ; do
+    check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
+  done
+done
 for r in st64-fresh st32-fresh; do
   for row in state-xform state-material state-tss state-swapchain state-rt state-tex state-late state-lock state-sb \
     state-upunbind state-fftex state-fftexoff state-getters state-stubs state-present state-ex; do
@@ -308,8 +315,8 @@ done
 # back-buffer format the core does not make, rs-refuse's under strict alone (its one since DXMTRS C4c-6d, which makes a
 # Reset into fullscreen the core's), extras_refusals: DXMTRS C4c-7a's RESZ into a dynamic depth texture, rz-refuse's
 # under strict alone).
-# The shaders, state, textures, targets, blend, mrt, msaa, blit, queries, fullscreen, parity and lost launches (DXMTRS
-# C4b-2, C4b-3a, C4b-3b, C4b-3d1, C4b-3d3, C4b-3d4, C4b-3d5, C4c-4a, C4c-5, C4c-6d, C4c-7d-1, C4d-2b) take no kind: no refusal
+# The shaders, state, textures, targets, blend, mrt, msaa, blit, queries, fullscreen, parity, lost and pace launches (DXMTRS
+# C4b-2, C4b-3a, C4b-3b, C4b-3d1, C4b-3d3, C4b-3d4, C4b-3d5, C4c-4a, C4c-5, C4c-6d, C4c-7d-1, C4d-2b, C4d-4a) take no kind: no refusal
 # line (the parity launch's since DXMTRS C4c-7d-1, which makes ProcessVertices the core's; the
 # fullscreen launch's since DXMTRS C4c-6d, which makes fullscreen devices and Resets into fullscreen the core's; the
 # shaders launch's since DXMTRS C4c-2a, which draws the crossing row; the state launch's since DXMTRS C4c-1: buffer
@@ -367,7 +374,7 @@ if [ "$RT" = core ]; then
   done
   for r in shd64-fresh shd32-fresh st64-fresh st32-fresh tg64-fresh tg32-fresh bl64-fresh bl32-fresh mr64-fresh \
     mr32-fresh ms64-fresh ms32-fresh bt64-fresh bt32-fresh qu64-fresh qu32-fresh fs64-fresh fs32-fresh pa64-fresh \
-    pa32-fresh lo64-fresh lo32-fresh; do
+    pa32-fresh lo64-fresh lo32-fresh pc64-fresh pc32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
   done
   for r in shd64-cold shd64-warm; do

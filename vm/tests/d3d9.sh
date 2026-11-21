@@ -57,6 +57,9 @@
 #   lo<64|32>-fresh.txt           d3d9_triangle lost (DXMTRS C4d-2b's 2 rows of permanent D3DERR_DEVICELOST latching
 #                                under debug.failNextSubmit=true: lost-plain and lost-ex, each on a device and a window
 #                                of its own; "lost strict" under core), 180 s
+#   pc<64|32>-fresh.txt           d3d9_triangle pace (DXMTRS C4d-4a's 3 rows of present pacing and occluded presents
+#                                under present.maxFps=30;debug.presentOccluded=true: pace-imm, pace-two, pace-occ, each
+#                                on a device and a window of its own; "pace strict" under core), 120 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
@@ -122,6 +125,7 @@ tri() {  # tri <exe> <name> [timeout [args...]]: killed after <timeout> s (defau
     case " $* " in *" strict "*) cfg="$cfg;shader.asyncCompile=false" ;; esac
   fi
   case $name in lo*-*) cfg="$cfg;debug.failNextSubmit=true" ;; esac
+  case $name in pc*-*) cfg="$cfg;present.maxFps=30;debug.presentOccluded=true" ;; esac
   MTLD3D_CONFIG=$cfg timeout -k 10 "$secs" wine "$T/$exe" "$@" < /dev/null > "$O/$name.raw" 2>&1
   echo "status $?" >> "$O/$name.raw"
   timeout 20 wineserver -k
@@ -174,6 +178,8 @@ tri d3d9_triangle.exe pa64-fresh 300 parity $strict
 tri d3d9_triangle32.exe pa32-fresh 300 parity $strict
 tri d3d9_triangle.exe lo64-fresh 180 lost $strict
 tri d3d9_triangle32.exe lo32-fresh 180 lost $strict
+tri d3d9_triangle.exe pc64-fresh 120 pace $strict maxfps30
+tri d3d9_triangle32.exe pc32-fresh 120 pace $strict maxfps30
 rm -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" "$WINEPREFIX/drive_c/windows/syswow64/mtld3d.dll"
 tri d3d9_triangle.exe tri64-nomarker  # Wine finds no builtin without its marker: these fail
 tri d3d9_triangle32.exe tri32-nomarker

@@ -192,6 +192,11 @@
 // D3DERR_DEVICELOST latching across Present/PresentEx/SwapChain::Present, TestCooperativeLevel, CheckDeviceState,
 // Reset/ResetEx, Clear (still D3D_OK), DrawPrimitiveUP (with stream 0 reset), Query::Issue/GetData and
 // GetFrontBufferData. With a 180 s budget.
+// With "pace" ("pace strict" under core; optional "maxfps30" or MTLD3D_CONFIG present.maxFps=30; DXMTRS C4d-4a): 3 rows
+// "d3d9 pace-<imm|two|occ> ok|FAIL <why>", each on a device and a window of its own (reset's):
+// D3DPRESENT_INTERVAL_IMMEDIATE over 15 presents (paced >= 350 ms when present.maxFps=30 is active, < 5000 ms),
+// D3DPRESENT_INTERVAL_TWO over 15 presents (>= 150 ms and < 5000 ms on 60-120 Hz displays), and 5 presents on a
+// hidden window (exercising debug.presentOccluded=true cleanly). With a 120 s budget.
 #include <windows.h>
 #include <d3d9.h>
 #include <cmath>
@@ -12275,9 +12280,9 @@ static bool rowRzCross() {
 // device with D3DCREATE_NOWINDOWCHANGES at the desktop's mode): SetGammaRamp(0) of gm-ramp's rising ramp, Get reads it
 // back; a quad lands, read back unchanged (rust: the back buffer is read before the ramp, on both runtimes), and a
 // present (presents()). Reset to a windowed 256x256 with the ramp still set: a quad lands. Reset into fullscreen again:
-// a quad lands and a present. The identity set: Get reads it, a quad lands, Present D3D_OK. No cell sees the ramp on
-// screen: under core the launch's log holds the line the core logs when a ramp first applies (the gates count it),
-// and the validation layer watches the presenter's path.
+// a quad lands and a present, then 3 distinct rising ramps presented back-to-back without stalling. The identity set:
+// Get reads it, a quad lands, Present D3D_OK. No cell sees the ramp on screen: under core the launch's log holds the line
+// the core logs when a ramp first applies (the gates count it), and the validation layer watches the presenter's path.
 static bool rowGmFull() {
     if (!modesEmulated()) return false;
     D3DDISPLAYMODE m = {};
@@ -12288,7 +12293,18 @@ static bool rowGmFull() {
     const D3DGAMMARAMP identity = gammaRamp([](int, int i) { return (WORD)(i * 257); }),
                        rising = gammaRamp([](int c, int i) {
                            return (WORD)(c == 0 ? i * 200 : c == 1 ? i * 100 + 7 : i * 256);
-                       });
+                       }),
+                       rapid[3] = {
+                           gammaRamp([](int c, int i) {
+                               return (WORD)(c == 0 ? i * 180 : c == 1 ? i * 120 + 5 : i * 240);
+                           }),
+                           gammaRamp([](int c, int i) {
+                               return (WORD)(c == 0 ? i * 220 : c == 1 ? i * 160 + 3 : i * 140);
+                           }),
+                           gammaRamp([](int c, int i) {
+                               return (WORD)(c == 0 ? i * 150 : c == 1 ? i * 210 + 9 : i * 190);
+                           }),
+                       };
     const auto frame = [] { return until([] { return lands(160, 160, 224, 224, 32, 32); }); };
     D3DPRESENT_PARAMETERS win = rsParams(r.w.h, 256, 256),
                           full = rsParams(r.w.h, m.Width, m.Height, D3DFMT_UNKNOWN, D3DMULTISAMPLE_NONE, &m);
@@ -12297,6 +12313,12 @@ static bool rowGmFull() {
         return failIn("fullscreen, the ramp set");
     if (!resetIs("Reset (to a windowed 256x256, the ramp still set)", win) || !frame()) return failIn("windowed");
     if (!resetIs("Reset (into fullscreen again)", full) || !frame() || !presents()) return failIn("fullscreen again");
+    for (int k = 0; k < 3; k++) {
+        dev->SetGammaRamp(0, D3DSGR_NO_CALIBRATION, &rapid[k]);
+        if (!gammaIs("GetGammaRamp (rapid fullscreen ramp)", 0, rapid[k]) || !clearBlue(false) ||
+            !quadIn(160, 160, 224, 224, KRUST) || !presentIs(D3D_OK))
+            return failIn("rapid fullscreen ramps");
+    }
     dev->SetGammaRamp(0, D3DSGR_NO_CALIBRATION, &identity);
     return (gammaIs("GetGammaRamp (the identity set)", 0, identity) && frame() && presentIs(D3D_OK)) ||
            failIn("the identity");
@@ -12512,6 +12534,102 @@ static void lostRows(IDirect3DDevice9 *d, bool strict) {
     }
 }
 
+// --- The "pace" mode (DXMTRS C4d-4a): present pacing (INTERVAL_IMMEDIATE + maxFps, INTERVAL_TWO) and hidden-window
+// occluded present (debug.presentOccluded=true). Budget 120 s.
+static bool paceMaxFps30;
+static bool rowPaceImm() {
+    RsDevice r;
+    if (!rsDevice(r)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    LARGE_INTEGER f, t0, t1;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&t0);
+    int ok = 0;
+    for (int i = 0; i < 15; i++) {
+        dev->Clear(0, nullptr, D3DCLEAR_TARGET, BLUE, 1.0f, 0);
+        ok += dev->Present(nullptr, nullptr, nullptr, nullptr) == D3D_OK;
+    }
+    QueryPerformanceCounter(&t1);
+    const double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart;
+    printf("pace-imm: %d/15 presents in %.1f ms (maxfps30=%d)\n", ok, ms, paceMaxFps30 ? 1 : 0);
+    if (ok != 15) return snprintf(why, sizeof why, "%d of 15 presents", ok), false;
+    if (ms >= 5000.0 || (paceMaxFps30 && ms < 350.0))
+        return snprintf(why, sizeof why, "15 presents in %.1f ms (maxfps30=%d)", ms, paceMaxFps30 ? 1 : 0), false;
+    return true;
+}
+
+static bool rowPaceTwo() {
+    RsDevice r;
+    if (!rsWindow(r.w, 256, 256)) return false;
+    D3DPRESENT_PARAMETERS pp = rsParams(r.w.h, 256, 256);
+    pp.PresentationInterval = D3DPRESENT_INTERVAL_TWO;
+    const HRESULT hr = direct3d ? direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, r.w.h,
+                                                         D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp, &r.d.p)
+                                : E_POINTER;
+    if (FAILED(hr) || !r.d.p) return fail("CreateDevice (INTERVAL_TWO)", hr);
+    const OnDevice on(r.d.p, nullptr);
+    LARGE_INTEGER f, t0, t1;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&t0);
+    int ok = 0;
+    for (int i = 0; i < 15; i++) {
+        dev->Clear(0, nullptr, D3DCLEAR_TARGET, BLUE, 1.0f, 0);
+        ok += dev->Present(nullptr, nullptr, nullptr, nullptr) == D3D_OK;
+    }
+    QueryPerformanceCounter(&t1);
+    const double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart;
+    printf("pace-two: %d/15 presents in %.1f ms\n", ok, ms);
+    if (ok != 15) return snprintf(why, sizeof why, "%d of 15 presents", ok), false;
+    if (ms < 150.0 || ms >= 5000.0) return snprintf(why, sizeof why, "15 presents in %.1f ms", ms), false;
+    return true;
+}
+
+static bool rowPaceOcc() {
+    RsDevice r;
+    RECT rc = {0, 0, 256, 256};
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+    r.w.h = CreateWindowW(L"d3d9_triangle", L"d3d9_triangle occ", WS_OVERLAPPEDWINDOW, 400, 100, rc.right - rc.left,
+                          rc.bottom - rc.top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!r.w.h) return snprintf(why, sizeof why, "CreateWindowW"), false;
+    ShowWindow(r.w.h, SW_HIDE);
+    if (!rsDevice(r)) return false;
+    const OnDevice on(r.d.p, nullptr);
+    int ok = 0;
+    for (int i = 0; i < 5; i++) {
+        if (!clearBlue(false) || !quadIn(64, 64, 192, 192, KRUST)) return false;
+        ok += dev->Present(nullptr, nullptr, nullptr, nullptr) == D3D_OK;
+    }
+    printf("pace-occ: %d/5 presents\n", ok);
+    if (ok != 5) return snprintf(why, sizeof why, "%d of 5 presents", ok), false;
+    return true;
+}
+
+static void paceRows(IDirect3DDevice9 *d, bool strict, bool maxfps30) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"pace-imm", rowPaceImm}, {"pace-two", rowPaceTwo}, {"pace-occ", rowPaceOcc}};
+    dev = d, strictMode = strict, paceMaxFps30 = maxfps30, budgetEnd = GetTickCount64() + 120000;
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = r.run();
+        row(r.name, ok, why);
+    }
+}
+
+static bool hasMaxFps30(int argc, char **argv) {
+    for (int i = 2; i < argc; i++)
+        if (!strcmp(argv[i], "maxfps30")) return true;
+    char cfg[4096] = {};
+    if (GetEnvironmentVariableA("MTLD3D_CONFIG", cfg, sizeof cfg) > 0) {
+        const char *last = nullptr;
+        for (const char *p = strstr(cfg, "present.maxFps="); p; p = strstr(p + 1, "present.maxFps=")) last = p + 15;
+        if (last && !strncmp(last, "30", 2) && (last[2] == '\0' || last[2] == ';' || last[2] == ',' || last[2] == ' '))
+            return true;
+    }
+    return false;
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const bool bench = argc > 3 && !strcmp(argv[1], "--bench");
@@ -12536,6 +12654,7 @@ int main(int argc, char **argv) {
     const bool fullscreenMode = !bench && argc > 1 && !strcmp(argv[1], "fullscreen");
     const bool parityMode = !bench && argc > 1 && !strcmp(argv[1], "parity");
     const bool lostMode = !bench && argc > 1 && !strcmp(argv[1], "lost");
+    const bool paceMode = !bench && argc > 1 && !strcmp(argv[1], "pace");
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     const bool bufBench = bench && argc > 4 && !strcmp(argv[4], "buf");
@@ -12625,6 +12744,16 @@ int main(int argc, char **argv) {
     }
     if (lostMode) {
         lostRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
+    if (paceMode) {
+        bool strict = false;
+        for (int i = 2; i < argc; i++)
+            if (!strcmp(argv[i], "strict")) strict = true;
+        paceRows(dev, strict, hasMaxFps30(argc, argv));
         dev->Release();
         d3d->Release();
         DestroyWindow(hwnd);
