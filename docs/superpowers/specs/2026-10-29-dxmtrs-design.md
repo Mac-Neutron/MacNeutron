@@ -1901,6 +1901,19 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   with D3D11/D3D12) plus non-blocking `try_close_all()` on `DLL_PROCESS_DETACH`. Gated: `rust-check.sh` (all 6 legs),
   `jt1`, `jl1`, `jq1` (19/19 Metal validation launches + D3D9/D3D11 shared SQLite `rows=25->34`), `jx2` (420/420), `jc1`
   (VM 48/48 + old/new WoW64 `wm-cache`), and plain build `jr2`.
+  **C4d-4a (D3D9 core presenter: non-stalling inline gamma, BT.2446-A EDR, pacing, occlusion)** done 2026-11-21 at
+  DXMTRS main `64251378` (`642513781264283dc66c0ee8ffccd332800889c2`), which MacNeutron pins. Leaves `src/d3d9/`
+  (`dxmt_command.metal`, `src/dxmt/meson.build`, `dxmt-core` `presenter.rs` and `encoder/{pass,flush}.rs`, `dxmt-fakes`;
+  zero winemetal slot/wire-struct changes, D3D10-12 `fs_present_quad` and `DXMTPresentMetadata` untouched): adds 6
+  dedicated D3D9 fragment shaders in `dxmt_command.metal` (`fs_present_d3d9_{sdr,sdr_gamma,hdr_passthrough,hdr_passthrough_gamma,hdr_bt2446,hdr_bt2446_gamma}`)
+  plus `Presenter::new_d3d9`, `prepare_d3d9_present`, and `Encoder::present_d3d9` carrying per-frame inline
+  `[u16; 1024]` gamma LUTs (`D3d9PresentArgs`, avoiding `wait_presented` and API/encode-thread races); opt-in
+  BT.2446-A HDR EDR presentation with 32-frame EDR poll throttling and `autoreleasepool` scoping; steady-deadline CPU
+  pacing fallback for `present.maxFps` and divided intervals (`present_after(interval, refresh_hz, max_fps)`,
+  `WMTLayerProps.display_sync_enabled`); window visibility/occlusion handling (`debug.presentOccluded` forwarded into
+  `core_arms::present`); nil-drawable fence balancing; and PSO fallback clear. Verified via `xcrun metal`,
+  `tools/rust-check.sh` 6/6, `jt2`, `jl1`, `jq1` (20/20 Metal validation), `jx1` (420/420), `jc1` (48/48 VM D3D10-12) +
+  `jc1`/`jc2` (VM D3D9 old/new WoW64), and `jr2` plain build.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features

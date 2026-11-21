@@ -150,3 +150,15 @@
     - Hidden window present with `debug.presentOccluded=true` vs `false`
 - `dxmt/d3d9-check.sh`, `vm/tests/d3d9.sh`, `vm/dxmt/d3d9-gate.sh`, `build/c4d/s4/gates/{head,jt,jl,jq,jx,jc,jr,post}.sh`:
   - Update row counts & `nval` in lockstep; run `xcrun -sdk macosx metal` smoke check, `tools/audit.sh --update-derives`, `tools/rust-check.sh` 6/6, combined `core-runtime,perf-build` clippy (`arm64ec`, `i686`), single-threaded `dxmt-core`/`d3d9-rt` tests, `jt1`, `jl1`, `jq1` (0 Metal validation reports), `jx1` (idle Mac D3D10-12), `jc1` (`JC_D3D10=1` VM D3D10-12 + VM D3D9 old/new WoW64), `jr1` (plain build), fresh final review, push, `post.sh`, CI.
+
+---
+
+## Shipped
+- **DXMTRS SHA**: `642513781264283dc66c0ee8ffccd332800889c2` (`64251378`)
+- **Verification**:
+  - `xcrun metal` syntax check and `tools/rust-check.sh` 6/6 green.
+  - `jt2` green, `jl1` green, `jq1` 20/20 Metal validation green.
+  - `jx1` 420/420 (D3D10-12) green.
+  - `jc1` 48/48 VM D3D10-12 + `jc1`/`jc2` VM D3D9 old/new WoW64 green.
+  - `jr2` plain build green.
+  - Final code review (`review-4a-final.md`) green.
