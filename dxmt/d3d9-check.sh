@@ -99,10 +99,10 @@
 # under core its launch's logs hold no refusal line. Every lane also runs d3d9_triangle pace (DXMTRS C4d-4a's 3 rows of
 # present pacing and occluded presents under present.maxFps=50;debug.presentOccluded=true: pace-imm, pace-two,
 # pace-occ; "pace strict" under core), its rows "pace-<row>"; under core its launch's logs hold no refusal line.
-# Every lane also runs d3d9_triangle scale (DXMTRS C4d-4b's 5 rows of render.scale=0.5, render.lodBias=true and
+# Every lane also runs d3d9_triangle scale (DXMTRS C4d-4b's 7 rows of render.scale=0.5, render.lodBias=true and
 # MetalFX spatial upscaling under render.scale=0.5;render.lodBias=true;debug.presentOccluded=true: scale-desc,
-# scale-draw, scale-stretch, scale-vpos, scale-mfx; "scale strict" under core), its rows "scale-<row>"; under core
-# its launch's logs hold no refusal line and hold "d3d9 core: MetalFX spatial scaler engaged".
+# scale-draw, scale-stretch, scale-vpos, scale-lod, scale-write, scale-mfx; "scale strict" under core), its rows
+# "scale-<row>"; under core its launch's logs hold no refusal line and hold "d3d9 core: MetalFX spatial scaler engaged".
 #   d3d9-check.sh [<wine.app>]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -334,7 +334,7 @@ check lost "lost-plain lost-ex"
 launch ours fresh pace 120 pace $strict maxfps50
 check pace "pace-imm pace-two pace-occ"
 launch ours fresh scale 180 scale $strict
-check scale "scale-desc scale-draw scale-stretch scale-vpos scale-mfx"
+check scale "scale-desc scale-draw scale-stretch scale-vpos scale-lod scale-write scale-mfx"
 if [ "$RT" = core ]; then
   if /usr/bin/grep -rqF 'd3d9 core: MetalFX spatial scaler engaged' "$WORK/mtld3d-logs/scale"; then
     echo "d3d9-check: scale: MetalFX spatial scaler engaged"

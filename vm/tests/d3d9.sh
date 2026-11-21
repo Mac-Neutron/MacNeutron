@@ -62,10 +62,11 @@
 #                                on a device and a window of its own; "pace strict maxfps50" under core enforces full
 #                                pacing floors, while mtld3d default passes "notime" as macdrv_wm.rs has no
 #                                addPresentedHandler), 120 s
-#   sc<64|32>-fresh.txt           d3d9_triangle scale (DXMTRS C4d-4b's 5 rows of render.scale=0.5, render.lodBias=true
+#   sc<64|32>-fresh.txt           d3d9_triangle scale (DXMTRS C4d-4b's 7 rows of render.scale=0.5, render.lodBias=true
 #                                and MetalFX spatial upscaling under
 #                                render.scale=0.5;render.lodBias=true;debug.presentOccluded=true: scale-desc,
-#                                scale-draw, scale-stretch, scale-vpos, scale-mfx; "scale strict" under core), 180 s
+#                                scale-draw, scale-stretch, scale-vpos, scale-lod, scale-write, scale-mfx;
+#                                "scale strict" under core), 180 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64

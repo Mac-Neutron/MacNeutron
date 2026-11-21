@@ -86,9 +86,9 @@
 # hold no refusal line. Every lane also checks d3d9_triangle pace's 3 rows (DXMTRS C4d-4a: present pacing and occluded
 # presents under present.maxFps=50;debug.presentOccluded=true: pace-imm, pace-two, pace-occ, each on a device and a
 # window of its own; "pace strict" under core; pc64-fresh, pc32-fresh); under core their logs hold no refusal line.
-# Every lane also checks d3d9_triangle scale's 5 rows (DXMTRS C4d-4b: render.scale=0.5, render.lodBias=true and MetalFX
+# Every lane also checks d3d9_triangle scale's 7 rows (DXMTRS C4d-4b: render.scale=0.5, render.lodBias=true and MetalFX
 # spatial upscaling under render.scale=0.5;render.lodBias=true;debug.presentOccluded=true: scale-desc, scale-draw,
-# scale-stretch, scale-vpos, scale-mfx; "scale strict" under core; sc64-fresh, sc32-fresh); under core their logs hold
+# scale-stretch, scale-vpos, scale-lod, scale-write, scale-mfx; "scale strict" under core; sc64-fresh, sc32-fresh); under core their logs hold
 # no refusal line.
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -305,7 +305,7 @@ for r in pc64-fresh pc32-fresh; do
   done
 done
 for r in sc64-fresh sc32-fresh; do
-  for row in scale-desc scale-draw scale-stretch scale-vpos scale-mfx; do
+  for row in scale-desc scale-draw scale-stretch scale-vpos scale-lod scale-write scale-mfx; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
