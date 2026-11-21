@@ -1888,6 +1888,19 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   (default/msl/core + 17/17 core Metal validation launches 0 reports), `jx1` (bounded idle Mac x64 D3D10-12 `dxmt/check.sh`
   420 ok / 0 FAIL), `jc1` (VM D3D10-12 gate 48/48 + VM D3D9 default & core across old/new WoW64, x64/x86 with `lo64`/`lo32`
   passing), and plain build `jr1` (translator key and `d3d9.dll` imports identical, `d3d9-default` and `conf-default` exit 0).
+  **C4d-3 (Async compile, skipped draws, prewarm & shared DXMT SQLite shader cache)** done 2026-11-21 at DXMTRS main
+  `5b7b8fd7` (`5b7b8fd7b93d9a6fa861f2674bdbd6d315ebfe91`), which MacNeutron pins. Leaves `src/d3d9/` (`dxmt-core`
+  `scheduler.rs`, `pipeline_cache.rs`, `shader_cache.rs`, `encoder/gaps.rs`, `mtld3d-core`, `dxmt-fakes`,
+  `tools/audit.sh`, `tools/derive_inventory.txt`, `Cargo.lock`; zero winemetal/airconv changes, translator key and plain
+  `d3d9.dll` imports unchanged): adds a 3-lane priority `CompileScheduler` (`Urgent`, `Pipeline`, `Normal`) with atomic
+  ticket reservation, `promote`, `run_urgent_or_wait` work-stealing, `cancel_unstarted`, `Weak` `SCHEDULERS` registry, and
+  non-blocking `Compiled::try_ready`/`ready_or_steal`; `Encoder::dispatch_tile_barrier` `recover_pso != 0` guard;
+  two-frame rebuilt-target draw skipping (`shader.asyncCompile`) with application-endpoint `note_stretch_copy`,
+  whole-target fill/clear tracking, and `PassBound` soundness; warm-start `"D3D9REC1"` pipeline recipe prewarming; and
+  shared DXMT SQLite shader cache (`shaders_<metal_version>.db`, `cache_<version>` table coexisting in a single table
+  with D3D11/D3D12) plus non-blocking `try_close_all()` on `DLL_PROCESS_DETACH`. Gated: `rust-check.sh` (all 6 legs),
+  `jt1`, `jl1`, `jq1` (19/19 Metal validation launches + D3D9/D3D11 shared SQLite `rows=25->34`), `jx2` (420/420), `jc1`
+  (VM 48/48 + old/new WoW64 `wm-cache`), and plain build `jr2`.
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features

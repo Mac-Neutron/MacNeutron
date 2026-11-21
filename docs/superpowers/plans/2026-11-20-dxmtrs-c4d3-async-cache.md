@@ -1,7 +1,7 @@
 # DXMTRS C4d-3 Implementation Plan: Async Compile, Skipped Draws, Prewarm & DXMT SQLite Shader Cache (Review-Folded)
 
 **Date:** 2026-11-20
-**Status:** Finalized after 3 independent adversarial reviews (`review-1-scheduler-cache.md`, `review-2-d3d9rt-prewarm.md`, `review-3-tests-build-audit.md`).
+**Status:** Complete (2026-11-21) at DXMTRS `5b7b8fd7b93d9a6fa861f2674bdbd6d315ebfe91` (`d09b2ac9` + review fix `5b7b8fd7`), MacNeutron pinned and verified: `rust-check` 6/6, `jt1`, `jl1`, `jq1` (19/19 Metal validation + D3D9/D3D11 shared SQLite `rows=25->34`), `jx2` (420/420), `jc1` (VM 48/48 + old/new WoW64 `wm-cache`), `jr2` (plain).
 **Scope:** Full compilation parity for the core D3D9 runtime (`d3d9-rt` on `dxmt-core`):
 1. Multi-lane priority (`Urgent`, `Pipeline`, `Normal`), atomic ticket reservation, `promote`, `run_urgent_or_wait` (steal + continuation wait + RAII `in_flight` guard), `cancel_unstarted`, `Weak` `SCHEDULERS` registry, and non-blocking `Compiled::try_ready()` + `ready_or_steal()` in `dxmt-core`.
 2. `Encoder::dispatch_tile_barrier` safety guard (`if recover_pso != 0`) so deferred/failed draws never emit `SetPSO(0)`.
