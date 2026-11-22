@@ -101,3 +101,10 @@
      - `DXMT_STATS=1` + `DXMT_DXIL_DUMP=<dir>` + `MTL_HUD_ENABLED=1` under `MTL_DEBUG_LAYER=1`: assert 0 Metal API Validation reports and `<dir>/stats.txt` matches `^# [0-9:]+ [0-9.]+ s, [1-9][0-9]* frames \(` and `^counters:`.
 3. **Required gates (Option A, strictly inside `src/d3d9/`)**:
    - `dxmt/run-rust-check.sh` (including `core-runtime,perf-build` on `arm64ec`/`i686` and host `cargo test -p d3d9-rt --features perf-build`), `jt`, `jl`, `jq`, `jc` (VM D3D9 old/new WoW64 x64/x86), `jr` (plain build, `base-imports.txt` and `base-key.txt` invariant), fresh final adversarial code review, push, `post.sh`, CI green.
+
+---
+
+## Completion
+
+- **DXMTRS main tip:** `f5ea9a103f7def611dd0cb59be28d9bb8f05e014` (`f5ea9a10`)
+- **Passing gates:** `ALL C4D5 RUST CHECKS OK`, `jt2`, `jl1`, `jq2` (22/22 Metal validation 0 reports, 0 `mtld3d.so` loads in `core` mode), `jc1` (VM D3D9 old/new WoW64), `jr1` (plain-build invariance), adversarial review findings fixed.

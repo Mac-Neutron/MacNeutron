@@ -1931,6 +1931,19 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   launches 0 reports, `MetalFX engaged lines 1`), `jx` (420/420 verified, translator key `e1074f4f...` unchanged), `jc2`
   (`d3d-gate` 48/48, `d3d9-default/core` old/new WoW64 all exit 0 with `sc64`/`sc32` 7/7+1, `was not recorded: 0`), and
   `jr1` plain build (exit 0, `imports vs base: same`).
+  **C4d-5 (7b `GetDeviceInfo` via winemetal, PE-side logger/VEH, lazy `mtld3d.dll` shim, unified config, `DXMT_STATS` & Metal `Hud`)**
+  done 2026-11-22 at DXMTRS main `f5ea9a10` (`f5ea9a103f7def611dd0cb59be28d9bb8f05e014`), which MacNeutron pins.
+  Strictly inside `src/d3d9/` (zero winemetal/dxmt/audit/derive-inventory changes; plain builds gated by
+  `#[cfg(feature = "core-runtime")]`): adds direct core `GetDeviceInfo` via winemetal (`d3d9_rt::device::info` with
+  `device_caps_from` and `query_default_device_info`); synchronous PE-side file/VEH logger (`mtld3d_core::pe_log` with
+  1 MiB `Pending` backlog, lazy `<stem>-<pid>.log` creation, mtime pruning, and lock-free `LOG_HANDLE` `WriteFile`
+  crash/fault fallback); lazy `mtld3d.dll` shim (`0` `mtld3d.so` loads or calls in `core` mode, `Once`-guarded init on
+  first unixcall in `mtld3d` mode); unified 4-layer config (`dxmt.conf` < `mtld3d.conf` < `DXMT_CONFIG` <
+  `MTLD3D_CONFIG`, silent foreign `dxmt.*`/`d3d11.*` keys); and `DXMT_STATS` (`d3d9_rt::stats`, `stats.txt` flushed on
+  `DLL_PROCESS_DETACH`) plus Metal `Hud` (`dxmt_core::hud::Hud`, initialized on `attach`, debug-only statistics update
+  after `present_boundary(true)`). Verified across Mac + VM gates (`ALL C4D5 RUST CHECKS OK`, `jt2`, `jl1`, `jq2`
+  22/22 Metal validation 0 reports and `0` `mtld3d.so` loads under `core`, `jc1` old/new WoW64, `jr1` plain-build
+  invariance, adversarial review findings fixed).
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
