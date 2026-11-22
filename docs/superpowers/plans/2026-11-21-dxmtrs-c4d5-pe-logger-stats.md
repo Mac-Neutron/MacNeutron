@@ -23,12 +23,12 @@
 1. **`src/d3d9/core/src/gpu_caps.rs`**:
    - Re-export `pub use mtld3d_shared::mtl::DeviceCapsFlags;` so `d3d9-rt` accesses `DeviceCapsFlags` without adding a new crate dependency.
 2. **`src/d3d9/rt/src/device/info.rs` (+ `info/tests.rs`)**:
-   - Define `pub struct DeviceInfo { pub name: [u8; 256], pub name_len: usize, pub registry_id: u64, pub vram_bytes: u64, pub caps: DeviceCapsFlags }` with no `Clone`/`Copy` derive.
-   - Add pure helper `pub fn device_caps_from(name: &str, unified_memory: bool, mac2: bool, apple2: bool, apple7: bool, msaa: [bool; 3]) -> DeviceCapsFlags`: sets `SAMPLER_BORDER` (`mac2 && !paravirtual`), `NATIVE_PACKED16` (`apple2`), `FLOAT32_FILTERING` (`apple7 || mac2`, documented parity with `mtld3d-mtl`), `SAMPLE_COUNT_2`/`4`/`8`, `RESOLVE_NEEDS_RETIRE` (`paravirtual`), and never sets `PAGES_FROM_UNIX`.
+   - Define `pub struct DeviceInfo { pub name: [u8; 256], pub name_len: usize, pub registry_id: u64, pub caps: DeviceCapsFlags }` with no `Clone`/`Copy` derive.
+   - Add pure helper `pub fn device_caps_from(name: &str, mac2: bool, apple2: bool, apple7: bool, msaa: [bool; 3]) -> DeviceCapsFlags`: sets `SAMPLER_BORDER` (`mac2 && !paravirtual`), `NATIVE_PACKED16` (`apple2`), `FLOAT32_FILTERING` (`apple7 || mac2`, documented parity with `mtld3d-mtl`), `SAMPLE_COUNT_2`/`4`/`8`, `RESOLVE_NEEDS_RETIRE` (`paravirtual`), and never sets `PAGES_FROM_UNIX`.
    - Implement `pub fn query_default_device_info() -> Option<DeviceInfo>` inside `winemetal_sys::Pool::new()`:
      - Adopt `WMTCopyAllDevices()`, guard non-zero and `NSArray_count > 0`, and fetch `NSArray_object(0)` without adopting (`+0` borrowed).
      - Query `MTLDevice_name(dev)` (`+0`, do not adopt), copy UTF-8 with `WMTUTF8_STRING_ENCODING`, and fall back via `NSString_lengthOfBytesUsingEncoding` + `Vec<u8>` truncated to 255 bytes + NUL when `>= 256` bytes.
-     - Query `MTLDevice_registryID`, `MTLDevice_recommendedMaxWorkingSetSize`, `MTLDevice_hasUnifiedMemory`, `MTLDevice_supportsFamily` (`APPLE2`, `APPLE7`, `MAC2`), and `MTLDevice_supportsTextureSampleCount` (`2`, `4`, `8`), then construct `DeviceInfo` via `device_caps_from`.
+     - Query `MTLDevice_registryID`, `MTLDevice_supportsFamily` (`APPLE2`, `APPLE7`, `MAC2`), and `MTLDevice_supportsTextureSampleCount` (`2`, `4`, `8`), then construct `DeviceInfo` via `device_caps_from`.
 3. **`src/d3d9/src/direct3d9.rs` (`device_info()`)**:
    - Under `#[cfg(feature = "core-runtime")]`, when `crate::is_core()`, call `d3d9_rt::device::query_default_device_info()` (emitting `log_once_warn!` and returning empty `CachedDeviceInfo` on `None`) instead of `unix_call(&mut GetDeviceInfoParams)`.
 4. **Unit tests (`src/d3d9/rt/src/device/info/tests.rs`)**:
@@ -63,7 +63,7 @@
 ## Task 3: Unified Config Audit & Verification
 
 - Preserve exact precedence: `default < AppProfile < dxmt.conf < mtld3d.conf < DXMT_CONFIG < MTLD3D_CONFIG`.
-- Verify `DXMT_CONFIG`-only (`MTLD3D_CONFIG` unset), `DXMT_CONFIG_FILE`, and foreign `dxmt.*` / `d3d11.*` keys (`d3d11.preferredMaxFrameRate=60`) pass silently with zero `unknown config key` warnings in both unit tests and gate runs.
+- Verify `DXMT_CONFIG`-only (`MTLD3D_CONFIG` unset), `DXMT_CONFIG_FILE`, and foreign `dxmt.*` / `d3d11.*` keys (`d3d11.preferredMaxFrameRate=60`) pass silently with zero `unknown key ` warnings in both unit tests and gate runs.
 
 ---
 
@@ -77,8 +77,8 @@
    - Call `stats::init_once()` in `CoreDevice::with_options` before `Device::with_config`, call `stats::frame()` unconditionally in `CoreDevice::present` (both visible and hidden branches), and call `d3d9_rt::flush_stats_on_detach()` next to `d3d9_rt::close_shader_cache_on_detach()` in `src/d3d9/src/lib.rs` `DLL_PROCESS_DETACH` before `TerminateProcess`.
 2. **Metal `Hud` (`dxmt_core::hud::Hud`, existing winemetal slots `62..=65`)**:
    - Add `hud: Option<dxmt_core::hud::Hud>` on `CoreDevice`.
-   - In `CoreDevice::attach`: lazily initialize once (`self.hud.get_or_insert_with(...)`) calling `hud.initialize("d3d9", &dxmt_core::info::version_text(9, 0x9300, env!("DXMT_VERSION")))` (no `DXMT_HUD` env var and no draw pass).
-   - In `CoreDevice::present`: strictly inside the visible branch right after `self.device.queue().present_boundary(true)`, under `#[cfg(all(debug_assertions, not(feature = "perf-build")))]`, call `hud.update_statistics(&stats, self.device.queue().current_frame_seq().wrapping_sub(1))` (zero release/perf-build overhead).
+   - In `CoreDevice::attach`: lazily initialize once (`self.hud.get_or_insert_with(...)`) calling `hud.initialize(&dxmt_core::info::version_text(9, 0x9300, env!("DXMT_VERSION")))` (no `DXMT_HUD` env var and no draw pass).
+   - In `CoreDevice::present`: strictly inside the visible branch right after `self.device.queue().present_boundary(true)`, under `#[cfg(all(debug_assertions, not(feature = "perf-build")))]`, call `hud.update_statistics(&statistics, frame)` (zero release/perf-build overhead).
 3. **`src/d3d9/rt/src/device/fixture.rs`**:
    - Add the 7 `#[unsafe(no_mangle)]` stubs (`MTLDevice_name`, `MTLDevice_supportsTextureSampleCount`, `NSString_alloc_init`, `DeveloperHUDProperties_{instance,addLabel,updateLabel,remove}`).
 4. **Child-process unit test (`src/d3d9/rt/src/stats/tests.rs`)**:
@@ -86,18 +86,18 @@
 
 ---
 
-## Task 5: Mac & VM Gate Assertions (`mn/` & `~/Documents/MacProton/build/c4d/s5/gates/`)
+## Task 5: Mac & VM Gate Assertions (`mn/` & C4d-5 staging gates)
 
 1. **`dxmt/d3d9-check.sh` & `vm/dxmt/d3d9-gate.sh`**:
    - For `RT = core` non-`arm64` launches, assert:
      - Zero lines matching `mtld3d::(unix|shim)|\] mtld3d\.so |\] mtld3d\.dll ` in the core launch logs (proving `mtld3d.so` was never loaded or called in `core` mode).
      - A PE `.log` file exists and contains `] d3d9.dll ` and (for device-creating launches) `d3d9 core: device on dxmt-core` (with `d3d9_dynamic.exe` checking `config: runtime.mode = core` and `] d3d9.dll `, and `stale` continuing to verify `mtld3d.dll` marker restoration plus core PE logging).
    - Keep `tri64-nomarker`/`tri32-nomarker` and Mac `arm64` fallback untouched and green.
-2. **Gate staging (`~/Documents/MacProton/build/c4d/s5/gates/`)**:
+2. **C4d-5 staging gates**:
    - Stage `head.sh`, `jt.sh`, `jl.sh`, `jq.sh`, `jc.sh` (`JC_D3D10=0` default, `SCALE_ROWS:-7`), `jr.sh`, `post.sh`, `base-key.txt`, and `base-imports.txt`.
    - In `jt.sh` and `jq.sh`, run the three C4d-5 probes under `core` mode:
      - Scratch zero-`mtld3d.so` smoke check: clone `ours`, delete `mtld3d.so`, run `d3d9_triangle.exe` under `runtime.mode=core`, assert `clear`, `triangle`, `present` all `ok`, PE log exists, and zero `mtld3d.so` lines.
-     - `DXMT_CONFIG`-only probe: unset `MTLD3D_CONFIG`, set `DXMT_CONFIG="runtime.mode=core;log.dir=<dir>;d3d11.preferredMaxFrameRate=60"`, run `d3d9_triangle.exe`, assert `ok`, PE log + `d3d9 core: device on dxmt-core`, and 0 `unknown config key` warnings.
+     - `DXMT_CONFIG`-only probe: unset `MTLD3D_CONFIG`, set `DXMT_CONFIG="runtime.mode=core;log.dir=<dir>;d3d11.preferredMaxFrameRate=60"`, run `d3d9_triangle.exe`, assert `ok`, PE log + `d3d9 core: device on dxmt-core`, and 0 `unknown key ` warnings.
      - `DXMT_STATS=1` + `DXMT_DXIL_DUMP=<dir>` + `MTL_HUD_ENABLED=1` under `MTL_DEBUG_LAYER=1`: assert 0 Metal API Validation reports and `<dir>/stats.txt` matches `^# [0-9:]+ [0-9.]+ s, [1-9][0-9]* frames \(` and `^counters:`.
 3. **Required gates (Option A, strictly inside `src/d3d9/`)**:
    - `dxmt/run-rust-check.sh` (including `core-runtime,perf-build` on `arm64ec`/`i686` and host `cargo test -p d3d9-rt --features perf-build`), `jt`, `jl`, `jq`, `jc` (VM D3D9 old/new WoW64 x64/x86), `jr` (plain build, `base-imports.txt` and `base-key.txt` invariant), fresh final adversarial code review, push, `post.sh`, CI green.
