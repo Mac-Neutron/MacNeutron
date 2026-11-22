@@ -110,3 +110,12 @@
      - Sub-viewport scaling + writable backbuffer `LockRect(0)` resampling pass (`scale-write`)
      - 40 presents + occlusion query logical area rescaling + `D3DGAMMARAMP` gamma pass + MetalFX spatial upscaling (`scale-mfx`), and diagnostic line confirms `MetalFX spatial scaler engaged` on frame 30.
    - Full gate suite: `rust-check.sh`, `jt1`, `jl1`, `jq1`, `jx1`, `jc1` (`JC_D3D10=1`), `jr1`, fresh final review, push, `post.sh`, CI.
+
+---
+
+## Shipped & Verified
+
+- **DXMTRS commits:** `d9c5a7b7` (initial C4d-4b implementation) + `235a919a` (adversarial review fixes: R32F/RG32F/RGBA32F nearest filtering, 1:1 MSAA nearest, collapsed physical viewport culling, `gate_level()` MetalFX log, `UpscaleCache::Unavailable` negative caching, physical `metal_level` GPU `StretchRect` routing, RT0-scaled depth `Clear`, mip-level occlusion `target_areas`, `attach_scaled` drain).
+- **Host checks & unit tests:** `tools/rust-check.sh` 6/6 (`audit: clean (1274 files)`), `dxmt-core` 242/242, `d3d9-rt` 274/274, `mtld3d-core` 2408/2408.
+- **Mac gates:** `jt2` (8/8 Metal validation 0 reports, `scale` 7/7 ok), `jl1` (`conf-core` 0 validation reports, `conf-compare: ok`), `jq1` (3 lanes ok, 21/21 Metal validation launches 0 reports, `MetalFX engaged lines 1`), `jx` (420/420 verified, translator key `e1074f4f...` unchanged).
+- **VM & plain build gates:** VM `jc2` (`d3d-gate` 48/48, `d3d9-default/core` old/new WoW64 all exit 0 with `sc64`/`sc32` 7/7+1, `was not recorded: 0`), plain build `jr1` (exit 0, `imports vs base: same`).

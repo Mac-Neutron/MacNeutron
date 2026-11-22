@@ -1914,6 +1914,23 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   `core_arms::present`); nil-drawable fence balancing; and PSO fallback clear. Verified via `xcrun metal`,
   `tools/rust-check.sh` 6/6, `jt2`, `jl1`, `jq1` (20/20 Metal validation), `jx1` (420/420), `jc1` (48/48 VM D3D10-12) +
   `jc1`/`jc2` (VM D3D9 old/new WoW64), and `jr2` plain build.
+  **C4d-4b (`RenderScale`, `render.lodBias`, and `MetalFX` spatial upscaling on the D3D9 core runtime)** done 2026-11-21
+  at DXMTRS main `235a919a` (`235a919a29afa02ac6f43e5c693c5b2e683bb41e`; `d9c5a7b7` initial + `235a919a` adversarial
+  review fixes), which MacNeutron pins. Leaves `src/d3d9/` only for `src/dxmt/fakes/src/lib.rs` (MetalFX spatial scaler
+  fakes; zero winemetal slot/wire-struct changes, D3D10-12 `fs_present_quad` and `DXMTPresentMetadata` untouched):
+  promotes `SETTLED_PRESENTS = 30`, `PresentGeometry`, and `geometry_settled` into `mtld3d-core`, adds
+  `CoreShaderMeta::reads_vpos`, `VariantFlags::VPOS_SCALE`, and `pos_fixup` `point_scale`; separates render vs drawable
+  sizes on `CoreDevice` with 30-frame hysteresis MetalFX spatial upscaling (`StorageModePrivate` output,
+  gamma-before-upscale chain, `gate_level()` engagement log, `UpscaleCache::Unavailable` negative caching, drain on
+  `attach_scaled`/`resize`/`retarget`), scaled readback/write resampling, and mip-level occlusion `target_areas`
+  rescaling; wires `RenderScale`, pixel-only `render.lodBias`, far-edge viewport/scissor, RT0-scaled depth `Clear`,
+  physical `metal_level` GPU `StretchRect` routing, R32F/RG32F/RGBA32F and 1:1 MSAA nearest filtering, collapsed
+  physical viewport culling, and all 7 CPU readback/write paths. Verified via `tools/rust-check.sh` 6/6 (`audit: clean
+  (1274 files)`), `dxmt-core` 242/242, `d3d9-rt` 274/274, `mtld3d-core` 2408/2408, `jt2` (8/8 Metal validation 0 reports,
+  `scale` 7/7 ok), `jl1` (`conf-core` 0 validation reports, `conf-compare: ok`), `jq1` (3 lanes ok, 21/21 Metal validation
+  launches 0 reports, `MetalFX engaged lines 1`), `jx` (420/420 verified, translator key `e1074f4f...` unchanged), `jc2`
+  (`d3d-gate` 48/48, `d3d9-default/core` old/new WoW64 all exit 0 with `sc64`/`sc32` 7/7+1, `was not recorded: 0`), and
+  `jr1` plain build (exit 0, `imports vs base: same`).
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
