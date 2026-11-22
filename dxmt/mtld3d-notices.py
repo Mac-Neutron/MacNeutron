@@ -21,9 +21,9 @@ import shutil
 import subprocess
 import sys
 
-LEGS = ((("d3d9", "mtld3d", "winemetal-pe", "nvngx", "nvapi", "d3d11", "d3d12"),
+LEGS = ((("d3d9", "d3d9-rt", "mtld3d", "winemetal-pe", "nvngx", "nvapi", "d3d11", "d3d12"),
          ("aarch64-pc-windows-msvc", "arm64ec-pc-windows-msvc", "x86_64-pc-windows-msvc")),
-        (("d3d9", "mtld3d", "winemetal-pe", "d3d11", "d3d12"), ("i686-pc-windows-msvc",)),
+        (("d3d9", "d3d9-rt", "mtld3d", "winemetal-pe", "d3d11", "d3d12"), ("i686-pc-windows-msvc",)),
         (("mtld3d-unix", "winemetal", "d3d11", "d3d12"), ("aarch64-apple-darwin",)),
         (("mtld3d-unix",), ("x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu")))
 PREFIXES = ("license", "licence", "copying", "notice", "unlicense")

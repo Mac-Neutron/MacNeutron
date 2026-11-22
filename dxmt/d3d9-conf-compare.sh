@@ -1,7 +1,9 @@
 #!/bin/sh
 # D3D9 conformance parity per site (C3d-5): two runner outputs of the same leg(s), a base lane's and a current lane's,
 # each stamped on its first line by dxmt/mtld3d-conformance.sh or vm/tests/d3d9.sh: by default the msl lane's and the
-# default lane's (AIR), with --base-lane and --cur-lane any two (C4a: default, then core, the in-process runtime).
+# default lane's (AIR), with --base-lane and --cur-lane any two (C4e: --base-lane mtld3d --cur-lane default compares
+# the default core runtime against the mtld3d escape hatch, using dxmt/mtld3d-triaged-core.txt and naming findings
+# core-worse etc.).
 # Fails when, under the current lane, a site fails more often, a suite crashes more, executes over 0.1% and more than
 # 16 fewer tests (DXMTRS C4c-7d-2: the default lane alone has read d3d9ex's 2426 to 2438, past its 0.1%, 2.4) or
 # skips a site the base lane measured; when a suite is missing from either file (each leg needs stateblock, visual,
@@ -32,8 +34,12 @@ done
   exit 2
 }
 TRI=$ROOT/dxmt/mtld3d-triaged.txt PRE=air
-[ "$CUR" = core ] && TRI=$ROOT/dxmt/mtld3d-triaged-core.txt
-[ "$CUR" = default ] || PRE=$CUR
+if [ "$CUR" = core ] || { [ "$BASE" = mtld3d ] && [ "$CUR" = default ]; }; then
+  TRI=$ROOT/dxmt/mtld3d-triaged-core.txt
+  PRE=core
+elif [ "$CUR" != default ]; then
+  PRE=$CUR
+fi
 MSL=$1 AIR=$2 TRI=${3:-$TRI}
 bad=
 case $(head -1 "$MSL" 2> /dev/null) in *": lane $BASE"*) ;; *) bad=1; echo "stamp $MSL: not the $BASE lane" ;; esac

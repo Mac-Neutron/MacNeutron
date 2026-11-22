@@ -7,33 +7,33 @@
 # configuration are the ones mtld3d's Makefile gave its test runs. MTLD3D_SO=<mtld3d.so> runs that build of D3D9's Unix
 # side instead (the loopback build of D3D9 spec §5.1), in an APFS clone of wine.app beside the prefix.
 # A run whose only new failing sites are dxmt/mtld3d-triaged.txt's, with no new crash, passes ("only triaged sites").
-# Two lanes (C3d-6): D3D9_BACKEND=air (the default lane) sets no shader.backend, so the build's default runs;
-# D3D9_BACKEND=msl sets shader.backend=msl (DXMT_CONFIG: the runner sets only MTLD3D_CONFIG). Both keep each subtest's
-# shader cache in build/mtld3d-conformance/caches-<lane> and write the runner's output, after a lane stamp line, to
-# build/mtld3d-conformance/run-<lane>.txt (dxmt/d3d9-conf-compare.sh's inputs). The lane's proof is its kinds row
-# (emit_corpus --kinds; the runner silences the logs): the default lane fails unless every programmable kind the tests
-# made has an AIR record and AIR fixed-function records exist; the msl lane fails on any AIR record or on no MSL
-# programmable and fixed-function record. Either lane fails on a Metal validation error or a GPU hang in the run.
-# D3D9_RUNTIME=core (DXMTRS C4b-3a, the default backend only) runs every suite (since DXMTRS C4c-7d-2; stateblock
-# alone before) under runtime.mode=core in a wine.app built with DXMT_D3D9_CORE=1, its stamp "mtld3d-conformance: lane
-# core (runtime.mode=core)", a full run's output run-core.txt (d3d9-conf-compare.sh --base-lane default --cur-lane
-# core). Its proof replaces the kinds row: the run's logs (build/mtld3d-conformance/logs-core, the runner's --log info)
-# hold the core device's line ("d3d9 core: device on dxmt-core"), not mtld3d.so's encoder line ("texture versions:
-# rename pool cap"), no core refusal line and no panic (the core lane unsets MTLD3D_CONFORMANCE_RAW_DIR:
-# the runner's own log.dir would take the logs out of the proof's reach). Any lane run with --only stateblock skips
-# the kinds row
-# and writes run-<lane>-stateblock.txt, keeping the full runs' files. MTLD3D_PE=<folder> runs that folder's d3d9.dll
+# Default lane (C4e, D3D9_RUNTIME=core, D3D9_BACKEND=air): runs every suite on D3D9's in-process encoder in d3d9.dll
+# without setting runtime.mode=core (proving core is the build default), its stamp "mtld3d-conformance: lane default",
+# a full run's output run-default.txt (d3d9-conf-compare.sh --base-lane mtld3d --cur-lane default). Its proof
+# replaces the kinds row: the run's logs (build/mtld3d-conformance/logs-core, the runner's --log info) hold
+# d3d9.dll's log identity and the core device's line ("d3d9 core: device on dxmt-core"), not mtld3d.so's encoder line
+# ("texture versions: rename pool cap"), zero mtld3d::(unix|shim) / mtld3d.so / mtld3d.dll log lines, no core refusal
+# line and no panic (the core lane unsets MTLD3D_CONFORMANCE_RAW_DIR: the runner's own log.dir would take the logs out
+# of the proof's reach).
+# Escape lanes (D3D9_RUNTIME=mtld3d, injecting runtime.mode=mtld3d): D3D9_BACKEND=air sets no shader.backend, so
+# mtld3d's default AIR backend runs (lane mtld3d, run-mtld3d.txt); D3D9_BACKEND=msl sets shader.backend=msl
+# (DXMT_CONFIG: the runner sets only MTLD3D_CONFIG; lane msl, run-msl.txt). Both keep each subtest's shader cache in
+# build/mtld3d-conformance/caches-<lane> and prove their backend with emit_corpus --kinds: the mtld3d lane fails
+# unless every programmable kind the tests made has an AIR record and AIR fixed-function records exist; the msl lane
+# fails on any AIR record or on no MSL programmable and fixed-function record. Any lane run with --only stateblock skips
+# the kinds row and writes run-<lane>-stateblock.txt, keeping the full runs' files. Either mtld3d lane fails on a Metal
+# validation error or a GPU hang in the run (core fails on those too). MTLD3D_PE=<folder> runs that folder's d3d9.dll
 # and mtld3d.dll (the PE side, as dxmt/d3d9-check.sh), in an APFS clone of wine.app like MTLD3D_SO's.
 #   mtld3d-conformance.sh [<wine.app>] [runner args, e.g. --only device]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/dxmt/pins"
 B="${BUILD_DIR:-$ROOT/build}"
-BK=${D3D9_BACKEND:-air} RT=${D3D9_RUNTIME:-mtld3d}
+BK=${D3D9_BACKEND:-air} RT=${D3D9_RUNTIME:-core}
 case $RT/$BK in
-  mtld3d/air) lane=default stamp="mtld3d-conformance: lane default" ;;
-  mtld3d/msl) lane=msl stamp="mtld3d-conformance: lane msl (shader.backend=msl)" ;;
-  core/air) lane=core stamp="mtld3d-conformance: lane core (runtime.mode=core)" ;;
+  core/air) lane=default stamp="mtld3d-conformance: lane default" ;;
+  mtld3d/air) lane=mtld3d stamp="mtld3d-conformance: lane mtld3d (runtime.mode=mtld3d)" ;;
+  mtld3d/msl) lane=msl stamp="mtld3d-conformance: lane msl (runtime.mode=mtld3d;shader.backend=msl)" ;;
   core/*) echo "mtld3d-conformance: D3D9_RUNTIME=core takes the default backend lane only" >&2; exit 2 ;;
   mtld3d/*) echo "mtld3d-conformance: D3D9_BACKEND=$BK: air or msl" >&2; exit 2 ;;
   *) echo "mtld3d-conformance: D3D9_RUNTIME=$RT: mtld3d or core" >&2; exit 2 ;;
@@ -92,17 +92,19 @@ status=0
 OUT="$B/mtld3d-conformance/run-$lane${sb:+-stateblock}.txt"
 K="$B/mtld3d-conformance/caches-$lane"
 rm -rf "$K"; mkdir -p "$K"
-[ "$BK" = air ] || export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}shader.backend=msl"  # the runner sets only MTLD3D_CONFIG
 LOGS="$B/mtld3d-conformance/logs-core"
 if [ "$RT" = core ]; then
   # The runner's own log.dir (MTLD3D_CONFORMANCE_RAW_DIR) would take the logs elsewhere, and the proof would find
   # none; its default --log off would silence them.
   unset MTLD3D_CONFORMANCE_RAW_DIR
   rm -rf "$LOGS"; mkdir -p "$LOGS"
-  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}runtime.mode=core;log.dir=Z:$LOGS"
+  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}log.dir=Z:$LOGS"
   export DXMT_SHADER_CACHE_PATH="${DXMT_SHADER_CACHE_PATH:-$K}"
   mkdir -p "$DXMT_SHADER_CACHE_PATH"
   set -- --log info "$@"
+else
+  msl_cfg=; [ "$BK" = air ] || msl_cfg=";shader.backend=msl"
+  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}runtime.mode=mtld3d${msl_cfg}"  # the runner sets only MTLD3D_CONFIG
 fi
 # runner <args...>: D3D9's conformance runner over the x64 tests (arm64x leg).
 runner() {
@@ -140,14 +142,17 @@ if /usr/bin/grep -qE '^conformance: (METAL VALIDATION|GPU HANG)' "$OUT"; then
 fi
 if [ "$RT" = core ]; then
   # The core lane's proof, from the code that ran.
-  if /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$LOGS" \
+  mtld3d_lines='mtld3d::(unix|shim)|\] mtld3d\.so |\] mtld3d\.dll '
+  if /usr/bin/grep -rqF '] d3d9.dll ' "$LOGS" \
+    && /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$LOGS" \
     && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$LOGS" \
+    && ! /usr/bin/grep -rqE "$mtld3d_lines" "$LOGS" \
     && ! /usr/bin/grep -rqF 'is not implemented under runtime.mode = core' "$LOGS" \
     && ! /usr/bin/grep -rqF 'panicked' "$LOGS" "$OUT"; then
     echo "conformance: core: runtime core"
   else
-    echo "conformance: FAIL: core: no core device, or an encoder, refusal or panic line, in $LOGS"
-    /usr/bin/grep -rhE 'is not implemented|panicked|rename pool cap' "$LOGS" "$OUT" | head -5 | sed 's/^/conformance: /'
+    echo "conformance: FAIL: core: no core device, missing d3d9.dll log, or an mtld3d, encoder, refusal or panic line, in $LOGS"
+    /usr/bin/grep -rhE "is not implemented|panicked|rename pool cap|$mtld3d_lines" "$LOGS" "$OUT" | head -5 | sed 's/^/conformance: /'
     status=1
   fi
   exit $status

@@ -15,24 +15,22 @@
 # swapped into the tool folder's own wine.app and signed with MACNEUTRON_SIGN_IDENTITY (ad hoc without one).
 # MTLD3D_PE=<folder> does the same with its ARM64X d3d9.dll and mtld3d.dll (DXMT's build marks both builtin:
 # build/wine-arm64-src/dxmt-install/aarch64-windows): a build of D3D9's PE side checked without rebuilding wine.app.
-# Two lanes (C3d-6): D3D9_BACKEND=air (the default lane) sets no shader.backend, so the build's default runs, and
-# requires the Unix side's "shader backend: air" line in its logs; D3D9_BACKEND=msl sets shader.backend=msl
-# (MTLD3D_CONFIG) and requires "shader backend: msl". Both run the programs from a scratch copy of the folder, so their
-# mtld3d_shaders.bin lands in the work folder, and print a lane stamp first. D3D9_KINDS=1 adds the kinds row
-# (emit_corpus --kinds, built from build/wine-arm64-src/dxmt, which must match the build): d3d9_triangle is
-# fixed-function, so the default lane must show air_ffvs and air_ffps records, and the msl lane ffvs and ffps records
-# and no air_* record at all (programmable kinds are dxmt/mtld3d-conformance.sh's). The verdict line is
-# "d3d9-check: ok" on the default lane and "d3d9-check: ok (msl)" on the msl lane.
-# D3D9_RUNTIME=core (DXMTRS C4a, the default backend lane only) runs every row under runtime.mode=core, D3D9's encoder
-# in d3d9.dll on dxmt-core (a wine.app built with DXMT_D3D9_CORE=1): each launch logs to a folder of its own, which
-# must hold the core device's line ("d3d9 core: device on dxmt-core") and not mtld3d.so's encoder line ("texture
-# versions: rename pool cap", printed by every mtld3d device) nor a line saying the core cannot present (no command
-# library, no Metal view, a pipeline that does not build) nor that a dynamic buffer fell back to staging ("has no
+# Default lane (C4e, D3D9_RUNTIME=core, D3D9_BACKEND=air): runs every row on D3D9's in-process encoder in d3d9.dll
+# on dxmt-core without setting runtime.mode=core (proving core is the build default): each launch logs to a folder of
+# its own, which must hold the core device's line ("d3d9 core: device on dxmt-core") and not mtld3d.so's encoder line
+# ("texture versions: rename pool cap", printed by every mtld3d device) nor a line saying the core cannot present (no
+# command library, no Metal view, a pipeline that does not build) nor that a dynamic buffer fell back to staging ("has no
 # mapped memory", DXMTRS C4c-2b), lines the code that ran prints, not the switch. Both halves of ARM64X d3d9.dll
 # carry the core runtime (C4d-6), so arm64 also logs 'loaded at .* as aarch64' and runs on dxmt-core. No shader-backend,
-# kinds or conformance rows under core (C4b on). Its stamp is
-# "d3d9-check: lane core (runtime.mode=core)", its verdict "d3d9-check: ok (core)". D3D9_RUNTIME=mtld3d (the default)
-# is the lanes above.
+# kinds or conformance rows under core. Its stamp is "d3d9-check: lane default (core)", its verdict "d3d9-check: ok".
+# Escape lanes (D3D9_RUNTIME=mtld3d, injecting runtime.mode=mtld3d): D3D9_BACKEND=air sets no shader.backend, so
+# mtld3d's default AIR backend runs (stamp "d3d9-check: lane mtld3d (runtime.mode=mtld3d)", verdict
+# "d3d9-check: ok (mtld3d)"); D3D9_BACKEND=msl sets shader.backend=msl (stamp "d3d9-check: lane msl
+# (runtime.mode=mtld3d;shader.backend=msl)", verdict "d3d9-check: ok (msl)"). Both mtld3d lanes run the programs from a
+# scratch copy of the folder, so their mtld3d_shaders.bin lands in the work folder, and D3D9_KINDS=1 adds the kinds row
+# (emit_corpus --kinds, built from build/wine-arm64-src/dxmt, which must match the build): d3d9_triangle is
+# fixed-function, so the mtld3d/air lane must show air_ffvs and air_ffps records, and the msl lane ffvs and ffps records
+# and no air_* record at all (programmable kinds are dxmt/mtld3d-conformance.sh's).
 # Every lane also runs d3d9_triangle shaders (DXMTRS C4b-2's 22 shader rows, C4b2-11; "shaders strict" under core: the
 # first frame must match), its rows "shaders-<row>". Its launch's logs hold no core refusal line ("... is not
 # implemented under runtime.mode = core") in any lane (under core since DXMTRS C4c-2a, which draws the crossing row),
@@ -119,17 +117,14 @@ made=; [ -n "${DXMT_CHECK_WORK:-}" ] || made=1
 WORK=${DXMT_CHECK_WORK:-$(mktemp -d "${TMPDIR:-/tmp}/macneutron-d3d9.XXXXXX")}
 trap 's=$?; [ -z "$made" ] || { rm -rf "$WORK/ours" "$WORK/old" "$WORK/compat" "$WORK/progs"; [ "$s" != 0 ] || rm -rf "$WORK"; }' EXIT
 fail=
-BK=${D3D9_BACKEND:-air} sfx= msl= RT=${D3D9_RUNTIME:-mtld3d}
+BK=${D3D9_BACKEND:-air} sfx= msl= RT=${D3D9_RUNTIME:-core}
 case $RT/$BK in
-  mtld3d/*) ;;
-  core/air) sfx=" (core)"; echo "d3d9-check: lane core (runtime.mode=core)" ;;
+  core/air) echo "d3d9-check: lane default (core)" ;;
   core/*) echo "d3d9-check: D3D9_RUNTIME=core takes the default backend lane only" >&2; exit 2 ;;
+  mtld3d/air) sfx=" (mtld3d)"; echo "d3d9-check: lane mtld3d (runtime.mode=mtld3d)" ;;
+  mtld3d/msl) sfx=" (msl)" msl=1; echo "d3d9-check: lane msl (runtime.mode=mtld3d;shader.backend=msl)" ;;
+  mtld3d/*) echo "d3d9-check: D3D9_BACKEND=$BK: air or msl" >&2; exit 2 ;;
   *) echo "d3d9-check: D3D9_RUNTIME=$RT: mtld3d or core" >&2; exit 2 ;;
-esac
-case $BK in
-  air) [ "$RT" = core ] || echo "d3d9-check: lane default" ;;
-  msl) sfx=" (msl)" msl=1; echo "d3d9-check: lane msl (shader.backend=msl)" ;;
-  *) echo "d3d9-check: D3D9_BACKEND=$BK: air or msl" >&2; exit 2 ;;
 esac
 rm -rf "$WORK/mtld3d-logs" "$WORK/progs"; mkdir -p "$WORK/mtld3d-logs" "$WORK/progs/x64" "$WORK/progs/arm64"
 export DXMT_SHADER_CACHE_PATH="${DXMT_SHADER_CACHE_PATH:-$WORK/shader-cache}"
@@ -137,7 +132,8 @@ mkdir -p "$DXMT_SHADER_CACHE_PATH"
 cp "$EXE" "$DYN" "$WORK/progs/x64/" && cp "$ARM" "$WORK/progs/arm64/" \
   || { echo "d3d9-check: could not copy the programs to $WORK/progs" >&2; exit 1; }
 EXE=$WORK/progs/x64/$(basename "$EXE") DYN=$WORK/progs/x64/$(basename "$DYN") ARM=$WORK/progs/arm64/$(basename "$ARM")
-export MTLD3D_CONFIG="${MTLD3D_CONFIG:+$MTLD3D_CONFIG;}log.dir=Z:$WORK/mtld3d-logs${msl:+;shader.backend=msl}"
+rt_cfg=; [ "$RT" != mtld3d ] || rt_cfg=";runtime.mode=mtld3d"
+export MTLD3D_CONFIG="${MTLD3D_CONFIG:+$MTLD3D_CONFIG;}log.dir=Z:$WORK/mtld3d-logs${rt_cfg}${msl:+;shader.backend=msl}"
 # launch <tool> <compat> <name> [<secs> [arg...]]: d3d9_triangle.exe (or $PROG) [arg...] through <tool>'s launcher in
 # the prefix of <compat>, killed after <secs> (default 120); its lines in $WORK/<name>.txt. MACNEUTRON_VM=0: the macOS
 # path, whatever VM folder this Mac has.
@@ -147,7 +143,7 @@ launch() {
   cfg=$MTLD3D_CONFIG
   if [ "$RT" = core ]; then
     mkdir -p "$WORK/mtld3d-logs/$name"
-    cfg="$cfg;log.dir=Z:$WORK/mtld3d-logs/$name;runtime.mode=core"
+    cfg="$cfg;log.dir=Z:$WORK/mtld3d-logs/$name"
     case " $* " in *" strict "*) cfg="$cfg;shader.asyncCompile=false" ;; esac
   fi
   [ "$name" != lost ] || cfg="$cfg;debug.failNextSubmit=true"

@@ -43,7 +43,7 @@ done
 echo "d3d9 bench: mode ff frames 0 draws 2000" >> "$F/bench-32-0.txt"
 echo "d3d9 bench: mode prog frames 0 draws 2000" >> "$F/benchp-32-0.txt"
 echo "d3d9 bench: mode ff frames 600 draws 2000" >> "$F/benchp-32-600.txt"  # the wrong mode
-out=$(gate "$F" D3D9_BENCH=1)
+out=$(gate "$F" D3D9_RUNTIME=mtld3d D3D9_BENCH=1)
 want "a good shd64-fresh passes every row" "$(printf '%s\n' "$out" | /usr/bin/grep -c '^ok   shd64-fresh ' || true)" 22
 want "shd32-fresh without fog fails that row only" \
   "$(printf '%s\n' "$out" | /usr/bin/grep '^FAIL shd32-fresh ' | cut -d: -f1 || true)" "FAIL shd32-fresh fog"
@@ -53,16 +53,17 @@ want "a prog bench row with an ff line fails" \
   "$(printf '%s\n' "$out" | /usr/bin/grep -c '^FAIL benchp-32-600 bench:' || true)" 1
 [ "$(cat "$saved")" = "d3d9 bench: saved" ] || { echo "FAIL a trace re-check rewrote the saved row: '$(cat "$saved")'"; fail=1; }
 
-# Core: shd64-fresh's logs with the device line and no refusal pass; shd32-fresh's with the crossing row's refusal
-# (which the core draws since DXMTRS C4c-2a) fail; tri64-fresh's without the device line fail.
+# Core (the default runtime since C4e): shd64-fresh's logs with the device line and no refusal pass; shd32-fresh's with
+# the crossing row's refusal (which the core draws since DXMTRS C4c-2a) fail; tri64-fresh's without the device line fail.
+id='[2026-01-01T00:00:00Z INFO  mtld3d::d3d9] d3d9.dll loaded'
 dev='d3d9 core: device on dxmt-core'
-refused='is not implemented under runtime.mode = core → D3DERR_NOTAVAILABLE'
+refused='is not implemented under runtime.mode = core -> D3DERR_NOTAVAILABLE'
 mkdir -p "$F/logs/shd64-fresh" "$F/logs/shd32-fresh" "$F/logs/tri64-fresh"
-echo "$dev" > "$F/logs/shd64-fresh/d3d9.log"
-printf '%s\nd3d9 core: IDirect3DDevice9::DrawPrimitiveUP (an attribute crossing the stride) %s\n' "$dev" "$refused" \
+printf '%s\n%s\n' "$id" "$dev" > "$F/logs/shd64-fresh/d3d9.log"
+printf '%s\n%s\nd3d9 core: IDirect3DDevice9::DrawPrimitiveUP (an attribute crossing the stride) %s\n' "$id" "$dev" "$refused" \
   > "$F/logs/shd32-fresh/d3d9.log"
 echo "frames: 10" > "$F/logs/tri64-fresh/d3d9.log"
-out=$(gate "$F" D3D9_RUNTIME=core)
+out=$(gate "$F")
 want "core: shd64-fresh with no refusal passes" \
   "$(printf '%s\n' "$out" | /usr/bin/grep -c '^ok   shd64-fresh runtime core$' || true)" 1
 want "core: shd32-fresh with the crossing refusal fails" \
@@ -71,13 +72,13 @@ want "core: tri64-fresh without the device line fails" \
   "$(printf '%s\n' "$out" | /usr/bin/grep -c '^FAIL tri64-fresh runtime core:' || true)" 1
 cp "$F/logs/shd32-fresh/d3d9.log" "$F/logs/tri64-fresh/d3d9.log"
 want "core: a tri row with a refusal fails" \
-  "$(gate "$F" D3D9_RUNTIME=core | /usr/bin/grep -c '^FAIL tri64-fresh runtime core:' || true)" 1
+  "$(gate "$F" | /usr/bin/grep -c '^FAIL tri64-fresh runtime core:' || true)" 1
 
 # Core, the buffers launch (DXMTRS C4c-2b): logs with the device line and the launch's one refusal pass the runtime
 # row; bf64-fresh's with the line of dynamic buffers read in place pass "buffers direct", bf32-fresh's without it fail
 # it; bf64-fresh's with a dynamic buffer's fall-back line ("... has no mapped memory ...") added fail the runtime row.
 mkdir -p "$F/logs/bf64-fresh" "$F/logs/bf32-fresh"
-printf '%s\nd3d9 core: IDirect3DDevice9::Draw*Primitive (a layout no binding can fetch) %s\n' "$dev" "$refused" \
+printf '%s\n%s\nd3d9 core: IDirect3DDevice9::Draw*Primitive (a layout no binding can fetch) %s\n' "$id" "$dev" "$refused" \
   > "$F/logs/bf32-fresh/d3d9.log"
 { cat "$F/logs/bf32-fresh/d3d9.log"; echo 'd3d9 core: dynamic buffers are read in place'; } > "$F/logs/bf64-fresh/d3d9.log"
 out=$(gate "$F" D3D9_RUNTIME=core)

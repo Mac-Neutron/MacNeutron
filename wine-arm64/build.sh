@@ -538,14 +538,14 @@ set -- "$SRC/dxmt-build" "$D" --cross-file "$D/build-arm64ec.txt" --cross-file "
   -Denable_nvapi=true -Denable_nvngx=true \
   -Dnative_llvm_path="$SRC/llvm23-arm64" -Dwine_build_path="$SRC/wine-build" \
   -Dtranslator_key_file="$SRC/dxmt-translator-key"
-# DXMT_D3D9_CORE=1 (a dev build for DXMTRS C4's gates, never a release): D3D9's in-process runtime linked into d3d9.dll
-# (runtime.mode=core picks it at run time; the shipped build has none until C4e).
-[ "${DXMT_D3D9_CORE:-0}" != 1 ] || set -- "$@" -Dd3d9_core_runtime=true
+# Default builds carry D3D9's in-process core runtime via meson.options since C4e (runtime.mode=core is the default);
+# DXMT_D3D9_CORE=0 opts out (-Dd3d9_core_runtime=false).
+[ "${DXMT_D3D9_CORE:-1}" != 0 ] || set -- "$@" -Dd3d9_core_runtime=false
 # DXMTRS's meson builds Rust static libraries (tools/cargo-staticlib.sh) with cargo. No -Dcargo_toolchain: a tree
 # without the option (the pinned one, before the Rust plumbing lands on DXMTRS's main) would fail to configure, and
 # its default is mtld3d's toolchain (MTLD3D_RUST) already.
 inputs=$(printf '%s\n' "$@"; cat "$D/build-arm64ec.txt" "$SRC/dxmt-xcrun.txt" "$SRC/dxmt-cpu.txt" \
-  "$ROOT/wine-arm64/tools/xcrun-metal.sh")
+  "$D/meson.options" "$ROOT/wine-arm64/tools/xcrun-metal.sh")
 if [ ! -f "$SRC/dxmt-build/build.ninja" ] || [ "$(cat "$SRC/dxmt-build/.setup-inputs" 2> /dev/null)" != "$inputs" ]; then
   rm -rf "$SRC/dxmt-build"
   meson setup "$@" >> "$SRC/dxmt.log" 2>&1 \

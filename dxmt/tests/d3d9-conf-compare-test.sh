@@ -73,4 +73,11 @@ v "$X/core" 's|executed=2430 ok|executed=2414 ok|' > "$X/core-16"
 t runtime-executed-floor 0 '^conf-compare: ok' $L "$D" "$X/core-16"
 v "$X/core" 's|executed=2430 ok|executed=2413 ok|' > "$X/core-17"
 t runtime-executed 1 '^core-executed arm64x/d3d9ex 2430 -> 2413$' $L "$D" "$X/core-17"
+# C4e default-is-core lane: --base-lane mtld3d --cur-lane default.
+v "$D" '1s|.*|mtld3d-conformance: lane mtld3d (runtime.mode=mtld3d)|' > "$X/mtld3d"
+L="--base-lane mtld3d --cur-lane default"
+t c4e-ok 0 '^conf-compare: ok \(1 legs, 4 suites' $L "$X/mtld3d" "$D"
+t c4e-swapped 1 '^stamp ' $L "$D" "$X/mtld3d"
+t c4e-worse 1 '^core-worse arm64x/visual visual\.c:15686 3 -> 4$' $L "$X/mtld3d" "$X/worse"
+t c4e-triaged 0 '^info triaged arm64x/visual visual\.c:15686 3 -> 4$' $L "$X/mtld3d" "$X/worse" "$X/triaged-core"
 [ -z "$fail" ] && echo "d3d9-conf-compare-test: ok" || { echo "d3d9-conf-compare-test: FAIL"; exit 1; }

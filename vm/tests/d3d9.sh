@@ -70,14 +70,15 @@
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
-# and logs/, mtld3d's logs (MTLD3D_CONFIG log.dir). The share's backend file picks the lane (C3d-6): "msl" sets
-# shader.backend=msl (MTLD3D_CONFIG for d3d9_triangle, DXMT_CONFIG for the conformance runs), anything else is the
-# default lane, which sets none. Both keep
-# caches/<leg>-<subtest>.bin, the conformance runs' shader caches, and stamp conf-<leg>.txt's first line with the lane. The 32-bit rows run under old WoW64 (the image's default: the i686
-# mtld3d.so and winemetal.so), or new WoW64 when the share's wow64 file says new (d3d9-gate.sh MN_WOW64=new).
-# The share's runtime file "core" (DXMTRS C4a) sets runtime.mode=core (MTLD3D_CONFIG for d3d9_triangle, DXMT_CONFIG for
-# the conformance runs): each triangle launch logs to logs/<row>, the core lane's proof, and no conformance runs (they
-# start with C4b).
+# and logs/, mtld3d's logs (MTLD3D_CONFIG log.dir). The share's runtime file picks the runtime (default "core" since
+# C4e, which injects no runtime.mode=core so the build default runs and stamps "mtld3d-conformance: lane default";
+# "mtld3d" injects runtime.mode=mtld3d as an escape hatch). The share's backend file picks the shader backend under
+# mtld3d (C3d-6): "msl" sets shader.backend=msl (MTLD3D_CONFIG for d3d9_triangle, DXMT_CONFIG for the conformance
+# runs), anything else is mtld3d's default AIR backend. Both keep caches/<leg>-<subtest>.bin, the conformance runs'
+# shader caches, and stamp conf-<leg>.txt's first line with the lane. Under core each triangle launch logs to logs/<row>
+# and each conformance run logs to logs/conf-<leg> (via DXMT_CONFIG log.dir and --log info, unsetting
+# MTLD3D_CONFORMANCE_RAW_DIR). The 32-bit rows run under old WoW64 (the image's default: the i686 mtld3d.so and
+# winemetal.so), or new WoW64 when the share's wow64 file says new (d3d9-gate.sh MN_WOW64=new).
 # The share's bench file (D3D9_BENCH=1, DXMTRS C4b-5): after the triangle rows, bench-<64|32>-<0|600>.txt, d3d9_triangle
 # --bench 2000 <frames> (0 frames first, then 600; the x86-64 rows only under old WoW64), and
 # benchp-<64|32>-<0|600>.txt, the same with "prog" (C4b2-12: a vs_2_0/ps_2_0 pair), each launch logging to logs/<row>
@@ -88,17 +89,22 @@ export WINEDLLOVERRIDES="mscoree,mshtml="  # as MacNeutron's prefixes: no Mono o
 T=/mnt/share/d3d9 O=/mnt/share/traces/d3d9 B=/mnt/share/bin
 rm -rf "$O"; mkdir -p "$O/logs"
 export MTLD3D_CONFIG="log.dir=Z:$O/logs"
-KEEP="--keep-shader-cache $O/caches" stamp="mtld3d-conformance: lane default"
-if [ "$(cat /mnt/share/d3d9/backend 2> /dev/null)" = msl ]; then
-  MTLD3D_CONFIG="$MTLD3D_CONFIG;shader.backend=msl"
-  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}shader.backend=msl"  # the runner sets only MTLD3D_CONFIG
-  stamp="mtld3d-conformance: lane msl (shader.backend=msl)"
-fi
+KEEP="--keep-shader-cache $O/caches"
 RT=$(cat /mnt/share/d3d9/runtime 2> /dev/null)
+RT=${RT:-core}
+BK=$(cat /mnt/share/d3d9/backend 2> /dev/null)
 if [ "$RT" = core ]; then
-  MTLD3D_CONFIG="$MTLD3D_CONFIG;runtime.mode=core"
-  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}runtime.mode=core"
-  stamp="mtld3d-conformance: lane core (runtime.mode=core)"
+  stamp="mtld3d-conformance: lane default"
+else
+  MTLD3D_CONFIG="$MTLD3D_CONFIG;runtime.mode=mtld3d"
+  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}runtime.mode=mtld3d"  # the runner sets only MTLD3D_CONFIG
+  if [ "$BK" = msl ]; then
+    MTLD3D_CONFIG="$MTLD3D_CONFIG;shader.backend=msl"
+    export DXMT_CONFIG="$DXMT_CONFIG;shader.backend=msl"
+    stamp="mtld3d-conformance: lane msl (runtime.mode=mtld3d;shader.backend=msl)"
+  else
+    stamp="mtld3d-conformance: lane mtld3d (runtime.mode=mtld3d)"
+  fi
 fi
 Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
 for t in "$T"/unit/* "$T"/unit32/*; do  # unit32: i686, on the i686 winemetal.so (named 32-<crate>)
@@ -221,7 +227,6 @@ if [ -f "$T/bench" ]; then
   bench d3d9_triangle32.exe benchp-32-0 0 prog
   bench d3d9_triangle32.exe benchp-32-600 600 prog
 fi
-[ "$RT" != core ] || exit 0  # no conformance under the core runtime in C4a
 for lane in "x64 arm64x" "x86 i686-arm64"; do
   set -- $lane
   prefix /home/mn/d3d9-conf-$1
@@ -230,9 +235,22 @@ for lane in "x64 arm64x" "x86 i686-arm64"; do
   mkdir -p "$O/exe/$1" && cp "$exe" "$O/exe/$1/" && exe="$O/exe/$1/d3d9_test.exe"
   echo "$stamp" > "$O/conf-$1.txt"
   # The guest runs a subtest several times slower than macOS (FEX, the transport): 20 minutes each, not 3.
-  MTLD3D_CONFORMANCE_TIMEOUT_SECS=1200 "$T/mtld3d-conformance" --wine /opt/mn-wine/bin/wine --wineserver /opt/mn-wine/bin/wineserver \
-    --assets "$T/conformance" --tests-wine-version "$(cat "$T/tests-wine-version")" --arch "$2" $KEEP \
-    --exe "$exe" >> "$O/conf-$1.txt" 2>&1
+  if [ "$RT" = core ]; then
+    mkdir -p "$O/logs/conf-$1"
+    (
+      unset MTLD3D_CONFORMANCE_RAW_DIR
+      export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}log.dir=Z:$O/logs/conf-$1"
+      MTLD3D_CONFORMANCE_TIMEOUT_SECS=1200 "$T/mtld3d-conformance" --wine /opt/mn-wine/bin/wine \
+        --wineserver /opt/mn-wine/bin/wineserver --assets "$T/conformance" \
+        --tests-wine-version "$(cat "$T/tests-wine-version")" --arch "$2" $KEEP --log info \
+        --exe "$exe"
+    ) >> "$O/conf-$1.txt" 2>&1
+  else
+    MTLD3D_CONFORMANCE_TIMEOUT_SECS=1200 "$T/mtld3d-conformance" --wine /opt/mn-wine/bin/wine \
+      --wineserver /opt/mn-wine/bin/wineserver --assets "$T/conformance" \
+      --tests-wine-version "$(cat "$T/tests-wine-version")" --arch "$2" $KEEP \
+      --exe "$exe" >> "$O/conf-$1.txt" 2>&1
+  fi
   echo $? > "$O/conf-$1.status"
   timeout 20 wineserver -k
   echo "guest: conformance $1 status $(cat "$O/conf-$1.status")"
