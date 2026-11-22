@@ -13105,7 +13105,7 @@ int main(int argc, char **argv) {
             for (int k = 0; k < 3; k++)
                 ttri[k] = {tri[k].x, tri[k].y, tri[k].z, tri[k].rhw, tri[k].color, tri[k].x / 256, tri[k].y / 256, 0};
         }
-        dev->SetFVF(texBench ? FVF_T2 : D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+        if (!prog) dev->SetFVF(texBench ? FVF_T2 : D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
         int failedDraws = 0;
         // One frame of draw() over the blue clear, read back: its centre, or 0 when it cannot be read.
         const auto centreOf = [&](auto draw) {
