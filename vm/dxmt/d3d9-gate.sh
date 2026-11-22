@@ -343,8 +343,12 @@ reset_refusals='IDirect3DDevice9::Reset (a back-buffer format the core does not 
 extras_refusals='IDirect3DDevice9::SetRenderState(RESZ) (into a dynamic depth texture)'
 runtime() {
   n=$(/usr/bin/grep -rhF "$refused" "$1" 2> /dev/null | wc -l | tr -d ' ')
-  /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" \
-    && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form|has no mapped memory|was not recorded' "$1" \
+  [ -n "$(find "$1" -maxdepth 1 -name '*.log' -type f 2> /dev/null | head -1)" ] \
+    && /usr/bin/grep -rqF '] d3d9.dll ' "$1" 2> /dev/null \
+    && /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$1" 2> /dev/null \
+    && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$1" 2> /dev/null \
+    && ! /usr/bin/grep -rqE 'mtld3d::(unix|shim)|\] mtld3d\.so |\] mtld3d\.dll ' "$1" 2> /dev/null \
+    && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form|has no mapped memory|was not recorded' "$1" 2> /dev/null \
     && case ${2:-} in
       fixed|depth|buffers|reset|extras)
         case $2 in

@@ -162,10 +162,13 @@ launch() {
   { kill "$dog" && wait "$dog"; } 2> /dev/null || true
   tr -d '\r' < "$WORK/$name.out" > "$WORK/$name.txt"
   [ "$RT" = core ] || return 0
-  # The core lane's proof, from the code that ran: the core device's line in this launch's logs and none of mtld3d.so's
-  # encoder line; the native arm64 half has no core runtime (C4-15), so there the fallback warning and the encoder line.
+  # The core lane's proof, from the code that ran: a PE .log file with d3d9.dll's identity and the core device's line,
+  # and none of mtld3d.so's encoder line or mtld3d::(unix|shim)/mtld3d.so/mtld3d.dll log lines; the native arm64 half
+  # has no core runtime (C4-15), so there the fallback warning and the encoder line.
   d="$WORK/mtld3d-logs/$name"
   enc='texture versions: rename pool cap'
+  mtld3d_lines='mtld3d::(unix|shim)|\] mtld3d\.so |\] mtld3d\.dll '
+  pe_log=$(find "$d" -maxdepth 1 -name '*.log' -type f 2> /dev/null | head -1)
   # A core device that cannot present or draw logs one of these and still answers D3D_OK: none may appear. "has no
   # mapped memory": a dynamic buffer staged for want of a usable name (DXMTRS C4c-2b). "was not recorded": a copy or a
   # resolve the core did not record, or an occlusion query left open at the device's end (DXMTRS C4c-4b, C4c-5).
@@ -178,19 +181,23 @@ launch() {
       echo "d3d9-check: $name: no arm64 fallback in $d"; fail="$fail $name-runtime"
     fi
   elif [ "$name" = dynamic ]; then
-    # d3d9_dynamic.exe makes no device (Direct3DCreate9 through GetProcAddress only): the config's mode, no fallback.
-    if /usr/bin/grep -rqF 'config: runtime.mode = core' "$d" && ! /usr/bin/grep -rqF "$enc" "$d" \
-      && ! /usr/bin/grep -rqF 'carries no core runtime' "$d"; then
+    # d3d9_dynamic.exe makes no device (Direct3DCreate9 through GetProcAddress only): PE log + config's mode, no mtld3d.so.
+    if [ -n "$pe_log" ] && /usr/bin/grep -rqF '] d3d9.dll ' "$d" \
+      && /usr/bin/grep -rqF 'config: runtime.mode = core' "$d" && ! /usr/bin/grep -rqF "$enc" "$d" \
+      && ! /usr/bin/grep -rqF 'carries no core runtime' "$d" && ! /usr/bin/grep -rqE "$mtld3d_lines" "$d"; then
       echo "d3d9-check: $name: runtime core (no device)"
     else
-      echo "d3d9-check: $name: no core runtime in $d"; fail="$fail $name-runtime"
+      echo "d3d9-check: $name: no core runtime, missing PE log, or mtld3d.so line in $d"; fail="$fail $name-runtime"
+      /usr/bin/grep -rhE "$mtld3d_lines" "$d" | head -5 | sed "s|^|d3d9-check: $name: |" || true
     fi
-  elif /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d" && ! /usr/bin/grep -rqF "$enc" "$d" \
+  elif [ -n "$pe_log" ] && /usr/bin/grep -rqF '] d3d9.dll ' "$d" \
+    && /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d" && ! /usr/bin/grep -rqF "$enc" "$d" \
+    && ! /usr/bin/grep -rqE "$mtld3d_lines" "$d" \
     && ! /usr/bin/grep -rqE "$unpresented" "$d" && refusals_ok "$name" "$d"; then
     echo "d3d9-check: $name: runtime core"
   else
-    echo "d3d9-check: $name: no core device, or a refusal or can't-present line, in $d"; fail="$fail $name-runtime"
-    /usr/bin/grep -rhE "$refused|$unpresented" "$d" | head -5 | sed "s|^|d3d9-check: $name: |" || true
+    echo "d3d9-check: $name: no core device, missing PE log, mtld3d.so line, refusal, or can't-present line, in $d"; fail="$fail $name-runtime"
+    /usr/bin/grep -rhE "$refused|$unpresented|$mtld3d_lines" "$d" | head -5 | sed "s|^|d3d9-check: $name: |" || true
   fi
 }
 # refusals_ok <name> <folder>: the fixed launch's logs hold exactly its one core refusal line (DXMTRS C4b-3c: a depth
