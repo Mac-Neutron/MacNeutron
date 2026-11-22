@@ -604,6 +604,7 @@ static void attach_poll_retire(void) {
 
     struct unixcall_generic_obj_uint64_noret retire = {att.ret_view, WMTRetireMetalViewFlagPark};
     CHECK(W(160, &retire) == 0);
+    sweep();
     struct WMTViewPollOut dead = {0};
     struct unixcall_wmt_view_sync_and_poll sp_dead = {att.ret_view, att.ret_layer, {&dead}, 0, 0};
     CHECK(W(161, &sp_dead) == MN_STATUS_INVALID_HANDLE);
