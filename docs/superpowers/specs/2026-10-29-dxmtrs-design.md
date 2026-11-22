@@ -1944,6 +1944,27 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   after `present_boundary(true)`). Verified across Mac + VM gates (`ALL C4D5 RUST CHECKS OK`, `jt2`, `jl1`, `jq2`
   22/22 Metal validation 0 reports and `0` `mtld3d.so` loads under `core`, `jc1` old/new WoW64, `jr1` plain-build
   invariance, adversarial review findings fixed).
+  **C4d-6 (C4-15 native ARM64X winemetal.dll & d3d9.dll + pull-on-present winemetal slots 158..=164)**
+  done 2026-11-22 at DXMTRS main `b8fa21ed` (`b8fa21edb04f9aac05c7699b8bda65bfbddf43f3`), which MacNeutron pins.
+  Adds native ARM64X dual-half `winemetal.dll` (via `tools/arm64x-link.sh --winecrt0` and hybrid `winemetal.dll.a`) and
+  dual-half `core-runtime` `d3d9.dll` (native `aarch64` + `arm64ec`), verified by `wine-arm64/bundle.sh` dual-half
+  export/import assertions and native `arm64` execution in `dxmt/d3d9-check.sh`. Adds 7 pull-on-present & latency
+  winemetal slots (`158` `WMTDeclareLatencyCriticalActivity`, `159` `WMTAttachMetalView`, `160` `WMTRetireMetalView`,
+  `161` `WMTViewSyncAndPoll`, `162` `WMTPresentClientSurface`, `163` `MTLDrawable_setPresentedEvent`, `164`
+  `WMTSetCursorOverlay`) implemented in `src/winemetal/unix/src/g6/` (`attachment`, `window`, `client_surface`,
+  `cursor_overlay`, `delegate_forward`, `display`, `appkit`), exposed via `winemetal-pe`/`winemetal-sys`/`dxmt-core`,
+  consumed by `d3d9-rt`/`d3d9` (EDR inverse tone mapping, occlusion/displays-nothing handling, presented-event pacing,
+  client-surface present, software cursor overlay with gamma LUT, view parking), forwarded in `vm/metal/wm/`
+  (`MN_WM_SLOTS=165`, `MN_HK_ATTACHED_VIEW`, guest-throttled slot `161` cache), and covered by `dxmt/tests/wm_probe/`
+  (`slots`/`table`/`cases g6`/`bites g6`, Wine & `--native`). Verified across all gates: `tools/rust-check.sh` 6/6
+  (`audit: clean (1285 files)`), `jt2` (`facade` 8/8, `wm-probe` g0..g10, `wm-probe-native` g0..g10, `vm/metal/wm` 6/6
+  under ASan/UBSan, `d3d9-default` & `d3d9-core` incl. `arm64: runtime core (aarch64)`, 10/10 Metal API Validation
+  launches 0 reports incl. `arm64`, 3/3 C4d-5 probes), `cover.sh` (`slots`, `table` 165/165, `cases g6`, `bites g6`),
+  `jl1` (`conf-core` 0 validation reports, `conf-compare: ok`), `jq1` (default/msl/core + 22/22 Metal API Validation
+  launches 0 reports incl. `arm64`), `jc2` (`JC_D3D10=1`: `vm/dxmt/check-build.sh` ok, `d3d-gate` 48/48, VM D3D9
+  old/new WoW64 default & core exit 0, `was not recorded: 0`), `jr1` (plain `DXMT_D3D9_CORE=0` build:
+  `translator key: same`, `imports vs base: same`, `d3d9-default` & `conf-default` exit 0), and `jx1` (`x64` 420/420,
+  `arm64ec` 420/420, translator key unchanged).
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features

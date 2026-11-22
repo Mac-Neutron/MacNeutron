@@ -42,9 +42,17 @@ Close the final two structural gaps between DXMTRS's `d3d9.dll` core runtime and
 - `vm/metal/wm/`: `calls.h`, `handles.h`, `calls.c`, `marshal.c`, `host/present.m`, `host/memory.m`, `host/invoke.m`, `guest/winemetal.c`, `guest/wow64.c`, `tests/marshal-test.m`, `tests/memory-test.m`, `tests/window-test.m`.
 - `dxmt/tests/wm_probe/`: `probe.h`, `probe.m`, `slots.txt`, `cover.sh`, `cases_g6.m`, `g6.fixed`, `g6.native`.
 
-## Verification Gates (Run by Orchestrator)
+## Verification Gates (Sealed 2026-11-22)
 
-- `make -C vm/metal/wm marshal-test memory-test window-test` (after DXMTRS install builds `winemetal.so`)
-- `sh dxmt/tests/wm_probe/cover.sh slots`, `table`, `cases ... g6`, `bites ... g6`
-- `sh dxmt/wm-probe-check.sh g6` and `sh dxmt/wm-probe-check.sh --native <dylib> g6`
-- `sh wine-arm64/bundle.sh` and `D3D9_RUNTIME=core sh dxmt/d3d9-check.sh`
+- **Status:** Sealed
+- **Date:** `2026-11-22`
+- **Pinned DXMTRS commit:** `b8fa21edb04f9aac05c7699b8bda65bfbddf43f3` (`b8fa21ed`)
+- **Gate commands & results:**
+  - `tools/rust-check.sh`: 6/6 (`audit: clean (1285 files)`)
+  - `jt2`: `facade` 8/8, `wm-probe` g0..g10, `wm-probe-native` g0..g10, `vm/metal/wm` 6/6 under ASan/UBSan (`marshal-test`, `memory-test`, `window-test`), `d3d9-default` & `d3d9-core` incl. `arm64: runtime core (aarch64)`, 10/10 Metal API Validation launches 0 reports incl. `arm64`, 3/3 C4d-5 probes, `wine-arm64/bundle.sh` dual-half checks
+  - `cover.sh`: `slots`, `table` 165/165, `cases g6`, `bites g6`
+  - `jl1`: `conf-core` 0 validation reports, `conf-compare: ok`
+  - `jq1`: default/msl/core + 22/22 Metal API Validation launches 0 reports incl. `arm64`
+  - `jc2` (`JC_D3D10=1`): `vm/dxmt/check-build.sh` ok, `d3d-gate` 48/48, VM D3D9 old/new WoW64 default & core exit 0, `was not recorded: 0`
+  - `jr1`: plain `DXMT_D3D9_CORE=0` build (`translator key: same`, `imports vs base: same`, `d3d9-default` & `conf-default` exit 0)
+  - `jx1`: `x64` 420/420, `arm64ec` 420/420, translator key unchanged
