@@ -51,8 +51,8 @@
 # C4c-4c, which copies rt-msaa's multisampled surface into a 32x32 target). Every lane also runs d3d9_triangle depth
 # (DXMTRS C4b-3d2's 31 rows of
 # the depth-stencil, on a device with an auto depth-stencil, ds-dynlock C4c-3b's; "depth strict" under core), its rows
-# "depth-<row>"; under core its launch's logs hold exactly its one refused call's line (a depth-tested draw sampling
-# the bound depth-stencil; a dynamic depth texture's lock is the core's since DXMTRS C4c-3b). Every lane also runs
+# "depth-<row>"; under core its launch's logs hold no refusal line (a dynamic depth texture's lock is the core's since
+# DXMTRS C4c-3b, and depth snapshot blitting covers bound-depth sampling). Every lane also runs
 # d3d9_triangle blend (DXMTRS C4b-3d3's 36 rows of partial clears, the scissor test, a depth-stencil of another size, sRGB write and
 # blending, on such a device; "blend strict" under core), its rows "blend-<row>"; under core its launch's logs hold no
 # refusal line. Every lane also runs d3d9_triangle mrt (DXMTRS C4b-3d4's 20 rows of render targets at index 1-3, on such
@@ -201,13 +201,14 @@ launch() {
   fi
 }
 # refusals_ok <name> <folder>: the fixed launch's logs hold exactly its one core refusal line (DXMTRS C4b-3c: a depth
-# texture at a vertex sampler), the depth launch's exactly its one (DXMTRS C4b-3d2: a depth-tested draw sampling the
-# bound depth-stencil; a dynamic depth texture's LockRect is the core's since DXMTRS C4c-3b); the buffers launch's
+# texture at a vertex sampler); the buffers launch's
 # exactly its one (DXMTRS C4c-2a: a layout no binding can fetch); the reset launch's exactly its one (DXMTRS C4c-6c: a
 # Reset to a back-buffer format the core does not make, which rs-refuse asks for under strict alone; its one since
 # DXMTRS C4c-6d, which makes a Reset into fullscreen the core's); the extras launch's exactly its one (DXMTRS C4c-7a:
 # a RESZ into a dynamic depth texture, which rz-refuse asks for under strict alone); the shaders, state, textures,
-# targets, blend, mrt, msaa, blit, queries, fullscreen, parity, lost, pace and scale launches' none (the scale launch's
+# targets, depth, blend, mrt, msaa, blit, queries, fullscreen, parity, lost, pace and scale launches' none (depth now has
+# 0 refusals since depth snapshot covers bound-depth sampling, and a dynamic depth texture's LockRect is the core's
+# since DXMTRS C4c-3b; the scale launch's
 # since DXMTRS C4d-4b, which wires core render.scale, render.lodBias and MetalFX spatial upscaling; the pace launch's
 # since DXMTRS C4d-4a, which wires core pacing and occluded presents; the lost launch's since DXMTRS
 # C4d-2b, which wires the core device-lost latch; the parity launch's since DXMTRS
@@ -221,15 +222,14 @@ launch() {
 # core's; the queries launch's since DXMTRS C4c-5: CreateQuery is the core's); the other launches are not held to it.
 refused='is not implemented under runtime.mode = core'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
-depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)'
 buffers_refusals='IDirect3DDevice9::Draw*Primitive (a layout no binding can fetch)'
 reset_refusals='IDirect3DDevice9::Reset (a back-buffer format the core does not make)'
 extras_refusals='IDirect3DDevice9::SetRenderState(RESZ) (into a dynamic depth texture)'
 refusals_ok() {
   case $1 in
-    fixed|depth|buffers|reset|extras)
+    fixed|buffers|reset|extras)
       case $1 in
-        fixed) set_=$fixed_refusals ;; depth) set_=$depth_refusals ;; buffers) set_=$buffers_refusals ;;
+        fixed) set_=$fixed_refusals ;; buffers) set_=$buffers_refusals ;;
         reset) set_=$reset_refusals ;; extras) set_=$extras_refusals ;;
       esac
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] \
@@ -237,7 +237,7 @@ refusals_ok() {
       printf '%s\n' "$set_" | while IFS= read -r n; do
         /usr/bin/grep -rqF "d3d9 core: $n $refused" "$2" || exit 1
       done ;;
-    shaders|state|textures|targets|blend|mrt|msaa|blit|queries|fullscreen|parity|lost|pace|scale|arm64|cache-cold|cache-warm)
+    shaders|state|textures|targets|blend|mrt|msaa|blit|queries|fullscreen|parity|lost|pace|scale|depth|arm64|cache-cold|cache-warm)
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
     *) return 0 ;;
   esac

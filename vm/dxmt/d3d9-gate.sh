@@ -45,8 +45,8 @@
 # which copies rt-msaa's multisampled surface into a 32x32 target). Every lane also checks d3d9_triangle depth's 31
 # rows (DXMTRS C4b-3d2: the
 # depth-stencil, on a device with an auto depth-stencil, ds-dynlock C4c-3b's; dp64-fresh, dp32-fresh); under core their
-# logs hold exactly its one refused call's line (a depth-tested draw sampling the bound depth-stencil; a dynamic depth
-# texture's lock is the core's since DXMTRS C4c-3b). Every lane also checks d3d9_triangle blend's 36
+# logs hold no refusal line (a dynamic depth texture's lock is the core's since DXMTRS C4c-3b, and depth snapshot
+# blitting covers bound-depth sampling). Every lane also checks d3d9_triangle blend's 36
 # rows (DXMTRS C4b-3d3: partial clears, the scissor test, a depth-stencil of another size, sRGB write and blending;
 # bl64-fresh, bl32-fresh); under core their logs hold no refusal line. Every lane also checks d3d9_triangle mrt's 20
 # rows (DXMTRS C4b-3d4: render targets at index 1-3; mr64-fresh, mr32-fresh); under core their logs hold no refusal
@@ -317,18 +317,19 @@ for r in st64-fresh st32-fresh; do
     check "$r $row" "$(/usr/bin/grep "^d3d9 $row " "$G/$r.txt" 2> /dev/null || echo "no line")" "d3d9 $row ok"
   done
 done
-# core: runtime <folder> [fixed|depth|buffers|reset|extras]: the core device's line in a launch's logs, none of
+# core: runtime <folder> [fixed|buffers|reset|extras]: the core device's line in a launch's logs, none of
 # mtld3d.so's encoder line nor of the core's can't-present, dropped-draw or staged-dynamic-buffer ("has no mapped
 # memory", DXMTRS C4c-2b) lines (the code that ran prints them, not the switch), and no refusal line, or with
-# "fixed", "depth", "buffers", "reset" or "extras" exactly that launch's refused rows'
-# (fixed_refusals, depth_refusals: one line since DXMTRS C4c-3b, which locks a dynamic depth texture,
+# "fixed", "buffers", "reset" or "extras" exactly that launch's refused rows'
+# (fixed_refusals,
 # buffers_refusals: DXMTRS C4c-2a's layout no binding can fetch, reset_refusals: DXMTRS C4c-6c's Reset to a
 # back-buffer format the core does not make, rs-refuse's under strict alone (its one since DXMTRS C4c-6d, which makes a
 # Reset into fullscreen the core's), extras_refusals: DXMTRS C4c-7a's RESZ into a dynamic depth texture, rz-refuse's
 # under strict alone).
-# The shaders, state, textures, targets, blend, mrt, msaa, blit, queries, fullscreen, parity, lost, pace and scale launches (DXMTRS
-# C4b-2, C4b-3a, C4b-3b, C4b-3d1, C4b-3d3, C4b-3d4, C4b-3d5, C4c-4a, C4c-5, C4c-6d, C4c-7d-1, C4d-2b, C4d-4a, C4d-4b) take no kind: no refusal
-# line (the parity launch's since DXMTRS C4c-7d-1, which makes ProcessVertices the core's; the
+# The shaders, state, textures, targets, depth, blend, mrt, msaa, blit, queries, fullscreen, parity, lost, pace and scale launches (DXMTRS
+# C4b-2, C4b-3a, C4b-3b, C4b-3d1, C4b-3d2, C4b-3d3, C4b-3d4, C4b-3d5, C4c-4a, C4c-5, C4c-6d, C4c-7d-1, C4d-2b, C4d-4a, C4d-4b) take no kind: no refusal
+# line (the depth launch's since depth snapshot covers bound-depth sampling, and a dynamic depth texture's lock is the
+# core's since DXMTRS C4c-3b; the parity launch's since DXMTRS C4c-7d-1, which makes ProcessVertices the core's; the
 # fullscreen launch's since DXMTRS C4c-6d, which makes fullscreen devices and Resets into fullscreen the core's; the
 # shaders launch's since DXMTRS C4c-2a, which draws the crossing row; the state launch's since DXMTRS C4c-1: buffer
 # locks are the core's, and since
@@ -339,7 +340,6 @@ done
 # C4c-4d: a depth-stencil resolve is the core's; the queries launch's since DXMTRS C4c-5: CreateQuery is the core's).
 refused='is not implemented under runtime.mode = core'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
-depth_refusals='IDirect3DDevice9::Draw*PrimitiveUP (the depth-stencil sampled while bound)'
 buffers_refusals='IDirect3DDevice9::Draw*Primitive (a layout no binding can fetch)'
 reset_refusals='IDirect3DDevice9::Reset (a back-buffer format the core does not make)'
 extras_refusals='IDirect3DDevice9::SetRenderState(RESZ) (into a dynamic depth texture)'
@@ -352,9 +352,9 @@ runtime() {
     && ! /usr/bin/grep -rqE 'mtld3d::(unix|shim)|\] mtld3d\.so |\] mtld3d\.dll ' "$1" 2> /dev/null \
     && ! /usr/bin/grep -rqE 'nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form|has no mapped memory|was not recorded' "$1" 2> /dev/null \
     && case ${2:-} in
-      fixed|depth|buffers|reset|extras)
+      fixed|buffers|reset|extras)
         case $2 in
-          fixed) set_=$fixed_refusals ;; depth) set_=$depth_refusals ;; buffers) set_=$buffers_refusals ;;
+          fixed) set_=$fixed_refusals ;; buffers) set_=$buffers_refusals ;;
           reset) set_=$reset_refusals ;; extras) set_=$extras_refusals ;;
         esac
         [ "$n" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] && printf '%s\n' "$set_" | while IFS= read -r m; do
@@ -372,9 +372,6 @@ if [ "$RT" = core ]; then
   for r in fx64-fresh fx32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" fixed)" ok
   done
-  for r in dp64-fresh dp32-fresh; do
-    check "$r runtime core" "$(runtime "$G/logs/$r" depth)" ok
-  done
   for r in rs64-fresh rs32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r" reset)" ok
   done
@@ -387,9 +384,9 @@ if [ "$RT" = core ]; then
     check "$r buffers direct" \
       "$(/usr/bin/grep -rqF 'd3d9 core: dynamic buffers are read in place' "$G/logs/$r" 2> /dev/null && echo ok)" ok
   done
-  for r in shd64-fresh shd32-fresh st64-fresh st32-fresh tg64-fresh tg32-fresh bl64-fresh bl32-fresh mr64-fresh \
-    mr32-fresh ms64-fresh ms32-fresh bt64-fresh bt32-fresh qu64-fresh qu32-fresh fs64-fresh fs32-fresh pa64-fresh \
-    pa32-fresh lo64-fresh lo32-fresh pc64-fresh pc32-fresh sc64-fresh sc32-fresh; do
+  for r in shd64-fresh shd32-fresh st64-fresh st32-fresh tg64-fresh tg32-fresh dp64-fresh dp32-fresh bl64-fresh \
+    bl32-fresh mr64-fresh mr32-fresh ms64-fresh ms32-fresh bt64-fresh bt32-fresh qu64-fresh qu32-fresh fs64-fresh \
+    fs32-fresh pa64-fresh pa32-fresh lo64-fresh lo32-fresh pc64-fresh pc32-fresh sc64-fresh sc32-fresh; do
     check "$r runtime core" "$(runtime "$G/logs/$r")" ok
   done
   for r in shd64-cold shd64-warm; do

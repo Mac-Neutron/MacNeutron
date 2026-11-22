@@ -61,7 +61,7 @@
 // surfaces and depth textures and their levels, shadow, raw (INTZ, DF16, DF24) and fetch4 samples of a depth texture,
 // a depth-stencil larger than the target, the pretransformed clip while one is bound, a multisampled surface beside a
 // single-sample target (DXMTRS C4b-3d5), dynamic depth textures written through their locks and sampled (DXMTRS
-// C4c-3b), and what the core refuses (a depth-tested draw sampling the bound depth-stencil), with a 150 s budget.
+// C4c-3b), and a depth-tested draw sampling the bound depth-stencil, with a 150 s budget. The core refuses none of it.
 // "--bench <draws> <frames> tex depth" runs the tex bench on such a device, Z cleared each frame and tested ("mode
 // texdepth").
 // With "blend" ("blend strict" under core; DXMTRS C4b-3d3): 36 rows "d3d9 <cl|sc|sz|sr|bl>-<row> ok|FAIL <why>" on such
@@ -4444,25 +4444,40 @@ static bool rowDsSize() {
     CK(SetDepthStencilSurface, dsSurf);
     return ok;
 }
-// The bound depth-stencil (INTZ, cleared to 0.5) sampled by the draw. With Z and stencil off the draw reads it in
-// every lane. With Z on it is past the core's slice (C4c's copy): D3DERR_NOTAVAILABLE under core (strict); D3D_OK
-// elsewhere, the result not asserted.
+// The bound depth-stencil (INTZ, cleared to 0.5) sampled by draws in every lane.
+// Test 1: with Z off (a) and with Z on, ZWRITEENABLE off, z = 0.5 (b, passing LESSEQUAL), both return D3D_OK and read
+// 0x808080.
+// Test 2: after writing z = 0.25 with ZWRITEENABLE on (TRED over x 32..224, y 176..240), re-binding t as texture 0
+// with ZWRITEENABLE off refreshes the snapshot (z = 0.20 passes and reads 0x404040) while live depth testing remains
+// active (z = 0.40 fails and leaves TRED).
 static bool rowDsFeedback() {
-    Px px[] = {{64, 128, 0x808080}, {192, 128, BLUE}};
-    px[1].mask = strictMode ? 0xffffff : 0;
-    const bool ok = frames(BLUE, px, 2, [&] {
+    const Px px[] = {{64, 128, 0x808080}, {192, 128, 0x808080}, {64, 208, 0x404040}, {192, 208, TRED}};
+    const bool ok = frames(BLUE, px, 4, [&] {
         Com<IDirect3DTexture9> t;
-        TV3 a[4], b[4];
-        tquad(a, 32, 96, 96, 160, 64.5f / 256, 0.5f, 0.5f), tquad(b, 160, 96, 224, 160, 192.5f / 256, 0.5f, 0.5f);
+        TV3 a[4], b[4], c[4], d[4];
+        tquad(a, 32, 96, 96, 160, 64.5f / 256, 0.5f, 0.5f);
+        tquad(b, 160, 96, 224, 160, 192.5f / 256, 0.5f, 0.5f);
+        tquad(c, 32, 176, 96, 240, 64.5f / 256, 208.5f / 256, 0.5f);
+        for (int i = 0; i < 4; i++) c[i].z = 0.20f;
+        tquad(d, 160, 176, 224, 240, 192.5f / 256, 208.5f / 256, 0.5f);
+        for (int i = 0; i < 4; i++) d[i].z = 0.40f;
         if (!makeDepthTex(t, FMT_INTZ) || !bindDsLevel(t.p) || !clearZ(0.5f)) return false;
         CK(SetTexture, 0, t.p);
-        if (!rstate(D3DRS_ZENABLE, D3DZB_FALSE) || !tdraw(a) || !rstate(D3DRS_ZENABLE, D3DZB_TRUE)) return false;
+        if (!rstate(D3DRS_ZENABLE, D3DZB_FALSE) || !tdraw(a) || !rstate(D3DRS_ZENABLE, D3DZB_TRUE) ||
+            !rstate(D3DRS_ZWRITEENABLE, FALSE))
+            return false;
+        CK(SetFVF, FVF_T2);
         const HRESULT hr = dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, b, sizeof *b);
+        if (hr != D3D_OK) return fail("DrawPrimitiveUP (Z on)", hr);
         CK(SetTexture, 0, nullptr);
-        if (strictMode ? hr != D3DERR_NOTAVAILABLE : hr != D3D_OK) return fail("DrawPrimitiveUP (Z on)", hr);
-        return bindDs(dsSurf);
+        if (!rstate(D3DRS_ZWRITEENABLE, TRUE) || !zquad(32, 176, 224, 240, 0.25f, TRED)) return false;
+        CK(SetTexture, 0, t.p);
+        if (!rstate(D3DRS_ZWRITEENABLE, FALSE) || !tdraw(c) || !tdraw(d)) return false;
+        CK(SetTexture, 0, nullptr);
+        return rstate(D3DRS_ZWRITEENABLE, TRUE) && bindDs(dsSurf);
     });
     CK(SetTexture, 0, nullptr);
+    CK(SetRenderState, D3DRS_ZWRITEENABLE, TRUE);
     CK(SetDepthStencilSurface, dsSurf);
     return ok;
 }
