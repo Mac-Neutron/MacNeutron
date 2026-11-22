@@ -2,7 +2,7 @@
  * helpers of probe.h. Usage:
  *   wm_probe <host-dir> fixed|full [g0 ... g10] [--counts]   <host-dir>/ntdll.so, then winemetal.so (loader.c)
  *   wm_probe native <dylib> fixed|full [g0 ... g10] [--counts]
- *   wm_probe <host-dir> table        "table <slot> <offset|null>" for 0-157, "wow64 <slot> ..." when exported
+ *   wm_probe <host-dir> table        "table <slot> <offset|null>" for 0-164, "wow64 <slot> ..." when exported
  *   wm_probe <host-dir> rate         "rate <slot> <ns per call>" for 36, 37, 38
  *   wm_probe <host-dir> pair <native-dylib>   both images in one process, slot 117 through each table
  *   wm_probe --list                  "<group> <slot> <case> <flags>" for every case, without loading
@@ -37,7 +37,7 @@ extern char **environ;
 void *objc_autoreleasePoolPush(void);
 void objc_autoreleasePoolPop(void *);
 
-#define NSLOTS 158
+#define NSLOTS 165
 
 id<MTLDevice> wm_device;
 id<MTLCommandQueue> wm_queue;
@@ -913,7 +913,7 @@ static void table_mode(const wm_unix_fn *funcs) {
         if (funcs[i]) printf("table %u %lx\n", i, (unsigned long)((const char *)funcs[i] - base));
         else printf("table %u null\n", i);
     /* The WoW64 table's length isn't in the image: its entries are those up to the next symbol dladdr finds (the
-     * table's extent as the symbol table has it), each null or code of this image, at most 158. */
+     * table's extent as the symbol table has it), each null or code of this image, at most 165. */
     const wm_unix_fn *wow = dlsym(image, "__wine_unix_call_wow64_funcs");
     for (unsigned i = 0; wow && i < NSLOTS; i++) {
         if (!dladdr((const void *)&wow[i], &d) || d.dli_saddr != (void *)wow) break;

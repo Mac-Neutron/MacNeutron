@@ -285,8 +285,9 @@ extern "C" __attribute__((visibility("default"))) const struct {
   void *(*view_create_metal_view)(void *, void *);
   void *(*view_get_metal_layer)(void *);
   void (*view_release_metal_view)(void *);
+  void *on_main_thread; // dispatch_block_t
 } macdrv_functions = {nullptr, NativeGetWinData, NativeReleaseWinData, nullptr, nullptr, nullptr,
-                      NativeCreateMetalView, NativeGetMetalLayer, NativeReleaseMetalView};
+                      NativeCreateMetalView, NativeGetMetalLayer, NativeReleaseMetalView, nullptr};
 static void InitNativeWsi() {
   using SetFn = void (*)(const WsiHooksP *);
   if (auto fn = (SetFn)dlsym(RTLD_DEFAULT, "WMTSetWsiHooks"))

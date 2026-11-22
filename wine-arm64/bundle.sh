@@ -298,7 +298,6 @@ id=$(otool -D "$U/libmacneutron-present.dylib" | tail -n +2)
   || die "libmacneutron-present.dylib's install name is ${id:-missing}, not @rpath/libmacneutron-present.dylib"
 # DXMT: Wine's builtin marker (bytes 64-79, in the DOS stub), the version token, the pin's place in the tree.
 builtin() { [ "$(dd if="$1" bs=1 skip=64 count=16 2> /dev/null)" = "Wine builtin DLL" ]; }
-builtin "$R/lib/wine/aarch64-windows/winemetal.dll" || die "winemetal.dll lacks Wine's builtin marker"
 for f in d3d11.dll d3d10core.dll dxgi.dll d3d12.dll nvapi64.dll nvngx.dll dxmt-replay.exe; do
   ! builtin "$R/DXMT/aarch64-windows/$f" || die "$f carries Wine's builtin marker"
 done
@@ -313,22 +312,36 @@ LC_ALL=C /usr/bin/grep -qxE '[0-9a-f]{64}' "$R/DXMT/translator" \
   || die "DXMT/translator is '$(cat "$R/DXMT/translator")', not the translator's 64-hex key"
 git -C "$DXMT_TREE" merge-base --is-ancestor "$DXMT_COMMIT" HEAD \
   || die "$DXMT_COMMIT (dxmt/pins) is not an ancestor of HEAD in $DXMT_TREE"
-# Direct3D 9 (D3D9 spec §4): its d3d9.dll (it imports mtld3d.dll, which Wine's own never does) and mtld3d.dll, Wine
-# builtins and ARM64X images (llvm-readobj prints a CHPEMetadata block for any hybrid image, an ARM64EC one too, so the
-# machine line must say ARM64X; an ARM64X image also prints ARM64EC's, indented, in its HybridObject view); mtld3d.so
-# signed; no assertion code in the three (production_asserts); its licence.
+# Direct3D 9 (D3D9 spec §4): winemetal.dll, d3d9.dll (it imports mtld3d.dll, which Wine's own never does) and
+# mtld3d.dll, Wine builtins and ARM64X images (llvm-readobj prints a CHPEMetadata block for any hybrid image, an
+# ARM64EC one too, so the machine line must say ARM64X; an ARM64X image also prints ARM64EC's, indented, in its
+# HybridObject view); winemetal.dll exports WMTCopyAllDevices in both halves, and core d3d9.dll imports winemetal.dll
+# in both halves; mtld3d.so signed; no assertion code in the binaries (production_asserts); its licence.
 readobj="$(sh "$ROOT/dxmt/toolchain.sh")/llvm-readobj"
-for f in d3d9.dll mtld3d.dll; do
+for f in winemetal.dll d3d9.dll mtld3d.dll; do
   builtin "$R/lib/wine/aarch64-windows/$f" || die "$f lacks Wine's builtin marker"
   "$readobj" --coff-load-config "$R/lib/wine/aarch64-windows/$f" | LC_ALL=C /usr/bin/grep -q CHPEMetadata \
     || die "$f is no ARM64X image"
   "$readobj" --file-headers "$R/lib/wine/aarch64-windows/$f" \
     | LC_ALL=C /usr/bin/grep -qxF '  Machine: IMAGE_FILE_MACHINE_ARM64X (0xA64E)' || die "$f's machine is not ARM64X"
 done
-"$readobj" --coff-imports "$R/lib/wine/aarch64-windows/d3d9.dll" | LC_ALL=C /usr/bin/grep -qx '  Name: mtld3d.dll' \
+wm_exp=$("$readobj" --coff-exports "$R/lib/wine/aarch64-windows/winemetal.dll")
+printf '%s\n' "$wm_exp" | LC_ALL=C /usr/bin/grep -qxF '  Name: WMTCopyAllDevices' \
+  || die "winemetal.dll's arm64 half lacks export WMTCopyAllDevices"
+printf '%s\n' "$wm_exp" | LC_ALL=C /usr/bin/grep -qxF '    Name: WMTCopyAllDevices' \
+  || die "winemetal.dll's arm64ec half lacks export WMTCopyAllDevices"
+d3d9_imp=$("$readobj" --coff-imports "$R/lib/wine/aarch64-windows/d3d9.dll")
+printf '%s\n' "$d3d9_imp" | LC_ALL=C /usr/bin/grep -qx '  Name: mtld3d.dll' \
   || die "lib/wine/aarch64-windows/d3d9.dll is Wine's, not DXMT's (it imports no mtld3d.dll)"
+if printf '%s\n' "$d3d9_imp" | LC_ALL=C /usr/bin/grep -qxF '    Name: winemetal.dll'; then
+  printf '%s\n' "$d3d9_imp" | LC_ALL=C /usr/bin/grep -qxF '  Name: winemetal.dll' \
+    || die "core d3d9.dll's arm64 half imports no winemetal.dll"
+elif printf '%s\n' "$d3d9_imp" | LC_ALL=C /usr/bin/grep -qxF '  Name: winemetal.dll'; then
+  die "core d3d9.dll's arm64ec half imports no winemetal.dll"
+fi
 [ -f "$U/mtld3d.so" ] && codesign --verify "$U/mtld3d.so" 2> /dev/null || die "no signed mtld3d.so in $U"
-production_asserts "$R/lib/wine/aarch64-windows/d3d9.dll" "$R/lib/wine/aarch64-windows/mtld3d.dll" "$U/mtld3d.so"
+production_asserts "$R/lib/wine/aarch64-windows/winemetal.dll" \
+  "$R/lib/wine/aarch64-windows/d3d9.dll" "$R/lib/wine/aarch64-windows/mtld3d.dll" "$U/mtld3d.so"
 [ -f "$L/mtld3d/LICENSE" ] && [ -f "$L/mtld3d/crates/INDEX" ] || die "no licenses/mtld3d/LICENSE or crates/INDEX"
 # The Steam bridge (ship-base spec §7): an ARM64X Wine builtin (llvm-readobj prints a CHPEMetadata block only for a
 # hybrid image) and an arm64 unix side that needs nothing from ntdll.so it doesn't export; and a loader that may load

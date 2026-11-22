@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "../../guest/transport.h"
 #include "../marshal.h"
 #include "../notify.h"
@@ -84,8 +85,36 @@ static uint32_t texture_format(mn_handle t) {
     return (uint32_t)r.ret;
 }
 
+/* C4d-6: guest cache for slot 161 (WMTViewSyncAndPoll), polling the host on first call, every 32nd frame, or when
+ * WMTViewSyncFlagForceRefresh is set so steady-state frames incur zero synchronous VM exits. */
+#define WMT_VIEW_POLL_THROTTLE 32u
+#define WMT_VIEW_POLL_CACHE_CAP 16u
+#define WMT_VIEW_POLL_EDGE_FLAGS \
+    (WMTViewPollFlagClientSurfaceDirty | WMTViewPollFlagCursorKick | WMTViewPollFlagColorspaceChanged)
+
+struct view_poll_entry {
+    obj_handle_t view;
+    uint32_t hits;
+    uint64_t stamp;
+    struct WMTViewPollOut out;
+};
+static pthread_mutex_t poll_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct view_poll_entry poll_cache[WMT_VIEW_POLL_CACHE_CAP];
+static uint64_t poll_stamp;
+
+static void view_poll_drop(obj_handle_t view) {
+    if (!view) return;
+    pthread_mutex_lock(&poll_lock);
+    for (size_t i = 0; i < WMT_VIEW_POLL_CACHE_CAP; i++)
+        if (poll_cache[i].view == view) poll_cache[i].view = 0;
+    pthread_mutex_unlock(&poll_lock);
+}
+
 /* A child after fork opens its own context on its next call (Wine forks to start processes, which then exec). */
 static void forget(void) {
+    pthread_mutex_init(&poll_lock, NULL);
+    memset(poll_cache, 0, sizeof poll_cache);
+    poll_stamp = 0;
     mn_forget();
     mn_galloc_forget();
     mn_wm_forget();
@@ -110,7 +139,7 @@ int mn_wm_stats(struct mn_wm_stats *st) {
                   slot##t##8, slot##t##9,
 STUB(0) STUB(1) STUB(2) STUB(3) STUB(4) STUB(5) STUB(6) STUB(7) STUB(8) STUB(9)
 STUB10(1) STUB10(2) STUB10(3) STUB10(4) STUB10(5) STUB10(6) STUB10(7) STUB10(8) STUB10(9) STUB10(10) STUB10(11)
-STUB10(12) STUB10(13) STUB10(14) STUB(150) STUB(151) STUB(152) STUB(156) STUB(157)
+STUB10(12) STUB10(13) STUB10(14) STUB(150) STUB(151) STUB(152) STUB(156) STUB(157) STUB(159) STUB(163)
 
 /* DXMT 0071's WMTMemoryAlloc and WMTMemoryFree: memory DXMT makes Metal buffers over, from the blob allocator, so the
  * host maps it too. A freed allocation comes back once every buffer over it is gone (galloc.h). */
@@ -132,6 +161,78 @@ static NTSTATUS_T slot154(void *p) {
     return 0;
 }
 
+/* DXMTRS C4d-6: slots 158, 162, 164 are answered in the guest without hitting the VM host; 160 drops the poll cache
+ * and forwards WMTRetireMetalView; 161 throttles WMTViewSyncAndPoll per view in the guest. */
+static NTSTATUS_T slot158(void *p) {
+    struct unixcall_generic_obj_ret *a = p;
+    if (a) a->ret = 1;
+    return 0;
+}
+
+static NTSTATUS_T slot160(void *p) {
+    const struct unixcall_generic_obj_uint64_noret *a = p;
+    if (!a || !a->handle) return 0;
+    view_poll_drop(a->handle);
+    return forward(160, p);
+}
+
+static NTSTATUS_T slot161(void *p) {
+    struct unixcall_wmt_view_sync_and_poll *a = p;
+    if (!a) return MN_STATUS_INVALID_PARAMETER;
+    struct WMTViewPollOut *out = a->out.ptr;
+    if (a->view && out && !(a->flags & WMTViewSyncFlagForceRefresh)) {
+        pthread_mutex_lock(&poll_lock);
+        for (size_t i = 0; i < WMT_VIEW_POLL_CACHE_CAP; i++) {
+            if (poll_cache[i].view == a->view) {
+                if (poll_cache[i].hits < WMT_VIEW_POLL_THROTTLE) {
+                    poll_cache[i].hits++;
+                    poll_cache[i].stamp = ++poll_stamp;
+                    *out = poll_cache[i].out;
+                    pthread_mutex_unlock(&poll_lock);
+                    return 0;
+                }
+                break;
+            }
+        }
+        pthread_mutex_unlock(&poll_lock);
+    }
+    NTSTATUS_T s = forward(161, a);
+    if (!s && a->view && out) {
+        struct WMTViewPollOut cached = *out;
+        cached.flags &= ~WMT_VIEW_POLL_EDGE_FLAGS;
+        pthread_mutex_lock(&poll_lock);
+        size_t slot_idx = WMT_VIEW_POLL_CACHE_CAP, empty_idx = WMT_VIEW_POLL_CACHE_CAP, lru_idx = 0;
+        for (size_t i = 0; i < WMT_VIEW_POLL_CACHE_CAP; i++) {
+            if (poll_cache[i].view == a->view) {
+                slot_idx = i;
+                break;
+            }
+            if (!poll_cache[i].view && empty_idx == WMT_VIEW_POLL_CACHE_CAP) {
+                empty_idx = i;
+            } else if (poll_cache[i].view && poll_cache[i].stamp < poll_cache[lru_idx].stamp) {
+                lru_idx = i;
+            }
+        }
+        if (slot_idx == WMT_VIEW_POLL_CACHE_CAP)
+            slot_idx = empty_idx < WMT_VIEW_POLL_CACHE_CAP ? empty_idx : lru_idx;
+        poll_cache[slot_idx] = (struct view_poll_entry){
+            .view = a->view, .hits = 1, .stamp = ++poll_stamp, .out = cached,
+        };
+        pthread_mutex_unlock(&poll_lock);
+    }
+    return s;
+}
+
+static NTSTATUS_T slot162(void *p) {
+    (void)p;
+    return 0;
+}
+
+static NTSTATUS_T slot164(void *p) {
+    (void)p;
+    return 0;
+}
+
 /* Direct3D forwarding (M2): mnd3d.dll's calls, through winemetal.dll's WMTForward (DXMT 0079); vm/d3d/guest/unix.c
  * has them (a build without it, the tests', refuses). */
 __attribute__((weak)) int32_t mn_d3d_unix_call(void *args) {
@@ -145,4 +246,5 @@ const unixlib_entry_t MN_WM_TABLE64[MN_WM_SLOTS] = {
     slot0, slot1, slot2, slot3, slot4, slot5, slot6, slot7, slot8, slot9,
     SLOT10(1) SLOT10(2) SLOT10(3) SLOT10(4) SLOT10(5) SLOT10(6) SLOT10(7) SLOT10(8) SLOT10(9) SLOT10(10) SLOT10(11)
     SLOT10(12) SLOT10(13) SLOT10(14) slot150, slot151, slot152, slot153, slot154, d3d, slot156, slot157,
+    slot158, slot159, slot160, slot161, slot162, slot163, slot164,
 };

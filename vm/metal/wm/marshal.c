@@ -377,7 +377,8 @@ static NTSTATUS_T guest_special(unsigned slot, uint8_t *params, struct mn_wm_out
         return 0;
     }
     case 73:  /* releasing a view (milestone 4c) */
-    case 110: { /* destroying it is its release: the host unbinds it too */
+    case 110: /* destroying it is its release: the host unbinds it too */
+    case 160: { /* retiring an attached view: off the window, never parked on the VM */
         mn_handle h;
         memcpy(&h, params, sizeof h);
         return mn_gh_release(h) < 0 ? MN_STATUS_INVALID_HANDLE : 0;

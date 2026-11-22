@@ -19,6 +19,7 @@
 #include <dlfcn.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <time.h>
 #include <unistd.h>
 #include "../host/loader.h"
 #include "winemetal_thunks.h"
@@ -239,11 +240,68 @@ static void no_quit(void) {
     CHECK(r == NSTerminateCancel);
 }
 
+/* C4d-6 slots 158..163: latency activity, attach, sync/poll, presented event, retire (all views removed, 0 leaks). */
+static void attach_lifecycle(void) {
+    struct unixcall_generic_obj_ret lat = {0};
+    CHECK(W(158, &lat) == 0 && lat.ret == 1);
+
+    struct WMTViewAttachDesc desc = {.width = 320, .height = 180};
+    struct WMTViewPollOut poll = {0};
+    struct unixcall_wmt_attach_metal_view att = {0x2468, (obj_handle_t)device, {&desc}, {&poll}, 0, 0};
+    CHECK(W(159, &att) == 0 && att.ret_view && att.ret_layer);
+    if (!att.ret_view || !att.ret_layer) return;
+    CHECK(poll.backing_scale >= 1 && poll.edr_potential >= 1.0f);
+    CHECK(metal_views().count == 1);
+
+    struct WMTViewPollOut poll2 = {0};
+    struct unixcall_wmt_view_sync_and_poll sp = {
+        att.ret_view, att.ret_layer, {&poll2}, WMTViewSyncFlagForceRefresh, 0,
+    };
+    CHECK(W(161, &sp) == 0 && poll2.backing_scale >= 1 && poll2.edr_potential >= 1.0f);
+
+    id<MTLSharedEvent> ev = [device newSharedEvent];
+    CHECK(ev != nil);
+    @autoreleasepool {
+        struct unixcall_generic_obj_obj_ret nd = {att.ret_layer, 0};
+        CHECK(W(67, &nd) == 0 && nd.ret);
+        struct unixcall_mtldrawable_setpresentedevent pe = {
+            nd.ret, att.ret_view, (obj_handle_t)ev, 7, WMTPresentedEventFlagPaced, 0,
+        };
+        CHECK(W(163, &pe) == 0);
+        if (nd.ret) {
+            id<MTLCommandQueue> q = [device newCommandQueue];
+            id<MTLCommandBuffer> cb = [q commandBuffer];
+            struct unixcall_generic_obj_obj_noret pd = {(obj_handle_t)cb, nd.ret};
+            CHECK(W(47, &pd) == 0);
+            [cb commit];
+            [cb waitUntilCompleted];
+            [q release];
+        }
+    }
+    struct timespec dl;
+    clock_gettime(CLOCK_MONOTONIC, &dl);
+    dl.tv_sec += 2;
+    while (ev.signaledValue < 7) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if (now.tv_sec > dl.tv_sec || (now.tv_sec == dl.tv_sec && now.tv_nsec >= dl.tv_nsec)) break;
+        usleep(1000);
+    }
+    CHECK(ev.signaledValue >= 7);
+    [ev release];
+
+    struct unixcall_generic_obj_uint64_noret ret = {att.ret_view, 0};
+    CHECK(W(160, &ret) == 0);
+    [(id)att.ret_layer release];
+    CHECK(metal_views().count == 0);
+}
+
 static void *run(void *arg) {
     (void)arg;
     struct { const char *name; void (*fn)(void); } tests[] = {
         {"view", view},       {"two-views", two_views}, {"place", place},
         {"capture", capture}, {"no-quit", no_quit},     {"release", release},
+        {"attach-lifecycle", attach_lifecycle},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         @autoreleasepool {

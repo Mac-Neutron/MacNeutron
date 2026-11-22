@@ -28,9 +28,9 @@
 # must hold the core device's line ("d3d9 core: device on dxmt-core") and not mtld3d.so's encoder line ("texture
 # versions: rename pool cap", printed by every mtld3d device) nor a line saying the core cannot present (no command
 # library, no Metal view, a pipeline that does not build) nor that a dynamic buffer fell back to staging ("has no
-# mapped memory", DXMTRS C4c-2b), lines the code that ran prints, not the switch. The
-# native arm64 half has no core runtime (C4-15): its launch must hold the fallback warning ("carries no core runtime,
-# so mtld3d runs") and the encoder line. No shader-backend, kinds or conformance rows under core (C4b on). Its stamp is
+# mapped memory", DXMTRS C4c-2b), lines the code that ran prints, not the switch. Both halves of ARM64X d3d9.dll
+# carry the core runtime (C4d-6), so arm64 also logs 'loaded at .* as aarch64' and runs on dxmt-core. No shader-backend,
+# kinds or conformance rows under core (C4b on). Its stamp is
 # "d3d9-check: lane core (runtime.mode=core)", its verdict "d3d9-check: ok (core)". D3D9_RUNTIME=mtld3d (the default)
 # is the lanes above.
 # Every lane also runs d3d9_triangle shaders (DXMTRS C4b-2's 22 shader rows, C4b2-11; "shaders strict" under core: the
@@ -163,8 +163,8 @@ launch() {
   tr -d '\r' < "$WORK/$name.out" > "$WORK/$name.txt"
   [ "$RT" = core ] || return 0
   # The core lane's proof, from the code that ran: a PE .log file with d3d9.dll's identity and the core device's line,
-  # and none of mtld3d.so's encoder line or mtld3d::(unix|shim)/mtld3d.so/mtld3d.dll log lines; the native arm64 half
-  # has no core runtime (C4-15), so there the fallback warning and the encoder line.
+  # and none of mtld3d.so's encoder line or mtld3d::(unix|shim)/mtld3d.so/mtld3d.dll log lines; both halves of ARM64X
+  # d3d9.dll carry the core runtime (C4d-6), so arm64 also runs on dxmt-core.
   d="$WORK/mtld3d-logs/$name"
   enc='texture versions: rename pool cap'
   mtld3d_lines='mtld3d::(unix|shim)|\] mtld3d\.so |\] mtld3d\.dll '
@@ -174,11 +174,15 @@ launch() {
   # resolve the core did not record, or an occlusion query left open at the device's end (DXMTRS C4c-4b, C4c-5).
   unpresented='nothing presents|d3d9 core: no Metal view|does not build|colour targets are not its key|depth-stencil is not its key|buffer has no core form|has no mapped memory|was not recorded'
   if [ "$name" = arm64 ]; then
-    if /usr/bin/grep -rqF 'carries no core runtime, so mtld3d runs' "$d" && /usr/bin/grep -rqF "$enc" "$d" \
-      && ! /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d"; then
-      echo "d3d9-check: $name: runtime mtld3d (the arm64 fallback)"
+    if [ -n "$pe_log" ] && /usr/bin/grep -rqF '] d3d9.dll ' "$d" \
+      && /usr/bin/grep -rqE 'loaded at .* as aarch64' "$d" \
+      && /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$d" && ! /usr/bin/grep -rqF "$enc" "$d" \
+      && ! /usr/bin/grep -rqE "$mtld3d_lines" "$d" \
+      && ! /usr/bin/grep -rqE "$unpresented" "$d" && refusals_ok "$name" "$d"; then
+      echo "d3d9-check: $name: runtime core (aarch64)"
     else
-      echo "d3d9-check: $name: no arm64 fallback in $d"; fail="$fail $name-runtime"
+      echo "d3d9-check: $name: no aarch64 core device, missing PE log, mtld3d.so line, refusal, or can't-present line, in $d"; fail="$fail $name-runtime"
+      /usr/bin/grep -rhE "$refused|$unpresented|$mtld3d_lines" "$d" | head -5 | sed "s|^|d3d9-check: $name: |" || true
     fi
   elif [ "$name" = dynamic ]; then
     # d3d9_dynamic.exe makes no device (Direct3DCreate9 through GetProcAddress only): PE log + config's mode, no mtld3d.so.
@@ -237,7 +241,7 @@ refusals_ok() {
       printf '%s\n' "$set_" | while IFS= read -r n; do
         /usr/bin/grep -rqF "d3d9 core: $n $refused" "$2" || exit 1
       done ;;
-    shaders|state|textures|targets|blend|mrt|msaa|blit|queries|fullscreen|parity|lost|pace|scale|cache-cold|cache-warm)
+    shaders|state|textures|targets|blend|mrt|msaa|blit|queries|fullscreen|parity|lost|pace|scale|arm64|cache-cold|cache-warm)
       [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
     *) return 0 ;;
   esac
@@ -257,8 +261,9 @@ if [ -n "${MTLD3D_SO:-}" ]; then
   rm -f "$so" && cp "$MTLD3D_SO" "$so" && codesign -f -s "${MACNEUTRON_SIGN_IDENTITY:--}" "$so" 2> /dev/null \
     || { echo "d3d9-check: could not put $MTLD3D_SO in the tool folder" >&2; exit 1; }
 fi
-for dll in d3d9.dll mtld3d.dll; do
+for dll in d3d9.dll mtld3d.dll winemetal.dll; do
   [ -n "${MTLD3D_PE:-}" ] || break
+  [ "$dll" != winemetal.dll ] || [ -f "$MTLD3D_PE/$dll" ] || continue
   pe="$WORK/ours/wine.app/Contents/Resources/lib/wine/aarch64-windows/$dll"
   rm -f "$pe" && cp "$MTLD3D_PE/$dll" "$pe" || { echo "d3d9-check: could not put $MTLD3D_PE/$dll in the tool folder" >&2; exit 1; }
 done

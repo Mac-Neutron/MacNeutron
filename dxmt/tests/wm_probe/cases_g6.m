@@ -6,6 +6,7 @@
 #import <QuartzCore/QuartzCore.h>
 #include <dlfcn.h>
 #include <objc/runtime.h>
+#include <unistd.h>
 
 /* ---- helpers ---- */
 
@@ -301,6 +302,8 @@ struct loose_win_data {
 };
 static struct loose_win_data loose_data;
 static id loose_view, loose_layer;
+static bool loose_real_view;
+static id loose_custom_client_view;
 #define LOOSE_CLIENT_VIEW ((void *)0x7777)
 
 struct loose_win_data *get_win_data(void *hwnd);
@@ -312,26 +315,57 @@ void macdrv_view_release_metal_view(void *v);
 struct loose_win_data *get_win_data(void *hwnd) {
     wm_line("loose get_win_data hwnd=%#llx", (unsigned long long)(uintptr_t)hwnd);
     if (hwnd == (void *)0x1) return NULL;
-    loose_data = (struct loose_win_data){hwnd, NULL, NULL, hwnd == (void *)0x2 ? NULL : LOOSE_CLIENT_VIEW};
+    void *client = hwnd == (void *)0x2 ? NULL : (loose_custom_client_view ? loose_custom_client_view : LOOSE_CLIENT_VIEW);
+    loose_data = (struct loose_win_data){hwnd, NULL, NULL, client};
     return &loose_data;
 }
 void release_win_data(struct loose_win_data *d) {
     wm_line("loose release_win_data data=%s", d == &loose_data ? "given" : "other");
 }
 void *macdrv_view_create_metal_view(void *v, void *device) {
-    wm_line("loose create_metal_view view=%s device=%s", v == LOOSE_CLIENT_VIEW ? "client_cocoa_view" : "other",
+    wm_line("loose create_metal_view view=%s device=%s",
+            (v == LOOSE_CLIENT_VIEW || (loose_custom_client_view && v == (__bridge void *)loose_custom_client_view))
+                ? "client_cocoa_view"
+                : "other",
             device == (void *)wm_device ? "wm_device" : "other");
+    if (loose_real_view) {
+        __block NSView *rv = nil;
+        wm_on_main(^{
+          rv = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 64, 64)];
+          CAMetalLayer *l = [[CAMetalLayer alloc] init];
+          rv.layer = l;
+          [l release];
+          rv.wantsLayer = YES;
+        });
+        loose_view = rv;
+        return loose_view;
+    }
     loose_view = [[NSObject alloc] init]; /* +1: release_metal_view's */
     return loose_view;
 }
 void *macdrv_view_get_metal_layer(void *v) {
     wm_line("loose get_metal_layer view=%s", v == (void *)loose_view ? "created" : "other");
+    if (loose_real_view && [((id)v) isKindOfClass:[NSView class]]) {
+        __block CALayer *l = nil;
+        wm_on_main(^{
+          l = ((NSView *)v).layer;
+        });
+        return l;
+    }
     if (!loose_layer) loose_layer = [[CAMetalLayer alloc] init];
     return loose_layer;
 }
 void macdrv_view_release_metal_view(void *v) {
     wm_line("loose release_metal_view view=%s", v == (void *)loose_view ? "created" : v ? "other" : "0");
-    if (v == (void *)loose_view) [loose_view release];
+    if (v == (void *)loose_view) {
+        if (loose_real_view) {
+            wm_on_main(^{
+              [loose_view release];
+            });
+        } else {
+            [loose_view release];
+        }
+    }
 }
 
 static void view_loose(void) {
@@ -638,6 +672,215 @@ static void nil_args(void) {
     query_layer(nil, nil, false, NULL, 0);
 }
 
+/* ---- C4d-6 slots 158..164 ---- */
+
+/* 158: process latency-critical activity latches once and returns 1. */
+static void latency_activity(void) {
+    struct unixcall_generic_obj_ret p;
+    wm_fill(&p, sizeof p);
+    wm_call(158, &p);
+    wm_val("ret", "%llu", (unsigned long long)p.ret);
+}
+
+/* 159/161/160 through winemac: attach returns +1 view (+2 in window) and +1 layer (+3); 161 syncs/polls; 160 retires. */
+static void attach_view(void) {
+    struct WMTViewAttachDesc desc = {.width = 320, .height = 180};
+    struct WMTViewPollOut poll;
+    wm_fill(&poll, sizeof poll);
+    struct unixcall_wmt_attach_metal_view p;
+    wm_fill(&p, sizeof p);
+    p.hwnd = 0x20003, p.device = (obj_handle_t)wm_device;
+    p.desc.ptr = &desc, p.out_poll.ptr = &poll;
+    wm_own("ret_view", &p.ret_view);
+    wm_own("ret_layer", &p.ret_layer);
+    wm_call(159, &p);
+    if (!p.ret_view || p.ret_view == WM_FILL64 || !p.ret_layer || p.ret_layer == WM_FILL64) return;
+    wm_val("metal", "%d", [(id)p.ret_layer isKindOfClass:[CAMetalLayer class]]);
+    wm_eq("device", (uint64_t)((CAMetalLayer *)p.ret_layer).device, (uint64_t)wm_device, "wm_device");
+    wm_rel("scale", poll.backing_scale >= 1 && poll.backing_scale <= 8, "valid", "%u", poll.backing_scale);
+    wm_rel("edr", poll.edr_potential >= 1.0f && poll.edr_current >= 1.0f, "valid", "%a,%a", poll.edr_current,
+           poll.edr_potential);
+
+    struct WMTViewPollOut poll2;
+    wm_fill(&poll2, sizeof poll2);
+    struct unixcall_wmt_view_sync_and_poll sp;
+    wm_fill(&sp, sizeof sp);
+    sp.view = p.ret_view, sp.layer = p.ret_layer, sp.out.ptr = &poll2, sp.flags = WMTViewSyncFlagForceRefresh;
+    wm_call(161, &sp);
+    written32("written", &poll2, sizeof poll2);
+    wm_rel("scale", poll2.backing_scale >= 1 && poll2.backing_scale <= 8, "valid", "%u", poll2.backing_scale);
+    wm_rel("edr", poll2.edr_potential >= 1.0f && poll2.edr_current >= 1.0f, "valid", "%a,%a", poll2.edr_current,
+           poll2.edr_potential);
+
+    wm_in((id)p.ret_view);
+    struct unixcall_generic_obj_uint64_noret r = {.handle = p.ret_view, .arg = 0};
+    wm_call(160, &r);
+    [(id)p.ret_layer release];
+}
+
+/* Native counterpart for 159/161/160 using loose NSView/CAMetalLayer symbols. */
+static void attach_view_loose(void) {
+    loose_real_view = true;
+    struct WMTViewAttachDesc desc = {.width = 320, .height = 180};
+    struct WMTViewPollOut poll;
+    wm_fill(&poll, sizeof poll);
+    struct unixcall_wmt_attach_metal_view p;
+    wm_fill(&p, sizeof p);
+    p.hwnd = 0x10, p.device = (obj_handle_t)wm_device;
+    p.desc.ptr = &desc, p.out_poll.ptr = &poll;
+    wm_own("ret_view", &p.ret_view);
+    wm_own("ret_layer", &p.ret_layer);
+    wm_call(159, &p);
+    if (!p.ret_view || p.ret_view == WM_FILL64 || !p.ret_layer || p.ret_layer == WM_FILL64) {
+        loose_real_view = false;
+        return;
+    }
+    wm_val("metal", "%d", [(id)p.ret_layer isKindOfClass:[CAMetalLayer class]]);
+    wm_eq("device", (uint64_t)((CAMetalLayer *)p.ret_layer).device, (uint64_t)wm_device, "wm_device");
+    wm_rel("scale", poll.backing_scale >= 1 && poll.backing_scale <= 8, "valid", "%u", poll.backing_scale);
+    wm_rel("edr", poll.edr_potential >= 1.0f && poll.edr_current >= 1.0f, "valid", "%a,%a", poll.edr_current,
+           poll.edr_potential);
+
+    struct WMTViewPollOut poll2;
+    wm_fill(&poll2, sizeof poll2);
+    struct unixcall_wmt_view_sync_and_poll sp;
+    wm_fill(&sp, sizeof sp);
+    sp.view = p.ret_view, sp.layer = p.ret_layer, sp.out.ptr = &poll2, sp.flags = WMTViewSyncFlagForceRefresh;
+    wm_call(161, &sp);
+    written32("written", &poll2, sizeof poll2);
+    wm_rel("scale", poll2.backing_scale >= 1 && poll2.backing_scale <= 8, "valid", "%u", poll2.backing_scale);
+    wm_rel("edr", poll2.edr_potential >= 1.0f && poll2.edr_current >= 1.0f, "valid", "%a,%a", poll2.edr_current,
+           poll2.edr_potential);
+
+    wm_in((id)p.ret_view);
+    struct unixcall_generic_obj_uint64_noret r = {.handle = p.ret_view, .arg = 0};
+    wm_call(160, &r);
+    [(id)p.ret_layer release];
+    loose_real_view = false;
+}
+
+/* Hook exports for win32u client-surface lookup in isolated case 162. */
+static _Atomic int surf_present_calls;
+void client_surface_add_ref(void *s);
+void client_surface_present(void *s);
+void client_surface_release(void *s);
+__attribute__((visibility("default"))) void client_surface_add_ref(void *s) { (void)s; }
+__attribute__((visibility("default"))) void client_surface_present(void *s) {
+    if (s == (void *)0x501) surf_present_calls++;
+}
+__attribute__((visibility("default"))) void client_surface_release(void *s) { (void)s; }
+
+/* 162 (WM_ISOLATE): WineContentView carries dxmt_client_surface so WMTPresentClientSurface calls present once. */
+static void client_surface_case(void) {
+    wm_on_main(^{
+      Class base = wm_native() ? [NSView class] : objc_getClass("MNWindowArea");
+      if (!base) return;
+      Class cls = objc_allocateClassPair(base, "WineContentView", 0);
+      if (!cls) return;
+      class_addIvar(cls, "dxmt_client_surface", sizeof(void *), 3, "^v");
+      objc_registerClassPair(cls);
+      Ivar iv = class_getInstanceVariable(cls, "dxmt_client_surface");
+      if (wm_native()) {
+          id cv = [[cls alloc] initWithFrame:NSMakeRect(0, 0, 64, 64)];
+          *(void **)((char *)(__bridge void *)cv + ivar_getOffset(iv)) = (void *)0x501;
+          loose_custom_client_view = cv;
+          loose_real_view = true;
+      } else {
+          Method m = class_getClassMethod(base, @selector(allocWithZone:));
+          IMP orig = method_getImplementation(m);
+          IMP swz = imp_implementationWithBlock(^id(id self, struct _NSZone *zone) {
+            Class target = ((Class)self == base) ? cls : (Class)self;
+            id obj = ((id (*)(id, SEL, struct _NSZone *))orig)(target, @selector(allocWithZone:), zone);
+            if (obj && (Class)self == base)
+                *(void **)((char *)(__bridge void *)obj + ivar_getOffset(iv)) = (void *)0x501;
+            return obj;
+          });
+          class_addMethod(object_getClass(base), @selector(allocWithZone:), swz, method_getTypeEncoding(m));
+      }
+    });
+    struct unixcall_wmt_attach_metal_view att = {.hwnd = 0x10, .device = (obj_handle_t)wm_device};
+    wm_call(159, &att);
+    surf_present_calls = 0;
+    struct unixcall_generic_obj_uint64_noret ps = {.handle = att.ret_view, .arg = 0};
+    wm_call(162, &ps);
+    wm_val("present", "%d", surf_present_calls);
+    struct unixcall_generic_obj_uint64_noret r = {.handle = att.ret_view, .arg = 0};
+    wm_call(160, &r);
+    if (att.ret_layer) [(id)att.ret_layer release];
+    loose_real_view = false;
+    if (loose_custom_client_view) {
+        wm_on_main(^{
+          [loose_custom_client_view release];
+          loose_custom_client_view = nil;
+        });
+    }
+}
+
+/* 163: drawable=0 signals immediately; live drawable signals when discarded/autoreleased. */
+static void presented_event_case(void) {
+    id<MTLSharedEvent> ev = [[wm_device newSharedEvent] autorelease];
+    struct unixcall_mtldrawable_setpresentedevent pe;
+    wm_fill(&pe, sizeof pe);
+    pe.drawable = 0, pe.view = 0, pe.shared_event = (obj_handle_t)ev, pe.signal_value = 5, pe.flags = 0, pe.reserved = 0;
+    wm_call(163, &pe);
+    wm_val("null_drawable_val", "%llu", (unsigned long long)ev.signaledValue);
+
+    CAMetalLayer *layer = [CAMetalLayer layer];
+    layer.device = wm_device;
+    layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+    layer.drawableSize = CGSizeMake(64, 64);
+    @autoreleasepool {
+        id<CAMetalDrawable> d = [layer nextDrawable];
+        wm_fill(&pe, sizeof pe);
+        pe.drawable = (obj_handle_t)d, pe.view = 0, pe.shared_event = (obj_handle_t)ev, pe.signal_value = 9,
+        pe.flags = 0, pe.reserved = 0;
+        wm_call(163, &pe);
+    }
+    wm_val("drop_drawable_val", "%llu", (unsigned long long)ev.signaledValue);
+}
+
+static bool has_named_sublayer(CALayer *l, NSString *name) {
+    if ([l.name isEqualToString:name]) return true;
+    for (CALayer *c in l.sublayers)
+        if (has_named_sublayer(c, name)) return true;
+    return false;
+}
+
+/* 164 (WM_ISOLATE): visible 1x1 overlay sprite creates the main-thread wmt-cursor-overlay window/layer. */
+static void cursor_overlay_case(void) {
+    if (wm_native()) loose_real_view = true;
+    struct unixcall_wmt_attach_metal_view att = {.hwnd = 0x10, .device = (obj_handle_t)wm_device};
+    wm_call(159, &att);
+
+    static const uint8_t px[4] = {0xff, 0xff, 0xff, 0xff};
+    struct WMTCursorOverlayParams cfg = {
+        .view = att.ret_view,
+        .pixels = {.ptr = px},
+        .pixels_len = sizeof px,
+        .width = 1,
+        .height = 1,
+        .scale = 1,
+        .flags = WMTCursorOverlayFlagVisible,
+    };
+    struct unixcall_generic_obj_constptr_noret co = {.handle = att.ret_view, .arg = {.ptr = &cfg}};
+    wm_call(164, &co);
+
+    __block int overlay = 0;
+    for (int i = 0; i < 40 && !overlay; i++) {
+        if (i) usleep(10000);
+        wm_on_main(^{
+          for (NSWindow *w in NSApp.windows)
+              if (has_named_sublayer(w.contentView.layer, @"wmt-cursor-overlay")) overlay = 1;
+        });
+    }
+    wm_val("overlay", "%d", overlay);
+
+    struct unixcall_generic_obj_uint64_noret r = {.handle = att.ret_view, .arg = 0};
+    wm_call(160, &r);
+    if (att.ret_layer) [(id)att.ret_layer release];
+    loose_real_view = false;
+}
+
 const struct wm_case wm_cases_g6[] = {
     {"g6", 62, "hud-absent", 0, hud_absent},
     {"g6", 62, "hud", WM_ISOLATE, hud},
@@ -656,5 +899,11 @@ const struct wm_case wm_cases_g6[] = {
     {"g6", 99, "wsi-hooks", WM_NATIVE, wsi_hooks},
     {"g6", 63, "nil-args", 0, nil_args},
     {"g6", 66, "x-drawable-on-device", 0, x_drawable_on_device},
+    {"g6", 158, "latency-activity", 0, latency_activity},
+    {"g6", 159, "attach-view", WM_WINE_ONLY, attach_view},
+    {"g6", 159, "attach-view-loose", WM_NATIVE, attach_view_loose},
+    {"g6", 162, "client-surface", WM_ISOLATE, client_surface_case},
+    {"g6", 163, "presented-event", 0, presented_event_case},
+    {"g6", 164, "cursor-overlay", WM_ISOLATE, cursor_overlay_case},
     {0},
 };

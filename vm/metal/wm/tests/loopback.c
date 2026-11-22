@@ -22,6 +22,7 @@ static pthread_once_t once = PTHREAD_ONCE_INIT;
 static _Thread_local uint64_t ring_state[8];
 
 struct mn_wm_ctx loop_ctx = {.ctx_id = 1};
+_Atomic uint64_t loop_host_calls[MN_WM_SLOTS];
 static size_t no_rings(void *c, void *e, struct mn_mark *m, size_t cap) { (void)c, (void)e, (void)m, (void)cap; return 0; }
 static int all_passed(void *c, const struct mn_mark *m, size_t n) { (void)c, (void)m, (void)n; return 1; }
 static struct mn_ht_rings rings = {NULL, no_rings, all_passed};
@@ -101,6 +102,7 @@ void loop_host_thread(int n) {
 }
 
 static int32_t host_call(uint32_t slot, const void *p, uint32_t len, void *reply, uint32_t cap, uint32_t *reply_len) {
+    if (slot < MN_WM_SLOTS) atomic_fetch_add(&loop_host_calls[slot], 1);
     if (!host_thread) return mn_wm_host_call(&loop_ctx, ring_state, slot, p, len, reply, cap, reply_len);
     struct hthread *h = &hthreads[host_thread];
     struct hcall k = {ring_state, slot, len, cap, reply_len, p, reply, 0, 1};

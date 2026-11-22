@@ -140,3 +140,30 @@ g6 93 nil-args 0 ret=1
 g6 97 nil-args 0 value=0x1p+0,0x1p+0
 g6 101 nil-args 0 version=0 colorspace=fill metadata=none edr=none
 g6 66 x-drawable-on-device raised NSInvalidArgumentException ret=fill
+g6 158 latency-activity 0 ret=1
+g6 159 attach-view-loose loose get_win_data hwnd=0x10
+g6 159 attach-view-loose loose create_metal_view view=client_cocoa_view device=wm_device
+g6 159 attach-view-loose loose get_metal_layer view=created
+g6 159 attach-view-loose loose release_win_data data=given
+g6 159 attach-view-loose 0 ret_view=h1 own=+1 pool=+0 ret_layer=h2 own=+2 pool=+0 metal=1 device=wm_device scale=valid edr=valid
+g6 161 attach-view-loose 0 written=0-31 scale=valid edr=valid
+g6 160 attach-view-loose loose release_metal_view view=created
+g6 160 attach-view-loose 0 in1=-1
+g6 159 client-surface loose get_win_data hwnd=0x10
+g6 159 client-surface loose create_metal_view view=client_cocoa_view device=wm_device
+g6 159 client-surface loose get_metal_layer view=created
+g6 159 client-surface loose release_win_data data=given
+g6 159 client-surface 0
+g6 162 client-surface 0 present=1
+g6 160 client-surface loose release_metal_view view=created
+g6 160 client-surface 0
+g6 163 presented-event 0 null_drawable_val=5
+g6 163 presented-event 0 drop_drawable_val=9
+g6 159 cursor-overlay loose get_win_data hwnd=0x10
+g6 159 cursor-overlay loose create_metal_view view=client_cocoa_view device=wm_device
+g6 159 cursor-overlay loose get_metal_layer view=created
+g6 159 cursor-overlay loose release_win_data data=given
+g6 159 cursor-overlay 0
+g6 164 cursor-overlay 0 overlay=1
+g6 160 cursor-overlay loose release_metal_view view=created
+g6 160 cursor-overlay 0

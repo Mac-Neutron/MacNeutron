@@ -393,7 +393,8 @@ NTSTATUS_T mn_wm_special(struct mn_wm_state *k) {
         case 47:
         case 48:
         case 71:
-        case 73: return mn_wm_present_special(k);
+        case 73:
+        case 160: return mn_wm_present_special(k);
         case 91: return mn_wm_enumerate(k);
         case 98: return mn_wm_constants(k);
         case 54:

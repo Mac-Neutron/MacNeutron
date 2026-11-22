@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include "../marshal.h"
 #include "loader.h"
+#include "winemetal_thunks.h"
 
 /* A guest's NSAutoreleasePool (slot 10) is a stand-in object here, not a host pool: a drained ring runs on whichever
  * vCPU traps, so one guest thread's calls move between host threads and several guest threads' share one, while host
@@ -44,6 +45,11 @@ void mn_wm_release_object(enum mn_hkind kind, void *obj) {
     case MN_HK_VIEW: /* winemetal's ReleaseMetalView: off the window, then released */
         mn_wm_invoke(73, &obj);
         return;
+    case MN_HK_ATTACHED_VIEW: { /* WMTRetireMetalView: detach, off window, release, park = 0 */
+        struct unixcall_generic_obj_uint64_noret a = {(obj_handle_t)(uintptr_t)obj, 0};
+        mn_wm_invoke(160, &a);
+        return;
+    }
     case MN_HK_LISTENER: /* our wrapper (events.m) */
         mn_wm_listener_release(obj);
         return;

@@ -1,8 +1,8 @@
 #!/bin/sh
 # cover.sh: wm_probe's coverage checks (DXMTRS step 2: winemetal's slots, each pinned by a probe case on the C).
-#   slots                                  slots.txt names each of 0-157 once, in groups of the plan's sizes
+#   slots                                  slots.txt names each of 0-164 once, in groups of the plan's sizes
 #   table <host-dir> <image>               the image's unix-call tables, named by `nm -a <image>`, equal slots.txt
-#                                          (the WoW64 table: entries 0-152, thunk32_ where the Wine build has one)
+#                                          (the WoW64 table: entries 0-164, thunk32_ where the Wine build has one)
 #   cases <wm_probe> <host-dir> [<group>]  every slot has a case and is called; a case per command type (g3:
 #                                          blit-<Name>, e.g. blit-CopyFromBufferToBuffer, blit-Nop); no cross call
 #                                          but g0's aniso-env
@@ -42,9 +42,9 @@ slots)
     { if (seen[$1]++) print "slot " $1 " twice"; n[$2]++; if ($1 == 83 && $3 != "-") print "slot 83 has a symbol" }
     $1 != 83 && $3 == "-" { print "slot " $1 " has no symbol" }
     END {
-      for (s = 0; s < 158; s++) if (!seen[s]) print "slot " s " missing"
-      if (NR != 158) print NR " lines, not 158"
-      split("4 26 28 24 12 9 19 16 5 3 12", want, " ")
+      for (s = 0; s < 165; s++) if (!seen[s]) print "slot " s " missing"
+      if (NR != 165) print NR " lines, not 165"
+      split("4 26 28 24 12 9 26 16 5 3 12", want, " ")
       for (g = 0; g <= 10; g++) if (n["g" g] + 0 != want[g + 1]) print "g" g " has " n["g" g] + 0 " slots, not " want[g + 1]
     }' "$SLOTS" > "$TMP/why"
   while IFS= read -r l; do fail "slots: $l"; done < "$TMP/why"
@@ -72,15 +72,14 @@ table)
       if (index(got, " " w " ") == 0) print kind " slot " slot " is" got "not " w
     }
     $1 == "table" { n++; check("table", $2, $3, want[$2]) }
-    $1 == "wow64" && $2 > 152 { next }
     $1 == "wow64" {
       w64++
       w = want[$2]; if ($2 in thunk32) sub(/^thunk_/, "thunk32_", w)
-      if ($2 > 152) print "wow64 slot " $2 " past 152"; else check("wow64", $2, $3, w)
+      check("wow64", $2, $3, w)
     }
     END {
-      if (n != 158) print "table has " n + 0 " entries, not 158"
-      if (w64 && w64 != 153) print "wow64 table has " w64 " entries, not 153"
+      if (n != 165) print "table has " n + 0 " entries, not 165"
+      if (w64 && w64 != 165) print "wow64 table has " w64 " entries, not 165"
       print n + 0 " entries" (w64 ? ", wow64 " w64 : ", no wow64 table") > summary
     }' "$TMP/nm" "$TMP/table" > "$TMP/why"
   while IFS= read -r l; do fail "table: $l"; done < "$TMP/why"

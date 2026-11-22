@@ -557,6 +557,83 @@ static void view_left(void) {
     [content release];
 }
 
+/* C4d-6 attach -> poll (including guest cache hits + force refresh) -> presented event -> retire -> live == baseline. */
+static void attach_poll_retire(void) {
+    struct mn_wm_stats st0;
+    CHECK(mn_wm_stats(&st0) == 0);
+    uint64_t fail0 = loop_ctx.failures;
+    uint64_t loc158 = atomic_load(&loop_host_calls[158]);
+    uint64_t loc162 = atomic_load(&loop_host_calls[162]);
+    uint64_t loc164 = atomic_load(&loop_host_calls[164]);
+    uint64_t polls0 = atomic_load(&loop_host_calls[161]);
+
+    struct unixcall_generic_obj_ret lat = {0};
+    CHECK(W(158, &lat) == 0 && lat.ret == 1);
+    struct unixcall_generic_obj_uint64_noret ps = {0, 0};
+    CHECK(W(162, &ps) == 0);
+    struct unixcall_generic_obj_constptr_noret cur = {0, {NULL}};
+    CHECK(W(164, &cur) == 0);
+    CHECK(atomic_load(&loop_host_calls[158]) == loc158 && atomic_load(&loop_host_calls[162]) == loc162 &&
+          atomic_load(&loop_host_calls[164]) == loc164);
+
+    struct WMTViewAttachDesc desc = {.width = 320, .height = 180};
+    struct WMTViewPollOut poll = {0};
+    struct unixcall_wmt_attach_metal_view att = {0x7777, device, {&desc}, {&poll}, 0, 0};
+    CHECK(W(159, &att) == 0 && att.ret_view && att.ret_layer);
+    if (!att.ret_view || !att.ret_layer) return;
+    CHECK(poll.backing_scale >= 1 && poll.edr_potential >= 1.0f);
+
+    for (unsigned i = 0; i < 34; i++) {
+        struct WMTViewPollOut out = {0};
+        struct unixcall_wmt_view_sync_and_poll sp = {
+            att.ret_view, att.ret_layer, {&out}, i == 33 ? WMTViewSyncFlagForceRefresh : 0, 0,
+        };
+        CHECK(W(161, &sp) == 0 && out.backing_scale == poll.backing_scale && out.edr_potential >= 1.0f);
+    }
+    CHECK(atomic_load(&loop_host_calls[161]) - polls0 == 3);
+
+    struct unixcall_generic_obj_obj_ret ev = {device, 0};
+    CHECK(W(15, &ev) == 0 && ev.ret);
+    if (ev.ret) {
+        struct unixcall_mtldrawable_setpresentedevent pe = {0, att.ret_view, ev.ret, 9, WMTPresentedEventFlagPaced, 0};
+        CHECK(W(163, &pe) == 0);
+        struct unixcall_generic_obj_uint64_ret sv = {ev.ret, 0};
+        CHECK(W(16, &sv) == 0 && sv.ret == 9);
+        release(ev.ret);
+    }
+
+    struct unixcall_generic_obj_uint64_noret retire = {att.ret_view, WMTRetireMetalViewFlagPark};
+    CHECK(W(160, &retire) == 0);
+    struct WMTViewPollOut dead = {0};
+    struct unixcall_wmt_view_sync_and_poll sp_dead = {att.ret_view, att.ret_layer, {&dead}, 0, 0};
+    CHECK(W(161, &sp_dead) == MN_STATUS_INVALID_HANDLE);
+    CHECK(atomic_load(&loop_host_calls[161]) - polls0 == 4);
+    release(att.ret_layer);
+    sweep();
+
+    struct mn_wm_stats st1;
+    CHECK(mn_wm_stats(&st1) == 0);
+    CHECK(st1.live == st0.live && st1.failures == fail0);
+
+    /* Crash cleanup on a second context with an attached view still open: mn_ht_free releases MN_HK_ATTACHED_VIEW. */
+    struct mn_ht_rings rings = {NULL, no_marks, all_passed};
+    struct mn_wm_ctx c2 = {.ctx_id = 3, .ht = mn_ht_new(&rings, mn_wm_release_object)};
+    struct unixcall_generic_obj_ret all = {0};
+    CHECK(call_on(&c2, 4, &all) == 0 && all.ret);
+    struct unixcall_generic_obj_uint64_obj_ret first = {all.ret, 0, 0};
+    CHECK(call_on(&c2, 2, &first) == 0 && first.ret);
+    struct unixcall_wmt_attach_metal_view v2 = {0x8888, first.ret, {&desc}, {&poll}, 0, 0};
+    CHECK(call_on(&c2, 159, &v2) == 0 && v2.ret_view && v2.ret_layer);
+    int ok = 0;
+    CAMetalLayer *l = mn_ht_get(c2.ht, v2.ret_layer, MN_HK_OBJC, &ok);
+    __block NSView *content = nil;
+    if (l) dispatch_sync(dispatch_get_main_queue(), ^{ content = [((NSView *)l.delegate).superview retain]; });
+    CHECK(content && metal_views(content) == 1);
+    mn_ht_free(c2.ht);
+    CHECK(content && metal_views(content) == 0);
+    [content release];
+}
+
 static obj_handle_t late_cb;
 static void *commit_late(void *arg) { /* another thread: its own ring */
     (void)arg;
@@ -632,6 +709,7 @@ static void *run(void *arg) {
         {"props", props},
         {"nil-drawable", nil_drawable}, {"view-left", view_left}, {"hud", hud},
         {"wait-uncommitted", wait_uncommitted}, {"pools-one-host", pools_one_host},
+        {"attach-poll-retire", attach_poll_retire},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         @autoreleasepool {

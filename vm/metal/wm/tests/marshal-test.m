@@ -24,7 +24,7 @@ static int failures;
     } while (0)
 
 enum { ARRAY, DEVICE, QUEUE, STRING, SAMPLER, FUNCTION, ARCHIVE, PSO, POOL, CMDBUF, ENCODER, SHADER, BITCODE, LOG0, LOG1,
-       CONSTFN, NOBJS };
+       CONSTFN, VIEW, LAYER, DRAWABLE, EVENT, NOBJS };
 static int objs[NOBJS];
 static int retains[NOBJS], releases[NOBJS], calls[MN_WM_SLOTS], checked[MN_WM_SLOTS];
 static int fail_next, raise_next;
@@ -123,6 +123,47 @@ static NTSTATUS_T f_blit_samples(void *p) {
     checked[129] = a->cmdbuf == OBJ(DEVICE) && a->num_attachments == 2 && v[0].sample_buffer == OBJ(QUEUE) &&
                    v[1].sample_buffer == OBJ(STRING);
     a->ret = OBJ(ENCODER);
+    return 0;
+}
+static NTSTATUS_T f_attach_view(void *p) {
+    struct unixcall_wmt_attach_metal_view *a = p;
+    const struct WMTViewAttachDesc *d = a->desc.ptr;
+    struct WMTViewPollOut *o = a->out_poll.ptr;
+    checked[159] = a->hwnd == 0x1234 && a->device == OBJ(DEVICE) && (!d || (d->width == 640 && d->height == 360));
+    if (o) {
+        *o = (struct WMTViewPollOut){
+            .drawable_width = 640, .drawable_height = 360, .backing_scale = 2,
+            .edr_current = 1.5f, .edr_potential = 2.0f, .panel_max_hz = 120,
+            .flags = WMTViewPollFlagHdrActive,
+        };
+    }
+    a->ret_view = OBJ(VIEW);
+    a->ret_layer = OBJ(LAYER);
+    return 0;
+}
+static NTSTATUS_T f_retire_view(void *p) {
+    struct unixcall_generic_obj_uint64_noret *a = p;
+    checked[160] += a->handle == OBJ(VIEW) && a->arg == 0;
+    return 0;
+}
+static NTSTATUS_T f_sync_poll(void *p) {
+    struct unixcall_wmt_view_sync_and_poll *a = p;
+    struct WMTViewPollOut *o = a->out.ptr;
+    checked[161] = a->view == OBJ(VIEW) && a->layer == OBJ(LAYER) && o != NULL;
+    if (o) {
+        *o = (struct WMTViewPollOut){
+            .drawable_width = 800, .drawable_height = 600, .backing_scale = 2,
+            .edr_current = 1.0f, .edr_potential = 1.0f, .panel_max_hz = 60,
+            .flags = WMTViewPollFlagSoftwareCursorActive,
+        };
+    }
+    return 0;
+}
+static NTSTATUS_T f_presented_event(void *p) {
+    struct unixcall_mtldrawable_setpresentedevent *a = p;
+    checked[163] = a->drawable == OBJ(DRAWABLE) && (a->view == OBJ(VIEW) || a->view == 0) &&
+                   a->shared_event == OBJ(EVENT) && a->signal_value == 42 &&
+                   a->flags == WMTPresentedEventFlagPaced;
     return 0;
 }
 static NTSTATUS_T f_cache_get(void *p) {
@@ -293,6 +334,7 @@ static wm_unix_fn fakes[MN_WM_SLOTS] = {
     [0] = f_retain, [1] = f_release, [2] = f_object, [4] = f_devices, [7] = f_name, [8] = f_getcstring,
     [9] = f_queue, [10] = f_pool, [11] = f_cmdbuf, [12] = f_commit, [19] = f_sampler, [26] = f_function,
     [29] = f_pso, [33] = f_end, [156] = f_pso_vertex, [157] = f_library_options, [92] = f_colorspace, [116] = f_cache_get, [129] = f_blit_samples,
+    [159] = f_attach_view, [160] = f_retire_view, [161] = f_sync_poll, [163] = f_presented_event,
 };
 
 /* The loopback's context and this thread's ring (no other rings: releases pass at once), which the guest code's own
@@ -607,12 +649,13 @@ static void enumerate(void) {
     CHECK(e.buffer.ptr == logs && e.buffer_size == 4);
 }
 
-/* Slots 153 and 154 are the guest's own: the host refuses them, queued or not, and never calls past the real
- * winemetal.so's 153 entries. */
+/* Local slots (153-154, 158, 162, 164) are answered in the guest: the host refuses them, queued or not. */
 static void local_refused(void) {
+    static const unsigned local[] = {153, 154, 158, 162, 164};
     uint8_t r[16] = {0}, out[64];
     uint32_t n = 0;
-    for (unsigned slot = 153; slot <= 154; slot++) {
+    for (size_t i = 0; i < sizeof local / sizeof *local; i++) {
+        unsigned slot = local[i];
         uint64_t before = atomic_load(&ctx.failures);
         CHECK(mn_wm_host_call(&ctx, ring_state, slot, r, sizeof r, NULL, 0, &n) == (int32_t)MN_STATUS_INVALID_PARAMETER);
         CHECK(atomic_load(&ctx.failures) == before + 1);
@@ -620,6 +663,58 @@ static void local_refused(void) {
               (int32_t)MN_STATUS_INVALID_PARAMETER);
         CHECK(atomic_load(&ctx.failures) == before + 1 && n == 0);
     }
+}
+
+/* C4d-6 attach / poll / presented-event / retire roundtrip through guest packing, host translation & special release. */
+static void present_attach_slots(void) {
+    struct WMTViewAttachDesc desc = {.width = 640, .height = 360, .flags = WMTViewAttachFlagHdrEnable};
+    struct WMTViewPollOut poll = {0};
+    struct unixcall_wmt_attach_metal_view att = {0x1234, device, {&desc}, {&poll}, 0, 0};
+    CHECK(call(159, &att) == 0 && att.ret_view && att.ret_layer && checked[159]);
+    CHECK(att.desc.ptr == &desc && att.out_poll.ptr == &poll);
+    CHECK(poll.drawable_width == 640 && poll.drawable_height == 360 && poll.backing_scale == 2 &&
+          poll.panel_max_hz == 120 && poll.flags == WMTViewPollFlagHdrActive);
+    int ok = 0;
+    CHECK(mn_ht_get(ctx.ht, att.ret_view, MN_HK_ATTACHED_VIEW, &ok) == (void *)OBJ(VIEW) && ok);
+    ok = 0;
+    CHECK(mn_ht_get(ctx.ht, att.ret_view, MN_HK_VIEW, &ok) == NULL && !ok);
+
+    struct WMTViewPollOut poll2 = {0};
+    struct unixcall_wmt_view_sync_and_poll sp = {att.ret_view, att.ret_layer, {&poll2}, WMTViewSyncFlagForceRefresh, 0};
+    CHECK(call(161, &sp) == 0 && checked[161] && sp.out.ptr == &poll2);
+    CHECK(poll2.drawable_width == 800 && poll2.drawable_height == 600 &&
+          poll2.flags == WMTViewPollFlagSoftwareCursorActive);
+
+    obj_handle_t drawable = mn_gh_alloc(MN_OWN_PLUS1), ev = mn_gh_alloc(MN_OWN_PLUS1);
+    CHECK(drawable && ev);
+    CHECK(mn_ht_bind(ctx.ht, ring_state, drawable, MN_HK_OBJC, (void *)OBJ(DRAWABLE), MN_OWN_PLUS1) == 0);
+    CHECK(mn_ht_bind(ctx.ht, ring_state, ev, MN_HK_OBJC, (void *)OBJ(EVENT), MN_OWN_PLUS1) == 0);
+    struct unixcall_mtldrawable_setpresentedevent pe = {drawable, att.ret_view, ev, 42, WMTPresentedEventFlagPaced, 0};
+    checked[163] = 0;
+    CHECK(call(163, &pe) == 0 && checked[163]);
+    pe.view = 0;
+    checked[163] = 0;
+    CHECK(call(163, &pe) == 0 && checked[163]);
+
+    checked[160] = 0;
+    struct unixcall_generic_obj_uint64_noret ret = {att.ret_view, WMTRetireMetalViewFlagPark};
+    CHECK(call(160, &ret) == 0);
+    mn_ht_sweep(ctx.ht, ring_state);
+    CHECK(checked[160] == 1);
+    ok = 0;
+    CHECK(mn_ht_get(ctx.ht, att.ret_view, MN_HK_ATTACHED_VIEW, &ok) == NULL && !ok);
+
+    /* Nullable desc and out_poll on 159. */
+    checked[159] = 0;
+    struct unixcall_wmt_attach_metal_view att_min = {0x1234, device, {NULL}, {NULL}, 0, 0};
+    CHECK(call(159, &att_min) == 0 && checked[159] && att_min.ret_view && att_min.ret_layer);
+    ret.handle = att_min.ret_view;
+    CHECK(call(160, &ret) == 0);
+    mn_ht_sweep(ctx.ht, ring_state);
+    CHECK(checked[160] == 2);
+
+    obj_handle_t rel[] = {att.ret_layer, att_min.ret_layer, drawable, ev};
+    for (size_t i = 0; i < sizeof rel / sizeof *rel; i++) CHECK(call(1, &rel[i]) == 0);
 }
 
 /* A slot 91 the host fails: the log handles the guest picked for it (the next fresh indexes) are freed. */
@@ -673,6 +768,7 @@ static const uint32_t catalog_sizes[MN_WM_SLOTS] = {
     16, 16, /* DXMT 0071's WMTMemoryAlloc and WMTMemoryFree */
     0,      /* Direct3D forwarding's (MN_WM_D3D), guest-only */
     40, 48, /* mtld3d's (D3D9 M2b): a pipeline with a vertex descriptor, a source library with options */
+    8, 48, 16, 32, 16, 40, 16, /* C4d-6 (158..164): latency activity, attach, retire, sync/poll, surface, event, cursor */
 };
 
 static void coverage(void) {
@@ -697,9 +793,10 @@ static const unsigned sync_slots[] = {
     13, 117, 126,                                               /* blocking */
     118,                       /* the guest's lock on its cache writer must cover the host's insert (not thread-safe) */
     67, 71, 72, 93, 97, 101,                                    /* presentation (4c): nil, layer props, display */
+    159, 161,                                                   /* C4d-6: attach and sync/poll */
 };
 static const unsigned refused_slots[] = {120, 121, 122, 123, 124, 83};
-static const unsigned local_slots[] = {153, 154, 155};
+static const unsigned local_slots[] = {153, 154, 155, 158, 162, 164};
 
 static void modes(void) {
     int want[MN_WM_SLOTS] = {0}, n[4] = {0};
@@ -713,7 +810,7 @@ static void modes(void) {
             failures++;
         }
     }
-    CHECK(n[MN_WM_SYNC] == 85 && n[MN_WM_QUEUED] == 64 && n[MN_WM_REFUSED] == 6 && n[MN_WM_LOCAL] == 3);
+    CHECK(n[MN_WM_SYNC] == 87 && n[MN_WM_QUEUED] == 66 && n[MN_WM_REFUSED] == 6 && n[MN_WM_LOCAL] == 6);
 }
 
 int main(void) {
@@ -727,6 +824,7 @@ int main(void) {
             {"cmdlist-unknown-type", cmdlist_unknown_type}, {"sm50-sizes", sm50_sizes}, {"sm50-args", sm50_args},
             {"paths", paths}, {"strings", strings}, {"enumerate", enumerate}, {"enumerate-fails", enumerate_fails},
             {"local-refused", local_refused},
+            {"present-attach-slots", present_attach_slots},
             {"constants", constants}, {"mtld3d-slots", mtld3d_slots},
             {"coverage", coverage},
             {"modes", modes},

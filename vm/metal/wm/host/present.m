@@ -164,7 +164,8 @@ NTSTATUS_T mn_wm_present_special(struct mn_wm_state *k) {
         props->device = 0; /* the guest puts its own value back (marshal.c) */
         return s;
     }
-    case 73: {
+    case 73:
+    case 160: {
         mn_handle h;
         memcpy(&h, k->rec, sizeof h);
         return mn_ht_release(k->c->ht, k->ring, h) ? MN_STATUS_INVALID_HANDLE : 0;

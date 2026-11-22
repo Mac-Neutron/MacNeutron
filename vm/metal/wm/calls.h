@@ -1,14 +1,14 @@
-/* Winemetal's 158 Unix-call slots, described for forwarding (milestone 4b-1): each slot's params struct, whether the
+/* Winemetal's 165 Unix-call slots, described for forwarding (milestone 4b-1): each slot's params struct, whether the
  * guest waits for it, and the fields the marshaller translates. Slot numbers and the facts behind each entry are the
  * call catalog's (docs/research/2026-10-15-vm-route/winemetal-calls.md), 153-154 DXMT 0071's, which the guest
- * answers itself (4b-2), 155 Direct3D forwarding's (guest-only) and 156-157 mtld3d's (D3D9 M2b). Shared by the guest
- * and the host. */
+ * answers itself (4b-2), 155 Direct3D forwarding's (guest-only), 156-157 mtld3d's (D3D9 M2b), and 158-164 core
+ * D3D9 presentation/latency slots (C4d-6). Shared by the guest and the host. */
 #ifndef MN_WM_CALLS_H
 #define MN_WM_CALLS_H
 #include <stdint.h>
 #include "handles.h"
 
-#define MN_WM_SLOTS 158
+#define MN_WM_SLOTS 165
 #define MN_WM_D3D 155 /* the guest winemetal.so's own: Direct3D forwarding's (vm/d3d/guest/unix.c) */
 
 /* The guest winemetal.so's tables: an x86-64 build exports the 64-bit one and the WoW64 one (guest/wow64.c), an i686

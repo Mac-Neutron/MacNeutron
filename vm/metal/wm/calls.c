@@ -1,4 +1,4 @@
-/* The 158 slots (calls.h), from the call catalog. Q: queued; S: the guest waits (Global Constraints' lists). */
+/* The 165 slots (calls.h), from the call catalog. Q: queued; S: the guest waits (Global Constraints' lists). */
 #include "calls.h"
 #include <stddef.h>
 #include "airconv_thunks.h"
@@ -412,6 +412,28 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
       PTR(WMF_IN, unixcall_mtldevice_newlibrarywithsource_options, options, sizeof(struct WMTCompileOptions), 0),
       HOUT(unixcall_mtldevice_newlibrarywithsource_options, ret_error, AR),
       HOUT(unixcall_mtldevice_newlibrarywithsource_options, ret_library, P1)),
+    /* Core D3D9 presentation & latency slots (DXMTRS C4d-6). */
+    [158] = {.name = "WMTDeclareLatencyCriticalActivity", .params_size = sizeof(struct G_R), .mode = MN_WM_LOCAL,
+             .refuse_status = MN_STATUS_INVALID_PARAMETER},
+    C(159, WMTAttachMetalView, unixcall_wmt_attach_metal_view, S, MN_SP_NONE,
+      HIN(unixcall_wmt_attach_metal_view, device),
+      PTR(WMF_IN, unixcall_wmt_attach_metal_view, desc, sizeof(struct WMTViewAttachDesc), 0),
+      PTR(WMF_OUT, unixcall_wmt_attach_metal_view, out_poll, sizeof(struct WMTViewPollOut), 0),
+      HOUTK(unixcall_wmt_attach_metal_view, ret_view, MN_HK_ATTACHED_VIEW, P1),
+      HOUT(unixcall_wmt_attach_metal_view, ret_layer, P1)),
+    C(160, WMTRetireMetalView, G_UNR, Q, MN_SP_VIEW, HINK(G_UNR, handle, MN_HK_ATTACHED_VIEW)),
+    C(161, WMTViewSyncAndPoll, unixcall_wmt_view_sync_and_poll, S, MN_SP_NONE,
+      HINK(unixcall_wmt_view_sync_and_poll, view, MN_HK_ATTACHED_VIEW),
+      HIN(unixcall_wmt_view_sync_and_poll, layer),
+      PTR(WMF_OUT, unixcall_wmt_view_sync_and_poll, out, sizeof(struct WMTViewPollOut), 0)),
+    [162] = {.name = "WMTPresentClientSurface", .params_size = sizeof(struct G_UNR), .mode = MN_WM_LOCAL,
+             .refuse_status = MN_STATUS_INVALID_PARAMETER},
+    C(163, MTLDrawable_setPresentedEvent, unixcall_mtldrawable_setpresentedevent, Q, MN_SP_NONE,
+      HIN(unixcall_mtldrawable_setpresentedevent, drawable),
+      HINK(unixcall_mtldrawable_setpresentedevent, view, MN_HK_ATTACHED_VIEW),
+      HIN(unixcall_mtldrawable_setpresentedevent, shared_event)),
+    [164] = {.name = "WMTSetCursorOverlay", .params_size = sizeof(struct unixcall_generic_obj_constptr_noret),
+             .mode = MN_WM_LOCAL, .refuse_status = MN_STATUS_INVALID_PARAMETER},
 };
 
 /* MTLPixelFormat's values (WMTPixelFormat mirrors them). */
