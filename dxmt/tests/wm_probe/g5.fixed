@@ -881,11 +881,594 @@ g5 152 interpolate-encode msg@worker setJitterOffsetY: setJitterOffsetY=-0x1.8p-
 g5 152 interpolate-encode msg@worker setShouldResetHistory: setShouldResetHistory=1
 g5 152 interpolate-encode msg@worker setDepthReversed: setDepthReversed=1
 g5 152 interpolate-encode msg@worker setIsUITextureComposited: setIsUITextureComposited=1
+g5 152 interpolate-encode msg@worker respondsToSelector: respondsToSelector=setContentWidth:
+g5 152 interpolate-encode msg@worker respondsToSelector: respondsToSelector=inputWidth
+g5 152 interpolate-encode msg@worker inputWidth
+g5 152 interpolate-encode msg@worker setContentWidth: setContentWidth=128
+g5 152 interpolate-encode msg@worker respondsToSelector: respondsToSelector=setContentHeight:
+g5 152 interpolate-encode msg@worker respondsToSelector: respondsToSelector=inputHeight
+g5 152 interpolate-encode msg@worker inputHeight
+g5 152 interpolate-encode msg@worker setContentHeight: setContentHeight=128
+g5 152 interpolate-encode msg@worker respondsToSelector: respondsToSelector=setDepthContentOffsetX:
+g5 152 interpolate-encode msg@worker setDepthContentOffsetX: setDepthContentOffsetX=0
+g5 152 interpolate-encode msg@worker respondsToSelector: respondsToSelector=setDepthContentOffsetY:
+g5 152 interpolate-encode msg@worker setDepthContentOffsetY: setDepthContentOffsetY=0
+g5 152 interpolate-encode msg@worker respondsToSelector: respondsToSelector=setMotionContentOffsetX:
+g5 152 interpolate-encode msg@worker setMotionContentOffsetX: setMotionContentOffsetX=0
+g5 152 interpolate-encode msg@worker respondsToSelector: respondsToSelector=setMotionContentOffsetY:
+g5 152 interpolate-encode msg@worker setMotionContentOffsetY: setMotionContentOffsetY=0
+g5 152 interpolate-encode msg@worker respondsToSelector: respondsToSelector=setOutputOffsetX:
+g5 152 interpolate-encode msg@worker setOutputOffsetX: setOutputOffsetX=0
+g5 152 interpolate-encode msg@worker respondsToSelector: respondsToSelector=setOutputOffsetY:
+g5 152 interpolate-encode msg@worker setOutputOffsetY: setOutputOffsetY=0
 g5 152 interpolate-encode msg@worker encodeToCommandBuffer: encodeToCommandBuffer=h1
 g5 152 interpolate-encode 0 in1=+1 in2=+2 in3=+2 cb-status=4
 g5 166 denoised-scaler swz@worker newTemporalDenoisedScalerWithDevice:
-g5 166 denoised-scaler 0 ret=h1 own=+1 pool=+0
+g5 166 denoised-scaler dump desc.autoExposureEnabled=0
+g5 166 denoised-scaler dump desc.colorTextureFormat=115
+g5 166 denoised-scaler dump desc.denoiseStrengthMaskTextureEnabled=1
+g5 166 denoised-scaler dump desc.denoiseStrengthMaskTextureFormat=10
+g5 166 denoised-scaler dump desc.depthTextureFormat=252
+g5 166 denoised-scaler dump desc.diffuseAlbedoTextureFormat=115
+g5 166 denoised-scaler dump desc.inputContentMaxScale=0x0p+0
+g5 166 denoised-scaler dump desc.inputContentMinScale=0x0p+0
+g5 166 denoised-scaler dump desc.inputContentPropertiesEnabled=0
+g5 166 denoised-scaler dump desc.inputHeight=64
+g5 166 denoised-scaler dump desc.inputWidth=64
+g5 166 denoised-scaler dump desc.motionTextureFormat=65
+g5 166 denoised-scaler dump desc.normalTextureFormat=115
+g5 166 denoised-scaler dump desc.outputHeight=128
+g5 166 denoised-scaler dump desc.outputTextureFormat=115
+g5 166 denoised-scaler dump desc.outputWidth=128
+g5 166 denoised-scaler dump desc.reactiveMaskTextureEnabled=1
+g5 166 denoised-scaler dump desc.reactiveMaskTextureFormat=10
+g5 166 denoised-scaler dump desc.requiresSynchronousInitialization=1
+g5 166 denoised-scaler dump desc.roughnessTextureFormat=25
+g5 166 denoised-scaler dump desc.specularAlbedoTextureFormat=115
+g5 166 denoised-scaler dump desc.specularHitDistanceTextureEnabled=1
+g5 166 denoised-scaler dump desc.specularHitDistanceTextureFormat=25
+g5 166 denoised-scaler dump desc.transparencyOverlayTextureEnabled=1
+g5 166 denoised-scaler dump desc.transparencyOverlayTextureFormat=70
+g5 166 denoised-scaler dump desc.version=0
+g5 166 denoised-scaler dump desc=MTLFXTemporalDenoisedScalerDescriptor
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=23
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=24
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=25
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=26
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=22
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4b59063d type=3 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0500 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0600 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0600 type=41 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0600 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0600 type=41 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=19
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0300 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0300 type=41 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=19
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0300 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0300 type=41 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=19
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=8000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0300 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0300 type=41 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=19
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=8000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=8000 type=41 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=37
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=37
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=37
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2c00 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=19
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=31
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=20
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=21
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=22
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=23
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=24
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=28
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=29
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=30
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=19
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=20
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=21
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=22
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=24
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=25
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0d00 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=03000000 type=33 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0800 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=37
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000 type=41 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=03000000 type=33 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0400 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=4000 type=41 atIndex=37
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=2
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=1000 type=41 atIndex=4
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0700 type=41 atIndex=5
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=6
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=03000000 type=33 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=11
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=12
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=13
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=17
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=18
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0100 type=41 atIndex=15
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0200 type=41 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=0
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=1
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=3
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=01 type=53 atIndex=8
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=10
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=2000 type=41 atIndex=37
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=7
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=0000803f type=3 atIndex=9
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=33 atIndex=16
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=14
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=25
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=26
+g5 166 denoised-scaler swz@worker setConstantValue:type:atIndex: setConstantValue=00000000 type=3 atIndex=27
+g5 166 denoised-scaler 0 ret=h1 own=+1 pool=+0 info-written=0-71
+g5 166 denoised-scaler dump scaler.colorTexture=nil
+g5 166 denoised-scaler dump scaler.colorTextureFormat=115
+g5 166 denoised-scaler dump scaler.colorTextureUsage=1
+g5 166 denoised-scaler dump scaler.debugTexture=nil
+g5 166 denoised-scaler dump scaler.denoiseStrengthMaskTexture=nil
+g5 166 denoised-scaler dump scaler.denoiseStrengthMaskTextureFormat=10
+g5 166 denoised-scaler dump scaler.denoiseStrengthMaskTextureUsage=1
+g5 166 denoised-scaler dump scaler.depthReversed=1
+g5 166 denoised-scaler dump scaler.depthTexture=nil
+g5 166 denoised-scaler dump scaler.depthTextureFormat=252
+g5 166 denoised-scaler dump scaler.depthTextureUsage=1
+g5 166 denoised-scaler dump scaler.diffuseAlbedoTexture=nil
+g5 166 denoised-scaler dump scaler.diffuseAlbedoTextureFormat=115
+g5 166 denoised-scaler dump scaler.diffuseAlbedoTextureUsage=1
+g5 166 denoised-scaler dump scaler.dilatedMotionVectors=h2
+g5 166 denoised-scaler dump scaler.effectID=10
+g5 166 denoised-scaler dump scaler.exposureTexture=nil
+g5 166 denoised-scaler dump scaler.fence=nil
+g5 166 denoised-scaler dump scaler.inputContentHeight=64
+g5 166 denoised-scaler dump scaler.inputContentMaxScale=0x1p+1
+g5 166 denoised-scaler dump scaler.inputContentMinScale=0x1p+1
+g5 166 denoised-scaler dump scaler.inputContentWidth=64
+g5 166 denoised-scaler dump scaler.inputHeight=64
+g5 166 denoised-scaler dump scaler.inputWidth=64
+g5 166 denoised-scaler dump scaler.jitterOffsetX=0x0p+0
+g5 166 denoised-scaler dump scaler.jitterOffsetY=0x0p+0
+g5 166 denoised-scaler dump scaler.motionTexture=nil
+g5 166 denoised-scaler dump scaler.motionTextureFormat=65
+g5 166 denoised-scaler dump scaler.motionTextureUsage=1
+g5 166 denoised-scaler dump scaler.motionVectorScaleX=-0x1p+6
+g5 166 denoised-scaler dump scaler.motionVectorScaleY=-0x1p+6
+g5 166 denoised-scaler dump scaler.normalTexture=nil
+g5 166 denoised-scaler dump scaler.normalTextureFormat=115
+g5 166 denoised-scaler dump scaler.normalTextureUsage=1
+g5 166 denoised-scaler dump scaler.outputHeight=128
+g5 166 denoised-scaler dump scaler.outputTexture=nil
+g5 166 denoised-scaler dump scaler.outputTextureFormat=115
+g5 166 denoised-scaler dump scaler.outputTextureUsage=7
+g5 166 denoised-scaler dump scaler.outputWidth=128
+g5 166 denoised-scaler dump scaler.preExposure=0x1p+0
+g5 166 denoised-scaler dump scaler.reactiveMaskTexture=nil
+g5 166 denoised-scaler dump scaler.reactiveMaskTextureFormat=10
+g5 166 denoised-scaler dump scaler.reactiveMaskTextureUsage=1
+g5 166 denoised-scaler dump scaler.reactiveTextureUsage=1
+g5 166 denoised-scaler dump scaler.reset=1
+g5 166 denoised-scaler dump scaler.roughnessTexture=nil
+g5 166 denoised-scaler dump scaler.roughnessTextureFormat=25
+g5 166 denoised-scaler dump scaler.roughnessTextureUsage=1
+g5 166 denoised-scaler dump scaler.shouldResetHistory=1
+g5 166 denoised-scaler dump scaler.specularAlbedoTexture=nil
+g5 166 denoised-scaler dump scaler.specularAlbedoTextureFormat=115
+g5 166 denoised-scaler dump scaler.specularAlbedoTextureUsage=1
+g5 166 denoised-scaler dump scaler.specularHitDistanceTexture=nil
+g5 166 denoised-scaler dump scaler.specularHitDistanceTextureFormat=25
+g5 166 denoised-scaler dump scaler.specularHitDistanceTextureUsage=1
+g5 166 denoised-scaler dump scaler.tracingDelegate=nil
+g5 166 denoised-scaler dump scaler.transparencyOverlayTexture=nil
+g5 166 denoised-scaler dump scaler.transparencyOverlayTextureFormat=70
+g5 166 denoised-scaler dump scaler.transparencyOverlayTextureUsage=1
+g5 166 denoised-scaler dump scaler.viewToClipMatrix=!
+g5 166 denoised-scaler dump scaler.worldToViewMatrix=!
+g5 166 denoised-scaler dump scaler=_MFXTemporalDenoisingScalingEffect
 g5 - denoised-encode inputs cmdbuf=h1 scaler=h2 color=h3 output=h4 fence=h5
+g5 167 denoised-encode msg@worker setColorTexture: setColorTexture=h3
+g5 167 denoised-encode msg@worker setOutputTexture: setOutputTexture=h4
+g5 167 denoised-encode msg@worker setDepthTexture: setDepthTexture=h6
+g5 167 denoised-encode msg@worker setMotionTexture: setMotionTexture=h7
+g5 167 denoised-encode msg@worker setDiffuseAlbedoTexture: setDiffuseAlbedoTexture=h8
+g5 167 denoised-encode msg@worker setSpecularAlbedoTexture: setSpecularAlbedoTexture=h9
+g5 167 denoised-encode msg@worker setNormalTexture: setNormalTexture=h10
+g5 167 denoised-encode msg@worker setRoughnessTexture: setRoughnessTexture=h11
+g5 167 denoised-encode msg@worker setSpecularHitDistanceTexture: setSpecularHitDistanceTexture=nil
+g5 167 denoised-encode msg@worker setDenoiseStrengthMaskTexture: setDenoiseStrengthMaskTexture=nil
+g5 167 denoised-encode msg@worker setTransparencyOverlayTexture: setTransparencyOverlayTexture=nil
+g5 167 denoised-encode msg@worker setExposureTexture: setExposureTexture=nil
+g5 167 denoised-encode msg@worker setReactiveMaskTexture: setReactiveMaskTexture=nil
+g5 167 denoised-encode msg@worker setFence: setFence=h5
+g5 167 denoised-encode msg@worker setPreExposure: setPreExposure=0x1.8p+0
+g5 167 denoised-encode msg@worker setJitterOffsetX: setJitterOffsetX=0x1p-2
+g5 167 denoised-encode msg@worker setJitterOffsetY: setJitterOffsetY=-0x1p-1
+g5 167 denoised-encode msg@worker setMotionVectorScaleX: setMotionVectorScaleX=0x1p+6
+g5 167 denoised-encode msg@worker setMotionVectorScaleY: setMotionVectorScaleY=-0x1p+6
+g5 167 denoised-encode msg@worker setShouldResetHistory: setShouldResetHistory=1
+g5 167 denoised-encode msg@worker setDepthReversed: setDepthReversed=1
+g5 167 denoised-encode msg@worker setWorldToViewMatrix: setWorldToViewMatrix=?{?}
+g5 167 denoised-encode msg@worker setViewToClipMatrix: setViewToClipMatrix=?{?}
+g5 167 denoised-encode msg@worker encodeToCommandBuffer: encodeToCommandBuffer=h1
 g5 167 denoised-encode 0 in1=+1 in2=+2 in3=+2 cb-status=4 matrices-ok=1
 g5 58 nil-args msg@worker setColorTexture: setColorTexture=nil
 g5 58 nil-args msg@worker setOutputTexture: setOutputTexture=nil
@@ -939,6 +1522,26 @@ g5 152 nil-args msg@worker setJitterOffsetY: setJitterOffsetY=-0x1.4b4b4ap-52
 g5 152 nil-args msg@worker setShouldResetHistory: setShouldResetHistory=0
 g5 152 nil-args msg@worker setDepthReversed: setDepthReversed=0
 g5 152 nil-args msg@worker setIsUITextureComposited: setIsUITextureComposited=0
+g5 152 nil-args msg@worker respondsToSelector: respondsToSelector=setContentWidth:
+g5 152 nil-args msg@worker respondsToSelector: respondsToSelector=inputWidth
+g5 152 nil-args msg@worker inputWidth
+g5 152 nil-args msg@worker setContentWidth: setContentWidth=0
+g5 152 nil-args msg@worker respondsToSelector: respondsToSelector=setContentHeight:
+g5 152 nil-args msg@worker respondsToSelector: respondsToSelector=inputHeight
+g5 152 nil-args msg@worker inputHeight
+g5 152 nil-args msg@worker setContentHeight: setContentHeight=0
+g5 152 nil-args msg@worker respondsToSelector: respondsToSelector=setDepthContentOffsetX:
+g5 152 nil-args msg@worker setDepthContentOffsetX: setDepthContentOffsetX=0
+g5 152 nil-args msg@worker respondsToSelector: respondsToSelector=setDepthContentOffsetY:
+g5 152 nil-args msg@worker setDepthContentOffsetY: setDepthContentOffsetY=0
+g5 152 nil-args msg@worker respondsToSelector: respondsToSelector=setMotionContentOffsetX:
+g5 152 nil-args msg@worker setMotionContentOffsetX: setMotionContentOffsetX=0
+g5 152 nil-args msg@worker respondsToSelector: respondsToSelector=setMotionContentOffsetY:
+g5 152 nil-args msg@worker setMotionContentOffsetY: setMotionContentOffsetY=0
+g5 152 nil-args msg@worker respondsToSelector: respondsToSelector=setOutputOffsetX:
+g5 152 nil-args msg@worker setOutputOffsetX: setOutputOffsetX=0
+g5 152 nil-args msg@worker respondsToSelector: respondsToSelector=setOutputOffsetY:
+g5 152 nil-args msg@worker setOutputOffsetY: setOutputOffsetY=0
 g5 152 nil-args msg@worker encodeToCommandBuffer: encodeToCommandBuffer=nil
 g5 152 nil-args 0
 g5 167 nil-args msg@worker setColorTexture: setColorTexture=nil
@@ -966,7 +1569,7 @@ g5 167 nil-args msg@worker encodeToCommandBuffer: encodeToCommandBuffer=nil
 g5 167 nil-args 0
 g5 68 nil-args 0 ret=1
 g5 69 nil-args 0 ret=1
-g5 165 nil-args 0 ret=1
+g5 165 nil-args 0 ret=0
 g5 150 nil-args 0 min=0x1p+0 max=0x1p+1
 g5 57 nil-args raised NSInvalidArgumentException ret=fill
 g5 151 nil-args 0 ret=0

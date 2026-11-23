@@ -199,10 +199,10 @@ static CFMutableDictionaryRef hnum; /* handle -> number, per case */
 static unsigned hnext;
 
 const char *wm_hs(uint64_t h) {
-    static __thread char buf[8][24];
+    static __thread char buf[16][24];
     static __thread unsigned i;
     if (!h) return "0";
-    char *b = buf[i++ % 8];
+    char *b = buf[i++ % 16];
     pthread_mutex_lock(&lock);
     uintptr_t n = (uintptr_t)CFDictionaryGetValue(hnum, (const void *)(uintptr_t)h);
     if (!n && !muted) {
