@@ -4,7 +4,7 @@
 # bin/steam_api64.dll. Expects Steam through the forwarder when the host has --steam-appid (EXPECT=ok), or a refused
 # Steam with Wine still running when it hasn't (EXPECT=refused). Exits 1 on a miss.
 # PROBE_ARCH=32 (the 32-bit games' spec, §8): bin/steamprobe32.exe through a 32-bit game's bin/steam_api.dll, its
-# lsteamclient calls WoW64 ones, with the prefix's steamclient.dll as run-game.sh puts it.
+# lsteamclient calls WoW64 ones, with the prefix's lsteamclient.dll as run-game.sh puts it.
 EXPECT=${EXPECT:-ok}
 if [ "${PROBE_ARCH:-64}" = 32 ]; then PROBE=steamprobe32.exe API=steam_api.dll; else PROBE=steamprobe.exe API=steam_api64.dll; fi
 export WINEPREFIX=/home/mn/probe-$EXPECT WINEDEBUG=-all SteamAppId=480 SteamGameId=480 DISPLAY=:0 PATH=/opt/mn-wine/bin:$PATH
@@ -16,7 +16,8 @@ STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
 cp /opt/mn-wine/lib/wine/x86_64-windows/lsteamclient.dll "$STEAM/steamclient64.dll"
-cp /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll "$STEAM/steamclient.dll"
+rm -f "$STEAM/steamclient.dll"
+cp /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll "$STEAM/lsteamclient.dll"
 # To a file, not $(...): Wine's services outlive a killed launcher and would hold the pipe open.
 timeout -s KILL ${PROBE_TIMEOUT:-120} wine 'C:\Program Files (x86)\Steam\steam.exe' "Z:\\mnt\\share\\bin\\$PROBE" \
   "Z:\\mnt\\share\\bin\\$API" fault > /tmp/probe.out 2>&1

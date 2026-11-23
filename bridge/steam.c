@@ -175,8 +175,13 @@ static void register_steam(DWORD pid)
     {
         set_dword(key, L"pid", pid);
         set_string(key, L"SteamClientDll64", STEAM_DIR L"\\steamclient64.dll");
+        /* Keep lsteamclient.dll under its own name when no separate Valve steamclient.dll is present:
+         * Wine's lsteamclient calls GetModuleHandleW(L"steamclient.dll") and carves vtable memory out of
+         * that module's .data section, which clobbers its own .data if loaded as steamclient.dll. */
         if (GetFileAttributesW(STEAM_DIR L"\\steamclient.dll") != INVALID_FILE_ATTRIBUTES)
             set_string(key, L"SteamClientDll", STEAM_DIR L"\\steamclient.dll");
+        else if (GetFileAttributesW(STEAM_DIR L"\\lsteamclient.dll") != INVALID_FILE_ATTRIBUTES)
+            set_string(key, L"SteamClientDll", STEAM_DIR L"\\lsteamclient.dll");
         /* An account ID earlier MacNeutron builds wrote; Proton writes none (parity L2). */
         RegDeleteValueW(key, L"ActiveUser");
         RegCloseKey(key);

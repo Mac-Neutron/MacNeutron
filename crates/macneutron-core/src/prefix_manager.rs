@@ -367,7 +367,7 @@ impl PrefixManager {
     pub fn remove_steam_bridge(&self) -> Result<(), PrefixError> {
         with_file_lock(&self.context.lock_file(), || {
             // steam.exe stays: HKCR\steam sends the game's steam:// links through it to Mac Steam (parity plan R10).
-            for name in ["steamclient64.dll", "steamclient.dll"] {
+            for name in ["steamclient64.dll", "steamclient.dll", "lsteamclient.dll"] {
                 let _ = std::fs::remove_file(self.context.prefix().join(format!("{}/{name}", SteamBridge::PREFIX_FOLDER)));
             }
         })

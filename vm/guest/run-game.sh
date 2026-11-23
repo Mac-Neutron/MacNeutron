@@ -119,10 +119,13 @@ mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
 cp /mnt/share/bin/steam.exe "$W/system32/steam.exe"  # the one Proton runs (proton:2120)
 [ -f /mnt/share/valve/steamclient64.dll ] && cp /mnt/share/valve/steamclient64.dll "$STEAM/steamclient64.dll"
-# A 32-bit game's client: steam.exe names it SteamClientDll when it's there. ponytail: Wine's own i386 lsteamclient.dll;
+# A 32-bit game's client: steam.exe names it SteamClientDll when it's there. Keep Wine's own i386 lsteamclient.dll
+# under its own name (and remove any stale steamclient.dll from an earlier launch) so get_mem_from_steamclient_dll()'s
+# GetModuleHandleW(L"steamclient.dll") does not clobber lsteamclient.dll's own .data section.
 # Proton puts Valve's signed 32-bit steamclient.dll there and redirects its exports, which Wine patch 0036 does for the
 # 64-bit one only, so a SteamStub-protected 32-bit game stops at its error 3 until 0036 covers i386.
-cp /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll "$STEAM/steamclient.dll"
+rm -f "$STEAM/steamclient.dll"
+cp /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll "$STEAM/lsteamclient.dll"
 # Steam's install scripts (spec 2026-10-24-macneutron-install-scripts-design), which Mac Steam never runs: the launcher's
 # installscript.reg in the run share (their Registry entries, UTF-16, imported when they changed) and mn_install_script
 # (their Run Process steps, InstallScripts.shell). As Steam runs a step: unless its HasRunKey DWORD, named after it, in
