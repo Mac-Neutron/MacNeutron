@@ -37,7 +37,7 @@ for r in $rows; do
 done
 id='[2026-01-01T00:00:00Z INFO  mtld3d::d3d9] d3d9.dll loaded'
 dev='d3d9 core: device on dxmt-core'
-refused='is not implemented under runtime.mode = core -> D3DERR_NOTAVAILABLE'
+refused='is not implemented -> D3DERR_NOTAVAILABLE'
 for r in bench-32-0 benchp-32-0 benchp-32-600; do
   mkdir -p "$F/logs/$r"
   printf '%s\n%s\n' "$id" "$dev" > "$F/logs/$r/d3d9.log"

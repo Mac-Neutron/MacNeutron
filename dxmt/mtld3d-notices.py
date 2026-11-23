@@ -21,9 +21,10 @@ import subprocess
 import sys
 
 LEGS = ((("d3d9", "winemetal-pe", "nvngx", "nvapi", "d3d11", "d3d12"),
+         ("d3d9/front-end",),
          ("aarch64-pc-windows-msvc", "arm64ec-pc-windows-msvc", "x86_64-pc-windows-msvc")),
-        (("d3d9", "winemetal-pe", "d3d11", "d3d12"), ("i686-pc-windows-msvc",)),
-        (("winemetal", "d3d11", "d3d12"), ("aarch64-apple-darwin",)))
+        (("d3d9", "winemetal-pe", "d3d11", "d3d12"), ("d3d9/front-end",), ("i686-pc-windows-msvc",)),
+        (("winemetal", "d3d11", "d3d12"), (), ("aarch64-apple-darwin",)))
 PREFIXES = ("license", "licence", "copying", "notice", "unlicense")
 MIT = """MIT License
 
@@ -54,9 +55,11 @@ def main(tree, out, cargo):
     meta = json.loads(subprocess.run(cargo + ["metadata", "--format-version", "1", "--locked"], cwd=tree,
                                      check=True, capture_output=True, text=True).stdout)
     by_name = {(p["name"], p["version"]): p for p in meta["packages"]}
-    for packages, targets in LEGS:
+    for packages, features, targets in LEGS:
         for target in targets:
             args = ["tree", "--locked", "-e", "normal", "--prefix", "none", "--format", "{p}", "--target", target]
+            if features:
+                args += ["--features", ",".join(features)]
             for package in packages:
                 args += ["-p", package]
             listing = subprocess.run(cargo + args, cwd=tree, check=True, capture_output=True, text=True).stdout

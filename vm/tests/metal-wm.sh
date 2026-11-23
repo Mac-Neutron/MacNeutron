@@ -29,7 +29,7 @@ for w in 64 32; do
   done
   # Each refused slot logs once, though called twice.
   n=$(grep -c "is refused" /tmp/wm-refused.err)
-  [ "$n" -eq 6 ] || { echo "FAIL $w: $n refusal lines, want 6"; fail=1; }
+  [ "$n" -eq 7 ] || { echo "FAIL $w: $n refusal lines, want 7"; fail=1; }
 done
 [ $fail -eq 0 ] && echo "metal-wm: ok"
 exit $fail

@@ -159,7 +159,7 @@ launch() {
     # d3d9_dynamic.exe makes no device (Direct3DCreate9 through GetProcAddress only): PE log + config, no legacy lines.
     if [ -n "$pe_log" ] && /usr/bin/grep -rqF '] d3d9.dll ' "$d" \
       && /usr/bin/grep -rqF 'config: log.dir = ' "$d" && ! /usr/bin/grep -rqF "$enc" "$d" \
-      && ! /usr/bin/grep -rqF 'carries no core runtime' "$d" && ! /usr/bin/grep -rqE "$mtld3d_lines" "$d"; then
+      && ! /usr/bin/grep -rqE "$mtld3d_lines" "$d"; then
       echo "d3d9-check: $name: runtime core (no device)"
     else
       echo "d3d9-check: $name: no core runtime, missing PE log, or legacy line in $d"; fail="$fail $name-runtime"

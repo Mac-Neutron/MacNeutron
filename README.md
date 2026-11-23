@@ -128,7 +128,7 @@ Direct3D 9 runs on DXMT's own Direct3D 9 → Metal layer, `src/d3d9` in our DXMT
 replaces Wine's own Direct3D 9 (wined3d) with either Graphics setting: there is no OpenGL fallback for a Direct3D 9
 game, and Wine's video renderers (EVR, VMR-9) draw through it too (EVR's frame grab, `GetCurrentImage`, fails on it
 for now). It writes its log to
-`~/Library/Logs/MacNeutron/mtld3d` and its shader cache, `mtld3d_shaders.bin`, beside the game's `.exe`; its
+`~/Library/Logs/MacNeutron/mtld3d` and shares DXMT's shader cache (`shaders_*.db`); its
 switches (`mtld3d.conf`, in its source) go in `/usr/bin/env MTLD3D_CONFIG='key=value;…' %command%`. It runs on
 macOS and in the game VM, where it draws through the Mac's Metal as DXMT's other front ends do.
 

@@ -233,7 +233,7 @@ for r in st64-fresh st32-fresh; do
   done
 done
 # core: runtime <folder> [fixed|buffers|reset|extras]: the core device's line in a launch's logs, none of
-# mtld3d.so's encoder line nor of the core's can't-present, dropped-draw or staged-dynamic-buffer ("has no mapped
+# the legacy encoder line nor of the core's can't-present, dropped-draw or staged-dynamic-buffer ("has no mapped
 # memory", DXMTRS C4c-2b) lines (the code that ran prints them, not the switch), and no refusal line, or with
 # "fixed", "buffers", "reset" or "extras" exactly that launch's refused rows'
 # (fixed_refusals,
