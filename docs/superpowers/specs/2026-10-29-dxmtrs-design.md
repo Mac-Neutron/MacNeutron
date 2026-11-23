@@ -1965,6 +1965,25 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   old/new WoW64 default & core exit 0, `was not recorded: 0`), `jr1` (plain `DXMT_D3D9_CORE=0` build:
   `translator key: same`, `imports vs base: same`, `d3d9-default` & `conf-default` exit 0), and `jx1` (`x64` 420/420,
   `arm64ec` 420/420, translator key unchanged).
+  **C4e (parity sweep, core default flip, escape hatch, BoundDepthSampled depth snapshot & 32-bit VM live gate)**
+  done 2026-11-22 at DXMTRS main `b3e7976b` (`b3e7976b32be3519269106e92bd0a90b1bbb0830`), which MacNeutron pins.
+  Flips `d3d9_core_runtime` and `RuntimeMode::default()` to `core` across DXMTRS and MacNeutron while preserving the
+  `mtld3d` escape hatch (`runtime.mode=mtld3d`, `shader.backend=msl`). Enables VM core conformance (`x64` and `x86`
+  under both `old` and `new` WoW64) in `vm/tests/d3d9.sh` and `vm/dxmt/d3d9-gate.sh`, adds `d3d9-rt` to
+  `dxmt/mtld3d-notices.py`, fixes `d3d9_triangle.cpp` `--bench prog` `SetFVF` guard, implements dirty-tracked depth
+  snapshot blitting in `d3d9-rt`/`d3d9` eliminating `CoreRefusal::BoundDepthSampled` (caught by live 32-bit Anomaly 2
+  testing, moving `depth`/`dp64`/`dp32` to 0 refusals and verifying 2-subtest `ds-feedback` across `core`/`mtld3d`/`msl`),
+  and fixes 32-bit VM `lsteamclient.dll` `.data` self-corruption (`bridge/steam.c`, `vm/guest/run-game.sh`,
+  `vm/tests/probe.sh`, `prefix_manager.rs`). Verified across all gates: `tools/rust-check.sh` 6/6
+  (`audit: clean (1285 files)`, 288 `d3d9_rt` tests), `jt1`/`jt2`/`jt4` (`licences_test`, `facade`, `wm-probe`,
+  `presenter/check.sh`, `d3d9-check.sh` default/mtld3d/msl incl. `arm64: runtime core (aarch64)` and warm SQLite cache
+  `hits=24 misses=0`, Metal API Validation 0 reports incl. `depth` 33/33), `jq1` (22/22 Metal API Validation 0 reports),
+  `jl1` (`visual 16` vs `30`, `conf-compare: ok`), `jx1` (`x64` 420/420 & `arm64ec` 420/420, translator key unchanged),
+  `jc1`/`jc2`/`jc3` (`vm/dxmt/check-build.sh`, `d3d-gate` 48/48, all 4 VM D3D9 legs `old`/`new` WoW64 x
+  `default`/`mtld3d` with `D3D9_BENCH=1`, `was not recorded: 0`, and all 4 VM conformance compares `ok`), and `jrel2`
+  (live 32-bit Anomaly 2 through unmodified `vm/guest/run-game.sh` on both `old` and `new` WoW64: 1,809 / 1,946
+  drawables, 67-76 FPS, active depth snapshot, 0 core refusals, 0 audio drops, plus `vm-setup.sh` bit-exact
+  `base.erofs`/`wine.erofs`/`initramfs.img` match and lockdown/TPM verification).
 - C4 (after step 5): `d3d9.dll` on the core (D3D11's model, PE-side encoding), the bridge and the one presenter; the core
   gains D3D9's needs (fixed-function constants, D3D9 binding, formats and surfaces, lockable pools, queries, present and
   reset, gamma, cursor; draw skipping and pipeline prewarm as per-API core policies); mtld3d's macOS window features
