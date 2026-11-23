@@ -5110,7 +5110,7 @@ static bool srgbBlend(float x0, float y0, float x1, float y1) {
 }
 // sRGB write under blending. On a target with an sRGB view (the back buffer, an A8R8G8B8 texture) the blend is in
 // linear space: black at alpha 128 over the 128 grey (stored 188) reads 137. On a target without one
-// (A16B16G16R16F) the pixel stage encodes before the blender: 0.735 * 0.498.
+// (A16B16G16R16F) writes remain linear: Clear GREY (128/255 = 0.502) blended with black at 128/255 gives 0.250.
 static bool rowSrBlend() {
     const Px px[] = {{128, 128, 0x898989}, {32, 32, 0xbcbcbc}};
     if (!frames(BLUE, px, 2, [&] { return srgbBlend(64, 64, 192, 192); })) return false;
@@ -5138,8 +5138,8 @@ static bool rowSrBlend() {
             float in[4], out[4];
             decodeTexel(D3DFMT_A16B16G16R16F, b + 32 * pitch + 32 * 8, in);
             decodeTexel(D3DFMT_A16B16G16R16F, b + 4 * pitch + 4 * 8, out);
-            if (fabsf(in[0] - 0.366f) > 0.01f || fabsf(out[0] - 0.735f) > 0.01f)
-                return snprintf(why, sizeof why, "16F: blended %.3f want 0.366, clear %.3f want 0.735", in[0], out[0]),
+            if (fabsf(in[0] - 0.250f) > 0.01f || fabsf(out[0] - 0.502f) > 0.01f)
+                return snprintf(why, sizeof why, "16F: blended %.3f want 0.250, clear %.3f want 0.502", in[0], out[0]),
                        false;
             return true;
         });
@@ -8070,9 +8070,10 @@ static bool rowCfLockable() {
 // cf-bb: the back buffer: cleared steel, a mint quad over (20,30)-(60,60); rust filled over (37,45)-(90,71); a gold
 // quad over (80,64)-(110,90): mint at (25,35); rust at (37,45) (the rect's corner, where the quad was), (89,50) and
 // (40,70); gold at (85,68) and (100,85); steel at (36,62), (90,50), (40,71) and (200,200) (colour channels:
-// X8R8G8B8). An additional swap chain's back buffer (the device's, aliased): aqua filled over (100,80)-(153,111) of
-// it, a rose quad over (140,100)-(170,130) of the device's: aqua at (100,80) (where the gold quad was), (152,90) and
-// (120,110), rose at (145,105) and (165,125), steel at (99,95), (120,111) and (153,90).
+// X8R8G8B8). An additional swap chain's standalone back buffer: cleared steel, aqua filled over (100,80)-(153,111), a
+// rose quad over (140,100)-(170,130): chain reads aqua at (100,80), (152,90) and (120,110), rose at (145,105) and
+// (165,125), steel at (99,95), (120,111) and (153,90); the device's back buffer is untouched (gold at (100,85), steel
+// at (200,200)).
 static bool rowCfBb() {
     return until([&] {
         Com<IDirect3DSwapChain9> sc;
@@ -8084,11 +8085,14 @@ static bool rowCfBb() {
                    {{25, 35, KMINT}, {37, 45, KRUST}, {89, 50, KRUST}, {40, 70, KRUST}, {85, 68, KGOLD},
                     {100, 85, KGOLD}, {36, 62, KSTEEL}, {90, 50, KSTEEL}, {40, 71, KSTEEL}, {200, 200, KSTEEL}}))
             return false;
-        return chainBackBuffer(nullptr, 0, sc, chain) && colorFill(chain.p, &onChain, KAQUA) &&
-               scene([&] { return zquad(140, 100, 170, 130, 0.5f, KROSE); }) &&
-               rtHas("the chain's fill", rtSurf, 256, X8,
+        return chainBackBuffer(nullptr, 0, sc, chain) &&
+               scene([&] { return bindRt(0, chain.p) && clearTo(KSTEEL) && backToScreen(); }) &&
+               colorFill(chain.p, &onChain, KAQUA) &&
+               scene([&] { return bindRt(0, chain.p) && zquad(140, 100, 170, 130, 0.5f, KROSE) && backToScreen(); }) &&
+               rtHas("the chain's fill", chain.p, 256, X8,
                      {{100, 80, KAQUA}, {152, 90, KAQUA}, {120, 110, KAQUA}, {145, 105, KROSE}, {165, 125, KROSE},
-                      {99, 95, KSTEEL}, {120, 111, KSTEEL}, {153, 90, KSTEEL}});
+                      {99, 95, KSTEEL}, {120, 111, KSTEEL}, {153, 90, KSTEEL}}) &&
+               rtHas("the back buffer kept", rtSurf, 256, X8, {{100, 85, KGOLD}, {200, 200, KSTEEL}});
     });
 }
 // cf-unbound: Y, a target, bound: cleared steel, a mint quad over (4,4)-(20,20). X, a render-target texture, bound:
@@ -8708,13 +8712,14 @@ static bool rowScRt() {
                       {32, 18, KAQUA}, {33, 40, KAQUA}, {0, 0, KAQUA}});
     });
 }
-// sc-bb: A, a target, cleared sage, a gold quad over (1,2)-(63,63); X, an X8R8G8B8 target, cleared plum; the back
-// buffer cleared lilac. A's (5,9)-(38,40) to the back buffer's (101,61); the back buffer's (101,61)-(134,92) to X's
-// (7,11); A's (3,6)-(36,40) to an additional swap chain's back buffer's (150,90) (read from the device's, which it
-// aliases): the back buffer gold at (101,61), (133,91), (150,90) and (182,123), lilac at (134,61), (101,60), (100,61),
-// (101,92), (183,90), (150,89), (149,90), (150,124) and (0,0); X gold at (7,11) and (39,41), plum at (40,11), (7,10),
-// (6,11), (7,42) and (0,0). Then A's (0,0)-(64,64) to the back buffer's (0,0)-(64,64) (test_pointsize's copy, at the
-// origin): sage at (0,0), gold at (32,32), lilac at (64,32) and (32,64). Colour channels (X8R8G8B8).
+// sc-bb: A, a target, cleared sage, a gold quad over (1,2)-(63,63); X, an X8R8G8B8 target, cleared plum; the device's
+// back buffer and an additional swap chain's standalone back buffer each cleared lilac. A's (5,9)-(38,40) to the back
+// buffer's (101,61); the back buffer's (101,61)-(134,92) to X's (7,11); A's (3,6)-(36,40) to the chain's standalone
+// back buffer's (150,90): the device back buffer gold at (101,61) and (133,91), lilac at (134,61), (101,60), (100,61),
+// (101,92), (150,90) and (0,0); the chain gold at (150,90) and (182,123), lilac at (183,90), (150,89), (149,90),
+// (150,124) and (0,0); X gold at (7,11) and (39,41), plum at (40,11), (7,10), (6,11), (7,42) and (0,0). Then A's
+// (0,0)-(64,64) to the back buffer's (0,0)-(64,64) (test_pointsize's copy, at the origin): sage at (0,0), gold at
+// (32,32), lilac at (64,32) and (32,64). Colour channels (X8R8G8B8).
 static bool rowScBb() {
     return until([&] {
         Com<IDirect3DSwapChain9> sc;
@@ -8723,12 +8728,15 @@ static bool rowScBb() {
         CK(CreateRenderTarget, 64, 64, X8, D3DMULTISAMPLE_NONE, 0, FALSE, &x.p, nullptr);
         if (!target64(a, FALSE) || !chainBackBuffer(nullptr, 0, sc, chain) ||
             !drawnTwo(a.p, KSAGE, {1, 2, 63, 63}, KGOLD) || !cleared(x.p, KPLUM) ||
-            !scene([&] { return backToScreen() && clearTo(KLILAC); }) || !copyTo(a.p, &toBb, rtSurf, 101, 61) ||
-            !copyTo(rtSurf, &fromBb, x.p, 7, 11) || !copyTo(a.p, &toChain, chain.p, 150, 90) ||
+            !scene([&] { return bindRt(0, chain.p) && clearTo(KLILAC) && backToScreen() && clearTo(KLILAC); }) ||
+            !copyTo(a.p, &toBb, rtSurf, 101, 61) || !copyTo(rtSurf, &fromBb, x.p, 7, 11) ||
+            !copyTo(a.p, &toChain, chain.p, 150, 90) ||
             !rtHas("the back buffer", rtSurf, 256, X8,
-                   {{101, 61, KGOLD}, {133, 91, KGOLD}, {150, 90, KGOLD}, {182, 123, KGOLD}, {134, 61, KLILAC},
-                    {101, 60, KLILAC}, {100, 61, KLILAC}, {101, 92, KLILAC}, {183, 90, KLILAC}, {150, 89, KLILAC},
-                    {149, 90, KLILAC}, {150, 124, KLILAC}, {0, 0, KLILAC}}) ||
+                   {{101, 61, KGOLD}, {133, 91, KGOLD}, {134, 61, KLILAC}, {101, 60, KLILAC}, {100, 61, KLILAC},
+                    {101, 92, KLILAC}, {150, 90, KLILAC}, {0, 0, KLILAC}}) ||
+            !rtHas("the chain", chain.p, 256, X8,
+                   {{150, 90, KGOLD}, {182, 123, KGOLD}, {183, 90, KLILAC}, {150, 89, KLILAC}, {149, 90, KLILAC},
+                    {150, 124, KLILAC}, {0, 0, KLILAC}}) ||
             !rtHas("X", x.p, 64, X8,
                    {{7, 11, KGOLD}, {39, 41, KGOLD}, {40, 11, KPLUM}, {7, 10, KPLUM}, {6, 11, KPLUM}, {7, 42, KPLUM},
                     {0, 0, KPLUM}}))
@@ -8930,22 +8938,21 @@ static bool rowScConv() {
 }
 // sc-same (one subresource at both ends): A, a target, cleared steel, a rust quad over (1,0)-(18,20); A's (3,2)-(16,18)
 // (rust) onto A's (40,32): rust at (40,32) and (52,47), steel at (53,32), (40,31), (39,32), (40,48) and (0,0), the
-// source kept (rust at (3,2) and (15,17)). The back buffer cleared aqua, a gold quad over (2,4)-(39,40); an additional
-// swap chain's back buffer's (4,6)-(37,38) (the device's, aliased) onto the device's at (150,120): gold at (150,120),
-// (182,151) and (4,6), aqua at (183,120), (150,119), (149,120), (150,152) and (0,0).
+// source kept (rust at (3,2) and (15,17)). The back buffer cleared aqua, a gold quad over (2,4)-(39,40); the back
+// buffer's own (4,6)-(37,38) onto itself at (150,120): gold at (150,120), (182,151) and (4,6), aqua at (183,120),
+// (150,119), (149,120), (150,152) and (0,0).
 static bool rowScSame() {
     return until([&] {
-        Com<IDirect3DSwapChain9> sc;
-        Com<IDirect3DSurface9> a, chain;
+        Com<IDirect3DSurface9> a;
         const RECT rect = {3, 2, 16, 18}, onBb = {4, 6, 37, 38};
-        if (!target64(a, FALSE) || !chainBackBuffer(nullptr, 0, sc, chain) ||
+        if (!target64(a, FALSE) ||
             !drawnTwo(a.p, KSTEEL, {1, 0, 18, 20}, KRUST) || !copyTo(a.p, &rect, a.p, 40, 32) ||
             !rtHas("A", a.p, 64, A8,
                    {{40, 32, KRUST}, {52, 47, KRUST}, {53, 32, KSTEEL}, {40, 31, KSTEEL}, {39, 32, KSTEEL},
                     {40, 48, KSTEEL}, {0, 0, KSTEEL}, {3, 2, KRUST}, {15, 17, KRUST}}))
             return false;
         return scene([&] { return backToScreen() && clearTo(KAQUA) && zquad(2, 4, 39, 40, 0.5f, KGOLD); }) &&
-               copyTo(chain.p, &onBb, rtSurf, 150, 120) &&
+               copyTo(rtSurf, &onBb, rtSurf, 150, 120) &&
                rtHas("the back buffer", rtSurf, 256, X8,
                      {{150, 120, KGOLD}, {182, 151, KGOLD}, {4, 6, KGOLD}, {183, 120, KAQUA}, {150, 119, KAQUA},
                       {149, 120, KAQUA}, {150, 152, KAQUA}, {0, 0, KAQUA}});
@@ -9440,24 +9447,23 @@ template <class R> static bool movedHas(R read) {
                  {0, 0, KLILAC}});
 }
 // sq-overlap (one subresource, or one texture, at both ends): A, a target, in the pattern; its (4,6)-(37,38) onto its
-// own (20,18), overlapping: movedHas. The back buffer in the pattern; an additional swap chain's back buffer's
-// (4,6)-(37,38) (the device's, aliased) onto the device's at (20,18): movedHas of the device's (colour channels). T, a
-// 64x64 render-target texture of two levels: level 0 cleared steel, a rust quad over (8,6)-(24,38) and a gold one over
-// (24,6)-(40,38), level 1 cleared aqua; level 0's (8,6)-(38,36) onto level 1's (3,4)-(18,19), POINT (a 2x downscale:
-// level 1's texel 3 + i samples level 0's 9 + 2i, between two texels of one colour): rust at (3,4) and (10,18), gold at
-// (11,4) and (17,18), aqua at (18,4), (3,3), (2,4), (3,19) and (0,0).
+// own (20,18), overlapping: movedHas. The back buffer in the pattern; its own (4,6)-(37,38) onto itself at (20,18),
+// overlapping: movedHas of the device's (colour channels). T, a 64x64 render-target texture of two levels: level 0
+// cleared steel, a rust quad over (8,6)-(24,38) and a gold one over (24,6)-(40,38), level 1 cleared aqua; level 0's
+// (8,6)-(38,36) onto level 1's (3,4)-(18,19), POINT (a 2x downscale: level 1's texel 3 + i samples level 0's 9 + 2i,
+// between two texels of one colour): rust at (3,4) and (10,18), gold at (11,4) and (17,18), aqua at (18,4), (3,3),
+// (2,4), (3,19) and (0,0).
 static bool rowSqOverlap() {
     return until([&] {
-        Com<IDirect3DSwapChain9> sc;
         Com<IDirect3DTexture9> t;
-        Com<IDirect3DSurface9> a, chain, t0, t1;
+        Com<IDirect3DSurface9> a, t0, t1;
         const RECT rect = {4, 6, 37, 38}, from = {8, 6, 38, 36}, to = {3, 4, 18, 19};
-        if (!target64(a, FALSE) || !chainBackBuffer(nullptr, 0, sc, chain) || !makeRt(t, 64, 2) ||
+        if (!target64(a, FALSE) || !makeRt(t, 64, 2) ||
             !levelOf(t.p, 0, t0) || !levelOf(t.p, 1, t1) ||
             !scene([&] { return bindRt(0, a.p) && fourDrawn() && backToScreen(); }) ||
             !copyTo(a.p, &rect, a.p, 20, 18) ||
             !movedHas([&](std::initializer_list<Tx> px) { return rtHas("A", a.p, 64, A8, px); }) ||
-            !scene([&] { return backToScreen() && fourDrawn(); }) || !copyTo(chain.p, &rect, rtSurf, 20, 18) ||
+            !scene([&] { return backToScreen() && fourDrawn(); }) || !copyTo(rtSurf, &rect, rtSurf, 20, 18) ||
             !movedHas([&](std::initializer_list<Tx> px) { return rtHas("the back buffer", rtSurf, 256, X8, px); }))
             return false;
         return scene([&] {
