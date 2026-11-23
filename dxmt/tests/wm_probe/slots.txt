@@ -163,3 +163,6 @@
 162 g6 _WMTPresentClientSurface
 163 g6 _MTLDrawable_setPresentedEvent
 164 g6 _WMTSetCursorOverlay
+165 g5 _MTLDevice_supportsFXTemporalDenoisedScaler
+166 g5 _MTLDevice_newTemporalDenoisedScaler
+167 g5 _MTLCommandBuffer_encodeTemporalDenoisedScale

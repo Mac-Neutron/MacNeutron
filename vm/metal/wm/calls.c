@@ -1,4 +1,4 @@
-/* The 165 slots (calls.h), from the call catalog. Q: queued; S: the guest waits (Global Constraints' lists). */
+/* The 168 slots (calls.h), from the call catalog. Q: queued; S: the guest waits (Global Constraints' lists). */
 #include "calls.h"
 #include <stddef.h>
 #include "airconv_thunks.h"
@@ -391,7 +391,8 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
       HIN(unixcall_mtlcommandbuffer_frame_interpolate, prev_color),
       HIN(unixcall_mtlcommandbuffer_frame_interpolate, depth), HIN(unixcall_mtlcommandbuffer_frame_interpolate, motion),
       HIN(unixcall_mtlcommandbuffer_frame_interpolate, output), HIN(unixcall_mtlcommandbuffer_frame_interpolate, fence),
-      PTR(WMF_IN, unixcall_mtlcommandbuffer_frame_interpolate, props, sizeof(struct WMTFXFrameInterpolatorProps), 0)),
+      PTR(WMF_IN, unixcall_mtlcommandbuffer_frame_interpolate, props, sizeof(struct WMTFXFrameInterpolatorProps), 0),
+      HIN(unixcall_mtlcommandbuffer_frame_interpolate, ui_texture)),
     /* DXMT 0071: memory from the guest's blob allocator (guest/winemetal.c), never sent. */
     [153] = {.name = "WMTMemoryAlloc", .params_size = sizeof(struct unixcall_wmtmemory), .mode = MN_WM_LOCAL,
              .refuse_status = MN_STATUS_INVALID_PARAMETER},
@@ -429,6 +430,31 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
       HIN(unixcall_mtldrawable_setpresentedevent, shared_event)),
     [164] = {.name = "WMTSetCursorOverlay", .params_size = sizeof(struct unixcall_generic_obj_constptr_noret),
              .mode = MN_WM_LOCAL, .refuse_status = MN_STATUS_INVALID_PARAMETER},
+    /* MetalFX temporal denoised scaler (DLSSD): supports query, creation, encode. */
+    QUERY(165, MTLDevice_supportsFXTemporalDenoisedScaler),
+    C(166, MTLDevice_newTemporalDenoisedScaler, unixcall_mtldevice_newfxtemporaldenoisedscaler, S, MN_SP_NONE,
+      HIN(unixcall_mtldevice_newfxtemporaldenoisedscaler, device),
+      PTR(WMF_IN, unixcall_mtldevice_newfxtemporaldenoisedscaler, info, sizeof(struct WMTFXTemporalDenoisedScalerInfo), 0),
+      HOUT(unixcall_mtldevice_newfxtemporaldenoisedscaler, ret, P1)),
+    C(167, MTLCommandBuffer_encodeTemporalDenoisedScale, unixcall_mtlcommandbuffer_temporal_denoised_scale, Q, MN_SP_NONE,
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, cmdbuf),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, scaler),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, color),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, output),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, depth),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, motion),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, diffuse_albedo),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, specular_albedo),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, normal),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, roughness),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, specular_hit_distance),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, denoise_strength_mask),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, transparency_overlay),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, exposure),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, reactive_mask),
+      HIN(unixcall_mtlcommandbuffer_temporal_denoised_scale, fence),
+      PTR(WMF_IN, unixcall_mtlcommandbuffer_temporal_denoised_scale, props,
+          sizeof(struct WMTFXTemporalDenoisedScalerProps), 0)),
 };
 
 /* MTLPixelFormat's values (WMTPixelFormat mirrors them). */

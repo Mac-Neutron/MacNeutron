@@ -66,7 +66,7 @@ public:
     virtual void Reset() = 0;
 };
 enum { NGX_OK = 1, NGX_FAIL = 0xbad00000 };
-enum { kSuperSampling = 1, kFrameGeneration = 11 };
+enum { kSuperSampling = 1, kFrameGeneration = 11, kRayReconstruction = 13 };
 enum { kMaxPerf = 0, kBalanced = 1, kMaxQuality = 2, kUltraPerformance = 3, kDLAA = 5 };
 enum { kFlagMVLowRes = 1 << 1, kFlagDepthInverted = 1 << 3 };
 static bool Failed(unsigned r) { return (r & NGX_FAIL) == NGX_FAIL; }
@@ -590,6 +590,322 @@ static void FrameGen(UINT frames, double slow_s = 0, double fast_s = 0, bool sti
         printf("dlss framegen growth %.0f MB\n", GpuMB() - settled);
 }
 
+static void MakeIdentity(float m[16]) {
+    for (int i = 0; i < 16; i++) m[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+}
+
+static void MakePerspective(float fov_deg, float aspect, float zn, float zf, float m[16]) {
+    for (int i = 0; i < 16; i++) m[i] = 0.0f;
+    float f = 1.0f / std::tan(fov_deg * 0.5f * 3.14159265f / 180.0f);
+    m[0] = f / aspect;
+    m[5] = f;
+    m[10] = zf / (zf - zn);
+    m[11] = 1.0f;
+    m[14] = (-zn * zf) / (zf - zn);
+}
+
+static void Dlssd() {
+    NgxParameter *caps = nullptr;
+    NGX(N.GetCapabilityParameters(&caps));
+    unsigned available = 0;
+    if (Failed(caps->Get("SuperSamplingDenoising.Available", &available)) || !available) {
+        N.DestroyParameters(caps);
+        printf("dlssd: unsupported\n");
+        return;
+    }
+    N.DestroyParameters(caps);
+
+    const UINT rw = 640, rh = 360, ow = 1280, oh = 720;
+    const float sx = (float)ow / rw, sy = (float)oh / rh;
+    ID3D12Resource *color = gpu->Texture(Tex2D(rw, rh, DXGI_FORMAT_R16G16B16A16_FLOAT), COPY_DEST);
+    ID3D12Resource *depth =
+        gpu->Texture(Tex2D(rw, rh, DXGI_FORMAT_D32_FLOAT, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL), COPY_DEST);
+    ID3D12Resource *motion = gpu->Texture(Tex2D(rw, rh, DXGI_FORMAT_R16G16_FLOAT), COPY_DEST);
+    ID3D12Resource *diffuse = gpu->Texture(Tex2D(rw, rh, DXGI_FORMAT_R16G16B16A16_FLOAT), COPY_DEST);
+    ID3D12Resource *specular = gpu->Texture(Tex2D(rw, rh, DXGI_FORMAT_R16G16B16A16_FLOAT), COPY_DEST);
+    ID3D12Resource *normals = gpu->Texture(Tex2D(rw, rh, DXGI_FORMAT_R16G16B16A16_FLOAT), COPY_DEST);
+    ID3D12Resource *roughness = gpu->Texture(Tex2D(rw, rh, DXGI_FORMAT_R16_FLOAT), COPY_DEST);
+    ID3D12Resource *output =
+        gpu->Texture(Tex2D(ow, oh, DXGI_FORMAT_R16G16B16A16_FLOAT, 1, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS), UAV);
+
+    Staging sc = MakeStaging(*gpu, rw * 8, rh), sd = MakeStaging(*gpu, rw * 4, rh),
+            sm = MakeStaging(*gpu, rw * 4, rh), sda = MakeStaging(*gpu, rw * 8, rh),
+            ssa = MakeStaging(*gpu, rw * 8, rh), sn = MakeStaging(*gpu, rw * 8, rh),
+            sr = MakeStaging(*gpu, rw * 2, rh);
+
+    Rows(rh, [&](UINT y) {
+        auto *c = (uint16_t *)(sc.p + (size_t)y * sc.pitch);
+        auto *d = (float *)(sd.p + (size_t)y * sd.pitch);
+        auto *m = (uint16_t *)(sm.p + (size_t)y * sm.pitch);
+        auto *da = (uint16_t *)(sda.p + (size_t)y * sda.pitch);
+        auto *sa = (uint16_t *)(ssa.p + (size_t)y * ssa.pitch);
+        auto *n = (uint16_t *)(sn.p + (size_t)y * sn.pitch);
+        auto *r = (uint16_t *)(sr.p + (size_t)y * sr.pitch);
+        for (UINT x = 0; x < rw; x++) {
+            Sample s = Scene((x + 0.5f) * sx, (y + 0.5f) * sy, 1.0f);
+            c[x * 4 + 0] = ToHalf(s.c[0]);
+            c[x * 4 + 1] = ToHalf(s.c[1]);
+            c[x * 4 + 2] = ToHalf(s.c[2]);
+            c[x * 4 + 3] = ToHalf(1.0f);
+            d[x] = s.d;
+            m[x * 2 + 0] = ToHalf(-s.vx / sx);
+            m[x * 2 + 1] = ToHalf(-s.vy / sy);
+            da[x * 4 + 0] = ToHalf(0.6f);
+            da[x * 4 + 1] = ToHalf(0.5f);
+            da[x * 4 + 2] = ToHalf(0.4f);
+            da[x * 4 + 3] = ToHalf(1.0f);
+            sa[x * 4 + 0] = ToHalf(0.2f);
+            sa[x * 4 + 1] = ToHalf(0.2f);
+            sa[x * 4 + 2] = ToHalf(0.2f);
+            sa[x * 4 + 3] = ToHalf(1.0f);
+            n[x * 4 + 0] = ToHalf(0.0f);
+            n[x * 4 + 1] = ToHalf(0.0f);
+            n[x * 4 + 2] = ToHalf(1.0f);
+            n[x * 4 + 3] = ToHalf(1.0f);
+            r[x] = ToHalf(0.35f);
+        }
+    });
+
+    Copy(*gpu, color, sc, DXGI_FORMAT_R16G16B16A16_FLOAT, 0, 0, rw, rh);
+    Copy(*gpu, depth, sd, DXGI_FORMAT_R32_TYPELESS, 0, 0, rw, rh);
+    Copy(*gpu, motion, sm, DXGI_FORMAT_R16G16_FLOAT, 0, 0, rw, rh);
+    Copy(*gpu, diffuse, sda, DXGI_FORMAT_R16G16B16A16_FLOAT, 0, 0, rw, rh);
+    Copy(*gpu, specular, ssa, DXGI_FORMAT_R16G16B16A16_FLOAT, 0, 0, rw, rh);
+    Copy(*gpu, normals, sn, DXGI_FORMAT_R16G16B16A16_FLOAT, 0, 0, rw, rh);
+    Copy(*gpu, roughness, sr, DXGI_FORMAT_R16_FLOAT, 0, 0, rw, rh);
+    for (auto *res : {color, depth, motion, diffuse, specular, normals, roughness})
+        gpu->Barrier(res, COPY_DEST, READ);
+    gpu->Submit();
+    for (auto &st : {sc, sd, sm, sda, ssa, sn, sr}) st.buffer->Release();
+
+    float w2v[16], v2c[16];
+    MakeIdentity(w2v);
+    MakePerspective(70.0f, (float)ow / oh, 0.1f, 1000.0f, v2c);
+
+    NgxParameter *p = nullptr;
+    NGX(N.AllocateParameters(&p));
+    p->Set("Width", rw);
+    p->Set("Height", rh);
+    p->Set("OutWidth", ow);
+    p->Set("OutHeight", oh);
+    p->Set("PerfQualityValue", (int)kBalanced);
+    p->Set("DLSS.Feature.Create.Flags", (int)kFlagMVLowRes);
+    unsigned *handle = nullptr;
+    NGX(N.CreateFeature(gpu->list, kRayReconstruction, p, &handle));
+
+    p->Set("Color", color);
+    p->Set("Output", output);
+    p->Set("Depth", depth);
+    p->Set("MotionVectors", motion);
+    p->Set("DiffuseAlbedo", diffuse);
+    p->Set("SpecularAlbedo", specular);
+    p->Set("Normals", normals);
+    p->Set("Roughness", roughness);
+    p->Set("DLSS.Render.Subrect.Dimensions.Width", rw);
+    p->Set("DLSS.Render.Subrect.Dimensions.Height", rh);
+    p->Set("DLSS.Pre.Exposure", 1.0f);
+    p->Set("MV.Scale.X", 1.0f);
+    p->Set("MV.Scale.Y", 1.0f);
+    p->Set("WorldToViewMatrix", (void *)w2v);
+    p->Set("ViewToClipMatrix", (void *)v2c);
+
+    for (UINT f = 0; f < 3; f++) {
+        p->Set("Reset", f == 0 ? 1 : 0);
+        p->Set("Jitter.Offset.X", (float)(Halton(f + 1, 2) - 0.5));
+        p->Set("Jitter.Offset.Y", (float)(Halton(f + 1, 3) - 0.5));
+        NGX(N.EvaluateFeature(gpu->list, handle, p, nullptr));
+        gpu->Submit();
+    }
+
+    UINT pitch = Pitch(ow * 8);
+    ID3D12Resource *rb = gpu->Buffer(D3D12_HEAP_TYPE_READBACK, (UINT64)pitch * oh, COPY_DEST);
+    gpu->Barrier(output, UAV, COPY_SOURCE);
+    D3D12_TEXTURE_COPY_LOCATION src = {output, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX};
+    src.SubresourceIndex = 0;
+    D3D12_TEXTURE_COPY_LOCATION dst = {rb, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT};
+    dst.PlacedFootprint.Footprint = {DXGI_FORMAT_R16G16B16A16_FLOAT, ow, oh, 1, pitch};
+    gpu->list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+    gpu->Barrier(output, COPY_SOURCE, UAV);
+    gpu->Submit();
+
+    uint8_t *mapped = nullptr;
+    CHECK(rb->Map(0, nullptr, (void **)&mapped));
+    bool any_nonzero = false;
+    for (UINT y = 0; y < oh; y++) {
+        auto *row = (uint16_t *)(mapped + (size_t)y * pitch);
+        for (UINT x = 0; x < ow; x++) {
+            for (int c = 0; c < 4; c++) {
+                float v = FromHalf(row[x * 4 + c]);
+                if (!std::isfinite(v)) {
+                    printf("dlss dlssd FAIL non-finite output\n");
+                    exit(1);
+                }
+                if (c < 3 && std::fabs(v) > 1e-4f) any_nonzero = true;
+            }
+        }
+    }
+    rb->Unmap(0, nullptr);
+    rb->Release();
+
+    NGX(N.ReleaseFeature(handle));
+    NGX(N.DestroyParameters(p));
+    for (auto *res : {color, depth, motion, diffuse, specular, normals, roughness, output})
+        res->Release();
+
+    if (!any_nonzero) {
+        printf("dlss dlssd FAIL zero output\n");
+        exit(1);
+    }
+    printf("dlssd: ok\n");
+}
+
+static void DlssgUi() {
+    const UINT w = 1280, h = 720, rw = 640, rh = 360;
+    WNDCLASSA wc = {};
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = GetModuleHandleA(nullptr);
+    wc.lpszClassName = "d3d12_dlss_ui";
+    RegisterClassA(&wc);
+    RECT r = {0, 0, (LONG)w, (LONG)h};
+    AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
+    HWND hwnd = CreateWindowA("d3d12_dlss_ui", "d3d12_dlss_ui", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 40, 40,
+                              r.right - r.left, r.bottom - r.top, nullptr, nullptr, wc.hInstance, nullptr);
+    IDXGIFactory4 *factory = nullptr;
+    CHECK(CreateDXGIFactory1(__uuidof(IDXGIFactory4), (void **)&factory));
+    DXGI_SWAP_CHAIN_DESC1 sd = {};
+    sd.Width = w;
+    sd.Height = h;
+    sd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.SampleDesc.Count = 1;
+    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    sd.BufferCount = 2;
+    sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    IDXGISwapChain1 *swap1 = nullptr;
+    IDXGISwapChain3 *swap = nullptr;
+    CHECK(factory->CreateSwapChainForHwnd(gpu->queue, hwnd, &sd, nullptr, nullptr, &swap1));
+    CHECK(swap1->QueryInterface(__uuidof(IDXGISwapChain3), (void **)&swap));
+    swap1->Release();
+    ID3D12Resource *buffers[2] = {};
+    for (UINT i = 0; i < 2; i++) CHECK(swap->GetBuffer(i, __uuidof(ID3D12Resource), (void **)&buffers[i]));
+
+    ID3D12Resource *color = gpu->Texture(Tex2D(rw, rh, DXGI_FORMAT_R16G16B16A16_FLOAT), COPY_DEST);
+    ID3D12Resource *depth =
+        gpu->Texture(Tex2D(rw, rh, DXGI_FORMAT_D32_FLOAT, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL), COPY_DEST);
+    ID3D12Resource *motion = gpu->Texture(Tex2D(rw, rh, DXGI_FORMAT_R16G16_FLOAT), COPY_DEST);
+    ID3D12Resource *output =
+        gpu->Texture(Tex2D(w, h, DXGI_FORMAT_R8G8B8A8_UNORM, 1, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS), UAV);
+    ID3D12Resource *ui = gpu->Texture(Tex2D(w, h, DXGI_FORMAT_R8G8B8A8_UNORM), COPY_DEST);
+
+    Staging sc = MakeStaging(*gpu, rw * 8, rh), sd_st = MakeStaging(*gpu, rw * 4, rh),
+            sm = MakeStaging(*gpu, rw * 4, rh), sui = MakeStaging(*gpu, w * 4, h);
+    for (UINT y = 0; y < rh; y++) {
+        auto *c = (uint16_t *)(sc.p + (size_t)y * sc.pitch);
+        auto *d = (float *)(sd_st.p + (size_t)y * sd_st.pitch);
+        auto *m = (uint16_t *)(sm.p + (size_t)y * sm.pitch);
+        for (UINT x = 0; x < rw; x++) {
+            c[x * 4 + 0] = ToHalf(0.2f);
+            c[x * 4 + 1] = ToHalf(0.4f);
+            c[x * 4 + 2] = ToHalf(0.7f);
+            c[x * 4 + 3] = ToHalf(1.0f);
+            d[x] = 0.5f;
+            m[x * 2 + 0] = m[x * 2 + 1] = 0;
+        }
+    }
+    for (UINT y = 0; y < h; y++) {
+        auto *u = sui.p + (size_t)y * sui.pitch;
+        for (UINT x = 0; x < w; x++) {
+            bool hud = x >= 40 && x < 240 && y >= 40 && y < 100;
+            u[x * 4 + 0] = hud ? 255 : 0;
+            u[x * 4 + 1] = hud ? 220 : 0;
+            u[x * 4 + 2] = hud ? 40 : 0;
+            u[x * 4 + 3] = hud ? 255 : 0;
+        }
+    }
+    Copy(*gpu, color, sc, DXGI_FORMAT_R16G16B16A16_FLOAT, 0, 0, rw, rh);
+    Copy(*gpu, depth, sd_st, DXGI_FORMAT_R32_TYPELESS, 0, 0, rw, rh);
+    Copy(*gpu, motion, sm, DXGI_FORMAT_R16G16_FLOAT, 0, 0, rw, rh);
+    Copy(*gpu, ui, sui, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 0, w, h);
+    for (auto *t : {color, depth, motion, ui}) gpu->Barrier(t, COPY_DEST, READ);
+    gpu->Submit();
+    for (auto &st : {sc, sd_st, sm, sui}) st.buffer->Release();
+
+    float w2v[16], v2c[16];
+    MakeIdentity(w2v);
+    MakePerspective(70.0f, (float)w / h, 0.1f, 1000.0f, v2c);
+
+    NgxParameter *p_ss = nullptr, *p_fg = nullptr;
+    NGX(N.AllocateParameters(&p_ss));
+    NGX(N.AllocateParameters(&p_fg));
+    p_ss->Set("Width", rw);
+    p_ss->Set("Height", rh);
+    p_ss->Set("OutWidth", w);
+    p_ss->Set("OutHeight", h);
+    p_ss->Set("PerfQualityValue", (int)kMaxPerf);
+    p_ss->Set("DLSS.Feature.Create.Flags", (int)kFlagMVLowRes);
+    unsigned *ss_handle = nullptr, *fg_handle = nullptr;
+    NGX(N.CreateFeature(gpu->list, kSuperSampling, p_ss, &ss_handle));
+
+    p_fg->Set("Width", rw);
+    p_fg->Set("Height", rh);
+    p_fg->Set("OutWidth", w);
+    p_fg->Set("OutHeight", h);
+    p_fg->Set("DLSSG.ContentWidth", rw);
+    p_fg->Set("DLSSG.ContentHeight", rh);
+    NGX(N.CreateFeature(gpu->list, kFrameGeneration, p_fg, &fg_handle));
+
+    p_ss->Set("Color", color);
+    p_ss->Set("Output", output);
+    p_ss->Set("Depth", depth);
+    p_ss->Set("MotionVectors", motion);
+    p_ss->Set("DLSS.Render.Subrect.Dimensions.Width", rw);
+    p_ss->Set("DLSS.Render.Subrect.Dimensions.Height", rh);
+
+    p_fg->Set("DLSSG.UI", ui);
+    p_fg->Set("DLSSG.UIComposited", 0);
+    p_fg->Set("DLSSG.ContentWidth", rw);
+    p_fg->Set("DLSSG.ContentHeight", rh);
+    p_fg->Set("DLSSG.DepthSubrectBase.X", 0u);
+    p_fg->Set("DLSSG.DepthSubrectBase.Y", 0u);
+    p_fg->Set("DLSSG.MvecSubrectBase.X", 0u);
+    p_fg->Set("DLSSG.MvecSubrectBase.Y", 0u);
+    p_fg->Set("DLSSG.BackbufferSubrectBase.X", 0u);
+    p_fg->Set("DLSSG.BackbufferSubrectBase.Y", 0u);
+    p_fg->Set("DLSSG.CameraNear", 0.1f);
+    p_fg->Set("DLSSG.CameraFar", 1000.0f);
+    p_fg->Set("DLSSG.CameraFOV", 70.0f);
+    p_fg->Set("DLSSG.CameraAspectRatio", (float)w / h);
+    p_fg->Set("WorldToViewMatrix", (void *)w2v);
+    p_fg->Set("ViewToClipMatrix", (void *)v2c);
+
+    for (UINT f = 0; f < 20; f++) {
+        MSG msg;
+        while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
+        p_ss->Set("Reset", f == 0 ? 1 : 0);
+        p_ss->Set("Jitter.Offset.X", (float)(Halton(f % 8 + 1, 2) - 0.5));
+        p_ss->Set("Jitter.Offset.Y", (float)(Halton(f % 8 + 1, 3) - 0.5));
+        NGX(N.EvaluateFeature(gpu->list, fg_handle, p_fg, nullptr));
+        NGX(N.EvaluateFeature(gpu->list, ss_handle, p_ss, nullptr));
+        ID3D12Resource *back = buffers[swap->GetCurrentBackBufferIndex()];
+        gpu->Barrier(output, UAV, COPY_SOURCE);
+        gpu->Barrier(back, D3D12_RESOURCE_STATE_PRESENT, COPY_DEST);
+        gpu->list->CopyResource(back, output);
+        gpu->Barrier(back, COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
+        gpu->Barrier(output, COPY_SOURCE, UAV);
+        gpu->Submit();
+        CHECK(swap->Present(0, 0));
+    }
+
+    NGX(N.ReleaseFeature(fg_handle));
+    NGX(N.ReleaseFeature(ss_handle));
+    NGX(N.DestroyParameters(p_fg));
+    NGX(N.DestroyParameters(p_ss));
+    for (auto *res : {color, depth, motion, output, ui, buffers[0], buffers[1]}) res->Release();
+    swap->Release();
+    factory->Release();
+    DestroyWindow(hwnd);
+    printf("dlssg-ui: ok\n");
+}
+
 static void Vendor() {
     IDXGIFactory1 *factory;
     IDXGIAdapter *adapter;
@@ -653,6 +969,8 @@ int main(int argc, char **argv) {
         else if (mode == "framegen-slow") FrameGen(0, 2.4, 0);
         else if (mode == "framegen-phases") FrameGen(0, 2, 13);
         else if (mode == "framegen-still") FrameGen(0, 0, 3, true);
+        else if (mode == "dlssd") Dlssd();
+        else if (mode == "dlssg-ui") DlssgUi();
         else { printf("unknown mode %s\n", mode.c_str()); return 2; }
     }
     if (gpu) N.Shutdown1(gpu->device);

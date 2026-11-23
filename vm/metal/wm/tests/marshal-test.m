@@ -24,7 +24,7 @@ static int failures;
     } while (0)
 
 enum { ARRAY, DEVICE, QUEUE, STRING, SAMPLER, FUNCTION, ARCHIVE, PSO, POOL, CMDBUF, ENCODER, SHADER, BITCODE, LOG0, LOG1,
-       CONSTFN, VIEW, LAYER, DRAWABLE, EVENT, NOBJS };
+       CONSTFN, VIEW, LAYER, DRAWABLE, EVENT, INTERP, DENOISED, TEX, FENCE, NOBJS };
 static int objs[NOBJS];
 static int retains[NOBJS], releases[NOBJS], calls[MN_WM_SLOTS], checked[MN_WM_SLOTS];
 static int fail_next, raise_next;
@@ -316,6 +316,45 @@ static NTSTATUS_T f_constants(void *p) {
     return 0;
 }
 
+static NTSTATUS_T f_new_interpolator(void *p) {
+    struct unixcall_mtldevice_newfxframeinterpolator *a = p;
+    const struct WMTFXFrameInterpolatorInfo *info = a->info.ptr;
+    checked[151] = a->device == OBJ(DEVICE) && info && info->ui_format == WMTPixelFormatRGBA16Float && info->scaler == 0;
+    a->ret = OBJ(INTERP);
+    return 0;
+}
+static NTSTATUS_T f_frame_interpolate(void *p) {
+    const struct unixcall_mtlcommandbuffer_frame_interpolate *a = p;
+    const struct WMTFXFrameInterpolatorProps *props = a->props.ptr;
+    checked[152] = a->cmdbuf == OBJ(CMDBUF) && a->interpolator == OBJ(INTERP) && a->ui_texture == OBJ(TEX) &&
+                   props && props->content_width == 64 && props->has_matrices == 1 &&
+                   props->world_to_view_matrix[0] == 1.0f && props->view_to_clip_matrix[15] == 2.0f;
+    return 0;
+}
+static NTSTATUS_T f_supports_denoised(void *p) {
+    struct unixcall_generic_obj_uint64_ret *a = p;
+    checked[165] = a->handle == OBJ(DEVICE);
+    a->ret = 1;
+    return 0;
+}
+static NTSTATUS_T f_new_denoised(void *p) {
+    struct unixcall_mtldevice_newfxtemporaldenoisedscaler *a = p;
+    const struct WMTFXTemporalDenoisedScalerInfo *info = a->info.ptr;
+    checked[166] = a->device == OBJ(DEVICE) && info && info->input_width == 64 && info->output_width == 128 &&
+                   info->diffuse_albedo_format == WMTPixelFormatRGBA16Float;
+    a->ret = OBJ(DENOISED);
+    return 0;
+}
+static NTSTATUS_T f_denoised_scale(void *p) {
+    const struct unixcall_mtlcommandbuffer_temporal_denoised_scale *a = p;
+    const struct WMTFXTemporalDenoisedScalerProps *props = a->props.ptr;
+    checked[167] = a->cmdbuf == OBJ(CMDBUF) && a->scaler == OBJ(DENOISED) && a->color == OBJ(TEX) &&
+                   a->diffuse_albedo == OBJ(TEX) && a->fence == OBJ(FENCE) && props &&
+                   props->pre_exposure == 1.5f && props->has_matrices == 1 &&
+                   props->world_to_view_matrix[0] == 3.0f && props->view_to_clip_matrix[15] == 4.0f;
+    return 0;
+}
+
 static wm_unix_fn fakes[MN_WM_SLOTS] = {
     [74] = f_sm50_init, [75] = f_sm50_destroy, [76] = f_sm50_compile, [77] = f_sm50_bitcode,
     [78] = f_sm50_destroy_bitcode, [79] = f_sm50_message, [88] = f_sm50_args_info, [115] = f_cache_open,
@@ -325,7 +364,9 @@ static wm_unix_fn fakes[MN_WM_SLOTS] = {
     [0] = f_retain, [1] = f_release, [2] = f_object, [4] = f_devices, [7] = f_name, [8] = f_getcstring,
     [9] = f_queue, [10] = f_pool, [11] = f_cmdbuf, [12] = f_commit, [19] = f_sampler, [26] = f_function,
     [29] = f_pso, [33] = f_end, [156] = f_pso_vertex, [92] = f_colorspace, [116] = f_cache_get, [129] = f_blit_samples,
+    [151] = f_new_interpolator, [152] = f_frame_interpolate,
     [159] = f_attach_view, [160] = f_retire_view, [161] = f_sync_poll, [163] = f_presented_event,
+    [165] = f_supports_denoised, [166] = f_new_denoised, [167] = f_denoised_scale,
 };
 
 /* The loopback's context and this thread's ring (no other rings: releases pass at once), which the guest code's own
@@ -745,6 +786,69 @@ static void mtld3d_slots(void) {
     CHECK(info.vertex_function == fn.ret); /* untouched in the guest */
 }
 
+/* DLSSG Level-2 UI + DLSSD denoised scaler slots (151, 152, 165, 166, 167). */
+static void metalfx_denoised_and_ui(void) {
+    obj_handle_t tex = mn_gh_alloc(MN_OWN_PLUS1), fence = mn_gh_alloc(MN_OWN_PLUS1),
+                 cb = mn_gh_alloc(MN_OWN_PLUS1);
+    CHECK(tex && fence && cb);
+    CHECK(mn_ht_bind(ctx.ht, ring_state, tex, MN_HK_OBJC, (void *)OBJ(TEX), MN_OWN_PLUS1) == 0);
+    CHECK(mn_ht_bind(ctx.ht, ring_state, fence, MN_HK_OBJC, (void *)OBJ(FENCE), MN_OWN_PLUS1) == 0);
+    CHECK(mn_ht_bind(ctx.ht, ring_state, cb, MN_HK_OBJC, (void *)OBJ(CMDBUF), MN_OWN_PLUS1) == 0);
+    struct WMTFXFrameInterpolatorInfo fi = {
+        .color_format = WMTPixelFormatRGBA16Float,
+        .output_format = WMTPixelFormatRGBA16Float,
+        .depth_format = WMTPixelFormatDepth32Float,
+        .motion_format = WMTPixelFormatRG16Float,
+        .input_width = 64,
+        .input_height = 64,
+        .output_width = 128,
+        .output_height = 128,
+        .ui_format = WMTPixelFormatRGBA16Float,
+    };
+    struct unixcall_mtldevice_newfxframeinterpolator ni = {device, {&fi}, 0};
+    CHECK(call(151, &ni) == 0 && ni.ret && checked[151]);
+    struct WMTFXFrameInterpolatorProps fp = {
+        .content_width = 64, .content_height = 64, .has_matrices = 1,
+        .world_to_view_matrix = {[0] = 1.0f}, .view_to_clip_matrix = {[15] = 2.0f},
+    };
+    struct unixcall_mtlcommandbuffer_frame_interpolate ip = {
+        .cmdbuf = cb, .interpolator = ni.ret, .color = tex, .prev_color = tex, .depth = tex,
+        .motion = tex, .output = tex, .fence = fence, .props = {&fp}, .ui_texture = tex,
+    };
+    CHECK(call(152, &ip) == 0);
+    struct unixcall_generic_obj_uint64_ret sup = {device, 0};
+    CHECK(call(165, &sup) == 0 && sup.ret == 1 && checked[165] && checked[152]);
+    struct WMTFXTemporalDenoisedScalerInfo di = {
+        .color_format = WMTPixelFormatRGBA16Float,
+        .depth_format = WMTPixelFormatDepth32Float,
+        .motion_format = WMTPixelFormatRG16Float,
+        .diffuse_albedo_format = WMTPixelFormatRGBA16Float,
+        .specular_albedo_format = WMTPixelFormatRGBA16Float,
+        .normal_format = WMTPixelFormatRGBA16Float,
+        .roughness_format = WMTPixelFormatR16Float,
+        .output_format = WMTPixelFormatRGBA16Float,
+        .input_width = 64,
+        .input_height = 64,
+        .output_width = 128,
+        .output_height = 128,
+    };
+    struct unixcall_mtldevice_newfxtemporaldenoisedscaler nd = {device, {&di}, 0};
+    CHECK(call(166, &nd) == 0 && nd.ret && checked[166]);
+    struct WMTFXTemporalDenoisedScalerProps dp = {
+        .pre_exposure = 1.5f, .has_matrices = 1,
+        .world_to_view_matrix = {[0] = 3.0f}, .view_to_clip_matrix = {[15] = 4.0f},
+    };
+    struct unixcall_mtlcommandbuffer_temporal_denoised_scale ds = {
+        .cmdbuf = cb, .scaler = nd.ret, .color = tex, .output = tex, .depth = tex, .motion = tex,
+        .diffuse_albedo = tex, .specular_albedo = tex, .normal = tex, .roughness = tex,
+        .specular_hit_distance = tex, .denoise_strength_mask = tex, .transparency_overlay = tex,
+        .exposure = tex, .reactive_mask = tex, .fence = fence, .props = {&dp},
+    };
+    CHECK(call(167, &ds) == 0);
+    checked[165] = 0;
+    CHECK(call(165, &sup) == 0 && checked[165] && checked[167]);
+}
+
 /* The params struct sizes, from the call catalog's table (its own clang run on DXMT's headers). */
 static const uint32_t catalog_sizes[MN_WM_SLOTS] = {
     8, 8, 24, 16, 8, 16, 16, 16, 40, 24, 8, 16, 8, 8, 16, 16, 16, 24, 24, 24, 24, 24, 40, 48, 24, 32, 24, 24, 16, 32,
@@ -752,11 +856,12 @@ static const uint32_t catalog_sizes[MN_WM_SLOTS] = {
     40, 24, 24, 8, 32, 24, 16, 16, 16, 16, 16, 16, 16, 32, 8, 48, 8, 48, 16, 8, 32, 8, 56, 56, 0, 56, 56, 16, 16, 24,
     16, 16, 40, 16, 24, 8, 8, 16, 16, 48, 32, 24, 40, 24, 16, 32, 16, 16, 32, 8, 8, 8, 24, 32, 24, 24, 24, 32, 24, 32,
     16, 24, 136, 136, 16, 24, 16, 32, 24, 32, 32, 24, 32, 32, 24, 24, 8, 8, 16, 24, 32, 24, 32, 32, 40, 40, 96, 40,
-    40, 24, 32, 16, 24, 72,
+    40, 24, 32, 16, 24, 80,
     16, 16, /* DXMT 0071's WMTMemoryAlloc and WMTMemoryFree */
     0,      /* Direct3D forwarding's (MN_WM_D3D), guest-only */
     40, 0,  /* mtld3d's (D3D9 M2b): a pipeline with a vertex descriptor; 157 retired */
     8, 48, 16, 32, 16, 40, 16, /* C4d-6 (158..164): latency activity, attach, retire, sync/poll, surface, event, cursor */
+    16, 24, 136, /* MetalFX temporal denoised scaler (165..167) */
 };
 
 static void coverage(void) {
@@ -782,6 +887,7 @@ static const unsigned sync_slots[] = {
     118,                       /* the guest's lock on its cache writer must cover the host's insert (not thread-safe) */
     67, 71, 72, 93, 97, 101,                                    /* presentation (4c): nil, layer props, display */
     159, 161,                                                   /* C4d-6: attach and sync/poll */
+    165, 166,                                                   /* MetalFX denoised scaler: supports, new */
 };
 static const unsigned refused_slots[] = {120, 121, 122, 123, 124, 83, 157};
 static const unsigned local_slots[] = {153, 154, 155, 158, 162, 164};
@@ -798,7 +904,7 @@ static void modes(void) {
             failures++;
         }
     }
-    CHECK(n[MN_WM_SYNC] == 86 && n[MN_WM_QUEUED] == 66 && n[MN_WM_REFUSED] == 7 && n[MN_WM_LOCAL] == 6);
+    CHECK(n[MN_WM_SYNC] == 88 && n[MN_WM_QUEUED] == 67 && n[MN_WM_REFUSED] == 7 && n[MN_WM_LOCAL] == 6);
 }
 
 int main(void) {
@@ -814,6 +920,7 @@ int main(void) {
             {"local-refused", local_refused},
             {"present-attach-slots", present_attach_slots},
             {"constants", constants}, {"mtld3d-slots", mtld3d_slots},
+            {"metalfx-denoised-and-ui", metalfx_denoised_and_ui},
             {"coverage", coverage},
             {"modes", modes},
         };

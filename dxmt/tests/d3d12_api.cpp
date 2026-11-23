@@ -289,12 +289,421 @@ static void Library(ID3D12RootSignature *root) {
     printf("library serialize-race overflow %d\n", overflow);
 }
 
+static const GUID kIidDevice11 = {0x5405c344, 0xd457, 0x444e, {0xb4, 0xdd, 0x23, 0x66, 0xe4, 0x5a, 0xee, 0x39}};
+static const GUID kIidDevice12 = {0x5af5c532, 0x4c91, 0x4cd0, {0xb5, 0x41, 0x15, 0xa4, 0x05, 0x39, 0x5f, 0xc5}};
+static const GUID kIidDevice13 = {0x14eecffc, 0x4df8, 0x40f7, {0xa1, 0x18, 0x5c, 0x81, 0x6f, 0x45, 0x69, 0x5e}};
+static const GUID kIidDevice14 = {0x5f6e592d, 0xd895, 0x44c2, {0x8e, 0x4a, 0x88, 0xad, 0x49, 0x26, 0xd3, 0x23}};
+static const GUID kIidList8 = {0xee936ef9, 0x599d, 0x4d28, {0x93, 0x8e, 0x23, 0xc4, 0xad, 0x05, 0xce, 0x51}};
+static const GUID kIidList9 = {0x34ed2808, 0xffe6, 0x4c2b, {0xb1, 0x1a, 0xca, 0xbd, 0x2b, 0x0c, 0x59, 0xe1}};
+static const GUID kIidList10 = {0x7013c015, 0xd161, 0x4b63, {0xa0, 0x8c, 0x23, 0x85, 0x52, 0xdd, 0x8a, 0xcc}};
+
+struct AgSamplerDesc2 {
+    D3D12_FILTER Filter;
+    D3D12_TEXTURE_ADDRESS_MODE AddressU;
+    D3D12_TEXTURE_ADDRESS_MODE AddressV;
+    D3D12_TEXTURE_ADDRESS_MODE AddressW;
+    FLOAT MipLODBias;
+    UINT MaxAnisotropy;
+    D3D12_COMPARISON_FUNC ComparisonFunc;
+    union {
+        FLOAT FloatBorderColor[4];
+        UINT UintBorderColor[4];
+    };
+    FLOAT MinLOD;
+    FLOAT MaxLOD;
+    UINT Flags;
+};
+
+struct AgDevice11 : public ID3D12Device10 {
+    virtual void STDMETHODCALLTYPE CreateSampler2(const AgSamplerDesc2 *pDesc,
+                                                  D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor) = 0;
+};
+
+struct AgDevice12 : public AgDevice11 {
+    virtual D3D12_RESOURCE_ALLOCATION_INFO *STDMETHODCALLTYPE GetResourceAllocationInfo3(
+        D3D12_RESOURCE_ALLOCATION_INFO *ret, UINT visibleMask, UINT numResourceDescs,
+        const D3D12_RESOURCE_DESC1 *pResourceDescs, const UINT *pNumCastableFormats,
+        const DXGI_FORMAT *const *ppCastableFormats,
+        D3D12_RESOURCE_ALLOCATION_INFO1 *pResourceAllocationInfo1) = 0;
+};
+
+struct AgDevice13 : public AgDevice12 {
+    virtual HRESULT STDMETHODCALLTYPE OpenExistingHeapFromAddress1(const void *pAddress, SIZE_T size,
+                                                                   REFIID riid, void **ppvHeap) = 0;
+};
+
+struct AgDevice14 : public AgDevice13 {
+    virtual HRESULT STDMETHODCALLTYPE CreateRootSignatureFromSubobjectInLibrary(
+        UINT nodeMask, const void *pLibraryBlob, SIZE_T blobLengthInBytes, LPCWSTR subobjectName,
+        REFIID riid, void **ppvRootSignature) = 0;
+};
+
+struct AgList8 : public ID3D12GraphicsCommandList7 {
+    virtual void STDMETHODCALLTYPE OMSetFrontAndBackStencilRef(UINT FrontStencilRef,
+                                                               UINT BackStencilRef) = 0;
+};
+
+struct AgList9 : public AgList8 {
+    virtual void STDMETHODCALLTYPE RSSetDepthBias(FLOAT DepthBias, FLOAT DepthBiasClamp,
+                                                  FLOAT SlopeScaledDepthBias) = 0;
+    virtual void STDMETHODCALLTYPE IASetIndexBufferStripCutValue(
+        D3D12_INDEX_BUFFER_STRIP_CUT_VALUE IBStripCutValue) = 0;
+};
+
+struct AgList10 : public AgList9 {
+    virtual void STDMETHODCALLTYPE SetProgram(const void *pDesc) = 0;
+    virtual void STDMETHODCALLTYPE DispatchGraph(const void *pDesc) = 0;
+};
+
+struct AgStaticSamplerDesc1 {
+    D3D12_FILTER Filter;
+    D3D12_TEXTURE_ADDRESS_MODE AddressU;
+    D3D12_TEXTURE_ADDRESS_MODE AddressV;
+    D3D12_TEXTURE_ADDRESS_MODE AddressW;
+    FLOAT MipLODBias;
+    UINT MaxAnisotropy;
+    D3D12_COMPARISON_FUNC ComparisonFunc;
+    D3D12_STATIC_BORDER_COLOR BorderColor;
+    FLOAT MinLOD;
+    FLOAT MaxLOD;
+    UINT ShaderRegister;
+    UINT RegisterSpace;
+    D3D12_SHADER_VISIBILITY ShaderVisibility;
+    UINT Flags;
+};
+
+struct AgRootSignatureDesc2 {
+    UINT NumParameters;
+    const D3D12_ROOT_PARAMETER1 *pParameters;
+    UINT NumStaticSamplers;
+    const AgStaticSamplerDesc1 *pStaticSamplers;
+    D3D12_ROOT_SIGNATURE_FLAGS Flags;
+};
+
+struct AgVersionedRootSignatureDesc {
+    UINT Version;
+    union {
+        D3D12_ROOT_SIGNATURE_DESC Desc_1_0;
+        D3D12_ROOT_SIGNATURE_DESC1 Desc_1_1;
+        AgRootSignatureDesc2 Desc_1_2;
+    };
+};
+
+static void Agility(ID3D12RootSignature *root) {
+    // 1. Device11..14 and GraphicsCommandList8..10 QueryInterface.
+    AgDevice11 *d11 = nullptr;
+    AgDevice12 *d12 = nullptr;
+    AgDevice13 *d13 = nullptr;
+    AgDevice14 *d14 = nullptr;
+    CHECK(gpu->device->QueryInterface(kIidDevice11, (void **)&d11));
+    CHECK(gpu->device->QueryInterface(kIidDevice12, (void **)&d12));
+    CHECK(gpu->device->QueryInterface(kIidDevice13, (void **)&d13));
+    CHECK(gpu->device->QueryInterface(kIidDevice14, (void **)&d14));
+
+    AgList8 *l8 = nullptr;
+    AgList9 *l9 = nullptr;
+    AgList10 *l10 = nullptr;
+    CHECK(gpu->list->QueryInterface(kIidList8, (void **)&l8));
+    CHECK(gpu->list->QueryInterface(kIidList9, (void **)&l9));
+    CHECK(gpu->list->QueryInterface(kIidList10, (void **)&l10));
+
+    // 2. CheckFeatureSupport for ROOT_SIGNATURE 1.2, OPTIONS12, OPTIONS16.
+    D3D12_FEATURE_DATA_ROOT_SIGNATURE rsFeat = {(D3D_ROOT_SIGNATURE_VERSION)3};
+    CHECK(gpu->device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &rsFeat, sizeof rsFeat));
+    if ((UINT)rsFeat.HighestVersion != 3) { printf("agility FAIL rsFeat=%u\n", (UINT)rsFeat.HighestVersion); exit(1); }
+    rsFeat.HighestVersion = (D3D_ROOT_SIGNATURE_VERSION)5;
+    CHECK(gpu->device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &rsFeat, sizeof rsFeat));
+    if ((UINT)rsFeat.HighestVersion != 3) { printf("agility FAIL rsFeatClamp=%u\n", (UINT)rsFeat.HighestVersion); exit(1); }
+
+    D3D12_FEATURE_DATA_D3D12_OPTIONS12 o12 = {};
+    CHECK(gpu->device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &o12, sizeof o12));
+    if (!o12.RelaxedFormatCastingSupported) { printf("agility FAIL RelaxedFormatCastingSupported=0\n"); exit(1); }
+
+    D3D12_FEATURE_DATA_D3D12_OPTIONS16 o16 = {};
+    CHECK(gpu->device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &o16, sizeof o16));
+    if (!o16.DynamicDepthBiasSupported || !o16.GPUUploadHeapSupported) {
+        printf("agility FAIL o16 bias=%d upload=%d\n", (int)o16.DynamicDepthBiasSupported, (int)o16.GPUUploadHeapSupported);
+        exit(1);
+    }
+
+    // 3. CreateSampler2, GetResourceAllocationInfo3, and Device13..14 unimplemented slots.
+    D3D12_DESCRIPTOR_HEAP_DESC shd = {D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 1};
+    ID3D12DescriptorHeap *sampHeap = nullptr;
+    CHECK(gpu->device->CreateDescriptorHeap(&shd, __uuidof(ID3D12DescriptorHeap), (void **)&sampHeap));
+    AgSamplerDesc2 sd2 = {};
+    sd2.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    sd2.AddressU = sd2.AddressV = sd2.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    sd2.MaxAnisotropy = 1;
+    sd2.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+    sd2.UintBorderColor[0] = 1;
+    sd2.MaxLOD = 1.0f;
+    sd2.Flags = 0x1;  // D3D12_SAMPLER_FLAG_UINT_BORDER_COLOR
+    d11->CreateSampler2(&sd2, sampHeap->GetCPUDescriptorHandleForHeapStart());
+
+    D3D12_RESOURCE_DESC1 rd1 = {D3D12_RESOURCE_DIMENSION_TEXTURE2D, 0, 16, 16, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM, {1, 0}};
+    DXGI_FORMAT castFormats[2] = {DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R32_UINT};
+    const DXGI_FORMAT *castPtr = castFormats;
+    UINT castCount = 2;
+    D3D12_RESOURCE_ALLOCATION_INFO rai = {};
+    D3D12_RESOURCE_ALLOCATION_INFO1 rai1 = {};
+    d12->GetResourceAllocationInfo3(&rai, 0, 1, &rd1, &castCount, &castPtr, &rai1);
+    if (rai.SizeInBytes == 0 || rai.SizeInBytes == UINT64_MAX || rai.Alignment == 0) {
+        printf("agility FAIL allocInfo3 size=%llu align=%llu\n", (unsigned long long)rai.SizeInBytes,
+               (unsigned long long)rai.Alignment);
+        exit(1);
+    }
+    void *stale = (void *)1;
+    if (d13->OpenExistingHeapFromAddress1(nullptr, 0, __uuidof(ID3D12Heap), &stale) != E_NOTIMPL || stale != nullptr) {
+        printf("agility FAIL OpenExistingHeapFromAddress1\n"); exit(1);
+    }
+    stale = (void *)1;
+    if (d14->CreateRootSignatureFromSubobjectInLibrary(0, nullptr, 0, L"rs", __uuidof(ID3D12RootSignature), &stale) != E_NOTIMPL ||
+        stale != nullptr) {
+        printf("agility FAIL CreateRootSignatureFromSubobjectInLibrary\n"); exit(1);
+    }
+
+    // 4. Root Signature 1.2 serialize + deserialize + CreateRootSignature.
+    D3D12_ROOT_PARAMETER1 rp1 = {};
+    rp1.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    AgStaticSamplerDesc1 ss1 = {};
+    ss1.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    ss1.AddressU = ss1.AddressV = ss1.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    ss1.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+    ss1.MaxLOD = 1.0f;
+    AgVersionedRootSignatureDesc vrs = {};
+    vrs.Version = 3;
+    vrs.Desc_1_2 = {1, &rp1, 1, &ss1, D3D12_ROOT_SIGNATURE_FLAG_NONE};
+    ID3DBlob *rsBlob = nullptr, *rsErr = nullptr;
+    CHECK(D3D12SerializeVersionedRootSignature((const D3D12_VERSIONED_ROOT_SIGNATURE_DESC *)&vrs, &rsBlob, &rsErr));
+    ID3D12VersionedRootSignatureDeserializer *deser = nullptr;
+    CHECK(D3D12CreateVersionedRootSignatureDeserializer(rsBlob->GetBufferPointer(), rsBlob->GetBufferSize(),
+                                                        __uuidof(ID3D12VersionedRootSignatureDeserializer), (void **)&deser));
+    const D3D12_VERSIONED_ROOT_SIGNATURE_DESC *outDesc = nullptr;
+    CHECK(deser->GetRootSignatureDescAtVersion((D3D_ROOT_SIGNATURE_VERSION)3, &outDesc));
+    if ((UINT)outDesc->Version != 3) { printf("agility FAIL deser version=%u\n", (UINT)outDesc->Version); exit(1); }
+    ID3D12RootSignature *rs12 = nullptr;
+    CHECK(gpu->device->CreateRootSignature(0, rsBlob->GetBufferPointer(), rsBlob->GetBufferSize(),
+                                           __uuidof(ID3D12RootSignature), (void **)&rs12));
+
+    // 5. D3D12_HEAP_TYPE_GPU_UPLOAD committed/placed buffer and WriteToSubresource texture.
+    const D3D12_HEAP_TYPE gpuUploadHeap = (D3D12_HEAP_TYPE)5;
+    ID3D12Resource *gpuUpBuf = gpu->Buffer(gpuUploadHeap, 256, D3D12_RESOURCE_STATE_COMMON);
+    uint32_t *upPtr = nullptr;
+    CHECK(gpuUpBuf->Map(0, nullptr, (void **)&upPtr));
+    upPtr[0] = 0x11223344u; upPtr[1] = 0x55667788u;
+    gpuUpBuf->Unmap(0, nullptr);
+
+    D3D12_HEAP_DESC gpuUpHd = {65536, {gpuUploadHeap}, 0, D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS};
+    ID3D12Heap *gpuHeap = nullptr;
+    CHECK(gpu->device->CreateHeap(&gpuUpHd, __uuidof(ID3D12Heap), (void **)&gpuHeap));
+    D3D12_RESOURCE_DESC placedBd = {D3D12_RESOURCE_DIMENSION_BUFFER, 0, 256, 1, 1, 1, DXGI_FORMAT_UNKNOWN, {1, 0},
+                                    D3D12_TEXTURE_LAYOUT_ROW_MAJOR};
+    ID3D12Resource *placedUpBuf = nullptr;
+    CHECK(gpu->device->CreatePlacedResource(gpuHeap, 0, &placedBd, D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                            __uuidof(ID3D12Resource), (void **)&placedUpBuf));
+    CHECK(placedUpBuf->Map(0, nullptr, (void **)&upPtr));
+    upPtr[0] = 0xcafebabeu; upPtr[1] = 0xdeadbeefu;
+    placedUpBuf->Unmap(0, nullptr);
+
+    D3D12_RESOURCE_DESC upTexDesc = Tex2D(4, 4, DXGI_FORMAT_R8G8B8A8_UNORM);
+    D3D12_HEAP_PROPERTIES upTexProps = {gpuUploadHeap};
+    ID3D12Resource *gpuUpTex = nullptr;
+    CHECK(gpu->device->CreateCommittedResource(&upTexProps, D3D12_HEAP_FLAG_NONE, &upTexDesc,
+                                               D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                               __uuidof(ID3D12Resource), (void **)&gpuUpTex));
+    uint32_t texSrc[16];
+    for (int i = 0; i < 16; i++) texSrc[i] = 0xff000080u + (uint32_t)i;
+    CHECK(gpuUpTex->WriteToSubresource(0, nullptr, texSrc, 16, 64));
+
+    ID3D12Resource *rbBuf = gpu->Buffer(D3D12_HEAP_TYPE_READBACK, 512, D3D12_RESOURCE_STATE_COPY_DEST);
+    ID3D12Resource *rbTex = gpu->Buffer(D3D12_HEAP_TYPE_READBACK, 4 * 256, D3D12_RESOURCE_STATE_COPY_DEST);
+    gpu->list->CopyBufferRegion(rbBuf, 0, gpuUpBuf, 0, 16);
+    gpu->list->CopyBufferRegion(rbBuf, 256, placedUpBuf, 0, 16);
+    D3D12_TEXTURE_COPY_LOCATION tdDst = {rbTex, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT};
+    tdDst.PlacedFootprint.Footprint = {DXGI_FORMAT_R8G8B8A8_UNORM, 4, 4, 1, 256};
+    D3D12_TEXTURE_COPY_LOCATION tdSrc = {gpuUpTex, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX};
+    gpu->list->CopyTextureRegion(&tdDst, 0, 0, 0, &tdSrc, nullptr);
+    gpu->Submit();
+
+    uint8_t *rbPtr = nullptr;
+    CHECK(rbBuf->Map(0, nullptr, (void **)&rbPtr));
+    uint32_t *rbWords = (uint32_t *)rbPtr;
+    if (rbWords[0] != 0x11223344u || rbWords[1] != 0x55667788u ||
+        rbWords[64] != 0xcafebabeu || rbWords[65] != 0xdeadbeefu) {
+        printf("agility FAIL gpu_upload buffer readback\n"); exit(1);
+    }
+    rbBuf->Unmap(0, nullptr);
+    CHECK(rbTex->Map(0, nullptr, (void **)&rbPtr));
+    for (int y = 0; y < 4; y++) {
+        if (memcmp(rbPtr + y * 256, &texSrc[y * 4], 16) != 0) {
+            printf("agility FAIL gpu_upload WriteToSubresource row=%d\n", y); exit(1);
+        }
+    }
+    rbTex->Unmap(0, nullptr);
+
+    // 6. CreateCommittedResource3 & CreatePlacedResource2 with cross-layout castable formats.
+    D3D12_RESOURCE_DESC1 castRd = {D3D12_RESOURCE_DIMENSION_TEXTURE2D, 0, 4, 4, 1, 1,
+                                   DXGI_FORMAT_R8G8B8A8_UNORM, {1, 0},
+                                   D3D12_TEXTURE_LAYOUT_UNKNOWN, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET};
+    D3D12_HEAP_PROPERTIES defProps = {D3D12_HEAP_TYPE_DEFAULT};
+    ID3D12Resource *castCommitted = nullptr, *castPlaced = nullptr;
+    CHECK(d14->CreateCommittedResource3(&defProps, D3D12_HEAP_FLAG_NONE, &castRd,
+                                         D3D12_BARRIER_LAYOUT_RENDER_TARGET, nullptr, nullptr, 2,
+                                         castFormats, __uuidof(ID3D12Resource), (void **)&castCommitted));
+    D3D12_RESOURCE_ALLOCATION_INFO castAlloc = {};
+    D3D12_RESOURCE_ALLOCATION_INFO1 castAlloc1 = {};
+    d12->GetResourceAllocationInfo3(&castAlloc, 0, 1, &castRd, &castCount, &castPtr, &castAlloc1);
+    D3D12_HEAP_DESC rtHeapDesc = {castAlloc.SizeInBytes > 65536 ? castAlloc.SizeInBytes : 65536,
+                                  {D3D12_HEAP_TYPE_DEFAULT}, castAlloc.Alignment,
+                                  D3D12_HEAP_FLAG_ALLOW_ONLY_RT_DS_TEXTURES};
+    ID3D12Heap *rtHeap = nullptr;
+    CHECK(gpu->device->CreateHeap(&rtHeapDesc, __uuidof(ID3D12Heap), (void **)&rtHeap));
+    CHECK(d14->CreatePlacedResource2(rtHeap, 0, &castRd, D3D12_BARRIER_LAYOUT_RENDER_TARGET,
+                                      nullptr, 2, castFormats, __uuidof(ID3D12Resource), (void **)&castPlaced));
+
+    D3D12_DESCRIPTOR_HEAP_DESC rtvHd = {D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 4};
+    ID3D12DescriptorHeap *rtvHeap = nullptr;
+    CHECK(gpu->device->CreateDescriptorHeap(&rtvHd, __uuidof(ID3D12DescriptorHeap), (void **)&rtvHeap));
+    UINT rtvInc = gpu->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    auto rtvAt = [&](UINT i) {
+        D3D12_CPU_DESCRIPTOR_HANDLE h = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+        h.ptr += (SIZE_T)i * rtvInc;
+        return h;
+    };
+    gpu->device->CreateRenderTargetView(castCommitted, nullptr, rtvAt(0));
+    gpu->device->CreateRenderTargetView(castPlaced, nullptr, rtvAt(1));
+    const FLOAT green[4] = {0, 1, 0, 1}, blue[4] = {0, 0, 1, 1}, red[4] = {1, 0, 0, 1}, black[4] = {0, 0, 0, 1};
+    gpu->list->ClearRenderTargetView(rtvAt(0), green, 0, nullptr);
+    gpu->list->ClearRenderTargetView(rtvAt(1), blue, 0, nullptr);
+    gpu->Barrier(castCommitted, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    gpu->Barrier(castPlaced, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    ID3D12Resource *rbCast0 = gpu->Buffer(D3D12_HEAP_TYPE_READBACK, 4 * 256, D3D12_RESOURCE_STATE_COPY_DEST);
+    ID3D12Resource *rbCast1 = gpu->Buffer(D3D12_HEAP_TYPE_READBACK, 4 * 256, D3D12_RESOURCE_STATE_COPY_DEST);
+    D3D12_TEXTURE_COPY_LOCATION cDst0 = {rbCast0, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT};
+    cDst0.PlacedFootprint.Footprint = {DXGI_FORMAT_R8G8B8A8_UNORM, 4, 4, 1, 256};
+    D3D12_TEXTURE_COPY_LOCATION cDst1 = {rbCast1, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT};
+    cDst1.PlacedFootprint.Footprint = {DXGI_FORMAT_R8G8B8A8_UNORM, 4, 4, 1, 256};
+    D3D12_TEXTURE_COPY_LOCATION cSrc0 = {castCommitted, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX};
+    D3D12_TEXTURE_COPY_LOCATION cSrc1 = {castPlaced, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX};
+    gpu->list->CopyTextureRegion(&cDst0, 0, 0, 0, &cSrc0, nullptr);
+    gpu->list->CopyTextureRegion(&cDst1, 0, 0, 0, &cSrc1, nullptr);
+    gpu->Submit();
+    CHECK(rbCast0->Map(0, nullptr, (void **)&rbPtr));
+    if (*(uint32_t *)rbPtr != 0xff00ff00u) { printf("agility FAIL castCommitted=%08x\n", *(uint32_t *)rbPtr); exit(1); }
+    rbCast0->Unmap(0, nullptr);
+    CHECK(rbCast1->Map(0, nullptr, (void **)&rbPtr));
+    if (*(uint32_t *)rbPtr != 0xffff0000u) { printf("agility FAIL castPlaced=%08x\n", *(uint32_t *)rbPtr); exit(1); }
+    rbCast1->Unmap(0, nullptr);
+
+    // 7. ID3D12GraphicsCommandList8..10 methods & RSSetDepthBias rendering + SetPipelineState reset.
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC gd;
+    QuadPipeline(*gpu, root, vs, ps, &gd)->Release();
+    gd.DepthStencilState.DepthEnable = TRUE;
+    gd.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    gd.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    gd.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    ID3D12PipelineState *depthPso = nullptr;
+    CHECK(gpu->device->CreateGraphicsPipelineState(&gd, __uuidof(ID3D12PipelineState), (void **)&depthPso));
+
+    ID3D12Resource *rtBias = gpu->Texture(Tex2D(4, 4, DXGI_FORMAT_R8G8B8A8_UNORM, 1, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET),
+                                          D3D12_RESOURCE_STATE_RENDER_TARGET);
+    ID3D12Resource *rtReset = gpu->Texture(Tex2D(4, 4, DXGI_FORMAT_R8G8B8A8_UNORM, 1, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET),
+                                           D3D12_RESOURCE_STATE_RENDER_TARGET);
+    ID3D12Resource *dsvTex = gpu->Texture(Tex2D(4, 4, DXGI_FORMAT_D32_FLOAT, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL),
+                                          D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    gpu->device->CreateRenderTargetView(rtBias, nullptr, rtvAt(2));
+    gpu->device->CreateRenderTargetView(rtReset, nullptr, rtvAt(3));
+    D3D12_DESCRIPTOR_HEAP_DESC dsvHd = {D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1};
+    ID3D12DescriptorHeap *dsvHeap = nullptr;
+    CHECK(gpu->device->CreateDescriptorHeap(&dsvHd, __uuidof(ID3D12DescriptorHeap), (void **)&dsvHeap));
+    D3D12_CPU_DESCRIPTOR_HANDLE dsv = dsvHeap->GetCPUDescriptorHandleForHeapStart();
+    gpu->device->CreateDepthStencilView(dsvTex, nullptr, dsv);
+
+    struct { float rect[4], color[4], z; } draws[3] = {
+        {{-1, -1, 1, 1}, {1, 0, 0, 1}, 0.5f},
+        {{-1, -1, 1, 1}, {0, 1, 0, 1}, 0.5f},
+        {{-1, -1, 1, 1}, {0, 0, 1, 1}, 0.5f},
+    };
+    ID3D12Resource *cb = gpu->Buffer(D3D12_HEAP_TYPE_UPLOAD, 3 * 256, D3D12_RESOURCE_STATE_GENERIC_READ);
+    uint8_t *cbPtr = nullptr;
+    CHECK(cb->Map(0, nullptr, (void **)&cbPtr));
+    for (int i = 0; i < 3; i++) memcpy(cbPtr + i * 256, &draws[i], sizeof draws[i]);
+    cb->Unmap(0, nullptr);
+    D3D12_GPU_VIRTUAL_ADDRESS cbVa = cb->GetGPUVirtualAddress();
+
+    D3D12_VIEWPORT vp = {0, 0, 4, 4, 0, 1};
+    D3D12_RECT sc = {0, 0, 4, 4};
+    D3D12_CPU_DESCRIPTOR_HANDLE rtv2 = rtvAt(2), rtv3 = rtvAt(3);
+
+    l10->OMSetFrontAndBackStencilRef(1, 1);
+    l10->IASetIndexBufferStripCutValue(D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_0xFFFF);
+    l10->SetProgram(nullptr);
+    l10->DispatchGraph(nullptr);
+
+    // Pass 1: negative dynamic depth bias allows second z=0.5 quad (blue) to beat initial z=0.5 (red).
+    gpu->list->ClearRenderTargetView(rtv2, black, 0, nullptr);
+    gpu->list->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+    gpu->list->OMSetRenderTargets(1, &rtv2, FALSE, &dsv);
+    gpu->list->RSSetViewports(1, &vp);
+    gpu->list->RSSetScissorRects(1, &sc);
+    gpu->list->SetGraphicsRootSignature(root);
+    gpu->list->SetPipelineState(depthPso);
+    gpu->list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    gpu->list->SetGraphicsRootConstantBufferView(0, cbVa);
+    gpu->list->DrawInstanced(6, 1, 0, 0);
+    l9->RSSetDepthBias(10000.0f, 0.0f, 0.0f);
+    gpu->list->SetGraphicsRootConstantBufferView(0, cbVa + 256);
+    gpu->list->DrawInstanced(6, 1, 0, 0);
+    l9->RSSetDepthBias(-10000.0f, 0.0f, 0.0f);
+    gpu->list->SetGraphicsRootConstantBufferView(0, cbVa + 512);
+    gpu->list->DrawInstanced(6, 1, 0, 0);
+
+    // Pass 2: SetPipelineState resets prior RSSetDepthBias back to PSO's 0, so z=0.5 (green) fails LESS.
+    gpu->list->ClearRenderTargetView(rtv3, black, 0, nullptr);
+    gpu->list->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+    gpu->list->OMSetRenderTargets(1, &rtv3, FALSE, &dsv);
+    gpu->list->SetPipelineState(depthPso);
+    gpu->list->SetGraphicsRootConstantBufferView(0, cbVa);
+    gpu->list->DrawInstanced(6, 1, 0, 0);
+    l9->RSSetDepthBias(-10000.0f, 0.0f, 0.0f);
+    gpu->list->SetPipelineState(depthPso);
+    gpu->list->SetGraphicsRootConstantBufferView(0, cbVa + 256);
+    gpu->list->DrawInstanced(6, 1, 0, 0);
+
+    gpu->Barrier(rtBias, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    gpu->Barrier(rtReset, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    ID3D12Resource *rbBias = gpu->Buffer(D3D12_HEAP_TYPE_READBACK, 4 * 256, D3D12_RESOURCE_STATE_COPY_DEST);
+    ID3D12Resource *rbReset = gpu->Buffer(D3D12_HEAP_TYPE_READBACK, 4 * 256, D3D12_RESOURCE_STATE_COPY_DEST);
+    D3D12_TEXTURE_COPY_LOCATION bDst = {rbBias, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT};
+    bDst.PlacedFootprint.Footprint = {DXGI_FORMAT_R8G8B8A8_UNORM, 4, 4, 1, 256};
+    D3D12_TEXTURE_COPY_LOCATION rDst = {rbReset, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT};
+    rDst.PlacedFootprint.Footprint = {DXGI_FORMAT_R8G8B8A8_UNORM, 4, 4, 1, 256};
+    D3D12_TEXTURE_COPY_LOCATION bSrc = {rtBias, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX};
+    D3D12_TEXTURE_COPY_LOCATION rSrc = {rtReset, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX};
+    gpu->list->CopyTextureRegion(&bDst, 0, 0, 0, &bSrc, nullptr);
+    gpu->list->CopyTextureRegion(&rDst, 0, 0, 0, &rSrc, nullptr);
+    gpu->Submit();
+
+    CHECK(rbBias->Map(0, nullptr, (void **)&rbPtr));
+    if (*(uint32_t *)rbPtr != 0xffff0000u) { printf("agility FAIL depthBias=%08x\n", *(uint32_t *)rbPtr); exit(1); }
+    rbBias->Unmap(0, nullptr);
+    CHECK(rbReset->Map(0, nullptr, (void **)&rbPtr));
+    if (*(uint32_t *)rbPtr != 0xff0000ffu) { printf("agility FAIL depthBiasReset=%08x\n", *(uint32_t *)rbPtr); exit(1); }
+    rbReset->Unmap(0, nullptr);
+
+    printf("agility ok\n");
+}
+
 int main(int argc, char **argv) {
     if (argc < 3) { printf("usage: d3d12_api.exe <vs.dxil> <ps.dxil> [section]\n"); return 2; }
     vs = Load(argv[1]); ps = Load(argv[2]); only = argc > 3 ? argv[3] : nullptr;
     if (vs.empty() || ps.empty()) { printf("can't read the shaders\n"); return 1; }
     gpu = new Gpu();
     ID3D12RootSignature *root = CbvRootSignature(*gpu);
+    if (only && !strcmp(only, "agility")) {
+        Agility(root);
+        return 0;
+    }
     if (Section("features")) Features();
     if (Section("list1")) List1();
     if (Section("heap1")) Heap1();

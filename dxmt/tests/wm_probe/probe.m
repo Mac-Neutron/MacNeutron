@@ -37,7 +37,7 @@ extern char **environ;
 void *objc_autoreleasePoolPush(void);
 void objc_autoreleasePoolPop(void *);
 
-#define NSLOTS 165
+#define NSLOTS 168
 
 id<MTLDevice> wm_device;
 id<MTLCommandQueue> wm_queue;
@@ -913,7 +913,7 @@ static void table_mode(const wm_unix_fn *funcs) {
         if (funcs[i]) printf("table %u %lx\n", i, (unsigned long)((const char *)funcs[i] - base));
         else printf("table %u null\n", i);
     /* The WoW64 table's length isn't in the image: its entries are those up to the next symbol dladdr finds (the
-     * table's extent as the symbol table has it), each null or code of this image, at most 165. */
+     * table's extent as the symbol table has it), each null or code of this image, at most 168. */
     const wm_unix_fn *wow = dlsym(image, "__wine_unix_call_wow64_funcs");
     for (unsigned i = 0; wow && i < NSLOTS; i++) {
         if (!dladdr((const void *)&wow[i], &d) || d.dli_saddr != (void *)wow) break;

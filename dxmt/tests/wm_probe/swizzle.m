@@ -6,7 +6,7 @@
 #include <objc/runtime.h>
 
 static bool on;
-static IMP orig[4];
+static IMP orig[5];
 
 static id dumped(id self, SEL cmd, id device, unsigned which) {
     if (on) {
@@ -18,6 +18,7 @@ static id dumped(id self, SEL cmd, id device, unsigned which) {
 static id temporal(id self, SEL cmd, id device) { return dumped(self, cmd, device, 0); }
 static id spatial(id self, SEL cmd, id device) { return dumped(self, cmd, device, 1); }
 static id interpolator(id self, SEL cmd, id device) { return dumped(self, cmd, device, 2); }
+static id denoised(id self, SEL cmd, id device) { return dumped(self, cmd, device, 4); }
 
 /* A constant's size by MTLDataType: the scalar and vector types (components times the scalar's size), else 0. */
 static unsigned type_size(MTLDataType t) {
@@ -61,6 +62,10 @@ void wm_swizzles(bool v) {
         swizzle([[MTLFXFrameInterpolatorDescriptor alloc] init], @selector(newFrameInterpolatorWithDevice:),
                 (IMP)interpolator, 2);
         swizzle([[MTLFunctionConstantValues alloc] init], @selector(setConstantValue:type:atIndex:), (IMP)set_constant, 3);
+        Class denoised_cls = NSClassFromString(@"MTLFXTemporalDenoisedScalerDescriptor");
+        if (denoised_cls)
+            swizzle([[denoised_cls alloc] init], sel_registerName("newTemporalDenoisedScalerWithDevice:"),
+                    (IMP)denoised, 4);
     }
     on = v;
 }

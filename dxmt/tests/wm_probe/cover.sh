@@ -42,9 +42,9 @@ slots)
     { if (seen[$1]++) print "slot " $1 " twice"; n[$2]++; if (($1 == 83 || $1 == 157) && $3 != "-") print "slot " $1 " has a symbol" }
     $1 !~ /^(83|157)$/ && $3 == "-" { print "slot " $1 " has no symbol" }
     END {
-      for (s = 0; s < 165; s++) if (!seen[s]) print "slot " s " missing"
-      if (NR != 165) print NR " lines, not 165"
-      split("5 26 28 24 11 9 26 16 5 3 12", want, " ")
+      for (s = 0; s < 168; s++) if (!seen[s]) print "slot " s " missing"
+      if (NR != 168) print NR " lines, not 168"
+      split("5 26 28 24 11 12 26 16 5 3 12", want, " ")
       for (g = 0; g <= 10; g++) if (n["g" g] + 0 != want[g + 1]) print "g" g " has " n["g" g] + 0 " slots, not " want[g + 1]
     }' "$SLOTS" > "$TMP/why"
   while IFS= read -r l; do fail "slots: $l"; done < "$TMP/why"
@@ -78,8 +78,8 @@ table)
       check("wow64", $2, $3, w)
     }
     END {
-      if (n != 165) print "table has " n + 0 " entries, not 165"
-      if (w64 && w64 != 165) print "wow64 table has " w64 " entries, not 165"
+      if (n != 168) print "table has " n + 0 " entries, not 168"
+      if (w64 && w64 != 168) print "wow64 table has " w64 " entries, not 168"
       print n + 0 " entries" (w64 ? ", wow64 " w64 : ", no wow64 table") > summary
     }' "$TMP/nm" "$TMP/table" > "$TMP/why"
   while IFS= read -r l; do fail "table: $l"; done < "$TMP/why"

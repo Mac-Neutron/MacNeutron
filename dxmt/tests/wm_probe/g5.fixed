@@ -1,5 +1,6 @@
 g5 68 supports 0 ret=supportsDevice
 g5 69 supports 0 ret=supportsDevice
+g5 165 supports 0 ret=supportsDevice
 g5 150 scale-range 0 written=0-7 min=supportedInputContentMinScale max=supportedInputContentMaxScale
 g5 56 temporal swz@worker newTemporalScalerWithDevice:
 g5 56 temporal dump desc.autoExposureEnabled=1
@@ -829,7 +830,7 @@ g5 151 interpolator dump desc.outputTextureFormat=115
 g5 151 interpolator dump desc.outputWidth=1280
 g5 151 interpolator dump desc.requiresPrevColorTexture=0
 g5 151 interpolator dump desc.scaler=h2
-g5 151 interpolator dump desc.uiTextureFormat=0
+g5 151 interpolator dump desc.uiTextureFormat=115
 g5 151 interpolator dump desc.version=0
 g5 151 interpolator dump desc.width=0
 g5 151 interpolator dump desc=MTLFXFrameInterpolatorDescriptor
@@ -860,13 +861,14 @@ g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=0
 g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=4
 g5 151 interpolator swz@worker setConstantValue:type:atIndex: setConstantValue=00 type=53 atIndex=5
 g5 151 interpolator 0 ret=h3 own=+1 pool=+0
-g5 - interpolate-encode inputs cmdbuf=h1 interpolator=h2 color=h3 prev=h4 depth=h5 motion=h6 output=h7 fence=h8
+g5 - interpolate-encode inputs cmdbuf=h1 interpolator=h2 color=h3 prev=h4 depth=h5 motion=h6 output=h7 ui=h8 fence=h9
 g5 152 interpolate-encode msg@worker setColorTexture: setColorTexture=h3
 g5 152 interpolate-encode msg@worker setPrevColorTexture: setPrevColorTexture=h4
 g5 152 interpolate-encode msg@worker setDepthTexture: setDepthTexture=h5
 g5 152 interpolate-encode msg@worker setMotionTexture: setMotionTexture=h6
 g5 152 interpolate-encode msg@worker setOutputTexture: setOutputTexture=h7
-g5 152 interpolate-encode msg@worker setFence: setFence=h8
+g5 152 interpolate-encode msg@worker setUITexture: setUITexture=h8
+g5 152 interpolate-encode msg@worker setFence: setFence=h9
 g5 152 interpolate-encode msg@worker setMotionVectorScaleX: setMotionVectorScaleX=0x1p+7
 g5 152 interpolate-encode msg@worker setMotionVectorScaleY: setMotionVectorScaleY=-0x1p+7
 g5 152 interpolate-encode msg@worker setDeltaTime: setDeltaTime=0x1.0624dep-6
@@ -878,9 +880,13 @@ g5 152 interpolate-encode msg@worker setJitterOffsetX: setJitterOffsetX=0x1p-2
 g5 152 interpolate-encode msg@worker setJitterOffsetY: setJitterOffsetY=-0x1.8p-2
 g5 152 interpolate-encode msg@worker setShouldResetHistory: setShouldResetHistory=1
 g5 152 interpolate-encode msg@worker setDepthReversed: setDepthReversed=1
-g5 152 interpolate-encode msg@worker setIsUITextureComposited: setIsUITextureComposited=0
+g5 152 interpolate-encode msg@worker setIsUITextureComposited: setIsUITextureComposited=1
 g5 152 interpolate-encode msg@worker encodeToCommandBuffer: encodeToCommandBuffer=h1
 g5 152 interpolate-encode 0 in1=+1 in2=+2 in3=+2 cb-status=4
+g5 166 denoised-scaler swz@worker newTemporalDenoisedScalerWithDevice:
+g5 166 denoised-scaler 0 ret=h1 own=+1 pool=+0
+g5 - denoised-encode inputs cmdbuf=h1 scaler=h2 color=h3 output=h4 fence=h5
+g5 167 denoised-encode 0 in1=+1 in2=+2 in3=+2 cb-status=4 matrices-ok=1
 g5 58 nil-args msg@worker setColorTexture: setColorTexture=nil
 g5 58 nil-args msg@worker setOutputTexture: setOutputTexture=nil
 g5 58 nil-args msg@worker setDepthTexture: setDepthTexture=nil
@@ -919,6 +925,7 @@ g5 152 nil-args msg@worker setPrevColorTexture: setPrevColorTexture=nil
 g5 152 nil-args msg@worker setDepthTexture: setDepthTexture=nil
 g5 152 nil-args msg@worker setMotionTexture: setMotionTexture=nil
 g5 152 nil-args msg@worker setOutputTexture: setOutputTexture=nil
+g5 152 nil-args msg@worker setUITexture: setUITexture=nil
 g5 152 nil-args msg@worker setFence: setFence=nil
 g5 152 nil-args msg@worker setMotionVectorScaleX: setMotionVectorScaleX=-0x1.4b4b4ap-52
 g5 152 nil-args msg@worker setMotionVectorScaleY: setMotionVectorScaleY=-0x1.4b4b4ap-52
@@ -934,10 +941,35 @@ g5 152 nil-args msg@worker setDepthReversed: setDepthReversed=0
 g5 152 nil-args msg@worker setIsUITextureComposited: setIsUITextureComposited=0
 g5 152 nil-args msg@worker encodeToCommandBuffer: encodeToCommandBuffer=nil
 g5 152 nil-args 0
+g5 167 nil-args msg@worker setColorTexture: setColorTexture=nil
+g5 167 nil-args msg@worker setOutputTexture: setOutputTexture=nil
+g5 167 nil-args msg@worker setDepthTexture: setDepthTexture=nil
+g5 167 nil-args msg@worker setMotionTexture: setMotionTexture=nil
+g5 167 nil-args msg@worker setDiffuseAlbedoTexture: setDiffuseAlbedoTexture=nil
+g5 167 nil-args msg@worker setSpecularAlbedoTexture: setSpecularAlbedoTexture=nil
+g5 167 nil-args msg@worker setNormalTexture: setNormalTexture=nil
+g5 167 nil-args msg@worker setRoughnessTexture: setRoughnessTexture=nil
+g5 167 nil-args msg@worker setSpecularHitDistanceTexture: setSpecularHitDistanceTexture=nil
+g5 167 nil-args msg@worker setDenoiseStrengthMaskTexture: setDenoiseStrengthMaskTexture=nil
+g5 167 nil-args msg@worker setTransparencyOverlayTexture: setTransparencyOverlayTexture=nil
+g5 167 nil-args msg@worker setExposureTexture: setExposureTexture=nil
+g5 167 nil-args msg@worker setReactiveMaskTexture: setReactiveMaskTexture=nil
+g5 167 nil-args msg@worker setFence: setFence=nil
+g5 167 nil-args msg@worker setPreExposure: setPreExposure=-0x1.4b4b4ap-52
+g5 167 nil-args msg@worker setJitterOffsetX: setJitterOffsetX=-0x1.4b4b4ap-52
+g5 167 nil-args msg@worker setJitterOffsetY: setJitterOffsetY=-0x1.4b4b4ap-52
+g5 167 nil-args msg@worker setMotionVectorScaleX: setMotionVectorScaleX=-0x1.4b4b4ap-52
+g5 167 nil-args msg@worker setMotionVectorScaleY: setMotionVectorScaleY=-0x1.4b4b4ap-52
+g5 167 nil-args msg@worker setShouldResetHistory: setShouldResetHistory=0
+g5 167 nil-args msg@worker setDepthReversed: setDepthReversed=0
+g5 167 nil-args msg@worker encodeToCommandBuffer: encodeToCommandBuffer=nil
+g5 167 nil-args 0
 g5 68 nil-args 0 ret=1
 g5 69 nil-args 0 ret=1
+g5 165 nil-args 0 ret=1
 g5 150 nil-args 0 min=0x1p+0 max=0x1p+1
 g5 57 nil-args raised NSInvalidArgumentException ret=fill
 g5 151 nil-args 0 ret=0
+g5 166 nil-args 0 ret=0
 g5 56 nil-device-temporal crashed (signal 11)
 g5 58 x-scaler-on-device raised NSInvalidArgumentException
