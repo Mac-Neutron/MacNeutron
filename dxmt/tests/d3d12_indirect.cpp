@@ -226,7 +226,7 @@ static int ComputeNative(const std::vector<char> &cs) {
     ID3D12CommandSignature *dsig;
     CHECK(gpu.device->CreateCommandSignature(&dsd, nullptr, __uuidof(ID3D12CommandSignature), (void **)&dsig));
 
-    ID3D12Resource *upload = gpu.Buffer(D3D12_HEAP_TYPE_UPLOAD, buf_bytes + 16, D3D12_RESOURCE_STATE_GENERIC_READ);
+    ID3D12Resource *upload = gpu.Buffer(D3D12_HEAP_TYPE_UPLOAD, buf_bytes + 32, D3D12_RESOURCE_STATE_GENERIC_READ);
     uint8_t *up = nullptr;
     D3D12_RANGE none = {0, 0};
     CHECK(upload->Map(0, &none, (void **)&up));
@@ -240,26 +240,37 @@ static int ComputeNative(const std::vector<char> &cs) {
         if (i < counted_cap) expected_counted += threads;
     }
     UINT zeros[2] = {0, 0};
+    D3D12_DISPATCH_ARGUMENTS init_gpu = {0, 2, 1};
+    UINT expected_gpu = 12 * 2 * 1 * 4;
     memcpy(up + buf_bytes, zeros, 8);
     memcpy(up + buf_bytes + 8, &counted_cap, 4);
+    memcpy(up + buf_bytes + 12, &init_gpu, sizeof(init_gpu));
     upload->Unmap(0, nullptr);
 
     ID3D12Resource *arg_buf = gpu.Buffer(D3D12_HEAP_TYPE_DEFAULT, buf_bytes, D3D12_RESOURCE_STATE_COPY_DEST);
     ID3D12Resource *cnt_buf = gpu.Buffer(D3D12_HEAP_TYPE_DEFAULT, 4, D3D12_RESOURCE_STATE_COPY_DEST);
+    ID3D12Resource *gpu_arg_buf = gpu.Buffer(D3D12_HEAP_TYPE_DEFAULT, 16, D3D12_RESOURCE_STATE_COPY_DEST,
+                                             D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     ID3D12Resource *out_multi = gpu.Buffer(D3D12_HEAP_TYPE_DEFAULT, 4, D3D12_RESOURCE_STATE_COPY_DEST,
                                            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     ID3D12Resource *out_counted = gpu.Buffer(D3D12_HEAP_TYPE_DEFAULT, 4, D3D12_RESOURCE_STATE_COPY_DEST,
                                              D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-    ID3D12Resource *readback = gpu.Buffer(D3D12_HEAP_TYPE_READBACK, 8, D3D12_RESOURCE_STATE_COPY_DEST);
+    ID3D12Resource *out_gpu = gpu.Buffer(D3D12_HEAP_TYPE_DEFAULT, 4, D3D12_RESOURCE_STATE_COPY_DEST,
+                                         D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    ID3D12Resource *readback = gpu.Buffer(D3D12_HEAP_TYPE_READBACK, 12, D3D12_RESOURCE_STATE_COPY_DEST);
 
     gpu.list->CopyBufferRegion(arg_buf, 0, upload, 0, buf_bytes);
     gpu.list->CopyBufferRegion(cnt_buf, 0, upload, buf_bytes + 8, 4);
+    gpu.list->CopyBufferRegion(gpu_arg_buf, 0, upload, buf_bytes + 12, sizeof(init_gpu));
     gpu.list->CopyBufferRegion(out_multi, 0, upload, buf_bytes, 4);
     gpu.list->CopyBufferRegion(out_counted, 0, upload, buf_bytes, 4);
+    gpu.list->CopyBufferRegion(out_gpu, 0, upload, buf_bytes, 4);
     gpu.Barrier(arg_buf, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
     gpu.Barrier(cnt_buf, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+    gpu.Barrier(gpu_arg_buf, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     gpu.Barrier(out_multi, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     gpu.Barrier(out_counted, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    gpu.Barrier(out_gpu, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     gpu.list->SetComputeRootSignature(croot);
     gpu.list->SetPipelineState(cpso);
@@ -269,22 +280,34 @@ static int ComputeNative(const std::vector<char> &cs) {
     gpu.list->SetComputeRootUnorderedAccessView(0, out_counted->GetGPUVirtualAddress());
     gpu.list->ExecuteIndirect(dsig, count, arg_buf, offset, cnt_buf, 0);
 
+    // GPU-driven dispatch writes `{12, 2, 1}` into `gpu_arg_buf`, barriers UAV -> INDIRECT_ARGUMENT on the
+    // same command list, then consumes it immediately with `ExecuteIndirect`.
+    gpu.list->SetComputeRootUnorderedAccessView(0, gpu_arg_buf->GetGPUVirtualAddress());
+    gpu.list->Dispatch(3, 1, 1);
+    gpu.Barrier(gpu_arg_buf, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+    gpu.list->SetComputeRootUnorderedAccessView(0, out_gpu->GetGPUVirtualAddress());
+    gpu.list->ExecuteIndirect(dsig, 1, gpu_arg_buf, 0, nullptr, 0);
+
     gpu.Barrier(out_multi, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
     gpu.Barrier(out_counted, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    gpu.Barrier(out_gpu, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
     gpu.list->CopyBufferRegion(readback, 0, out_multi, 0, 4);
     gpu.list->CopyBufferRegion(readback, 4, out_counted, 0, 4);
+    gpu.list->CopyBufferRegion(readback, 8, out_gpu, 0, 4);
     gpu.Submit();
 
     uint8_t *r = nullptr;
-    D3D12_RANGE whole = {0, 8};
+    D3D12_RANGE whole = {0, 12};
     CHECK(readback->Map(0, &whole, (void **)&r));
-    UINT got_multi = 0, got_counted = 0;
+    UINT got_multi = 0, got_counted = 0, got_gpu = 0;
     memcpy(&got_multi, r, 4);
     memcpy(&got_counted, r + 4, 4);
+    memcpy(&got_gpu, r + 8, 4);
     readback->Unmap(0, &none);
 
-    printf("compute-native multi %u %u counted %u %u\n", got_multi, expected_multi, got_counted, expected_counted);
-    return (got_multi == expected_multi && got_counted == expected_counted) ? 0 : 1;
+    printf("compute-native multi %u %u counted %u %u gpu %u %u\n", got_multi, expected_multi, got_counted,
+           expected_counted, got_gpu, expected_gpu);
+    return (got_multi == expected_multi && got_counted == expected_counted && got_gpu == expected_gpu) ? 0 : 1;
 }
 
 int main(int argc, char **argv) {

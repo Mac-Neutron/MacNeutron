@@ -465,14 +465,19 @@ static void Agility(ID3D12RootSignature *root) {
     // 4. Root Signature 1.2 serialize + deserialize + CreateRootSignature.
     D3D12_ROOT_PARAMETER1 rp1 = {};
     rp1.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    AgStaticSamplerDesc1 ss1 = {};
-    ss1.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-    ss1.AddressU = ss1.AddressV = ss1.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    ss1.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-    ss1.MaxLOD = 1.0f;
+    AgStaticSamplerDesc1 ss1[3] = {};
+    for (UINT i = 0; i < 3; i++) {
+        ss1[i].Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+        ss1[i].AddressU = ss1[i].AddressV = ss1[i].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        ss1[i].ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+        ss1[i].MaxLOD = 1.0f;
+        ss1[i].ShaderRegister = i;
+    }
+    ss1[1].BorderColor = (D3D12_STATIC_BORDER_COLOR)3;  // D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK_UINT
+    ss1[2].BorderColor = (D3D12_STATIC_BORDER_COLOR)4;  // D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE_UINT
     AgVersionedRootSignatureDesc vrs = {};
     vrs.Version = 3;
-    vrs.Desc_1_2 = {1, &rp1, 1, &ss1, D3D12_ROOT_SIGNATURE_FLAG_NONE};
+    vrs.Desc_1_2 = {1, &rp1, 3, ss1, D3D12_ROOT_SIGNATURE_FLAG_NONE};
     ID3DBlob *rsBlob = nullptr, *rsErr = nullptr;
     CHECK(D3D12SerializeVersionedRootSignature((const D3D12_VERSIONED_ROOT_SIGNATURE_DESC *)&vrs, &rsBlob, &rsErr));
     ID3D12VersionedRootSignatureDeserializer *deser = nullptr;
@@ -545,11 +550,30 @@ static void Agility(ID3D12RootSignature *root) {
     D3D12_RESOURCE_DESC1 castRd = {D3D12_RESOURCE_DIMENSION_TEXTURE2D, 0, 4, 4, 1, 1,
                                    DXGI_FORMAT_R8G8B8A8_UNORM, {1, 0},
                                    D3D12_TEXTURE_LAYOUT_UNKNOWN, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET};
+    D3D12_RESOURCE_DESC1 castCommittedRd = castRd;
+    castCommittedRd.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
     D3D12_HEAP_PROPERTIES defProps = {D3D12_HEAP_TYPE_DEFAULT};
     ID3D12Resource *castCommitted = nullptr, *castPlaced = nullptr;
-    CHECK(d14->CreateCommittedResource3(&defProps, D3D12_HEAP_FLAG_NONE, &castRd,
+    CHECK(d14->CreateCommittedResource3(&defProps, D3D12_HEAP_FLAG_NONE, &castCommittedRd,
                                          D3D12_BARRIER_LAYOUT_RENDER_TARGET, nullptr, nullptr, 2,
                                          castFormats, __uuidof(ID3D12Resource), (void **)&castCommitted));
+    D3D12_DESCRIPTOR_HEAP_DESC castViewHd = {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 2};
+    ID3D12DescriptorHeap *castViewHeap = nullptr;
+    CHECK(gpu->device->CreateDescriptorHeap(&castViewHd, __uuidof(ID3D12DescriptorHeap), (void **)&castViewHeap));
+    UINT cbvSrvUavInc = gpu->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE castSrvHandle = castViewHeap->GetCPUDescriptorHandleForHeapStart();
+    D3D12_CPU_DESCRIPTOR_HANDLE castUavHandle = castSrvHandle;
+    castUavHandle.ptr += cbvSrvUavInc;
+    D3D12_SHADER_RESOURCE_VIEW_DESC castSrvDesc = {};
+    castSrvDesc.Format = DXGI_FORMAT_R32_UINT;
+    castSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    castSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    castSrvDesc.Texture2D.MipLevels = 1;
+    gpu->device->CreateShaderResourceView(castCommitted, &castSrvDesc, castSrvHandle);
+    D3D12_UNORDERED_ACCESS_VIEW_DESC castUavDesc = {};
+    castUavDesc.Format = DXGI_FORMAT_R32_UINT;
+    castUavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    gpu->device->CreateUnorderedAccessView(castCommitted, nullptr, &castUavDesc, castUavHandle);
     D3D12_RESOURCE_ALLOCATION_INFO castAlloc = {};
     D3D12_RESOURCE_ALLOCATION_INFO1 castAlloc1 = {};
     d12->GetResourceAllocationInfo3(&castAlloc, 0, 1, &castRd, &castCount, &castPtr, &castAlloc1);

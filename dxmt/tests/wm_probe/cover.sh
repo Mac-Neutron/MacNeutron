@@ -1,8 +1,8 @@
 #!/bin/sh
 # cover.sh: wm_probe's coverage checks (DXMTRS step 2: winemetal's slots, each pinned by a probe case on the C).
-#   slots                                  slots.txt names each of 0-164 once, in groups of the plan's sizes
+#   slots                                  slots.txt names each of 0-167 once, in groups of the plan's sizes
 #   table <host-dir> <image>               the image's unix-call tables, named by `nm -a <image>`, equal slots.txt
-#                                          (the WoW64 table: entries 0-164, thunk32_ where the Wine build has one)
+#                                          (the WoW64 table: entries 0-167, thunk32_ where the Wine build has one)
 #   cases <wm_probe> <host-dir> [<group>]  every slot has a case and is called; a case per command type (g3:
 #                                          blit-<Name>, e.g. blit-CopyFromBufferToBuffer, blit-Nop); no cross call
 #                                          but g0's aniso-env

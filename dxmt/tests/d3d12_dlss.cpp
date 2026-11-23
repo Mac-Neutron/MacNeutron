@@ -411,18 +411,33 @@ static void Reactive() {
 }
 
 static void Refuse() {
+    NgxParameter *caps = nullptr;
+    NGX(N.GetCapabilityParameters(&caps));
+    unsigned fg_available = 0;
+    caps->Get("FrameGeneration.Available", &fg_available);
+    NGX(N.DestroyParameters(caps));
+
     NgxParameter *p = nullptr;
     NGX(N.AllocateParameters(&p));
     p->Set("Width", 1280u);
     p->Set("Height", 720u);
     p->Set("OutWidth", OW);
     p->Set("OutHeight", OH);
-    unsigned *handle = nullptr;
-    unsigned fg = N.CreateFeature(gpu->list, kFrameGeneration, p, &handle);
+    unsigned *fg_handle = nullptr;
+    unsigned fg = N.CreateFeature(gpu->list, fg_available ? 99u : kFrameGeneration, p, &fg_handle);
+    if (!Failed(fg) && fg_handle) {
+        NGX(N.ReleaseFeature(fg_handle));
+        fg_handle = nullptr;
+    }
     p->Set("Width", 640u);
     p->Set("Height", 360u);
-    unsigned big = N.CreateFeature(gpu->list, kSuperSampling, p, &handle);
-    handle = Create(p, 1280, 720, kBalanced, kFlagMVLowRes);
+    unsigned *big_handle = nullptr;
+    unsigned big = N.CreateFeature(gpu->list, kSuperSampling, p, &big_handle);
+    if (!Failed(big) && big_handle) {
+        NGX(N.ReleaseFeature(big_handle));
+        big_handle = nullptr;
+    }
+    unsigned *handle = Create(p, 1280, 720, kBalanced, kFlagMVLowRes);
     Frames fr(*gpu, 1280, 720);
     fr.Record(p, 0, true);
     ID3D12Resource *none = nullptr;
@@ -760,6 +775,16 @@ static void Dlssd() {
 }
 
 static void DlssgUi() {
+    NgxParameter *caps = nullptr;
+    NGX(N.GetCapabilityParameters(&caps));
+    unsigned available = 0;
+    if (Failed(caps->Get("FrameGeneration.Available", &available)) || !available) {
+        N.DestroyParameters(caps);
+        printf("dlssg-ui: unsupported\n");
+        return;
+    }
+    N.DestroyParameters(caps);
+
     const UINT w = 1280, h = 720, rw = 640, rh = 360;
     WNDCLASSA wc = {};
     wc.lpfnWndProc = WindowProc;
@@ -877,14 +902,16 @@ static void DlssgUi() {
     p_fg->Set("WorldToViewMatrix", (void *)w2v);
     p_fg->Set("ViewToClipMatrix", (void *)v2c);
 
-    for (UINT f = 0; f < 20; f++) {
+    const UINT kUiFrames = 20;
+    UINT presented = 0;
+    for (UINT f = 0; f < kUiFrames; f++) {
         MSG msg;
         while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
         p_ss->Set("Reset", f == 0 ? 1 : 0);
         p_ss->Set("Jitter.Offset.X", (float)(Halton(f % 8 + 1, 2) - 0.5));
         p_ss->Set("Jitter.Offset.Y", (float)(Halton(f % 8 + 1, 3) - 0.5));
-        NGX(N.EvaluateFeature(gpu->list, fg_handle, p_fg, nullptr));
         NGX(N.EvaluateFeature(gpu->list, ss_handle, p_ss, nullptr));
+        NGX(N.EvaluateFeature(gpu->list, fg_handle, p_fg, nullptr));
         ID3D12Resource *back = buffers[swap->GetCurrentBackBufferIndex()];
         gpu->Barrier(output, UAV, COPY_SOURCE);
         gpu->Barrier(back, D3D12_RESOURCE_STATE_PRESENT, COPY_DEST);
@@ -892,7 +919,13 @@ static void DlssgUi() {
         gpu->Barrier(back, COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
         gpu->Barrier(output, COPY_SOURCE, UAV);
         gpu->Submit();
-        CHECK(swap->Present(0, 0));
+        HRESULT hr = swap->Present(0, 0);
+        CHECK(hr);
+        if (SUCCEEDED(hr)) presented++;
+    }
+    if (presented != kUiFrames) {
+        printf("dlssg-ui FAIL presented %u/%u\n", presented, kUiFrames);
+        exit(1);
     }
 
     NGX(N.ReleaseFeature(fg_handle));

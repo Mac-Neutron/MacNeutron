@@ -2,7 +2,7 @@
  * helpers of probe.h. Usage:
  *   wm_probe <host-dir> fixed|full [g0 ... g10] [--counts]   <host-dir>/ntdll.so, then winemetal.so (loader.c)
  *   wm_probe native <dylib> fixed|full [g0 ... g10] [--counts]
- *   wm_probe <host-dir> table        "table <slot> <offset|null>" for 0-164, "wow64 <slot> ..." when exported
+ *   wm_probe <host-dir> table        "table <slot> <offset|null>" for 0-167, "wow64 <slot> ..." when exported
  *   wm_probe <host-dir> rate         "rate <slot> <ns per call>" for 36, 37, 38
  *   wm_probe <host-dir> pair <native-dylib>   both images in one process, slot 117 through each table
  *   wm_probe --list                  "<group> <slot> <case> <flags>" for every case, without loading

@@ -25,15 +25,153 @@ static NSString *quoted(NSString *s) {
     return q;
 }
 
-/* NSGetSizeAndAlignment, 0 for an encoding it can't size. */
-static NSUInteger size_of(const char *t) {
-    NSUInteger n = 0;
+static const char *skip_qualifiers(const char *t) {
+    while (*t && strchr("rnNoORV", *t)) t++;
+    return t;
+}
+
+static bool size_align_step(const char **tp, NSUInteger *size_out, NSUInteger *align_out);
+
+/* Advances *tp past one ObjC type encoding, returning false if malformed. */
+static bool skip_type(const char **tp) {
+    NSUInteger s = 0, a = 1;
+    return size_align_step(tp, &s, &a);
+}
+
+static bool size_align_scalar(char c, NSUInteger *size_out, NSUInteger *align_out) {
+    char buf[2] = { c, '\0' };
     @try {
-        NSGetSizeAndAlignment(t, &n, NULL);
+        NSGetSizeAndAlignment(buf, size_out, align_out);
+        return *size_out > 0;
     } @catch (NSException *x) {
-        n = 0;
+        *size_out = 0;
+        *align_out = 1;
+        return false;
     }
-    return n;
+}
+
+static NSUInteger next_pow2(NSUInteger v) {
+    NSUInteger p = 1;
+    while (p < v && p <= (NSUIntegerMax >> 1)) p <<= 1;
+    return p >= v ? p : v;
+}
+
+static bool size_align_step(const char **tp, NSUInteger *size_out, NSUInteger *align_out) {
+    const char *p = skip_qualifiers(*tp);
+    if (!*p) return false;
+    if (*p == '<') {
+        p++;
+        unsigned long n = 0;
+        while (*p >= '0' && *p <= '9') n = n * 10 + (unsigned long)(*p++ - '0');
+        NSUInteger es = 0, ea = 1;
+        if (n == 0 || !size_align_step(&p, &es, &ea) || *p != '>') return false;
+        p++;
+        NSUInteger sz = next_pow2((NSUInteger)n * es);
+        *size_out = sz;
+        *align_out = sz;
+        *tp = p;
+        return true;
+    }
+    if (*p == '[') {
+        p++;
+        unsigned long n = 0;
+        while (*p >= '0' && *p <= '9') n = n * 10 + (unsigned long)(*p++ - '0');
+        NSUInteger es = 0, ea = 1;
+        if (!size_align_step(&p, &es, &ea) || *p != ']') return false;
+        p++;
+        NSUInteger stride = (es + ea - 1) & ~(ea - 1);
+        *size_out = (NSUInteger)n * stride;
+        *align_out = ea;
+        *tp = p;
+        return true;
+    }
+    if (*p == '{' || *p == '(') {
+        char close = *p == '{' ? '}' : ')';
+        bool is_union = (*p == '(');
+        p++;
+        while (*p && *p != '=' && *p != close) p++;
+        if (*p != '=') {
+            if (*p == close) p++;
+            *tp = p;
+            *size_out = 0;
+            *align_out = 1;
+            return false;
+        }
+        p++;
+        NSUInteger total = 0, max_align = 1;
+        bool has_field = false;
+        while (*p && *p != close) {
+            NSUInteger fs = 0, fa = 1;
+            if (!size_align_step(&p, &fs, &fa) || fs == 0) return false;
+            has_field = true;
+            if (fa > max_align) max_align = fa;
+            if (is_union) {
+                if (fs > total) total = fs;
+            } else {
+                total = ((total + fa - 1) & ~(fa - 1)) + fs;
+            }
+        }
+        if (*p != close) return false;
+        p++;
+        *tp = p;
+        if (!has_field) {
+            *size_out = 0;
+            *align_out = 1;
+            return false;
+        }
+        *size_out = (total + max_align - 1) & ~(max_align - 1);
+        *align_out = max_align;
+        return true;
+    }
+    if (*p == '^') {
+        p++;
+        *size_out = sizeof(void *);
+        *align_out = _Alignof(void *);
+        if (*p == 'v') {
+            *tp = p + 1;
+            return true;
+        }
+        if (!skip_type(&p)) {
+            /* Void/opaque pointees such as ^{MTLDevice=} still have pointer size. */
+            *tp = p;
+            return true;
+        }
+        *tp = p;
+        return true;
+    }
+    if (*p == '@') {
+        p++;
+        if (*p == '?') p++;
+        else if (*p == '"') {
+            p++;
+            while (*p && *p != '"') p++;
+            if (*p == '"') p++;
+        }
+        *size_out = sizeof(id);
+        *align_out = _Alignof(id);
+        *tp = p;
+        return true;
+    }
+    char c = *p++;
+    *tp = p;
+    return size_align_scalar(c, size_out, align_out);
+}
+
+/* NSGetSizeAndAlignment with Clang SIMD vector/matrix support, 0 if unsizable. */
+static NSUInteger size_of(const char *t) {
+    if (!t || !*t) return 0;
+    NSUInteger n = 0;
+    if (!strchr(t, '<')) {
+        @try {
+            NSGetSizeAndAlignment(t, &n, NULL);
+        } @catch (NSException *x) {
+            n = 0;
+        }
+        if (n > 0) return n;
+    }
+    const char *p = t;
+    NSUInteger a = 1;
+    return size_align_step(&p, &n, &a) ? n : 0;
 }
 
 static bool is_mtl(id o) { return o && ![o isProxy] && !strncmp(object_getClassName(o), "MTL", 3); }
@@ -84,8 +222,10 @@ static NSString *fmt_obj(id o, NSString *path, NSMutableArray *dumps) {
         return [NSString stringWithFormat:@"{%@}", [a componentsJoinedByString:@","]];
     }
     if ([o isKindOfClass:[NSValue class]]) {
-        NSUInteger size = size_of([o objCType]);
-        void *b = calloc(1, size ? size : 1);
+        const char *vt = [o objCType];
+        NSUInteger size = size_of(vt);
+        if (size == 0) return [NSString stringWithFormat:@"?%s", vt ?: ""];
+        void *b = calloc(1, size);
         [o getValue:b size:size];
         NSString *s = [NSString stringWithFormat:@"{%@}", hex(b, size)];
         free(b);
@@ -193,11 +333,6 @@ void wm_dump_key(const char *key) { [wm__dump_keys() addObject:@(key)]; }
 }
 @end
 
-static const char *skip_qualifiers(const char *t) {
-    while (*t && strchr("rnNoORV", *t)) t++;
-    return t;
-}
-
 static NSString *fmt_int(const char *t, const void *b) {
     switch (*t) {
     case 'c': return [NSString stringWithFormat:@"%d", *(const int8_t *)b];
@@ -239,6 +374,7 @@ static long pointee_count(NSInvocation *inv, NSArray *pieces, bool *bytes) {
 static NSString *fmt_arg(NSInvocation *inv, NSUInteger i, NSArray *pieces, NSString *path, NSMutableArray *dumps) {
     const char *t = skip_qualifiers([inv.methodSignature getArgumentTypeAtIndex:i]);
     NSUInteger size = size_of(t);
+    if (size == 0) return [NSString stringWithFormat:@"?%s", t];
     uint8_t *b = calloc(1, size > 16 ? size : 16);
     [inv getArgument:b atIndex:i];
     NSString *s;
@@ -249,7 +385,11 @@ static NSString *fmt_arg(NSInvocation *inv, NSUInteger i, NSArray *pieces, NSStr
     case '#': s = @(class_getName(*(Class *)b) ?: "nil"); break;
     case ':': s = @(sel_getName(*(SEL *)b)); break;
     case '*': s = *(char **)b ? quoted(@(*(char **)b)) : @"null"; break;
-    case '{': s = hex(b, size); break;
+    case '{':
+    case '<':
+    case '[':
+        s = hex(b, size);
+        break;
     case '^': {
         const uint8_t *p = *(const uint8_t **)b;
         bool bytes = false;

@@ -1,4 +1,4 @@
-/* wm_probe (DXMTRS step 2): winemetal's 165 unix-call slots driven natively, without Wine or the VM. The probe loads
+/* wm_probe (DXMTRS step 2): winemetal's 168 unix-call slots driven natively, without Wine or the VM. The probe loads
  * one winemetal.so beside the VM host's stand-ins (or the native winemetal.dylib), copies its table, and runs case
  * tables (cases_g0.m .. cases_g10.m, one per slot group of slots.txt) on a worker thread while main runs its run loop.
  * Each call prints one line, "<group> <slot> <case> <status-hex>|raised <name> [<key>=<value>...]", with the fields
