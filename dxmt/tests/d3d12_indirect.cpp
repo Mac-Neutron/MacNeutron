@@ -1,5 +1,6 @@
 // Many indirect draws in one render pass, as Unreal draws grass and GPU particles:
 //   d3d12_indirect.exe <vs.dxil> <ps.dxil> <cs.dxil> [<vsid.dxil> <psid.dxil> [<vsvid.dxil> [<vsstart.dxil>]]]
+//   d3d12_indirect.exe compute-native <cs.dxil>
 //   (shaders/indirect.hlsl)
 // Each frame clears a 64x64 target and paints its 1024 cells with one ExecuteIndirect each (one draw command, its
 // StartInstanceLocation picks the cell from a per-instance vertex stream, as Unreal's instance ids), then runs 1024
@@ -11,6 +12,7 @@
 // With vsvid and vsstart (DXIL SM 6.8 plan, Task 12), the same lines again, each drawn with that vertex shader and named
 // "indirect vid-<run>" and "indirect start-<run>".
 #include "d3d12_common.hpp"
+#include <cstring>
 #include <string>
 
 // GPU efficiency E10: draw signatures that set nothing but the draw. Each call clears the 32x8 target, runs one
@@ -206,9 +208,94 @@ static void Draws(Gpu &gpu, ID3D12RootSignature *root, const std::vector<char> &
     });
 }
 
+// Multi-command compute ExecuteIndirect with stride > 12 bytes, non-zero offset, and GPU-written argument buffer
+// barrier (tests both the native Metal dispatchThreadgroupsWithIndirectBuffer fast path and DXMT_D3D12_INDIRECT=icb).
+static int ComputeNative(const std::vector<char> &cs) {
+    const UINT count = 64, counted_cap = 10, stride = 24, offset = 16;
+    const UINT buf_bytes = offset + count * stride;
+    Gpu gpu;
+    D3D12_ROOT_PARAMETER uav = {};
+    uav.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+    D3D12_ROOT_SIGNATURE_DESC crd = {1, &uav, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE};
+    ID3D12RootSignature *croot = gpu.RootSignature(crd);
+    D3D12_COMPUTE_PIPELINE_STATE_DESC cd = {croot, {cs.data(), cs.size()}};
+    ID3D12PipelineState *cpso;
+    CHECK(gpu.device->CreateComputePipelineState(&cd, __uuidof(ID3D12PipelineState), (void **)&cpso));
+    D3D12_INDIRECT_ARGUMENT_DESC darg = {D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH};
+    D3D12_COMMAND_SIGNATURE_DESC dsd = {stride, 1, &darg, 0};
+    ID3D12CommandSignature *dsig;
+    CHECK(gpu.device->CreateCommandSignature(&dsd, nullptr, __uuidof(ID3D12CommandSignature), (void **)&dsig));
+
+    ID3D12Resource *upload = gpu.Buffer(D3D12_HEAP_TYPE_UPLOAD, buf_bytes + 16, D3D12_RESOURCE_STATE_GENERIC_READ);
+    uint8_t *up = nullptr;
+    D3D12_RANGE none = {0, 0};
+    CHECK(upload->Map(0, &none, (void **)&up));
+    memset(up, 0xdd, buf_bytes);
+    UINT expected_multi = 0, expected_counted = 0;
+    for (UINT i = 0; i < count; i++) {
+        D3D12_DISPATCH_ARGUMENTS rec = {i % 5 + 1, i % 3 + 1, 1};
+        memcpy(up + offset + i * stride, &rec, sizeof(rec));
+        UINT threads = rec.ThreadGroupCountX * rec.ThreadGroupCountY * rec.ThreadGroupCountZ * 4;
+        expected_multi += threads;
+        if (i < counted_cap) expected_counted += threads;
+    }
+    UINT zeros[2] = {0, 0};
+    memcpy(up + buf_bytes, zeros, 8);
+    memcpy(up + buf_bytes + 8, &counted_cap, 4);
+    upload->Unmap(0, nullptr);
+
+    ID3D12Resource *arg_buf = gpu.Buffer(D3D12_HEAP_TYPE_DEFAULT, buf_bytes, D3D12_RESOURCE_STATE_COPY_DEST);
+    ID3D12Resource *cnt_buf = gpu.Buffer(D3D12_HEAP_TYPE_DEFAULT, 4, D3D12_RESOURCE_STATE_COPY_DEST);
+    ID3D12Resource *out_multi = gpu.Buffer(D3D12_HEAP_TYPE_DEFAULT, 4, D3D12_RESOURCE_STATE_COPY_DEST,
+                                           D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    ID3D12Resource *out_counted = gpu.Buffer(D3D12_HEAP_TYPE_DEFAULT, 4, D3D12_RESOURCE_STATE_COPY_DEST,
+                                             D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    ID3D12Resource *readback = gpu.Buffer(D3D12_HEAP_TYPE_READBACK, 8, D3D12_RESOURCE_STATE_COPY_DEST);
+
+    gpu.list->CopyBufferRegion(arg_buf, 0, upload, 0, buf_bytes);
+    gpu.list->CopyBufferRegion(cnt_buf, 0, upload, buf_bytes + 8, 4);
+    gpu.list->CopyBufferRegion(out_multi, 0, upload, buf_bytes, 4);
+    gpu.list->CopyBufferRegion(out_counted, 0, upload, buf_bytes, 4);
+    gpu.Barrier(arg_buf, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+    gpu.Barrier(cnt_buf, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+    gpu.Barrier(out_multi, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    gpu.Barrier(out_counted, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+    gpu.list->SetComputeRootSignature(croot);
+    gpu.list->SetPipelineState(cpso);
+    gpu.list->SetComputeRootUnorderedAccessView(0, out_multi->GetGPUVirtualAddress());
+    gpu.list->ExecuteIndirect(dsig, count, arg_buf, offset, nullptr, 0);
+
+    gpu.list->SetComputeRootUnorderedAccessView(0, out_counted->GetGPUVirtualAddress());
+    gpu.list->ExecuteIndirect(dsig, count, arg_buf, offset, cnt_buf, 0);
+
+    gpu.Barrier(out_multi, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    gpu.Barrier(out_counted, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    gpu.list->CopyBufferRegion(readback, 0, out_multi, 0, 4);
+    gpu.list->CopyBufferRegion(readback, 4, out_counted, 0, 4);
+    gpu.Submit();
+
+    uint8_t *r = nullptr;
+    D3D12_RANGE whole = {0, 8};
+    CHECK(readback->Map(0, &whole, (void **)&r));
+    UINT got_multi = 0, got_counted = 0;
+    memcpy(&got_multi, r, 4);
+    memcpy(&got_counted, r + 4, 4);
+    readback->Unmap(0, &none);
+
+    printf("compute-native multi %u %u counted %u %u\n", got_multi, expected_multi, got_counted, expected_counted);
+    return (got_multi == expected_multi && got_counted == expected_counted) ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
+    if (argc == 3 && strcmp(argv[1], "compute-native") == 0) {
+        std::vector<char> cs = Load(argv[2]);
+        if (cs.empty()) { printf("can't read the shaders\n"); return 1; }
+        return ComputeNative(cs);
+    }
     if (argc != 4 && (argc < 6 || argc > 8)) {
         printf("usage: d3d12_indirect.exe <vs.dxil> <ps.dxil> <cs.dxil> [<vsid.dxil> <psid.dxil> [<vsvid.dxil> [<vsstart.dxil>]]]\n");
+        printf("       d3d12_indirect.exe compute-native <cs.dxil>\n");
         return 2;
     }
     std::vector<char> vs = Load(argv[1]), ps = Load(argv[2]), cs = Load(argv[3]);

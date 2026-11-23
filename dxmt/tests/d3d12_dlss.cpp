@@ -194,7 +194,7 @@ struct Frames {
     }
 
     // Frame f's inputs uploaded on the list (not submitted), and its parameters set in `p`.
-    void Record(NgxParameter *p, UINT f, bool reset) {
+    void Record(NgxParameter *p, UINT f, bool reset, bool set_pre_exposure = true) {
         int i = f % phases + 1;
         float jx = Halton(i, 2) - 0.5, jy = Halton(i, 3) - 0.5;
         Rows(ih, [&](UINT y) {
@@ -230,7 +230,7 @@ struct Frames {
         p->Set("MV.Scale.X", 1.0f);
         p->Set("MV.Scale.Y", 1.0f);
         p->Set("Reset", reset ? 1 : 0);
-        p->Set("DLSS.Pre.Exposure", 1.0f);
+        if (set_pre_exposure) p->Set("DLSS.Pre.Exposure", 1.0f);
         p->Set("DLSS.Render.Subrect.Dimensions.Width", iw);
         p->Set("DLSS.Render.Subrect.Dimensions.Height", ih);
         for (const char *name : {"DLSS.Input.Color.Subrect.Base.X", "DLSS.Input.Color.Subrect.Base.Y",
@@ -339,6 +339,75 @@ static void Upscale(int quality, UINT base = 0, bool inverted = false) {
         printf("dlss inverted %s psnr %.2f bilinear %.2f\n", ok ? "ok" : "FAIL", s, b);
     else
         printf("dlss %s render %ux%u %s psnr %.2f bilinear %.2f\n", mode.c_str(), w, h, ok ? "ok" : "FAIL", s, b);
+}
+
+static void Reactive() {
+    auto [w, h] = Optimal(kBalanced);
+    NgxParameter *p_create = nullptr, *p1 = nullptr, *p2 = nullptr;
+    NGX(N.AllocateParameters(&p_create));
+    NGX(N.AllocateParameters(&p1));
+    NGX(N.AllocateParameters(&p2));
+    unsigned *handle = Create(p_create, w, h, kBalanced, kFlagMVLowRes);
+
+    Frames fr(*gpu, w, h, 16, false);
+    ID3D12Resource *mask_unorm = gpu->Texture(Tex2D(w + 16, h + 16, DXGI_FORMAT_R8_UNORM), COPY_DEST);
+    ID3D12Resource *mask_typeless = gpu->Texture(Tex2D(w + 8, h + 8, DXGI_FORMAT_R8_TYPELESS), COPY_DEST);
+    Staging sk = MakeStaging(*gpu, w, h);
+    Rows(h, [&](UINT y) {
+        uint8_t *row = sk.p + (size_t)y * sk.pitch;
+        for (UINT x = 0; x < w; x++) row[x] = ((x + y) & 15) == 0 ? 204 : 0;
+    });
+    Copy(*gpu, mask_unorm, sk, DXGI_FORMAT_R8_UNORM, 16, 16, w, h);
+    Copy(*gpu, mask_typeless, sk, DXGI_FORMAT_R8_UNORM, 8, 8, w, h);
+    gpu->Barrier(mask_unorm, COPY_DEST, READ);
+    gpu->Barrier(mask_typeless, COPY_DEST, READ);
+    gpu->Submit();
+
+    for (UINT f = 0; f < kFrames; f++) {
+        fr.Record(p1, f, f == 0, false);
+        p1->Set("DLSS.Exposure.Scale", 1.5f);
+        p1->Set("DLSS.Input.Bias.Current.Color.Active", 1);
+        p1->Set("DLSS.Input.Bias.Current.Color.Mask", mask_unorm);
+        p1->Set("DLSS.Input.Bias.Current.Color.SubrectBase.X", 16u);
+        p1->Set("DLSS.Input.Bias.Current.Color.SubrectBase.Y", 16u);
+        p1->Set("DLSSG.CameraNear", 0.25f);
+        p1->Set("DLSSG.CameraFar", 5000.0f);
+        p1->Set("DLSSG.CameraFOV", 60.0f);
+        p1->Set("DLSSG.CameraAspectRatio", (float)OW / OH);
+        NGX(N.EvaluateFeature(gpu->list, handle, p1, nullptr));
+        gpu->Submit();
+    }
+    auto [s1, b1] = fr.Read(kFrames - 1);
+
+    for (UINT f = 0; f < kFrames; f++) {
+        fr.Record(p2, f, f == 0, true);
+        p2->Set("DLSS.Exposure.Scale", 2.0f);
+        p2->Set("DLSS.Input.Bias.Current.Color.Active", 1);
+        p2->Set("DLSS.Input.Bias.Current.Color.Mask", mask_typeless);
+        p2->Set("DLSS.Input.Bias.Current.Color.SubrectBase.X", 8u);
+        p2->Set("DLSS.Input.Bias.Current.Color.SubrectBase.Y", 8u);
+        NGX(N.EvaluateFeature(gpu->list, handle, p2, nullptr));
+        gpu->Submit();
+    }
+    auto [s2, b2] = fr.Read(kFrames - 1);
+
+    p2->Set("DLSS.Input.Bias.Current.Color.Active", 0);
+    for (UINT f = 0; f < kFrames; f++) {
+        fr.Record(p2, f, f == 0, true);
+        NGX(N.EvaluateFeature(gpu->list, handle, p2, nullptr));
+        gpu->Submit();
+    }
+    auto [s3, b3] = fr.Read(kFrames - 1);
+
+    mask_unorm->Release();
+    mask_typeless->Release();
+    sk.buffer->Release();
+    NGX(N.ReleaseFeature(handle));
+    NGX(N.DestroyParameters(p1));
+    NGX(N.DestroyParameters(p2));
+    NGX(N.DestroyParameters(p_create));
+    bool ok = (s1 > b1) && (s2 > b2) && (s3 > b3);
+    printf("dlss %s %s psnr %.2f/%.2f bilinear %.2f/%.2f\n", mode.c_str(), ok ? "ok" : "FAIL", s1, s2, b1, b2);
 }
 
 static void Refuse() {
@@ -576,6 +645,7 @@ int main(int argc, char **argv) {
         else if (mode == "ultraperf") Upscale(kUltraPerformance);
         else if (mode == "dlaa") Upscale(kDLAA);
         else if (mode == "inverted") Upscale(kBalanced, 16, true);
+        else if (mode == "reactive" || mode == "reactive-exposure") Reactive();
         else if (mode == "refuse") Refuse();
         else if (mode == "cost") Cost();
         else if (mode == "framegen") FrameGen(120);
