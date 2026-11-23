@@ -24,6 +24,7 @@ struct Target {
 static Gpu *g;
 static ID3D12RootSignature *root, *croot;
 static ID3D12PipelineState *add, *set, *sample, *add_sample, *add_uav, *fill, *count, *args;
+static std::vector<char> g_vs, g_value;
 static ID3D12CommandSignature *draw_signature;
 static ID3D12DescriptorHeap *rtv_heap, *srv_heap;
 static UINT targets_made;
@@ -52,7 +53,8 @@ static Target MakeTarget(ID3D12Resource *texture = nullptr) {
 }
 
 static ID3D12PipelineState *Graphics(const std::vector<char> &vs, const std::vector<char> &ps, bool additive,
-                                     ID3D12RootSignature *signature = root) {
+                                     ID3D12RootSignature *signature = root,
+                                     DXGI_FORMAT dsv_format = DXGI_FORMAT_UNKNOWN) {
     D3D12_GRAPHICS_PIPELINE_STATE_DESC gd = {};
     gd.pRootSignature = signature;
     gd.VS = {vs.data(), vs.size()};
@@ -71,6 +73,8 @@ static ID3D12PipelineState *Graphics(const std::vector<char> &vs, const std::vec
     gd.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     gd.NumRenderTargets = 1;
     gd.RTVFormats[0] = kFormat;
+    gd.DSVFormat = dsv_format;
+    gd.DepthStencilState.DepthEnable = FALSE;
     gd.SampleDesc.Count = 1;
     ID3D12PipelineState *pso;
     CHECK(g->device->CreateGraphicsPipelineState(&gd, __uuidof(ID3D12PipelineState), (void **)&pso));
@@ -1598,6 +1602,7 @@ static void RenderPassDiscard() {
 // Opt-in E8 scenario: two lists bind a read-only DSV (DONT_CARE store) with additive color draws; same_target merges
 // them across lists without dropping either draw. Prints 2.
 static void RoDsvMerge() {
+    ID3D12PipelineState *add_d32 = Graphics(g_vs, g_value, true, root, DXGI_FORMAT_D32_FLOAT);
     ID3D12Resource *depth = g->Texture(
         Tex2D(kSize, kSize, DXGI_FORMAT_D32_FLOAT, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL),
         D3D12_RESOURCE_STATE_DEPTH_READ);
@@ -1614,11 +1619,11 @@ static void RoDsvMerge() {
     auto *main_list = g->list;
     List b = MakeList();
     Clear(T[0]);
-    Bind(T[0], add, 1);
+    Bind(T[0], add_d32, 1);
     g->list->OMSetRenderTargets(1, &T[0].rtv, FALSE, &dsv);
     g->list->DrawInstanced(3, 1, 0, 0);
     g->list = b.l;
-    Bind(T[0], add, 1);
+    Bind(T[0], add_d32, 1);
     g->list->OMSetRenderTargets(1, &T[0].rtv, FALSE, &dsv);
     g->list->DrawInstanced(3, 1, 0, 0);
     Read(T[0], RT, 512, 512, 0);
@@ -1628,6 +1633,7 @@ static void RoDsvMerge() {
     RunLists({main_list, b.l});
     CHECK(g->allocator->Reset());
     CHECK(g->list->Reset(g->allocator, nullptr));
+    add_d32->Release();
     dsv_heap->Release();
     depth->Release();
     printf("hazard ro-dsv-merge %g\n", Texel(0));
@@ -1705,12 +1711,14 @@ int main(int argc, char **argv) {
     params[1] = {};
     params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
     croot = gpu.RootSignature(rd);
-    auto vs = shader("vsfull"), value = shader("psvalue"), sampled = shader("pssample");
-    add = Graphics(vs, value, true);
-    set = Graphics(vs, value, false);
-    sample = Graphics(vs, sampled, false);
-    add_sample = Graphics(vs, sampled, true);
-    add_uav = Graphics(vs, shader("psuav"), true, croot);
+    g_vs = shader("vsfull");
+    g_value = shader("psvalue");
+    auto sampled = shader("pssample");
+    add = Graphics(g_vs, g_value, true);
+    set = Graphics(g_vs, g_value, false);
+    sample = Graphics(g_vs, sampled, false);
+    add_sample = Graphics(g_vs, sampled, true);
+    add_uav = Graphics(g_vs, shader("psuav"), true, croot);
     fill = Compute(shader("csfill"));
     count = Compute(shader("cscount"));
     args = Compute(shader("csargs"));

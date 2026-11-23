@@ -342,7 +342,8 @@ static void Upscale(int quality, UINT base = 0, bool inverted = false) {
 }
 
 static void Reactive() {
-    auto [w, h] = Optimal(kBalanced);
+    auto opt = Optimal(kBalanced);
+    UINT w = opt.first, h = opt.second;
     NgxParameter *p_create = nullptr, *p1 = nullptr, *p2 = nullptr;
     NGX(N.AllocateParameters(&p_create));
     NGX(N.AllocateParameters(&p1));

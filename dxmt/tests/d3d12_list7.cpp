@@ -522,6 +522,7 @@ static const char *discardresolve(Gpu &gpu, ID3D12GraphicsCommandList7 *list) {
     D3D12_GRAPHICS_PIPELINE_STATE_DESC gd;
     QuadPipeline(gpu, root, vs_bytes, ps_bytes, &gd)->Release();
     gd.SampleDesc.Count = 4;
+    gd.DSVFormat = DXGI_FORMAT_D32_FLOAT;
     ID3D12PipelineState *pso;
     TRY(gpu.device->CreateGraphicsPipelineState(&gd, __uuidof(ID3D12PipelineState), (void **)&pso),
         "PSO (4x MSAA discardresolve)");
