@@ -1560,6 +1560,130 @@ static void MergeIndirect() {
     printf("hazard merge-indirect %g\n", Texel(0));
 }
 
+// Opt-in E8 scenario: prior ClearTo(99) folded into a BeginRenderPass(DISCARD) pass is dropped and overwritten by 3,
+// followed by DiscardResource + draw overwriting with 5. Prints 3 5.
+static void RenderPassDiscard() {
+    ID3D12GraphicsCommandList4 *list4 = nullptr;
+    CHECK(g->list->QueryInterface(__uuidof(ID3D12GraphicsCommandList4), (void **)&list4));
+    ClearTo(T[0], 99);
+    D3D12_RENDER_PASS_RENDER_TARGET_DESC rt = {};
+    rt.cpuDescriptor = T[0].rtv;
+    rt.BeginningAccess.Type = D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_DISCARD;
+    rt.EndingAccess.Type = D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE;
+    list4->BeginRenderPass(1, &rt, nullptr, D3D12_RENDER_PASS_FLAG_NONE);
+    D3D12_VIEWPORT vp = {0, 0, (float)kSize, (float)kSize, 0, 1};
+    D3D12_RECT sc = {0, 0, (LONG)kSize, (LONG)kSize};
+    g->list->RSSetViewports(1, &vp);
+    g->list->RSSetScissorRects(1, &sc);
+    g->list->SetDescriptorHeaps(1, &srv_heap);
+    g->list->SetGraphicsRootSignature(root);
+    g->list->SetPipelineState(set);
+    g->list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    float val = 3.0f;
+    UINT constants[2] = {0, 0};
+    memcpy(&constants[0], &val, 4);
+    g->list->SetGraphicsRoot32BitConstants(0, 2, constants, 0);
+    g->list->DrawInstanced(3, 1, 0, 0);
+    list4->EndRenderPass();
+    Read(T[0], RT, 512, 512, 0);
+
+    g->list->DiscardResource(T[0].texture, nullptr);
+    Pass(T[0], set, 5, 1);
+    Read(T[0], RT, 512, 512, 1);
+    list4->Release();
+    g->Submit();
+    printf("hazard renderpass-discard %g %g\n", Texel(0), Texel(1));
+}
+
+// Opt-in E8 scenario: two lists bind a read-only DSV (DONT_CARE store) with additive color draws; same_target merges
+// them across lists without dropping either draw. Prints 2.
+static void RoDsvMerge() {
+    ID3D12Resource *depth = g->Texture(
+        Tex2D(kSize, kSize, DXGI_FORMAT_D32_FLOAT, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL),
+        D3D12_RESOURCE_STATE_DEPTH_READ);
+    ID3D12DescriptorHeap *dsv_heap = nullptr;
+    D3D12_DESCRIPTOR_HEAP_DESC dhd = {D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1};
+    CHECK(g->device->CreateDescriptorHeap(&dhd, __uuidof(ID3D12DescriptorHeap), (void **)&dsv_heap));
+    D3D12_CPU_DESCRIPTOR_HANDLE dsv = dsv_heap->GetCPUDescriptorHandleForHeapStart();
+    D3D12_DEPTH_STENCIL_VIEW_DESC dvd = {};
+    dvd.Format = DXGI_FORMAT_D32_FLOAT;
+    dvd.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    dvd.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH;
+    g->device->CreateDepthStencilView(depth, &dvd, dsv);
+
+    auto *main_list = g->list;
+    List b = MakeList();
+    Clear(T[0]);
+    Bind(T[0], add, 1);
+    g->list->OMSetRenderTargets(1, &T[0].rtv, FALSE, &dsv);
+    g->list->DrawInstanced(3, 1, 0, 0);
+    g->list = b.l;
+    Bind(T[0], add, 1);
+    g->list->OMSetRenderTargets(1, &T[0].rtv, FALSE, &dsv);
+    g->list->DrawInstanced(3, 1, 0, 0);
+    Read(T[0], RT, 512, 512, 0);
+    g->list = main_list;
+    for (auto *l : {main_list, b.l})
+        CHECK(l->Close());
+    RunLists({main_list, b.l});
+    CHECK(g->allocator->Reset());
+    CHECK(g->list->Reset(g->allocator, nullptr));
+    dsv_heap->Release();
+    depth->Release();
+    printf("hazard ro-dsv-merge %g\n", Texel(0));
+}
+
+// Opt-in E10 scenario: bind index buffer 1 (degenerate indices -> 0), release it (unregisters VA & bumps
+// va_generation), create index buffer 2 (valid indices -> 1), rebind, and issue both DrawIndexedInstanced and
+// ExecuteIndirect(DRAW_INDEXED). Prints 0 2.
+static void VaReuseIb() {
+    auto make_ib = [&](const uint16_t idx[3]) {
+        ID3D12Resource *ib = g->Buffer(D3D12_HEAP_TYPE_UPLOAD, 256, D3D12_RESOURCE_STATE_GENERIC_READ);
+        void *p = nullptr;
+        CHECK(ib->Map(0, nullptr, &p));
+        memcpy(p, idx, 6);
+        ib->Unmap(0, nullptr);
+        return ib;
+    };
+    const uint16_t deg_idx[3] = {0, 0, 0};
+    const uint16_t full_idx[3] = {0, 1, 2};
+
+    ID3D12Resource *ib1 = make_ib(deg_idx);
+    D3D12_INDEX_BUFFER_VIEW ibv1 = {ib1->GetGPUVirtualAddress(), 6, DXGI_FORMAT_R16_UINT};
+    Clear(T[0]);
+    Bind(T[0], add, 1);
+    g->list->IASetIndexBuffer(&ibv1);
+    g->list->DrawIndexedInstanced(3, 1, 0, 0, 0);
+    Read(T[0], RT, 512, 512, 0);
+    g->Submit();
+    float first = Texel(0);
+    ib1->Release();
+
+    ID3D12Resource *ib2 = make_ib(full_idx);
+    D3D12_INDEX_BUFFER_VIEW ibv2 = {ib2->GetGPUVirtualAddress(), 6, DXGI_FORMAT_R16_UINT};
+    D3D12_INDIRECT_ARGUMENT_DESC iarg = {D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED};
+    D3D12_COMMAND_SIGNATURE_DESC isd = {sizeof(D3D12_DRAW_INDEXED_ARGUMENTS), 1, &iarg, 0};
+    ID3D12CommandSignature *draw_idx_sig = nullptr;
+    CHECK(g->device->CreateCommandSignature(&isd, nullptr, __uuidof(ID3D12CommandSignature), (void **)&draw_idx_sig));
+    D3D12_DRAW_INDEXED_ARGUMENTS dargs = {3, 1, 0, 0, 0};
+    ID3D12Resource *arg_buf = g->Buffer(D3D12_HEAP_TYPE_UPLOAD, sizeof(dargs), D3D12_RESOURCE_STATE_GENERIC_READ);
+    void *ap = nullptr;
+    CHECK(arg_buf->Map(0, nullptr, &ap));
+    memcpy(ap, &dargs, sizeof(dargs));
+    arg_buf->Unmap(0, nullptr);
+
+    Bind(T[0], add, 1);
+    g->list->IASetIndexBuffer(&ibv2);
+    g->list->DrawIndexedInstanced(3, 1, 0, 0, 0);
+    g->list->ExecuteIndirect(draw_idx_sig, 1, arg_buf, 0, nullptr, 0);
+    Read(T[0], RT, 512, 512, 1);
+    g->Submit();
+    arg_buf->Release();
+    draw_idx_sig->Release();
+    ib2->Release();
+    printf("hazard va-reuse-ib %g %g\n", first, Texel(1));
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) { printf("usage: d3d12_hazards.exe <shader folder> [mode...]\n"); return 2; }
     std::string dir = argv[1];
@@ -1613,6 +1737,11 @@ int main(int argc, char **argv) {
         {"fold-lists-barrier", FoldListsBarrier}, {"fold-m4", FoldM4}, {"fold-twice", FoldTwice}, {"fold-copy", FoldCopy},
         {"indirect-war", IndirectWar}, {"merge-indirect", MergeIndirect}, {"placed-uav", PlacedUav},
         {"heap-released", HeapReleased}, {"ts-many", TimestampMany}, {"sampled", Sampled}, {"ts-queues", TimestampQueues}};
+    static const struct { const char *name; void (*run)(); } kExtraModes[] = {
+        {"renderpass-discard", RenderPassDiscard},
+        {"ro-dsv-merge", RoDsvMerge},
+        {"va-reuse-ib", VaReuseIb},
+    };
     std::vector<std::string> modes(argv + 2, argv + argc);
     if (modes.empty())
         for (auto &m : kModes)
@@ -1620,6 +1749,11 @@ int main(int argc, char **argv) {
     for (auto &m : modes) {
         bool found = false;
         for (auto &k : kModes)
+            if (m == k.name) {
+                k.run();
+                found = true;
+            }
+        for (auto &k : kExtraModes)
             if (m == k.name) {
                 k.run();
                 found = true;

@@ -477,6 +477,99 @@ static const char *emptybarrier(Gpu &gpu, ID3D12GraphicsCommandList7 *list) {
     return "ok";
 }
 
+// Opt-in E8 scenario (`d3d12_list7.exe [<depth.vs.dxil> <depth.ps.dxil>] discardresolve`):
+// Exercises DiscardResource, BeginRenderPass DISCARD beginning/ending actions, BIND_READ_ONLY_DEPTH,
+// and single-subresource inline MSAA resolve with PreserveResolveSource=TRUE.
+static const char *discardresolve(Gpu &gpu, ID3D12GraphicsCommandList7 *list) {
+    ID3D12Resource *target = Target(gpu, 4), *dst = Target(gpu), *dst2 = Target(gpu);
+    ID3D12Resource *depth = Target(gpu, 4, DXGI_FORMAT_D32_FLOAT, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
+                                   D3D12_RESOURCE_STATE_DEPTH_READ);
+    auto rtv = View(gpu, target, D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    auto dsv = View(gpu, depth, D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+
+    // DiscardResource followed by ClearRenderTargetView must preserve the clear.
+    list->DiscardResource(target, nullptr);
+    list->ClearRenderTargetView(rtv, kGreenF, 0, nullptr);
+    list->ClearRenderTargetView(View(gpu, dst, D3D12_DESCRIPTOR_HEAP_TYPE_RTV), kBlackF, 0, nullptr);
+    list->ClearRenderTargetView(View(gpu, dst2, D3D12_DESCRIPTOR_HEAP_TYPE_RTV), kBlackF, 0, nullptr);
+    gpu.Barrier(dst, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+    gpu.Barrier(dst2, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+
+    D3D12_RENDER_PASS_ENDING_ACCESS_RESOLVE_SUBRESOURCE_PARAMETERS whole = {0, 0, 0, 0, {0, 0, 4, 4}};
+    if (vs_bytes.empty() || ps_bytes.empty()) {
+        // Shaderless fallback: CLEAR->RESOLVE + READ_ONLY_DEPTH + DISCARD ending on a separate pass.
+        auto rt = PassTarget(rtv, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR, kGreenF);
+        ResolveInto(rt, target, dst, 1, &whole);
+        rt.EndingAccess.Resolve.PreserveResolveSource = TRUE;
+        D3D12_RENDER_PASS_DEPTH_STENCIL_DESC ds = {};
+        ds.cpuDescriptor = dsv;
+        ds.DepthBeginningAccess.Type = D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE;
+        ds.StencilBeginningAccess.Type = D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS;
+        ds.DepthEndingAccess.Type = D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_DISCARD;
+        ds.StencilEndingAccess.Type = D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS;
+        list->BeginRenderPass(1, &rt, &ds, D3D12_RENDER_PASS_FLAG_BIND_READ_ONLY_DEPTH);
+        list->EndRenderPass();
+        list->ResolveSubresourceRegion(dst2, 0, 0, 0, target, 0, nullptr, DXGI_FORMAT_R8G8B8A8_UNORM,
+                                       D3D12_RESOLVE_MODE_AVERAGE);
+        auto t1 = Read(gpu, dst, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+        auto t2 = Read(gpu, dst2, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+        target->Release(), dst->Release(), dst2->Release(), depth->Release();
+        const char *r = Expect(t1, "dst", [](int, int) { return kGreen; });
+        return strcmp(r, "ok") ? r : Expect(t2, "preserved", [](int, int) { return kGreen; });
+    }
+
+    ID3D12RootSignature *root = CbvRootSignature(gpu);
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC gd;
+    QuadPipeline(gpu, root, vs_bytes, ps_bytes, &gd)->Release();
+    gd.SampleDesc.Count = 4;
+    ID3D12PipelineState *pso;
+    TRY(gpu.device->CreateGraphicsPipelineState(&gd, __uuidof(ID3D12PipelineState), (void **)&pso),
+        "PSO (4x MSAA discardresolve)");
+    struct { float rect[4], color[4], z; } draws[2] = {
+        {{-1, -1, 1, 1}, {0, 1, 0, 1}, 0},
+        {{-1, -1, 0, 1}, {1, 0, 0, 1}, 0},
+    };
+    ID3D12Resource *cbuf = gpu.Buffer(D3D12_HEAP_TYPE_UPLOAD, 512, D3D12_RESOURCE_STATE_GENERIC_READ);
+    uint8_t *p;
+    TRY(cbuf->Map(0, nullptr, (void **)&p), "Map");
+    memcpy(p, &draws[0], sizeof draws[0]);
+    memcpy(p + 256, &draws[1], sizeof draws[1]);
+    cbuf->Unmap(0, nullptr);
+
+    auto rt = PassTarget(rtv, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_DISCARD, kBlueF);
+    ResolveInto(rt, target, dst, 1, &whole);
+    rt.EndingAccess.Resolve.PreserveResolveSource = TRUE;
+    D3D12_RENDER_PASS_DEPTH_STENCIL_DESC ds = {};
+    ds.cpuDescriptor = dsv;
+    ds.DepthBeginningAccess.Type = D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_DISCARD;
+    ds.StencilBeginningAccess.Type = D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS;
+    ds.DepthEndingAccess.Type = D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_DISCARD;
+    ds.StencilEndingAccess.Type = D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS;
+    list->BeginRenderPass(1, &rt, &ds, D3D12_RENDER_PASS_FLAG_BIND_READ_ONLY_DEPTH);
+    D3D12_VIEWPORT viewport = {0, 0, 4, 4, 0, 1};
+    D3D12_RECT scissor = {0, 0, 4, 4};
+    list->SetGraphicsRootSignature(root);
+    list->SetPipelineState(pso);
+    list->RSSetViewports(1, &viewport);
+    list->RSSetScissorRects(1, &scissor);
+    list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    D3D12_GPU_VIRTUAL_ADDRESS cb_va = cbuf->GetGPUVirtualAddress();
+    list->SetGraphicsRootConstantBufferView(0, cb_va);
+    list->DrawInstanced(6, 1, 0, 0);
+    list->SetGraphicsRootConstantBufferView(0, cb_va + 256);
+    list->DrawInstanced(6, 1, 0, 0);
+    list->EndRenderPass();
+    list->ResolveSubresourceRegion(dst2, 0, 0, 0, target, 0, nullptr, DXGI_FORMAT_R8G8B8A8_UNORM,
+                                   D3D12_RESOLVE_MODE_AVERAGE);
+
+    auto t1 = Read(gpu, dst, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+    auto t2 = Read(gpu, dst2, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+    target->Release(), dst->Release(), dst2->Release(), depth->Release(), cbuf->Release(), pso->Release(),
+        root->Release();
+    const char *r = Expect(t1, "dst", [](int x, int) { return x < 2 ? kRed : kGreen; });
+    return strcmp(r, "ok") ? r : Expect(t2, "preserved", [](int x, int) { return x < 2 ? kRed : kGreen; });
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     Gpu gpu;
@@ -493,6 +586,11 @@ int main(int argc, char **argv) {
         return printf("order %s\n", order(gpu, list)), 0;
     if (only && !strcmp(only, "emptybarrier"))
         return printf("emptybarrier %s\n", emptybarrier(gpu, list)), 0;
+    if (only && !strcmp(only, "discardresolve"))
+        return printf("discardresolve %s\n",
+                      sizeof(void *) == 4 ? "untested: no descriptor heaps in 32-bit DXMT"
+                                          : discardresolve(gpu, list)),
+               0;
     static const struct { const char *name; const char *(*row)(Gpu &, ID3D12GraphicsCommandList7 *); } views[] = {
         {"resolveregion", resolveregion}, {"renderpass", renderpass}, {"drawpass", drawpass}, {"mrt", mrt},
         {"depthpass", depthpass},
