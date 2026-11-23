@@ -1991,6 +1991,32 @@ R. **Layout and build** (maintainer's direction, 2026-10-30; before step 3, so n
   switch until parity, measured with a 32-bit D3D9 title in the VM's lanes separately.
 - C5 (after C4's parity): `mtld3d.dll`, `mtld3d.so`, mtld3d's transport and wire, the `mtl` facade (its wire mirrors
   with it) and C3's interim pieces retire, and with them winemetal's MSL source-library slots for D3D9.
+  **Done 2026-11-23 at DXMTRS main `8439c756` (`8439c756209889517c95028e140940286b71ae31`, commits `1c228657`,
+  `b6e1ed50`, `8439c756`), which MacNeutron pins.**
+  Moved `d3d9-rt`'s 5 static internal shaders (`mtld3d_blit_vs/ps`, `resolve_depth_vs/fs/stencil_fs`) into
+  `src/dxmt/dxmt_command.metal` (loaded from `Device::cmd_library_handle()`), and retired winemetal unix-call slot `157`
+  (`MTLDevice_newLibraryWithSourceOptions`) in-place as `None` (table stays 165 entries, slots `158..=164` unrenumbered;
+  7 refused slots on VM guest). Deleted retired `mtld3d.dll`, `mtld3d.so`, `src/d3d9/{shim,unix,mtl}`,
+  `tests/d3d9/dxso-corpus`, legacy MSL emitter/disk-cache/zstd, and `mtld3d` escape hatch; merged `src/d3d9/rt` into
+  `src/d3d9/` (`front-end` feature pattern, `LGPL-2.1-or-later AND Zlib`); trimmed `shared` (12 modules) and `core`
+  (single-lane AIR/dxmt-core); `d3d9.dll` links `winemetal.dll` directly on ARM64X, x86_64, and i386. MacNeutron
+  dropped `mtld3d.dll`/`mtld3d.so` from bundles, VM images, and notices, switched prefix/test checks
+  (`vm/guest/run-game.sh`, `d3d9_triangle.cpp`, `d3d9_dynamic.cpp`) to `winemetal.dll`, and collapsed gates to
+  single-lane core while preserving §6 names. Translator key moved once
+  (`e1074f4f5f966252586e28ef2b935c7a4bc9acb462ef098691730f9091e6e59c` to
+  `8455aa01c317f0d8f5e35793a63a77f2b3238ff4377d4f21b2505ce245c8b4da`) from `src/airconv/Cargo.toml` dev-dependency
+  cleanup with identical translated output.
+  Verified across all gates: DXMTRS `tools/rust-check.sh` 6/6 (`audit: clean (1045 files)`, 288 `d3d9` + 1,173
+  `mtld3d-core` tests, `derive_inventory.txt` 832 types) and GitHub CI green (`8439c756`); Mac `jt1`/`jt2`/`jq1` (`make
+  wine-arm64`, `licences_test`, `wm-probe` 11/11 `winemetal.so` and `std` `winemetal.dylib`, `cover.sh` 165/165, 6/6
+  `vm/metal/wm` ASan/UBSan tests, `wine-arm64/check.sh` 100% PASS, `presenter/check.sh` PASS, `d3d9-check.sh` warm
+  SQLite `hits=24 misses=0`, 22/22 Metal API Validation 0 reports, `c5_probes` zero `mtld3d.*`); `jx1` (`x64` 420/420,
+  `arm64ec` 420/420); `jl1` (0-line diff vs C4e `default`, `conf-compare: ok` vs C4e `mtld3d`); `jc1` (`JC_D3D10=1`:
+  `vm/dxmt/check-build.sh`, `mtld3d_guest_test.sh`, `vm/metal/gate.sh` 7 refused slots on 64/32-bit, `vm/dxmt/gate.sh`
+  48/48, `vm/dxmt/d3d9-gate.sh` `old` and `new` WoW64 `D3D9_BENCH=1`, 0 `was not recorded`, 4/4 VM `conf-compare: ok`);
+  `jrel2` (live 32-bit Anomaly 2 on `old` and `new` WoW64 via unmodified `vm/guest/run-game.sh`: zero `mtld3d.*` in
+  `/opt/mn-wine` or prefix, `system32` and `syswow64` `winemetal.dll` markers, warm pass 2 skips `wineboot -u`,
+  3,015/2,197 and 3,051/2,259 drawables at 68-77 FPS, active depth snapshot, 0 core refusals, 0 audio drops).
 - The C, C++ and Objective-C left in the tree (maintainer, 2026-11-16: port them, like the rest of DXMTRS; the inventory,
   the order and the open questions are in `docs/superpowers/plans/2026-11-16-dxmtrs-c-to-rust.md`). First landing
   2026-11-16 at DXMTRS main 40c76ab1 (40c76ab1def4126fe30b137bbb69e0aac138670a), which MacNeutron pins: the three groups that
