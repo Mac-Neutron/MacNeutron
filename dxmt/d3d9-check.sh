@@ -7,34 +7,21 @@
 # d3d9_triangle (build/dxmt-tests-arm64, rows "arm64: ...") is a native arm64 process: it draws through the ARM64X
 # d3d9.dll's native half, which no x64 program reaches (the launcher starts it as it is, Preflight admits arm64).
 # Then with vsync ("d3d9 vsync ok": 60 presents at D3DPRESENT_INTERVAL_ONE paced, not waiting out mtld3d's 1 s cap),
-# and in the same prefix as another wine.app left it (its stamp another runtime's, mtld3d.dll's marker gone), which the
-# launcher's prefix update must give the marker back. With OLD=<another wine.app> the same run again in a prefix that
-# wine.app made first (it must lack mtld3d.dll: a player's prefix from before mtld3d). Prints "d3d9-check: ok" or what
-# failed; exits 1 on a miss. DXMT_CHECK_WORK names the work folder (default a temporary one). MTLD3D_SO=<mtld3d.so>
-# runs that build of D3D9's Unix side instead (the loopback build of D3D9 spec §5.1, dxmt/mtld3d-build.sh --loopback),
-# swapped into the tool folder's own wine.app and signed with MACNEUTRON_SIGN_IDENTITY (ad hoc without one).
-# MTLD3D_PE=<folder> does the same with its ARM64X d3d9.dll and mtld3d.dll (DXMT's build marks both builtin:
-# build/wine-arm64-src/dxmt-install/aarch64-windows): a build of D3D9's PE side checked without rebuilding wine.app.
-# Default lane (C4e, D3D9_RUNTIME=core, D3D9_BACKEND=air): runs every row on D3D9's in-process encoder in d3d9.dll
-# on dxmt-core without setting runtime.mode=core (proving core is the build default): each launch logs to a folder of
-# its own, which must hold the core device's line ("d3d9 core: device on dxmt-core") and not mtld3d.so's encoder line
-# ("texture versions: rename pool cap", printed by every mtld3d device) nor a line saying the core cannot present (no
-# command library, no Metal view, a pipeline that does not build) nor that a dynamic buffer fell back to staging ("has no
-# mapped memory", DXMTRS C4c-2b), lines the code that ran prints, not the switch. Both halves of ARM64X d3d9.dll
-# carry the core runtime (C4d-6), so arm64 also logs 'loaded at .* as aarch64' and runs on dxmt-core. No shader-backend,
-# kinds or conformance rows under core. Its stamp is "d3d9-check: lane default (core)", its verdict "d3d9-check: ok".
-# Escape lanes (D3D9_RUNTIME=mtld3d, injecting runtime.mode=mtld3d): D3D9_BACKEND=air sets no shader.backend, so
-# mtld3d's default AIR backend runs (stamp "d3d9-check: lane mtld3d (runtime.mode=mtld3d)", verdict
-# "d3d9-check: ok (mtld3d)"); D3D9_BACKEND=msl sets shader.backend=msl (stamp "d3d9-check: lane msl
-# (runtime.mode=mtld3d;shader.backend=msl)", verdict "d3d9-check: ok (msl)"). Both mtld3d lanes run the programs from a
-# scratch copy of the folder, so their mtld3d_shaders.bin lands in the work folder, and D3D9_KINDS=1 adds the kinds row
-# (emit_corpus --kinds, built from build/wine-arm64-src/dxmt, which must match the build): d3d9_triangle is
-# fixed-function, so the mtld3d/air lane must show air_ffvs and air_ffps records, and the msl lane ffvs and ffps records
-# and no air_* record at all (programmable kinds are dxmt/mtld3d-conformance.sh's).
-# Every lane also runs d3d9_triangle shaders (DXMTRS C4b-2's 22 shader rows, C4b2-11; "shaders strict" under core: the
-# first frame must match), its rows "shaders-<row>". Its launch's logs hold no core refusal line ("... is not
-# implemented under runtime.mode = core") in any lane (under core since DXMTRS C4c-2a, which draws the crossing row),
-# else "shaders-runtime". Every lane also runs d3d9_triangle state (DXMTRS C4b-3a's 12 rows of API state and inert
+# and in the same prefix as another wine.app left it (its stamp another runtime's, winemetal.dll's marker gone), which
+# the launcher's prefix update must give the marker back. With OLD=<another wine.app> the same run again in a prefix
+# that wine.app made first (it must lack winemetal.dll: a player's prefix from before winemetal). Prints "d3d9-check: ok"
+# or what failed; exits 1 on a miss. DXMT_CHECK_WORK names the work folder (default a temporary one). MTLD3D_PE=<folder>
+# swaps in its ARM64X d3d9.dll (and winemetal.dll if present) into the tool folder's own wine.app without rebuilding
+# wine.app.
+# Runs every row on D3D9's in-process encoder in d3d9.dll on dxmt-core: each launch logs to a folder of its own, which
+# must hold the core device's line ("d3d9 core: device on dxmt-core") and none of the legacy encoder line
+# ("texture versions: rename pool cap"), nor a line saying the core cannot present (no command library, no Metal view,
+# a pipeline that does not build), nor that a dynamic buffer fell back to staging ("has no mapped memory", DXMTRS
+# C4c-2b). Both halves of ARM64X d3d9.dll carry the core runtime (C4d-6), so arm64 also logs 'loaded at .* as aarch64'
+# and runs on dxmt-core. Its verdict is "d3d9-check: ok".
+# Also runs d3d9_triangle shaders (DXMTRS C4b-2's 22 shader rows, C4b2-11; "shaders strict": the
+# first frame must match), its rows "shaders-<row>". Its launch's logs hold no core refusal line (since DXMTRS C4c-2a,
+# which draws the crossing row), else "shaders-runtime". Every lane also runs d3d9_triangle state (DXMTRS C4b-3a's 12 rows of API state and inert
 # objects and C4c-6a's four of the getters, the stubs, Present's other forms and an extended device: state-getters,
 # state-stubs, state-present, state-ex: 16; "state strict" under core), its rows "state-<row>"; its launch's logs hold no
 # refusal line in any lane (under core since DXMTRS C4c-1, which made buffer locks the core's, and C4c-6a, which makes
@@ -117,23 +104,14 @@ made=; [ -n "${DXMT_CHECK_WORK:-}" ] || made=1
 WORK=${DXMT_CHECK_WORK:-$(mktemp -d "${TMPDIR:-/tmp}/macneutron-d3d9.XXXXXX")}
 trap 's=$?; [ -z "$made" ] || { rm -rf "$WORK/ours" "$WORK/old" "$WORK/compat" "$WORK/progs"; [ "$s" != 0 ] || rm -rf "$WORK"; }' EXIT
 fail=
-BK=${D3D9_BACKEND:-air} sfx= msl= RT=${D3D9_RUNTIME:-core}
-case $RT/$BK in
-  core/air) echo "d3d9-check: lane default (core)" ;;
-  core/*) echo "d3d9-check: D3D9_RUNTIME=core takes the default backend lane only" >&2; exit 2 ;;
-  mtld3d/air) sfx=" (mtld3d)"; echo "d3d9-check: lane mtld3d (runtime.mode=mtld3d)" ;;
-  mtld3d/msl) sfx=" (msl)" msl=1; echo "d3d9-check: lane msl (runtime.mode=mtld3d;shader.backend=msl)" ;;
-  mtld3d/*) echo "d3d9-check: D3D9_BACKEND=$BK: air or msl" >&2; exit 2 ;;
-  *) echo "d3d9-check: D3D9_RUNTIME=$RT: mtld3d or core" >&2; exit 2 ;;
-esac
+echo "d3d9-check: lane default (core)"
 rm -rf "$WORK/mtld3d-logs" "$WORK/progs"; mkdir -p "$WORK/mtld3d-logs" "$WORK/progs/x64" "$WORK/progs/arm64"
 export DXMT_SHADER_CACHE_PATH="${DXMT_SHADER_CACHE_PATH:-$WORK/shader-cache}"
 mkdir -p "$DXMT_SHADER_CACHE_PATH"
 cp "$EXE" "$DYN" "$WORK/progs/x64/" && cp "$ARM" "$WORK/progs/arm64/" \
   || { echo "d3d9-check: could not copy the programs to $WORK/progs" >&2; exit 1; }
 EXE=$WORK/progs/x64/$(basename "$EXE") DYN=$WORK/progs/x64/$(basename "$DYN") ARM=$WORK/progs/arm64/$(basename "$ARM")
-rt_cfg=; [ "$RT" != mtld3d ] || rt_cfg=";runtime.mode=mtld3d"
-export MTLD3D_CONFIG="${MTLD3D_CONFIG:+$MTLD3D_CONFIG;}log.dir=Z:$WORK/mtld3d-logs${rt_cfg}${msl:+;shader.backend=msl}"
+export MTLD3D_CONFIG="${MTLD3D_CONFIG:+$MTLD3D_CONFIG;}log.dir=Z:$WORK/mtld3d-logs"
 # launch <tool> <compat> <name> [<secs> [arg...]]: d3d9_triangle.exe (or $PROG) [arg...] through <tool>'s launcher in
 # the prefix of <compat>, killed after <secs> (default 120); its lines in $WORK/<name>.txt. MACNEUTRON_VM=0: the macOS
 # path, whatever VM folder this Mac has.
@@ -141,11 +119,9 @@ launch() {
   tool=$1 compat=$2 name=$3 secs=${4:-120}
   shift 3; [ $# -eq 0 ] || shift
   cfg=$MTLD3D_CONFIG
-  if [ "$RT" = core ]; then
-    mkdir -p "$WORK/mtld3d-logs/$name"
-    cfg="$cfg;log.dir=Z:$WORK/mtld3d-logs/$name"
-    case " $* " in *" strict "*) cfg="$cfg;shader.asyncCompile=false" ;; esac
-  fi
+  mkdir -p "$WORK/mtld3d-logs/$name"
+  cfg="$cfg;log.dir=Z:$WORK/mtld3d-logs/$name"
+  case " $* " in *" strict "*) cfg="$cfg;shader.asyncCompile=false" ;; esac
   [ "$name" != lost ] || cfg="$cfg;debug.failNextSubmit=true"
   [ "$name" != pace ] || cfg="$cfg;present.maxFps=50;debug.presentOccluded=true"
   [ "$name" != scale ] || cfg="$cfg;render.scale=0.5;render.lodBias=true;debug.presentOccluded=true"
@@ -157,10 +133,9 @@ launch() {
   wait "$pid" || true
   { kill "$dog" && wait "$dog"; } 2> /dev/null || true
   tr -d '\r' < "$WORK/$name.out" > "$WORK/$name.txt"
-  [ "$RT" = core ] || return 0
-  # The core lane's proof, from the code that ran: a PE .log file with d3d9.dll's identity and the core device's line,
-  # and none of mtld3d.so's encoder line or mtld3d::(unix|shim)/mtld3d.so/mtld3d.dll log lines; both halves of ARM64X
-  # d3d9.dll carry the core runtime (C4d-6), so arm64 also runs on dxmt-core.
+  # The core proof, from the code that ran: a PE .log file with d3d9.dll's identity and the core device's line,
+  # and none of the legacy encoder line; both halves of ARM64X d3d9.dll carry the core runtime (C4d-6), so arm64
+  # also runs on dxmt-core.
   d="$WORK/mtld3d-logs/$name"
   enc='texture versions: rename pool cap'
   mtld3d_lines='mtld3d::(unix|shim)|\] mtld3d\.so |\] mtld3d\.dll '
@@ -177,17 +152,17 @@ launch() {
       && ! /usr/bin/grep -rqE "$unpresented" "$d" && refusals_ok "$name" "$d"; then
       echo "d3d9-check: $name: runtime core (aarch64)"
     else
-      echo "d3d9-check: $name: no aarch64 core device, missing PE log, mtld3d.so line, refusal, or can't-present line, in $d"; fail="$fail $name-runtime"
+      echo "d3d9-check: $name: no aarch64 core device, missing PE log, legacy line, refusal, or can't-present line, in $d"; fail="$fail $name-runtime"
       /usr/bin/grep -rhE "$refused|$unpresented|$mtld3d_lines" "$d" | head -5 | sed "s|^|d3d9-check: $name: |" || true
     fi
   elif [ "$name" = dynamic ]; then
-    # d3d9_dynamic.exe makes no device (Direct3DCreate9 through GetProcAddress only): PE log + config's mode, no mtld3d.so.
+    # d3d9_dynamic.exe makes no device (Direct3DCreate9 through GetProcAddress only): PE log + config, no legacy lines.
     if [ -n "$pe_log" ] && /usr/bin/grep -rqF '] d3d9.dll ' "$d" \
-      && /usr/bin/grep -rqF 'config: runtime.mode = core' "$d" && ! /usr/bin/grep -rqF "$enc" "$d" \
+      && /usr/bin/grep -rqF 'config: log.dir = ' "$d" && ! /usr/bin/grep -rqF "$enc" "$d" \
       && ! /usr/bin/grep -rqF 'carries no core runtime' "$d" && ! /usr/bin/grep -rqE "$mtld3d_lines" "$d"; then
       echo "d3d9-check: $name: runtime core (no device)"
     else
-      echo "d3d9-check: $name: no core runtime, missing PE log, or mtld3d.so line in $d"; fail="$fail $name-runtime"
+      echo "d3d9-check: $name: no core runtime, missing PE log, or legacy line in $d"; fail="$fail $name-runtime"
       /usr/bin/grep -rhE "$mtld3d_lines" "$d" | head -5 | sed "s|^|d3d9-check: $name: |" || true
     fi
   elif [ -n "$pe_log" ] && /usr/bin/grep -rqF '] d3d9.dll ' "$d" \
@@ -196,7 +171,7 @@ launch() {
     && ! /usr/bin/grep -rqE "$unpresented" "$d" && refusals_ok "$name" "$d"; then
     echo "d3d9-check: $name: runtime core"
   else
-    echo "d3d9-check: $name: no core device, missing PE log, mtld3d.so line, refusal, or can't-present line, in $d"; fail="$fail $name-runtime"
+    echo "d3d9-check: $name: no core device, missing PE log, legacy line, refusal, or can't-present line, in $d"; fail="$fail $name-runtime"
     /usr/bin/grep -rhE "$refused|$unpresented|$mtld3d_lines" "$d" | head -5 | sed "s|^|d3d9-check: $name: |" || true
   fi
 }
@@ -220,7 +195,7 @@ launch() {
 # multisampled surface is the core's; the msaa launch's since DXMTRS C4c-4b: a depth-stencil copy of 4 samples is the
 # core's, and since DXMTRS C4c-4d its resolve; the blit launch's since DXMTRS C4c-4d: a depth-stencil resolve is the
 # core's; the queries launch's since DXMTRS C4c-5: CreateQuery is the core's); the other launches are not held to it.
-refused='is not implemented under runtime.mode = core'
+refused='d3d9 core: .* is not implemented'
 fixed_refusals='IDirect3DDevice9::Draw*PrimitiveUP (a depth texture at a vertex sampler)'
 buffers_refusals='IDirect3DDevice9::Draw*Primitive (a layout no binding can fetch)'
 reset_refusals='IDirect3DDevice9::Reset (a back-buffer format the core does not make)'
@@ -232,13 +207,13 @@ refusals_ok() {
         fixed) set_=$fixed_refusals ;; buffers) set_=$buffers_refusals ;;
         reset) set_=$reset_refusals ;; extras) set_=$extras_refusals ;;
       esac
-      [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] \
+      [ "$(/usr/bin/grep -rhE "$refused" "$2" | wc -l | tr -d ' ')" = "$(printf '%s\n' "$set_" | wc -l | tr -d ' ')" ] \
         || return 1
       printf '%s\n' "$set_" | while IFS= read -r n; do
-        /usr/bin/grep -rqF "d3d9 core: $n $refused" "$2" || exit 1
+        /usr/bin/grep -rqF "d3d9 core: $n is not implemented" "$2" || exit 1
       done ;;
     shaders|state|textures|targets|blend|mrt|msaa|blit|queries|fullscreen|parity|lost|pace|scale|depth|arm64|cache-cold|cache-warm)
-      [ "$(/usr/bin/grep -rhF "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
+      [ "$(/usr/bin/grep -rhE "$refused" "$2" | wc -l | tr -d ' ')" = 0 ] ;;
     *) return 0 ;;
   esac
 }
@@ -252,12 +227,7 @@ check() {
 }
 rm -rf "$WORK/ours" "$WORK/compat"; mkdir -p "$WORK/compat"
 "$CLI" install --tool-dir "$WORK/ours" --wine-app "$APP" > /dev/null || { echo "d3d9-check: install failed" >&2; exit 1; }
-if [ -n "${MTLD3D_SO:-}" ]; then
-  so="$WORK/ours/wine.app/Contents/Resources/lib/wine/aarch64-unix/mtld3d.so"
-  rm -f "$so" && cp "$MTLD3D_SO" "$so" && codesign -f -s "${MACNEUTRON_SIGN_IDENTITY:--}" "$so" 2> /dev/null \
-    || { echo "d3d9-check: could not put $MTLD3D_SO in the tool folder" >&2; exit 1; }
-fi
-for dll in d3d9.dll mtld3d.dll winemetal.dll; do
+for dll in d3d9.dll winemetal.dll; do
   [ -n "${MTLD3D_PE:-}" ] || break
   [ "$dll" != winemetal.dll ] || [ -f "$MTLD3D_PE/$dll" ] || continue
   pe="$WORK/ours/wine.app/Contents/Resources/lib/wine/aarch64-windows/$dll"
@@ -269,7 +239,7 @@ PROG=$DYN; launch ours fresh dynamic; PROG=  # (an assignment before a function 
 check dynamic "module imports"
 launch ours fresh vsync 120 vsync
 check vsync vsync
-strict=; [ "$RT" != core ] || strict=strict  # the core compiles asynchronously by default since C4d-3; strict launches pass shader.asyncCompile=false
+strict=strict  # the core compiles asynchronously by default since C4d-3; strict launches pass shader.asyncCompile=false
 launch ours fresh shaders 300 shaders $strict
 check shaders "caps vs1 vs2 vs3 consti constb rel decl indexed fan bypass vsff alpha fog mask wire cull viewport clip
   srgb crossing getters"
@@ -310,14 +280,12 @@ check buffers "buf-d3d buf-lock buf-draw buf-start buf-offset buf-strip buf-fan 
   buf-instanced buf-shader buf-tex buf-nobuffer buf-release buf-odd buf-cross buf-cross-up buf-cross-multi
   buf-cross-odd buf-cross-indexed buf-wide buf-dyn-preserve buf-dyn-many buf-dyn-index buf-dyn-read buf-dyn-cross
   buf-writeonly"
-# Under core: the line d3d9-rt logs at the first draw that reads a dynamic buffer in place (DXMTRS C4c-2b).
-if [ "$RT" = core ]; then
-  if /usr/bin/grep -rqF 'd3d9 core: dynamic buffers are read in place' "$WORK/mtld3d-logs/buffers"; then
-    echo "d3d9-check: buffers: dynamic buffers are read in place"
-  else
-    echo "d3d9-check: buffers: no 'dynamic buffers are read in place' line in $WORK/mtld3d-logs/buffers"
-    fail="$fail buffers-direct"
-  fi
+# The line d3d9.dll logs at the first draw that reads a dynamic buffer in place (DXMTRS C4c-2b).
+if /usr/bin/grep -rqF 'd3d9 core: dynamic buffers are read in place' "$WORK/mtld3d-logs/buffers"; then
+  echo "d3d9-check: buffers: dynamic buffers are read in place"
+else
+  echo "d3d9-check: buffers: no 'dynamic buffers are read in place' line in $WORK/mtld3d-logs/buffers"
+  fail="$fail buffers-direct"
 fi
 launch ours fresh blit 240 blit $strict
 check blit "cf-rt cf-lockable cf-bb cf-unbound cf-rtex cf-autogen cf-msaa cf-plain cf-reject us-tex us-level us-rtex
@@ -343,135 +311,102 @@ launch ours fresh pace 120 pace $strict maxfps50
 check pace "pace-imm pace-two pace-occ"
 launch ours fresh scale 180 scale $strict
 check scale "scale-desc scale-draw scale-stretch scale-vpos scale-lod scale-write scale-mfx"
-if [ "$RT" = core ]; then
-  if /usr/bin/grep -rqF 'd3d9 core: MetalFX spatial scaler engaged' "$WORK/mtld3d-logs/scale"; then
-    echo "d3d9-check: scale: MetalFX spatial scaler engaged"
-  else
-    echo "d3d9-check: scale: no 'd3d9 core: MetalFX spatial scaler engaged' line in $WORK/mtld3d-logs/scale"
-    fail="$fail scale-mfx-log"
-  fi
-fi
-if [ "$RT" != core ] && /usr/bin/grep -rqF "$refused" "$WORK/mtld3d-logs"; then
-  echo "d3d9-check: shaders, state: a core refusal line in an mtld3d lane's logs"; fail="$fail shaders-runtime"
+if /usr/bin/grep -rqF 'd3d9 core: MetalFX spatial scaler engaged' "$WORK/mtld3d-logs/scale"; then
+  echo "d3d9-check: scale: MetalFX spatial scaler engaged"
+else
+  echo "d3d9-check: scale: no 'd3d9 core: MetalFX spatial scaler engaged' line in $WORK/mtld3d-logs/scale"
+  fail="$fail scale-mfx-log"
 fi
 PROG=$ARM; launch ours fresh arm64; PROG=
 check arm64
-P="$WORK/compat/fresh/pfx/drive_c/windows/system32/mtld3d.dll"
+P="$WORK/compat/fresh/pfx/drive_c/windows/system32/winemetal.dll"
 rm -f "$P" && echo "wine.app another msync=0" > "$WORK/compat/fresh/version"
 launch ours fresh stale
 check stale
-[ -f "$P" ] || { echo "d3d9-check: stale: the prefix update wrote no mtld3d.dll marker"; fail="$fail stale-marker"; }
+[ -f "$P" ] || { echo "d3d9-check: stale: the prefix update wrote no winemetal.dll marker"; fail="$fail stale-marker"; }
 if [ -n "${OLD:-}" ]; then
   rm -rf "$WORK/old"
   "$CLI" install --tool-dir "$WORK/old" --wine-app "$(cd "$OLD" && pwd)" > /dev/null \
     || { echo "d3d9-check: install of OLD failed" >&2; exit 1; }
   env STEAM_COMPAT_DATA_PATH="$WORK/compat/old" SteamAppId=0 "$WORK/old/bin/macneutron" launch getcompatpath "$WORK" \
     > /dev/null 2>&1 || { echo "d3d9-check: OLD made no prefix" >&2; exit 1; }
-  [ ! -f "$WORK/compat/old/pfx/drive_c/windows/system32/mtld3d.dll" ] \
-    || { echo "d3d9-check: OLD's prefix has mtld3d.dll already: OLD is no wine.app from before mtld3d" >&2; exit 1; }
+  [ ! -f "$WORK/compat/old/pfx/drive_c/windows/system32/winemetal.dll" ] \
+    || { echo "d3d9-check: OLD's prefix has winemetal.dll already: OLD is no wine.app from before winemetal" >&2; exit 1; }
   launch ours old updated
   check updated
 fi
-if [ "$RT" = core ]; then
-  # Core SQLite shader cache + async compile + real D3D11 single-table coexistence check (DXMTRS C4d-3).
-  rm -rf "$WORK/cache-coexist"; mkdir -p "$WORK/cache-coexist"
-  _saved_cache_path=$DXMT_SHADER_CACHE_PATH
-  _saved_mtld3d_cfg=$MTLD3D_CONFIG
-  export DXMT_SHADER_CACHE_PATH="$WORK/cache-coexist"
-  export DXMT_CACHE_EXE="d3d9_coexist"
-  MTLD3D_CONFIG="$_saved_mtld3d_cfg;shader.asyncCompile=true;shaderCache.enable=true"
+# Core SQLite shader cache + async compile + real D3D11 single-table coexistence check (DXMTRS C4d-3).
+rm -rf "$WORK/cache-coexist"; mkdir -p "$WORK/cache-coexist"
+_saved_cache_path=$DXMT_SHADER_CACHE_PATH
+_saved_mtld3d_cfg=$MTLD3D_CONFIG
+export DXMT_SHADER_CACHE_PATH="$WORK/cache-coexist"
+export DXMT_CACHE_EXE="d3d9_coexist"
+MTLD3D_CONFIG="$_saved_mtld3d_cfg;shader.asyncCompile=true;shaderCache.enable=true"
 
-  shader_rows="caps vs1 vs2 vs3 consti constb rel decl indexed fan bypass vsff alpha fog mask wire cull viewport clip
-    srgb crossing getters"
-  launch ours fresh cache-cold 300 shaders
-  check cache-cold "$shader_rows"
-  db=$(find "$WORK/cache-coexist" -maxdepth 2 -name 'shaders_*.db' 2> /dev/null | head -1)
-  cold_tables=
-  if [ -z "$db" ]; then
-    echo "d3d9-check: cache-coexist: no shaders_*.db in $WORK/cache-coexist"
-    fail="$fail cache-cold-db"
-  else
-    cold_tables=$(sqlite3 "$db" "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'cache_%';" 2> /dev/null || true)
-    cold_count=$(printf '%s\n' "$cold_tables" | sed '/^$/d' | wc -l | tr -d ' ')
-    echo "d3d9-check: cache-coexist cold: db=$(basename "$db") tables=${cold_tables:-none} count=$cold_count"
-    if [ "$cold_count" != 1 ] || [ "$cold_tables" = "cache_5555813613417847110" ] || [ "$cold_tables" = "cache_10131673474557754031" ]; then
-      echo "d3d9-check: cache-coexist: expected 1 non-dev cache_* table, got '$cold_tables'"
-      fail="$fail cache-cold-table"
-    fi
-  fi
-  cold_sum=$(/usr/bin/grep -rhF 'd3d9 core: shader cache summary:' "$WORK/mtld3d-logs/cache-cold" 2> /dev/null | tail -1 || true)
-  echo "d3d9-check: cache-cold summary: ${cold_sum:-none}"
-  if ! printf '%s\n' "$cold_sum" | /usr/bin/grep -qE '(^|[ ,])(cache_)?misses=[1-9]' \
-    || ! printf '%s\n' "$cold_sum" | /usr/bin/grep -qE '(^|[ ,])recipes_saved=[1-9]'; then
-    echo "d3d9-check: cache-cold: missing misses>=1 or recipes_saved>=1 in summary"
-    fail="$fail cache-cold-summary"
-  fi
-
-  if [ ! -f "$ROOT/build/dxmt-tests/d3d11_draw.exe" ] || [ ! -d "$ROOT/dxmt/tests/shaders/d3d11" ]; then
-    echo "d3d9-check: cache-coexist: missing d3d11_draw.exe or shaders/d3d11"
-    fail="$fail cache-coexist-d3d11"
-  elif [ -n "$db" ]; then
-    cold_rows=$(sqlite3 "$db" "SELECT COUNT(*) FROM \"$cold_tables\";" 2> /dev/null || echo 0)
-    env DXMT_SHADER_CACHE_PATH="$WORK/cache-coexist" DXMT_CACHE_EXE="d3d9_coexist" \
-      STEAM_COMPAT_DATA_PATH="$WORK/compat/fresh" SteamAppId=0 MACNEUTRON_VM=0 MACNEUTRON_GRAPHICS=dxmt \
-      MACNEUTRON_NO_STEAM_BRIDGE=1 MACNEUTRON_NO_METALFX=1 \
-      "$WORK/ours/bin/macneutron" launch waitforexitandrun "$ROOT/build/dxmt-tests/d3d11_draw.exe" \
-      "Z:$ROOT/dxmt/tests/shaders/d3d11" < /dev/null > "$WORK/coexist-d3d11.out" 2>&1 &
-    dpid=$!
-    ( sleep 120; kill "$dpid" 2> /dev/null ) > /dev/null 2>&1 & ddog=$!
-    drc=0; wait "$dpid" || drc=$?
-    { kill "$ddog" && wait "$ddog"; } 2> /dev/null || true
-    tr -d '\r' < "$WORK/coexist-d3d11.out" > "$WORK/coexist-d3d11.txt"
-    db_count=$(find "$WORK/cache-coexist" -maxdepth 2 -name 'shaders_*.db' 2> /dev/null | wc -l | tr -d ' ')
-    d11_tables=$(sqlite3 "$db" "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'cache_%';" 2> /dev/null || true)
-    d11_count=$(printf '%s\n' "$d11_tables" | sed '/^$/d' | wc -l | tr -d ' ')
-    d11_rows=$(sqlite3 "$db" "SELECT COUNT(*) FROM \"$cold_tables\";" 2> /dev/null || echo 0)
-    echo "d3d9-check: cache-coexist d3d11: rc=$drc db_count=$db_count tables=${d11_tables:-none} count=$d11_count rows=${cold_rows}->${d11_rows}"
-    if [ "$drc" != 0 ] || [ "$db_count" != 1 ] || [ "$d11_count" != 1 ] || [ "$d11_tables" != "$cold_tables" ] || [ "$d11_rows" -le "$cold_rows" ]; then
-      echo "d3d9-check: cache-coexist: D3D11 failed, created extra DB, changed table, or added no rows"
-      fail="$fail cache-coexist-d3d11"
-    fi
-  fi
-
-  launch ours fresh cache-warm 300 shaders
-  check cache-warm "$shader_rows"
-  warm_sum=$(/usr/bin/grep -rhF 'd3d9 core: shader cache summary:' "$WORK/mtld3d-logs/cache-warm" 2> /dev/null | tail -1 || true)
-  echo "d3d9-check: cache-warm summary: ${warm_sum:-none}"
-  if ! printf '%s\n' "$warm_sum" | /usr/bin/grep -qE '(^|[ ,])(cache_)?hits=[1-9]' \
-    || ! printf '%s\n' "$warm_sum" | /usr/bin/grep -qE '(^|[ ,])(cache_)?misses=0([^0-9]|$)' \
-    || ! printf '%s\n' "$warm_sum" | /usr/bin/grep -qE '(^|[ ,])recipes_loaded=[1-9]'; then
-    echo "d3d9-check: cache-warm: missing hits>=1, misses=0, or recipes_loaded>=1 in summary"
-    fail="$fail cache-warm-summary"
-  fi
-
-  export DXMT_SHADER_CACHE_PATH="$_saved_cache_path"
-  unset DXMT_CACHE_EXE
-  MTLD3D_CONFIG="$_saved_mtld3d_cfg"
-elif [ "$BK" = air ]; then
-  /usr/bin/grep -rqE 'shader backend: air, translator [0-9a-f]{8}' "$WORK/mtld3d-logs" \
-    || { echo "d3d9-check: no 'shader backend: air' line in $WORK/mtld3d-logs"; fail="$fail air-log"; }
+shader_rows="caps vs1 vs2 vs3 consti constb rel decl indexed fan bypass vsff alpha fog mask wire cull viewport clip
+  srgb crossing getters"
+launch ours fresh cache-cold 300 shaders
+check cache-cold "$shader_rows"
+db=$(find "$WORK/cache-coexist" -maxdepth 2 -name 'shaders_*.db' 2> /dev/null | head -1)
+cold_tables=
+if [ -z "$db" ]; then
+  echo "d3d9-check: cache-coexist: no shaders_*.db in $WORK/cache-coexist"
+  fail="$fail cache-cold-db"
 else
-  /usr/bin/grep -rqE 'shader backend: msl, translator ' "$WORK/mtld3d-logs" \
-    || { echo "d3d9-check: no 'shader backend: msl' line in $WORK/mtld3d-logs"; fail="$fail msl-log"; }
-fi
-if [ "${D3D9_KINDS:-0}" = 1 ] && [ "$RT" != core ]; then
-  . "$ROOT/dxmt/pins"
-  line=$(cd "$ROOT/build/wine-arm64-src/dxmt" && PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 \
-    CARGO_TARGET_DIR="$ROOT/build/d3d9-cargo/kinds" cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-core \
-    --features disk-cache --example emit_corpus -- --kinds "$WORK"/progs/*/mtld3d_shaders.bin 2> /dev/null \
-    | sed -n '/^kinds /p') || line=
-  echo "d3d9-check: $BK $line"
-  if [ "$BK" = air ]; then
-    miss=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '
-      /^(air_)?(sm[0-9]|ff)(vs|ps)=/ { k = $1; sub(/^air_/, "", k); seen[k] = 1; if ($1 ~ /^air_/) { a[k] = $2; t += $2; if (k ~ /^ff/) af[k] = $2 } else m[k] = $2 }
-      END { for (k in seen) if (m[k] + a[k] > 0 && a[k] < 1) printf "%s ", k; if (t < 1) printf "no-air-records "; if (af["ffvs"] < 1 || af["ffps"] < 1) printf "no-air-ff-records " }')
-    kf=air-kinds
-  else
-    miss=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '
-      /^air_(sm[0-9]|ff)(vs|ps)=/ { t += $2 } /^ff(vs|ps)=/ { m[$1] = $2 }
-      END { if (t > 0) printf "air-records-under-msl "; if (m["ffvs"] < 1 || m["ffps"] < 1) printf "no-msl-records " }')
-    kf=msl-kinds
+  cold_tables=$(sqlite3 "$db" "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'cache_%';" 2> /dev/null || true)
+  cold_count=$(printf '%s\n' "$cold_tables" | sed '/^$/d' | wc -l | tr -d ' ')
+  echo "d3d9-check: cache-coexist cold: db=$(basename "$db") tables=${cold_tables:-none} count=$cold_count"
+  if [ "$cold_count" != 1 ] || [ "$cold_tables" = "cache_5555813613417847110" ] || [ "$cold_tables" = "cache_10131673474557754031" ]; then
+    echo "d3d9-check: cache-coexist: expected 1 non-dev cache_* table, got '$cold_tables'"
+    fail="$fail cache-cold-table"
   fi
-  if [ -z "$line" ]; then fail="$fail $kf"; elif [ -n "$miss" ]; then echo "d3d9-check: kinds: $miss"; fail="$fail $kf $miss"; fi
 fi
-[ -z "$fail" ] && echo "d3d9-check: ok$sfx" || { echo "d3d9-check: FAIL$fail"; exit 1; }
+cold_sum=$(/usr/bin/grep -rhF 'd3d9 core: shader cache summary:' "$WORK/mtld3d-logs/cache-cold" 2> /dev/null | tail -1 || true)
+echo "d3d9-check: cache-cold summary: ${cold_sum:-none}"
+if ! printf '%s\n' "$cold_sum" | /usr/bin/grep -qE '(^|[ ,])(cache_)?misses=[1-9]' \
+  || ! printf '%s\n' "$cold_sum" | /usr/bin/grep -qE '(^|[ ,])recipes_saved=[1-9]'; then
+  echo "d3d9-check: cache-cold: missing misses>=1 or recipes_saved>=1 in summary"
+  fail="$fail cache-cold-summary"
+fi
+
+if [ ! -f "$ROOT/build/dxmt-tests/d3d11_draw.exe" ] || [ ! -d "$ROOT/dxmt/tests/shaders/d3d11" ]; then
+  echo "d3d9-check: cache-coexist: missing d3d11_draw.exe or shaders/d3d11"
+  fail="$fail cache-coexist-d3d11"
+elif [ -n "$db" ]; then
+  cold_rows=$(sqlite3 "$db" "SELECT COUNT(*) FROM \"$cold_tables\";" 2> /dev/null || echo 0)
+  env DXMT_SHADER_CACHE_PATH="$WORK/cache-coexist" DXMT_CACHE_EXE="d3d9_coexist" \
+    STEAM_COMPAT_DATA_PATH="$WORK/compat/fresh" SteamAppId=0 MACNEUTRON_VM=0 MACNEUTRON_GRAPHICS=dxmt \
+    MACNEUTRON_NO_STEAM_BRIDGE=1 MACNEUTRON_NO_METALFX=1 \
+    "$WORK/ours/bin/macneutron" launch waitforexitandrun "$ROOT/build/dxmt-tests/d3d11_draw.exe" \
+    "Z:$ROOT/dxmt/tests/shaders/d3d11" < /dev/null > "$WORK/coexist-d3d11.out" 2>&1 &
+  dpid=$!
+  ( sleep 120; kill "$dpid" 2> /dev/null ) > /dev/null 2>&1 & ddog=$!
+  drc=0; wait "$dpid" || drc=$?
+  { kill "$ddog" && wait "$ddog"; } 2> /dev/null || true
+  tr -d '\r' < "$WORK/coexist-d3d11.out" > "$WORK/coexist-d3d11.txt"
+  db_count=$(find "$WORK/cache-coexist" -maxdepth 2 -name 'shaders_*.db' 2> /dev/null | wc -l | tr -d ' ')
+  d11_tables=$(sqlite3 "$db" "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'cache_%';" 2> /dev/null || true)
+  d11_count=$(printf '%s\n' "$d11_tables" | sed '/^$/d' | wc -l | tr -d ' ')
+  d11_rows=$(sqlite3 "$db" "SELECT COUNT(*) FROM \"$cold_tables\";" 2> /dev/null || echo 0)
+  echo "d3d9-check: cache-coexist d3d11: rc=$drc db_count=$db_count tables=${d11_tables:-none} count=$d11_count rows=${cold_rows}->${d11_rows}"
+  if [ "$drc" != 0 ] || [ "$db_count" != 1 ] || [ "$d11_count" != 1 ] || [ "$d11_tables" != "$cold_tables" ] || [ "$d11_rows" -le "$cold_rows" ]; then
+    echo "d3d9-check: cache-coexist: D3D11 failed, created extra DB, changed table, or added no rows"
+    fail="$fail cache-coexist-d3d11"
+  fi
+fi
+
+launch ours fresh cache-warm 300 shaders
+check cache-warm "$shader_rows"
+warm_sum=$(/usr/bin/grep -rhF 'd3d9 core: shader cache summary:' "$WORK/mtld3d-logs/cache-warm" 2> /dev/null | tail -1 || true)
+echo "d3d9-check: cache-warm summary: ${warm_sum:-none}"
+if ! printf '%s\n' "$warm_sum" | /usr/bin/grep -qE '(^|[ ,])(cache_)?hits=[1-9]' \
+  || ! printf '%s\n' "$warm_sum" | /usr/bin/grep -qE '(^|[ ,])(cache_)?misses=0([^0-9]|$)' \
+  || ! printf '%s\n' "$warm_sum" | /usr/bin/grep -qE '(^|[ ,])recipes_loaded=[1-9]'; then
+  echo "d3d9-check: cache-warm: missing hits>=1, misses=0, or recipes_loaded>=1 in summary"
+  fail="$fail cache-warm-summary"
+fi
+
+export DXMT_SHADER_CACHE_PATH="$_saved_cache_path"
+unset DXMT_CACHE_EXE
+MTLD3D_CONFIG="$_saved_mtld3d_cfg"
+[ -z "$fail" ] && echo "d3d9-check: ok" || { echo "d3d9-check: FAIL$fail"; exit 1; }

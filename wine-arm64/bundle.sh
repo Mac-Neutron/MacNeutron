@@ -80,10 +80,9 @@ done
 for f in COPYING.LIB LICENSE LICENSE.OLD; do put "$DXMT_TREE" "$f" "$R/DXMT/"; done
 put "$DXMT_IN" version "$R/DXMT/"
 put "$DXMT_IN" translator "$R/DXMT/"
-# Direct3D 9 on Metal (D3D9 spec §4, DXMTRS's src/d3d9), before signing too: its ARM64X pair over Wine's d3d9.dll among
-# Wine's builtins (DXMT's build marks both builtin), and mtld3d.so beside Wine's unix libraries.
-for f in d3d9.dll mtld3d.dll; do put "$DXMT_IN" "aarch64-windows/$f" "$R/lib/wine/aarch64-windows/"; done
-put "$DXMT_IN" aarch64-unix/mtld3d.so "$R/lib/wine/aarch64-unix/"
+# Direct3D 9 on Metal (D3D9 spec §4, DXMTRS's src/d3d9): its ARM64X d3d9.dll over Wine's among Wine's builtins
+# (DXMT's build marks it builtin; it runs on dxmt-core over winemetal.dll).
+put "$DXMT_IN" aarch64-windows/d3d9.dll "$R/lib/wine/aarch64-windows/"
 # The CPU the runtime was built for and the features its code may use (build.sh: MACNEUTRON_CPU), for the launcher's
 # check; none for the generic build.
 [ ! -f "$B/wine-arm64-src/cpu" ] || cp "$B/wine-arm64-src/cpu" "$R/cpu"
@@ -312,36 +311,35 @@ LC_ALL=C /usr/bin/grep -qxE '[0-9a-f]{64}' "$R/DXMT/translator" \
   || die "DXMT/translator is '$(cat "$R/DXMT/translator")', not the translator's 64-hex key"
 git -C "$DXMT_TREE" merge-base --is-ancestor "$DXMT_COMMIT" HEAD \
   || die "$DXMT_COMMIT (dxmt/pins) is not an ancestor of HEAD in $DXMT_TREE"
-# Direct3D 9 (D3D9 spec §4): winemetal.dll, d3d9.dll (it imports mtld3d.dll, which Wine's own never does) and
-# mtld3d.dll, Wine builtins and ARM64X images (llvm-readobj prints a CHPEMetadata block for any hybrid image, an
-# ARM64EC one too, so the machine line must say ARM64X; an ARM64X image also prints ARM64EC's, indented, in its
-# HybridObject view); winemetal.dll exports WMTCopyAllDevices in both halves, and core d3d9.dll imports winemetal.dll
-# in both halves; mtld3d.so signed; no assertion code in the binaries (production_asserts); its licence.
+# Direct3D 9 (D3D9 spec §4): winemetal.dll and d3d9.dll, Wine builtins and ARM64X images (llvm-readobj prints a
+# CHPEMetadata block for any hybrid image, an ARM64EC one too, so the machine line must say ARM64X; an ARM64X image
+# also prints ARM64EC's, indented, in its HybridObject view); winemetal.dll exports WMTCopyAllDevices in both halves,
+# and d3d9.dll imports winemetal.dll in both halves (Wine's own never does) and does not import mtld3d.dll; no
+# assertion code in the binaries (production_asserts); its licence.
 readobj="$(sh "$ROOT/dxmt/toolchain.sh")/llvm-readobj"
-for f in winemetal.dll d3d9.dll mtld3d.dll; do
+for f in winemetal.dll d3d9.dll; do
   builtin "$R/lib/wine/aarch64-windows/$f" || die "$f lacks Wine's builtin marker"
   "$readobj" --coff-load-config "$R/lib/wine/aarch64-windows/$f" | LC_ALL=C /usr/bin/grep -q CHPEMetadata \
     || die "$f is no ARM64X image"
   "$readobj" --file-headers "$R/lib/wine/aarch64-windows/$f" \
     | LC_ALL=C /usr/bin/grep -qxF '  Machine: IMAGE_FILE_MACHINE_ARM64X (0xA64E)' || die "$f's machine is not ARM64X"
 done
+[ ! -e "$R/lib/wine/aarch64-windows/mtld3d.dll" ] && [ ! -e "$U/mtld3d.so" ] \
+  || die "retired mtld3d.dll or mtld3d.so staged in wine.app"
 wm_exp=$("$readobj" --coff-exports "$R/lib/wine/aarch64-windows/winemetal.dll")
 printf '%s\n' "$wm_exp" | LC_ALL=C /usr/bin/grep -qxF '  Name: WMTCopyAllDevices' \
   || die "winemetal.dll's arm64 half lacks export WMTCopyAllDevices"
 printf '%s\n' "$wm_exp" | LC_ALL=C /usr/bin/grep -qxF '    Name: WMTCopyAllDevices' \
   || die "winemetal.dll's arm64ec half lacks export WMTCopyAllDevices"
 d3d9_imp=$("$readobj" --coff-imports "$R/lib/wine/aarch64-windows/d3d9.dll")
-printf '%s\n' "$d3d9_imp" | LC_ALL=C /usr/bin/grep -qx '  Name: mtld3d.dll' \
-  || die "lib/wine/aarch64-windows/d3d9.dll is Wine's, not DXMT's (it imports no mtld3d.dll)"
-if printf '%s\n' "$d3d9_imp" | LC_ALL=C /usr/bin/grep -qxF '    Name: winemetal.dll'; then
-  printf '%s\n' "$d3d9_imp" | LC_ALL=C /usr/bin/grep -qxF '  Name: winemetal.dll' \
-    || die "core d3d9.dll's arm64 half imports no winemetal.dll"
-elif printf '%s\n' "$d3d9_imp" | LC_ALL=C /usr/bin/grep -qxF '  Name: winemetal.dll'; then
-  die "core d3d9.dll's arm64ec half imports no winemetal.dll"
-fi
-[ -f "$U/mtld3d.so" ] && codesign --verify "$U/mtld3d.so" 2> /dev/null || die "no signed mtld3d.so in $U"
+printf '%s\n' "$d3d9_imp" | LC_ALL=C /usr/bin/grep -qxF '  Name: winemetal.dll' \
+  || die "d3d9.dll's arm64 half imports no winemetal.dll"
+printf '%s\n' "$d3d9_imp" | LC_ALL=C /usr/bin/grep -qxF '    Name: winemetal.dll' \
+  || die "d3d9.dll's arm64ec half imports no winemetal.dll"
+! printf '%s\n' "$d3d9_imp" | LC_ALL=C /usr/bin/grep -qi 'Name: mtld3d\.dll' \
+  || die "d3d9.dll still imports mtld3d.dll"
 production_asserts "$R/lib/wine/aarch64-windows/winemetal.dll" \
-  "$R/lib/wine/aarch64-windows/d3d9.dll" "$R/lib/wine/aarch64-windows/mtld3d.dll" "$U/mtld3d.so"
+  "$R/lib/wine/aarch64-windows/d3d9.dll"
 [ -f "$L/mtld3d/LICENSE" ] && [ -f "$L/mtld3d/crates/INDEX" ] || die "no licenses/mtld3d/LICENSE or crates/INDEX"
 # The Steam bridge (ship-base spec §7): an ARM64X Wine builtin (llvm-readobj prints a CHPEMetadata block only for a
 # hybrid image) and an arm64 unix side that needs nothing from ntdll.so it doesn't export; and a loader that may load

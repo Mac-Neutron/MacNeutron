@@ -1,88 +1,73 @@
-# Direct3D 9 in the guest (D3D9 M2b gate, the guest's half): mtld3d on the guest winemetal.so, its share folder from
-# vm/dxmt/d3d9-gate.sh (/mnt/share/d3d9). Writes /mnt/share/traces/d3d9/:
-#   unit-<name>.txt and .status  mtld3d's Linux unit tests, the facade's on the guest winemetal.so outside Wine (its
-#                                stub ntdll.so beside it, as metal-wm-test runs); unit-32-<name>, their i686 builds
-#                                on the i686 winemetal.so
-#   tri<64|32>-<fresh|nomarker|updated>.txt  d3d9_triangle (x86-64 and i386) in a new prefix, again with mtld3d.dll's
-#                                markers removed from system32 and syswow64 (a prefix made before mtld3d), and
+# Direct3D 9 in the guest (D3D9 M2b gate, the guest's half): d3d9.dll on dxmt-core over the guest winemetal.so, its
+# share folder from vm/dxmt/d3d9-gate.sh (/mnt/share/d3d9). Writes /mnt/share/traces/d3d9/:
+#   tri<64|32>-<fresh|nomarker|updated>.txt  d3d9_triangle (x86-64 and i386) in a new prefix, again with winemetal.dll's
+#                                markers removed from system32 and syswow64 (a prefix made before winemetal), and
 #                                after run-game.sh's update of such a prefix
-#   shd<64|32>-fresh.txt          d3d9_triangle shaders (DXMTRS C4b-2's 22 shader rows; "shaders strict" under core),
-#                                right after tri32-fresh, 300 s each
+#   shd<64|32>-fresh.txt          d3d9_triangle shaders (DXMTRS C4b-2's 22 shader rows; "shaders strict"), right after
+#                                tri32-fresh, 300 s each
 #   st<64|32>-fresh.txt           d3d9_triangle state (DXMTRS C4b-3a's 12 rows of API state and inert objects and
 #                                C4c-6a's four of the getters, the stubs, Present's other forms and an extended
-#                                device: 16; "state strict" under core), after them, 120 s each
-#   tx<64|32>-fresh.txt           d3d9_triangle textures (DXMTRS C4b-3b's and C4b-3c's 39 rows; "textures strict"
-#                                under core), 240 s
+#                                device: 16; "state strict"), after them, 120 s each
+#   tx<64|32>-fresh.txt           d3d9_triangle textures (DXMTRS C4b-3b's and C4b-3c's 39 rows; "textures strict"),
+#                                240 s
 #   fx<64|32>-fresh.txt           d3d9_triangle fixed (DXMTRS C4b-3c's 31 rows of the fixed-function vertex stage;
-#                                "fixed strict" under core), 240 s
+#                                "fixed strict"), 240 s
 #   tg<64|32>-fresh.txt           d3d9_triangle targets (DXMTRS C4b-3d1's 22 rows of render targets other than the
 #                                back buffer, C4b-3d5's rt-plain, C4c-3a's four of locks and the front buffer and
 #                                C4c-3b's eight of device contexts, an additional swap chain's back buffer and a
-#                                lockable back buffer; "targets strict" under core), 240 s
+#                                lockable back buffer; "targets strict"), 240 s
 #   dp<64|32>-fresh.txt           d3d9_triangle depth (DXMTRS C4b-3d2's 31 rows of the depth-stencil, on a device with
-#                                an auto depth-stencil, C4c-3b's ds-dynlock among them; "depth strict" under core),
-#                                240 s
+#                                an auto depth-stencil, C4c-3b's ds-dynlock among them; "depth strict"), 240 s
 #   bl<64|32>-fresh.txt           d3d9_triangle blend (DXMTRS C4b-3d3's 36 rows of partial clears, the scissor test, a
-#                                depth-stencil of another size, sRGB write and blending; "blend strict" under core),
-#                                240 s
+#                                depth-stencil of another size, sRGB write and blending; "blend strict"), 240 s
 #   mr<64|32>-fresh.txt           d3d9_triangle mrt (DXMTRS C4b-3d4's 20 rows of render targets at index 1-3; "mrt
-#                                strict" under core), 240 s
+#                                strict"), 240 s
 #   ms<64|32>-fresh.txt           d3d9_triangle msaa (DXMTRS C4b-3d5's 17 rows of multisampling, on a device whose
 #                                back buffer and auto depth-stencil have 4 samples, C4c-3a's two reads of the back
 #                                buffer, C4c-4b's depth-stencil copy, C4c-4d's depth-stencil resolve, and C4d-2a's
-#                                writable LockRect and GetDC on a 4x MSAA lockable back buffer: 23; "msaa
-#                                strict" under core), 240 s
+#                                writable LockRect and GetDC on a 4x MSAA lockable back buffer: 23; "msaa strict"),
+#                                240 s
 #   bf<64|32>-fresh.txt           d3d9_triangle buffers (DXMTRS C4c-1's, C4c-2a's and C4c-2b's 39 rows of vertex and
-#                                index buffers and the draws that read them; "buffers strict" under core), 240 s
+#                                index buffers and the draws that read them; "buffers strict"), 240 s
 #   bt<64|32>-fresh.txt           d3d9_triangle blit (DXMTRS C4c-4a's 17 rows of ColorFill, UpdateSurface and
 #                                StretchRect's answers, C4c-4b's 13 of its unscaled copies, C4c-4c's 10 of its
-#                                sampled ones and C4c-4d's one of its depth-stencil resolve: 41; "blit strict" under
-#                                core), 240 s
+#                                sampled ones and C4c-4d's one of its depth-stencil resolve: 41; "blit strict"), 240 s
 #   qu<64|32>-fresh.txt           d3d9_triangle queries (DXMTRS C4c-5's 12 rows of EVENT and OCCLUSION queries;
-#                                "queries strict" under core), 240 s
+#                                "queries strict"), 240 s
 #   rs<64|32>-fresh.txt           d3d9_triangle reset (DXMTRS C4c-6c's 14 rows of Reset and ResetEx of a windowed
-#                                device, each row on a device and a window of its own; "reset strict" under core, where
+#                                device, each row on a device and a window of its own; "reset strict", where
 #                                rs-refuse alone asks for a Reset to an R5G6B5 back buffer), 300 s
 #   ex<64|32>-fresh.txt           d3d9_triangle extras (DXMTRS C4c-7a's 15 rows of the gamma ramp, frame latency, the
 #                                Ex creators, RESZ and the cursor calls, each row on a device and a window of its own;
-#                                "extras strict" under core, where rz-self and rz-refuse alone run), 300 s
+#                                "extras strict", where rz-self and rz-refuse alone run), 300 s
 #   fs<64|32>-fresh.txt           d3d9_triangle fullscreen (DXMTRS C4c-6d's 9 rows of fullscreen devices, Reset into
 #                                and out of fullscreen and the window subclass, each row on a plain device and a window
-#                                of its own, in this prefix, which emulates mode sets; "fullscreen strict" under core),
-#                                300 s
-#   pa<64|32>-fresh.txt           d3d9_triangle parity (DXMTRS C4c-7d-1's, C4c-7d-2's and C4d-2a's 11 rows of the last
-#                                differences between the core runtime and mtld3d, rz-cross and gm-full each on a device
-#                                and a window of its own, gm-full fullscreen in this
-#                                prefix; "parity strict" under core), 300 s
+#                                of its own, in this prefix, which emulates mode sets; "fullscreen strict"), 300 s
+#   pa<64|32>-fresh.txt           d3d9_triangle parity (DXMTRS C4c-7d-1's, C4c-7d-2's and C4d-2a's 11 rows of parity
+#                                tests, rz-cross and gm-full each on a device and a window of its own, gm-full fullscreen
+#                                in this prefix; "parity strict"), 300 s
 #   lo<64|32>-fresh.txt           d3d9_triangle lost (DXMTRS C4d-2b's 2 rows of permanent D3DERR_DEVICELOST latching
 #                                under debug.failNextSubmit=true: lost-plain and lost-ex, each on a device and a window
-#                                of its own; "lost strict" under core), 180 s
+#                                of its own; "lost strict"), 180 s
 #   pc<64|32>-fresh.txt           d3d9_triangle pace (DXMTRS C4d-4a's 3 rows of present pacing and occluded presents
 #                                under present.maxFps=50;debug.presentOccluded=true: pace-imm, pace-two, pace-occ, each
-#                                on a device and a window of its own; "pace strict maxfps50" under core enforces full
-#                                pacing floors, while mtld3d default passes "notime" as macdrv_wm.rs has no
-#                                addPresentedHandler), 120 s
+#                                on a device and a window of its own; "pace strict maxfps50"), 120 s
 #   sc<64|32>-fresh.txt           d3d9_triangle scale (DXMTRS C4d-4b's 7 rows of render.scale=0.5, render.lodBias=true
 #                                and MetalFX spatial upscaling under
 #                                render.scale=0.5;render.lodBias=true;debug.presentOccluded=true: scale-desc,
 #                                scale-draw, scale-stretch, scale-vpos, scale-lod, scale-write, scale-mfx;
-#                                "scale strict" under core), 180 s
+#                                "scale strict"), 180 s
 #   metal-sm50-args32-test[32].txt and .status  the transport's 32-bit argument conversion, D3D9's node included
 #   conf-<x64|x86>.txt and .status  Wine's d3d9 tests through mtld3d's runner, x64 against the macOS product's leg
 #                                (arm64x), i386 against i686-arm64
-# and logs/, mtld3d's logs (MTLD3D_CONFIG log.dir). The share's runtime file picks the runtime (default "core" since
-# C4e, which injects no runtime.mode=core so the build default runs and stamps "mtld3d-conformance: lane default";
-# "mtld3d" injects runtime.mode=mtld3d as an escape hatch). The share's backend file picks the shader backend under
-# mtld3d (C3d-6): "msl" sets shader.backend=msl (MTLD3D_CONFIG for d3d9_triangle, DXMT_CONFIG for the conformance
-# runs), anything else is mtld3d's default AIR backend. Both keep caches/<leg>-<subtest>.bin, the conformance runs'
-# shader caches, and stamp conf-<leg>.txt's first line with the lane. Under core each triangle launch logs to logs/<row>
-# and each conformance run logs to logs/conf-<leg> (via DXMT_CONFIG log.dir and --log info, unsetting
-# MTLD3D_CONFORMANCE_RAW_DIR). The 32-bit rows run under old WoW64 (the image's default: the i686 mtld3d.so and
-# winemetal.so), or new WoW64 when the share's wow64 file says new (d3d9-gate.sh MN_WOW64=new).
+# and logs/, D3D9's logs (MTLD3D_CONFIG log.dir). Keeps caches/<leg>-<subtest>.bin and stamps conf-<leg>.txt's first line
+# with "mtld3d-conformance: lane default". Each triangle launch logs to logs/<row> and each conformance run logs to
+# logs/conf-<leg> (via DXMT_CONFIG log.dir and --log info, unsetting MTLD3D_CONFORMANCE_RAW_DIR). The 32-bit rows run
+# under old WoW64 (the image's default: the i686 winemetal.so), or new WoW64 when the share's wow64 file says new
+# (d3d9-gate.sh MN_WOW64=new).
 # The share's bench file (D3D9_BENCH=1, DXMTRS C4b-5): after the triangle rows, bench-<64|32>-<0|600>.txt, d3d9_triangle
 # --bench 2000 <frames> (0 frames first, then 600; the x86-64 rows only under old WoW64), and
-# benchp-<64|32>-<0|600>.txt, the same with "prog" (C4b2-12: a vs_2_0/ps_2_0 pair), each launch logging to logs/<row>
-# in both lanes.
+# benchp-<64|32>-<0|600>.txt, the same with "prog" (C4b2-12: a vs_2_0/ps_2_0 pair), each launch logging to logs/<row>.
 export PATH=/opt/mn-wine/bin:$PATH WINEDEBUG=-all DISPLAY=:0
 [ "$(cat /mnt/share/d3d9/wow64 2> /dev/null)" != new ] || export WINEARCH=wow64
 export WINEDLLOVERRIDES="mscoree,mshtml="  # as MacNeutron's prefixes: no Mono or Gecko prompt waiting on Xvfb
@@ -90,31 +75,8 @@ T=/mnt/share/d3d9 O=/mnt/share/traces/d3d9 B=/mnt/share/bin
 rm -rf "$O"; mkdir -p "$O/logs"
 export MTLD3D_CONFIG="log.dir=Z:$O/logs"
 KEEP="--keep-shader-cache $O/caches"
-RT=$(cat /mnt/share/d3d9/runtime 2> /dev/null)
-RT=${RT:-core}
-BK=$(cat /mnt/share/d3d9/backend 2> /dev/null)
-if [ "$RT" = core ]; then
-  stamp="mtld3d-conformance: lane default"
-else
-  MTLD3D_CONFIG="$MTLD3D_CONFIG;runtime.mode=mtld3d"
-  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}runtime.mode=mtld3d"  # the runner sets only MTLD3D_CONFIG
-  if [ "$BK" = msl ]; then
-    MTLD3D_CONFIG="$MTLD3D_CONFIG;shader.backend=msl"
-    export DXMT_CONFIG="$DXMT_CONFIG;shader.backend=msl"
-    stamp="mtld3d-conformance: lane msl (runtime.mode=mtld3d;shader.backend=msl)"
-  else
-    stamp="mtld3d-conformance: lane mtld3d (runtime.mode=mtld3d)"
-  fi
-fi
+stamp="mtld3d-conformance: lane default"
 Xvfb :0 -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 &
-for t in "$T"/unit/* "$T"/unit32/*; do  # unit32: i686, on the i686 winemetal.so (named 32-<crate>)
-  [ -f "$t" ] || continue  # the core lane ships none
-  n=${t##*/} wm=$B/wm
-  [ "${t%/*}" = "$T/unit" ] || n=32-$n wm=$B/wm/i386
-  MTLD3D_WINEMETAL=$wm/winemetal.so LD_LIBRARY_PATH=$wm timeout -k 10 900 "$t" > "$O/unit-$n.txt" 2>&1
-  echo $? > "$O/unit-$n.status"
-  echo "guest: unit $n status $(cat "$O/unit-$n.status")"
-done
 for n in metal-sm50-args32-test metal-sm50-args32-test32; do  # D3D9's SM50 node through the 32-bit conversion (C3a)
   "$B/$n" > "$O/$n.txt" 2>&1
   echo $? > "$O/$n.status"
@@ -132,11 +94,9 @@ tri() {  # tri <exe> <name> [timeout [args...]]: killed after <timeout> s (defau
   exe=$1 name=$2 secs=${3:-120}
   shift 2; [ $# -eq 0 ] || shift
   cfg=$MTLD3D_CONFIG
-  if [ "$RT" = core ]; then
-    mkdir -p "$O/logs/$name"
-    cfg="$cfg;log.dir=Z:$O/logs/$name"
-    case " $* " in *" strict "*) cfg="$cfg;shader.asyncCompile=false" ;; esac
-  fi
+  mkdir -p "$O/logs/$name"
+  cfg="$cfg;log.dir=Z:$O/logs/$name"
+  case " $* " in *" strict "*) cfg="$cfg;shader.asyncCompile=false" ;; esac
   case $name in lo*-*) cfg="$cfg;debug.failNextSubmit=true" ;; esac
   case $name in pc*-*) cfg="$cfg;present.maxFps=50;debug.presentOccluded=true" ;; esac
   case $name in sc*-*) cfg="$cfg;render.scale=0.5;render.lodBias=true;debug.presentOccluded=true" ;; esac
@@ -157,7 +117,7 @@ bench() {  # bench <exe> <row> <frames> [mode]: tri's launch with --bench 2000 <
 prefix /home/mn/d3d9
 tri d3d9_triangle.exe tri64-fresh
 tri d3d9_triangle32.exe tri32-fresh
-strict=; [ "$RT" != core ] || strict=strict  # the core compiles asynchronously by default since C4d-3; strict launches pass shader.asyncCompile=false
+strict=strict  # the core compiles asynchronously by default since C4d-3; strict launches pass shader.asyncCompile=false
 tri d3d9_triangle.exe shd64-fresh 300 shaders $strict
 tri d3d9_triangle32.exe shd32-fresh 300 shaders $strict
 tri d3d9_triangle.exe st64-fresh 120 state $strict
@@ -192,31 +152,27 @@ tri d3d9_triangle.exe pa64-fresh 300 parity $strict
 tri d3d9_triangle32.exe pa32-fresh 300 parity $strict
 tri d3d9_triangle.exe lo64-fresh 180 lost $strict
 tri d3d9_triangle32.exe lo32-fresh 180 lost $strict
-# VM core enforces full pacing floors; VM mtld3d default passes notime because macdrv_wm.rs has no addPresentedHandler.
-pace_opts="maxfps50"; [ "$RT" = core ] || pace_opts="notime"
-tri d3d9_triangle.exe pc64-fresh 120 pace $strict $pace_opts
-tri d3d9_triangle32.exe pc32-fresh 120 pace $strict $pace_opts
+tri d3d9_triangle.exe pc64-fresh 120 pace $strict maxfps50
+tri d3d9_triangle32.exe pc32-fresh 120 pace $strict maxfps50
 tri d3d9_triangle.exe sc64-fresh 180 scale $strict
 tri d3d9_triangle32.exe sc32-fresh 180 scale $strict
-rm -f "$WINEPREFIX/drive_c/windows/system32/mtld3d.dll" "$WINEPREFIX/drive_c/windows/syswow64/mtld3d.dll"
+rm -f "$WINEPREFIX/drive_c/windows/system32/winemetal.dll" "$WINEPREFIX/drive_c/windows/syswow64/winemetal.dll"
 tri d3d9_triangle.exe tri64-nomarker  # Wine finds no builtin without its marker: these fail
 tri d3d9_triangle32.exe tri32-nomarker
-# As run-game.sh: a prefix without mtld3d.dll's marker gets a forced update, which writes both.
+# As run-game.sh: a prefix without winemetal.dll's marker gets a forced update, which writes both.
 W=$WINEPREFIX/drive_c/windows
-[ -f "$W/system32/mtld3d.dll" ] && { [ ! -d "$W/syswow64" ] || [ -f "$W/syswow64/mtld3d.dll" ]; } \
+[ -f "$W/system32/winemetal.dll" ] && { [ ! -d "$W/syswow64" ] || [ -f "$W/syswow64/winemetal.dll" ]; } \
   || wineboot -u > /dev/null 2>&1
 timeout 20 wineserver -k
 tri d3d9_triangle.exe tri64-updated
 tri d3d9_triangle32.exe tri32-updated
-if [ "$RT" = core ]; then
-  _saved_cfg=$MTLD3D_CONFIG
-  MTLD3D_CONFIG="$_saved_cfg;shader.asyncCompile=true;shaderCache.enable=true"
-  export DXMT_CACHE_EXE=d3d9_vm_cache
-  tri d3d9_triangle.exe shd64-cold 300 shaders
-  tri d3d9_triangle.exe shd64-warm 300 shaders
-  unset DXMT_CACHE_EXE
-  MTLD3D_CONFIG=$_saved_cfg
-fi
+_saved_cfg=$MTLD3D_CONFIG
+MTLD3D_CONFIG="$_saved_cfg;shader.asyncCompile=true;shaderCache.enable=true"
+export DXMT_CACHE_EXE=d3d9_vm_cache
+tri d3d9_triangle.exe shd64-cold 300 shaders
+tri d3d9_triangle.exe shd64-warm 300 shaders
+unset DXMT_CACHE_EXE
+MTLD3D_CONFIG=$_saved_cfg
 if [ -f "$T/bench" ]; then
   if [ "$(cat "$T/wow64" 2> /dev/null)" != new ]; then
     bench d3d9_triangle.exe bench-64-0 0; bench d3d9_triangle.exe bench-64-600 600
@@ -235,22 +191,15 @@ for lane in "x64 arm64x" "x86 i686-arm64"; do
   mkdir -p "$O/exe/$1" && cp "$exe" "$O/exe/$1/" && exe="$O/exe/$1/d3d9_test.exe"
   echo "$stamp" > "$O/conf-$1.txt"
   # The guest runs a subtest several times slower than macOS (FEX, the transport): 20 minutes each, not 3.
-  if [ "$RT" = core ]; then
-    mkdir -p "$O/logs/conf-$1"
-    (
-      unset MTLD3D_CONFORMANCE_RAW_DIR
-      export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}log.dir=Z:$O/logs/conf-$1"
-      MTLD3D_CONFORMANCE_TIMEOUT_SECS=1200 "$T/mtld3d-conformance" --wine /opt/mn-wine/bin/wine \
-        --wineserver /opt/mn-wine/bin/wineserver --assets "$T/conformance" \
-        --tests-wine-version "$(cat "$T/tests-wine-version")" --arch "$2" $KEEP --log info \
-        --exe "$exe"
-    ) >> "$O/conf-$1.txt" 2>&1
-  else
+  mkdir -p "$O/logs/conf-$1"
+  (
+    unset MTLD3D_CONFORMANCE_RAW_DIR
+    export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}log.dir=Z:$O/logs/conf-$1"
     MTLD3D_CONFORMANCE_TIMEOUT_SECS=1200 "$T/mtld3d-conformance" --wine /opt/mn-wine/bin/wine \
       --wineserver /opt/mn-wine/bin/wineserver --assets "$T/conformance" \
-      --tests-wine-version "$(cat "$T/tests-wine-version")" --arch "$2" $KEEP \
-      --exe "$exe" >> "$O/conf-$1.txt" 2>&1
-  fi
+      --tests-wine-version "$(cat "$T/tests-wine-version")" --arch "$2" $KEEP --log info \
+      --exe "$exe"
+  ) >> "$O/conf-$1.txt" 2>&1
   echo $? > "$O/conf-$1.status"
   timeout 20 wineserver -k
   echo "guest: conformance $1 status $(cat "$O/conf-$1.status")"

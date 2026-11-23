@@ -61,11 +61,11 @@ INPUT_LOG=/home/mn/mn-input.log
 # SamSs, Wine's lsass.exe, at every launch; vm/tests/services.sh). A forced update at every launch cost ~10 s once
 # it covered syswow64 (new WoW64).
 if [ -n "$(find "$WINEPREFIX/drive_c/windows" -name '*.dll' -size 0 -print -delete 2>/dev/null)" ]; then up=-u; else up=-s; fi
-# A prefix made before the image had mtld3d (Direct3D 9) has no marker for its mtld3d.dll, a builtin with no Windows
-# counterpart, and Wine finds a builtin only through its marker: a forced update writes it, once (both widths': an
-# update cut short may have written system32's alone; a prefix without syswow64 has no 32-bit side to mark).
+# A prefix made before the image had DXMT's builtin winemetal.dll has no marker for it (a builtin with no Windows
+# counterpart, which Wine finds only through its marker): a forced update writes it, once (both widths': an update
+# cut short may have written system32's alone; a prefix without syswow64 has no 32-bit side to mark).
 W=$WINEPREFIX/drive_c/windows
-[ -f "$W/system32/mtld3d.dll" ] && { [ ! -d "$W/syswow64" ] || [ -f "$W/syswow64/mtld3d.dll" ]; } || up=-u
+[ -f "$W/system32/winemetal.dll" ] && { [ ! -d "$W/syswow64" ] || [ -f "$W/syswow64/winemetal.dll" ]; } || up=-u
 # The launcher's toast says what goes on until the game's window shows: traces/stage, which it polls.
 mn_stage() { echo "$*" > /mnt/share/traces/stage; }
 if [ ! -f "$WINEPREFIX/system.reg" ]; then mn_stage "Preparing its Windows environment. The first launch takes a minute or two."

@@ -2,8 +2,8 @@
 // mtld3d must leave the program's own imports alone. It redirects the main module's EnumDisplaySettings* and exit
 // imports only when that module imports d3d9.dll itself; Age of Empires II DE's protector, finding its import table
 // changed after an EVR or dxdiag load, ended the game. This program imports no d3d9 function.
-// Prints, each "ok" or "FAIL <what>": "d3d9 module" (Direct3DCreate9 through GetProcAddress, then mtld3d's mtld3d.dll
-// is loaded: the d3d9.dll is mtld3d's) and "d3d9 imports" (this program's EnumDisplaySettingsW and ExitProcess import
+// Prints, each "ok" or "FAIL <what>": "d3d9 module" (Direct3DCreate9 through GetProcAddress, then DXMT's winemetal.dll
+// is loaded: the d3d9.dll is DXMT's) and "d3d9 imports" (this program's EnumDisplaySettingsW and ExitProcess import
 // slots still hold user32's and kernel32's own entry points). Exits with the number of failures.
 #include <windows.h>
 #include <d3d9.h>
@@ -23,7 +23,7 @@ int main() {
     HMODULE d3d9 = LoadLibraryA("d3d9.dll");
     auto create = d3d9 ? (IDirect3D9 *(WINAPI *)(UINT))GetProcAddress(d3d9, "Direct3DCreate9") : nullptr;
     IDirect3D9 *d3d = create ? create(D3D_SDK_VERSION) : nullptr;
-    row("module", d3d && GetModuleHandleW(L"mtld3d.dll"), d3d ? "no mtld3d.dll in the process" : "Direct3DCreate9");
+    row("module", d3d && GetModuleHandleW(L"winemetal.dll"), d3d ? "no winemetal.dll in the process" : "Direct3DCreate9");
     void *enum_slot = (void *)&EnumDisplaySettingsW, *exit_slot = (void *)&ExitProcess;
     void *enum_own = (void *)GetProcAddress(GetModuleHandleW(L"user32.dll"), "EnumDisplaySettingsW");
     void *exit_own = (void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "ExitProcess");

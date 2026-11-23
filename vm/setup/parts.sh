@@ -21,9 +21,9 @@ mkdir -p "$L/dxmt"
 for d in wine fex lsteamclient macneutron; do cp -R "$APP/Contents/Resources/licenses/$d" "$L/"; done
 cp "$APP/Contents/Resources/DXMT/LICENSE" "$APP/Contents/Resources/DXMT/COPYING.LIB" "$APP/Contents/Resources/DXMT/LICENSE.OLD" \
   "$L/dxmt/"
-# DXMT's nvngx.dll is Rust (DXMTRS): Rust's standard library's texts, wine.app's copy of them. Its Direct3D 9 (d3d9.dll,
-# mtld3d.dll, mtld3d.so): its zlib LICENSE and the crates DXMT's Rust links (snmalloc's among them), wine.app's copy;
-# each also links DXMTRS's dxmt-util, LGPL-2.1-or-later, whose texts are dxmt/'s (COPYING.LIB, above).
+# DXMT's nvngx.dll is Rust (DXMTRS): Rust's standard library's texts, wine.app's copy of them. Its Direct3D 9 (d3d9.dll):
+# its zlib LICENSE and the crates DXMT's Rust links (snmalloc's among them), wine.app's copy;
+# it also links DXMTRS's dxmt-util, LGPL-2.1-or-later, whose texts are dxmt/'s (COPYING.LIB, above).
 cp -R "$APP/Contents/Resources/licenses/mtld3d/rust" "$L/dxmt/rust"
 [ -s "$L/dxmt/rust/COPYRIGHT-library.html" ] || { echo "parts: no Rust standard library notice in $APP" >&2; exit 1; }
 mkdir -p "$L/d3d9"
@@ -36,10 +36,10 @@ Fedora's packages, which it downloads from Fedora to the Mac (MacNeutron ships n
 - wine.tar: MacNeutron's Wine for x86-64 Linux (LGPL-2.1-or-later, wine/), with DXMT's Direct3D DLLs and its guest
   winemetal.so (LGPL-2.1-or-later, dxmt/; its nvngx.dll, nvapi64.dll, dxgi.dll, d3d10core.dll and winemetal.dll link
   Rust's standard library, dxmt/rust),
-  DXMT's Direct3D 9 (d3d9.dll and mtld3d.dll of both widths, mtld3d.so in x86_64-unix and i386-unix: zlib, d3d9/LICENSE,
-  altered from mtld3d 0.14.1, with DXMTRS's dxmt-util, LGPL-2.1-or-later, dxmt/, linked into each: LGPL combined works;
-  the crates they link, snmalloc's C++ among them, in d3d9/crates, listed in d3d9/crates/INDEX; d3d9.dll and
-  mtld3d.dll also link Rust's standard library, dxmt/rust), and Proton's lsteamclient (BSD-3-Clause, lsteamclient/) with MacNeutron's
+  DXMT's Direct3D 9 (d3d9.dll of both widths: zlib, d3d9/LICENSE, altered from mtld3d 0.14.1, with DXMTRS's dxmt-util,
+  LGPL-2.1-or-later, dxmt/, linked into it: an LGPL combined work; the crates it links, snmalloc's C++ among them, in
+  d3d9/crates, listed in d3d9/crates/INDEX; d3d9.dll also links Rust's standard library, dxmt/rust), and Proton's
+  lsteamclient (BSD-3-Clause, lsteamclient/) with MacNeutron's
   Steam forwarder (MIT, macneutron/). Its lib/mn-i386 holds Fedora's alsa-lib for i686 ($ALSA_LIB_NVR:
   libasound.so.2, LGPL-2.1-or-later, COPYING.alsa-lib beside it), for 32-bit games' sound. Its share/fonts holds
   Proton's Windows-named fonts, built from the Liberation fonts (SIL OFL 1.1, LICENSE beside them; not Microsoft's

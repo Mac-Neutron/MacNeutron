@@ -2,7 +2,7 @@
 # D3D9 conformance parity per site (C3d-5): two runner outputs of the same leg(s), a base lane's and a current lane's,
 # each stamped on its first line by dxmt/mtld3d-conformance.sh or vm/tests/d3d9.sh: by default the msl lane's and the
 # default lane's (AIR), with --base-lane and --cur-lane any two (C4e: --base-lane mtld3d --cur-lane default compares
-# the default core runtime against the mtld3d escape hatch, using dxmt/mtld3d-triaged-core.txt and naming findings
+# the default core runtime against the mtld3d escape hatch, using dxmt/mtld3d-triaged.txt and naming findings
 # core-worse etc.).
 # Fails when, under the current lane, a site fails more often, a suite crashes more, executes over 0.1% and more than
 # 16 fewer tests (DXMTRS C4c-7d-2: the default lane alone has read d3d9ex's 2426 to 2438, past its 0.1%, 2.4) or
@@ -10,7 +10,7 @@
 # device, d3d9ex); when a file is cut short (a suite's current failures differ from its baseline plus its listed sites'
 # changes, or no closing "conformance:" line); or when the stamps are not the base lane's then the current lane's.
 # Information, not failures: a site the runner calls flaky in either file, a worse site listed in <triaged> for that leg
-# and subtest (default dxmt/mtld3d-triaged.txt; dxmt/mtld3d-triaged-core.txt for the core lane), a suite that crashed in
+# and subtest (default dxmt/mtld3d-triaged.txt), a suite that crashed in
 # both ("partial": its counts cover only the failures before the crash). A site a file doesn't list failed there as
 # often as in the baseline (the runner lists every site whose count changed). Findings are named <cur>-worse etc.
 # (air-worse etc. for the default lane, as C3d named them).
@@ -35,7 +35,6 @@ done
 }
 TRI=$ROOT/dxmt/mtld3d-triaged.txt PRE=air
 if [ "$CUR" = core ] || { [ "$BASE" = mtld3d ] && [ "$CUR" = default ]; }; then
-  TRI=$ROOT/dxmt/mtld3d-triaged-core.txt
   PRE=core
 elif [ "$CUR" != default ]; then
   PRE=$CUR

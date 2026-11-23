@@ -4,56 +4,32 @@
 # under <wine.app>'s own Wine and the D3D9 it ships (default build/wine-arm64/wine.app), in a prefix of its own
 # (build/mtld3d-conformance/prefix). The runner diffs each site's failure count against its baseline.txt and exits
 # non-zero on a regression; --update-baseline (a runner argument) rewrites it. The environment and the prefix's
-# configuration are the ones mtld3d's Makefile gave its test runs. MTLD3D_SO=<mtld3d.so> runs that build of D3D9's Unix
-# side instead (the loopback build of D3D9 spec §5.1), in an APFS clone of wine.app beside the prefix.
+# configuration are the ones mtld3d's Makefile gave its test runs.
 # A run whose only new failing sites are dxmt/mtld3d-triaged.txt's, with no new crash, passes ("only triaged sites").
-# Default lane (C4e, D3D9_RUNTIME=core, D3D9_BACKEND=air): runs every suite on D3D9's in-process encoder in d3d9.dll
-# without setting runtime.mode=core (proving core is the build default), its stamp "mtld3d-conformance: lane default",
-# a full run's output run-default.txt (d3d9-conf-compare.sh --base-lane mtld3d --cur-lane default). Its proof
-# replaces the kinds row: the run's logs (build/mtld3d-conformance/logs-core, the runner's --log info) hold
-# d3d9.dll's log identity and the core device's line ("d3d9 core: device on dxmt-core"), not mtld3d.so's encoder line
-# ("texture versions: rename pool cap"), zero mtld3d::(unix|shim) / mtld3d.so / mtld3d.dll log lines, no core refusal
-# line and no panic (the core lane unsets MTLD3D_CONFORMANCE_RAW_DIR: the runner's own log.dir would take the logs out
-# of the proof's reach).
-# Escape lanes (D3D9_RUNTIME=mtld3d, injecting runtime.mode=mtld3d): D3D9_BACKEND=air sets no shader.backend, so
-# mtld3d's default AIR backend runs (lane mtld3d, run-mtld3d.txt); D3D9_BACKEND=msl sets shader.backend=msl
-# (DXMT_CONFIG: the runner sets only MTLD3D_CONFIG; lane msl, run-msl.txt). Both keep each subtest's shader cache in
-# build/mtld3d-conformance/caches-<lane> and prove their backend with emit_corpus --kinds: the mtld3d lane fails
-# unless every programmable kind the tests made has an AIR record and AIR fixed-function records exist; the msl lane
-# fails on any AIR record or on no MSL programmable and fixed-function record. Any lane run with --only stateblock skips
-# the kinds row and writes run-<lane>-stateblock.txt, keeping the full runs' files. Either mtld3d lane fails on a Metal
-# validation error or a GPU hang in the run (core fails on those too). MTLD3D_PE=<folder> runs that folder's d3d9.dll
-# and mtld3d.dll (the PE side, as dxmt/d3d9-check.sh), in an APFS clone of wine.app like MTLD3D_SO's.
+# Runs every suite on D3D9's in-process encoder in d3d9.dll on dxmt-core, its stamp "mtld3d-conformance: lane default",
+# a full run's output run-default.txt. Its proof: the run's logs (build/mtld3d-conformance/logs-core, the runner's
+# --log info) hold d3d9.dll's log identity and the core device's line ("d3d9 core: device on dxmt-core"), none of the
+# legacy encoder line ("texture versions: rename pool cap"), zero mtld3d::(unix|shim) / mtld3d.so / mtld3d.dll log
+# lines, no core refusal line and no panic (it unsets MTLD3D_CONFORMANCE_RAW_DIR: the runner's own log.dir would take
+# the logs out of the proof's reach). Any Metal validation error or GPU hang in the run fails it. MTLD3D_PE=<folder>
+# runs that folder's d3d9.dll (and winemetal.dll if present, as dxmt/d3d9-check.sh), in an APFS clone of wine.app.
 #   mtld3d-conformance.sh [<wine.app>] [runner args, e.g. --only device]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/dxmt/pins"
 B="${BUILD_DIR:-$ROOT/build}"
-BK=${D3D9_BACKEND:-air} RT=${D3D9_RUNTIME:-core}
-case $RT/$BK in
-  core/air) lane=default stamp="mtld3d-conformance: lane default" ;;
-  mtld3d/air) lane=mtld3d stamp="mtld3d-conformance: lane mtld3d (runtime.mode=mtld3d)" ;;
-  mtld3d/msl) lane=msl stamp="mtld3d-conformance: lane msl (runtime.mode=mtld3d;shader.backend=msl)" ;;
-  core/*) echo "mtld3d-conformance: D3D9_RUNTIME=core takes the default backend lane only" >&2; exit 2 ;;
-  mtld3d/*) echo "mtld3d-conformance: D3D9_BACKEND=$BK: air or msl" >&2; exit 2 ;;
-  *) echo "mtld3d-conformance: D3D9_RUNTIME=$RT: mtld3d or core" >&2; exit 2 ;;
-esac
+lane=default stamp="mtld3d-conformance: lane default"
 echo "$stamp"
 APP="$B/wine-arm64/wine.app"
 case ${1:-} in *.app) APP=$1; shift ;; esac
-# --only stateblock among the runner args: the subset run (no kinds row, its own output file).
+# --only stateblock among the runner args: the subset run (its own output file).
 sb=; prev=
 for a in "$@"; do [ "$prev" = --only ] && [ "$a" = stateblock ] && sb=1; prev=$a; done
-if [ -n "${MTLD3D_SO:-}${MTLD3D_PE:-}" ]; then
+if [ -n "${MTLD3D_PE:-}" ]; then
   C="$B/mtld3d-conformance/wine.app"
   rm -rf "$C"; mkdir -p "$B/mtld3d-conformance"; cp -cR "$APP" "$C"
-  if [ -n "${MTLD3D_SO:-}" ]; then
-    so="$C/Contents/Resources/lib/wine/aarch64-unix/mtld3d.so"
-    rm -f "$so" && cp "$MTLD3D_SO" "$so" && codesign -f -s "${MACNEUTRON_SIGN_IDENTITY:--}" "$so" 2> /dev/null \
-      || { echo "mtld3d-conformance: could not put $MTLD3D_SO in $C" >&2; exit 1; }
-  fi
-  for dll in d3d9.dll mtld3d.dll; do
-    [ -n "${MTLD3D_PE:-}" ] || break
+  for dll in d3d9.dll winemetal.dll; do
+    [ "$dll" != winemetal.dll ] || [ -f "$MTLD3D_PE/$dll" ] || continue
     pe="$C/Contents/Resources/lib/wine/aarch64-windows/$dll"
     rm -f "$pe" && cp "$MTLD3D_PE/$dll" "$pe" || { echo "mtld3d-conformance: could not put $MTLD3D_PE/$dll in $C" >&2; exit 1; }
   done
@@ -93,19 +69,14 @@ OUT="$B/mtld3d-conformance/run-$lane${sb:+-stateblock}.txt"
 K="$B/mtld3d-conformance/caches-$lane"
 rm -rf "$K"; mkdir -p "$K"
 LOGS="$B/mtld3d-conformance/logs-core"
-if [ "$RT" = core ]; then
-  # The runner's own log.dir (MTLD3D_CONFORMANCE_RAW_DIR) would take the logs elsewhere, and the proof would find
-  # none; its default --log off would silence them.
-  unset MTLD3D_CONFORMANCE_RAW_DIR
-  rm -rf "$LOGS"; mkdir -p "$LOGS"
-  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}log.dir=Z:$LOGS"
-  export DXMT_SHADER_CACHE_PATH="${DXMT_SHADER_CACHE_PATH:-$K}"
-  mkdir -p "$DXMT_SHADER_CACHE_PATH"
-  set -- --log info "$@"
-else
-  msl_cfg=; [ "$BK" = air ] || msl_cfg=";shader.backend=msl"
-  export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}runtime.mode=mtld3d${msl_cfg}"  # the runner sets only MTLD3D_CONFIG
-fi
+# The runner's own log.dir (MTLD3D_CONFORMANCE_RAW_DIR) would take the logs elsewhere, and the proof would find
+# none; its default --log off would silence them.
+unset MTLD3D_CONFORMANCE_RAW_DIR
+rm -rf "$LOGS"; mkdir -p "$LOGS"
+export DXMT_CONFIG="${DXMT_CONFIG:+$DXMT_CONFIG;}log.dir=Z:$LOGS"
+export DXMT_SHADER_CACHE_PATH="${DXMT_SHADER_CACHE_PATH:-$K}"
+mkdir -p "$DXMT_SHADER_CACHE_PATH"
+set -- --log info "$@"
 # runner <args...>: D3D9's conformance runner over the x64 tests (arm64x leg).
 runner() {
   ( cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/conformance" \
@@ -121,10 +92,8 @@ sed 1d "$OUT"
 # The runner fails on any new failing site; the triaged ones don't fail this run. Each subtest's line names it
 # (<leg>/<subtest> ... REGRESSION), its sites follow, indented.
 if [ $status -ne 0 ]; then
-  core=; [ "$RT" = core ] && core="$ROOT/dxmt/mtld3d-triaged-core.txt"
-  left=$(awk -v triaged="$ROOT/dxmt/mtld3d-triaged.txt" -v core="$core" '
-    BEGIN { while ((getline l < triaged) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); ok[f[1] " " f[2]] = 1 }
-            if (core != "") while ((getline l < core) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); ok[f[1] " " f[2]] = 1 } }
+  left=$(awk -v triaged="$ROOT/dxmt/mtld3d-triaged.txt" '
+    BEGIN { while ((getline l < triaged) > 0) if (l !~ /^#/ && l != "") { split(l, f, " "); ok[f[1] " " f[2]] = 1 } }
     /^[a-z0-9_+@-]+\/[a-z0-9]+ / { sub_ = $1; if ($0 ~ /current\(failed=[0-9]+ crash=1\)/ && $0 !~ /baseline\([^)]*crash=1\)/) print sub_ " crash"; next }
     /^  [a-z0-9_]+\.c:[0-9]+ .*REGRESSION/ { if (!((sub_ " " $1) in ok)) print sub_ " " $1 }
   ' "$OUT")
@@ -140,40 +109,19 @@ if /usr/bin/grep -qE '^conformance: (METAL VALIDATION|GPU HANG)' "$OUT"; then
   echo "conformance: FAIL: Metal validation error or GPU hang in the run"
   status=1
 fi
-if [ "$RT" = core ]; then
-  # The core lane's proof, from the code that ran.
-  mtld3d_lines='mtld3d::(unix|shim)|\] mtld3d\.so |\] mtld3d\.dll '
-  if /usr/bin/grep -rqF '] d3d9.dll ' "$LOGS" \
-    && /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$LOGS" \
-    && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$LOGS" \
-    && ! /usr/bin/grep -rqE "$mtld3d_lines" "$LOGS" \
-    && ! /usr/bin/grep -rqF 'is not implemented under runtime.mode = core' "$LOGS" \
-    && ! /usr/bin/grep -rqF 'panicked' "$LOGS" "$OUT"; then
-    echo "conformance: core: runtime core"
-  else
-    echo "conformance: FAIL: core: no core device, missing d3d9.dll log, or an mtld3d, encoder, refusal or panic line, in $LOGS"
-    /usr/bin/grep -rhE "is not implemented|panicked|rename pool cap|$mtld3d_lines" "$LOGS" "$OUT" | head -5 | sed 's/^/conformance: /'
-    status=1
-  fi
-  exit $status
-fi
-# Stateblock writes no shader record: a stateblock-only run has no kinds row.
-[ -z "$sb" ] || exit $status
-# The lane's proof: the kinds of the records its subtests wrote.
-line=$(cd "$T" && PATH="$TOOLS:$PATH" MACOSX_DEPLOYMENT_TARGET=27.0 CARGO_TARGET_DIR="$B/d3d9-cargo/kinds" \
-  cargo "+$MTLD3D_RUST" run -q --release -p mtld3d-core --features disk-cache --example emit_corpus -- \
-  --kinds "$K"/*.bin 2> /dev/null | sed -n '/^kinds /p') || line=
-echo "conformance: $BK $line"
-if [ "$BK" = air ]; then
-  miss=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '
-    /^(air_)?(sm[0-9]|ff)(vs|ps)=/ { k = $1; sub(/^air_/, "", k); seen[k] = 1; if ($1 ~ /^air_/) { a[k] = $2; t += $2; if (k ~ /^ff/) af[k] = $2 } else m[k] = $2 }
-    END { for (k in seen) if (m[k] + a[k] > 0 && a[k] < 1) printf "%s ", k; if (t < 1) printf "no-air-records "; if (af["ffvs"] < 1 || af["ffps"] < 1) printf "no-air-ff-records " }')
+# The core proof, from the code that ran.
+mtld3d_lines='mtld3d::(unix|shim)|\] mtld3d\.so |\] mtld3d\.dll '
+refused='d3d9 core: .* is not implemented'
+if /usr/bin/grep -rqF '] d3d9.dll ' "$LOGS" \
+  && /usr/bin/grep -rqF 'd3d9 core: device on dxmt-core' "$LOGS" \
+  && ! /usr/bin/grep -rqF 'texture versions: rename pool cap' "$LOGS" \
+  && ! /usr/bin/grep -rqE "$mtld3d_lines" "$LOGS" \
+  && ! /usr/bin/grep -rqE "$refused" "$LOGS" \
+  && ! /usr/bin/grep -rqF 'panicked' "$LOGS" "$OUT"; then
+  echo "conformance: core: runtime core"
 else
-  miss=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '
-    /^air_(sm[0-9]|ff)(vs|ps)=/ { t += $2 } /^sm[0-9](vs|ps)=/ { p += $2 } /^ff(vs|ps)=/ { m[$1] = $2 }
-    END { if (t > 0) printf "air-records-under-msl "; if (p < 1) printf "no-msl-records "; if (m["ffvs"] < 1 || m["ffps"] < 1) printf "no-msl-ff-records " }')
+  echo "conformance: FAIL: core: no core device, missing d3d9.dll log, or a legacy, refusal or panic line, in $LOGS"
+  /usr/bin/grep -rhE "$refused|panicked|rename pool cap|$mtld3d_lines" "$LOGS" "$OUT" | head -5 | sed 's/^/conformance: /'
+  status=1
 fi
-if [ -z "$line" ]; then echo "conformance: FAIL: no kinds line from emit_corpus over $K"; status=1
-elif [ -n "$miss" ]; then echo "conformance: FAIL: kinds: $miss"; status=1; fi
-[ "${proof:-}" != fail ] || status=1
 exit $status

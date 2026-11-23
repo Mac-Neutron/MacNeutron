@@ -37,8 +37,8 @@ need_tool makeinfo texinfo; need_tool gperf gperf; need_tool wget wget
 # DXMT compiles its own Metal shaders; Xcode ships the compiler as a separate component.
 xcrun metal --version > /dev/null 2>&1 || missing="$missing, Metal Toolchain (xcodebuild -downloadComponent MetalToolchain)"
 # DXMT's Rust (DXMTRS: Direct3D 9 and its other crates) builds with rustup's MTLD3D_RUST toolchain (dxmt/pins), its
-# llvm-tools, and a target for each of its builds: the ARM64X halves and mtld3d.so here, the VM guest's x86 pairs and
-# its x86_64 and i686 Linux mtld3d.so (vm).
+# llvm-tools, and a target for each of its builds: the ARM64X halves and winemetal.so here, the VM guest's x86 pairs,
+# and x86_64 Linux mtld3d-conformance.
 need_tool rustup rustup
 if command -v rustup > /dev/null 2>&1; then
   . "$ROOT/dxmt/pins"
@@ -47,7 +47,7 @@ if command -v rustup > /dev/null 2>&1; then
   else
     installed=$(rustup target list --installed --toolchain "$MTLD3D_RUST" 2> /dev/null)
     for t in aarch64-pc-windows-msvc arm64ec-pc-windows-msvc aarch64-apple-darwin x86_64-pc-windows-msvc \
-      i686-pc-windows-msvc x86_64-unknown-linux-gnu i686-unknown-linux-gnu; do
+      i686-pc-windows-msvc x86_64-unknown-linux-gnu; do
       printf '%s\n' "$installed" | /usr/bin/grep -qx "$t" \
         || missing="$missing, Rust target $t (rustup target add --toolchain $MTLD3D_RUST $t)"
     done
@@ -520,8 +520,7 @@ else mv "$SRC/dxmt-cpu.txt.new" "$SRC/dxmt-cpu.txt"; fi
 # The translator's key hashes the crates cargo resolves for airconv (lib.sh's translator_key: cargo tree --locked
 # --offline), and that needs the Rust toolchain on PATH and the tree's crates in the cargo cache, which a fresh Mac or a
 # cleared cargo registry only has after the fetch: both come first. Meson's cargo runs offline too
-# (tools/cargo-staticlib.sh). The retired dxmt/mtld3d-build.sh left a cargo config above the tree (path remaps every
-# cargo run in it would still read).
+# (tools/cargo-staticlib.sh). Remove any stale cargo config above the tree so cargo reads only the tree's own config.
 PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH"
 export MTLD3D_RUST
 rm -f "$SRC/.cargo/config.toml"
@@ -538,9 +537,6 @@ set -- "$SRC/dxmt-build" "$D" --cross-file "$D/build-arm64ec.txt" --cross-file "
   -Denable_nvapi=true -Denable_nvngx=true \
   -Dnative_llvm_path="$SRC/llvm23-arm64" -Dwine_build_path="$SRC/wine-build" \
   -Dtranslator_key_file="$SRC/dxmt-translator-key"
-# Default builds carry D3D9's in-process core runtime via meson.options since C4e (runtime.mode=core is the default);
-# DXMT_D3D9_CORE=0 opts out (-Dd3d9_core_runtime=false).
-[ "${DXMT_D3D9_CORE:-1}" != 0 ] || set -- "$@" -Dd3d9_core_runtime=false
 # DXMTRS's meson builds Rust static libraries (tools/cargo-staticlib.sh) with cargo. No -Dcargo_toolchain: a tree
 # without the option (the pinned one, before the Rust plumbing lands on DXMTRS's main) would fail to configure, and
 # its default is mtld3d's toolchain (MTLD3D_RUST) already.
@@ -594,9 +590,9 @@ sh "$ROOT/wine-arm64/tools/xcrun-metal.sh" -sdk macosx metal -o "$SRC/presenter/
      "$SRC/presenter/cmaa2.air" "$SRC/presenter/sharpen.air" \
   >> "$SRC/presenter.log" 2>&1 || die "building the presenter's shaders failed; see $SRC/presenter.log"
 
-# 7b. Direct3D 9 (D3D9 spec §4, DXMTRS's src/d3d9): step 7's meson build made its ARM64X d3d9.dll and mtld3d.dll and
-#     its mtld3d.so in dxmt-install (bundle.sh puts them in wine.app). The crates the tree's shipped Rust links, their
-#     licence files (bundle.sh: licenses/mtld3d/crates).
+# 7b. Direct3D 9 (D3D9 spec §4, DXMTRS's src/d3d9): step 7's meson build made its ARM64X d3d9.dll in dxmt-install
+#     (bundle.sh puts it in wine.app). The crates the tree's shipped Rust links, their licence files (bundle.sh:
+#     licenses/mtld3d/crates).
 PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH" python3 -I "$ROOT/dxmt/mtld3d-notices.py" "$D" \
   "$SRC/mtld3d-notices" "cargo +$MTLD3D_RUST" 2> "$SRC/mtld3d.log" \
   || die "collecting D3D9's crate licences failed; see $SRC/mtld3d.log"
