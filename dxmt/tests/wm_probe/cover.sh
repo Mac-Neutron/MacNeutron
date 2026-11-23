@@ -39,12 +39,12 @@ slots)
   need_slots slots
   awk '
     NF != 3 || $1 !~ /^[0-9]+$/ || $2 !~ /^g([0-9]|10)$/ { print "line " NR " is not <slot> <group> <symbol>: " $0; next }
-    { if (seen[$1]++) print "slot " $1 " twice"; n[$2]++; if ($1 == 83 && $3 != "-") print "slot 83 has a symbol" }
-    $1 != 83 && $3 == "-" { print "slot " $1 " has no symbol" }
+    { if (seen[$1]++) print "slot " $1 " twice"; n[$2]++; if (($1 == 83 || $1 == 157) && $3 != "-") print "slot " $1 " has a symbol" }
+    $1 !~ /^(83|157)$/ && $3 == "-" { print "slot " $1 " has no symbol" }
     END {
       for (s = 0; s < 165; s++) if (!seen[s]) print "slot " s " missing"
       if (NR != 165) print NR " lines, not 165"
-      split("4 26 28 24 12 9 26 16 5 3 12", want, " ")
+      split("5 26 28 24 11 9 26 16 5 3 12", want, " ")
       for (g = 0; g <= 10; g++) if (n["g" g] + 0 != want[g + 1]) print "g" g " has " n["g" g] + 0 " slots, not " want[g + 1]
     }' "$SLOTS" > "$TMP/why"
   while IFS= read -r l; do fail "slots: $l"; done < "$TMP/why"

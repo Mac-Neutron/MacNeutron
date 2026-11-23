@@ -91,8 +91,7 @@ static NTSTATUS_T f_pso(void *p) {
     a->ret_pso = OBJ(PSO);
     return 0;
 }
-/* mtld3d's slots (D3D9 M2b): the pipeline's functions translated and its vertex descriptor as sent; the source and
- * its options as sent. */
+/* mtld3d's slot (D3D9 M2b): the pipeline's functions translated and its vertex descriptor as sent. */
 static NTSTATUS_T f_pso_vertex(void *p) {
     struct unixcall_mtldevice_newrenderpso_vertex *a = p;
     const struct WMTRenderPipelineInfo *info = a->info.ptr;
@@ -101,14 +100,6 @@ static NTSTATUS_T f_pso_vertex(void *p) {
                    v->attributes[0].format == 31 && v->attributes[30].buffer_index == 30 && v->layouts[0].stride == 12 &&
                    v->layouts[30].step_rate == 7;
     a->ret_pso = OBJ(PSO);
-    return 0;
-}
-static NTSTATUS_T f_library_options(void *p) {
-    struct unixcall_mtldevice_newlibrarywithsource_options *a = p;
-    const struct WMTCompileOptions *o = a->options.ptr;
-    checked[157] = a->length == 6 && !memcmp(a->source.ptr, "kernel", 6) && o->language_version == 0x20004 &&
-                   o->preserve_invariance == 1 && o->math_mode == 2;
-    a->ret_library = OBJ(FUNCTION);
     return 0;
 }
 static NTSTATUS_T f_colorspace(void *p) {
@@ -333,7 +324,7 @@ static wm_unix_fn fakes[MN_WM_SLOTS] = {
     [36] = f_blit_encode, [37] = f_compute_encode, [38] = f_render_encode,
     [0] = f_retain, [1] = f_release, [2] = f_object, [4] = f_devices, [7] = f_name, [8] = f_getcstring,
     [9] = f_queue, [10] = f_pool, [11] = f_cmdbuf, [12] = f_commit, [19] = f_sampler, [26] = f_function,
-    [29] = f_pso, [33] = f_end, [156] = f_pso_vertex, [157] = f_library_options, [92] = f_colorspace, [116] = f_cache_get, [129] = f_blit_samples,
+    [29] = f_pso, [33] = f_end, [156] = f_pso_vertex, [92] = f_colorspace, [116] = f_cache_get, [129] = f_blit_samples,
     [159] = f_attach_view, [160] = f_retire_view, [161] = f_sync_poll, [163] = f_presented_event,
 };
 
@@ -742,7 +733,7 @@ static void constants(void) {
     CHECK(call(98, &nf) == MN_STATUS_INVALID_PARAMETER);
 }
 
-/* mtld3d's two slots (D3D9 M2b): a pipeline with a vertex descriptor, a source library with options. */
+/* mtld3d's active slot (D3D9 M2b): a pipeline with a vertex descriptor (157 retired). */
 static void mtld3d_slots(void) {
     struct unixcall_generic_obj_uint64_obj_ret fn = {device, (uint64_t)(uintptr_t) "dbl", 0}; /* the library's stand-in */
     CHECK(call(26, &fn) == 0 && fn.ret);
@@ -752,9 +743,6 @@ static void mtld3d_slots(void) {
     struct unixcall_mtldevice_newrenderpso_vertex rp = {device, {&info}, {&v}, 0, 0};
     CHECK(call(156, &rp) == 0 && rp.ret_pso && !rp.ret_error && checked[156]);
     CHECK(info.vertex_function == fn.ret); /* untouched in the guest */
-    struct WMTCompileOptions o = {.language_version = 0x20004, .preserve_invariance = 1, .math_mode = 2};
-    struct unixcall_mtldevice_newlibrarywithsource_options lo = {device, {"kernel"}, 6, {&o}, 0, 0};
-    CHECK(call(157, &lo) == 0 && lo.ret_library && !lo.ret_error && checked[157]);
 }
 
 /* The params struct sizes, from the call catalog's table (its own clang run on DXMT's headers). */
@@ -767,7 +755,7 @@ static const uint32_t catalog_sizes[MN_WM_SLOTS] = {
     40, 24, 32, 16, 24, 72,
     16, 16, /* DXMT 0071's WMTMemoryAlloc and WMTMemoryFree */
     0,      /* Direct3D forwarding's (MN_WM_D3D), guest-only */
-    40, 48, /* mtld3d's (D3D9 M2b): a pipeline with a vertex descriptor, a source library with options */
+    40, 0,  /* mtld3d's (D3D9 M2b): a pipeline with a vertex descriptor; 157 retired */
     8, 48, 16, 32, 16, 40, 16, /* C4d-6 (158..164): latency activity, attach, retire, sync/poll, surface, event, cursor */
 };
 
@@ -787,7 +775,7 @@ static const unsigned sync_slots[] = {
     3, 5, 6, 8, 14, 16, 24, 27, 39, 40, 41, 42, 43, 44, 49, 50, 51, 52, 63, 68, 69, 77, 79, 88, 91, 92, 94, 95, 96,
     99, 111, 119, 125, 128, 130, 139, 140, 145, 148, 149, 150,  /* data comes back */
     18, 19, 21, 22, 23, 141, 142, 143,                          /* GPU addresses or resource ids */
-    25, 29, 34, 35, 98, 112, 113, 131, 132, 144, 156, 157,      /* error handles */
+    25, 29, 34, 35, 98, 112, 113, 131, 132, 144, 156,           /* error handles */
     26, 56, 62, 89, 115, 116, 127, 151,                         /* nil is an answer */
     74, 76, 81, 82, 84, 85,                                     /* SM50 with outputs */
     13, 117, 126,                                               /* blocking */
@@ -795,7 +783,7 @@ static const unsigned sync_slots[] = {
     67, 71, 72, 93, 97, 101,                                    /* presentation (4c): nil, layer props, display */
     159, 161,                                                   /* C4d-6: attach and sync/poll */
 };
-static const unsigned refused_slots[] = {120, 121, 122, 123, 124, 83};
+static const unsigned refused_slots[] = {120, 121, 122, 123, 124, 83, 157};
 static const unsigned local_slots[] = {153, 154, 155, 158, 162, 164};
 
 static void modes(void) {
@@ -810,7 +798,7 @@ static void modes(void) {
             failures++;
         }
     }
-    CHECK(n[MN_WM_SYNC] == 87 && n[MN_WM_QUEUED] == 66 && n[MN_WM_REFUSED] == 6 && n[MN_WM_LOCAL] == 6);
+    CHECK(n[MN_WM_SYNC] == 86 && n[MN_WM_QUEUED] == 66 && n[MN_WM_REFUSED] == 7 && n[MN_WM_LOCAL] == 6);
 }
 
 int main(void) {

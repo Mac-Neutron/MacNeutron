@@ -151,8 +151,8 @@ static int cross_thread(int (*stats)(struct mn_wm_stats *)) {
 
 /* ---- refused, fork ---- */
 static int refused(void) {
-    /* Mach ports and slot 83 (milestone 4c forwards the presentation slots 4b-1 refused). */
-    static const unsigned unsupported[] = {120, 121, 122, 123, 124, 83};
+    /* Mach ports, slot 83, and retired slot 157 (milestone 4c forwards the presentation slots 4b-1 refused). */
+    static const unsigned unsupported[] = {120, 121, 122, 123, 124, 83, 157};
     uint8_t params[256] = {0};
     int ok = 1;
     for (int pass = 0; pass < 2; pass++) {

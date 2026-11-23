@@ -1,4 +1,4 @@
-/* wm_probe's g4 cases (slots.txt's g4; probe.h), recorded from DXMT's C: libraries (25, 144, 157), functions (26, 98),
+/* wm_probe's g4 cases (slots.txt's g4; probe.h), recorded from DXMT's C: libraries (25, 144), functions (26, 98),
  * pipelines (29 compute, 34 render, 35 mesh, 131 tile, 156 render with a vertex descriptor) and binary archives (112,
  * 113). The pipeline slots go through a recording device (the real device behind it makes the objects): the descriptor
  * the handler builds is dumped, and a spy in front of the recorder adds the immutable-buffer masks over all 31 slots
@@ -785,32 +785,19 @@ static void archive_serialize(void) {
     }
 }
 
-/* ---- 144, 157 ---- */
+/* ---- 144 ---- */
 
-static void source_call(unsigned slot, const char *what, id dev, const char *src, uint64_t len, const struct WMTCompileOptions *opt) {
+static void source_call(const char *what, id dev, const char *src, uint64_t len) {
     wm_line("run=%s", what);
-    if (slot == 144) {
-        struct unixcall_mtldevice_newlibrarywithsource p;
-        wm_fill(&p, sizeof p);
-        p.device = (uint64_t)dev;
-        p.source.ptr = src;
-        p.length = len;
-        wm_own("ret_library", &p.ret_library);
-        wm_own("ret_error", &p.ret_error);
-        wm_call(144, &p);
-        error_of("error", p.ret_error, !strncmp(what, "syntax", 6));
-    } else {
-        struct unixcall_mtldevice_newlibrarywithsource_options p;
-        wm_fill(&p, sizeof p);
-        p.device = (uint64_t)dev;
-        p.source.ptr = src;
-        p.length = len;
-        p.options.ptr = opt;
-        wm_own("ret_library", &p.ret_library);
-        wm_own("ret_error", &p.ret_error);
-        wm_call(157, &p);
-        error_of("error", p.ret_error, !strncmp(what, "syntax", 6));
-    }
+    struct unixcall_mtldevice_newlibrarywithsource p;
+    wm_fill(&p, sizeof p);
+    p.device = (uint64_t)dev;
+    p.source.ptr = src;
+    p.length = len;
+    wm_own("ret_library", &p.ret_library);
+    wm_own("ret_error", &p.ret_error);
+    wm_call(144, &p);
+    error_of("error", p.ret_error, !strncmp(what, "syntax", 6));
 }
 
 /* 144: source of a length (ASCII, MSL 3.1 for every library it builds), a syntax error (+1 error with Metal's text), a
@@ -818,51 +805,18 @@ static void source_call(unsigned slot, const char *what, id dev, const char *src
 static void source(void) {
     id rec = wm_rec(wm_device, @protocol(MTLDevice));
     const char *good = "#include <metal_stdlib>\nusing namespace metal;\nkernel void sk(device uint *b [[buffer(0)]]) { b[0] = 1; }\n";
-    source_call(144, "good", rec, good, strlen(good), NULL);
-    source_call(144, "good-real-device", (id)wm_device, good, strlen(good), NULL);
+    source_call("good", rec, good, strlen(good));
+    source_call("good-real-device", (id)wm_device, good, strlen(good));
     const char *bad = "kernel void broken( { }\n";
-    source_call(144, "syntax-error", rec, bad, strlen(bad), NULL);
-    source_call(144, "short-length", rec, good, 24, NULL);
-    source_call(144, "length-0", rec, good, 0, NULL);
+    source_call("syntax-error", rec, bad, strlen(bad));
+    source_call("short-length", rec, good, 24);
+    source_call("length-0", rec, good, 0);
     const char *versioned = "#include <metal_stdlib>\nusing namespace metal;\nkernel void sk(device uint *b [[buffer(0)]]) { b[0] = __METAL_VERSION__; }\n";
-    source_call(144, "version-31", rec, versioned, strlen(versioned), NULL);
+    source_call("version-31", rec, versioned, strlen(versioned));
     /* The string is decoded as ASCII, which takes bytes of 0x80 and up: a UTF-8 decode of 0xff gets nil, and Metal aborts
      * the process on a nil source. Last, so the rest of the case is printed before such an abort. */
     const char *high = "#include <metal_stdlib>\nusing namespace metal;\n// \xff\xfe bytes\nkernel void sk(device uint *b [[buffer(0)]]) { b[0] = 1; }\n";
-    source_call(144, "high-bytes-comment", rec, high, strlen(high), NULL);
-}
-
-/* 157: the compile options dumped (language version 0 keeps Metal's default), each field, and a syntax error. */
-static void source_options(void) {
-    id rec = wm_rec(wm_device, @protocol(MTLDevice));
-    const char *good = "#include <metal_stdlib>\nusing namespace metal;\nkernel void sk(device uint *b [[buffer(0)]]) { b[0] = 1; }\n";
-    struct {
-        const char *what;
-        uint64_t version;
-        uint8_t invariance, math;
-    } runs[] = {
-        {"default", 0, 0, 0},
-        {"msl-3.1-invariant", 0x30001, 1, 0},
-        {"msl-2.4-relaxed", 0x20004, 0, 1},
-        {"msl-3.2-fast", 0x30002, 1, 2},
-        {"invariance-2", 0, 2, 0},
-        {"math-3", 0, 0, 3},
-    };
-    for (unsigned i = 0; i < sizeof runs / sizeof *runs; i++) {
-        struct WMTCompileOptions o;
-        memset(&o, 0, sizeof o);
-        o.language_version = runs[i].version;
-        o.preserve_invariance = runs[i].invariance;
-        o.math_mode = runs[i].math;
-        source_call(157, runs[i].what, rec, good, strlen(good), &o);
-    }
-    struct WMTCompileOptions o = {.language_version = 0x30001};
-    const char *bad = "kernel void broken( { }\n";
-    source_call(157, "syntax-error", rec, bad, strlen(bad), &o);
-    source_call(157, "short-length", rec, good, 24, &o);
-    /* As 144: the source is ASCII-decoded, so a byte of 0x80 and up in a comment is accepted. Last, as in 144. */
-    const char *high = "#include <metal_stdlib>\nusing namespace metal;\n// \xff\xfe bytes\nkernel void sk(device uint *b [[buffer(0)]]) { b[0] = 1; }\n";
-    source_call(157, "high-bytes-comment", rec, high, strlen(high), &o);
+    source_call("high-bytes-comment", rec, high, strlen(high));
 }
 
 /* ---- nil ---- */
@@ -948,16 +902,6 @@ static void nil_args(void) {
     wm_call(144, &s);
     wm_val("144.ret_library", "%s", nz(s.ret_library));
     wm_val("144.ret_error", "%s", nz(s.ret_error));
-    struct WMTCompileOptions o = {0};
-    struct unixcall_mtldevice_newlibrarywithsource_options so;
-    wm_fill(&so, sizeof so);
-    so.device = 0;
-    so.source.ptr = src;
-    so.length = strlen(src);
-    so.options.ptr = &o;
-    wm_call(157, &so);
-    wm_val("157.ret_library", "%s", nz(so.ret_library));
-    wm_val("157.ret_error", "%s", nz(so.ret_error));
     struct unixcall_mtldevice_newbinaryarchive ba;
     wm_fill(&ba, sizeof ba);
     ba.device = 0;
@@ -1241,7 +1185,6 @@ const struct wm_case wm_cases_g4[] = {
     {"g4", 98, "constants", 0, constants},
     {"g4", 112, "archive", 0, archive},
     {"g4", 144, "source", 0, source},
-    {"g4", 157, "source-options", 0, source_options},
     {"g4", 25, "nil-args", 0, nil_args},
     {"g4", 29, "lookup-nil-entry", 0, lookup_nil_entry},
     {"g4", 29, "nil-device-serialize", 0, nil_device_serialize},

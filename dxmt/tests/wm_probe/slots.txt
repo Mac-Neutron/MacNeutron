@@ -155,7 +155,7 @@
 154 g0 _MacNeutron_guestOnly
 155 g0 _MacNeutron_guestOnly
 156 g4 _MTLDevice_newRenderPipelineStateWithVertexDescriptor
-157 g4 _MTLDevice_newLibraryWithSourceOptions
+157 g0 -
 158 g6 _WMTDeclareLatencyCriticalActivity
 159 g6 _WMTAttachMetalView
 160 g6 _WMTRetireMetalView

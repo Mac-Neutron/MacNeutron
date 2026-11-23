@@ -399,19 +399,14 @@ const struct mn_wm_call mn_wm_calls[MN_WM_SLOTS] = {
              .refuse_status = MN_STATUS_INVALID_PARAMETER},
     /* MN_WM_D3D: the guest's Direct3D forwarding, whose calls travel as MN_OP_D3D, never as this slot. */
     [155] = {.name = "MacNeutron_d3d", .mode = MN_WM_LOCAL, .refuse_status = MN_STATUS_NOT_SUPPORTED},
-    /* mtld3d's (D3D9 M2b, DXMT's MacNeutron slots): slot 34 with a vertex descriptor, and slot 144 with options. */
+    /* mtld3d's (D3D9 M2b, DXMT's MacNeutron slots): slot 34 with a vertex descriptor; slot 157 retired. */
     C(156, MTLDevice_newRenderPipelineStateWithVertexDescriptor, unixcall_mtldevice_newrenderpso_vertex, S, MN_SP_NONE,
       HIN(unixcall_mtldevice_newrenderpso_vertex, device),
       PTR(WMF_IN, unixcall_mtldevice_newrenderpso_vertex, info, sizeof(struct WMTRenderPipelineInfo), N_RENDER),
       PTR(WMF_IN, unixcall_mtldevice_newrenderpso_vertex, vertex, sizeof(struct WMTVertexDescriptorInfo), 0),
       HOUT(unixcall_mtldevice_newrenderpso_vertex, ret_error, AR),
       HOUT(unixcall_mtldevice_newrenderpso_vertex, ret_pso, P1)),
-    C(157, MTLDevice_newLibraryWithSourceOptions, unixcall_mtldevice_newlibrarywithsource_options, S, MN_SP_NONE,
-      HIN(unixcall_mtldevice_newlibrarywithsource_options, device),
-      ARR(WMF_IN, unixcall_mtldevice_newlibrarywithsource_options, source, 1, length, 0),
-      PTR(WMF_IN, unixcall_mtldevice_newlibrarywithsource_options, options, sizeof(struct WMTCompileOptions), 0),
-      HOUT(unixcall_mtldevice_newlibrarywithsource_options, ret_error, AR),
-      HOUT(unixcall_mtldevice_newlibrarywithsource_options, ret_library, P1)),
+    R(157, (none), 0, MN_STATUS_NOT_SUPPORTED), /* retired; NULL in winemetal */
     /* Core D3D9 presentation & latency slots (DXMTRS C4d-6). */
     [158] = {.name = "WMTDeclareLatencyCriticalActivity", .params_size = sizeof(struct G_R), .mode = MN_WM_LOCAL,
              .refuse_status = MN_STATUS_INVALID_PARAMETER},

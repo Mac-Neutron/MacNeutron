@@ -1,4 +1,4 @@
-/* wm_probe's g0 cases (slots.txt's g0; probe.h), recorded from DXMT's C: the null entry 83, the guest-only slots 153-155,
+/* wm_probe's g0 cases (slots.txt's g0; probe.h), recorded from DXMT's C: the null entries 83 and 157, the guest-only slots 153-155,
  * and the two constructors (DXMT_MAX_ANISOTROPY, whose floor slot 19 applies; MACNEUTRON_PRESENT, which loads the
  * presenter). The constructors run when the image loads, so each env case is a child with the variable set. */
 #include "probe.h"
@@ -10,6 +10,13 @@
 static void slot83_null(void) {
     struct unixcall_generic_obj_noret p = {.handle = WM_FILL64};
     wm_call(83, &p);
+    wm_bytes("written", &p, sizeof p);
+}
+
+/* 157: retired in-place; the table entry is null and never called (wm_call answers "null" without calling). */
+static void slot157_null(void) {
+    struct unixcall_generic_obj_noret p = {.handle = WM_FILL64};
+    wm_call(157, &p);
     wm_bytes("written", &p, sizeof p);
 }
 
@@ -107,6 +114,7 @@ static void presenter_env(void) {
 
 const struct wm_case wm_cases_g0[] = {
     {"g0", 83, "slot83-null", 0, slot83_null},
+    {"g0", 157, "slot157-null", 0, slot157_null},
     {"g0", 153, "guest-only", 0, guest_only},
     {"g0", 19, "aniso-env", WM_ENV_ANISO, aniso_env},
     {"g0", 153, "presenter-env", WM_ENV_PRESENT, presenter_env},
