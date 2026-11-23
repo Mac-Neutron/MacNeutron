@@ -1074,26 +1074,51 @@ static bool rowSwapchain() {
     if (FAILED(hr = sc.p->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &bb.p))) return fail("GetBackBuffer", hr);
     return true;
 }
-// rt: the additional chain's back buffer as render target 0, a red clear read back through render target 0's original
-// surface (the chains alias one back buffer); SetRenderTarget(1, NULL); no depth surface; SetDepthStencilSurface(NULL).
+// rt (#1199): the additional chain owns a standalone back buffer distinct from rtSurf; SetRenderTarget/GetRenderTarget
+// round-trips on bb and rtSurf, clearing bb red leaves rtSurf blue, GetRenderTargetData reads each independently;
+// SetRenderTarget(1, NULL); no depth surface; SetDepthStencilSurface(NULL).
 static bool rowRt() {
     D3DPRESENT_PARAMETERS pp = {};
     pp.Windowed = TRUE, pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = stateHwnd;
     Com<IDirect3DSwapChain9> sc;
-    Com<IDirect3DSurface9> bb, ds;
+    Com<IDirect3DSurface9> bb, gotRt, gotBack, ds;
     CK(CreateAdditionalSwapChain, &pp, &sc.p);
     HRESULT hr = sc.p->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
-    if (FAILED(hr)) return fail("GetBackBuffer", hr);
-    CK(SetRenderTarget, 0, bb.p);
-    CK(Clear, 0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(255, 0, 0), 1.0f, 0);
-    CK(GetRenderTargetData, rtSurf, sysSurf);
-    D3DLOCKED_RECT lr = {};
-    if (FAILED(hr = sysSurf->LockRect(&lr, nullptr, D3DLOCK_READONLY))) return fail("LockRect", hr);
-    const DWORD got = *(const DWORD *)((const BYTE *)lr.pBits + 128 * lr.Pitch + 128 * 4) & 0xffffff;
-    sysSurf->UnlockRect();
+    if (FAILED(hr) || !bb.p) return fail("GetBackBuffer", hr);
+    if (bb.p == rtSurf) return snprintf(why, sizeof why, "chain back buffer aliased rtSurf"), false;
+
     CK(SetRenderTarget, 0, rtSurf);
+    CK(Clear, 0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 255), 1.0f, 0);
+    CK(SetRenderTarget, 0, bb.p);
+    CK(GetRenderTarget, 0, &gotRt.p);
+    if (gotRt.p != bb.p) {
+        dev->SetRenderTarget(0, rtSurf);
+        return snprintf(why, sizeof why, "GetRenderTarget(0) after chain bind mismatch"), false;
+    }
+    hr = dev->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(255, 0, 0), 1.0f, 0);
+    if (FAILED(hr)) {
+        dev->SetRenderTarget(0, rtSurf);
+        return fail("Clear (chain back buffer)", hr);
+    }
+
+    const auto readCenter = [&](IDirect3DSurface9 *surf, DWORD &out) -> bool {
+        if (FAILED(hr = dev->GetRenderTargetData(surf, sysSurf))) return fail("GetRenderTargetData", hr);
+        D3DLOCKED_RECT lr = {};
+        if (FAILED(hr = sysSurf->LockRect(&lr, nullptr, D3DLOCK_READONLY))) return fail("LockRect", hr);
+        out = *(const DWORD *)((const BYTE *)lr.pBits + 128 * lr.Pitch + 128 * 4) & 0xffffff;
+        sysSurf->UnlockRect();
+        return true;
+    };
+    DWORD chainPx = 0, devPx = 0;
+    const bool readOk = readCenter(bb.p, chainPx) && readCenter(rtSurf, devPx);
+    CK(SetRenderTarget, 0, rtSurf);
+    CK(GetRenderTarget, 0, &gotBack.p);
+    if (gotBack.p != rtSurf) return snprintf(why, sizeof why, "GetRenderTarget(0) after rtSurf restore mismatch"), false;
     CK(Present, nullptr, nullptr, nullptr, nullptr);
-    if (got != 0xff0000) return snprintf(why, sizeof why, "back buffer %06lx want ff0000", (unsigned long)got), false;
+    if (!readOk) return false;
+    if (chainPx != 0xff0000) return snprintf(why, sizeof why, "chain back buffer %06lx want ff0000", (unsigned long)chainPx), false;
+    if (devPx != 0x0000ff) return snprintf(why, sizeof why, "device back buffer %06lx want 0000ff", (unsigned long)devPx), false;
+
     CK(SetRenderTarget, 1, nullptr);
     hr = dev->GetDepthStencilSurface(&ds.p);
     if (hr != D3DERR_NOTFOUND || ds.p) return fail("GetDepthStencilSurface", hr);
@@ -2043,6 +2068,14 @@ static bool rowTexVtxSrgb() {
     });
 }
 
+static bool rowNullRt();
+static bool rowL8Rt();
+static bool rowAti2Tex();
+static bool rowDefZero();
+static bool rowFpuCw();
+static bool rowFfFogSphere();
+static bool rowVbDrawtime();
+
 static void textureRows(IDirect3DDevice9 *d, bool strict) {
     static const struct { const char *name; bool (*run)(); } rows[] = {
         {"tex-ps2d", rowTexPs2d},       {"tex-ff", rowTexFf},           {"tex-cascade", rowTexCascade},
@@ -2058,6 +2091,7 @@ static void textureRows(IDirect3DDevice9 *d, bool strict) {
         {"tex-fetch4a", rowTexFetch4a}, {"tex-rttex", rowTexRtTex},     {"tex-vtx", rowTexVtx},         {"tex-rtlock", rowTexRtLock},
         {"tex-vtxlod", rowTexVtxLod},   {"tex-vtxblack", rowTexVtxBlack}, {"tex-vtxcube", rowTexVtxCube},
         {"tex-vtxvolume", rowTexVtxVolume}, {"tex-vtxsrgb", rowTexVtxSrgb},
+        {"ati2-tex", rowAti2Tex},       {"def-zero", rowDefZero},
         {"tex-big256", sizeof(void *) == 4 ? rowTexBig256 : nullptr}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
@@ -2592,8 +2626,8 @@ static void fixedRows(IDirect3DDevice9 *d, bool strict) {
         {"ff-ttproj", rowFfTtProj},         {"ff-tcindex", rowFfTcIndex},       {"ff-tex", rowFfTex},
         {"ff-blend", rowFfBlend},           {"ff-blendidx", rowFfBlendIdx},     {"ff-point", rowFfPoint},
         {"ff-pointscale", rowFfPointScale}, {"ff-clip", rowFfClip},             {"ff-indexed", rowFfIndexed},
-        {"ff-decl", rowFfDecl},             {"tex-vtxrt", rowTexVtxRt},         {"tex-vtxdepth", rowTexVtxDepth},
-        {"tex-vtxdepthfmt", rowTexVtxDepthFmt}};
+        {"ff-decl", rowFfDecl},             {"ff-fog-sphere", rowFfFogSphere}, {"tex-vtxrt", rowTexVtxRt},
+        {"tex-vtxdepth", rowTexVtxDepth},   {"tex-vtxdepthfmt", rowTexVtxDepthFmt}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
@@ -3744,29 +3778,34 @@ static bool chainBackBuffer(HWND w, DWORD flags, Com<IDirect3DSwapChain9> &sc, C
     const HRESULT hr = sc.p->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &bb.p);
     return SUCCEEDED(hr) || fail("IDirect3DSwapChain9::GetBackBuffer", hr);
 }
-// rt-chain: an additional swap chain of the device's size on the device's window (a null hDeviceWindow, which names
-// the device's window: this mode is given no window, and the core refused GetCreationParameters before DXMTRS
-// C4c-6a); the device's back buffer cleared steel with the rust triangle. The chain's back
-// buffer (an alias of the device's) locked READONLY reads rust at (40,40) and steel at (248,8); LockRect(NULL, 0) of
-// it is D3DERR_INVALIDCALL (the device has no lockable back buffer); GetRenderTargetData of it into a system-memory
-// surface reads the same two texels.
+// rt-chain: an additional swap chain of the device's size on the device's window owns a standalone color back buffer
+// rather than aliasing the device's primary back buffer: clearing/drawing on the device's back buffer leaves the
+// chain's untouched, and clearing/drawing on the chain's back buffer leaves the device's untouched. LockRect(READONLY)
+// on the chain's back buffer reads its own contents; LockRect(NULL, 0) is D3DERR_INVALIDCALL (no lockable flag);
+// GetRenderTargetData of it reads its own contents.
 static bool rowRtChain() {
     return until([&] {
         Com<IDirect3DSwapChain9> sc;
         Com<IDirect3DSurface9> bb;
         DWORD in = 0, out = 0;
+        const RV gold[3] = {{16, 16, 0.5f, 1, KGOLD}, {112, 16, 0.5f, 1, KGOLD}, {16, 112, 0.5f, 1, KGOLD}};
         if (!chainBackBuffer(nullptr, 0, sc, bb) ||
-            !scene([&] { return backToScreen() && clearTo(KSTEEL) && rtri(BB_RUST); }) ||
+            !scene([&] {
+                if (!backToScreen() || !clearTo(KSTEEL) || !rtri(BB_RUST)) return false;
+                CK(SetRenderTarget, 0, bb.p);
+                return clearTo(KAQUA) && rtri(gold) && backToScreen();
+            }) ||
+            !rtHas("device back buffer", rtSurf, 256, D3DFMT_X8R8G8B8, {{40, 40, KRUST}, {248, 8, KSTEEL}}) ||
             !underLock(bb.p, "LockRect (READONLY)", nullptr, D3DLOCK_READONLY, [&](BYTE *b, int p) {
                 in = texel(b, p, 40, 40), out = texel(b, p, 248, 8);
             }))
             return false;
-        if (!want("READONLY lock (40,40)", in, KRUST) || !want("READONLY lock (248,8)", out, KSTEEL)) return false;
+        if (!want("READONLY lock (40,40)", in, KGOLD) || !want("READONLY lock (248,8)", out, KAQUA)) return false;
         D3DLOCKED_RECT lr = {};
         const HRESULT hr = bb.p->LockRect(&lr, nullptr, 0);
         if (SUCCEEDED(hr)) bb.p->UnlockRect();
         if (hr != D3DERR_INVALIDCALL) return fail("LockRect (NULL, 0)", hr);
-        return rtHas("GetRenderTargetData", bb.p, 256, D3DFMT_X8R8G8B8, {{40, 40, KRUST}, {248, 8, KSTEEL}});
+        return rtHas("GetRenderTargetData", bb.p, 256, D3DFMT_X8R8G8B8, {{40, 40, KGOLD}, {248, 8, KAQUA}});
     });
 }
 
@@ -3855,10 +3894,18 @@ static bool rowLbLock() {
         if (hr != D3DERR_INVALIDCALL) return fail("LockRect (an empty rect)", hr);
         Com<IDirect3DSwapChain9> sc;
         Com<IDirect3DSurface9> chain;
-        return chainBackBuffer(l.w.h, D3DPRESENTFLAG_LOCKABLE_BACKBUFFER, sc, chain) &&
-               underLock(chain.p, "the chain's LockRect (NULL, 0)", nullptr, 0,
-                         [&](BYTE *b, int p) { paint(b, p, 40, 160, 72, 224, KSAGE); }) &&
-               rtHas("the chain's write", bb, 256, x8, {{56, 192, KSAGE}, {40, 40, KRUST}});
+        if (!chainBackBuffer(l.w.h, D3DPRESENTFLAG_LOCKABLE_BACKBUFFER, sc, chain) ||
+            !scene([&] {
+                CK(SetRenderTarget, 0, chain.p);
+                return clearTo(KLILAC) && backToScreen();
+            }) ||
+            !underLock(chain.p, "the chain's LockRect (NULL, 0)", nullptr, 0,
+                       [&](BYTE *b, int p) { paint(b, p, 40, 160, 72, 224, KSAGE); }) ||
+            !rtHas("the chain's write", chain.p, 256, x8, {{56, 192, KSAGE}, {40, 40, KLILAC}}))
+            return false;
+        hr = sc.p->Present(nullptr, nullptr, nullptr, nullptr, 0);
+        if (FAILED(hr)) return fail("IDirect3DSwapChain9::Present", hr);
+        return rtHas("device back buffer kept", bb, 256, x8, {{56, 192, KSTEEL}, {40, 40, KRUST}, {120, 120, KMINT}});
     });
 }
 // lb-dc (on the lockable device): its back buffer cleared steel with the rust triangle; under GetDC GetPixel reads rust
@@ -3892,10 +3939,18 @@ static bool rowLbDc() {
         if (unlocked != D3D_OK) return fail("UnlockRect (a DC held, no lock)", unlocked);
         Com<IDirect3DSwapChain9> sc;
         Com<IDirect3DSurface9> chain;
-        return rtHas("UnlockRect under the DC", bb, 256, x8, {{120, 120, KMINT}, {192, 48, KAQUA}}) &&
-               chainBackBuffer(l.w.h, D3DPRESENTFLAG_LOCKABLE_BACKBUFFER, sc, chain) &&
-               underDc(chain.p, "the chain's GetDC", [&](HDC dc) { return gdiFill(dc, 40, 160, 72, 224, KSAGE); }) &&
-               rtHas("the chain's DC", bb, 256, x8, {{56, 192, KSAGE}, {40, 40, KRUST}});
+        if (!rtHas("UnlockRect under the DC", bb, 256, x8, {{120, 120, KMINT}, {192, 48, KAQUA}}) ||
+            !chainBackBuffer(l.w.h, D3DPRESENTFLAG_LOCKABLE_BACKBUFFER, sc, chain) ||
+            !scene([&] {
+                CK(SetRenderTarget, 0, chain.p);
+                return clearTo(KLILAC) && backToScreen();
+            }) ||
+            !underDc(chain.p, "the chain's GetDC", [&](HDC dc) { return gdiFill(dc, 40, 160, 72, 224, KSAGE); }) ||
+            !rtHas("the chain's DC", chain.p, 256, x8, {{56, 192, KSAGE}, {40, 40, KLILAC}}))
+            return false;
+        const HRESULT phr = sc.p->Present(nullptr, nullptr, nullptr, nullptr, 0);
+        if (FAILED(phr)) return fail("IDirect3DSwapChain9::Present", phr);
+        return rtHas("device back buffer kept", bb, 256, x8, {{56, 192, KSTEEL}, {40, 40, KRUST}, {120, 120, KMINT}});
     });
 }
 
@@ -3912,6 +3967,7 @@ static void targetRows(IDirect3DDevice9 *d, bool strict) {
         {"rt-nolock", rowRtNolock},     {"rt-bblock", rowRtBblock},     {"rt-front", rowRtFront},
         {"dc-mem", rowDcMem},           {"dc-tex", rowDcTex},           {"dc-rtex", rowDcRtex},
         {"dc-rt", rowDcRt},             {"dc-bb", rowDcBb},             {"rt-chain", rowRtChain},
+        {"null-rt", rowNullRt},         {"l8-rt", rowL8Rt},
         // The lockable device's rows last (a second device beside the first; DXMTRS C4c-3b).
         {"lb-lock", rowLbLock},         {"lb-dc", rowLbDc}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
@@ -5666,8 +5722,9 @@ static bool rowMrtFormats() {
     });
 }
 // sRGB write over two targets, a black quad at alpha 0.5 over a 128 grey Clear. Two A8R8G8B8 targets: the blend is
-// linear and encoded (137) on both. With a half-float target at index 1 (no sRGB view) the whole set takes the pixel
-// stage's encode, before the blender: 94 and 0.368 (mtld3d's rule, kept: DXMTRS C4b-3d4 ruling 10).
+// linear and encoded (137, 0x89) on both. With a half-float target at index 1 (no sRGB view), per-RT hardware sRGB
+// twins keep T0 sRGB-encoded (linear blend -> post-blend encode: 137 / 0x898989) while float T1 stays linear
+// (0.5 * (128/255) = 64/255 ≈ 0.251).
 static bool rowMrtSrgb() {
     Prog p;
     if (!make(p, DECL_XYZ, VS_POS, PS_MRT2)) return false;
@@ -5687,16 +5744,17 @@ static bool rowMrtSrgb() {
                 if (!mixed)
                     return rtHas("T0 twins", a.s.p, 64, A8, {{32, 32, 0x898989}}) &&
                            rtHas("T1 twins", b.s.p, 64, A8, {{32, 32, 0x898989}});
-                const float f[4] = {0.368f, 0.368f, 0.368f, 0};
-                return rtHas("T0 mixed", a.s.p, 64, A8, {{32, 32, 0x5e5e5e}}) &&
+                const float f[4] = {64.0f / 255.0f, 64.0f / 255.0f, 64.0f / 255.0f, 0};
+                return rtHas("T0 mixed", a.s.p, 64, A8, {{32, 32, 0x898989}}) &&
                        rtHasF("T1 mixed", b.s.p, 64, fb, 8, 32, 32, f, 3);
             }))
             return false;
     }
     return true;
 }
-// Clear under sRGB write encodes each target once: an 8-bit target beside a float one (188 and 0.737, a rect to 64
-// reading 137 and 0.538), and beside an 8-bit one of another size (188 on both).
+// Clear under sRGB write encodes each sRGB-capable 8-bit target via its hardware sRGB twin (188 and 137) while a
+// float target beside it stays linear (128/255 ≈ 0.502 and 64/255 ≈ 0.251); two 8-bit targets of different sizes
+// both encode (188).
 static bool rowMrtSrgbClear() {
     return mrtUntil([&] {
                Rt a, r;
@@ -5708,7 +5766,7 @@ static bool rowMrtSrgbClear() {
                               clearRects(1, &rect, D3DCLEAR_TARGET, D3DCOLOR_XRGB(64, 64, 64));
                    }))
                    return false;
-               const float whole[4] = {0.737f, 0, 0, 0}, part[4] = {0.538f, 0, 0, 0};
+               const float whole[4] = {128.0f / 255.0f, 0, 0, 0}, part[4] = {64.0f / 255.0f, 0, 0, 0};
                return rtHas("T0", a.s.p, 64, A8, {{40, 40, 0xbcbcbc}, {16, 16, 0x898989}}) &&
                       rtHasF("T1 whole", r.s.p, 64, D3DFMT_R32F, 4, 40, 40, whole, 1) &&
                       rtHasF("T1 rect", r.s.p, 64, D3DFMT_R32F, 4, 16, 16, part, 1);
@@ -6521,54 +6579,117 @@ static bool rowMsFront() {
     });
 }
 
-// A 256x256 4x MSAA lockable device (D3DPRESENTFLAG_LOCKABLE_BACKBUFFER + D3DSWAPEFFECT_DISCARD).
-static bool makeMsaaLockable(Lockable &l) {
-    RECT r = {0, 0, 256, 256};
-    AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    l.w.h = CreateWindowW(L"d3d9_triangle", L"d3d9_triangle msaa lockable", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 400, 100,
-                          r.right - r.left, r.bottom - r.top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-    if (!l.w.h) return snprintf(why, sizeof why, "CreateWindowW"), false;
+// 256x256 windowed parameters with configurable multisample type and D3DPRESENTFLAG flags.
+static D3DPRESENT_PARAMETERS ppMsaaLockable(HWND w, D3DMULTISAMPLE_TYPE ms, DWORD flags) {
     D3DPRESENT_PARAMETERS pp = {};
     pp.BackBufferWidth = 256, pp.BackBufferHeight = 256, pp.BackBufferFormat = D3DFMT_X8R8G8B8, pp.BackBufferCount = 1;
-    pp.MultiSampleType = D3DMULTISAMPLE_4_SAMPLES, pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    pp.hDeviceWindow = l.w.h, pp.Windowed = TRUE, pp.Flags = D3DPRESENTFLAG_LOCKABLE_BACKBUFFER;
+    pp.MultiSampleType = ms, pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    pp.hDeviceWindow = w, pp.Windowed = TRUE, pp.Flags = flags;
     pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
-    HRESULT hr = direct3d ? direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, l.w.h,
-                                                   D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp, &l.d.p)
-                          : E_POINTER;
-    if (FAILED(hr)) return fail("CreateDevice (4x MSAA lockable back buffer)", hr);
-    hr = l.d.p->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &l.bb.p);
-    return SUCCEEDED(hr) || fail("GetBackBuffer (4x MSAA lockable device)", hr);
+    return pp;
 }
-// ms-lblock (DXMTRS C4d-2a): 4x MSAA lockable back buffer written through LockRect(NULL, 0) on its left half after a
-// green draw, then drawn on its top-right quadrant with blue; read back via msHas.
+static bool makeMsaaWindow(Window &w, const wchar_t *title) {
+    RECT r = {0, 0, 256, 256};
+    AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
+    w.h = CreateWindowW(L"d3d9_triangle", title, WS_OVERLAPPEDWINDOW | WS_VISIBLE, 400, 100, r.right - r.left,
+                        r.bottom - r.top, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    return w.h || (snprintf(why, sizeof why, "CreateWindowW"), false);
+}
+// ms-lblock (#1184): D3DPRESENTFLAG_LOCKABLE_BACKBUFFER combined with multisampling is refused with
+// D3DERR_INVALIDCALL on CreateDevice, CreateDeviceEx, and CreateAdditionalSwapChain, without creating an object or
+// breaking the existing device.
 static bool rowMsLbLock() {
-    Lockable l;
-    if (!makeMsaaLockable(l)) return false;
-    const OnDevice on(l.d.p, l.bb.p);
-    return until([&] {
-        if (!reset() || !msStart()) return false;
-        if (!scene([&] { return backToScreen() && clearTo(TBLK) && zquad(0, 0, 256, 256, 0.5f, TGRN); })) return false;
-        if (!underLock(l.bb.p, "LockRect (NULL, 0)", nullptr, 0,
-                       [&](BYTE *b, int p) { paint(b, p, 0, 0, 128, 256, TRED); }))
-            return false;
-        if (!scene([&] { return zquad(128, 0, 256, 128, 0.5f, TBLU); })) return false;
-        return msHas("the 4x MSAA lockable back buffer", l.bb.p, {{64, 128, TRED}, {192, 64, TBLU}, {192, 192, TGRN}});
+    Window w;
+    if (!makeMsaaWindow(w, L"d3d9_triangle msaa lockable")) return false;
+    D3DPRESENT_PARAMETERS bad = ppMsaaLockable(w.h, D3DMULTISAMPLE_4_SAMPLES, D3DPRESENTFLAG_LOCKABLE_BACKBUFFER);
+    Com<IDirect3DDevice9> badDev;
+    HRESULT hr = direct3d ? direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, w.h,
+                                                   D3DCREATE_HARDWARE_VERTEXPROCESSING, &bad, &badDev.p)
+                          : E_POINTER;
+    if (hr != D3DERR_INVALIDCALL) return fail("CreateDevice (4x MSAA lockable)", hr);
+    if (badDev.p) return snprintf(why, sizeof why, "CreateDevice wrote output pointer on refusal"), false;
+
+    Com<IDirect3D9Ex> d3dx;
+    if (SUCCEEDED(Direct3DCreate9Ex(D3D_SDK_VERSION, &d3dx.p)) && d3dx.p) {
+        Com<IDirect3DDevice9Ex> badEx;
+        hr = d3dx.p->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, w.h, D3DCREATE_HARDWARE_VERTEXPROCESSING, &bad,
+                                    nullptr, &badEx.p);
+        if (hr != D3DERR_INVALIDCALL) return fail("CreateDeviceEx (4x MSAA lockable)", hr);
+        if (badEx.p) return snprintf(why, sizeof why, "CreateDeviceEx wrote output pointer on refusal"), false;
+    }
+
+    Com<IDirect3DSwapChain9> badSc;
+    hr = dev->CreateAdditionalSwapChain(&bad, &badSc.p);
+    if (hr != D3DERR_INVALIDCALL) return fail("CreateAdditionalSwapChain (4x MSAA lockable)", hr);
+    if (badSc.p) return snprintf(why, sizeof why, "CreateAdditionalSwapChain wrote output pointer on refusal"), false;
+
+    const bool ok = until([&] {
+        Rt r;
+        const bool drew = mkRt(r) && rstate(D3DRS_ZENABLE, D3DZB_FALSE) &&
+                          scene([&] {
+                              dev->SetDepthStencilSurface(nullptr);
+                              return bindRt(0, r.s.p) && clearTo(TBLK) && zquad(0, 0, 64, 64, 0.5f, TGRN) &&
+                                     backToScreen();
+                          });
+        dev->SetDepthStencilSurface(dsSurf);
+        return drew && rtHas("device draws after refused swapchain", r.s.p, 64, A8, {{32, 32, TGRN}});
     });
+    dev->SetDepthStencilSurface(dsSurf);
+    return ok;
 }
-// ms-lbdc (DXMTRS C4d-2a): 4x MSAA lockable back buffer written through GetDC + FillRect on its left half after a
-// green draw, then drawn on its top-right quadrant with blue; read back via msHas.
+// ms-lbdc (#1184): Reset with D3DPRESENTFLAG_LOCKABLE_BACKBUFFER + multisampling returns D3DERR_INVALIDCALL; a failed
+// plain IDirect3DDevice9::Reset latches TestCooperativeLevel() == D3DERR_DEVICENOTRESET until a valid Reset
+// succeeds, while IDirect3DDevice9Ex::Reset/ResetEx refuse with D3DERR_INVALIDCALL and stay D3D_OK.
 static bool rowMsLbDc() {
-    Lockable l;
-    if (!makeMsaaLockable(l)) return false;
-    const OnDevice on(l.d.p, l.bb.p);
-    return until([&] {
-        if (!reset() || !msStart()) return false;
-        if (!scene([&] { return backToScreen() && clearTo(TBLK) && zquad(0, 0, 256, 256, 0.5f, TGRN); })) return false;
-        if (!underDc(l.bb.p, "GetDC", [&](HDC dc) { return gdiFill(dc, 0, 0, 128, 256, TRED); })) return false;
-        if (!scene([&] { return zquad(128, 0, 256, 128, 0.5f, TBLU); })) return false;
-        return msHas("the 4x MSAA lockable back buffer", l.bb.p, {{64, 128, TRED}, {192, 64, TBLU}, {192, 192, TGRN}});
-    });
+    Window w;
+    if (!makeMsaaWindow(w, L"d3d9_triangle msaa reset")) return false;
+    D3DPRESENT_PARAMETERS good = ppMsaaLockable(w.h, D3DMULTISAMPLE_NONE, 0);
+    D3DPRESENT_PARAMETERS bad = ppMsaaLockable(w.h, D3DMULTISAMPLE_4_SAMPLES, D3DPRESENTFLAG_LOCKABLE_BACKBUFFER);
+    Com<IDirect3DDevice9> d;
+    HRESULT hr = direct3d ? direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, w.h,
+                                                   D3DCREATE_HARDWARE_VERTEXPROCESSING, &good, &d.p)
+                          : E_POINTER;
+    if (FAILED(hr) || !d.p) return fail("CreateDevice (plain reset target)", hr);
+    const auto ans = [](const char *what, HRESULT got, HRESULT expect) {
+        if (got == expect) return true;
+        snprintf(why, sizeof why, "%s %08lx want %08lx", what, (unsigned long)got, (unsigned long)expect);
+        return false;
+    };
+    if (!ans("Reset (4x MSAA lockable)", d.p->Reset(&bad), D3DERR_INVALIDCALL) ||
+        !ans("TestCooperativeLevel after refused Reset", d.p->TestCooperativeLevel(), D3DERR_DEVICENOTRESET) ||
+        !ans("Reset (valid recovery)", d.p->Reset(&good), D3D_OK) ||
+        !ans("TestCooperativeLevel after recovery Reset", d.p->TestCooperativeLevel(), D3D_OK))
+        return false;
+    Com<IDirect3DSurface9> bb;
+    if (FAILED(hr = d.p->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb.p)))
+        return fail("GetBackBuffer (recovered device)", hr);
+    {
+        const OnDevice on(d.p, bb.p);
+        if (!until([&] {
+                return rstate(D3DRS_ZENABLE, D3DZB_FALSE) &&
+                       scene([&] { return clearTo(TBLK) && zquad(0, 0, 128, 128, 0.5f, TGRN); }) &&
+                       rtHas("recovered back buffer", bb.p, 256, X8, {{64, 64, TGRN}, {200, 200, TBLK}});
+            }))
+            return failIn("draw after recovery Reset");
+    }
+    bb.p->Release(), bb.p = nullptr;
+    d.p->Release(), d.p = nullptr;
+
+    Window wx;
+    if (!makeMsaaWindow(wx, L"d3d9_triangle msaa reset ex")) return false;
+    Com<IDirect3D9Ex> d3dx;
+    if (FAILED(hr = Direct3DCreate9Ex(D3D_SDK_VERSION, &d3dx.p)) || !d3dx.p) return fail("Direct3DCreate9Ex", hr);
+    D3DPRESENT_PARAMETERS goodEx = ppMsaaLockable(wx.h, D3DMULTISAMPLE_NONE, 0);
+    D3DPRESENT_PARAMETERS badEx = ppMsaaLockable(wx.h, D3DMULTISAMPLE_4_SAMPLES, D3DPRESENTFLAG_LOCKABLE_BACKBUFFER);
+    Com<IDirect3DDevice9Ex> ex;
+    if (FAILED(hr = d3dx.p->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wx.h,
+                                           D3DCREATE_HARDWARE_VERTEXPROCESSING, &goodEx, nullptr, &ex.p)) ||
+        !ex.p)
+        return fail("CreateDeviceEx (ex reset target)", hr);
+    return ans("Ex::Reset (4x MSAA lockable)", ex.p->Reset(&badEx), D3DERR_INVALIDCALL) &&
+           ans("Ex::TestCooperativeLevel after Reset", ex.p->TestCooperativeLevel(), D3D_OK) &&
+           ans("Ex::ResetEx (4x MSAA lockable)", ex.p->ResetEx(&badEx, nullptr), D3DERR_INVALIDCALL) &&
+           ans("Ex::TestCooperativeLevel after ResetEx", ex.p->TestCooperativeLevel(), D3D_OK);
 }
 
 static void msaaRows(IDirect3DDevice9 *d, bool strict) {
@@ -7789,7 +7910,8 @@ static void buffersRows(IDirect3DDevice9 *d, bool strict, const char *skip) {
         {"buf-cross", rowBufCross},       {"buf-cross-up", rowBufCrossUp},  {"buf-cross-multi", rowBufCrossMulti},
         {"buf-cross-odd", rowBufCrossOdd}, {"buf-cross-indexed", rowBufCrossIndexed}, {"buf-wide", rowBufWide},
         {"buf-dyn-preserve", rowBufDynPreserve}, {"buf-dyn-many", rowBufDynMany}, {"buf-dyn-index", rowBufDynIndex},
-        {"buf-dyn-read", rowBufDynRead},  {"buf-dyn-cross", rowBufDynCross}, {"buf-writeonly", rowBufWriteOnly}};
+        {"buf-dyn-read", rowBufDynRead},  {"buf-dyn-cross", rowBufDynCross}, {"buf-writeonly", rowBufWriteOnly},
+        {"vb-drawtime", rowVbDrawtime}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
@@ -12462,7 +12584,7 @@ static void parityRows(IDirect3DDevice9 *d, bool strict) {
         {"sr-lsb", rowSrLsb},       {"vo-one", rowVoOne},     {"dr-keep", rowDrKeep},
         {"pv-sysmem", rowPvSysmem}, {"pv-draw", rowPvDraw},   {"pv-dynsrc", rowPvDynsrc},
         {"pv-dyndst", rowPvDyndst}, {"rz-cross", rowRzCross}, {"gm-full", rowGmFull},
-        {"tb-self", rowTbSelf},     {"tex-unwritten", rowTexUnwritten}};
+        {"tb-self", rowTbSelf},     {"tex-unwritten", rowTexUnwritten}, {"fpu-cw", rowFpuCw}};
     dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 200000;
     HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
     if (SUCCEEDED(hr))
@@ -12878,6 +13000,607 @@ static void scaleRows(IDirect3DDevice9 *d, bool strict) {
     if (rtSurf) rtSurf->Release();
 }
 
+static const D3DFORMAT FMT_NULL = (D3DFORMAT)MAKEFOURCC('N', 'U', 'L', 'L');
+static const D3DFORMAT FMT_ATI2 = (D3DFORMAT)MAKEFOURCC('A', 'T', 'I', '2');
+
+// null-rt (#1257): D3DFMT_NULL capability queries + depth-only draw & Z rect clear pass + depth test verification.
+static bool rowNullRt() {
+    if (!direct3d) return fail("Direct3DCreate9", E_POINTER);
+    if (!answer("CheckDeviceFormat(NULL, SURFACE RT)",
+                direct3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, X8, D3DUSAGE_RENDERTARGET,
+                                            D3DRTYPE_SURFACE, FMT_NULL),
+                D3D_OK) ||
+        !answer("CheckDeviceFormat(NULL, TEXTURE RT)",
+                direct3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, X8, D3DUSAGE_RENDERTARGET,
+                                            D3DRTYPE_TEXTURE, FMT_NULL),
+                D3D_OK) ||
+        !answer("CheckDeviceFormat(NULL, SURFACE 0)",
+                direct3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, X8, 0, D3DRTYPE_SURFACE, FMT_NULL),
+                D3DERR_NOTAVAILABLE) ||
+        !answer("CheckDeviceFormat(NULL, DEPTHSTENCIL)",
+                direct3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, X8, D3DUSAGE_DEPTHSTENCIL,
+                                            D3DRTYPE_SURFACE, FMT_NULL),
+                D3DERR_NOTAVAILABLE) ||
+        !answer("CheckDepthStencilMatch(NULL, D24S8)",
+                direct3d->CheckDepthStencilMatch(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, X8, FMT_NULL, D3DFMT_D24S8),
+                D3D_OK) ||
+        !answer("CheckDeviceMultiSampleType(NULL, NONE)",
+                direct3d->CheckDeviceMultiSampleType(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, FMT_NULL, TRUE,
+                                                     D3DMULTISAMPLE_NONE, nullptr),
+                D3D_OK) ||
+        !answer("CheckDeviceMultiSampleType(NULL, 4x)",
+                direct3d->CheckDeviceMultiSampleType(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, FMT_NULL, TRUE,
+                                                     D3DMULTISAMPLE_4_SAMPLES, nullptr),
+                D3DERR_NOTAVAILABLE))
+        return false;
+
+    const bool ok = until([&] {
+        Com<IDirect3DSurface9> nullRt, ds;
+        CK(CreateRenderTarget, 128, 128, FMT_NULL, D3DMULTISAMPLE_NONE, 0, FALSE, &nullRt.p, nullptr);
+        if (!makeDs(ds, D3DFMT_D24S8, 128)) return false;
+        Rt colorRt;
+        if (!mkRt(colorRt, 128, A8)) return false;
+        if (!answer("ColorFill(NULL)", dev->ColorFill(nullRt.p, nullptr, TRED), D3D_OK) ||
+            !answer("StretchRect(to NULL)", dev->StretchRect(colorRt.s.p, nullptr, nullRt.p, nullptr, D3DTEXF_NONE),
+                    D3DERR_INVALIDCALL) ||
+            !answer("StretchRect(from NULL)", dev->StretchRect(nullRt.p, nullptr, colorRt.s.p, nullptr, D3DTEXF_NONE),
+                    D3DERR_INVALIDCALL))
+            return false;
+
+        const D3DRECT zRect = {64, 64, 128, 128};
+        const bool drawn = scene([&] {
+            if (!bindRt(0, nullRt.p) || !bindDs(ds.p)) return false;
+            CK(Clear, 0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, TRED, 1.0f, 0);
+            if (!rstate(D3DRS_ZENABLE, D3DZB_TRUE) || !rstate(D3DRS_ZWRITEENABLE, TRUE) ||
+                !rstate(D3DRS_ZFUNC, D3DCMP_LESSEQUAL) || !zquad(0, 0, 64, 128, 0.25f, TRED))
+                return false;
+            CK(Clear, 1, &zRect, D3DCLEAR_ZBUFFER, 0, 0.1f, 0);
+            if (!bindRt(0, colorRt.s.p) || !rstate(D3DRS_ZWRITEENABLE, FALSE) || !clearTo(BLUE) ||
+                !zquad(0, 0, 128, 128, 0.5f, TGRN))
+                return false;
+            return backToScreen() && bindDs(dsSurf);
+        });
+        dev->SetDepthStencilSurface(dsSurf);
+        dev->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+        dev->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+        return drawn && rtHas("NULL RT depth test", colorRt.s.p, 128, A8,
+                              {{32, 64, BLUE}, {96, 32, TGRN}, {96, 96, BLUE}});
+    });
+    dev->SetDepthStencilSurface(dsSurf);
+    dev->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+    dev->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+    return ok;
+}
+
+// l8-rt (#1203): D3DFMT_L8 render target draw + GetRenderTargetData + StretchRect luminance decode [r, r, r, 1].
+static bool rowL8Rt() {
+    if (!direct3d) return fail("Direct3DCreate9", E_POINTER);
+    if (!answer("CheckDeviceFormat(L8, SURFACE RT)",
+                direct3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, X8, D3DUSAGE_RENDERTARGET,
+                                            D3DRTYPE_SURFACE, D3DFMT_L8),
+                D3D_OK) ||
+        !answer("CheckDeviceFormat(L8, TEXTURE RT)",
+                direct3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, X8, D3DUSAGE_RENDERTARGET,
+                                            D3DRTYPE_TEXTURE, D3DFMT_L8),
+                D3D_OK) ||
+        !answer("CheckDeviceFormatConversion(L8 -> L8)",
+                direct3d->CheckDeviceFormatConversion(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_L8, D3DFMT_L8),
+                D3D_OK) ||
+        !answer("CheckDeviceFormatConversion(L8 -> X8R8G8B8)",
+                direct3d->CheckDeviceFormatConversion(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_L8, X8),
+                D3DERR_NOTAVAILABLE))
+        return false;
+
+    const auto inRange = [](int v, int lo, int hi) { return v >= lo && v <= hi; };
+    const bool ok = until([&] {
+        Com<IDirect3DTexture9> l8tex;
+        Com<IDirect3DSurface9> l8rt, sysL8, x8rt;
+        CK(CreateTexture, 64, 64, 1, D3DUSAGE_RENDERTARGET, D3DFMT_L8, D3DPOOL_DEFAULT, &l8tex.p, nullptr);
+        if (!levelOf(l8tex.p, 0, l8rt)) return false;
+        CK(CreateOffscreenPlainSurface, 64, 64, D3DFMT_L8, D3DPOOL_SYSTEMMEM, &sysL8.p, nullptr);
+        CK(CreateRenderTarget, 64, 64, X8, D3DMULTISAMPLE_NONE, 0, FALSE, &x8rt.p, nullptr);
+
+        const bool drawn = scene([&] {
+            if (!bindRt(0, l8rt.p) || !clearTo(D3DCOLOR_XRGB(20, 20, 20)) || !rstate(D3DRS_LIGHTING, FALSE))
+                return false;
+            CK(SetTextureStageState, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+            CK(SetTextureStageState, 0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+            const bool drew = zquad(8, 8, 56, 56, 0.5f, D3DCOLOR_ARGB(255, 128, 128, 128));
+            dev->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+            dev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+            return drew && backToScreen();
+        });
+        if (!drawn) return false;
+
+        CK(GetRenderTargetData, l8rt.p, sysL8.p);
+        D3DLOCKED_RECT lr = {};
+        HRESULT hr = sysL8.p->LockRect(&lr, nullptr, D3DLOCK_READONLY);
+        if (FAILED(hr)) return fail("LockRect (L8 GetRenderTargetData)", hr);
+        const BYTE *b = (const BYTE *)lr.pBits;
+        const int vCenter = b[32 * lr.Pitch + 32];
+        const int vCorner = b[4 * lr.Pitch + 4];
+        sysL8.p->UnlockRect();
+        if (!inRange(vCenter, 126, 130) || !inRange(vCorner, 18, 22))
+            return snprintf(why, sizeof why, "L8 RT data center=%d (want 126..130), corner=%d (want 18..22)",
+                            vCenter, vCorner),
+                   false;
+
+        CK(StretchRect, l8rt.p, nullptr, x8rt.p, nullptr, D3DTEXF_POINT);
+        if (!readTarget(x8rt.p, 64, 64, X8, [&](const BYTE *px, int pitch) {
+                const DWORD c1 = texel(px, pitch, 32, 32), c0 = texel(px, pitch, 4, 4);
+                const int r1 = (int)(c1 >> 16 & 0xff), g1 = (int)(c1 >> 8 & 0xff), b1 = (int)(c1 & 0xff);
+                const int r0 = (int)(c0 >> 16 & 0xff), g0 = (int)(c0 >> 8 & 0xff), b0 = (int)(c0 & 0xff);
+                if (inRange(r1, 126, 130) && r1 == g1 && g1 == b1 && inRange(r0, 18, 22) && r0 == g0 && g0 == b0)
+                    return true;
+                snprintf(why, sizeof why, "StretchRect L8->X8 center=%06lx corner=%06lx", (unsigned long)(c1 & 0xffffff),
+                         (unsigned long)(c0 & 0xffffff));
+                return false;
+            }))
+            return false;
+
+        Com<IDirect3DPixelShader9> ps;
+        if (!usePs(ps, K2D, 0, false) || !pointClamp(0)) return false;
+        CK(SetTexture, 0, l8tex.p);
+        TV3 tq[4];
+        tquad(tq, 0, 0, 64, 64, 0.5f, 0.5f);
+        const bool sampled = scene([&] {
+            return bindRt(0, x8rt.p) && clearTo(TRED) && tdraw(tq) && backToScreen();
+        });
+        dev->SetTexture(0, nullptr);
+        dev->SetPixelShader(nullptr);
+        return sampled && readTarget(x8rt.p, 64, 64, X8, [&](const BYTE *px, int pitch) {
+                   const DWORD c = texel(px, pitch, 32, 32);
+                   const int r = (int)(c >> 16 & 0xff), g = (int)(c >> 8 & 0xff), bl = (int)(c & 0xff);
+                   if (inRange(r, 126, 130) && r == g && g == bl) return true;
+                   snprintf(why, sizeof why, "sample L8 RT got %06lx", (unsigned long)(c & 0xffffff));
+                   return false;
+               });
+    });
+    dev->SetTexture(0, nullptr);
+    dev->SetPixelShader(nullptr);
+    dev->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    dev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+    return ok;
+}
+
+// ati2-tex (#1260): D3DFMT_ATI2 capability checks, byte-per-texel pitch, DEFAULT-pool non-dynamic lock + block-grid
+// alignment, and sampling [G, R, 1, 1] swizzle across MANAGED and DEFAULT UpdateTexture.
+static bool rowAti2Tex() {
+    if (!direct3d) return fail("Direct3DCreate9", E_POINTER);
+    if (!answer("CheckDeviceFormat(ATI2, TEXTURE)",
+                direct3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, X8, 0, D3DRTYPE_TEXTURE, FMT_ATI2),
+                D3D_OK) ||
+        !answer("CheckDeviceFormat(ATI2, DYNAMIC)",
+                direct3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, X8, D3DUSAGE_DYNAMIC,
+                                            D3DRTYPE_TEXTURE, FMT_ATI2),
+                D3D_OK) ||
+        !answer("CheckDeviceFormat(ATI2, CUBETEXTURE)",
+                direct3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, X8, 0, D3DRTYPE_CUBETEXTURE, FMT_ATI2),
+                D3D_OK) ||
+        !answer("CheckDeviceFormat(ATI2, RENDERTARGET)",
+                direct3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, X8, D3DUSAGE_RENDERTARGET,
+                                            D3DRTYPE_TEXTURE, FMT_ATI2),
+                D3DERR_NOTAVAILABLE) ||
+        !answer("CheckDeviceFormat(ATI2, VOLUMETEXTURE)",
+                direct3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, X8, 0, D3DRTYPE_VOLUMETEXTURE,
+                                            FMT_ATI2),
+                D3DERR_NOTAVAILABLE))
+        return false;
+
+    const auto checkPitch = [](UINT w, UINT h, INT expectPitch) -> bool {
+        Com<IDirect3DTexture9> t;
+        CK(CreateTexture, w, h, 1, 0, FMT_ATI2, D3DPOOL_MANAGED, &t.p, nullptr);
+        D3DLOCKED_RECT lr = {};
+        const HRESULT hr = t.p->LockRect(0, &lr, nullptr, 0);
+        if (FAILED(hr)) return fail("LockRect (ATI2 pitch)", hr);
+        t.p->UnlockRect(0);
+        return exact("ATI2 pitch", (unsigned long long)(UINT)lr.Pitch, (unsigned long long)(UINT)expectPitch);
+    };
+    if (!checkPitch(8, 4, 8) || !checkPitch(6, 10, 8) || !checkPitch(257, 3, 260)) return false;
+
+    {
+        Com<IDirect3DTexture9> defAti2, defCtrl, dynAti2, manAti2;
+        Com<IDirect3DSurface9> sDef, sCtrl, sDyn, sMan;
+        CK(CreateTexture, 16, 16, 1, 0, FMT_ATI2, D3DPOOL_DEFAULT, &defAti2.p, nullptr);
+        CK(CreateTexture, 16, 16, 1, 0, A8, D3DPOOL_DEFAULT, &defCtrl.p, nullptr);
+        CK(CreateTexture, 16, 16, 1, D3DUSAGE_DYNAMIC, FMT_ATI2, D3DPOOL_DEFAULT, &dynAti2.p, nullptr);
+        CK(CreateTexture, 16, 16, 1, 0, FMT_ATI2, D3DPOOL_MANAGED, &manAti2.p, nullptr);
+        if (!levelOf(defAti2.p, 0, sDef) || !levelOf(defCtrl.p, 0, sCtrl) || !levelOf(dynAti2.p, 0, sDyn) ||
+            !levelOf(manAti2.p, 0, sMan))
+            return false;
+        D3DLOCKED_RECT lr = {};
+        HRESULT hr = sDef.p->LockRect(&lr, nullptr, 0);
+        if (SUCCEEDED(hr)) sDef.p->UnlockRect();
+        if (!answer("DEFAULT non-dynamic ATI2 lock", hr, D3D_OK)) return false;
+        hr = sCtrl.p->LockRect(&lr, nullptr, 0);
+        if (SUCCEEDED(hr)) sCtrl.p->UnlockRect();
+        if (!answer("DEFAULT non-dynamic A8R8G8B8 lock", hr, D3DERR_INVALIDCALL)) return false;
+        const RECT split = {2, 0, 4, 4};
+        hr = sDyn.p->LockRect(&lr, &split, 0);
+        if (SUCCEEDED(hr)) sDyn.p->UnlockRect();
+        if (!answer("DEFAULT split-block ATI2 lock", hr, D3DERR_INVALIDCALL)) return false;
+        hr = sMan.p->LockRect(&lr, &split, 0);
+        if (SUCCEEDED(hr)) sMan.p->UnlockRect();
+        if (!answer("MANAGED split-block ATI2 lock", hr, D3D_OK)) return false;
+    }
+
+    // Two 4x4 BC5 blocks (16 bytes each): first 8 bytes decode to G, second 8 bytes to R, with B=1 and A=1.
+    static const BYTE blk[32] = {
+        0x7f, 0x7f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0x7f, 0x7f, 0, 0, 0, 0, 0, 0};
+    const Probe rgbExpect[] = {{0.25f, 0.5f, D3DCOLOR_XRGB(0, 0x7f, 0xff)},
+                               {0.75f, 0.5f, D3DCOLOR_XRGB(0x7f, 0, 0xff)}};
+    const Probe alphaExpect[] = {{0.25f, 0.5f, 0xffffff}, {0.75f, 0.5f, 0xffffff}};
+
+    Com<IDirect3DTexture9> manTex, sysTex, defTex;
+    CK(CreateTexture, 8, 4, 1, 0, FMT_ATI2, D3DPOOL_MANAGED, &manTex.p, nullptr);
+    D3DLOCKED_RECT lr = {};
+    HRESULT hr = manTex.p->LockRect(0, &lr, nullptr, 0);
+    if (FAILED(hr)) return fail("LockRect (ATI2 MANAGED)", hr);
+    memcpy(lr.pBits, blk, sizeof blk);
+    manTex.p->UnlockRect(0);
+    if (!probe2d(manTex.p, rgbExpect, 2, false) || !probe2d(manTex.p, alphaExpect, 2, true))
+        return failIn("ATI2 MANAGED sample");
+
+    CK(CreateTexture, 8, 4, 1, 0, FMT_ATI2, D3DPOOL_SYSTEMMEM, &sysTex.p, nullptr);
+    hr = sysTex.p->LockRect(0, &lr, nullptr, 0);
+    if (FAILED(hr)) return fail("LockRect (ATI2 SYSTEMMEM)", hr);
+    memcpy(lr.pBits, blk, sizeof blk);
+    sysTex.p->UnlockRect(0);
+    CK(CreateTexture, 8, 4, 1, 0, FMT_ATI2, D3DPOOL_DEFAULT, &defTex.p, nullptr);
+    CK(UpdateTexture, sysTex.p, defTex.p);
+    const bool defOk = probe2d(defTex.p, rgbExpect, 2, false) && probe2d(defTex.p, alphaExpect, 2, true);
+    dev->SetTexture(0, nullptr);
+    dev->SetPixelShader(nullptr);
+    return defOk || failIn("ATI2 DEFAULT UpdateTexture sample");
+}
+
+// def-zero (#1256): DEFAULT-pool textures partially written via UpdateSurface or LockRect(DISCARD) leave untouched
+// pixels zeroed (black) even after same-sized bright textures are drawn and released.
+static bool rowDefZero() {
+    for (int round = 0; round < 4; round++) {
+        Com<IDirect3DTexture9> dynBright;
+        CK(CreateTexture, 64, 64, 1, D3DUSAGE_DYNAMIC, X8, D3DPOOL_DEFAULT, &dynBright.p, nullptr);
+        if (!fill(dynBright.p, 0, 4, [](int, int) { return D3DCOLOR_XRGB(255, 255, 0); })) return false;
+        const Probe y[] = {{0.5f, 0.5f, D3DCOLOR_XRGB(255, 255, 0)}};
+        if (!probe2d(dynBright.p, y, 1)) return false;
+
+        Com<IDirect3DTexture9> sysBright, defBright;
+        Com<IDirect3DSurface9> sysS, defS;
+        CK(CreateTexture, 64, 64, 1, 0, X8, D3DPOOL_SYSTEMMEM, &sysBright.p, nullptr);
+        if (!fill(sysBright.p, 0, 4, [](int, int) { return D3DCOLOR_XRGB(255, 255, 0); })) return false;
+        CK(CreateTexture, 64, 64, 1, 0, X8, D3DPOOL_DEFAULT, &defBright.p, nullptr);
+        if (!levelOf(sysBright.p, 0, sysS) || !levelOf(defBright.p, 0, defS)) return false;
+        CK(UpdateSurface, sysS.p, nullptr, defS.p, nullptr);
+        if (!probe2d(defBright.p, y, 1)) return false;
+    }
+
+    const Probe quadrants[] = {
+        {0.25f, 0.25f, TGRN}, {0.75f, 0.25f, 0x000000}, {0.25f, 0.75f, 0x000000}, {0.75f, 0.75f, 0x000000}};
+
+    {
+        Com<IDirect3DSurface9> partSys, defSurf;
+        Com<IDirect3DTexture9> defPartial;
+        CK(CreateOffscreenPlainSurface, 32, 32, X8, D3DPOOL_SYSTEMMEM, &partSys.p, nullptr);
+        if (!underLock(partSys.p, "LockRect (partial src)", nullptr, 0,
+                       [](BYTE *b, int p) { paint(b, p, 0, 0, 32, 32, TGRN); }))
+            return false;
+        CK(CreateTexture, 64, 64, 1, 0, X8, D3DPOOL_DEFAULT, &defPartial.p, nullptr);
+        if (!levelOf(defPartial.p, 0, defSurf)) return false;
+        const POINT pt = {0, 0};
+        CK(UpdateSurface, partSys.p, nullptr, defSurf.p, &pt);
+        if (!probe2d(defPartial.p, quadrants, 4)) return failIn("DEFAULT UpdateSurface partial");
+    }
+
+    {
+        Com<IDirect3DTexture9> dynPartial;
+        CK(CreateTexture, 64, 64, 1, D3DUSAGE_DYNAMIC, X8, D3DPOOL_DEFAULT, &dynPartial.p, nullptr);
+        D3DLOCKED_RECT lr = {};
+        const HRESULT hr = dynPartial.p->LockRect(0, &lr, nullptr, D3DLOCK_DISCARD);
+        if (FAILED(hr)) return fail("LockRect (DEFAULT DYNAMIC DISCARD)", hr);
+        paint((BYTE *)lr.pBits, (int)lr.Pitch, 0, 0, 32, 32, TGRN);
+        dynPartial.p->UnlockRect(0);
+        if (!probe2d(dynPartial.p, quadrants, 4)) return failIn("DEFAULT DYNAMIC partial");
+    }
+
+    dev->SetTexture(0, nullptr);
+    dev->SetPixelShader(nullptr);
+    return true;
+}
+
+// fpu-cw (#1171): on 32-bit x86, CreateDevice without D3DCREATE_FPU_PRESERVE sets x87 CW to single precision
+// (0x007f, PC=0) and keeps it on Release, while D3DCREATE_FPU_PRESERVE preserves the caller's x87 CW.
+static bool rowFpuCw() {
+#if defined(__i386__)
+    const auto readCw = []() -> unsigned short {
+        unsigned short cw = 0;
+        __asm__ __volatile__("fnstcw %0" : "=m"(cw));
+        return cw;
+    };
+    const auto writeCw = [](unsigned short cw) {
+        __asm__ __volatile__("fldcw %0" : : "m"(cw));
+    };
+    const unsigned short savedCw = readCw();
+    const unsigned short foreignCw = 0x0f7f;
+    Window w;
+    if (!rsWindow(w, 64, 64)) {
+        writeCw(savedCw);
+        return false;
+    }
+    D3DPRESENT_PARAMETERS pp = rsParams(w.h, 64, 64);
+
+    writeCw(foreignCw);
+    {
+        Com<IDirect3DDevice9> d;
+        const HRESULT hr = direct3d ? direct3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, w.h,
+                                                             D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp, &d.p)
+                                    : E_POINTER;
+        if (FAILED(hr) || !d.p) {
+            writeCw(savedCw);
+            return fail("CreateDevice (default FPU CW)", hr);
+        }
+        const unsigned short got = readCw();
+        if (got != 0x007f) {
+            writeCw(savedCw);
+            return snprintf(why, sizeof why, "CreateDevice x87 CW %#06x want 0x007f", (unsigned)got), false;
+        }
+    }
+    if (readCw() != 0x007f) {
+        const unsigned short got = readCw();
+        writeCw(savedCw);
+        return snprintf(why, sizeof why, "Release x87 CW %#06x want 0x007f", (unsigned)got), false;
+    }
+
+    writeCw(foreignCw);
+    {
+        Com<IDirect3DDevice9> d;
+        const HRESULT hr = direct3d ? direct3d->CreateDevice(
+                                          D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, w.h,
+                                          D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE, &pp, &d.p)
+                                    : E_POINTER;
+        if (FAILED(hr) || !d.p) {
+            writeCw(savedCw);
+            return fail("CreateDevice (D3DCREATE_FPU_PRESERVE)", hr);
+        }
+        const unsigned short got = readCw();
+        if (got != foreignCw) {
+            writeCw(savedCw);
+            return snprintf(why, sizeof why, "FPU_PRESERVE x87 CW %#06x want %#06x", (unsigned)got,
+                            (unsigned)foreignCw),
+                   false;
+        }
+    }
+    writeCw(savedCw);
+    return true;
+#else
+    return true;
+#endif
+}
+
+// ff-fog-sphere (#1187): linear table fog with FOGSTART == FOGEND steps at end across FF and shader paths (while
+// vertex fog fogs all); FF sphere-map texgen uses denominator 2 * |R + (0, 0, -1)| rather than (0, 0, +1).
+static bool rowFfFogSphere() {
+    static const D3DVERTEXELEMENT9 DECL_XYZ_COL[] = {
+        {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
+        D3DDECL_END()};
+    static const DWORD VS_POS_COL[] = {
+        0xfffe0200,                         // vs_2_0
+        0x0200001f, 0x80000000, 0x900f0000, // dcl_position v0
+        0x0200001f, 0x8000000a, 0x900f0001, // dcl_color v1
+        0x02000001, 0xc00f0000, 0x90e40000, // mov oPos, v0
+        0x02000001, 0xd00f0000, 0x90e40001, // mov oD0, v1
+        0x0000ffff};
+    static const DWORD PS_T0_11[] = {
+        0xffff0101,             // ps_1_1
+        0x00000040, 0xb00f0000, // texcoord t0
+        0x00000001, 0x800f0000, 0xb0e40000, // mov r0, t0
+        0x0000ffff};
+
+    const FC q[4] = {{-1, 1, 0, TRED}, {1, 1, 1, TRED}, {-1, -1, 0, TRED}, {1, -1, 1, TRED}};
+    if (!xform(D3DTS_WORLD, IDENTITY) || !xform(D3DTS_VIEW, IDENTITY) || !xform(D3DTS_PROJECTION, IDENTITY) ||
+        !rstate(D3DRS_LIGHTING, FALSE) || !rstate(D3DRS_FOGENABLE, TRUE) || !rstate(D3DRS_FOGCOLOR, TGRN) ||
+        !rstate(D3DRS_FOGSTART, fbits(0.5f)) || !rstate(D3DRS_FOGEND, fbits(0.5f)))
+        return false;
+
+    const Px tablePx[] = {{64, 128, TRED}, {192, 128, TGRN}};
+    if (!rstate(D3DRS_FOGTABLEMODE, D3DFOG_LINEAR) || !rstate(D3DRS_FOGVERTEXMODE, D3DFOG_NONE) ||
+        !frames(BLUE, tablePx, 2, [&] { return fdraw(FVF_C, q); }))
+        return failIn("FF table fog range==0");
+
+    Prog fogProg;
+    if (!make(fogProg, DECL_XYZ_COL, VS_POS_COL, PS_V0)) return false;
+    const bool shaderFogOk = frames(BLUE, tablePx, 2, [&] {
+        return use(fogProg) && SUCCEEDED(dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof *q));
+    });
+    dev->SetVertexShader(nullptr);
+    dev->SetPixelShader(nullptr);
+    if (!shaderFogOk) return failIn("shader table fog range==0");
+
+    const Px vtxPx[] = {{64, 128, TGRN}, {192, 128, TGRN}};
+    if (!rstate(D3DRS_FOGTABLEMODE, D3DFOG_NONE) || !rstate(D3DRS_FOGVERTEXMODE, D3DFOG_LINEAR) ||
+        !frames(BLUE, vtxPx, 2, [&] { return fdraw(FVF_C, q); }))
+        return failIn("FF vertex fog range==0");
+
+    if (!rstate(D3DRS_FOGENABLE, FALSE) || !rstate(D3DRS_FOGVERTEXMODE, D3DFOG_NONE)) return false;
+
+    Com<IDirect3DPixelShader9> psT0;
+    CK(CreatePixelShader, PS_T0_11, &psT0.p);
+    const D3DMATRIX shift = mTrans(0.2f, 0.2f, 0.0f);
+    const FN tri[3] = {
+        {2.0f, -2.0f, 0.1f, 0.8f, 0.0f, 0.7f},
+        {-2.0f, -2.0f, 0.1f, 0.8f, 0.0f, 0.7f},
+        {0.0f, 2.0f, 0.1f, 0.8f, 0.0f, 0.7f}};
+    const bool sphereOk = until([&] {
+        if (!xform(D3DTS_WORLD, shift) || !xform(D3DTS_VIEW, shift) || !xform(D3DTS_PROJECTION, IDENTITY) ||
+            !rstate(D3DRS_LIGHTING, FALSE))
+            return false;
+        CK(SetVertexShader, nullptr);
+        CK(SetPixelShader, psT0.p);
+        CK(SetTextureStageState, 0, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_SPHEREMAP);
+        CK(SetTextureStageState, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+        const bool drew = scene([&] {
+            if (!backToScreen() || !clearTo(TWHT)) return false;
+            CK(SetFVF, FVF_N);
+            CK(DrawPrimitiveUP, D3DPT_TRIANGLELIST, 1, tri, sizeof *tri);
+            return true;
+        });
+        if (!drew) return false;
+        return readTarget(rtSurf, 256, 256, X8, [&](const BYTE *px, int pitch) {
+            const auto rgApprox = [&](const char *what, int x, int y, int er, int eg) {
+                const DWORD c = texel(px, pitch, x, y);
+                const int r = (int)(c >> 16 & 0xff), g = (int)(c >> 8 & 0xff);
+                if (abs(r - er) <= 2 && abs(g - eg) <= 2) return true;
+                snprintf(why, sizeof why, "%s (%d,%d) got %06lx want %02x%02x00", what, x, y,
+                         (unsigned long)(c & 0xffffff), er, eg);
+                return false;
+            };
+            return rgApprox("sphere center", 128, 128, 0x83, 0x69) &&
+                   rgApprox("sphere off-center", 96, 160, 0x86, 0x5a);
+        });
+    });
+    dev->SetPixelShader(nullptr);
+    dev->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+    dev->SetTransform(D3DTS_WORLD, &IDENTITY);
+    dev->SetTransform(D3DTS_VIEW, &IDENTITY);
+    return sphereOk;
+}
+
+static bool hasDrawTimeUpload() {
+    char cfg[4096] = {};
+    if (GetEnvironmentVariableA("MTLD3D_CONFIG", cfg, sizeof cfg) > 0) {
+        const char *last = nullptr;
+        for (const char *p = strstr(cfg, "buffer.drawTimeUpload="); p; p = strstr(p + 1, "buffer.drawTimeUpload="))
+            last = p + 22;
+        if (last && (!strncmp(last, "true", 4) || !strncmp(last, "1", 1))) return true;
+    }
+    return false;
+}
+
+// vb-drawtime (#1243): WRITEONLY vertex/index buffer Lock/Unlock/relock upload behavior, plus post-Unlock write
+// visibility when MTLD3D_CONFIG enables buffer.drawTimeUpload=true.
+static bool rowVbDrawtime() {
+    RV grn[4], red[4];
+    quadRhw(grn, 64, 64, 192, 192, TGRN);
+    quadRhw(red, 64, 64, 192, 192, TRED);
+    const Px gPx[] = {{128, 128, TGRN}, {16, 16, BLUE}}, rPx[] = {{128, 128, TRED}, {16, 16, BLUE}};
+
+    Com<IDirect3DVertexBuffer9> vb;
+    CK(CreateVertexBuffer, sizeof grn, D3DUSAGE_WRITEONLY, FVF_RV, D3DPOOL_DEFAULT, &vb.p, nullptr);
+    void *p = nullptr;
+    HRESULT hr = vb.p->Lock(0, sizeof grn, &p, 0);
+    if (FAILED(hr)) return fail("VB Lock (initial)", hr);
+    memcpy(p, grn, sizeof grn);
+    if (FAILED(hr = vb.p->Unlock())) return fail("VB Unlock (initial)", hr);
+    if (!frames(BLUE, gPx, 2, [&] {
+            CK(SetStreamSource, 0, vb.p, 0, sizeof(RV));
+            CK(SetFVF, FVF_RV);
+            CK(DrawPrimitive, D3DPT_TRIANGLESTRIP, 0, 2);
+            return true;
+        }))
+        return failIn("initial VB draw");
+
+    p = nullptr;
+    hr = vb.p->Lock(0, sizeof red, &p, 0);
+    if (FAILED(hr)) return fail("VB Lock (relock)", hr);
+    memcpy(p, red, sizeof red);
+    if (FAILED(hr = vb.p->Unlock())) return fail("VB Unlock (relock)", hr);
+
+    const WORD idx[6] = {0, 1, 2, 2, 1, 3};
+    Com<IDirect3DIndexBuffer9> ib;
+    CK(CreateIndexBuffer, sizeof idx, D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_DEFAULT, &ib.p, nullptr);
+    void *ip = nullptr;
+    if (FAILED(hr = ib.p->Lock(0, sizeof idx, &ip, 0))) return fail("IB Lock", hr);
+    memcpy(ip, idx, sizeof idx);
+    if (FAILED(hr = ib.p->Unlock())) return fail("IB Unlock", hr);
+    if (!frames(BLUE, rPx, 2, [&] {
+            CK(SetStreamSource, 0, vb.p, 0, sizeof(RV));
+            CK(SetIndices, ib.p);
+            CK(SetFVF, FVF_RV);
+            CK(DrawIndexedPrimitive, D3DPT_TRIANGLELIST, 0, 0, 4, 0, 2);
+            return true;
+        }))
+        return failIn("relocked VB + IB draw");
+
+    if (hasDrawTimeUpload()) {
+        const bool dtOk = until([&] {
+            Com<IDirect3DVertexBuffer9> dvb;
+            CK(CreateVertexBuffer, sizeof grn, D3DUSAGE_WRITEONLY, FVF_RV, D3DPOOL_DEFAULT, &dvb.p, nullptr);
+            void *kept = nullptr;
+            HRESULT dhr = dvb.p->Lock(0, sizeof grn, &kept, 0);
+            if (FAILED(dhr)) return fail("VB Lock (drawTimeUpload)", dhr);
+            memcpy(kept, grn, sizeof grn);
+            if (FAILED(dhr = dvb.p->Unlock())) return fail("VB Unlock (drawTimeUpload)", dhr);
+            memcpy(kept, red, sizeof red);
+            if (!scene([&] {
+                    if (!clearTo(BLUE)) return false;
+                    CK(SetStreamSource, 0, dvb.p, 0, sizeof(RV));
+                    CK(SetFVF, FVF_RV);
+                    CK(DrawPrimitive, D3DPT_TRIANGLESTRIP, 0, 2);
+                    return true;
+                }))
+                return false;
+            return rtHas("drawTimeUpload post-Unlock write", rtSurf, 256, X8, {{128, 128, TRED}, {16, 16, BLUE}});
+        });
+        if (!dtOk) return false;
+    }
+
+    dev->SetStreamSource(0, nullptr, 0, 0);
+    dev->SetIndices(nullptr);
+    return true;
+}
+
+static void wave3Rows(IDirect3DDevice9 *d, bool strict) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"null-rt", rowNullRt}, {"l8-rt", rowL8Rt}, {"ati2-tex", rowAti2Tex}, {"def-zero", rowDefZero},
+        {"fpu-cw", rowFpuCw}, {"ff-fog-sphere", rowFfFogSphere}, {"vb-drawtime", rowVbDrawtime}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
+    HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
+    if (SUCCEEDED(hr))
+        hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
+    for (const auto &r : rows) {
+        why[0] = 0;
+        bool ok;
+        if (FAILED(hr)) ok = fail("GetRenderTarget/CreateOffscreenPlainSurface", hr);
+        else if (GetTickCount64() >= budgetEnd) ok = false, snprintf(why, sizeof why, "budget");
+        else ok = reset() && bufStart() && r.run();
+        row(r.name, ok, why);
+    }
+    if (sysSurf) sysSurf->Release();
+    if (rtSurf) rtSurf->Release();
+}
+
+static bool runCaseRow(IDirect3DDevice9 *d, const char *name, bool strict, bool needsDepth) {
+    static const struct { const char *name; bool (*run)(); } rows[] = {
+        {"null-rt", rowNullRt},           {"l8-rt", rowL8Rt},           {"ati2-tex", rowAti2Tex},
+        {"def-zero", rowDefZero},         {"fpu-cw", rowFpuCw},         {"ff-fog-sphere", rowFfFogSphere},
+        {"vb-drawtime", rowVbDrawtime},   {"ms-lblock", rowMsLbLock},   {"ms-lbdc", rowMsLbDc},
+        {"rt-chain", rowRtChain},         {"lb-lock", rowLbLock},       {"lb-dc", rowLbDc},
+        {"mrt-srgb", rowMrtSrgb},         {"mrt-srgbclear", rowMrtSrgbClear}};
+    dev = d, strictMode = strict, budgetEnd = GetTickCount64() + 180000;
+    bool (*fn)() = nullptr;
+    for (const auto &r : rows)
+        if (!strcmp(r.name, name)) { fn = r.run; break; }
+    if (!fn) {
+        snprintf(why, sizeof why, "unknown case");
+        row(name, false, why);
+        return false;
+    }
+    HRESULT hr = dev->GetRenderTarget(0, &rtSurf);
+    if (SUCCEEDED(hr))
+        hr = dev->CreateOffscreenPlainSurface(256, 256, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sysSurf, nullptr);
+    if (SUCCEEDED(hr) && needsDepth) hr = dev->GetDepthStencilSurface(&dsSurf);
+    why[0] = 0;
+    bool ok;
+    if (FAILED(hr)) ok = fail("GetRenderTarget/CreateOffscreenPlainSurface", hr);
+    else ok = reset() && (!needsDepth || depthReset()) && bufStart() && fn();
+    row(name, ok, why);
+    if (dsSurf) dsSurf->Release(), dsSurf = nullptr;
+    if (sysSurf) sysSurf->Release(), sysSurf = nullptr;
+    if (rtSurf) rtSurf->Release(), rtSurf = nullptr;
+    return ok;
+}
+
 static bool hasMaxFps50(int argc, char **argv) {
     for (int i = 2; i < argc; i++)
         if (!strcmp(argv[i], "maxfps50")) return true;
@@ -12917,6 +13640,9 @@ int main(int argc, char **argv) {
     const bool lostMode = !bench && argc > 1 && !strcmp(argv[1], "lost");
     const bool paceMode = !bench && argc > 1 && !strcmp(argv[1], "pace");
     const bool scaleMode = !bench && argc > 1 && !strcmp(argv[1], "scale");
+    const bool wave3Mode = !bench && argc > 1 && !strcmp(argv[1], "wave3");
+    const bool caseMode = !bench && argc > 2 && !strcmp(argv[1], "--case");
+    const char *caseName = caseMode ? argv[2] : nullptr;
     const bool depthBench = bench && argc > 5 && !strcmp(argv[5], "depth");
     const bool litBench = bench && argc > 4 && !strcmp(argv[4], "lit");
     const bool bufBench = bench && argc > 4 && !strcmp(argv[4], "buf");
@@ -12944,10 +13670,12 @@ int main(int argc, char **argv) {
     pp.SwapEffect = D3DSWAPEFFECT_DISCARD, pp.hDeviceWindow = hwnd, pp.Windowed = TRUE;
     pp.PresentationInterval = vsync ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
     // The "depth", "blend", "mrt" and "msaa" modes' devices alone have a depth-stencil: the other modes' rows assume none.
-    if (depth || blendMode || mrtMode || msaaMode || depthBench)
+    const bool caseNeedsMsaa = caseMode && !strncmp(caseName, "ms-", 3);
+    const bool caseNeedsDepth = caseNeedsMsaa || (caseMode && !strncmp(caseName, "mrt-", 4));
+    if (depth || blendMode || mrtMode || msaaMode || caseNeedsDepth || depthBench)
         pp.EnableAutoDepthStencil = TRUE, pp.AutoDepthStencilFormat = D3DFMT_D24S8;
     // The "msaa" mode's back buffer and auto depth-stencil have 4 samples (DXMTRS C4b-3d5).
-    if (msaaMode) pp.MultiSampleType = D3DMULTISAMPLE_4_SAMPLES;
+    if (msaaMode || caseNeedsMsaa) pp.MultiSampleType = D3DMULTISAMPLE_4_SAMPLES;
     IDirect3DDevice9 *dev = nullptr;
     HRESULT hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd, D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp,
                                    &dev);
@@ -13024,6 +13752,23 @@ int main(int argc, char **argv) {
     }
     if (scaleMode) {
         scaleRows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
+    if (wave3Mode) {
+        wave3Rows(dev, argc > 2 && !strcmp(argv[2], "strict"));
+        dev->Release();
+        d3d->Release();
+        DestroyWindow(hwnd);
+        return failures;
+    }
+    if (caseMode) {
+        bool strict = false;
+        for (int i = 3; i < argc; i++)
+            if (!strcmp(argv[i], "strict")) strict = true;
+        runCaseRow(dev, caseName, strict, caseNeedsDepth);
         dev->Release();
         d3d->Release();
         DestroyWindow(hwnd);

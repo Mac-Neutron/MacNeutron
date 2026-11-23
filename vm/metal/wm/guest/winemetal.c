@@ -86,7 +86,7 @@ static uint32_t texture_format(mn_handle t) {
 }
 
 /* C4d-6: guest cache for slot 161 (WMTViewSyncAndPoll), polling the host on first call, every 32nd frame, or when
- * WMTViewSyncFlagForceRefresh is set so steady-state frames incur zero synchronous VM exits. */
+ * WMTViewSyncFlagForceRefresh or WMTViewSyncFlagSourceExtent is set so steady-state frames incur zero VM exits. */
 #define WMT_VIEW_POLL_THROTTLE 32u
 #define WMT_VIEW_POLL_CACHE_CAP 16u
 #define WMT_VIEW_POLL_EDGE_FLAGS \
@@ -180,7 +180,7 @@ static NTSTATUS_T slot161(void *p) {
     struct unixcall_wmt_view_sync_and_poll *a = p;
     if (!a) return MN_STATUS_INVALID_PARAMETER;
     struct WMTViewPollOut *out = a->out.ptr;
-    if (a->view && out && !(a->flags & WMTViewSyncFlagForceRefresh)) {
+    if (a->view && out && !(a->flags & (WMTViewSyncFlagForceRefresh | WMTViewSyncFlagSourceExtent))) {
         pthread_mutex_lock(&poll_lock);
         for (size_t i = 0; i < WMT_VIEW_POLL_CACHE_CAP; i++) {
             if (poll_cache[i].view == a->view) {
