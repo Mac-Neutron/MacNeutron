@@ -2,7 +2,7 @@
 # Direct3D 9 in the VM (D3D9 M2b gate), from the Mac: d3d9_triangle for x86-64 and i386 in a new prefix and in one
 # without winemetal.dll's markers that run-game.sh's update then fixes; and Wine's d3d9 tests through mtld3d's
 # runner, the x64 lane held to the macOS product's figures at most (D3D9 spec §5.1's loopback run: stateblock 0,
-# visual 31, device 739, d3d9ex 74, no crash, no untriaged new site) and the i386 lane to its baseline's failures and
+# visual 15, device 907, d3d9ex 65, no crash, no untriaged new site) and the i386 lane to its baseline's failures and
 # crashes at most, no untriaged new site.
 # Builds the runner (DXMTRS's tools/linux-cargo.sh); needs the image with DXMT/d3d9
 # (guest-stages.sh dxmt, image/build.sh wine), the VM host (host/build.sh), make build/dxmt-tests/d3d9_triangle.exe
@@ -357,7 +357,7 @@ executed() { sed -n "s|^$1/$2 .* executed=\([0-9]*\) .*|\1|p" "$G/conf-$3.txt" 2
 # Each subtest: the macOS product's failures, and the tests it executes at least, the lower of the macOS run's and the
 # guest's (2026-10-21: the guest runs 19 fewer d3d9ex display-mode tests under Xvfb, macOS 7 fewer device ones), so a
 # run that returned early without crashing doesn't pass as an improvement.
-WANT="stateblock 0 14738,visual 31 211219,device 739 159542,d3d9ex 74 2407"
+WANT="stateblock 0 14738,visual 15 211219,device 907 159542,d3d9ex 65 2407"
 # The x64 lane: at most the macOS product's figures, no crash, those tests executed, and no failing site of its own
 # beyond the macOS run's triaged ones (dxmt/mtld3d-triaged.txt, as dxmt/mtld3d-conformance.sh rules them). The guest
 # fails a few display-mode sites fewer than macOS (Xvfb's mode emulation).
