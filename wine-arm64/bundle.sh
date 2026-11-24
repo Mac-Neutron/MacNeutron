@@ -97,6 +97,16 @@ done
 # The MetalFX presenter (arm64 release spec §5.3): winemetal.so loads it from its own folder (DXMT patch 0002), and it
 # loads its CMAA2 shaders from beside itself.
 for f in libmacneutron-present.dylib libmacneutron-present.metallib; do put "$B/wine-arm64-src/presenter" "$f" "$U/"; done
+# The Steam overlay shim (arm64 macOS 27.0 dylib).
+put "$B/wine-arm64-src/overlay-shim" libmacneutron-overlay-shim.dylib "$U/"
+# Proton's Windows-named fonts (15 files, preserving alt/arial.ttf) into share/fonts/.
+FONTS_OUT="$B/wine-arm64-src/fonts-out"
+mkdir -p "$R/share/fonts/alt"
+for f in arial.ttf arialbd.ttf times.ttf georgia.ttf cour.ttf courbd.ttf \
+  msyh.ttf msyhbd.ttf simsun.ttc malgun.ttf msgothic.ttc micross.ttf nirmala.ttf lucon.ttf; do
+  put "$FONTS_OUT" "$f" "$R/share/fonts/"
+done
+put "$FONTS_OUT" alt/arial.ttf "$R/share/fonts/alt/"
 # Licences (ship-base spec §4): the components' own texts, the committed README and NOTICES.md, and build.sh's SOURCE.
 # DXMT's stay in DXMT/.
 L="$R/licenses"
@@ -147,12 +157,15 @@ done
 # FFmpeg's LGPL-2.1 text and its LICENSE.md, which says which files are under other terms.
 for f in COPYING.LGPLv2.1 LICENSE.md; do put "$DS/ffmpeg" "$f" "$L/ffmpeg/"; done
 # lsteamclient (ship-base spec §7): Valve's Steamworks SDK licence, and a note for the one file under another.
-mkdir -p "$L/lsteamclient"
+mkdir -p "$L/lsteamclient" "$L/fonts"
 put "$S/lsteamclient/lsteamclient" LICENSE "$L/lsteamclient/"
 cat > "$L/lsteamclient/NOTE" << 'EOF'
 lsteamclient is under Valve's Steamworks SDK licence (LICENSE, beside this note), except its cxx.h, which is
 LGPL-2.1-or-later: copyright 2012 Piotr Caban for CodeWeavers, from Wine (Wine's licence texts are in ../wine/).
 EOF
+for f in liberation-OFL.txt noto-OFL.txt source-han-sans-OFL.txt ume-license.html proton-fonts-LICENSE.txt; do
+  put "$FONTS_OUT/licenses" "$f" "$L/fonts/"
+done
 cp "$ROOT/wine-arm64/Info.plist" "$APP/Contents/Info.plist"
 # The version (arm64 release spec §5.1): dev for a development bundle.
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VERSION" \
@@ -206,6 +219,9 @@ fi
 # runtime that says so (ToolLayout.supportsGenuineSteamclient). Read from the tree this bundle is built from.
 if LC_ALL=C /usr/bin/grep -q setup_steamclient_trampolines "$B/wine-arm64-src/wine/dlls/ntdll/loader.c"; then
   echo 0036 > "$R/genuine-steamclient"
+fi
+if LC_ALL=C /usr/bin/grep -q gameoverlayrenderer64 "$B/wine-arm64-src/wine/dlls/ntdll/loader.c"; then
+  echo 0036 > "$R/genuine-gameoverlayrenderer"
 fi
 
 # 2. Sign: everything but the loader, then the bundle with the entitlements, which land on the loader alone.
@@ -299,6 +315,9 @@ links=$(find "$APP" -type l ! -exec test -e {} \; -print)
 id=$(otool -D "$U/libmacneutron-present.dylib" | tail -n +2)
 [ "$id" = @rpath/libmacneutron-present.dylib ] \
   || die "libmacneutron-present.dylib's install name is ${id:-missing}, not @rpath/libmacneutron-present.dylib"
+id=$(otool -D "$U/libmacneutron-overlay-shim.dylib" | tail -n +2)
+[ "$id" = @rpath/libmacneutron-overlay-shim.dylib ] \
+  || die "libmacneutron-overlay-shim.dylib's install name is ${id:-missing}, not @rpath/libmacneutron-overlay-shim.dylib"
 # DXMT: Wine's builtin marker (bytes 64-79, in the DOS stub), the version token, the pin's place in the tree.
 builtin() { [ "$(dd if="$1" bs=1 skip=64 count=16 2> /dev/null)" = "Wine builtin DLL" ]; }
 for f in d3d11.dll d3d10core.dll dxgi.dll d3d12.dll nvapi64.dll nvngx.dll dxmt-replay.exe; do

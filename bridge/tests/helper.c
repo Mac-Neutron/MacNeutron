@@ -21,6 +21,18 @@ static DWORD read_dword(const WCHAR *name)
     return value;
 }
 
+static void read_string(HKEY root, const WCHAR *subkey, REGSAM sam, const WCHAR *name, WCHAR *out, DWORD cap_chars)
+{
+    HKEY key;
+    DWORD type = 0, bytes = (cap_chars - 1) * sizeof(WCHAR);
+
+    out[0] = 0;
+    if (RegOpenKeyExW(root, subkey, 0, KEY_QUERY_VALUE | sam, &key)) return;
+    if (RegQueryValueExW(key, name, NULL, &type, (BYTE *)out, &bytes) || type != REG_SZ) out[0] = 0;
+    else out[bytes / sizeof(WCHAR)] = 0;
+    RegCloseKey(key);
+}
+
 /* 1 when ActiveProcess\pid names a running process: the check steam_api.dll makes. */
 static int steam_alive(void)
 {
@@ -53,6 +65,23 @@ int main(void)
         RegGetValueW(HKEY_CURRENT_USER, ACTIVE_PROCESS_KEY, L"SteamClientDll64", RRF_RT_REG_SZ, NULL, client, &size);
         printf("alive=%d client64=", steam_alive());
         put(client);
+        fputs("\n", stdout);
+        return 0;
+    }
+    if (!wcscmp(mode, L"reg"))  /* 64-bit and Wow6432Node InstallPath + ActiveProcess Universe and SteamPath */
+    {
+        WCHAR install64[MAX_PATH], install32[MAX_PATH], universe[64], steampath[MAX_PATH];
+
+        read_string(HKEY_LOCAL_MACHINE, L"Software\\Valve\\Steam", KEY_WOW64_64KEY, L"InstallPath",
+                    install64, ARRAYSIZE(install64));
+        read_string(HKEY_LOCAL_MACHINE, L"Software\\Wow6432Node\\Valve\\Steam", 0, L"InstallPath",
+                    install32, ARRAYSIZE(install32));
+        read_string(HKEY_CURRENT_USER, ACTIVE_PROCESS_KEY, 0, L"Universe", universe, ARRAYSIZE(universe));
+        read_string(HKEY_CURRENT_USER, ACTIVE_PROCESS_KEY, 0, L"SteamPath", steampath, ARRAYSIZE(steampath));
+        fputs("install64=", stdout); put(install64);
+        fputs(" install32=", stdout); put(install32);
+        fputs(" universe=", stdout); put(universe);
+        fputs(" steampath=", stdout); put(steampath);
         fputs("\n", stdout);
         return 0;
     }
@@ -201,15 +230,22 @@ int main(void)
         fputs("\n", stdout);
         return 0;
     }
-    /* Built as a console program (helper-console.exe): whether steam.exe gave it a console of its own. Its stdout can't
-     * reach check.sh then, so it writes to <file>. */
+    /* Built as a console program (helper-console.exe): whether steam.exe gave it a console of its own without
+     * inheriting the parent's redirected stdout pipe. Its stdout doesn't reach check.sh, so it writes to <file>. */
     if (!wcscmp(mode, L"console") && argc > 2)
     {
-        DWORD list[8];
+        DWORD list[8], cmode = 0;
+        HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+        DWORD type = GetFileType(h);
         FILE *out;
 
+        fputs("leaked_stdout\n", stdout);
+        fflush(stdout);
         if (!(out = _wfopen(argv[2], L"w"))) return 2;
-        fprintf(out, "own_console=%d\n", GetConsoleProcessList(list, ARRAYSIZE(list)) == 1);
+        fprintf(out, "own_console=%d pipe_stdout=%d console_stdout=%d\n",
+                GetConsoleProcessList(list, ARRAYSIZE(list)) == 1,
+                type == FILE_TYPE_PIPE,
+                GetConsoleMode(h, &cmode) != 0);
         fclose(out);
         return 0;
     }

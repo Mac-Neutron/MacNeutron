@@ -66,6 +66,8 @@ STEPS="$STEPS dxmt-release" NEEDS_PREFIX="$NEEDS_PREFIX dxmt-release" NEEDS_FEX=
 NEEDS_DXMT="$NEEDS_DXMT dxmt-release"
 # Wine patch 0043: a mount point (APFS's Preboot volume; Wine lists no /dev) answers FSCTL_GET_REPARSE_POINT as one.
 STEPS="$STEPS mountpoint" NEEDS_PREFIX="$NEEDS_PREFIX mountpoint" NEEDS_FEX="$NEEDS_FEX mountpoint"
+# Proton EAC runtime version spoof: wine_get_version() returns "11.20" by default and "9.0" with PROTON_EAC_RUNTIME.
+STEPS="$STEPS wine-version" NEEDS_PREFIX="$NEEDS_PREFIX wine-version"
 
 # The processes running the runtime's executables. Wine rewrites argv, so `pkill -f <path>` finds nothing; the kernel
 # knows the executable. The Rosetta tool folders' (the launcher, Wine and its server): g4-bench's, and the reference's
@@ -386,9 +388,38 @@ bench_rows() {
   [ "$n" = "$BENCH_ROWS" ] || { echo "${1#"$WORK"/} has $n of $BENCH_ROWS rows; it ends: $(tail -n 1 "$1")"; return 1; }
 }
 
-# Text and TLS (ship-base spec §5): the bundled FreeType and gnutls load where Wine dlopens them. Wine says so on
-# stderr when one doesn't; those lines come before the FAIL line.
+# Text and TLS (ship-base spec §5): the bundled FreeType and gnutls load where Wine dlopens them, and bundled Proton
+# fonts (share/fonts/) resolve in DirectWrite and GDI. Wine says so on stderr when a library doesn't load; those lines
+# come before the FAIL line.
 fonts_tls_cmd() {
+  if [ -d "$TOOL/Contents/Resources/share/fonts" ]; then
+    mkdir -p "$PFX/drive_c/windows/Fonts"
+    for f in "$TOOL/Contents/Resources/share/fonts"/*.tt[fc]; do
+      [ -f "$f" ] || continue
+      [ -e "$PFX/drive_c/windows/Fonts/${f##*/}" ] && [ ! -L "$PFX/drive_c/windows/Fonts/${f##*/}" ] \
+        || ln -sf "$f" "$PFX/drive_c/windows/Fonts/${f##*/}"
+    done
+    cat > "$WORK/proton-fonts.reg" << 'EOF'
+Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Fonts]
+"Arial (TrueType)"="arial.ttf"
+"Arial Bold (TrueType)"="arialbd.ttf"
+"Times New Roman (TrueType)"="times.ttf"
+"Georgia (TrueType)"="georgia.ttf"
+"Courier New (TrueType)"="cour.ttf"
+"Courier New Bold (TrueType)"="courbd.ttf"
+"Microsoft YaHei (TrueType)"="msyh.ttf"
+"Microsoft YaHei Bold (TrueType)"="msyhbd.ttf"
+"SimSun & NSimSun (TrueType)"="simsun.ttc"
+"Malgun Gothic (TrueType)"="malgun.ttf"
+"MS Gothic & MS PGothic & MS UI Gothic (TrueType)"="msgothic.ttc"
+"Microsoft Sans Serif (TrueType)"="micross.ttf"
+"Nirmala UI (TrueType)"="nirmala.ttf"
+"Lucida Console (TrueType)"="lucon.ttf"
+EOF
+    wine_run regedit /S "Z:$WORK/proton-fonts.reg" || return 1
+  fi
   exe_cmd arm64-fonts-tls "Z:$ROOT/wine-arm64/tests/fixtures/fonts-tls.pfx" && rc=0 || rc=1
   err="$WORK/arm64-fonts-tls.err"
   bad=$(tr -d '\r' < "$err" | LC_ALL=C /usr/bin/grep -iE 'cannot find the FreeType|failed to load libgnutls' || true)
@@ -805,30 +836,85 @@ crt_cmd() {
   [ -z "$fails" ] || { echo "FAIL crt: $fails"; return 1; }
 }
 
-# A genuine steamclient64.dll (Wine patch 0036): x64-steamclient under FEX loads Valve's signed DLL from a copy here,
-# then the bundle's lsteamclient.dll copied under the same name, which the loader must leave alone. Wine's trace+module
-# lines show whose DllMain ran: lsteamclient.dll's (the control) and the builtin copy's, never the genuine one's.
+# A genuine steamclient64.dll and GameOverlayRenderer64.dll (Wine patch 0036): x64-steamclient under FEX loads Valve's
+# signed DLL from a copy here, then the bundle's lsteamclient.dll copied under the same name, which the loader must
+# leave alone. Also verifies genuine-gameoverlayrenderer and GameOverlayRenderer64.dll stubbing (real if present, else a
+# synthetic DLL with a DllMain counter). Wine's trace+module lines show whose DllMain ran: lsteamclient.dll's (the
+# control) and the builtin copy's, never the genuine steamclient64.dll's or GameOverlayRenderer64.dll's.
 STEAMCLIENT64="${VALVE_STEAMCLIENT64:-$B/valve/steamclient64.dll}"
 # Then the copy the app downloaded from Valve (ValveClient), after build/valve.
 [ -f "$STEAMCLIENT64" ] || STEAMCLIENT64=$(ls -d "$HOME/Library/Application Support/MacNeutron/Valve/"[0-9]*/steamclient64.dll \
-  2> /dev/null | tail -n 1)
+  2> /dev/null | tail -n 1 || true)
+OVERLAY64="${VALVE_GAMEOVERLAYRENDERER64:-$(dirname "$STEAMCLIENT64")/GameOverlayRenderer64.dll}"
+[ -f "$OVERLAY64" ] || OVERLAY64=$(ls -d "$HOME/Library/Application Support/MacNeutron/Valve/"[0-9]*/GameOverlayRenderer64.dll \
+  2> /dev/null | tail -n 1 || true)
 dllmain_calls() {
   tr -d '\r' < "$WORK/x64-steamclient.err" | LC_ALL=C /usr/bin/grep -c "L\"$1\",PROCESS_ATTACH,.*) - CALL" || true
 }
 steamclient_cmd() {
-  [ -f "$STEAMCLIENT64" ] || { echo "skip steamclient: no genuine steamclient64.dll at $STEAMCLIENT64"; return 0; }
   [ -f "$TOOL/Contents/Resources/genuine-steamclient" ] \
     || { echo "FAIL steamclient: wine.app has no genuine-steamclient marker (bundle.sh writes it with Wine 0036)"; return 1; }
+  [ -f "$TOOL/Contents/Resources/genuine-gameoverlayrenderer" ] \
+    || { echo "FAIL steamclient: wine.app has no genuine-gameoverlayrenderer marker (bundle.sh writes it with Wine 0036)"; return 1; }
   d="$WORK/steamclient"
   mkdir -p "$d/genuine" "$d/builtin"
-  cp "$STEAMCLIENT64" "$d/genuine/steamclient64.dll"
-  cp "$TOOL/Contents/Resources/lib/wine/aarch64-windows/lsteamclient.dll" "$d/builtin/steamclient64.dll"
+  if [ -f "$OVERLAY64" ]; then
+    cp "$OVERLAY64" "$d/genuine/GameOverlayRenderer64.dll"
+  else
+    cat > "$d/overlay_stub.c" << 'EOF'
+#include <windows.h>
+static volatile int calls = 0;
+BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
+  (void)inst; (void)reason; (void)reserved;
+  calls++;
+  return TRUE;
+}
+__declspec(dllexport) int overlay_dllmain_calls(void) { return calls; }
+EOF
+    "$(sh "$ROOT/dxmt/toolchain.sh")/x86_64-w64-mingw32-clang" -O1 -shared -o "$d/genuine/GameOverlayRenderer64.dll" \
+      "$d/overlay_stub.c" || { echo "FAIL steamclient: failed to build synthetic GameOverlayRenderer64.dll"; return 1; }
+  fi
   wine_run reg add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f > /dev/null || return 1
-  WINEDEBUG=trace+module exe_cmd x64-steamclient genuine "Z:$d/genuine/steamclient64.dll" || return 1
-  [ "$(dllmain_calls lsteamclient.dll)" -ge 1 ] || { echo "FAIL steamclient: no trace of lsteamclient.dll's DllMain"; return 1; }
-  [ "$(dllmain_calls steamclient64.dll)" = 0 ] || { echo "FAIL steamclient: the genuine steamclient64.dll's DllMain ran"; return 1; }
-  WINEDEBUG=trace+module exe_cmd x64-steamclient builtin "Z:$d/builtin/steamclient64.dll" || return 1
-  [ "$(dllmain_calls steamclient64.dll)" -ge 1 ] || { echo "FAIL steamclient: the builtin copy's DllMain didn't run"; return 1; }
+  if [ -f "$STEAMCLIENT64" ]; then
+    cp "$STEAMCLIENT64" "$d/genuine/steamclient64.dll"
+    cp "$TOOL/Contents/Resources/lib/wine/aarch64-windows/lsteamclient.dll" "$d/builtin/steamclient64.dll"
+    WINEDEBUG=trace+module exe_cmd x64-steamclient genuine "Z:$d/genuine/steamclient64.dll" \
+      "Z:$d/genuine/GameOverlayRenderer64.dll" || return 1
+    [ "$(dllmain_calls lsteamclient.dll)" -ge 1 ] || { echo "FAIL steamclient: no trace of lsteamclient.dll's DllMain"; return 1; }
+    [ "$(dllmain_calls steamclient64.dll)" = 0 ] || { echo "FAIL steamclient: the genuine steamclient64.dll's DllMain ran"; return 1; }
+    [ "$(dllmain_calls GameOverlayRenderer64.dll)" = 0 ] || { echo "FAIL steamclient: GameOverlayRenderer64.dll's DllMain ran"; return 1; }
+    WINEDEBUG=trace+module exe_cmd x64-steamclient builtin "Z:$d/builtin/steamclient64.dll" || return 1
+    [ "$(dllmain_calls steamclient64.dll)" -ge 1 ] || { echo "FAIL steamclient: the builtin copy's DllMain didn't run"; return 1; }
+  else
+    echo "skip steamclient: no genuine steamclient64.dll at $STEAMCLIENT64"
+    WINEDEBUG=trace+module exe_cmd x64-steamclient overlay "Z:$d/genuine/GameOverlayRenderer64.dll" || return 1
+    [ "$(dllmain_calls GameOverlayRenderer64.dll)" = 0 ] || { echo "FAIL steamclient: GameOverlayRenderer64.dll's DllMain ran"; return 1; }
+  fi
+}
+
+wine_version_cmd() {
+  cat > "$WORK/wine-ver.c" << 'EOF'
+#include <windows.h>
+#include <stdio.h>
+int main(void) {
+  typedef const char *(__cdecl *fn_t)(void);
+  fn_t fn = (fn_t)(void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_version");
+  if (!fn) return 2;
+  printf("%s\n", fn());
+  return 0;
+}
+EOF
+  "$(sh "$ROOT/dxmt/toolchain.sh")/aarch64-w64-mingw32-clang" -O1 -o "$WORK/wine-ver.exe" "$WORK/wine-ver.c" || return 1
+  v_def=$(env -u PROTON_EAC_RUNTIME -u MACNEUTRON_WINE_VERSION WINEPREFIX="$PFX" "$TOOL/Contents/MacOS/wine" "$WORK/wine-ver.exe" 2> /dev/null | tr -d '\r')
+  [ "$v_def" = "11.20" ] || { echo "FAIL wine-version: default wine_get_version()='$v_def', want '11.20'"; return 1; }
+  v_eac=$(env -u MACNEUTRON_WINE_VERSION PROTON_EAC_RUNTIME=/tmp WINEPREFIX="$PFX" "$TOOL/Contents/MacOS/wine" "$WORK/wine-ver.exe" 2> /dev/null | tr -d '\r')
+  [ "$v_eac" = "9.0" ] || { echo "FAIL wine-version: PROTON_EAC_RUNTIME=/tmp wine_get_version()='$v_eac', want '9.0'"; return 1; }
+  long_eac="/Volumes/Proton EasyAntiCheat Runtime/very/long/path/exceeding/sixty/four/bytes"
+  v_eac_long=$(env -u MACNEUTRON_WINE_VERSION PROTON_EAC_RUNTIME="$long_eac" WINEPREFIX="$PFX" "$TOOL/Contents/MacOS/wine" "$WORK/wine-ver.exe" 2> /dev/null | tr -d '\r')
+  [ "$v_eac_long" = "9.0" ] || { echo "FAIL wine-version: long PROTON_EAC_RUNTIME wine_get_version()='$v_eac_long', want '9.0'"; return 1; }
+  v_override=$(MACNEUTRON_WINE_VERSION=10.5 PROTON_EAC_RUNTIME=/tmp WINEPREFIX="$PFX" "$TOOL/Contents/MacOS/wine" "$WORK/wine-ver.exe" 2> /dev/null | tr -d '\r')
+  [ "$v_override" = "10.5" ] || { echo "FAIL wine-version: MACNEUTRON_WINE_VERSION=10.5 wine_get_version()='$v_override', want '10.5'"; return 1; }
+  echo "info wine-version: default=$v_def eac=$v_eac eac_long=$v_eac_long override=$v_override"
 }
 
 dxmt_release_cmd() {
@@ -882,6 +968,7 @@ run_step() {
     steamclient) step steamclient 120 steamclient_cmd; LC_ALL=C /usr/bin/grep -E '^(skip|info) ' "$WORK/steamclient.log" ;;
     dxmt-release) step dxmt-release 120 dxmt_release_cmd ;;
     mountpoint) step mountpoint 60 exe_cmd x64-mountpoint mount 'Z:\System\Volumes\Preboot' dir 'Z:\System\Volumes' ;;
+    wine-version) step wine-version 60 wine_version_cmd; grep '^info ' "$WORK/wine-version.log" ;;
     *) die "no runner for $1" ;;
   esac
 }

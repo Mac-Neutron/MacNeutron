@@ -929,7 +929,7 @@ sh "$B" ssh 'sh ~/mn-image/build.sh > /tmp/image.log 2>&1' || die "the image bui
 sh "$ROOT/vm/setup/parts.sh" "$OUT/vm-parts" "$OUT/wine.app" > /dev/null || die "parts.sh failed"
 check_parts_paths "$OUT/vm-parts" || exit 1
 # Each guest stage was built from the trees the source archive carries.
-for s in wine:.mn-source forwarder:.mn-source-forwarder dxmt:.mn-source-dxmt; do
+for s in wine:.mn-source forwarder:.mn-source-forwarder dxmt:.mn-source-dxmt fonts:.mn-source-fonts; do
   found=$(tar -xOf "$OUT/vm-parts/wine.tar" "./${s#*:}" 2> /dev/null || true)
   check_stamp "${s%%:*}" "$found" "$(sh "$ROOT/vm/image/stamps.sh" "${s%%:*}")" || exit 1
 done

@@ -1,11 +1,12 @@
-// The genuine steamclient64.dll (Wine patch 0036): SteamStub DRM checks the signature of the prefix's
-// steamclient64.dll on disk, so the prefix holds Valve's signed one and Wine's loader makes it lsteamclient.dll's in
-// memory, as Proton's does: each export lsteamclient.dll also has starts with an x64 jump to lsteamclient.dll's, its
-// tier0_s64.dll and vstdlib_s64.dll imports get ntdll stubs, and its DllMain and TLS callbacks never run (check.sh's
-// steamclient step reads that off Wine's trace+module lines).
-//   x64-steamclient genuine <dll>  Valve's DLL, loaded as a game's steam_api64.dll loads it, under FEX; then a new
-//                                  thread (Valve's TLS callback must stay off) and a second load after FreeLibrary
-//   x64-steamclient builtin <dll>  lsteamclient.dll copied as steamclient64.dll (today's prefixes): left as it is
+// The genuine steamclient64.dll and GameOverlayRenderer64.dll (Wine patch 0036): SteamStub DRM checks the signature of
+// the prefix's steamclient64.dll on disk, so the prefix holds Valve's signed one and Wine's loader makes it
+// lsteamclient.dll's in memory, as Proton's does: each export lsteamclient.dll also has starts with an x64 jump to
+// lsteamclient.dll's, its tier0_s64.dll and vstdlib_s64.dll imports get ntdll stubs, and its DllMain and TLS callbacks
+// never run (check.sh's steamclient step reads that off Wine's trace+module lines). GameOverlayRenderer64.dll is
+// similarly stubbed via LDR_DONT_CALL_DLLMAIN | LDR_DONT_RESOLVE_REFS so its DllMain never runs.
+//   x64-steamclient genuine <steamclient64.dll> [GameOverlayRenderer64.dll]
+//   x64-steamclient builtin <steamclient64.dll>
+//   x64-steamclient overlay <GameOverlayRenderer64.dll>
 // One line per row, `ok <row>` or `FAIL <row>: <why>`, `info` lines, then PASS or FAIL x64-steamclient.
 #include <windows.h>
 #include <wintrust.h>
@@ -88,44 +89,76 @@ static void check_genuine(HMODULE dll, const WCHAR *want, const char *prefix) {
 #undef ROW
 }
 
+// GameOverlayRenderer64.dll: mapped without resolving imports or invoking DllMain.
+static void check_overlay(const WCHAR *arg) {
+  WCHAR want[MAX_PATH], got[MAX_PATH] = L"";
+  GetFullPathNameW(arg, MAX_PATH, want, NULL);
+  HMODULE dll = LoadLibraryW(want);
+  row(dll != NULL, "overlay load", "LoadLibraryW failed on GameOverlayRenderer64.dll");
+  if (!dll) {
+    printf("info overlay GetLastError=%lu\n", GetLastError());
+    return;
+  }
+  GetModuleFileNameW(dll, got, MAX_PATH);
+  BYTE *base = (BYTE *)dll;
+  IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+  int marked = !memcmp(base + sizeof(IMAGE_DOS_HEADER), "Wine builtin DLL", 16);
+  row(!_wcsicmp(got, want) && nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 && !marked, "overlay file",
+      "not the expected x64 GameOverlayRenderer64.dll");
+  int(__cdecl * get_calls)(void) = (int(__cdecl *)(void))(void *)GetProcAddress(dll, "overlay_dllmain_calls");
+  if (get_calls) {
+    int calls = get_calls();
+    printf("info overlay dllmain_calls %d\n", calls);
+    row(calls == 0, "overlay dllmain", "GameOverlayRenderer64.dll DllMain ran");
+  }
+  FreeLibrary(dll);
+}
+
 int wmain(int argc, wchar_t **argv) {
   setvbuf(stdout, NULL, _IONBF, 0);  // a crash keeps what was printed before it
-  if (argc != 3 || (wcscmp(argv[1], L"genuine") && wcscmp(argv[1], L"builtin"))) {
-    printf("FAIL x64-steamclient: usage: x64-steamclient genuine|builtin <steamclient64.dll>\n");
+  int genuine = argc >= 3 && !wcscmp(argv[1], L"genuine");
+  int builtin = argc == 3 && !wcscmp(argv[1], L"builtin");
+  int overlay = argc == 3 && !wcscmp(argv[1], L"overlay");
+  if (!((genuine && (argc == 3 || argc == 4)) || builtin || overlay)) {
+    printf("FAIL x64-steamclient: usage: x64-steamclient genuine|builtin|overlay <dll> [overlay.dll]\n");
     return 1;
   }
-  int genuine = !wcscmp(argv[1], L"genuine");
-  WCHAR want[MAX_PATH], got[MAX_PATH] = L"";
-  GetFullPathNameW(argv[2], MAX_PATH, want, NULL);
-  if (genuine) printf("info winverifytrust 0x%08lx (0: this Wine trusts Valve's signature)\n", verify(want));
-
-  HMODULE dll = LoadLibraryW(want);
-  if (!dll) {
-    printf("FAIL x64-steamclient: LoadLibrary failed, error %lu\n", GetLastError());
-    return 1;
-  }
-  if (!genuine) {
-    GetModuleFileNameW(dll, got, MAX_PATH);
-    int marked = !memcmp((BYTE *)dll + sizeof(IMAGE_DOS_HEADER), "Wine builtin DLL", 16);
-    HMODULE ls = GetModuleHandleW(L"lsteamclient.dll");
-    BYTE *create = (BYTE *)GetProcAddress(dll, "CreateInterface");
-    row(!_wcsicmp(got, want) && marked, "file", "not the builtin copy itself");
-    row(!ls && create && !jumps(create), "untouched",
-        ls ? "the loader loaded lsteamclient.dll for a builtin" : "the builtin's CreateInterface was patched");
+  if (overlay) {
+    check_overlay(argv[2]);
   } else {
-    check_genuine(dll, want, "");
-    // Valve's TLS callback runs its thread_local initializers on THREAD_ATTACH, against ntdll stubs: it must not run
-    HANDLE thread = CreateThread(NULL, 0, thread_main, NULL, 0, NULL);
-    DWORD code = 0;
-    row(thread && !WaitForSingleObject(thread, 10000) && GetExitCodeThread(thread, &code) && code == 7, "thread",
-        "a new thread didn't run to its end");
-    // SteamStub loads the DLL, then the game's steam_api64.dll again: the loader's cached lsteamclient.dll path
-    FreeLibrary(dll);
-    if (!(dll = LoadLibraryW(want))) {
-      printf("FAIL x64-steamclient: second LoadLibrary failed, error %lu\n", GetLastError());
+    WCHAR want[MAX_PATH], got[MAX_PATH] = L"";
+    GetFullPathNameW(argv[2], MAX_PATH, want, NULL);
+    if (genuine) printf("info winverifytrust 0x%08lx (0: this Wine trusts Valve's signature)\n", verify(want));
+
+    HMODULE dll = LoadLibraryW(want);
+    if (!dll) {
+      printf("FAIL x64-steamclient: LoadLibrary failed, error %lu\n", GetLastError());
       return 1;
     }
-    check_genuine(dll, want, "reload ");
+    if (builtin) {
+      GetModuleFileNameW(dll, got, MAX_PATH);
+      int marked = !memcmp((BYTE *)dll + sizeof(IMAGE_DOS_HEADER), "Wine builtin DLL", 16);
+      HMODULE ls = GetModuleHandleW(L"lsteamclient.dll");
+      BYTE *create = (BYTE *)GetProcAddress(dll, "CreateInterface");
+      row(!_wcsicmp(got, want) && marked, "file", "not the builtin copy itself");
+      row(!ls && create && !jumps(create), "untouched",
+          ls ? "the loader loaded lsteamclient.dll for a builtin" : "the builtin's CreateInterface was patched");
+    } else {
+      check_genuine(dll, want, "");
+      // Valve's TLS callback runs its thread_local initializers on THREAD_ATTACH, against ntdll stubs: it must not run
+      HANDLE thread = CreateThread(NULL, 0, thread_main, NULL, 0, NULL);
+      DWORD code = 0;
+      row(thread && !WaitForSingleObject(thread, 10000) && GetExitCodeThread(thread, &code) && code == 7, "thread",
+          "a new thread didn't run to its end");
+      // SteamStub loads the DLL, then the game's steam_api64.dll again: the loader's cached lsteamclient.dll path
+      FreeLibrary(dll);
+      if (!(dll = LoadLibraryW(want))) {
+        printf("FAIL x64-steamclient: second LoadLibrary failed, error %lu\n", GetLastError());
+        return 1;
+      }
+      check_genuine(dll, want, "reload ");
+      if (argc == 4) check_overlay(argv[3]);
+    }
   }
   if (!failed) {
     printf("PASS x64-steamclient\n");

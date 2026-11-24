@@ -13,10 +13,23 @@ trap 'rm -rf "$T" "$W/share/fonts-test.bat"' EXIT
 # A new prefix each run: links an earlier run left must not pass for this one.
 rm -f "$W/state/fonts.img"
 K='HKLM\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
-printf '%s\r\n' '@echo off' 'if not exist C:\windows\Fonts\tahoma.ttf exit 8' \
-  'if not exist C:\windows\Fonts\arial.ttf exit 10' \
-  "reg query \"$K\" /v \"Tahoma (TrueType)\" | find \"REG_SZ    tahoma.ttf\" >nul || exit 9" \
-  "reg query \"$K\" /v \"Arial (TrueType)\" | find \"REG_SZ    arial.ttf\" >nul || exit 11" 'exit 7' > "$W/share/fonts-test.bat"
+{
+  printf '%s\r\n' '@echo off' \
+    'if not exist C:\windows\Fonts\tahoma.ttf exit 8' \
+    'if not exist C:\windows\Fonts\arial.ttf exit 10' \
+    "reg query \"$K\" /v \"Tahoma (TrueType)\" | find \"REG_SZ    tahoma.ttf\" >nul || exit 9" \
+    "reg query \"$K\" /v \"Arial (TrueType)\" | find \"REG_SZ    arial.ttf\" >nul || exit 11"
+  for f in arial.ttf arialbd.ttf times.ttf georgia.ttf cour.ttf courbd.ttf \
+           msyh.ttf msyhbd.ttf simsun.ttc malgun.ttf msgothic.ttc micross.ttf nirmala.ttf lucon.ttf; do
+    printf '%s\r\n' "if not exist C:\\windows\\Fonts\\$f exit 12"
+  done
+  printf '%s\r\n' "reg query \"$K\" > C:\\fonts_reg.txt || exit 13"
+  for f in arial.ttf arialbd.ttf times.ttf georgia.ttf cour.ttf courbd.ttf \
+           msyh.ttf msyhbd.ttf simsun.ttc malgun.ttf msgothic.ttc micross.ttf nirmala.ttf lucon.ttf; do
+    printf '%s\r\n' "find /i \"REG_SZ    $f\" C:\\fonts_reg.txt >nul || exit 14"
+  done
+  printf '%s\r\n' 'del C:\fonts_reg.txt >nul 2>&1' 'exit 7'
+} > "$W/share/fonts-test.bat"
 # printf, not echo: sh's echo reads the \c of \cmd.exe as "stop here".
 { printf '%s\n' "VERB=waitforexitandrun APPID=0 GAME_DIR=/mnt/share/bin EXE='C:\\windows\\system32\\cmd.exe'" \
     "set -- /c 'Z:\\mnt\\share\\fonts-test.bat'"; cat "$ROOT/vm/guest/run-game.sh"; } > "$T/guest.sh"

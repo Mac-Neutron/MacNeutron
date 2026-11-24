@@ -121,8 +121,20 @@ impl ValveInstall {
         self.folder.join("steamclient64.dll")
     }
 
+    pub fn steam_client32(&self) -> PathBuf {
+        self.folder.join("steamclient.dll")
+    }
+
     pub fn legacy_steam_dll(&self) -> PathBuf {
         self.folder.join("Steam.dll")
+    }
+
+    pub fn game_overlay_renderer64(&self) -> PathBuf {
+        self.folder.join("GameOverlayRenderer64.dll")
+    }
+
+    pub fn game_overlay_renderer32(&self) -> PathBuf {
+        self.folder.join("GameOverlayRenderer.dll")
     }
 }
 
@@ -862,7 +874,13 @@ mod tests {
 
         let install = ValveClient::installed(&cache).unwrap();
         assert_eq!(install.legacy_steam_dll(), install.folder.join("Steam.dll"));
+        assert_eq!(install.steam_client32(), install.folder.join("steamclient.dll"));
+        assert_eq!(install.game_overlay_renderer64(), install.folder.join("GameOverlayRenderer64.dll"));
+        assert_eq!(install.game_overlay_renderer32(), install.folder.join("GameOverlayRenderer.dll"));
         assert!(install.legacy_steam_dll().exists());
+        assert!(install.steam_client32().exists());
+        assert!(install.game_overlay_renderer64().exists());
+        assert!(install.game_overlay_renderer32().exists());
 
         let source = std::fs::read_to_string(install.folder.join("source.txt")).unwrap();
         assert!(source.contains(&format!("url {winning_package}\n")), "source.txt was:\n{source}");

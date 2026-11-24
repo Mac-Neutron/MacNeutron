@@ -483,6 +483,22 @@ are used under the MIT licence below, with this copyright line:
 Copyright (c) 2026 eac-arm64-emulation-poc contributors
 ```
 
+## Proton fonts (in `share/fonts`)
+
+The Windows-named compatibility fonts in `share/fonts` are built from four open-source font families using Valve's
+Proton font build scripts, patches and Unicode range tables (`fonts/*` in `https://github.com/Mac-Neutron/Proton.git`
+at `LSTEAMCLIENT_COMMIT`, and `vm/fonts/` in this repository):
+
+- **Liberation** (`arial.ttf`, `arialbd.ttf`, `times.ttf`, `georgia.ttf`, `cour.ttf`, `courbd.ttf`): SIL Open Font
+  License 1.1 (`fonts/liberation-OFL.txt`).
+- **Google Noto** (merged into `micross.ttf`, `nirmala.ttf`, `lucon.ttf`, `alt/arial.ttf`): SIL Open Font License 1.1
+  (`fonts/noto-OFL.txt`).
+- **Adobe Source Han Sans** (`msyh.ttf`, `msyhbd.ttf`, `simsun.ttc`, `malgun.ttf`): SIL Open Font License 1.1
+  (`fonts/source-han-sans-OFL.txt`).
+- **UmeFont** (`msgothic.ttc`): permissive UmeFont licence (`fonts/ume-license.html`).
+- **Valve font build scripts and patches**: BSD-3-Clause (`Copyright (c) 2018-2022, Valve Corporation`,
+  `fonts/proton-fonts-LICENSE.txt`).
+
 ## The MIT licence
 
 The terms of the MIT entries above, with each entry's copyright line (the text of FEX's `LICENSE`):

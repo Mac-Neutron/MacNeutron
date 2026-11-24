@@ -28,6 +28,13 @@ impl SteamBridge {
     /// The folder `steam.exe` names in the registry, relative to the prefix.
     pub const PREFIX_FOLDER: &'static str = "drive_c/Program Files (x86)/Steam";
 
+    /// Valve's 64-bit overlay renderer DLL in `PREFIX_FOLDER`.
+    pub const OVERLAY_RENDERER64: &'static str = "GameOverlayRenderer64.dll";
+
+    pub fn overlay_renderer64_destination() -> String {
+        format!("{}/{}", Self::PREFIX_FOLDER, Self::OVERLAY_RENDERER64)
+    }
+
     /// A launch option for the prefix's `steamclient64.dll`: an absolute Mac path to another copy of Valve's signed
     /// DLL, or `builtin` for lsteamclient.dll (no Valve DLL). Without it the launcher uses the app's download from
     /// Valve when the runtime has Wine patch 0036, which makes the genuine DLL's exports jump to lsteamclient.dll's.

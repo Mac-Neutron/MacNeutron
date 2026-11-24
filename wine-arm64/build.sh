@@ -137,8 +137,8 @@ fetch_dxmt() {
   git -C "$D.tmp" submodule update -q --init --depth 1 || die "can't fetch DXMT's submodules"
   place_tree "$D.tmp" dxmt "$dxmt_series"
 }
-# Our Proton fork's lsteamclient/ alone (ship-base spec §7): the one commit, blob-filtered, checked out sparse without the
-# Steamworks SDK folders and the generator. Git fetches the blobs it checks out from the fork, so lazy fetching is on.
+# Our Proton fork's lsteamclient/ and fonts/ (ship-base spec §7): the one commit, blob-filtered, checked out sparse
+# without the Steamworks SDK folders and the generator. Git fetches the blobs it checks out from the fork, so lazy fetching is on.
 fetch_lsteamclient() {
   echo "wine-arm64: fetching lsteamclient $LSTEAMCLIENT_COMMIT" >&2
   unset GIT_NO_LAZY_FETCH
@@ -148,7 +148,7 @@ fetch_lsteamclient() {
   git -C "$LSC.tmp" fetch -q --depth 1 --filter=blob:none origin "$LSTEAMCLIENT_COMMIT" \
     || die "can't fetch $LSTEAMCLIENT_COMMIT from $LSTEAMCLIENT_REPO"
   git -C "$LSC.tmp" sparse-checkout set --no-cone '/lsteamclient/' '!/lsteamclient/steamworks_sdk_*/' \
-    '!/lsteamclient/gen_wrapper.py' || die "can't set lsteamclient's sparse checkout"
+    '!/lsteamclient/gen_wrapper.py' '/fonts/' || die "can't set lsteamclient's sparse checkout"
   git -C "$LSC.tmp" checkout -q -b main FETCH_HEAD || die "can't check out lsteamclient/ from $LSTEAMCLIENT_REPO"
   place_tree "$LSC.tmp" lsteamclient "$lsc_series"
 }
@@ -165,6 +165,8 @@ stamp=$(stamp_of "$ROOT/wine-arm64/pins" "$ROOT/wine-arm64/build.sh" \
   "$ROOT/dxmt/fetch.sh" "$ROOT/wine-arm64/x18-allow.txt" "$ROOT/wine-arm64/tools/x18scan.sh" \
   "$ROOT/presenter/present.m" "$ROOT/presenter/cmaa2.metal" "$ROOT/presenter/sharpen.metal" \
   "$ROOT/presenter/CMAA2-LICENSE.txt" "$ROOT/LICENSE" \
+  "$ROOT/overlay-shim/overlay_shim.m" "$ROOT/vm/fonts/build.sh" "$ROOT/vm/fonts/pins" \
+  "$ROOT/vm/fonts/generatefont.pe" "$ROOT/vm/fonts/LiberationMono-Regular.patch" "$ROOT/vm/fonts/LICENSE.proton" \
   "$ROOT/wine-arm64/tools/xcrun-metal.sh" "$ROOT/dxmt/toolchain.sh" "$ROOT/dxmt/llvm-mingw.sh" \
   "$ROOT/wine-arm64/tools/authenticode-sign.swift" "$ROOT/dxmt/mtld3d-tools.sh" "$ROOT/dxmt/mtld3d-notices.py")
 # Another CPU, LTO setting or toolchain is another build.
@@ -189,6 +191,13 @@ prepare wine "$wine_mode"
 prepare fex "$fex_mode"
 prepare dxmt "$dxmt_mode"
 prepare lsteamclient "$lsteamclient_mode"
+# Ensure existing sparse checkouts of Mac-Neutron/Proton also materialize fonts/ alongside lsteamclient/.
+if [ ! -d "$LSC/fonts/noto" ]; then
+  echo "wine-arm64: widening lsteamclient sparse checkout to include fonts/" >&2
+  unset GIT_NO_LAZY_FETCH
+  git -C "$LSC" sparse-checkout set --no-cone '/lsteamclient/' '!/lsteamclient/steamworks_sdk_*/' \
+    '!/lsteamclient/gen_wrapper.py' '/fonts/' || die "can't widen lsteamclient's sparse checkout"
+fi
 # lsteamclient builds as one of Wine's DLLs (our Wine registers it): its folder is linked in as dlls/lsteamclient,
 # which the Wine tree ignores, so that tree stays applied and lsteamclient's source never enters a Wine commit. Every build: a fetched Wine tree has neither. The ignore goes first, so the link never shows as a change.
 LC_ALL=C /usr/bin/grep -qx /dlls/lsteamclient "$W/.git/info/exclude" 2> /dev/null \
@@ -198,7 +207,7 @@ ln -sfn ../../lsteamclient/lsteamclient "$W/dlls/lsteamclient"
 # differs from that commit, a new file included.
 mac=$(git -C "$ROOT" rev-parse HEAD)
 [ -z "$(git -C "$ROOT" status --porcelain --untracked-files=normal -- wine-arm64 dxmt bridge Makefile presenter \
-  LICENSE)" ] || mac="$mac+dirty"
+  overlay-shim vm/fonts LICENSE)" ] || mac="$mac+dirty"
 # The build is a development build if any tree is.
 if [ "$wine_mode" = development ] || [ "$fex_mode" = development ] || [ "$dxmt_mode" = development ] \
   || [ "$lsteamclient_mode" = development ]; then
@@ -596,6 +605,48 @@ sh "$ROOT/wine-arm64/tools/xcrun-metal.sh" -sdk macosx metal -o "$SRC/presenter/
 PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH" python3 -I "$ROOT/dxmt/mtld3d-notices.py" "$D" \
   "$SRC/mtld3d-notices" "cargo +$MTLD3D_RUST" 2> "$SRC/mtld3d.log" \
   || die "collecting D3D9's crate licences failed; see $SRC/mtld3d.log"
+
+# 7c. Steam Overlay Shim (arm64 macOS 27.0 dylib in aarch64-unix/, next to winemac.so / winemetal.so).
+mkdir -p "$SRC/overlay-shim"
+/usr/bin/clang -arch arm64 -mmacosx-version-min=27.0 -fobjc-arc -O2 -Wall -Wextra $UNIX_CPU $UNIX_LTO -dynamiclib \
+  -install_name @rpath/libmacneutron-overlay-shim.dylib -framework Metal -framework QuartzCore -framework CoreGraphics \
+  -framework Foundation -framework AppKit -o "$SRC/overlay-shim/libmacneutron-overlay-shim.dylib" \
+  "$ROOT/overlay-shim/overlay_shim.m" > "$SRC/overlay-shim.log" 2>&1 \
+  || die "building the overlay shim failed; see $SRC/overlay-shim.log"
+
+# 7d. Full 15-file Proton font suite into $SRC/fonts-out/ (reused if .mn-stamp matches pins and build inputs).
+. "$ROOT/vm/fonts/pins"
+fonts_inputs=$(stamp_of "$ROOT/vm/fonts/build.sh" "$ROOT/vm/fonts/pins" "$ROOT/vm/fonts/generatefont.pe" \
+  "$ROOT/vm/fonts/LiberationMono-Regular.patch" "$ROOT/vm/fonts/LICENSE.proton")
+proton_fonts_tree=$(git -C "$LSC" rev-parse HEAD:fonts 2>/dev/null || printf '%s' "$LSTEAMCLIENT_COMMIT")
+fonts_stamp="$LIBERATION_COMMIT:$proton_fonts_tree:$fonts_inputs"
+fonts_ready() {
+  [ "$(cat "$1/.mn-stamp" 2> /dev/null)" = "$fonts_stamp" ] || return 1
+  for _ff in arial.ttf arialbd.ttf times.ttf georgia.ttf cour.ttf courbd.ttf \
+    msyh.ttf msyhbd.ttf simsun.ttc malgun.ttf msgothic.ttc micross.ttf nirmala.ttf lucon.ttf alt/arial.ttf \
+    licenses/liberation-OFL.txt licenses/noto-OFL.txt licenses/source-han-sans-OFL.txt \
+    licenses/ume-license.html licenses/proton-fonts-LICENSE.txt; do
+    [ -s "$1/$_ff" ] || return 1
+  done
+}
+if fonts_ready "$SRC/fonts-out"; then
+  echo "wine-arm64: Proton fonts are up to date" >&2
+elif [ "$B" != "$ROOT/build" ] && fonts_ready "$ROOT/build/wine-arm64-src/fonts-out"; then
+  echo "wine-arm64: reusing Proton fonts from shared build dir" >&2
+  rm -rf "$SRC/fonts-out"
+  cp -c -R "$ROOT/build/wine-arm64-src/fonts-out" "$SRC/fonts-out" \
+    || cp -R "$ROOT/build/wine-arm64-src/fonts-out" "$SRC/fonts-out"
+else
+  mkdir -p "$B/fonts-src"
+  fetch "$LIBERATION_URL" "$B/fonts-src/liberation-fonts-$LIBERATION_COMMIT.tar.gz" "$LIBERATION_SHA256"
+  echo "wine-arm64: building Proton fonts (log: $SRC/fonts.log)" >&2
+  LIBERATION_TARBALL="$B/fonts-src/liberation-fonts-$LIBERATION_COMMIT.tar.gz" \
+  PROTON_FONTS_DIR="$LSC/fonts" \
+  FONTS_OUT="$SRC/fonts-out" \
+  BUILD_DIR="$B" \
+    sh "$ROOT/vm/fonts/build.sh" > "$SRC/fonts.log" 2>&1 || die "building Proton fonts failed; see $SRC/fonts.log"
+  printf '%s\n' "$fonts_stamp" > "$SRC/fonts-out/.mn-stamp"
+fi
 
 # 8. Bundle and sign (make install into wine.app, the loader's entitlements, every check on the result). First the
 #    bundle's licenses/SOURCE (ship-base spec §4): the inputs it is built from, each tree's series or dev.

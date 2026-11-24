@@ -3,7 +3,7 @@
 # repository's folders it builds from, each +dirty when it has uncommitted changes. guest-stages.sh writes it into the
 # stage (.mn-source), image/build.sh carries it into the VM parts, and release.sh checks it against the trees it
 # archives.
-#   stamps.sh wine|forwarder|dxmt|d3d|fex
+#   stamps.sh wine|forwarder|dxmt|d3d|fonts|fex
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 W=${BUILD_DIR:-$ROOT/build}/vm-work
@@ -17,6 +17,7 @@ case ${1:-} in
   dxmt) echo "dxmt $(rev "$S/dxmt") build $(here vm/dxmt) metal $(here vm/metal) d3d $(here vm/d3d)" \
     "scripts $(here dxmt) sysroot $(here vm/sysroot)" ;;
   d3d) echo "d3d $(here vm/d3d) dxmt $(rev "$S/dxmt")" ;;
+  fonts) echo "fonts $(here vm/fonts) lsteamclient $(rev "$S/lsteamclient")" ;;
   fex) echo "fex $(rev "$S/fex")" ;;
-  *) echo "usage: stamps.sh wine|forwarder|dxmt|d3d|fex" >&2; exit 2 ;;
+  *) echo "usage: stamps.sh wine|forwarder|dxmt|d3d|fonts|fex" >&2; exit 2 ;;
 esac

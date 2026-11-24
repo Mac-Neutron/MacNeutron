@@ -44,7 +44,6 @@
  */
 #include <windows.h>
 #include <winternl.h>
-#include <objbase.h>
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <ctype.h>
@@ -125,10 +124,15 @@ static BOOL env_nonzero(const char *name)
     return value && *value && *value != '0';
 }
 
-static HKEY create_key(HKEY root, const WCHAR *path)
+static HKEY create_key_access(HKEY root, const WCHAR *path, REGSAM access)
 {
     HKEY key;
-    return RegCreateKeyExW(root, path, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &key, NULL) ? NULL : key;
+    return RegCreateKeyExW(root, path, 0, NULL, 0, access, NULL, &key, NULL) ? NULL : key;
+}
+
+static HKEY create_key(HKEY root, const WCHAR *path)
+{
+    return create_key_access(root, path, KEY_ALL_ACCESS);
 }
 
 static void set_string(HKEY key, const WCHAR *name, const WCHAR *value)
@@ -143,7 +147,8 @@ static void set_dword(HKEY key, const WCHAR *name, DWORD value)
 
 /* What a game process gets: ActiveProcess\pid, as Proton's set_active_process_pid, and the keys Valve's Wine writes
  * into every Proton prefix (wine.inf: SteamPath, SteamExe, SteamClientDll*, InstallPath), which ours isn't built
- * with. Not ActiveProcess\SteamPath, and SteamClientDll only with a 32-bit client (D-26). */
+ * with. ActiveProcess\{Universe,SteamPath} and 64-bit HKLM\...\InstallPath are written alongside Wow6432Node;
+ * SteamClientDll is set only when a 32-bit client is present (D-26). */
 static void register_steam(DWORD pid)
 {
     WCHAR apps[64];
@@ -175,6 +180,8 @@ static void register_steam(DWORD pid)
     {
         set_dword(key, L"pid", pid);
         set_string(key, L"SteamClientDll64", STEAM_DIR L"\\steamclient64.dll");
+        set_string(key, L"Universe", L"Public");
+        set_string(key, L"SteamPath", STEAM_DIR);
         /* Keep lsteamclient.dll under its own name when no separate Valve steamclient.dll is present:
          * Wine's lsteamclient calls GetModuleHandleW(L"steamclient.dll") and carves vtable memory out of
          * that module's .data section, which clobbers its own .data if loaded as steamclient.dll. */
@@ -184,6 +191,11 @@ static void register_steam(DWORD pid)
             set_string(key, L"SteamClientDll", STEAM_DIR L"\\lsteamclient.dll");
         /* An account ID earlier MacNeutron builds wrote; Proton writes none (parity L2). */
         RegDeleteValueW(key, L"ActiveUser");
+        RegCloseKey(key);
+    }
+    if ((key = create_key_access(HKEY_LOCAL_MACHINE, STEAM_KEY, KEY_ALL_ACCESS | KEY_WOW64_64KEY)))
+    {
+        set_string(key, L"InstallPath", STEAM_DIR);
         RegCloseKey(key);
     }
     if ((key = create_key(HKEY_LOCAL_MACHINE, L"Software\\Wow6432Node\\Valve\\Steam")))
@@ -512,7 +524,6 @@ static HANDLE run_process(BOOL *should_await, BOOL game_process)
             ERR("Can't convert %ls to a DOS path\n", scratchW);
             goto run;
         }
-        CoInitialize(NULL);
         console = SHGetFileInfoW(dos, 0, &sfi, sizeof(sfi), SHGFI_EXETYPE);
         if (console && !HIWORD(console)) flags |= CREATE_NEW_CONSOLE;
         new_cmdline = malloc((wcslen(dos) + 3 + wcslen(remainder) + 1) * sizeof(WCHAR));
@@ -614,8 +625,9 @@ run:
             si.wShowWindow = SW_HIDE;
         }
         /* Proton inherits no handles. Then Wine gives the game no standard handles at all, and its own output, which
-         * MacNeutron's game log holds (MACNEUTRON_LOG), is lost: we inherit them (D-line). */
-        if (!CreateProcessW(NULL, new_cmdline, NULL, NULL, TRUE, flags, NULL, NULL, &si, &pi))
+         * MacNeutron's game log holds (MACNEUTRON_LOG), is lost: we inherit them unless starting a new console
+         * (CREATE_NEW_CONSOLE), so a console child gets its own console handles instead of the parent's pipe. */
+        if (!CreateProcessW(NULL, new_cmdline, NULL, NULL, !(flags & CREATE_NEW_CONSOLE), flags, NULL, NULL, &si, &pi))
         {
             ERR("could not start %ls (error %lu)\n", new_cmdline, GetLastError());
             return INVALID_HANDLE_VALUE;
@@ -790,6 +802,16 @@ static void setup_vr_registry(void)
     if ((init = (void *)GetProcAddress(vrclient, "vrclient_init_registry"))) init();
     else ERR("Failed to find vrclient_init_registry export\n");
     FreeLibrary(vrclient);
+}
+
+static void init_steamclient_registry(void)
+{
+    HMODULE mod = LoadLibraryW(L"lsteamclient");
+    void (CDECL *fn)(void);
+    if (!mod) return;
+    fn = (void (CDECL *)(void))GetProcAddress(mod, "steamclient_init_registry");
+    if (fn) fn();
+    FreeLibrary(mod);
 }
 
 /* Valve's Wine reports a Unix debugger (class 1100, Linux only); ours has no such class, so on a Mac only a Windows
@@ -988,6 +1010,7 @@ int main(int argc, char *argv[])
         GetDesktopWindow();
         CreateThread(NULL, 0, create_steam_windows, NULL, 0, NULL);
         register_steam(GetCurrentProcessId());
+        init_steamclient_registry();
         /* Steam on Windows sets these for its games (Source's GameUI finds Steam through ValvePlatformMutex): the
          * path of the steam.exe that ran, with / for \. The game copies our environment when it starts. */
         SetEnvironmentVariableW(L"SteamPath", STEAM_DIR);

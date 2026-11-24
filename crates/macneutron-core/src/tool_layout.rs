@@ -93,6 +93,19 @@ impl ToolLayout {
         self.resources().join("lib/wine/aarch64-unix/lsteamclient.so")
     }
 
+    /// MacNeutron's overlay compatibility shim, loaded by Wine alongside Valve's `gameoverlayrenderer.dylib`.
+    pub fn overlay_shim(&self) -> PathBuf {
+        self.resources().join("lib/wine/aarch64-unix/libmacneutron-overlay-shim.dylib")
+    }
+
+    pub fn fonts(&self) -> PathBuf {
+        self.resources().join("share/fonts")
+    }
+
+    pub fn wine_fonts(&self) -> PathBuf {
+        self.resources().join("share/wine/fonts")
+    }
+
     pub fn launcher_binary(&self) -> PathBuf {
         self.root.join("bin/macneutron")
     }
@@ -113,6 +126,11 @@ impl ToolLayout {
     /// lsteamclient. An older runtime would fail to load Valve's DLL (its `tier0_s64` import), so the game gets no Steam.
     pub fn supports_genuine_steamclient(&self) -> bool {
         self.resources().join("genuine-steamclient").exists()
+    }
+
+    /// Written by `bundle.sh` when the runtime supports loading Valve's signed `GameOverlayRenderer64.dll`.
+    pub fn supports_genuine_overlay_renderer(&self) -> bool {
+        self.resources().join("genuine-gameoverlayrenderer").exists()
     }
 
     /// `MacNeutron/Valve`, beside `MacNeutron/compatibilitytools.d`: Valve's Windows client files, downloaded by the
@@ -201,6 +219,9 @@ mod tests {
         assert_eq!(layout.dxmt_replay(), PathBuf::from(format!("{app}/Resources/DXMT/aarch64-windows/dxmt-replay.exe")));
         assert_eq!(layout.lsteamclient(), PathBuf::from(format!("{app}/Resources/lib/wine/aarch64-windows/lsteamclient.dll")));
         assert_eq!(layout.lsteamclient_unix(), PathBuf::from(format!("{app}/Resources/lib/wine/aarch64-unix/lsteamclient.so")));
+        assert_eq!(layout.overlay_shim(), PathBuf::from(format!("{app}/Resources/lib/wine/aarch64-unix/libmacneutron-overlay-shim.dylib")));
+        assert_eq!(layout.fonts(), PathBuf::from(format!("{app}/Resources/share/fonts")));
+        assert_eq!(layout.wine_fonts(), PathBuf::from(format!("{app}/Resources/share/wine/fonts")));
         assert_eq!(layout.launcher_binary(), PathBuf::from("/t/macneutron/bin/macneutron"));
         assert_eq!(layout.steam_helper(), PathBuf::from("/t/macneutron/bin/steam.exe"));
         assert_eq!(layout.runtime_damaged_marker(), PathBuf::from("/t/macneutron/runtime-damaged"));
@@ -236,8 +257,11 @@ mod tests {
         use crate::test_support::{make_tool_layout, write};
         let layout = make_tool_layout();
         assert!(!layout.supports_genuine_steamclient());
+        assert!(!layout.supports_genuine_overlay_renderer());
         write("0036\n", &layout.wine_app().join("Contents/Resources/genuine-steamclient"), false);
+        write("1\n", &layout.wine_app().join("Contents/Resources/genuine-gameoverlayrenderer"), false);
         assert!(layout.supports_genuine_steamclient());
+        assert!(layout.supports_genuine_overlay_renderer());
     }
 
     #[test]

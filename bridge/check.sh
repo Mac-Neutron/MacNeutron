@@ -52,6 +52,7 @@ cp "$B/steam.exe" "$STEAM/steam.exe"
 mkdir -p "$WINEPREFIX/drive_c/windows/system32"
 cp "$B/steam.exe" "$WINEPREFIX/drive_c/windows/system32/steam.exe"
 cp "$B/tests/helper.exe" "$WORK/game dir/hélper.exe"
+cp "$B/tests/helper-console.exe" "$WORK/game dir/helper-console.exe"
 winpath() { printf 'Z:%s' "$1" | tr / '\\'; }
 HELPER="$(winpath "$WORK/game dir/hélper.exe")"
 STEAMEXE='C:\Program Files (x86)\Steam\steam.exe'
@@ -78,11 +79,35 @@ expect() { # name got want
   if [ "$2" = "$3" ]; then printf 'ok   %s\n' "$1"; else printf 'FAIL %s: got [%s], want [%s]\n' "$1" "$2" "$3"; fail=1; fi
 }
 
+OBJDUMP="$(sh "$ROOT/dxmt/toolchain.sh")/llvm-objdump"
+for arch in x86_64 arm64; do
+  exe="$ROOT/build/bridge/$arch/steam.exe"
+  if [ ! -f "$exe" ]; then ole32=missing
+  elif "$OBJDUMP" -p "$exe" 2>/dev/null | /usr/bin/grep -qi 'ole32\.dll'; then ole32=imported
+  else ole32=absent; fi
+  expect "bridge/$arch/steam.exe does not import ole32.dll" "$ole32" absent
+done
+
 set +e; "$WINE" "$STEAMEXE" "$HELPER" exit 7 >/dev/null 2>&1; got=$?; set -e
 expect "exit code passes through" "$got" 7
 expect "arguments arrive unchanged" "$(steam args 'a b' '--name="Player One"' '')" '[a b][--name="Player One"][]'
 expect "registry names a live Steam" "$(steam steam)" \
   'alive=1 client64=C:\Program Files (x86)\Steam\steamclient64.dll'
+"$WINE" reg delete 'HKLM\Software\Valve\Steam' /reg:64 /f >/dev/null 2>&1 || true
+"$WINE" reg delete 'HKLM\Software\Wow6432Node\Valve\Steam' /f >/dev/null 2>&1 || true
+"$WINE" reg delete 'HKCU\Software\Valve\Steam\ActiveProcess' /v Universe /f >/dev/null 2>&1 || true
+"$WINE" reg delete 'HKCU\Software\Valve\Steam\ActiveProcess' /v SteamPath /f >/dev/null 2>&1 || true
+expect "registry sets 64-bit and Wow6432Node InstallPath plus ActiveProcess Universe and SteamPath" \
+  "$(steam reg)" \
+  'install64=C:\Program Files (x86)\Steam install32=C:\Program Files (x86)\Steam universe=Public steampath=C:\Program Files (x86)\Steam'
+rm -f "$WORK/ownconsole.txt"
+console_out=$("$WINE" "$STEAMEXE" "$WORK/game dir/helper-console.exe" console "$(winpath "$WORK/ownconsole.txt")" 2>/dev/null | tr -d '\r')
+expect "a console program under CREATE_NEW_CONSOLE gets its own console without inheriting parent stdout" \
+  "$(tr -d '\r' < "$WORK/ownconsole.txt" 2>/dev/null || true)|$console_out" \
+  "own_console=1 pipe_stdout=0 console_stdout=1|"
+rm -rf "$WORK/no-steam" && mkdir -p "$WORK/no-steam"
+set +e; STEAM_COMPAT_CLIENT_INSTALL_PATH="$WORK/no-steam" "$WINE" "$STEAMEXE" "$HELPER" exit 0 >/dev/null 2>&1; got=$?; set -e
+expect "with SteamGameId and no steamclient.dylib, steam.exe still exits cleanly" "$got" 0
 rm -f "$WORK/late.txt"
 steam spawn "$(winpath "$WORK/late.txt")" >/dev/null
 expect "launcher-style child still sees Steam" "$(tr -d '\r' < "$WORK/late.txt" 2>/dev/null || true)" "alive=1"
@@ -281,9 +306,10 @@ if [ -n "$COMPAT" ]; then
   expect "launcher: a library that fails Proton's checks gets its fallback (S: is the steamapps folder)" \
     "$(lib "$WORK/Bad/SteamApps" hélper.exe module)" 'S:\common\Game\hélper.exe'
   rm -f "$WORK/ownconsole.txt"
-  lib "$SLIB/steamapps" helper-console.exe console "$(winpath "$WORK/ownconsole.txt")" >/dev/null
-  expect "launcher: a console program gets a console of its own" "$(tr -d '\r' < "$WORK/ownconsole.txt" 2>/dev/null || true)" \
-    own_console=1
+  console_out=$(lib "$SLIB/steamapps" helper-console.exe console "$(winpath "$WORK/ownconsole.txt")")
+  expect "launcher: a console program gets a console of its own without inheriting parent stdout" \
+    "$(tr -d '\r' < "$WORK/ownconsole.txt" 2>/dev/null || true)|$console_out" \
+    "own_console=1 pipe_stdout=0 console_stdout=1|"
   expect "launcher: ... and its exit code still reaches Steam" "$(lib_status "$SLIB/steamapps" helper-console.exe exit 9)" 9
   # A target that isn't an .exe goes through ShellExecute, as Proton's: a batch file, ASCII only (cmd reads it in the
   # OEM code page), which finds the helper next to it and exits 3. steam.exe still waits for the prefix to empty, but

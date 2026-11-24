@@ -93,10 +93,15 @@ wine_image() {
     sudo cp "$M32"/usr/share/licenses/alsa-lib/COPYING "$WORK/wine/lib/mn-i386/COPYING.alsa-lib"
   fi
   # Proton's Windows-named fonts (vm/fonts/build.sh, guest-stages.sh fonts) where Proton keeps them, share/fonts,
-  # with their licence (SIL OFL 1.1): run-game.sh links and registers them in each prefix.
-  [ -f "$FONTS/arial.ttf" ] && [ -f "$FONTS/LICENSE" ] || { echo "no fonts at $FONTS: guest-stages.sh fonts" >&2; exit 1; }
-  sudo mkdir -p "$WORK/wine/share/fonts"
-  sudo install -m644 "$FONTS"/*.ttf "$FONTS/LICENSE" "$WORK/wine/share/fonts/"
+  # with their licences: run-game.sh links and registers them in each prefix.
+  [ -f "$FONTS/arial.ttf" ] && [ -f "$FONTS/alt/arial.ttf" ] && [ -d "$FONTS/licenses" ] \
+    || { echo "no fonts at $FONTS: guest-stages.sh fonts" >&2; exit 1; }
+  sudo mkdir -p "$WORK/wine/share/fonts/alt" "$WORK/wine/share/fonts/licenses"
+  sudo install -m644 "$FONTS"/*.ttf "$FONTS"/*.ttc "$WORK/wine/share/fonts/"
+  sudo install -m644 "$FONTS/alt/arial.ttf" "$WORK/wine/share/fonts/alt/"
+  sudo install -m644 "$FONTS/licenses"/* "$WORK/wine/share/fonts/licenses/"
+  [ ! -f "$FONTS/LICENSE" ] || sudo install -m644 "$FONTS/LICENSE" "$WORK/wine/share/fonts/"
+  [ ! -f "$FONTS/.mn-source" ] || sudo install -m644 "$FONTS/.mn-source" "$WORK/wine/.mn-source-fonts"
   # What the forwarder and DXMT were built from, beside the Wine stage's own (guest-stages.sh; release.sh checks them).
   [ ! -f "$(dirname "$STEAM_FORWARDER")/.mn-source" ] \
     || sudo install -m644 "$(dirname "$STEAM_FORWARDER")/.mn-source" "$WORK/wine/.mn-source-forwarder"

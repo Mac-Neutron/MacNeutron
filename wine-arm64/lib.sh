@@ -61,7 +61,7 @@ tree_mode() {  # tree_mode <tree>
 write_source() {  # write_source <out> <mac>
   (
     S="${BUILD_DIR:-$ROOT/build}/wine-arm64-src"
-    . "$ROOT/wine-arm64/pins"; . "$ROOT/dxmt/pins"; . "$ROOT/wine-arm64/deps.pins"; . "$S/dxmt/tools/llvm.sh"
+    . "$ROOT/wine-arm64/pins"; . "$ROOT/dxmt/pins"; . "$ROOT/wine-arm64/deps.pins"; . "$ROOT/vm/fonts/pins"; . "$S/dxmt/tools/llvm.sh"
     series() { if [ "$(tree_mode "$1")" = applied ]; then tree_series "$1"; else echo dev; fi; }
     echo "MACNEUTRON_COMMIT=$2"
     echo "WINE_COMMIT=$WINE_COMMIT"
@@ -80,6 +80,9 @@ write_source() {  # write_source <out> <mac>
     echo "LLVM_MINGW_SHA256=$LLVM_MINGW_SHA256"
     echo "LSTEAMCLIENT_COMMIT=$LSTEAMCLIENT_COMMIT"
     echo "LSTEAMCLIENT_SERIES=$(series lsteamclient)"
+    echo "LIBERATION_COMMIT=$LIBERATION_COMMIT"
+    echo "LIBERATION_URL=$LIBERATION_URL"
+    echo "LIBERATION_SHA256=$LIBERATION_SHA256"
     deps_pins  # <NAME>_REPO and <NAME>_COMMIT, GMP's <NAME>_URL and <NAME>_SHA256
   ) > "$1"
 }

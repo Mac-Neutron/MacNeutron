@@ -262,6 +262,16 @@ impl Launcher {
         {
             env.insert("MACNEUTRON_PRESENT".into(), "1".into());
         }
+        if matches!(request.verb, Verb::Run | Verb::WaitForExitAndRun)
+            && env.get("STEAM_DYLD_INSERT_LIBRARIES").is_some_and(|v| !v.is_empty())
+            && env.get("MACNEUTRON_NO_OVERLAY").map(String::as_str) != Some("1")
+            && self.layout.overlay_shim().is_file()
+        {
+            env.insert(
+                "MACNEUTRON_OVERLAY_SHIM".into(),
+                self.layout.overlay_shim().to_string_lossy().into_owned(),
+            );
+        }
         if let Some(game_log) = game_log {
             self.write_header(game_log, &request, &env);
         }
@@ -1609,6 +1619,47 @@ pub(crate) mod tests {
         f.launch(&["getcompatpath", "/g/save"], &f.env);
         assert!(!f.calls().is_empty());
         assert!(f.calls().iter().all(|c| !c.environment.contains_key("MACNEUTRON_PRESENT")));
+    }
+
+    #[test]
+    fn overlay_shim_env_is_set_only_when_steam_overlay_and_shim_exist_and_not_opted_out() {
+        let f = make_bridge_fixture();
+        let shim = f.launcher.layout.overlay_shim();
+
+        // Without shim file on disk: not set even when STEAM_DYLD_INSERT_LIBRARIES is present.
+        f.launch(
+            &["run", "/g/Game.exe"],
+            &with(&f.env, &[("STEAM_DYLD_INSERT_LIBRARIES", "/Steam/gameoverlayrenderer.dylib")]),
+        );
+        assert_eq!(f.last_env("MACNEUTRON_OVERLAY_SHIM"), None);
+
+        // With shim file and STEAM_DYLD_INSERT_LIBRARIES: set to shim path.
+        write("shim", &shim, false);
+        f.launch(
+            &["run", "/g/Game.exe"],
+            &with(&f.env, &[("STEAM_DYLD_INSERT_LIBRARIES", "/Steam/gameoverlayrenderer.dylib")]),
+        );
+        assert_eq!(
+            f.last_env("MACNEUTRON_OVERLAY_SHIM"),
+            Some(shim.to_string_lossy().into_owned())
+        );
+
+        // With MACNEUTRON_NO_OVERLAY=1: not set.
+        f.launch(
+            &["run", "/g/Game.exe"],
+            &with(
+                &f.env,
+                &[
+                    ("STEAM_DYLD_INSERT_LIBRARIES", "/Steam/gameoverlayrenderer.dylib"),
+                    ("MACNEUTRON_NO_OVERLAY", "1"),
+                ],
+            ),
+        );
+        assert_eq!(f.last_env("MACNEUTRON_OVERLAY_SHIM"), None);
+
+        // Without STEAM_DYLD_INSERT_LIBRARIES (or empty): not set.
+        f.launch(&["run", "/g/Game.exe"], &with(&f.env, &[("STEAM_DYLD_INSERT_LIBRARIES", "")]));
+        assert_eq!(f.last_env("MACNEUTRON_OVERLAY_SHIM"), None);
     }
 
     #[test]

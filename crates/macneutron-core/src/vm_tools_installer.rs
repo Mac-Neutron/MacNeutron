@@ -130,26 +130,41 @@ impl VMToolsInstaller {
         Ok(VMToolsInstallOutcome::Installed)
     }
 
-    /// Valve's steamclient64.dll and Steam.dll (`ValveClient`) as the guest's share/valve/{steamclient64,Steam}.dll
-    /// (run-game.sh copies them into the game's prefix); a None install (or absent Steam.dll) removes them.
+    /// Valve's client and overlay DLLs (`ValveClient`) as the guest's `share/valve/*` (run-game.sh copies them into
+    /// the game's prefix); a `None` install (or absent optional file) removes them.
     pub fn copy_valve_client(install: Option<&ValveInstall>, vm: &Path) -> std::io::Result<()> {
         if Self::is_developer_folder(vm) {
             return Ok(());
         }
         let valve_dir = vm.join("share/valve");
         let dest64 = valve_dir.join("steamclient64.dll");
-        let dest_legacy = valve_dir.join("Steam.dll");
+        let optional_names = [
+            "Steam.dll",
+            "steamclient.dll",
+            "GameOverlayRenderer64.dll",
+            "GameOverlayRenderer.dll",
+        ];
         let Some(install) = install else {
             let _ = std::fs::remove_file(&dest64);
-            let _ = std::fs::remove_file(&dest_legacy);
+            for name in optional_names {
+                let _ = std::fs::remove_file(valve_dir.join(name));
+            }
             return Ok(());
         };
         RuntimeInstaller::install_file(&install.steam_client64(), &dest64)?;
-        let src_legacy = install.legacy_steam_dll();
-        if src_legacy.is_file() {
-            RuntimeInstaller::install_file(&src_legacy, &dest_legacy)?;
-        } else {
-            let _ = std::fs::remove_file(&dest_legacy);
+        let optional_sources = [
+            ("Steam.dll", install.legacy_steam_dll()),
+            ("steamclient.dll", install.steam_client32()),
+            ("GameOverlayRenderer64.dll", install.game_overlay_renderer64()),
+            ("GameOverlayRenderer.dll", install.game_overlay_renderer32()),
+        ];
+        for (name, src) in optional_sources {
+            let dest = valve_dir.join(name);
+            if src.is_file() {
+                RuntimeInstaller::install_file(&src, &dest)?;
+            } else {
+                let _ = std::fs::remove_file(&dest);
+            }
         }
         Ok(())
     }
@@ -613,26 +628,49 @@ mod tests {
         let valve_dir = make_temp_dir();
         write("valve 64\n", &valve_dir.join("steamclient64.dll"), false);
         write("valve legacy\n", &valve_dir.join("Steam.dll"), false);
+        write("valve 32\n", &valve_dir.join("steamclient.dll"), false);
+        write("overlay 64\n", &valve_dir.join("GameOverlayRenderer64.dll"), false);
+        write("overlay 32\n", &valve_dir.join("GameOverlayRenderer.dll"), false);
         let valve = ValveInstall { version: "1".into(), folder: valve_dir.clone() };
 
         VMToolsInstaller::copy_valve_client(Some(&valve), &vm).unwrap();
         let copied64 = vm.join("share/valve/steamclient64.dll");
         let copied_legacy = vm.join("share/valve/Steam.dll");
+        let copied32 = vm.join("share/valve/steamclient.dll");
+        let copied_ov64 = vm.join("share/valve/GameOverlayRenderer64.dll");
+        let copied_ov32 = vm.join("share/valve/GameOverlayRenderer.dll");
         assert_eq!(text(&copied64).unwrap(), "valve 64\n");
         assert_eq!(text(&copied_legacy).unwrap(), "valve legacy\n");
+        assert_eq!(text(&copied32).unwrap(), "valve 32\n");
+        assert_eq!(text(&copied_ov64).unwrap(), "overlay 64\n");
+        assert_eq!(text(&copied_ov32).unwrap(), "overlay 32\n");
 
-        std::fs::remove_file(valve_dir.join("Steam.dll")).unwrap();
+        for name in ["Steam.dll", "steamclient.dll", "GameOverlayRenderer64.dll", "GameOverlayRenderer.dll"] {
+            std::fs::remove_file(valve_dir.join(name)).unwrap();
+        }
         VMToolsInstaller::copy_valve_client(Some(&valve), &vm).unwrap();
         assert!(copied64.exists());
         assert!(!copied_legacy.exists());
+        assert!(!copied32.exists());
+        assert!(!copied_ov64.exists());
+        assert!(!copied_ov32.exists());
 
         write("valve legacy 2\n", &valve_dir.join("Steam.dll"), false);
+        write("valve 32 2\n", &valve_dir.join("steamclient.dll"), false);
+        write("overlay 64 2\n", &valve_dir.join("GameOverlayRenderer64.dll"), false);
+        write("overlay 32 2\n", &valve_dir.join("GameOverlayRenderer.dll"), false);
         VMToolsInstaller::copy_valve_client(Some(&valve), &vm).unwrap();
         assert!(copied_legacy.exists());
+        assert!(copied32.exists());
+        assert!(copied_ov64.exists());
+        assert!(copied_ov32.exists());
 
         VMToolsInstaller::copy_valve_client(None, &vm).unwrap();
         assert!(!copied64.exists());
         assert!(!copied_legacy.exists());
+        assert!(!copied32.exists());
+        assert!(!copied_ov64.exists());
+        assert!(!copied_ov32.exists());
     }
 
     #[test]

@@ -40,11 +40,11 @@ smoke: build bridge wine-arm64
 # the share's bin/, which the VM parts carry (vm/setup/parts.sh).
 bridge:
 	mkdir -p $(BRIDGE)/arm64/tests $(BRIDGE)/x86_64 build/vm-work/share/bin
-	$(MINGW) -mwindows -o $(BRIDGE)/x86_64/steam.exe bridge/steam.c -ladvapi32 -lntdll -luser32 -lshell32 -lshlwapi -lole32
+	$(MINGW) -mwindows -o $(BRIDGE)/x86_64/steam.exe bridge/steam.c -ladvapi32 -lntdll -luser32 -lshell32 -lshlwapi
 	cp $(BRIDGE)/x86_64/steam.exe build/vm-work/share/bin/steam.exe
 	$(MINGW) -fms-extensions -mwindows -o $(BRIDGE)/steamprobe.exe bridge/probe.c
 	$(MINGW_BIN)/i686-w64-mingw32-clang -O3 -flto=thin -static -s -fms-extensions -mwindows -o $(BRIDGE)/steamprobe32.exe bridge/probe.c
-	$(MINGW_A64) -mwindows -o $(BRIDGE)/arm64/steam.exe bridge/steam.c -ladvapi32 -lntdll -luser32 -lshell32 -lshlwapi -lole32
+	$(MINGW_A64) -mwindows -o $(BRIDGE)/arm64/steam.exe bridge/steam.c -ladvapi32 -lntdll -luser32 -lshell32 -lshlwapi
 	$(MINGW_A64) -mwindows -o $(BRIDGE)/arm64/tests/helper.exe bridge/tests/helper.c -ladvapi32 -lshell32 -luser32
 	$(MINGW_A64) -o $(BRIDGE)/arm64/tests/helper-console.exe bridge/tests/helper.c -ladvapi32 -lshell32 -luser32
 

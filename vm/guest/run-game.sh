@@ -96,7 +96,7 @@ env -u PROTON_EAC_RUNTIME WINEDLLOVERRIDES="mscoree,mshtml=" wineboot $up >/dev/
 # scripts skip their installers (Wine Mono stands in). The server is waited for: mn_hasrun below reads the files.
 if ! grep -q '^"EmulateModeset"="Y"' "$WINEPREFIX/user.reg" 2>/dev/null ||
    ! grep -q '^"ShowCrashDialog"=dword:00000000' "$WINEPREFIX/user.reg" 2>/dev/null ||
-   ! grep -q '^"Arial (TrueType)"="arial.ttf"' "$WINEPREFIX/system.reg" 2>/dev/null ||
+   ! grep -q '^"Microsoft YaHei (TrueType)"="msyh.ttf"' "$WINEPREFIX/system.reg" 2>/dev/null ||
    ! grep -qF 'CommonRedist\\XNA\\4.0]' "$WINEPREFIX/system.reg" 2>/dev/null ||
    ! sed -n '/^\[Software\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\AeDebug\]/,/^\[/p' "$WINEPREFIX/system.reg" 2>/dev/null | grep -q '^"Auto"="0"' ||
    ! sed -n '/^\[Software\\\\Wow6432Node\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\AeDebug\]/,/^\[/p' "$WINEPREFIX/system.reg" 2>/dev/null | grep -q '^"Auto"="0"'; then
@@ -107,10 +107,30 @@ if ! grep -q '^"EmulateModeset"="Y"' "$WINEPREFIX/user.reg" 2>/dev/null ||
     printf '[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AeDebug]\n"Auto"="0"\n\n'
     printf '[HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion\\AeDebug]\n"Auto"="0"\n\n'
     printf '[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts]\n'
-    for e in Arial:arial Arial\ Bold:arialbd Courier\ New:cour Courier\ New\ Bold:courbd Times\ New\ Roman:times \
-             Tahoma:tahoma Tahoma\ Bold:tahomabd Marlett:marlett Symbol:symbol Webdings:webdings Wingdings:wingding; do
-      printf '"%s (TrueType)"="%s.ttf"\n' "${e%:*}" "${e#*:}"
-    done
+    while IFS=: read -r fn ff; do
+      printf '"%s (TrueType)"="%s"\n' "$fn" "$ff"
+    done <<'FONTS'
+Arial:arial.ttf
+Arial Bold:arialbd.ttf
+Times New Roman:times.ttf
+Georgia:georgia.ttf
+Courier New:cour.ttf
+Courier New Bold:courbd.ttf
+Microsoft YaHei:msyh.ttf
+Microsoft YaHei Bold:msyhbd.ttf
+SimSun & NSimSun:simsun.ttc
+Malgun Gothic:malgun.ttf
+MS Gothic & MS PGothic & MS UI Gothic:msgothic.ttc
+Microsoft Sans Serif:micross.ttf
+Nirmala UI:nirmala.ttf
+Lucida Console:lucon.ttf
+Tahoma:tahoma.ttf
+Tahoma Bold:tahomabd.ttf
+Marlett:marlett.ttf
+Symbol:symbol.ttf
+Webdings:webdings.ttf
+Wingdings:wingding.ttf
+FONTS
     for n in 4.8 4.7.2 4.6.2 4.5.2 4.0 '4.0 Client Profile' 3.5 '3.5 Client Profile' XNA; do
       k=.NET\\$n v=$n
       [ "$n" != XNA ] || k=XNA\\4.0 v=4.0
@@ -130,9 +150,14 @@ export MN_D3D_DESCRIPTORS=${MN_D3D_DESCRIPTORS:-async}
 for F in "$W"/[Ff]onts; do break; done
 [ -d "$F" ] || F=$W/Fonts
 mkdir -p "$F"
-for f in /opt/mn-wine/share/fonts/*.tt[fc] /opt/mn-wine/share/wine/fonts/*.tt[fc]; do
+for f in /opt/mn-wine/share/wine/fonts/*.tt[fc] /opt/mn-wine/share/fonts/*.tt[fc]; do
   [ -f "$f" ] || continue
-  [ -e "$F/${f##*/}" ] && [ ! -L "$F/${f##*/}" ] || ln -sf "$f" "$F/${f##*/}"
+  src=$f
+  case "${APPID:-}:${f##*/}" in
+    1313860:arial.ttf|1506830:arial.ttf)
+      [ ! -f /opt/mn-wine/share/fonts/alt/arial.ttf ] || src=/opt/mn-wine/share/fonts/alt/arial.ttf ;;
+  esac
+  [ -e "$F/${f##*/}" ] && [ ! -L "$F/${f##*/}" ] || ln -sf "$src" "$F/${f##*/}"
 done
 STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM"
@@ -151,13 +176,23 @@ if [ -f /mnt/share/valve/Steam.dll ]; then
 else
   rm -f "$STEAM/Steam.dll" "$W/syswow64/Steam.dll"
 fi
-# A 32-bit game's client: steam.exe names it SteamClientDll when it's there. Keep Wine's own i386 lsteamclient.dll
-# under its own name (and remove any stale steamclient.dll from an earlier launch) so get_mem_from_steamclient_dll()'s
-# GetModuleHandleW(L"steamclient.dll") does not clobber lsteamclient.dll's own .data section.
-# Proton puts Valve's signed 32-bit steamclient.dll there and redirects its exports, which Wine patch 0036 does for the
-# 64-bit one only, so a SteamStub-protected 32-bit game stops at its error 3 until 0036 covers i386.
-rm -f "$STEAM/steamclient.dll"
-cp /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll "$STEAM/lsteamclient.dll"
+if [ -f /mnt/share/valve/steamclient.dll ]; then
+  cp /mnt/share/valve/steamclient.dll "$STEAM/steamclient.dll"
+else
+  rm -f "$STEAM/steamclient.dll"
+fi
+[ ! -f /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll ] || \
+  cp /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll "$STEAM/lsteamclient.dll"
+if [ -f /mnt/share/valve/GameOverlayRenderer64.dll ]; then
+  cp /mnt/share/valve/GameOverlayRenderer64.dll "$STEAM/GameOverlayRenderer64.dll"
+else
+  rm -f "$STEAM/GameOverlayRenderer64.dll"
+fi
+if [ -f /mnt/share/valve/GameOverlayRenderer.dll ]; then
+  cp /mnt/share/valve/GameOverlayRenderer.dll "$STEAM/GameOverlayRenderer.dll"
+else
+  rm -f "$STEAM/GameOverlayRenderer.dll"
+fi
 # Steam's install scripts (spec 2026-10-24-macneutron-install-scripts-design), which Mac Steam never runs: the launcher's
 # installscript.reg in the run share (their Registry entries, UTF-16, imported when they changed) and mn_install_script
 # (their Run Process steps, InstallScripts.shell). As Steam runs a step: unless its HasRunKey DWORD, named after it, in

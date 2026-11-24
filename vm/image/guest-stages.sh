@@ -50,16 +50,50 @@ for stage in ${*:-wine forwarder dxmt d3d fonts fex}; do
       cp "$ROOT/vm/d3d/guest/prefix.sh" "$W/d3d-guest-stage/"
       stamp d3d > "$W/d3d-guest-stage/.mn-source"
       $B sync "$W/d3d-guest-stage" mn-d3d-guest > /dev/null ;;
-    fonts)  # Proton's Windows-named fonts (vm/fonts/build.sh in the builder), from the pinned Liberation sources
+    fonts)  # Proton's Windows-named fonts (vm/fonts/build.sh in the builder), from Liberation + Proton's fonts/
       . "$ROOT/vm/fonts/pins"
+      . "$ROOT/wine-arm64/deps.pins"
       die() { echo "guest-stages: $*" >&2; exit 1; }
       FETCH_TAG=fonts; . "$ROOT/dxmt/fetch.sh"
       mkdir -p "${BUILD_DIR:-$ROOT/build}/fonts-src"
       fetch "$LIBERATION_URL" "${BUILD_DIR:-$ROOT/build}/fonts-src/liberation-fonts-$LIBERATION_COMMIT.tar.gz" "$LIBERATION_SHA256"
+      if [ ! -d "$S/lsteamclient/.git" ]; then
+        echo "guest-stages: fetching Proton ($LSTEAMCLIENT_COMMIT) for fonts/" >&2
+        unset GIT_NO_LAZY_FETCH
+        rm -rf "$S/lsteamclient.tmp"
+        mkdir -p "$S"
+        git init -q "$S/lsteamclient.tmp"
+        git -C "$S/lsteamclient.tmp" remote add origin "$LSTEAMCLIENT_REPO"
+        git -C "$S/lsteamclient.tmp" fetch -q --depth 1 --filter=blob:none origin "$LSTEAMCLIENT_COMMIT" \
+          || die "can't fetch $LSTEAMCLIENT_COMMIT from $LSTEAMCLIENT_REPO"
+        git -C "$S/lsteamclient.tmp" sparse-checkout set --no-cone '/lsteamclient/' '!/lsteamclient/steamworks_sdk_*/' \
+          '!/lsteamclient/gen_wrapper.py' '/fonts/' || die "can't set lsteamclient sparse checkout"
+        git -C "$S/lsteamclient.tmp" checkout -q -b main FETCH_HEAD || die "can't check out $LSTEAMCLIENT_COMMIT"
+        git -C "$S/lsteamclient.tmp" rev-parse HEAD > "$S/lsteamclient.applied"
+        echo "$LSTEAMCLIENT_COMMIT" > "$S/lsteamclient.series"
+        mv "$S/lsteamclient.tmp" "$S/lsteamclient"
+      elif [ ! -d "$S/lsteamclient/fonts/noto" ]; then
+        echo "guest-stages: widening $S/lsteamclient sparse checkout to include fonts/" >&2
+        unset GIT_NO_LAZY_FETCH
+        git -C "$S/lsteamclient" sparse-checkout set --no-cone '/lsteamclient/' '!/lsteamclient/steamworks_sdk_*/' \
+          '!/lsteamclient/gen_wrapper.py' '/fonts/' || die "can't widen lsteamclient sparse checkout"
+      fi
       rm -rf "$W/fonts-stage"; cp -R "$ROOT/vm/fonts" "$W/fonts-stage"
       cp "${BUILD_DIR:-$ROOT/build}/fonts-src/liberation-fonts-$LIBERATION_COMMIT.tar.gz" "$W/fonts-stage/"
+      cp -R "$S/lsteamclient/fonts" "$W/fonts-stage/proton-fonts"
       $B sync "$W/fonts-stage" mn-fonts > /dev/null
-      $B ssh "set -e; sh mn-fonts/build.sh" ;;
+      $B ssh "set -e; sh mn-fonts/build.sh; echo '$(stamp fonts)' > mn-fonts-out/.mn-source"
+      # Pull prebuilt fonts back to $S/fonts-out so wine-arm64/bundle.sh on macOS can reuse them cleanly.
+      rm -rf "$S/fonts-out.tmp"
+      mkdir -p "$S/fonts-out.tmp"
+      $B ssh 'tar -C "$HOME/mn-fonts-out" -cf - .' | tar -C "$S/fonts-out.tmp" -xf -
+      fonts_inputs=$({ cat "$ROOT/vm/fonts/build.sh" "$ROOT/vm/fonts/pins" "$ROOT/vm/fonts/generatefont.pe" \
+        "$ROOT/vm/fonts/LiberationMono-Regular.patch" "$ROOT/vm/fonts/LICENSE.proton"
+        printf '%s' "${MACNEUTRON_SIGN_IDENTITY:-}"; } | shasum -a 256 | cut -d ' ' -f 1)
+      proton_fonts_tree=$(git -C "$S/lsteamclient" rev-parse HEAD:fonts 2>/dev/null || printf '%s' "$LSTEAMCLIENT_COMMIT")
+      printf '%s\n' "$LIBERATION_COMMIT:$proton_fonts_tree:$fonts_inputs" > "$S/fonts-out.tmp/.mn-stamp"
+      rm -rf "$S/fonts-out"
+      mv "$S/fonts-out.tmp" "$S/fonts-out" ;;
     fex)  # vm/image/build-fex.sh in the builder, from the Mac build's FEX tree (one FEX for both)
       $B sync "$S/fex" fex-linux > /dev/null
       $B sync "$ROOT/vm/image" mn-image > /dev/null

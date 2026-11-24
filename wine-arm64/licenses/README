@@ -113,11 +113,22 @@ steamclient.dylib)
   wine-arm64/deps.pins): Proton (https://github.com/ValveSoftware/Proton.git) with dappermint/winecx's three Mac
   fixes.
 
-MacNeutron (libmacneutron-present.dylib and libmacneutron-present.metallib, the MetalFX presenter)
+MacNeutron (libmacneutron-present.dylib, libmacneutron-present.metallib, the MetalFX presenter; and
+libmacneutron-overlay-shim.dylib, the Steam overlay shim)
   Licence: MIT, macneutron/LICENSE; its CMAA2 anti-aliasing shader (libmacneutron-present.metallib) is Apache-2.0
   (Intel), macneutron/CMAA2-LICENSE.txt and NOTICES.md.
-  Source: the repository at MACNEUTRON_COMMIT: presenter/present.m and presenter/cmaa2.metal. MacNeutron's changes in
-  our forks keep the licence of the tree they change (Wine and DXMT: LGPL-2.1-or-later; FEX: MIT; lsteamclient:
-  Valve's terms).
+  Source: the repository at MACNEUTRON_COMMIT: presenter/present.m, presenter/cmaa2.metal, presenter/sharpen.metal and
+  overlay-shim/overlay_shim.m. MacNeutron's changes in our forks keep the licence of the tree they change (Wine and
+  DXMT: LGPL-2.1-or-later; FEX: MIT; lsteamclient: Valve's terms).
+
+Proton fonts (share/fonts: arial.ttf, arialbd.ttf, times.ttf, georgia.ttf, cour.ttf, courbd.ttf, msyh.ttf, msyhbd.ttf,
+simsun.ttc, malgun.ttf, msgothic.ttc, micross.ttf, nirmala.ttf, lucon.ttf and alt/arial.ttf)
+  Licences: Liberation (SIL Open Font License 1.1, fonts/liberation-OFL.txt), Google Noto (SIL Open Font License 1.1,
+  fonts/noto-OFL.txt), Adobe Source Han Sans (SIL Open Font License 1.1, fonts/source-han-sans-OFL.txt), UmeFont
+  (permissive licence, fonts/ume-license.html), and Valve's font build scripts, patches and range tables
+  (BSD-3-Clause, fonts/proton-fonts-LICENSE.txt; NOTICES.md).
+  Source: Liberation at LIBERATION_COMMIT (https://github.com/liberationfonts/liberation-fonts.git, pinned in
+  vm/fonts/pins); Noto, Source Han Sans, UmeFont and Valve's font scripts and patches from
+  https://github.com/Mac-Neutron/Proton.git (fonts/*) at LSTEAMCLIENT_COMMIT (pinned in wine-arm64/deps.pins).
 
 FreeType: Portions of this software are copyright © The FreeType Project (www.freetype.org). All rights reserved.

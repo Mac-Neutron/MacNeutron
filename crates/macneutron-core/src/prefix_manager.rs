@@ -209,6 +209,7 @@ impl PrefixManager {
         for note in GameDrive::apply(&prefix, environment) {
             self.log.append(&format!("note: {note}"));
         }
+        self.deploy_fonts(&prefix, environment)?;
         if steam_bridge {
             self.deploy_steam_bridge(environment)?;
         }
@@ -425,6 +426,23 @@ impl PrefixManager {
                  \"Hidraw\"=dword:00000000\r\n"
             ));
         }
+        reg.push_str(
+            "\r\n[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts]\r\n\
+             \"Arial (TrueType)\"=\"arial.ttf\"\r\n\
+             \"Arial Bold (TrueType)\"=\"arialbd.ttf\"\r\n\
+             \"Times New Roman (TrueType)\"=\"times.ttf\"\r\n\
+             \"Georgia (TrueType)\"=\"georgia.ttf\"\r\n\
+             \"Courier New (TrueType)\"=\"cour.ttf\"\r\n\
+             \"Courier New Bold (TrueType)\"=\"courbd.ttf\"\r\n\
+             \"Microsoft YaHei (TrueType)\"=\"msyh.ttf\"\r\n\
+             \"Microsoft YaHei Bold (TrueType)\"=\"msyhbd.ttf\"\r\n\
+             \"SimSun & NSimSun (TrueType)\"=\"simsun.ttc\"\r\n\
+             \"Malgun Gothic (TrueType)\"=\"malgun.ttf\"\r\n\
+             \"MS Gothic & MS PGothic & MS UI Gothic (TrueType)\"=\"msgothic.ttc\"\r\n\
+             \"Microsoft Sans Serif (TrueType)\"=\"micross.ttf\"\r\n\
+             \"Nirmala UI (TrueType)\"=\"nirmala.ttf\"\r\n\
+             \"Lucida Console (TrueType)\"=\"lucon.ttf\"\r\n",
+        );
         reg
     }
 
@@ -750,16 +768,84 @@ impl PrefixManager {
         }
     }
 
+    /// Symlinks Proton's Windows-named fonts and Wine's TrueType fonts into `<prefix>/drive_c/windows/Fonts/` on
+    /// every launch without clobbering real game-installed font files.
+    fn deploy_fonts(&self, prefix: &Path, environment: &BTreeMap<String, String>) -> Result<(), PrefixError> {
+        let app_id = environment.get("SteamAppId").map(String::as_str);
+        let use_alt_arial = matches!(app_id, Some("1313860" | "1506830"));
+        let mut wanted: BTreeMap<std::ffi::OsString, PathBuf> = BTreeMap::new();
+
+        let fonts_dir_src = self.layout.fonts();
+        let wine_fonts_src = self.layout.wine_fonts();
+        for (is_proton_fonts, dir) in [(true, &fonts_dir_src), (false, &wine_fonts_src)] {
+            let Ok(entries) = std::fs::read_dir(dir) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                let name = entry.file_name();
+                let is_font = Path::new(&name)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("ttf") || e.eq_ignore_ascii_case("ttc"));
+                if !is_font {
+                    continue;
+                }
+                let src = if is_proton_fonts && use_alt_arial && name == "arial.ttf" {
+                    let alt = dir.join("alt/arial.ttf");
+                    if alt.is_file() { alt } else { path }
+                } else {
+                    path
+                };
+                wanted.entry(name).or_insert(src);
+            }
+        }
+
+        if wanted.is_empty() {
+            return Ok(());
+        }
+
+        let windows = prefix.join("drive_c/windows");
+        let fonts_dst = if windows.join("Fonts").is_dir() {
+            windows.join("Fonts")
+        } else if windows.join("fonts").is_dir() {
+            windows.join("fonts")
+        } else {
+            windows.join("Fonts")
+        };
+        std::fs::create_dir_all(&fonts_dst)?;
+
+        for (name, src) in wanted {
+            let dst = fonts_dst.join(&name);
+            match std::fs::symlink_metadata(&dst) {
+                Ok(meta) if !meta.file_type().is_symlink() => continue,
+                Ok(_) => {
+                    if std::fs::read_link(&dst).ok().as_deref() == Some(src.as_path()) {
+                        continue;
+                    }
+                    let _ = std::fs::remove_file(&dst);
+                    std::os::unix::fs::symlink(&src, &dst)?;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    std::os::unix::fs::symlink(&src, &dst)?;
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Ok(())
+    }
+
     /// Every launch: prefixes made before the bridge existed get it too, and a runtime update replaces it.
     fn deploy_steam_bridge(&self, environment: &BTreeMap<String, String>) -> Result<(), PrefixError> {
-        let (steam_client64, legacy_steam_dll) = self.steam_client_sources(environment)?;
-        for (source, destination) in SteamBridge::prefix_files(&self.layout, steam_client64) {
+        let sources = self.steam_client_sources(environment)?;
+        for (source, destination) in SteamBridge::prefix_files(&self.layout, sources.steam_client64) {
             self.install(&source, &destination)
                 .map_err(|error| PrefixError::SteamBridgeCopyFailed(format!("{destination}: {error}")))?;
         }
         let steam_dll_pfx = format!("{}/Steam.dll", SteamBridge::PREFIX_FOLDER);
         let steam_dll_syswow64 = "drive_c/windows/syswow64/Steam.dll";
-        if let Some(legacy_src) = legacy_steam_dll {
+        if let Some(legacy_src) = sources.legacy_steam_dll {
             self.install(&legacy_src, &steam_dll_pfx)
                 .map_err(|error| PrefixError::SteamBridgeCopyFailed(format!("{steam_dll_pfx}: {error}")))?;
             if self.context.prefix().join("drive_c/windows/syswow64").is_dir() {
@@ -772,21 +858,29 @@ impl PrefixManager {
             let _ = std::fs::remove_file(self.context.prefix().join(&steam_dll_pfx));
             let _ = std::fs::remove_file(self.context.prefix().join(steam_dll_syswow64));
         }
+        let overlay64_pfx = SteamBridge::overlay_renderer64_destination();
+        if let Some(overlay_src) = sources.game_overlay_renderer64 {
+            self.install(&overlay_src, &overlay64_pfx)
+                .map_err(|error| PrefixError::SteamBridgeCopyFailed(format!("{overlay64_pfx}: {error}")))?;
+        } else {
+            let _ = std::fs::remove_file(self.context.prefix().join(&overlay64_pfx));
+        }
         Ok(())
     }
 
-    /// The prefix's `steamclient64.dll` and optional legacy `Steam.dll` (only when Valve's client install is active):
-    /// the launch option's choice, else the app's download from Valve when the runtime can use it (Wine 0036), else
-    /// None for lsteamclient. Chosen and logged per launch, so a change takes effect at the next one.
+    /// The prefix's `steamclient64.dll` and optional legacy `Steam.dll` and `GameOverlayRenderer64.dll` (only when
+    /// Valve's client install is active): the launch option's choice, else the app's download from Valve when the
+    /// runtime can use it (Wine 0036), else None for lsteamclient. Chosen and logged per launch, so a change takes
+    /// effect at the next one.
     fn steam_client_sources(
         &self,
         environment: &BTreeMap<String, String>,
-    ) -> Result<(Option<PathBuf>, Option<PathBuf>), PrefixError> {
+    ) -> Result<SteamClientSources, PrefixError> {
         let variable = SteamBridge::STEAMCLIENT64_VARIABLE;
         if let Some(path) = environment.get(variable).filter(|p| !p.is_empty()) {
             if path == "builtin" {
                 self.log.append(&format!("note: steamclient64.dll is lsteamclient ({variable}=builtin)"));
-                return Ok((None, None));
+                return Ok(SteamClientSources::default());
             }
             // Logged first, so a bad path is diagnosable.
             self.log.append(&format!("note: steamclient64.dll from {path} ({variable})"));
@@ -795,15 +889,18 @@ impl PrefixManager {
                     "{variable}: {path} is missing or not an x64 DLL"
                 )));
             }
-            return Ok((Some(PathBuf::from(path)), None));
+            return Ok(SteamClientSources {
+                steam_client64: Some(PathBuf::from(path)),
+                ..SteamClientSources::default()
+            });
         }
         if !self.layout.supports_genuine_steamclient() {
             self.log.append("note: steamclient64.dll is lsteamclient: this runtime has no genuine-steamclient marker");
-            return Ok((None, None));
+            return Ok(SteamClientSources::default());
         }
         let Some(valve) = ValveClient::installed(&self.layout.valve_cache()) else {
             self.log.append("note: steamclient64.dll is lsteamclient: Valve's isn't downloaded");
-            return Ok((None, None));
+            return Ok(SteamClientSources::default());
         };
         self.log.append(&format!(
             "note: steamclient64.dll from Valve's client {} ({})",
@@ -812,7 +909,13 @@ impl PrefixManager {
         ));
         let legacy = valve.legacy_steam_dll();
         let legacy = legacy.exists().then_some(legacy);
-        Ok((Some(valve.steam_client64()), legacy))
+        let overlay64 = (self.layout.supports_genuine_overlay_renderer() && valve.game_overlay_renderer64().is_file())
+            .then(|| valve.game_overlay_renderer64());
+        Ok(SteamClientSources {
+            steam_client64: Some(valve.steam_client64()),
+            legacy_steam_dll: legacy,
+            game_overlay_renderer64: overlay64,
+        })
     }
 
     /// For a game started without the bridge (launch option, or a runtime without it): its steam_api loads the client
@@ -821,7 +924,13 @@ impl PrefixManager {
     pub fn remove_steam_bridge(&self) -> Result<(), PrefixError> {
         with_file_lock(&self.context.lock_file(), || {
             // steam.exe stays: HKCR\steam sends the game's steam:// links through it to Mac Steam (parity plan R10).
-            for name in ["steamclient64.dll", "steamclient.dll", "lsteamclient.dll", "Steam.dll"] {
+            for name in [
+                "steamclient64.dll",
+                "steamclient.dll",
+                "lsteamclient.dll",
+                "Steam.dll",
+                SteamBridge::OVERLAY_RENDERER64,
+            ] {
                 let _ = std::fs::remove_file(self.context.prefix().join(format!("{}/{name}", SteamBridge::PREFIX_FOLDER)));
             }
             let _ = std::fs::remove_file(self.context.prefix().join("drive_c/windows/syswow64/Steam.dll"));
@@ -851,6 +960,13 @@ impl PrefixManager {
         }
         posix::copy_times(source, &target)
     }
+}
+
+#[derive(Default)]
+struct SteamClientSources {
+    steam_client64: Option<PathBuf>,
+    legacy_steam_dll: Option<PathBuf>,
+    game_overlay_renderer64: Option<PathBuf>,
 }
 
 /// C's `atoi`: leading whitespace, an optional sign, then digits up to the first non-digit; 0 when there are none.
@@ -1090,6 +1206,25 @@ mod tests {
         assert!(reg.contains(r#""Auto"="0""#));
         assert!(reg.contains(r"[HKEY_CURRENT_USER\Software\Wine\X11 Driver]"));
         assert!(reg.contains(r#""EmulateModeset"="Y""#));
+        assert!(reg.contains(r"[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Fonts]"));
+        for (face, file) in [
+            ("Arial", "arial.ttf"),
+            ("Arial Bold", "arialbd.ttf"),
+            ("Times New Roman", "times.ttf"),
+            ("Georgia", "georgia.ttf"),
+            ("Courier New", "cour.ttf"),
+            ("Courier New Bold", "courbd.ttf"),
+            ("Microsoft YaHei", "msyh.ttf"),
+            ("Microsoft YaHei Bold", "msyhbd.ttf"),
+            ("SimSun & NSimSun", "simsun.ttc"),
+            ("Malgun Gothic", "malgun.ttf"),
+            ("MS Gothic & MS PGothic & MS UI Gothic", "msgothic.ttc"),
+            ("Microsoft Sans Serif", "micross.ttf"),
+            ("Nirmala UI", "nirmala.ttf"),
+            ("Lucida Console", "lucon.ttf"),
+        ] {
+            assert!(reg.contains(&format!("\"{face} (TrueType)\"=\"{file}\"")), "{face}");
+        }
         for id in PrefixManager::SWITCH_DEFAULT_IDS {
             assert!(reg.contains(&format!(r"[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\WineBus\Devices\{id}]")));
         }
@@ -2357,5 +2492,83 @@ mod tests {
         let name = dir.file_name().unwrap().to_string_lossy();
         assert_eq!(name, format!("server-{:x}-{:x}", meta.dev(), meta.ino()));
         assert!(PrefixManager::sweep_stragglers(&manager.context.prefix()).is_empty());
+    }
+
+    #[test]
+    fn game_overlay_renderer64_is_deployed_only_with_marker_and_removed_when_absent_or_bridge_removed() {
+        let (manager, env) = make_manager(&runner(wineboot_creating_prefix(0, 0.0)));
+        install_fake_steam_bridge(&manager.layout);
+        let dll = cache_valve_client(&manager.layout, true);
+        let overlay_src = dll.parent().unwrap().join("GameOverlayRenderer64.dll");
+        std::fs::write(&overlay_src, pe_bytes(pe_image::AMD64, true)).unwrap();
+        let overlay_dst = steam_folder(&manager).join("GameOverlayRenderer64.dll");
+
+        // Without genuine-gameoverlayrenderer marker: never deployed.
+        manager.prepare(&env, true).unwrap();
+        assert!(!overlay_dst.exists());
+
+        // With genuine-gameoverlayrenderer marker: deployed alongside Valve's steamclient64.dll.
+        let marker = manager.layout.wine_app().join("Contents/Resources/genuine-gameoverlayrenderer");
+        put("1\n", &marker);
+        manager.prepare(&env, true).unwrap();
+        assert_eq!(std::fs::read(&overlay_dst).unwrap(), pe_bytes(pe_image::AMD64, true));
+
+        // Switching to builtin removes stale GameOverlayRenderer64.dll.
+        manager
+            .prepare(&dxmt_environment(&manager, &[("MACNEUTRON_STEAMCLIENT64", "builtin")]), true)
+            .unwrap();
+        assert!(!overlay_dst.exists());
+
+        // Re-deploy, then verify missing marker removes stale GameOverlayRenderer64.dll.
+        manager.prepare(&env, true).unwrap();
+        assert!(overlay_dst.exists());
+        std::fs::remove_file(&marker).unwrap();
+        manager.prepare(&env, true).unwrap();
+        assert!(!overlay_dst.exists());
+
+        // Re-deploy with marker, then verify remove_steam_bridge() removes it too.
+        put("1\n", &marker);
+        manager.prepare(&env, true).unwrap();
+        assert!(overlay_dst.exists());
+        manager.remove_steam_bridge().unwrap();
+        assert!(!overlay_dst.exists());
+    }
+
+    #[test]
+    fn fonts_symlink_from_both_roots_route_alt_arial_and_never_clobber_real_files() {
+        let (manager, env) = make_manager(&runner(wineboot_creating_prefix(0, 0.0)));
+        let fonts_src = manager.layout.fonts();
+        let wine_fonts_src = manager.layout.wine_fonts();
+        put("arial-main", &fonts_src.join("arial.ttf"));
+        put("arial-alt", &fonts_src.join("alt/arial.ttf"));
+        put("msyh", &fonts_src.join("msyh.ttf"));
+        put("simsun", &fonts_src.join("simsun.ttc"));
+        put("tahoma", &wine_fonts_src.join("tahoma.ttf"));
+        put("game-custom", &fonts_src.join("lucon.ttf"));
+
+        // Pre-seed a game-owned real file and a stale symlink in drive_c/windows/Fonts.
+        let pfx_fonts = manager.context.prefix().join("drive_c/windows/Fonts");
+        put("real-game-lucon", &pfx_fonts.join("lucon.ttf"));
+        std::os::unix::fs::symlink("/nonexistent/old-msyh.ttf", pfx_fonts.join("msyh.ttf")).unwrap();
+
+        manager.prepare(&env, false).unwrap();
+
+        assert_eq!(std::fs::read_link(pfx_fonts.join("arial.ttf")).unwrap(), fonts_src.join("arial.ttf"));
+        assert_eq!(std::fs::read_link(pfx_fonts.join("msyh.ttf")).unwrap(), fonts_src.join("msyh.ttf"));
+        assert_eq!(std::fs::read_link(pfx_fonts.join("simsun.ttc")).unwrap(), fonts_src.join("simsun.ttc"));
+        assert_eq!(std::fs::read_link(pfx_fonts.join("tahoma.ttf")).unwrap(), wine_fonts_src.join("tahoma.ttf"));
+        // Real game file is preserved (not replaced by symlink).
+        assert!(!std::fs::symlink_metadata(pfx_fonts.join("lucon.ttf")).unwrap().file_type().is_symlink());
+        assert_eq!(read(&pfx_fonts.join("lucon.ttf")), "real-game-lucon");
+
+        // AppID 1313860 and 1506830 route arial.ttf to alt/arial.ttf; switching back restores arial.ttf.
+        for alt_id in ["1313860", "1506830"] {
+            let mut alt_env = env.clone();
+            alt_env.insert("SteamAppId".into(), alt_id.into());
+            manager.prepare(&alt_env, false).unwrap();
+            assert_eq!(std::fs::read_link(pfx_fonts.join("arial.ttf")).unwrap(), fonts_src.join("alt/arial.ttf"));
+        }
+        manager.prepare(&env, false).unwrap();
+        assert_eq!(std::fs::read_link(pfx_fonts.join("arial.ttf")).unwrap(), fonts_src.join("arial.ttf"));
     }
 }

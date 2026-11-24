@@ -42,8 +42,9 @@ Fedora's packages, which it downloads from Fedora to the Mac (MacNeutron ships n
   lsteamclient (BSD-3-Clause, lsteamclient/) with MacNeutron's
   Steam forwarder (MIT, macneutron/). Its lib/mn-i386 holds Fedora's alsa-lib for i686 ($ALSA_LIB_NVR:
   libasound.so.2, LGPL-2.1-or-later, COPYING.alsa-lib beside it), for 32-bit games' sound. Its share/fonts holds
-  Proton's Windows-named fonts, built from the Liberation fonts (SIL OFL 1.1, LICENSE beside them; not Microsoft's
-  fonts) as Proton names them.
+  Proton's Windows-named fonts, built from Liberation, Noto, Source Han Sans (SIL OFL 1.1), and UmeFont (free
+  license) using Valve's BSD-3-Clause scripts (notices in share/fonts/licenses/; not Microsoft's fonts) as Proton
+  names them.
 - overlay/: FEX for Linux (MIT, fex/); MacNeutron's tso-litmus and image configuration (MIT, macneutron/); and data
   the image build generated from Fedora's packages with their own tools: the user database (systemd-sysusers), the
   library cache (glibc's ldconfig), the kernel module lists (kmod's depmod, from the kernel's modules), systemd's

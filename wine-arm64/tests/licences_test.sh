@@ -113,6 +113,13 @@ check() {  # check <wine.app> <build dir>
     g -qF "maintainer's decision of 2026-10-04" "$L/README" 2> /dev/null \
       || miss "lsteamclient entry in README with the maintainer's decision of 2026-10-04"
   fi
+  if [ -d "$R/share/fonts" ]; then
+    for f in liberation-OFL.txt noto-OFL.txt source-han-sans-OFL.txt ume-license.html proton-fonts-LICENSE.txt; do
+      [ -s "$L/fonts/$f" ] || miss "fonts/$f"
+    done
+    g -q '^Proton fonts ' "$L/README" 2> /dev/null || miss "Proton fonts entry in README"
+    key LIBERATION_COMMIT; key LIBERATION_SHA256
+  fi
 
   # 5. Source correspondence: SOURCE names the exact inputs, and README cites our LLVM 23.1.4 fork at LLVM_COMMIT.
   awk '/^LLVM 23\.1\.4 \(/ { p = 1 } p && /^$/ { exit } p' "$L/README" 2> /dev/null | tr -s ' \n' '  ' \
@@ -189,6 +196,15 @@ cp -c "$APP/Contents/Resources/licenses/macneutron/LICENSE" "$T/wine.app/Content
 rm "$T/wine.app/Contents/Resources/licenses/macneutron/CMAA2-LICENSE.txt"
 red "a copy without macneutron/CMAA2-LICENSE.txt" licenses/macneutron/CMAA2-LICENSE.txt
 cp -c "$APP/Contents/Resources/licenses/macneutron/CMAA2-LICENSE.txt" "$T/wine.app/Contents/Resources/licenses/macneutron/"
+if [ -d "$T/wine.app/Contents/Resources/share/fonts" ]; then
+  rm "$T/wine.app/Contents/Resources/licenses/fonts/source-han-sans-OFL.txt"
+  red "a copy without fonts/source-han-sans-OFL.txt" fonts/source-han-sans-OFL.txt
+  cp -c "$APP/Contents/Resources/licenses/fonts/source-han-sans-OFL.txt" "$T/wine.app/Contents/Resources/licenses/fonts/"
+else
+  mkdir -p "$T/wine.app/Contents/Resources/share/fonts"
+  red "a copy with share/fonts but without fonts/source-han-sans-OFL.txt" fonts/source-han-sans-OFL.txt
+  rm -rf "$T/wine.app/Contents/Resources/share/fonts"
+fi
 N="$T/wine.app/Contents/Resources/licenses/NOTICES.md"
 sed -i '' 's/^## FFmpeg /## FFmpeg-less /' "$N"
 red "a NOTICES.md without its FFmpeg section" "NOTICES.md section for FFmpeg"

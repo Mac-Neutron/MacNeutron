@@ -69,5 +69,29 @@ for c in ('steamclient_next_callback', 'wow64_steamclient_next_callback'):
     ok = bool(got) and 'MN_CAP' in got[1]
     print(('ok   ' if ok else 'FAIL ') + f'{c} callback MN_CAP: {got}')
     failures += not ok
+# SteamNetworkingSocketsSerialized005 unix calls: present in both tables with zero MN_UNSUPPORTED fields.
+S = 'ISteamNetworkingSocketsSerialized_SteamNetworkingSocketsSerialized005_'
+for method in (
+    'AllowDirectConnectToPeer',
+    'BeginAsyncRequestFakeIP',
+    'CacheRelayTicket',
+    'GetCachedRelayTicket',
+    'GetCachedRelayTicketCount',
+    'GetCertAsync',
+    'GetNetworkConfigJSON',
+    'GetSTUNServer',
+    'PostConnectionStateMsg',
+    'SendP2PConnectionFailure',
+    'SendP2PRendezvous',
+):
+    call = S + method
+    for label, prefix in (('64-bit', ''), ('wow64', 'wow64_')):
+        sname = prefix + call + '_params'
+        has_desc = bool(re.search(
+            r'\{\s*"' + call + r'",\s*sizeof\(struct ' + sname + r'\),\s*\d+,\s*(?:[fw]\d+|NULL)\s*\}', text))
+        has_unsup = bool(re.search(r'offsetof\(struct ' + sname + r',\s*\w+\),\s*MN_UNSUPPORTED\b', text))
+        ok = has_desc and not has_unsup
+        print(('ok   ' if ok else 'FAIL ') + f'{call} ({label}) zero MN_UNSUPPORTED')
+        failures += not ok
 print('gen-check: ' + ('FAIL' if failures else 'all passed'))
 sys.exit(1 if failures else 0)
