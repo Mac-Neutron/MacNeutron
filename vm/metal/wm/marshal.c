@@ -880,7 +880,21 @@ static int32_t host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const s
     if (!s) s = unpack_fields(k, call->fields, call->nfields, p, 0);
     if (!s) s = k->status;
     if (!s && sync && psz + k->out_bytes > cap) s = MN_STATUS_BUFFER_TOO_SMALL;
-    if (!s) s = invoke ? invoke(p) : call->special == MN_SP_NONE ? mn_wm_invoke(slot, p) : mn_wm_special(k);
+    if (!s) {
+        if (invoke) {
+            s = invoke(p);
+        } else if (call->special == MN_SP_NONE) {
+            int do_invoke = 1;
+            if (slot == 33) {
+                mn_handle eh = 0;
+                memcpy(&eh, rec, sizeof eh);
+                do_invoke = mn_ht_try_close_encoder(c->ht, eh);
+            }
+            if (do_invoke) s = mn_wm_invoke(slot, p);
+        } else {
+            s = mn_wm_special(k);
+        }
+    }
     for (unsigned i = 0; i < k->nholds; i++) /* blob memory nothing took: its region is the guest's again */
         if (!k->holds[i].taken) mn_wm_drop_hold(c, &k->holds[i]);
     if (s) {
@@ -902,7 +916,10 @@ static int32_t host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const s
             continue;
         }
         if (obj && (f->own == MN_OWN_AUTORELEASED || f->own == MN_OWN_BORROWED)) mn_wm_invoke(0, &obj);
-        if (mn_ht_bind(c->ht, ring, h, kind, obj, (enum mn_own)f->own)) {
+        int bind_err = (obj && (slot == 30 || slot == 31 || slot == 32 || slot == 129 || slot == 147))
+                           ? mn_ht_bind_encoder(c->ht, h, (uint8_t)kind, obj, ring, 1)
+                           : mn_ht_bind(c->ht, ring, h, kind, obj, (enum mn_own)f->own);
+        if (bind_err) {
             if (obj) mn_wm_release_object(kind, obj);
             if (sync) memset(p + f->offset, 0, sizeof(mn_handle));
             lost = 1;

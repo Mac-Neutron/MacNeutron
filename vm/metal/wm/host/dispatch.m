@@ -33,6 +33,7 @@ static struct ctx *ctx_of(uint32_t ctx_id, void *ring_state) {
         c->wm.ctx_id = ctx_id;
         c->rings = (struct mn_ht_rings){c, snapshot, passed};
         if ((c->wm.ht = mn_ht_new(&c->rings, mn_wm_release_object))) {
+            mn_ht_set_encoder_closer(c->wm.ht, mn_wm_end_encoder);
             c->next = ctxs;
             ctxs = c;
         } else {

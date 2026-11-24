@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
 #include "winemetal_thunks.h"
 
 #define PAGE 16384u
@@ -80,6 +81,39 @@ int mn_galloc_cases(const struct mn_galloc_env *env) {
     env->call(1, &b2);
     env->call(1, &b3);
     env->call(1, &b4);
+    /* Idle 64 MiB blob trimming: 3 x 40 MiB buffers force 3 distinct standard blobs. Freeing all 3 and draining
+     * notifications trims excess blobs so at most 1 warm 64 MiB blob remains mapped, and re-allocating reuses it. */
+    env->stats(&st);
+    void *lp[3] = {NULL, NULL, NULL};
+    obj_handle_t lb[3] = {0, 0, 0};
+    for (int i = 0; i < 3; i++) {
+        lb[i] = new_buffer(env, device, 40u << 20, &lp[i]);
+        if (lb[i] && lp[i]) memset(lp[i], 0x5A + i, PAGE);
+    }
+    EXPECT(lb[0] && lb[1] && lb[2] && lp[0] && lp[1] && lp[2], "three 40 MiB buffers");
+    EXPECT(lp[0] != lp[1] && lp[1] != lp[2] && lp[0] != lp[2], "three distinct 64 MiB blobs");
+    for (int i = 0; i < 3; i++)
+        if (lb[i]) env->call(1, &lb[i]);
+    env->stats(&st);
+    void *lp4 = NULL;
+    obj_handle_t lb4 = new_buffer(env, device, 40u << 20, &lp4);
+    EXPECT(lb4 && lp4, "reused warm blob buffer");
+    EXPECT(lp4 == lp[0] || lp4 == lp[1] || lp4 == lp[2], "warm blob reused after trimming");
+    int lp4_zeroed = 1;
+    for (unsigned i = 0; lb4 && i < PAGE; i++) lp4_zeroed &= ((unsigned char *)lp4)[i] == 0;
+    EXPECT(lp4_zeroed, "reused warm blob not zeroed");
+#ifndef __i386__
+    int mapped = 0;
+    for (int i = 0; i < 3; i++)
+        if (lp[i] && msync(lp[i], PAGE, MS_ASYNC) == 0) mapped++;
+    EXPECT(mapped <= 1, "excess 64 MiB blobs not trimmed");
+#endif
+    if (lb4) env->call(1, &lb4);
+    env->stats(&st);
+    void *lp5 = NULL;
+    obj_handle_t lb5 = new_buffer(env, device, PAGE, &lp5);
+    EXPECT(lb5 && lp5 == lp4, "warm blob reused cleanly by subsequent buffer");
+    if (lb5) env->call(1, &lb5);
     env->call(1, &all.ret);
     if (!bad) env->print("galloc ok");
     return bad;

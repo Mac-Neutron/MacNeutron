@@ -73,5 +73,9 @@ void mn_ht_pool_pop(struct mn_ht *t, void *ring, mn_handle pool);
 void mn_ht_ring_end(struct mn_ht *t, void *ring);
 size_t mn_ht_live(struct mn_ht *t);     /* bound handles */
 size_t mn_ht_deferred(struct mn_ht *t); /* releases waiting for rings */
+void mn_ht_set_encoder_closer(struct mn_ht *t, void (*end_enc)(void *obj));
+void mn_ht_mark_encoder(struct mn_ht *t, mn_handle h, int open);
+int mn_ht_bind_encoder(struct mn_ht *t, mn_handle h, uint8_t kind, void *obj, void *ring, int open_encoder);
+int mn_ht_try_close_encoder(struct mn_ht *t, mn_handle h);
 
 #endif

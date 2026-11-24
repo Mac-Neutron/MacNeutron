@@ -16,5 +16,23 @@
 	<string>27.0</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
+	<key>GCSupportsGameMode</key>
+	<true/>
+	<key>LSSupportsGameMode</key>
+	<true/>
+	<key>GCSupportsControllerUserInteraction</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Windows games launched through MacNeutron may request microphone access for voice chat and audio input.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Windows games launched through MacNeutron may request camera access for video input.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Windows games launched through MacNeutron may use Bluetooth to communicate with game controllers and peripherals.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Windows games launched through MacNeutron may use the local network for LAN multiplayer and discovery.</string>
+	<key>NSInputMonitoringUsageDescription</key>
+	<string>Windows games launched through MacNeutron may monitor keyboard and controller input while playing.</string>
 </dict>
 </plist>

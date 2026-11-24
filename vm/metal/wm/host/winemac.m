@@ -15,8 +15,10 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
 #include <fcntl.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 /* winemetal's struct macdrv_win_data: it reads client_cocoa_view only. */
@@ -220,11 +222,23 @@ static BOOL game_wants_capture; /* main thread: the guest's word, mn_window_set_
     [device release];
     [super dealloc];
 }
+static NSUInteger desired_max_drawables(void) {
+    const char *v = getenv("MN_MAX_DRAWABLES");
+    if (!v || !*v) return 2;
+    if (!strcmp(v, "2")) return 2;
+    if (!strcmp(v, "3")) return 3;
+    static _Atomic int warned;
+    if (!atomic_exchange(&warned, 1))
+        fprintf(stderr, "mn-window: MN_MAX_DRAWABLES=%s isn't 2 or 3, using 2\n", v);
+    return 2;
+}
+
 - (CALayer *)makeBackingLayer {
     CAMetalLayer *layer = [CAMetalLayer layer];
     layer.device = device;
     layer.framebufferOnly = YES; /* DXMT's setProps decides */
     layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
+    layer.maximumDrawableCount = desired_max_drawables();
     return layer;
 }
 - (BOOL)isOpaque {

@@ -150,7 +150,7 @@ app: build bridge wine-arm64
 	sh vm/host/stage.sh $(APP)/Contents/Helpers/vm
 	mkdir -p $(APP)/Contents/Resources/vm && mv $(APP)/Contents/Helpers/vm/run-*.sh $(APP)/Contents/Helpers/vm/dxmt-translator $(APP)/Contents/Resources/vm/
 	# With the release's identity, as vm/host/build.sh signs it: the TPM keys a release made trust it, no password.
-	codesign --force --sign "$${MACNEUTRON_SIGN_IDENTITY:--}" --entitlements vm/host/hv.plist $(APP)/Contents/Helpers/vm/macneutron-vm
+	codesign --force --sign "$${MACNEUTRON_SIGN_IDENTITY:--}" --entitlements vm/host/hv.plist $(APP)/Contents/Helpers/vm/macneutron-vm.app
 	codesign --force --sign - $(APP)/Contents/Helpers/vm/gvproxy  # the upstream universal binary comes unsigned
 	sh vm/setup-tools/build.sh > /dev/null && cp build/vm-setup-tools/mkfs.erofs $(APP)/Contents/Helpers/mkfs.erofs
 	codesign --force --sign - $(APP)/Contents/Helpers/mkfs.erofs

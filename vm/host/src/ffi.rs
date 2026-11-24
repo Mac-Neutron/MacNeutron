@@ -3,7 +3,7 @@
 // tpm.c), and the POSIX/System calls the Swift host used. No bindgen: the surface is small and fixed.
 #![allow(non_camel_case_types, non_snake_case, dead_code)]
 
-use core::ffi::{c_char, c_int, c_void};
+use core::ffi::{c_char, c_int, c_uint, c_void};
 
 // ---- libkrun primitive types (libkrun.h) ----
 
@@ -79,6 +79,7 @@ extern "C" {
 
     pub fn krun_console_device_builder() -> *mut KrunConsoleBuilder;
     pub fn krun_console_builder_add_tty_port(handle: *mut KrunConsoleBuilder, name: KrunStr, tty_fd: c_int, result: *mut u32, err_out: *mut *mut KrunError) -> KrunResult;
+    pub fn krun_console_builder_add_inout_port(handle: *mut KrunConsoleBuilder, name: KrunStr, input_fd: c_int, output_fd: c_int, result: *mut u32, err_out: *mut *mut KrunError) -> KrunResult;
     pub fn krun_console_builder_build(handle: *mut KrunConsoleBuilder, err_out: *mut *mut KrunError) -> *mut KrunConsoleDevice;
 
     pub fn krun_rng_device_new(err_out: *mut *mut KrunError) -> *mut KrunRngDevice;
@@ -182,6 +183,18 @@ extern "C" {
     pub fn proc_pid_rusage(pid: c_int, flavor: c_int, buffer: *mut RusageInfoV4) -> c_int;
     pub fn waitpid(pid: c_int, status: *mut c_int, options: c_int) -> c_int;
     pub fn signal(sig: c_int, handler: Sighandler) -> usize;
+    pub fn getrlimit(resource: c_int, rlp: *mut Rlimit) -> c_int;
+    pub fn setrlimit(resource: c_int, rlp: *const Rlimit) -> c_int;
+    pub fn pthread_set_qos_class_self_np(qos_class: c_uint, relative_priority: c_int) -> c_int;
+    pub fn pipe(fds: *mut c_int) -> c_int;
+    pub fn clock_gettime(clock_id: c_int, tp: *mut Timespec) -> c_int;
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Rlimit {
+    pub rlim_cur: u64,
+    pub rlim_max: u64,
 }
 
 pub type Sighandler = extern "C" fn(c_int);
@@ -271,11 +284,19 @@ pub struct Timespec {
 
 pub const O_RDWR: c_int = 0x0002;
 pub const O_WRONLY: c_int = 0x0001;
+pub const O_NONBLOCK: c_int = 0x0004;
 pub const O_CREAT: c_int = 0x0200;
 pub const O_TRUNC: c_int = 0x0400;
 pub const O_CLOEXEC: c_int = 0x1000000;
 pub const F_SETFD: c_int = 2;
+pub const F_GETFL: c_int = 3;
+pub const F_SETFL: c_int = 4;
+pub const F_SETNOSIGPIPE: c_int = 73;
 pub const FD_CLOEXEC: c_int = 1;
+pub const QOS_CLASS_USER_INTERACTIVE: c_uint = 0x21;
+pub const RLIMIT_NOFILE: c_int = 8;
+pub const RLIM_INFINITY: u64 = 0x7fff_ffff_ffff_ffff;
+pub const CLOCK_REALTIME: c_int = 0;
 pub const LOCK_EX: c_int = 0x0002;
 pub const LOCK_NB: c_int = 0x0004;
 pub const R_OK: c_int = 0x0004;
@@ -295,10 +316,12 @@ pub const NOTE_EXIT_DETAIL: u32 = 0x0200_0000;
 pub const NOTE_EXIT_MEMORY: u32 = 0x0002_0000;
 pub const RUSAGE_INFO_V4: c_int = 4;
 
-// ---- AppKit / Metal shim (appkit_shim.m) ----
+// ---- AppKit / Metal shim (appkit_shim.m, metal_cache.m) ----
 extern "C" {
     pub fn mn_begin_activity();
     pub fn mn_run_appkit_main_loop();
+    pub fn mn_register_wake_callback(cb: extern "C" fn(*mut c_void), ctx: *mut c_void);
+    pub fn mn_prepare_metal_shader_cache();
     pub fn mn_gpu_is_paravirtual() -> bool;
     pub fn mn_metal_memory_info(
         name_buf: *mut c_char,

@@ -1,0 +1,9 @@
+[Unit]
+Description=MacNeutron host wake wall-clock sync
+After=systemd-udevd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/mn-clock-sync
+Restart=on-failure
+RestartSec=2

@@ -560,7 +560,7 @@ fn a_new_app_version_checks_again() {
 fn make_vm_tools() -> PathBuf {
     let tools = make_temp_dir().join("vm-tools");
     for file in [
-        "macneutron-vm",
+        "macneutron-vm.app/Contents/MacOS/macneutron-vm",
         "libkrun/libkrun.1.dylib",
         "steam-forward/host/mn-steam-host.app/Contents/MacOS/mn-steam-host",
         "gvproxy",
@@ -572,6 +572,11 @@ fn make_vm_tools() -> PathBuf {
     ] {
         write(&format!("{file}\n"), &tools.join(file), true);
     }
+    write(
+        "macneutron-vm.app/Contents/Info.plist\n",
+        &tools.join("macneutron-vm.app/Contents/Info.plist"),
+        false,
+    );
     tools
 }
 
@@ -628,7 +633,7 @@ fn the_vm_folder_is_never_the_real_one_unless_named() {
 fn the_vm_tools_follow_the_runtime_install() {
     let vm_root = make_temp_dir().join("vm");
     let model = make_vm_model(&vm_root, |_| {});
-    assert!(exists(&vm_root.join("macneutron-vm")));
+    assert!(exists(&vm_root.join("macneutron-vm.app/Contents/MacOS/macneutron-vm")));
     assert!(!model.state().vm_tools_deferred);
 }
 
@@ -639,16 +644,18 @@ fn deferred_vm_tools_are_retried_by_the_poll() {
     let model = make_vm_model(&vm_root, |config| {
         config.vm_installer = Arc::new(move |tools, vm| {
             if calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                return Ok(VMToolsInstallOutcome::Deferred(vm.join("macneutron-vm").to_string_lossy().into_owned()));
+                return Ok(VMToolsInstallOutcome::Deferred(
+                    vm.join("macneutron-vm.app/Contents/MacOS/macneutron-vm").to_string_lossy().into_owned(),
+                ));
             }
             install_tools(tools, vm)
         })
     });
     assert!(model.state().vm_tools_deferred);
-    assert!(!exists(&vm_root.join("macneutron-vm")));
+    assert!(!exists(&vm_root.join("macneutron-vm.app/Contents/MacOS/macneutron-vm")));
     model.poll_runtime();
     assert!(!model.state().vm_tools_deferred);
-    assert!(exists(&vm_root.join("macneutron-vm")));
+    assert!(exists(&vm_root.join("macneutron-vm.app/Contents/MacOS/macneutron-vm")));
 }
 
 #[test]
@@ -766,7 +773,7 @@ fn a_needed_setup_starts_after_the_tools() {
     let (vm_root, manifest) = (make_temp_dir().join("vm"), make_manifest());
     let order = make_temp_dir().join("order");
     let (helper, calls_file) = fake_helper(&format!(
-        "[ -e '{}/macneutron-vm' ] && echo tools-first >> '{}'\necho 'progress download 400000000 1350000000'\necho 'progress assemble 2 5'\nexit 0",
+        "[ -e '{}/macneutron-vm.app/Contents/MacOS/macneutron-vm' ] && echo tools-first >> '{}'\necho 'progress download 400000000 1350000000'\necho 'progress assemble 2 5'\nexit 0",
         vm_root.display(),
         order.display()
     ));
@@ -900,7 +907,7 @@ fn rebuild_replaces_a_link_to_a_missing_folder() {
     assert_eq!(model.state().error_message, None);
     model.rebuild_vm();
     assert!(std::fs::read_link(&vm_root).is_err());
-    assert!(exists(&vm_root.join("macneutron-vm")));
+    assert!(exists(&vm_root.join("macneutron-vm.app/Contents/MacOS/macneutron-vm")));
     assert_eq!(calls(&calls_file).len(), 1);
     assert_eq!(model.vm_status().as_deref(), Some("Game VM: ready"));
     assert!(model.vm_ready());
@@ -921,7 +928,7 @@ fn rebuild_replaces_a_link_to_a_developers_folder() {
     assert!(!model.vm_rebuild_off());
     model.rebuild_vm();
     assert!(std::fs::read_link(&vm_root).is_err());
-    assert!(exists(&vm_root.join("macneutron-vm")));
+    assert!(exists(&vm_root.join("macneutron-vm.app/Contents/MacOS/macneutron-vm")));
     assert_eq!(calls(&calls_file).len(), 1);
     assert_eq!(model.vm_status().as_deref(), Some("Game VM: ready"));
     assert_eq!(entries(&dev), ["images", "state"]);
@@ -964,7 +971,7 @@ fn a_missing_folder_waits_for_its_drive() {
     model.poll_runtime();
     model.wait_vm_setup();
     assert_eq!(model.vm_folder_missing(), None);
-    assert!(exists(&drive.join("macneutron-vm")));
+    assert!(exists(&drive.join("macneutron-vm.app/Contents/MacOS/macneutron-vm")));
     assert_eq!(calls(&calls_file).len(), 1);
     assert_eq!(read(&drive.join("state/1.img")), "game\n");
 }
@@ -979,7 +986,7 @@ fn ready_means_the_launcher_would_run_it() {
     assert_eq!(model.state().vm_notice, None);
     assert_eq!(model.vm_status().as_deref(), Some("Game VM: ready"));
 
-    // Fresh AppModel after restart (no setup run): vm_status() still reports ready while images & macneutron-vm exist.
+    // Fresh AppModel after restart (no setup run): vm_status() still reports ready while images & macneutron-vm.app exist.
     let (mode, _) = make_mode();
     let mut restart_cfg = config(&mode, make_tool_layout());
     restart_cfg.vm_root = Some(vm_root.clone());
@@ -988,7 +995,7 @@ fn ready_means_the_launcher_would_run_it() {
     assert_eq!(restarted.state().vm_notice, None);
     assert_eq!(restarted.vm_status().as_deref(), Some("Game VM: ready"));
 
-    std::fs::remove_file(vm_root.join("macneutron-vm")).unwrap();
+    std::fs::remove_file(vm_root.join("macneutron-vm.app/Contents/MacOS/macneutron-vm")).unwrap();
     assert!(!model.vm_setup_needed());
     assert!(!model.vm_ready()); // the launcher would refuse a game: Setup mustn't say Ready
     assert_eq!(model.vm_status(), None);

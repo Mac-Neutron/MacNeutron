@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include "transport.h"
 #include "../ring.h"
+#include "../wm/calls.h"
 
 struct thread_ring { struct mn_blob blob; struct mn_ring_view v; uint64_t head, seq; int fence_idx, drained; };
 
@@ -22,7 +23,7 @@ static int fd = -1;
 static atomic_uint_fast64_t next_blob_id = 1;
 static struct mn_blob trap_blob;   /* drained mode's trap: its pages are never mapped on the host */
 static volatile uint64_t *trap;
-static atomic_uint spin_us = 50;
+static atomic_uint spin_us = 20;
 static pthread_mutex_t idx_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t idx_used = 1; /* bit i: fence ring index i is leased; 0 carries control messages */
 static pthread_key_t ring_key;
@@ -98,7 +99,38 @@ static void blob_close(struct mn_blob *b) {
     ioctl(fd, DRM_IOCTL_GEM_CLOSE, &gc);
 }
 
-static void wait_done(struct thread_ring *t, uint64_t seq);
+static uint32_t op_spin_us(uint32_t op) {
+    if (op >= MN_OP_WM && op < MN_OP_WM + 256) {
+        switch (op - MN_OP_WM) {
+        /* Class B: blocking waits and drawable acquisition. */
+        case 13:  /* MTLCommandBuffer_waitUntilCompleted */
+        case 67:  /* MetalLayer_nextDrawable */
+        case 126: /* MTLSharedEvent_waitUntilSignaledValue */
+        /* Class C: shader, pipeline, library compilation and archive serialization. */
+        case 25:  /* MTLDevice_newLibrary */
+        case 29:  /* MTLDevice_newComputePipelineState */
+        case 34:  /* MTLDevice_newRenderPipelineState */
+        case 35:  /* MTLDevice_newMeshRenderPipelineState */
+        case 74:  /* SM50Initialize */
+        case 76:  /* SM50Compile */
+        case 81:  /* SM50CompileGeometryPipelineVertex */
+        case 82:  /* SM50CompileGeometryPipelineGeometry */
+        case 84:  /* SM50CompileTessellationPipelineHull */
+        case 85:  /* SM50CompileTessellationPipelineDomain */
+        case 112: /* MTLDevice_newBinaryArchive */
+        case 113: /* MTLBinaryArchive_serialize */
+        case 131: /* MTLDevice_newTileRenderPipelineState */
+        case 144: /* MTLDevice_newLibraryWithSource */
+        case 156: /* MTLDevice_newRenderPipelineStateWithVertexDescriptor */
+            return 0;
+        default:
+            break;
+        }
+    }
+    return atomic_load_explicit(&spin_us, memory_order_relaxed);
+}
+
+static void wait_done(struct thread_ring *t, uint64_t seq, uint32_t budget_us);
 static uint64_t put(struct thread_ring *t, uint32_t op, const void *p, uint32_t len);
 static void flush(struct thread_ring *t) {
     atomic_thread_fence(memory_order_release); /* the published head before the store that exits */
@@ -111,7 +143,7 @@ static void thread_exit(void *p) {
      * every other thread's control messages meanwhile. */
     uint64_t seq = put(t, MN_OP_NOP | MN_REC_SYNC, NULL, 0);
     if (t->drained) flush(t);
-    else wait_done(t, seq);
+    else wait_done(t, seq, op_spin_us(MN_OP_NOP));
     ctrl(MN_CTRL_RING_DETACH, t->blob.blob_id, 0, 0, NULL); /* the host stops its consumer before the close */
     blob_close(&t->blob);
     pthread_mutex_lock(&idx_lock);
@@ -123,7 +155,21 @@ static void thread_exit(void *p) {
 
 static pthread_mutex_t open_lock = PTHREAD_MUTEX_INITIALIZER;
 
+static void parse_spin_env(void) {
+    static int parsed;
+    if (parsed) return;
+    parsed = 1;
+    const char *s = getenv("MN_TRANSPORT_SPIN_US");
+    if (!s || s[0] < '0' || s[0] > '9') return;
+    errno = 0;
+    char *end = NULL;
+    unsigned long v = strtoul(s, &end, 10);
+    if (errno || !end || *end || v > UINT32_MAX) return;
+    atomic_store_explicit(&spin_us, (uint32_t)v, memory_order_relaxed);
+}
+
 static int open_locked(void) {
+    parse_spin_env();
     if (fd >= 0) return 0;
     int f = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
     if (f < 0) return -errno;
@@ -236,20 +282,24 @@ static uint64_t done_seq(struct thread_ring *t) {
     return atomic_load_explicit(&t->v.hdr->done_seq, memory_order_acquire);
 }
 
-static void wait_done(struct thread_ring *t, uint64_t seq) {
+static void wait_done(struct thread_ring *t, uint64_t seq, uint32_t budget_us) {
     if (done_seq(t) >= seq) return; /* the consumer thread is often already done: skip the clock read */
-    uint64_t until = now_ns() + atomic_load(&spin_us) * 1000ull;
-    /* A clock read costs about 270 ns under FEX: check it every 512 spins (a yield between, to keep the core from
-     * flooding its load-store unit with speculative reads while the host writes done_seq from another core). */
-    for (unsigned i = 1; done_seq(t) < seq; i++) {
-        if (!(i & 511) && now_ns() >= until) break;
+    if (budget_us > 0) {
+        uint64_t until = now_ns() + (uint64_t)budget_us * 1000ull;
+        /* A clock read costs about 270 ns under FEX: check it every 64 spins to avoid overshooting a 20 us budget
+         * (with a yield between, to keep the core from flooding its load-store unit with speculative reads while the
+         * host writes done_seq from another core). */
+        for (unsigned i = 1; done_seq(t) < seq; i++) {
+            if (!(i & 63) && now_ns() >= until) break;
 #if defined(__x86_64__) || defined(__i386__)
-        __asm__ volatile("pause" ::: "memory");
+            __asm__ volatile("pause" ::: "memory");
 #else
-        __asm__ volatile("yield" ::: "memory");
+            __asm__ volatile("yield" ::: "memory");
 #endif
+        }
     }
     while (done_seq(t) < seq) {
+        atomic_thread_fence(memory_order_seq_cst);
         int ffd;
         if (t->fence_idx && !ctrl(MN_CTRL_WAIT, t->blob.blob_id, seq, (uint32_t)t->fence_idx, &ffd)) {
             struct pollfd pf = { .fd = ffd, .events = POLLIN };
@@ -328,7 +378,7 @@ int mn_call(uint32_t op, const void *p, uint32_t len, void *reply, uint32_t cap,
     if (!t) return -ENODEV;
     if (t->drained) return mn_call_flush(op, p, len, reply, cap, reply_len);
     if (len > MN_REC_MAX) return -E2BIG;
-    wait_done(t, put(t, op | MN_REC_SYNC, p, len));
+    wait_done(t, put(t, op | MN_REC_SYNC, p, len), op_spin_us(op));
     uint32_t n = t->v.hdr->reply_len;
     if (reply && n) memcpy(reply, t->v.reply, n < cap ? n : cap);
     if (reply_len) *reply_len = n;

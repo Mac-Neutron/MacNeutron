@@ -26,7 +26,7 @@ impl VMToolsInstaller {
     /// dxmt: native DXMT and its replayer, which macneutron-vm loads for Direct3D forwarding (vm/d3d).
     /// dxmt-translator: native DXMT's translator key (MicroVM's `dxmt_translator`).
     pub const ITEMS: [&'static str; 9] = [
-        "macneutron-vm",
+        "macneutron-vm.app",
         "libkrun",
         "steam-forward",
         "gvproxy",
@@ -124,6 +124,7 @@ impl VMToolsInstaller {
             let _ = posix::remove_item(&vm.join(format!("{item}.new"))); // the old item, after a swap
             crate::runtime_installer::scrub_tree_xattrs(&old);
         }
+        let _ = std::fs::remove_file(vm.join("macneutron-vm"));
         std::fs::write(&stamp, wanted.as_bytes()).map_err(|e| RuntimeInstallError::Io(e.to_string()))?;
         let _ = std::fs::remove_file(&installing);
         Ok(VMToolsInstallOutcome::Installed)
@@ -317,7 +318,7 @@ mod tests {
     fn make_tools(version: &str) -> PathBuf {
         let tools = make_temp_dir().join("vm-tools");
         for file in [
-            "macneutron-vm",
+            "macneutron-vm.app/Contents/MacOS/macneutron-vm",
             "libkrun/libkrun.1.dylib",
             "steam-forward/host/mn-steam-host.app/Contents/MacOS/mn-steam-host",
             "gvproxy",
@@ -330,6 +331,11 @@ mod tests {
         ] {
             write(&format!("{version} {file}\n"), &tools.join(file), true);
         }
+        write(
+            &format!("{version} macneutron-vm.app/Contents/Info.plist\n"),
+            &tools.join("macneutron-vm.app/Contents/Info.plist"),
+            false,
+        );
         tools
     }
 
@@ -399,7 +405,7 @@ mod tests {
         let tools = make_tools("a");
         let vm = empty_folder();
         install(&tools, None, &vm, &[]).unwrap();
-        let file = vm.join("macneutron-vm");
+        let file = vm.join("macneutron-vm.app/Contents/MacOS/macneutron-vm");
         let before = std::fs::metadata(&file).unwrap().modified().unwrap();
         assert_eq!(install(&tools, None, &vm, &[]).unwrap(), VMToolsInstallOutcome::Unchanged);
         assert_eq!(std::fs::metadata(&file).unwrap().modified().unwrap(), before);
@@ -425,7 +431,7 @@ mod tests {
     fn a_running_vm_defers_the_install() {
         let vm = empty_folder();
         std::fs::create_dir_all(&vm).unwrap();
-        let running = vm.join("macneutron-vm").to_string_lossy().into_owned();
+        let running = vm.join("macneutron-vm.app/Contents/MacOS/macneutron-vm").to_string_lossy().into_owned();
         assert_eq!(
             install(&make_tools("a"), None, &vm, std::slice::from_ref(&running)).unwrap(),
             VMToolsInstallOutcome::Deferred(running)
@@ -437,7 +443,7 @@ mod tests {
     fn a_vm_started_during_the_copy_defers_the_swap() {
         let vm = empty_folder();
         install(&make_tools("a"), None, &vm, &[]).unwrap();
-        let running = vm.join("macneutron-vm").to_string_lossy().into_owned();
+        let running = vm.join("macneutron-vm.app/Contents/MacOS/macneutron-vm").to_string_lossy().into_owned();
         let count_new = |vm: &Path| std::fs::read_dir(vm).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".new")).count();
         let before = count_new(&vm);
         let calls = std::cell::Cell::new(0);
@@ -452,7 +458,10 @@ mod tests {
         })
         .unwrap();
         assert_eq!(outcome, VMToolsInstallOutcome::Deferred(running));
-        assert_eq!(text(&vm.join("macneutron-vm")).unwrap(), "a macneutron-vm\n");
+        assert_eq!(
+            text(&vm.join("macneutron-vm.app/Contents/MacOS/macneutron-vm")).unwrap(),
+            "a macneutron-vm.app/Contents/MacOS/macneutron-vm\n"
+        );
         assert_eq!(count_new(&vm), before);
     }
 
@@ -543,7 +552,10 @@ mod tests {
             VMToolsInstallOutcome::Installed
         );
         assert_eq!(text(&vm.join("run-guest.sh")).unwrap(), "script run-guest.sh\n");
-        assert_eq!(text(&vm.join("macneutron-vm")).unwrap(), "a macneutron-vm\n");
+        assert_eq!(
+            text(&vm.join("macneutron-vm.app/Contents/MacOS/macneutron-vm")).unwrap(),
+            "a macneutron-vm.app/Contents/MacOS/macneutron-vm\n"
+        );
     }
 
     #[test]
@@ -563,7 +575,7 @@ mod tests {
         let tools = make_tools("a");
         let vm = empty_folder();
         install(&tools, None, &vm, &[]).unwrap();
-        let vm_tool = tools.join("macneutron-vm");
+        let vm_tool = tools.join("macneutron-vm.app/Contents/MacOS/macneutron-vm");
         std::fs::remove_file(&vm_tool).unwrap();
         std::fs::copy("/usr/bin/true", &vm_tool).unwrap();
         // Changes its bytes after the signature: no longer verifies.
@@ -575,8 +587,11 @@ mod tests {
         let runner = crate::runtime_installer::standard_runner();
         let outcome = VMToolsInstaller::install(&tools, None, &vm, &runner, &|| Vec::new());
         assert!(matches!(outcome, Err(RuntimeInstallError::SignatureInvalid(_))), "{outcome:?}");
-        assert_eq!(text(&vm.join("macneutron-vm")).unwrap(), "a macneutron-vm\n");
-        assert!(!vm.join("macneutron-vm.new").exists());
+        assert_eq!(
+            text(&vm.join("macneutron-vm.app/Contents/MacOS/macneutron-vm")).unwrap(),
+            "a macneutron-vm.app/Contents/MacOS/macneutron-vm\n"
+        );
+        assert!(!vm.join("macneutron-vm.app.new").exists());
     }
 
     #[test]
@@ -625,7 +640,7 @@ mod tests {
         let tools = make_tools("a");
         let vm = empty_folder();
         let targets = [
-            tools.join("macneutron-vm"),
+            tools.join("macneutron-vm.app/Contents/MacOS/macneutron-vm"),
             tools.join("libkrun/libkrun.1.dylib"),
             tools.join("run-game.sh"),
         ];
@@ -635,7 +650,11 @@ mod tests {
         }
         assert_eq!(install(&tools, None, &vm, &[]).unwrap(), VMToolsInstallOutcome::Installed);
         let can_strip_provenance = can_remove_provenance(&vm);
-        for rel in ["macneutron-vm", "libkrun/libkrun.1.dylib", "run-game.sh"] {
+        for rel in [
+            "macneutron-vm.app/Contents/MacOS/macneutron-vm",
+            "libkrun/libkrun.1.dylib",
+            "run-game.sh",
+        ] {
             let dest = vm.join(rel);
             assert!(!has_xattr(&dest, "com.apple.quarantine"), "{}", dest.display());
             assert_ne!(
@@ -648,6 +667,15 @@ mod tests {
                 assert!(!has_xattr(&dest, "com.apple.provenance"), "{}", dest.display());
             }
         }
+    }
+
+    #[test]
+    fn legacy_bare_binary_is_removed_on_upgrade() {
+        let vm = empty_folder();
+        write("legacy\n", &vm.join("macneutron-vm"), true);
+        assert_eq!(install(&make_tools("a"), None, &vm, &[]).unwrap(), VMToolsInstallOutcome::Installed);
+        assert!(!vm.join("macneutron-vm").exists());
+        assert!(vm.join("macneutron-vm.app/Contents/MacOS/macneutron-vm").exists());
     }
 
     fn set_xattr(path: &Path, name: &str, value: &[u8]) -> i32 {

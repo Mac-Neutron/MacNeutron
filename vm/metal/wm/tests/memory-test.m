@@ -581,6 +581,7 @@ static void attach_poll_retire(void) {
     struct unixcall_wmt_attach_metal_view att = {0x7777, device, {&desc}, {&poll}, 0, 0};
     CHECK(W(159, &att) == 0 && att.ret_view && att.ret_layer);
     if (!att.ret_view || !att.ret_layer) return;
+    CHECK([(CAMetalLayer *)host_obj(att.ret_layer) maximumDrawableCount] == 2);
     CHECK(poll.backing_scale >= 1 && poll.edr_potential >= 1.0f);
 
     for (unsigned i = 0; i < 34; i++) {
@@ -698,6 +699,88 @@ static void pools_one_host(void) {
     }
 }
 
+static int32_t queued_host_call(struct mn_wm_ctx *c, unsigned slot, void *params) {
+    static uint8_t rec[MN_REC_MAX];
+    struct mn_wm_out o = {.buf = rec, .cap = sizeof rec};
+    NTSTATUS_T s = mn_wm_pack(slot, params, &o);
+    if (s) return (int32_t)s;
+    uint32_t n = 0;
+    return mn_wm_host_call(c, loop_ring(), slot, rec, o.len, NULL, 0, &n);
+}
+
+static void nil_present(void) {
+    uint64_t before_p = loop_ctx.presented, before_f = loop_ctx.failures;
+    obj_handle_t q = new_queue(), pool = pool_push();
+    struct unixcall_generic_obj_obj_ret cb = {q, 0};
+    CHECK(W(11, &cb) == 0 && cb.ret);
+    struct unixcall_generic_obj_obj_noret pd47 = {cb.ret, 0};
+    CHECK(W(47, &pd47) == 0);
+    struct unixcall_generic_obj_obj_double_noret pd48 = {cb.ret, 0, 0.0};
+    CHECK(W(48, &pd48) == 0);
+    CHECK(loop_ctx.presented == before_p && loop_ctx.failures == before_f);
+    struct unixcall_generic_obj_noret c = {cb.ret};
+    CHECK(W(12, &c) == 0 && W(13, &c) == 0);
+    release(pool);
+    release(q);
+    sweep();
+}
+
+static void committed_encoder(void) {
+    uint64_t before_f = loop_ctx.failures;
+    obj_handle_t q = new_queue(), pool = pool_push();
+    struct unixcall_generic_obj_obj_ret cb = {q, 0};
+    CHECK(W(11, &cb) == 0 && cb.ret);
+    struct unixcall_generic_obj_noret c = {cb.ret};
+    CHECK(W(12, &c) == 0 && W(13, &c) == 0);
+
+    struct unixcall_generic_obj_obj_ret blit = {cb.ret, 0};
+    CHECK(queued_host_call(&loop_ctx, 30, &blit) == (int32_t)MN_STATUS_INVALID_PARAMETER);
+    CHECK(host_obj(blit.ret) == nil);
+
+    struct unixcall_generic_obj_uint64_obj_ret comp = {cb.ret, 0, 0};
+    CHECK(queued_host_call(&loop_ctx, 31, &comp) == (int32_t)MN_STATUS_INVALID_PARAMETER);
+    CHECK(host_obj(comp.ret) == nil);
+
+    struct WMTRenderPassInfo rp;
+    memset(&rp, 0, sizeof rp);
+    struct unixcall_generic_obj_uint64_obj_ret rend = {cb.ret, (uint64_t)(uintptr_t)&rp, 0};
+    CHECK(queued_host_call(&loop_ctx, 32, &rend) == (int32_t)MN_STATUS_INVALID_PARAMETER);
+    CHECK(host_obj(rend.ret) == nil);
+
+    CHECK(loop_ctx.failures == before_f + 3);
+
+    struct WMTRenderPipelineInfo rpi;
+    memset(&rpi, 0, sizeof rpi);
+    struct unixcall_mtldevice_newrenderpso pso = {device, {&rpi}, 0, 0};
+    CHECK(W(34, &pso) == MN_STATUS_INVALID_PARAMETER && pso.ret_pso == 0);
+
+    release(pool);
+    release(q);
+    sweep();
+}
+
+static void open_encoder_teardown(void) {
+    struct mn_ht_rings rings = {NULL, no_marks, all_passed};
+    struct mn_wm_ctx c2 = {.ctx_id = 4, .ht = mn_ht_new(&rings, mn_wm_release_object)};
+    mn_ht_set_encoder_closer(c2.ht, mn_wm_end_encoder);
+
+    struct unixcall_generic_obj_ret all = {0};
+    CHECK(call_on(&c2, 4, &all) == 0 && all.ret);
+    struct unixcall_generic_obj_uint64_obj_ret first = {all.ret, 0, 0};
+    CHECK(call_on(&c2, 2, &first) == 0 && first.ret);
+    struct unixcall_generic_obj_uint64_obj_ret q = {first.ret, 64, 0};
+    CHECK(call_on(&c2, 9, &q) == 0 && q.ret);
+    struct unixcall_generic_obj_obj_ret cb = {q.ret, 0};
+    CHECK(call_on(&c2, 11, &cb) == 0 && cb.ret);
+    struct unixcall_generic_obj_obj_ret blit = {cb.ret, 0};
+    CHECK(call_on(&c2, 30, &blit) == 0 && blit.ret);
+
+    int ok = 0;
+    CHECK(mn_ht_get(c2.ht, blit.ret, MN_HK_OBJC, &ok) != NULL && ok);
+    mn_ht_free(c2.ht);
+    CHECK(c2.failures == 0);
+}
+
 static void *run(void *arg) {
     (void)arg;
     struct { const char *name; void (*fn)(void); } tests[] = {
@@ -711,6 +794,8 @@ static void *run(void *arg) {
         {"nil-drawable", nil_drawable}, {"view-left", view_left}, {"hud", hud},
         {"wait-uncommitted", wait_uncommitted}, {"pools-one-host", pools_one_host},
         {"attach-poll-retire", attach_poll_retire},
+        {"nil-present", nil_present}, {"committed-encoder", committed_encoder},
+        {"open-encoder-teardown", open_encoder_teardown},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         @autoreleasepool {

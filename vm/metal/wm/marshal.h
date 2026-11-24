@@ -84,6 +84,7 @@ struct mn_wm_ctx {
     struct mn_notifyq *_Atomic notify; /* MN_NOTIFY_REGION_FREE goes here (memory.m) */
     _Atomic uint32_t d3d_removed;      /* Direct3D: the HRESULT that removed the device; every later call answers it */
     _Atomic uint32_t refused_said;     /* refused handles named on stderr (marshal.c, cmdlist.c): 32 a context */
+    _Atomic uint32_t nil_present_logs; /* nil drawable warnings logged on stderr (present.m): 4 a context */
 };
 int32_t mn_wm_host_call(struct mn_wm_ctx *c, void *ring, unsigned slot, const void *rec, uint32_t len, void *reply,
                         uint32_t cap, uint32_t *reply_len);
@@ -162,6 +163,7 @@ void mn_wm_present_count(struct mn_wm_ctx *c);
 void mn_wm_present_probe(struct mn_wm_ctx *c, void *cmdbuf, void *drawable);
 void mn_wm_present_probe_of(uint32_t ctx_id, void *cmdbuf, void *drawable);
 void mn_wm_on_shown(void *drawable, void (*fn)(void *ctx), void *ctx); /* present.m: once the display shows it */
+uint32_t mn_desired_max_drawables(void); /* present.m: MN_MAX_DRAWABLES (2 or 3; default 2) */
 
 /* events.m: slots 104, 108-110 and 146; and the table's release of a listener. */
 NTSTATUS_T mn_wm_listener_special(struct mn_wm_state *k);
@@ -172,9 +174,11 @@ void mn_wm_will_release(void *obj);
 
 /* invoke.m: winemetal's own slot (mn_wm_funcs), an Objective-C exception becoming STATUS_INVALID_PARAMETER; and the
  * table's release of an object, by kind. */
+extern int mn_wm_is_real;
 void *mn_wm_autorelease_push(void); /* a host autorelease pool around one forwarded call (invoke.m) */
 void mn_wm_autorelease_pop(void *pool);
 NTSTATUS_T mn_wm_invoke(unsigned slot, void *params);
 void mn_wm_release_object(enum mn_hkind kind, void *obj);
+void mn_wm_end_encoder(void *obj);
 
 #endif

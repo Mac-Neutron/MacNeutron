@@ -48,6 +48,9 @@ fn launch(rest: &[String], environment: &BTreeMap<String, String>, executable: &
     let launcher = Arc::new(launcher);
     install_termination_handlers(launcher.clone(), environment.clone());
     let _ = LAUNCHING.set(launcher.clone());
+    let _sleep_guard = matches!(rest.first().map(String::as_str), Some("run" | "waitforexitandrun"))
+        .then(|| macneutron_core::sleep_assertion::DisplaySleepAssertion::acquire("MacNeutron game"))
+        .flatten();
     launcher.launch(rest, environment)
 }
 

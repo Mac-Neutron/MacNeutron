@@ -85,17 +85,19 @@ done
 # stays Objective-C-free, and the C helpers and libkrun are linked through rustc's link-args. The C objects keep clang's
 # $HOPT (so their PGO and ThinLTO match the rest of the host); rustc's link step drives Apple's ld, which reads them.
 clang $HOPT -Wall -Wextra -c -o "$W/obj/appkit_shim.o" vm/host/appkit_shim.m
-objs="$objs $W/obj/appkit_shim.o"
+clang $HOPT -Wall -Wextra -c -o "$W/obj/metal_cache.o" vm/host/metal_cache.m
+objs="$objs $W/obj/appkit_shim.o $W/obj/metal_cache.o"
 # Every object and library rustc must hand to ld, each as its own -Clink-arg (the objects are space-separated in $objs).
 link_args=
 for o in $objs; do link_args="$link_args -Clink-arg=$o"; done
 link_args="$link_args -Clink-arg=$W/libkrun/libkrun.1.dylib"
-link_args="$link_args -Clink-arg=-Wl,-rpath,@executable_path/libkrun"
+link_args="$link_args -Clink-arg=-Wl,-rpath,@executable_path/../../../libkrun -Clink-arg=-Wl,-rpath,@executable_path/libkrun"
 link_args="$link_args -Clink-arg=$W/libtpms/libtpms.a -Clink-arg=$SSL/lib/libcrypto.a"
 link_args="$link_args -Clink-arg=-framework -Clink-arg=AudioToolbox"
 link_args="$link_args -Clink-arg=-framework -Clink-arg=Security"
 link_args="$link_args -Clink-arg=-framework -Clink-arg=AppKit"
 link_args="$link_args -Clink-arg=-framework -Clink-arg=Metal"
+link_args="$link_args -Clink-arg=-framework -Clink-arg=QuartzCore"
 link_args="$link_args -Clink-arg=-lc++"
 # The host's PGO (RUST_PGO) rides the same $ROOT/pgo/host.profdata as the clang objects. The C objects are LLVM
 # bitcode (-flto=thin) and are passed through -Clink-arg, which cargo does not track: touch the source so the link
@@ -105,12 +107,15 @@ touch "$ROOT/vm/host/src/main.rs"
 # target/ that make build uses (and BUILD_DIR's p profile keeps its own).
 RUSTFLAGS="-Ctarget-cpu=${MACNEUTRON_CPU:-apple-m5} ${RUST_PGO:+$RUST_PGO }$link_args" \
   cargo build --release --manifest-path "$ROOT/vm/host/Cargo.toml" --target-dir "$W/cargo-target"
-cp "$W/cargo-target/release/macneutron-vm" "$W/macneutron-vm"
+rm -rf "$W/macneutron-vm" "$W/macneutron-vm.app"
+mkdir -p "$W/macneutron-vm.app/Contents/MacOS"
+cp "$W/cargo-target/release/macneutron-vm" "$W/macneutron-vm.app/Contents/MacOS/macneutron-vm"
+cp "$ROOT/vm/host/Info.plist" "$W/macneutron-vm.app/Contents/Info.plist"
 make -s -C "$ROOT/vm/metal/wm" metal-host
 # The VM's folder is what MacNeutron's launcher runs a game from (crates/macneutron-core/src/micro_vm.rs).
 cp "$ROOT/vm/run-guest.sh" "$W/run-guest.sh"
 cp "$ROOT/vm/guest/run-game.sh" "$W/run-game.sh"
 # The TPMs' keys are keychain items that trust the binary that made them: signed with MACNEUTRON_SIGN_IDENTITY, a
 # rebuild is still that binary; signed ad hoc, the first VM after each rebuild asks once to use the keychain.
-codesign -s "${MACNEUTRON_SIGN_IDENTITY:--}" -f --entitlements "$ROOT/vm/host/hv.plist" "$W/macneutron-vm"
-echo "$W/macneutron-vm"
+codesign -s "${MACNEUTRON_SIGN_IDENTITY:--}" -f --entitlements "$ROOT/vm/host/hv.plist" "$W/macneutron-vm.app"
+echo "$W/macneutron-vm.app"

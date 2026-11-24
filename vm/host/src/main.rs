@@ -9,8 +9,10 @@ mod ffi;
 use ffi::*;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
+use std::io::Write as _;
 use std::os::raw::{c_char, c_int, c_void};
 use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::ptr;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -397,9 +399,135 @@ fn flag_present(args: &[String], flag: &str) -> bool {
 /// inherit the state disk's and the TPM's locks (raw `open`s here and in tpm.c), hold them after this process exits,
 /// and the next VM would find its state "in use". This process never execs itself, so nothing here needs them across one.
 fn no_inherited_fds() {
-    for fd in 3..unsafe { getdtablesize() } {
-        // SAFETY: F_SETFD on a descriptor that isn't open fails with EBADF and changes nothing.
-        unsafe { fcntl(fd, F_SETFD, FD_CLOEXEC) };
+    match std::fs::read_dir("/dev/fd") {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                if let Some(fd) = entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|s| s.parse::<c_int>().ok())
+                {
+                    if fd >= 3 {
+                        // SAFETY: F_SETFD on a descriptor that isn't open fails with EBADF and changes nothing.
+                        unsafe { fcntl(fd, F_SETFD, FD_CLOEXEC) };
+                    }
+                }
+            }
+        }
+        Err(_) => {
+            let limit = unsafe { getdtablesize() }.min(4096);
+            for fd in 3..limit {
+                // SAFETY: F_SETFD on a descriptor that isn't open fails with EBADF and changes nothing.
+                unsafe { fcntl(fd, F_SETFD, FD_CLOEXEC) };
+            }
+        }
+    }
+}
+
+fn raise_file_limit() {
+    let mut rl = Rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    if unsafe { getrlimit(RLIMIT_NOFILE, &mut rl) } != 0 {
+        return;
+    }
+    let per_proc = sysctl_opt_int("kern.maxfilesperproc")
+        .filter(|&v| v > 0)
+        .map(|v| v as u64)
+        .unwrap_or(10240);
+    let target = if rl.rlim_max == RLIM_INFINITY {
+        per_proc
+    } else {
+        rl.rlim_max.min(per_proc)
+    };
+    if rl.rlim_cur < target {
+        let next = Rlimit {
+            rlim_cur: target,
+            rlim_max: rl.rlim_max,
+        };
+        if unsafe { setrlimit(RLIMIT_NOFILE, &next) } == 0 {
+            eprintln!(
+                "macneutron-vm: file descriptors: soft limit {} -> {}",
+                rl.rlim_cur, target
+            );
+        } else {
+            let fallback = 10240u64.min(if rl.rlim_max == RLIM_INFINITY {
+                10240
+            } else {
+                rl.rlim_max
+            });
+            if fallback > rl.rlim_cur && fallback != target {
+                let fb_next = Rlimit {
+                    rlim_cur: fallback,
+                    rlim_max: rl.rlim_max,
+                };
+                if unsafe { setrlimit(RLIMIT_NOFILE, &fb_next) } == 0 {
+                    eprintln!(
+                        "macneutron-vm: file descriptors: soft limit {} -> {}",
+                        rl.rlim_cur, fallback
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn vm_root_dir(exe: &Path) -> PathBuf {
+    let resolved = std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
+    if let Some(macos) = resolved.parent() {
+        if macos.file_name().and_then(|n| n.to_str()) == Some("MacOS") {
+            if let Some(contents) = macos.parent() {
+                if contents.file_name().and_then(|n| n.to_str()) == Some("Contents") {
+                    if let Some(app) = contents.parent() {
+                        if app
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|n| n.ends_with(".app"))
+                        {
+                            if let Some(root) = app.parent() {
+                                return if root.as_os_str().is_empty() {
+                                    PathBuf::from(".")
+                                } else {
+                                    root.to_path_buf()
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return if macos.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            macos.to_path_buf()
+        };
+    }
+    PathBuf::from(".")
+}
+
+static CLOCK_FD: AtomicI32 = AtomicI32::new(-1);
+
+extern "C" fn send_host_clock(_ctx: *mut c_void) {
+    let fd = CLOCK_FD.load(Ordering::Relaxed);
+    if fd < 0 {
+        return;
+    }
+    let mut ts = Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    if unsafe { clock_gettime(CLOCK_REALTIME, &mut ts) } != 0 || ts.tv_sec < 0 || ts.tv_nsec < 0 {
+        return;
+    }
+    let ns = (ts.tv_sec as u64)
+        .saturating_mul(1_000_000_000)
+        .saturating_add(ts.tv_nsec as u64);
+    let mut buf = [0u8; 48];
+    let mut cur = std::io::Cursor::new(&mut buf[..]);
+    if writeln!(cur, "time {}", ns).is_ok() {
+        let len = cur.position() as usize;
+        let _ = unsafe { write(fd, buf.as_ptr() as *const c_void, len) };
     }
 }
 
@@ -496,12 +624,9 @@ fn main() {
             .unwrap_or_else(|| std::path::PathBuf::from("/"));
         parent.join("state/default.img").to_string_lossy().into_owned()
     });
-    let exe_dir = std::path::Path::new(&argv_raw[0])
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .to_string_lossy()
-        .into_owned();
+    let exe_path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from(&argv_raw[0]));
+    let root_dir = vm_root_dir(&exe_path);
+    let exe_dir = root_dir.to_string_lossy().into_owned();
 
     for f in ["vmlinuz", "initramfs.img", "cmdline.txt", "base.erofs", "x86-64-rootfs.erofs", "wine.erofs"]
         .iter()
@@ -556,6 +681,8 @@ fn main() {
     if std::env::var("MN_VM_SUPERVISED").as_deref() != Ok("1") {
         supervise(&argv_raw, &share, ram_mib);
     }
+    raise_file_limit();
+    unsafe { mn_prepare_metal_shader_cache() };
     check_hypervisor();
 
     // One VM per state disk: two writers would corrupt its ext4. The lock lives as long as this process.
@@ -699,6 +826,55 @@ fn main() {
         unsafe { krun_console_builder_add_tty_port(consoles, kstr(""), pty_slave, &mut port, &mut e) },
         "console port",
     );
+    let mut clock_fds = [-1 as c_int; 2];
+    let devnull_fd = unsafe { open(cstring("/dev/null").as_ptr(), O_WRONLY | O_CLOEXEC) };
+    if unsafe { pipe(clock_fds.as_mut_ptr()) } != 0 || devnull_fd < 0 {
+        let msg = unsafe { CStr::from_ptr(strerror(errno())) }
+            .to_string_lossy()
+            .into_owned();
+        if devnull_fd >= 0 {
+            unsafe { close(devnull_fd) };
+        }
+        if clock_fds[0] >= 0 {
+            unsafe { close(clock_fds[0]) };
+        }
+        if clock_fds[1] >= 0 {
+            unsafe { close(clock_fds[1]) };
+        }
+        fail(1, &format!("clock pipe: {}", msg));
+    }
+    let clock_rd = clock_fds[0];
+    let clock_wr = clock_fds[1];
+    unsafe {
+        fcntl(clock_rd, F_SETFD, FD_CLOEXEC);
+        fcntl(clock_wr, F_SETFD, FD_CLOEXEC);
+        fcntl(clock_wr, F_SETNOSIGPIPE, 1);
+        let flags = fcntl(clock_wr, F_GETFL, 0);
+        if flags >= 0 {
+            fcntl(clock_wr, F_SETFL, flags | O_NONBLOCK);
+        }
+    }
+    let mut clock_port: u32 = 0;
+    let mut e: *mut KrunError = ptr::null_mut();
+    let clock_res = unsafe {
+        krun_console_builder_add_inout_port(
+            consoles,
+            kstr("mn.clock"),
+            clock_rd,
+            devnull_fd,
+            &mut clock_port,
+            &mut e,
+        )
+    };
+    unsafe {
+        close(clock_rd);
+        close(devnull_fd);
+    }
+    if clock_res != KRUN_RESULT_SUCCESS {
+        unsafe { close(clock_wr) };
+        check(clock_res, "clock port");
+    }
+    CLOCK_FD.store(clock_wr, Ordering::SeqCst);
     let mut e: *mut KrunError = ptr::null_mut();
     let console_dev = made(unsafe { krun_console_builder_build(consoles, &mut e) }, &mut e, "console");
     unsafe { krun_mmio_device_manager_add(devices, console_dev as *mut KrunAttachDevice) };
@@ -786,11 +962,8 @@ fn main() {
     unsafe { krun_mmio_device_manager_add(devices, balloon as *mut KrunAttachDevice) };
 
     // The Metal transport: winemetal.so beside our stand-ins for Wine's libraries (vm/metal/wm).
-    let metal_host = std::fs::canonicalize(&argv_raw[0])
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .map(|p| p.join("metal-host"))
-        .unwrap_or_else(|| std::path::PathBuf::from("metal-host"))
+    let metal_host = root_dir
+        .join("metal-host")
         .to_string_lossy()
         .into_owned();
     let wm_loaded = unsafe { mn_wm_load(cstring(&metal_host).as_ptr()) } == 0;
@@ -801,10 +974,7 @@ fn main() {
         );
     }
     // Direct3D forwarding: native DXMT beside macneutron-vm, loaded by the first Direct3D record.
-    let dxmt_dir = std::path::Path::new(&metal_host)
-        .parent()
-        .map(|p| p.join("dxmt"))
-        .unwrap_or_else(|| std::path::PathBuf::from("dxmt"));
+    let dxmt_dir = root_dir.join("dxmt");
     unsafe { mn_d3d_set_dir(cstring(&dxmt_dir.to_string_lossy()).as_ptr()) };
     let _ = std::fs::create_dir_all(format!("{}/traces", share));
     if std::env::var("DXMT_LOG_LEVEL").as_deref() != Ok("none") {
@@ -899,6 +1069,8 @@ fn main() {
         );
         no_inherited_fds();
         let child = Command::new(&host_bin)
+            .env_remove("STEAM_DYLD_INSERT_LIBRARIES")
+            .env_remove("MACNEUTRON_OVERLAY_SHIM")
             .args([
                 "--socket",
                 &sock,
@@ -1013,15 +1185,23 @@ fn main() {
 
     // The VM runs off the main thread; the main thread runs AppKit (the game window and Metal share its run loop).
     let vmm_addr = vmm as usize;
-    std::thread::spawn(move || {
-        unsafe { krun_vmm_run(vmm_addr as *mut KrunVmm) };
-        // exit, not _exit: atexit runs, which is what flushes an instrumented PGO profile (a training run's whole point)
-        // and what the Swift host's exit(0) did.
-        unsafe { exit(0) }
-    });
+    std::thread::Builder::new()
+        .name("krun-vmm".into())
+        .stack_size(16 << 20)
+        .spawn(move || {
+            unsafe { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) };
+            unsafe { krun_vmm_run(vmm_addr as *mut KrunVmm) };
+            // exit, not _exit: atexit runs, which is what flushes an instrumented PGO profile (a training run's whole point)
+            // and what the Swift host's exit(0) did.
+            unsafe { exit(0) }
+        })
+        .unwrap_or_else(|e| fail(1, &format!("krun-vmm thread: {}", e)));
 
     // The activity (AppKit shim) lasts as long as the VM, and the run loop keeps the main thread alive.
-    unsafe { mn_run_appkit_main_loop() };
+    unsafe {
+        mn_register_wake_callback(send_host_clock, ptr::null_mut());
+        mn_run_appkit_main_loop();
+    }
 }
 
 /// Non-blocking liveness check for a spawned child (its pid): mirrors Swift's `Process.isRunning`.

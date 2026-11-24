@@ -1,0 +1,1 @@
+SUBSYSTEM=="virtio-ports", ATTR{name}=="mn.clock", TAG+="systemd", ENV{SYSTEMD_WANTS}="mn-clock-sync.service"

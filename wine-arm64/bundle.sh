@@ -290,6 +290,10 @@ v=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Content
 # macOS turns Game Mode on for a full-screen app of the games category; the game runs in this bundle's process.
 c=$(/usr/libexec/PlistBuddy -c 'Print :LSApplicationCategoryType' "$APP/Contents/Info.plist" 2> /dev/null || true)
 [ "$c" = public.app-category.games ] || die "Info.plist's LSApplicationCategoryType is '${c:-missing}', not games"
+for k in GCSupportsGameMode LSSupportsGameMode; do
+  v=$(/usr/libexec/PlistBuddy -c "Print :$k" "$APP/Contents/Info.plist" 2> /dev/null || true)
+  [ "$v" = true ] || die "Info.plist's $k is '${v:-missing}', not true"
+done
 links=$(find "$APP" -type l ! -exec test -e {} \; -print)
 [ -z "$links" ] || die "dangling links: $(echo "$links" | tr '\n' ' ')"
 id=$(otool -D "$U/libmacneutron-present.dylib" | tail -n +2)

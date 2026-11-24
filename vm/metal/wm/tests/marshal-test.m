@@ -3,9 +3,13 @@
  * outputs), and the guest unpacks the reply. Fake objects are slots of objs[]; their retains and releases are
  * counted. Mac, ASan; Objective-C for the fake that raises. */
 #import <Foundation/Foundation.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include "../host/loader.h"
 #include "../cmdlist.h"
 #include "../marshal.h"
@@ -26,13 +30,14 @@ static int failures;
 enum { ARRAY, DEVICE, QUEUE, STRING, SAMPLER, FUNCTION, ARCHIVE, PSO, POOL, CMDBUF, ENCODER, SHADER, BITCODE, LOG0, LOG1,
        CONSTFN, VIEW, LAYER, DRAWABLE, EVENT, INTERP, DENOISED, TEX, FENCE, NOBJS };
 static int objs[NOBJS];
-static int retains[NOBJS], releases[NOBJS], calls[MN_WM_SLOTS], checked[MN_WM_SLOTS];
+static _Atomic int retains[NOBJS], releases[NOBJS];
+static int calls[MN_WM_SLOTS], checked[MN_WM_SLOTS];
 static int fail_next, raise_next;
 #define OBJ(i) ((obj_handle_t)(uintptr_t)&objs[i])
 static int index_of(obj_handle_t o) { return (int)((int *)(uintptr_t)o - objs); }
 
-static NTSTATUS_T f_retain(void *p) { retains[index_of(*(obj_handle_t *)p)]++; return 0; }
-static NTSTATUS_T f_release(void *p) { releases[index_of(*(obj_handle_t *)p)]++; return 0; }
+static NTSTATUS_T f_retain(void *p) { atomic_fetch_add(&retains[index_of(*(obj_handle_t *)p)], 1); return 0; }
+static NTSTATUS_T f_release(void *p) { atomic_fetch_add(&releases[index_of(*(obj_handle_t *)p)], 1); return 0; }
 static NTSTATUS_T f_object(void *p) {
     struct unixcall_generic_obj_uint64_obj_ret *a = p;
     checked[2] = a->handle == OBJ(ARRAY) && a->arg == 0;
@@ -264,21 +269,28 @@ static NTSTATUS_T f_sm50_args_info(void *p) {
 }
 /* Paths: what the host was given. */
 static char host_path[1024];
+static pthread_mutex_t host_path_lock = PTHREAD_MUTEX_INITIALIZER;
 static NTSTATUS_T f_cache_open(void *p) {
     struct unixcall_cache_alloc_init *a = p;
+    pthread_mutex_lock(&host_path_lock);
     snprintf(host_path, sizeof host_path, "%s", (const char *)a->path.ptr);
+    pthread_mutex_unlock(&host_path_lock);
     a->ret_cache = OBJ(ARCHIVE);
     return 0;
 }
 static NTSTATUS_T f_cache_path(void *p) {
     struct unixcall_setmetalcachepath *a = p;
+    pthread_mutex_lock(&host_path_lock);
     snprintf(host_path, sizeof host_path, "%s", (const char *)a->path.ptr);
+    pthread_mutex_unlock(&host_path_lock);
     a->ret_success = 1;
     return 0;
 }
 static NTSTATUS_T f_new_archive(void *p) {
     struct unixcall_mtldevice_newbinaryarchive *a = p;
+    pthread_mutex_lock(&host_path_lock);
     snprintf(host_path, sizeof host_path, "%s", a->url.ptr ? (const char *)a->url.ptr : "(null)");
+    pthread_mutex_unlock(&host_path_lock);
     a->ret_archive = OBJ(ARCHIVE);
     return 0;
 }
@@ -907,11 +919,95 @@ static void modes(void) {
     CHECK(n[MN_WM_SYNC] == 88 && n[MN_WM_QUEUED] == 67 && n[MN_WM_REFUSED] == 7 && n[MN_WM_LOCAL] == 6);
 }
 
+struct cold_arg {
+    int id;
+    pthread_mutex_t *gate_lock;
+    pthread_cond_t *gate_cond;
+    int *ready;
+    int *go;
+    int ok;
+    obj_handle_t ret_cache;
+};
+
+static NTSTATUS_T call_mt(unsigned slot, void *params) {
+    uint8_t th_rec[4096], th_reply[MN_REPLY_BYTES];
+    struct mn_wm_out out = {.buf = th_rec, .cap = sizeof th_rec};
+    NTSTATUS_T s = mn_wm_pack(slot, params, &out);
+    if (s) return s;
+    uint32_t rl = 0;
+    int32_t hs = mn_wm_host_call(&ctx, loop_ring(), slot, th_rec, out.len, out.sync ? th_reply : NULL,
+                                 out.sync ? sizeof th_reply : 0, &rl);
+    if (!out.sync) return 0;
+    if (hs) {
+        mn_wm_unwind(&out, 1);
+        return (NTSTATUS_T)hs;
+    }
+    return mn_wm_unpack(slot, params, &out, th_reply, rl);
+}
+
+static void *cold_worker(void *arg) {
+    struct cold_arg *a = arg;
+    pthread_mutex_lock(a->gate_lock);
+    (*a->ready)++;
+    pthread_cond_broadcast(a->gate_cond);
+    while (!*a->go) pthread_cond_wait(a->gate_cond, a->gate_lock);
+    pthread_mutex_unlock(a->gate_lock);
+    if (a->id % 2 == 0) {
+        struct unixcall_cache_alloc_init open = {{"dxmt/cold.db"}, 3, 0};
+        NTSTATUS_T s = call_mt(115, &open);
+        a->ret_cache = open.ret_cache;
+        a->ok = s == 0 && open.ret_cache != 0;
+    } else {
+        struct unixcall_setmetalcachepath cp = {{"/home/mn/.cache/dxmt"}, 0};
+        NTSTATUS_T s = call_mt(119, &cp);
+        a->ok = s == 0 && cp.ret_success == 1;
+    }
+    mn_wm_ring_end(loop_ring());
+    return NULL;
+}
+
+static void paths_cold_start(void) {
+    const char *root = getenv("MN_WM_CACHE_DIR");
+    char fallback[64] = "";
+    if (!root || !*root) {
+        snprintf(fallback, sizeof fallback, "/tmp/mn-marshal-cold-%d", (int)getpid());
+        setenv("MN_WM_CACHE_DIR", fallback, 1);
+        root = getenv("MN_WM_CACHE_DIR");
+    }
+    rmdir(root); /* make fresh if empty from a prior run */
+
+    pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+    int ready = 0, go = 0;
+    pthread_t th[8];
+    struct cold_arg args[8];
+    for (int i = 0; i < 8; i++) {
+        args[i] = (struct cold_arg){.id = i, .gate_lock = &lock, .gate_cond = &cond, .ready = &ready, .go = &go};
+        CHECK(pthread_create(&th[i], NULL, cold_worker, &args[i]) == 0);
+    }
+    pthread_mutex_lock(&lock);
+    while (ready < 8) pthread_cond_wait(&cond, &lock);
+    go = 1;
+    pthread_cond_broadcast(&cond);
+    pthread_mutex_unlock(&lock);
+
+    for (int i = 0; i < 8; i++) {
+        pthread_join(th[i], NULL);
+        CHECK(args[i].ok);
+        if (args[i].ret_cache) CHECK(call(1, &args[i].ret_cache) == 0);
+    }
+    mn_ht_sweep(ctx.ht, ring_state);
+    struct stat sb;
+    CHECK(root && stat(root, &sb) == 0 && S_ISDIR(sb.st_mode));
+    if (fallback[0]) rmdir(fallback);
+}
+
 int main(void) {
     @autoreleasepool {
         mn_wm_funcs = fakes;
         mn_open(); /* the loopback's context */
         struct { const char *name; void (*fn)(void); } tests[] = {
+            {"paths-cold-start", paths_cold_start},
             {"roundtrip", roundtrip}, {"bad-handle", bad_handle}, {"create-fails", create_fails},
             {"nil-answer", nil_answer}, {"exception", exception}, {"pool", pool},
             {"cmdlist-roundtrip", cmdlist_roundtrip}, {"cmdlist-loop", cmdlist_loop},

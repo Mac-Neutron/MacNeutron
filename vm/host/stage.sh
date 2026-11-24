@@ -9,7 +9,8 @@ W=${BUILD_DIR:-$ROOT/build}/vm-work
 D=${1:?usage: stage.sh <dest>}
 rm -rf "$D"
 mkdir -p "$D/libkrun" "$D/steam-forward/host" "$D/metal-host" "$D/dxmt"
-cp "$W/macneutron-vm" "$W/run-guest.sh" "$W/run-game.sh" "$D/"
+cp -R "$W/macneutron-vm.app" "$D/"
+cp "$W/run-guest.sh" "$W/run-game.sh" "$D/"
 cp "$W/libkrun/libkrun.1.dylib" "$D/libkrun/"
 cp -R "$W/steam-forward/host/mn-steam-host.app" "$D/steam-forward/host/"
 cp -L "$W/gvproxy" "$D/gvproxy"

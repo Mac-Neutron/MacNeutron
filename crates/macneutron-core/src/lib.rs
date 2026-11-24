@@ -49,6 +49,7 @@ pub mod updater;
 pub mod install_scripts;
 pub mod steam_play_mode;
 pub mod prefix_manager;
+pub mod sleep_assertion;
 pub mod launcher;
 
 // The fixtures every ported test uses; other crates' tests get them through the `test-support` feature.

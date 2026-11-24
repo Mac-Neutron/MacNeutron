@@ -7,6 +7,7 @@
  *   paths         54, 112, 113, 115, 117, 119 name a file in the host's cache directory instead of the guest's path
  * In a reply, a field that held an out-pointer carries the guest handle it got (0: none). */
 #include <errno.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -628,23 +629,29 @@ NTSTATUS_T mn_wm_constants(struct mn_wm_state *k) {
     return mn_wm_invoke(98, a);
 }
 
-/* ~/Library/Caches/MacNeutron/vm/metal (MN_WM_CACHE_DIR for tests), made on first use. */
-static const char *cache_root(void) {
-    static char root[1024];
-    static atomic_int made;
-    if (atomic_load(&made)) return root;
+static char cache_root_buf[1024];
+static pthread_once_t cache_root_once = PTHREAD_ONCE_INIT;
+
+static void init_cache_root(void) {
     const char *env = getenv("MN_WM_CACHE_DIR"), *home = getenv("HOME");
-    if (env) snprintf(root, sizeof root, "%s", env);
-    else snprintf(root, sizeof root, "%s/Library/Caches/MacNeutron/vm/metal", home ? home : "/tmp");
-    for (char *p = root + 1; *p; p++)
+    int n;
+    if (env && *env) n = snprintf(cache_root_buf, sizeof cache_root_buf, "%s", env);
+    else n = snprintf(cache_root_buf, sizeof cache_root_buf, "%s/Library/Caches/MacNeutron/vm/metal", home ? home : "/tmp");
+    if (n < 0 || (size_t)n >= sizeof cache_root_buf)
+        snprintf(cache_root_buf, sizeof cache_root_buf, "/tmp/mn-metal");
+    for (char *p = cache_root_buf + 1; *p; p++)
         if (*p == '/') {
             *p = 0;
-            mkdir(root, 0755);
+            mkdir(cache_root_buf, 0755);
             *p = '/';
         }
-    mkdir(root, 0755);
-    atomic_store(&made, 1);
-    return root;
+    mkdir(cache_root_buf, 0755);
+}
+
+/* ~/Library/Caches/MacNeutron/vm/metal (MN_WM_CACHE_DIR for tests), made on first use. */
+static const char *cache_root(void) {
+    pthread_once(&cache_root_once, init_cache_root);
+    return cache_root_buf;
 }
 
 /* The host file (or directory) a guest path names: in the cache root, a hash of the whole guest path, then the guest's

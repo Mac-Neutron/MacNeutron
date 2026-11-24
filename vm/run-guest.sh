@@ -67,8 +67,10 @@ fi
 # The run's TPM 2.0 beside its state disk (a game's state/<appid>.tpm), unless MN_TPM names another folder or is empty.
 TPM=${MN_TPM-${STATE%.img}.tpm}
 [ -z "$TPM" ] || set -- --tpm "$TPM" "$@"
+VM_BIN="$W/macneutron-vm.app/Contents/MacOS/macneutron-vm"
+[ -x "$VM_BIN" ] || VM_BIN="$W/macneutron-vm"
 host=0
-"$W/macneutron-vm" --images "$W/images" --share "$SHARE" --state "$STATE" --timeout "${MN_RUN_TIMEOUT:-1800}" "$@" \
+"$VM_BIN" --images "$W/images" --share "$SHARE" --state "$STATE" --timeout "${MN_RUN_TIMEOUT:-1800}" "$@" \
   || host=$?
 [ $host -eq 0 ] || echo "run-guest: host exited $host" >&2
 cat "$SHARE/run.log" 2>/dev/null || true

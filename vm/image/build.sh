@@ -174,13 +174,14 @@ for b in FEX FEXServer FEXBash FEXGetConfig FEXpidof; do sudo install -m755 "$FE
   sudo install -m644 "$FEX_BIN/.mn-source" "$WORK/root/usr/share/fex-emu/.mn-source"; }
 sudo rm -f "$WORK/root/etc/resolv.conf"  # ours replaces whatever the packages left, a symlink included
 sudo cp -R "$HERE/rootfs/." "$WORK/root/"
-sudo chown -R root:root "$WORK/root/etc/fstab" "$WORK/root/etc/asound.conf" "$WORK/root/etc/resolv.conf" "$WORK/root/usr/lib/sysusers.d/mn.conf" "$WORK/root/etc/systemd/system" "$WORK/root/usr/libexec/mn-runner" \
+sudo chown -R root:root "$WORK/root/etc/fstab" "$WORK/root/etc/asound.conf" "$WORK/root/etc/resolv.conf" "$WORK/root/usr/lib/sysusers.d/mn.conf" "$WORK/root/etc/systemd/system" "$WORK/root/etc/udev/rules.d" "$WORK/root/usr/libexec/mn-runner" \
   "$WORK/root/usr/libexec/mn-tso-check" "$WORK/root/usr/share/fex-emu/Config.json"
 # /Users, /Volumes: mn-runner's tmpfs for the Mac's home folders (its user shares' mount points; the root is
 # read-only).
 sudo mkdir -p "$WORK/root/usr/share/fex-emu/RootFS/fedora" "$WORK/root/mnt/share" "$WORK/root/mnt/games" "$WORK/root/opt/mn-wine" \
   "$WORK/root/Users" "$WORK/root/Volumes"
 sudo gcc -O2 -pthread -o "$WORK/root/usr/libexec/tso-litmus" "$HERE/tso-litmus.c"
+sudo gcc -O2 -Wall -Wextra -o "$WORK/root/usr/libexec/mn-clock-sync" "$HERE/mn-clock-sync.c"
 sudo systemctl --root="$WORK/root" enable mn-runner.service mn-tso-check.service mn-net.service
 sudo systemd-sysusers --root="$WORK/root"  # our mn user (rootfs/usr/lib/sysusers.d) in the image's passwd
 sudo systemd-hwdb update --root="$WORK/root"  # its scriptlet cannot write hwdb.bin inside the install root

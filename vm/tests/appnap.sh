@@ -6,6 +6,10 @@
 # Prints "appnap: ok" or "appnap: FAIL".
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+W=${BUILD_DIR:-$ROOT/build}/vm-work
+VM=$W/macneutron-vm.app/Contents/MacOS/macneutron-vm
+[ -x "$VM" ] || VM=$W/macneutron-vm
+[ -x "$VM" ] || { echo "appnap: missing $VM" >&2; exit 1; }
 T=$(mktemp -d "${TMPDIR:-/tmp}/appnap.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 echo 'sleep 30' > "$T/guest.sh"
@@ -22,4 +26,11 @@ while [ $i -lt 60 ]; do
 done
 wait $vm || true
 cat "$T/held.txt"
-if /usr/bin/grep -q 'MacNeutron game VM' "$T/held.txt"; then echo "appnap: ok"; else echo "appnap: FAIL"; exit 1; fi
+if /usr/bin/grep -q 'MacNeutron game VM' "$T/held.txt" \
+  && /usr/bin/grep -q 'PreventUserIdleSystemSleep' "$T/held.txt" \
+  && /usr/bin/grep -q 'PreventUserIdleDisplaySleep' "$T/held.txt"; then
+  echo "appnap: ok"
+else
+  echo "appnap: FAIL"
+  exit 1
+fi

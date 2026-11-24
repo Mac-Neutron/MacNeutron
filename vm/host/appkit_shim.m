@@ -4,6 +4,7 @@
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 #import <mach/mach.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -12,6 +13,19 @@
 // Held in a static so the compiler never inserts an early release of the activity (it must last until the process ends;
 // [app run] never returns, and a balanced endActivity is never reached).
 static id g_activity_token;
+typedef void (*mn_wake_cb)(void *ctx);
+// Guarded by g_wake_lock so callback/context pair registration and wake dispatch cannot tear across threads.
+static pthread_mutex_t g_wake_lock = PTHREAD_MUTEX_INITIALIZER;
+static mn_wake_cb g_wake_cb = NULL;
+static void *g_wake_ctx = NULL;
+static id g_wake_observer = nil;
+
+void mn_register_wake_callback(mn_wake_cb cb, void *ctx) {
+    pthread_mutex_lock(&g_wake_lock);
+    g_wake_cb = cb;
+    g_wake_ctx = ctx;
+    pthread_mutex_unlock(&g_wake_lock);
+}
 
 void mn_begin_activity(void) {
     @autoreleasepool {
@@ -21,7 +35,8 @@ void mn_begin_activity(void) {
         // App Nap would slow the guest once the window is covered, and an idle Mac would sleep under a running game;
         // the activity lasts as long as the process (never balanced, it ends with the VM).
         g_activity_token = [[NSProcessInfo processInfo]
-            beginActivityWithOptions:(NSActivityUserInitiated | NSActivityLatencyCritical)
+            beginActivityWithOptions:(NSActivityUserInitiated | NSActivityLatencyCritical |
+                                      NSActivityIdleDisplaySleepDisabled)
                               reason:@"MacNeutron game VM"];
         if (g_activity_token != nil) {
             CFRetain((__bridge CFTypeRef)g_activity_token);
@@ -35,6 +50,25 @@ void mn_run_appkit_main_loop(void) {
         // No Dock icon until the game window shows (accessory, not regular).
         [app setActivationPolicy:NSApplicationActivationPolicyAccessory];
         mn_begin_activity();
+        if (g_wake_observer == nil) {
+            g_wake_observer = [[[NSWorkspace sharedWorkspace] notificationCenter]
+                addObserverForName:NSWorkspaceDidWakeNotification
+                            object:nil
+                             queue:nil
+                        usingBlock:^(NSNotification *note) {
+                            (void)note;
+                            pthread_mutex_lock(&g_wake_lock);
+                            mn_wake_cb cb = g_wake_cb;
+                            void *ctx = g_wake_ctx;
+                            pthread_mutex_unlock(&g_wake_lock);
+                            if (cb != NULL) {
+                                cb(ctx);
+                            }
+                        }];
+            if (g_wake_observer != nil) {
+                CFRetain((__bridge CFTypeRef)g_wake_observer);
+            }
+        }
         [app run];
     }
 }

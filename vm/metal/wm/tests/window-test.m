@@ -19,6 +19,8 @@
 #include <dlfcn.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 #include "../host/loader.h"
@@ -296,12 +298,47 @@ static void attach_lifecycle(void) {
     CHECK(metal_views().count == 0);
 }
 
+static void max_drawables(void) {
+    const char *prev_raw = getenv("MN_MAX_DRAWABLES");
+    char *prev = prev_raw ? strdup(prev_raw) : NULL;
+    unsetenv("MN_MAX_DRAWABLES");
+
+    struct unixcall_create_metal_view_from_hwnd c2 = {0x3333, (obj_handle_t)device, 0, 0};
+    CHECK(W(72, &c2) == 0 && c2.ret_view && c2.ret_layer);
+    if (c2.ret_view && c2.ret_layer) {
+        __block NSUInteger cnt = 0;
+        on_main(^{ cnt = ((CAMetalLayer *)c2.ret_layer).maximumDrawableCount; });
+        CHECK(cnt == 2);
+        struct unixcall_generic_obj_noret r = {c2.ret_view};
+        CHECK(W(73, &r) == 0);
+    }
+
+    setenv("MN_MAX_DRAWABLES", "3", 1);
+    struct unixcall_create_metal_view_from_hwnd c3 = {0x4444, (obj_handle_t)device, 0, 0};
+    CHECK(W(72, &c3) == 0 && c3.ret_view && c3.ret_layer);
+    if (c3.ret_view && c3.ret_layer) {
+        __block NSUInteger cnt = 0;
+        on_main(^{ cnt = ((CAMetalLayer *)c3.ret_layer).maximumDrawableCount; });
+        CHECK(cnt == 3);
+        struct unixcall_generic_obj_noret r = {c3.ret_view};
+        CHECK(W(73, &r) == 0);
+    }
+
+    if (prev) {
+        setenv("MN_MAX_DRAWABLES", prev, 1);
+        free(prev);
+    } else {
+        unsetenv("MN_MAX_DRAWABLES");
+    }
+    CHECK(metal_views().count == 0);
+}
+
 static void *run(void *arg) {
     (void)arg;
     struct { const char *name; void (*fn)(void); } tests[] = {
         {"view", view},       {"two-views", two_views}, {"place", place},
         {"capture", capture}, {"no-quit", no_quit},     {"release", release},
-        {"attach-lifecycle", attach_lifecycle},
+        {"attach-lifecycle", attach_lifecycle}, {"max-drawables", max_drawables},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         @autoreleasepool {

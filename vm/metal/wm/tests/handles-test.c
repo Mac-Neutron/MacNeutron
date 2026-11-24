@@ -385,13 +385,111 @@ static void free_newest_first(void) {
     CHECK(norder == 3 && order[0] == 5 && order[1] == 4 && order[2] == 3);
 }
 
+static int ended[4096];
+struct enc_ev { int kind, idx; };
+static struct enc_ev enc_ev[16];
+static int nenc_ev;
+static void on_end_enc(void *o) {
+    int idx = (int)((int *)o - objs);
+    ended[idx]++;
+    if (nenc_ev < 16) enc_ev[nenc_ev++] = (struct enc_ev){1, idx};
+}
+static void on_rel_enc(enum mn_hkind kind, void *o) {
+    (void)kind;
+    int idx = (int)((int *)o - objs);
+    released[idx]++;
+    if (nenc_ev < 16) enc_ev[nenc_ev++] = (struct enc_ev){2, idx};
+}
+static int enc_before_rel(int idx) {
+    int e = -1, r = -1;
+    for (int i = 0; i < nenc_ev; i++) {
+        if (enc_ev[i].kind == 1 && enc_ev[i].idx == idx && e < 0) e = i;
+        if (enc_ev[i].kind == 2 && enc_ev[i].idx == idx && r < 0) r = i;
+    }
+    return e >= 0 && r > e;
+}
+
+static void encoder_cleanup(void) {
+    /* 1. mn_ht_sweep: open encoder gets end_encoder before on_release; cleared encoder does not. */
+    memset(&rings, 0, sizeof rings);
+    rings.n = 2;
+    reset();
+    memset(ended, 0, sizeof ended);
+    nenc_ev = 0;
+    struct mn_ht *t = mn_ht_new(&fake_rings, on_rel_enc);
+    mn_ht_set_encoder_closer(t, on_end_enc);
+    mn_ht_bind(t, ring(0), H(1, 100), MN_HK_OBJC, obj(100), MN_OWN_PLUS1);
+    mn_ht_mark_encoder(t, H(1, 100), 1);
+    mn_ht_bind(t, ring(0), H(1, 101), MN_HK_OBJC, obj(101), MN_OWN_PLUS1);
+    mn_ht_mark_encoder(t, H(1, 101), 1);
+    mn_ht_mark_encoder(t, H(1, 101), 0);
+    CHECK(mn_ht_release(t, ring(0), H(1, 100)) == 0);
+    CHECK(mn_ht_release(t, ring(0), H(1, 101)) == 0);
+    mn_ht_sweep(t, NULL);
+    CHECK(ended[100] == 1 && released[100] == 1 && enc_before_rel(100));
+    CHECK(ended[101] == 0 && released[101] == 1);
+    mn_ht_free(t);
+
+    /* 2. mn_ht_free: open encoder closes BEFORE ANY on_release (even newer objects); cleared does not. */
+    memset(&rings, 0, sizeof rings);
+    rings.n = 2;
+    reset();
+    memset(ended, 0, sizeof ended);
+    nenc_ev = 0;
+    t = mn_ht_new(&fake_rings, on_rel_enc);
+    mn_ht_set_encoder_closer(t, on_end_enc);
+    mn_ht_bind(t, ring(0), H(1, 102), MN_HK_OBJC, obj(102), MN_OWN_PLUS1);
+    mn_ht_bind(t, ring(0), H(1, 103), MN_HK_OBJC, obj(103), MN_OWN_PLUS1);
+    mn_ht_mark_encoder(t, H(1, 103), 1);
+    mn_ht_bind(t, ring(0), H(1, 104), MN_HK_OBJC, obj(104), MN_OWN_PLUS1);
+    mn_ht_bind(t, ring(0), H(1, 105), MN_HK_OBJC, obj(105), MN_OWN_PLUS1);
+    mn_ht_mark_encoder(t, H(1, 105), 1);
+    mn_ht_mark_encoder(t, H(1, 105), 0);
+    mn_ht_free(t);
+    CHECK(ended[103] == 1 && ended[102] == 0 && ended[104] == 0 && ended[105] == 0);
+    CHECK(released[102] == 1 && released[103] == 1 && released[104] == 1 && released[105] == 1);
+    CHECK(nenc_ev == 5 && enc_ev[0].kind == 1 && enc_ev[0].idx == 103);
+
+    /* 3. mn_ht_bind_encoder + mn_ht_try_close_encoder: 1 on first close, 0 on second; non-encoder returns 1. */
+    memset(&rings, 0, sizeof rings);
+    rings.n = 2;
+    reset();
+    memset(ended, 0, sizeof ended);
+    nenc_ev = 0;
+    t = mn_ht_new(&fake_rings, on_rel_enc);
+    mn_ht_set_encoder_closer(t, on_end_enc);
+    CHECK(mn_ht_bind_encoder(t, H(1, 106), MN_HK_OBJC, obj(106), ring(0), 1) == 0);
+    CHECK(mn_ht_bind(t, ring(0), H(1, 107), MN_HK_OBJC, obj(107), MN_OWN_PLUS1) == 0);
+    CHECK(mn_ht_try_close_encoder(t, H(1, 107)) == 1);
+    CHECK(mn_ht_try_close_encoder(t, H(1, 106)) == 1);
+    CHECK(mn_ht_try_close_encoder(t, H(1, 106)) == 0);
+    CHECK(mn_ht_release(t, ring(0), H(1, 106)) == 0);
+    CHECK(mn_ht_release(t, ring(0), H(1, 107)) == 0);
+    mn_ht_sweep(t, NULL);
+    CHECK(ended[106] == 0 && released[106] == 1 && released[107] == 1);
+
+    /* 4. mn_ht_sweep FIFO order: cmdbuf released before open encoder; end_encoder runs BEFORE cmdbuf's on_release. */
+    reset();
+    memset(ended, 0, sizeof ended);
+    nenc_ev = 0;
+    CHECK(mn_ht_bind(t, ring(0), H(1, 108), MN_HK_OBJC, obj(108), MN_OWN_PLUS1) == 0);
+    CHECK(mn_ht_bind_encoder(t, H(1, 109), MN_HK_OBJC, obj(109), ring(0), 1) == 0);
+    CHECK(mn_ht_release(t, ring(0), H(1, 108)) == 0);
+    CHECK(mn_ht_release(t, ring(0), H(1, 109)) == 0);
+    mn_ht_sweep(t, NULL);
+    CHECK(ended[109] == 1 && released[108] == 1 && released[109] == 1);
+    CHECK(nenc_ev == 3 && enc_ev[0].kind == 1 && enc_ev[0].idx == 109);
+    CHECK(enc_ev[1].kind == 2 && enc_ev[1].idx == 108 && enc_ev[2].kind == 2 && enc_ev[2].idx == 109);
+    mn_ht_free(t);
+}
+
 int main(void) {
     struct { const char *name; void (*fn)(void); } tests[] = {
         {"bind-get", bind_get}, {"stale", stale}, {"unbound", unbound}, {"out-of-range", out_of_range},
         {"kind-mismatch", kind_mismatch}, {"refs", refs}, {"pool", pool}, {"nested-pools", nested_pools},
         {"borrowed", borrowed}, {"cross-ring-use", cross_ring_use}, {"cross-ring-release", cross_ring_release},
         {"reuse-fifo", reuse_fifo}, {"threads", threads}, {"ring-end", ring_end}, {"sweep-phase2", sweep_phase2},
-        {"free-all", free_all}, {"free-newest-first", free_newest_first},
+        {"free-all", free_all}, {"free-newest-first", free_newest_first}, {"encoder-cleanup", encoder_cleanup},
     };
     for (size_t i = 0; i < sizeof tests / sizeof *tests; i++) {
         int before = failures;

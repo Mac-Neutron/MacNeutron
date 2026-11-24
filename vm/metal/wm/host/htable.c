@@ -23,6 +23,8 @@ struct hentry {
     void *_Atomic obj;
     uint32_t refs;          /* the guest's references */
     uint8_t own, busy;      /* busy: bound, or its release is in its second phase */
+    uint8_t is_encoder;     /* bound as a tracked command encoder */
+    uint8_t open_encoder;   /* encoder bound via 30/31/32/129/147 and not yet closed via 33 */
     void *ring;             /* a pool's ring */
     uint64_t seq;           /* when it was bound, the table's count (M4: a context's end releases newest first) */
 };
@@ -41,6 +43,7 @@ struct ringpools { void *ring; struct hpool *stack; size_t n, cap; };
 struct mn_ht {
     struct mn_ht_rings rings;
     void (*release)(enum mn_hkind, void *);
+    void (*end_encoder)(void *obj);
     pthread_mutex_t lock;
     pthread_cond_t cond;
     struct hentry *_Atomic chunks[MN_H_MAX / CHUNK];
@@ -53,26 +56,31 @@ struct mn_ht {
 };
 
 /* Releases collected under the lock, run after it (a dealloc may do anything). */
-struct pending { enum mn_hkind kind; void *obj; uint64_t seq; };
+struct pending { enum mn_hkind kind; void *obj; uint64_t seq; uint8_t open_encoder; };
 struct pendings { struct pending *v; size_t n, cap; };
 
-static void pend_at(struct pendings *p, enum mn_hkind kind, void *obj, uint64_t seq) {
+static void pend_at(struct pendings *p, enum mn_hkind kind, void *obj, uint64_t seq, uint8_t open_encoder) {
     if (!obj) return; /* a queued creation that failed */
     if (p->n == p->cap) {
         struct pending *v = realloc(p->v, (p->cap ? p->cap * 2 : 16) * sizeof *v);
         if (!v) return; /* ponytail: leaks the object rather than failing a release */
         p->v = v, p->cap = p->cap ? p->cap * 2 : 16;
     }
-    p->v[p->n++] = (struct pending){kind, obj, seq};
+    p->v[p->n++] = (struct pending){kind, obj, seq, open_encoder};
 }
-static void pend(struct pendings *p, enum mn_hkind kind, void *obj) { pend_at(p, kind, obj, 0); }
+static void pend(struct pendings *p, enum mn_hkind kind, void *obj) { pend_at(p, kind, obj, 0, 0); }
 static int newer_first(const void *a, const void *b) {
     uint64_t x = ((const struct pending *)a)->seq, y = ((const struct pending *)b)->seq;
     return x < y ? 1 : x > y ? -1 : 0;
 }
 
-static void run_pending(struct mn_ht *t, struct pendings *p) {
-    for (size_t i = 0; i < p->n; i++) t->release(p->v[i].kind, p->v[i].obj);
+static void run_pending(struct mn_ht *t, struct pendings *p, void (*end_enc)(void *)) {
+    if (end_enc) {
+        for (size_t i = 0; i < p->n; i++)
+            if (p->v[i].open_encoder) end_enc(p->v[i].obj);
+    }
+    for (size_t i = 0; i < p->n; i++)
+        t->release(p->v[i].kind, p->v[i].obj);
     free(p->v);
 }
 
@@ -171,7 +179,8 @@ static void push_item(struct hpool *p, mn_handle h) {
     p->items[p->n++] = h;
 }
 
-int mn_ht_bind(struct mn_ht *t, void *ring, mn_handle h, enum mn_hkind kind, void *obj, enum mn_own own) {
+static int bind_impl(struct mn_ht *t, void *ring, mn_handle h, enum mn_hkind kind, void *obj, enum mn_own own,
+                     int open_encoder) {
     uint32_t i = MN_H_INDEX(h), g = MN_H_GEN(h);
     if (!i || i >= MN_H_MAX || !g || kind == MN_HK_ANY || kind == MN_HK_ANY_OBJC) return -1;
     pthread_mutex_lock(&t->lock);
@@ -188,6 +197,8 @@ int mn_ht_bind(struct mn_ht *t, void *ring, mn_handle h, enum mn_hkind kind, voi
     e->refs = 1;
     e->own = (uint8_t)own;
     e->busy = 1;
+    e->is_encoder = open_encoder ? 1 : 0;
+    e->open_encoder = open_encoder ? 1 : 0;
     e->ring = ring;
     e->seq = ++t->seq;
     atomic_store_explicit(&e->state, STATE(g, kind, BOUND), memory_order_release);
@@ -199,6 +210,14 @@ int mn_ht_bind(struct mn_ht *t, void *ring, mn_handle h, enum mn_hkind kind, voi
     pthread_cond_broadcast(&t->cond);
     pthread_mutex_unlock(&t->lock);
     return 0;
+}
+
+int mn_ht_bind(struct mn_ht *t, void *ring, mn_handle h, enum mn_hkind kind, void *obj, enum mn_own own) {
+    return bind_impl(t, ring, h, kind, obj, own, 0);
+}
+
+int mn_ht_bind_encoder(struct mn_ht *t, mn_handle h, uint8_t kind, void *obj, void *ring, int open_encoder) {
+    return bind_impl(t, ring, h, (enum mn_hkind)kind, obj, MN_OWN_AUTORELEASED, open_encoder);
 }
 
 int mn_ht_retain(struct mn_ht *t, mn_handle h) {
@@ -274,9 +293,10 @@ void mn_ht_pool_pop(struct mn_ht *t, void *ring, mn_handle pool) {
     struct pendings run = {0};
     pthread_mutex_lock(&t->lock);
     pop(t, ring, pool, &run);
+    void (*end_enc)(void *) = t->end_encoder;
     pthread_cond_broadcast(&t->cond);
     pthread_mutex_unlock(&t->lock);
-    run_pending(t, &run);
+    run_pending(t, &run, end_enc);
 }
 
 void mn_ht_ring_end(struct mn_ht *t, void *ring) {
@@ -297,8 +317,9 @@ void mn_ht_ring_end(struct mn_ht *t, void *ring) {
         *rp = t->rp[--t->nrp];
         pthread_cond_broadcast(&t->cond);
     }
+    void (*end_enc)(void *) = t->end_encoder;
     pthread_mutex_unlock(&t->lock);
-    run_pending(t, &run);
+    run_pending(t, &run, end_enc);
 }
 
 int mn_ht_release(struct mn_ht *t, void *ring, mn_handle h) {
@@ -322,8 +343,9 @@ int mn_ht_release(struct mn_ht *t, void *ring, mn_handle h) {
             unref(t, e, h, ring);
         }
     }
+    void (*end_enc)(void *) = t->end_encoder;
     pthread_mutex_unlock(&t->lock);
-    run_pending(t, &run);
+    run_pending(t, &run, end_enc);
     return r;
 }
 
@@ -341,15 +363,18 @@ void mn_ht_sweep(struct mn_ht *t, void *ring) {
             unbind(t, e); /* no new use can find it now; one still in flight (not on this ring) is waited out next */
             defer(t, d->index, d->gen, 2, ring);
         } else if (d->phase == 2) {
-            pend(&run, S_KIND(e->state), e->obj);
+            pend_at(&run, S_KIND(e->state), e->obj, 0, e->open_encoder);
+            e->open_encoder = 0;
+            e->is_encoder = 0;
             e->obj = NULL;
             e->busy = 0;
             pthread_cond_broadcast(&t->cond);
         } /* else retained again by a ring that ran after the release: it lives on */
         free(d);
     }
+    void (*end_enc)(void *) = t->end_encoder;
     pthread_mutex_unlock(&t->lock);
-    run_pending(t, &run);
+    run_pending(t, &run, end_enc);
 }
 
 void mn_ht_free(struct mn_ht *t) {
@@ -362,7 +387,11 @@ void mn_ht_free(struct mn_ht *t) {
         struct hentry *chunk = t->chunks[c];
         if (!chunk) continue;
         for (uint32_t i = 0; i < CHUNK; i++)
-            if (chunk[i].busy) pend_at(&run, S_KIND(chunk[i].state), chunk[i].obj, chunk[i].seq);
+            if (chunk[i].busy) {
+                pend_at(&run, S_KIND(chunk[i].state), chunk[i].obj, chunk[i].seq, chunk[i].open_encoder);
+                chunk[i].open_encoder = 0;
+                chunk[i].is_encoder = 0;
+            }
         free(chunk);
     }
     for (size_t i = 0; i < t->nrp; i++) {
@@ -371,12 +400,54 @@ void mn_ht_free(struct mn_ht *t) {
     }
     free(t->rp);
     /* Newest first, by when each was bound, as a program tears down (M4: native DXMT's D3D11 children use their
-     * device's pools without holding it, so the device, made first, goes last). */
+     * device's pools without holding it, so the device, made first, goes last). Close any open encoders first before
+     * releasing any command buffers or resources. */
     if (run.n) qsort(run.v, run.n, sizeof *run.v, newer_first);
-    run_pending(t, &run);
+    pthread_mutex_lock(&t->lock);
+    void (*end_enc)(void *) = t->end_encoder;
+    pthread_mutex_unlock(&t->lock);
+    run_pending(t, &run, end_enc);
     pthread_mutex_destroy(&t->lock);
     pthread_cond_destroy(&t->cond);
     free(t);
+}
+
+void mn_ht_set_encoder_closer(struct mn_ht *t, void (*end_enc)(void *obj)) {
+    if (!t) return;
+    pthread_mutex_lock(&t->lock);
+    t->end_encoder = end_enc;
+    pthread_mutex_unlock(&t->lock);
+}
+
+void mn_ht_mark_encoder(struct mn_ht *t, mn_handle h, int open) {
+    uint32_t i = MN_H_INDEX(h), g = MN_H_GEN(h);
+    if (!t || !i || i >= MN_H_MAX || !g) return;
+    pthread_mutex_lock(&t->lock);
+    struct hentry *e = entry(t, i, 0);
+    if (e && e->busy && S_GEN(e->state) == g) {
+        if (open) e->is_encoder = 1;
+        e->open_encoder = open ? 1 : 0;
+    }
+    pthread_mutex_unlock(&t->lock);
+}
+
+int mn_ht_try_close_encoder(struct mn_ht *t, mn_handle h) {
+    uint32_t i = MN_H_INDEX(h), g = MN_H_GEN(h);
+    if (!t || !i || i >= MN_H_MAX || !g) return 1;
+    pthread_mutex_lock(&t->lock);
+    struct hentry *e = entry(t, i, 0);
+    int ret = 1;
+    if (e && e->busy && S_GEN(e->state) == g) {
+        if (!e->is_encoder) ret = 1;
+        else if (e->open_encoder) {
+            e->open_encoder = 0;
+            ret = 1;
+        } else {
+            ret = 0;
+        }
+    }
+    pthread_mutex_unlock(&t->lock);
+    return ret;
 }
 
 size_t mn_ht_live(struct mn_ht *t) {

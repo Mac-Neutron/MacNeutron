@@ -44,11 +44,22 @@ impl MicroVM {
         }
     }
 
-    /// A launch would run in the folder's VM: macneutron-vm and a complete image set there, no tools swap under way.
+    /// The VM helper executable: inside `macneutron-vm.app` when present and executable, else the legacy bare `macneutron-vm`.
+    pub fn executable(folder: &Path) -> PathBuf {
+        let app_bin = folder.join("macneutron-vm.app/Contents/MacOS/macneutron-vm");
+        if is_executable(&app_bin) {
+            app_bin
+        } else {
+            folder.join("macneutron-vm")
+        }
+    }
+
+    /// A launch would run in the folder's VM: macneutron-vm (bundle or bare binary) and a complete image set there, no tools swap under way.
     pub fn is_ready(folder: &Path) -> bool {
-        let vm = folder.join("macneutron-vm");
+        let app_bin = folder.join("macneutron-vm.app/Contents/MacOS/macneutron-vm");
+        let bare_bin = folder.join("macneutron-vm");
         let installing = folder.join(".installing"); // VMToolsInstaller's swap
-        is_executable(&vm) && Self::images_complete(folder) && !installing.exists()
+        (is_executable(&app_bin) || is_executable(&bare_bin)) && Self::images_complete(folder) && !installing.exists()
     }
 
     /// The setup (`macneutron vm-setup`) writes images/manifest.sha256 last, once the whole set is in place; the image
@@ -452,6 +463,31 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(root.join("macneutron-vm"), std::fs::Permissions::from_mode(0o644)).unwrap();
         assert!(!MicroVM::is_ready(&root));
+    }
+
+    #[test]
+    fn executable_and_is_ready_prefer_app_bundle_and_fall_back_to_bare_binary() {
+        let root = make_folder("app-bundle");
+        // Bare binary alone: ready, executable falls back to bare macneutron-vm.
+        assert!(MicroVM::is_ready(&root));
+        assert_eq!(MicroVM::executable(&root), root.join("macneutron-vm"));
+
+        // With an executable .app bundle, executable prefers the bundle path.
+        let app_bin = root.join("macneutron-vm.app/Contents/MacOS/macneutron-vm");
+        crate::test_support::write("#!/bin/sh\n", &app_bin, true);
+        assert!(MicroVM::is_ready(&root));
+        assert_eq!(MicroVM::executable(&root), app_bin);
+
+        // Removing the legacy bare binary still leaves the .app bundle ready.
+        std::fs::remove_file(root.join("macneutron-vm")).unwrap();
+        assert!(MicroVM::is_ready(&root));
+        assert_eq!(MicroVM::executable(&root), app_bin);
+
+        // Non-executable .app binary alone is not ready and falls back to bare path.
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&app_bin, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!MicroVM::is_ready(&root));
+        assert_eq!(MicroVM::executable(&root), root.join("macneutron-vm"));
     }
 
     #[test]

@@ -706,7 +706,7 @@ build_app() {
   cat > "$AL/README" << 'EOF'
 MacNeutron is under the MIT licence (LICENSE, beside this file).
 
-MacNeutron's programs (Contents/MacOS/MacNeutron, Contents/Helpers/macneutron, Contents/Helpers/vm/macneutron-vm,
+MacNeutron's programs (Contents/MacOS/MacNeutron, Contents/Helpers/macneutron, Contents/Helpers/vm/macneutron-vm.app,
 and Install MacNeutron, which carries this app) are Rust: they link Rust's standard library (its notices in rust/std/)
 and the crates rust/crates/INDEX lists, each crate's licence files in rust/crates/<crate>-<version>/. zstd-sys compiles
 zstd's decoder in (BSD-3-Clause, its folder's zstd-LICENSE).
@@ -770,11 +770,11 @@ EOF
   # In its bundle with the provisioning profile: the cross-architecture entitlement maps 32-bit Steam calls' region.
   cp -X "$MACNEUTRON_PROVISIONING_PROFILE" "$SH/Contents/embedded.provisionprofile" || die "no provisioning profile"
   signed_for "$ROOT/release/entitlements/mn-steam-host.plist" "$SH"
-  signed_for "$ROOT/release/entitlements/macneutron-vm.plist" "$VMH/macneutron-vm"
+  signed_for "$ROOT/release/entitlements/macneutron-vm.plist" "$VMH/macneutron-vm.app"
   check_hardened "$VMH" "$A/Contents/Helpers/mkfs.erofs" || exit 1
   check_entitlement "$SH" com.apple.security.cs.disable-library-validation || exit 1
   check_entitlement "$SH" com.apple.developer.cross-architecture-support || exit 1
-  check_entitlement "$VMH/macneutron-vm" com.apple.security.hypervisor || exit 1
+  check_entitlement "$VMH/macneutron-vm.app" com.apple.security.hypervisor || exit 1
   sign "$A/Contents/Helpers/macneutron"
   sign "$A"
   check_minos "$A" 27.0 || exit 1

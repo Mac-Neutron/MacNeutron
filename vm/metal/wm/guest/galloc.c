@@ -1,8 +1,8 @@
 /* The guest's blob sub-allocator (galloc.h): first fit over each blob's 16 KiB pages, one lock. A region past 64 MiB
- * has a blob of its own, freed with it.
- * ponytail: 64 MiB blobs are kept until the process ends; free empty ones if guest memory pressure shows. Zeroing a
- * reused region happens under the lock: per-blob locks if allocation-heavy threads contend (milestone 5). */
+ * has a blob of its own, freed with it; idle 64 MiB blobs are trimmed back to the OS, keeping at most 1 warm blob.
+ * Zeroing a reused region happens under the lock: per-blob locks if allocation-heavy threads contend (milestone 5). */
 #include "galloc.h"
+#include <assert.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -19,12 +19,15 @@ enum { FREE, USED, DIRTY };
 struct gblob {
     struct mn_blob b;
     uint32_t npages;
+    uint32_t used_pages;
     uint8_t *used;     /* per page: FREE, USED or DIRTY (free, and written since the blob was made) */
     struct rinfo *r;   /* per page: a region's record at its first page */
+    struct gblob *next_free;
 };
 int mn_wm_wow64;
 static struct gblob **blobs;
 static size_t nblobs;
+static size_t empty_std_blobs;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static struct mn_notify *queue;
 static int queue_tried;
@@ -59,36 +62,56 @@ static struct rinfo *region(uint64_t id, struct gblob **gb) {
     return &b->r[page];
 }
 
-/* A blob of its own (past 64 MiB): gone with its region. */
-static void free_blob(struct gblob *b) {
+/* A blob of its own (past 64 MiB), or an excess idle 64 MiB blob. */
+static void detach_blob_locked(struct gblob *b, struct gblob **to_free) {
     for (size_t i = 0; i < nblobs; i++)
         if (blobs[i] == b) {
+            if (b->npages == BLOB_PAGES && b->used_pages == 0 && empty_std_blobs > 0) empty_std_blobs--;
             blobs[i] = blobs[--nblobs];
             break;
         }
-    mn_blob_free(&b->b);
-    free(b->used);
-    free(b->r);
-    free(b);
+    b->next_free = *to_free;
+    *to_free = b;
 }
 
-static void release_pages(struct gblob *b, uint32_t page) {
-    if (b->npages > BLOB_PAGES) return free_blob(b);
-    memset(b->used + page, DIRTY, b->r[page].pages);
+static void free_detached(struct gblob *list) {
+    while (list) {
+        struct gblob *b = list;
+        list = b->next_free;
+        mn_blob_free(&b->b);
+        free(b->used);
+        free(b->r);
+        free(b);
+    }
+}
+
+static void release_pages_locked(struct gblob *b, uint32_t page, struct gblob **to_free) {
+    uint32_t n = b->r[page].pages;
+    if (b->npages > BLOB_PAGES) {
+        detach_blob_locked(b, to_free);
+        return;
+    }
+    memset(b->used + page, DIRTY, n);
     b->r[page] = (struct rinfo){0};
+    assert(b->used_pages >= n);
+    b->used_pages -= n;
+    if (b->used_pages == 0) {
+        empty_std_blobs++;
+        if (empty_std_blobs > 1) detach_blob_locked(b, to_free);
+    }
 }
 
-static void drop_holder(uint64_t id) {
+static void drop_holder(uint64_t id, struct gblob **to_free) {
     struct gblob *b;
     struct rinfo *r = region(id, &b);
     if (!r || !r->holders) return;
-    if (!--r->holders && r->freed) release_pages(b, (uint32_t)id);
+    if (!--r->holders && r->freed) release_pages_locked(b, (uint32_t)id, to_free);
 }
 
-static void drain_locked(void) {
+static void drain_locked(struct gblob **to_free) {
     struct mn_notify_rec rec;
     while (queue && mn_notify_next(queue, &rec))
-        if (rec.type == MN_NOTIFY_REGION_FREE) drop_holder(rec.value);
+        if (rec.type == MN_NOTIFY_REGION_FREE) drop_holder(rec.value, to_free);
 }
 
 static struct gblob *new_blob(uint32_t pages) {
@@ -127,21 +150,26 @@ int mn_galloc(uint64_t len, struct mn_region *out) {
     uint64_t pages64 = len ? (len + MN_PAGE - 1) / MN_PAGE : 1;
     if (pages64 > UINT32_MAX) return -ENOMEM;
     uint32_t pages = (uint32_t)pages64, at = 0;
+    struct gblob *to_free = NULL;
     pthread_mutex_lock(&lock);
     if (!queue_tried) attach_queue();
-    drain_locked();
+    drain_locked(&to_free);
     struct gblob *b = NULL;
     if (pages <= BLOB_PAGES)
         for (size_t i = 0; i < nblobs && !b; i++)
             if (blobs[i]->npages == BLOB_PAGES && fit(blobs[i], pages, &at)) b = blobs[i];
-    if (!b) {
+    if (b) {
+        if (b->used_pages == 0 && empty_std_blobs > 0) empty_std_blobs--;
+    } else {
         b = new_blob(pages > BLOB_PAGES ? pages : BLOB_PAGES);
         at = 0;
     }
     if (!b) {
         pthread_mutex_unlock(&lock);
+        free_detached(to_free);
         return -ENOMEM;
     }
+    b->used_pages += pages;
     /* As a new Metal buffer's: zeroed (D3D12's committed resources start so, and DXMT relies on fresh memory). */
     for (uint32_t p = at; p < at + pages; p++)
         if (b->used[p] == DIRTY) memset((uint8_t *)b->b.ptr + (uint64_t)p * MN_PAGE, 0, MN_PAGE);
@@ -150,18 +178,21 @@ int mn_galloc(uint64_t len, struct mn_region *out) {
     *out = (struct mn_region){MN_REGION(b->b.blob_id, at), (uint8_t *)b->b.ptr + (uint64_t)at * MN_PAGE,
                               (uint64_t)pages * MN_PAGE};
     pthread_mutex_unlock(&lock);
+    free_detached(to_free);
     return 0;
 }
 
 void mn_gfree(uint64_t id) {
+    struct gblob *to_free = NULL;
     pthread_mutex_lock(&lock);
     struct gblob *b;
     struct rinfo *r = region(id, &b);
     if (r && !r->freed) {
         r->freed = 1;
-        if (!r->holders) release_pages(b, (uint32_t)id);
+        if (!r->holders) release_pages_locked(b, (uint32_t)id, &to_free);
     }
     pthread_mutex_unlock(&lock);
+    free_detached(to_free);
 }
 
 void mn_ghold(uint64_t id) {
@@ -172,9 +203,11 @@ void mn_ghold(uint64_t id) {
 }
 
 void mn_gunhold(uint64_t id) {
+    struct gblob *to_free = NULL;
     pthread_mutex_lock(&lock);
-    drop_holder(id);
+    drop_holder(id, &to_free);
     pthread_mutex_unlock(&lock);
+    free_detached(to_free);
 }
 
 int mn_glookup(const void *p, uint64_t len, uint64_t *id, uint64_t *blob_id, uint64_t *offset) {
@@ -214,13 +247,15 @@ unsigned mn_gholders(uint64_t id) {
 }
 
 void mn_gdrain(void) {
+    struct gblob *to_free = NULL;
     pthread_mutex_lock(&lock);
-    drain_locked();
+    drain_locked(&to_free);
     pthread_mutex_unlock(&lock);
+    free_detached(to_free);
 }
 
 void mn_galloc_forget(void) {
-    blobs = NULL, nblobs = 0; /* ponytail: the parent's mappings stay in the child, unused */
+    blobs = NULL, nblobs = 0, empty_std_blobs = 0; /* ponytail: the parent's mappings stay in the child, unused */
     queue = NULL, queue_tried = 0;
     pthread_mutex_init(&lock, NULL);
 }

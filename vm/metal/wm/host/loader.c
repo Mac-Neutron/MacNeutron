@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 const wm_unix_fn *mn_wm_funcs;
+int mn_wm_is_real = 0;
 static void (*set_hook)(void (*)(uint64_t));
 
 int mn_wm_load(const char *dir) {
@@ -16,7 +17,10 @@ int mn_wm_load(const char *dir) {
     if (!wm) goto fail;
     set_hook = (void (*)(void (*)(uint64_t)))dlsym(nt, "mn_ntdll_set_hook");
     mn_wm_funcs = (const wm_unix_fn *)dlsym(wm, "__wine_unix_call_funcs");
-    if (set_hook && mn_wm_funcs) return 0;
+    if (set_hook && mn_wm_funcs) {
+        mn_wm_is_real = 1;
+        return 0;
+    }
     fprintf(stderr, "mn_wm_load: %s lacks mn_ntdll_set_hook or __wine_unix_call_funcs\n", dir);
     return -1;
 fail:

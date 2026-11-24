@@ -133,8 +133,20 @@ void mn_wm_present_probe(struct mn_wm_ctx *c, void *cmdbuf, void *drawable) {
         probe((id<MTLCommandBuffer>)cmdbuf, (id<CAMetalDrawable>)drawable, frame);
 }
 
+uint32_t mn_desired_max_drawables(void) {
+    const char *v = getenv("MN_MAX_DRAWABLES");
+    if (!v || !*v) return 2;
+    if (!strcmp(v, "2")) return 2;
+    if (!strcmp(v, "3")) return 3;
+    static _Atomic int warned;
+    if (!atomic_exchange(&warned, 1))
+        fprintf(stderr, "mn-window: MN_MAX_DRAWABLES=%s isn't 2 or 3, using 2\n", v);
+    return 2;
+}
+
 /* fn(ctx) once the display shows drawable (or drops it): Metal's presented handler. */
 void mn_wm_on_shown(void *drawable, void (*fn)(void *ctx), void *ctx) {
+    if (!drawable) return;
     [(id<MTLDrawable>)drawable addPresentedHandler:^(id<MTLDrawable> d) {
         (void)d;
         fn(ctx);
@@ -149,8 +161,14 @@ NTSTATUS_T mn_wm_present_special(struct mn_wm_state *k) {
         id<CAMetalDrawable> drawable;
         memcpy(&cb, k->p, sizeof cb);
         memcpy(&drawable, k->p + 8, sizeof drawable);
+        if (!cb) return MN_STATUS_INVALID_PARAMETER;
+        if (!drawable) {
+            if (atomic_fetch_add(&k->c->nil_present_logs, 1) < 4)
+                fprintf(stderr, "mn-present: slot %u skipped nil drawable (ctx %u)\n", k->slot, k->c->ctx_id);
+            return 0;
+        }
         uint64_t frame = atomic_fetch_add(&k->c->presented, 1) + 1;
-        if (probing() && frame % 60 == 30 && cb && drawable) probe(cb, drawable, frame);
+        if (probing() && frame % 60 == 30) probe(cb, drawable, frame);
         NTSTATUS_T s = mn_wm_invoke(k->slot, k->p);
         if (s) atomic_fetch_sub(&k->c->presented, 1);
         else count_frame();

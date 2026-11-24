@@ -27,7 +27,10 @@ static size_t no_rings(void *c, void *e, struct mn_mark *m, size_t cap) { (void)
 static int all_passed(void *c, const struct mn_mark *m, size_t n) { (void)c, (void)m, (void)n; return 1; }
 static struct mn_ht_rings rings = {NULL, no_rings, all_passed};
 
-static void init(void) { loop_ctx.ht = mn_ht_new(&rings, mn_wm_release_object); }
+static void init(void) {
+    loop_ctx.ht = mn_ht_new(&rings, mn_wm_release_object);
+    mn_ht_set_encoder_closer(loop_ctx.ht, mn_wm_end_encoder);
+}
 
 void *loop_ring(void) { return ring_state; }
 
