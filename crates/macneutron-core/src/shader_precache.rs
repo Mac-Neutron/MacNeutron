@@ -75,7 +75,18 @@ impl ShaderPrecache {
 
     pub fn write_stamp(&self) {
         let _ = std::fs::create_dir_all(&self.folder);
+        Self::exclude_from_backup(&self.folder);
         let _ = std::fs::write(self.stamp_file(), format!("{}\n", self.builds));
+    }
+
+    /// Best-effort Time Machine exclusion for the shader precache directory.
+    pub fn exclude_from_backup(dir: &Path) {
+        let _ = std::process::Command::new("/usr/bin/tmutil")
+            .arg("addexclusion")
+            .arg(dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
 
     pub fn write_stamp_if_missing(&self) {
@@ -503,5 +514,17 @@ mod tests {
             lines,
             ["precache: Game.exe.pipelines exit=0 replay: 20 pipelines (20 graphics, 0 compute), 20 created, 0 failed, 0 bad records, 9 ms"]
         );
+    }
+
+    #[test]
+    fn write_stamp_creates_folder_and_best_effort_tmutil_exclusion() {
+        let dir = make_temp_dir().join("dxmt-pipelines");
+        let precache = ShaderPrecache::with_folder(dir.clone(), "tr123 26A1".to_string());
+        assert!(!dir.exists());
+        precache.write_stamp();
+        assert!(dir.is_dir());
+        assert_eq!(precache.stamp().as_deref(), Some("tr123 26A1"));
+        // Calling exclude_from_backup on a missing directory is a safe no-op.
+        ShaderPrecache::exclude_from_backup(&dir.join("nonexistent-subdir"));
     }
 }

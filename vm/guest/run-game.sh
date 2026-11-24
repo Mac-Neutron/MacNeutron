@@ -2,8 +2,14 @@
 # GAME_DIR, EXE, the game's arguments (set --) and its launch options before this). As Proton's waitforexitandrun: the
 # prefix (/home/mn/pfx, on the game's own state disk), Steam's bridge with Valve's steamclient64.dll from the share, the
 # game through steam.exe, and every process in the prefix waited for. Exits with the game's status.
-export WINEPREFIX=/home/mn/pfx SteamAppId=$APPID SteamGameId=$APPID DISPLAY=:0 PATH=/opt/mn-wine/bin:$PATH
+export WINEPREFIX=/home/mn/pfx SteamGameId=$APPID DISPLAY=:0 PATH=/opt/mn-wine/bin:$PATH
 export WINEDEBUG=${WINEDEBUG:--all}
+export FEX_X87REDUCEDPRECISION="${FEX_X87REDUCEDPRECISION:-1}"
+if [ "${MN_NON_STEAM_SHORTCUT:-}" = "1" ]; then
+  unset SteamAppId
+else
+  export SteamAppId=$APPID
+fi
 # MN_MAC_HOME (the launcher's): the profile is the Mac prefix's, which mn-runner mounted at users/steamuser (spec
 # 2026-10-23-macneutron-vm-shared-saves §4.5), so Steam Cloud and the game use the same saves. Wine names the profile
 # after $USER: steamuser, Proton's name. And the XDG folders are the Mac's, which the profile's links name, so when
@@ -35,7 +41,13 @@ if [ "${MACNEUTRON_VM_WOW64:-}" = 1 ] || [ "${PROTON_USE_WOW64:-}" = 1 ]; then e
 # launcher's PROTON_EAC_RUNTIME (Steam's copy, mounted read-only by mn-runner), or the share's (vm/tests/eac.sh
 # puts one there). An EAC game's process loads its easyanticheat_x64.so, or under old WoW64 a 32-bit one its
 # lib32/easyanticheat_x86.so.
-[ ! -d /mnt/share/eac-runtime/v2 ] || export PROTON_EAC_RUNTIME=/mnt/share/eac-runtime
+if [ -z "${PROTON_EAC_RUNTIME:-}" ]; then
+  if [ -d "/Volumes/Proton EasyAntiCheat Runtime/v2" ]; then
+    export PROTON_EAC_RUNTIME="/Volumes/Proton EasyAntiCheat Runtime"
+  elif [ -d /mnt/share/eac-runtime/v2 ]; then
+    export PROTON_EAC_RUNTIME=/mnt/share/eac-runtime
+  fi
+fi
 # The 32-bit Unix side's libraries FEX's RootFS lacks (i686 libasound); 64-bit processes skip them.
 export LD_LIBRARY_PATH="/opt/mn-wine/lib/mn-i386${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 # Direct3D 9's mtld3d logs into the share's traces/mtld3d, not beside the game's exe (as the launcher's on macOS); a
@@ -85,10 +97,16 @@ env -u PROTON_EAC_RUNTIME WINEDLLOVERRIDES="mscoree,mshtml=" wineboot $up >/dev/
 if ! grep -q '^"EmulateModeset"="Y"' "$WINEPREFIX/user.reg" 2>/dev/null ||
    ! grep -q '^"ShowCrashDialog"=dword:00000000' "$WINEPREFIX/user.reg" 2>/dev/null ||
    ! grep -q '^"Arial (TrueType)"="arial.ttf"' "$WINEPREFIX/system.reg" 2>/dev/null ||
-   ! grep -qF 'CommonRedist\\XNA\\4.0]' "$WINEPREFIX/system.reg" 2>/dev/null; then
-  wine reg add 'HKCU\Software\Wine\X11 Driver' /v EmulateModeset /d Y /f >/dev/null 2>&1
-  wine reg add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f >/dev/null 2>&1
-  { printf 'REGEDIT4\n\n[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts]\n'
+   ! grep -qF 'CommonRedist\\XNA\\4.0]' "$WINEPREFIX/system.reg" 2>/dev/null ||
+   ! sed -n '/^\[Software\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\AeDebug\]/,/^\[/p' "$WINEPREFIX/system.reg" 2>/dev/null | grep -q '^"Auto"="0"' ||
+   ! sed -n '/^\[Software\\\\Wow6432Node\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\AeDebug\]/,/^\[/p' "$WINEPREFIX/system.reg" 2>/dev/null | grep -q '^"Auto"="0"'; then
+  {
+    printf 'Windows Registry Editor Version 5.00\n\n'
+    printf '[HKEY_CURRENT_USER\\Software\\Wine\\X11 Driver]\n"EmulateModeset"="Y"\n\n'
+    printf '[HKEY_CURRENT_USER\\Software\\Wine\\WineDbg]\n"ShowCrashDialog"=dword:00000000\n\n'
+    printf '[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AeDebug]\n"Auto"="0"\n\n'
+    printf '[HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion\\AeDebug]\n"Auto"="0"\n\n'
+    printf '[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts]\n'
     for e in Arial:arial Arial\ Bold:arialbd Courier\ New:cour Courier\ New\ Bold:courbd Times\ New\ Roman:times \
              Tahoma:tahoma Tahoma\ Bold:tahomabd Marlett:marlett Symbol:symbol Webdings:webdings Wingdings:wingding; do
       printf '"%s (TrueType)"="%s.ttf"\n' "${e%:*}" "${e#*:}"
@@ -97,8 +115,10 @@ if ! grep -q '^"EmulateModeset"="Y"' "$WINEPREFIX/user.reg" 2>/dev/null ||
       k=.NET\\$n v=$n
       [ "$n" != XNA ] || k=XNA\\4.0 v=4.0
       printf '\n[HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Valve\\Steam\\Apps\\CommonRedist\\%s]\n"%s"=dword:00000001\n' "$k" "$v"
-    done; } > /tmp/mn-fonts.reg
-  wine reg import 'Z:\tmp\mn-fonts.reg' >/dev/null 2>&1
+    done
+  } > /tmp/mn-init.reg
+  wine reg import 'Z:\tmp\mn-init.reg' >/dev/null 2>&1
+  rm -f /tmp/mn-init.reg
   wineserver -k; wineserver -w
 fi
 # MACNEUTRON_VM_D3D=forward (the launcher's): the game's Direct3D through mnd3d.dll to the host's native DXMT.
@@ -118,7 +138,19 @@ STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
 cp /mnt/share/bin/steam.exe "$W/system32/steam.exe"  # the one Proton runs (proton:2120)
-[ -f /mnt/share/valve/steamclient64.dll ] && cp /mnt/share/valve/steamclient64.dll "$STEAM/steamclient64.dll"
+if [ -f /mnt/share/valve/steamclient64.dll ]; then
+  cp /mnt/share/valve/steamclient64.dll "$STEAM/steamclient64.dll"
+elif [ -f /opt/mn-wine/lib/wine/x86_64-windows/lsteamclient.dll ]; then
+  cp /opt/mn-wine/lib/wine/x86_64-windows/lsteamclient.dll "$STEAM/steamclient64.dll"
+fi
+if [ -f /mnt/share/valve/Steam.dll ]; then
+  cp /mnt/share/valve/Steam.dll "$STEAM/Steam.dll"
+  if [ -d "$W/syswow64" ]; then
+    cp /mnt/share/valve/Steam.dll "$W/syswow64/Steam.dll"
+  fi
+else
+  rm -f "$STEAM/Steam.dll" "$W/syswow64/Steam.dll"
+fi
 # A 32-bit game's client: steam.exe names it SteamClientDll when it's there. Keep Wine's own i386 lsteamclient.dll
 # under its own name (and remove any stale steamclient.dll from an earlier launch) so get_mem_from_steamclient_dll()'s
 # GetModuleHandleW(L"steamclient.dll") does not clobber lsteamclient.dll's own .data section.

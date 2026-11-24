@@ -93,6 +93,7 @@ impl VMToolsInstaller {
                 }
                 return Err(RuntimeInstallError::CopyFailed(status));
             }
+            crate::runtime_installer::scrub_tree_xattrs(&vm.join(format!("{item}.new")));
         }
         // As wine.app's install checks its copy: every Mach-O in the copies verifies, or nothing is swapped.
         for item in Self::ITEMS.iter() {
@@ -121,24 +122,35 @@ impl VMToolsInstaller {
                 return Err(RuntimeInstallError::SwapFailed(std::io::Error::last_os_error().raw_os_error().unwrap_or(0)));
             }
             let _ = posix::remove_item(&vm.join(format!("{item}.new"))); // the old item, after a swap
+            crate::runtime_installer::scrub_tree_xattrs(&old);
         }
         std::fs::write(&stamp, wanted.as_bytes()).map_err(|e| RuntimeInstallError::Io(e.to_string()))?;
         let _ = std::fs::remove_file(&installing);
         Ok(VMToolsInstallOutcome::Installed)
     }
 
-    /// Valve's steamclient64.dll (`ValveClient`) as the guest's share/valve/steamclient64.dll (run-game.sh copies it into
-    /// the game's prefix); a None install removes it.
+    /// Valve's steamclient64.dll and Steam.dll (`ValveClient`) as the guest's share/valve/{steamclient64,Steam}.dll
+    /// (run-game.sh copies them into the game's prefix); a None install (or absent Steam.dll) removes them.
     pub fn copy_valve_client(install: Option<&ValveInstall>, vm: &Path) -> std::io::Result<()> {
         if Self::is_developer_folder(vm) {
             return Ok(());
         }
-        let destination = vm.join("share/valve/steamclient64.dll");
+        let valve_dir = vm.join("share/valve");
+        let dest64 = valve_dir.join("steamclient64.dll");
+        let dest_legacy = valve_dir.join("Steam.dll");
         let Some(install) = install else {
-            let _ = std::fs::remove_file(&destination);
+            let _ = std::fs::remove_file(&dest64);
+            let _ = std::fs::remove_file(&dest_legacy);
             return Ok(());
         };
-        RuntimeInstaller::install_file(&install.steam_client64(), &destination)
+        RuntimeInstaller::install_file(&install.steam_client64(), &dest64)?;
+        let src_legacy = install.legacy_steam_dll();
+        if src_legacy.is_file() {
+            RuntimeInstaller::install_file(&src_legacy, &dest_legacy)?;
+        } else {
+            let _ = std::fs::remove_file(&dest_legacy);
+        }
+        Ok(())
     }
 
     /// codesign --verify --strict on every Mach-O under `url` (an item's copy): 0, or the first failure's status.
@@ -578,5 +590,120 @@ mod tests {
         assert!(MicroVM::find(&vm, &BTreeMap::new(), Verb::WaitForExitAndRun).is_some());
         write("", &vm.join(".installing"), false);
         assert!(MicroVM::find(&vm, &BTreeMap::new(), Verb::WaitForExitAndRun).is_none());
+    }
+
+    #[test]
+    fn steam_dll_is_copied_when_present_and_removed_when_absent_or_none() {
+        let vm = empty_folder();
+        let valve_dir = make_temp_dir();
+        write("valve 64\n", &valve_dir.join("steamclient64.dll"), false);
+        write("valve legacy\n", &valve_dir.join("Steam.dll"), false);
+        let valve = ValveInstall { version: "1".into(), folder: valve_dir.clone() };
+
+        VMToolsInstaller::copy_valve_client(Some(&valve), &vm).unwrap();
+        let copied64 = vm.join("share/valve/steamclient64.dll");
+        let copied_legacy = vm.join("share/valve/Steam.dll");
+        assert_eq!(text(&copied64).unwrap(), "valve 64\n");
+        assert_eq!(text(&copied_legacy).unwrap(), "valve legacy\n");
+
+        std::fs::remove_file(valve_dir.join("Steam.dll")).unwrap();
+        VMToolsInstaller::copy_valve_client(Some(&valve), &vm).unwrap();
+        assert!(copied64.exists());
+        assert!(!copied_legacy.exists());
+
+        write("valve legacy 2\n", &valve_dir.join("Steam.dll"), false);
+        VMToolsInstaller::copy_valve_client(Some(&valve), &vm).unwrap();
+        assert!(copied_legacy.exists());
+
+        VMToolsInstaller::copy_valve_client(None, &vm).unwrap();
+        assert!(!copied64.exists());
+        assert!(!copied_legacy.exists());
+    }
+
+    #[test]
+    fn installed_vm_tools_scrub_quarantine_and_provenance() {
+        let tools = make_tools("a");
+        let vm = empty_folder();
+        let targets = [
+            tools.join("macneutron-vm"),
+            tools.join("libkrun/libkrun.1.dylib"),
+            tools.join("run-game.sh"),
+        ];
+        for file in &targets {
+            assert_eq!(set_xattr(file, "com.apple.quarantine", b"0083;66f00000;Safari;"), 0);
+            let _ = set_xattr(file, "com.apple.provenance", b"test-prov");
+        }
+        assert_eq!(install(&tools, None, &vm, &[]).unwrap(), VMToolsInstallOutcome::Installed);
+        let can_strip_provenance = can_remove_provenance(&vm);
+        for rel in ["macneutron-vm", "libkrun/libkrun.1.dylib", "run-game.sh"] {
+            let dest = vm.join(rel);
+            assert!(!has_xattr(&dest, "com.apple.quarantine"), "{}", dest.display());
+            assert_ne!(
+                xattr_bytes(&dest, "com.apple.provenance").as_deref(),
+                Some(b"test-prov".as_slice()),
+                "{}",
+                dest.display()
+            );
+            if can_strip_provenance {
+                assert!(!has_xattr(&dest, "com.apple.provenance"), "{}", dest.display());
+            }
+        }
+    }
+
+    fn set_xattr(path: &Path, name: &str, value: &[u8]) -> i32 {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        let cpath = CString::new(path.as_os_str().as_bytes()).unwrap();
+        let cname = CString::new(name).unwrap();
+        unsafe {
+            libc::setxattr(
+                cpath.as_ptr(),
+                cname.as_ptr(),
+                value.as_ptr() as *const libc::c_void,
+                value.len(),
+                0,
+                0,
+            )
+        }
+    }
+
+    fn xattr_bytes(path: &Path, name: &str) -> Option<Vec<u8>> {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        let cpath = CString::new(path.as_os_str().as_bytes()).unwrap();
+        let cname = CString::new(name).unwrap();
+        let len = unsafe { libc::getxattr(cpath.as_ptr(), cname.as_ptr(), std::ptr::null_mut(), 0, 0, 0) };
+        if len < 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; len as usize];
+        let got = unsafe {
+            libc::getxattr(
+                cpath.as_ptr(),
+                cname.as_ptr(),
+                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.len(),
+                0,
+                0,
+            )
+        };
+        (got >= 0).then(|| {
+            buf.truncate(got as usize);
+            buf
+        })
+    }
+
+    fn has_xattr(path: &Path, name: &str) -> bool {
+        xattr_bytes(path, name).is_some_and(|b| !b.is_empty())
+    }
+
+    fn can_remove_provenance(dir: &Path) -> bool {
+        let probe = dir.join(".provenance-probe");
+        let _ = std::fs::write(&probe, b"");
+        let _ = set_xattr(&probe, "com.apple.provenance", b"test-prov");
+        posix::remove_xattr(&probe, "com.apple.provenance");
+        let removed = !has_xattr(&probe, "com.apple.provenance");
+        let _ = std::fs::remove_file(&probe);
+        removed
     }
 }

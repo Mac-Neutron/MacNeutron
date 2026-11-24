@@ -82,11 +82,14 @@ impl UninstalledDrives {
         }
     }
 
-    /// Total allocated bytes of one file, the same measure Finder shows.
+    /// Total allocated bytes of one file, using APFS private size when available.
     fn file_bytes(path: &Path) -> i64 {
         use std::os::unix::fs::MetadataExt;
         match std::fs::metadata(path) {
-            Ok(meta) if meta.is_file() => meta.blocks() as i64 * 512,
+            Ok(meta) if meta.is_file() => {
+                crate::orphan_prefixes::apfs_private_size(path)
+                    .unwrap_or_else(|| meta.blocks() as i64 * 512)
+            }
             _ => 0,
         }
     }

@@ -62,15 +62,54 @@ impl OrphanPrefixes {
     }
 }
 
+const ATTR_CMNEXT_PRIVATESIZE: libc::attrgroup_t = 0x0000_0008;
+const FSOPT_ATTR_CMN_EXTENDED: libc::c_uint = 0x0000_0020;
+
+#[repr(C)]
+struct PrivateSizeBuf {
+    length: u32,
+    returned: libc::attribute_set_t,
+    private_size: i64,
+}
+
+/// Returns the APFS private allocated size of `path` via `getattrlist(ATTR_CMNEXT_PRIVATESIZE)` without following
+/// symlinks, or `None` on volumes/paths that do not report it.
+pub(crate) fn apfs_private_size(path: &Path) -> Option<i64> {
+    use std::os::unix::ffi::OsStrExt;
+    let cpath = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut attr_list: libc::attrlist = unsafe { std::mem::zeroed() };
+    attr_list.bitmapcount = libc::ATTR_BIT_MAP_COUNT;
+    attr_list.commonattr = libc::ATTR_CMN_RETURNED_ATTRS;
+    attr_list.forkattr = ATTR_CMNEXT_PRIVATESIZE;
+    let mut buf: PrivateSizeBuf = unsafe { std::mem::zeroed() };
+    let ret = unsafe {
+        libc::getattrlist(
+            cpath.as_ptr(),
+            (&mut attr_list as *mut libc::attrlist).cast::<libc::c_void>(),
+            (&mut buf as *mut PrivateSizeBuf).cast::<libc::c_void>(),
+            std::mem::size_of::<PrivateSizeBuf>(),
+            libc::FSOPT_NOFOLLOW | FSOPT_ATTR_CMN_EXTENDED,
+        )
+    };
+    if ret == 0 && (buf.returned.forkattr & ATTR_CMNEXT_PRIVATESIZE) != 0 && buf.private_size >= 0 {
+        Some(buf.private_size)
+    } else {
+        None
+    }
+}
+
 fn collect_size(folder: &Path, total: &mut i64) {
     let Ok(entries) = std::fs::read_dir(folder) else { return };
     for entry in entries.flatten() {
         let Ok(meta) = entry.metadata() else { continue };
+        let path = entry.path();
         if meta.is_dir() {
-            collect_size(&entry.path(), total);
+            collect_size(&path, total);
         } else if meta.is_file() {
-            use std::os::unix::fs::MetadataExt;
-            *total += meta.blocks() as i64 * 512;
+            *total += apfs_private_size(&path).unwrap_or_else(|| {
+                use std::os::unix::fs::MetadataExt;
+                meta.blocks() as i64 * 512
+            });
         }
     }
 }
@@ -116,6 +155,35 @@ mod tests {
         std::fs::create_dir_all(compatdata.join("3141592653/pfx/drive_c")).unwrap();
         std::fs::write(compatdata.join("3141592653/pfx/drive_c/save.dat"), b"save").unwrap();
         assert!(OrphanPrefixes::find(&steam).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn apfs_private_size_excludes_shared_clone_extents() {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::MetadataExt;
+
+        let (_, root) = fake_steam("apfs-clone");
+        let src = root.join("src.bin");
+        let dst = root.join("dst.bin");
+        std::fs::write(&src, vec![0x5Au8; 1024 * 1024]).unwrap();
+
+        let csrc = std::ffi::CString::new(src.as_os_str().as_bytes()).unwrap();
+        let cdst = std::ffi::CString::new(dst.as_os_str().as_bytes()).unwrap();
+        let ret = unsafe { libc::clonefile(csrc.as_ptr(), cdst.as_ptr(), 0) };
+        if ret != 0 {
+            let err = std::io::Error::last_os_error();
+            let _ = std::fs::remove_dir_all(&root);
+            if err.raw_os_error() == Some(libc::ENOTSUP) {
+                return;
+            }
+            panic!("clonefile failed unexpectedly: {err}");
+        }
+
+        let priv_size = apfs_private_size(&dst).expect("APFS clone should report private size");
+        assert!(priv_size < 64 * 1024, "expected unmodified clone private size < 64 KiB, got {priv_size}");
+        let meta = std::fs::metadata(&dst).unwrap();
+        assert!(meta.blocks() * 512 >= 1_048_576);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

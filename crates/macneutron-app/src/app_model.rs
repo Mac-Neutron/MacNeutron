@@ -698,8 +698,9 @@ impl AppModel {
         let removed = self.valve_client.remove();
         let version = ValveClient::installed(&self.valve_client.cache).map(|install| install.version);
         self.mutate(|state| {
-            if let Err(error) = removed {
-                state.valve_notice = Some(error.to_string());
+            match removed {
+                Ok(()) => state.valve_notice = None,
+                Err(error) => state.valve_notice = Some(error.to_string()),
             }
             state.valve_version = version;
         });
@@ -781,7 +782,8 @@ impl AppModel {
                     .into(),
             );
         }
-        self.state.lock().unwrap().vm_notice.clone()
+        let notice = self.state.lock().unwrap().vm_notice.clone();
+        notice.or_else(|| self.vm_ready().then(|| "Game VM: ready".to_string()))
     }
 
     /// A game would run: the images are the manifest's and the launcher's own check (`MicroVM::is_ready`) passes.
@@ -946,14 +948,17 @@ impl AppModel {
         }
     }
 
-    /// Valve's steamclient64.dll for the guest (the VM folder's share/valve), only where the app ships the VM.
+    /// Valve's steamclient64.dll for the guest (the VM folder's share/valve), when a VM root exists or the app ships the VM.
     fn copy_valve_client_to_vm(&self) {
-        let Some(root) = &self.vm_root else { return };
-        if self.vm_tools.is_none() {
+        let Some(root) = self
+            .vm_root
+            .clone()
+            .or_else(|| self.vm_tools.is_some().then(MicroVM::standard_root))
+        else {
             return;
-        }
+        };
         let installed = ValveClient::installed(&self.valve_client.cache);
-        if let Err(error) = VMToolsInstaller::copy_valve_client(installed.as_ref(), root) {
+        if let Err(error) = VMToolsInstaller::copy_valve_client(installed.as_ref(), &root) {
             self.mutate(|state| state.error_message = Some(error.to_string()));
         }
     }

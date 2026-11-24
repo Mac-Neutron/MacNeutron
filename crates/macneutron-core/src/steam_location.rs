@@ -44,6 +44,10 @@ impl SteamLocation {
     }
 
     pub fn app_info(&self) -> PathBuf {
+        let dir = self.root.join("appcache/appinfo");
+        if dir.is_dir() && has_appinfo_shards(&dir) {
+            return dir;
+        }
         self.root.join("appcache/appinfo.vdf")
     }
 
@@ -156,6 +160,19 @@ impl SteamLocation {
             None
         }
     }
+}
+
+fn has_appinfo_shards(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            return false;
+        };
+        name.starts_with("appinfo_") && name.ends_with(".vdf") && entry.path().is_file()
+    })
 }
 
 fn same_path(a: &Path, b: &Path) -> bool {
@@ -317,5 +334,19 @@ mod tests {
             false,
         );
         assert!(ends(steam.local_config()));
+    }
+
+    #[test]
+    fn app_info_prefers_sharded_directory_when_shards_exist() {
+        let steam = SteamLocation::new(make_temp_dir());
+        assert_eq!(steam.app_info(), steam.root.join("appcache/appinfo.vdf"));
+
+        // An empty or unrelated `appcache/appinfo` directory still falls back to `appinfo.vdf`.
+        write("", &steam.root.join("appcache/appinfo/other.vdf"), false);
+        assert_eq!(steam.app_info(), steam.root.join("appcache/appinfo.vdf"));
+
+        // Once an `appinfo_*.vdf` shard file exists, `app_info()` returns the directory.
+        write("", &steam.root.join("appcache/appinfo/appinfo_0.vdf"), false);
+        assert_eq!(steam.app_info(), steam.root.join("appcache/appinfo"));
     }
 }

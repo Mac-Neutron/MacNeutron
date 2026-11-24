@@ -46,6 +46,12 @@ pub struct GameSettings {
     /// game renders, when it runs DLSS on MetalFX and generating doesn't hold it back. nil/false: off.
     #[serde(rename = "frameGen")]
     pub frame_gen: Option<bool>,
+    /// Disable Wine's hidraw controller backend (MACNEUTRON_DISABLE_HIDRAW=1). nil/false: off.
+    #[serde(rename = "disableHidraw", skip_serializing_if = "Option::is_none")]
+    pub disable_hidraw: Option<bool>,
+    /// Retina mode (MACNEUTRON_RETINA=1): render at the display's full Retina resolution. nil/false: off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retina: Option<bool>,
     /// The Games window's launch options (`LaunchOptions::parse`): variables over the controls' and game arguments.
     /// Steam's own launch options still win over both. nil: none.
     #[serde(rename = "launchOptions")]
@@ -53,6 +59,23 @@ pub struct GameSettings {
 }
 
 impl GameSettings {
+    /// True when every field is `None` (no per-game overrides).
+    pub fn is_empty(&self) -> bool {
+        self.graphics.is_none()
+            && self.log.is_none()
+            && self.msync.is_none()
+            && self.run_as.is_none()
+            && self.metal_fx.is_none()
+            && self.post_aa.is_none()
+            && self.anisotropy.is_none()
+            && self.upscale.is_none()
+            && self.metal_hud.is_none()
+            && self.dlss.is_none()
+            && self.frame_gen.is_none()
+            && self.disable_hidraw.is_none()
+            && self.retina.is_none()
+            && self.launch_options.is_none()
+    }
     /// The launch-option variables these settings stand for (`run_as` is for the mapping planner only).
     pub fn environment(&self) -> BTreeMap<String, String> {
         let mut env = BTreeMap::new();
@@ -100,6 +123,12 @@ impl GameSettings {
         }
         if self.frame_gen == Some(true) {
             env.insert("MACNEUTRON_FRAMEGEN".to_string(), "1".to_string());
+        }
+        if self.disable_hidraw == Some(true) {
+            env.insert("MACNEUTRON_DISABLE_HIDRAW".to_string(), "1".to_string());
+        }
+        if self.retina == Some(true) {
+            env.insert("MACNEUTRON_RETINA".to_string(), "1".to_string());
         }
         for (k, v) in LaunchOptions::parse(self.launch_options.as_deref().unwrap_or("")).0 {
             env.insert(k, v);
@@ -230,6 +259,41 @@ mod tests {
         assert!(!settings(|s| s.dlss = Some(false)).environment().contains_key("MACNEUTRON_DLSS"));
         assert_eq!(settings(|s| s.frame_gen = Some(true)).environment()["MACNEUTRON_FRAMEGEN"], "1");
         assert!(!settings(|s| s.frame_gen = Some(false)).environment().contains_key("MACNEUTRON_FRAMEGEN"));
+    }
+
+    #[test]
+    fn disable_hidraw_and_retina() {
+        let defaults = GameSettings::default();
+        assert!(defaults.is_empty());
+        assert!(!defaults.environment().contains_key("MACNEUTRON_DISABLE_HIDRAW"));
+        assert!(!defaults.environment().contains_key("MACNEUTRON_RETINA"));
+
+        let s = settings(|s| {
+            s.disable_hidraw = Some(true);
+            s.retina = Some(true);
+        });
+        assert!(!s.is_empty());
+        let env = s.environment();
+        assert_eq!(env["MACNEUTRON_DISABLE_HIDRAW"], "1");
+        assert_eq!(env["MACNEUTRON_RETINA"], "1");
+
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains(r#""disableHidraw":true"#), "{json}");
+        assert!(json.contains(r#""retina":true"#), "{json}");
+        let round_trip: GameSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(round_trip, s);
+
+        let default_json = serde_json::to_string(&defaults).unwrap();
+        assert!(!default_json.contains("disableHidraw"), "{default_json}");
+        assert!(!default_json.contains("retina"), "{default_json}");
+
+        let off = settings(|s| {
+            s.disable_hidraw = Some(false);
+            s.retina = Some(false);
+        });
+        assert!(!off.is_empty());
+        assert!(!off.environment().contains_key("MACNEUTRON_DISABLE_HIDRAW"));
+        assert!(!off.environment().contains_key("MACNEUTRON_RETINA"));
     }
 
     #[test]

@@ -136,15 +136,21 @@ pub fn standard_fetch() -> Fetch {
         let directory = std::env::temp_dir().join(format!("macneutron-download-{}-{}", std::process::id(), unique_stamp()));
         std::fs::create_dir(&directory).map_err(|_| ValveClientError::Http(0))?;
         let out = directory.join(name);
-        let status = std::process::Command::new("/usr/bin/curl")
+        let status = match std::process::Command::new("/usr/bin/curl")
             .args(["-fsSL", "--retry", "2", "-o"])
             .arg(&out)
             .arg("--")
             .arg(url)
             .status()
-            .map_err(|_| ValveClientError::Http(0))?;
+        {
+            Ok(status) => status,
+            Err(_) => {
+                let _ = std::fs::remove_dir_all(&directory);
+                return Err(ValveClientError::Http(0));
+            }
+        };
         if !status.success() {
-            let _ = std::fs::remove_file(&out);
+            let _ = std::fs::remove_dir_all(&directory);
             return Err(ValveClientError::Http(status.code().unwrap_or(0) as u16));
         }
         Ok(out)

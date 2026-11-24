@@ -664,6 +664,35 @@ fn valve_files_reach_the_vm() {
     assert_eq!(std::fs::read(vm_root.join("share/valve/steamclient64.dll")).unwrap(), std::fs::read(cached).unwrap());
 }
 
+#[test]
+fn remove_valve_client_clears_vm_share_and_stale_notice() {
+    let vm_root = make_temp_dir().join("vm");
+    let layout = supporting_layout();
+    let cdn = FakeValveCDN::new(&make_temp_dir());
+    let _model = make_vm_model(&vm_root, |config| {
+        config.valve_client = Some(cdn_client(&layout, &cdn));
+        config.layout = layout.clone();
+    });
+    write("steam\n", &vm_root.join("share/valve/Steam.dll"), false);
+    assert!(exists(&vm_root.join("share/valve/steamclient64.dll")));
+
+    // Offline download leaves a stale valve_notice; vm_tools: None still cleans vm_root on remove.
+    cdn.set_offline(true);
+    let (mode, _) = make_mode();
+    let mut no_tools_cfg = config(&mode, layout.clone());
+    no_tools_cfg.valve_client = Some(cdn_client(&layout, &cdn));
+    no_tools_cfg.vm_root = Some(vm_root.clone());
+    let no_tools = AppModel::new(no_tools_cfg);
+    no_tools.update_valve_client(true);
+    assert!(no_tools.state().valve_notice.is_some());
+
+    no_tools.remove_valve_client();
+    assert!(!exists(&vm_root.join("share/valve/steamclient64.dll")));
+    assert!(!exists(&vm_root.join("share/valve/Steam.dll")));
+    assert_eq!(no_tools.state().valve_notice, None);
+    assert_eq!(no_tools.state().valve_version, None);
+}
+
 // MARK: The game VM's setup
 
 /// A stand-in for the app's CLI: each run appends its arguments to `calls`, then runs `body`.
@@ -947,9 +976,23 @@ fn ready_means_the_launcher_would_run_it() {
     let (helper, _) = fake_helper("exit 0");
     let model = make_setup_model(&helper, &vm_root, Some(&manifest), true, |_| {});
     assert!(model.vm_ready());
+    assert_eq!(model.state().vm_notice, None);
+    assert_eq!(model.vm_status().as_deref(), Some("Game VM: ready"));
+
+    // Fresh AppModel after restart (no setup run): vm_status() still reports ready while images & macneutron-vm exist.
+    let (mode, _) = make_mode();
+    let mut restart_cfg = config(&mode, make_tool_layout());
+    restart_cfg.vm_root = Some(vm_root.clone());
+    restart_cfg.vm_manifest = Some(manifest.clone());
+    let restarted = AppModel::new(restart_cfg);
+    assert_eq!(restarted.state().vm_notice, None);
+    assert_eq!(restarted.vm_status().as_deref(), Some("Game VM: ready"));
+
     std::fs::remove_file(vm_root.join("macneutron-vm")).unwrap();
     assert!(!model.vm_setup_needed());
     assert!(!model.vm_ready()); // the launcher would refuse a game: Setup mustn't say Ready
+    assert_eq!(model.vm_status(), None);
+    assert_eq!(restarted.vm_status(), None);
 }
 
 #[test]

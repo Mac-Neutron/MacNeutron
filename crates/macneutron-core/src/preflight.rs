@@ -16,6 +16,8 @@ pub enum PreflightError {
     ThirtyTwoBit,
     UnsupportedMachine(u16),
     UnsupportedCPU(String, Vec<String>),
+    NestedVirtualMachine,
+    HypervisorUnavailable,
 }
 
 impl PreflightError {
@@ -60,6 +62,14 @@ impl std::fmt::Display for PreflightError {
                 Self::cpu_name(cpu),
                 missing.join(", ")
             ),
+            PreflightError::NestedVirtualMachine => write!(
+                f,
+                "MacNeutron's game VM can't run inside a virtual machine (nested virtualization isn't supported on this Mac)."
+            ),
+            PreflightError::HypervisorUnavailable => write!(
+                f,
+                "MacNeutron's game VM needs Apple's Hypervisor framework, which isn't available on this Mac."
+            ),
         }
     }
 }
@@ -74,6 +84,7 @@ pub struct Preflight {
     pub system_supported: Box<dyn Fn() -> bool + Send + Sync>,
     pub identity: IdentityProbe,
     pub cpu_has: Box<dyn Fn(&str) -> bool + Send + Sync>,
+    pub hv_check: Box<dyn Fn() -> Result<(), PreflightError> + Send + Sync>,
 }
 
 impl Default for Preflight {
@@ -82,6 +93,7 @@ impl Default for Preflight {
             system_supported: Box::new(Preflight::is_supported_system),
             identity: Box::new(|layout| layout.identity()),
             cpu_has: Box::new(Preflight::cpu_has),
+            hv_check: Box::new(Preflight::default_hv_check),
         }
     }
 }
@@ -92,7 +104,50 @@ impl Preflight {
         identity: IdentityProbe,
         cpu_has: Box<dyn Fn(&str) -> bool + Send + Sync>,
     ) -> Self {
-        Preflight { system_supported, identity, cpu_has }
+        Preflight {
+            system_supported,
+            identity,
+            cpu_has,
+            hv_check: Box::new(|| Ok(())),
+        }
+    }
+
+    pub fn with_hv_check(
+        mut self,
+        check: impl Fn() -> Result<(), PreflightError> + Send + Sync + 'static,
+    ) -> Self {
+        self.hv_check = Box::new(check);
+        self
+    }
+
+    /// Evaluates Darwin hypervisor sysctls (`kern.hv_vmm_present`, `hw.model`, `kern.hv_support`).
+    pub fn evaluate_hv_sysctls(
+        vmm_present: Option<i32>,
+        hw_model: Option<&str>,
+        hv_support: Option<i32>,
+    ) -> Result<(), PreflightError> {
+        if vmm_present == Some(1)
+            || hw_model.is_some_and(|m| m.to_ascii_lowercase().starts_with("virtualmac"))
+        {
+            return Err(PreflightError::NestedVirtualMachine);
+        }
+        if hv_support == Some(0) {
+            return Err(PreflightError::HypervisorUnavailable);
+        }
+        Ok(())
+    }
+
+    pub fn default_hv_check() -> Result<(), PreflightError> {
+        Self::evaluate_hv_sysctls(
+            sysctl_int("kern.hv_vmm_present"),
+            sysctl_string("hw.model").as_deref(),
+            sysctl_int("kern.hv_support"),
+        )
+    }
+
+    /// Checks whether the microVM can run on this host (not nested inside a VM and Hypervisor.framework available).
+    pub fn check_vm(&self) -> Result<(), PreflightError> {
+        (self.hv_check)()
     }
 
     /// `hw.optional.arm.<feature>` reads 1.
@@ -185,6 +240,33 @@ fn sysctl_int(name: &str) -> Option<i32> {
     } else {
         None
     }
+}
+
+fn sysctl_string(name: &str) -> Option<String> {
+    let cname = std::ffi::CString::new(name).ok()?;
+    let mut size: usize = 0;
+    let rc = unsafe {
+        sysctlbyname(cname.as_ptr(), std::ptr::null_mut(), &mut size, std::ptr::null_mut(), 0)
+    };
+    if rc != 0 || size == 0 {
+        return None;
+    }
+    let mut buf = vec![0u8; size];
+    let rc = unsafe {
+        sysctlbyname(
+            cname.as_ptr(),
+            buf.as_mut_ptr().cast::<std::ffi::c_void>(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 {
+        return None;
+    }
+    let len = size.min(buf.len());
+    let end = buf[..len].iter().position(|&b| b == 0).unwrap_or(len);
+    String::from_utf8(buf[..end].to_vec()).ok()
 }
 
 extern "C" {
@@ -464,5 +546,43 @@ mod tests {
     #[test]
     fn quotes_applescript_strings() {
         assert_eq!(AppleScriptNotifier::quoted(r#"say "hi" \o/"#), r#""say \"hi\" \\o/""#);
+    }
+
+    #[test]
+    fn hypervisor_sysctl_evaluation_detects_nested_vm_and_missing_hv() {
+        assert_eq!(
+            Preflight::evaluate_hv_sysctls(Some(1), Some("Mac15,3"), Some(1)),
+            Err(PreflightError::NestedVirtualMachine)
+        );
+        assert_eq!(
+            Preflight::evaluate_hv_sysctls(Some(0), Some("VirtualMac2,1"), Some(1)),
+            Err(PreflightError::NestedVirtualMachine)
+        );
+        assert_eq!(
+            Preflight::evaluate_hv_sysctls(None, Some("virtualmac1,1"), Some(1)),
+            Err(PreflightError::NestedVirtualMachine)
+        );
+        assert_eq!(
+            Preflight::evaluate_hv_sysctls(Some(0), Some("Mac15,3"), Some(0)),
+            Err(PreflightError::HypervisorUnavailable)
+        );
+        assert_eq!(Preflight::evaluate_hv_sysctls(Some(0), Some("Mac15,3"), Some(1)), Ok(()));
+        assert_eq!(Preflight::evaluate_hv_sysctls(None, None, None), Ok(()));
+    }
+
+    #[test]
+    fn check_vm_uses_injectable_hv_check_and_native_check_skips_it() {
+        let layout = make_tool_layout();
+        let nested = test_preflight().with_hv_check(|| Err(PreflightError::NestedVirtualMachine));
+        assert_eq!(nested.check_vm(), Err(PreflightError::NestedVirtualMachine));
+        // Native Wine path (`check` with in_micro_vm=false) must NOT fail on HV check.
+        assert_eq!(check(&nested, &layout, Verb::WaitForExitAndRun, &exe(pe_image::AMD64)), Ok(TEST_IDENTITY.to_string()));
+
+        let no_hv = test_preflight().with_hv_check(|| Err(PreflightError::HypervisorUnavailable));
+        assert_eq!(no_hv.check_vm(), Err(PreflightError::HypervisorUnavailable));
+        assert_eq!(check(&no_hv, &layout, Verb::Run, &layout.wine()), Ok(TEST_IDENTITY.to_string()));
+
+        assert!(PreflightError::NestedVirtualMachine.to_string().contains("virtual machine"));
+        assert!(PreflightError::HypervisorUnavailable.to_string().contains("Hypervisor"));
     }
 }

@@ -166,6 +166,52 @@ check_hardened() {  # check_hardened <dir or file>...: names the first Mach-O si
   done
 }
 
+check_minos() {  # check_minos <bundle_dir> <max_minos>: every Mach-O under <bundle_dir> has minos <= <max_minos>
+  _cm_dir=${1%/} _cm_max=$2
+  find "$_cm_dir" -type f | while IFS= read -r _cm_f; do
+    file -b "$_cm_f" | LC_ALL=C /usr/bin/grep -q 'Mach-O' || continue
+    _cm_out=$(xcrun vtool -show-build "$_cm_f" 2>&1) \
+      || { echo "release: vtool failed on ${_cm_f#"$_cm_dir"/}" >&2; exit 1; }
+    _cm_bad=$(printf '%s\n' "$_cm_out" | awk -v max="$_cm_max" '
+      function gt(a_str, b_str,   a, b, i, n, m) {
+        n = split(a_str, a, "."); m = split(b_str, b, ".")
+        if (m > n) n = m
+        for (i = 1; i <= n; i++) {
+          if ((a[i] + 0) > (b[i] + 0)) return 1
+          if ((a[i] + 0) < (b[i] + 0)) return 0
+        }
+        return 0
+      }
+      /^[^ \t]/ && $0 !~ /^Load command / && /:$/ {
+        if (in_slice && !found) { bad = "missing"; exit }
+        in_slice = 1
+        found = 0
+        cmd = ""
+        next
+      }
+      $1 == "Load" && $2 == "command" { cmd = "" }
+      $1 == "cmd" { cmd = $2 }
+      $1 == "minos" || (cmd == "LC_VERSION_MIN_MACOSX" && $1 == "version") {
+        in_slice = 1
+        found = 1
+        if (gt($2, max)) { bad = $2; exit }
+      }
+      END {
+        if (bad != "") print bad
+        else if (!found) print "missing"
+      }
+    ')
+    if [ -n "$_cm_bad" ]; then
+      if [ "$_cm_bad" = missing ]; then
+        echo "release: ${_cm_f#"$_cm_dir"/} has no minos version" >&2
+      else
+        echo "release: ${_cm_f#"$_cm_dir"/} has minos $_cm_bad > $_cm_max" >&2
+      fi
+      exit 1
+    fi
+  done || return 1
+}
+
 check_entitlement() {  # check_entitlement <binary> <entitlement>
   codesign -d --entitlements - --xml "$1" 2> /dev/null | LC_ALL=C /usr/bin/grep -qF "<key>$2</key>" \
     || { echo "release: $(basename "$1") isn't signed with $2" >&2; return 1; }
@@ -402,6 +448,20 @@ self_test() {
     check_entitlement "$T/helpers/tool" com.apple.security.cs.disable-library-validation
   codesign -f -s - -o runtime --entitlements "$ROOT/release/entitlements/mn-steam-host.plist" "$T/helpers/tool" 2> /dev/null
   passes "mn-steam-host with its entitlement" check_entitlement "$T/helpers/tool" com.apple.security.cs.disable-library-validation
+
+  # Every Mach-O in a bundle has minos <= 27.0 (universal/thin).
+  mkdir -p "$T/minos-ok/bin" "$T/minos-bad/bin"
+  printf 'not a macho\n' > "$T/minos-ok/note.txt"
+  cc -mmacosx-version-min=15.0 -o "$T/minos-ok/bin/ok" "$T/m.c"
+  xcrun vtool -set-build-version macos 27.0 27.0 -replace -output "$T/minos-ok/bin/exact" "$T/minos-ok/bin/ok"
+  ln -s bin/ok "$T/minos-ok/link"
+  passes "a bundle with minos <= 27.0" check_minos "$T/minos-ok" 27.0
+  xcrun vtool -set-build-version macos 27.1 27.1 -replace -output "$T/minos-bad/bin/too-new" "$T/minos-ok/bin/ok"
+  refused "a bundle with minos 27.1 > 27.0" "release: bin/too-new has minos 27.1 > 27.0" \
+    check_minos "$T/minos-bad" 27.0
+  xcrun vtool -set-build-version macos 99.0 99.0 -replace -output "$T/minos-bad/bin/too-new" "$T/minos-ok/bin/ok"
+  refused "a bundle with minos 99.0 > 27.0" "release: bin/too-new has minos 99.0 > 27.0" \
+    check_minos "$T/minos-bad" 27.0
 
   # The VM's parts: a sparse template, and a manifest naming the archive.
   mkdir -p "$T/parts"
@@ -717,6 +777,7 @@ EOF
   check_entitlement "$VMH/macneutron-vm" com.apple.security.hypervisor || exit 1
   sign "$A/Contents/Helpers/macneutron"
   sign "$A"
+  check_minos "$A" 27.0 || exit 1
   out=$(codesign --verify --strict --deep "$A" 2>&1) || die "codesign --verify --strict --deep $A: $out"
   cd1=$(codesign -dvvv "$OUT/wine.app" 2>&1 | sed -n 's/^CDHash=//p')
   cd2=$(codesign -dvvv "$A/Contents/Helpers/wine.app" 2>&1 | sed -n 's/^CDHash=//p')
@@ -762,6 +823,7 @@ build_installer() {
   ! LC_ALL=C /usr/bin/grep -aq /Users/ "$f" || die "the installer's binary still names a path under /Users/"
   ditto "$A" "$INST/Contents/Helpers/MacNeutron.app"
   codesign -f -s "$MACNEUTRON_SIGN_IDENTITY" --options runtime --timestamp "$INST" > /dev/null 2>&1 || die "can't sign $INST"
+  check_minos "$INST" 27.0 || exit 1
   out=$(codesign --verify --strict --deep "$INST" 2>&1) || die "codesign --verify --strict --deep $INST: $out"
 }
 

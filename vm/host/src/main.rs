@@ -10,6 +10,7 @@ use ffi::*;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
+use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::ptr;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -41,7 +42,7 @@ fn errno() -> i32 {
     unsafe { *__error() }
 }
 
-fn sysctl_int(name: &str) -> i64 {
+fn sysctl_opt_int(name: &str) -> Option<i32> {
     let cs = cstring(name);
     let mut v: i32 = 0;
     let mut n = std::mem::size_of::<i32>();
@@ -55,7 +56,31 @@ fn sysctl_int(name: &str) -> i64 {
         )
     };
     if rc == 0 {
-        v as i64
+        Some(v)
+    } else {
+        None
+    }
+}
+
+fn sysctl_int(name: &str) -> i64 {
+    sysctl_opt_int(name).map(|v| v as i64).unwrap_or(0)
+}
+
+fn sysctl_u64(name: &str) -> u64 {
+    let cs = cstring(name);
+    let mut v: u64 = 0;
+    let mut n = std::mem::size_of::<u64>();
+    let rc = unsafe {
+        sysctlbyname(
+            cs.as_ptr(),
+            &mut v as *mut u64 as *mut c_void,
+            &mut n,
+            ptr::null_mut(),
+            0,
+        )
+    };
+    if rc == 0 {
+        v
     } else {
         0
     }
@@ -115,6 +140,231 @@ fn environment_cpus() -> Option<i64> {
         default_cpus()
     );
     None
+}
+
+/// Half of host physical RAM rounded to the nearest GiB in MiB, clamped to [4096, 16384].
+fn auto_ram_mib(mem_bytes: u64) -> u32 {
+    let half_mib = mem_bytes >> 21;
+    let rounded = ((half_mib + 512) / 1024) * 1024;
+    rounded.clamp(4096, 16384) as u32
+}
+
+/// MN_VM_RAM_MIB: guest RAM in MiB when --ram-mib doesn't say; anything invalid keeps auto_ram_mib.
+fn environment_ram_mib() -> Option<u32> {
+    let v = std::env::var("MN_VM_RAM_MIB").ok()?;
+    if v.is_empty() {
+        return None;
+    }
+    if let Ok(n) = v.parse::<u32>() {
+        if n >= 512 {
+            return Some(n);
+        }
+    }
+    eprintln!(
+        "macneutron-vm: MN_VM_RAM_MIB={} isn't a MiB count, {} instead",
+        v,
+        auto_ram_mib(sysctl_u64("hw.memsize"))
+    );
+    None
+}
+
+fn metal_device_name() -> String {
+    let mut buf = [0u8; 256];
+    let mut alloc = 0u64;
+    let mut rec = 0u64;
+    let ok = unsafe {
+        mn_metal_memory_info(
+            buf.as_mut_ptr() as *mut c_char,
+            buf.len(),
+            &mut alloc,
+            &mut rec,
+        )
+    };
+    if !ok {
+        return "none".to_string();
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    let s = String::from_utf8_lossy(&buf[..end]).into_owned();
+    if s.is_empty() {
+        "none".to_string()
+    } else {
+        s
+    }
+}
+
+/// Refuse to boot inside a nested macOS VM or on a host without Hypervisor.framework support.
+fn check_hypervisor() {
+    let hv_vmm_present = sysctl_opt_int("kern.hv_vmm_present");
+    let hv_support = sysctl_opt_int("kern.hv_support");
+    let hw_model = sysctl_string("hw.model");
+    let is_virtual_mac = hw_model.to_ascii_lowercase().starts_with("virtualmac");
+    let is_pv_gpu = unsafe { mn_gpu_is_paravirtual() };
+    if hv_vmm_present == Some(1) || is_virtual_mac || hv_support == Some(0) || is_pv_gpu {
+        let gpu = metal_device_name();
+        let fmt_opt = |o: Option<i32>| o.map(|v| v.to_string()).unwrap_or_else(|| "none".to_string());
+        fail(
+            70,
+            &format!(
+                "macneutron-vm: hypervisor unavailable or running inside a virtual machine \
+                 (kern.hv_vmm_present={} kern.hv_support={} hw.model={} gpu={})",
+                fmt_opt(hv_vmm_present), fmt_opt(hv_support), hw_model, gpu
+            ),
+        );
+    }
+}
+
+static SUPERVISED_CHILD_PID: AtomicI32 = AtomicI32::new(0);
+
+extern "C" fn forward_signal(sig: c_int) {
+    let pid = SUPERVISED_CHILD_PID.load(Ordering::Relaxed);
+    if pid > 0 {
+        unsafe { kill(pid, sig) };
+    }
+}
+
+/// Supervises the VM child via kqueue(EVFILT_PROC, NOTE_EXIT | NOTE_EXIT_DETAIL) so Jetsam kills
+/// (NOTE_EXIT_MEMORY) and peak physical footprint are captured to `<share>/traces/vm-exit` even if the child
+/// dies by SIGKILL.
+fn supervise(argv_raw: &[String], share: &str, ram_mib: u32) -> ! {
+    const ESRCH: c_int = 3;
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from(&argv_raw[0]));
+    let child = Command::new(&exe)
+        .arg0(&argv_raw[0])
+        .args(&argv_raw[1..])
+        .env("MN_VM_SUPERVISED", "1")
+        .spawn();
+    let child_pid = match child {
+        Ok(c) => c.id() as c_int,
+        Err(e) => fail(1, &format!("macneutron-vm: failed to spawn supervised child: {}", e)),
+    };
+    SUPERVISED_CHILD_PID.store(child_pid, Ordering::SeqCst);
+    unsafe {
+        signal(SIGTERM, forward_signal);
+        signal(SIGINT, forward_signal);
+        signal(SIGHUP, forward_signal);
+        mn_begin_activity();
+    }
+
+    let mut detail: u32 = 0;
+    let mut child_exited = false;
+    let kq = unsafe { kqueue() };
+    if kq >= 0 {
+        let kev = Kevent {
+            ident: child_pid as usize,
+            filter: EVFILT_PROC,
+            flags: EV_ADD | EV_ONESHOT,
+            fflags: NOTE_EXIT | NOTE_EXIT_DETAIL,
+            data: 0,
+            udata: ptr::null_mut(),
+        };
+        let mut reg;
+        loop {
+            reg = unsafe { kevent(kq, &kev, 1, ptr::null_mut(), 0, ptr::null()) };
+            if reg >= 0 || errno() != EINTR {
+                break;
+            }
+        }
+        if reg == 0 {
+            let mut out: Kevent = unsafe { std::mem::zeroed() };
+            loop {
+                let n = unsafe { kevent(kq, ptr::null(), 0, &mut out, 1, ptr::null()) };
+                if n > 0 {
+                    if (out.flags & EV_ERROR) == 0 {
+                        detail = out.data as u32;
+                    }
+                    child_exited = true;
+                    break;
+                }
+                if n < 0 && errno() == EINTR {
+                    continue;
+                }
+                break;
+            }
+        } else if errno() == ESRCH {
+            child_exited = true;
+        }
+        unsafe { close(kq) };
+    }
+
+    let killed_for_memory = (detail & NOTE_EXIT_MEMORY) != 0;
+    let peak_footprint_bytes: Option<u64> = if child_exited {
+        let mut rusage: RusageInfoV4 = unsafe { std::mem::zeroed() };
+        if unsafe { proc_pid_rusage(child_pid, RUSAGE_INFO_V4, &mut rusage) } == 0
+            && rusage.ri_lifetime_max_phys_footprint > 0
+        {
+            Some(rusage.ri_lifetime_max_phys_footprint)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let host_pressure = sysctl_int("kern.memorystatus_vm_pressure_level");
+
+    let mut raw_status: c_int = 0;
+    let mut w;
+    loop {
+        w = unsafe { waitpid(child_pid, &mut raw_status, 0) };
+        if w >= 0 || errno() != EINTR {
+            break;
+        }
+    }
+    SUPERVISED_CHILD_PID.store(0, Ordering::SeqCst);
+    let (status, sig) = if w == child_pid {
+        if (raw_status & 0x7f) == 0 {
+            ((raw_status >> 8) & 0xff, 0)
+        } else if (raw_status & 0x7f) != 0x7f {
+            let s = raw_status & 0x7f;
+            (128 + s, s)
+        } else {
+            (1, 0)
+        }
+    } else {
+        (1, 0)
+    };
+
+    let traces_dir = format!("{}/traces", share);
+    if std::fs::create_dir_all(&traces_dir).is_ok() {
+        let exit_path = format!("{}/vm-exit", traces_dir);
+        let mut body = format!(
+            "status={}\nsignal={}\nexit_detail=0x{:08x}\nkilled_for_memory={}\n",
+            status,
+            sig,
+            detail,
+            if killed_for_memory { 1 } else { 0 },
+        );
+        if let Some(bytes) = peak_footprint_bytes {
+            body.push_str(&format!("peak_footprint_bytes={}\n", bytes));
+        }
+        body.push_str(&format!("vm_ram_mib={}\nhost_pressure={}\n", ram_mib, host_pressure));
+        let _ = std::fs::write(exit_path, body);
+    }
+
+    unsafe { _exit(status) }
+}
+
+fn start_memory_diagnostics() {
+    std::thread::spawn(|| loop {
+        let mut footprint = 0u64;
+        let mut rss = 0u64;
+        let mut compressed = 0u64;
+        unsafe { mn_task_memory_info(&mut footprint, &mut rss, &mut compressed) };
+        let mut metal_alloc = 0u64;
+        let mut metal_rec = 0u64;
+        unsafe { mn_metal_memory_info(ptr::null_mut(), 0, &mut metal_alloc, &mut metal_rec) };
+        let pressure = sysctl_int("kern.memorystatus_vm_pressure_level");
+        let to_mib = |b: u64| b / (1024 * 1024);
+        eprintln!(
+            "[mem] footprint={}MiB rss={}MiB compressed={}MiB metal_alloc={}MiB/{}MiB pressure={}",
+            to_mib(footprint),
+            to_mib(rss),
+            to_mib(compressed),
+            to_mib(metal_alloc),
+            to_mib(metal_rec),
+            pressure
+        );
+        std::thread::sleep(std::time::Duration::from_secs(10));
+    });
 }
 
 fn check(r: KrunResult, what: &str) {
@@ -218,7 +468,8 @@ fn main() {
     let ram_mib: u32 = opts
         .get("--ram-mib")
         .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(8192);
+        .or_else(environment_ram_mib)
+        .unwrap_or_else(|| auto_ram_mib(sysctl_u64("hw.memsize")));
     let console = opts
         .get("--console")
         .cloned()
@@ -261,6 +512,51 @@ fn main() {
             fail(2, &format!("missing image: {}", f));
         }
     }
+
+    // MN_VM_CMDLINE_EXTRA: tick and RCU parameters appended to the images' command line, for measuring. Allowlisted
+    // whole, and refused whole (the kernel takes a parameter's last value, so lockdown=, module.sig_enforce= or init=
+    // must never get in).
+    let cmdline_extra: String = {
+        match std::env::var("MN_VM_CMDLINE_EXTRA") {
+            Ok(v) if !v.is_empty() => {
+                let allowed = ["nohz_full=", "rcu_nocbs=", "nohz=", "skew_tick=", "irqaffinity="];
+                let words: Vec<&str> = v.split(' ').collect();
+                let ok = words.iter().all(|w| {
+                    allowed.iter().any(|a| w.starts_with(a))
+                        && w.chars().all(|c| {
+                            c.is_ascii() && (c.is_ascii_alphanumeric() || "=_,-".contains(c))
+                        })
+                });
+                if ok {
+                    format!(" {}", words.join(" "))
+                } else {
+                    eprintln!(
+                        "macneutron-vm: MN_VM_CMDLINE_EXTRA={} refused: only {}",
+                        v,
+                        allowed.join(" ")
+                    );
+                    String::new()
+                }
+            }
+            _ => String::new(),
+        }
+    };
+    let cmdline = format!(
+        "{}{}",
+        std::fs::read_to_string(path("cmdline.txt"))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default(),
+        cmdline_extra
+    );
+    if print_cmdline {
+        println!("{}", cmdline);
+        unsafe { _exit(0) }
+    }
+
+    if std::env::var("MN_VM_SUPERVISED").as_deref() != Ok("1") {
+        supervise(&argv_raw, &share, ram_mib);
+    }
+    check_hypervisor();
 
     // One VM per state disk: two writers would corrupt its ext4. The lock lives as long as this process.
     // O_CLOEXEC: no child inherits the lock (see `no_inherited_fds`).
@@ -307,46 +603,6 @@ fn main() {
         }
     }
 
-    // MN_VM_CMDLINE_EXTRA: tick and RCU parameters appended to the images' command line, for measuring. Allowlisted
-    // whole, and refused whole (the kernel takes a parameter's last value, so lockdown=, module.sig_enforce= or init=
-    // must never get in).
-    let cmdline_extra: String = {
-        match std::env::var("MN_VM_CMDLINE_EXTRA") {
-            Ok(v) if !v.is_empty() => {
-                let allowed = ["nohz_full=", "rcu_nocbs=", "nohz=", "skew_tick=", "irqaffinity="];
-                let words: Vec<&str> = v.split(' ').collect();
-                let ok = words.iter().all(|w| {
-                    allowed.iter().any(|a| w.starts_with(a))
-                        && w.chars().all(|c| {
-                            c.is_ascii() && (c.is_ascii_alphanumeric() || "=_,-".contains(c))
-                        })
-                });
-                if ok {
-                    format!(" {}", words.join(" "))
-                } else {
-                    eprintln!(
-                        "macneutron-vm: MN_VM_CMDLINE_EXTRA={} refused: only {}",
-                        v,
-                        allowed.join(" ")
-                    );
-                    String::new()
-                }
-            }
-            _ => String::new(),
-        }
-    };
-    let cmdline = format!(
-        "{}{}",
-        std::fs::read_to_string(path("cmdline.txt"))
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default(),
-        cmdline_extra
-    );
-    if print_cmdline {
-        println!("{}", cmdline);
-        unsafe { _exit(0) }
-    }
-
     // MN_KRUN_LOG: libkrun log level, 0 (off) to 5 (trace); warnings and errors by default.
     let log_level: u32 = std::env::var("MN_KRUN_LOG")
         .ok()
@@ -389,7 +645,7 @@ fn main() {
     let console_fd = unsafe {
         open(
             cstring(&console).as_ptr(),
-            O_WRONLY | O_CREAT | O_TRUNC,
+            O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
             0o644,
         )
     };
@@ -408,6 +664,10 @@ fn main() {
     {
         let msg = unsafe { CStr::from_ptr(strerror(errno())) };
         fail(1, &format!("console: {}", msg.to_string_lossy()));
+    }
+    unsafe {
+        fcntl(pty_master, F_SETFD, FD_CLOEXEC);
+        fcntl(pty_slave, F_SETFD, FD_CLOEXEC);
     }
     std::thread::spawn(move || {
         let mut buf = [0u8; 65536];
@@ -552,6 +812,9 @@ fn main() {
     }
     if let Ok(state) = std::env::var("MN_D3D_STATE") {
         let _ = std::fs::create_dir_all(format!("{}/pipelines", state));
+        let _ = Command::new("/usr/bin/tmutil")
+            .args(["addexclusion", &state])
+            .output();
         unsafe { setenv(cstring("DXMT_SHADER_CACHE_PATH").as_ptr(), cstring(&format!("{}/", state)).as_ptr(), 0) };
         if std::env::var("MACNEUTRON_PRECACHE").as_deref() != Ok("0") {
             unsafe {
@@ -745,6 +1008,8 @@ fn main() {
         &mut e,
         "build the VM",
     );
+
+    start_memory_diagnostics();
 
     // The VM runs off the main thread; the main thread runs AppKit (the game window and Metal share its run loop).
     let vmm_addr = vmm as usize;

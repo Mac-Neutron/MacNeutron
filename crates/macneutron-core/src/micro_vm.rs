@@ -106,13 +106,72 @@ impl MicroVM {
     }
 
     /// The launch options the guest reads (run-game.sh), as the launcher's own environment has them.
-    pub const PASSED: [&'static str; 19] = [
+    pub const PASSED: [&'static str; 21] = [
         "MACNEUTRON_DLSS", "MACNEUTRON_XESS", "DXMT_ENABLE_NVEXT", "MACNEUTRON_LOG", "MN_SCREEN",
         "MACNEUTRON_VM_PROFILE", "DXMT_STATS", "MACNEUTRON_VM_D3D", "MACNEUTRON_VM_D3D32",
         "MACNEUTRON_VM_D3D_TRACE", "DXMT_LOG_LEVEL", "MACNEUTRON_VM_WOW64", "PROTON_USE_WOW64",
         "MTLD3D_CONFIG", "WINEDEBUG", "MN_MAC_HOME", "MN_INSTALL_TIMEOUT", "PROTON_EAC_RUNTIME",
-        "MN_CRASH_REPORTERS",
+        "MN_CRASH_REPORTERS", "FEX_X87REDUCEDPRECISION", "MN_NON_STEAM_SHORTCUT",
     ];
+
+    /// Memory reserved for macOS on the host: max of 3 GiB or 25% of host RAM (in MiB).
+    pub fn host_reserve_mib(mem_bytes: u64) -> u32 {
+        ((mem_bytes >> 22).min(u32::MAX as u64) as u32).max(3072)
+    }
+
+    /// Automatic VM RAM sizing: half of host RAM rounded to whole GiB, clamped to 4..=16 GiB (in MiB).
+    pub fn auto_ram_mib(mem_bytes: u64) -> u32 {
+        let half_mib = mem_bytes >> 21;
+        let rounded = ((half_mib + 512) / 1024) * 1024;
+        rounded.clamp(4096, 16384) as u32
+    }
+
+    /// Physical host RAM in bytes via `sysctlbyname("hw.memsize")`.
+    pub fn host_memory_bytes() -> Option<u64> {
+        let name = std::ffi::CString::new("hw.memsize").ok()?;
+        let mut mem: u64 = 0;
+        let mut size = std::mem::size_of::<u64>();
+        let rc = unsafe {
+            libc::sysctlbyname(
+                name.as_ptr(),
+                (&mut mem as *mut u64).cast::<libc::c_void>(),
+                &mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        (rc == 0 && size == std::mem::size_of::<u64>() && mem > 0).then_some(mem)
+    }
+
+    /// VM RAM in MiB for `env` and `host_mem_bytes`, plus an optional advisory warning if an explicit override
+    /// leaves less than `host_reserve_mib` for macOS.
+    pub fn ram_mib_for(env: &BTreeMap<String, String>, host_mem_bytes: Option<u64>) -> (u32, Option<String>) {
+        let override_ram = ["MACNEUTRON_VM_RAM_MIB", "MN_VM_RAM_MIB"]
+            .iter()
+            .find_map(|key| env.get(*key).and_then(|v| v.trim().parse::<u32>().ok()));
+        if let Some(chosen) = override_ram {
+            let mut ram = chosen.max(1024);
+            let mut warning = None;
+            if let Some(bytes) = host_mem_bytes {
+                let host_mib = (bytes >> 20).min(u32::MAX as u64) as u32;
+                let cap = host_mib.saturating_sub(1024).max(1024);
+                ram = ram.min(cap);
+                let reserve = Self::host_reserve_mib(bytes);
+                if ram.saturating_add(reserve) > host_mib {
+                    warning = Some(format!(
+                        "note: VM RAM override {ram} MiB leaves less than {reserve} MiB for macOS on a {host_mib} MiB host"
+                    ));
+                }
+            }
+            return (ram, warning);
+        }
+        (host_mem_bytes.map(Self::auto_ram_mib).unwrap_or(8192), None)
+    }
+
+    /// Convenience wrapper returning the chosen VM RAM in MiB for the current host.
+    pub fn ram_mib(env: &BTreeMap<String, String>) -> u32 {
+        Self::ram_mib_for(env, Self::host_memory_bytes()).0
+    }
 
     /// What a performance build's guest doesn't get: its stats and profiler are compiled out or off.
     pub const NOT_PASSED_TO_PERFORMANCE: [&'static str; 2] = ["MACNEUTRON_VM_PROFILE", "DXMT_STATS"];
@@ -784,6 +843,85 @@ mod tests {
         // MicroVM's part: the launch option's timeout reaches run-game.sh.
         let script = smite_script(&[], &env(&[("MN_INSTALL_TIMEOUT", "120")]), false);
         assert!(script.contains("MN_INSTALL_TIMEOUT='120'\n"));
+    }
+
+    #[test]
+    fn host_reserve_and_auto_ram_sizing_table() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        assert_eq!(MicroVM::host_reserve_mib(8 * GIB), 3072);
+        assert_eq!(MicroVM::host_reserve_mib(12 * GIB), 3072);
+        assert_eq!(MicroVM::host_reserve_mib(16 * GIB), 4096);
+        assert_eq!(MicroVM::host_reserve_mib(24 * GIB), 6144);
+        assert_eq!(MicroVM::host_reserve_mib(32 * GIB), 8192);
+        assert_eq!(MicroVM::host_reserve_mib(64 * GIB), 16384);
+
+        let expected = [
+            (8, 4096),
+            (16, 8192),
+            (18, 9216),
+            (24, 12288),
+            (32, 16384),
+            (36, 16384),
+            (64, 16384),
+            (128, 16384),
+        ];
+        for (gb, mib) in expected {
+            assert_eq!(MicroVM::auto_ram_mib(gb * GIB), mib, "{gb} GiB");
+        }
+        assert_eq!(MicroVM::ram_mib_for(&env(&[]), None), (8192, None));
+        assert!(MicroVM::host_memory_bytes().is_some_and(|b| b > 0));
+    }
+
+    #[test]
+    fn vm_ram_overrides_clamp_and_warn() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        // MACNEUTRON_VM_RAM_MIB takes precedence over MN_VM_RAM_MIB.
+        assert_eq!(
+            MicroVM::ram_mib_for(
+                &env(&[("MACNEUTRON_VM_RAM_MIB", "6144"), ("MN_VM_RAM_MIB", "10240")]),
+                Some(16 * GIB),
+            ),
+            (6144, None)
+        );
+        // MN_VM_RAM_MIB works when MACNEUTRON_VM_RAM_MIB is unset.
+        assert_eq!(
+            MicroVM::ram_mib_for(&env(&[("MN_VM_RAM_MIB", "10240")]), Some(16 * GIB)),
+            (10240, None)
+        );
+        // Minimum clamp at 1024 MiB.
+        assert_eq!(
+            MicroVM::ram_mib_for(&env(&[("MACNEUTRON_VM_RAM_MIB", "256")]), Some(16 * GIB)),
+            (1024, None)
+        );
+        // Upper cap at host_mib - 1024 and advisory warning when exceeding host_reserve_mib.
+        let (ram, warning) = MicroVM::ram_mib_for(&env(&[("MACNEUTRON_VM_RAM_MIB", "32768")]), Some(16 * GIB));
+        assert_eq!(ram, 15360);
+        assert!(warning.is_some());
+        // Override within cap but encroaching on reserve still warns.
+        let (ram, warning) = MicroVM::ram_mib_for(&env(&[("MACNEUTRON_VM_RAM_MIB", "13312")]), Some(16 * GIB));
+        assert_eq!(ram, 13312);
+        assert!(warning.is_some());
+        // Invalid value falls back to auto sizing.
+        assert_eq!(
+            MicroVM::ram_mib_for(&env(&[("MACNEUTRON_VM_RAM_MIB", "not-a-number")]), Some(24 * GIB)),
+            (12288, None)
+        );
+        // Without host memory info, overrides still clamp min 1024 without warning.
+        assert_eq!(MicroVM::ram_mib_for(&env(&[("MACNEUTRON_VM_RAM_MIB", "512")]), None), (1024, None));
+    }
+
+    #[test]
+    fn guest_script_passes_fex_x87_and_non_steam_shortcut() {
+        let script = smite_script(
+            &[],
+            &env(&[("FEX_X87REDUCEDPRECISION", "1"), ("MN_NON_STEAM_SHORTCUT", "1")]),
+            false,
+        );
+        assert!(script.contains("FEX_X87REDUCEDPRECISION='1'\n"));
+        assert!(script.contains("MN_NON_STEAM_SHORTCUT='1'\n"));
+        let exp = exported(&script);
+        assert!(exp.iter().any(|k| k == "FEX_X87REDUCEDPRECISION"));
+        assert!(exp.iter().any(|k| k == "MN_NON_STEAM_SHORTCUT"));
     }
 }
 

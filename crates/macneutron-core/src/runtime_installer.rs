@@ -169,6 +169,7 @@ impl RuntimeInstaller {
                 let _ = std::fs::remove_dir_all(&new);
                 return Err(RuntimeInstallError::CopyFailed(copied));
             }
+            scrub_tree_xattrs(&new);
             calls.push(format!("codesign --verify --strict {new_path}"));
             let verified = runner
                 .run(
@@ -195,6 +196,7 @@ impl RuntimeInstaller {
                 return Err(RuntimeInstallError::SwapFailed(error));
             }
             let _ = std::fs::remove_dir_all(&new); // the old copy, after a swap
+            scrub_tree_xattrs(&layout.wine_app());
             let _ = std::fs::remove_file(layout.runtime_damaged_marker());
             RuntimeInstallOutcome::Installed
         };
@@ -238,7 +240,7 @@ impl RuntimeInstaller {
         }
         let contents = std::fs::read(source)?;
         if std::fs::read(destination).map(|d| d == contents).unwrap_or(false) {
-            posix::remove_xattr(destination, "com.apple.quarantine"); // an earlier copy's
+            scrub_xattrs(destination); // an earlier copy's
             return Ok(());
         }
         if let Some(parent) = destination.parent() {
@@ -249,12 +251,35 @@ impl RuntimeInstaller {
         let temporary = PathBuf::from(temporary);
         let _ = std::fs::remove_file(&temporary);
         std::fs::copy(source, &temporary)?;
-        // The copy keeps a downloaded app's quarantine, and Steam execs these files directly (no stapled ticket).
-        posix::remove_xattr(&temporary, "com.apple.quarantine");
+        // The copy keeps a downloaded app's quarantine/provenance, and Steam execs these files directly (no stapled ticket).
+        scrub_xattrs(&temporary);
         if !posix::rename(&temporary, destination) {
             return Err(std::io::Error::last_os_error());
         }
+        scrub_xattrs(destination);
         Ok(())
+    }
+}
+
+/// Removes quarantine and provenance xattrs from `path`.
+pub(crate) fn scrub_xattrs(path: &Path) {
+    posix::remove_xattr(path, "com.apple.quarantine");
+    posix::remove_xattr(path, "com.apple.provenance");
+}
+
+/// Recursively removes quarantine and provenance xattrs under `root`, without following symlinks.
+pub(crate) fn scrub_tree_xattrs(root: &Path) {
+    let kind = posix::kind(root);
+    if kind == posix::Kind::Link || kind == posix::Kind::Missing {
+        return;
+    }
+    scrub_xattrs(root);
+    if kind != posix::Kind::Directory {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(root) else { return };
+    for entry in entries.flatten() {
+        scrub_tree_xattrs(&entry.path());
     }
 }
 
@@ -617,13 +642,43 @@ mod tests {
         let quarantine = "0083;66f00000;Safari;";
         for file in [&launcher, &steam_exe] {
             assert_eq!(set_xattr(file, "com.apple.quarantine", quarantine.as_bytes()), 0);
+            let _ = set_xattr(file, "com.apple.provenance", b"test-prov");
         }
         let layout = ToolLayout::new(make_temp_dir().join("macneutron"));
         RuntimeInstaller::write_tool_files(&layout, &launcher, None).unwrap();
+        let can_strip_provenance = can_remove_provenance(&layout.root);
         for file in [layout.launcher_binary(), layout.steam_helper()] {
             assert!(!has_xattr(&file, "com.apple.quarantine"), "{}", file.display());
+            assert_ne!(
+                xattr_bytes(&file, "com.apple.provenance").as_deref(),
+                Some(b"test-prov".as_slice()),
+                "{}",
+                file.display()
+            );
+            if can_strip_provenance {
+                assert!(!has_xattr(&file, "com.apple.provenance"), "{}", file.display());
+            }
         }
         assert!(has_xattr(&launcher, "com.apple.quarantine")); // the source keeps it
+    }
+
+    #[test]
+    fn installed_wine_app_scrubs_quarantine_and_provenance() {
+        let layout = make_installed_layout("A");
+        let source = make_fake_wine_app(&make_temp_dir(), "B");
+        let wine_bin = source.join("Contents/MacOS/wine");
+        assert_eq!(set_xattr(&wine_bin, "com.apple.quarantine", b"0083;66f00000;Safari;"), 0);
+        let _ = set_xattr(&wine_bin, "com.apple.provenance", b"test-prov");
+        let (outcome, _, _) = install_fake(&source, &layout, None, None, false, 0, 0, &[], None, None);
+        assert_eq!(outcome.unwrap(), RuntimeInstallOutcome::Installed);
+        assert!(!has_xattr(&layout.wine(), "com.apple.quarantine"));
+        assert_ne!(
+            xattr_bytes(&layout.wine(), "com.apple.provenance").as_deref(),
+            Some(b"test-prov".as_slice())
+        );
+        if can_remove_provenance(&layout.root) {
+            assert!(!has_xattr(&layout.wine(), "com.apple.provenance"));
+        }
     }
 
     #[test]
@@ -779,12 +834,44 @@ mod tests {
         }
     }
 
-    fn has_xattr(path: &Path, name: &str) -> bool {
+    fn xattr_bytes(path: &Path, name: &str) -> Option<Vec<u8>> {
         use std::ffi::CString;
         use std::os::unix::ffi::OsStrExt;
         let cpath = CString::new(path.as_os_str().as_bytes()).unwrap();
         let cname = CString::new(name).unwrap();
-        unsafe { libc::getxattr(cpath.as_ptr(), cname.as_ptr(), std::ptr::null_mut(), 0, 0, 0) > 0 }
+        let len = unsafe { libc::getxattr(cpath.as_ptr(), cname.as_ptr(), std::ptr::null_mut(), 0, 0, 0) };
+        if len < 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; len as usize];
+        let got = unsafe {
+            libc::getxattr(
+                cpath.as_ptr(),
+                cname.as_ptr(),
+                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.len(),
+                0,
+                0,
+            )
+        };
+        (got >= 0).then(|| {
+            buf.truncate(got as usize);
+            buf
+        })
+    }
+
+    fn has_xattr(path: &Path, name: &str) -> bool {
+        xattr_bytes(path, name).is_some_and(|b| !b.is_empty())
+    }
+
+    fn can_remove_provenance(dir: &Path) -> bool {
+        let probe = dir.join(".provenance-probe");
+        let _ = std::fs::write(&probe, b"");
+        let _ = set_xattr(&probe, "com.apple.provenance", b"test-prov");
+        posix::remove_xattr(&probe, "com.apple.provenance");
+        let removed = !has_xattr(&probe, "com.apple.provenance");
+        let _ = std::fs::remove_file(&probe);
+        removed
     }
 
     /// `FileManager.copyItem`: copies a file or a whole tree, like the `cp -c -R` the fake stands in for (std's copy is file-only, so the swap would find no source directory to rename into place).

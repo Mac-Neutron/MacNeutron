@@ -95,7 +95,20 @@ impl LaunchEnvironment {
                 ShaderPrecache::folder(context).to_string_lossy().into_owned(),
             );
         }
+        if !base.contains_key("FEX_X87REDUCEDPRECISION") {
+            env.insert("FEX_X87REDUCEDPRECISION".to_string(), "1".to_string());
+        }
+        if Self::is_non_steam_shortcut(&env) {
+            env.remove("SteamAppId");
+        }
         env
+    }
+
+    /// Steam gives non-Steam shortcuts a 64-bit `SteamGameId` whose low 32 bits equal `0x0200_0000`.
+    pub fn is_non_steam_shortcut(env: &BTreeMap<String, String>) -> bool {
+        env.get("SteamGameId")
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .is_some_and(|id| (id & 0xFFFF_FFFF) == 0x0200_0000)
     }
 
     /// Wine's WINEDEBUG, the user's if they set one (the microVM's guest gets it too). MACNEUTRON_LOG=1 leaves out
@@ -345,5 +358,40 @@ mod tests {
         assert_eq!(forced(with("8"), &[]).as_deref(), Some("8"));
         assert_eq!(forced(with("game"), &[]), None);
         assert_eq!(forced(GameSettings::default(), &[("DXMT_MAX_ANISOTROPY", "0")]).as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn fex_x87_reduced_precision_defaults_to_one_unless_overridden() {
+        let env = LaunchEnvironment::build(&BTreeMap::new(), &context(), GraphicsBackend::Dxmt, false);
+        assert_eq!(env.get("FEX_X87REDUCEDPRECISION").map(String::as_str), Some("1"));
+        let overridden = LaunchEnvironment::build(
+            &base(&[("FEX_X87REDUCEDPRECISION", "0")]),
+            &context(),
+            GraphicsBackend::Dxmt,
+            false,
+        );
+        assert_eq!(overridden.get("FEX_X87REDUCEDPRECISION").map(String::as_str), Some("0"));
+    }
+
+    #[test]
+    fn non_steam_shortcut_unsets_steam_app_id() {
+        // Non-Steam shortcut: (id & 0xFFFF_FFFF) == 0x0200_0000
+        let shortcut_id = ((0x1234_5678u64 << 32) | 0x0200_0000u64).to_string();
+        let mut shortcut_base = base(&[("SteamAppId", "0"), ("SteamGameId", &shortcut_id)]);
+        assert!(LaunchEnvironment::is_non_steam_shortcut(&shortcut_base));
+        let built = LaunchEnvironment::build(&shortcut_base, &context(), GraphicsBackend::Dxmt, false);
+        assert!(!built.contains_key("SteamAppId"));
+        assert_eq!(built.get("SteamGameId"), Some(&shortcut_id));
+
+        // Regular Steam game keeps SteamAppId.
+        shortcut_base.insert("SteamAppId".into(), "42".into());
+        shortcut_base.insert("SteamGameId".into(), "42".into());
+        assert!(!LaunchEnvironment::is_non_steam_shortcut(&shortcut_base));
+        let built_regular = LaunchEnvironment::build(&shortcut_base, &context(), GraphicsBackend::Dxmt, false);
+        assert_eq!(built_regular.get("SteamAppId").map(String::as_str), Some("42"));
+
+        // Missing or invalid SteamGameId is false.
+        assert!(!LaunchEnvironment::is_non_steam_shortcut(&BTreeMap::new()));
+        assert!(!LaunchEnvironment::is_non_steam_shortcut(&base(&[("SteamGameId", "not-a-number")])));
     }
 }

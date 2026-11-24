@@ -170,6 +170,71 @@ extern "C" {
     pub fn __error() -> *mut c_int;
     pub fn fstat(fd: c_int, buf: *mut stat) -> c_int;
     pub fn confstr(name: c_int, buf: *mut c_char, len: usize) -> usize;
+    pub fn kqueue() -> c_int;
+    pub fn kevent(
+        kq: c_int,
+        changelist: *const Kevent,
+        nchanges: c_int,
+        eventlist: *mut Kevent,
+        nevents: c_int,
+        timeout: *const Timespec,
+    ) -> c_int;
+    pub fn proc_pid_rusage(pid: c_int, flavor: c_int, buffer: *mut RusageInfoV4) -> c_int;
+    pub fn waitpid(pid: c_int, status: *mut c_int, options: c_int) -> c_int;
+    pub fn signal(sig: c_int, handler: Sighandler) -> usize;
+}
+
+pub type Sighandler = extern "C" fn(c_int);
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Kevent {
+    pub ident: usize,
+    pub filter: i16,
+    pub flags: u16,
+    pub fflags: u32,
+    pub data: isize,
+    pub udata: *mut c_void,
+}
+
+#[repr(C)]
+pub struct RusageInfoV4 {
+    pub ri_uuid: [u8; 16],
+    pub ri_user_time: u64,
+    pub ri_system_time: u64,
+    pub ri_pkg_idle_wkups: u64,
+    pub ri_interrupt_wkups: u64,
+    pub ri_pageins: u64,
+    pub ri_wired_size: u64,
+    pub ri_resident_size: u64,
+    pub ri_phys_footprint: u64,
+    pub ri_proc_start_abstime: u64,
+    pub ri_proc_exit_abstime: u64,
+    pub ri_child_user_time: u64,
+    pub ri_child_system_time: u64,
+    pub ri_child_pkg_idle_wkups: u64,
+    pub ri_child_interrupt_wkups: u64,
+    pub ri_child_pageins: u64,
+    pub ri_child_elapsed_abstime: u64,
+    pub ri_diskio_bytesread: u64,
+    pub ri_diskio_byteswritten: u64,
+    pub ri_cpu_time_qos_default: u64,
+    pub ri_cpu_time_qos_maintenance: u64,
+    pub ri_cpu_time_qos_background: u64,
+    pub ri_cpu_time_qos_utility: u64,
+    pub ri_cpu_time_qos_legacy: u64,
+    pub ri_cpu_time_qos_user_initiated: u64,
+    pub ri_cpu_time_qos_user_interactive: u64,
+    pub ri_billed_system_time: u64,
+    pub ri_serviced_system_time: u64,
+    pub ri_logical_writes: u64,
+    pub ri_lifetime_max_phys_footprint: u64,
+    pub ri_instructions: u64,
+    pub ri_cycles: u64,
+    pub ri_billed_energy: u64,
+    pub ri_serviced_energy: u64,
+    pub ri_interval_max_phys_footprint: u64,
+    pub ri_runnable_time: u64,
 }
 
 // struct stat: only st_size is read (the ext4-grow check). st_size is off_t at the offset the macOS ABI puts it, so
@@ -217,9 +282,33 @@ pub const R_OK: c_int = 0x0004;
 pub const W_OK: c_int = 0x0002;
 pub const X_OK: c_int = 0x0001;
 pub const F_OK: c_int = 0x0000;
+pub const EINTR: c_int = 4;
+pub const SIGHUP: c_int = 1;
+pub const SIGINT: c_int = 2;
 pub const SIGTERM: c_int = 15;
+pub const EVFILT_PROC: i16 = -5;
+pub const EV_ADD: u16 = 0x0001;
+pub const EV_ONESHOT: u16 = 0x0010;
+pub const EV_ERROR: u16 = 0x4000;
+pub const NOTE_EXIT: u32 = 0x8000_0000;
+pub const NOTE_EXIT_DETAIL: u32 = 0x0200_0000;
+pub const NOTE_EXIT_MEMORY: u32 = 0x0002_0000;
+pub const RUSAGE_INFO_V4: c_int = 4;
 
-// ---- AppKit shim (appkit_shim.m) ----
+// ---- AppKit / Metal shim (appkit_shim.m) ----
 extern "C" {
+    pub fn mn_begin_activity();
     pub fn mn_run_appkit_main_loop();
+    pub fn mn_gpu_is_paravirtual() -> bool;
+    pub fn mn_metal_memory_info(
+        name_buf: *mut c_char,
+        name_len: usize,
+        allocated_out: *mut u64,
+        recommended_out: *mut u64,
+    ) -> bool;
+    pub fn mn_task_memory_info(
+        footprint_out: *mut u64,
+        rss_out: *mut u64,
+        compressed_out: *mut u64,
+    ) -> bool;
 }

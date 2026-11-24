@@ -150,6 +150,11 @@ impl VMSetup {
         let built = setup.join("images");
         let parts = setup.join("parts");
         std::fs::create_dir_all(&setup).map_err(|e| VMSetupError::Missing { path: e.to_string() })?;
+        exclude_from_time_machine(&setup);
+        let state = vm.join("state");
+        if std::fs::create_dir_all(&state).is_ok() {
+            exclude_from_time_machine(&state);
+        }
         let already = std::fs::read_to_string(built.join(".built-for")).ok() == Some(hash.clone());
         if !already {
             match Self::build(&manifest_value, &hash, vm, mkfs, min_free_gb, fetch, pause, &setup, &built, &parts, progress) {
@@ -176,6 +181,7 @@ impl VMSetup {
         if !swapped {
             return Err(VMSetupError::Missing { path: format!("rename {} -> {}", built.display(), old.display()) });
         }
+        exclude_from_time_machine(&old);
         // The guest's tools, once the images are in: each file replaced in one rename, at its path under share/bin
         // (the ALSA plugin of each width is in lib/ and lib64/).
         for name in walk_names(&parts.join("share/bin")) {
@@ -357,6 +363,13 @@ impl VMSetup {
             roots.iter().any(|root| real.starts_with(root.as_str()) || path.starts_with(root.as_str()))
         })
     }
+}
+
+fn exclude_from_time_machine(path: &Path) {
+    let _ = Command::new("/usr/bin/tmutil")
+        .arg("addexclusion")
+        .arg(path)
+        .output();
 }
 
 fn last_component(path: &str) -> String {

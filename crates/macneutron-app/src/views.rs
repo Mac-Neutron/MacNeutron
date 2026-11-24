@@ -521,11 +521,21 @@ pub enum GameToggle {
     MetalFX,
     DLSS,
     FrameGen,
+    Retina,
+    DisableHidraw,
 }
 
 impl GameToggle {
-    pub const ALL: [GameToggle; 6] =
-        [GameToggle::Log, GameToggle::MetalHUD, GameToggle::Msync, GameToggle::MetalFX, GameToggle::DLSS, GameToggle::FrameGen];
+    pub const ALL: [GameToggle; 8] = [
+        GameToggle::Log,
+        GameToggle::MetalHUD,
+        GameToggle::Msync,
+        GameToggle::MetalFX,
+        GameToggle::DLSS,
+        GameToggle::FrameGen,
+        GameToggle::Retina,
+        GameToggle::DisableHidraw,
+    ];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -535,6 +545,8 @@ impl GameToggle {
             GameToggle::MetalFX => "MetalFX upscaling",
             GameToggle::DLSS => "DLSS",
             GameToggle::FrameGen => "Frame generation",
+            GameToggle::Retina => "Retina mode",
+            GameToggle::DisableHidraw => "Disable hidraw",
         }
     }
 
@@ -545,6 +557,8 @@ impl GameToggle {
             GameToggle::MetalFX => "Upscales with Apple's MetalFX when the game renders below its window or the display's pixel density.",
             GameToggle::DLSS => "Experimental: the game sees an NVIDIA GPU, and its DLSS option upscales with MetalFX's temporal upscaler (MACNEUTRON_DLSS=1). Direct3D 12 games on DXMT.",
             GameToggle::FrameGen => "Experimental: MetalFX interpolates a frame between each two the game renders, while the game runs DLSS and is slow enough for it to help (MACNEUTRON_FRAMEGEN=1; it turns itself off when it would hold the game back). More frames shown, a little more latency; the HUD may wobble in motion.",
+            GameToggle::Retina => "Render at the display's full Retina resolution instead of point-scaled resolution (MACNEUTRON_RETINA=1). Sharper on high-DPI displays; disable if the UI is tiny or performance drops.",
+            GameToggle::DisableHidraw => "Disable Wine's hidraw controller backend so the game uses standard macOS controller input instead (MACNEUTRON_DISABLE_HIDRAW=1). Helps with duplicate or misbehaving controllers.",
         })
     }
 
@@ -556,6 +570,8 @@ impl GameToggle {
             GameToggle::MetalFX => &mut settings.metal_fx,
             GameToggle::DLSS => &mut settings.dlss,
             GameToggle::FrameGen => &mut settings.frame_gen,
+            GameToggle::Retina => &mut settings.retina,
+            GameToggle::DisableHidraw => &mut settings.disable_hidraw,
         }
     }
 

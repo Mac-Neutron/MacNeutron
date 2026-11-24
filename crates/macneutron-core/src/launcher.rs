@@ -204,6 +204,9 @@ impl Launcher {
                     game_log,
                 );
             };
+            if let Err(error) = self.preflight.check_vm() {
+                return self.fail(&error.to_string(), argv, true, game_log);
+            }
             return self.run_in_micro_vm(&vm, &request, &context, &library, &guest, environment, game_log, argv);
         }
         if vm_wanted {
@@ -352,6 +355,12 @@ impl Launcher {
                     // Keep Steam's "running" state until every process in the prefix is gone (covers launchers that
                     // start the real game and exit).
                     self.runner.run(&self.layout.wineserver(), &["-w".to_string()], env, None)?;
+                    if PrefixManager::wine_server_dir(&context.prefix()).is_some_and(|dir| dir.exists()) {
+                        let killed = PrefixManager::sweep_stragglers(&context.prefix());
+                        if !killed.is_empty() {
+                            self.log.append(&format!("note: swept Wine straggler PIDs: {killed:?}"));
+                        }
+                    }
                     if let Some(precache) = &precache {
                         precache.write_stamp_if_missing();
                     }
@@ -413,6 +422,9 @@ impl Launcher {
         let quiet = self.layout.is_performance_build() && game_log.is_none();
         if quiet {
             environment.entry("DXMT_LOG_LEVEL".into()).or_insert_with(|| "none".into());
+        }
+        if LaunchEnvironment::is_non_steam_shortcut(&environment) {
+            environment.insert("MN_NON_STEAM_SHORTCUT".into(), "1".into());
         }
         self.vm_run.begin();
         let _end = Defer(|| self.vm_run.end());
@@ -509,37 +521,13 @@ impl Launcher {
         // until the game's window shows on the Mac (macneutron-vm's MN_WINDOW_SHOWN) or the run ends, run-game.sh's
         // stages its message (the last run's word on both removed first).
         let traces = share.join("traces");
-        let (window_shown, stage) = (traces.join("window"), traces.join("stage"));
-        for marker in [&window_shown, &stage] {
+        let (window_shown, stage, vm_exit_trace) = (traces.join("window"), traces.join("stage"), traces.join("vm-exit"));
+        for marker in [&window_shown, &stage, &vm_exit_trace] {
             let _ = std::fs::remove_file(marker);
         }
-        let start = if !vm.state(app_id).exists() {
-            Self::setup_toast(&request.target)
-        } else {
-            (format!("Starting {}", Self::game_name(&request.target)), "Starting its game VM.".to_string())
-        };
-        let toast = Arc::new(self.notifier.progress(&start.0, &start.1, Some(window_shown.clone())));
-        let launched = Arc::new(AtomicBool::new(false));
-        {
-            // The share is the guest's: polled.
-            let (toast, launched, stage) = (toast.clone(), launched.clone(), stage.clone());
-            std::thread::spawn(move || {
-                let mut last = String::new();
-                while !launched.load(Ordering::SeqCst) {
-                    let line = std::fs::read_to_string(&stage).unwrap_or_default().trim().to_string();
-                    if !line.is_empty() && line != last {
-                        (toast.update)(&line);
-                        last = line;
-                    }
-                    std::thread::sleep(Duration::from_millis(500));
-                }
-            });
-        }
-        let _close = Defer(|| {
-            launched.store(true, Ordering::SeqCst);
-            (toast.close)();
-        });
         let mut env = environment.clone();
+        // Preserve the exact `$SHARE/mounts` file written above (including eac-runtime and user Documents mounts).
+        env.insert("MN_MOUNTS".into(), "keep".into());
         env.insert("MN_WINDOW_SHOWN".into(), window_shown.to_string_lossy().into_owned());
         // The game's name on that window and its .exe's icon on the Dock tile (vm/metal/wm/host/winemac.m), not a bare
         // executable's.
@@ -561,6 +549,7 @@ impl Launcher {
         }
         // Forwarded, native DXMT's shader cache and recordings are the game's, in its VM state folder (macneutron-vm
         // points DXMT at them); after a translator or macOS update its recordings replay natively before the boot.
+        // Replay completes and closes its shader toast BEFORE the VM launch toast opens.
         let mut precache = None;
         if environment.get("MACNEUTRON_VM_D3D").map(String::as_str) == Some("forward") {
             let state = vm.dxmt_state(app_id);
@@ -591,21 +580,49 @@ impl Launcher {
                 precache.write_stamp();
             }
         }
-        let _stamp = Defer(|| {
-            if let Some(precache) = &precache {
-                precache.write_stamp_if_missing();
-            }
+        if self.stopped() {
+            return Ok(STOPPED);
+        }
+        let start = if !vm.state(app_id).exists() {
+            Self::setup_toast(&request.target)
+        } else {
+            (format!("Starting {}", Self::game_name(&request.target)), "Starting its game VM.".to_string())
+        };
+        let toast = Arc::new(self.notifier.progress(&start.0, &start.1, Some(window_shown.clone())));
+        let launched = Arc::new(AtomicBool::new(false));
+        {
+            // The share is the guest's: polled.
+            let (toast, launched, stage) = (toast.clone(), launched.clone(), stage.clone());
+            std::thread::spawn(move || {
+                let mut last = String::new();
+                while !launched.load(Ordering::SeqCst) {
+                    let line = std::fs::read_to_string(&stage).unwrap_or_default().trim().to_string();
+                    if !line.is_empty() && line != last {
+                        (toast.update)(&line);
+                        last = line;
+                    }
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            });
+        }
+        let _close = Defer(|| {
+            launched.store(true, Ordering::SeqCst);
+            (toast.close)();
         });
         if perf {
             env.insert("MN_PRESENT_STATS".into(), share.join("traces/frames.txt").to_string_lossy().into_owned());
         }
         env.entry("MN_RUN_TIMEOUT".into()).or_insert_with(|| "86400".into());
+        let (ram_mib, ram_warning) = MicroVM::ram_mib_for(&environment, MicroVM::host_memory_bytes());
+        if let Some(warning) = ram_warning {
+            self.log.append(&warning);
+        }
         let mut arguments: Vec<String> = vec![
             file.to_string_lossy().into_owned(),
             "--steam-appid".into(),
             app_id.into(),
             "--ram-mib".into(),
-            "16384".into(),
+            ram_mib.to_string(),
             "--steam-map".into(),
             format!("{library}=/mnt/games"),
         ];
@@ -616,8 +633,46 @@ impl Launcher {
         if quiet {
             arguments.extend(["--console".to_string(), "/dev/null".to_string()]);
         }
-        let mut status =
-            self.runner.run_with_started(&vm.run_guest(), &arguments, &env, game_log, &mut |pid| self.vm_run.started(pid))?;
+        let exit = self.runner.run_with_exit_detail(
+            &vm.run_guest(),
+            &arguments,
+            &env,
+            game_log,
+            &mut |pid| self.vm_run.started(pid),
+        )?;
+        if let Some(precache) = &precache {
+            precache.write_stamp_if_missing();
+        }
+        let mut status = exit.status;
+        let vm_exit = std::fs::read_to_string(&vm_exit_trace)
+            .map(|text| VmExitTrace::parse(&text))
+            .unwrap_or_default();
+        let killed_for_memory = exit.killed_for_memory || vm_exit.killed_for_memory;
+        let exit_detail = vm_exit.exit_detail.or(exit.exit_detail);
+        let peak_footprint_bytes = vm_exit.peak_footprint_bytes.or(exit.peak_footprint_bytes);
+        let reported_ram_mib = vm_exit.vm_ram_mib.unwrap_or(ram_mib);
+        if killed_for_memory || status == 137 {
+            let trace_status = vm_exit.status.unwrap_or(status);
+            let signal = vm_exit.signal.map_or_else(|| "none".to_string(), |s| s.to_string());
+            let detail = exit_detail.map_or_else(|| "none".to_string(), |d| format!("0x{d:08x}"));
+            let footprint = peak_footprint_bytes
+                .map_or_else(|| "unknown".to_string(), |b| format!("{:.1} MiB ({b} bytes)", b as f64 / (1024.0 * 1024.0)));
+            let pressure = vm_exit.host_pressure.as_deref().unwrap_or("unknown");
+            self.log.summary(&format!(
+                "vm-exit: appid={app_id} status={trace_status} signal={signal} killed_for_memory={killed_for_memory} \
+                 exit_detail={detail} peak_footprint={footprint} vm_ram_mib={reported_ram_mib} host_pressure={pressure}"
+            ));
+        }
+        if killed_for_memory && !self.stopped() {
+            self.notifier.post(
+                "MacNeutron",
+                &format!(
+                    "macOS closed {}'s game VM because the Mac ran low on memory. Close other apps or set \
+                     MACNEUTRON_VM_RAM_MIB lower (currently {reported_ram_mib} MiB) in Steam launch options.",
+                    Self::game_name(&request.target)
+                ),
+            );
+        }
         // run-game.sh ended the VM because a game's crash reporter was waiting on the invisible Xvfb (Unreal's, and its
         // kin): keep the report where the player can find it and say so. A crash is never a success.
         if let Some(crash) = VMCrash::read(&share, &context.prefix(), library) {
@@ -715,6 +770,10 @@ impl Launcher {
         let backend = GraphicsBackend::select(merged.get("MACNEUTRON_GRAPHICS").map(String::as_str)).0;
         let env = LaunchEnvironment::build(&merged, &context, backend, false);
         let _ = self.runner.run(&self.layout.wineserver(), &["-k".to_string()], &env, None);
+        let killed = PrefixManager::sweep_stragglers(&context.prefix());
+        if !killed.is_empty() {
+            self.log.append(&format!("note: swept Wine straggler PIDs on terminate: {killed:?}"));
+        }
     }
 
     /// Steam's Stop on macOS: it asks the processes it tracks to quit, as apps (the launcher is one while it runs). A
@@ -921,6 +980,47 @@ fn unique() -> String {
     format!("{}-{nanos}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
+#[derive(Default)]
+struct VmExitTrace {
+    status: Option<i32>,
+    signal: Option<i32>,
+    exit_detail: Option<u32>,
+    killed_for_memory: bool,
+    peak_footprint_bytes: Option<u64>,
+    vm_ram_mib: Option<u32>,
+    host_pressure: Option<String>,
+}
+
+impl VmExitTrace {
+    fn parse(text: &str) -> Self {
+        let mut out = Self::default();
+        for line in text.lines() {
+            let Some((key, value)) = line.split_once('=') else { continue };
+            let key = key.trim();
+            let value = value.trim();
+            match key {
+                "status" => out.status = value.parse::<i32>().ok(),
+                "signal" => out.signal = value.parse::<i32>().ok(),
+                "exit_detail" => {
+                    let parsed = value
+                        .strip_prefix("0x")
+                        .or_else(|| value.strip_prefix("0X"))
+                        .map_or_else(|| value.parse::<u32>().ok(), |hex| u32::from_str_radix(hex, 16).ok());
+                    out.exit_detail = parsed;
+                }
+                "killed_for_memory" => {
+                    out.killed_for_memory = value == "1" || value.eq_ignore_ascii_case("true");
+                }
+                "peak_footprint_bytes" => out.peak_footprint_bytes = value.parse::<u64>().ok().filter(|&b| b > 0),
+                "vm_ram_mib" => out.vm_ram_mib = value.parse::<u32>().ok(),
+                "host_pressure" if !value.is_empty() => out.host_pressure = Some(value.to_string()),
+                _ => {}
+            }
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1051,13 +1151,13 @@ pub(crate) mod tests {
         let f = make_fixture_with(runner, Some(TEST_IDENTITY), false);
         assert_eq!(f.launch(&["waitforexitandrun", "/g/Game.exe", "-windowed"], &f.env), 7);
         let commands: Vec<Vec<String>> = f.calls().iter().map(command).collect();
+        assert_eq!(commands.len(), 6);
+        assert_eq!(commands[0], args(&["wine", "wineboot", "-u"]));
+        assert_eq!(commands[1][..3], args(&["wine", "reg", "import"]));
+        assert!(commands[1][3].starts_with("Z:\\"));
         assert_eq!(
-            commands,
-            vec![
-                args(&["wine", "wineboot", "-u"]),
-                args(&["wine", "reg", "add", r"HKLM\Software\Microsoft\Wow64\amd64", "/ve", "/d", "libarm64ecfex.dll", "/f"]),
-                args(&["wine", "reg", "add", r"HKCU\Software\Wine\WineDbg", "/v", "ShowCrashDialog", "/t", "REG_DWORD", "/d", "0", "/f"]),
-                args(&["wine", "reg", "add", r"HKCU\Software\Wine\X11 Driver", "/v", "EmulateModeset", "/d", "Y", "/f"]),
+            &commands[2..],
+            &[
                 args(&["wineserver", "-w"]),
                 args(&["wineserver", "-w"]),
                 args(&["wine", "/g/Game.exe", "-windowed"]),
@@ -1810,13 +1910,14 @@ pub(crate) mod tests {
             assert_eq!(f.calls().len(), 1); // no host prefix, no host Wine
             assert_eq!(call.tool, "run-guest.sh");
             let profile = f.profile().to_string_lossy().into_owned();
+            let expected_ram = MicroVM::ram_mib(&f.env).to_string();
             assert_eq!(
                 call.arguments[1..],
                 [
                     "--steam-appid".to_string(),
                     "2437170".into(),
                     "--ram-mib".into(),
-                    "16384".into(),
+                    expected_ram,
                     "--steam-map".into(),
                     "/Users/someone/Library/Application Support/Steam/steamapps/common=/mnt/games".into(),
                     "--user-share".into(),
@@ -1827,6 +1928,7 @@ pub(crate) mod tests {
                     "game=/Users/someone/Library/Application Support/Steam/steamapps/common/SMITE 2".into(),
                 ]
             );
+            assert_eq!(call.environment.get("MN_MOUNTS").map(String::as_str), Some("keep"));
             assert_eq!(call.environment["MN_VM_DIR"], directory_path(&f.vm));
             assert_eq!(call.environment["MN_STATE"], f.vm.join("state/2437170.img").to_string_lossy());
             assert_eq!(call.environment["MN_SHARE"], f.share().to_string_lossy());
@@ -2264,7 +2366,12 @@ pub(crate) mod tests {
             );
             assert_eq!(replay.environment.get("DXMT_PIPELINE_RECORD"), None);
             assert_ne!(read(&pipelines.join("replayed")), "an older build\n");
-            assert!(f.notifier.toasts().iter().any(|t| t.contains("shaders")));
+            let toasts = f.notifier.toasts();
+            assert_eq!(toasts.len(), 2);
+            assert!(toasts[0].contains("shaders"));
+            assert!(toasts[1].contains("Setting up SMITE 2"));
+            assert_eq!(f.notifier.toasts_closed(), 2);
+            assert_eq!(f.guest_call().environment.get("MN_MOUNTS").map(String::as_str), Some("keep"));
         }
 
         #[test]
@@ -2597,6 +2704,151 @@ pub(crate) mod tests {
                   window the game VM can't show. It runs again at the next launch."]
             );
             assert!(f.scripts.first().contains("MN_INSTALL_TIMEOUT='120'\n"));
+        }
+
+        #[test]
+        fn shader_precache_toast_closes_before_vm_toast_opens() {
+            struct ToastOrderNotifier {
+                inner: Arc<RecordingNotifier>,
+                events: Arc<Mutex<Vec<String>>>,
+            }
+            impl Notifier for ToastOrderNotifier {
+                fn post(&self, title: &str, message: &str) {
+                    self.inner.post(title, message);
+                }
+                fn progress(&self, title: &str, message: &str, until: Option<PathBuf>) -> crate::preflight::ToastHandle {
+                    self.events.lock().unwrap().push(format!("open:{title}"));
+                    let handle = self.inner.progress(title, message, until);
+                    let events = self.events.clone();
+                    let title = title.to_string();
+                    let inner_close = handle.close;
+                    crate::preflight::ToastHandle {
+                        update: handle.update,
+                        close: Box::new(move || {
+                            events.lock().unwrap().push(format!("close:{title}"));
+                            (inner_close)();
+                        }),
+                    }
+                }
+            }
+
+            let mut f = fixture();
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let inner = f.notifier.clone();
+            f.launcher.notifier = Arc::new(ToastOrderNotifier {
+                inner: inner.clone(),
+                events: events.clone(),
+            });
+            let pipelines = f.vm.join("state/2437170.dxmt/pipelines");
+            write("recorded\n", &pipelines.join("game.pipelines"), false);
+            write("an older build\n", &pipelines.join("replayed"), false);
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_VM_D3D", "forward")]));
+
+            assert_eq!(
+                *events.lock().unwrap(),
+                [
+                    "open:Preparing SMITE 2's shaders",
+                    "close:Preparing SMITE 2's shaders",
+                    "open:Setting up SMITE 2",
+                    "close:Setting up SMITE 2",
+                ]
+            );
+            assert_eq!(inner.toasts_closed(), 2);
+        }
+
+        #[test]
+        fn vm_ram_mib_is_dynamic_and_respects_override_with_advisory_warning() {
+            let f = fixture();
+            f.launch(&["waitforexitandrun", GAME], &f.env);
+            let call = f.guest_call();
+            let ram_idx = call.arguments.iter().position(|a| a == "--ram-mib").unwrap() + 1;
+            assert_eq!(call.arguments[ram_idx], MicroVM::ram_mib(&f.env).to_string());
+
+            // Explicit override within limits.
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_VM_RAM_MIB", "4096")]));
+            let call2 = f.guest_call();
+            let ram_idx2 = call2.arguments.iter().position(|a| a == "--ram-mib").unwrap() + 1;
+            assert_eq!(call2.arguments[ram_idx2], "4096");
+
+            // Excessive override caps and logs an advisory warning.
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("MACNEUTRON_VM_RAM_MIB", "9999999")]));
+            assert!(f.launcher_log().contains("VM RAM override"));
+        }
+
+        #[test]
+        fn hypervisor_preflight_blocks_vm_when_unavailable_but_allows_native() {
+            use crate::preflight::PreflightError;
+            for (err, expected_fragment) in [
+                (PreflightError::NestedVirtualMachine, "virtual machine"),
+                (PreflightError::HypervisorUnavailable, "Hypervisor"),
+            ] {
+                let mut f = fixture();
+                let err_clone = err.clone();
+                f.launcher.preflight = Preflight::new(
+                    Box::new(|| true),
+                    Box::new(|_| Some(TEST_IDENTITY.to_string())),
+                    Box::new(|_| true),
+                )
+                .with_hv_check(move || Err(err_clone.clone()));
+
+                // VM launch is blocked cleanly.
+                assert_eq!(f.launch(&["waitforexitandrun", GAME], &f.env), 1);
+                assert!(f.calls().is_empty());
+                assert!(f.notifier.posted().iter().any(|m| m.contains(expected_fragment)));
+
+                // Native macOS launch is NOT blocked by HV check.
+                assert_eq!(f.launch(&["run", "/g/Game.exe"], &f.env), 0);
+                assert!(!f.calls().is_empty());
+            }
+        }
+
+        #[test]
+        fn jetsam_vm_exit_trace_logs_diagnostics_and_notifies_player() {
+            let vm = make_vm_folder();
+            let layout = make_tool_layout();
+            let runner = Arc::new(FakeRunner::new(|call| {
+                if call.tool == "run-guest.sh" {
+                    if let Some(share) = call.environment.get("MN_SHARE").map(PathBuf::from) {
+                        write(
+                            "status=137\nsignal=9\nexit_detail=0x00020000\nkilled_for_memory=1\n\
+                             peak_footprint_bytes=12884901888\nvm_ram_mib=12288\nhost_pressure=critical\n",
+                            &share.join("traces/vm-exit"),
+                            false,
+                        );
+                    }
+                    return 137;
+                }
+                0
+            }));
+            let notifier = Arc::new(RecordingNotifier::default());
+            let home = make_temp_dir().join("home");
+            std::fs::create_dir_all(home.join("Documents")).unwrap();
+            let mut launcher = test_launcher(layout, runner, notifier.clone(), Some(TEST_IDENTITY), vm);
+            launcher.home = home.to_string_lossy().into_owned();
+            let data_path = make_temp_dir().join("compatdata/2437170");
+            let env = steam_environment(&data_path, "2437170");
+
+            assert_eq!(launcher.launch(&args(&["waitforexitandrun", GAME]), &env), 137);
+            let log = read(&launcher.log.launcher_log());
+            assert!(log.contains("vm-exit: appid=2437170"));
+            assert!(log.contains("killed_for_memory=true"));
+            assert!(log.contains("exit_detail=0x00020000"));
+            assert!(log.contains("vm_ram_mib=12288"));
+            assert!(log.contains("host_pressure=critical"));
+            assert!(log.contains("12884901888 bytes"));
+            let posted = notifier.posted();
+            assert_eq!(posted.len(), 1);
+            assert!(posted[0].contains("low on memory"));
+            assert!(posted[0].contains("MACNEUTRON_VM_RAM_MIB"));
+        }
+
+        #[test]
+        fn non_steam_shortcut_sets_mn_non_steam_shortcut_in_vm() {
+            let f = fixture();
+            let shortcut_id = ((0xABCD_1234u64 << 32) | 0x0200_0000u64).to_string();
+            f.launch(&["waitforexitandrun", GAME], &with(&f.env, &[("SteamGameId", &shortcut_id)]));
+            assert!(f.scripts.first().contains("MN_NON_STEAM_SHORTCUT='1'\n"));
+            assert_eq!(f.guest_call().environment.get("MN_NON_STEAM_SHORTCUT").map(String::as_str), Some("1"));
         }
     }
 }

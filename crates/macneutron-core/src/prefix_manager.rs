@@ -1,10 +1,11 @@
 //! Creates, upgrades and equips a game's Wine prefix at `compatdata/<appid>/pfx`. Its stamp, `compatdata/<appid>/version`,
 //! names the `wine.app` that prepared it and the msync mode its wineserver runs in. Ported from `PrefixManager.swift`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::compat_context::CompatContext;
@@ -83,6 +84,10 @@ impl PrefixManager {
     pub(crate) const PENDING_RECORD: &'static str = "player-data-pending";
     /// The last carry's record (its prefix's name); nothing reads it.
     pub(crate) const CARRIED_MARKER: &'static str = "player-data-carried";
+    pub(crate) const HIDDEN_CONTROLLERS_FILE: &'static str = "macneutron-hidden-controllers";
+    pub(crate) const DISABLE_HIDRAW_FILE: &'static str = "macneutron-disable-hidraw";
+    pub(crate) const RETINA_FILE: &'static str = "macneutron-retina";
+    pub(crate) const SWITCH_DEFAULT_IDS: [&'static str; 3] = ["057e/2006", "057e/2007", "057e/2009"];
 
     /// A manager whose `on_prepare` does nothing; set the field for the launcher's toast.
     pub fn new(
@@ -97,6 +102,43 @@ impl PrefixManager {
 
     pub fn stamp(identity: &str, msync: bool) -> String {
         format!("wine.app {identity} msync={}", if msync { 1 } else { 0 })
+    }
+
+    /// The Wine server socket directory for `prefix` (`/tmp/.wine-<uid>/server-<dev:x>-<ino:x>`).
+    pub fn wine_server_dir(prefix: &Path) -> Option<PathBuf> {
+        let meta = std::fs::metadata(prefix).ok()?;
+        let uid = unsafe { libc::getuid() };
+        Some(PathBuf::from(format!("/tmp/.wine-{uid}/server-{:x}-{:x}", meta.dev(), meta.ino())))
+    }
+
+    /// Kills any leftover processes holding files in `prefix`'s Wine server directory.
+    pub fn sweep_stragglers(prefix: &Path) -> Vec<i32> {
+        let Some(server_dir) = Self::wine_server_dir(prefix) else {
+            return Vec::new();
+        };
+        if !server_dir.exists() {
+            return Vec::new();
+        }
+        let Ok(output) = std::process::Command::new("/usr/sbin/lsof")
+            .arg("-t")
+            .arg("+D")
+            .arg(&server_dir)
+            .output()
+        else {
+            return Vec::new();
+        };
+        let self_pid = std::process::id() as i32;
+        let mut killed = Vec::new();
+        let text = String::from_utf8_lossy(&output.stdout);
+        for line in text.lines() {
+            let Ok(pid) = line.trim().parse::<i32>() else { continue };
+            if pid > 1 && pid != self_pid && !killed.contains(&pid)
+                && unsafe { libc::kill(pid, libc::SIGKILL) } == 0
+            {
+                killed.push(pid);
+            }
+        }
+        killed
     }
 
     /// Prepares the prefix when it is missing or another `wine.app` prepared it; stops a wineserver left in the other
@@ -156,6 +198,7 @@ impl PrefixManager {
             prepared();
             result?;
         }
+        self.apply_prefix_toggles(&prefix, environment)?;
         // Every launch: Steam may have made real folders where the links go since the last one.
         let user = environment.get("USER").cloned().unwrap_or_else(posix::user_name);
         let links = ProfileLinks::apply(&prefix, &user, true);
@@ -180,7 +223,24 @@ impl PrefixManager {
         want: &str,
     ) -> Result<(), PrefixError> {
         write_atomic(&self.context.version_file(), Self::PREPARING_STAMP.as_bytes())?;
-        self.prepare_new(environment)?;
+        let prefix = self.context.prefix();
+        let use_template = !prefix.join("system.reg").exists()
+            && environment.get("MACNEUTRON_NO_TEMPLATE").map(String::as_str) != Some("1");
+        let template_dir = if use_template { self.template_path() } else { None };
+        let mut cloned = false;
+        if let Some(ref template) = template_dir {
+            cloned = self.try_clone_from_template(template, &prefix);
+        }
+        if !cloned {
+            let had_prefix = prefix.exists();
+            self.prepare_new(environment)?;
+            if let Some(template) = template_dir
+                .as_ref()
+                .filter(|_| !had_prefix && carry_from.is_none() && prefix.join("system.reg").exists())
+            {
+                self.populate_template(template, &prefix);
+            }
+        }
         // After prepare_new's `wineserver -w`: no server runs to rewrite user.reg.
         if let Some(name) = carry_from {
             self.carry_player_data(name);
@@ -189,9 +249,189 @@ impl PrefixManager {
         Ok(())
     }
 
+    fn template_path(&self) -> Option<PathBuf> {
+        let prefix = self.context.prefix();
+        let app_compat = prefix.parent()?;
+        let compat_root = app_compat.parent()?;
+        // Avoid writing `.macneutron-template` directly under `/` if `compatdata/<appid>` is malformed.
+        compat_root.parent()?;
+        let safe_id: String = self
+            .identity
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+            .collect();
+        if safe_id.is_empty() || safe_id == "." || safe_id == ".." {
+            return None;
+        }
+        Some(compat_root.join(".macneutron-template").join(safe_id))
+    }
+
+    fn template_lock_path(template: &Path) -> PathBuf {
+        let parent = template.parent().unwrap_or_else(|| Path::new("/"));
+        let name = template.file_name().unwrap_or_default().to_string_lossy();
+        parent.join(format!("{name}.lock"))
+    }
+
+    fn try_clone_from_template(&self, template: &Path, prefix: &Path) -> bool {
+        let saved_steamuser = self.context.data_path.join(".macneutron-steamuser-tmp");
+        if std::fs::symlink_metadata(&saved_steamuser).is_ok() {
+            return false;
+        }
+        let Some(parent) = template.parent() else { return false };
+        if std::fs::create_dir_all(parent).is_err() {
+            return false;
+        }
+        let lock = Self::template_lock_path(template);
+        let Ok(cloned) = with_file_lock(&lock, || {
+            if !(template.join(".mn-ready").exists() && template.join("system.reg").exists()) {
+                return false;
+            }
+            if std::fs::symlink_metadata(&saved_steamuser).is_ok() {
+                return false;
+            }
+            let steamuser = prefix.join("drive_c/users/steamuser");
+            match posix::kind(prefix) {
+                posix::Kind::Missing => {}
+                posix::Kind::Directory => {
+                    if posix::kind(&steamuser) == posix::Kind::Link {
+                        return false;
+                    }
+                    if !prefix_has_only_steamuser(prefix) {
+                        return false;
+                    }
+                }
+                posix::Kind::Link | posix::Kind::File | posix::Kind::Other => return false,
+            }
+            let mut moved_steamuser = false;
+            if std::fs::symlink_metadata(&steamuser).is_ok() {
+                if std::fs::rename(&steamuser, &saved_steamuser).is_ok() {
+                    moved_steamuser = true;
+                } else {
+                    return false;
+                }
+            }
+            let prefix_tmp = self.context.data_path.join("pfx.clone-tmp");
+            let _ = std::fs::remove_dir_all(&prefix_tmp);
+            let copied = std::process::Command::new("/bin/cp")
+                .args(["-c", "-R"])
+                .arg(template)
+                .arg(&prefix_tmp)
+                .status()
+                .is_ok_and(|s| s.success());
+            if !copied || !prefix_tmp.join("system.reg").exists() {
+                let _ = std::fs::remove_dir_all(&prefix_tmp);
+                if moved_steamuser {
+                    if let Some(p) = steamuser.parent() {
+                        let _ = std::fs::create_dir_all(p);
+                    }
+                    let _ = std::fs::rename(&saved_steamuser, &steamuser);
+                }
+                return false;
+            }
+            let _ = std::fs::remove_file(prefix_tmp.join(".mn-ready"));
+            if posix::kind(prefix) != posix::Kind::Missing {
+                let _ = std::fs::remove_dir_all(prefix);
+            }
+            if std::fs::rename(&prefix_tmp, prefix).is_err() {
+                let _ = std::fs::remove_dir_all(&prefix_tmp);
+                if moved_steamuser {
+                    if let Some(p) = steamuser.parent() {
+                        let _ = std::fs::create_dir_all(p);
+                    }
+                    let _ = std::fs::rename(&saved_steamuser, &steamuser);
+                }
+                return false;
+            }
+            if moved_steamuser {
+                merge_dir_into(&saved_steamuser, &prefix.join("drive_c/users/steamuser"));
+            }
+            let _ = self.record_default_hidden_controllers();
+            self.log.append("note: cloned prefix from APFS template");
+            true
+        }) else {
+            return false;
+        };
+        cloned
+    }
+
+    fn populate_template(&self, template: &Path, prefix: &Path) {
+        let Some(parent) = template.parent() else { return };
+        if std::fs::create_dir_all(parent).is_err() {
+            return;
+        }
+        let lock = Self::template_lock_path(template);
+        let _ = with_file_lock(&lock, || {
+            if template.join(".mn-ready").exists() && template.join("system.reg").exists() {
+                return;
+            }
+            let name = template.file_name().unwrap_or_default().to_string_lossy();
+            let template_tmp = parent.join(format!("{name}.tmp"));
+            let _ = std::fs::remove_dir_all(&template_tmp);
+            let copied = std::process::Command::new("/bin/cp")
+                .args(["-c", "-R"])
+                .arg(prefix)
+                .arg(&template_tmp)
+                .status()
+                .is_ok_and(|s| s.success());
+            if copied
+                && template_tmp.join("system.reg").exists()
+                && std::fs::write(template_tmp.join(".mn-ready"), b"ready\n").is_ok()
+            {
+                if template.exists() {
+                    let _ = std::fs::remove_dir_all(template);
+                }
+                if std::fs::rename(&template_tmp, template).is_ok() {
+                    return;
+                }
+            }
+            let _ = std::fs::remove_dir_all(&template_tmp);
+        });
+    }
+
     fn run(&self, executable: &Path, arguments: &[&str], environment: &BTreeMap<String, String>) -> Result<ExitStatus, PrefixError> {
         let arguments: Vec<String> = arguments.iter().map(|a| a.to_string()).collect();
         Ok(self.runner.run(executable, &arguments, environment, None)?)
+    }
+
+    fn import_reg_text(&self, text: &str, environment: &BTreeMap<String, String>) -> Result<ExitStatus, PrefixError> {
+        static REG_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = REG_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let reg_path = std::env::temp_dir().join(format!("macneutron-reg-{}-{id}.reg", std::process::id()));
+        std::fs::write(&reg_path, text.as_bytes())?;
+        let path_str = reg_path.to_string_lossy().into_owned();
+        let win_path = format!("Z:{}", path_str.replace('/', "\\"));
+        let result = self.run(&self.layout.wine(), &["reg", "import", &win_path], environment);
+        let _ = std::fs::remove_file(&reg_path);
+        result
+    }
+
+    fn default_registry_text() -> String {
+        let mut reg = String::from(
+            "Windows Registry Editor Version 5.00\r\n\r\n\
+             [HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Wow64\\amd64]\r\n\
+             @=\"libarm64ecfex.dll\"\r\n\r\n\
+             [HKEY_CURRENT_USER\\Software\\Wine\\WineDbg]\r\n\
+             \"ShowCrashDialog\"=dword:00000000\r\n\r\n\
+             [HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AeDebug]\r\n\
+             \"Auto\"=\"0\"\r\n\r\n\
+             [HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion\\AeDebug]\r\n\
+             \"Auto\"=\"0\"\r\n\r\n\
+             [HKEY_CURRENT_USER\\Software\\Wine\\X11 Driver]\r\n\
+             \"EmulateModeset\"=\"Y\"\r\n",
+        );
+        for id in Self::SWITCH_DEFAULT_IDS {
+            reg.push_str(&format!(
+                "\r\n[HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\WineBus\\Devices\\{id}]\r\n\
+                 \"Hidraw\"=dword:00000000\r\n"
+            ));
+        }
+        reg
+    }
+
+    fn record_default_hidden_controllers(&self) -> Result<(), PrefixError> {
+        let content = format!("{}\n", Self::SWITCH_DEFAULT_IDS.join("\n"));
+        write_atomic(&self.context.data_path.join(Self::HIDDEN_CONTROLLERS_FILE), content.as_bytes())?;
+        Ok(())
     }
 
     fn prepare_new(&self, environment: &BTreeMap<String, String>) -> Result<(), PrefixError> {
@@ -209,30 +449,11 @@ impl PrefixManager {
         if status != 0 {
             return Err(PrefixError::WinebootFailed(status));
         }
-        // x64 code runs on FEX; without this entry, on Wine's stub xtajit64, and every x64 game fails.
-        let fex = self.run(
-            &wine,
-            &["reg", "add", r"HKLM\Software\Microsoft\Wow64\amd64", "/ve", "/d", "libarm64ecfex.dll", "/f"],
-            environment,
-        )?;
-        if fex != 0 {
-            return Err(PrefixError::EmulatorSetupFailed(fex));
+        // Single batched .reg import: FEX WoW64, crash dialog suppression, AeDebug Auto=0, EmulateModeset, Switch dedup.
+        let reg_status = self.import_reg_text(&Self::default_registry_text(), environment)?;
+        if reg_status != 0 {
+            return Err(PrefixError::EmulatorSetupFailed(reg_status));
         }
-        // A crashing game must exit, not wait behind Wine's crash window while Steam shows it running.
-        // ponytail: best effort; if reg fails, crashes still work, they just show the dialog.
-        self.run(
-            &wine,
-            &["reg", "add", r"HKCU\Software\Wine\WineDbg", "/v", "ShowCrashDialog", "/t", "REG_DWORD", "/d", "0", "/f"],
-            environment,
-        )?;
-        // A game's exclusive fullscreen changes Wine's virtual mode, scaled to the screen, never the Mac's display
-        // (win32u reads it for winemac too, despite the key's name). Existing prefixes get it with the runtime that
-        // brings it: a new wine.app changes the stamp, which prepares them again. Best effort, as above.
-        self.run(
-            &wine,
-            &["reg", "add", r"HKCU\Software\Wine\X11 Driver", "/v", "EmulateModeset", "/d", "Y", "/f"],
-            environment,
-        )?;
         // Whatever the game's graphics setting: wined3d's overrides ignore them, and switching back to DXMT doesn't
         // change the stamp. The identity covers DXMT, so they're refreshed whenever wine.app changes.
         for name in ToolLayout::DXMT_DLLS {
@@ -248,6 +469,218 @@ impl PrefixManager {
                 .map_err(|error| PrefixError::DllCopyFailed(format!("{destination}: {error}")))?;
         }
         self.run(&self.layout.wineserver(), &["-w"], environment)?;
+        self.record_default_hidden_controllers()?;
+        Ok(())
+    }
+
+    /// Parses comma-separated `0xVVVV/0xPPPP` (or `VVVV/PPPP`) VID/PID entries into normalized lowercase `vvvv/pppp`.
+    pub(crate) fn parse_vid_pid_list(raw: &str) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for token in raw.split(',') {
+            let token = token.trim();
+            if token.is_empty() {
+                continue;
+            }
+            let Some((vid_raw, pid_raw)) = token.split_once('/') else { continue };
+            fn strip_hex(s: &str) -> &str {
+                let s = s.trim();
+                s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s)
+            }
+            if let (Ok(vid), Ok(pid)) = (
+                u16::from_str_radix(strip_hex(vid_raw), 16),
+                u16::from_str_radix(strip_hex(pid_raw), 16),
+            ) {
+                out.insert(format!("{vid:04x}/{pid:04x}"));
+            }
+        }
+        out
+    }
+
+    /// Applies WineBus Hidraw controller dedup, DisableHidraw, and RetinaMode/LogPixels toggles when env or marker
+    /// state differs from what is currently recorded in `compatdata`.
+    pub(crate) fn apply_prefix_toggles(
+        &self,
+        prefix: &Path,
+        environment: &BTreeMap<String, String>,
+    ) -> Result<(), PrefixError> {
+        let compatdata = prefix.parent().unwrap_or(&self.context.data_path);
+        let hidden_marker = compatdata.join(Self::HIDDEN_CONTROLLERS_FILE);
+        let disable_hidraw_marker = compatdata.join(Self::DISABLE_HIDRAW_FILE);
+        let retina_marker = compatdata.join(Self::RETINA_FILE);
+
+        let any_env_toggle = environment.contains_key("SDL_GAMECONTROLLER_IGNORE_DEVICES")
+            || environment.contains_key("SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT")
+            || environment.get("MACNEUTRON_RAW_CONTROLLERS").map(String::as_str) == Some("1")
+            || environment.get("MACNEUTRON_DISABLE_HIDRAW").map(String::as_str) == Some("1")
+            || environment.get("MACNEUTRON_RETINA").map(String::as_str) == Some("1");
+        let any_marker = hidden_marker.exists() || disable_hidraw_marker.exists() || retina_marker.exists();
+        if !any_env_toggle && !any_marker {
+            return Ok(());
+        }
+
+        let mut reg_sections: Vec<String> = Vec::new();
+        let mut winebus_changed = false;
+        let mut log_pixels_changed = false;
+
+        // 1. WineBus Hidraw controller dedup
+        let desired_hidden: BTreeSet<String> =
+            if environment.get("MACNEUTRON_RAW_CONTROLLERS").map(String::as_str) == Some("1") {
+                BTreeSet::new()
+            } else {
+                let mut set: BTreeSet<String> = Self::SWITCH_DEFAULT_IDS.iter().map(|s| (*s).to_string()).collect();
+                if let Some(ignore) = environment.get("SDL_GAMECONTROLLER_IGNORE_DEVICES") {
+                    set.extend(Self::parse_vid_pid_list(ignore));
+                }
+                if let Some(except) = environment.get("SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT") {
+                    for id in Self::parse_vid_pid_list(except) {
+                        set.remove(&id);
+                    }
+                }
+                set
+            };
+        let prev_hidden: BTreeSet<String> = std::fs::read_to_string(&hidden_marker)
+            .ok()
+            .map(|text| {
+                text.lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let hidden_needs_update = !hidden_marker.exists() || prev_hidden != desired_hidden;
+        if hidden_needs_update {
+            let before = reg_sections.len();
+            for id in &desired_hidden {
+                if !prev_hidden.contains(id) || !hidden_marker.exists() {
+                    reg_sections.push(format!(
+                        "[HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\WineBus\\Devices\\{id}]\r\n\
+                         \"Hidraw\"=dword:00000000\r\n"
+                    ));
+                }
+            }
+            for old in &prev_hidden {
+                if !desired_hidden.contains(old) {
+                    reg_sections.push(format!(
+                        "[-HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\WineBus\\Devices\\{old}]\r\n"
+                    ));
+                }
+            }
+            if reg_sections.len() > before {
+                winebus_changed = true;
+            }
+        }
+
+        // 2. DisableHidraw toggle
+        let want_disable_hidraw = environment.get("MACNEUTRON_DISABLE_HIDRAW").map(String::as_str) == Some("1");
+        let prev_disable_hidraw = disable_hidraw_marker.exists();
+        let disable_hidraw_needs_update = want_disable_hidraw != prev_disable_hidraw;
+        if disable_hidraw_needs_update {
+            if want_disable_hidraw {
+                reg_sections.push(
+                    "[HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\WineBus]\r\n\
+                     \"DisableHidraw\"=dword:00000001\r\n"
+                        .to_string(),
+                );
+            } else {
+                reg_sections.push(
+                    "[HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\WineBus]\r\n\
+                     \"DisableHidraw\"=-\r\n"
+                        .to_string(),
+                );
+            }
+            winebus_changed = true;
+        }
+
+        // 3. RetinaMode + LogPixels toggle
+        let want_retina = environment.get("MACNEUTRON_RETINA").map(String::as_str) == Some("1");
+        let want_dpi = want_retina && environment.get("MACNEUTRON_RETINA_DPI").map(String::as_str) != Some("0");
+        let prev_retina_raw = std::fs::read_to_string(&retina_marker).ok();
+        let prev_retina = prev_retina_raw.as_deref().is_some_and(|s| s.trim().starts_with("retina=1"));
+        let prev_dpi = prev_retina_raw.as_deref().is_some_and(|s| s.trim() == "retina=1 dpi=1");
+        let retina_needs_update = (want_retina, want_dpi) != (prev_retina, prev_dpi);
+        if retina_needs_update {
+            if want_retina {
+                if !prev_retina {
+                    reg_sections.push(
+                        "[HKEY_CURRENT_USER\\Software\\Wine\\Mac Driver]\r\n\
+                         \"RetinaMode\"=\"y\"\r\n"
+                            .to_string(),
+                    );
+                }
+                if !prev_dpi && want_dpi {
+                    let cur = read_user_reg_log_pixels(&prefix.join("user.reg")).filter(|&v| v > 0).unwrap_or(96);
+                    let next = cur.saturating_mul(2);
+                    reg_sections.push(format!(
+                        "[HKEY_CURRENT_USER\\Control Panel\\Desktop]\r\n\
+                         \"LogPixels\"=dword:{next:08x}\r\n"
+                    ));
+                    log_pixels_changed = true;
+                } else if prev_dpi && !want_dpi {
+                    let cur = read_user_reg_log_pixels(&prefix.join("user.reg")).unwrap_or(192);
+                    let next = (cur / 2).max(96);
+                    reg_sections.push(format!(
+                        "[HKEY_CURRENT_USER\\Control Panel\\Desktop]\r\n\
+                         \"LogPixels\"=dword:{next:08x}\r\n"
+                    ));
+                    log_pixels_changed = true;
+                }
+            } else if prev_retina {
+                reg_sections.push(
+                    "[HKEY_CURRENT_USER\\Software\\Wine\\Mac Driver]\r\n\
+                     \"RetinaMode\"=-\r\n"
+                        .to_string(),
+                );
+                if prev_dpi {
+                    let cur = read_user_reg_log_pixels(&prefix.join("user.reg")).unwrap_or(192);
+                    let next = (cur / 2).max(96);
+                    reg_sections.push(format!(
+                        "[HKEY_CURRENT_USER\\Control Panel\\Desktop]\r\n\
+                         \"LogPixels\"=dword:{next:08x}\r\n"
+                    ));
+                    log_pixels_changed = true;
+                }
+            }
+        }
+
+        if !reg_sections.is_empty() {
+            let mut text = String::from("Windows Registry Editor Version 5.00\r\n\r\n");
+            text.push_str(&reg_sections.join("\r\n"));
+            let status = self.import_reg_text(&text, environment)?;
+            if status != 0 {
+                self.log.append(&format!("note: prefix toggle reg import exited {status}"));
+                return Ok(());
+            }
+        }
+
+        if hidden_needs_update {
+            let content = if desired_hidden.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n", desired_hidden.iter().cloned().collect::<Vec<_>>().join("\n"))
+            };
+            write_atomic(&hidden_marker, content.as_bytes())?;
+        }
+        if disable_hidraw_needs_update {
+            if want_disable_hidraw {
+                write_atomic(&disable_hidraw_marker, b"1\n")?;
+            } else {
+                let _ = std::fs::remove_file(&disable_hidraw_marker);
+            }
+        }
+        if retina_needs_update {
+            if want_retina {
+                let val = if want_dpi { "retina=1 dpi=1\n" } else { "retina=1 dpi=0\n" };
+                write_atomic(&retina_marker, val.as_bytes())?;
+            } else {
+                let _ = std::fs::remove_file(&retina_marker);
+            }
+        }
+
+        if winebus_changed || log_pixels_changed {
+            let _ = self.run(&self.layout.wineserver(), &["-k"], environment);
+            let _ = self.run(&self.layout.wineserver(), &["-w"], environment);
+        }
         Ok(())
     }
 
@@ -319,22 +752,41 @@ impl PrefixManager {
 
     /// Every launch: prefixes made before the bridge existed get it too, and a runtime update replaces it.
     fn deploy_steam_bridge(&self, environment: &BTreeMap<String, String>) -> Result<(), PrefixError> {
-        for (source, destination) in SteamBridge::prefix_files(&self.layout, self.steam_client64(environment)?) {
+        let (steam_client64, legacy_steam_dll) = self.steam_client_sources(environment)?;
+        for (source, destination) in SteamBridge::prefix_files(&self.layout, steam_client64) {
             self.install(&source, &destination)
                 .map_err(|error| PrefixError::SteamBridgeCopyFailed(format!("{destination}: {error}")))?;
+        }
+        let steam_dll_pfx = format!("{}/Steam.dll", SteamBridge::PREFIX_FOLDER);
+        let steam_dll_syswow64 = "drive_c/windows/syswow64/Steam.dll";
+        if let Some(legacy_src) = legacy_steam_dll {
+            self.install(&legacy_src, &steam_dll_pfx)
+                .map_err(|error| PrefixError::SteamBridgeCopyFailed(format!("{steam_dll_pfx}: {error}")))?;
+            if self.context.prefix().join("drive_c/windows/syswow64").is_dir() {
+                self.install(&legacy_src, steam_dll_syswow64)
+                    .map_err(|error| PrefixError::SteamBridgeCopyFailed(format!("{steam_dll_syswow64}: {error}")))?;
+            } else {
+                let _ = std::fs::remove_file(self.context.prefix().join(steam_dll_syswow64));
+            }
+        } else {
+            let _ = std::fs::remove_file(self.context.prefix().join(&steam_dll_pfx));
+            let _ = std::fs::remove_file(self.context.prefix().join(steam_dll_syswow64));
         }
         Ok(())
     }
 
-    /// The prefix's `steamclient64.dll`, as Proton keeps Valve's signed one there (SteamStub checks its signature): the
-    /// launch option's choice, else the app's download from Valve when the runtime can use it (Wine 0036), else None
-    /// for lsteamclient. Chosen and logged per launch, so a change takes effect at the next one (the sizes differ).
-    fn steam_client64(&self, environment: &BTreeMap<String, String>) -> Result<Option<PathBuf>, PrefixError> {
+    /// The prefix's `steamclient64.dll` and optional legacy `Steam.dll` (only when Valve's client install is active):
+    /// the launch option's choice, else the app's download from Valve when the runtime can use it (Wine 0036), else
+    /// None for lsteamclient. Chosen and logged per launch, so a change takes effect at the next one.
+    fn steam_client_sources(
+        &self,
+        environment: &BTreeMap<String, String>,
+    ) -> Result<(Option<PathBuf>, Option<PathBuf>), PrefixError> {
         let variable = SteamBridge::STEAMCLIENT64_VARIABLE;
         if let Some(path) = environment.get(variable).filter(|p| !p.is_empty()) {
             if path == "builtin" {
                 self.log.append(&format!("note: steamclient64.dll is lsteamclient ({variable}=builtin)"));
-                return Ok(None);
+                return Ok((None, None));
             }
             // Logged first, so a bad path is diagnosable.
             self.log.append(&format!("note: steamclient64.dll from {path} ({variable})"));
@@ -343,22 +795,24 @@ impl PrefixManager {
                     "{variable}: {path} is missing or not an x64 DLL"
                 )));
             }
-            return Ok(Some(PathBuf::from(path)));
+            return Ok((Some(PathBuf::from(path)), None));
         }
         if !self.layout.supports_genuine_steamclient() {
             self.log.append("note: steamclient64.dll is lsteamclient: this runtime has no genuine-steamclient marker");
-            return Ok(None);
+            return Ok((None, None));
         }
         let Some(valve) = ValveClient::installed(&self.layout.valve_cache()) else {
             self.log.append("note: steamclient64.dll is lsteamclient: Valve's isn't downloaded");
-            return Ok(None);
+            return Ok((None, None));
         };
         self.log.append(&format!(
             "note: steamclient64.dll from Valve's client {} ({})",
             valve.version,
             valve.steam_client64().display()
         ));
-        Ok(Some(valve.steam_client64()))
+        let legacy = valve.legacy_steam_dll();
+        let legacy = legacy.exists().then_some(legacy);
+        Ok((Some(valve.steam_client64()), legacy))
     }
 
     /// For a game started without the bridge (launch option, or a runtime without it): its steam_api loads the client
@@ -367,9 +821,10 @@ impl PrefixManager {
     pub fn remove_steam_bridge(&self) -> Result<(), PrefixError> {
         with_file_lock(&self.context.lock_file(), || {
             // steam.exe stays: HKCR\steam sends the game's steam:// links through it to Mac Steam (parity plan R10).
-            for name in ["steamclient64.dll", "steamclient.dll", "lsteamclient.dll"] {
+            for name in ["steamclient64.dll", "steamclient.dll", "lsteamclient.dll", "Steam.dll"] {
                 let _ = std::fs::remove_file(self.context.prefix().join(format!("{}/{name}", SteamBridge::PREFIX_FOLDER)));
             }
+            let _ = std::fs::remove_file(self.context.prefix().join("drive_c/windows/syswow64/Steam.dll"));
         })
         .map_err(|error| PrefixError::LockFailed(error.to_string()))
     }
@@ -413,6 +868,107 @@ fn atoi(text: &str) -> i32 {
         .take_while(u8::is_ascii_digit)
         .fold(0i32, |value, digit| value.wrapping_mul(10).wrapping_add((digit - b'0') as i32));
     if negative { value.wrapping_neg() } else { value }
+}
+
+/// Checks that `prefix` contains only the ancestor chain to `drive_c/users/steamuser` (all real directories) and
+/// everything inside `steamuser`, so template cloning never deletes any non-`steamuser` files.
+fn prefix_has_only_steamuser(prefix: &Path) -> bool {
+    enum Step {
+        Empty,
+        Match,
+        Unexpected,
+    }
+    fn check_only_dir(dir: &Path, expected: &str) -> Step {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Step::Unexpected;
+        };
+        let mut count = 0usize;
+        for entry in entries {
+            let Ok(entry) = entry else {
+                return Step::Unexpected;
+            };
+            if entry.file_name().to_str() != Some(expected) || posix::kind(&entry.path()) != posix::Kind::Directory {
+                return Step::Unexpected;
+            }
+            count += 1;
+        }
+        if count == 0 { Step::Empty } else { Step::Match }
+    }
+
+    match check_only_dir(prefix, "drive_c") {
+        Step::Empty => return true,
+        Step::Match => {}
+        Step::Unexpected => return false,
+    }
+    let drive_c = prefix.join("drive_c");
+    match check_only_dir(&drive_c, "users") {
+        Step::Empty => return true,
+        Step::Match => {}
+        Step::Unexpected => return false,
+    }
+    let users = drive_c.join("users");
+    !matches!(check_only_dir(&users, "steamuser"), Step::Unexpected)
+}
+
+/// Recursively moves files from `src` into `dst`; player Steam Cloud files win over template files at `dst`, while
+/// symlinks and directories at `dst` are never overwritten or followed.
+fn merge_dir_into(src: &Path, dst: &Path) {
+    match posix::kind(dst) {
+        posix::Kind::Link | posix::Kind::File | posix::Kind::Other => return,
+        posix::Kind::Missing => {
+            if let Some(parent) = dst.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if std::fs::rename(src, dst).is_ok() {
+                return;
+            }
+            if posix::kind(dst) != posix::Kind::Directory {
+                return;
+            }
+        }
+        posix::Kind::Directory => {}
+    }
+    let Ok(entries) = std::fs::read_dir(src) else { return };
+    for entry in entries.flatten() {
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if posix::kind(&from) == posix::Kind::Directory {
+            merge_dir_into(&from, &to);
+        } else {
+            match posix::kind(&to) {
+                posix::Kind::Missing | posix::Kind::File => {
+                    let _ = posix::rename(&from, &to);
+                }
+                posix::Kind::Link | posix::Kind::Directory | posix::Kind::Other => {}
+            }
+        }
+    }
+    let _ = std::fs::remove_dir(src);
+}
+
+/// Reads `"LogPixels"=dword:XXXXXXXX` under `[Control Panel\\Desktop]` from Wine's `user.reg`.
+fn read_user_reg_log_pixels(user_reg: &Path) -> Option<u32> {
+    let text = std::fs::read_to_string(user_reg).ok()?;
+    let mut in_desktop = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_desktop = trimmed.to_ascii_lowercase().starts_with("[control panel\\\\desktop]");
+            continue;
+        }
+        if !in_desktop {
+            continue;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        if let Some(hex) = lower
+            .strip_prefix("\"logpixels\"")
+            .and_then(|r| r.trim_start().strip_prefix('='))
+            .and_then(|r| r.trim_start().strip_prefix("dword:"))
+        {
+            return u32::from_str_radix(hex.trim(), 16).ok();
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -488,30 +1044,55 @@ mod tests {
         Arc::new(fake)
     }
 
-    /// x64 code runs on FEX; without this entry, on Wine's stub.
-    const REGISTER_FEX: [&str; 7] = ["reg", "add", r"HKLM\Software\Microsoft\Wow64\amd64", "/ve", "/d", "libarm64ecfex.dll", "/f"];
-    /// A crashing game must exit, not wait forever behind Wine's crash window (Steam would show it running).
-    const DISABLE_CRASH_DIALOG: [&str; 10] =
-        ["reg", "add", r"HKCU\Software\Wine\WineDbg", "/v", "ShowCrashDialog", "/t", "REG_DWORD", "/d", "0", "/f"];
-    /// A game's exclusive fullscreen changes Wine's virtual mode, never the Mac's display (XeSS plan, Task FS).
-    const EMULATE_MODESET: [&str; 8] = ["reg", "add", r"HKCU\Software\Wine\X11 Driver", "/v", "EmulateModeset", "/d", "Y", "/f"];
+    fn is_reg_import(call: &Call) -> bool {
+        call.tool == "wine" && call.arguments.len() == 3 && call.arguments[0] == "reg" && call.arguments[1] == "import"
+    }
 
     #[test]
     fn fresh_prefix_runs_wineboot_and_records_version() {
-        let runner = runner(wineboot_creating_prefix(0, 0.0));
+        let imported: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+        let seen = imported.clone();
+        let runner = runner(FakeRunner::new(move |call| {
+            if call.arguments.first().map(String::as_str) == Some("wineboot") {
+                if let Some(prefix) = call.environment.get("WINEPREFIX") {
+                    let _ = std::fs::create_dir_all(prefix);
+                }
+            }
+            if is_reg_import(call) {
+                assert!(call.arguments[2].starts_with("Z:\\"), "expected Z:\\ path, got {}", call.arguments[2]);
+                let path = call.arguments[2]
+                    .strip_prefix("Z:")
+                    .map(|p| p.replace('\\', "/"))
+                    .unwrap_or_else(|| call.arguments[2].clone());
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                seen.lock().unwrap().push((path, text));
+            }
+            0
+        }));
         let (manager, env) = make_manager(&runner);
         manager.prepare(&env, false).unwrap();
         let calls = runner.calls();
-        assert_eq!(
-            calls.iter().map(command).collect::<Vec<_>>(),
-            vec![
-                line("wine", &["wineboot", "-u"]),
-                line("wine", &REGISTER_FEX),
-                line("wine", &DISABLE_CRASH_DIALOG),
-                line("wine", &EMULATE_MODESET),
-                line("wineserver", &["-w"]),
-            ]
-        );
+        assert_eq!(calls.len(), 3);
+        assert_eq!(command(&calls[0]), line("wine", &["wineboot", "-u"]));
+        assert!(is_reg_import(&calls[1]));
+        assert_eq!(command(&calls[2]), line("wineserver", &["-w"]));
+        let imports = imported.lock().unwrap();
+        assert_eq!(imports.len(), 1);
+        assert!(!Path::new(&imports[0].0).exists()); // temporary .reg cleaned up
+        let reg = &imports[0].1;
+        assert!(reg.contains("Windows Registry Editor Version 5.00"));
+        assert!(reg.contains(r"[HKEY_LOCAL_MACHINE\Software\Microsoft\Wow64\amd64]"));
+        assert!(reg.contains(r#"@="libarm64ecfex.dll""#));
+        assert!(reg.contains(r"[HKEY_CURRENT_USER\Software\Wine\WineDbg]"));
+        assert!(reg.contains(r#""ShowCrashDialog"=dword:00000000"#));
+        assert!(reg.contains(r"[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\AeDebug]"));
+        assert!(reg.contains(r"[HKEY_LOCAL_MACHINE\Software\Wow6432Node\Microsoft\Windows NT\CurrentVersion\AeDebug]"));
+        assert!(reg.contains(r#""Auto"="0""#));
+        assert!(reg.contains(r"[HKEY_CURRENT_USER\Software\Wine\X11 Driver]"));
+        assert!(reg.contains(r#""EmulateModeset"="Y""#));
+        for id in PrefixManager::SWITCH_DEFAULT_IDS {
+            assert!(reg.contains(&format!(r"[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\WineBus\Devices\{id}]")));
+        }
         let prefix = format!("{}/", manager.context.prefix().display());
         assert!(calls.iter().all(|c| c.environment.get("WINEPREFIX") == Some(&prefix)));
         assert!(calls[0].environment.get("WINEDLLOVERRIDES").is_some_and(|v| v.contains("mscoree=;mshtml=")));
@@ -536,12 +1117,31 @@ mod tests {
         manager.prepare(&env, false).unwrap();
         manager.prepare(&env, false).unwrap();
         assert_eq!(wineboot_count(&runner), 1);
-        assert_eq!(runner.calls().len(), 5);
+        assert_eq!(runner.calls().len(), 3);
     }
 
     #[test]
     fn identity_change_prepares_in_place() {
-        let runner = runner(wineboot_creating_prefix(0, 0.0));
+        let imported: Arc<Mutex<Vec<String>>> = Arc::default();
+        let seen = imported.clone();
+        let runner = runner(FakeRunner::new(move |call| {
+            if call.arguments.first().map(String::as_str) == Some("wineboot") {
+                if let Some(prefix) = call.environment.get("WINEPREFIX") {
+                    let _ = std::fs::create_dir_all(prefix);
+                }
+            }
+            if is_reg_import(call) {
+                assert!(call.arguments[2].starts_with("Z:\\"), "expected Z:\\ path, got {}", call.arguments[2]);
+                let path = call.arguments[2]
+                    .strip_prefix("Z:")
+                    .map(|p| p.replace('\\', "/"))
+                    .unwrap_or_else(|| call.arguments[2].clone());
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    seen.lock().unwrap().push(text);
+                }
+            }
+            0
+        }));
         let (manager, env) = make_manager(&runner);
         let save = manager.context.prefix().join("drive_c/users/steamuser/save.dat");
         put("progress", &save);
@@ -549,7 +1149,7 @@ mod tests {
         manager.prepare(&env, false).unwrap();
         assert_eq!(wineboot_count(&runner), 1);
         // Prefixes made before EmulateModeset was a default get it with the runtime that brings it.
-        assert!(runner.calls().iter().any(|c| c.arguments == EMULATE_MODESET));
+        assert!(imported.lock().unwrap().iter().any(|t| t.contains(r#""EmulateModeset"="Y""#)));
         assert_eq!(read(&save), "progress");
         assert!(!manager.context.data_path.join("pfx.rosetta").exists());
         assert_eq!(stamp(&manager).as_deref(), Some("wine.app id1 msync=1"));
@@ -608,11 +1208,11 @@ mod tests {
                     let _ = std::fs::create_dir_all(prefix);
                 }
             }
-            if call.arguments == REGISTER_FEX { 5 } else { 0 }
+            if is_reg_import(call) { 5 } else { 0 }
         }));
         let (manager, env) = make_manager(&runner);
         assert_eq!(manager.prepare(&env, false).unwrap_err(), PrefixError::EmulatorSetupFailed(5));
-        assert!(!runner.calls().iter().any(|c| c.arguments == DISABLE_CRASH_DIALOG));
+        assert!(!runner.calls().iter().any(|c| c.tool == "wineserver"));
         assert_eq!(stamp(&manager).as_deref(), Some("wine.app preparing"));
     }
 
@@ -1490,5 +2090,272 @@ mod tests {
         let old = manager.context.data_path.join("pfx.rosetta/drive_c/users");
         assert!(!old.join("steamuser").exists());
         assert!(old.join("crossover/AppData/Roaming/G/local.cfg").exists());
+    }
+
+    #[test]
+    fn apfs_template_clones_second_prefix_and_preserves_steam_cloud_files() {
+        let runner = runner(FakeRunner::new(|call| {
+            if call.arguments.first().map(String::as_str) == Some("wineboot") {
+                if let Some(prefix) = call.environment.get("WINEPREFIX") {
+                    let p = PathBuf::from(prefix);
+                    let home = p.join("drive_c/users/u");
+                    for folder in ["AppData/Local", "AppData/Roaming", "Documents"] {
+                        let _ = std::fs::create_dir_all(home.join(folder));
+                    }
+                    let _ = std::fs::write(p.join("system.reg"), b"WINE REGISTRY Version 2\n");
+                    let _ = std::fs::write(p.join("user.reg"), NEW_USER_REG);
+                }
+            }
+            0
+        }));
+        let layout = make_tool_layout();
+        let compat_root = make_temp_dir().join("compatdata");
+        let log = Arc::new(LauncherLog::new(make_temp_dir().join("Logs")));
+
+        let ctx1 = CompatContext::new(&steam_environment(&compat_root.join("100"), "100")).unwrap();
+        let mut env1 = LaunchEnvironment::build(&steam_environment(&ctx1.data_path, "100"), &ctx1, GraphicsBackend::Dxmt, false);
+        env1.insert("USER".into(), "u".into());
+        let m1 = PrefixManager::new(ctx1.clone(), layout.clone(), "id1".to_string(), runner.clone(), log.clone());
+        m1.prepare(&env1, false).unwrap();
+        assert_eq!(wineboot_count(&runner), 1);
+
+        let template = compat_root.join(".macneutron-template/id1");
+        assert!(template.join(".mn-ready").exists());
+        assert!(template.join("system.reg").exists());
+
+        // Second game has pre-existing Steam Cloud saves under drive_c/users/steamuser before first launch.
+        let ctx2 = CompatContext::new(&steam_environment(&compat_root.join("200"), "200")).unwrap();
+        let mut env2 = LaunchEnvironment::build(&steam_environment(&ctx2.data_path, "200"), &ctx2, GraphicsBackend::Dxmt, false);
+        env2.insert("USER".into(), "u".into());
+        let cloud_save = ctx2.prefix().join("drive_c/users/steamuser/Local Settings/Application Data/G/cloud.sav");
+        put("cloud-data", &cloud_save);
+        let m2 = PrefixManager::new(ctx2.clone(), layout.clone(), "id1".to_string(), runner.clone(), log.clone());
+        m2.prepare(&env2, false).unwrap();
+        assert_eq!(wineboot_count(&runner), 1); // cloned, no wineboot!
+        assert!(ctx2.prefix().join("system.reg").exists());
+        assert!(!ctx2.prefix().join(".mn-ready").exists());
+        assert_eq!(read(&ctx2.prefix().join("drive_c/users/u/AppData/Local/G/cloud.sav")), "cloud-data");
+
+        // MACNEUTRON_NO_TEMPLATE=1 opts out and runs wineboot directly.
+        let ctx3 = CompatContext::new(&steam_environment(&compat_root.join("300"), "300")).unwrap();
+        let m3 = PrefixManager::new(ctx3.clone(), layout.clone(), "id1".to_string(), runner.clone(), log.clone());
+        let env3 = dxmt_environment(&m3, &[("MACNEUTRON_NO_TEMPLATE", "1")]);
+        m3.prepare(&env3, false).unwrap();
+        assert_eq!(wineboot_count(&runner), 2);
+
+        // 1. Pre-existing non-steamuser files in prefix cause template clone to bail out and preserve them.
+        let ctx4 = CompatContext::new(&steam_environment(&compat_root.join("400"), "400")).unwrap();
+        let other_save = ctx4.prefix().join("drive_c/ProgramData/save.dat");
+        put("programdata-save", &other_save);
+        let m4 = PrefixManager::new(ctx4.clone(), layout.clone(), "id1".to_string(), runner.clone(), log.clone());
+        let mut env4 = LaunchEnvironment::build(&steam_environment(&ctx4.data_path, "400"), &ctx4, GraphicsBackend::Dxmt, false);
+        env4.insert("USER".into(), "u".into());
+        m4.prepare(&env4, false).unwrap();
+        assert_eq!(wineboot_count(&runner), 3); // fell back to in-place prepare_new()
+        assert_eq!(read(&other_save), "programdata-save");
+
+        // 2. Existing .macneutron-steamuser-tmp from a prior crash causes template clone to bail out without deleting it.
+        let ctx5 = CompatContext::new(&steam_environment(&compat_root.join("500"), "500")).unwrap();
+        let stranded = ctx5.data_path.join(".macneutron-steamuser-tmp/stranded.sav");
+        put("stranded-save", &stranded);
+        let m5 = PrefixManager::new(ctx5.clone(), layout.clone(), "id1".to_string(), runner.clone(), log.clone());
+        let mut env5 = LaunchEnvironment::build(&steam_environment(&ctx5.data_path, "500"), &ctx5, GraphicsBackend::Dxmt, false);
+        env5.insert("USER".into(), "u".into());
+        m5.prepare(&env5, false).unwrap();
+        assert_eq!(wineboot_count(&runner), 4);
+        assert_eq!(read(&stranded), "stranded-save");
+
+        // 3. Colliding Steam Cloud file wins over template boilerplate and is never deleted.
+        put("template-boilerplate", &template.join("drive_c/users/steamuser/AppData/Local/G/cloud.sav"));
+        let ctx6 = CompatContext::new(&steam_environment(&compat_root.join("600"), "600")).unwrap();
+        let mut env6 = LaunchEnvironment::build(&steam_environment(&ctx6.data_path, "600"), &ctx6, GraphicsBackend::Dxmt, false);
+        env6.insert("USER".into(), "u".into());
+        put("player-cloud-save", &ctx6.prefix().join("drive_c/users/steamuser/AppData/Local/G/cloud.sav"));
+        let m6 = PrefixManager::new(ctx6.clone(), layout, "id1".to_string(), runner.clone(), log);
+        m6.prepare(&env6, false).unwrap();
+        assert_eq!(wineboot_count(&runner), 4); // cloned from template
+        assert_eq!(read(&ctx6.prefix().join("drive_c/users/u/AppData/Local/G/cloud.sav")), "player-cloud-save");
+
+        // Also verify merge_dir_into preserves src files when dst is a symlink.
+        let merge_root = make_temp_dir();
+        let merge_src = merge_root.join("src");
+        let merge_dst = merge_root.join("dst");
+        let symlink_target = merge_root.join("mac_docs");
+        std::fs::create_dir_all(&symlink_target).unwrap();
+        std::fs::create_dir_all(&merge_dst).unwrap();
+        std::os::unix::fs::symlink(&symlink_target, merge_dst.join("Documents")).unwrap();
+        put("keep-me", &merge_src.join("Documents/save.txt"));
+        merge_dir_into(&merge_src, &merge_dst);
+        assert_eq!(read(&merge_src.join("Documents/save.txt")), "keep-me");
+        assert!(!symlink_target.join("save.txt").exists());
+    }
+
+    #[test]
+    fn controller_dedup_and_disable_hidraw_toggles() {
+        let imported: Arc<Mutex<Vec<String>>> = Arc::default();
+        let seen = imported.clone();
+        let runner = runner(FakeRunner::new(move |call| {
+            if call.arguments.first().map(String::as_str) == Some("wineboot") {
+                if let Some(prefix) = call.environment.get("WINEPREFIX") {
+                    let _ = std::fs::create_dir_all(prefix);
+                }
+            }
+            if is_reg_import(call) {
+                assert!(call.arguments[2].starts_with("Z:\\"), "expected Z:\\ path, got {}", call.arguments[2]);
+                let path = call.arguments[2]
+                    .strip_prefix("Z:")
+                    .map(|p| p.replace('\\', "/"))
+                    .unwrap_or_else(|| call.arguments[2].clone());
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    seen.lock().unwrap().push(text);
+                }
+            }
+            0
+        }));
+        let (manager, _) = make_manager(&runner);
+
+        // Fresh prefix with SDL_GAMECONTROLLER_IGNORE_DEVICES and EXCEPT.
+        let env_ignore = dxmt_environment(
+            &manager,
+            &[
+                ("SDL_GAMECONTROLLER_IGNORE_DEVICES", "0x045E/0x028E,0x28DE/0x1142"),
+                ("SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT", "0x28de/0x1142"),
+            ],
+        );
+        manager.prepare(&env_ignore, false).unwrap();
+        // 1 reg import in prepare_new + 1 reg import in apply_prefix_toggles + wineserver -k / -w
+        let count_after_first = imported.lock().unwrap().len();
+        assert_eq!(count_after_first, 2);
+        let toggle_reg = imported.lock().unwrap()[1].clone();
+        assert!(toggle_reg.contains(r"[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\WineBus\Devices\045e/028e]"));
+        assert!(!toggle_reg.contains("28de/1142"));
+        assert!(read(&manager.context.data_path.join(PrefixManager::HIDDEN_CONTROLLERS_FILE)).contains("045e/028e"));
+
+        // Steady-state second launch: zero extra reg imports!
+        let calls_before = runner.calls().len();
+        manager.prepare(&env_ignore, false).unwrap();
+        assert_eq!(runner.calls().len(), calls_before);
+
+        // MACNEUTRON_RAW_CONTROLLERS=1 removes owned WineBus entries and MACNEUTRON_DISABLE_HIDRAW=1 disables Hidraw.
+        let env_raw = dxmt_environment(
+            &manager,
+            &[("MACNEUTRON_RAW_CONTROLLERS", "1"), ("MACNEUTRON_DISABLE_HIDRAW", "1")],
+        );
+        manager.prepare(&env_raw, false).unwrap();
+        let raw_reg = imported.lock().unwrap().last().cloned().unwrap();
+        assert!(raw_reg.contains(r"[-HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\WineBus\Devices\045e/028e]"));
+        assert!(raw_reg.contains(r"[-HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\WineBus\Devices\057e/2009]"));
+        assert!(raw_reg.contains(r"[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\WineBus]"));
+        assert!(raw_reg.contains(r#""DisableHidraw"=dword:00000001"#));
+        assert_eq!(read(&manager.context.data_path.join(PrefixManager::HIDDEN_CONTROLLERS_FILE)), "");
+
+        // Turning both toggles back off restores Switch defaults and removes DisableHidraw.
+        let env_plain = dxmt_environment(&manager, &[]);
+        manager.prepare(&env_plain, false).unwrap();
+        let revert_reg = imported.lock().unwrap().last().cloned().unwrap();
+        assert!(revert_reg.contains(r"[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\WineBus\Devices\057e/2009]"));
+        assert!(revert_reg.contains(r#""DisableHidraw"=-"#));
+        assert!(!manager.context.data_path.join(PrefixManager::DISABLE_HIDRAW_FILE).exists());
+    }
+
+    #[test]
+    fn retina_mode_and_log_pixels_toggle_on_and_off() {
+        let imported: Arc<Mutex<Vec<String>>> = Arc::default();
+        let seen = imported.clone();
+        let runner = runner(FakeRunner::new(move |call| {
+            if call.arguments.first().map(String::as_str) == Some("wineboot") {
+                if let Some(prefix) = call.environment.get("WINEPREFIX") {
+                    let p = PathBuf::from(prefix);
+                    let _ = std::fs::create_dir_all(&p);
+                    let _ = std::fs::write(
+                        p.join("user.reg"),
+                        "WINE REGISTRY Version 2\n\n[Control Panel\\\\Desktop] 1700000000\n\"LogPixels\"=dword:00000078\n",
+                    );
+                }
+            }
+            if is_reg_import(call) {
+                assert!(call.arguments[2].starts_with("Z:\\"), "expected Z:\\ path, got {}", call.arguments[2]);
+                let path = call.arguments[2]
+                    .strip_prefix("Z:")
+                    .map(|p| p.replace('\\', "/"))
+                    .unwrap_or_else(|| call.arguments[2].clone());
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    seen.lock().unwrap().push(text);
+                }
+            }
+            0
+        }));
+        let (manager, _) = make_manager(&runner);
+
+        // Turn ON RetinaMode (DPI scaling defaults to ON): 120 (0x78) -> 240 (0xf0).
+        let env_on = dxmt_environment(&manager, &[("MACNEUTRON_RETINA", "1")]);
+        manager.prepare(&env_on, false).unwrap();
+        let on_reg = imported.lock().unwrap().last().cloned().unwrap();
+        assert!(on_reg.contains(r"[HKEY_CURRENT_USER\Software\Wine\Mac Driver]"));
+        assert!(on_reg.contains(r#""RetinaMode"="y""#));
+        assert!(on_reg.contains(r"[HKEY_CURRENT_USER\Control Panel\Desktop]"));
+        assert!(on_reg.contains(r#""LogPixels"=dword:000000f0"#));
+        assert_eq!(read(&manager.context.data_path.join(PrefixManager::RETINA_FILE)), "retina=1 dpi=1\n");
+        assert!(runner.calls().iter().any(|c| c.tool == "wineserver" && c.arguments == ["-k"]));
+
+        // Simulate Wine having updated user.reg to 0x000000f0 (240), then toggle OFF -> halves back to 120 (0x78).
+        put(
+            "WINE REGISTRY Version 2\n\n[Control Panel\\\\Desktop] 1700000000\n\"LogPixels\"=dword:000000f0\n",
+            &manager.context.prefix().join("user.reg"),
+        );
+        let env_off = dxmt_environment(&manager, &[]);
+        manager.prepare(&env_off, false).unwrap();
+        let off_reg = imported.lock().unwrap().last().cloned().unwrap();
+        assert!(off_reg.contains(r#""RetinaMode"=-"#));
+        assert!(off_reg.contains(r#""LogPixels"=dword:00000078"#));
+        assert!(!manager.context.data_path.join(PrefixManager::RETINA_FILE).exists());
+
+        // Turn ON RetinaMode with MACNEUTRON_RETINA_DPI=0: sets RetinaMode without changing LogPixels.
+        let calls_before = runner.calls().len();
+        let env_no_dpi = dxmt_environment(&manager, &[("MACNEUTRON_RETINA", "1"), ("MACNEUTRON_RETINA_DPI", "0")]);
+        manager.prepare(&env_no_dpi, false).unwrap();
+        let no_dpi_reg = imported.lock().unwrap().last().cloned().unwrap();
+        assert!(no_dpi_reg.contains(r#""RetinaMode"="y""#));
+        assert!(!no_dpi_reg.contains("LogPixels"));
+        assert_eq!(read(&manager.context.data_path.join(PrefixManager::RETINA_FILE)), "retina=1 dpi=0\n");
+        assert!(!runner.calls()[calls_before..].iter().any(|c| c.tool == "wineserver"));
+    }
+
+    #[test]
+    fn legacy_steam_dll_is_copied_when_valve_install_is_active_and_cleaned_when_absent() {
+        let (manager, env) = make_manager(&runner(wineboot_creating_prefix(0, 0.0)));
+        install_fake_steam_bridge(&manager.layout);
+        let dll = cache_valve_client(&manager.layout, true);
+        let legacy_src = dll.parent().unwrap().join("Steam.dll");
+        std::fs::write(&legacy_src, pe_bytes(pe_image::I386, true)).unwrap();
+
+        // Create syswow64 so both Program Files (x86)/Steam and syswow64 receive Steam.dll.
+        let syswow64 = manager.context.prefix().join("drive_c/windows/syswow64");
+        std::fs::create_dir_all(&syswow64).unwrap();
+
+        manager.prepare(&env, true).unwrap();
+        let pfx_steam_dll = steam_folder(&manager).join("Steam.dll");
+        let sys_steam_dll = syswow64.join("Steam.dll");
+        assert_eq!(std::fs::read(&pfx_steam_dll).unwrap(), pe_bytes(pe_image::I386, true));
+        assert_eq!(std::fs::read(&sys_steam_dll).unwrap(), pe_bytes(pe_image::I386, true));
+
+        // Switching to builtin removes stale Steam.dll from both locations.
+        manager
+            .prepare(&dxmt_environment(&manager, &[("MACNEUTRON_STEAMCLIENT64", "builtin")]), true)
+            .unwrap();
+        assert!(!pfx_steam_dll.exists());
+        assert!(!sys_steam_dll.exists());
+    }
+
+    #[test]
+    fn wine_server_dir_formats_dev_and_ino_and_sweep_handles_missing_dir() {
+        let (manager, env) = make_manager(&runner(wineboot_creating_prefix(0, 0.0)));
+        assert_eq!(PrefixManager::wine_server_dir(&manager.context.prefix()), None);
+        manager.prepare(&env, false).unwrap();
+        let dir = PrefixManager::wine_server_dir(&manager.context.prefix()).unwrap();
+        let meta = std::fs::metadata(manager.context.prefix()).unwrap();
+        let name = dir.file_name().unwrap().to_string_lossy();
+        assert_eq!(name, format!("server-{:x}-{:x}", meta.dev(), meta.ino()));
+        assert!(PrefixManager::sweep_stragglers(&manager.context.prefix()).is_empty());
     }
 }

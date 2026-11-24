@@ -377,7 +377,24 @@ fn game_toggles_store_only_what_differs_from_the_default() {
     assert_eq!(settings.msync, None);
     GameToggle::DLSS.set(&mut settings, false);
     assert_eq!(settings.dlss, None);
-    assert_eq!(GameToggle::ALL.map(GameToggle::title), ["Log", "Metal HUD", "msync", "MetalFX upscaling", "DLSS", "Frame generation"]);
+    assert!(!GameToggle::Retina.is_on(&settings));
+    assert!(!GameToggle::DisableHidraw.is_on(&settings));
+    assert!(GameToggle::Retina.is_enabled(&settings));
+    assert!(GameToggle::DisableHidraw.is_enabled(&settings));
+    GameToggle::Retina.set(&mut settings, true);
+    GameToggle::DisableHidraw.set(&mut settings, true);
+    assert_eq!(settings.retina, Some(true));
+    assert_eq!(settings.disable_hidraw, Some(true));
+    assert!(GameToggle::Retina.is_on(&settings));
+    assert!(GameToggle::DisableHidraw.is_on(&settings));
+    GameToggle::Retina.set(&mut settings, false);
+    GameToggle::DisableHidraw.set(&mut settings, false);
+    assert_eq!(settings.retina, None);
+    assert_eq!(settings.disable_hidraw, None);
+    assert_eq!(
+        GameToggle::ALL.map(GameToggle::title),
+        ["Log", "Metal HUD", "msync", "MetalFX upscaling", "DLSS", "Frame generation", "Retina mode", "Disable hidraw"]
+    );
 }
 
 #[test]

@@ -29,7 +29,7 @@ if [ "$SHARE" != "$W/share" ]; then
     [ ! -d "$W/share/$d" ] || cp -cR "$W/share/$d" "$SHARE/$d"
   done
 fi
-rm -f "$SHARE/run.log" "$SHARE/run.status" "$SHARE/console.log" "$SHARE/traces/window" "$SHARE/traces/stage" "$SHARE/traces/mounts.failed"
+rm -f "$SHARE/run.log" "$SHARE/run.status" "$SHARE/console.log" "$SHARE/traces/window" "$SHARE/traces/stage" "$SHARE/traces/mounts.failed" "$SHARE/traces/vm-exit"
 cp "$script" "$SHARE/run.sh"
 # The guest mounts each --ro-share tag at /mnt/share/<tag> (mn-runner); the EAC runtime is one. MN_MOUNTS=keep leaves
 # the share's `mounts` as the caller wrote it, or absent (tests/user-shares.sh: places and refusals of its own).
@@ -62,6 +62,7 @@ fi
 if [ ! -e "$STATE" ]; then
   mkdir -p "$(dirname "$STATE")"
   cp -c "$W/images/state-template.img" "$STATE.tmp" && mv "$STATE.tmp" "$STATE"
+  /usr/bin/tmutil addexclusion "$STATE" 2>/dev/null || true
 fi
 # The run's TPM 2.0 beside its state disk (a game's state/<appid>.tpm), unless MN_TPM names another folder or is empty.
 TPM=${MN_TPM-${STATE%.img}.tpm}

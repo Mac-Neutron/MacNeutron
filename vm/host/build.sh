@@ -84,7 +84,7 @@ done
 # The Rust host (src/main.rs, a 1:1 translation of macneutron-vm.swift): the AppKit shim is compiled apart so the crate
 # stays Objective-C-free, and the C helpers and libkrun are linked through rustc's link-args. The C objects keep clang's
 # $HOPT (so their PGO and ThinLTO match the rest of the host); rustc's link step drives Apple's ld, which reads them.
-clang $HOPT -c -o "$W/obj/appkit_shim.o" vm/host/appkit_shim.m
+clang $HOPT -Wall -Wextra -c -o "$W/obj/appkit_shim.o" vm/host/appkit_shim.m
 objs="$objs $W/obj/appkit_shim.o"
 # Every object and library rustc must hand to ld, each as its own -Clink-arg (the objects are space-separated in $objs).
 link_args=
@@ -95,6 +95,7 @@ link_args="$link_args -Clink-arg=$W/libtpms/libtpms.a -Clink-arg=$SSL/lib/libcry
 link_args="$link_args -Clink-arg=-framework -Clink-arg=AudioToolbox"
 link_args="$link_args -Clink-arg=-framework -Clink-arg=Security"
 link_args="$link_args -Clink-arg=-framework -Clink-arg=AppKit"
+link_args="$link_args -Clink-arg=-framework -Clink-arg=Metal"
 link_args="$link_args -Clink-arg=-lc++"
 # The host's PGO (RUST_PGO) rides the same $ROOT/pgo/host.profdata as the clang objects. The C objects are LLVM
 # bitcode (-flto=thin) and are passed through -Clink-arg, which cargo does not track: touch the source so the link

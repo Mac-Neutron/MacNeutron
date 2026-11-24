@@ -120,6 +120,10 @@ impl ValveInstall {
     pub fn steam_client64(&self) -> PathBuf {
         self.folder.join("steamclient64.dll")
     }
+
+    pub fn legacy_steam_dll(&self) -> PathBuf {
+        self.folder.join("Steam.dll")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +143,12 @@ pub struct ValveClient {
 }
 
 impl ValveClient {
+    pub const CDN_HOSTS: [&'static str; 4] = [
+        "https://client-update.steamstatic.com",
+        "https://client-update.akamai.steamstatic.com",
+        "https://steamcdn-a.akamaihd.net/client",
+        "https://media.steampowered.com/client",
+    ];
     pub const MANIFEST_URL: &'static str = "https://client-update.steamstatic.com/steam_client_win64";
     pub const PACKAGE_BASE: &'static str = "https://client-update.steamstatic.com/";
 
@@ -182,10 +192,25 @@ impl ValveClient {
         self.cache.join(name)
     }
 
+    fn fetch_with_fallback(&self, relative_path: &str) -> Result<(PathBuf, String), ValveClientError> {
+        let mut last_error = None;
+        for host in Self::CDN_HOSTS {
+            let url = format!("{host}/{relative_path}");
+            match (self.fetch)(&url) {
+                Ok(path) => return Ok((path, url)),
+                Err(err @ ValveClientError::Http(_)) => {
+                    last_error = Some(err);
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        Err(last_error.unwrap_or(ValveClientError::Http(0)))
+    }
+
     /// Downloads, checks and installs `bins_win64`'s files unless (without `force`) the installed copy came from the
     /// manifest's `sha2`. A failure leaves the installed copy as it was.
     pub fn update(&self, force: bool) -> Result<ValveUpdateOutcome, ValveClientError> {
-        let manifest_file = (self.fetch)(Self::MANIFEST_URL)?;
+        let (manifest_file, _) = self.fetch_with_fallback("steam_client_win64")?;
         let result = self.install_from(&manifest_file, force);
         remove_parent(&manifest_file);
         result
@@ -201,8 +226,7 @@ impl ValveClient {
                 }
             }
         }
-        let url = format!("{}{}", Self::PACKAGE_BASE, manifest.file);
-        let zip = (self.fetch)(&url)?;
+        let (zip, url) = self.fetch_with_fallback(&manifest.file)?;
         let result = self.install_zip(&zip, &url, &manifest);
         remove_parent(&zip);
         result
@@ -796,5 +820,62 @@ mod tests {
         assert_eq!(client.update_if_needed("1.0"), Err(ValveClientError::Http(404)));
         cdn.lock().unwrap().offline = false;
         assert_eq!(client.update_if_needed("1.0").unwrap(), Some(ValveUpdateOutcome::Installed(VERSION.to_string())));
+    }
+
+    #[test]
+    fn falls_back_across_cdn_hosts_and_records_winning_url() {
+        let dir = temp("cdn-fallback");
+        let cdn = Arc::new(Mutex::new(Cdn::new(dir.clone(), &six_files(true), VERSION)));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let host2 = ValveClient::CDN_HOSTS[2];
+        let pkg_name = cdn.lock().unwrap().package_name.clone();
+        let winning_manifest = format!("{host2}/steam_client_win64");
+        let winning_package = format!("{host2}/{pkg_name}");
+
+        let cdn_clone = cdn.clone();
+        let reqs_clone = requests.clone();
+        let winning_manifest_for_closure = winning_manifest.clone();
+        let winning_package_for_closure = winning_package.clone();
+        let fetch: Fetch = Arc::new(move |url: &str| {
+            reqs_clone.lock().unwrap().push(url.to_string());
+            if url.starts_with(ValveClient::CDN_HOSTS[0]) || url.starts_with(ValveClient::CDN_HOSTS[1]) {
+                return Err(ValveClientError::Http(503));
+            }
+            let c = cdn_clone.lock().unwrap();
+            let out = c.dir.join(format!("served-{}", unique()));
+            std::fs::create_dir_all(&out).map_err(|_| ValveClientError::Http(0))?;
+            let file = out.join(url.rsplit('/').next().unwrap_or("file"));
+            if url == winning_manifest_for_closure {
+                std::fs::write(&file, &c.text).map_err(|_| ValveClientError::Http(0))?;
+                Ok(file)
+            } else if url == winning_package_for_closure {
+                std::fs::write(&file, &c.zip).map_err(|_| ValveClientError::Http(0))?;
+                Ok(file)
+            } else {
+                Err(ValveClientError::Http(404))
+            }
+        });
+
+        let cache = dir.join("Valve");
+        let client = ValveClient::new(cache.clone(), fetch, Arc::new(SystemProcessRunner::new()));
+        assert_eq!(client.update(false).unwrap(), ValveUpdateOutcome::Installed(VERSION.to_string()));
+
+        let install = ValveClient::installed(&cache).unwrap();
+        assert_eq!(install.legacy_steam_dll(), install.folder.join("Steam.dll"));
+        assert!(install.legacy_steam_dll().exists());
+
+        let source = std::fs::read_to_string(install.folder.join("source.txt")).unwrap();
+        assert!(source.contains(&format!("url {winning_package}\n")), "source.txt was:\n{source}");
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec![
+                format!("{}/steam_client_win64", ValveClient::CDN_HOSTS[0]),
+                format!("{}/steam_client_win64", ValveClient::CDN_HOSTS[1]),
+                winning_manifest,
+                format!("{}/{pkg_name}", ValveClient::CDN_HOSTS[0]),
+                format!("{}/{pkg_name}", ValveClient::CDN_HOSTS[1]),
+                winning_package,
+            ]
+        );
     }
 }
