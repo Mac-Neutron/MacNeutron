@@ -117,12 +117,13 @@ impl MicroVM {
     }
 
     /// The launch options the guest reads (run-game.sh), as the launcher's own environment has them.
-    pub const PASSED: [&'static str; 21] = [
+    pub const PASSED: [&'static str; 23] = [
         "MACNEUTRON_DLSS", "MACNEUTRON_XESS", "DXMT_ENABLE_NVEXT", "MACNEUTRON_LOG", "MN_SCREEN",
         "MACNEUTRON_VM_PROFILE", "DXMT_STATS", "MACNEUTRON_VM_D3D", "MACNEUTRON_VM_D3D32",
         "MACNEUTRON_VM_D3D_TRACE", "DXMT_LOG_LEVEL", "MACNEUTRON_VM_WOW64", "PROTON_USE_WOW64",
         "MTLD3D_CONFIG", "WINEDEBUG", "MN_MAC_HOME", "MN_INSTALL_TIMEOUT", "PROTON_EAC_RUNTIME",
         "MN_CRASH_REPORTERS", "FEX_X87REDUCEDPRECISION", "MN_NON_STEAM_SHORTCUT",
+        "MACNEUTRON_WINE_VERSION", "WINE_DISABLE_EAC_ALT_DOWNLOAD",
     ];
 
     /// Memory reserved for macOS on the host: max of 3 GiB or 25% of host RAM (in MiB).
@@ -346,9 +347,13 @@ impl MicroVM {
     /// The game's own folder in its library (its writable share), from its path in the guest; nil for a file at the
     /// library's top.
     pub fn game_folder(guest: &str) -> Option<String> {
-        let in_games = guest.strip_prefix("/mnt/games/").unwrap_or("");
+        let in_games = guest.strip_prefix("/mnt/games/").unwrap_or("").trim_start_matches('/');
         if in_games.contains('/') {
-            in_games.split('/').next().map(|s| s.to_string())
+            in_games
+                .split('/')
+                .next()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
         } else {
             None
         }
@@ -359,17 +364,9 @@ impl MicroVM {
 
     /// The Proton EasyAntiCheat Runtime (Steam app 1826330), which Linux Steam passes to every game under Proton: a
     /// Steam library's, or the copy Steam's console downloads (`download_depot 1826330 1826331`: Mac Steam doesn't
-    /// install the Linux-only tool). A runtime is a folder with v2/.
+    /// install the Linux-only tool). Prefers complete installations over bare `v2/` directories.
     pub fn eac_runtime(steam: &SteamLocation) -> Option<String> {
-        let depot = "steamapps/content/app_1826330/depot_1826331";
-        let mut places: Vec<PathBuf> = steam
-            .libraries()
-            .into_iter()
-            .map(|library| library.join("common/Proton EasyAntiCheat Runtime"))
-            .collect();
-        places.push(steam.root.join(depot));
-        places.push(steam.bundle_macos().join(depot));
-        places.into_iter().map(|p| path_string(&p)).find(|p| Path::new(p).join("v2").is_dir())
+        crate::eac::find_runtime(steam).map(|p| path_string(&p))
     }
 
     /// The run share's `mounts`: a `<tag> <guest path>` line per share, read by mn-runner.
@@ -633,6 +630,8 @@ mod tests {
     #[test]
     fn game_folder_is_the_top_of_the_library() {
         assert_eq!(MicroVM::game_folder("/mnt/games/SMITE 2/Windows/Hemingway.exe"), Some("SMITE 2".to_string()));
+        assert_eq!(MicroVM::game_folder("/mnt/games//Game/Game.exe"), Some("Game".to_string()));
+        assert_eq!(MicroVM::game_folder("/mnt/games///"), None);
         assert_eq!(MicroVM::game_folder("/mnt/games/Game"), None);
         assert_eq!(MicroVM::game_folder("/tmp/x"), None);
     }
@@ -785,6 +784,54 @@ mod tests {
         let script = smite_script(&[], &env(&[("PROTON_EAC_RUNTIME", MicroVM::GUEST_EAC_RUNTIME)]), false);
         assert!(script.contains("PROTON_EAC_RUNTIME='/Volumes/Proton EasyAntiCheat Runtime'\n"));
         assert!(exported(&script).iter().any(|k| k == "PROTON_EAC_RUNTIME"));
+    }
+
+    #[test]
+    fn eac_runtime_checks_secondary_library_depot_and_prefers_complete_over_bare_v2() {
+        let base = temp("eac-secondary");
+        let steam = SteamLocation::new(base.join("Steam"));
+        let extra = base.join("Games Drive");
+        crate::test_support::write(
+            &format!(
+                "\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n\t\"1\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n}}\n",
+                steam.root.display(),
+                extra.display()
+            ),
+            &steam.root.join("steamapps/libraryfolders.vdf"),
+            false,
+        );
+        // Bare v2/ in primary library common/ is found when nothing complete exists.
+        let bare = steam.root.join("steamapps/common/Proton EasyAntiCheat Runtime");
+        std::fs::create_dir_all(bare.join("v2")).unwrap();
+        assert_eq!(MicroVM::eac_runtime(&steam), Some(path_string(&bare)));
+
+        // Complete runtime in secondary library content/app_1826330/depot_1826331 wins over bare v2/.
+        let secondary_depot = extra.join("steamapps/content/app_1826330/depot_1826331");
+        for rel in [
+            "v2/lib64/easyanticheat_x64.so",
+            "v2/lib64/easyanticheat_x64.dll",
+            "v2/lib64/easyanticheat.so",
+            "v2/lib64/easyanticheat.dll",
+            "v2/lib32/easyanticheat_x86.so",
+            "v2/lib32/easyanticheat_x86.dll",
+        ] {
+            crate::test_support::write("stub", &secondary_depot.join(rel), false);
+        }
+        assert_eq!(MicroVM::eac_runtime(&steam), Some(path_string(&secondary_depot)));
+    }
+
+    #[test]
+    fn guest_script_passes_wine_version_and_eac_alt_download() {
+        let script = smite_script(
+            &[],
+            &env(&[("MACNEUTRON_WINE_VERSION", "10.5"), ("WINE_DISABLE_EAC_ALT_DOWNLOAD", "1")]),
+            false,
+        );
+        assert!(script.contains("MACNEUTRON_WINE_VERSION='10.5'\n"));
+        assert!(script.contains("WINE_DISABLE_EAC_ALT_DOWNLOAD='1'\n"));
+        let exp = exported(&script);
+        assert!(exp.iter().any(|k| k == "MACNEUTRON_WINE_VERSION"));
+        assert!(exp.iter().any(|k| k == "WINE_DISABLE_EAC_ALT_DOWNLOAD"));
     }
 
     #[test]

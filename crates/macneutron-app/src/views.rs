@@ -4,8 +4,11 @@
 
 use std::collections::BTreeSet;
 
-use macneutron_core::{GameSettings, GraphicsBackend, LaunchOptions, OrphanPrefix, RunAs, SteamPlayStatus};
+use macneutron_core::eac::EAC_DEPOT_COMMAND;
 use macneutron_core::game_settings::UPSCALE_PRESETS;
+use macneutron_core::{
+    EacRuntimeStatus, GameSettings, GraphicsBackend, LaunchOptions, OrphanPrefix, RunAs, SteamPlayStatus,
+};
 use objc2_foundation::{NSByteCountFormatter, NSByteCountFormatterCountStyle, NSString};
 
 use crate::app_model::{AppModel, GameRow, LoginItemStatus, State, StatusDisplay};
@@ -77,6 +80,9 @@ pub enum Act {
     RetryVM,
     /// Asks first ("Rebuild the game VM?").
     RebuildVM,
+    InstallEacRuntime,
+    OpenSteamConsole,
+    RevealEacRuntime,
     /// Asks first ("Turn off Steam Play mode?").
     TurnOffSteamPlay,
     TurnOnSteamPlay,
@@ -259,6 +265,54 @@ pub fn settings(inputs: &Inputs) -> Vec<Row> {
         rows.push(labeled("Game VM", controls));
         if let Some(notice) = &inputs.vm_status {
             rows.push(Row::Note(notice.clone(), Tone::Secondary));
+        }
+    }
+    let has_eac_games = state.games.iter().any(|g| g.installed && g.eac.is_some());
+    match &state.eac_runtime {
+        EacRuntimeStatus::Ready(_) => rows.push(Row::Labeled {
+            label: "Easy Anti-Cheat Runtime".into(),
+            tone: None,
+            controls: vec![
+                Control::Text("Installed".into(), Tone::Secondary),
+                button("Show in Finder", Act::RevealEacRuntime, free),
+            ],
+        }),
+        EacRuntimeStatus::Incomplete(info) => {
+            rows.push(Row::Labeled {
+                label: "Easy Anti-Cheat Runtime".into(),
+                tone: Some(Tone::Orange),
+                controls: vec![
+                    Control::Text("Incomplete".into(), Tone::Orange),
+                    button("Install in Steam", Act::InstallEacRuntime, free && inputs.steam_installed),
+                    button("Console", Act::OpenSteamConsole, free && inputs.steam_installed),
+                ],
+            });
+            rows.push(Row::Note(
+                format!(
+                    "Missing {}. If Steam refuses Install in Steam, click Console and paste: {}",
+                    info.missing_components().join(", "),
+                    EAC_DEPOT_COMMAND
+                ),
+                Tone::Secondary,
+            ));
+        }
+        EacRuntimeStatus::Missing => {
+            let tone = has_eac_games.then_some(Tone::Orange);
+            rows.push(Row::Labeled {
+                label: "Easy Anti-Cheat Runtime".into(),
+                tone,
+                controls: vec![
+                    Control::Text("Not installed".into(), tone.unwrap_or(Tone::Secondary)),
+                    button("Install in Steam", Act::InstallEacRuntime, free && inputs.steam_installed),
+                    button("Console", Act::OpenSteamConsole, free && inputs.steam_installed),
+                ],
+            });
+            rows.push(Row::Note(
+                format!(
+                    "Needed for Easy Anti-Cheat games (Linux v1 / EOS). If Mac Steam refuses Install in Steam, click Console and paste: {EAC_DEPOT_COMMAND}"
+                ),
+                Tone::Secondary,
+            ));
         }
     }
     rows.push(labeled("Setup", vec![button("Run setup again", Act::ShowSetup, free)]));
@@ -687,6 +741,35 @@ pub fn steam_launch_lines(row: &GameRow) -> Vec<(String, Tone)> {
         LaunchOptions::problems(line, &row.settings.environment()).into_iter().map(|problem| (problem, Tone::Orange)),
     );
     lines
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EacBanner {
+    pub text: String,
+    pub tone: Tone,
+    pub show_install_actions: bool,
+}
+
+pub fn eac_banner(row: &GameRow, runtime: &EacRuntimeStatus) -> Option<EacBanner> {
+    let kind = row.eac?;
+    Some(match runtime {
+        EacRuntimeStatus::Ready(_) => EacBanner {
+            text: format!("Easy Anti-Cheat ({}) — Proton EasyAntiCheat Runtime installed.", kind.label()),
+            tone: Tone::Secondary,
+            show_install_actions: false,
+        },
+        EacRuntimeStatus::Missing | EacRuntimeStatus::Incomplete(_) => {
+            let status = if matches!(runtime, EacRuntimeStatus::Missing) { "not installed" } else { "incomplete" };
+            EacBanner {
+                text: format!(
+                    "Uses Easy Anti-Cheat ({}), but Proton EasyAntiCheat Runtime is {status}. Install it in Steam, or click Steam Console and paste: {EAC_DEPOT_COMMAND}",
+                    kind.label()
+                ),
+                tone: Tone::Orange,
+                show_install_actions: true,
+            }
+        }
+    })
 }
 
 /// The selected game's options pane: only for a game MacNeutron runs.

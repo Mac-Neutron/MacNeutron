@@ -69,12 +69,13 @@ cp "${BUILD_DIR:-$ROOT/build}"/dxmt-native/install/lib/*.dylib "${BUILD_DIR:-$RO
 cp "${BUILD_DIR:-$ROOT/build}/dxmt-native/install/lib/translator" "$W/dxmt-translator"
 clang $HOPT -std=gnu2x -Wall -c -I"$W/libkrun/include" -o "$W/obj/input.c.o" vm/host/input.c
 clang $HOPT -std=gnu2x -Wall -c -o "$W/obj/audio.c.o" vm/host/audio.c
+clang $HOPT -Wall -Wextra -c -Ivm/host -o "$W/obj/audio_tcc.m.o" vm/host/audio_tcc.m
 # The TPM's engine: libtpms (vm/libtpms) on Homebrew's openssl@3, both linked in statically.
 SSL=${OPENSSL:-$(brew --prefix openssl@3)}
 cmp -s "$ROOT/vm/libtpms/PIN" "$W/libtpms/PIN" || "$ROOT/vm/libtpms/build.sh"
 clang $HOPT -std=gnu2x -Wall -c -I"$W/libkrun/include" -I"$W/libtpms/include" -I"$SSL/include" -o "$W/obj/tpm.c.o" \
   vm/host/tpm.c
-objs="$objs $W/obj/input.c.o $W/obj/audio.c.o $W/obj/tpm.c.o"
+objs="$objs $W/obj/input.c.o $W/obj/audio.c.o $W/obj/audio_tcc.m.o $W/obj/tpm.c.o"
 # The executor's C goes through clang so it always gets $HOPT (swiftc takes no clang optimisation flags).
 csrc="vm/metal/host/executor.c vm/metal/host/testops.c vm/metal/ring.c"
 for f in $csrc; do
@@ -86,7 +87,10 @@ done
 # $HOPT (so their PGO and ThinLTO match the rest of the host); rustc's link step drives Apple's ld, which reads them.
 clang $HOPT -Wall -Wextra -c -o "$W/obj/appkit_shim.o" vm/host/appkit_shim.m
 clang $HOPT -Wall -Wextra -c -o "$W/obj/metal_cache.o" vm/host/metal_cache.m
-objs="$objs $W/obj/appkit_shim.o $W/obj/metal_cache.o"
+clang $HOPT -Wall -Wextra -c -Ivm/host -o "$W/obj/gamepad.m.o" vm/host/gamepad.m
+clang $HOPT -Wall -Wextra -c -Ivm/host -o "$W/obj/gamepad_rumble.m.o" vm/host/gamepad_rumble.m
+clang $HOPT -Wall -Wextra -c -Ivm/host -o "$W/obj/gamepad_hid.m.o" vm/host/gamepad_hid.m
+objs="$objs $W/obj/appkit_shim.o $W/obj/metal_cache.o $W/obj/gamepad.m.o $W/obj/gamepad_rumble.m.o $W/obj/gamepad_hid.m.o"
 # Every object and library rustc must hand to ld, each as its own -Clink-arg (the objects are space-separated in $objs).
 link_args=
 for o in $objs; do link_args="$link_args -Clink-arg=$o"; done
@@ -94,6 +98,11 @@ link_args="$link_args -Clink-arg=$W/libkrun/libkrun.1.dylib"
 link_args="$link_args -Clink-arg=-Wl,-rpath,@executable_path/../../../libkrun -Clink-arg=-Wl,-rpath,@executable_path/libkrun"
 link_args="$link_args -Clink-arg=$W/libtpms/libtpms.a -Clink-arg=$SSL/lib/libcrypto.a"
 link_args="$link_args -Clink-arg=-framework -Clink-arg=AudioToolbox"
+link_args="$link_args -Clink-arg=-framework -Clink-arg=CoreAudio"
+link_args="$link_args -Clink-arg=-framework -Clink-arg=AVFoundation"
+link_args="$link_args -Clink-arg=-framework -Clink-arg=GameController"
+link_args="$link_args -Clink-arg=-framework -Clink-arg=CoreHaptics"
+link_args="$link_args -Clink-arg=-framework -Clink-arg=IOKit"
 link_args="$link_args -Clink-arg=-framework -Clink-arg=Security"
 link_args="$link_args -Clink-arg=-framework -Clink-arg=AppKit"
 link_args="$link_args -Clink-arg=-framework -Clink-arg=Metal"

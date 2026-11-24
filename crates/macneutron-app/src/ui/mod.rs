@@ -9,7 +9,9 @@ pub mod system;
 
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -361,7 +363,10 @@ impl App {
             }),
             Act::ShowCleanup => self.show(Scene::Cleanup),
             Act::ShowLogs => open_path(&macneutron_core::LauncherLog::standard().directory),
-            Act::ShowSettings => self.show(Scene::Settings),
+            Act::ShowSettings => {
+                self.work(AppModel::refresh);
+                self.show(Scene::Settings);
+            }
             Act::Quit => NSApplication::sharedApplication(self.mtm).terminate(None),
             Act::SetLaunchAtLogin => {
                 let on = kit::is_on(sender);
@@ -373,11 +378,7 @@ impl App {
                 let updates = self.updates.clone();
                 std::thread::spawn(move || updates.check());
             }
-            Act::OpenURL(url) => {
-                if let Some(url) = NSURL::URLWithString(&ns(url)) {
-                    NSWorkspace::sharedWorkspace().openURL(&url);
-                }
-            }
+            Act::OpenURL(url) => open_url(url),
             Act::InstallUpdate => {
                 let updates = self.updates.clone();
                 std::thread::spawn(move || updates.install());
@@ -392,6 +393,17 @@ impl App {
                 self.confirm(Scene::Settings, confirmation, true, move || {
                     std::thread::spawn(move || model.rebuild_vm());
                 });
+            }
+            Act::InstallEacRuntime => open_url(macneutron_core::eac::EAC_INSTALL_URL),
+            Act::OpenSteamConsole => {
+                copy_to_pasteboard(macneutron_core::eac::EAC_DEPOT_COMMAND);
+                open_url(macneutron_core::eac::EAC_CONSOLE_URL);
+            }
+            Act::RevealEacRuntime => {
+                let path = self.inputs.borrow().state.eac_runtime.path().map(Path::to_path_buf);
+                if let Some(path) = path {
+                    open_path(&path);
+                }
             }
             Act::TurnOffSteamPlay => {
                 let model = self.model.clone();
@@ -498,6 +510,26 @@ impl App {
             }
         });
         alert.beginSheetModalForWindow_completionHandler(&self.window(scene), Some(&handler));
+    }
+}
+
+fn open_url(url: &str) {
+    if let Some(url) = NSURL::URLWithString(&ns(url)) {
+        NSWorkspace::sharedWorkspace().openURL(&url);
+    }
+}
+
+fn copy_to_pasteboard(text: &str) {
+    if let Ok(mut child) = Command::new("/usr/bin/pbcopy")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        let _ = child.wait();
     }
 }
 

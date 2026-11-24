@@ -34,8 +34,18 @@ EAC_ARGS=${EAC_ARGS--homedir=SMITE2Alpha -d3d12 -game -oss=SteamV2 -RallyHereURL
 EAC_EXPECT=${EAC_EXPECT-301}
 EAC_USER=${EAC_USER:-$(id -un)}
 EAC_CLIENT=${EAC_CLIENT:-easyanticheat_x64.so}
-export WINEPREFIX=$EAC_PREFIX SteamAppId=$EAC_APPID SteamGameId=$EAC_APPID DISPLAY=:0 PATH=/opt/mn-wine/bin:$PATH
-export PROTON_EAC_RUNTIME=/mnt/share/eac-runtime WINEDEBUG=-all USER=$EAC_USER
+export WINEPREFIX="$EAC_PREFIX" SteamAppId=$EAC_APPID SteamGameId=$EAC_APPID DISPLAY=:0 PATH=/opt/mn-wine/bin:$PATH
+if [ -z "${PROTON_EAC_RUNTIME:-}" ]; then
+  if [ -d "/Volumes/Proton EasyAntiCheat Runtime/v2" ]; then
+    PROTON_EAC_RUNTIME="/Volumes/Proton EasyAntiCheat Runtime"
+  else
+    PROTON_EAC_RUNTIME=/mnt/share/eac-runtime
+  fi
+fi
+export PROTON_EAC_RUNTIME WINEDEBUG=-all USER="$EAC_USER"
+export FEX_X87REDUCEDPRECISION="${FEX_X87REDUCEDPRECISION:-1}"
+export LD_LIBRARY_PATH="/opt/mn-wine/lib/mn-i386${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+if [ "${MACNEUTRON_VM_WOW64:-}" = 1 ] || [ "${PROTON_USE_WOW64:-}" = 1 ]; then export WINEARCH=wow64; fi
 # Under FEX Mesa's CPU detection picks AVX2 paths that LLVM then fails to select (llvmpipe compute shaders).
 export GALLIUM_OVERRIDE_CPU_CAPS=sse4.1
 RUN=${EAC_RUN_SECONDS:-300}
@@ -52,12 +62,42 @@ mkdir -p /home/mn
 # Create, or update after a Wine change, with MacNeutron's override: the Mono prompt would wait on Xvfb. Without
 # PROTON_EAC_RUNTIME, as Proton fills prefixes from its default prefix: a wineboot that sees the runtime copies its
 # easyanticheat*.dll into system32 (earlier runs left them there).
-rm -f "$WINEPREFIX"/drive_c/windows/system32/easyanticheat*.dll "$WINEPREFIX"/drive_c/windows/syswow64/easyanticheat*.dll
+W=$WINEPREFIX/drive_c/windows
+find "$W/system32" "$W/syswow64" -maxdepth 1 -iname 'easyanticheat*.dll' -delete 2>/dev/null || true
 env -u PROTON_EAC_RUNTIME WINEDLLOVERRIDES="mscoree,mshtml=" wineboot -u >/dev/null 2>&1
+if [ "${MACNEUTRON_VM_D3D:-}" = forward ] && [ -f /opt/mn-wine/lib/wine/mn-d3d/prefix.sh ]; then
+  . /opt/mn-wine/lib/wine/mn-d3d/prefix.sh
+fi
 STEAM="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 mkdir -p "$STEAM"
 cp /mnt/share/bin/steam.exe "$STEAM/steam.exe"
+cp /mnt/share/bin/steam.exe "$W/system32/steam.exe"
 cp /mnt/share/valve/steamclient64.dll "$STEAM/steamclient64.dll"
+if [ -f /mnt/share/valve/Steam.dll ]; then
+  cp /mnt/share/valve/Steam.dll "$STEAM/Steam.dll"
+  if [ -d "$W/syswow64" ]; then
+    cp /mnt/share/valve/Steam.dll "$W/syswow64/Steam.dll"
+  fi
+else
+  rm -f "$STEAM/Steam.dll" "$W/syswow64/Steam.dll"
+fi
+if [ -f /mnt/share/valve/steamclient.dll ]; then
+  cp /mnt/share/valve/steamclient.dll "$STEAM/steamclient.dll"
+else
+  rm -f "$STEAM/steamclient.dll"
+fi
+[ ! -f /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll ] || \
+  cp /opt/mn-wine/lib/wine/i386-windows/lsteamclient.dll "$STEAM/lsteamclient.dll"
+if [ -f /mnt/share/valve/GameOverlayRenderer64.dll ]; then
+  cp /mnt/share/valve/GameOverlayRenderer64.dll "$STEAM/GameOverlayRenderer64.dll"
+else
+  rm -f "$STEAM/GameOverlayRenderer64.dll"
+fi
+if [ -f /mnt/share/valve/GameOverlayRenderer.dll ]; then
+  cp /mnt/share/valve/GameOverlayRenderer.dll "$STEAM/GameOverlayRenderer.dll"
+else
+  rm -f "$STEAM/GameOverlayRenderer.dll"
+fi
 EACLOG="$WINEPREFIX/drive_c/users/$EAC_USER/AppData/Roaming/EasyAntiCheat"
 rm -rf "$EACLOG"
 # SMITE 2's own logs too: a log left by an earlier run must not pass for this one.
@@ -76,11 +116,16 @@ timeout -s KILL "$RUN" wine 'C:\Program Files (x86)\Steam\steam.exe' "Z:$(printf
   $EAC_ARGS > /home/mn/eac-run.log 2>&1
 set +f
 echo "ran $(( $(date +%s) - start )) s"
+echo "runtime=$PROTON_EAC_RUNTIME wow64=${WINEARCH:-old}"
 wait "$sampler"
 timeout 20 wineserver -k
 fail=0
 boot=$(find "$EACLOG" -name anticheatlauncher.log -exec cat {} + 2>/dev/null | tr -d '\r' |
   grep -o "Launcher finished with: [0-9]*" | head -1)
+if [ -z "$boot" ]; then
+  legacy=$(find "$EACLOG" -name gamelauncher.log -exec cat {} + 2>/dev/null | tr -d '\r' | grep -v '^$' | tail -1)
+  [ -z "$legacy" ] || echo "     gamelauncher: $legacy"
+fi
 if [ -z "$EAC_EXPECT" ]; then echo "     bootstrapper: '${boot:-none}'"
 elif [ "$boot" = "Launcher finished with: $EAC_EXPECT" ]; then echo "ok   bootstrapper: $EAC_EXPECT"
 else echo "FAIL bootstrapper: '$boot'"; fail=1; fi

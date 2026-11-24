@@ -15,7 +15,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::ptr;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 const MN_AUDIO_PORT: u32 = 5102;
 const STEAM_VSOCK_PORT: u32 = 5101;
@@ -531,6 +531,21 @@ extern "C" fn send_host_clock(_ctx: *mut c_void) {
     }
 }
 
+extern "C" fn on_focus_change(active: c_int, _ctx: *mut c_void) {
+    unsafe {
+        mn_audio_set_focus_active(active);
+        mn_gamepad_set_paused(if active == 0 { 1 } else { 0 });
+    }
+}
+
+static GAMEPAD_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+fn shutdown_gamepad() {
+    if GAMEPAD_ACTIVE.swap(false, Ordering::SeqCst) {
+        unsafe { mn_gamepad_shutdown() };
+    }
+}
+
 /// The user's temporary folder with its trailing slash, as Swift's `NSTemporaryDirectory()` gave it: Darwin's
 /// `_CS_DARWIN_USER_TEMP_DIR` (Foundation's own source for it), `/tmp/` when that has no answer.
 fn temp_dir() -> String {
@@ -875,6 +890,73 @@ fn main() {
         check(clock_res, "clock port");
     }
     CLOCK_FD.store(clock_wr, Ordering::SeqCst);
+
+    let gamepad_enabled = std::env::var("MN_GAMEPAD").as_deref() != Ok("0");
+    let mut gamepad_pipes: Option<([c_int; 4], [c_int; 4])> = None;
+    if gamepad_enabled {
+        let mut host_wr = [-1 as c_int; 4];
+        let mut host_rd = [-1 as c_int; 4];
+        let pad_names = ["mn.pad", "mn.pad2", "mn.pad3", "mn.pad4"];
+        let close_opened_pad_fds = |wr: &[c_int; 4], rd: &[c_int; 4]| {
+            for &fd in wr.iter().chain(rd.iter()) {
+                if fd >= 0 {
+                    unsafe { close(fd) };
+                }
+            }
+        };
+        for (idx, &name) in pad_names.iter().enumerate() {
+            let mut to_guest = [-1 as c_int; 2];
+            let mut from_guest = [-1 as c_int; 2];
+            if unsafe { pipe(to_guest.as_mut_ptr()) } != 0
+                || unsafe { pipe(from_guest.as_mut_ptr()) } != 0
+            {
+                let msg = unsafe { CStr::from_ptr(strerror(errno())) }
+                    .to_string_lossy()
+                    .into_owned();
+                for &fd in to_guest.iter().chain(from_guest.iter()) {
+                    if fd >= 0 {
+                        unsafe { close(fd) };
+                    }
+                }
+                close_opened_pad_fds(&host_wr, &host_rd);
+                fail(1, &format!("{} pipe: {}", name, msg));
+            }
+            unsafe {
+                fcntl(to_guest[0], F_SETFD, FD_CLOEXEC);
+                fcntl(to_guest[1], F_SETFD, FD_CLOEXEC);
+                fcntl(from_guest[0], F_SETFD, FD_CLOEXEC);
+                fcntl(from_guest[1], F_SETFD, FD_CLOEXEC);
+            }
+            let mut pad_port: u32 = 0;
+            let mut e: *mut KrunError = ptr::null_mut();
+            let pad_res = unsafe {
+                krun_console_builder_add_inout_port(
+                    consoles,
+                    kstr(name),
+                    to_guest[0],
+                    from_guest[1],
+                    &mut pad_port,
+                    &mut e,
+                )
+            };
+            unsafe {
+                close(to_guest[0]);
+                close(from_guest[1]);
+            }
+            if pad_res != KRUN_RESULT_SUCCESS {
+                unsafe {
+                    close(to_guest[1]);
+                    close(from_guest[0]);
+                }
+                close_opened_pad_fds(&host_wr, &host_rd);
+                check(pad_res, &format!("{} port", name));
+            }
+            host_wr[idx] = to_guest[1];
+            host_rd[idx] = from_guest[0];
+        }
+        gamepad_pipes = Some((host_wr, host_rd));
+    }
+
     let mut e: *mut KrunError = ptr::null_mut();
     let console_dev = made(unsafe { krun_console_builder_build(consoles, &mut e) }, &mut e, "console");
     unsafe { krun_mmio_device_manager_add(devices, console_dev as *mut KrunAttachDevice) };
@@ -1183,6 +1265,14 @@ fn main() {
 
     start_memory_diagnostics();
 
+    if let Some((wr, rd)) = gamepad_pipes {
+        if unsafe { mn_gamepad_init(wr.as_ptr(), rd.as_ptr(), 4) } == 0 {
+            GAMEPAD_ACTIVE.store(true, Ordering::SeqCst);
+        } else {
+            eprintln!("macneutron-vm: gamepad bridge failed to initialize");
+        }
+    }
+
     // The VM runs off the main thread; the main thread runs AppKit (the game window and Metal share its run loop).
     let vmm_addr = vmm as usize;
     std::thread::Builder::new()
@@ -1191,6 +1281,7 @@ fn main() {
         .spawn(move || {
             unsafe { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) };
             unsafe { krun_vmm_run(vmm_addr as *mut KrunVmm) };
+            shutdown_gamepad();
             // exit, not _exit: atexit runs, which is what flushes an instrumented PGO profile (a training run's whole point)
             // and what the Swift host's exit(0) did.
             unsafe { exit(0) }
@@ -1200,8 +1291,10 @@ fn main() {
     // The activity (AppKit shim) lasts as long as the VM, and the run loop keeps the main thread alive.
     unsafe {
         mn_register_wake_callback(send_host_clock, ptr::null_mut());
+        mn_register_focus_callback(on_focus_change, ptr::null_mut());
         mn_run_appkit_main_loop();
     }
+    shutdown_gamepad();
 }
 
 /// Non-blocking liveness check for a spawned child (its pid): mirrors Swift's `Process.isRunning`.

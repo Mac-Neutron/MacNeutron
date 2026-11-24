@@ -12,10 +12,11 @@ use macneutron_core::runtime_installer::{default_identity, default_running_execu
 use macneutron_core::steam_watcher::{SteamEvent, SteamWatcher};
 use macneutron_core::vm_downloads::standard_fetch;
 use macneutron_core::{
-    app_info, AppInfo, CodeIdentity, GameSettings, GameSettingsStore, LaunchOptions, LauncherLog, MappingPlanner,
-    MicroVM, OrphanPrefix, OrphanPrefixes, RunAs, RuntimeInstallError, RuntimeInstallOutcome, RuntimeInstaller,
-    SteamLocation, SteamPlayError, SteamPlayMode, SteamPlayStatus, SystemProcessRunner, ToolLayout, ToolMapping,
-    UninstalledDrives, VMSetup, VMToolsInstallOutcome, VMToolsInstaller, ValveClient,
+    app_info, AppInfo, CodeIdentity, EacKind, EacRuntimeStatus, GameSettings, GameSettingsStore, LaunchOptions,
+    LauncherLog, MappingPlanner, MicroVM, OrphanPrefix, OrphanPrefixes, RunAs, RuntimeInstallError,
+    RuntimeInstallOutcome, RuntimeInstaller, SteamLocation, SteamPlayError, SteamPlayMode, SteamPlayStatus,
+    SystemProcessRunner, ToolLayout, ToolMapping, UninstalledDrives, VMSetup, VMToolsInstallOutcome, VMToolsInstaller,
+    ValveClient,
 };
 
 use crate::OnChange;
@@ -28,6 +29,7 @@ pub struct GameRow {
     pub settings: GameSettings,
     /// The game's own launch options in Steam (read only); None when it has none.
     pub steam_launch_options: Option<String>,
+    pub eac: Option<EacKind>,
 }
 
 impl GameRow {
@@ -113,6 +115,8 @@ pub struct Snapshot {
     pub status: SteamPlayStatus,
     /// Each game's launch options in Steam, by app ID.
     pub steam_launch_options: BTreeMap<u32, String>,
+    pub eac_runtime: EacRuntimeStatus,
+    pub eac_games: BTreeMap<u32, EacKind>,
 }
 
 /// `RuntimeInstaller::install(wine_app, layout, launcher_binary, force)`.
@@ -230,6 +234,7 @@ pub struct State {
     pub vm_setup_running: bool,
     /// The last setup failed: nothing retries it but Retry or Rebuild.
     pub vm_setup_failed: bool,
+    pub eac_runtime: EacRuntimeStatus,
     /// Bumped by every change the model makes on disk.
     pub generation: u64,
     vm_tools_installing: bool,
@@ -268,6 +273,7 @@ impl Default for State {
             vm_notice: None,
             vm_setup_running: false,
             vm_setup_failed: false,
+            eac_runtime: EacRuntimeStatus::Missing,
             generation: 0,
             vm_tools_installing: false,
             vm_setup_deferred: false,
@@ -340,6 +346,7 @@ impl AppModel {
         let state = State {
             runtime: InstalledRuntime::read(&config.layout, &*config.identity),
             valve_version: ValveClient::installed(&valve_client.cache).map(|install| install.version),
+            eac_runtime: macneutron_core::eac::runtime_status(&config.steam),
             ..State::default()
         };
         Arc::new_cyclic(|me| AppModel {
@@ -508,6 +515,7 @@ impl AppModel {
             }
             state.runtime = snapshot.runtime;
             state.app_info_error = snapshot.app_info_error;
+            state.eac_runtime = snapshot.eac_runtime;
             let mut games: Vec<GameRow> = snapshot
                 .apps
                 .iter()
@@ -520,6 +528,7 @@ impl AppModel {
                     installed: snapshot.installed.contains(&app.app_id),
                     settings: snapshot.settings.get(&app.app_id.to_string()).cloned().unwrap_or_default(),
                     steam_launch_options: snapshot.steam_launch_options.get(&app.app_id).cloned(),
+                    eac: snapshot.eac_games.get(&app.app_id).copied(),
                 })
                 .collect();
             games.sort_by_cached_key(|row| (!row.installed, row.name().to_lowercase()));
@@ -546,6 +555,12 @@ impl AppModel {
             Err(error) => (fallback_apps.to_vec(), Some(error.to_string())),
         };
         let plan = MappingPlanner::plan(&apps, &store.run_as_overrides());
+        let eac_runtime = macneutron_core::eac::runtime_status(steam);
+        let eac_games = steam
+            .installed_app_dirs()
+            .into_iter()
+            .filter_map(|(app_id, dir)| macneutron_core::eac::detect_game(&dir).map(|kind| (app_id, kind)))
+            .collect();
         Snapshot {
             runtime: InstalledRuntime::read(layout, identity),
             app_info_error,
@@ -554,6 +569,8 @@ impl AppModel {
             orphans: OrphanPrefixes::find(steam),
             status: mode.status(&plan),
             steam_launch_options: steam.local_config().map(|file| LaunchOptions::steam_lines(&file)).unwrap_or_default(),
+            eac_runtime,
+            eac_games,
             apps,
         }
     }

@@ -20,11 +20,57 @@ static mn_wake_cb g_wake_cb = NULL;
 static void *g_wake_ctx = NULL;
 static id g_wake_observer = nil;
 
+typedef void (*mn_focus_cb)(int active, void *ctx);
+// Guarded by g_focus_lock so callback/context pair registration and focus dispatch cannot tear across threads.
+static pthread_mutex_t g_focus_lock = PTHREAD_MUTEX_INITIALIZER;
+static mn_focus_cb g_focus_cb = NULL;
+static void *g_focus_ctx = NULL;
+static id g_focus_observers[4] = { nil, nil, nil, nil };
+
 void mn_register_wake_callback(mn_wake_cb cb, void *ctx) {
     pthread_mutex_lock(&g_wake_lock);
     g_wake_cb = cb;
     g_wake_ctx = ctx;
     pthread_mutex_unlock(&g_wake_lock);
+}
+
+void mn_register_focus_callback(mn_focus_cb cb, void *ctx) {
+    pthread_mutex_lock(&g_focus_lock);
+    g_focus_cb = cb;
+    g_focus_ctx = ctx;
+    pthread_mutex_unlock(&g_focus_lock);
+}
+
+static int mn_compute_effective_focus(NSNotification *note) {
+    if (![NSApp isActive] ||
+        [note.name isEqualToString:NSApplicationDidResignActiveNotification]) {
+        return 0;
+    }
+    NSArray<NSWindow *> *windows = [NSApp windows];
+    if (windows.count == 0) {
+        return 1;
+    }
+    id miniaturizing =
+        [note.name isEqualToString:NSWindowDidMiniaturizeNotification] ? note.object : nil;
+    for (NSWindow *win in windows) {
+        if (win == miniaturizing) {
+            continue;
+        }
+        if ([win isVisible] && ![win isMiniaturized]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void mn_dispatch_focus(int active) {
+    pthread_mutex_lock(&g_focus_lock);
+    mn_focus_cb cb = g_focus_cb;
+    void *ctx = g_focus_ctx;
+    pthread_mutex_unlock(&g_focus_lock);
+    if (cb != NULL) {
+        cb(active, ctx);
+    }
 }
 
 void mn_begin_activity(void) {
@@ -69,7 +115,40 @@ void mn_run_appkit_main_loop(void) {
                 CFRetain((__bridge CFTypeRef)g_wake_observer);
             }
         }
+        NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+        if (g_focus_observers[0] == nil) {
+            NSNotificationName names[4] = {
+                NSApplicationDidResignActiveNotification,
+                NSApplicationDidBecomeActiveNotification,
+                NSWindowDidMiniaturizeNotification,
+                NSWindowDidDeminiaturizeNotification,
+            };
+            for (int i = 0; i < 4; i++) {
+                id obs = [nc addObserverForName:names[i]
+                                         object:nil
+                                          queue:nil
+                                     usingBlock:^(NSNotification *note) {
+                                         mn_dispatch_focus(mn_compute_effective_focus(note));
+                                     }];
+                if (obs != nil) {
+                    CFRetain((__bridge CFTypeRef)obs);
+                    g_focus_observers[i] = obs;
+                }
+            }
+        }
         [app run];
+        for (int i = 0; i < 4; i++) {
+            if (g_focus_observers[i] != nil) {
+                [nc removeObserver:g_focus_observers[i]];
+                CFRelease((__bridge CFTypeRef)g_focus_observers[i]);
+                g_focus_observers[i] = nil;
+            }
+        }
+        if (g_wake_observer != nil) {
+            [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:g_wake_observer];
+            CFRelease((__bridge CFTypeRef)g_wake_observer);
+            g_wake_observer = nil;
+        }
     }
 }
 

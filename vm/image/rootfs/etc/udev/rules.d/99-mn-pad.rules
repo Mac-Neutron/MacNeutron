@@ -1,0 +1,2 @@
+SUBSYSTEM=="virtio-ports", ATTR{name}=="mn.pad", TAG+="systemd", ENV{SYSTEMD_WANTS}+="mn-pad.service"
+SUBSYSTEM=="virtio-ports", ATTR{name}=="mn.pad[2-4]", TAG+="systemd", ENV{SYSTEMD_WANTS}+="mn-pad@$attr{name}.service"

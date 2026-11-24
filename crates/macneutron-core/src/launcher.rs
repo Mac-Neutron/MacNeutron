@@ -464,7 +464,9 @@ impl Launcher {
         let mut shares = MicroVM::user_shares(&context.prefix(), library, guest, &self.home)?;
         // The Proton EasyAntiCheat Runtime, as Linux Steam passes it to every game under Proton: read-only in the
         // game's own VM, wherever Steam put it (an EAC game's processes load its libraries).
-        if let Some(runtime) = MicroVM::eac_runtime(&self.steam) {
+        let eac_status = crate::eac::runtime_status(&self.steam);
+        if let Some(runtime) = eac_status.path() {
+            let runtime = runtime.to_string_lossy().into_owned();
             shares.push(UserShare {
                 read_only: true,
                 ..UserShare::new("eac-runtime", &runtime, MicroVM::GUEST_EAC_RUNTIME)
@@ -472,6 +474,55 @@ impl Launcher {
             environment.insert("PROTON_EAC_RUNTIME".into(), MicroVM::GUEST_EAC_RUNTIME.into());
         } else {
             environment.remove("PROTON_EAC_RUNTIME");
+        }
+        if request.verb == Verb::WaitForExitAndRun {
+            let game_dir = MicroVM::game_folder(guest).map(|folder| Path::new(library).join(folder));
+            if let Some(kind) = game_dir.as_deref().and_then(crate::eac::detect_game) {
+                let noeac = crate::eac::launch_args_disable_eac(&request.arguments);
+                match &eac_status {
+                    crate::eac::EacRuntimeStatus::Missing => {
+                        self.log.summary(&format!(
+                            "note: appid={app_id} uses Easy Anti-Cheat ({}) but Proton EasyAntiCheat Runtime (app 1826330) is not installed",
+                            kind.label()
+                        ));
+                        if !noeac {
+                            self.notifier.post(
+                                "MacNeutron",
+                                &format!(
+                                    "{} uses Easy Anti-Cheat, but the Proton EasyAntiCheat Runtime isn't installed. Open MacNeutron Settings to install it.",
+                                    Self::game_name(&request.target)
+                                ),
+                            );
+                        }
+                    }
+                    crate::eac::EacRuntimeStatus::Incomplete(info) => {
+                        self.log.summary(&format!(
+                            "note: appid={app_id} uses Easy Anti-Cheat ({}) but Proton EasyAntiCheat Runtime at {} is missing: {}",
+                            kind.label(),
+                            info.path.display(),
+                            info.missing_components().join(", ")
+                        ));
+                        if !noeac {
+                            self.notifier.post(
+                                "MacNeutron",
+                                &format!(
+                                    "{}'s Proton EasyAntiCheat Runtime looks incomplete. Open MacNeutron Settings to reinstall it.",
+                                    Self::game_name(&request.target)
+                                ),
+                            );
+                        }
+                    }
+                    crate::eac::EacRuntimeStatus::Ready(_) => {
+                        let new_wow64 = environment.get("MACNEUTRON_VM_WOW64").map(String::as_str) == Some("1")
+                            || environment.get("PROTON_USE_WOW64").map(String::as_str) == Some("1");
+                        if new_wow64 && pe_image::machine(Path::new(&request.target)) == Some(pe_image::I386) {
+                            self.log.summary(&format!(
+                                "note: appid={app_id} is a 32-bit EAC launcher/game with new WoW64 enabled; 32-bit EAC bridges (easyanticheat_x86.so) require default old WoW64"
+                            ));
+                        }
+                    }
+                }
+            }
         }
         // Steam's Auto-Cloud roots are the profile's XP names (ProfileLinks): a game no macOS launch prepared has
         // none, so they're made here, under the prefix's lock as PrefixManager makes them, merging what Steam's
@@ -2315,6 +2366,129 @@ pub(crate) mod tests {
                 assert!(exported(&script).iter().any(|k| k == "PROTON_EAC_RUNTIME")); // Wine's processes get it
                 std::fs::remove_dir_all(&runtime).unwrap();
             }
+        }
+
+        fn make_eac_game_exe(name: &str, eos: bool) -> String {
+            let game_dir = make_temp_dir().join(format!("steamapps/common/{name}"));
+            let exe = game_dir.join("Windows/Game.exe");
+            write("mz", &exe, false);
+            if eos {
+                write(
+                    "{\"deploymentid\":\"dep-1\"}",
+                    &game_dir.join("Windows/EasyAntiCheat/Settings.json"),
+                    false,
+                );
+            }
+            exe.to_string_lossy().into_owned()
+        }
+
+        fn make_complete_eac_runtime(dir: &Path) {
+            for rel in [
+                "v2/lib64/easyanticheat_x64.so",
+                "v2/lib64/easyanticheat_x64.dll",
+                "v2/lib64/easyanticheat.so",
+                "v2/lib64/easyanticheat.dll",
+                "v2/lib32/easyanticheat_x86.so",
+                "v2/lib32/easyanticheat_x86.dll",
+            ] {
+                write("stub", &dir.join(rel), false);
+            }
+        }
+
+        #[test]
+        fn eac_game_without_runtime_logs_summary_and_notifies_without_blocking() {
+            let exe = make_eac_game_exe("EacNoRuntime", true);
+            let f = fixture();
+            assert_eq!(f.launch(&["waitforexitandrun", &exe], &f.env), 0);
+            assert_eq!(f.runner.tools(), ["run-guest.sh"]);
+            assert!(f.launcher_log().contains("uses Easy Anti-Cheat (EOS) but Proton EasyAntiCheat Runtime (app 1826330) is not installed"));
+            assert!(f.notifier.posted().iter().any(|m| m.contains("Proton EasyAntiCheat Runtime isn't installed")));
+        }
+
+        #[test]
+        fn eac_game_with_noeac_suppresses_notification_but_keeps_log_note() {
+            let exe = make_eac_game_exe("EacDisabled", true);
+            let f = fixture();
+            assert_eq!(f.launch(&["waitforexitandrun", &exe, "-NOEAC"], &f.env), 0);
+            assert_eq!(f.runner.tools(), ["run-guest.sh"]);
+            assert!(f.launcher_log().contains("uses Easy Anti-Cheat (EOS) but Proton EasyAntiCheat Runtime (app 1826330) is not installed"));
+            assert!(f.notifier.posted().is_empty());
+        }
+
+        #[test]
+        fn non_eac_game_without_runtime_posts_no_eac_notification() {
+            let exe = make_eac_game_exe("PlainNoEac", false);
+            let f = fixture();
+            assert_eq!(f.launch(&["waitforexitandrun", &exe], &f.env), 0);
+            assert!(f.notifier.posted().is_empty());
+            assert!(!f.launcher_log().contains("Easy Anti-Cheat"));
+        }
+
+        #[test]
+        fn eac_game_with_complete_secondary_runtime_mounts_cleanly_without_warning() {
+            let base = make_temp_dir();
+            let steam = SteamLocation::new(base.join("Steam"));
+            let extra = base.join("ExtraLibrary");
+            write(
+                &format!(
+                    "\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n\t\"1\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n}}\n",
+                    steam.root.display(),
+                    extra.display()
+                ),
+                &steam.root.join("steamapps/libraryfolders.vdf"),
+                false,
+            );
+            let runtime = extra.join("steamapps/content/app_1826330/depot_1826331");
+            make_complete_eac_runtime(&runtime);
+            let exe = make_eac_game_exe("EacReady", true);
+            let f = make_vm_fixture(Options { steam: Some(steam), ..Default::default() });
+            assert_eq!(f.launch(&["waitforexitandrun", &exe], &f.env), 0);
+            let call = f.guest_call();
+            let at = call.arguments.iter().position(|a| a == "--ro-share").unwrap();
+            assert_eq!(call.arguments[at + 1], format!("eac-runtime={}", runtime.to_string_lossy()));
+            assert_eq!(call.environment.get("MN_MOUNTS").map(String::as_str), Some("keep"));
+            let script = f.scripts.last();
+            assert!(script.contains("PROTON_EAC_RUNTIME='/Volumes/Proton EasyAntiCheat Runtime'\n"));
+            assert!(exported(&script).iter().any(|k| k == "PROTON_EAC_RUNTIME"));
+            assert!(f.notifier.posted().is_empty());
+            assert!(!f.launcher_log().contains("is not installed"));
+            assert!(!f.launcher_log().contains("is missing:"));
+        }
+
+        #[test]
+        fn eac_game_with_incomplete_runtime_mounts_logs_note_and_notifies() {
+            let steam = SteamLocation::new(make_temp_dir().join("Steam"));
+            let runtime = steam.root.join("steamapps/common/Proton EasyAntiCheat Runtime");
+            std::fs::create_dir_all(runtime.join("v2")).unwrap();
+            let exe = make_eac_game_exe("EacIncomplete", true);
+            let f = make_vm_fixture(Options { steam: Some(steam), ..Default::default() });
+            assert_eq!(f.launch(&["waitforexitandrun", &exe], &f.env), 0);
+            let call = f.guest_call();
+            let at = call.arguments.iter().position(|a| a == "--ro-share").unwrap();
+            assert_eq!(call.arguments[at + 1], format!("eac-runtime={}", runtime.to_string_lossy()));
+            assert!(f.launcher_log().contains("is missing:"));
+            assert!(f.notifier.posted().iter().any(|m| m.contains("looks incomplete")));
+        }
+
+        #[test]
+        fn eac_32bit_with_new_wow64_logs_summary_advisory() {
+            let steam = SteamLocation::new(make_temp_dir().join("Steam"));
+            let runtime = steam.root.join("steamapps/common/Proton EasyAntiCheat Runtime");
+            make_complete_eac_runtime(&runtime);
+            let exe = make_eac_game_exe("Eac32Wow64", true);
+            std::fs::write(&exe, pe_bytes(pe_image::I386, false)).unwrap();
+            let f = make_vm_fixture(Options {
+                steam: Some(steam),
+                version: Some("0.7.1p"),
+                ..Default::default()
+            });
+            assert_eq!(
+                f.launch(&["waitforexitandrun", &exe], &with(&f.env, &[("PROTON_USE_WOW64", "1")])),
+                0
+            );
+            assert!(f.launcher_log().contains("32-bit EAC launcher/game with new WoW64 enabled"));
+            assert!(f.launcher_log().contains("easyanticheat_x86.so"));
+            assert!(f.notifier.posted().is_empty());
         }
 
         #[test]

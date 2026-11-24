@@ -125,9 +125,13 @@ extern "C" {
     pub fn mn_d3d_set_dir(dir: *const c_char);
     pub fn mn_d3d_set_trace(path: *const c_char);
 
-    // vm/host/input.h, audio.h, tpm.h
+    // vm/host/input.h, audio.h, gamepad.h, tpm.h
     pub fn mn_input_device(share: *const c_char, err: *mut *mut KrunError) -> *mut KrunInputDevice;
     pub fn mn_audio_listen(path: *const c_char) -> c_int;
+    pub fn mn_audio_set_focus_active(active: c_int);
+    pub fn mn_gamepad_init(wr_fds: *const c_int, rd_fds: *const c_int, nslots: c_int) -> c_int;
+    pub fn mn_gamepad_shutdown();
+    pub fn mn_gamepad_set_paused(paused: c_int);
     pub fn mn_tpm_start(dir: *const c_char) -> c_int;
     pub fn mn_tpm_device(err: *mut *mut KrunError) -> *mut KrunTpmDevice;
 }
@@ -321,6 +325,7 @@ extern "C" {
     pub fn mn_begin_activity();
     pub fn mn_run_appkit_main_loop();
     pub fn mn_register_wake_callback(cb: extern "C" fn(*mut c_void), ctx: *mut c_void);
+    pub fn mn_register_focus_callback(cb: extern "C" fn(c_int, *mut c_void), ctx: *mut c_void);
     pub fn mn_prepare_metal_shader_cache();
     pub fn mn_gpu_is_paravirtual() -> bool;
     pub fn mn_metal_memory_info(

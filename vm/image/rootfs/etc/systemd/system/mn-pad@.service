@@ -1,0 +1,16 @@
+[Unit]
+Description=MacNeutron gamepad and raw HID bridge (%i)
+After=systemd-udevd.service systemd-modules-load.service
+
+[Service]
+Type=simple
+Environment=MN_PAD_PORT=/dev/virtio-ports/%i
+ExecStart=/usr/libexec/mn-pad
+Restart=on-failure
+RestartSec=2
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes

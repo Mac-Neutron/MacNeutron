@@ -18,4 +18,5 @@ mesa-libGL-devel
 alsa-lib-devel
 fontconfig-devel
 libstdc++-devel
+systemd-devel
 gcc-c++

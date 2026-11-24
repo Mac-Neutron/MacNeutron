@@ -1,9 +1,9 @@
 /* ALSA's "mn" PCM: a game's sound (Wine's winealsa, under FEX) to the Mac, over vsock port MN_AUDIO_PORT to the VM
- * host's CoreAudio player (vm/host/audio.c; protocol mn-audio.h). Playback only; two channels, which games mix
+ * host's CoreAudio player/capture (vm/host/audio.c; protocol mn-audio.h). Playback: two channels, which games mix
  * down to themselves (a wider device would have ALSA's plug drop the rest); S16 or FLOAT; any rate (CoreAudio
- * converts). Its hardware pointer is the frames the host has played, so the game is paced by the Mac's audio clock.
- * Without the host (no vsock port, or it went away) it plays into nothing at the stream's rate, as the null device
- * did: a game must never fail to open its sound (SMITE 2 crashes on a mastering voice that could not be created).
+ * converts). Capture: 1-2 channels, S16 or FLOAT, 8-192 kHz; connect/prepare never touch host CoreAudio/TCC so
+ * probing at game launch completes in microseconds without macOS permission popups. Without the host on playback
+ * it plays into nothing at the stream's rate, as the null device did: a game must never fail to open its sound.
  * x86-64, against the FEX RootFS's libasound (build-audio.sh); /etc/asound.conf makes it the default device. */
 #include <alsa/asoundlib.h>
 #include <alsa/pcm_external.h>
@@ -19,19 +19,32 @@
 #include <unistd.h>
 #include "mn-audio.h"
 
+enum { RX_HDR = 0, RX_BODY = 1 };
+
 struct mn {
     snd_pcm_ioplug_t io;
     int fd;                /* the host, or -1 */
     int tried;             /* connecting, since these parameters */
     int timer;             /* without the host: a tick a period, for poll */
+    int is_capture;        /* 0 = playback, 1 = capture */
     unsigned frame;        /* bytes a frame */
     uint64_t sent, played; /* frames since the connection: sent to the host; played by it (its last word) or the clock */
-    uint64_t base;         /* played at the last prepare: the hardware pointer's zero */
+    uint64_t base;         /* played/captured at the last prepare: the hardware pointer's zero */
     int running;
     double clock_start;    /* without the host: the clock plays from clock_played at clock_start */
     uint64_t clock_played;
     uint8_t heard[64];     /* the host's counts, as they arrive */
     size_t heard_len;
+    /* Capture state */
+    uint8_t *cap_ring;
+    uint64_t cap_size;     /* bytes, power of two >= 1 s */
+    uint64_t cap_w, cap_r; /* bytes written/read in cap_ring */
+    uint64_t captured;     /* complete frames received since the connection */
+    int cap_err;
+    int rx_state;
+    struct mn_audio_msg rx_msg;
+    size_t rx_hdr_off;
+    uint32_t rx_body_rem;
 };
 
 static double now(void) {
@@ -95,7 +108,7 @@ static void hear(struct mn *m, int timeout_ms) {
     }
 }
 
-static int connect_host(struct mn *m) {
+static int connect_vsock(void) {
     int s = socket(AF_VSOCK, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (s < 0) return -1;
     struct sockaddr_vm a = {.svm_family = AF_VSOCK, .svm_cid = VMADDR_CID_HOST, .svm_port = MN_AUDIO_PORT};
@@ -111,6 +124,12 @@ static int connect_host(struct mn *m) {
         return -1;
     }
     fcntl(s, F_SETFL, fcntl(s, F_GETFL) & ~O_NONBLOCK);
+    return s;
+}
+
+static int connect_host(struct mn *m) {
+    int s = connect_vsock();
+    if (s < 0) return -1;
     m->fd = s, m->sent = m->played = m->heard_len = 0;
     /* MNA2: with the buffer, so the host sends the position often enough for it (mn-audio.h). */
     struct {
@@ -120,6 +139,164 @@ static int connect_host(struct mn *m) {
             m->io.format == SND_PCM_FORMAT_FLOAT_LE ? MN_AUDIO_F32 : MN_AUDIO_S16},
            (uint32_t)m->io.buffer_size};
     return send_all(m, &h, sizeof h);
+}
+
+static void cap_lose_host(struct mn *m) {
+    if (m->fd >= 0) {
+        close(m->fd);
+        m->fd = -1;
+    }
+    m->cap_err = 1;
+    m->running = 0;
+    if (m->timer >= 0) {
+        struct itimerspec imm = {{0, 0}, {0, 1}};
+        timerfd_settime(m->timer, 0, &imm, NULL);
+    }
+}
+
+static int cap_send_all(struct mn *m, const void *buf, size_t n) {
+    for (const char *p = buf; n && m->fd >= 0;) {
+        ssize_t k = send(m->fd, p, n, MSG_NOSIGNAL);
+        if (k < 0 && errno == EINTR) continue;
+        if (k <= 0) {
+            cap_lose_host(m);
+            return -1;
+        }
+        p += k, n -= (size_t)k;
+    }
+    return m->fd >= 0 ? 0 : -1;
+}
+
+static int connect_cap_host(struct mn *m) {
+    int s = connect_vsock();
+    if (s < 0) return -1;
+    m->fd = s;
+    m->cap_w = m->cap_r = 0;
+    m->captured = m->base = 0;
+    m->cap_err = 0;
+    m->rx_state = RX_HDR;
+    m->rx_hdr_off = 0;
+    m->rx_body_rem = 0;
+    struct {
+        struct mn_audio_hello h;
+        uint32_t buffer;
+    } h = {{MN_AUDIO_MAGIC_CAP, m->io.rate, m->io.channels,
+            m->io.format == SND_PCM_FORMAT_FLOAT_LE ? MN_AUDIO_F32 : MN_AUDIO_S16},
+           (uint32_t)m->io.buffer_size};
+    return cap_send_all(m, &h, sizeof h);
+}
+
+/* Single nonblocking step of the capture RX state machine.
+ * Returns 1 if progress was made, 0 on EAGAIN or status delivery, -1 on error/EOF. */
+static int cap_rx_step(struct mn *m, int discard_data, int *got_status, uint32_t *status_code) {
+    if (m->rx_state == RX_HDR) {
+        ssize_t n = recv(m->fd, (uint8_t *)&m->rx_msg + m->rx_hdr_off,
+                         sizeof m->rx_msg - m->rx_hdr_off, MSG_DONTWAIT);
+        if (n < 0) {
+            if (errno == EINTR) return 1;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+            cap_lose_host(m);
+            return -1;
+        }
+        if (n == 0) {
+            cap_lose_host(m);
+            return -1;
+        }
+        m->rx_hdr_off += (size_t)n;
+        if (m->rx_hdr_off < sizeof m->rx_msg) return 1;
+        m->rx_hdr_off = 0;
+        if (m->rx_msg.type == MN_AUDIO_STATUS) {
+            if (got_status) {
+                *got_status = 1;
+                *status_code = m->rx_msg.bytes;
+                return 0;
+            }
+            if (m->rx_msg.bytes != MN_AUDIO_OK) {
+                m->cap_err = 1;
+                m->running = 0;
+                return -1;
+            }
+            return 1;
+        }
+        if (m->rx_msg.type == MN_AUDIO_DATA) {
+            if (m->rx_msg.bytes > 0) {
+                m->rx_state = RX_BODY;
+                m->rx_body_rem = m->rx_msg.bytes;
+            }
+            return 1;
+        }
+        cap_lose_host(m);
+        return -1;
+    }
+
+    if (discard_data || !m->cap_ring || !m->cap_size) {
+        uint8_t scratch[4096];
+        size_t chunk = m->rx_body_rem < sizeof scratch ? m->rx_body_rem : sizeof scratch;
+        ssize_t n = recv(m->fd, scratch, chunk, MSG_DONTWAIT);
+        if (n < 0) {
+            if (errno == EINTR) return 1;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+            cap_lose_host(m);
+            return -1;
+        }
+        if (n == 0) {
+            cap_lose_host(m);
+            return -1;
+        }
+        m->rx_body_rem -= (uint32_t)n;
+        if (m->rx_body_rem == 0) m->rx_state = RX_HDR;
+        return 1;
+    }
+
+    uint64_t at = m->cap_w & (m->cap_size - 1);
+    size_t chunk = m->rx_body_rem;
+    if (chunk > m->cap_size - at) chunk = (size_t)(m->cap_size - at);
+    if (chunk > m->cap_size / 2) chunk = (size_t)(m->cap_size / 2);
+    ssize_t n = recv(m->fd, m->cap_ring + at, chunk, MSG_DONTWAIT);
+    if (n < 0) {
+        if (errno == EINTR) return 1;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+        cap_lose_host(m);
+        return -1;
+    }
+    if (n == 0) {
+        cap_lose_host(m);
+        return -1;
+    }
+    unsigned frame = m->frame ? m->frame : 4;
+    uint64_t used = m->cap_w - m->cap_r;
+    uint64_t free_bytes = m->cap_size - used;
+    if ((uint64_t)n > free_bytes) {
+        uint64_t need = (uint64_t)n - free_bytes;
+        uint64_t drop_frames = (need + frame - 1) / frame;
+        uint64_t drop_bytes = drop_frames * frame;
+        if (drop_bytes > used) drop_bytes = (used / frame) * frame;
+        m->cap_r += drop_bytes;
+    }
+    uint64_t old_frames = m->cap_w / frame;
+    m->cap_w += (uint64_t)n;
+    uint64_t new_frames = m->cap_w / frame;
+    m->captured += (new_frames - old_frames);
+    m->rx_body_rem -= (uint32_t)n;
+    if (m->rx_body_rem == 0) m->rx_state = RX_HDR;
+    return 1;
+}
+
+static void hear_capture(struct mn *m, int blocking) {
+    if (m->fd < 0) {
+        if (m->running) {
+            m->cap_err = 1;
+            m->running = 0;
+        }
+        return;
+    }
+    if (blocking > 0) {
+        struct pollfd p = {.fd = m->fd, .events = POLLIN};
+        if (poll(&p, 1, blocking) <= 0) return;
+    }
+    while (m->fd >= 0 && !m->cap_err) {
+        if (cap_rx_step(m, 0, NULL, NULL) <= 0) break;
+    }
 }
 
 /* Whatever is still out is dropped: the host's answer counts it played (a second at most for it). */
@@ -136,11 +313,57 @@ static int mn_hw_params(snd_pcm_ioplug_t *io, snd_pcm_hw_params_t *params) {
     m->frame = io->channels * (unsigned)snd_pcm_format_physical_width(io->format) / 8;
     if (m->fd >= 0) close(m->fd), m->fd = -1;  /* the next prepare says hello with these */
     m->tried = 0, m->sent = m->played = 0;
+    m->captured = m->base = 0;
+    m->cap_w = m->cap_r = 0;
+    m->cap_err = 0;
+    m->rx_state = RX_HDR;
+    m->rx_hdr_off = 0;
+    m->rx_body_rem = 0;
     return 0;
 }
 
 static int mn_prepare(snd_pcm_ioplug_t *io) {
     struct mn *m = io->private_data;
+    if (m->is_capture) {
+        unsigned frame = m->frame ? m->frame : 4;
+        uint64_t need = 256 * 1024;
+        uint64_t one_sec = (uint64_t)io->rate * frame;
+        while (need < one_sec) need <<= 1;
+        if (m->cap_size < need || !m->cap_ring) {
+            uint8_t *buf = malloc((size_t)need);
+            if (!buf) return -ENOMEM;
+            free(m->cap_ring);
+            m->cap_ring = buf;
+            m->cap_size = need;
+        }
+        if (m->fd >= 0 && m->cap_err) {
+            close(m->fd);
+            m->fd = -1;
+            m->tried = 0;
+        }
+        if (m->fd < 0 && !m->tried) {
+            m->tried = 1;
+            connect_cap_host(m);
+        } else if (m->fd >= 0) {
+            if (m->running) {
+                struct mn_audio_msg stop_msg = {MN_AUDIO_STOP, 0};
+                cap_send_all(m, &stop_msg, sizeof stop_msg);
+            }
+            hear_capture(m, 0);
+            if (m->fd < 0) {
+                connect_cap_host(m);
+            } else {
+                uint64_t avail_bytes = m->cap_w - m->cap_r;
+                m->cap_r += (avail_bytes / frame) * frame;
+                m->base = m->captured;
+                m->cap_err = 0;
+            }
+            m->running = 0;
+        }
+        struct itimerspec disarm = {{0, 0}, {0, 0}};
+        timerfd_settime(m->timer, 0, &disarm, NULL);
+        return 0;
+    }
     if (m->fd < 0 && !m->tried) m->tried = 1, connect_host(m);
     drop(m);
     m->base = m->played;
@@ -152,6 +375,46 @@ static int mn_prepare(snd_pcm_ioplug_t *io) {
 
 static int mn_start(snd_pcm_ioplug_t *io) {
     struct mn *m = io->private_data;
+    if (m->is_capture) {
+        if (m->fd < 0) {
+            m->running = 0;
+            m->cap_err = 1;
+            return -EIO;
+        }
+        struct mn_audio_msg msg = {MN_AUDIO_START, 0};
+        if (cap_send_all(m, &msg, sizeof msg) < 0) return -EIO;
+        double deadline = now() + 0.300;
+        uint32_t status_code = MN_AUDIO_ERR_IO;
+        int got_status = 0;
+        while (!got_status) {
+            int r = cap_rx_step(m, 1, &got_status, &status_code);
+            if (r < 0 || got_status) break;
+            if (r > 0) continue;
+            int rem_ms = (int)((deadline - now()) * 1000.0 + 0.999);
+            if (rem_ms <= 0) break;
+            struct pollfd p = {.fd = m->fd, .events = POLLIN};
+            int pr = poll(&p, 1, rem_ms);
+            if (pr < 0) {
+                if (errno == EINTR) continue;
+                break;
+            }
+            if (pr == 0) break;
+        }
+        if (!got_status) {
+            cap_lose_host(m);
+            return -EIO;
+        }
+        if (status_code != MN_AUDIO_OK) {
+            m->running = 0;
+            m->cap_err = 1;
+            return -EIO;
+        }
+        m->cap_w = m->cap_r = 0;
+        m->base = m->captured;
+        m->running = 1;
+        m->cap_err = 0;
+        return 0;
+    }
     tell(m, MN_AUDIO_START);
     m->running = 1;
     restart_clock(m);
@@ -159,12 +422,36 @@ static int mn_start(snd_pcm_ioplug_t *io) {
 }
 
 static int mn_stop(snd_pcm_ioplug_t *io) {
-    drop(io->private_data);
+    struct mn *m = io->private_data;
+    if (m->is_capture) {
+        unsigned frame = m->frame ? m->frame : 4;
+        if (m->fd >= 0) {
+            struct mn_audio_msg msg = {MN_AUDIO_STOP, 0};
+            cap_send_all(m, &msg, sizeof msg);
+            hear_capture(m, 0);
+        }
+        uint64_t avail_bytes = m->cap_w - m->cap_r;
+        m->cap_r += (avail_bytes / frame) * frame;
+        m->base = m->captured;
+        m->running = 0;
+        return 0;
+    }
+    drop(m);
     return 0;
 }
 
 static int mn_pause(snd_pcm_ioplug_t *io, int enable) {
     struct mn *m = io->private_data;
+    if (m->is_capture) {
+        if (!enable) return mn_start(io);
+        hear_capture(m, 0);
+        if (m->fd >= 0) {
+            struct mn_audio_msg msg = {MN_AUDIO_PAUSE, 1u};
+            cap_send_all(m, &msg, sizeof msg);
+        }
+        m->running = 0;
+        return m->cap_err ? -EIO : 0;
+    }
     hear(m, 0);
     tell(m, enable ? MN_AUDIO_PAUSE : MN_AUDIO_START);
     m->running = !enable;
@@ -172,10 +459,15 @@ static int mn_pause(snd_pcm_ioplug_t *io, int enable) {
     return 0;
 }
 
-/* With SND_PCM_IOPLUG_FLAG_BOUNDARY_WA: frames played since the prepare, not wrapped at the buffer's size (a whole
- * buffer played between two calls would look like none). */
+/* With SND_PCM_IOPLUG_FLAG_BOUNDARY_WA: frames played/captured since the prepare, not wrapped at the buffer's size
+ * (a whole buffer between two calls would look like none). */
 static snd_pcm_sframes_t mn_pointer(snd_pcm_ioplug_t *io) {
     struct mn *m = io->private_data;
+    if (m->is_capture) {
+        hear_capture(m, 0);
+        if (m->cap_err) return -EIO;
+        return (snd_pcm_sframes_t)(m->captured - m->base);
+    }
     hear(m, 0);
     return (snd_pcm_sframes_t)(m->played - m->base);
 }
@@ -183,6 +475,22 @@ static snd_pcm_sframes_t mn_pointer(snd_pcm_ioplug_t *io) {
 static snd_pcm_sframes_t mn_transfer(snd_pcm_ioplug_t *io, const snd_pcm_channel_area_t *areas,
                                      snd_pcm_uframes_t offset, snd_pcm_uframes_t size) {
     struct mn *m = io->private_data;
+    if (m->is_capture) {
+        hear_capture(m, 0);
+        unsigned frame = m->frame ? m->frame : 4;
+        uint64_t avail_frames = (m->cap_w - m->cap_r) / frame;
+        if (m->cap_err && avail_frames == 0) return -EIO;
+        snd_pcm_uframes_t todo = size < avail_frames ? size : (snd_pcm_uframes_t)avail_frames;
+        if (!todo) return 0;
+        uint64_t bytes = (uint64_t)todo * frame;
+        uint64_t at = m->cap_r & (m->cap_size - 1);
+        uint64_t first = bytes < m->cap_size - at ? bytes : m->cap_size - at;
+        uint8_t *dst = (uint8_t *)areas->addr + (areas->first + areas->step * offset) / 8;
+        memcpy(dst, m->cap_ring + at, (size_t)first);
+        if (bytes > first) memcpy(dst + first, m->cap_ring, (size_t)(bytes - first));
+        m->cap_r += bytes;
+        return (snd_pcm_sframes_t)todo;
+    }
     const char *buf = (const char *)areas->addr + (areas->first + areas->step * offset) / 8;
     struct mn_audio_msg msg = {MN_AUDIO_DATA, (uint32_t)(size * m->frame)};
     if (m->fd >= 0 && !send_all(m, &msg, sizeof msg)) send_all(m, buf, size * m->frame);
@@ -210,6 +518,17 @@ static int mn_poll_descriptors(snd_pcm_ioplug_t *io, struct pollfd *pfd, unsigne
 static int mn_poll_revents(snd_pcm_ioplug_t *io, struct pollfd *pfd, unsigned int nfds, unsigned short *revents) {
     (void)pfd, (void)nfds;
     struct mn *m = io->private_data;
+    if (m->is_capture) {
+        hear_capture(m, 0);
+        if (m->cap_err) {
+            *revents = POLLERR;
+            return 0;
+        }
+        unsigned frame = m->frame ? m->frame : 4;
+        uint64_t avail_frames = (m->cap_w - m->cap_r) / frame;
+        *revents = avail_frames >= io->period_size ? POLLIN : 0;
+        return 0;
+    }
     uint64_t ticks;
     if (read(m->timer, &ticks, sizeof ticks) < 0) {}  /* the timer's ticks, whichever woke the poll */
     hear(m, 0);
@@ -222,6 +541,7 @@ static int mn_close(snd_pcm_ioplug_t *io) {
     struct mn *m = io->private_data;
     if (m->fd >= 0) close(m->fd);
     close(m->timer);
+    free(m->cap_ring);
     free(m);
     return 0;
 }
@@ -241,12 +561,14 @@ static const snd_pcm_ioplug_callback_t callbacks = {
 };
 
 static int constrain(snd_pcm_ioplug_t *io) {
+    struct mn *m = io->private_data;
     static const unsigned int access[] = {SND_PCM_ACCESS_RW_INTERLEAVED};
     static const unsigned int formats[] = {SND_PCM_FORMAT_S16_LE, SND_PCM_FORMAT_FLOAT_LE};
+    unsigned int min_ch = m->is_capture ? 1 : 2;
     int err;
     if ((err = snd_pcm_ioplug_set_param_list(io, SND_PCM_IOPLUG_HW_ACCESS, 1, access)) < 0 ||
         (err = snd_pcm_ioplug_set_param_list(io, SND_PCM_IOPLUG_HW_FORMAT, 2, formats)) < 0 ||
-        (err = snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_CHANNELS, 2, 2)) < 0 ||
+        (err = snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_CHANNELS, min_ch, 2)) < 0 ||
         (err = snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_RATE, 8000, 192000)) < 0 ||
         (err = snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_PERIOD_BYTES, 64, 64 * 1024)) < 0 ||
         (err = snd_pcm_ioplug_set_param_minmax(io, SND_PCM_IOPLUG_HW_PERIODS, 2, 64)) < 0 ||
@@ -265,10 +587,11 @@ SND_PCM_PLUGIN_DEFINE_FUNC(mn) {
         SNDERR("Unknown field %s", id);
         return -EINVAL;
     }
-    if (stream != SND_PCM_STREAM_PLAYBACK) return -ENOENT;  /* no capture: no microphone in the VM */
+    if (stream != SND_PCM_STREAM_PLAYBACK && stream != SND_PCM_STREAM_CAPTURE) return -ENOENT;
     struct mn *m = calloc(1, sizeof *m);
     if (!m) return -ENOMEM;
     m->fd = -1;
+    m->is_capture = (stream == SND_PCM_STREAM_CAPTURE);
     if ((m->timer = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC)) < 0) {
         free(m);
         return -errno;

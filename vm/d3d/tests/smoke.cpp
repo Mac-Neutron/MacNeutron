@@ -254,7 +254,7 @@ static const char *shared() {
     d10d.Width = d10d.Height = 1, d10d.MipLevels = d10d.ArraySize = 1, d10d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     d10d.SampleDesc.Count = 1, d10d.BindFlags = D3D10_BIND_RENDER_TARGET;
     d10d.MiscFlags = D3D10_RESOURCE_MISC_SHARED_KEYEDMUTEX;
-    if (!bad && (FAILED(dev->QueryInterface(__uuidof(ID3D10Device), (void **)&d10)) ||
+    if (!bad && (FAILED(D3D10CreateDevice(nullptr, D3D10_DRIVER_TYPE_HARDWARE, nullptr, 0, D3D10_SDK_VERSION, &d10)) ||
                  FAILED(d10->CreateTexture2D(&d10d, nullptr, &t10))))
         bad = "FAIL d3d10 keyed mutex";
     if (t10) t10->Release();

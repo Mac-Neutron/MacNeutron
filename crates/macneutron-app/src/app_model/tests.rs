@@ -6,7 +6,7 @@ use macneutron_core::test_support::{
     make_app_info_v29, make_fake_steam, make_temp_dir, make_tool_layout, write, FakeSteam, FakeValveCDN, OK_SESSION,
     STEAM_CONFIG_FIXTURE, TEST_IDENTITY,
 };
-use macneutron_core::{SteamControlling, ValveClientError};
+use macneutron_core::{EacKind, EacRuntimeStatus, SteamControlling, ValveClientError};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1078,4 +1078,72 @@ fn a_performance_build_keeps_the_setup_log_for_failures() {
     let (bad, _) = fake_helper("echo 'progress assemble 1 5'\necho 'no disk space' >&2\nexit 1");
     make_setup_model(&bad, &other, Some(&manifest), true, performance);
     assert!(read(&log).contains("no disk space"));
+}
+
+#[test]
+fn snapshot_and_refresh_detect_eac_runtime_and_secondary_library_eac_games() {
+    let (mode, _) = make_mode();
+    let extra = make_temp_dir().join("GamesDrive");
+    let steam_root = mode.steam.root.display().to_string();
+    let extra_root = extra.display().to_string();
+    write(
+        &format!(
+            "\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\t\"{steam_root}\"\n\t}}\n\t\"1\"\n\t{{\n\t\t\"path\"\t\t\"{extra_root}\"\n\t}}\n}}\n"
+        ),
+        &mode.steam.root.join("steamapps/libraryfolders.vdf"),
+        false,
+    );
+
+    let smite = app(2437170, "SMITE 2", &["windows"]);
+    let plain = cats();
+    std::fs::create_dir_all(mode.steam.app_info().parent().unwrap()).unwrap();
+    std::fs::write(mode.steam.app_info(), make_app_info_v29(&[smite.clone(), plain.clone()], MAGIC_V29)).unwrap();
+
+    // Install SMITE 2 (EOS EAC) in the secondary library and Cats (non-EAC) in the primary library.
+    write(
+        "\"AppState\"\n{\n\t\"appid\"\t\t\"2437170\"\n\t\"installdir\"\t\t\"SMITE 2\"\n}\n",
+        &extra.join("steamapps/appmanifest_2437170.acf"),
+        false,
+    );
+    write(
+        "{\"deploymentid\":\"dep-1\"}",
+        &extra.join("steamapps/common/SMITE 2/Windows/EasyAntiCheat/Settings.json"),
+        false,
+    );
+    write(
+        "\"AppState\"\n{\n\t\"appid\"\t\t\"2977660\"\n\t\"installdir\"\t\t\"Cats\"\n}\n",
+        &mode.steam.root.join("steamapps/appmanifest_2977660.acf"),
+        false,
+    );
+    write("mz", &mode.steam.root.join("steamapps/common/Cats/Cats.exe"), false);
+
+    let mut cfg = config(&mode, make_tool_layout());
+    cfg.store = GameSettingsStore::new(make_temp_dir().join("games"));
+    let model = AppModel::new(cfg);
+    assert_eq!(model.state().eac_runtime, EacRuntimeStatus::Missing);
+
+    model.refresh();
+    assert_eq!(model.state().eac_runtime, EacRuntimeStatus::Missing);
+    assert_eq!(row(&model, 2437170).eac, Some(EacKind::Eos));
+    assert_eq!(row(&model, 2977660).eac, None);
+
+    // Incomplete runtime in secondary library depot.
+    let depot = extra.join("steamapps/content/app_1826330/depot_1826331");
+    std::fs::create_dir_all(depot.join("v2")).unwrap();
+    model.refresh();
+    assert!(matches!(model.state().eac_runtime, EacRuntimeStatus::Incomplete(_)));
+
+    // Complete runtime -> Ready.
+    for rel in [
+        "v2/lib64/easyanticheat_x64.so",
+        "v2/lib64/easyanticheat_x64.dll",
+        "v2/lib64/easyanticheat.so",
+        "v2/lib64/easyanticheat.dll",
+        "v2/lib32/easyanticheat_x86.so",
+        "v2/lib32/easyanticheat_x86.dll",
+    ] {
+        write("stub", &depot.join(rel), false);
+    }
+    model.refresh();
+    assert!(matches!(model.state().eac_runtime, EacRuntimeStatus::Ready(ref info) if info.path == depot));
 }

@@ -1,0 +1,6 @@
+# Virtual gamepads and raw HID devices from mn-pad (vm/image/mn-pad.c): read-write by unprivileged user mn
+# so games can use evdev/SDL/Wine input, FF_RUMBLE (EVIOCSFF), and hidraw output/feature reports.
+SUBSYSTEM=="input", KERNEL=="event*|js*", ENV{ID_INPUT_JOYSTICK}=="1", GROUP="mn", MODE="0660"
+SUBSYSTEM=="hidraw", KERNEL=="hidraw*", IMPORT{parent}="HID_PHYS"
+SUBSYSTEM=="hidraw", KERNEL=="hidraw*", ENV{HID_PHYS}=="mn.pad*", GROUP="mn", MODE="0660"
+SUBSYSTEM=="input", KERNEL=="event*|js*", ATTRS{phys}=="mn.pad*", GROUP="mn", MODE="0660"

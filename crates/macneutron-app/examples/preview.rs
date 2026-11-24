@@ -16,7 +16,9 @@ use macneutron_app::app_model::{AppModel, AppModelConfig, InstalledRuntime, Snap
 use macneutron_app::ui;
 use macneutron_app::update_model::{PlistDefaults, UpdateModel, UpdateServices};
 use macneutron_core::test_support::{releases_json, RecordingNotifier};
-use macneutron_core::{AppInfo, GameSettings, OrphanPrefix, RunAs, SteamPlayStatus, VMToolsInstallOutcome};
+use macneutron_core::{
+    AppInfo, EacKind, EacRuntimeStatus, GameSettings, OrphanPrefix, RunAs, SteamPlayStatus, VMToolsInstallOutcome,
+};
 
 fn app(app_id: u32, name: &str, oslist: &[&str]) -> AppInfo {
     let oslist: HashSet<String> = oslist.iter().map(|os| os.to_string()).collect();
@@ -63,6 +65,8 @@ fn main() {
             orphans: vec![OrphanPrefix { app_id: "440".into(), url: home.join("440"), bytes: 1_234_567_890 }],
             status: SteamPlayStatus::RestartNeeded(1),
             steam_launch_options: BTreeMap::from([(2977660, "DXMT_D3D12_SM6=0 %command%".to_string())]),
+            eac_runtime: EacRuntimeStatus::Missing,
+            eac_games: BTreeMap::from([(2977660, EacKind::Eos)]),
         },
         0,
     );

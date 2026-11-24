@@ -84,6 +84,7 @@ if [ ! -f "$WINEPREFIX/system.reg" ]; then mn_stage "Preparing its Windows envir
 elif [ "$up" = -u ]; then mn_stage "Updating its Windows environment"; fi
 # Not with PROTON_EAC_RUNTIME: a wineboot that sees it copies the runtime's easyanticheat*.dll into system32, which
 # Proton's prefixes (filled from its default prefix) don't have.
+find "$W/system32" "$W/syswow64" -maxdepth 1 -iname 'easyanticheat*.dll' -delete 2>/dev/null || true
 env -u PROTON_EAC_RUNTIME WINEDLLOVERRIDES="mscoree,mshtml=" wineboot $up >/dev/null 2>&1
 # Xvfb has one mode and can't change it: Wine offers games its standard modes and takes their changes itself (the
 # drawable has the game's size; the host window scales it). Read when the desktop starts: once per prefix, a restart.

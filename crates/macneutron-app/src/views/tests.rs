@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::app_model::InstalledRuntime;
-use macneutron_core::{AppInfo, Release};
+use macneutron_core::{AppInfo, EacKind, EacRuntimeInfo, Release};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -39,6 +39,7 @@ fn row(app_id: u32, name: &str, oslist: &[&str], installed: bool) -> GameRow {
         installed,
         settings: GameSettings::default(),
         steam_launch_options: None,
+        eac: None,
     }
 }
 
@@ -448,4 +449,154 @@ fn steam_launch_lines_list_their_problems() {
 fn the_restart_bar_shows_only_while_a_restart_is_needed() {
     assert_eq!(restart_bar(&SteamPlayStatus::On), None);
     assert_eq!(restart_bar(&SteamPlayStatus::RestartNeeded(1)), Some("Restart Steam to apply 1 change".into()));
+}
+
+fn eac_info(has_x64: bool, has_eos: bool, has_x86: bool) -> EacRuntimeInfo {
+    EacRuntimeInfo {
+        path: PathBuf::from("/tmp/Proton EasyAntiCheat Runtime"),
+        has_x64,
+        has_eos,
+        has_x86,
+    }
+}
+
+#[test]
+fn settings_eac_row_reflects_missing_incomplete_ready_and_game_presence() {
+    // Missing without any installed EAC game: secondary tone, install/console enabled, explanatory note.
+    let mut uninstalled_eac = row(2437170, "SMITE 2", &["windows"], false);
+    uninstalled_eac.eac = Some(EacKind::Eos);
+    let inputs_no_eac = inputs(state(|s| s.games = vec![uninstalled_eac]));
+    let rows = settings(&inputs_no_eac);
+    assert!(rows.contains(&Row::Labeled {
+        label: "Easy Anti-Cheat Runtime".into(),
+        tone: None,
+        controls: vec![
+            Control::Text("Not installed".into(), Tone::Secondary),
+            button("Install in Steam", Act::InstallEacRuntime, true),
+            button("Console", Act::OpenSteamConsole, true),
+        ],
+    }));
+    assert!(rows.contains(&Row::Note(
+        format!(
+            "Needed for Easy Anti-Cheat games (Linux v1 / EOS). If Mac Steam refuses Install in Steam, click Console and paste: {EAC_DEPOT_COMMAND}"
+        ),
+        Tone::Secondary,
+    )));
+
+    // Missing with an installed EAC game: escalates label & status text to orange.
+    let mut installed_eac = row(2437170, "SMITE 2", &["windows"], true);
+    installed_eac.eac = Some(EacKind::Eos);
+    let inputs_with_eac = inputs(state(|s| s.games = vec![installed_eac]));
+    let rows = settings(&inputs_with_eac);
+    assert!(rows.contains(&Row::Labeled {
+        label: "Easy Anti-Cheat Runtime".into(),
+        tone: Some(Tone::Orange),
+        controls: vec![
+            Control::Text("Not installed".into(), Tone::Orange),
+            button("Install in Steam", Act::InstallEacRuntime, true),
+            button("Console", Act::OpenSteamConsole, true),
+        ],
+    }));
+
+    // Incomplete: orange label + status + missing components note.
+    let inputs_incomplete = inputs(state(|s| {
+        s.eac_runtime = EacRuntimeStatus::Incomplete(eac_info(true, false, false));
+    }));
+    let rows = settings(&inputs_incomplete);
+    assert!(rows.contains(&Row::Labeled {
+        label: "Easy Anti-Cheat Runtime".into(),
+        tone: Some(Tone::Orange),
+        controls: vec![
+            Control::Text("Incomplete".into(), Tone::Orange),
+            button("Install in Steam", Act::InstallEacRuntime, true),
+            button("Console", Act::OpenSteamConsole, true),
+        ],
+    }));
+    assert!(rows.contains(&Row::Note(
+        format!(
+            "Missing easyanticheat (EOS), easyanticheat_x86. If Steam refuses Install in Steam, click Console and paste: {EAC_DEPOT_COMMAND}"
+        ),
+        Tone::Secondary,
+    )));
+
+    // Ready: secondary "Installed" + "Show in Finder".
+    let inputs_ready = inputs(state(|s| {
+        s.eac_runtime = EacRuntimeStatus::Ready(eac_info(true, true, true));
+    }));
+    let rows = settings(&inputs_ready);
+    assert!(rows.contains(&Row::Labeled {
+        label: "Easy Anti-Cheat Runtime".into(),
+        tone: None,
+        controls: vec![
+            Control::Text("Installed".into(), Tone::Secondary),
+            button("Show in Finder", Act::RevealEacRuntime, true),
+        ],
+    }));
+}
+
+#[test]
+fn settings_eac_controls_disable_when_busy_or_steam_missing() {
+    let mut no_steam = inputs(State::default());
+    no_steam.steam_installed = false;
+    let rows = settings(&no_steam);
+    assert_eq!(enabled(&rows, "Install in Steam"), Some(false));
+    assert_eq!(enabled(&rows, "Console"), Some(false));
+
+    let busy_missing = inputs(state(|s| s.busy = Some("Restarting Steam…".into())));
+    let rows = settings(&busy_missing);
+    assert_eq!(enabled(&rows, "Install in Steam"), Some(false));
+    assert_eq!(enabled(&rows, "Console"), Some(false));
+
+    let busy_ready = inputs(state(|s| {
+        s.busy = Some("Restarting Steam…".into());
+        s.eac_runtime = EacRuntimeStatus::Ready(eac_info(true, true, true));
+    }));
+    let rows = settings(&busy_ready);
+    assert_eq!(enabled(&rows, "Show in Finder"), Some(false));
+}
+
+#[test]
+fn eac_banner_matches_game_kind_and_runtime_status() {
+    let plain = row(1, "Plain", &["windows"], true);
+    assert_eq!(eac_banner(&plain, &EacRuntimeStatus::Missing), None);
+    assert_eq!(eac_banner(&plain, &EacRuntimeStatus::Ready(eac_info(true, true, true))), None);
+
+    let mut legacy = row(2, "Legacy Game", &["windows"], true);
+    legacy.eac = Some(EacKind::Legacy);
+    let mut eos = row(3, "EOS Game", &["windows"], true);
+    eos.eac = Some(EacKind::Eos);
+
+    let ready = EacRuntimeStatus::Ready(eac_info(true, true, true));
+    let incomplete = EacRuntimeStatus::Incomplete(eac_info(true, false, false));
+
+    for (game, label) in [(&legacy, "Legacy"), (&eos, "EOS")] {
+        assert_eq!(
+            eac_banner(game, &EacRuntimeStatus::Missing),
+            Some(EacBanner {
+                text: format!(
+                    "Uses Easy Anti-Cheat ({label}), but Proton EasyAntiCheat Runtime is not installed. Install it in Steam, or click Steam Console and paste: {EAC_DEPOT_COMMAND}"
+                ),
+                tone: Tone::Orange,
+                show_install_actions: true,
+            })
+        );
+        assert_eq!(
+            eac_banner(game, &incomplete),
+            Some(EacBanner {
+                text: format!(
+                    "Uses Easy Anti-Cheat ({label}), but Proton EasyAntiCheat Runtime is incomplete. Install it in Steam, or click Steam Console and paste: {EAC_DEPOT_COMMAND}"
+                ),
+                tone: Tone::Orange,
+                show_install_actions: true,
+            })
+        );
+        assert_eq!(
+            eac_banner(game, &ready),
+            Some(EacBanner {
+                text: format!("Easy Anti-Cheat ({label}) — Proton EasyAntiCheat Runtime installed."),
+                tone: Tone::Secondary,
+                show_install_actions: false,
+            })
+        );
+    }
 }

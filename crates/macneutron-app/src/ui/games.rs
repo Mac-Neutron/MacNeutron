@@ -15,6 +15,8 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSArray, NSIndexSet, NSSize, NSString};
 
+use macneutron_core::EacRuntimeStatus;
+
 use super::kit::{font, insets, ns, upcast, Kit, Targets};
 use super::App;
 use crate::app_model::GameRow;
@@ -49,7 +51,8 @@ pub(crate) struct Games {
     selection: Cell<Option<u32>>,
     pub rows: RefCell<Vec<GameRow>>,
     views: OnceCell<Views>,
-    drawn_detail: RefCell<Option<Option<GameRow>>>,
+    drawn_detail: RefCell<Option<(Option<GameRow>, EacRuntimeStatus, bool)>>,
+    drawn_eac_runtime: RefCell<Option<EacRuntimeStatus>>,
     drawn_launch: RefCell<Option<LaunchKey>>,
     drawn_bars: RefCell<Option<[Option<String>; 3]>>,
     table_targets: Targets,
@@ -170,15 +173,18 @@ impl Games {
     pub(crate) fn draw(&self, app: &App, inputs: &Inputs, force: bool) {
         let Some(views) = self.views.get() else { return };
         let rows = views::filter(&inputs.state.games, &self.search.borrow());
-        if force || rows != *self.rows.borrow() {
+        let eac_changed = self.drawn_eac_runtime.borrow().as_ref() != Some(&inputs.state.eac_runtime);
+        if force || eac_changed || rows != *self.rows.borrow() {
             *self.rows.borrow_mut() = rows.clone();
+            *self.drawn_eac_runtime.borrow_mut() = Some(inputs.state.eac_runtime.clone());
             self.reload(app);
         }
 
         let detail = views::detail(&rows, self.selection.get());
-        if force || self.drawn_detail.borrow().as_ref() != Some(&detail) {
-            self.draw_detail(app, views, detail.as_ref());
-            *self.drawn_detail.borrow_mut() = Some(detail);
+        let detail_key = (detail, inputs.state.eac_runtime.clone(), inputs.state.busy.is_none() && inputs.steam_installed);
+        if force || self.drawn_detail.borrow().as_ref() != Some(&detail_key) {
+            self.draw_detail(app, views, inputs, detail_key.0.as_ref());
+            *self.drawn_detail.borrow_mut() = Some(detail_key);
             // SwiftUI grows the window to the options' width; at least 640 by 360.
             let needed = views.content.fittingSize().width.max(640.0);
             views.window.setContentMinSize(NSSize::new(needed, 360.0));
@@ -268,6 +274,16 @@ impl Games {
                     installed.setFont(Some(&font(unsafe { NSFontTextStyleCaption1 })));
                     parts.push(upcast(&installed));
                 }
+                if row.eac.is_some() {
+                    let tone = if app.inputs.borrow().state.eac_runtime.is_ready() {
+                        Tone::Secondary
+                    } else {
+                        Tone::Orange
+                    };
+                    let eac = kit.text("EAC", Some(tone));
+                    eac.setFont(Some(&font(unsafe { NSFontTextStyleCaption1 })));
+                    parts.push(upcast(&eac));
+                }
             }
             "runsAs" => parts.push(table_cell(&kit, views::runs_as_cell(&row), Act::RunsAs(row.id()))),
             "graphics" => parts.push(table_cell(&kit, views::graphics_cell(&row), Act::Graphics(row.id()))),
@@ -277,7 +293,7 @@ impl Games {
         Some(upcast(&kit.hstack(&parts, 8.0)))
     }
 
-    fn draw_detail(&self, app: &App, views: &Views, row: Option<&GameRow>) {
+    fn draw_detail(&self, app: &App, views: &Views, inputs: &Inputs, row: Option<&GameRow>) {
         views.detail.setHidden(row.is_none());
         self.options_targets.clear();
         let kit = app.kit(&self.options_targets);
@@ -318,7 +334,19 @@ impl Games {
             pickers.push(upcast(&labeled));
         }
         pickers.push(kit.spacer());
-        replace(&views.options, &[upcast(&kit.hstack(&toggles, 16.0)), upcast(&kit.hstack(&pickers, 16.0))]);
+        let mut option_rows = vec![upcast(&kit.hstack(&toggles, 16.0)), upcast(&kit.hstack(&pickers, 16.0))];
+        if let Some(banner) = views::eac_banner(row, &inputs.state.eac_runtime) {
+            let room = views.table.frame().size.width.max(620.0) - 20.0;
+            let text = kit.wrapping(&banner.text, Some(banner.tone), room, true);
+            option_rows.push(upcast(&text));
+            if banner.show_install_actions {
+                let enabled = inputs.state.busy.is_none() && inputs.steam_installed;
+                let install = kit.button("Install in Steam", Act::InstallEacRuntime, enabled);
+                let console = kit.button("Steam Console", Act::OpenSteamConsole, enabled);
+                option_rows.push(upcast(&kit.hstack(&[upcast(&install), upcast(&console), kit.spacer()], 8.0)));
+            }
+        }
+        replace(&views.options, &option_rows);
 
         let launch = (row.id(), views::steam_launch_lines(row));
         if self.drawn_launch.borrow().as_ref() != Some(&launch) {

@@ -1,6 +1,6 @@
 //! Paths inside the native macOS Steam installation.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -95,6 +95,41 @@ impl SteamLocation {
             }
         }
         ids
+    }
+
+    /// Installed app IDs mapped to their existing `<library>/common/<installdir>` directories across all libraries.
+    pub fn installed_app_dirs(&self) -> BTreeMap<u32, PathBuf> {
+        let mut dirs = BTreeMap::new();
+        for library in self.libraries() {
+            let Ok(entries) = std::fs::read_dir(&library) else { continue };
+            for entry in entries.flatten() {
+                let Ok(name) = entry.file_name().into_string() else { continue };
+                let Some(rest) = name.strip_prefix("appmanifest_").and_then(|n| n.strip_suffix(".acf")) else {
+                    continue;
+                };
+                let Ok(id) = rest.parse::<u32>() else { continue };
+                let Ok(text) = std::fs::read_to_string(entry.path()) else { continue };
+                let Ok(nodes) = KeyValues::parse(&text) else { continue };
+                let Some(installdir) = node_at(&nodes, &["AppState", "installdir"]).and_then(|n| n.string_value())
+                else {
+                    continue;
+                };
+                if installdir.is_empty()
+                    || installdir == "."
+                    || installdir == ".."
+                    || installdir.contains('/')
+                    || installdir.contains('\\')
+                    || installdir.contains('\0')
+                {
+                    continue;
+                }
+                let dir = library.join("common").join(&installdir);
+                if std::fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir()) {
+                    dirs.entry(id).or_insert(dir);
+                }
+            }
+        }
+        dirs
     }
 
     /// The app IDs in every library's `apps` list in steamapps/libraryfolders.vdf, a library on a disconnected drive
@@ -317,6 +352,76 @@ mod tests {
         write("", &extra.join("steamapps/appmanifest_2977660.acf"), false);
         assert_eq!(steam.libraries().len(), 2);
         assert_eq!(steam.installed_app_ids(), BTreeSet::from([1062090, 2977660]));
+    }
+
+    #[test]
+    fn installed_app_dirs_resolves_primary_and_secondary_libraries_and_rejects_unsafe_installdir() {
+        let base = make_temp_dir();
+        let steam = SteamLocation::new(base.join("Steam"));
+        let extra = base.join("Games Drive");
+        write(
+            &format!(
+                "\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n\t\"1\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n}}\n",
+                steam.root.display(),
+                extra.display()
+            ),
+            &steam.root.join("steamapps/libraryfolders.vdf"),
+            false,
+        );
+        let primary_dir = steam.root.join("steamapps/common/SMITE 2");
+        let dots_dir = steam.root.join("steamapps/common/Foo...");
+        let secondary_dir = extra.join("steamapps/common/Other Game");
+        let symlink_target = base.join("SymlinkTarget");
+        let symlink_dir = steam.root.join("steamapps/common/SymlinkGame");
+        std::fs::create_dir_all(&primary_dir).unwrap();
+        std::fs::create_dir_all(&dots_dir).unwrap();
+        std::fs::create_dir_all(&secondary_dir).unwrap();
+        std::fs::create_dir_all(&symlink_target).unwrap();
+        std::os::unix::fs::symlink(&symlink_target, &symlink_dir).unwrap();
+        write(
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"2437170\"\n\t\"installdir\"\t\t\"SMITE 2\"\n}\n",
+            &steam.root.join("steamapps/appmanifest_2437170.acf"),
+            false,
+        );
+        write(
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"444\"\n\t\"installdir\"\t\t\"Foo...\"\n}\n",
+            &steam.root.join("steamapps/appmanifest_444.acf"),
+            false,
+        );
+        write(
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"999999\"\n\t\"installdir\"\t\t\"Other Game\"\n}\n",
+            &extra.join("steamapps/appmanifest_999999.acf"),
+            false,
+        );
+        // Unsafe, symlinked, or missing installdir entries are ignored.
+        write(
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"111\"\n\t\"installdir\"\t\t\"../escape\"\n}\n",
+            &steam.root.join("steamapps/appmanifest_111.acf"),
+            false,
+        );
+        write(
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"112\"\n\t\"installdir\"\t\t\"..\"\n}\n",
+            &steam.root.join("steamapps/appmanifest_112.acf"),
+            false,
+        );
+        write(
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"113\"\n\t\"installdir\"\t\t\"SymlinkGame\"\n}\n",
+            &steam.root.join("steamapps/appmanifest_113.acf"),
+            false,
+        );
+        write(
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"222\"\n\t\"installdir\"\t\t\"\"\n}\n",
+            &steam.root.join("steamapps/appmanifest_222.acf"),
+            false,
+        );
+        write(
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"333\"\n\t\"installdir\"\t\t\"NotOnDisk\"\n}\n",
+            &steam.root.join("steamapps/appmanifest_333.acf"),
+            false,
+        );
+
+        let dirs = steam.installed_app_dirs();
+        assert_eq!(dirs, BTreeMap::from([(444, dots_dir), (999999, secondary_dir), (2437170, primary_dir)]));
     }
 
     #[test]

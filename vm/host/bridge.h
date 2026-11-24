@@ -5,6 +5,7 @@
 #include "libkrun_trap.h"
 #include "input.h"
 #include "audio.h"
+#include "gamepad.h"
 #include "tpm.h"
 #include "../guest/mn-audio.h"
 #include "../metal/host/executor.h"

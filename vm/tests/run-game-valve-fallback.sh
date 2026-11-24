@@ -31,10 +31,16 @@ printf 'tahoma-font\n' > "$T/opt/share/wine/fonts/tahoma.ttf"
 printf 'game-owned-lucon\n' > "$T/opt/share/fonts/lucon.ttf"
 printf 'real-game-lucon\n' > "$T/pfx/drive_c/windows/Fonts/lucon.ttf"
 
-for stub in Xvfb wineboot wineserver; do
+for stub in Xvfb wineserver; do
   printf '#!/bin/sh\nexit 0\n' > "$T/opt/bin/$stub"
   chmod +x "$T/opt/bin/$stub"
 done
+cat > "$T/opt/bin/wineboot" <<EOF
+#!/bin/sh
+printf 'PROTON_EAC_RUNTIME=%s\n' "\${PROTON_EAC_RUNTIME-__UNSET__}" > "$T/wineboot.env"
+exit 0
+EOF
+chmod +x "$T/opt/bin/wineboot"
 cat > "$T/opt/bin/wine" <<EOF
 #!/bin/sh
 if [ "\${1:-}" = reg ] && [ "\${2:-}" = import ]; then
@@ -46,6 +52,7 @@ fi
   printf 'SteamGameId=%s\n' "\${SteamGameId-__UNSET__}"
   printf 'PROTON_EAC_RUNTIME=%s\n' "\${PROTON_EAC_RUNTIME-__UNSET__}"
   printf 'FEX_X87REDUCEDPRECISION=%s\n' "\${FEX_X87REDUCEDPRECISION-__UNSET__}"
+  printf 'MACNEUTRON_WINE_VERSION=%s\n' "\${MACNEUTRON_WINE_VERSION-__UNSET__}"
 } > "$T/probe.env"
 exit 0
 EOF
@@ -62,8 +69,9 @@ sed \
   "$ROOT/vm/guest/run-game.sh" > "$T/run-game.patched.sh"
 
 run_case() {
-  rm -f "$T/probe.env" "$T/captured.reg"
-  env "$@" VERB=run APPID=2437170 GAME_DIR="$T/game" EXE=probe.exe HOME="$T/home" \
+  rm -f "$T/probe.env" "$T/wineboot.env" "$T/captured.reg"
+  env -u PROTON_EAC_RUNTIME -u MACNEUTRON_WINE_VERSION -u MN_NON_STEAM_SHORTCUT -u FEX_X87REDUCEDPRECISION -u SteamAppId \
+    "$@" VERB=run APPID=2437170 GAME_DIR="$T/game" EXE=probe.exe HOME="$T/home" \
     MN_CRASH_POLL=60 /bin/sh "$T/run-game.patched.sh"
 }
 
@@ -150,18 +158,30 @@ run_case
 [ ! -e "$STEAM_DIR/GameOverlayRenderer64.dll" ] || fail="$fail stale-overlay64-kept"
 [ ! -e "$STEAM_DIR/GameOverlayRenderer.dll" ] || fail="$fail stale-overlay32-kept"
 
-# Case 3: PROTON_EAC_RUNTIME discovery + launcher preservation + MN_NON_STEAM_SHORTCUT=1.
+# Case 3: PROTON_EAC_RUNTIME discovery + launcher preservation + MN_NON_STEAM_SHORTCUT=1 + EAC prefix hygiene + MACNEUTRON_WINE_VERSION.
 mkdir -p "$T/share/eac-runtime/v2"
+printf 'stale-eac64\n' > "$T/pfx/drive_c/windows/system32/easyanticheat_x64.dll"
+printf 'stale-eac86\n' > "$SYSWOW64/easyanticheat_x86.dll"
 run_case
+[ ! -e "$T/pfx/drive_c/windows/system32/easyanticheat_x64.dll" ] || fail="$fail stale-eac-x64-kept"
+[ ! -e "$SYSWOW64/easyanticheat_x86.dll" ] || fail="$fail stale-eac-x86-kept"
+grep -qx 'PROTON_EAC_RUNTIME=__UNSET__' "$T/wineboot.env" || fail="$fail wineboot-eac-unset-fallback"
 grep -qx "PROTON_EAC_RUNTIME=$T/share/eac-runtime" "$T/probe.env" || fail="$fail eac-share-fallback"
 
 mkdir -p "$T/volumes/Proton EasyAntiCheat Runtime/v2"
+printf 'stale-eac64\n' > "$T/pfx/drive_c/windows/system32/easyanticheat_x64.dll"
+printf 'stale-eac86\n' > "$SYSWOW64/easyanticheat_x86.dll"
 run_case
+[ ! -e "$T/pfx/drive_c/windows/system32/easyanticheat_x64.dll" ] || fail="$fail stale-eac-x64-volumes-kept"
+[ ! -e "$SYSWOW64/easyanticheat_x86.dll" ] || fail="$fail stale-eac-x86-volumes-kept"
+grep -qx 'PROTON_EAC_RUNTIME=__UNSET__' "$T/wineboot.env" || fail="$fail wineboot-eac-unset-volumes"
 grep -qx "PROTON_EAC_RUNTIME=$T/volumes/Proton EasyAntiCheat Runtime" "$T/probe.env" || fail="$fail eac-volumes"
 
-run_case PROTON_EAC_RUNTIME=/custom/eac MN_NON_STEAM_SHORTCUT=1 SteamAppId=999
+run_case PROTON_EAC_RUNTIME=/custom/eac MN_NON_STEAM_SHORTCUT=1 SteamAppId=999 MACNEUTRON_WINE_VERSION=10.5
+grep -qx 'PROTON_EAC_RUNTIME=__UNSET__' "$T/wineboot.env" || fail="$fail wineboot-eac-unset-custom"
 grep -qx 'PROTON_EAC_RUNTIME=/custom/eac' "$T/probe.env" || fail="$fail eac-preserved"
 grep -qx 'SteamAppId=__UNSET__' "$T/probe.env" || fail="$fail non-steam-shortcut-unset"
+grep -qx 'MACNEUTRON_WINE_VERSION=10.5' "$T/probe.env" || fail="$fail wine-version-passthrough"
 
 if [ -z "$fail" ]; then
   echo "run-game-valve-fallback: ok"
