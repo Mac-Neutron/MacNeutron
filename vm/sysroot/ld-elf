@@ -1,0 +1,21 @@
+#!/bin/sh
+# Wrapper around ld.lld for dynamically-linked Linux ELFs: emit both DT_HASH and DT_GNU_HASH and keep .dynstr
+# immediately after .dynsym (matching GNU ld.bfd), so tools/anti-cheats bounding .dynsym by DT_STRTAB - DT_SYMTAB
+# do not walk into .gnu.version / .gnu.version_r / .gnu.hash.
+HERE=$(cd "$(dirname "$0")" && pwd)
+dyn=0 rel=0
+for a in "$@"; do
+  case "$a" in
+    -shared|-dynamic-linker|--dynamic-linker) dyn=1 ;;
+    -r|--relocatable) rel=1 ;;
+    @*)
+      f=${a#@}
+      if grep -qE '(^|[[:space:]])(-shared|-dynamic-linker|--dynamic-linker)([[:space:]]|$)' "$f" 2>/dev/null; then dyn=1; fi
+      if grep -qE '(^|[[:space:]])(-r|--relocatable)([[:space:]]|$)' "$f" 2>/dev/null; then rel=1; fi
+      ;;
+  esac
+done
+if [ "$dyn" = 1 ] && [ "$rel" = 0 ] && [ -f "$HERE/dyn.lds" ]; then
+  set -- "$@" --hash-style=both -T "$HERE/dyn.lds"
+fi
+exec /usr/bin/ld.lld "$@"

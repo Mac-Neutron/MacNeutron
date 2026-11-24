@@ -14,10 +14,38 @@ BUILD=${BUILD:-$HOME/wine-build64}
 STAGE=${STAGE:-$HOME/wine-stage}
 SYSROOT=${SYSROOT:-/var/cache/mn-sysroot-x86_64}
 JOBS=${JOBS:-$(nproc)}
-# clang links x86-64 objects with the first x86_64-redhat-linux-ld on PATH: lld. (LDFLAGS doesn't reach every link,
-# e.g. the preloader's, and -fuse-ld in CC trips configure's -Werror=unused-command-line-argument.)
+# clang links x86-64 objects with the first x86_64-redhat-linux-ld on PATH: lld, wrapped to keep .dynstr immediately
+# after .dynsym with --hash-style=both (matching GNU ld.bfd; lld defaults to placing .gnu.version/.gnu.version_r/
+# .gnu.hash between .dynsym and .dynstr without DT_HASH, causing EAC's symbol scanner to walk into .gnu.version_r).
+# (LDFLAGS doesn't reach every link, e.g. the preloader's, and -fuse-ld in CC trips configure's -Werror=unused-command-line-argument.)
 mkdir -p "$HOME/mn-cross-bin"
-ln -sf /usr/bin/ld.lld "$HOME/mn-cross-bin/x86_64-redhat-linux-ld"
+cat > "$HOME/mn-cross-bin/dyn.lds" <<'LDS'
+SECTIONS {
+  .dynstr : { *(.dynstr) }
+} INSERT AFTER .dynsym;
+LDS
+cat > "$HOME/mn-cross-bin/ld-elf" <<'SH'
+#!/bin/sh
+HERE=$(cd "$(dirname "$0")" && pwd)
+dyn=0 rel=0
+for a in "$@"; do
+  case "$a" in
+    -shared|-dynamic-linker|--dynamic-linker) dyn=1 ;;
+    -r|--relocatable) rel=1 ;;
+    @*)
+      f=${a#@}
+      if grep -qE '(^|[[:space:]])(-shared|-dynamic-linker|--dynamic-linker)([[:space:]]|$)' "$f" 2>/dev/null; then dyn=1; fi
+      if grep -qE '(^|[[:space:]])(-r|--relocatable)([[:space:]]|$)' "$f" 2>/dev/null; then rel=1; fi
+      ;;
+  esac
+done
+if [ "$dyn" = 1 ] && [ "$rel" = 0 ]; then
+  set -- "$@" --hash-style=both -T "$HERE/dyn.lds"
+fi
+exec /usr/bin/ld.lld "$@"
+SH
+chmod +x "$HOME/mn-cross-bin/ld-elf"
+ln -sf ld-elf "$HOME/mn-cross-bin/x86_64-redhat-linux-ld"
 export PATH="$HOME/mn-cross-bin:$PATH"
 case ${1:-} in
 tools)
@@ -86,7 +114,7 @@ wine32)
   # link reads only the packages' own flags.
   BUILD32=${BUILD32:-$HOME/wine-build32}
   SYSROOT32=${SYSROOT32:-/var/cache/mn-sysroot-multilib}
-  ln -sf /usr/bin/ld.lld "$HOME/mn-cross-bin/i686-redhat-linux-ld"
+  ln -sf ld-elf "$HOME/mn-cross-bin/i686-redhat-linux-ld"
   set --
   [ "${MACNEUTRON_PROFILE:-std}" != p ] || set -- CFLAGS="-O2 -DWINE_NO_TRACE_MSGS" i386_CFLAGS="-O2 -DWINE_NO_TRACE_MSGS"
   inputs=$(printf '%s\n' "$@")  # as the x86-64 build's: other flags, a fresh build folder
@@ -117,6 +145,13 @@ install)
   B32=${BUILD32:-$HOME/wine-build32}
   [ "${WINE32:-1}" = 0 ] || make -C "$B32" install DESTDIR="$STAGE" > "$B32/install.log" 2>&1
   make -C "$BUILD" install DESTDIR="$STAGE" > "$BUILD/install.log" 2>&1
+  # Proton places 32- and 64-bit loaders in one bin/; old WoW64 puts wine/wine-preloader in i386-unix/ and
+  # wine64/wine64-preloader in x86_64-unix/. EOS EAC's 32-bit bootstrapper probes dirname(/proc/self/exe)/wine64-preloader
+  # before launching a Win64 game (and loader/main.c already maps i386-unix/wine64 -> x86_64-unix/ntdll.so).
+  if [ "${WINE32:-1}" != 0 ] && [ -d "$STAGE/opt/mn-wine/lib/wine/i386-unix" ]; then
+    ln -sf ../x86_64-unix/wine64 "$STAGE/opt/mn-wine/lib/wine/i386-unix/wine64"
+    ln -sf ../x86_64-unix/wine64-preloader "$STAGE/opt/mn-wine/lib/wine/i386-unix/wine64-preloader"
+  fi
   du -sh "$STAGE/opt/mn-wine" ;;
 *) sed -n '2,7p' "$0"; exit 2 ;;
 esac
