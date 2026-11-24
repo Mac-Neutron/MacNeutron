@@ -76,17 +76,16 @@ impl fmt::Display for UpdateError {
 impl std::error::Error for UpdateError {}
 
 pub const RELEASES: &str = "https://api.github.com/repos/Mac-Neutron/MacNeutron/releases?per_page=30";
-pub const IDENTIFIER: &str = "io.github.chadouming.MacNeutron";
+pub const IDENTIFIER: &str = "io.github.mac-neutron.MacNeutron";
 /// Install MacNeutron's (spec 2026-10-25-macneutron-installer-design §3.1).
-pub const INSTALLER_IDENTIFIER: &str = "io.github.chadouming.MacNeutron.Installer";
-/// What an update may be: this app, or the release after it, which moves to github.com/Mac-Neutron's identifiers
-/// (2026-10-27) and publishes its app as MacNeutron-<V>-macOS.zip. 0.9.6 looks for neither, so it takes this
-/// release first and this one installs that.
+pub const INSTALLER_IDENTIFIER: &str = "io.github.mac-neutron.MacNeutron.Installer";
+/// What an update or running app may be: `io.github.mac-neutron.*` is now primary, and `io.github.chadouming.*`
+/// stays listed so the installer cleanly terminates older running 1.0.0 instances during upgrade.
 pub fn identifiers() -> [&'static str; 2] {
-    [IDENTIFIER, "io.github.mac-neutron.MacNeutron"]
+    [IDENTIFIER, "io.github.chadouming.MacNeutron"]
 }
 pub fn installer_identifiers() -> [&'static str; 2] {
-    [INSTALLER_IDENTIFIER, "io.github.mac-neutron.MacNeutron.Installer"]
+    [INSTALLER_IDENTIFIER, "io.github.chadouming.MacNeutron.Installer"]
 }
 
 const INSTALLER_FOLDER: &str = "MacNeutron-installer-";
@@ -953,10 +952,10 @@ mod tests {
 
     #[test]
     fn updates_may_carry_either_bundle_id() {
-        assert_eq!(identifiers(), ["io.github.chadouming.MacNeutron", "io.github.mac-neutron.MacNeutron"]);
+        assert_eq!(identifiers(), ["io.github.mac-neutron.MacNeutron", "io.github.chadouming.MacNeutron"]);
         assert_eq!(
             installer_identifiers(),
-            ["io.github.chadouming.MacNeutron.Installer", "io.github.mac-neutron.MacNeutron.Installer"]
+            ["io.github.mac-neutron.MacNeutron.Installer", "io.github.chadouming.MacNeutron.Installer"]
         );
     }
 }

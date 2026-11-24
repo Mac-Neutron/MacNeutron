@@ -775,6 +775,7 @@ EOF
   check_entitlement "$SH" com.apple.security.cs.disable-library-validation || exit 1
   check_entitlement "$SH" com.apple.developer.cross-architecture-support || exit 1
   check_entitlement "$VMH/macneutron-vm.app" com.apple.security.hypervisor || exit 1
+  check_entitlement "$VMH/macneutron-vm.app" com.apple.security.device.audio-input || exit 1
   sign "$A/Contents/Helpers/macneutron"
   sign "$A"
   check_minos "$A" 27.0 || exit 1

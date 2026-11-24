@@ -124,9 +124,9 @@ static bool build_primary_path(char *out, size_t cap) {
     NSString *bundle_id = [[NSBundle mainBundle] bundleIdentifier];
     const char *bid = (bundle_id != nil && [bundle_id length] > 0)
         ? [bundle_id UTF8String]
-        : "io.github.chadouming.MacNeutron.vm";
+        : "io.github.mac-neutron.MacNeutron.vm";
     if (!bid || bid[0] == '\0') {
-        bid = "io.github.chadouming.MacNeutron.vm";
+        bid = "io.github.mac-neutron.MacNeutron.vm";
     }
     int written = snprintf(out, cap, "%s/%s/com.apple.metalfe", cache_dir, bid);
     return written > 0 && (size_t)written < cap;
