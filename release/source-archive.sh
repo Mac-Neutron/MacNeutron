@@ -63,16 +63,18 @@ tree dxmt "$DXMT_COMMIT"
 for p in external/nvapi include/native/directx; do sub dxmt "$p"; done
 
 applied lsteamclient "$LSTEAMCLIENT_COMMIT"
-git -C "$S/lsteamclient" -c core.quotePath=false ls-files -t | sed -n 's/^H //p' > "$W/lsteamclient.list"
-[ -s "$W/lsteamclient.list" ] || die "lsteamclient's worktree lists no files"
-if LC_ALL=C /usr/bin/grep -vE '^lsteamclient/' "$W/lsteamclient.list" \
-  || LC_ALL=C /usr/bin/grep -E '^lsteamclient/(steamworks_sdk_|gen_wrapper\.py$)' "$W/lsteamclient.list"; then
+git -C "$S/lsteamclient" -c core.quotePath=false ls-files -t | sed -n 's/^H //p' > "$W/lsteamclient.all"
+[ -s "$W/lsteamclient.all" ] || die "lsteamclient's worktree lists no files"
+if LC_ALL=C /usr/bin/grep -vE '^(lsteamclient|fonts)/' "$W/lsteamclient.all" \
+  || LC_ALL=C /usr/bin/grep -E '^lsteamclient/(steamworks_sdk_|gen_wrapper\.py$)' "$W/lsteamclient.all"; then
   die "lsteamclient's worktree holds files outside the build's (above)"
 fi
+LC_ALL=C /usr/bin/grep -E '^lsteamclient/' "$W/lsteamclient.all" > "$W/lsteamclient.list"
+[ -s "$W/lsteamclient.list" ] || die "lsteamclient's worktree lists no lsteamclient/ files"
 COPYFILE_DISABLE=1 tar -cf "$W/lsteamclient.tar" --no-mac-metadata --no-xattrs --no-acls --no-fflags --uid 0 --gid 0 \
   --uname root --gname root -s ',^,lsteamclient/,' -C "$S/lsteamclient" -T "$W/lsteamclient.list" \
   || die "can't tar lsteamclient's worktree"
-rm "$W/lsteamclient.list"
+rm "$W/lsteamclient.all" "$W/lsteamclient.list"
 row lsteamclient "$LSTEAMCLIENT_COMMIT" "$a" "$n" lsteamclient.tar
 # The VM setup's mkfs.erofs (GPL-2.0-or-later, Contents/Helpers/mkfs.erofs) and the lz4 compiled into it, at
 # vm/setup-tools/PIN (vm/setup-tools/build.sh, in MacNeutron.tar, builds it).
