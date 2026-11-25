@@ -8,19 +8,19 @@
 # bootstrapped by build.sh. GMP's development trunk (gmp-next) is its own nightly snapshot, configure included: its
 # repository refuses scripted clones. GMP signs no snapshot; the SHA-256 was recorded at download, 2026-10-24.
 FREETYPE_REPO=https://gitlab.freedesktop.org/freetype/freetype.git
-FREETYPE_COMMIT=2b01fa2d6723bf12490822268c9627697ed89643
+FREETYPE_COMMIT=d4d00b890aab5970f291338b9de626ceafefbdec
 GNUTLS_REPO=https://gitlab.com/gnutls/gnutls.git
-GNUTLS_COMMIT=0e7b36b58a259d5c67f298adb66291d79b019f22
+GNUTLS_COMMIT=6542d6fc9e05a7fd5370da0832dbbc6bbd7a54db
 LIBTASN1_REPO=https://gitlab.com/gnutls/libtasn1.git
-LIBTASN1_COMMIT=2b2065b2383aebe138c7d0f7b5646369e5f56ec3
+LIBTASN1_COMMIT=8dddaa983ac6e4c6e7bb1c1a8ada25500352ae75
 NETTLE_REPO=https://git.lysator.liu.se/nettle/nettle.git
-NETTLE_COMMIT=cf01e9d2741339cf01a90a0986b82e732b00ea59
+NETTLE_COMMIT=970f99b8063351eaad2109ebc6b2a1829347241b
 GMP_URL=https://gmplib.org/download/snapshot/gmp-next/gmp-6.3.0-20260920180220.tar.zst
 GMP_SHA256=a625d1bdf36b096117fac26463ab9c6037b2e678d7e98b8711783c25a8894d16
 FFMPEG_REPO=https://git.ffmpeg.org/ffmpeg.git
-FFMPEG_COMMIT=3719f257cf76e4463adc8b5b77029c3594def120
+FFMPEG_COMMIT=6e839cf771424ec15c05e6d46401a4b13ebd8911
 # lsteamclient, the Steam bridge (spec §7): the lsteamclient/ folder of our Proton fork's main (Proton's bleeding-edge
 # with our changes) at this commit, a sparse, blob-filtered checkout without the Steamworks SDK folders. Its pin is
 # LSTEAMCLIENT_COMMIT alone: a tarball pin never re-fetches it.
 LSTEAMCLIENT_REPO=https://github.com/Mac-Neutron/Proton.git
-LSTEAMCLIENT_COMMIT=57cb19babc8fbf8f6fbb785881fc8ca661e1799b
+LSTEAMCLIENT_COMMIT=5175dd1329e18eff153abae3b556e0ea5179eec1

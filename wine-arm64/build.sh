@@ -251,7 +251,16 @@ dep_clone() {
 for n in $DEPS_GIT; do dep_clone "$n"; done
 # Each git source's bootstrap, run in its deps-src copy (gnulib's bootstrap fetches the submodules it records).
 boot_libtasn1='./bootstrap --skip-po'
-boot_nettle='./.bootstrap'
+# Nettle efa1b6b uses GNU sed `i0` in configure.ac, which BSD sed parses as label `found;i0`.
+boot_nettle='awk '\''
+  index($0, "NETTLE_VERSION_PATCH_LEVEL=$(echo $PACKAGE_VERSION | sed -n ") == 1 {
+    if (getline n <= 0 || index(n, "q;:found;p") != 1) exit 1
+    q = sprintf("%c", 39)
+    print "NETTLE_VERSION_PATCH_LEVEL=$(echo $PACKAGE_VERSION | awk -F. " q "{print 0+$3}" q ")"
+    c++; next
+  }
+  { print }
+  END { if (c != 1) exit 1 }'\'' configure.ac > configure.ac.tmp && mv configure.ac.tmp configure.ac && ./.bootstrap'
 boot_gnutls='./bootstrap --skip-po'
 boot_freetype='git submodule -q update --init --depth 1 subprojects/dlg && ./autogen.sh'
 boot_ffmpeg=:

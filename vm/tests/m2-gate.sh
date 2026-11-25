@@ -3,7 +3,7 @@
 # Exits 1 if any check misses.
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1: $2"; else echo "FAIL $1: got '$2', want '$3'"; fail=1; fi; }
-check kernel "$(uname -r)" 7.2.10-200.fc44.aarch64
+check kernel "$(uname -r)" 7.3.4-200.fc44.aarch64
 check lockdown "$(grep -o '\[[a-z]*\]' /sys/kernel/security/lockdown)" "[integrity]"
 check sig_enforce "$(cat /sys/module/module/parameters/sig_enforce)" Y
 check kexec_load_disabled "$(cat /proc/sys/kernel/kexec_load_disabled)" 1

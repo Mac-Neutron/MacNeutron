@@ -237,7 +237,7 @@ mod tests {
             let mut count = 0;
             RPMReader::read_files(&rpm, |_, paths, next| {
                 count += 1;
-                if paths.iter().any(|p| p == "/lib/modules/7.2.10-200.fc44.aarch64/vmlinuz") {
+                if paths.iter().any(|p| p == "/lib/modules/7.3.4-200.fc44.aarch64/vmlinuz") {
                     let mut hash = crate::posix::Sha256::new();
                     while let Some(chunk) = next()? {
                         hash.update(&chunk);

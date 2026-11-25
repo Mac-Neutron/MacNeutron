@@ -5,7 +5,7 @@ util-linux
 e2fsprogs
 kmod
 procps-ng
-kernel-modules-core-7.2.10-200.fc44
+kernel-modules-core-7.3.4-200.fc44
 fex-emu
 fex-emu-filesystem
 # Wine needs a display; nothing is shown from the guest (spec §5.7)

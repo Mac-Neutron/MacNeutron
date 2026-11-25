@@ -3,7 +3,7 @@
 #   1. Read-only virtiofs mount at /Volumes/Proton EasyAntiCheat Runtime + all 6 Valve depot 1826331 files
 #   2. Both x86_64-unix and i386-unix ntdll.so contain PROTON_EAC_RUNTIME
 #   3. Prefix hygiene: run-game.sh-style wineboot removes/avoids easyanticheat*.dll in system32/ & syswow64/
-#   4. Wave 5C wine_get_version() for 64-bit (winever.exe) & 32-bit Old WoW64 (winever32.exe): 11.20 / 9.0 / 10.5
+#   4. Wave 5C wine_get_version() for 64-bit (winever.exe) & 32-bit Old WoW64 (winever32.exe): 11.22 / 9.0 / 10.5
 #   5. loadorder.c bridge routing (easyanticheat_x64.dll, easyanticheat.dll, easyanticheat_x86.dll):
 #      no sibling .so -> native; sibling .so -> builtin from v2/lib64 or v2/lib32; PROTON_EAC_LAUNCHER_PROCESS=1 -> native
 # Prints per-check rows and exits 0 iff all checks pass.
@@ -149,8 +149,8 @@ v64_eac=$(env -u MACNEUTRON_WINE_VERSION PROTON_EAC_RUNTIME="$R" WINEDEBUG=-all 
 v32_eac=$(env -u MACNEUTRON_WINE_VERSION PROTON_EAC_RUNTIME="$R" WINEDEBUG=-all timeout 20 wine /mnt/share/bin/winever32.exe 2>/dev/null | tr -d '\r')
 v64_ovr=$(MACNEUTRON_WINE_VERSION=10.5 PROTON_EAC_RUNTIME="$R" WINEDEBUG=-all timeout 20 wine /mnt/share/bin/winever.exe 2>/dev/null | tr -d '\r')
 v32_ovr=$(MACNEUTRON_WINE_VERSION=10.5 PROTON_EAC_RUNTIME="$R" WINEDEBUG=-all timeout 20 wine /mnt/share/bin/winever32.exe 2>/dev/null | tr -d '\r')
-check "4 winever64-unset"    "$v64_unset" 11.20
-check "4 winever32-unset"    "$v32_unset" 11.20
+check "4 winever64-unset"    "$v64_unset" 11.22
+check "4 winever32-unset"    "$v32_unset" 11.22
 check "4 winever64-eac"      "$v64_eac"   9.0
 check "4 winever32-eac"      "$v32_eac"   9.0
 check "4 winever64-override" "$v64_ovr"   10.5

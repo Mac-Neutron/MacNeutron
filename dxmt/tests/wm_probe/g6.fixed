@@ -127,7 +127,7 @@ g6 101 nil-args 0 version=0 colorspace=fill metadata=none edr=none
 g6 66 x-drawable-on-device raised NSInvalidArgumentException ret=fill
 g6 158 latency-activity 0 ret=1
 g6 159 attach-view 0 ret_view=h1 own=+2 pool=+0 ret_layer=h2 own=+3 pool=+0 metal=1 device=wm_device scale=valid edr=valid
-g6 161 attach-view 0 written=0-31 scale=valid edr=valid
+g6 161 attach-view 0 written=0-39 scale=valid edr=valid
 g6 160 attach-view 0 in1=-2
 g6 159 client-surface 0
 g6 162 client-surface 0 present=1

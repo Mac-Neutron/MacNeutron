@@ -2,7 +2,7 @@
 # DXMT_COMMIT is a commit of DXMTRS's main (our DXMT, being ported to Rust) that MacNeutron ships; LGPL: its source is
 # public there. Commits up to 89558c1 are on the frozen fork Mac-Neutron/dxmt too.
 DXMT_REPO=https://github.com/Mac-Neutron/DXMTRS.git
-DXMT_COMMIT=9be2317fe7bb629f913392c2ab2222a5cf55b0af
+DXMT_COMMIT=5e3568d83350f6d8194242e79739d7d62e177bdd
 # 3Shain's Wine 8.16 tree, which DXMT's CI builds against. SHA-256 recorded at first download, 2026-09-28.
 WINE_URL=https://github.com/3Shain/wine/releases/download/v8.16-3shain/wine.tar.gz
 WINE_SHA256=289c7f19e270a3d3d0a6fdb07691b176c70a0795f6811e5255cba82425de4f10
@@ -10,16 +10,16 @@ WINE_SHA256=289c7f19e270a3d3d0a6fdb07691b176c70a0795f6811e5255cba82425de4f10
 DXC_URL=https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2607/dxc_2026_07_29.zip
 DXC_SHA256=a1dfb116ba3eeae6a1582291b53a8e7bf65ad760676bd3194685c8f7367cd241
 # Clang-based mingw cross toolchain for every Windows-side binary; the release DXMT's CI pins. SHA-256 recorded at first download.
-LLVM_MINGW_URL=https://github.com/mstorsjo/llvm-mingw/releases/download/20261020/llvm-mingw-20261020-ucrt-macos-universal.tar.xz
-LLVM_MINGW_SHA256=e9c13e4ede38e715003ffc674d4d00a1088df8235439d1f0c16188ff0704c17e
+LLVM_MINGW_URL=https://github.com/mstorsjo/llvm-mingw/releases/download/20261117/llvm-mingw-20261117-ucrt-macos-universal.tar.xz
+LLVM_MINGW_SHA256=98d340bbb8d46b09ad6886ffba88bd9d5415e131c316de48e6bd7647377446aa
 # MacNeutron's own llvm-mingw (dxmt/llvm-mingw.sh, the default; MACNEUTRON_TOOLCHAIN=upstream takes the release above):
 # llvm-mingw's build scripts at this commit of its master, and LLVM at this commit of our llvm-project fork's main
 # (LLVM_MINGW_LLVM_REPO): the release llvm-mingw pins, with our changes.
 LLVM_MINGW_REPO=https://github.com/mstorsjo/llvm-mingw.git
-LLVM_MINGW_COMMIT=14a17396dfc53d01e82f9125c4da86203aa40a9f
+LLVM_MINGW_COMMIT=903f4cf7faa24e30c8e0c4615f8ce61a0f3d80f8
 LLVM_MINGW_LLVM_REPO=https://github.com/Mac-Neutron/llvm-project.git
-LLVM_MINGW_LLVM=bff2c9ff19ac881e3402a5992c4d22950882c227
+LLVM_MINGW_LLVM=a127c47fe6da1b96ad035055b1c15fa846b28ac6
 # DXMTRS's Rust toolchain (D3D9 spec): the default of its meson.options:14 (cargo_toolchain), one number in two places.
-MTLD3D_RUST=1.99.0
+MTLD3D_RUST=1.100.0
 # The nightly whose rustfmt DXMTRS's tools/rust-check.sh formats with (a rustup nightly is named by its build date).
 MTLD3D_RUST_NIGHTLY=nightly-2026-10-30

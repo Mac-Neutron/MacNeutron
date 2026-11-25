@@ -6,7 +6,7 @@ upstream with MacNeutron's changes; each tree's *_SERIES is its pin, "dev" for a
 the other upstream commits, and the source tarballs' URLs and SHA-256. The pins are in the MacNeutron repository
 (https://github.com/Mac-Neutron/MacNeutron), at the commit SOURCE's MACNEUTRON_COMMIT names. NOTICES.md quotes the notices that live only in source headers. Not legal advice.
 
-Wine 11.20 (the loader, wineserver, Wine's libraries and programs)
+Wine 11.22 (the loader, wineserver, Wine's libraries and programs)
   Licence: LGPL-2.1-or-later. Texts: wine/LICENSE, wine/COPYING.LIB, wine/AUTHORS; Wine's vendored libraries are
   listed in wine/NOTICES.md, and GSM (wine/gsm-COPYRIGHT) and FAudio (zlib licence, wine/faudio-LICENSE) carry their
   own texts. msync (from CrossOver) and its helpers adapted from Apple's xnu (APSL-2.0): NOTICES.md. libxess.dll's XeSS

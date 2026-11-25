@@ -1,4 +1,4 @@
-/* The 12 Wine symbols MacNeutron's macOS lsteamclient Unix half imports from ntdll.so (the Makefile checks the list), for
+/* The 13 Wine symbols MacNeutron's macOS lsteamclient Unix half imports from ntdll.so (the Makefile checks the list), for
  * running it in mn-steam-host outside Wine (spec §5.9). Built as ntdll.so next to a copy of lsteamclient.so, which finds
  * it through `@loader_path/`.
  * - Paths go through one mapping: a host path under the shared library folder becomes the guest's path in Wine's DOS
@@ -208,6 +208,14 @@ NTSTATUS WINAPI NtClose(HANDLE key) {
 /* ---- debug output ---- */
 
 static int debug_on(void) { static int on = -1; if (on < 0) { const char *e = getenv("MN_STEAM_DEBUG"); on = e && *e == '1'; } return on; }
+
+unsigned char __cdecl __wine_dbg_get_channel_flags(struct __wine_debug_channel *channel) {
+    unsigned char flags = debug_on()
+        ? ((1 << __WINE_DBCL_FIXME) | (1 << __WINE_DBCL_ERR) | (1 << __WINE_DBCL_WARN) | (1 << __WINE_DBCL_TRACE))
+        : (1 << __WINE_DBCL_ERR);
+    if (channel) channel->flags = flags;
+    return flags;
+}
 
 int __cdecl __wine_dbg_header(enum __wine_debug_class cls, struct __wine_debug_channel *channel, const char *function) {
     static const char *const classes[] = { "fixme", "err", "warn", "trace" };

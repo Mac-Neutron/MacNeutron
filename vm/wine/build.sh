@@ -27,11 +27,12 @@ LDS
 cat > "$HOME/mn-cross-bin/ld-elf" <<'SH'
 #!/bin/sh
 HERE=$(cd "$(dirname "$0")" && pwd)
-dyn=0 rel=0
+dyn=0 rel=0 noro=0
 for a in "$@"; do
   case "$a" in
     -shared|-dynamic-linker|--dynamic-linker) dyn=1 ;;
     -r|--relocatable) rel=1 ;;
+    --no-rosegment) noro=1 ;;
     @*)
       f=${a#@}
       if grep -qE '(^|[[:space:]])(-shared|-dynamic-linker|--dynamic-linker)([[:space:]]|$)' "$f" 2>/dev/null; then dyn=1; fi
@@ -39,6 +40,17 @@ for a in "$@"; do
       ;;
   esac
 done
+if [ "$noro" = 1 ]; then
+  n=$#
+  while [ "$n" -gt 0 ]; do
+    a=$1; shift
+    case "$a" in
+      -Ttext=*) set -- "$@" "--image-base=${a#-Ttext=}" ;;
+      *) set -- "$@" "$a" ;;
+    esac
+    n=$((n - 1))
+  done
+fi
 if [ "$dyn" = 1 ] && [ "$rel" = 0 ]; then
   set -- "$@" --hash-style=both -T "$HERE/dyn.lds"
 fi

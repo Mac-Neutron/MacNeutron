@@ -146,7 +146,7 @@ g6 159 attach-view-loose loose create_metal_view view=client_cocoa_view device=w
 g6 159 attach-view-loose loose get_metal_layer view=created
 g6 159 attach-view-loose loose release_win_data data=given
 g6 159 attach-view-loose 0 ret_view=h1 own=+1 pool=+0 ret_layer=h2 own=+2 pool=+0 metal=1 device=wm_device scale=valid edr=valid
-g6 161 attach-view-loose 0 written=0-31 scale=valid edr=valid
+g6 161 attach-view-loose 0 written=0-39 scale=valid edr=valid
 g6 160 attach-view-loose loose release_metal_view view=created
 g6 160 attach-view-loose 0 in1=-1
 g6 159 client-surface loose get_win_data hwnd=0x10

@@ -19,7 +19,7 @@
 # `build.sh wine` remakes wine.erofs only. Wine's x86-64 libraries come from the RootFS (all there but libodbc).
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
-KVER=7.2.10-200.fc44.aarch64
+KVER=7.3.4-200.fc44.aarch64
 FEX_BIN=${FEX_BIN:-$HOME/fex-linux/build/Bin}
 # The p profile (MACNEUTRON_PROFILE=p) builds its own set: through the builder's outp share, in its own work folder.
 case ${MACNEUTRON_PROFILE:-std} in std) SFX= ;; *) SFX=-$MACNEUTRON_PROFILE ;; esac

@@ -12,7 +12,7 @@ G=${BUILD_DIR:-$ROOT/build}/vm-setup-gate
 B="sh $ROOT/vm/builder.sh"
 # The builder's share of this profile's images (image/build.sh's: the p profile's is outp at /mnt/out-p).
 case ${MACNEUTRON_PROFILE:-std} in std) O=/mnt/out ;; *) O=/mnt/out-$MACNEUTRON_PROFILE ;; esac
-KVER=7.2.10-200.fc44.aarch64
+KVER=7.3.4-200.fc44.aarch64
 fail=
 
 make -s -C "$ROOT" build 2>&1 | tail -1

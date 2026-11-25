@@ -36,7 +36,11 @@ fi
 rm -rf "$SDK.tmp"
 mkdir -p "$SDK/bin"
 ln -sfn "$S/wine-build/tools/winebuild/winebuild" "$SDK/bin/winebuild"
-set -- "$B" "$S/dxmt" --cross-file "$S/dxmt/build-win64.txt" --buildtype release --strip --prefix "$W/dxmt-guest" \
+printf "[binaries]\nxcrun = ['/bin/sh', '%s']\n" "$ROOT/wine-arm64/tools/xcrun-metal.sh" > "$W/dxmt-xcrun.txt.new"
+if cmp -s "$W/dxmt-xcrun.txt.new" "$W/dxmt-xcrun.txt" 2>/dev/null; then rm "$W/dxmt-xcrun.txt.new"
+else mv "$W/dxmt-xcrun.txt.new" "$W/dxmt-xcrun.txt"; fi
+set -- "$B" "$S/dxmt" --cross-file "$S/dxmt/build-win64.txt" --cross-file "$W/dxmt-xcrun.txt" --buildtype release \
+  --strip --prefix "$W/dxmt-guest" \
   -Dguest_vm=true -Dwine_builtin_dll=true -Denable_d3d12=true -Denable_nvapi=true -Denable_nvngx=true \
   -Dwine_install_path="$SDK" -Dtranslator_key_file="$S/dxmt-translator-key"
 # DXMTRS's meson builds Rust static libraries (tools/cargo-staticlib.sh) with cargo. No -Dcargo_toolchain: a tree
@@ -51,7 +55,7 @@ PATH="$(sh "$ROOT/dxmt/mtld3d-tools.sh"):$PATH"
 # The tree's commit too: a tree put in place with older files than the build's objects (the upstream-master swap)
 # leaves ninja nothing newer to rebuild, so stale objects stayed (M3 Task 7: nvngx's old error values). ponytail: a full
 # build after every fork commit; the tree's base commit instead if that ever costs too much.
-inputs=$(printf '%s\n' "$@"; cat "$S/dxmt/build-win64.txt"; git -C "$S/dxmt" rev-parse HEAD)
+inputs=$(printf '%s\n' "$@"; cat "$S/dxmt/build-win64.txt" "$ROOT/wine-arm64/tools/xcrun-metal.sh"; git -C "$S/dxmt" rev-parse HEAD)
 if [ ! -f "$B/build.ninja" ] || [ "$(cat "$B/.setup-inputs" 2> /dev/null)" != "$inputs" ]; then
   rm -rf "$B"
   meson setup "$@" > "$W/dxmt-guest.log" 2>&1 \
@@ -74,12 +78,13 @@ fi
   || { echo "dxmt-guest: signing DXMT's NVIDIA DLLs failed; see $W/dxmt-guest.log" >&2; exit 1; }
 # The i386 build (WoW64 games), the same options without the NVIDIA DLLs, into the same prefix's i386-windows.
 B32=$W/dxmt-guest-build32
-set -- "$B32" "$S/dxmt" --cross-file "$S/dxmt/build-win32.txt" --buildtype release --strip --prefix "$W/dxmt-guest" \
+set -- "$B32" "$S/dxmt" --cross-file "$S/dxmt/build-win32.txt" --cross-file "$W/dxmt-xcrun.txt" --buildtype release \
+  --strip --prefix "$W/dxmt-guest" \
   -Dguest_vm=true -Dwine_builtin_dll=true -Denable_d3d12=true -Denable_nvapi=false -Denable_nvngx=false \
   -Dwine_install_path="$SDK" -Dtranslator_key_file="$S/dxmt-translator-key"
 [ "${MACNEUTRON_PROFILE:-std}" != p ] || set -- "$@" -Dc_args=-DDXMT_PERF_BUILD -Dcpp_args=-DDXMT_PERF_BUILD
 ! p_flag dxmt || set -- "$@" -Db_lto=true -Db_lto_mode=thin
-inputs=$(printf '%s\n' "$@"; cat "$S/dxmt/build-win32.txt"; git -C "$S/dxmt" rev-parse HEAD)
+inputs=$(printf '%s\n' "$@"; cat "$S/dxmt/build-win32.txt" "$ROOT/wine-arm64/tools/xcrun-metal.sh"; git -C "$S/dxmt" rev-parse HEAD)
 if [ ! -f "$B32/build.ninja" ] || [ "$(cat "$B32/.setup-inputs" 2> /dev/null)" != "$inputs" ]; then
   rm -rf "$B32"
   meson setup "$@" >> "$W/dxmt-guest.log" 2>&1 \

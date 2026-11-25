@@ -15,6 +15,9 @@ mkdir -p "$SRC"
 while read -r name tag sha; do
   case $name in erofs-utils) url=https://github.com/erofs/erofs-utils.git ;; lz4) url=https://github.com/lz4/lz4.git ;; esac
   [ -d "$SRC/$name/.git" ] || git clone -q --depth 1 --branch "$tag" "$url" "$SRC/$name"
+  if [ "$(git -C "$SRC/$name" rev-parse HEAD)" != "$sha" ]; then
+    git -C "$SRC/$name" fetch -q --depth 1 origin "$sha" && git -C "$SRC/$name" checkout -q "$sha"
+  fi
   [ "$(git -C "$SRC/$name" rev-parse HEAD)" = "$sha" ] || { echo "setup-tools: $SRC/$name is not at $sha" >&2; exit 1; }
 done < "$HERE/PIN"
 E=$SRC/erofs-utils
@@ -36,7 +39,7 @@ cat > "$OUT/obj/config.h" <<CONFIG
 CONFIG
 sources="config.c io.c cache.c super.c inode.c xattr.c exclude.c namei.c data.c compress.c compressor.c zmap.c
   decompress.c compress_hints.c sha256.c blobchunk.c dir.c fragments.c dedupe.c uuid_unparse.c uuid.c tar.c
-  block_list.c rebuild.c diskbuf.c bitops.c dedupe_ext.c vmdk.c metabox.c global.c importer.c base64.c
+  block_list.c rebuild.c diskbuf.c bitops.c dedupe_ext.c vmdk.c metabox.c global.c importer.c base64.c manifest.c
   compressor_lz4.c compressor_lz4hc.c kite_deflate.c compressor_deflate.c xxhash.c workqueue.c gzran.c"
 objs=
 for f in $sources; do

@@ -8,7 +8,12 @@
 if [ $# -ge 7 ] && [ "$1 $2 $3 $4 $6" = "-sdk macosx metal -o -c" ]; then
   out=$5 in=$7
   shift 7
-  exec /usr/bin/xcrun -sdk macosx metal -x metal -I "$(dirname "$in")" -Xclang -main-file-name \
-    -Xclang "$(basename "$in")" -o "$out" -c - "$@" < "$in"
+  set -- -sdk macosx metal -x metal -I "$(dirname "$in")" -Xclang -main-file-name \
+    -Xclang "$(basename "$in")" -o "$out" -c - "$@"
+  exec < "$in"
+fi
+if [ $# -ge 3 ] && [ "$1 $2 $3" = "-sdk macosx metal" ] &&
+   /usr/bin/xcrun --toolchain metal -f metal >/dev/null 2>&1; then
+  set -- --toolchain metal "$@"
 fi
 exec /usr/bin/xcrun "$@"

@@ -66,7 +66,7 @@ STEPS="$STEPS dxmt-release" NEEDS_PREFIX="$NEEDS_PREFIX dxmt-release" NEEDS_FEX=
 NEEDS_DXMT="$NEEDS_DXMT dxmt-release"
 # Wine patch 0043: a mount point (APFS's Preboot volume; Wine lists no /dev) answers FSCTL_GET_REPARSE_POINT as one.
 STEPS="$STEPS mountpoint" NEEDS_PREFIX="$NEEDS_PREFIX mountpoint" NEEDS_FEX="$NEEDS_FEX mountpoint"
-# Proton EAC runtime version spoof: wine_get_version() returns "11.20" by default and "9.0" with PROTON_EAC_RUNTIME.
+# Proton EAC runtime version spoof: wine_get_version() returns "11.22" by default and "9.0" with PROTON_EAC_RUNTIME.
 STEPS="$STEPS wine-version" NEEDS_PREFIX="$NEEDS_PREFIX wine-version"
 
 # The processes running the runtime's executables. Wine rewrites argv, so `pkill -f <path>` finds nothing; the kernel
@@ -906,7 +906,7 @@ int main(void) {
 EOF
   "$(sh "$ROOT/dxmt/toolchain.sh")/aarch64-w64-mingw32-clang" -O1 -o "$WORK/wine-ver.exe" "$WORK/wine-ver.c" || return 1
   v_def=$(env -u PROTON_EAC_RUNTIME -u MACNEUTRON_WINE_VERSION WINEPREFIX="$PFX" "$TOOL/Contents/MacOS/wine" "$WORK/wine-ver.exe" 2> /dev/null | tr -d '\r')
-  [ "$v_def" = "11.20" ] || { echo "FAIL wine-version: default wine_get_version()='$v_def', want '11.20'"; return 1; }
+  [ "$v_def" = "11.22" ] || { echo "FAIL wine-version: default wine_get_version()='$v_def', want '11.22'"; return 1; }
   v_eac=$(env -u MACNEUTRON_WINE_VERSION PROTON_EAC_RUNTIME=/tmp WINEPREFIX="$PFX" "$TOOL/Contents/MacOS/wine" "$WORK/wine-ver.exe" 2> /dev/null | tr -d '\r')
   [ "$v_eac" = "9.0" ] || { echo "FAIL wine-version: PROTON_EAC_RUNTIME=/tmp wine_get_version()='$v_eac', want '9.0'"; return 1; }
   long_eac="/Volumes/Proton EasyAntiCheat Runtime/very/long/path/exceeding/sixty/four/bytes"

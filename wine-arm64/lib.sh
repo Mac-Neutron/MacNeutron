@@ -228,7 +228,7 @@ translator_key() {  # translator_key <dxmt-tree> <buildtype>
   _tk_f=$(cd "$1" && printf '%s\n' "$_tk_fl" | tr '\n' '\0' | xargs -0 shasum -a 256) && [ -n "$_tk_f" ] \
     || die "can't hash the translator's files in $1"
   _tk_c=$(c++ --version) && _tk_c=$(printf '%s\n' "$_tk_c" | head -n 1) && [ -n "$_tk_c" ] || die "c++ --version failed"
-  _tk_m=$(xcrun -sdk macosx metal --version) && _tk_m=$(printf '%s\n' "$_tk_m" | head -n 1) && [ -n "$_tk_m" ] \
+  _tk_m=$(sh "$ROOT/wine-arm64/tools/xcrun-metal.sh" -sdk macosx metal --version) && _tk_m=$(printf '%s\n' "$_tk_m" | head -n 1) && [ -n "$_tk_m" ] \
     || die "metal --version failed"  # the rest names the toolchain's mount point
   [ -n "${MTLD3D_RUST:-}" ] || die "MTLD3D_RUST is not set (dxmt/pins)"
   _tk_t=$(sed -n "s/^option('cargo_toolchain'.*value *: *'\([^']*\)'.*/\1/p" "$1/meson.options") \
